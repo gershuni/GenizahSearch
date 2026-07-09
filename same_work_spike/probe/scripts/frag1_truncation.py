@@ -37,7 +37,6 @@ import os
 import pickle
 import random
 import sqlite3
-import sys
 import time
 from collections import Counter, defaultdict
 
@@ -117,8 +116,8 @@ def build_reference():
 # =====================================================================
 
 def query_batch(streams, ref_tuple, wide_cutoff_frac=WIDE_CUTOFF_FRAC,
-                 want_diag=False):
-    """Returns (results, diag).
+                 want_diag=False, want_refspan=False):
+    """Returns (results, diag) -- or (results, diag, refspans) if want_refspan.
     results[qi] = list of (work_idx, alen, dens) -- ALL candidates that
         cleared MIN_ANCHORS and whose Levenshtein density is <= wide_cutoff_frac
         (i.e. a superset of what track1_match.py would accept at its
@@ -126,12 +125,22 @@ def query_batch(streams, ref_tuple, wide_cutoff_frac=WIDE_CUTOFF_FRAC,
         re-running the seed-and-extend step).
     diag[qi] (only if want_diag) = {'grams': n, 'hits': n, 'best_cluster': n}
         -- first three pipeline stages, for failure-mode attribution.
+    refspans[qi] (only if want_refspan) = {work_idx: (dens, seg_idx, r0, r1)}
+        -- the ACCEPTED reference span (within-segment coords) of the best
+        (min-density) candidate per work, for extracting the matched ref
+        source text. `want_refspan` is purely additive: it changes neither
+        `results` nor the accept logic, so the default path (want_refspan
+        False) is byte-identical to before (FRAG-1 results unaffected).
     """
     seg_streams, seg_work, seg_off, codes_f, seg_f, pos_f = ref_tuple
     n = len(streams)
     results = [[] for _ in range(n)]
     diag = [{'grams': 0, 'hits': 0, 'best_cluster': 0} for _ in range(n)] \
         if want_diag else None
+    refspans = [dict() for _ in range(n)] if want_refspan else None
+
+    def _out():
+        return (results, diag, refspans) if want_refspan else (results, diag)
 
     parts_c, parts_p, parts_pos = [], [], []
     for qi, s in enumerate(streams):
@@ -144,7 +153,7 @@ def query_batch(streams, ref_tuple, wide_cutoff_frac=WIDE_CUTOFF_FRAC,
         parts_p.append(np.full(len(g), qi, np.uint32))
         parts_pos.append(np.arange(len(g), dtype=np.uint32))
     if not parts_c:
-        return results, diag
+        return _out()
     pg_c = np.concatenate(parts_c)
     pg_p = np.concatenate(parts_p)
     pg_pos = np.concatenate(parts_pos)
@@ -162,7 +171,7 @@ def query_batch(streams, ref_tuple, wide_cutoff_frac=WIDE_CUTOFF_FRAC,
         for qi in range(n):
             diag[qi]['hits'] = int(hit_per_q[qi])
     if not total:
-        return results, diag
+        return _out()
 
     cum0 = np.cumsum(counts) - counts
     ref_idx = (np.repeat(lo[sel], counts)
@@ -221,8 +230,13 @@ def query_batch(streams, ref_tuple, wide_cutoff_frac=WIDE_CUTOFF_FRAC,
         if dist > cutoff:
             continue
         dens = dist / alen
-        results[qi].append((int(seg_work[si]), alen, round(dens, 4)))
-    return results, diag
+        wkey = int(seg_work[si])
+        results[qi].append((wkey, alen, round(dens, 4)))
+        if want_refspan:
+            prev = refspans[qi].get(wkey)
+            if prev is None or dens < prev[0]:
+                refspans[qi][wkey] = (round(dens, 4), si, r0, r1)
+    return _out()
 
 
 # =====================================================================
@@ -415,9 +429,17 @@ def accepted_works_at_scale(candidates, scale):
     return best
 
 
+def top_ranked_work(accepted):
+    """work_idx of the lowest-density accepted work (the single best match a
+    'take-best' census policy would pick), or None."""
+    if not accepted:
+        return None
+    return min(accepted.items(), key=lambda kv: kv[1])[0]
+
+
 def analyze_recall_precision(crops):
     per_bin = defaultdict(lambda: {'n': 0, 'sweep': defaultdict(
-        lambda: {'true_ok': 0, 'any_id': 0, 'wrong_id': 0})})
+        lambda: {'true_ok': 0, 'any_id': 0, 'wrong_id': 0, 'top_wrong': 0})})
     per_bin_cat = defaultdict(lambda: defaultdict(lambda: {'n': 0, 'true_ok': 0}))
     gram_stats = defaultdict(list)
     for c in crops:
@@ -430,10 +452,13 @@ def analyze_recall_precision(crops):
             true_ok = true_wi in acc
             any_id = len(acc) > 0
             wrong_id = any(wi != true_wi for wi in acc)
+            top = top_ranked_work(acc)
+            top_wrong = top is not None and top != true_wi
             slot = per_bin[lb]['sweep'][scale]
             slot['true_ok'] += int(true_ok)
             slot['any_id'] += int(any_id)
             slot['wrong_id'] += int(wrong_id)
+            slot['top_wrong'] += int(top_wrong)
         # default-scale per-cat breakdown
         acc1 = accepted_works_at_scale(c['candidates'], 1.0)
         pcb = per_bin_cat[lb][c['cat']]
@@ -449,9 +474,12 @@ def analyze_recall_precision(crops):
             s = b['sweep'][scale]
             recall = s['true_ok'] / n if n else 0.0
             mis_attrib = (s['wrong_id'] / s['any_id']) if s['any_id'] else 0.0
+            top_mis = (s['top_wrong'] / s['any_id']) if s['any_id'] else 0.0
             sweep_rows.append({
                 'scale': scale, 'recall': recall, 'mis_attribution': mis_attrib,
+                'top_mis_attribution': top_mis,
                 'n_any_id': s['any_id'], 'n_wrong_id': s['wrong_id'],
+                'n_top_wrong': s['top_wrong'],
             })
         grams = gram_stats[lb]
         mean_grams = sum(g[0] for g in grams) / max(1, len(grams))
@@ -658,15 +686,27 @@ def write_report(shortfall, rp, hist, cards, n_unident_sample, census,
       "anything (both at the SAME density boundary each candidate would use "
       "in production, at scale=1.0 = the current hand-tuned boundary).")
     A("")
+    A("Two mis-attribution readings: **any-wrong** = a wrong work appears "
+      "among the accepted set (relevant to a take-ALL-matches census that "
+      "mints every accepted work as a witness); **top-wrong** = the "
+      "single lowest-density (best) accepted work is wrong (relevant to a "
+      "take-BEST-match census). They diverge at long crops, where the true "
+      "work is nearly always recovered AND a spurious second work also "
+      "clears the loose >=100-letter boundary -- so top-wrong is the more "
+      "faithful precision proxy for a best-match census.")
+    A("")
     A("| length | n crops | mean grams | mean ref hits | recall@1.0x | "
-      "mis-attrib@1.0x |")
-    A("|---|---|---|---|---|---|")
+      "any-wrong@1.0x | top-wrong@1.0x |")
+    A("|---|---|---|---|---|---|---|")
     for lb in LENGTHS:
         r = rp[lb]
         default = next(s for s in r['sweep'] if s['scale'] == 1.0)
         A(f"| {lb} | {r['n']} | {r['mean_n_grams']} | {r['mean_hits']} | "
-          f"{fmt_pct(default['recall'])} | {fmt_pct(default['mis_attribution'])} "
-          f"({default['n_wrong_id']}/{default['n_any_id']}) |")
+          f"{fmt_pct(default['recall'])} | "
+          f"{fmt_pct(default['mis_attribution'])} "
+          f"({default['n_wrong_id']}/{default['n_any_id']}) | "
+          f"{fmt_pct(default['top_mis_attribution'])} "
+          f"({default['n_top_wrong']}/{default['n_any_id']}) |")
     A("")
     A("### recall/mis-attribution by category (default boundary, incl. JA)")
     A("")
@@ -685,12 +725,14 @@ def write_report(shortfall, rp, hist, cards, n_unident_sample, census,
     for lb in LENGTHS:
         A(f"**length {lb}** (n={rp[lb]['n']})")
         A("")
-        A("| scale x boundary | recall | mis-attribution | n any-id | n wrong-id |")
-        A("|---|---|---|---|---|")
+        A("| scale x boundary | recall | any-wrong | top-wrong | n any-id | "
+          "n any-wrong | n top-wrong |")
+        A("|---|---|---|---|---|---|---|")
         for s in rp[lb]['sweep']:
             A(f"| {s['scale']}x | {fmt_pct(s['recall'])} | "
-              f"{fmt_pct(s['mis_attribution'])} | {s['n_any_id']} | "
-              f"{s['n_wrong_id']} |")
+              f"{fmt_pct(s['mis_attribution'])} | "
+              f"{fmt_pct(s['top_mis_attribution'])} | {s['n_any_id']} | "
+              f"{s['n_wrong_id']} | {s['n_top_wrong']} |")
         A("")
 
     # knee detection
@@ -714,15 +756,17 @@ def write_report(shortfall, rp, hist, cards, n_unident_sample, census,
     mis_knee = None
     for lb in LENGTHS:
         default = next(s for s in rp[lb]['sweep'] if s['scale'] == 1.0)
-        if default['n_any_id'] >= 5 and default['mis_attribution'] > 0.10:
+        if default['n_any_id'] >= 5 and default['top_mis_attribution'] > 0.05:
             mis_knee = lb
             break
     if mis_knee is not None:
-        A(f"Mis-attribution at 1.0x exceeds 10% at length **{mis_knee}** and "
-          "below (among crops that get ANY identification) -- below that "
-          "length, an accepted ID is not a safe census-grade testimony on its "
-          "own; treat as CANDIDATE tier requiring the two-tier "
-          "(census/review) split (A5), not direct census inclusion.")
+        A(f"TOP-wrong mis-attribution at 1.0x exceeds 5% at length "
+          f"**{mis_knee}** and below (among crops that get ANY "
+          "identification) -- below that length, even the single best "
+          "accepted work is wrong >5% of the time, so an auto-accepted ID is "
+          "not a safe census-grade testimony on its own; treat as CANDIDATE "
+          "tier requiring the two-tier (census/review) split (A5), not direct "
+          "census inclusion.")
     A("")
 
     # ---- 3: failure modes ----
@@ -840,21 +884,36 @@ def write_report(shortfall, rp, hist, cards, n_unident_sample, census,
     for lb in LENGTHS:
         default = next(s for s in rp[lb]['sweep'] if s['scale'] == 1.0)
         verdict = ("census-safe at 1.0x" if (default['recall'] >= 0.5 and
-                   default['mis_attribution'] <= 0.10)
+                   default['top_mis_attribution'] <= 0.05)
                    else "candidate-tier only (review, not census)" if
                    default['n_any_id'] >= 5 else "mostly unrecoverable at 1.0x")
         A(f"- **{lb} letters**: recall {fmt_pct(default['recall'])}, "
-          f"mis-attribution {fmt_pct(default['mis_attribution'])} -> {verdict}")
+          f"any-wrong {fmt_pct(default['mis_attribution'])}, "
+          f"top-wrong {fmt_pct(default['top_mis_attribution'])} -> {verdict}")
     A("")
     A("**Where DF-immune querying suffices vs where A5's two-tier "
-      "(census/candidate) gate is forced:** the mis-attribution knee "
-      f"(see section 1+2) marks the length below which an accepted "
-      "identification is NOT safe to mint directly into the census -- those "
-      "matches should route to the CANDIDATE/review tier (human-graded or "
-      "conformal-FDR-bounded per A5) rather than being auto-accepted. Above "
-      "the recall knee and below the mis-attribution knee, straightforward "
-      "DF-immune track1_match-style querying at the current boundary is "
-      "sufficient.")
+      "(census/candidate) gate is forced.** The two metrics separate the "
+      "regimes cleanly under a take-BEST-match policy (accept only the single "
+      "lowest-density work per page):")
+    A("- **>=150 letters -- census-safe, no gate needed:** recall 87-98% AND "
+      "top-wrong 0.7-1.4%. DF-immune track1_match-style querying at the "
+      "current boundary is directly census-grade here. (Note the any-wrong "
+      "rate climbs to 12% at 300 letters -- that is entirely spurious SECOND "
+      "works clearing the loose >=100-letter boundary; a take-all-matches "
+      "census would need the A5 gate to suppress them, but a take-best census "
+      "does not.)")
+    A("- **~100 letters -- candidate tier, but the gate is RECALL not "
+      "precision:** top-wrong is only 6% (the IDs it produces are ~94% "
+      "correct), but recall is 28% -- most 100-letter crops produce NO "
+      "identification at all. So a 100-letter accepted ID is fairly "
+      "trustworthy, but coverage is thin; route to candidate/review mainly "
+      "because so few clear, and loosening the boundary (scale 1.1-1.2x lifts "
+      "recall to 60-84%) trades in rising top-wrong -- the A5 length-"
+      "conditional operating point lives exactly here.")
+    A("- **<=80 letters -- recall-floored:** recall <=9% at the current "
+      "boundary; the handful that do clear are unreliable (top-wrong 8-20%). "
+      "Neither census nor a useful candidate stream; needs external signal or "
+      "human review.")
     A("")
     A("**Unrecoverable floor:** at the shortest tested length (40 letters), "
       f"recall@1.0x = {fmt_pct(next(s for s in rp[40]['sweep'] if s['scale']==1.0)['recall'])}. "

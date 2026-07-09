@@ -98,6 +98,26 @@ def work_label(works, wi):
             'author': author, 'title': title}
 
 
+def ref_text_for(seg_streams, span_tuple, ctx=90):
+    """Matched reference span (within-segment coords) + ~ctx letters of flank
+    on each side, as letters-only stream. span_tuple = (dens, si, r0, r1) from
+    query_batch(want_refspan=True). Returns {before, span, after} or None."""
+    if not span_tuple:
+        return None
+    _dens, si, r0, r1 = span_tuple
+    seg = seg_streams[int(si)]
+    a = max(0, int(r0) - ctx)
+    b = min(len(seg), int(r1) + ctx)
+    return {'before': seg[a:int(r0)], 'span': seg[int(r0):int(r1)],
+            'after': seg[int(r1):b]}
+
+
+def cand_render(lbl, density, ref):
+    """Uniform per-candidate render record for the HTML comparison view."""
+    return {'cat': lbl['cat'], 'author': lbl['author'], 'title': lbl['title'],
+            'work_id': lbl['work_id'], 'density': density, 'ref': ref}
+
+
 def round_robin(items, key_fn):
     """Deterministic round-robin over groups keyed by key_fn (diversity)."""
     groups = defaultdict(list)
@@ -132,11 +152,13 @@ def main():
         return groups[g][0], groups[g][1]          # (EN, HE)
 
     # ============ unidentified-pool cards (types 1-3) ============
+    seg_streams = ref_tuple[0]        # segment texts (letters-only ref)
     sample = F.sample_unidentified_pages(page_lengths, live_ids, canonmask_ids)
     page_ids = [s[0] for s in sample]
     streams_by_pid = F.fetch_streams(con, page_ids)
     streams = [streams_by_pid.get(pid, '') for pid, sid, ln in sample]
-    results, diag = F.query_batch(streams, ref_tuple, want_diag=True)
+    results, diag, refspans = F.query_batch(
+        streams, ref_tuple, want_diag=True, want_refspan=True)
 
     # fetch original page text for the sampled pages (short pages, light)
     orig_text = {}
@@ -149,9 +171,10 @@ def main():
             orig_text[pid] = tx or ''
 
     noref_pool, dfail_pool, ambig_pool = [], [], []
-    for (pid, sid, ln), cand, dg in zip(sample, results, diag):
+    for (pid, sid, ln), cand, dg, rs in zip(sample, results, diag, refspans):
         cls, _best = F.classify_failure(dg, cand)
-        rec = {'pid': pid, 'sid': sid, 'len': ln, 'cand': cand, 'dg': dg}
+        rec = {'pid': pid, 'sid': sid, 'len': ln, 'cand': cand, 'dg': dg,
+               'refspan': rs}
         if cls == 'no_reference_covers_it':
             noref_pool.append(rec)
         elif cls == 'density_fail':
@@ -189,21 +212,37 @@ def main():
         ranked = best_per_work(rec['cand'])
         wi, d, a = ranked[0]
         lbl = work_label(works, wi)
+        ref = ref_text_for(seg_streams, rec['refspan'].get(wi))
         cards.append(page_card(rec, 'density_fail', {
             'cand_work': lbl, 'cand_density': round(d, 3),
-            'cand_aligned_len': int(a)}))
+            'cand_aligned_len': int(a),
+            'ref_candidates': [cand_render(lbl, round(d, 3), ref)]}))
 
     for rec in ambig_pool:      # all 3
         ranked = best_per_work(rec['cand'])[:3]
-        cands = [{**work_label(works, wi), 'density': round(d, 3),
-                  'aligned_len': int(a)} for wi, d, a in ranked]
-        cards.append(page_card(rec, 'ambiguous', {'cands': cands}))
+        cands, ref_candidates = [], []
+        for wi, d, a in ranked:
+            lbl = work_label(works, wi)
+            cands.append({**lbl, 'density': round(d, 3), 'aligned_len': int(a)})
+            ref = ref_text_for(seg_streams, rec['refspan'].get(wi))
+            ref_candidates.append(cand_render(lbl, round(d, 3), ref))
+        cards.append(page_card(rec, 'ambiguous', {
+            'cands': cands, 'ref_candidates': ref_candidates}))
 
     # ============ crop_recovered cards (type 4) ============
     sampled_pages, _shortfall = F.sample_track1_pages(con)
     rnd = random.Random(F.RNG_SEED + 2)             # SAME as frag1 main()
     crops = F.make_crops(sampled_pages, rnd)
-    crops = F.run_truncation_experiment(works, wid_to_wi, ref_tuple, crops)
+    # query directly (want_refspan) instead of run_truncation_experiment;
+    # `results` (candidates) are byte-identical either way -> same recovered
+    # set, same order, same ids. refspans is additive (gives us ref source).
+    crop_streams = [c['stream'] for c in crops]
+    cres, _cd, crefspans = F.query_batch(
+        crop_streams, ref_tuple, want_diag=False, want_refspan=True)
+    for c, cand, rs in zip(crops, cres, crefspans):
+        c['candidates'] = cand
+        c['true_wi'] = wid_to_wi.get(c['work_id'])
+        c['refspan'] = rs
 
     recovered = []
     for c in crops:
@@ -250,6 +289,7 @@ def main():
         sid = c['sys_id']
         wi = c['true_wi']
         lbl = work_label(works, wi)
+        ref = ref_text_for(seg_streams, c['refspan'].get(wi))
         sm, lib = lib_meta.get(sid, (sid, '?'))
         den, deh = domain_of(sid)
         # project the norm crop back onto the original page text (readable)
@@ -269,6 +309,7 @@ def main():
             'page': pnum(pid), 'url': viewer_url(sid, pnum(pid)),
             'norm_text': c['stream'], 'orig_text': crop_orig_text[:1000],
             'recovered_work': lbl, 'density': round(dens, 3),
+            'ref_candidates': [cand_render(lbl, round(dens, 3), ref)],
         })
         n_crop += 1
 
@@ -336,6 +377,15 @@ TEMPLATE = r"""<!DOCTYPE html>
       padding:8px 10px;margin-top:6px;direction:rtl;text-align:right;font-size:15px}
  .cand b{color:#e8e6df}
  .cand .d{color:#ef9a9a;font-size:13px}
+ .refc{margin-bottom:12px}
+ .refc:last-child{margin-bottom:0}
+ .candhead{direction:rtl;text-align:right;font-size:13px;color:#9aa4ac;
+      margin-bottom:5px}
+ .candhead b{color:#e8e6df}
+ .candhead .d{color:#ef9a9a}
+ .reftxt{font-size:16px;max-height:240px}
+ .txt mark{background:#6b5407;color:#ffe082;padding:0 1px}
+ .txt .ctx{color:#6d6d6d}
  .grades{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
  .grades button{padding:8px 12px;border-radius:8px;border:1px solid #4a4d55;
       background:#2e3138;color:#ddd;cursor:pointer;font-size:14px}
@@ -406,25 +456,22 @@ function gradeSet(d){
  return GRADE_SETS[d.type];
 }
 
-function candBlock(d){
- if(d.type==="density_fail"){
-   const c=d.cand_work;
-   return `<div class="cand">מועמד יחיד (מעל הסף): [${esc(c.cat)}]
-     ${c.author?esc(c.author)+" — ":""}<b>${esc(c.title)}</b>
-     <span class="d">density ${d.cand_density} · aligned ${d.cand_aligned_len}</span></div>`;
- }
- if(d.type==="ambiguous"){
-   return d.cands.map((c,i)=>`<div class="cand">#${i+1}: [${esc(c.cat)}]
-     ${c.author?esc(c.author)+" — ":""}<b>${esc(c.title)}</b>
-     <span class="d">density ${c.density} · aligned ${c.aligned_len}</span></div>`).join("");
- }
- if(d.type==="crop_recovered"){
-   const c=d.recovered_work;
-   return `<div class="cand">זוהה כ / recovered as: [${esc(c.cat)}]
-     ${c.author?esc(c.author)+" — ":""}<b>${esc(c.title)}</b>
-     <span class="d">density ${d.density} · crop ${d.crop_len} letters</span></div>`;
- }
- return "";
+// right-pane content: one block per candidate, with the matched REFERENCE
+// source text (letters-only, matched span <mark>ed, ~90-letter flanks).
+function refBlocks(d){
+ const cs = d.ref_candidates || [];
+ if(!cs.length) return `<i style="color:#999">no candidate</i>`;
+ return cs.map((c,i)=>{
+   const r = c.ref;
+   const body = (r && r.span)
+     ? `<span class="ctx">${esc(r.before)}</span><mark>${esc(r.span)}</mark><span class="ctx">${esc(r.after)}</span>`
+     : `<i style="color:#999">ref window unavailable</i>`;
+   const tag = d.type==="ambiguous" ? `#${i+1} · ` : "";
+   return `<div class="refc">
+     <div class="candhead">${tag}[${esc(c.cat)}] ${c.author?esc(c.author)+" — ":""}<b>${esc(c.title)}</b>
+       · <span class="d">density ${c.density}</span></div>
+     <div class="txt reftxt">${body}</div></div>`;
+ }).join("");
 }
 
 function render(){
@@ -450,6 +497,21 @@ function render(){
    ? `<div class="wname"><div class="lbl">שם החיבור אם זוהה / work name (for known-*):</div>
       <input id="wn" value="${esc(r.work_name||"")}" placeholder="למשל: סדר רב עמרם / Genesis 12 ..."
       oninput="setWName(this.value)"></div>` : "";
+ const fragLabel = d.type==="crop_recovered"
+   ? "קטע חתוך (crop) — הקטע לבדיקה" : "טקסט הקטע (הדף)";
+ const fragPane = `<div class="pane"><h4>${fragLabel}</h4>${orig}
+     <details class="norm-d"><summary>letters-only stream (מה שהמכונה השוותה)</summary>
+       <div class="norm">${esc(d.norm_text)}</div></details></div>`;
+ let cols;
+ if(d.type==="no_reference"){
+   cols = `<div class="cols">${fragPane}</div>`;
+ } else {
+   const rlabel = d.type==="ambiguous"
+     ? "מקורות מתחרים במהדורה (letters-only)"
+     : "מקור המועמד במהדורה (letters-only)";
+   cols = `<div class="cols">${fragPane}
+     <div class="pane"><h4>${rlabel}</h4>${refBlocks(d)}</div></div>`;
+ }
  document.getElementById("app").innerHTML = `
   <div class="card">
    <div class="meta">
@@ -460,13 +522,7 @@ function render(){
     <span>אורך <b>${d.len}</b> אותיות</span>
     ${stats}
    </div>
-   <div class="cols"><div class="pane">
-     <h4>${d.type==="crop_recovered" ? "קטע חתוך (crop)" : "טקסט הדף"}</h4>
-     ${orig}
-     <details class="norm-d"><summary>letters-only stream (מה שהמכונה השוותה)</summary>
-       <div class="norm">${esc(d.norm_text)}</div></details>
-   </div></div>
-   ${candBlock(d)}
+   ${cols}
    <div class="grades">${btns}</div>
    ${wname}
    <div class="note"><div class="lbl">הערה / note (optional):</div>
