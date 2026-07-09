@@ -301,16 +301,30 @@ Bible+Targum/Tafsīr class defeats Track-1 partly for this reason (A3); B2's
 4. Report `../results/ref1_acquisition_report.md`: found/missing per target,
    license summary, size stats, and the B2-list hit rate.
 
-**Stage 2 — integration (wave-3, tied to the Map v2 / A8 rebuild):** dedup vs
-Maagarim by title equivalence AS A CANDIDATE FILTER ONLY, then
-**normalized-stream near-duplicate detection as the real gate** (Codex
-HIGH-1: shadowing's 0.03 density-gap requirement lets identical twin
-references BOTH stay live — title matching alone cannot be the deduper);
-extend track1_build_ref.py with the staging source + `ref_kind` provenance
-enforced at the testimony classifier (mask_only refs never mint
-testimony/new? rows); rebuild ref_corpus, THEN the full Track-1 rerun +
-shadowing + census — batched with the other reference additions
-(interleaved refs from A3, Targum) because the rerun is the expensive step.
+**Stage 2 — integration (wave-3, tied to the Map v2 / A8 rebuild):**
+**VERSION-GROUP design (revised 2026-07-09 per Hillel — similar texts are an
+asset, not a dedup problem):** reference entries become (version, work_unit)
+pairs — e.g. Maagarim-BH and Sefaria-Ashkenaz-BH are two VERSIONS of the one
+unit 'Birkat Hamazon' (consistent with the binding unit-level same_text
+semantics). Mechanics:
+- MATCHING runs against ALL versions (multi-rite variant coverage = recall
+  exactly where liturgy is weakest; a page can clear the boundary against
+  one rite's wording and miss another's).
+- CENSUS aggregates at the work_unit level: one (MS, unit) row max, keeping
+  best-matching version + density per page as a **rite signal** (feeds the
+  D1 stemma/rite work).
+- Grouping versions into units: title equivalence (track1_bib) as candidate
+  filter + normalized-stream near-duplicate detection as the real gate
+  (Codex HIGH-1: shadowing's 0.03 density-gap lets identical twins BOTH
+  stay live — grouping, not shadowing, is what prevents double counting).
+- `mask_only` narrows to its real job: modern-rite-only matches never mint
+  new?/discovery rows (unit-level testimony claims like 'this page is a BH
+  witness' remain legitimate; container-level claims like 'witness of
+  Siddur Ashkenaz' are never made because the container is not the unit).
+Then extend track1_build_ref.py with staging source + version/unit/ref_kind
+fields, rebuild ref_corpus, THEN the full Track-1 rerun + shadowing +
+census — batched with the other reference additions (interleaved refs from
+A3, Targum) because the rerun is the expensive step.
 
 **Other candidate sources (need Hillel input, Stage 2+):** Dicta-internal
 rabbinic corpora (likely the largest untapped source — in-house), Ben-Yehuda
