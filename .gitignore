@@ -23,6 +23,9 @@ same_work_spike/probe/data/spill/
 # SEED-029 Track 1: Maagarim+JA reference pickle, regenerable (track1_build_ref.py)
 same_work_spike/probe/data/ref_corpus.pkl
 same_work_spike/probe/data/canon/
+# SEED-029 C1-prep: Phase-0 JABERT training dataset (JSONL, regenerable via
+# phase0_build_dataset.py)
+same_work_spike/probe/data/phase0/
 Results/
 # Re-include probe results (the `Results/` pattern above matches
 # `results/` case-insensitively on Windows and would swallow them;
