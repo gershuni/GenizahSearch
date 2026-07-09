@@ -20,7 +20,7 @@ We hold purpose-built encoders in exactly our register:
 | Model | Iter | Vocab | Notes |
 |---|---|---|---|
 | **JABERT** (`JA_FinalModel`) | 86,010 | 128K | Published: HF `MiDRASH-ERC/JABERT`, CC-BY-4.0, ERC MiDRASH #101071829, LT4HALA 2026. Co-authored (incl. H. Gershuni, A. Shmidman). Already consumed by `mrustow/geniza-lacunae` (Rustow / Princeton Genizah Lab). |
-| **RamBert_round_2** | 86,010 | 128K | Internal. Distinct weights **and** vocab from JABERT despite the shared iter number. |
+| **RamBert_round_2** | 86,010 | 128K | Internal, **unpublished**. **Combined Hebrew+JA** (a native shared space). Distinct weights **and** vocab from JABERT despite the shared iter number. |
 | **GereshlessRamBert** | 65,980 | 128K | Internal; geresh (׳) stripped — a script-normalization ablation. |
 
 All three: **BERT-base** (12L / 768h / 12 heads / 3072 ff, 512 positions,
@@ -33,14 +33,18 @@ transliterate-JA→Arabic-script→CAMeLBERT workaround. We don't need it. This
 collapses the single hardest piece of the base-model problem, in our register,
 manuscript-native, from our own ecosystem.
 
-**Open questions for the team (only Hillel can answer):**
-1. **RamBERT scope** — is RamBERT a *combined Hebrew+JA* model (a native shared
-   space, which would resolve cross-lingual Heb↔JA reuse in-house) or JA-only
-   like JABERT? Its different-vocab-vs-JABERT hints at a different data mix.
-2. Which checkpoint is the intended Track-3 base — JABERT (published, citable)
-   or a RamBERT round?
-3. Is there a held-out MLM eval (perplexity / masked-accuracy) per register we
-   can reuse to rank them before fine-tuning?
+**RamBERT is combined Hebrew+JA (confirmed) — and it has no benchmark that
+distinguishes it from using two separate BERTs.** Cross-lingual reuse detection
+is the task class where joint pretraining is theoretically obligated to win, so
+it is that missing benchmark. See **`RAMBERT-CROSSLINGUAL-EXPERIMENT-PLAN.md`**
+for the pre-registered head-to-head (this is "the test case we were looking
+for" — it validates RamBERT and Track-3's cross-lingual layer at once).
+
+**Remaining inputs needed:**
+1. Digital, verse-aligned **Saadia Tafsīr** (or equivalent aligned JA↔Heb
+   bitext) reachable in our data? (proposed gold backbone)
+2. A **Hebrew-only checkpoint from RamBERT's own pipeline** (for the pristine
+   joint-vs-separate ablation)? If absent, the practical comparison still stands.
 
 ---
 
