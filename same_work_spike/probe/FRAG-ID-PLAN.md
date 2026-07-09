@@ -112,6 +112,30 @@ does not measure (a FRAG-2 extension: crop + inject HTR-confusion noise).
 
 ---
 
+## Reference universe is CLOSED at Maagarim + Sefaria + JA (Hillel 2026-07-09)
+
+Dicta's other corpora are usually irrelevant here — Genizah fragments are
+early-medieval, so Dicta's later/modern-register material (responsa, printed
+acharonim, modern Hebrew) does not overlap the fragment content. So reference
+expansion is essentially complete: Maagarim (have) + JA (have) + Sefaria
+(REF-1, adding Targum + canonical liturgy/works). No further reference-source
+hunt.
+
+**Consequence — the fragment population bifurcates, and only one half is an
+identification problem:**
+- **Reference-covered fragment** (its work is in Maagarim/Sefaria/JA) →
+  IDENTIFIABLE; the FRAG-1/FRAG-2 DF-immune-query + length-threshold machinery
+  is the lever. This is where recall/precision engineering pays off.
+- **No-reference fragment** (work in no corpus — e.g. much of the B2 residue:
+  JA Karaite exegesis/philology) → cannot be labeled against a reference, by
+  definition. Only Track-2 / motif / unit clustering can group it with other
+  witnesses of the same *unknown* work and surface it as a DISCOVERY product.
+  Not a fixable recall gap.
+
+FRAG-1's `no_reference_covers_it` failure bucket measures the split directly —
+it tells us how much of the unidentified-short-fragment mass is "recoverable
+with better matching" vs "discovery-only."
+
 ## FRAG-2 (wave 3, after FRAG-1 + mask job + Map-v2) — full-scale fragment run
 
 Systematized DF-immune fragment identification at full corpus scale: work-query
@@ -122,6 +146,6 @@ expanded reference set (Targum + Sefaria + whatever Dicta-internal adds). Output
 (candidate tier), graded by Hillel. Scoped in detail once FRAG-1's numbers land.
 
 ## Open input from Hillel
-- Dicta-internal rabbinic corpora as reference sources (biggest untapped recall
-  lever for fragment ID — a fragment is only identifiable against a reference
-  that exists).
+- (RESOLVED 2026-07-09) Reference universe closed at Maagarim + Sefaria + JA;
+  Dicta's other corpora usually irrelevant (wrong period/register). No further
+  reference-source hunt — see "Reference universe is CLOSED" above.
