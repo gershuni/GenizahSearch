@@ -317,10 +317,19 @@ semantics). Mechanics:
   filter + normalized-stream near-duplicate detection as the real gate
   (Codex HIGH-1: shadowing's 0.03 density-gap lets identical twins BOTH
   stay live — grouping, not shadowing, is what prevents double counting).
-- `mask_only` narrows to its real job: modern-rite-only matches never mint
-  new?/discovery rows (unit-level testimony claims like 'this page is a BH
-  witness' remain legitimate; container-level claims like 'witness of
-  Siddur Ashkenaz' are never made because the container is not the unit).
+- **`mask_only` RETIRED as an identity restriction (Hillel 2026-07-09):**
+  a Fustat fragment is a witness of Siddur Ashkenaz in exactly the sense a
+  Bavli fragment is a witness of the Gemara we know from the Vilna page —
+  the reference version is the identification LENS, cited as provenance,
+  and the whole census already works this way (Maagarim's canonical texts
+  are themselves edition-derived). Testimony rows are legitimate from ANY
+  version; the manifest's version/provenance field is standard scholarly
+  citation, not a caveat.
+- The one remaining suppression is a NOISE gate, recast source-neutrally:
+  units above a witness-count threshold do not mint new?/discovery rows
+  (discovery value ∝ rarity — thousands of 'new BH witness!' rows are
+  technically true and scholarly worthless). Applies equally to Maagarim-
+  and Sefaria-referenced units; threshold picked at Stage-2 design.
 Then extend track1_build_ref.py with staging source + version/unit/ref_kind
 fields, rebuild ref_corpus, THEN the full Track-1 rerun + shadowing +
 census — batched with the other reference additions (interleaved refs from
