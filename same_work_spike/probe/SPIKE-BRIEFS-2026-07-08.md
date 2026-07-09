@@ -313,10 +313,25 @@ semantics). Mechanics:
 - CENSUS aggregates at the work_unit level: one (MS, unit) row max, keeping
   best-matching version + density per page as a **rite signal** (feeds the
   D1 stemma/rite work).
-- Grouping versions into units: title equivalence (track1_bib) as candidate
-  filter + normalized-stream near-duplicate detection as the real gate
-  (Codex HIGH-1: shadowing's 0.03 density-gap lets identical twins BOTH
-  stay live — grouping, not shadowing, is what prevents double counting).
+- **GRANULARITY (Hillel 2026-07-09): sources chunk differently** — Sefaria's
+  'work' is often a CONTAINER (one Siddur Ashkenaz = dozens of units) while
+  Maagarim sits near the true unit grain (Amidah, single berakhot, piyyutim).
+  So version-grouping is NOT work-to-work matching; containers become
+  **COMPOSITE REFERENCES**: a sequence of unit-spans with per-span identity
+  (the same first-class concept as A3's interleaved Bible+Targum/Tafsīr
+  refs — one mechanism serves both). Segmentation of a container, two
+  channels: (a) Sefaria's own named schema nodes (captured with char
+  offsets in the Stage-1 sidecars — agent instructed mid-flight); (b) run
+  Maagarim units AS QUERIES against the container stream (the A2
+  work-query engine): matching spans inherit the unit; UNMATCHED leftover
+  spans are themselves the find — rite-specific material Maagarim lacks,
+  minted as new units. Container unit-ORDER is retained as rite-sequence
+  evidence (the right model for the 18K-MS chained-prayer continuum).
+- Grouping version-spans into units: title/node-name equivalence
+  (track1_bib) as candidate filter + normalized-stream near-duplicate
+  detection as the real gate (Codex HIGH-1: shadowing's 0.03 density-gap
+  lets identical twins BOTH stay live — grouping, not shadowing, is what
+  prevents double counting).
 - **`mask_only` RETIRED as an identity restriction (Hillel 2026-07-09):**
   a Fustat fragment is a witness of Siddur Ashkenaz in exactly the sense a
   Bavli fragment is a witness of the Gemara we know from the Vilna page —
