@@ -64,10 +64,16 @@ import time
 
 import numpy as np
 
-ROOT = r"C:\Genizahsearch\same_work_spike\probe"
+# ROOT is derived from this file's location (probe/scripts/ -> probe/) so the
+# script is portable across Windows and WSL/Linux (the 2026-07-09 GPU box is
+# WSL; the Windows C:\... paths only resolve under the Git-Bash/Windows Python).
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR_DEFAULT = os.path.join(ROOT, 'data', 'phase0')
 RESULTS_DIR = os.path.join(ROOT, 'results')
+# local JABERT checkpoint: Windows path if present, else its WSL /mnt/c mount,
+# else the HF hub id (resolve_model_path falls through in that order).
 LOCAL_MODEL_DEFAULT = r"C:\Users\gersh\Dropbox\JA Models\JABert_ckpt86010"
+LOCAL_MODEL_DEFAULT_WSL = "/mnt/c/Users/gersh/Dropbox/JA Models/JABert_ckpt86010"
 HF_MODEL_FALLBACK = "MiDRASH-ERC/JABERT"
 
 
@@ -85,6 +91,8 @@ def resolve_model_path(explicit):
         return explicit
     if os.path.isdir(LOCAL_MODEL_DEFAULT):
         return LOCAL_MODEL_DEFAULT
+    if os.path.isdir(LOCAL_MODEL_DEFAULT_WSL):
+        return LOCAL_MODEL_DEFAULT_WSL
     return HF_MODEL_FALLBACK
 
 
