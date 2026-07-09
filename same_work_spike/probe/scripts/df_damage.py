@@ -38,9 +38,11 @@ def main():
     work_pages = defaultdict(set)
     work_ms = defaultdict(set)
     work_info = {}
+    cols = [r[1] for r in con.execute("PRAGMA table_info(track1_matches)")]
+    live = (" WHERE shadowed_by IS NULL" if 'shadowed_by' in cols else "")
     for pid, sid, wid, cat, author, title, letters in con.execute(
             "SELECT page_id, sys_id, work_id, cat, author, title, "
-            "matched_letters FROM track1_matches"):
+            f"matched_letters FROM track1_matches{live}"):
         if letters < MIN_LETTERS:
             continue
         page_works[pid].add(wid)
@@ -168,9 +170,11 @@ def main():
         "   liturgy/formulae almost by definition.",
         "3. Long works' low pairing = fragment dispersion (witnesses carry",
         "   different sections) — benign, not cap damage.",
-        "4. Side-catch: suspicious Track-1 identifications surfaced by the",
-        "   metric (n MSS >> plausible): מגילת המקדש (176), מגילת פשר",
-        "   ישעיהו (35), פיירברג לאן (96) — a Track-1 review category.",
+        "4. Side-catch (historical): suspicious Track-1 identifications the",
+        "   metric surfaced pre-shadowing — מגילת המקדש (176), מגילת פשר",
+        "   ישעיהו (35), פיירברג לאן (96). Competitive span assignment",
+        "   (track1_shadow.py) now resolves these; this census reads live",
+        "   (unshadowed) rows only when the shadowed_by column exists.",
         "5. Remedy note: for REFERENCE-COVERED short works, Track-1 already",
         "   connects the witnesses (the testimonies census groups them",
         "   without needing Track-2 pairs). The cap damage matters for",

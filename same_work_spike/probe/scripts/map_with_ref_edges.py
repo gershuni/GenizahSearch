@@ -74,9 +74,11 @@ def main():
     # ---- Track-1 witness webs (edited works) ----
     work_ms = defaultdict(set)
     work_name = {}
+    t1cols = [r[1] for r in con.execute("PRAGMA table_info(track1_matches)")]
+    live = (" WHERE shadowed_by IS NULL" if 'shadowed_by' in t1cols else "")
     for sid, wid, cat, author, title, letters in con.execute(
             "SELECT sys_id, work_id, cat, author, title, matched_letters "
-            "FROM track1_matches"):
+            f"FROM track1_matches{live}"):
         if letters < MIN_LETTERS or cat in CANON_CATS:
             continue
         work_ms[wid].add(sid)

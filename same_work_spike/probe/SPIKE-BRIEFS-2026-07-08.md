@@ -215,14 +215,18 @@ the +1/+2 tail).
 
 ### A2 — DF-policy v2: work-keyed second pass (COMPUTE-GATED)
 
-Feed the df_damage 0%-cohort (68 short works, ≥10 MSS — see
-`results/df_damage_full.md` §short-work cohort) as queries through the
-`motif_query.py` mechanics (per-query DF immunity, two-sided boundary), using each
-work's REFERENCE text (from ref_corpus) as the query instead of a motif. Measure:
-cohort pairing rate before/after (target ≥60%), added pair volume, precision spot
-sample (20 pairs). Must run detached (`Start-Process`), BelowNormal, checkpointed,
-AFTER mask_ref_canon.py finishes. Compare against the liturgy-subcorpus-pass
-numbers where the cohorts overlap.
+**RE-ANCHORED by A1 (2026-07-08):** the pre-shadow "0% cohort" was mostly
+shadowing artifacts (see `results/a1_shadow_consumers_report.md`). Target cohort =
+the REGENERATED `results/df_damage_full.md` short-work cohort (60 works, 77%
+overall, floor 14–30%: תפילת פסוקים לאחר ערבית 14%, תפילה ליום כיפור 15%, צלותא
+21%, קידוש לרגלים 30%) plus the sub-30% ≥20-MSS damaged list (Yannai qedushtaot,
+Rambam Mishnah-commentary orders, ראב"ש מלכים א). Feed these works as queries
+through the `motif_query.py` mechanics (per-query DF immunity, two-sided
+boundary), using each work's REFERENCE text (from ref_corpus) as the query.
+Measure: cohort pairing rate before/after (target: sub-30% works reach ≥60%),
+added pair volume, precision spot sample (20 pairs). Must run detached
+(`Start-Process`), BelowNormal, checkpointed, AFTER mask_ref_canon.py finishes.
+Compare against the liturgy-subcorpus-pass numbers where the cohorts overlap.
 
 ### A6 — motif v2: community detection on the segment graph
 

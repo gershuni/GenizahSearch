@@ -200,12 +200,14 @@ def main():
 
     # ---- Track-1 spans per member page (label propagation) ----
     t1 = defaultdict(list)       # page -> [(p0, p1, label, cat)]
+    t1cols = [r[1] for r in con.execute("PRAGMA table_info(track1_matches)")]
+    live = (" AND shadowed_by IS NULL" if 'shadowed_by' in t1cols else "")
     for i in range(0, len(ids), 500):
         batch = ids[i:i + 500]
         ph = ','.join('?' * len(batch))
         for pid, cat, author, title, spans_json in con.execute(
                 f"SELECT page_id, cat, author, title, spans_json "
-                f"FROM track1_matches WHERE page_id IN ({ph})", batch):
+                f"FROM track1_matches WHERE page_id IN ({ph}){live}", batch):
             label = (f"{author} — {title}" if author else title)[:80]
             for s in json.loads(spans_json):
                 t1[pid].append((int(s[0]), int(s[1]), label, cat))
