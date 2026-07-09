@@ -225,8 +225,24 @@ through the `motif_query.py` mechanics (per-query DF immunity, two-sided
 boundary), using each work's REFERENCE text (from ref_corpus) as the query.
 Measure: cohort pairing rate before/after (target: sub-30% works reach ≥60%),
 added pair volume, precision spot sample (20 pairs). Must run detached
-(`Start-Process`), BelowNormal, checkpointed, AFTER mask_ref_canon.py finishes.
-Compare against the liturgy-subcorpus-pass numbers where the cohorts overlap.
+(`Start-Process`, NOT bash `&` — that got reaped), BelowNormal, checkpointed,
+AFTER mask_ref_canon.py finishes. Compare against the liturgy-subcorpus-pass
+numbers where the cohorts overlap.
+
+**IMPLEMENTATION STATUS (2026-07-09, `work_query.py`, commit 4517c5da +
+follow-up):** built + Codex-reviewed (REVISE → 3 BLOCKER/HIGH fixed: (1)
+distinct-QUERY-WORK DF cap replacing the recall-destroying raw-posting cap;
+(2) tag-scoped checkpoint tables + run-metadata refuse-on-mismatch guard;
+(3) df_damage-compatible reference-mediated pairing metric + raw coverage
+kept separately). **DF-cap tuning (critical):** the cap is a SMALL ABSOLUTE
+distinct-work count, NOT a fraction of cohort size — frac=0.5 (cap=24/49)
+let the 4-24-work semi-generic band through → 34.5M candidates/8k-page batch
+(~15 min/batch, unusable). Default **cap=3** (keep grams in ≤3 works, drop
+the 302k codes in 4+ works) → 1.65M postings; within-work repetition always
+survives (dw=1), which is the BLOCKER fix. `--index-audit` builds the index +
+prints dw-histogram/retention with no scan; `--work-df-cap N` overrides.
+Recall validated empirically by the liturgy dry run, NOT by retention %.
+Full 667K run still gated behind mask_ref_canon.py.
 
 ### A6 — motif v2: community detection on the segment graph
 

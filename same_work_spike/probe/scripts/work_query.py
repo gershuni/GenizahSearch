@@ -72,13 +72,21 @@ CKPT_EVERY = 8   # batches between checkpoint commits (motif_query.py convention
 # a formula shared across several cohort works, blows the raw count) and
 # silently re-suppresses the very texts this pass exists to recover.
 # The right discriminator is DISTINCT QUERY WORKS per gram: a gram in few
-# works is discriminative (keep ALL its postings, however often it repeats);
-# a gram spread across MANY unrelated cohort works is generic connective
-# tissue (drop it -- it is what scatters spurious anchors on short works).
-# Cap is a fraction of the query-set size (auto), overridable via
-# --work-df-cap; the per-work retention table + dw-histogram are printed so
-# the choice is auditable before the 667K-page scan.
-WORK_DF_CAP_FRAC = 0.5
+# works is discriminative (keep ALL its postings, however often it repeats --
+# so a formula repeated 100x WITHIN one work has distinct-work-count 1 and
+# always survives: that is the BLOCKER fix); a gram spread across MANY
+# unrelated cohort works is generic connective tissue (drop it -- it is what
+# scatters spurious anchors AND explodes candidate volume).
+# The cap is a SMALL ABSOLUTE count, NOT a fraction of the cohort: distinct-
+# work frequency is meaningful in absolute terms (a gram in 4+ of these
+# heterogeneous works -- piyyut + Rambam-JA + Saadia + grammar -- is generic
+# regardless of whether the cohort has 5 works or 500). An earlier frac=0.5
+# (cap=24/49) let the semi-generic 4-24-work band through and produced 34.5M
+# candidates in a single 8k-page batch (~15 min/batch, unusable); cap=3 keeps
+# the discriminative 1-3-work band (dw-hist: 458k+302k codes) and drops the
+# 302k generic 4+-work codes. Per-work retention + dw-histogram are printed
+# so the choice stays auditable (--index-audit); overridable via --work-df-cap.
+WORK_DF_CAP_DEFAULT = 3
 # debug-only knob for kill/resume testing -- unset in production (0 = off)
 _DEBUG_SLEEP = float(os.environ.get('WORK_QUERY_DEBUG_SLEEP', '0') or 0)
 
@@ -350,8 +358,9 @@ def main():
                      help='comma-separated work_id allowlist (overrides '
                           '--limit; for dry runs / smoke tests)')
     ap.add_argument('--work-df-cap', type=int, default=None,
-                     help='distinct-work DF cap (default: round(0.5*Nworks)); '
-                          'grams in more works than this are dropped')
+                     help=f'distinct-work DF cap (default {WORK_DF_CAP_DEFAULT}); '
+                          'grams appearing in more query works than this are '
+                          'dropped as generic')
     ap.add_argument('--index-audit', action='store_true',
                      help='build the full-cohort index, print the dw-histogram '
                           '+ per-work retention, then exit (no corpus scan)')
@@ -406,7 +415,7 @@ def main():
     print(f"ref-side canonical masks: {n_apply}/{len(works)} query works "
           f"masked ({time.time() - t0:.0f}s)", flush=True)
 
-    work_df_cap = args.work_df_cap or max(2, round(WORK_DF_CAP_FRAC * len(works)))
+    work_df_cap = args.work_df_cap or WORK_DF_CAP_DEFAULT
     (seg_streams, seg_work, seg_off, codes_f, seg_f, pos_f,
      df_dropped, retention, dw_count) = build_work_query_index(
         works, canon_masks, work_df_cap)
