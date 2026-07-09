@@ -26,6 +26,11 @@ same_work_spike/probe/data/canon/
 # SEED-029 C1-prep: Phase-0 JABERT training dataset (JSONL, regenerable via
 # phase0_build_dataset.py)
 same_work_spike/probe/data/phase0/
+# SEED-029 REF-1 Stage 1: acquired reference texts (Sefaria/Wikisource) staged
+# for licensing review before Stage-2 ingestion into ref_corpus.pkl. Mixed
+# per-version licenses (see manifest.json reuse_ok fields) -- never commit
+# raw text until the reuse_ok review clears each entry.
+same_work_spike/probe/refs_staging/
 Results/
 # Re-include probe results (the `Results/` pattern above matches
 # `results/` case-insensitively on Windows and would swallow them;
