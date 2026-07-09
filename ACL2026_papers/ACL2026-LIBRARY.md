@@ -126,3 +126,186 @@ Ranked by how many independent cards chased them + directness to our problems:
 4. **Lacuna-completion product spike**: MsBERT + RAG-restoration + UniHIR self-refine loop, retrieval store = our witness census; human-in-the-loop gate in the web app.
 5. **Cite-ready validations**: witness-recall over CER (Qihoo); multi-algorithm robustness (ICoMa); "lexical gatekeeping" as the Track-3 motivation (Wu & Tolonen).
 6. **Verifier upgrade (cheap)**: build the Hebrew HTR confusion matrix into substitution-cost weights for banded Levenshtein (Nepal HTR precedent).
+
+---
+
+# WAVE 2 — cross-domain mechanism transfers (the analogy hunt)
+
+Compiled 2026-07-08. Eight agents scanned the tracks wave 1 skipped
+(Interpretability 189, ML-for-NLP+*SEM 212, Safety 324, Multimodality 315,
+Efficiency+LM-scale 752, Agents+coref+QA+Summ 523, formal/cognitive
+SCiL+CoNLL+CogPsy 140, cross-domain long tail ~562) against
+`_scan2/WAVE2-PROFILE.md`. Different question from wave 1: **not "does this
+match our domain" but "does this paper's mechanism solve a problem isomorphic
+to one of ours, regardless of surface domain."** Twelve domain-neutral target
+problems (A noisy alignment · B all-pairs near-dup · C competitive assignment ·
+D change-point/segmentation · E graph clustering · F lineage/tree · G
+contrastive-from-graded-labels · H calibration-without-gold · I concept
+removal/disentanglement · J rare-event · K draft-then-verify · L
+cross-representation alignment). Apophenia guard on: every A-card carries a
+"why it might NOT transfer" line + a transfer-confidence rating. Cards in
+`_scan2/*-cards.md`. Verdicts ~57 A / ~103 B, but **the count is not the
+product — the convergences are.**
+
+## The premise, vindicated
+The single most useful find is a **computational-biology paper** (TIGER,
+enzyme↔reaction retrieval), and the fill for our biggest capability gap came
+from an **LLM-data-provenance paper** and a **social-bot-detection paper**.
+None would ever surface under a "text reuse / Genizah / Hebrew" search. When
+the same reformulation arrives independently from tracks that don't cite each
+other, that convergence is the signal to trust.
+
+## Convergence 1 — span-shadowing IS an assignment problem (problem C)
+Our hand-tuned `track1_shadow.py` (keep-best-span, mark-overlap-shadowed) drew
+**five independent principled reformulations from four unrelated tracks**, and
+they partition the design space by which assumption fits:
+- **Confidence-weighted set cover** (Sultan & Astudillo, LLM-Efficiency) —
+  *the highest-confidence transfer of the whole wave.* Minimal weighted set of
+  spans covering the region; greedy with a (1−1/e) guarantee; drops into
+  `track1_shadow.py`, fold ownership into the weights. **HIGH.**
+- **Unbalanced Optimal Transport** (SCOUT, Interpretability) — differentiable,
+  and its whole point is that noise legitimately matches *nothing* ("geometric
+  mass suppression") = the many-to-many case. **HIGH** (verification-stage only,
+  O(n·m)).
+- **Bipartite matching** (MatchTIR, Agents) — the clean one-to-one objective,
+  with the honest caveat *reuse is many-to-many → needs the OT relaxation above.*
+- **Stable matching under probabilistic preferences** (Kong & Shen, LM) — when
+  match scores are themselves uncertain (Expected Blocking Pairs).
+- **Deferral** (Kim & Danescu-Niculescu-Mizil, CSS) — don't commit the shadow
+  while a better-covering span could still emerge as the alignment extends.
+Plus a meta-nudge: *learn the selector instead of hand-coding NMS* (Measure
+Twice Click Once, Multimodality). **Action:** reimplement shadowing as
+weighted set-cover now; keep UOT for the semantic verification tier.
+
+## Convergence 2 — the stemma we don't build (problem F), now over-determined
+Wave 1 and the Interpretability + formal hunters all reported F as a *null*.
+Then it arrived, in force, from tracks that have nothing to do with philology —
+and it decomposes into exactly the two halves of classical (Lachmannian)
+stemmatics plus the graph machinery to run it:
+- **Shared-innovation principle** (When Agents Look the Same, Agents) —
+  separate *mandatory* shared features (forced, uninformative) from
+  *non-mandatory* shared features (evidence of a common exemplar). This is
+  Lachmann's "shared errors, not shared correct readings, prove descent,"
+  independently rediscovered for LLM-distillation detection.
+- **Directed derivation graph + propagation** (Tracing the Roots, Agents) —
+  build a who-derived-from-whom graph; contamination propagates along ancestry
+  = a late gloss back-propagating through a copy chain.
+- **Distance-tree half** (Baidildinova & Futrell, SCiL) — LM cross-perplexity →
+  cophenetic tree distance; asymmetric, alignment-free, mirrors our asymmetric
+  matcher.
+- **Graph edge-purification** (TRUST, social-bot detection, CSS) — delete
+  heterophilous edges (links between probably-different-class nodes), propagate
+  labels only from low-uncertainty nodes = purge coincidental phrase-overlap
+  edges, bootstrap attributions from confident witnesses.
+- Supporting: iterative global-consistency edge pruning (SVRECI, NLG),
+  structural+temporal fusion for direction (RCTEA, Safety), attribution as
+  bipartite link prediction on a fragment×work graph (GEMS, CSS), dating as a
+  hard partitioner (CohTP, Discourse).
+**Action:** this is a full method kit for a new capability — spin up a stemma
+spike (weight edges by non-mandatory overlap → purify → cross-perplexity tree
+→ date-constrained direction).
+
+## Convergence 3 — concept erasure is a mature, verifiable toolkit (problem I)
+Stripping scribe-hand / language-identity / script / genre from Track-3
+embeddings drew **six removal methods plus, crucially, the gold-free
+verification half**:
+- Removal: CRISP (SAE concept-unlearning, Safety), ReGLU (orthogonal-complement
+  LoRA, Safety), ReAlign (SAE + training-free whitening, Multimodality),
+  SAE-NER monosemantic axes (*SEM), sentiment-circuit SAE steer→suppress
+  (Sentiment), CLaS-Bench's ranked *menu* of extractors (Interpretability) —
+  building on wave-1 LangSAE.
+- **Verification (the missing half)**: LEACE + containment/disentanglement
+  diagnostics prove erasure worked with *no labels* (Naowarat & Goldwater,
+  CoNLL); "From Isolation to Entanglement" (Interpretability) is the caution —
+  erasing one factor usually perturbs others, so test multi-concept.
+- **The data**: CausalDetox (Safety) evaluates factor-removal on *aligned
+  counterfactual pairs* — which we already own as multi-witness copies of one
+  work (same text, different scribe/script).
+- Bonus: Vocab Diet (Interpretability, HUJI) — spelling variants may be a single
+  additive offset we can subtract to normalize plene/defective forms.
+**Action:** the plan is de-risked end-to-end — removal + proof + eval data all
+in hand. Pilot LEACE (closed-form) with the containment/disentanglement check.
+
+## Convergence 4 — replace hand-tuned density gates with calibrated, gold-free thresholds (problem H)
+- **Conformal p-values + FDR control** (Principled Hallucination Detection,
+  Safety) — feed n-gram density, Levenshtein ratio, reference score, embedding
+  sim as separate scores; get one provably-controlled false-positive budget
+  across 1.34M pairs, no manual thresholds. **HIGH.** (CEBC, Multimodality, is
+  the per-domain conformal-quantile sibling.)
+- **ODASim** (NLP-Applications) — train the similarity to be *monotone in reuse
+  strength and absolutely calibrated* from perturbed-gold grades, so a fixed
+  threshold means the same thing corpus-wide (−85% ECE). **MED-HIGH.**
+- **GIRB isotonic remap** (Summarization) + **Balanced Brier Score** (ML-for-NLP,
+  the caveat that high-accuracy regimes hide error-miscalibration).
+- **Load-bearing warning**: Dataset Cartography (CODI-CRAC) — raw confidence is
+  confounded by class rarity, so naive confidence-pruning would systematically
+  purge our *rare works and rare scripts*. Do not threshold on confidence alone.
+
+## Convergence 5 — the HTR confusion matrix is a triple-purpose asset (problems A + G)
+Three unrelated papers point at the same artifact from different angles:
+- **Edit costs** (problem A): noisy-channel reading with targeted reanalysis
+  (Clark, Levy & Gibson — an *eye-tracking* paper) says replace uniform
+  Levenshtein costs with a learned letter-confusion prior, and add a reanalysis
+  pass that relocates a greedy misalignment using downstream context. (Nepal-HTR
+  from wave 1 gives the same edit-cost recipe.)
+- **Hard negatives** (problem G): "Semantic Hardness Is Not Visual Hardness"
+  (SAN, Multimodality) — mine Track-3 contrastive negatives from *visual
+  confusability*, not semantic similarity — i.e. from the confusion matrix.
+So one measured confusion matrix serves the verifier, the embedding trainer,
+and the negative sampler. Also here: elastic band width driven by local HTR
+confidence (EASE, Sentiment); embedding-space DP alignment as a noise-robust
+reframing of seed-and-extend (SEA sign-language, Multimodality).
+
+## A-tier singletons worth their own line (beyond the convergences)
+- **TIGER** (comp-bio, ML-for-NLP) — asymmetric two-space retrieval via a
+  generated *text pivot*; template for JA↔Hebrew / dirty-ms↔clean-edition (L).
+- **GenDis** (ML-for-NLP) — generalized category discovery = our **"new?" queue
+  (1,168 items)** as a dual-view (surface + Track-3) co-training task (J/G).
+- **LSCD benchmark** (*SEM) — pairwise → graph → sense-induction clustering "IS
+  our census pipeline"; opens the WSI / correlation-clustering-on-noisy-graphs
+  subfield for problem E.
+- **LASA semantic bottleneck** (Safety) — probe for the layer where language
+  identity drops out; embed/match there for JA↔Hebrew (L/I).
+- **LycheeCluster** (Efficiency) — triangle-inequality metric tree = O(log n)
+  candidate pruning (B) + boundary-aware chunking (D), two-for-one.
+- **HHQ** (Efficiency) — cosine-preserving quantization; beats wave-1's
+  Isolation-Kernel binary codes for contrastive embeddings (B).
+- **HeteroSpec / Speculative Verification** (Efficiency) — adaptive
+  verification budget: spend banded-Levenshtein effort proportional to a cheap
+  seed-density signal (K/H).
+- **MEIC-DT** (Discourse) — bounded-memory streaming clustering; a principled
+  discipline for our disk-spill witness/motif clustering (E).
+- **GovScape** (Demo) — exact-match + semantic + facet + **visual** search over
+  70M heritage pages for ~$1.5K/10M PDFs; a near-exact product blueprint at 70×
+  scale, and the case for adding image-based "find pages that look like X"
+  search (product).
+
+## Honest caveats this wave surfaced (worth heeding)
+- **Frequency confound** (Momen & Zarrieß, *SEM): "low-DF = distinctive" is
+  partly a raw-frequency artifact — control for frequency before crediting a
+  rare-gram match.
+- **Committee correlation** (single-agent-diversity, Agents; MoMIA, LM): our
+  multi-detector "committee" may give correlated, not independent, signal —
+  sampling one strong model N times can be more diverse than N models.
+- **Stylometry doesn't cross scripts** (LaCava, cross-domain): authorship/
+  scribe-hand features do NOT transfer across language families — a direct
+  warning for Hebrew↔JA scribe modeling.
+
+## Wave-2 additions to the Monday-morning shortlist
+7. **Reimplement shadowing as weighted set-cover** (Sultan & Astudillo);
+   evaluate UOT (SCOUT) for the many-to-many verification tier.
+8. **Stemma spike** (new capability): non-mandatory-overlap edge weights (When
+   Agents Look the Same) → TRUST edge-purification → cross-perplexity cophenetic
+   tree (Baidildinova) → date-constrained direction (CohTP/RCTEA).
+9. **Concept-erasure pilot**: LEACE removal + containment/disentanglement
+   verification (Naowarat), counterfactual eval on our multi-witness pairs
+   (CausalDetox), multi-concept safety check (From Isolation to Entanglement).
+10. **Swap density gates for conformal+FDR** (Principled Hallucination
+    Detection) with per-domain calibration (CEBC); make Track-3 similarity
+    calibrated-and-monotone via ODASim; do NOT confidence-prune rare works
+    (Dataset Cartography).
+11. **One confusion matrix, three uses**: edit-cost prior + reanalysis pass
+    (Clark/Levy/Gibson) + visual-confusability hard negatives (SAN).
+12. **new?-queue as generalized category discovery** (GenDis); **scale**:
+    metric-tree pruning (LycheeCluster) + HHQ codes; **product**: cost out a
+    GovScape-style visual+semantic search over the 948K folios.
