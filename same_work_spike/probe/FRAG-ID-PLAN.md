@@ -136,6 +136,33 @@ FRAG-1's `no_reference_covers_it` failure bucket measures the split directly —
 it tells us how much of the unidentified-short-fragment mass is "recoverable
 with better matching" vs "discovery-only."
 
+## FRAG-1 RESULTS (2026-07-09, commit re frag1_truncation.md) — reorders the levers
+
+- **recall(length) knee ≈ 150 letters** at the current boundary (40:0% / 80:9% /
+  100:28% / 150:87% / 200:95% / 300:98%). The 40-letter 0% is a STRUCTURAL floor
+  (~36 grams; HTR variants wipe shared anchors) — not tunable; those need
+  paleography/join/catalog signal or human review.
+- **Boundary sweep = the recovery lever.** At 100 letters, loosening 1.0×→1.2×
+  lifts recall 28%→84% at ~9% wrong-work mis-attribution; at 150, 1.0×→1.1×
+  gives 87%→93%. Length-conditional loosening (A5) recovers most of the
+  sub-150 loss into a CANDIDATE tier.
+- **Failure census reorders priorities:** 297/300 orphan short pages fail at
+  `density_fail`, **0 `no_reference`, 0 anchor-starved.** So for the SHORT-
+  FRAGMENT population the bottleneck is the ACCEPTANCE BOUNDARY (A5), NOT
+  reference coverage. (This does NOT contradict the bifurcation above: the
+  B2 no-reference residue is a DIFFERENT, high-witness population; the short
+  orphans here DO hit references but get rejected.)
+- **Prize size:** 16,420 orphan pages <100 letters, 71,176 <200 (neither
+  Track-1 ID nor Track-2 pair); Piyyut/Bible/Liturgy dominant.
+- **Honest caveat:** truncation used CLEAN crops → these are OPTIMISTIC upper
+  bounds; real HTR-damaged/variant fragments are harder (FRAG-2 must crop +
+  inject confusion-matrix noise). Mis-attribution measured on known-work clean
+  crops; real-orphan precision needs the A5 boundary applied + human grading.
+
+**Consequence for sequencing:** A5 length-conditional / two-tier thresholds is
+now the FIRST fragment lever (was going to be reference expansion). Its full
+calibration (deferred to wave 2 in the A5 brief) is now on the critical path.
+
 ## FRAG-2 (wave 3, after FRAG-1 + mask job + Map-v2) — full-scale fragment run
 
 Systematized DF-immune fragment identification at full corpus scale: work-query
