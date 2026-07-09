@@ -136,32 +136,47 @@ FRAG-1's `no_reference_covers_it` failure bucket measures the split directly —
 it tells us how much of the unidentified-short-fragment mass is "recoverable
 with better matching" vs "discovery-only."
 
-## FRAG-1 RESULTS (2026-07-09, commit re frag1_truncation.md) — reorders the levers
+## FRAG-1 RESULTS (2026-07-09, commit re frag1_truncation.md) — REVISED (v2, the correct read)
 
-- **recall(length) knee ≈ 150 letters** at the current boundary (40:0% / 80:9% /
-  100:28% / 150:87% / 200:95% / 300:98%). The 40-letter 0% is a STRUCTURAL floor
-  (~36 grams; HTR variants wipe shared anchors) — not tunable; those need
-  paleography/join/catalog signal or human review.
-- **Boundary sweep = the recovery lever.** At 100 letters, loosening 1.0×→1.2×
-  lifts recall 28%→84% at ~9% wrong-work mis-attribution; at 150, 1.0×→1.1×
-  gives 87%→93%. Length-conditional loosening (A5) recovers most of the
-  sub-150 loss into a CANDIDATE tier.
-- **Failure census reorders priorities:** 297/300 orphan short pages fail at
-  `density_fail`, **0 `no_reference`, 0 anchor-starved.** So for the SHORT-
-  FRAGMENT population the bottleneck is the ACCEPTANCE BOUNDARY (A5), NOT
-  reference coverage. (This does NOT contradict the bifurcation above: the
-  B2 no-reference residue is a DIFFERENT, high-witness population; the short
-  orphans here DO hit references but get rejected.)
-- **Prize size:** 16,420 orphan pages <100 letters, 71,176 <200 (neither
-  Track-1 ID nor Track-2 pair); Piyyut/Bible/Liturgy dominant.
-- **Honest caveat:** truncation used CLEAN crops → these are OPTIMISTIC upper
-  bounds; real HTR-damaged/variant fragments are harder (FRAG-2 must crop +
-  inject confusion-matrix noise). Mis-attribution measured on known-work clean
-  crops; real-orphan precision needs the A5 boundary applied + human grading.
+NOTE: a preliminary v1 of the report (read/reported/plan-folded mid-run) had
+the failure-mode classification BACKWARDS (density_fail 297 / no_reference 0)
+because it counted any chance-collision cluster that then failed density as
+`density_fail`. The agent's final v2 corrects this: a cluster of chance 5-gram
+collisions that verifies NOTHING even at a generous 0.55 density is
+`no_reference_covers_it`, not a near-miss. v2 numbers below are authoritative.
 
-**Consequence for sequencing:** A5 length-conditional / two-tier thresholds is
-now the FIRST fragment lever (was going to be reference expansion). Its full
-calibration (deferred to wave 2 in the A5 brief) is now on the critical path.
+- **recall(length) knee ≈ 150 letters** (40:0% / 80:9% / 100:28% / 150:87% /
+  200:95% / 300:98%). 40-letter 0% = STRUCTURAL floor (~36 grams; not tunable).
+- **Precision is NOT the problem — recall is.** Two mis-attribution reads:
+  *any-wrong* (any wrong work in the accepted set) rises to 12% at 300 — but
+  that's spurious SECOND works clearing a loose boundary; *top-wrong* (the
+  single best/lowest-density work is wrong — the census-relevant metric under
+  take-best) is **≤1.4% at 150-300**, ~6-8% at 80-100. So best-match ID is
+  essentially precise once recall exists.
+- **Failure census (300 orphan short pages <200 letters) — the binding
+  finding:** `no_reference_covers_it` **247 (82%)**, `density_fail` 50 (17%),
+  `ambiguous` 3 (1%), anchor-starvation 0. **The bottleneck is REFERENCE
+  COVERAGE, not the acceptance boundary.** A5 threshold loosening only touches
+  the ~17% density_fail slice; 82% form only chance clusters that verify
+  against nothing in Maagarim/Sefaria/JA. This VINDICATES the bifurcation
+  above (the earlier v1 read had briefly seemed to overturn it).
+- **CRUCIAL caveat (agent-flagged):** the classifier CANNOT fully separate
+  "work genuinely absent from references" from "work IS referenced but this
+  short fragment is too variant/HTR-garbled to anchor+verify." The latter would
+  masquerade as no_reference and needs lower-k / confusion-weighted matching
+  (the FRAG-2 noise axis), NOT reference expansion. Truncation used CLEAN crops,
+  so real fragments are harder still. **Human grading of the short-bin cards
+  (report §5) is the gate that splits these two — do it before FRAG-2.**
+- **Prize size:** 16,420 orphan pages <100 letters, 71,176 <200; Piyyut/Bible/
+  Liturgy/Documents dominant.
+
+**Consequence for sequencing (corrected):** the fragment levers, in order:
+(1) **human grading** of the no_reference/density_fail/ambiguous short-bin cards
+to resolve the "absent vs too-variant" split — cheap, gates everything;
+(2) **REF-1 reference expansion** for the genuinely-absent share;
+(3) **FRAG-2 lower-k / confusion-weighted matching** for the too-variant share;
+(4) **A5 length-conditional two-tier** for the ~17% density_fail near-misses
+(smaller than v1 implied, but still real, and it's the ≥100-<150 recall zone).
 
 ## FRAG-2 (wave 3, after FRAG-1 + mask job + Map-v2) — full-scale fragment run
 
