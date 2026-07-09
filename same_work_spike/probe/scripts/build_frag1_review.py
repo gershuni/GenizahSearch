@@ -28,14 +28,19 @@ No pipeline-script edits. No git commit.
 import csv
 import html
 import json
+import os
 import random
 import re
 import sqlite3
 import time
-from collections import defaultdict
+import unicodedata
+from collections import Counter, defaultdict
 
 import frag1_truncation as F
 from normalize import norm_stream, project_span
+# import-only from track1_build_ref (no behavior change): its source dirs +
+# header regex, so the id->path map inverts its EXACT discovery/id logic.
+from track1_build_ref import HEADER_RE, JA_DIR, MAAGARIM
 
 ROOT = r"C:\Genizahsearch"
 PROBE = ROOT + r"\same_work_spike\probe"
@@ -112,10 +117,48 @@ def ref_text_for(seg_streams, span_tuple, ctx=90):
             'after': seg[int(r1):b]}
 
 
-def cand_render(lbl, density, ref):
-    """Uniform per-candidate render record for the HTML comparison view."""
+def cand_render(lbl, density, ref, ref_spaced):
+    """Uniform per-candidate render record. `ref` = letters-only (fallback);
+    `ref_spaced` = readable spaced source (or None -> HTML falls back to ref)."""
     return {'cat': lbl['cat'], 'author': lbl['author'], 'title': lbl['title'],
-            'work_id': lbl['work_id'], 'density': density, 'ref': ref}
+            'work_id': lbl['work_id'], 'density': density,
+            'ref': ref, 'ref_spaced': ref_spaced}
+
+
+def build_id2path():
+    """work_id -> (kind, path). Inverts track1_build_ref's EXACT id logic:
+    Maagarim id = 'M:' + last '--'-part of fn minus '.txt-OnlyText.txt';
+    JA id = 'J:' + fn[:-4]. Built ONCE (listdir only; no file reads)."""
+    m = {}
+    for fn in os.listdir(MAAGARIM):
+        if fn.endswith('.txt'):
+            base = fn.replace('.txt-OnlyText.txt', '')
+            parts = base.split('--')
+            m[f"M:{parts[-1] if parts else fn}"] = \
+                ('M', os.path.join(MAAGARIM, fn))
+    for fn in os.listdir(JA_DIR):
+        if fn.endswith('.txt'):
+            m[f"J:{fn[:-4]}"] = ('J', os.path.join(JA_DIR, fn))
+    return m
+
+
+def spaced_pieces(nfc, offs, abs0, abs1, pad=90):
+    """Recover readable spaced (before, span, after) for a stream span using
+    normalize's offset map (the mechanism project_span uses). `span` is taken
+    via project_span(pad=0); flanks via the same offset->NFC-index mapping."""
+    n = len(offs)
+    if n == 0 or abs0 >= n:
+        return None
+    end = min(abs1, n)
+    if end <= abs0:
+        end = min(abs0 + 1, n)
+    span = project_span(offs, abs0, end, nfc, pad=0)   # reuse project_span
+    if not span:
+        return None
+    a0 = int(offs[abs0])
+    z0 = int(offs[end - 1]) + 1
+    return {'before': nfc[max(0, a0 - pad):a0], 'span': span,
+            'after': nfc[z0:min(len(nfc), z0 + pad)]}
 
 
 def round_robin(items, key_fn):
@@ -153,6 +196,60 @@ def main():
 
     # ============ unidentified-pool cards (types 1-3) ============
     seg_streams = ref_tuple[0]        # segment texts (letters-only ref)
+    seg_off = ref_tuple[2]            # segment offset into each work's stream
+
+    # --- spaced-source recovery machinery (build id->path map ONCE) ---
+    id2path = build_id2path()
+    spaced_cache = {}                 # work_id -> (nfc_prepped, offs) | None
+    fallback = Counter()
+    print(f"id->source-path map: {len(id2path):,} works "
+          f"({time.time() - t0:.0f}s)", flush=True)
+
+    def prepped_for(work_id, expected_stream):
+        """Read + prep a candidate work's source EXACTLY as track1_build_ref
+        did, so stream coords align; cache (nfc, offs). Assert stream matches
+        ref_corpus; on any failure return None (card falls back to letters)."""
+        if work_id in spaced_cache:
+            return spaced_cache[work_id]
+        res = None
+        ent = id2path.get(work_id)
+        if not ent:
+            fallback['no_source_path'] += 1
+        else:
+            kind, path = ent
+            try:
+                if kind == 'M':
+                    raw = open('\\\\?\\' + path, encoding='utf-8',
+                               errors='replace').read()
+                    prepped = HEADER_RE.sub(' ', raw)
+                else:
+                    prepped = open(path, encoding='utf-8',
+                                   errors='replace').read()
+                stream, offs = norm_stream(prepped)
+                if stream == expected_stream:
+                    res = (unicodedata.normalize('NFC', prepped), offs)
+                else:
+                    fallback['stream_mismatch'] += 1
+            except OSError:
+                fallback['file_error'] += 1
+        spaced_cache[work_id] = res
+        return res
+
+    def ref_pair(wi, span_tuple):
+        """(letters-only ref dict, spaced ref dict|None) for work index wi."""
+        ref_letters = ref_text_for(seg_streams, span_tuple)
+        ref_spaced = None
+        if span_tuple:
+            _d, si, r0, r1 = span_tuple
+            abs0 = int(seg_off[int(si)]) + int(r0)
+            abs1 = int(seg_off[int(si)]) + int(r1)
+            prep = prepped_for(works[wi]['id'], works[wi]['stream'])
+            if prep:
+                ref_spaced = spaced_pieces(prep[0], prep[1], abs0, abs1)
+                if ref_spaced is None:
+                    fallback['span_out_of_range'] += 1
+        return ref_letters, ref_spaced
+
     sample = F.sample_unidentified_pages(page_lengths, live_ids, canonmask_ids)
     page_ids = [s[0] for s in sample]
     streams_by_pid = F.fetch_streams(con, page_ids)
@@ -212,11 +309,11 @@ def main():
         ranked = best_per_work(rec['cand'])
         wi, d, a = ranked[0]
         lbl = work_label(works, wi)
-        ref = ref_text_for(seg_streams, rec['refspan'].get(wi))
+        rl, rsp = ref_pair(wi, rec['refspan'].get(wi))
         cards.append(page_card(rec, 'density_fail', {
             'cand_work': lbl, 'cand_density': round(d, 3),
             'cand_aligned_len': int(a),
-            'ref_candidates': [cand_render(lbl, round(d, 3), ref)]}))
+            'ref_candidates': [cand_render(lbl, round(d, 3), rl, rsp)]}))
 
     for rec in ambig_pool:      # all 3
         ranked = best_per_work(rec['cand'])[:3]
@@ -224,8 +321,8 @@ def main():
         for wi, d, a in ranked:
             lbl = work_label(works, wi)
             cands.append({**lbl, 'density': round(d, 3), 'aligned_len': int(a)})
-            ref = ref_text_for(seg_streams, rec['refspan'].get(wi))
-            ref_candidates.append(cand_render(lbl, round(d, 3), ref))
+            rl, rsp = ref_pair(wi, rec['refspan'].get(wi))
+            ref_candidates.append(cand_render(lbl, round(d, 3), rl, rsp))
         cards.append(page_card(rec, 'ambiguous', {
             'cands': cands, 'ref_candidates': ref_candidates}))
 
@@ -289,7 +386,7 @@ def main():
         sid = c['sys_id']
         wi = c['true_wi']
         lbl = work_label(works, wi)
-        ref = ref_text_for(seg_streams, c['refspan'].get(wi))
+        rl, rsp = ref_pair(wi, c['refspan'].get(wi))
         sm, lib = lib_meta.get(sid, (sid, '?'))
         den, deh = domain_of(sid)
         # project the norm crop back onto the original page text (readable)
@@ -297,7 +394,6 @@ def main():
         crop_orig_text = ''
         if raw:
             nfc_stream, offs = norm_stream(raw)
-            import unicodedata
             crop_orig_text = project_span(
                 offs, c['offset'], c['offset'] + c['length_bin'],
                 unicodedata.normalize('NFC', raw))
@@ -309,7 +405,7 @@ def main():
             'page': pnum(pid), 'url': viewer_url(sid, pnum(pid)),
             'norm_text': c['stream'], 'orig_text': crop_orig_text[:1000],
             'recovered_work': lbl, 'density': round(dens, 3),
-            'ref_candidates': [cand_render(lbl, round(dens, 3), ref)],
+            'ref_candidates': [cand_render(lbl, round(dens, 3), rl, rsp)],
         })
         n_crop += 1
 
@@ -318,10 +414,18 @@ def main():
     counts = defaultdict(int)
     for c in cards:
         counts[c['type']] += 1
+    # spaced-source coverage: count candidate cards whose ref rendered spaced
+    n_cand_cards = sum(1 for c in cards if c.get('ref_candidates'))
+    n_spaced_ok = sum(1 for c in cards for k in c.get('ref_candidates', [])
+                      if k.get('ref_spaced'))
+    n_cand_total = sum(len(c.get('ref_candidates', [])) for c in cards)
     print(f"cards: {dict(counts)} (total {len(cards)}) "
           f"[noref_pool={len(noref_pool)} dfail_pool={len(dfail_pool)} "
           f"ambig_pool={len(ambig_pool)} recovered={len(recovered)}] "
           f"({time.time() - t0:.0f}s)", flush=True)
+    print(f"spaced ref-text: {n_spaced_ok}/{n_cand_total} candidate panels "
+          f"across {n_cand_cards} candidate cards; "
+          f"fallbacks={dict(fallback) or 'none'}", flush=True)
 
     # ---- write JSON dataset ----
     json.dump(cards, open(OUT_JSON, 'w', encoding='utf-8'),
@@ -462,14 +566,20 @@ function refBlocks(d){
  const cs = d.ref_candidates || [];
  if(!cs.length) return `<i style="color:#999">no candidate</i>`;
  return cs.map((c,i)=>{
-   const r = c.ref;
-   const body = (r && r.span)
-     ? `<span class="ctx">${esc(r.before)}</span><mark>${esc(r.span)}</mark><span class="ctx">${esc(r.after)}</span>`
-     : `<i style="color:#999">ref window unavailable</i>`;
+   const rs = c.ref_spaced, r = c.ref;
+   let body, note = "";
+   if(rs && rs.span){                       // readable spaced source
+     body = `<span class="ctx">${esc(rs.before)}</span><mark>${esc(rs.span)}</mark><span class="ctx">${esc(rs.after)}</span>`;
+   } else if(r && r.span){                   // fallback: letters-only
+     body = `<span class="ctx">${esc(r.before)}</span><mark>${esc(r.span)}</mark><span class="ctx">${esc(r.after)}</span>`;
+     note = ` <span style="color:#c98a4b">(letters-only — spaced source unavailable)</span>`;
+   } else {
+     body = `<i style="color:#999">ref window unavailable</i>`;
+   }
    const tag = d.type==="ambiguous" ? `#${i+1} · ` : "";
    return `<div class="refc">
      <div class="candhead">${tag}[${esc(c.cat)}] ${c.author?esc(c.author)+" — ":""}<b>${esc(c.title)}</b>
-       · <span class="d">density ${c.density}</span></div>
+       · <span class="d">density ${c.density}</span>${note}</div>
      <div class="txt reftxt">${body}</div></div>`;
  }).join("");
 }
