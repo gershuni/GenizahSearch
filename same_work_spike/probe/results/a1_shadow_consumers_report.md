@@ -55,13 +55,14 @@ reference corpus with a large identified Genizah witness base. The cross-lingual
 gold build (RamBERT plan §4) can verse-align against the reference text directly;
 "is a digital Tafsīr reachable?" is partially answered from our own data.
 
-## passage_units rerun — DEFERRED (queued)
+## passage_units rerun — DONE (2026-07-08 late night, 232s)
 
-The patch is in, but a full rerun REWRITES `passage_units_*` tables inside
-`fullcorpus.db` while three wave-1 probe agents hold read connections on that DB
-(SQLite writer lock would 'database is locked' them). Queued to run right after
-wave 1 completes. Expected effect: unit/member structure unchanged (Track-1 is
-label-propagation-only there); only inherited labels change.
+Structure-invariance assertion HELD: **81,365 units, identical to the pre-patch
+build** (Track-1 is label-propagation-only there). Only labels moved — 14
+changed lines in `units_full.md`; label propagation rose to 26,304 inherited
+pages (pre-patch ~20K), consistent with shadowing noise removal: phantom-work
+labels no longer split units' label votes, so more units clear the ≥2-direct
+confidence gate. `units_full.html` regenerated.
 
 ## Mask-side consumers — semantic decision: KEEP ALL SPANS (no patch)
 

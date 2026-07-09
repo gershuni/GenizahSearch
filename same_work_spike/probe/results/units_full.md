@@ -2,11 +2,11 @@
 
 - units (passage attested in >=2 MSS): **81,365**
 - MS-size distribution: 2:53324 3:14665 4:5620 5:2719 6:1540 7:879 8:589 9:413 10:277 11:223 12:132 13:162 … max 18676
-- confidently labeled: 8,293 · unlabeled/low-conf: **73,071** (the discovery/residue census) · continuum-scale (> 2000 MSS): 1
-- label propagation (high-conf units): 26245 member pages inherit a label their page never matched directly
+- confidently labeled: 8,263 · unlabeled/low-conf: **73,101** (the discovery/residue census) · continuum-scale (> 2000 MSS): 1
+- label propagation (high-conf units): 26304 member pages inherit a label their page never matched directly
 
 ## Continuum-scale units (chained sequences, NOT single passages)
-- unit 367274: **18,676 MSS** (91,731 pages) — top label candidate 'משה בן מיימון (רמב״ם) — משנה תורה, ספר אהבה' (1055 direct = 1.2% — low confidence); needs sequence-aware decomposition
+- unit 367274: **18,676 MSS** (91,731 pages) — top label candidate 'משה בן מיימון (רמב״ם) — משנה תורה, ספר אהבה' (1150 direct = 1.3% — low confidence); needs sequence-aware decomposition
 
 ## Top UNLABELED units by witness count (frequent but unedited)
 - unit 1405798: **167 MSS** (641 pages, med 436 letters) roles {'witness': 572, 'partial': 64, 'embed': 5} libs {'RNL': 619, 'JTS': 9, 'CUL': 8, 'Oxford': 4}
@@ -37,32 +37,32 @@
 - unit 1143026: **44 MSS** (144 pages, med 711 letters) roles {'embed': 7, 'witness': 114, 'partial': 23} libs {'RNL': 130, 'CUL': 12, 'JTS': 2}
 - unit 29572: **44 MSS** (103 pages, med 404 letters) roles {'embed': 5, 'witness': 73, 'partial': 25} libs {'RNL': 64, 'JTS': 21, 'CUL': 18}
 - unit 1123696: **43 MSS** (181 pages, med 675 letters) roles {'partial': 37, 'witness': 124, 'embed': 20} libs {'RNL': 168, 'CUL': 6, 'BL': 3, 'JTS': 3} · label? מחבר לא ידוע — סדר עולם רבה (low)
-- unit 2254424: **42 MSS** (62 pages, med 220 letters) roles {'partial': 20, 'witness': 34, 'embed': 8} libs {'CUL': 36, 'RNL': 9, 'BL': 6, 'HAS': 3} · label? מחבר לא ידוע — והזהיר (low)
+- unit 2254424: **42 MSS** (62 pages, med 220 letters) roles {'partial': 20, 'witness': 34, 'embed': 8} libs {'CUL': 36, 'RNL': 9, 'BL': 6, 'HAS': 3} · label? שרירא גאון בר׳ חנניה והאיי גאון בר׳ שרירא — תשובות אל קיירואן (low)
 - unit 555602: **42 MSS** (88 pages, med 274 letters) roles {'embed': 4, 'witness': 63, 'partial': 21} libs {'CUL': 70, 'JTS': 9, 'RNL': 4, 'Sassoon': 3} · label? מחבר לא ידוע — בקשה לאחר ברכות השחר (low)
 
 ## Top LABELED units (known works, member counts)
-- האיי גאון בר׳ שרירא — ספר השטרות — 454 MSS (494 pages, med 236); direct Track-1 32, inherited 462
+- האיי גאון בר׳ שרירא — ספר השטרות — 454 MSS (494 pages, med 236); direct Track-1 23, inherited 471
 - משה בן מיימון (רמב״ם) — משנה תורה, ספר קדושה — 368 MSS (885 pages, med 355); direct Track-1 420, inherited 465
 - רב סעדיה גאון — רהיטי ברכי נפשי ליו״כ — 311 MSS (624 pages, med 281); direct Track-1 258, inherited 366
-- מחבר לא ידוע — ספרא — 281 MSS (568 pages, med 368); direct Track-1 14, inherited 554
+- מחבר לא ידוע — ספרא — 281 MSS (568 pages, med 368); direct Track-1 13, inherited 555
 - רס"ג, במדבר תרגום (תפסיר תורה) — 247 MSS (540 pages, med 376); direct Track-1 20, inherited 520
-- האיי גאון בר׳ שרירא — פתרון תורה — 239 MSS (466 pages, med 385); direct Track-1 3, inherited 463
-- משה בן מיימון (רמב״ם) — משנה תורה, ספר זמנים — 229 MSS (308 pages, med 220); direct Track-1 18, inherited 290
-- רס"ג, במדבר תרגום (תפסיר תורה) — 205 MSS (535 pages, med 427); direct Track-1 26, inherited 509
+- האיי גאון בר׳ שרירא — פתרון תורה — 239 MSS (466 pages, med 385); direct Track-1 2, inherited 464
+- משה בן מיימון (רמב״ם) — משנה תורה, ספר זמנים — 229 MSS (308 pages, med 220); direct Track-1 19, inherited 289
+- רס"ג, במדבר תרגום (תפסיר תורה) — 205 MSS (535 pages, med 427); direct Track-1 25, inherited 510
 - יוסף הקסטנדיני — עדת דבורים (טקסט בלבד) — 204 MSS (1000 pages, med 450); direct Track-1 4, inherited 996
-- משה בן מיימון (רמב״ם) — משנה תורה, ספר נשים — 168 MSS (238 pages, med 171); direct Track-1 9, inherited 229
+- משה בן מיימון (רמב״ם) — משנה תורה, ספר נשים — 168 MSS (238 pages, med 171); direct Track-1 12, inherited 226
 - לוי אבן אלתבאן — לאט האל בעם נדכה ומכאובים כל ימיו — 159 MSS (265 pages, med 239); direct Track-1 8, inherited 257
-- משה בן מיימון (רמב״ם) — משנה תורה, ספר קדושה — 137 MSS (322 pages, med 280); direct Track-1 186, inherited 136
+- משה בן מיימון (רמב״ם) — משנה תורה, ספר קדושה — 137 MSS (322 pages, med 280); direct Track-1 189, inherited 133
 - רס"ג, במדבר תרגום (תפסיר תורה) — 133 MSS (256 pages, med 336); direct Track-1 6, inherited 250
-- רב אחאי משבחא — שאילתות — 130 MSS (219 pages, med 412); direct Track-1 7, inherited 212
-- רס"ג, במדבר תרגום (תפסיר תורה) — 126 MSS (412 pages, med 545); direct Track-1 34, inherited 378
+- רב אחאי משבחא — שאילתות — 130 MSS (219 pages, med 412); direct Track-1 6, inherited 213
+- רס"ג, במדבר תרגום (תפסיר תורה) — 126 MSS (412 pages, med 545); direct Track-1 32, inherited 380
 - רס"ג, בראשית תרגום (תפסיר תורה) — 121 MSS (308 pages, med 395); direct Track-1 18, inherited 290
 - מחבר לא ידוע — הלכות ״ראו״ — 110 MSS (184 pages, med 497); direct Track-1 5, inherited 179
 - רס"ג, במדבר תרגום (תפסיר תורה) — 107 MSS (177 pages, med 302); direct Track-1 14, inherited 163
 - חפץ בן יצליח, ספר המצוות לחפץ בן יצליח — 107 MSS (195 pages, med 347); direct Track-1 2, inherited 193
 - רב סעדיה גאון — תוכחה — 107 MSS (191 pages, med 318); direct Track-1 118, inherited 73
 - אלעזר הקליר — קדושתות ליום כיפור — 107 MSS (183 pages, med 296); direct Track-1 33, inherited 150
-- רס"ג, בראשית תרגום (תפסיר תורה) — 104 MSS (188 pages, med 329); direct Track-1 32, inherited 156
+- רס"ג, בראשית תרגום (תפסיר תורה) — 104 MSS (188 pages, med 329); direct Track-1 25, inherited 163
 - רשב"ח, פירוש התורה לרשב"ח — 102 MSS (222 pages, med 420); direct Track-1 2, inherited 220
 - ישראל הדיין הקראי — מעריב לפסח — 98 MSS (200 pages, med 302); direct Track-1 32, inherited 168
 - מבשר הלוי, השגות על רס"ג — 97 MSS (173 pages, med 262); direct Track-1 5, inherited 168
