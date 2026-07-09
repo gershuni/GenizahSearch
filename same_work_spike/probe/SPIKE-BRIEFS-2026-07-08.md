@@ -258,6 +258,64 @@ README; no training.
 
 ---
 
+### REF-1 — reference-source expansion (Sefaria + others), STAGED (added 2026-07-09 per Hillel)
+
+Three independent findings converge on reference-corpus gaps: Targum Onkelos
+VERIFIED absent from ref_corpus.pkl (B2 + direct check); the interleaved
+Bible+Targum/Tafsīr class defeats Track-1 partly for this reason (A3); B2's
+90 auto-labeled residue units are works catalogs know but our references lack.
+
+**Stage 1 — inventory + targeted acquisition (agent, network; NO ref rebuild):**
+1. Source: **Sefaria API** (`api.sefaria.org`) — NOT raw Sefaria-Export GitHub
+   URLs (they 404'd on the 2026 attempt; a `git clone --depth 1` of the Export
+   repo is an acceptable fallback). Secondary: Hebrew Wikisource.
+2. Targets, in priority order:
+   (a) Targum Onkelos (all 5 books) + Targum Jonathan (Prophets); Targum to
+       Writings if present;
+   (b) statutory liturgy core (weekday+Shabbat Amidah, Birkat Hamazon, Shema
+       blessings, Kiddush, Hallel, Haggadah) — these MUST carry
+       `ref_kind: mask_only` in the manifest (Codex HIGH-2): Sefaria's
+       siddurim are MODERN printed rites; under the coverage-only testimony
+       rule (>=0.45 => 'this page IS a copy') they would mint FALSE testimony
+       labels on Genizah liturgy pages. Stage 2 must enforce mask_only refs
+       being excluded from witness/new-testimony census (masking + candidate
+       linking only) — a consumer-side gate, not a manifest note;
+   (c) B2's 90 reference-gap works (`b2_residue_most_copied.md` list):
+       name-by-name lookup on Sefaria/Wikisource, fetch what exists (JA works
+       like קצת חנה will NOT be there — mark unsourced);
+   (d) verify Saadia Tafsīr coverage in the existing JA refs (which Torah
+       books present?) and report the gap — do not hunt sources for it yet.
+3. Output: `same_work_spike/probe/refs_staging/` — one plain-text file per
+   work: **content text ONLY** (Codex MEDIUM-3) — Hebrew script, vowels/
+   cantillation stripped, NO verse/chapter labels or headers in the body
+   (norm_stream keeps only Hebrew base letters, but Hebrew-letter verse
+   labels like פרק א would poison the stream); the verse/section map goes in
+   a sidecar JSON per work (needed later for the interleaved-ref builder),
+   plain line breaks between verses are fine. Plus `manifest.json` per file
+   (Codex HIGH-4): canonical title HE+EN, source URL/API ref, version title,
+   per-VERSION license + license URL, required attribution text, retrieval
+   date, transformation notes, `ref_kind` (edition | modern_rite_mask_only),
+   `reuse_ok` (yes/no/unclear — quarantine unclear before integration),
+   char count. NO changes to ref_corpus.pkl or track1_build_ref.py —
+   ingestion format decisions get their own review.
+4. Report `../results/ref1_acquisition_report.md`: found/missing per target,
+   license summary, size stats, and the B2-list hit rate.
+
+**Stage 2 — integration (wave-3, tied to the Map v2 / A8 rebuild):** dedup vs
+Maagarim by title equivalence AS A CANDIDATE FILTER ONLY, then
+**normalized-stream near-duplicate detection as the real gate** (Codex
+HIGH-1: shadowing's 0.03 density-gap requirement lets identical twin
+references BOTH stay live — title matching alone cannot be the deduper);
+extend track1_build_ref.py with the staging source + `ref_kind` provenance
+enforced at the testimony classifier (mask_only refs never mint
+testimony/new? rows); rebuild ref_corpus, THEN the full Track-1 rerun +
+shadowing + census — batched with the other reference additions
+(interleaved refs from A3, Targum) because the rerun is the expensive step.
+
+**Other candidate sources (need Hillel input, Stage 2+):** Dicta-internal
+rabbinic corpora (likely the largest untapped source — in-house), Ben-Yehuda
+Project (modern Hebrew), CAL (Aramaic; licensing unclear).
+
 ## Post-wave gates
 
 - Codex reviews THIS FILE before any dispatch (plan gate).
