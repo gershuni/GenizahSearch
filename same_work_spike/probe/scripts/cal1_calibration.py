@@ -179,6 +179,65 @@ def chunk_shuffle(stream, chunk, rnd):
 
 
 # =====================================================================
+# noise-injection arm (FRAG2-PLAN mitigation (b) -- TRIGGERED by the pilot
+# stress test: Hillel's real density_fail cards are 10/10 correct at density
+# 0.41-0.55 but clean-crop calibration predicts P 0.002-0.24 there. HTR noise
+# pushes CORRECT matches into densities where clean crops are mostly wrong,
+# so the clean model is PESSIMISTIC for the real orphan population. Injecting
+# the MEASURED HTR error profile (results/confusion_matrix.json, 209 FGP-
+# aligned pages) recalibrates for noisy-but-correct matches.)
+# =====================================================================
+
+CONF_MATRIX = PROBE + r"\results\confusion_matrix.json"
+
+
+def load_noise_model():
+    """(sub_dist, ins_dist, op_weights) from the empirical profile.
+    sub_dist: ref_char -> ([hyp_chars], [cum_weights]); ins_dist likewise
+    global. Op mix approximated from available counts (full substitution
+    list; top-10 ins/del lists) -- a stress-arm approximation, documented."""
+    d = json.load(open(CONF_MATRIX, encoding='utf-8'))
+    subs = d['substitutions']                      # [ref, hyp, count]
+    by_ref = defaultdict(list)
+    for ref, hyp, cnt in subs:
+        by_ref[ref].append((hyp, cnt))
+    sub_dist = {ref: ([h for h, _ in lst], [c for _, c in lst])
+                for ref, lst in by_ref.items()}
+    ins_top = d['report']['top_insertions']
+    ins_dist = ([e['hyp'] for e in ins_top], [e['count'] for e in ins_top])
+    n_sub = sum(c for _, _, c in subs)
+    n_del = sum(e['count'] for e in d['report']['top_deletions'])
+    n_ins = sum(e['count'] for e in ins_top)
+    return sub_dist, ins_dist, (n_sub, n_del, n_ins)
+
+
+def perturb(stream, rate, noise_model, rnd):
+    """Inject sub/del/ins errors at ~`rate` per letter, sampled from the
+    empirical HTR profile."""
+    sub_dist, ins_dist, (w_sub, w_del, w_ins) = noise_model
+    w_tot = w_sub + w_del + w_ins
+    out = []
+    for ch in stream:
+        r = rnd.random()
+        if r >= rate:
+            out.append(ch)
+            continue
+        op = rnd.random() * w_tot
+        if op < w_sub:
+            if ch in sub_dist:
+                hyps, wts = sub_dist[ch]
+                out.append(rnd.choices(hyps, weights=wts)[0])
+            else:
+                out.append(rnd.choices(*ins_dist)[0])
+        elif op < w_sub + w_del:
+            pass                                   # deletion
+        else:
+            out.append(rnd.choices(*ins_dist)[0])  # insertion + keep char
+            out.append(ch)
+    return ''.join(out)
+
+
+# =====================================================================
 # candidate rows
 # =====================================================================
 
@@ -536,7 +595,12 @@ def main():
     ap.add_argument('--tag', default=STAGE_DEFAULT,
                     help="output stage tag: 'pilot' (pre-REF-2, default) or "
                          "'final' (frozen Map-v2 state)")
+    ap.add_argument('--noise-rate', type=float, default=0.0,
+                    help="inject empirical HTR noise into crops at this "
+                         "per-letter rate (e.g. 0.15); tag gets -n<pct>")
     args = ap.parse_args()
+    if args.noise_rate > 0:
+        args.tag = f"{args.tag}-n{int(round(args.noise_rate * 100))}"
     out_model = OUT_MODEL.format(tag=args.tag)
     out_rows = OUT_ROWS.format(tag=args.tag)
     out_md = OUT_MD.format(tag=args.tag)
@@ -552,6 +616,13 @@ def main():
     rnd = random.Random(RNG_SEED + 1)
     crops = make_crops(pages, rnd)
     log(f"{len(crops):,} crops")
+    if args.noise_rate > 0:
+        nm = load_noise_model()
+        nrnd = random.Random(RNG_SEED + 5)
+        for c in crops:
+            c['stream'] = perturb(c['stream'], args.noise_rate, nm, nrnd)
+        log(f"noise injected at rate {args.noise_rate} "
+            f"(empirical HTR profile, {CONF_MATRIX})")
 
     # labeled arm
     results, _ = query_batch([c['stream'] for c in crops], ref_tuple,
@@ -580,7 +651,8 @@ def main():
     sweeps = sweep(rows, decoy_best, lwo_wrong, n_by_len, n_decoy_by_len)
     external = load_graded_external(model)
 
-    json.dump({'meta': {'stage': args.tag, 'lengths': LENGTHS,
+    json.dump({'meta': {'stage': args.tag, 'noise_rate': args.noise_rate,
+                        'lengths': LENGTHS,
                         'wide_cutoff': WIDE_CUTOFF,
                         'n_pages': len(pages), 'n_crops': len(crops),
                         'n_rows': len(rows), 'seed': RNG_SEED,
