@@ -149,6 +149,27 @@ notes). **REF-2 completion = the FREEZE point: FINAL CAL-1 runs here.**
 
 ---
 
+## Freeze-prep findings folded in (2026-07-10 parallel diagnostics)
+
+Before the reference rebuild, three diagnostics landed — all fold into step 3:
+- **Known-witness gate = 4 channels** (NLI cat + FJMS cat/bib + used-mesirah +
+  **מסירות נוספות**). Nosafot harvest DONE (738/738): incremental demotions of
+  the 1,168 new? queue = used-mesirah 59 → +nosafot 136 (DISJOINT) → **union 195
+  high-conf (~17%)**, +web-msirot 215. Gate consumes
+  `data/known_witnesses_all.json`; demote on confidence=='high'.
+- **Header-regex fix (REQUIRED in the reference rebuild):** replace
+  `track1_build_ref.HEADER_RE` `##[^#]*##` → `r'##(?:[^#\n]|#(?!#))*##'`
+  (full-corpus verified: restores 30,677 real letters wrongly deleted from
+  ספר הרקמה, removes 342 leaked junk letters, 0 over-strip, single-# content
+  preserved). NOTE: v1 ref_corpus.pkl AND ref_corpus_v2.pkl both currently
+  carry the ספר הרקמה truncation → the rebuild must regenerate v1 FROM SOURCE
+  with the fixed regex, then re-append the 58 REF-2 refs (re-run ref2_build).
+- **RSG cluster = false alarm (glossary, not Saadia):** do NOT add RSG
+  re-verification / an interleaving pass. The unidentified glossary + Karaite
+  JA commentaries are ABSENT from the closed universe (gap-works 24/27) →
+  **discovery-only**; a lemma/motif-query matcher for the `<gloss> מן <lemma>`
+  sub-class is a SEPARATE follow-on spike (FRAG-3), NOT a Map-v2 blocker.
+
 ## Step 3 — MAPV2: the rebuild (one overnight, Codex-gated, checkpointed)
 
 Single consolidated rerun so every lever multiplies the others:
