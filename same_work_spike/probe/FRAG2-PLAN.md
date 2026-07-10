@@ -210,6 +210,33 @@ window.
   no_reference cards graded (hard, needs images + expertise, Hillel's pace)
   before REF-2 gains are interpreted as recall-recovered vs discovery-only.
 
+## FINDING — singleton band is unfittable from synthetic data (2026-07-10)
+
+The margin refit (`cal1_margin_refit.py`) confirmed the DIAGNOSIS (Hillel's
+10/10-correct density_fail cards are all SINGLETONS — exactly one work aligns)
+but ALSO surfaced that the margin-isotonic **cannot be fit for the singleton
+band from synthetic crops**: only 12 of 921,492 pilot rows are singletons (5 in
+n10, 14 in n20 — all < the 20-row fit floor). Root cause: a random crop of a
+well-referenced work almost always ALSO chance-matches other works, so the
+`m<=0` (not-best) band swallows 908K rows and the singleton structure of a real
+orphan fragment never appears in synthetic data. So the refit predicts `—` for
+every real density_fail card — the isotonic route can't score the exact regime
+the small-fragment discovery lives in. (The other bands ARE well-fit and cover
+the multi-candidate majority.)
+
+**FIX for FINAL CAL-1 (decoy-anchored singleton scoring):** score singletons
+NOT by synthetic isotonic but by the target-decoy null — a singleton verified
+at density d is scored by `P ≈ 1 − localFDR(len, d)` where the null is the
+chunk-shuffle decoys' best-candidate-density distribution (decoys produce only
+chance alignments, so their best-match density IS the chance-singleton null).
+This needs the FINAL decoy arm to record FULL candidate sets (not just
+decoy_best) so the chance-singleton rate per (len, d) is measured directly.
+Caveat already visible in the pilot sweep: chance singletons are common at
+density > 0.45 (n20 decoy_accept ~0.40 at len150/d0.50), so high-density
+singletons are genuinely CANDIDATE-TIER (route to the human-graded discovery
+deck), consistent with the tier-B design — NOT auto-high-P. The fresh blinded
+post-Map-v2 deck remains the reliability instrument for this band.
+
 ## Codex revision log (plan-gate, 2026-07-09 — verdict REVISE, all folded)
 
 - BLOCKER 1 (calibrate on deployed state) → CAL-1 split PILOT/FINAL; FINAL
