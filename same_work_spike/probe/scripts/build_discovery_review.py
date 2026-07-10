@@ -39,6 +39,7 @@ import numpy as np
 
 import build_frag1_review as B
 import frag1_truncation as F
+import residue_naming as RN              # cataloger-title aggregation panels
 from build_track1_review import CANON_CATS, locate_in_work
 from engine_np import _gram_codes
 from normalize import norm_stream
@@ -147,7 +148,7 @@ def spaced_from_page(page_text, s, e):
 # TYPE 1: residue_unidentified
 # =====================================================================
 
-def build_residue_cards(con, lib_meta, domains, groups, other_idx):
+def build_residue_cards(con, lib_meta, domains, groups, other_idx, fj):
     t0 = time.time()
     # strictly UNLABELED: labeled=0 alone still admits low-confidence Track-1
     # labels; also require NO Track-1 label at all (COALESCE(t1_label,'')='').
@@ -208,6 +209,20 @@ def build_residue_cards(con, lib_meta, domains, groups, other_idx):
                 'shelf': sm, 'lib': lib, 'cat_title': (cat_title or '')[:80],
                 'page': B.pnum(m['page_id']),
                 'url': B.viewer_url(sid, B.pnum(m['page_id']))})
+        # cataloger-title aggregation (residue_naming.py, distinct-witness
+        # counts) — the panel Hillel judges the explicit title / competing-
+        # titles decision from.
+        sids = sorted(by_sid)
+        org, eng, frame, marc = RN.witness_titles(fj, sids, lib_meta)
+        org_c = RN.distinct_witness_counter(org, sids)
+        marc_c = RN.distinct_witness_counter(marc, sids)
+        n_named_org = len({s for s in sids if org.get(s)})
+        n_named_marc = len({s for s in sids if marc.get(s)})
+        verdict, top_org = RN.analyze(org_c, n_named_org)
+        lit_sids = {s for s in sids
+                    if any(RN.is_liturgy_title(t) for t in marc.get(s, ()))}
+        lit_share = len(lit_sids) / len(sids) if sids else 0.0
+
         um = umeta[u]
         cards.append({
             'id': f"residue|{u}", 'type': 'residue_unidentified',
@@ -217,6 +232,12 @@ def build_residue_cards(con, lib_meta, domains, groups, other_idx):
             'lib_spread': lib_counts.most_common(8),
             'weak_t1': um['t1_label'], 'weak_conf': um['conf'],
             'passage_spaced': passage, 'members': mem_list,
+            'naming_verdict': verdict,
+            'titles_org': top_org[:8], 'n_named_org': n_named_org,
+            'titles_marc': marc_c.most_common(6),
+            'n_named_marc': n_named_marc,
+            'liturgy_share': round(lit_share, 2),
+            'is_liturgy': lit_share >= RN.LITURGY_SHARE,
         })
     audit = {
         'n': len(cards),
@@ -372,8 +393,11 @@ def main():
           f"{len(id2path):,} source paths ({time.time() - t0:.0f}s)",
           flush=True)
 
+    fj = sqlite3.connect(RN.FJMS)
+    fj.execute("PRAGMA busy_timeout=120000")
     residue_cards, res_audit = build_residue_cards(
-        con, lib_meta, domains, groups, other_idx)
+        con, lib_meta, domains, groups, other_idx, fj)
+    fj.close()
     new_cards, new_audit = build_new_cards(
         con, works, wid2work, domains, groups, other_idx, id2path)
     con.close()
@@ -533,9 +557,24 @@ function render(){
    const mem = d.members.map(m=>
      `<li><a href="${m.url}" target="_blank">${esc(m.shelf)}</a> (${esc(m.lib)}) עמ' ${m.page}`
      + (m.cat_title?` — <i style="color:#9aa4ac">${esc(m.cat_title)}</i>`:"")+`</li>`).join("");
-   const wname = `<div class="wname"><div class="lbl">שם החיבור אם זוהה / work name (for "identify-named"):</div>
+   const wname = `<div class="wname"><div class="lbl">שם החיבור אם זוהה / work name (for "identify-named"; אם שמות מתחרים — כתוב את השם הנכון, או "מקבילים" בהערה):</div>
       <input value="${esc(r.work_name||"")}" placeholder="למשל: פיוט לר' יהודה הלוי / Karaite siddur ..."
       oninput="setWName(this.value)"></div>`;
+   const VBADGE={clear:["✅ שם ברור","#2c7d32"],competing:["⚖️ שמות מתחרים — הכרע!","#b26a00"],
+                 thin:["❓ רמז חלש","#555"],unnamed:["⬜ ללא שם קטלוגי","#444"]};
+   const vb=VBADGE[d.naming_verdict]||["",""];
+   const lit=d.is_liturgy?`<span class="badge" style="background:#6d4c41">🎵 liturgy-agglomeration ${(d.liturgy_share*100)|0}% — כנראה שרשור פיוטים, לא חיבור אחד</span>`:"";
+   const torg=(d.titles_org||[]).map(x=>`<li><b>${x[1]}×</b> ${esc(x[0])}</li>`).join("");
+   const tmarc=(d.titles_marc||[]).map(x=>`<li><b>${x[1]}×</b> ${esc(x[0])}</li>`).join("");
+   const titles = `<div class="pane" style="margin-top:10px">
+      <h4>שמות מהקטלוגים (לפי עדים נפרדים) —
+        <span class="badge" style="background:${vb[1]}">${vb[0]}</span> ${lit}</h4>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div style="flex:1 1 260px"><div class="lbl">genizah-title (${d.n_named_org} named):</div>
+          <ul class="members">${torg||"<li>—</li>"}</ul></div>
+        <div style="flex:1 1 260px"><div class="lbl">library/MARC title (${d.n_named_marc} named):</div>
+          <ul class="members">${tmarc||"<li>—</li>"}</ul></div>
+      </div></div>`;
    inner = `
     <div class="meta">
      <span class="badge ${bcl}">residue_unidentified</span>
@@ -548,6 +587,7 @@ function render(){
     <div class="libs">libraries (by witness MS): ${esc(libs)}</div>
     <div class="cols"><div class="pane"><h4>קטע ייצוגי (spaced, from a member page)</h4>
       <div class="txt">${spacedBody(d.passage_spaced)}</div></div></div>
+    ${titles}
     <div class="pane" style="margin-top:10px"><h4>עדים (member shelfmarks)</h4>
       <ul class="members">${mem}</ul></div>
     ${wname}`;
