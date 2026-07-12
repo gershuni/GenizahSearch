@@ -61,10 +61,16 @@ def main():
 
     cards = json.load(open(CARDS, encoding='utf-8'))
     con = sqlite3.connect(FJMS)
+    # MAPV2-11: Friedberg bibliography rows per manuscript — the annotators'
+    # biggest blind spot in the v11 cycle (9/17 human-killed "discoveries"
+    # were known there)
+    from bib_gate import BibGate
+    bg = BibGate()
     n_with = 0
     for c in cards:
         idents = fjms_idents(con, c['sys_id'])
         c['fjms_catalog_identifications'] = idents
+        c['friedberg_bibliography'] = bg.display(c['sys_id'], k=8)
         if idents:
             n_with += 1
     con.close()

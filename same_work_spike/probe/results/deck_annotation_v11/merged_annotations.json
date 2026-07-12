@@ -197,6 +197,12 @@
    "name_equation": null,
    "reasoning_he": "הדף הוא פירוש בערבית-יהודית לפרשת המנחות, והמהדורה הנטענת (אוצר נחמד לטוביה בן משה) עברית; החפיפה נשענת על שרשרת פסוקי המנחות ('והנותרת מן המנחה לאהרן ולבניו', 'מנחת מחבת ומרחשת') שכל פרשן לויקרא מצטט. הבדל הלשון מוכיח שאין זה אותו עד, והדמיון הוא מקור משותף (הפסוקים).",
    "key_evidence": "Page is Judeo-Arabic, edition Hebrew; the ~140-letter overlap is the Leviticus meal-offering verse chain both cite — classic shared-source leak."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib",
+   "note_he": "ראה ביב' פרידברג \"The Pentateuch exegesis of the Karaites Yusuf ibn Nuh and Abu al-Faraj Harun\". אך הדמיון ראוי לציון."
   }
  },
  {
@@ -237,6 +243,12 @@
    "name_equation": null,
    "reasoning_he": "NLI גנרי ('פיוט') ו-FJMS ריק. הטורים המשותפים 'ישוררו ויהללו סלה פזורים / אשר גזו בים עזורים / לגוזר ים סוף לגזרים' הם חריזה פייטנית מובחנת (פזורים/עזורים/גזרים) של יוצר יוסף אלברדאני — עד חדש שאינו בקטלוג.",
    "key_evidence": "Distinctive rhymed yotzer lines (פזורים/עזורים/גזרים) of Joseph al-Bardani; generic NLI, no FJMS."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib",
+   "note_he": "ראה ביב' פרידברג \"החזן הגדול אשר בבגדאד: פיוטי יוסף בן חיים אלברדאני\t\""
   }
  },
  {
@@ -277,6 +289,12 @@
    "name_equation": null,
    "reasoning_he": "הטקסט 'על הכל יתגדל ויתקדש... שמו של מלך מלכי המלכים הקדוש ברוך הוא, בעולמו שברא' הוא נוסח קבע סטטוטורי הנאמר לפני קריאת התורה, וכל סידור שכולל אותו נושא אותו. NLI אף מציין 'תפילות קבע / קטע סידור'. לפי כלל הזהירות — נוסח תפילה שגור אינו תגלית.",
    "key_evidence": "'על הכל יתגדל' — standard statutory pre-Torah-reading prayer; NLI itself labels it 'fixed prayers / siddur fragment'. Boilerplate liturgy."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "זה מקור שמצטט את הקטע הזה ולכן עד נוסח טוב לקטע הזה (השווה לברכת המזון שבה עדי נוסח לברכת המזון כוללים גם סידורים והגדות של פסח שמצטטים אותה). מובן שאין זה זיהוי של *כל* כתב היד אלא רק של החלק הזה שבו."
   }
  },
  {
@@ -357,6 +375,12 @@
    "name_equation": null,
    "reasoning_he": "NLI ריק ו-FJMS ריק. הדף נושא דו-שיח מדרשי צמוד ('אם עצמותי יעברו את הירדן... אף עצמותיך לא יעברו', 'אמר ר' חלבו') התואם מילולית למהדורת ספרי במדבר (עד מבוסס). ההתאמה הצמודה מלמדת על אותה עריכה ולא מקבילה רופפת — עד חדש בקטע לא מזוהה.",
    "key_evidence": "Uncatalogued MS; verbatim midrashic dialogue (Moses/Jordan, R. Ḥelbo) matching the Sifrei edition — same redaction, not a loose aggadic parallel."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "indirect_witness",
+   "note_he": "כאמור נכונה השוליים שונים ולכן נראה שמדובר בשימוש משני במדרש. מכל מקום זה עד נוסח עקיף."
   }
  },
  {
@@ -477,6 +501,12 @@
    "name_equation": null,
    "reasoning_he": "החפיפה היא סדרת ה'הרחמן הוא...' שבסוף ברכת המזון — פורמולה ליטורגית שגורה (אף שמורחבת). לפי כלל הזהירות נוסח תפילה תקני אינו תגלית; NLI ריק אך התוכן עצמו מצוי בכל הנוסחים. דליפה על בסיס פורמולה ליטורגית משותפת.",
    "key_evidence": "The 'הרחמן הוא…' Grace-after-Meals supplications — a fixed (if expanded) liturgical formula; boilerplate, not a discovery."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "ראה 7. עד נוסח טוב."
   }
  },
  {
@@ -522,6 +552,12 @@
    "name_equation": "הגדה של פסח ⊃ ברכת המזון + סדרת 'הרחמן'",
    "reasoning_he": "NLI ו-FJMS מזהים את כתב היד כ'הגדה של פסח'. היצירה הנטענת ('תוספת לברכת המזון' — סדרת ה'הרחמן') היא חלק מברכת המזון שבתוך ההגדה, ולכן החפיפה צפויה מן הזיהוי עצמו (הגדה כוללת את ברכת המזון). אין כאן ידע חדש.",
    "key_evidence": "Catalog (NLI + FJMS) identifies the MS as a Passover Haggadah; the הרחמן addition is part of the Haggadah's Birkat HaMazon — overlap expected from the ID."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_dependence",
+   "note_he": "תלות ספרותית ידועה אך עדיין זה ידע מועיל וראוי לציון (כי ההגדה יכולה להיות קטועה במקום זה). ראה 7, 12."
   }
  },
  {
@@ -562,6 +598,12 @@
    "name_equation": null,
    "reasoning_he": "הטקסט 'אל מלך יושב על כסא רחמים, מתנהג בחסידות, מעביר ראשון ראשון, מרבה סליחה לחטאים ומחילה לפושעים' הוא הנוסח הסטטוטורי הפותח את אמירת שלוש עשרה מידות בסליחות ובתעניות — נוסח קבע בכל מחזור. NLI אף רושם 'תפילות קבע'. אינו תגלית.",
    "key_evidence": "'אל מלך יושב על כסא רחמים' — the standard prelude to the Thirteen Attributes in every selichot rite; NLI labels 'fixed prayers'. Boilerplate."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "ראה האמור למעלה."
   }
  },
  {
@@ -602,6 +644,12 @@
    "name_equation": null,
    "reasoning_he": "NLI גנרי ('פיוט') ו-FJMS ריק. הטורים 'את בני בכורי אנהגהו / ועל מי מנוחות אנהלהו / במישור לים אורידהו' הם חריזה מובחנת (אנהגהו/אנהלהו/אורידהו) מפיוטי שמעון בר' מגס, התואמת למהדורה. עד חדש.",
    "key_evidence": "Distinctive rhymed piyyut lines (…אנהגהו/אנהלהו/אורידהו) of Shimʿon bar Megas; generic NLI, no FJMS."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib",
+   "note_he": "לא תגלית. ראה ביב' פרידברג \"פיוטי שמעון בר מגס\t\""
   }
  },
  {
@@ -642,6 +690,12 @@
    "name_equation": null,
    "reasoning_he": "כמו קלף 12 (אותה יצירה, M:Ytext586191): החפיפה היא סדרת ה'הרחמן הוא...' של ברכת המזון — פורמולה ליטורגית שגורה. NLI ריק, אך התוכן תקני ומצוי בכל הנוסחים; דליפה על בסיס פורמולה משותפת, לא תגלית.",
    "key_evidence": "Same 'הרחמן הוא…' Birkat HaMazon supplications (work M:Ytext586191, recurring across cards 12/13/16) — fixed liturgical formula; not a discovery."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "ראה למעלה."
   }
  },
  {
@@ -682,6 +736,12 @@
    "name_equation": null,
    "reasoning_he": "NLI ריק ו-FJMS ריק. הטקסט 'שלא תעלה קנאתנו על לב אדם ולא קנאת אדם תעלה על לבנו... וכל היועץ עלינו... עצה טובה' עם ציטוטי 'יתן לך כלבבך' ו'ותגזר אומר ויקם לך' הוא תפילה מוגדרת נגד קנאה ושנאה, לא ברכת קבע. עד חדש בקטע לא מזוהה, בזהירות (לשון תחינה חלקית שגורה).",
    "key_evidence": "Defined petitionary prayer against jealousy (framing Ps 20 verses), uncatalogued MS, close match; not standard statutory text."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "noteworthy",
+   "note_he": "הטקסט לפני ואחרי שונה, כך שזה ראוי לציון אך לא עד נוסח ישיר."
   }
  },
  {
@@ -722,6 +782,12 @@
    "name_equation": null,
    "reasoning_he": "NLI גנרי ('פיוט') ו-FJMS ריק. הדף נושא יוצר עם אקרוסטיכון א-ב מובחן ('אתויי מארץ אדם ולא אל / ביאור מסעתם ביד יקותיאל / גנון והציל...') מיוצרות שלמה סוליימאן לפרשת מסעי, התואם למהדורה. עד חדש.",
    "key_evidence": "Distinctive alphabetical-acrostic yotzer (א:אתויי, ב:ביאור, ג:גנון…) of Shlomo Suleiman for Masei; generic NLI, no FJMS."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib",
+   "note_he": "ראה ביב' פרידברג \"מחזור היוצרות של ר' סולימן אלסנג'ארי לפרשות השבוע\""
   }
  },
  {
@@ -762,6 +828,12 @@
    "name_equation": null,
    "reasoning_he": "הדף הוא הלכות עירוב תבשילין בערבית-יהודית, והמהדורה הנטענת (הלכות קצובות) עברית. גרעין החפיפה הוא ברכת העירוב ונוסח ההצהרה הקבוע ('אשר קדשנו... על מצות עירוב, וזה העירוב יהיה לנו ולכל ישראל הדרים במקום הזה מותר לאפות ולבשל...'), פורמולה הלכתית-ליטורגית קבועה. NLI אף רושם 'תפלות'. דליפה על בסיס פורמולה משותפת.",
    "key_evidence": "Page is Judeo-Arabic eruv-tavshilin halakha; matched core is the fixed eruv berakhah + declaration formula (carried by many works); edition is Hebrew."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "formula_only",
+   "note_he": "פורמולה משותפת בלבד."
   }
  },
  {
@@ -802,6 +874,12 @@
    "name_equation": null,
    "reasoning_he": "NLI גנרי ('פיוטים') ו-FJMS ריק. הטורים 'מכל טומאותיכם יום צמתם וסרתם / חוקר לב יקרא כי עדיו שבתם / וזרקתי עליכם מים טהורים וטהרתם' הם חריזה מובחנת (וסרתם/שבתם/וטהרתם/שברתם) של פיוט יצחק אבן גיאת (עד יחיד). עד חדש.",
    "key_evidence": "Distinctive rhymed piyyut (…וסרתם/שבתם/וטהרתם) of Isaac ibn Ghiyyat, built on Ezek 36:25; rare (1 witness), generic NLI."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "discovery_confirmed",
+   "note_he": "אכן תגלית, לא ראיתי משהו על זה בביבליוגרפיה (אך ההפניה לקטלוג מוצרי ריקה ויש לעיין)"
   }
  },
  {
@@ -842,6 +920,12 @@
    "name_equation": null,
    "reasoning_he": "NLI רושם נכונה 'רשימות ספרים' — הדף הוא רשימת ספרים ערבית-יהודית המצטטת את פתיחת 'אותיות דרבי עקיבא' ('ואבתדאה: אמר עקיבה, אלו עשרים ושתים אותיות...') כדי לזהות את הספר ברשימה. אין זה עד של היצירה אלא ציטוט תמצית-פתיחה; הכיוון: הדף מצטט את היצירה.",
    "key_evidence": "NLI correctly labels a booklist; the 'match' is the incipit of Otiyot de-R. Akiva quoted to catalog it ('ואבתדאה…'), not a witness of the work."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "discovery_confirmed",
+   "note_he": "אכן"
   }
  },
  {
@@ -882,6 +966,12 @@
    "name_equation": null,
    "reasoning_he": "הטקסט הוא ברכה מעין שלוש (על העץ ועל פרי העץ) — נוסח סטטוטורי שמופיע בכל סידור. הכותרת ב-NLI ריקה ואין זיהוי FJMS, אבל אין כאן חידוש: זו ברכה שגרתית שכל עד ליטורגי מכיל.",
    "key_evidence": "Matched span is the standard 'al ha-etz' one-blessing (berakha me'ein shalosh) — universal statutory text, not distinctive."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "עד נוסח לברכה, ראה למעלה"
   }
  },
  {
@@ -922,6 +1012,12 @@
    "name_equation": null,
    "reasoning_he": "הקטע הוא נוסח קדושת היום של יום כיפור ('ותתן לנו... את יום הכפורים הזה... למחילה ולסליחה ולכפרה') — נוסח תפילה קבוע שבכל מחזור. הכותרות ריקות, אך אין חידוש בזיהוי טקסט סטטוטורי.",
    "key_evidence": "Standard YK Amidah kedushat hayom insertion — boilerplate machzor text."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "עד נוסח לקטע התפילה, ראה למעלה"
   }
  },
  {
@@ -962,6 +1058,12 @@
    "name_equation": null,
    "reasoning_he": "מדובר בפתיחה לי״ג מידות בנויה כאקרוסטיכון אלפביתי (עם רובריקה בערבית-יהודית 'והי תמאם אלאלף ביתה' — היינו השלמת הא״ב), וההתאמה כוללת שורה מחורזת + מסגרת 'וכן כתוב בתורתך'. NLI כותב סתמית 'פיוט; תפילות קבע', ולכן זיהוי הפיוט הספציפי הוא ידע חדש — אם כי חלק ניכר מההתאמה הוא פסוק י״ג המידות המשותף.",
    "key_evidence": "Distinctive acrostic peticha to the 13 middot (with a Judeo-Arabic alphabet-completion rubric) on a generically-catalogued 'Piyyut' fragment."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "כנ\"ל"
   }
  },
  {
@@ -1002,6 +1104,12 @@
    "name_equation": null,
    "reasoning_he": "העמוד אמנם נושא את ההרחבה של קדושת היום ליו״כ, אך הקטע התואם עצמו הוא הפתיחה הסטטוטורית ('נחת לנו... את יום הכפורים הזה את יום סליחת העון הזה') והתחלת מניין חמשת העינויים ממשנה יומא — חומר משותף שאינו ייחודי לחיבור זה.",
    "key_evidence": "Aligned span is the shared statutory YK opening plus the Mishnah Yoma five-afflictions list, not distinctive composed material."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "formula_only",
+   "note_he": "פורמולה משותפת בלבד."
   }
  },
  {
@@ -1042,6 +1150,12 @@
    "name_equation": null,
    "reasoning_he": "הטקסט הוא הברכה הרביעית של ברכת המזון בנוסח האבל ('אל אמת דיין אמת... גודר פרצות הוא יגדור את הפרצה הזאת') יחד עם צידוק הדין — נוסחאות ליטורגיות קבועות. אין חידוש בזיהוי.",
    "key_evidence": "Birkat Hamazon 4th blessing (mourner's 'ha-tov ve-ha-metiv' + 'goder peratzot') plus Tzidduk Hadin — fixed statutory formulas."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "עד נוסח לחלק הברכה, ראה למעלה"
   }
  },
  {
@@ -1082,6 +1196,12 @@
    "name_equation": null,
    "reasoning_he": "הבקשה 'מכל נגע... מן השעות הקשות המתרגשות לבוא לעולם' היא תבנית תחינה שגרתית של תפילת שחר (מבוססת ברכות טז ע״ב), והרפרנס מציג כמה נוסחאות מקבילות — סימן לנוסחה נודדת ולא לחיבור ייחודי.",
    "key_evidence": "Floating morning-prayer protective petition ('from the harsh hours...'); the edition shows multiple parallel recensions, i.e. a shared formula."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "כנ\"ל עד נוסח לקטע התפילה."
   }
  },
  {
@@ -1122,6 +1242,12 @@
    "name_equation": null,
    "reasoning_he": "הקטע 'עונות אבותינו החריבו... אבל זכרון דברים תהא סליחתנו ועינוי נפשנו תהא כפרתנו' הוא יחידה ליטורגית נודדת בסדר עבודת יו״כ — היא מופיעה גם בעמוד של כרטיס 34 (המשויך לחיבור אחר). לכן זו נוסחה משותפת ולא עדות ייחודית.",
    "key_evidence": "The 'avonot avoteinu heherivu' lament is a floating YK-Avodah unit (it also appears in card 34's page under a different work) — shared formula."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "noteworthy",
+   "note_he": "נוסחה משותפת אבל ייחודית וראויה לציון"
   }
  },
  {
@@ -1162,6 +1288,12 @@
    "name_equation": null,
    "reasoning_he": "ההתאמה היא הרחבת 'בספר חיים / עושה שלום' של מוסף ימים נוראים עם הפסוק 'כי בי ירבו ימיך' וסיום 'יהיו לרצון אמרי פי' — כולם נוסח קבע ופסוקים משותפים. אין חידוש.",
    "key_evidence": "Standard High-Holiday 'be-sefer chayim' expansion + Prov 9:11 verse + the fixed 'yihyu le-ratzon' closing — boilerplate."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "נראה עד נוסח לקטע התפילה"
   }
  },
  {
@@ -1202,6 +1334,12 @@
    "name_equation": null,
    "reasoning_he": "זהו קטע מקרובות לימים נוראים המיוחסות ל'יהודה', עם מניין חמש העקרות (שרה, רבקה, רחל, חנה) והפסוקים השזורים; ההתאמה ארוכה מאוד (230 אותיות) וצמודה. NLI כותב רק 'פיוט; שירת חול', ולכן זיהוי הפיוט המיוחס הוא חידוש אמיתי.",
    "key_evidence": "Long (alen=230) close match to a specific attributed kerova (Yehuda) enumerating the barren matriarchs; NLI only generic 'Piyyut / secular poetry'."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib",
+   "note_he": "ראה ביב' פרידברג \"The Qedushtaot of Yehudah according to Genizah Manuscripts\""
   }
  },
  {
@@ -1242,6 +1380,12 @@
    "name_equation": null,
    "reasoning_he": "קינה למנחה של ט׳ באב עם הפזמון 'חטאנו' והשורות 'זכור לנו ברית שלשה איתנים, קבץ מפזרים מארבע פנים' — חיבור ספציפי (0 עדי-מפקד, כמעט ייחודי). NLI כותב סתמית 'שירים ופיוטים (קטעים)', כך שהזיהוי מוסיף ידע.",
    "key_evidence": "Near-unique Tisha b'Av kina (0 census witnesses) on a generically-catalogued 'poems/piyyutim' fragment."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "discovery_confirmed",
+   "note_he": "אכן, אולי יש עדויות ביבליוגרפיות אך לא ראיתי אצלנו."
   }
  },
  {
@@ -1282,6 +1426,12 @@
    "name_equation": null,
    "reasoning_he": "העמוד הוא חיבור מסורתי בערבית-יהודית על טעמי המקרא (מתי 'למה' רפה ומתי דגש), וההתאמה כוללת את הניסוח האנליטי עצמו ('אם הנסמך לג' אותיות הן רפין') ולא רק פסוקים. NLI מזהה סתמית 'חבור בדקדוק עברי'; מאגרים מצמיד 12 עמודים לחיבור ספציפי — תוספת ידע.",
    "key_evidence": "Judeo-Arabic masoretic/te'amim treatise (rafe/dagesh rules); NLI's generic 'Hebrew grammar treatise' pinned to a specific work across 12 pages."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "discovery_confirmed",
+   "note_he": "יושם לב שההקבלה היא בין נוסח בעברית לנוסח בערבית, ומאגרים הוא \"תרגום\", כלומר כנראה כאן זה המקור הערבי."
   }
  },
  {
@@ -1322,6 +1472,12 @@
    "name_equation": null,
    "reasoning_he": "אותו חיבור טעמי-מקרא בערבית-יהודית (כאן על טעם הפזר וה'מתרדף'), פרוס על 6 עמודים. NLI כותב סתמית 'חבור במסורה'; ההתאמה בפרוזה האנליטית מצביעה על אותו חיבור, והזיהוי הספציפי מוסיף ידע.",
    "key_evidence": "Same Judeo-Arabic te'amim treatise (pazer / 'mitradef' accents), 6 matched pages; NLI's generic 'Masorah treatise' specified."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "discovery_confirmed",
+   "note_he": "כנ\"ל"
   }
  },
  {
@@ -1362,6 +1518,12 @@
    "name_equation": null,
    "reasoning_he": "ההתאמה היא הרחבת קדושת היום ליו״כ בנוסח ארץ-ישראל ('יום אסור באכילה... יום שבו נכנס כהן גדול... ועתה אלהינו חרב מקדש ובטלה עבודה') — הרחבה סטטוטורית המבוססת על משנה יומא ועם קינה נודדת. אף שההתאמה צמודה מאוד, זהו נוסח יו״כ שגרתי (28 עדים) שאין בו חידוש ממשי.",
    "key_evidence": "Very close match, but to a routine (28-witness) Palestinian-rite YK kedushat-hayom expansion (Mishnah-Yoma afflictions + floating lament) — statutory."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "עד נוסח טוב לקטע התפילה."
   }
  },
  {
@@ -1402,6 +1564,12 @@
    "name_equation": null,
    "reasoning_he": "כמו כרטיס 28: הקטע 'עונות אבותינו החריבו... אבל זכרון דברים תהא סליחתנו' + 'על כן ברחמיך הרבים נתתה לנו... את יום הכפורים הזה יום אסור באכילה' — צירוף של קינה נודדת, נוסח קבע ומניין העינויים ממשנה יומא. חומר משותף.",
    "key_evidence": "Floating YK lament + statutory kedushat hayom + Mishnah-Yoma afflictions — shared liturgical material."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "כנ\"ל"
   }
  },
  {
@@ -1442,6 +1610,12 @@
    "name_equation": null,
    "reasoning_he": "העמוד נושא את רצף 'ובכן' של תפילת ימים נוראים ('ובכן תן כבוד... ובכן צדיקים יראו... ותמלוך אתה הוא... קדוש אתה ונורא שמך') — נוסח מחזור אוניברסלי, כולל הפסוקים 'ימלוך ה'' ו'ויגבה ה' צבאות'. גם אם מאגרים מייחס לר׳ יוחנן בן נורי, הטקסט עצמו סטטוטורי ואין חידוש.",
    "key_evidence": "Standard High-Holiday 'u-ve-khen' Amidah sequence (universal machzor text) despite the attribution label — boilerplate plus shared verses."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "כנ\"ל"
   }
  },
  {
@@ -1482,6 +1656,12 @@
    "name_equation": null,
    "reasoning_he": "ההתאמה תחומה בין שני פסוקים ('הנסתרות לה' אלהינו', 'שגיאות מי יבין') וביניהם רפרין סליחה נודד ('ואתה רחום מקבל שבים... על התשובה עינינו מייחלות לך') שהרפרנס מציג בכמה נוסחאות. זו נוסחת וידוי/סליחה משותפת, לא חיבור ייחודי.",
    "key_evidence": "Match bounded by two Bible verses with a floating selicha refrain ('you are merciful, accepting penitents') shown in multiple recensions — shared formula."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "כנ\"ל"
   }
  },
  {
@@ -1522,6 +1702,12 @@
    "name_equation": null,
    "reasoning_he": "העמוד מוסר את הפיוט 'יש מאין בורא ומה לא נהיה ירא' לר׳ יצחק אבן גיאת (הרפרנס מציין 'מעמד ליל שבעה-עשר לר' יצחק אבן-גיאת'), בהתאמה צמודה. NLI כותב רק 'פיוט', כך שהזיהוי המיוחס הוא חידוש.",
    "key_evidence": "Close match to a specifically attributed piyyut of R. Isaac Ibn Ghiyyat; NLI only generic 'Piyyut'."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib",
+   "note_he": "ראה ביב' פרידברג \"'בעמדם בחצות הליל פעם ושתים': סליחות על פי סדר האשמורות מאת יצחק אבן גיאת\""
   }
  },
  {
@@ -1562,6 +1748,12 @@
    "name_equation": null,
    "reasoning_he": "ההתאמה היא רשימת ה'אין לנו לא אשם ולא אישים...' האלפביתית מסדר העבודה ליו״כ המיוחסת לפינחס (הכהן) [אמיץ כח]. אף שהמוטיב מצוי, החיבור האקרוסטי הספציפי מיוחס לפייטן, ו-NLI כותב סתמית 'פיוט'; הייחוס הוא ידע חדש.",
    "key_evidence": "Alphabetical 'ein lanu' Temple-lament from Pinchas ha-Kohen's Avodah ('Ammitz Koaḥ'); an attribution added over a generic 'Piyyut' catalog entry."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib_partial",
+   "note_he": "ביב' פרידברג מביא שני אזכורים שכנראה מלמדים שאין מדובר בידע חדש (אף כי שם לא נאמר פינחס)"
   }
  },
  {
@@ -1602,6 +1794,12 @@
    "name_equation": null,
    "reasoning_he": "העמוד מוסר את הפיוט 'אקדישה לאל בנועם שינוני' ליצחק בן ג׳יקטילה, בהתאמה צמודה (כולל שילוב הפסוק 'אהבתי כי ישמע'). NLI כותב רק 'פיוט', ולכן הזיהוי המיוחס הוא חידוש.",
    "key_evidence": "Close match to the attributed piyyut 'Akdisha la-El be-no'am' of Isaac ibn Giqatilla; NLI only generic 'Piyyut'."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib_partial",
+   "note_he": "ביב' פרידברג גם כאן מביא אזכורים אם כי לא את יצחק בן ג'יקטילה וצ\"ע"
   }
  },
  {
@@ -1642,6 +1840,12 @@
    "name_equation": null,
    "reasoning_he": "העמוד הוא דרשה על משלי ו ('עד מתי עצל תשכב') המשתמשת בדרשות מדרש משלי (מעט שנות=משנתך, ובא כמהלך=מלך המשיח) אך עוטפת אותן במסגרת דרשנית עצמאית ('ולזו הכונה הזהיר שלמה'), וההתאמה רופפת (dens 0.45). NLI: 'דרשות על התורה'. זו יצירה נפרדת שמעבדת את המדרש — קשר ספרותי, לא עדות של המדרש עצמו.",
    "key_evidence": "A distinct Proverbs homily reworking Midrash Mishlei's expositions (loose match, own homiletical framing); NLI 'Torah homilies' — a related but separate composition."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "indirect_witness",
+   "note_he": "אכן זה ציטוט (\"דרשו\") כלומר עד נוסח עקיף"
   }
  },
  {
@@ -1682,6 +1886,12 @@
    "name_equation": null,
    "reasoning_he": "העמוד הוא פלפול תלמודי ('וקשה... ותירצו... בסכינא חריפא') שמצטט את המימרה 'מסרבין לקטן ואין מסרבין לגדול' (בבלי ב״מ פז ומקבילה במסכת כלה) כדי לדון בה; ההתאמה רופפת. NLI כותב בטעות 'תנ״ך (קטעים)'. החפיפה היא מקור תלמודי משותף, לא עדות של מסכת כלה.",
    "key_evidence": "Dialectical talmudic commentary quoting the shared 'one declines to a lesser, not a greater' dictum (Bavli BM 87a / Kalla) — shared source; NLI mislabels the codex 'Bible fragments'."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "indirect_witness",
+   "note_he": "אכן ציטוט, וכותרת NLI מטעה."
   }
  },
  {
@@ -1722,6 +1932,12 @@
    "name_equation": null,
    "reasoning_he": "הכותרת ב-NLI היא \"מעשה תורה\" (חיבור של אמרות מספריות), והקטע המסומן — \"ששה דברים נאמרו בבני אדם, שלושה כבהמה ושלושה כמלאכי השרת\" — הוא אגדה תלמודית מוכרת (חגיגה טז ע\"א, מצויה גם באדר\"נ). הדף (בהקשר ערבי-יהודי הדן בטבעי האדם) מצטט את האגדה, ואבות דרבי נתן מכיל אותה גם — כך שהחפיפה היא מקור משותף ולא עדות לאותו חיבור.",
    "key_evidence": "Matched span = the aggadah 'ששה דברים נאמרו בבני אדם' shared by Avot de-R. Nathan and Bavli Chagigah 16a; NLI titles the MS מעשה תורה, a different numerical-adage work."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "shared_source",
+   "note_he": "אכן מקור משותף"
   }
  },
  {
@@ -1795,6 +2011,12 @@
    "name_equation": null,
    "reasoning_he": "זיהויי FJMS (מוסדות) כוללים במפורש את הפיוט \"לא בחסד ולא במעשים באנו אליך\" עבור כתב היד הזה, וזהו בדיוק הטקסט המסומן (הסליחה הרגילה: \"אין לנו פה להשיב ולא מצח להרים ראש... לא בחסד ולא במעשים באנו אליך\"). הקטלוג כבר מזהה את היחידה הליטורגית, ולכן אין כאן חידוש.",
    "key_evidence": "FJMS piyyut list for this MS already names the exact incipit 'לא בחסד ולא במעשים באנו אליך' — the matched supplication."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "אין חידוש אבל כאמור זה מועיל לדעת שהסליחות כוללות את הקטע המסוים הזה."
   }
  },
  {
@@ -1835,6 +2057,12 @@
    "name_equation": null,
    "reasoning_he": "הקטע המסומן הוא הברייתא בענייני תפילין — \"כשהוא מניח מניח של יד ואחר כך של ראש, וכשהוא חולץ חולץ של ראש ואחר כך של יד\" (מנחות לו), ולפניה נוסח הבאה ערבי-יהודי \"לקול תאנא\" (=לקולה, תניא). גם תשובת הגאון וגם הדף מצטטים את אותה ברייתא — החפיפה היא במקור התלמודי המשותף, לא בגוף התשובה. הכותרת ב-NLI כללית (\"קבץ בהלכה\").",
    "key_evidence": "Highlighted span is the tefillin-order baraita (Menachot 36a), headed by JA citation 'לקול תאנא'; both the geonic responsum and the page merely quote it."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "shared_source",
+   "note_he": "אכן ציטוט משותף"
   }
  },
  {
@@ -1875,6 +2103,12 @@
    "name_equation": null,
    "reasoning_he": "תוכן הדף הוא ליטורגיה סטנדרטית להוצאת ספר תורה בשני וחמישי (\"אל ארך אפים ורב חסד ואמת... חוסה ה' על ישראל עמך... ונוטל ספר תורה ואומר גדלו לה' אתי\"), נוסח קבע המצוי בכל סידור. אין ref להשוואה, אך זו תפילה סטטוטורית רגילה ולא יחידה נדירה — לכן מקור משותף בלי חידוש.",
    "key_evidence": "Standard Monday/Thursday Torah-reading liturgy (אל ארך אפים / גדלו ליי); boilerplate in every rite; ref_snippet empty."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "witness",
+   "note_he": "כנ\"ל מועיל לדעת שהקטע נמצא בכתב היד."
   }
  },
  {
@@ -1915,6 +2149,12 @@
    "name_equation": null,
    "reasoning_he": "הדף נושא את הפיוט הפסחי \"אז בפסח גאלת דורשי הוד כבודך... זאת חוקת הפסח טהרת ידידים\" בהתאמה קרובה למהדורה, כולל אותם פסוקי משען (\"וימהר אברהם האהלה... מהרי שלש סאים קמח סולת\"). זהו פיוט ייחודי, לא נוסח קבע; הכותרת ב-NLI כללית (\"הגדה של פסח\"), ולכן זיהוי החיבור המסוים (\"ברכת המזון לפסח\") הוא ידע חדש.",
    "key_evidence": "Distinctive Passover piyyut 'אז בפסח גאלת / זאת חוקת הפסח' closely matches the edition; NLI only 'הגדה של פסח', no FJMS ID."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib",
+   "note_he": "לא חידוש, ראה ביב' פרידברג \"ברכות המזון המפויטות מן הגניזה הקהירית: מבוא ומהדורה מדעית\""
   }
  },
  {
@@ -2555,6 +2795,12 @@
    "name_equation": null,
    "reasoning_he": "הדף הוא תרגום ארמי מרחיב לעשרת הדברות (שמות כ) התואם באורך רב (685 אותיות) לתרגום המיוחס ליונתן, עם ההרחבות האופייניות (\"עמי בית ישראל\", \"מדכר חובי אבהת רשיען על בנין מרדין על דר תליתאי ועל דר רביעאי\"). כותרת NLI ריקה לגמרי — כתב יד לא מזוהה. הזיהוי כתרגום (פסאודו-)יונתן על שמות הוא ידע חדש; יש להיזהר בהבחנה בין יונתן לתרגום ארץ-ישראלי אחר (מרווח דק, מתחרה אחד).",
    "key_evidence": "Long (685-letter) close match to Targum Pseudo-Jonathan Exodus 20 with its signature expansions; NLI title is empty (uncatalogued MS); thin margin over 1 competing Targum recension."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "known_bib",
+   "note_he": "ראה ביב' פרידברג \"תרגום ירושלמי לתורה על פי כתבי-יד מגניזות קאהיר\""
   }
  },
  {
@@ -2635,6 +2881,12 @@
    "name_equation": null,
    "reasoning_he": "הדף נושא את פירוש ר״ח למועד קטן: לצד הברייתא 'דברים שעושין לאבל בימי אבלו... רשב״ג... בצנעה' מופיעה גם הגלוסה הפרשנית הייחודית לר״ח ('אבל על ידי אחרים... ונראה שהלכה כרשב״ג דאמר שמואל הלכה כדברי המיקל באבל'), ולא רק לשון התלמוד. כתב־היד אינו מזוהה (כותרת NLI ריקה ואין זיהוי FJMS), ולכן זהו עד חדש לפירוש ר״ח.",
    "key_evidence": "Page carries R.Chananel's interpretive gloss ('aval al yedei aḥerim', 'halakha ke-RaShBaG') not just the shared braita; MS uncatalogued."
+  },
+  "human_review": {
+   "reviewer": "Hillel",
+   "date": "2026-07-12",
+   "class": "rejected",
+   "note_he": "לא עד נוסח שהרי מעבר לציטוטים המשותפים אין דמיון לפני ואחרי"
   }
  },
  {

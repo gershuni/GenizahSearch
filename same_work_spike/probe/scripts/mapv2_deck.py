@@ -273,6 +273,16 @@ def main():
         mf_pages = set(json.load(open(mf_p, encoding='utf-8'))['pages'])
         print(f"microfilm title-card exclude-list: {len(mf_pages):,} pages",
               flush=True)
+    # MAPV2-11: Friedberg bibliography gate (Hillel review 2026-07-12) —
+    # the bibliography table already connects many ms<->work pairs the title
+    # gate can't see (9/17 reviewed "discoveries" were known there). Claimed-
+    # work matches are routed out of the discovery strata; every card
+    # displays its top bib rows so reviewers catch what token matching can't.
+    from bib_gate import BibGate
+    bibgate = BibGate()
+    print(f"bibliography gate: "
+          f"{sum(len(v) for v in bibgate.rows.values()):,} rows over "
+          f"{len(bibgate.rows):,} manuscripts", flush=True)
     cols = {r[1] for r in con.execute("PRAGMA table_info(track1_matches)")}
     has_shadow = 'shadowed_by' in cols
     if not has_shadow and not args.allow_noshadow:
@@ -756,6 +766,10 @@ def main():
                     else "<div class='pane'><div class='lbl'>(המקבילה במהדורה לא אותרה לתצוגה)</div></div>")
         nli_t = (f" <span class='nli'>· קטלוג NLI: {html.escape(title_nli[:60])}</span>"
                  if title_nli else "")
+        bib_lines = bibgate.display(sid)
+        bib_div = ("<div class='bibl'>ביבליוגרפיה (פרידברג): "
+                   + " ∙ ".join(html.escape(x) for x in bib_lines)
+                   + "</div>") if bib_lines else ""
         info = {
             'page_id': pid, 'sys_id': sid, 'shelfmark': sm, 'library': lib,
             'nli_title': title_nli, 'work_id': wid, 'cat': cat,
@@ -766,6 +780,8 @@ def main():
             'flank_class': fc, 'flank_dist': fd, 'text_provenance': prov,
             'url': url, 'page_snippet': _plain(page_htm),
             'ref_snippet': _plain(ref_htm),
+            'friedberg_bib': bib_lines,
+            'bib_class': bibgate.classify(sid, name)[0],
         }
         return info, f"""
 <div class='card'>
@@ -779,6 +795,7 @@ def main():
   {prov_chip}
  </div>
  <div class='stats'>{stat_line}</div>
+ {bib_div}
  <div class='panes'>
   <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש = ההתאמה):</div>
    <div class='ev'>{page_htm}</div></div>
@@ -797,6 +814,7 @@ def main():
  .chip{font-size:12px;font-weight:bold;border:1px solid currentColor;
  border-radius:10px;padding:1px 8px}
  .stats{font-size:12.5px;color:#666;margin:4px 0}
+ .bibl{font-size:12px;color:#7a5c00;margin:2px 0}
  .ev{direction:rtl;text-align:right;font-size:14.5px;line-height:1.7;
  white-space:pre-wrap;background:#fcfcf9;border:1px solid #eee;
  border-radius:6px;padding:6px 8px}
@@ -855,6 +873,24 @@ def main():
         pools[tclass_of(r)].append(r)
     stats_t = {k: len(v) for k, v in pools.items()}
     print(f"title gate over (ms,work) rows: {stats_t}", flush=True)
+    # MAPV2-11: bibliography gate over the discovery pool — rows whose
+    # claimed work/author is already named by a Friedberg bib entry on this
+    # manuscript move to their own "known in research" section
+    bcache = {}
+
+    def bclass_of(row):
+        key = (row[2], row[3])
+        if key not in bcache:
+            bcache[key] = bibgate.classify(row[2], f"{row[5]} {row[6]}")
+        return bcache[key][0]
+
+    gen = pools['generic_or_absent']
+    pools['known_bib'] = [r for r in gen if bclass_of(r) == 'known_bib']
+    pools['generic_or_absent'] = [r for r in gen
+                                  if bclass_of(r) != 'known_bib']
+    print(f"bibliography gate over the discovery pool: "
+          f"{len(pools['known_bib'])} rows -> known-in-research, "
+          f"{len(pools['generic_or_absent'])} stay", flush=True)
     known_rows = sorted(pools['same_work'] + pools['name_variant'],
                         key=lambda r: -r[0])
     reversed_items = []
@@ -910,6 +946,9 @@ def main():
         ("תגליות בסימן שאלה — P 0.2–0.5 או פער־שוליים קטן",
          fill(pools['generic_or_absent'], 0.2, 0.5, 12, small_any_p=True,
               divert_reversed=True)),
+        ("ידוע במחקר — הביבליוגרפיה (פרידברג) כבר קושרת את כתב־היד "
+         "לחיבור (הוסט ממדורי התגליות; P ≥ 0.5)",
+         fill(pools['known_bib'], 0.5, 1.01, 12)),
         ("הקטלוג מזהה חיבור אחר — לרוב מקור משותף, אך כאן מסתתרים "
          "תיקוני־קטלוג (P ≥ 0.8)",
          fill(pools['different_specific'], 0.8, 1.01, 12,
@@ -962,14 +1001,19 @@ def main():
             continue
         body.append(f"<h2>{label}</h2>")
         body.extend(cards)
-    note = (f"<b>מה זה (v11):</b> רובד התגליות של {args.label} "
+    note = (f"<b>מה זה (v12):</b> רובד התגליות של {args.label} "
             f"({n_pages:,} עמודים עם מועמדים; הרובד המחמיר: {n_a_live:,} "
-            f"זיהויים). <b>חדש: נתב הכותרות</b> — כל כרטיס הושווה אוטומטית "
+            f"זיהויים). <b>נתב הכותרות</b> — כל כרטיס הושווה אוטומטית "
             f"מול כותרת NLI וזיהויי FJMS (עם בקרת שמות־נרדפים): "
             f"מדורי <b>התגליות</b> מכילים רק כתבי־יד שהקטלוג עדיין לא "
             f"מזהה בהם חיבור ספציפי; זיהוי־קיים הופרד ל'אישורי קטלוג'; "
             f"כותרת שמזהה חיבור אחר — למדור חשוד משלה (שם מסתתרים גם "
             f"תיקוני־קטלוג); תלות ספרותית ידועה (ערוך↔ר\"ח וכד') הופרדה. "
+            f"<b>חדש (v12): שער הביבליוגרפיה</b> — בעקבות הביקורת האנושית "
+            f"(2026-07-12) כל טענה מושווה גם מול רשומות הביבליוגרפיה של "
+            f"פרידברג על כתב־היד; כרטיס שהביבליוגרפיה כבר קושרת לחיבור "
+            f"הנטען הוסט למדור 'ידוע במחקר', וכל כרטיס מציג את רשומות "
+            f"הביבליוגרפיה שלו. "
             f"<b>P = טיב הקשר הטקסטואלי</b> (חוזק היחס בין הדף למהדורה), "
             f"לא הסתברות עדות. מסנני הציטוטים כוללים כעת גם את משפחת "
             f"הסימנים הערבית־יהודית (לקו', כמא קאל) ופטור־ציטוט שנבדק "
