@@ -345,6 +345,16 @@ def phase_engine_verify_spill(con, src, decoy_n, funnel, mode):
     # ---- load real pages ----
     rows = src.execute(
         "SELECT page_id, sys_id, text FROM pages ORDER BY rowid").fetchall()
+    # MAPV2-10: NLI microfilm title-card / copyright-stamp pages are not
+    # manuscript content and match EACH OTHER across HTR modes — drop them
+    # from the engine input AND the decoy pool entirely
+    mf_path = os.path.join(DATA, 'microfilm_title_pages.json')
+    if os.path.exists(mf_path):
+        mf = set(json.load(open(mf_path, encoding='utf-8'))['pages'])
+        n_pre = len(rows)
+        rows = [r for r in rows if r[0] not in mf]
+        print(f"microfilm title-card pages dropped: {n_pre - len(rows):,} "
+              f"(exclude-list {len(mf):,})", flush=True)
     ids = [r[0] for r in rows]
     real_sys = [r[1] for r in rows]
     texts = [r[2] for r in rows]

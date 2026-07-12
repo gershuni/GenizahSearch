@@ -12,6 +12,8 @@ Out:   review/track2_wide_small_fragments.html
 """
 import csv
 import html
+import json
+import os
 import re
 import sqlite3
 
@@ -21,6 +23,7 @@ ROOT = r"C:\Genizahsearch"
 PROBE = ROOT + r"\same_work_spike\probe"
 WIDE = PROBE + r"\data\track2_wide.db"
 CORPUS = PROBE + r"\data\fullcorpus_v2.db"
+MICROFILM = PROBE + r"\data\microfilm_title_pages.json"
 OUT = PROBE + r"\review\track2_wide_small_fragments.html"
 P_RE = re.compile(r'_P(\d+)_')
 MASK_OV_MAX = 0.30
@@ -53,6 +56,13 @@ def snip(text, s0, s1, pad=70):
 def main():
     wide = sqlite3.connect(f"file:{WIDE}?mode=ro", uri=True)
     corp = sqlite3.connect(f"file:{CORPUS}?mode=ro", uri=True)
+    # MAPV2-10: microfilm title-card / copyright-stamp pages (NLI film
+    # leaders read by different HTR modes match EACH OTHER) — never map them
+    mf_pages = set()
+    if os.path.exists(MICROFILM):
+        mf_pages = set(
+            json.load(open(MICROFILM, encoding='utf-8'))['pages'])
+        print(f"microfilm title-card exclude-list: {len(mf_pages):,} pages")
     meta = {}
     with open(ROOT + r"\libraries.csv", encoding='utf-8-sig', newline='') as f:
         rd = csv.reader(f)
@@ -67,24 +77,39 @@ def main():
             "dens, minlen, p_local_bucket, q_value, flank_dist, flank_class "
             "FROM track2_wide WHERE stratum <= 1 AND dup_shelf = 0 "
             "AND dup_lines < 0.6 AND mask_ov_a < ? AND mask_ov_b < ? ")
+    # SQL over-fetches (LIMIT = 4x the display cap) so post-SQL drops
+    # (microfilm pages / dedup) can't under-fill a section
     sections = [
-        ("ההקשר ממשיך (המבחן שלך) — הראיה החזקה", base +
+        ("ההקשר ממשיך (המבחן שלך) — הראיה החזקה", 20, base +
          "AND flank_class='continuation' ORDER BY p_local_bucket DESC, "
-         "alen DESC LIMIT 20"),
-        ("שברי־זעיר (צד קטן ≤ 150 אות) — אוכלוסיית המטרה", base +
-         "AND minlen <= 150 ORDER BY p_local_bucket DESC, dens ASC LIMIT 12"),
-        ("שאר הזוגות המובילים (אי/קצה — לבדיקת ציטוט משותף)", base +
+         "alen DESC LIMIT 80", ""),
+        ("שברי־זעיר (צד קטן ≤ 150 אות) — אוכלוסיית המטרה", 12, base +
+         "AND minlen <= 150 ORDER BY p_local_bucket DESC, dens ASC LIMIT 48",
+         ""),
+        ("שאר הזוגות המובילים (אי/קצה — לבדיקת ציטוט משותף)", 13, base +
          "AND flank_class != 'continuation' ORDER BY p_local_bucket DESC, "
-         "alen DESC LIMIT 13"),
+         "alen DESC LIMIT 52",
+         "ביקורת אנושית (2026-07-11): רוב הזוגות במדור זה הם ציטוטים — "
+         "תרגום או פירוש ערבי הכולל את פסוק המקרא עצמו; שני חיבורים "
+         "המצטטים אותו פסוק; שני חיבורים הלכתיים עם נוסחה משותפת; לעיתים "
+         "אותו ספר (כגון תורה) כששבר אחד מצרף פסוקים אחרים הנקראים יחד "
+         "בגלל דפים או עמודות חתוכים — וחלקם אכן מקבילות טובות של אותו "
+         "קטע פיוטי."),
     ]
     used = set()
     body = []
     n_cards = 0
-    for label, q in sections:
+    n_mf_dropped = 0
+    for label, cap, q, note in sections:
         cards = []
         for row in wide.execute(q, (MASK_OV_MAX, MASK_OV_MAX)):
+            if len(cards) >= cap:
+                break
             (pa, pb, sa, sb, a0, a1, b0, b1, alen, dens, minlen,
              pl, qv, fd, fc) = row
+            if pa in mf_pages or pb in mf_pages:
+                n_mf_dropped += 1
+                continue
             key = frozenset((pa, pb))
             if key in used:
                 continue
@@ -124,9 +149,12 @@ def main():
  <div class='panes'>{''.join(panes)}</div>
 </div>""")
         body.append(f"<h2>{label} ({len(cards)})</h2>")
+        if note:
+            body.append(f"<div class='note'>{note}</div>")
         body.extend(cards)
         n_cards += len(cards)
         print(f"  {label}: {len(cards)}")
+    print(f"  microfilm title-card pairs dropped from view: {n_mf_dropped}")
 
     n_all = wide.execute("SELECT COUNT(*) FROM track2_wide").fetchone()[0]
     n_small = wide.execute(
@@ -165,7 +193,9 @@ def main():
 הכיול שמרני — דליים דלי־ראיות קיבלו חסם עליון). סה"כ ברובד:
 {n_all:,} זוגות, מהם {n_small:,} בשכבות הקטנות; כאן {n_cards} לדוגמה.
 זוגות מאותה מדף־משפחה (join פיזי) סוננו החוצה, וכן ראיות שרובן
-טקסט קנוני ממוסך.
+טקסט קנוני ממוסך, וכן עמודי פתיחת־מיקרופילם (חותמת "בית הספרים
+הלאומי והאוניברסיטאי" / "כל הזכויות שמורות" בקריאות HTR שונות) —
+{len(mf_pages):,} עמודים כאלה אינם ממופים כלל.
 </div>
 {''.join(body)}
 </body></html>"""

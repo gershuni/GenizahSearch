@@ -77,3 +77,44 @@ See the module docstring for the full step-by-step.
 - Verification runs on UNMASKED streams, so canonical text can re-enter a window near an anchor; `mask_ov_a/mask_ov_b` let consumers drop rows whose evidence is mostly masked (design #5).
 - Decoys inflate DF by the injected fraction, mildly tightening the DF<=100 cap vs a pure production run (reported delta above).
 - `dup_shelf`/`dup_lines` flag same-object joins (design R4): these are FINDS for a scholar, kept and flagged, not dropped.
+## Addendum 2026-07-11 — human review (Hillel) + microfilm masking (MAPV2-10)
+
+**Human review of the review page (`review/track2_wide_small_fragments.html`):**
+
+- **The parallels are excellent** (Hillel, verbatim).
+- The 13 "שאר הזוגות המובילים (אי/קצה)" pairs are, on inspection, **citations**:
+  Arabic Targum / Arabic commentary that includes the biblical verse itself;
+  two works citing the same verse; two halachic works with a shared formula;
+  sometimes the same book (e.g. Torah) where one fragment juxtaposes other
+  verses read together because of cut pages/columns; and some are indeed good
+  parallels of the same poetic passage. This confirms the section's framing
+  (island/edge flank = shared-citation suspect), and the note is now embedded
+  under that section header in the HTML.
+- **Defect found: NLI microfilm title-card pages** ("בית הספרים הלאומי
+  והאוניברסיטאי" / "כל הזכויות שמורות" film leaders) read by different HTR
+  modes match EACH OTHER and pollute the pair map. Directive: these pages
+  should not be mapped at all.
+
+**Fix (MAPV2-10):** `scripts/mask_microfilm_pages.py` fuzzy-detects the
+boilerplate (3 needles over norm_stream: בית הספרים הלאומי והאוניברסיטאי @78,
+כל הזכויות שמורות @84, המכון לתצלומי כתבי היד העבריים @80) and writes
+`data/microfilm_title_pages.json`. Consumers: `build_track2_wide_deck.py`
+(pair exclude + over-fetch so sections stay full), `track2_wide_run.py`
+(pages dropped at load on future runs — engine input AND decoy pool),
+`mapv2_deck.py` (`guard_microfilm` page exclude). Numbers below reflect the
+post-mask rebuild of the review page only; the track2_wide.db table itself
+still contains the pairs (they are filtered at view/run level).
+
+**Measured impact (2026-07-11):** detector scanned 667,411 pages in ~6 min;
+flagged **5,426** title-card/stamp pages (by needle: bet_hasfarim 5,394,
+makhon_tatslumim 28, rights 4; flagged-page stream length median 105,
+p95 200). Position check: 97% sit at P000003 — the film-leader frame
+(P3=5,247, P1-P8 minor, P9+=35; the later-page flags are real NLI ownership
+stamps read mid-page, almost all on modern printed books — excluded too, by
+design). Wide-tier damage: **24,759 of 552,403 pairs (4.5%) touch a flagged
+page**, 24,192 of them passing the review-page filters — stamp-vs-stamp
+matches were crowding the small-fragment strata. Track-1 exposure: **zero**
+(0 deck cards, 0 track1_matches, 0 track1_candidates rows on flagged pages —
+the boilerplate never matched a literary reference; the mapv2_deck guard is
+prophylactic). Post-mask rebuild: all three sections fill to 20/12/13; five
+title-card pairs dropped out of the top view.

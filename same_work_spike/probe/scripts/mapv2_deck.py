@@ -265,6 +265,14 @@ def main():
             json.load(open(risk_p, encoding='utf-8'))['page_ids'])
         print(f"substitution-risk exclude-list: {len(risk_pages)} pages",
               flush=True)
+    # MAPV2-10: NLI microfilm title-card / copyright-stamp pages — pure
+    # film-leader boilerplate, never manuscript content; never map them
+    mf_pages = set()
+    mf_p = PROBE + r"\data\microfilm_title_pages.json"
+    if os.path.exists(mf_p):
+        mf_pages = set(json.load(open(mf_p, encoding='utf-8'))['pages'])
+        print(f"microfilm title-card exclude-list: {len(mf_pages):,} pages",
+              flush=True)
     cols = {r[1] for r in con.execute("PRAGMA table_info(track1_matches)")}
     has_shadow = 'shadowed_by' in cols
     if not has_shadow and not args.allow_noshadow:
@@ -334,6 +342,9 @@ def main():
             continue
         if pid in risk_pages:
             stats['guard_substitution_risk'] += len(disp)
+            continue
+        if pid in mf_pages:
+            stats['guard_microfilm'] += len(disp)
             continue
         bible_iv = merge_iv([(a, b) for _w, c, sp, _d in ctx if c == 'Bible'
                              for a, b, *_ in sp])
