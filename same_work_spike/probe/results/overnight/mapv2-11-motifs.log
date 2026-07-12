@@ -1,0 +1,55 @@
+
+===== 2026-07-10 21:32:01 motif_pilot.py C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db accepted_pairs_canonmask pilot =====
+continuum unit 367064: 91,547 pages
+continuum pairs: 790,987 (3s)
+elementary segments: 526,531 on 91,547 pages (4s)
+links: 1,630,687 (10s)
+motifs (>= 2 MSS): 42,430; size dist head {2: 13552, 3: 6915, 4: 5507, 5: 4373, 6: 3070, 7: 2169, 8: 1493, 9: 1093}; max 694
+  phrase scan 10000/42430 (4s)
+  phrase scan 20000/42430 (8s)
+  phrase scan 30000/42430 (12s)
+  phrase scan 40000/42430 (15s)
+BH-anchored motifs: 60 (29 phrase-anchored); known BH covered: 147 (phrase-only 83) / ceiling 206 reachable of 597 in index
+unknown-witness candidate MSS (own-segment anchored): 79
+# Motif pilot — sequence-aware decomposition of the continuum
+
+- continuum: 91,547 pages, 790,987 internal pairs -> 526,531 elementary segments -> **42,430 motifs** (>= 2 MSS)
+- motif MS-size distribution: 2:13552 3:6915 4:5507 5:4373 6:3070 7:2169 8:1493 9:1093 10:717 11:559 … max 694
+
+## BH validation (acceptance test)
+- known BH witness sys_ids (index): 597; reachable in the continuum's pair data (ceiling): **206**
+- BH-anchored motifs: 60 (29 text-anchored)
+- **known BH witnesses recovered: 147** (text-anchored motifs alone: 83; pairwise canonmask map connected 166)
+
+## BH-anchored motifs (top by known-BH members)
+- motif 519049: 115 MSS (63 known BH = 55%), med 68 letters, phrases ['matnat']  
+  «ואל ת)צריכנו ואלנא
+מבטיחנן עוד לידי מתנת בשר ודם ⟦מתנאם
+לפי שמתנת כשר ודם מתנתם מעוטה וחרפתם
+מרוכה אלא מידך הפתוחה הרחוה»
+- motif 526381: 87 MSS (48 known BH = 55%), med 67 letters, phrases []  
+  «שלום ביניגו : הרחמן הוא ישלח ברכה רו[
+והצלחה בכל מעשה ידינו : הרחמן הוא יצליח את דר[
+הרחמן הוא ישבור עול הגוים טהרה מעל
+»
+- motif 235166: 27 MSS (8 known BH = 30%), med 70 letters, phrases []  
+  «וברחמים נותן לחם לכל
+בשר כי לעולם חסדו :
+אז בפסח גאלתה דורשי הוד
+כבודך הצלתה והושעתה
+זרענס עשי עוגות ככתוב
+וימהר אברהם ה»
+- motif 511354: 8 MSS (6 known BH = 75%), med 152 letters, phrases []  
+  «צאתנו מארב [
+ובהיתנו מבית עבדים ועל בריתך שחתאתה בבש
+געל תורתך שלימדתני ועל חוקי רצונך שהודעוו[
+חיים חן וחסד ומזון שאתה »
+- motif 288325: 10 MSS (6 known BH = 60%), med 89 letters, phrases []  
+  «י בחודש האכיב
+הוציאך יי אלהיך ממצרים לילה :
+]אכלתה מצות פסח ומילה נ[
+תתה לאכותינו שמחת עמיסים
+פקדת צאן קדשים דממתה שקרת
+»
+wrote C:\Genizahsearch\same_work_spike\probe\results\motifs_pilot.md
+      C:\Genizahsearch\same_work_spike\probe\review\bh_new_witnesses.html (29s)

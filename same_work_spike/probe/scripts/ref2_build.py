@@ -100,6 +100,11 @@ def main():
     skipped = []        # (key, n_letters)
     for e in entries:
         key = e['key']
+        if e.get('guard_only'):
+            # citation-guard material (statutory formulas) — must NEVER
+            # enter the census reference; the deck loads these itself
+            print(f'  SKIP {key}: guard_only', flush=True)
+            continue
         path = os.path.join(STAGING, e['body_file'])
         raw = open(path, encoding='utf-8', errors='replace').read()
         stream, _ = norm_stream(raw)

@@ -1,0 +1,15 @@
+
+===== 2026-07-10 20:28:58 build_track1_review.py C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db fullv2 =====
+ref: 5363 works, source paths resolved for 5363 (0s)
+match rows: 218,684; matched pages: 180,562 (54s)
+fjms: titles for 45,253 MSS, bib for 30,611 MSS; 112 acronym-equiv tokens (57s)
+strata: {'new_witness': 120, 'new_discussed': 30, 'title_mismatch': 100, 'generic_title': 60, 'partial_mismatch': 40, 'match_control': 30, 'canonical_control': 20}
+  works 25/187 items=57 (72s)
+  works 50/187 items=120 (77s)
+  works 75/187 items=205 (80s)
+  works 100/187 items=246 (83s)
+  works 125/187 items=272 (84s)
+  works 150/187 items=303 (87s)
+  works 175/187 items=368 (88s)
+review items: 400 (ref window missing: 0)
+wrote C:\Genizahsearch\same_work_spike\probe\review\track1_fullv2_id_review.html (1760 KB, 88s)

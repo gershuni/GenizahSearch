@@ -1,0 +1,10 @@
+ref index: 574,324 grams canonical-masked
+[19:52:10] ref index: 5,363 works, 27,739 segments, 34,466,845 postings, canon_masks=503 works, mtime=2026-07-09 14:13 (6s)
+[19:52:11] single-work page pool: 37,462 pages, by cat: {'Mishnah': 96, 'Maagarim': 4092, 'Bible': 31241, 'JA': 1851, 'Bavli': 153, 'Yerushalmi': 24, 'Tosefta': 5} (1s)
+[19:52:12] sampled 979 single-work pages (2s); shortfalls: {'Tosefta': (3, 4)}
+[19:52:12] 13,706 crops
+[19:52:50] labeled candidate rows: 921,492
+[19:53:23] decoys (CHUNK=25): 13,706 queries, 13,700 with any candidate
+[20:01:44] wrote C:\Genizahsearch\same_work_spike\probe\data\p_calibration_pilot.json
+[20:01:44] wrote C:\Genizahsearch\same_work_spike\probe\results\p_calibration_pilot.md
+[20:01:44] TOTAL 9.7 min

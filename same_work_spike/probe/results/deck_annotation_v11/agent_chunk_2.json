@@ -1,0 +1,233 @@
+[
+ {
+  "card_no": 22,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הטקסט הוא ברכה מעין שלוש (על העץ ועל פרי העץ) — נוסח סטטוטורי שמופיע בכל סידור. הכותרת ב-NLI ריקה ואין זיהוי FJMS, אבל אין כאן חידוש: זו ברכה שגרתית שכל עד ליטורגי מכיל.",
+  "key_evidence": "Matched span is the standard 'al ha-etz' one-blessing (berakha me'ein shalosh) — universal statutory text, not distinctive."
+ },
+ {
+  "card_no": 23,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הקטע הוא נוסח קדושת היום של יום כיפור ('ותתן לנו... את יום הכפורים הזה... למחילה ולסליחה ולכפרה') — נוסח תפילה קבוע שבכל מחזור. הכותרות ריקות, אך אין חידוש בזיהוי טקסט סטטוטורי.",
+  "key_evidence": "Standard YK Amidah kedushat hayom insertion — boilerplate machzor text."
+ },
+ {
+  "card_no": 24,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "מדובר בפתיחה לי״ג מידות בנויה כאקרוסטיכון אלפביתי (עם רובריקה בערבית-יהודית 'והי תמאם אלאלף ביתה' — היינו השלמת הא״ב), וההתאמה כוללת שורה מחורזת + מסגרת 'וכן כתוב בתורתך'. NLI כותב סתמית 'פיוט; תפילות קבע', ולכן זיהוי הפיוט הספציפי הוא ידע חדש — אם כי חלק ניכר מההתאמה הוא פסוק י״ג המידות המשותף.",
+  "key_evidence": "Distinctive acrostic peticha to the 13 middot (with a Judeo-Arabic alphabet-completion rubric) on a generically-catalogued 'Piyyut' fragment."
+ },
+ {
+  "card_no": 25,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "העמוד אמנם נושא את ההרחבה של קדושת היום ליו״כ, אך הקטע התואם עצמו הוא הפתיחה הסטטוטורית ('נחת לנו... את יום הכפורים הזה את יום סליחת העון הזה') והתחלת מניין חמשת העינויים ממשנה יומא — חומר משותף שאינו ייחודי לחיבור זה.",
+  "key_evidence": "Aligned span is the shared statutory YK opening plus the Mishnah Yoma five-afflictions list, not distinctive composed material."
+ },
+ {
+  "card_no": 26,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הטקסט הוא הברכה הרביעית של ברכת המזון בנוסח האבל ('אל אמת דיין אמת... גודר פרצות הוא יגדור את הפרצה הזאת') יחד עם צידוק הדין — נוסחאות ליטורגיות קבועות. אין חידוש בזיהוי.",
+  "key_evidence": "Birkat Hamazon 4th blessing (mourner's 'ha-tov ve-ha-metiv' + 'goder peratzot') plus Tzidduk Hadin — fixed statutory formulas."
+ },
+ {
+  "card_no": 27,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הבקשה 'מכל נגע... מן השעות הקשות המתרגשות לבוא לעולם' היא תבנית תחינה שגרתית של תפילת שחר (מבוססת ברכות טז ע״ב), והרפרנס מציג כמה נוסחאות מקבילות — סימן לנוסחה נודדת ולא לחיבור ייחודי.",
+  "key_evidence": "Floating morning-prayer protective petition ('from the harsh hours...'); the edition shows multiple parallel recensions, i.e. a shared formula."
+ },
+ {
+  "card_no": 28,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הקטע 'עונות אבותינו החריבו... אבל זכרון דברים תהא סליחתנו ועינוי נפשנו תהא כפרתנו' הוא יחידה ליטורגית נודדת בסדר עבודת יו״כ — היא מופיעה גם בעמוד של כרטיס 34 (המשויך לחיבור אחר). לכן זו נוסחה משותפת ולא עדות ייחודית.",
+  "key_evidence": "The 'avonot avoteinu heherivu' lament is a floating YK-Avodah unit (it also appears in card 34's page under a different work) — shared formula."
+ },
+ {
+  "card_no": 29,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "ההתאמה היא הרחבת 'בספר חיים / עושה שלום' של מוסף ימים נוראים עם הפסוק 'כי בי ירבו ימיך' וסיום 'יהיו לרצון אמרי פי' — כולם נוסח קבע ופסוקים משותפים. אין חידוש.",
+  "key_evidence": "Standard High-Holiday 'be-sefer chayim' expansion + Prov 9:11 verse + the fixed 'yihyu le-ratzon' closing — boilerplate."
+ },
+ {
+  "card_no": 30,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "זהו קטע מקרובות לימים נוראים המיוחסות ל'יהודה', עם מניין חמש העקרות (שרה, רבקה, רחל, חנה) והפסוקים השזורים; ההתאמה ארוכה מאוד (230 אותיות) וצמודה. NLI כותב רק 'פיוט; שירת חול', ולכן זיהוי הפיוט המיוחס הוא חידוש אמיתי.",
+  "key_evidence": "Long (alen=230) close match to a specific attributed kerova (Yehuda) enumerating the barren matriarchs; NLI only generic 'Piyyut / secular poetry'."
+ },
+ {
+  "card_no": 31,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "קינה למנחה של ט׳ באב עם הפזמון 'חטאנו' והשורות 'זכור לנו ברית שלשה איתנים, קבץ מפזרים מארבע פנים' — חיבור ספציפי (0 עדי-מפקד, כמעט ייחודי). NLI כותב סתמית 'שירים ופיוטים (קטעים)', כך שהזיהוי מוסיף ידע.",
+  "key_evidence": "Near-unique Tisha b'Av kina (0 census witnesses) on a generically-catalogued 'poems/piyyutim' fragment."
+ },
+ {
+  "card_no": 32,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "העמוד הוא חיבור מסורתי בערבית-יהודית על טעמי המקרא (מתי 'למה' רפה ומתי דגש), וההתאמה כוללת את הניסוח האנליטי עצמו ('אם הנסמך לג' אותיות הן רפין') ולא רק פסוקים. NLI מזהה סתמית 'חבור בדקדוק עברי'; מאגרים מצמיד 12 עמודים לחיבור ספציפי — תוספת ידע.",
+  "key_evidence": "Judeo-Arabic masoretic/te'amim treatise (rafe/dagesh rules); NLI's generic 'Hebrew grammar treatise' pinned to a specific work across 12 pages."
+ },
+ {
+  "card_no": 33,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "אותו חיבור טעמי-מקרא בערבית-יהודית (כאן על טעם הפזר וה'מתרדף'), פרוס על 6 עמודים. NLI כותב סתמית 'חבור במסורה'; ההתאמה בפרוזה האנליטית מצביעה על אותו חיבור, והזיהוי הספציפי מוסיף ידע.",
+  "key_evidence": "Same Judeo-Arabic te'amim treatise (pazer / 'mitradef' accents), 6 matched pages; NLI's generic 'Masorah treatise' specified."
+ },
+ {
+  "card_no": 34,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "ההתאמה היא הרחבת קדושת היום ליו״כ בנוסח ארץ-ישראל ('יום אסור באכילה... יום שבו נכנס כהן גדול... ועתה אלהינו חרב מקדש ובטלה עבודה') — הרחבה סטטוטורית המבוססת על משנה יומא ועם קינה נודדת. אף שההתאמה צמודה מאוד, זהו נוסח יו״כ שגרתי (28 עדים) שאין בו חידוש ממשי.",
+  "key_evidence": "Very close match, but to a routine (28-witness) Palestinian-rite YK kedushat-hayom expansion (Mishnah-Yoma afflictions + floating lament) — statutory."
+ },
+ {
+  "card_no": 35,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "כמו כרטיס 28: הקטע 'עונות אבותינו החריבו... אבל זכרון דברים תהא סליחתנו' + 'על כן ברחמיך הרבים נתתה לנו... את יום הכפורים הזה יום אסור באכילה' — צירוף של קינה נודדת, נוסח קבע ומניין העינויים ממשנה יומא. חומר משותף.",
+  "key_evidence": "Floating YK lament + statutory kedushat hayom + Mishnah-Yoma afflictions — shared liturgical material."
+ },
+ {
+  "card_no": 36,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "העמוד נושא את רצף 'ובכן' של תפילת ימים נוראים ('ובכן תן כבוד... ובכן צדיקים יראו... ותמלוך אתה הוא... קדוש אתה ונורא שמך') — נוסח מחזור אוניברסלי, כולל הפסוקים 'ימלוך ה'' ו'ויגבה ה' צבאות'. גם אם מאגרים מייחס לר׳ יוחנן בן נורי, הטקסט עצמו סטטוטורי ואין חידוש.",
+  "key_evidence": "Standard High-Holiday 'u-ve-khen' Amidah sequence (universal machzor text) despite the attribution label — boilerplate plus shared verses."
+ },
+ {
+  "card_no": 37,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "ההתאמה תחומה בין שני פסוקים ('הנסתרות לה' אלהינו', 'שגיאות מי יבין') וביניהם רפרין סליחה נודד ('ואתה רחום מקבל שבים... על התשובה עינינו מייחלות לך') שהרפרנס מציג בכמה נוסחאות. זו נוסחת וידוי/סליחה משותפת, לא חיבור ייחודי.",
+  "key_evidence": "Match bounded by two Bible verses with a floating selicha refrain ('you are merciful, accepting penitents') shown in multiple recensions — shared formula."
+ },
+ {
+  "card_no": 38,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "העמוד מוסר את הפיוט 'יש מאין בורא ומה לא נהיה ירא' לר׳ יצחק אבן גיאת (הרפרנס מציין 'מעמד ליל שבעה-עשר לר' יצחק אבן-גיאת'), בהתאמה צמודה. NLI כותב רק 'פיוט', כך שהזיהוי המיוחס הוא חידוש.",
+  "key_evidence": "Close match to a specifically attributed piyyut of R. Isaac Ibn Ghiyyat; NLI only generic 'Piyyut'."
+ },
+ {
+  "card_no": 39,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "ההתאמה היא רשימת ה'אין לנו לא אשם ולא אישים...' האלפביתית מסדר העבודה ליו״כ המיוחסת לפינחס (הכהן) [אמיץ כח]. אף שהמוטיב מצוי, החיבור האקרוסטי הספציפי מיוחס לפייטן, ו-NLI כותב סתמית 'פיוט'; הייחוס הוא ידע חדש.",
+  "key_evidence": "Alphabetical 'ein lanu' Temple-lament from Pinchas ha-Kohen's Avodah ('Ammitz Koaḥ'); an attribution added over a generic 'Piyyut' catalog entry."
+ },
+ {
+  "card_no": 40,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "העמוד מוסר את הפיוט 'אקדישה לאל בנועם שינוני' ליצחק בן ג׳יקטילה, בהתאמה צמודה (כולל שילוב הפסוק 'אהבתי כי ישמע'). NLI כותב רק 'פיוט', ולכן הזיהוי המיוחס הוא חידוש.",
+  "key_evidence": "Close match to the attributed piyyut 'Akdisha la-El be-no'am' of Isaac ibn Giqatilla; NLI only generic 'Piyyut'."
+ },
+ {
+  "card_no": 41,
+  "verdict": "PARALLEL",
+  "confidence": "medium",
+  "title_relation": "different_specific",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "העמוד הוא דרשה על משלי ו ('עד מתי עצל תשכב') המשתמשת בדרשות מדרש משלי (מעט שנות=משנתך, ובא כמהלך=מלך המשיח) אך עוטפת אותן במסגרת דרשנית עצמאית ('ולזו הכונה הזהיר שלמה'), וההתאמה רופפת (dens 0.45). NLI: 'דרשות על התורה'. זו יצירה נפרדת שמעבדת את המדרש — קשר ספרותי, לא עדות של המדרש עצמו.",
+  "key_evidence": "A distinct Proverbs homily reworking Midrash Mishlei's expositions (loose match, own homiletical framing); NLI 'Torah homilies' — a related but separate composition."
+ },
+ {
+  "card_no": 42,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "different_specific",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "העמוד הוא פלפול תלמודי ('וקשה... ותירצו... בסכינא חריפא') שמצטט את המימרה 'מסרבין לקטן ואין מסרבין לגדול' (בבלי ב״מ פז ומקבילה במסכת כלה) כדי לדון בה; ההתאמה רופפת. NLI כותב בטעות 'תנ״ך (קטעים)'. החפיפה היא מקור תלמודי משותף, לא עדות של מסכת כלה.",
+  "key_evidence": "Dialectical talmudic commentary quoting the shared 'one declines to a lesser, not a greater' dictum (Bavli BM 87a / Kalla) — shared source; NLI mislabels the codex 'Bible fragments'."
+ }
+]

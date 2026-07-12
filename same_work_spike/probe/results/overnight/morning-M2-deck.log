@@ -1,0 +1,44 @@
+params overridden from C:\Genizahsearch\same_work_spike\probe\data\deck_params.json
+P model: C:\Genizahsearch\same_work_spike\probe\data\p_calibration_final2.json
+tier A: 87,547 live (ms,work) links, 3,665 works; witness-count q92=45 -> rarity_max=45
+  pages 50,000 · survivors 10,865
+  pages 300,000 · survivors 71,664
+  pages 350,000 · survivors 80,883
+cheap guards done: 364,900 pages, survivors 84,232; stats {'guard_rarity': 344422, 'skip_not_best': 845482, 'band_singleton': 67127, 'band_m_ge_010': 972, 'band_m_003_010': 6532, 'guard_canon_citation': 9557, 'not_best_union': 10426, 'known_tierA_pair': 7026, 'guard_bible': 32916, 'band_m_0_003': 9601, 'skip_flag': 1259} (19s)
+known-sibling (version-group) suppression: dropped 0
+guard v7: +21 well-attested rabbinic-genre works (witnesses > 45)
+guard: +16 guard-only statutory units (refs_staging)
+guard reference: 188 works; bible stream 1,204,678
+guard todo: 84,232 of 84,232
+  guard chunk 1/22 (198s)
+  guard chunk 2/22 (373s)
+  guard chunk 3/22 (557s)
+  guard chunk 4/22 (735s)
+  guard chunk 5/22 (800s)
+  guard chunk 6/22 (906s)
+  guard chunk 7/22 (975s)
+  guard chunk 8/22 (1050s)
+  guard chunk 9/22 (1219s)
+  guard chunk 10/22 (1398s)
+  guard chunk 11/22 (1578s)
+  guard chunk 12/22 (1690s)
+  guard chunk 13/22 (1870s)
+  guard chunk 14/22 (2049s)
+  guard chunk 15/22 (2242s)
+  guard chunk 16/22 (2424s)
+  guard chunk 17/22 (2635s)
+  guard chunk 18/22 (2838s)
+  guard chunk 19/22 (3040s)
+  guard chunk 20/22 (3260s)
+  guard chunk 21/22 (3427s)
+  guard chunk 22/22 (3430s)
+guards final: kept 43,274 (canonical 32,343, verse-align 8,615)
+(manuscript, work) rows: 36,333
+  P ≥ 0.8 — כמעט־ודאי: 40 cards
+  P 0.5–0.8 — סביר: 25 cards
+  P 0.2–0.5 — ספק: 15 cards
+  P < 0.2 — קרוב לרעש (לניגוד): 8 cards
+  statutory section: 0 cards
+wrote C:\Genizahsearch\same_work_spike\probe\review\full_deck\mapv2_discovery_deck.html
+wrote C:\Genizahsearch\same_work_spike\probe\review\full_deck\mapv2_blinded_deck.html + key (55 cards)
+wrote C:\Genizahsearch\same_work_spike\probe\review\full_deck\mapv2_deck_report.md; TOTAL 3438s

@@ -18,6 +18,7 @@ Out: results/track1_<tag>_testimonies.{md,csv}, review/track1_<tag>_testimonies.
 import csv
 import html
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -173,6 +174,7 @@ def main():
         m['bib_n'] = 0
         m['bib_signal'] = ''
         m['bib_entry'] = ''
+        m['known_channel'] = ''
     new_rows = [m for m in ms_rows if m['tier'] == 'new?']
     if new_rows:
         fj = FjmsInfo({m['sys_id'] for m in new_rows})
@@ -185,9 +187,34 @@ def main():
             m['bib_entry'] = entry
             if sig:
                 m['tier'] = 'new?known'
+                m['known_channel'] = 'fjms_bib'
         fj.close()
         print(f"bib demotion: {sum(1 for m in new_rows if m['bib_signal'])}"
               f"/{len(new_rows)} tier-new? rows already in research",
+              flush=True)
+
+    # ---- known-witness gate (Map-v2, 4 channels): a (work, manuscript)
+    # pair the Academy already knows — via the edition's used mesirot, the
+    # website מסירות נוספות tab, or the web msirot list — is not a new
+    # discovery. Demote ONLY on confidence='high' (exact shelfmark match;
+    # classmark-only stays, flagged upstream). Fail-open when the harvest
+    # file is absent (pre-Map-v2 runs behave exactly as before). ----
+    kw_path = ROOT + r"\same_work_spike\probe\data\known_witnesses_all.json"
+    if os.path.exists(kw_path):
+        known = {(k['work_id'], k['sys_id']): k['channel']
+                 for k in json.load(open(kw_path, encoding='utf-8'))
+                 if k.get('confidence') == 'high'}
+        n_gate = 0
+        for m in ms_rows:
+            if m['tier'] != 'new?':
+                continue
+            ch = known.get((m['work_id'], m['sys_id']))
+            if ch:
+                m['tier'] = 'new?known'
+                m['known_channel'] = ch
+                n_gate += 1
+        print(f"known-witness gate: {n_gate} tier-new? rows demoted "
+              f"({len(known):,} high-conf known pairs, 4-channel)",
               flush=True)
 
     canon_test = [m for m in ms_rows

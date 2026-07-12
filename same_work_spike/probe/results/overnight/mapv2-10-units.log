@@ -1,0 +1,35 @@
+
+===== 2026-07-10 21:29:14 passage_units.py C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db fullv2 accepted_pairs_canonmask =====
+clean pairs: 1,350,146
+occurrences: 2,680,640 on 296,092 pages (5s)
+union-find done (18s)
+units (>=2 MSS): 81,949 (22s)
+page lengths: 296,092; stamp-junk pages dropped: 3,075; units after: 81,816 (158s)
+track1 label pages: 75,492 (161s)
+persisted (166s)
+# Shared-passage units — 'fullv2' (accepted_pairs_canonmask)
+
+- units (passage attested in >=2 MSS): **81,816**
+- MS-size distribution: 2:53606 3:14713 4:5692 5:2727 6:1538 7:897 8:603 9:407 10:281 11:221 12:135 13:162 … max 19129
+- confidently labeled: 8,754 · unlabeled/low-conf: **73,061** (the discovery/residue census) · continuum-scale (> 2000 MSS): 1
+- label propagation (high-conf units): 28470 member pages inherit a label their page never matched directly
+
+## Continuum-scale units (chained sequences, NOT single passages)
+- unit 367064: **19,129 MSS** (91,547 pages) — top label candidate 'משה בן מיימון (רמב״ם) — משנה תורה, ספר אהבה' (1154 direct = 1.3% — low confidence); needs sequence-aware decomposition
+
+## Top UNLABELED units by witness count (frequent but unedited)
+- unit 1406754: **168 MSS** (643 pages, med 437 letters) roles {'witness': 576, 'partial': 62, 'embed': 5} libs {'RNL': 621, 'JTS': 9, 'CUL': 8, 'Oxford': 4}
+- unit 59290: **133 MSS** (306 pages, med 396 letters) roles {'witness': 275, 'partial': 30, 'embed': 1} libs {'CUL': 116, 'RNL': 100, 'JTS': 44, 'BL': 17}
+- unit 715622: **116 MSS** (172 pages, med 148 letters) roles {'embed': 68, 'partial': 73, 'witness': 31} libs {'RNL': 148, 'CUL': 18, 'BL': 4, 'AIU': 1}
+- unit 569230: **115 MSS** (201 pages, med 302 letters) roles {'witness': 159, 'partial': 42} libs {'CUL': 79, 'RNL': 71, 'BL': 15, 'JTS': 14}
+- unit 490454: **109 MSS** (164 pages, med 263 letters) roles {'witness': 106, 'partial': 51, 'embed': 7} libs {'RNL': 70, 'CUL': 60, 'JTS': 16, 'BL': 9}
+- unit 1431296: **97 MSS** (628 pages, med 588 letters) roles {'partial': 39, 'witness': 588, 'embed': 1} libs {'RNL': 557, 'Oxford': 38, 'CUL': 12, 'JTS': 11}
+- unit 304828: **94 MSS** (175 pages, med 489 letters) roles {'partial': 51, 'witness': 101, 'embed': 23} libs {'RNL': 134, 'CUL': 27, 'BL': 5, 'JTS': 3} · label? רמב"ם, פרוש המשנה א. סדר זרעים (low)
+- unit 696874: **77 MSS** (125 pages, med 172 letters) roles {'witness': 20, 'partial': 50, 'embed': 55} libs {'RNL': 120, 'CUL': 3, 'JTS': 1, 'Manchester': 1} · label? מחבר לא ידוע — ברהמ״ז לפסח (low)
+- unit 570284: **75 MSS** (133 pages, med 300 letters) roles {'witness': 105, 'partial': 25, 'embed': 3} libs {'CUL': 64, 'RNL': 40, 'JTS': 16, 'BL': 8}
+- unit 668762: **74 MSS** (102 pages, med 150 letters) roles {'partial': 46, 'embed': 42, 'witness': 14} libs {'RNL': 93, 'CUL': 8, 'JTS': 1} · label? רב סעדיה גאון — שבעתות גשם לשמיני עצרת (low)
+- unit 498194: **63 MSS** (116 pages, med 372 letters) roles {'embed': 44, 'partial': 24, 'witness': 48} libs {'RNL': 99, 'BL': 8, 'CUL': 5, 'Manchester': 2} · label? מחבר לא ידוע — מדרש תהלים, קטעים (מאן 1939, 320) (low)
+- unit 2395922: **63 MSS** (63 pages, med 129 letters) roles {'witness': 3, 'partial': 26, 'embed': 34} libs {'CUL': 41, 'JTS': 8, 'Oxford': 5, 'Mosseri': 3}
+- unit 2199868: **62 MSS** (148 pages, med 400 letters) roles {'witness': 127, 'partial': 21} libs {'RNL': 53, 'CUL': 37, 'JTS': 25, 'Oxford': 20}
+wrote C:\Genizahsearch\same_work_spike\probe\results\units_fullv2.md
+      C:\Genizahsearch\same_work_spike\probe\review\units_fullv2.html (166s)

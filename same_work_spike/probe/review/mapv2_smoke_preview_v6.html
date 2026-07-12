@@ -1,0 +1,2222 @@
+<!DOCTYPE html><html lang='he' dir='rtl'><head>
+<meta charset='utf-8'><title>MAPV2 preview v5 — ציון סופי + מסננים</title>
+<style>
+ body{font-family:Segoe UI,Arial;max-width:1100px;margin:20px auto;
+ padding:0 12px;background:#fafaf7;color:#222}
+ .card{background:#fff;border:1px solid #ddd;border-radius:8px;
+ margin:10px 0;padding:8px 14px}
+ .head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+ .p{background:#1a5da6;color:#fff;border-radius:6px;padding:2px 8px;
+ font-weight:bold} .work{color:#444}
+ .stats{font-size:12.5px;color:#666;margin:4px 0}
+ .ev{direction:rtl;text-align:right;font-size:14.5px;line-height:1.7;
+ white-space:pre-wrap;background:#fcfcf9;border:1px solid #eee;
+ border-radius:6px;padding:6px 8px}
+ .ev mark{background:#ffe58a} .ev .ctx{color:#aaa}
+ .ev.ref{background:#f4f9f4;border-color:#d8e8d8}
+ .lbl{font-size:12px;color:#777;margin-top:6px}
+ .nli{font-size:12.5px;color:#8a6d3b}
+ .panes{display:flex;gap:12px;flex-wrap:wrap}
+ .pane{flex:1 1 320px;min-width:0}
+ h2{border-bottom:2px solid #1a5da6;padding-bottom:4px;margin-top:28px}
+ .note{background:#eef4fb;border:1px solid #cfe0f5;border-radius:8px;
+ padding:10px 14px;font-size:14px}
+</style></head><body>
+<h1>תצוגה מקדימה v5 — ציון סופי + מסנני v5 (ליטורגיה)</h1>
+<div class='note'>
+<b>מה במסנן v5</b> (מכויל על 68 מקרים שדורגו ידנית בביקורת הסוכן):
+(1) הציונים חושבו מחדש עם הכיול הסופי; (2) <b>מסנן עיבודים קנוניים —
+גבעות חתוכות</b>: כל קטע ראיה נבדק מול רפרנס קנוני של 151
+חיבורים (מקרא + תרגומים + תפסיר + יחידות תפילת קבע) באימות ללא ריפוד־שוליים
+(חלון ≥ 18, צפיפות ≤ 0.35); כיסוי־איחוד
+לחיבור קנוני אחד ≥ 45% ⇐ הסרה. גרסת v4
+(אימות מרופד) תפסה רק 1/39 דליפות מדורגות — הגרסה החתוכה תופסת 32/47,
+כולל דף הסליחות תה' מד שיוחס ל"לאן?" של פיירברג ב־P=1.00; (3) <b>הוחזר
+המסנן הגלובלי מול נוסח המקרא</b> בסף 60 (במקום 70) לכל
+מועמד שאינו מקרא/תרגום — יחד ≈87% תפיסת דליפות במדגם המדורג; חיבור
+נטען שנמצא בעצמו ברפרנס הקנוני פטור מהמסנן (תיקון הסרת־היתר של
+אונקלוס); (4) הוסר כל מועמד שקטעו מכוסה בפסוקי מקרא שזוהו באותו עמוד;
+(5) חיבורים עם יותר מ־60 עדים מחמירים הוצאו; (6) כרטיס אחד
+לכל (כתב־יד, חיבור); (7) שני הטקסטים זה לצד זה + כותרת קטלוג NLI.
+<b>חדש ב־v6:</b> גם משנה/בבלי/ירושלמי/תוספתא נכנסו לרפרנס־המסנן (הערתך:
+ציטוטי חז"ל שכיחים לא פחות מפסוקים) — חיבור שנתלה במימרא תלמודית משותפת
+(רשב"ח מבוא התלמוד, מדרש אגור) יוסר; טענות אמיתיות על בבלי/משנה עצמם
+פטורות מהמסנן. <b>שיירי רעש ידועים</b> (יטופלו בהמשך): נוסחי קבע שחסרים
+ברפרנס — כל חמירא, קדיש, המפיל, ברכות נישואין — יתווספו כיחידות; נוסחי
+קבע בגרסת־נוסח שונה שמנתצת את רצפי העוגנים; שרשראות של קטעים קצרצרים
+(&lt;18 אות); ודו־כיווניות ציטוט (מי מצטט את מי).
+<br><b>המספרים:</b> מתוך 657,205 שורות גולמיות נשארו 13,759
+(כתב־יד, חיבור) אחרי הציון הסופי והמסננים. הרובד המחמיר: 78,875 זיהויים
+(ללא שינוי). התפלגות P אחרי הכל: 0.0: 19 · 0.1: 733 · 0.4: 1,353 · 0.5: 2,217 · 0.6: 2,440 · 0.7: 1,192 · 0.8: 2,163 · 0.9: 3,642
+</div>
+<h2>P ≥ 0.8 — כמעט־ודאי</h2>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001004120205171&page=4' target='_blank'><bdi dir='ltr'><b>Library of the Hungarian Academy of Sciences Ms. 108</b>
+  (HAS)</bdi></a>
+  <span class='work'>[Maagarim] משה בן נחמן (רמב״ן) — פירוש לתורה, בראשית</span> <span class='nli'>· קטלוג NLI: פרוש סודות התורה לרמב&quot;ן.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>180</bdi> אות · מרחק
+  <bdi dir='ltr'>0.38</bdi> · מוביל בפער גדול (פער 0.12) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>43</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>טה לפי&#x27; הראשון אשר כתבתי
+ואתה בדור לך הדעת אשר מתישב לפי לשון הרב ז&#x27;ל&#x27;
+אשר כתב ו</span><mark>המתקשר יותר על שהביאו
+מעל שהים מעל אברהם . לשון כל יפי המקום ⟦/⟧
+ולמדנו שהצדיקים מרכבתו של הק&#x27;ב&#x27;ה&#x27;
+לשון יזל אבל לשונם זל בבר האבות הן הן המרנה
+יראוז למה שכתי תתן אחת ליעקב וחסד לאברהם
+]זה היה לי והמשכל יבין ע(ו)ב . פי&#x27; כי אלה</mark><span class='ctx'>ים
+שבמעשה בראשית שהוא למעלה
+]י אחר יעקב וחסד
+]פס דבר בשם
+]בר עמו עלה אלהים
+]ים ב</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>עולם ובזרעו אחריו. וישמעאל אברך להרבות זרעו. אך לא מבריתי. 
+
+ 
+&gt;&gt; &quot;ויעל אלהי&#x27; מעל אברהם&quot;. לשון כבוד כלפי המקום. ולמדנו שהצדיקים מרכבתו של הקב&#x27;ה. לרש&#x27;י. אבל לשונם בבר&#x27;-רב&#x27;. &#x27;&#x27;האבות הן הן המרכבה&#x27;&#x27; #&lt;בראשית-רבה מז,ו. עמ&#x27; 475&gt;#. ירמז למה שכתו&#x27; &quot;תתן אמת ליעקב חסד לאברהם&quot;. &quot;ופחד יצחק היה לי&quot;. והמשכיל יבין. 
+
+ 
+&gt;&gt; &quot;בעצם היום הזה&quot;. כתב רש&#x27;י. בעצם היום שמלאו לאברהם צ&#x27;ט ולי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001231840205171&page=92' target='_blank'><bdi dir='ltr'><b>LON BL Or. 2597</b>
+  (BL)</bdi></a>
+  <span class='work'>[Maagarim] שלמה בן יצחק (רש״י) — פירוש לתורה</span> <span class='nli'>· קטלוג NLI: קטעים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>379</bdi> אות · מרחק
+  <bdi dir='ltr'>0.35</bdi> · מוביל בפער גדול (פער 0.16) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>7</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ר עליהן בשני לאוין ויש אומרים
+לפי שאמר וקצרתם את קצירה והבאתם את עומר יכול תפטר
+</span><mark>אותה הארץ מלקט שכחה ופיאה תלמוד לומר ובקצרכם לחייב
+אפילו אותה הארץ אמ&#x27; ר&#x27; אברימום ביר&#x27; יוסי מהראה הכתוב
+ליתנה באמצע הרג̇לים פסח ועצרת מיכן וראש השנה ויום )שריר
+וחג מיכן ללמדך שכל הנותן לקט שכחה ופיאה ומעשרות בראוי
+מעלה עליו הכתוב כאילו בנה בית המקדש והקריב קרבנותיו
+בתוכו וכל שאינו נותנן כראוי מעלין עליו כאילו בית המקדש
+קיים ולא הקריב קרבנותיו בתוכו תעזוב אותם הנח לפניהם
+והם ילקטו ואין לך לסייע אחד מהם אני יי נאמן ליתן לשכר::
+וידבר יי׳ אל משה לאמר בחרש השביע</mark><span class='ctx'>י באחד לחדש
+יהיה לכם שבתון מצות עשה לשבות באחד לחדש השביעי ⟦ה&#x27;⟧
+ואסור לעשות בו מ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>י כבשים&quot;. &quot;קדש יהיו&quot;. לפי ששלמי יחיד קדשים קלים. הו?ז?קק לומ&#x27; בשלמי צבור שיהו קדשי קדשים. 
+
+ 
+&gt;&gt; &quot;ובקצרכם&quot; וגו&#x27;. חזר ושנה לעבור עליהם בשני לאוין. א&#x27;ר אברדימס ב&#x27;ר ?(א)[יו]?סי. מה ראה הכת&#x27; ליתנה באמצע הרגלים. פסח וע?צר?ת מכאן. ראש השנה ויום הכפורים והחג מכאן. ללמד שכל הנותן לקט שכחה ופאה ומעשר עני כראוי מעלין עליו כאילו בנה בית המקדש ומקריב קרבנות לתוכו. וכל שאינו נותנן כראוי מעלין עליו כאילו בית המקדש +&lt;קיים01&gt; ואינו מקריב קרבנותיו לתוכו. 
+&gt;&gt; &quot;תעזוב&quot;. הנח לפניהם והם ילקטו. ואין לך לסייע את אחד מהן. &quot;אני ייי אלקיכם&quot;. נאמן ליתן שכר. 
+
+ 
+&gt;&gt; &quot;זכרון תרועה&quot;. זכרון פסוקי זכרון ופסוקי שופרות. לזכור לכם עקידת יצח&#x27; שקרב תחתי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001262110205171&page=2' target='_blank'><bdi dir='ltr'><b>Library of the Hungarian Academy of Sciences Ms. 135</b>
+  (HAS)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — סדר פסוקים למנחה ליו״כ</span> <span class='nli'>· קטלוג NLI: מחזור ליום כפור (קטע) : ; פיוטים ותפלות, עם ליווי והערות בער</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>95</bdi> אות · מרחק
+  <bdi dir='ltr'>0.42</bdi> · מוביל בפער גדול (פער 0.12) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>1</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>קבעתה ח</span><mark>ק יעוולם וואן כא שונה רשע
+לכפר פעם אחת בשנה : ככת&#x27; בת&#x27;
+והיתה זאת לכם לחקת עולם לכפר
+שוממותינו ראה כי אין בנו מעשה
+תחן תפלתינו הקשיבה ועשר[
+בד קד הטה אלהי אתך ושמע ופהחי
+שמע תפלה והמדיא במי</mark><span class='ctx'> אל ⟦כמ&#x27;⟧
+תעבוד על פשע לשאירי [ מי אלכמ
+אשמינו תבלע במצולות שועל מיאל כמ[
+גבורות</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>חנון למענך רחם נא. 
+&gt;&gt; יום קבעת חוק עולם לניזלי ש{י}נה. 
+&gt;&gt; היום רשעם לכפר אחת בשנה. ככת&#x27; בת&#x27; &quot;והיתה זאת להם לחקת עולם לכפר על בני ישר&#x27; מכל חטאו&#x27; אחת בשנ&#x27; כא&#x27; צו&#x27; י&#x27;י&quot;. 
+&gt;&gt; יום שוממותינו ראה כי אין מעשה. 
+&gt;&gt; היום תחן תפילתינו הקשיבה ועשה. ככת&#x27; בד&#x27; קדשך &quot;הטה אלה&#x27;י אזנך ושמע פקח עיניך וראה את שוממותינו והעי()[ר] אשר נקרא שמך&quot; &quot;כי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001403210205171&page=4' target='_blank'><bdi dir='ltr'><b>CAMB U T-S Or. 1080 1.49</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — מסכת דרך ארץ זוטא</span> <span class='nli'>· קטלוג NLI: חופת אליהו (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>107</bdi> אות · מרחק
+  <bdi dir='ltr'>0.40</bdi> · מוביל בפער גדול (פער 0.12) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>9</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>נות הללו חזרו להם לישראל בזכ
+משה וביום שמת בטלו שלשה דברים אומ&#x27;
+חכמים הנוש אשר ל</span><mark>שום גמים והנושא את לש[
+יופי והנושא אשה שום ממ ליו הכתוב אומ&#x27; ער
+אכלם חדש את הכ[ ום חדש ננכנס וחדש יוצא ממינם
+כלה והנושא אשה כשום יופי
+ו</mark><span class='ctx'>הנושא אשה כשום שמים א ר הק&#x27;ב&#x27;ה&#x27;
+להוציא ממנו בנים אדיקין גמורינ [ ] הכתוב
+אומ&#x27; בר</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>מים. הנושא אשה לשום זנות עליו הכת&#x27; אומ&#x27; &quot;בי&#x27;י בגדו כי בנים זרים ילדו&quot;. הנושא אשה לשום ממון עליו הכת&#x27; אומ&#x27; &quot;עתה יאכלם חדש את חלקיהם&quot;. חדש נכנס וחדש יוצא וממונם כלה. הנושא אשה לשום גדולה לסוף שמורידין אותו מגדולתו. הנושא אשה לשום שמים סוף שיוצא</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001413070205171&page=78' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S Misc. 33/03</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — מעריב א פסח</span> <span class='nli'>· קטלוג NLI: מחזור מנהג אשכנז לשלש רגלים : ; קטעי גניזה.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>125</bdi> אות · מרחק
+  <bdi dir='ltr'>0.37</bdi> · מוביל בפער גדול (פער 0.13) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>3</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ם תפארתו ⟦ה&#x27;⟧
+הגיד לקרובים ולרחקים כבודו בים ⟦מי⟧
+מחוקקים שיר ותושבחות משוררים ו</span><mark>משחקים .
+[ ]בגילה גרנה בשמחה רבה ואמרו כולם . מי כמוכה בא . . מלכותל .
+ליל שמורים סמן הוא לעתיד לבא עליון כי בו.
+יבא פקוד יפקוד עם קרובו צורנו נגילה</mark><span class='ctx'></span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ת מצרים מקברים. 
+&gt;&gt; מילול המתיקו בני ?ח?ורים. 
+&gt;&gt; נצחו יחד כעל מכת בכורים. $בגילה בשמחה רבה ואמרו כולם$. 
+
+ 
+&gt;&gt; $מי-כמוך$. 
+&gt;&gt; ליל שמורים סימן הוא לעתיד לבוא. 
+&gt;&gt; עליון כי ?ב?וא יבוא. 
+&gt;&gt; פקוד יפקוד עם קרובו. 
+&gt;&gt; צורינו הוא ?נ?גילה ונשמחה בו. $זה צור ישענו פצו פה ואמרו$. 
+&gt;&gt; ליל שמורים קראו</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001429050205171&page=76' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 58</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — פתיחה לפסוקי דזמרה</span> <span class='nli'>· קטלוג NLI: מחזור מנהג ספרד לשלש רגלים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>121</bdi> אות · מרחק
+  <bdi dir='ltr'>0.38</bdi> · מוביל בפער גדול (פער 0.16) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>40</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>..
+ייי כלח&#x27; ⟦/א⟧
+ויפלקנו עצריכו ..
+פלח&#x27; /
+נותן לחם לכל בשר
+/
+  י כלק&#x27; ⟦./⟧
+הודו </span><mark>לאו השיניים .. ..
+: כוח..
+בשוה כרוך או&#x27; ועושה .. כלוך גוזר וצוקים ..
+ברוך עושה בראשות .. ברוך מרחם
+על הארץ .. ברוך מרחם על הבליות .. ברוך עשום
+שכר טוב ליריאיו .. ברוך עטביר אפיוה וצביח
+אורה .י ברוך שאין לפניו עולה</mark><span class='ctx'> ולא שלחה .. ולא
+עשוא פנים יי ולא עקח שוחד :י צדיק הוח בכל
+דרליו ייוחסיד בכל עעש</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ארץ. 
+&gt;&gt; ברוך מרחם על הבריות. 
+
+ 
+&gt;&gt; ברוך שאמר והיה העולם ברוך (ב) הוא. 
+&gt;&gt; ברוך אומר ועושי. 
+&gt;&gt; ברוך גוזר ומקיים. ברוך מושיע ומרחם. 
+&gt;&gt; ברוך מרחם על הארץ. 
+&gt;&gt; ברוך המרחם על הבריות. 
+
+ 
+&gt;&gt; ברוך מעביר אפלה ומביא אורה. 
+&gt;&gt; ברוך משלם שכר טוב ליראיו. 
+
+ 
+&gt;&gt; ברוך מעביר אפלה ומביא אורה. 
+&gt;&gt; ברוך שנתן תורה לעמו ישראל. 
+&gt;&gt; ברוך משלם שכר טוב ליראיו ברוך הוא</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001434750205171&page=39' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 201/01</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — צידוק הדין</span> <span class='nli'>· קטלוג NLI: קינות על נפטרים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>116</bdi> אות · מרחק
+  <bdi dir='ltr'>0.41</bdi> · מוביל בפער גדול (פער 0.13) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>10</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ם .
+אעשה מספד כתנים
+אהה ליום המות הבא בזעזעי ואמות בבוא המות ליטול
+הנפש בצער ומה</span><mark>ומות רחום תרחם הנפש וגויתם
+הצור תמים בכל פועל ומי אשר יאמר לו מה תפעל
+השלוט בתחת ובמעל י ממות ומחוה מוריד שאול
+ויעל ..
+אשרי
+הצור תמים נפש כל חי בידיך</mark><span class='ctx'> צדק מלאה ימיניך רחם
+פליטת צאן מרעיתיך ותאמר למלאך המשחית הרף
+ידיך. אשרי
+הצור תמ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>הצור תמים פעלו כי כל דרכיו משפט אל אמונה ואין עול צדיק וישר הוא&quot;. 
+&gt;&gt; הצור תמים בכל פועל. 
+&gt;&gt; מי יאמר לו מה תפעל. 
+&gt;&gt; שליט במטה ובמעל. 
+&gt;&gt; ממית ומחיה מוריד שאול ויעל. הצור. 
+&gt;&gt; הצור תמים בכל מעשה. 
+&gt;&gt; מי יאמר לו מה תעשה (ובזכות הנעקד כשה). 
+&gt;&gt; אומר ועושה. חסד חנם</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001442610205171&page=23' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 819</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — בקשה</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים (קטעים).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>93</bdi> אות · מרחק
+  <bdi dir='ltr'>0.39</bdi> · מוביל בפער גדול (פער 0.12) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>22</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>מרתי
+פשעירים עלי רשח וכרביכים על עשב פי שםיגי אקרא הבו
+אדל לאלהינו
+קול
+אלשירה כא</span><mark>מלה אלי אן תקול וכפר חדמתו עמו
+וקול הושיעה את עמך וכרך את נחלתיך ורעם ונשאם עד העולם
+ברוך יג לעולם אמן ואסכן
+שמעו שמר</mark><span class='ctx'></span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>הראינו ייי חסדך וישעך תתן לנו&quot;. 
+
+ 
+&gt;&gt; קיים לנו הבטחותיך. 
+&gt;&gt; ומלא לנו את נחמותיך. 
+&gt;&gt; &quot;הושיעה את עמיך וברך את נחלתיך ורעם ונשאם עד העולם&quot;. 
+&gt;&gt; &quot;ברוך יו&#x27;י לעולם אמן ואמן</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001442980205171&page=17' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 856</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — בקשה</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>93</bdi> אות · מרחק
+  <bdi dir='ltr'>0.41</bdi> · מוביל בפער גדול (פער 0.10) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>22</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ת אלי אלאלי ויחר לנו אסרו חג בעבו
+עד קרנות המזבח : אלי אתה ואודכ
+אלהי ארוממה י ה</span><mark>ודו לאלי כי טוב כי לעולא
+חסדו : תסקול הושיעה את עמבובך
+את נחלתים ורעם ונשאם עד העולם ברות
+אלי לעולם אמן ואמן
+ואסאד וקו</mark><span class='ctx'>ל
+כי כה אמר דם
+ונשא שוכ
+שמו&#x27;
+עד וקדוש
+מרום וקדוש אשכון ואת דכא ושפל רוח
+להחיות ר</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ו. 
+&gt;&gt; &quot;הראינו ייי חסדך וישעך תתן לנו&quot;. 
+
+ 
+&gt;&gt; קיים לנו הבטחותיך. 
+&gt;&gt; ומלא לנו את נחמותיך. 
+&gt;&gt; &quot;הושיעה את עמיך וברך את נחלתיך ורעם ונשאם עד העולם&quot;. 
+&gt;&gt; &quot;ברוך יו&#x27;י לעולם אמן ואמן</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001446040205171&page=8' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 1138</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] נחום אלברדאני — פזמונים לז׳ פסח</span> <span class='nli'>· קטלוג NLI: פיוטים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>114</bdi> אות · מרחק
+  <bdi dir='ltr'>0.38</bdi> · מוביל בפער גדול (פער 0.16) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>1</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>שיר
+ישראל את הוא[ ר הזאר⟦/
+נטויים האזינו /
+אמוני יום כתב שירה רביעית
+זמוני חמישי</span><mark>ת צר ואור
+ב
+ידו לעיני. אן ידבר
+[
+  ליט :[ ]פז&#x27;
+קיב
+נחית כצאן עם בנוף עזרתו
+חודה ביד ציה וכהן בחרתו .
+וכגע ליס סוף לפניו לזרתו
+מוליך לימין משה זרוע
+תפארתו: זימרה ששית
+ותשב דבורה י קידשך ברה
+ב</mark><span class='ctx'>מפלת סיסרא: ושביעית
+מנגן כמיא⟧ מאוי ביו עזרה
+וידבר דויד לייי את דברי
+רשידה את
+פד</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>אוּ עֵינָם. 
+&gt;&gt; חוֹכֵֿי לְעוֹנָם. 
+&gt;&gt; וְהִנֵה מְעַנָּם. 
+&gt;&gt; מְמַהֵר לְאַנָּם. 
+&gt;&gt; וְיַרא קְטֶנָם. 
+&gt;&gt; עִם זְקֵנָם. 
+&gt;&gt; צָעֶקוּ וְעָנָם. 
+&gt;&gt; עַזְרָם וּמָגִֿנָם. 
+
+ 
+&gt;&gt;  &lt;~&gt;  $פז&#x27;$. 
+&gt;&gt; נָחִיתָ כַּצאֹן עַם בְנוֹף עְזַרְתּוֹ. 
+&gt;&gt; חוֹדֶה בְיַד צִיר וְכֹהֵן בחַרְתּוֹ. 
+&gt;&gt; וּכְֿגָע לְיַם-סֻוף לְפָנָיו גְזַרְתּוֹ. 
+&gt;&gt; &quot;&lt;מו11&gt;לִיךֿ לִימִין משֶׁה זְרוֹעַ ת?פ?ארת&lt;ו11&gt;&quot;. 
+
+ 
+&gt;&gt;  &lt;~&gt;  $פז&#x27;$. 
+&gt;&gt; בְשִׁירוֹת תֵשֶׁע. 
+&gt;&gt; רִינן עַם נוֹשָע. 
+&gt;&gt; דְרִישָׁתוֹ יִשַׁע. 
+&gt;&gt; אְלוֹהָיו כְמוֹשָׁע. 
+&gt;&gt; נָקִי מֵרָשָׁע. 
+&gt;&gt; יְהִי נֶפְשׁוֹ לְשַעְשָׁע. 
+&gt;&gt; עְשׂיִריִת כְיִשַׁע. 
+&gt;&gt; לְהָשׁי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001446290205171&page=119' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 1163</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — ספרי דברים</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים (קטעים).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>99</bdi> אות · מרחק
+  <bdi dir='ltr'>0.37</bdi> · מוביל בפער גדול (פער 0.17) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>25</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ם אשה ריח
+ניחח ליוי על עולת התמיד
+יעשה
+יכפר עון ולא ישחית לב
+בזאח יכופר נכון יור</span><mark>קב סדואל
+למוך נושא עון ועובד נבל פשע
+]אב ירחמנו יכבוש וכונותינו
+ונתן אמת ליעקב חסד לאברהם
+נכונא ונוכחה יאמר יי וג&#x27; בה
+אמר ייי</mark><span class='ctx'> אלהים ביום טהרי אתכם
+וידנכתם כי אני ייי בעשותי אתכם
+למען שמי למען שמי אאריך
+אפי</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>בשן אשר בהר שומרון&quot; וגומ&#x27;. חזר ואמר להן דברי ניחומין. +. &quot;מ&#x27; אל כמוך נושא עון ועובר על פשע ישוב ירחמנו יכבוש עונותינו תתן אמת ליעקב וחסד לאברהם&quot;. 
+&gt;&gt; וכן ירמיה אמ&#x27; להן &quot;והשבתי מערי יהודה ומחוצות ירושלם קול ששון&quot; וגו&#x27;. וחזר ואמר להן דברי ניחומ</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001449200205171&page=11' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 1429</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — בקשה</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>94</bdi> אות · מרחק
+  <bdi dir='ltr'>0.39</bdi> · מוביל בפער גדול (פער 0.15) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>22</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>א פניהם קלון ויבקשו שמך
+ייי יבושו ויבה לו יב עד ויחפרו ויאבדוו וידעו פי ארה
+שמך </span><mark>ייי ליברך עליו על כל הארץ תם קול א
+לאהגשיעה את עמך וברך את נחלתיך ודעם
+ונשאם עד העולם ברוך ↑ י לעולם אמן ואמן : וקו&#x27;
+ההפך עלי</mark><span class='ctx'> בל הות תרדוף כרוח נריבתי וכעב
+עברה ישועתי
+תם קול מלחן
+שיר מזמור לבני קרח
+למנצח
+</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ינו. 
+&gt;&gt; &quot;הראינו ייי חסדך וישעך תתן לנו&quot;. 
+
+ 
+&gt;&gt; קיים לנו הבטחותיך. 
+&gt;&gt; ומלא לנו את נחמותיך. 
+&gt;&gt; &quot;הושיעה את עמיך וברך את נחלתיך ורעם ונשאם עד העולם&quot;. 
+&gt;&gt; &quot;ברוך יו&#x27;י לעולם אמן ואמן</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001464440205171&page=31' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 2903</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — ברכות ההפטרה</span> <span class='nli'>· קטלוג NLI: תפלות מנהג קראים (קטעים).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>98</bdi> אות · מרחק
+  <bdi dir='ltr'>0.39</bdi> · מוביל בפער גדול (פער 0.11) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>46</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>דה תם מן אל
+פרשם יב פואסיק מן אכר אלפרשה ואלבקא
+ספס תורה ויבארך מחל אלעאדה ואדא
+</span><mark>רודאתה וגר אלהינו מלך העולם
+שר
+ה בנציאים הטובים ורצר[ ]הם ובדבריהם
+מרים באמת ברוך אתה יוי הבותך בתורה
+זה עבדו אובישראל עמו ובנביאיך את
+קבסומן : תם יקרא אפטארה ח
+אלגמע</mark><span class='ctx'>ה ואדא אנתהי מן א[ ]..
+ועולהא יתבו
+ב[
+]הא
+רבא קדישא מנרך מן עלי[ ].א
+וויחננו לך </span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>לם. 
+&gt;&gt; אשר בחר בנביאים טובים. 
+&gt;&gt; ורצה בדבריהם הנאמרים באמת. 
+
+ 
+&gt;&gt; בר&#x27; את&#x27; יו&#x27;י אלה&#x27; מ&#x27; הע&#x27;. 
+&gt;&gt; אשר בחר בנביאים הטובים. 
+&gt;&gt; ורצה בהם בדבריהם אמת. 
+
+ 
+&gt;&gt; ברוך אתה י?ה?&lt;וה&gt; &lt;הבו22&gt;חר בת&lt;ורה22&gt; ובמשה עבדו. 
+&gt;&gt; ובישראל עמו. 
+&gt;&gt; &lt;ובנב22&gt;יאי הא&lt;מת22&gt; והצדק. 
+
+ 
+&gt;&gt; ברוך אתה י&#x27;י הבוחר בתורה במשה עבדו. 
+&gt;&gt; ובישראל עמו. 
+&gt;&gt; ובנביאי האמת והצדק. 
+
+ 
+&gt;&gt; ברוך אתה יי&#x27;י. 
+&gt;&gt; הב</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001591500205171&page=161' target='_blank'><bdi dir='ltr'><b>Ms. EVR IV 4</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Bavli] מחבר לא ידוע — תלמוד בבלי, עירובין</span> <span class='nli'>· קטלוג NLI: פסקי רי&quot;ד (שבת, ערובין, פסחים).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>102</bdi> אות · מרחק
+  <bdi dir='ltr'>0.42</bdi> · מוביל בפער גדול (פער 0.11) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>11</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>בפנרם
+וחכמים אומרים איל
+שון כבני עירי
+או אינו מנהם כל עיקר
+בלרוח אחת
+מערב לפיני
+</span><mark>ימים אינו מערב כל עיקר כיצד יעשה
+מוכיכו בראשון ומחשיך עליו ונוטלו
+ובאלו ובשיני מחשיך עליו ואוכלו ⟦/⟧
+נמצא משתבר בהליכתו ומשתכר</mark><span class='ctx'> ⟦/⟧
+בעירוסו נאכל בראשון . עירוב לראשון
+ואינו עירוב לשיני . אמ&#x27; להם ר&#x27; אליעזר
+מו</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>פת בשיני. #אמ&#x27; שמואל#. ובאותה הפת. #אמ&#x27; רב אשי. מתניתין נמי דייקא מדקתני#. &#x27;&#x27;כאי-זה-צד הוא עושה. מוליכו בראשון ומחשיך עליו ונוטלו ובא לו. בשני מחשיך עליו ואוכלו&#x27;&#x27;. #ורבנן#. עצה טובה #קא משמ&#x27; לן#. 
+
+ 
+&gt;&gt; #מתני&#x27;. &quot;ר&#x27; יהודה אומ&#x27;&quot; כו&#x27;. מאן# &#x27;&#x27;לא הודו לו&#x27;&#x27;. #אמ&#x27; רב. ר&#x27; יוסי היא. דתניא#. מוד</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001591500205171&page=111' target='_blank'><bdi dir='ltr'><b>Ms. EVR IV 4</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Sefaria] יצחק אלפסי (רי&quot;ף) — הלכות הרי&quot;ף (שבת)</span> <span class='nli'>· קטלוג NLI: פסקי רי&quot;ד (שבת, ערובין, פסחים).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>107</bdi> אות · מרחק
+  <bdi dir='ltr'>0.38</bdi> · מוביל בפער גדול (פער 0.10) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>44</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ת לעז&#x27; . מה עז&#x27; לא תעביר וכי
+עסיד מיחיים הכא נמי לא שנא . ור&#x27;
+יהושע אמ&#x27; לך לא דמ</span><mark>י התם לאו
+מצוה . הכא מצוה עביד ..
+מתני&#x27; קטן טמול לשמונה . ⟦/⟧
+לתשעה לעשרה . לאחד
+עשר . לשנים עשר . לא פחות ולא
+יתר . כדרכו לשמונה . נולד בין ⟦ה&#x27;⟧
+השמשות . נימול לתשעה . פירו&#x27; .
+דמספיקא מאחדינן ולא מקדמינן
+ד</mark><span class='ctx'>קודם שמיני אינו ומן מילה . וכת&#x27;
+ומשמיט והלאה הוא זמן מילה . בין
+השמשות של ערב שב</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ל בערב שבת ואחד למול בשבת ושכח ומל את של ערב שבת בשבת רא מחייב חטאת ורבי יהושע פוטר קטן נימול לשמונה לתשעה ולעשרה ולאחד עשר ולשנים עשר לא פחות ולא יותר כיצד כדרכו נמול לשמונה נולד בין השמשות נימול לתשעה בין השמשות לעש לעשרה יום טוב אחר השבת ליא שני יט של רה נימול לשנים עשר קטן</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001608820205171&page=8' target='_blank'><bdi dir='ltr'><b>Ms. EVR ARAB II 1666</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — תפילת עמידה, הוספות לעשרת ימי תשובה</span> <span class='nli'>· קטלוג NLI: סדר תפלות לשבתות ולמועדים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>118</bdi> אות · מרחק
+  <bdi dir='ltr'>0.38</bdi> · מוביל בפער גדול (פער 0.10) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>14</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>תך כאמר אל ההודאות בם
+הסוב שמר ולר נאה להורות: שים שלו
+אלא בבל עת בשלום ושים שלו</span><mark>ם על ישראל
+לעולם וכספד חיים ברבה ועדלים פרנסה
+וכלבלה ישועה ויחמיה מחילה וסליחה
+נזבר ופקד נכתב אלפניך אנו וכל עמד
+בית ישראל ברוב עז מיולים בם המבד</mark><span class='ctx'>ר
+את עמו ישראל בשלום יהיו לרצון אמר
+פי וכול פאן כאן באלחצרה גמאעה יקול
+שליח צבור</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ל ברב עז ושלום. 
+
+ 
+&gt;&gt; ובספר חיים ניכתב לפניך. 
+&gt;&gt; ואנו וכל עמך בית ישראל לחיים. 
+
+ 
+&gt;&gt; ובספר חיים ישועה ורחמים פרנסה וכלכלה מחילה וסליחה. 
+&gt;&gt; נזכר נפקד נכתב נחשב לפניך אנו וכל עמך בית ישראל ברוב עוז בשלום. 
+
+ 
+&gt;&gt; ובספר חיים ברכה ושלום פרנסה וכלכלה ישועה נחמה. 
+&gt;&gt; נזכר ונפקד ונכתב א</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001734430205171&page=2' target='_blank'><bdi dir='ltr'><b>Ms. Mittwoch 2</b>
+  (Birmingham)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — קדושה, נוסח מעורב (בבלי וארץ ישראלי)</span> <span class='nli'>· קטלוג NLI: כי ילדתיני איש ריב.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>95</bdi> אות · מרחק
+  <bdi dir='ltr'>0.40</bdi> · מוביל בפער גדול (פער 0.11) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>1</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'></span><mark>ראשון ואחרון תשמיעות אמר
+אני הייתי לראשנים ואני אהיה
+לאחרונים . להיות לכם לאלהים
+וקול אדיר ייי אדונינו וג והיה
+ל</mark><span class='ctx'>מלך . וג&#x27; ותמלוך בציון וג&#x27; וכמו
+בדברי קדשך ימלך ייי לעולם וג[
+בן גזע כהונה . נית</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>רינו אחד גואלינו. 
+&gt;&gt; ואחד יוסיף שינית ידו לגאלינו. 
+&gt;&gt; וישמיענו אחרית כראשית ויאמר. 
+&gt;&gt; ראו כי אני הייתי לראשנים. 
+&gt;&gt; ואני אהיה לאחרונים. 
+&gt;&gt; &quot;להיות לכם לאלהים&quot;. 
+&gt;&gt; אלהיכם אני. 
+&gt;&gt; ואני אמלוך ואכנס גליותיכם. 
+&gt;&gt; ואעבור כמלך בראשכם. 
+&gt;&gt; ויאמר &quot;והיה י&#x27;י ל</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990051143460205171&page=1' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S A 42.1</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — ברכה לאחר קריאת המגילה בפורים</span> <span class='nli'>· קטלוג NLI: מגילת אסתר;מקרא [טקסט];סדרי ברכות (ברכות הנהנין, השבח, המצוו</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>110</bdi> אות · מרחק
+  <bdi dir='ltr'>0.38</bdi> · מוביל בפער גדול (פער 0.12) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>הודו לייי כי טו</span><mark>ב כי לעולם ואחה
+אחר מאלהינו מלף העולם הרב אתריביו
+והכן את דינינו הגולינו והמושיענו
+מכף עריצינו ברוך אתה לי האל המוטיע
+את עמו ישראל ב</mark><span class='ctx'>רחמים :
+אוהב אמונה בוחר במימנה . גוזר
+ומיקים דר בשחקים : העושה גדולות
+ומוד ]ות ב</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>קמתינו. 
+&gt;&gt; והנפרע לנו מכל צרותינו. 
+&gt;&gt; והמשלם גמול לכל אויבי נפשנו. 
+
+ 
+&gt;&gt; בר?ו?ך אתה י&#x27;י אלהינו מלך העולם. 
+&gt;&gt; הרב את ריבינו. 
+&gt;&gt; והדן את דינינו. 
+&gt;&gt; והגואלינו והמושיענו מכף עריצינו. 
+
+ 
+&gt;&gt; ב&#x27; א&#x27; יי&#x27;י הנפרע לישראל מכל אויביהם. האל המושיע. 
+
+ 
+&gt;&gt; האל הנפרע לעמו ישר&#x27; מכל צריהם. האל המוש</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990051183530205171&page=12' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S H 2.86</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — הבדלה בתפילה משבת ליום טוב</span> <span class='nli'>· קטלוג NLI: סידור שלמה מסיג&#x27;ילמאסה;פיוט;תפילה וברכות;תפילות קבע. ; Piyyu</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>180</bdi> אות · מרחק
+  <bdi dir='ltr'>0.37</bdi> · מוביל בפער גדול (פער 0.13) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>52</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>אעלם אן כל עיד
+יתפק לילה אלאחד פיגב דכר אלהבדלה פיה פי אתה
+בחרתנו עלי ⲙ הדא אלוצ</span><mark>ע והו אן יקול הכדי
+ותתן לא י אלהינו משפטים ישרים ותורות אמת
+חוקים ומצות טובים ותנחילינו דמני ששון מועד
+קדש וחני נדבה ותורישינו קדושת שבת כבוד
+מועד וחגיגת הרגל בין קדושת שבת לקדושת</mark><span class='ctx'></span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ם ותורות אמת. 
+&gt;&gt; חוקים ומשפטים. אשר יעשה אותם האדם וחי בהם. 
+
+ 
+&gt;&gt; ותתן לנו י&#x27;י אלהינו. 
+&gt;&gt; משפטים ישרים וחוקות אמת. 
+&gt;&gt; חוקים ומצוות טובים. אשר יעשה אותם האדם וחי בהם. 
+
+ 
+&gt;&gt; ותנחילנו זמני ששון מועדי קודש וחגי נדבה. 
+&gt;&gt; ותורישנו קדושת שבת כבוד מועד וחגיגת הרגל. 
+
+ 
+&gt;&gt; ותבדילנו י&#x27;י אלהינו בין קדש לחול. 
+&gt;&gt; בין אור לחשך. 
+&gt;&gt; בין ישראל</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990051185590205171&page=1' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S H 4.19</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — תפילה לתענית ציבור</span> <span class='nli'>· קטלוג NLI: כתאב ג&#x27;אמע אלצלואת ואלתסאביח;כתאב פי וג&#x27;וב אלצלוה;פיוט;תפילה</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>91</bdi> אות · מרחק
+  <bdi dir='ltr'>0.29</bdi> · מוביל בפער גדול (פער 0.16) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>11</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'> לסלוח וצלוה אלצום אדא
+כאנו גמאעה יקול אלאמאם בין אלברכה אלז ואלח אעני בין
+גואל </span><mark>ורופא הדה אלברכה עננו ייי אלהינו עננו
+כי בצרה גדולה אנחנו ואל תעלם אזנך משמוע תפלתנו
+ואל תתעלם מלכנו מבקשתנו היה נא קרוב לשוענו נקרא
+ואתה תעננו כד שנ והיה טרם יקראו וג כי אתה עונה
+בכל עת צדה פודה ומציל</mark><span class='ctx'> בכל עת צרה ומצוקה ב
+העונה בעת צרה ואמא אלפראד פידכלהא פי טיברכה
+שומע תפלה כמא כ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>פניך ממנו. 
+&gt;&gt; ואל תתעלם מתחינתינו. 
+
+ 
+&gt;&gt; ענינו יהוה עננו ביום התענית הזה. 
+&gt;&gt; [כי בצרה גדולה אנחנו]. 
+&gt;&gt; ואל תעלם אזנך משמוע תחנתינו. פתח שערי [שמים] לתפלתינו. ודלתי מרום לצעקתינו. 
+
+ 
+&gt;&gt; היה נא קרוב לשועינו. 
+&gt;&gt; טרם נקרא אתה תענינו. 
+&gt;&gt; כהבטחתנו על ידי נביאך. 
+&gt;&gt; &quot;והיה טרם יקראו ?ו?אני אענה עוד הם מדברים ואני אשמע&quot;. 
+
+ 
+&gt;&gt; היה נא קרוב לשועינו. 
+&gt;&gt; טרם נקרא ואת</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990051188070205171&page=2' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S H 5A.1</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — תפילה לאחר סדר עבודה ליום הכיפורים</span> <span class='nli'>· קטלוג NLI: פיוט. ; Piyyut ; פיוט (יום הכיפורים)</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>191</bdi> אות · מרחק
+  <bdi dir='ltr'>0.40</bdi> · מוביל בפער גדול (פער 0.14) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>16</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ור
+עעולמים משכים על גדיך . קולך פותח
+טבעה רקיעים דם ונשא שוכן עד שלום
+נאתך שמיחי</span><mark>ם עטיך . תהילה וזמרה אומרים
+במלכם . אשר עין ראתה כל אלה הלא בנן
+למשמע אוין איותה נפשינו עוונות אבתינו
+החריבו גווך ופשעונו האריכו קצינו אבל זברון
+ברים תהא סליחתינו ועינוי נפשינו תהא
+כפרתינו על בן נ</mark><span class='ctx'>תתה ליו ייי אלהינו את יום הכם
+הזה יום אסור באכילה . יום אסור בשתיה . יום
+פסור בר</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>כהן גדול בצאתו מן הקודש. 
+&gt;&gt; ובהראותו בתוך העזרה. 
+&gt;&gt; אשרי עין ראתה כל אלה. 
+&gt;&gt; הלא למשמע אזן דאבה נפשנו. 
+
+ 
+&gt;&gt; אשרי עין ראתה כל אלה. 
+&gt;&gt; הלא (במ) למשמע אוזן איותה נפשינו. 
+
+ 
+&gt;&gt; עונות אבותינו החריבו נוך. 
+&gt;&gt; ופשעינו האריכו קצנו. 
+&gt;&gt; אבל זכרון דברים תהי סליחתנו. 
+&gt;&gt; וענו[י] נפשנו תהי כפרתנו. 
+
+ 
+&gt;&gt; עוונות אבותינו החריבו נאווה. 
+&gt;&gt; וחטאתינו האריכו קיצו. 
+
+ 
+&gt;&gt; הי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990051189270205171&page=4' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S H 6.98</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — פסקת תפילה בקדושתות ימים נוראים [לאחר הקדושה]</span> <span class='nli'>· קטלוג NLI: פיוט. ; Piyyut ; פיוט: &quot;אליך תלויות עינינו ד&quot; אדוננו&quot;</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>91</bdi> אות · מרחק
+  <bdi dir='ltr'>0.33</bdi> · מוביל בפער גדול (פער 0.13) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>1</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'></span><mark>כי מקדישיך בער כך קידשתם גאהל
+מקדוש פאר מקדושים :
+הא[ ] ובכן א[
+יתגדל ויתקדש שמך ייי אלהינו על ישראל
+עמך : ליראה את השם
+הנ</mark><span class='ctx'>תקף . הנשבח . הנרנן . הנקדש .
+הנצנף . הנפלא . הנערץ . הנשגב ⟦.⟧
+]ן הננעם . הנמלך</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>כי מקדישיך בקדושתך קדשתה. 
+&gt;&gt; נאה לקדוש פאר מקדושים. 
+&gt;&gt; ובכן יתקדש שמך י&#x27;י אלהינו על ישראל עמך. 
+&gt;&gt; ועל ירושלם עירך. 
+&gt;&gt; ועל ציון משכן כבודך. 
+&gt;&gt; ועל מלכות בית דוד משיחך. 
+&gt;&gt; ו</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990051190100205171&page=2' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S H 8.13</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — וידוי</span> <span class='nli'>· קטלוג NLI: פיוט. ; Piyyut</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>93</bdi> אות · מרחק
+  <bdi dir='ltr'>0.38</bdi> · מוביל בפער גדול (פער 0.17) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>40</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>נו
+ונכפפה קומתינו מפני אשמתינו . ואין לנו פה להשב ולא
+מצה להבים ראש . והיאך מנו </span><mark>פנינו ונקשה ערפינו ונאמר
+בסניך ייי אינו צדילים אנחנו ולא חטאנו . אבל אנהם
+אשמנו בגדנו גזלנו שי תי אמת עשית ואנחנו הרשענו
+אשמנו מ</mark><span class='ctx'>כל עם כושנו מכל הור . גלה ממנו משוש
+דוה לבינו בדוויה . החבל איויינו ונפרע פאדינו</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ורף. 
+&gt;&gt; שנאמר לפניך. צדיקים אנחנו ולא רשענו. 
+
+ 
+&gt;&gt; שאנו עזי פנים וקשה עורף. 
+&gt;&gt; ואיך נאמר לפניך כדבר הזה. צדיקים אנחנו ולא חטאנו. 
+
+ 
+&gt;&gt; אבל אנחנו. 
+&gt;&gt; אשמנו בגדנו גזלנו דיברנו דופי. 
+&gt;&gt; העוינו והירשענו זדנו חמסנו טפלנו שקר. 
+
+ 
+&gt;&gt; אבל אנחנו חטאנו. 
+&gt;&gt; אשמנו בגדנו גזלנו ד</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990051195030205171&page=2' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S H 12.2</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] יוסף בן אביתור — שבעתות לשבתות מיוחדות</span> <span class='nli'>· קטלוג NLI: פיוט. ; Piyyut ; פיוט (שבת): &quot;ובהקבץ אצילי עמים&quot; (ר&#x27; יוסף אב</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>197</bdi> אות · מרחק
+  <bdi dir='ltr'>0.35</bdi> · מוביל בפער גדול (פער 0.20) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ח .
+יומת איש כפץ מזריע ידידיה. להעמיד ימינו להנ[
+]חמה ידועה לעמלק ביה ויא כי יד </span><mark>על כם יה[
+ובכן ושאר שרידי אופנים . מרדע נ[
+ז&#x27; לויהי בימי א&#x27; לשבת דר&#x27; יוסף שט&#x27; ז&#x27;ל&#x27; הפרץ[
+ובהקבץ אצילי עם ↑ יחדוך שוכן ערץ . ושוחחים פעולתך בימי
+ברוך אשר קידשנו במצותיו וצונו על מקרא מגלה במרץ .
+כי לאלהים מגני ארץ בם מגן</mark><span class='ctx'></span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ו מיחדיו במרץ. 
+&gt;&gt; &lt;...&gt; משיחי בן פרץ. 
+&gt;&gt; ושפתם תהלל לאל שוכן שמי ערץ. 
+&gt;&gt; &quot;כי לאלהים מגני ארץ&quot;. 
+
+ 
+&gt;&gt;  &lt;~&gt;  $ז&#x27; ל&quot;ויהי בימי א&#x27;&quot; לשבת דר&#x27; יוסף שט&#x27; ז&#x27;ל$. 
+&gt;&gt; ובהקבץ אצילי עמ[ים] ייחדוך שוכן ערץ. 
+&gt;&gt; ו?ש/ס?וחחים פעולתך בימי מרדכי גודר הפרץ. 
+&gt;&gt; ברוך אשר קידשנו במצותיו וצונו על מקרא מגלה במרץ. 
+&gt;&gt; &quot;כי לאלהים מגני ארץ&quot;. $ב&#x27; מגן$. 
+&gt;&gt; בתולות בני בריתך יצלצלוך דר שמי מעל. 
+&gt;&gt; ושוהדים פעלך</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 1.00</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990051293390205171&page=2' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. T-S Ar. 36.59</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — ברכת השינה</span> <span class='nli'>· קטלוג NLI: כתאב ג&#x27;אמע אלצלואת ואלתסאביח;כתאב פי וג&#x27;וב אלצלוה;פיוט;שירת </span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>243</bdi> אות · מרחק
+  <bdi dir='ltr'>0.40</bdi> · מוביל בפער גדול (פער 0.12) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>19</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>טי אלכמר
+בברכתה ואסתגני אן יברך עליה .
+ואלצרב אלג אלכדמה לכל פן
+מנהא תסבא פענד א</span><mark>לנוס יקול
+ברוך א&#x27; יי אלהינו מ&#x27; הע&#x27; המפייר
+חבלי שינה על עיני ומשקועישנת
+התרדימה ומאיר לאועון בתעין
+יהי רצון מלפניך ייי אלהי שתצולני
+מיצר הרע ומ ]גע דעואל יכהלווני
+חלומות רעים והטהורים רעים
+אר עיני פן אישן המות
+והעמודני ממסתי לחיים ולשלום
+ברוך את ייי המאיר לכל היעולם</mark><span class='ctx'></span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>לאישון בת עין. 
+
+ 
+&gt;&gt; ב&#x27;. 
+&gt;&gt; המפיל חבלי שינה על אדם. 
+&gt;&gt; ומשקיע שנת תרדמה. 
+&gt;&gt; ומאיר לאישון בת עין. 
+
+ 
+&gt;&gt; &lt;...&gt; העולם. 
+&gt;&gt; המפיל חבלי שינה מעיני. 
+&gt;&gt; &lt;...&gt;. 
+&gt;&gt; &lt;ומ&gt;?א?יר לאישון בת עין. 
+
+ 
+&gt;&gt; יהי רצון מלפניך ייי אלהי. 
+&gt;&gt; שתצילני מיצר הרע ומפגע רע. 
+&gt;&gt; ואל יבהלוני חלומות רעים ?ו?הרהורים רעים. 
+&gt;&gt; והאר עיני פן אישן המות. 
+&gt;&gt; ותעמ?י?דני ממטתי ?(ו)?לחיים ולשלום. 
+
+ 
+&gt;&gt; יהי רצון מלפניך י&#x27;י אלהינו. 
+&gt;&gt; שתציליני מיצר רע ומפגע רע ומשטן המשחית. 
+&gt;&gt; ואל יבהילוני חלומות רעות והרה</div></div>
+ </div>
+</div><h2>P 0.5–0.8 — סביר</h2>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000852760205171&page=28' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 133</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] משה בן מיימון (רמב״ם) — משנה תורה, ספר המדע</span> <span class='nli'>· קטלוג NLI: קובץ חבורי משה בשיצי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>139</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>58</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ף
+ולא כח בנוף יש לנו לבאר ולהודע שאחד שאינו נוף לא
+יאורעו לו מאלרעות שלינוף: ואי</span><mark>ן דבר שיברום
+ולו ישנוי כנון מות וחיים כחייהחי לאיסכלות ולא חכמה
+כחכמת אנוס לא שינה ולא הקיצה לא כעם ולא שאורך
+לא עצבותי ולא שמחה לא שתיקה ולא דבור כאמר
+בני</mark><span class='ctx'> אדם[ ]אמכם [ ]ן הכל וימצך שה
+אחר זה ביו שביאתו[ והמתבונן על כל
+ענין מאשר זכרנו </span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>לו ראשית ואחרית ומניין שנים. ואינו משתנה. שאין לו דבר שיגרום לו שינוי. 
+
+ 
+&gt;&gt; ואין לו [2] [ולא] חיים [1] [לא] מות כחיי הגוף החי. ולא סכלות ולא חכמה כחכמת האיש החכם. לא שינה ולא הקצה ולא כעס ולא שחוק ולא שמחה ולא עצבות. לא שתיקה ולא דיבור כדיבור אדם. כך אמרו חכמים. אין למעלה לא ישיבה ו</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000905190205171&page=9' target='_blank'><bdi dir='ltr'><b>Ms. Evr. Antonin B 3</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — תוספות למשנה</span> <span class='nli'>· קטלוג NLI: סדור מנהג רומניא לכל השנה (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>133</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>6</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'> עז פנים לגיהינם א[
+ובוש פנים לגן עדן יהי רצון מלפניך ייי אינו ואי&#x27;⟧
+אבותינו שתב</span><mark>נה עירך בימינו ותתן חלקינו בתורתך
+כ&#x27;ה&#x27; בן בגבג או&#x27; הפוך בה והפך בה דכולא בה וכולך
+בה ומנה לא תזוע שאין לך מידה טובה ממנה בן הא
+האהא או&#x27; לפום צערא אגרא : א&#x27; ר&#x27; לעזר אר&#x27;
+יי ו</mark><span class='ctx'>רב שלום בניך יהי שלום בחילך שלווה בארמנותייך
+למען אחיי וריעיי אדברה נא שלום בך ל</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>בן ששים לזקנה. בן שבעים לשיבה. בן שמנים לגבורה. בן תשעים לשוח. בן מאה כאילו מת עבר ובטל מן העולם. 
+
+ 
+&gt;&gt; בן בגבג אומ&#x27;. הפך בה והפך בה #דכו()[לה] ב()[ך וכולך בה. ובה תיהוי] ומנה לא תזוע#. שאין לך מידה טובה ממנה. 
+
+ 
+&gt;&gt; בן ההא אומ&#x27;. #לפם צערה אגרה#. 
+
+ 
+&gt;&gt; [השוחט מן הצואר שחיטתו כשירה. המולק מן הצואר מליקתו פס</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000906340205171&page=33' target='_blank'><bdi dir='ltr'><b>Ms. EVR ARAB I 1421</b>
+  (RNL)</bdi></a>
+  <span class='work'>[JA] אבן עקנין, התגלות הסודות</span> <span class='nli'>· קטלוג NLI: סדור ר&#x27; ישעיה הכהן.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>80</bdi> אות · מרחק
+  <bdi dir='ltr'>0.46</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>35</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>י הו פעל שריעתה תע יג ולא
+אשרי העם שככה לו אשריך ישראל מי כמיד
+והדה כאנת חאלהם מ</span><mark>א דאמהם ממתתלי וסומה
+תע וקד קאל תע זכרתי לך חסד נעוריך אהבת
+כל ולותיך וקאל להם אלרסול אלצאצר אלצמין</mark><span class='ctx'>
+ע אלס ואתם הדבקים ביני אלהיכם חיים כלכם
+היום פכאן קד דכר ענהם פי אלפרשה אלא
+אלמ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>הא
+אלתשפע פי אלאמה אן יבסטוא בין ידי אלבארי מחבתהא פיה וודאדהא לה פי
+ד&#x27;כרהא וכמא קאל תעלי {זכרתי לך חסד נעוריך אהבת כלולותיך} ואנמא עברת ען
+אלאפאצ&#x27;ל ואלאנביא בלפט&#x27; אלתאנית&#x27; אשארה לשפקתהם עלי אלאמה כמת&#x27;ל</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001004230205171&page=2' target='_blank'><bdi dir='ltr'><b>Library of the Hungarian Academy of Sciences Ms. 57</b>
+  (HAS)</bdi></a>
+  <span class='work'>[JA] סעדיה בן דוד, מדרש הבאור א</span> <span class='nli'>· קטלוג NLI: מדרש תנחומא (קטעים).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>87</bdi> אות · מרחק
+  <bdi dir='ltr'>0.46</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>39</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ובו את ובפהן א&#x27;מ&#x27; כ&#x27;
+זה לזה רפינחס אמ&#x27; בלבם ההרהרו אמ&#x27; ר&#x27; בירביה אמ&#x27; להם
+ה&#x27;ג&#x27;ה&#x27; </span><mark>אל תהלל ביום מחר כילא תדע מי ילד יוסי הרבה
+סיחין מתו ונעשו עווותיהן שטיחין על גבי זמותיהן
+עוד מן הזרו אל אצי</mark><span class='ctx'>לי בני ישראל לא שלח ידו ז&#x27;ר&#x27; פצחס
+מטן שהיו חויין להשלחת יד ז&#x27;ר&#x27; יהושעיה וכי אוכל</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>לי ראי מן יקול אנהא נבייה ואלא פהו
+בעץ&#x27; אלאנביא אכ&#x27;ברהא. {יקרבו ימי אבל אבי,
+אמר רב נחמן הרבה סייחים מתו ונעשו עורותיהן
+שטוחין על גבי אמותיהן. יקרבו ימי אבל אבי},
+קיל אן {עשו יכבד אביו יתר מדאי. יקרבו ימי אבל
+אבי, אמר אנ</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001261710205171&page=3' target='_blank'><bdi dir='ltr'><b>Library of the Hungarian Academy of Sciences Ms. 10</b>
+  (HAS)</bdi></a>
+  <span class='work'>[Maagarim] חביש — מעריב לפסח</span> <span class='nli'>· קטלוג NLI: פיוטי קרובות מתוך מחזור לחגים (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>96</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ליל שמ&#x27; מצה ומרור אוכלים נועם הכ[
+מה ללים בליל שמ .⟧ ליל שמ ש</span><mark>שון
+חה מ.ים⟧ ולעתיד בו ⟦יזכור בו
+בני איתנים ב גאל ליל שמ
+הוא לי שמור בו עדן עידניי ולי
+הוהל החלב חוקרים בני איתני[
+ישל</mark><span class='ctx'>ח בו משיח הישדי יכרנ עלינו
+לוב
+סוכת שלומה ↑ משמי מעונוים בורת
+מעריב שמיני עצ&#x27; וש</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ן יפדה בו] לאחרונים. 
+&gt;&gt; הוא הלילה קדושים בארבעה כוסות נ?ה?נים. 
+&gt;&gt; רחומים בו נגאלו מפרך לבינים. $ב&#x27; גאל$. 
+&gt;&gt; ליל שימורים הוא לייי. 
+&gt;&gt; שמור לע?י?דן עידני. 
+&gt;&gt; הוא הלילה תהלה חוקרים בני איתני. 
+&gt;&gt; [&lt;ת23&gt;?ק?יף יפרוס] שלומו עלימו משמי מעוני. $השכיבנו</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001262120205171&page=2' target='_blank'><bdi dir='ltr'><b>Library of the Hungarian Academy of Sciences Ms. 136</b>
+  (HAS)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — תפילה לסליחות</span> <span class='nli'>· קטלוג NLI: קבץ סליחות (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>109</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>10</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>פשותינו משחת למ שמ תשקיף
+עלינו ברחמים ממרומך בעבור שמך וג
+שמך נקרא עלינו ייי אלה</span><mark>ינו אל השכחינו
+ואל תעובינו אלהינו בשנו ונכלמנו להרים
+אלהינו פנינו אליך אין לנו פה להשיב
+ולא מצח להרים ראש אלהינו בשנו במעש
+ונכלמנו בעונותינו . לא בחסד ולא במעשים
+באנו אלי</mark><span class='ctx'>ך כדלים כרשים דפקנו דלתיך
+לא בח&#x27; ולא במ&#x27; בא&#x27; אל&#x27; כאביונים כבזויים ⟦דפ&#x27;
+לא בח ולב</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ואין לנו פה להשיב. ולא מצח להרים ראש. 
+
+ 
+&gt;&gt; ואנו בושנו במעשינו ונכלמנו בעונותינו. 
+&gt;&gt; ונכפפה קומתינו מפני אשמותינו. וקדרו פנינו מפני אולתינו. 
+&gt;&gt; ואין לנו פה להשיב. ולא מצח להרים ראש. 
+
+ 
+&gt;&gt; ואנו בושנו במעשינו ונכלמנו בעונתינו. 
+&gt;&gt; וכפופה קומתינו מפני פשענו. 
+&gt;&gt; ואין לנו פה להשיב ולא מצח להרים ראש. 
+
+ 
+&gt;&gt; והי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001262900205171&page=10' target='_blank'><bdi dir='ltr'><b>Library of the Hungarian Academy of Sciences Ms. 115</b>
+  (HAS)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — סיום לאזהרות לשבועות</span> <span class='nli'>· קטלוג NLI: אזהרות לשבועות (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>98</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>2</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>סד[
+הרב</span><mark>ים כל משאלות
+ליבינו עליונים ותחתונים
+ששו ושמיחו בקבלת
+כלה כתובה מסיני תואר
+כלה מאר נתעלה נקבלם
+ביום זה עשרת הדברות</mark><span class='ctx'> :
+י&#x27;יי יהיו לרצון
+אמרי פי והגיון לבילפניך
+ייי צורי וגואלי
+]
+וצל את אול יום
+מת&#x27;ל</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>שבעתים. 
+&gt;&gt; צרופות ככסף בחונות כזהב. 
+
+ 
+&gt;&gt; אמרות טהרות שבעתים. 
+&gt;&gt; צרופות ככסף ומבחנות כזהב. 
+
+ 
+&gt;&gt; עליונים ששו ותחתונים עלצו. 
+&gt;&gt; בקבלת כלה כתובת חתן. 
+&gt;&gt; תואר כלה מאד () נתעלה. 
+&gt;&gt; בקבלת יום עשרת הדברות. 
+
+ 
+&gt;&gt; שמים וארץ ששו ושמחו. 
+&gt;&gt; בקבלת כלה כתובת חתן. 
+&gt;&gt; תואר כלה</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001399080205171&page=7' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. Add. 3366</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — ברכת המזון לפסח</span> <span class='nli'>· קטלוג NLI: הגדה של פסח (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>166</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>3</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>רית כסב מיי על ידוי ואמר ברנך
+]תה ייי אלהינו מלך העולם אשר קידשנו במציותיו וצעו
+</span><mark>והגיע
+]מצלת שטיפת ידיים [ ] ברכתה
+ךאתה
+אן בפסח גאלתה דורשי הוד כבויך הצלמה והושעתה
+ר ברוך
+כר עשי עוגות ככתוב וימהר אברהם האהלה אלעזדה
+על בצו[
+מר מהדי שלש טאים קמח סלמ רושי ועשי שנגוד
+מה[
+חאות חקת הפסח טהרת ידידים ש[
+למור חדעו האריב ככמוב שלם</mark><span class='ctx'></span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ברהם האוהלה אל שרה ויאמר מהרי שלוש סאים קמח סולת לושי ועשי עוגות&quot;. ונ&#x27; &quot;פתיח&quot;. 
+
+ 
+&gt;&gt; {או}: &lt;אז23&gt; בפסח גאלת דורשי הוד כבודך. 
+&gt;&gt; הצלת והושעת זרע נם &quot;עשי עוגות&quot;. ככ&#x27; &quot;וימהר אברהם האהלה אל שרה ויאמר מהרי שלש סאים קמח סלת לושי ועשי עוגות&quot;. ונ&#x27; &quot;פותח&quot; וג&#x27;. 
+
+ 
+&gt;&gt; זאת חוקת הפסח טהרת ידידים. 
+&gt;&gt; כלם יצאו שמחים לשמור את חודש האביב. ככ&#x27; &quot;שמור א?ת? חודש האביב ועשית פסח לי&#x27;י אלהיך כי בחודש האביב הו</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001429040205171&page=84' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 57</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — תפילה לימים נוראים</span> <span class='nli'>· קטלוג NLI: סדר תפלות לשבת.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>113</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>שלום עלינ ועל כל ישראל ואצרו אמן ..
+כעשרת ימי השובה
+אבינו אלכנו חצאנו לפניך
+כי
+א</span><mark>מ אן נוצלך אלא אפה
+אמ עשה עלכו ועעון שנך
+אמ&#x27; חדש עלינו שנה טובה
+/⟧
+ⲙ
+אמ&#x27; כאל צעלינו כל גזירות קשות ורעות ..
+אמ כאו עחשכות שונאינו</mark><span class='ctx'>
+אח&#x27; הפר עבת חויבינו
+אמ&#x27; כלה כוצר ועשטין זוענינ
+ש
+אמ&#x27; כלה דבר וחרב והעב ושכי וכז</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>אבינו מלכינו חטאנו לפניך. 
+&gt;&gt; א&#x27; מ&#x27; אין לנו מלך אלא אתה. 
+&gt;&gt; א&#x27; מ&#x27; עשה עמנו למען שמך. 
+
+ 
+&gt;&gt; א&#x27;מ חדש עלינו שנה טובה. 
+
+ 
+&gt;&gt; א&#x27; מ&#x27; בטל ממנו גזירות קשות. 
+
+ 
+&gt;&gt; א&#x27;מ בטל מעלינו כל גזירות קשות. 
+
+ 
+&gt;&gt; א&#x27;מ חדש עלינו בשורות טובות. 
+
+ 
+&gt;&gt; א&#x27; מ&#x27; בטל ממנו מחשבות שונאינ</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001433340205171&page=81' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 186/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] יוסף בן אביתור — סליחות לתעניות</span> <span class='nli'>· קטלוג NLI: דיואן ר&#x27; יוסף בן אברהם הלוי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>122</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>30</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>לא ימיש אמיד מגבוהים
+של ראשה ולהם הגיש אתה אלשהים
+וכונפת וכדבש וצרי מהלכי לריש[
+</span><mark>ונגיזות אש רב ראצל יום השביע
+א סר קעג
+ארבע מדות פדורות במסכבד
+בצדק ובמשא כי ננתכם ישיבה
+גם בחסד ואמת לשבי ממשובה [
+צדקתך בהררי אלי משטיר תהים</mark><span class='ctx'></span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>זנך קשבת. 
+&gt;&gt; לדופקת דלתיך ברוח נעצבת. 
+&gt;&gt; ורצה תעניתה כמנחה נערבת. 
+&gt;&gt; בחדש העשירי בעשרה בטבתֿ. 
+&gt;&gt; ארבע מדות סדורות במרכבה. 
+&gt;&gt; בצדק ומשפט סובבת כס ישיבה. 
+&gt;&gt; גם בחסד ואמת לשבי משובה. 
+&gt;&gt; &quot;צדקתך כהררי אל משפטיך תהום רבה&quot;. 
+&gt;&gt; דלות מדת משפט לאיים בשפטיך. 
+&gt;&gt; הכינותה הצדֿק להצדיק קו</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001434030205171&page=222' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 193/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] האיי גאון בר׳ שרירא — סליחות ובקשות</span> <span class='nli'>· קטלוג NLI: תפלות ופיוטים וסליחות לשבת ומועד.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>166</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>22</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'></span><mark>ומלהב מוקרה כ&#x27;ת&#x27; בנויה באזה
+שכודה נדוכה תפוסה במעבר במטה
+מוסכה קולה ישמע מעפר כי לתהום
+ירדה ובחטאה בין גוים היתה לנינה
+כג&#x27; לפניך ביום זה . בתחן עמנה .
+אנא זכורנא את יום העקידה ותראה
+לפנ</mark><span class='ctx'>יך . אפר היקירה. והדרש כיום . לקהל
+ועידה . כי באו בנים עד מאבר . וכוח אין
+ללירה </span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>וכמו באיל נאחז. נפשו פדה. 
+&gt;&gt; תמלטנו מאש. נפשינו להשרידה. &quot;ישמח הר&quot; וג&#x27;. 
+&gt;&gt; בזוזה בזויה. שדודה נדודה. 
+&gt;&gt; תפושה במעב!ד!. במטה מוסדה. &quot;י(ס)[ש]מח הר ציון&quot;. 
+&gt;&gt; קולה ישמע מעפר. כי לתהום ירדה. 
+&gt;&gt; ובחטאה בנידה. היתה לנידה. &quot;ישמח הר&quot; וג&#x27;. 
+&gt;&gt; לפניך ביום זה. בתחן עמדה. 
+&gt;&gt; כי שרויה בצער. כחבלי יולדה. &quot;ישמח הר&quot; וג&#x27;. 
+&gt;&gt; קנא לשמך. מאויבת אשר זדה. 
+&gt;&gt; כמו בבעל</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001435030205171&page=75' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 206</b>
+  (RNL)</bdi></a>
+  <span class='work'>[JA] רמב&quot;ע, העיונים והדיונים</span> <span class='nli'>· קטלוג NLI: דיואן ר&#x27; יהודה הלוי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>128</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>11</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'></span><mark>נופת שפתים ויין שנים או ציץ לחיים ומור אביים
+או ניבו רוחי נעורים מסאת מכתב שלמה
+ב&#x27; תאות עינים
+ם
+מכתב במראהו כזוהר יום אבל פרשה</mark><span class='ctx'>יו עליו
+כסות ערבים
+ספר כעין ספיר בניסך פיתחו טוריו כמו בבות
+בעפעפים
+או מתכלת רקמ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>י יוסף ואבון עברה [כי אחרי מות שובבה רוחינו]}
+וקאל איצ&#x27;א ימדח
+{נפת שפתים ויין שנים או ציץ לחיים ומור אפים
+או נשבו רוחות נעורים מפאתי מכתב שלמה תאות עינים}
+ואבתדי אבן סהל באלמקאבלהֵ פקאל:
+{חסדיך כגלים עצומים וצדקתך רחבה מתהומים}.
+ולי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001435100205171&page=31' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 209/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] יהודה הלוי בן שמואל — ראה כי ענני גשמי וטלי (טקסט בלבד)</span> <span class='nli'>· קטלוג NLI: דיואן ר&#x27; יהודה הלוי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>89</bdi> אות · מרחק
+  <bdi dir='ltr'>0.46</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>1</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'></span><mark>ומהלכים הוכלים כי ותך ואורך תהלה ישים בהנו
+ואולם מדרשה שלום ואחזיק במעודך ושלום
+וכתב אליה מן אלמרכב
+הרף שאון</mark><span class='ctx'> יסעד אשר יקרב תלמיד וישק את מ[
+אהרן הרב אשר שבטו לא נש ענים לחה ולא הרב
+למד ולא</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>חולי. 
+&gt;&gt; מאד אקטן בעיני מהשיבך. עדי כי נעשה פרעוש גמלי. 
+&gt;&gt; ומהללי מהוללים לנגדך. ואורך תָּהֳלָה ישים בהלי. 
+&gt;&gt; ואולם אדרשה שלום ואחזיק. במעוזך ושלום תעשה לי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001435100205171&page=35' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 209/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] יהודה הלוי בן שמואל — שמע מכל עבריך שלומות וקורות הזמן איתך שלמות (טקסט בלב</span> <span class='nli'>· קטלוג NLI: דיואן ר&#x27; יהודה הלוי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>174</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>0</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ב נסותכם
+ותאמר מיצבו יגור בבית גור וכאעגוד ולא נובה הרדה
+ענו אותה הלא את הצביה א</span><mark>שר הובאת לגוו אריה
+ודה
+ולה פיחתן איצא
+חתן תורה יעטתך מעיל האובגלי עוז ולה
+וכבוד נתנה כתי לראשך ומהזקא לךגבים [
+שלח ריח שמניך לאפי והידיך נחלקאי שמות
+שמר טוב מבשמים ראש ומנארי[
+שלמוד
+וקאל פי סעיד אלדמ</mark><span class='ctx'>יאטועא
+תוריעה לה מן מצר פי ענואן כתאב[ [
+זולד לגן ערן בצען אישיאיש אחד שמוחלפון </span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ורות הזמן א?ת?ך שלֵ?י?מות. 
+&gt;&gt; צבי החן שמעוך רחוקים. והתאוו ראותך בחלומות. 
+&gt;&gt; חתן תורה יעטתך מעיל הו?ד?. ובגדי עוז ולא ?ב?גדי רקמות. 
+&gt;&gt; וכבוד נתנה כתר לראשך. ומדרך רגלך גביש וראמות. 
+&gt;&gt; שלח ריח שמניך לאפי. ידידיך וח?י?ה הנשמות. 
+&gt;&gt; שמך טוב מבשמים ראש וממור. דרור על כן אהבוך עלמות</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001441130205171&page=4' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 614</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] שמואל ארקוולטי — ערוגת הבושם (טקסט בלבד)</span> <span class='nli'>· קטלוג NLI: דיואן ר&#x27; יהודה הלוי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>74</bdi> אות · מרחק
+  <bdi dir='ltr'>0.46</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>0</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>כי יפחד פן קרבה עתו
+שאלו מה היה ↑ לבן ששים . אם למנוש ו בדים ושרשים
+שרידיו כלים </span><mark>והלשים לא יקימנן אינו במלאמתו כי לעת&#x27;
+אם שנותוו נגעו אלי שבעים אין הגדיו נראים ונשמעים
+ה למש</mark><span class='ctx'>א יהיה עלי רעים . מכום על נפשו ומשעלתו כי לעס
+קשן בא שהח עלי בש איו לא בו ונפו ו</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>נימוס קצת מדינות אין עוד מקחו מקח וממכרו ממכר כאלו נפרד מבני חלוף. וכן אמר הראב&quot;ע בשירו &lt;אם שנותיו נגעו אלי שבעים אין דבריו נראים ונשמעים&gt;: 
+&gt;&gt; {מספר} השמנים יציץ ופרח בדרכי מספר הח&#x27; המורה על הדבר השלם כ</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001442680205171&page=29' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 826</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — תפילה לפני הזכרת גשמים בשמיני עצרת</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים (קטעים).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>89</bdi> אות · מרחק
+  <bdi dir='ltr'>0.46</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>7</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'> שערי רחמים
+שערי ברכה שערי סליחה שערי כפרה שערי גאולה שערי פרות שערי שער
+ישועה ו</span><mark>שים השנה ↑ הבאה עלינו ועל כל עמך בית ישראל שנת אמת
+גרץ שני נהדה ושלום שנת גאולה קאויבאו שנת דבר על צרינו
+ועת השקיו</mark><span class='ctx'> לבהרא לנו ע אעיד בניל אתיבו&#x27; אנת זכרון ברית אבותינו
+שנת חמר ורחמים שנת טובה ובר</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>שֶם. 
+&gt;&gt; יְהִי רָצוֹן וְרַחֲמִים מִלְפָנֶיךָ יְיָ אֱלֹהֵינוּ וֵאלֹהֵי אֲבוֹתֵינוּ. 
+&gt;&gt; שֶתְּהֵא הַשָׁנָה הַזֹאת הַבָּאָה עָלֵינוּ וְעַל כָּל עַמְךָ בֵּית יִשְרָאֵל. 
+&gt;&gt; שְׁנַת אוֹרָה. 
+&gt;&gt; שְׁנַת בְּרָכָה. 
+&gt;&gt; שְׁנַת גְאוּלָה. 
+&gt;&gt; שָׁנָה דְשׁוּנָה. 
+&gt;&gt; שָׁנָה הֲדוּרָה. 
+&gt;&gt; שְנַת וַעַד. 
+&gt;&gt; שְׁנַת זְכוּת. 
+&gt;&gt; שְׁנַת חַיִים. 
+&gt;&gt; שָׁנָה טוֹבָה. 
+&gt;&gt; שָׁנָה מְבוֹרֶכֶת. 
+&gt;&gt; שָׁנָה שֶׁלֹא תַפִּיל אִשָׁה אֶת פְּר</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001442700205171&page=29' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 828</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — תפילה [סוף ובא לציון]</span> <span class='nli'>· קטלוג NLI: סדור.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>76</bdi> אות · מרחק
+  <bdi dir='ltr'>0.46</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>18</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>דשים בעזרת אל נעריך
+]
+כסוד קדושים
+מי כמלכינו[ ]מי כמיטיענו
+] הבדאתרר
+נודה לאדוני</span><mark>נו ורה למלכינו נודה למשיש
+ברוך אהינ[
+]
+ברוך אדונינו ברוך מלכינו ברוך מיטיענו
+את ההוא
+אהינו אתה ה</mark><span class='ctx'>וא אדונינו אתה הוא
+מלכינו
+אתה הוא מושיעגו
+את החקום
+תרחם ציון כיעת לחננה כי בא
+מו</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>יענו דרכי חיים והנחילנו תורת אמת על ידי משה רב&#x27;. 
+&gt;&gt; חיי עו&#x27; נטעה בתוכינו. 
+
+ 
+&gt;&gt; ברוך אלהינו ברוך אדונינו ברוך מלכנו ברוך מושיעינו. 
+&gt;&gt; ברוך בוראנו אשר בראנו לכבודו. 
+&gt;&gt; שהבדילנו מן התועים. 
+&gt;&gt; והנחילנו דרכי חיים ונתן ל</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001442930205171&page=46' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 851</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] פינחס — תוספת לסדר עבודה ליום הכיפורים [אמיץ כח 8]</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>100</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>6</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>הרם
+לא מנאם ולא השום לאבל ולה ולא בכורים ולא
+גבור ולא בורל לא רבר ולא רקה. ליי ה</span><mark>יכל
+ולאכר הזמנים לא וער ולא והול לם זבח ולא
+זריקה . לא חלב ולא חטאת לא טהרה ולא מבילה
+לא ירושה ולא יובלי בכור ולא ברובים לא
+לכונה ולא לחם הפגים לא מנורה ולא מטור לא
+נסך ולא נוחחים . לא סלת ולא סמים . לא ששין
+ולמשפחה לא עשרון ולמעזמזל לט פ</mark><span class='ctx'>רכת
+ולא פר חטאת לאצלח ולא פהלה לא חטורת
+ולא קרבן לאריח ולא רקיחים . לא שפ ולא
+של</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ו&lt;&#x27;&gt; הדורה. 
+&gt;&gt; +ל&lt;&#x27;&gt; וותיק +ו&lt;&#x27;&gt; וועדה. 
+&gt;&gt; +ל&lt;&#x27;&gt; זבד +ו&lt;&#x27;&gt; זכר. 
+&gt;&gt; +ל&lt;&#x27;&gt; חוקים +ו&lt;&#x27;&gt; חקוקים. 
+
+ 
+&gt;&gt; ל&#x27; היכל ול&#x27; הר המור. 
+&gt;&gt; לא וועד ול&#x27; ווידוי. 
+&gt;&gt; ל&#x27; זוביח ול&#x27; זוריק. 
+&gt;&gt; ל&#x27; חדווה ול&#x27; חשן המשפט. 
+
+ 
+&gt;&gt; ל&#x27; טהרה ולא טבילה. 
+&gt;&gt; ל&#x27; ירושלם ול&#x27; יער הלבנון. 
+&gt;&gt; ל&#x27; כפרת ול&#x27; כרובים. 
+&gt;&gt; ל&#x27; לבונה זכה ול&#x27; לחם הפנים. 
+
+ 
+&gt;&gt; לא טוהר ולא טבילה. 
+&gt;&gt; לא יפה נוף ולא ידידות. 
+&gt;&gt; לא כפורת ולא כרובים. 
+&gt;&gt; לא לשכה ולא לבונה. 
+
+ 
+&gt;&gt; &lt;... ו&gt;לא &lt;... ה&gt;?פנ?ים. 
+
+ 
+&gt;&gt; ל&#x27; טהרה ול&#x27; טורי אבן. 
+&gt;&gt; &lt;... הלבנ&gt;?ון?. 
+&gt;&gt; ל&#x27; כפורת ול&#x27; כרובים. 
+&gt;&gt; ל</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001443160205171&page=59' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 868</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] האיי גאון בר׳ שרירא — פתרון תורה</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים (קטעים).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>105</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>הו ועתה ומר נאמר[
+אלהינו וג׳ חטאנו עם אבותינו וג
+דרכי ציון אכלות : היה יוי כאויב</span><mark>לם
+ויחמס כגן סבו : זנח יוי מזבחו וג&#x27;
+לא תסיפו הביא מנחת שוא וג&#x27; חדשיכם ⟦/⟧
+ומועדיכם וג&#x27; ובפרשכם כפיכם וג&#x27;
+וחשבתי כל משושה וג&#x27; שבת משוש
+לבנו וג&#x27; נ</mark><span class='ctx'>פלה עטרת ראשינו וג&#x27; על זה
+היה דוח לבנו וג׳ על הר ציון ששמם]
+ומא בעדה אלי חית תקו</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>טות משפט קשה מכל עון. שנ&#x27; &quot;וירא יי&#x27;י וירע בעיניו&quot; וג&#x27;. וכת&#x27; &quot;שמעו נא + ראשי בית יעקב וקצ&#x27; ב&#x27; ישר&#x27; המתעבים&quot; וג&#x27;. ואמ&#x27; &quot;לא תוסיפו הביא מנחת שוא&quot; וג&#x27;. &quot;חדשיכם ומועדיכם&quot; וג&#x27;. &quot;ובפרשכם כפיכם&quot; וג&#x27;. אבל &quot;למדו היטיב דרשו מש{&#x27;}פט&quot; וג&#x27;. 
+&gt;&gt; ועוד אמר על יד ישעיהו &quot;איכה היתה לזונה&quot; וג&#x27;. וכת&#x27; &quot;ש</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.80</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001443710205171&page=49' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 922</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] שמואל הנגיד בן יוסף הלוי — שחרתיך מחולל כל נפשים בזמרתי מקום קרבן ואישים</span> <span class='nli'>· קטלוג NLI: פיוטים לתפלות השבתות המצויינות והמועדים ולהזדמנויות שונות.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>107</bdi> אות · מרחק
+  <bdi dir='ltr'>0.45</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>0</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>נפש ולב . פניהם לא יחפרו ולא
+ידאג להם לב . פקודי ייי ישרים משמחי לב ..
+נשמת ישרא</span><mark>ל עמך בארצות שביים וכו&#x27; רשות לפרק
+החדש .. . שחרתיך מחולל כל נפשים .
+בזמרתי . מקום קרבן ואישים .. מגמתי להללך
+מי נכונה .. כתרבה לעיל . חזמון יה אור מסו</mark><span class='ctx'>ת אור
+כראי</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>חזון שבת החדש. רשות לר&#x27; שמואל הנגיד +ז&lt;&#x27;&gt;ל$. 
+&gt;&gt; שְחַרְתִּיךָ מְחוֹלֵל כֹּל נְפָשִׁים. בְזִמְרָתִי מְקוֹם קָרְבָּן וְאִישִים. 
+&gt;&gt; מְגָמַתִי לְהַללְךָ נְכוֹנָה. וְלִבַּתִי לְ?יַ?חְדָךְ בֵּין קְדשִׁים. 
+&gt;&gt; ובַטָחְתִּי עֲלֵי שִמְךָ אֲשׁר הוּא. מְעוֹן חֶסֶד לְנִכְב</div></div>
+ </div>
+</div><h2>P 0.2–0.5 — ספק</h2>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000846800205171&page=29' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 85/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[JA] סעדיה בן דוד, מדרש הבאור א</span> <span class='nli'>· קטלוג NLI: תחכמוני (בלתי שלם).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>73</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>39</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ן אמ
+עלאג אלהויצאם הימן האזרחי קורת הזמן
+תוע בלבי ציר נאמן והשיבוני על עתשש
+מצור</span><mark>ים וירוני בשבאל סלים ויסורים [מ&#x27;
+מקום אשר אסירי המלך אסורים והייתי
+יתניבו רבום שוכב על עד שת</mark><span class='ctx'>ורעיתואשו
+ממני קווי ונואלו כל הרופאים במדויד
+וייעצו אותי אוחבי ורעי וחברת מבוד ע</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>תן קשתו וכו&#x27; ישב יוסף
+שנה עם אדוניו שנ&#x27; ויהי כדברה אל יוסף יום
+יום, ועשר בבית האסורים שנ&#x27; מקום אשר אסירי
+המלך אסורים, אסירים כתיב, וקרן אסורים,
+ושתים אחר שיצאו שר המשקים ושר האופים},
+לאנהם גלסו מחאבי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000849660205171&page=9' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 171/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — קטעי ספרות מאגית (שפר 170)</span> <span class='nli'>· קטלוג NLI: ספר גורלות.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>86</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>0</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ה
+ידרמ יאוא ואל הנז והאסתחר השכריר חביוץ אשר ביץ ולב לאו
+נסינהו אגיד אראסית אחרי</span><mark>ת אגה קל האורית ראוא
+דרסותח הוא גוי סאיקתא ואסתרתא ירצ אה בחשובא ונהורא סאי&#x27; שריא
+אגלה צ אוקות אני חשך ולוכי</mark><span class='ctx'>ה ואלן דור האל האואר והאושה האניר והאקיי
+אשר הזרח צדויה הגלות השר והארוף הזה אשר</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>כוסיה. ברוך שם כבוד מלכותו ל?ע?ל&#x27; וע&#x27;. ובשם ?י?ואל אביאל רפאל ?ה?דריאל. &quot;והוא גלי עמיקתא ומ?ס?תרתא &lt;יד&gt;?ע? מה בחשוכא ונהורא עמי?ה? שרי&quot;. הוא יג?ל?ה לי רזי עולם וסוד תעלומ&lt;ו&gt;?ת?. 
+&gt;&gt; אני פל&#x27; ב&#x27; פל&#x27;. כי לא יעשה יי&#x27;י אלהים דבר כי אם גל?ה ס?ודו אלי. אני פל</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000852000205171&page=49' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 105/01</b>
+  (RNL)</bdi></a>
+  <span class='work'>[JA] ראב&quot;ש, שמואל ב פירוש</span> <span class='nli'>· קטלוג NLI: קובץ.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>71</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>8</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'> ועלו חמושים . ואם ילכו שנים אנשים .
+וינצו שניהם בשדה יי מסכלות מדנים לא מצאו חו</span><mark>כש . ואין
+מרגוע ונופשי גבורים המה ומרי נפש כדוב שכול כשדה יי
+חמש וריב בעיר ראיתי ובערי הפר</mark><span class='ctx'>זי יד חזיתי יומיד בני
+קניטי קניתי את חלקת השדה ייי ואעד עדים לזברון .
+פלע ופוה
+ת</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>עצה אשר יעץ אחיתפל בפעם הזאת,
+ויאמר חושי אתה ידעת את אביך ואת
+אנשיו כי גברים המה ומרי נפש המה
+כדוב שכול בשדה ואביך איש מלחמה ולא
+ילין את העם, הנה עתה הוא נחבא באחת
+הפחתים או באחד המקומות והיה כ</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000852760205171&page=43' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 133</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] האיי גאון בר׳ שרירא — פתרון תורה</span> <span class='nli'>· קטלוג NLI: קובץ חבורי משה בשיצי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>73</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>תשמור אותו באישון
+מעקה
+תשים לעיך
+על&#x27;
+ערי מקלט שם תכין להורגי הרוניך
+כרוים תתן ער</span><mark>ים לשבת ומגכוהים
+עזר ישים
+סופטים ושוטרים תתן לך בכל שערך
+לרבים
+תעח אחרי האמת לכלת עצות אך מ</mark><span class='ctx'>עיית ראותם
+ממת [ ] רכל אשר יאמרו לך בר ועשה כצאת מקה מפי
+על הימין ימין ועל השמאל</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>בכל עיר {ו}בצורה שבישראל היה שם שופט לוי. מציוויו של משה היו עושים כזה שצום. &quot;שופטים ושוטרים תתן לך בכל שעריך&quot;. $כל הענין$. 
+&gt;&gt; והתורה נמסרת להם. שנ&#x27; &quot;ויכתב משה את התורה הזאת&quot; וג&#x27;. וכך הזהיר משה לישר&#x27;. &quot;כי יפלא ממך ד</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000852760205171&page=58' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 133</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Bavli] מחבר לא ידוע — תלמוד בבלי, בבא מציעא</span> <span class='nli'>· קטלוג NLI: קובץ חבורי משה בשיצי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>73</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>9</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ל עון ואשמה
+ולא יענה עד אחד בנפש למות
+שק
+ו תעיד כן תמות
+לא יעד על קרובו לטובתו ו</span><mark>גם לרעתי
+המעיד לא תסמע עדותו
+לא
+תעשו [ ] חעול במשפט במדה בעש
+ובמשורה
+אמה
+העברה לא תמכור לעברי
+ת</mark><span class='ctx'>נאף
+ושרם
+תזהר
+  רן ולא תשנא את אחיך
+נאנא
+לא תנאף עם קדשה ו ח⟧
+אדם ובהמה לא תשרם </span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>דכת&#x27; רחמ&#x27;# במשקלות #למה לי. אמ&#x27; ליה#. לטומן משקלותיו במלח. #הינו# גזל. לעבור עליו משעת עשייה. 
+&gt;&gt; #תנו רבנן#. &quot;לא תעשו עול במשפט במדה במשקל ובמשורה&quot;. &quot;במדה&quot;. זו מדידת קרקע. שלא ימוד לאחד בימות החמה ולאחד בימות הגשמים</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001004290205171&page=1' target='_blank'><bdi dir='ltr'><b>Library of the Hungarian Academy of Sciences Ms. 59</b>
+  (HAS)</bdi></a>
+  <span class='work'>[Maagarim] האיי גאון בר׳ שרירא — פתרון תורה</span> <span class='nli'>· קטלוג NLI: לקוטי מדרשי אגדה.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>80</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>חת[ ]עברן הרבת
+אמר
+די
+דומה צנן אחת לצאן הרבה וראר חיבה שחיבב הקבה את ישר שקיאן א</span><mark>ן וכן היא אומ צהג אות[
+עמוי לאה כצאן לא כשם שהרועה הוא נזהר בצאנו ביום מפני[ ]רה וכלי[
+הוא נזהר בישר ביום ו</mark><span class='ctx'>כלילה ביום מפני החמה וכלילה מפ[
+ועמוד האשלילה לפני העם מפני מ[ ]ה והוכה תהיה לב
+</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ול קורא במד&#x27; פנו דרך&quot; וג&#x27;. &quot;ואמר סולו סולו פנו דרך&quot;. 
+&gt;&gt; לכך אמ&#x27; &quot;נחית כצאן&quot; וג&#x27;. וכשם שהרועה זהיר בצאנו ביום מפני החמה ובלילה מפני האויבים. כך היה הק&#x27; שומר לישראל ביום ובלילה. שכך הוא אומ&#x27; &quot;לא ימיש עמוד הע&#x27;&quot; וג&#x27;. 
+&gt;&gt; וכשהיו נוסעים</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001090680205171&page=235' target='_blank'><bdi dir='ltr'><b>Ms. EVR IV 110</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] יהודה הלוי בן שמואל — במה אקדם את אדוני הרב (טקסט בלבד)</span> <span class='nli'>· קטלוג NLI: גן המלך (בלתי שלם).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>82</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>2</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ולתו והוד תהלתו ויגדיל חכמתו
+ותורתו. נרו לא יסבה. והודו ירבה. אורו לא יקדיר. ותו</span><mark>רתו יאדיר.
+כבודו יגדל. והודו לא ידל ואכי ישא ממני שלומות בעוז ותעצומות. ברוב
+אהבתי . ועצם חכתי . אצילי ומשכ</mark><span class='ctx'>ילי . הנחמד נגד ה&#x27; אלהים יענה את
+שלומו. וירבה לו נועמו פחפצו וכחפץ הנחתם בחותמו.</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>דוני ..רב אהבתי ועוצם חבתי. 
+&gt;&gt; &lt; 37&gt; כי גם עתה הנה עדי בין צלעותי ושהדי בין מורשי. &lt; 38&gt; ואדוני ישא ממני שלומות. ועוז ותעצומות. &lt;00-039&gt; לפני רוב אהבתי והאלהים יענה את שלומו. אמן</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001090680205171&page=237' target='_blank'><bdi dir='ltr'><b>Ms. EVR IV 110</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] גרשם בן קלונימוס כ״ץ — אגרון יד (טקסט בלבד)</span> <span class='nli'>· קטלוג NLI: גן המלך (בלתי שלם).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>82</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>0</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>. דבריו כדברי חוזים .
+מאוצרות רוכלים לקוחים . בשמן משחת קדש משוחים . ריחם כריח ה</span><mark>תנוגח .
+אל אשר יהיה שמה הרוח . אמרתי מי יתן לי אבר כיונה . אעומה ואשכונה .
+לראות אח ידיד . ואשמח כלובש רדיד . אשר ל</mark><span class='ctx'>שונן מלאה תורי משלים .
+ארוזי שיר מהללים . מנחלי שחק שאובים . וממאורי אור גנובים </span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>וני. לח!ק!י ערבים מדבש ונופת צופים. בראותי שזכרוני עולה לפני מעלתך פעמים בשבוע זה אחר זה. ומי יתן לי אבר כיונה אעופה ואשכונה לעשות כל אשר יאהב. וכל אשר יאמר לי. כזה עשה. אחזק בידי מנהג אבותינו בהיותם במתן תורה</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001262140205171&page=9' target='_blank'><bdi dir='ltr'><b>Library of the Hungarian Academy of Sciences Ms. 138</b>
+  (HAS)</bdi></a>
+  <span class='work'>[Maagarim] יהודה — קרובות לשבתות השנה, במדבר</span> <span class='nli'>· קטלוג NLI: קבץ קרובות.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>80</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>5</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>
+המוניי קשוב מניסיח חינוני. רחמיך רבים יי שדי אתה ראשון
+ואחרון שמע צעקת אום נצור</span><mark>ה כאישון תפארתך בכל פה ולשון
+תהלתך לאדם מערכי לב ומיי מענה לשון. אשמנו לך
+שוכן מעונים על לב לאשמנו י</mark><span class='ctx'>קרה מפנינים. בריתך עזבו אבות ובנים
+וילכו אחרי שיקוצים וחמנים: גודל עונים ועוצם ז</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ינו מסבלים&quot; !מ!ג&#x27;. 
+&gt;&gt; כי בך ת&lt;שבע&gt; ?כל? לשון. 
+&gt;&gt; לכן נמ&lt;ת&gt;ה &quot;מות וחיים ביד לשון&quot;. 
+&gt;&gt; יכרת יי&#x27;י כל שפתי חלקות ?בל?שון. 
+&gt;&gt; &quot;לאדם מערכי לב ומיי&#x27;י מענה לשון&quot;. 
+&gt;&gt; כמעשהו לאיש תשלם. 
+&gt;&gt; סחתה &lt;..&gt;ים לבניו שלום. 
+&gt;&gt; כעל גמולות בעל ה?ש?ל?ו?ם. 
+&gt;&gt; &quot;טוב אשר לא ?ת?דר !ומה שתדר! ו</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001332480205171&page=6' target='_blank'><bdi dir='ltr'><b>Ms. 187</b>
+  (Sassoon)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — מרכבה רבה וקטעי היכלות</span> <span class='nli'>· קטלוג NLI: קמיע לעין הרע, השבעה וכו&#x27;.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>88</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>0</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>בסםא אלהים אלהים אלהים אלדישרישרי
+ה&#x27; זה&#x27; חה&#x27; והה והו להו הוה היה היה והיה יאהיה </span><mark>היה
+היך הי הנ אהיה מהוה היה ויהו אהיה אהה והיה
+בנשה והניה יהבשכמלו צבאות צבאוח
+אם</mark><span class='ctx'> קםסקצאאוה כזנוי הבאיה
+באות
+גמ.
+נברת
+ויה אריה
+בעזף לנפני שטי לשוטנ
+]ת הודו
+ואותי</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>נסי הויי. ופירושו בלשון. יהוה הה יהיה ווהי הה יה יה יהוה הו יה יה הי היה ויה הוה יהוה הוי הי יהו היו יה יה ההוה יה ההיה ברוך שם כבוד מלכותו לעולם ועד. 
+&gt;&gt; והכל יאד[י]רו ויפארו לשמך כי בך חיבתך. השב</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001403610205171&page=4' target='_blank'><bdi dir='ltr'><b>Cambridge University Library Ms. Or. 1080 13.2</b>
+  (CUL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — בראשית רבה</span> <span class='nli'>· קטלוג NLI: לקוטי מדרשים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>71</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>11</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>את</span><mark>ה
+על מה אחריו עושה מלאבין הדות א&#x27; חנינא אמ&#x27; בחמשי נבראו תגילא פין שכת&#x27; ושמאנן
+יעופו על הארץ</mark><span class='ctx'> וג&#x27; ואי שו עופי אלא המלאכין שנ&#x27; ובשתים ישפת אמ&#x27; ר&#x27; יולאינא פר
+טיברי בשם ר&#x27; יצחק</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>נן. #ר&#x27;# יוחנן [#אמ&#x27;#]. בשני נבראו המלאכים. #הדה היא#. &quot;המקרה במים עליותיו&quot; וגו&#x27;. וכת&#x27;. &quot;עושה מלאכיו רוחות&quot;. #ר&#x27;# חנינה #אמ&#x27;#. בחמישי נבראו המלאכים. &quot;ועוף יעופף על הארץ&quot;. וכת&#x27;. &quot;ובשתים יעופף&quot;. 
+&gt;&gt; #ר&#x27;# לוליני #בר# טוביריס #בשם ר&#x27;# יצחק. #בי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001428290205171&page=136' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 29</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] פינחס אליהו הורביץ — ספר הברית (חלק א, מאמרים ח-יז) (טקסט בלבד)</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>86</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>בישני מסברי :
+מעודד אם אתה לא תעודד מי יעודד :
+מעודב עגוים יוי משחיל רשעים עדי א</span><mark>רץ :
+פודה אם אתה לא תפבה מי יפרה :
+פודה יוי נפש עבדיו ולא יאשמו כל החוסים בו :
+רועה יום אתה תרעה מי ירעה :
+רעה עמך בשכנ</mark><span class='ctx'>וך צאין נחלתיך :
+שומר אם אתה לא תשמור מי ישמור :
+שמרני כאישון בת עין בצל פנפיך מ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ב המכוון ממנו, בעבור הרע המעט אשר יקרה לפעמים בזמן רחוק, שאף בעת ההיא הוא פודה נפש עבדיו ולא יאשמו כל החוסים בו, והוא ישקיט ומי ירשיע, ולכן הרעש כי יקרה במדינה, מה&#x27; יצא הדבר, בהשגחה מאת ה&#x27; מן השמים, ישלח דברו ורומז אלי</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001428380205171&page=23' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 45/2</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] עלי החבר בן עמרם — הספד על אברהם התסתרי</span> <span class='nli'>· קטלוג NLI: דיואן.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>86</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>1</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>חות ⟦/⟧
+בשלחי זכריה להודיעך ↑ הנתיבות הנכוחות ⟦/⟧
+ותשפכי כמו והנה .. חטאתיך מפות</span><mark>חות ⟦/⟧
+ותחת אבניך צעק ידרוש יוי נקמתי ארץ
+אלתכסי דמי וליהי מקום לזעקתי פי[
+ארץ אלתכסי כמי
+הלך לעם במלאכתו כי ה</mark><span class='ctx'>פרו את בריתו ⟦//⟧
+ויצמרו לבעלים ולהים עזבו וקתו ⟦/⟧
+העם והמלך ושריו ושרי יהודה ל</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>פ&gt;&lt;לה//&gt;&quot;. 
+&gt;&gt; מי שמע כזאת ומי ראה בתוגתי ו!תלאלתי!. 
+&gt;&gt; נדהום נדהמתי ואבדה תקותי. 
+&gt;&gt; סחבוני בחבלים והשליכו נבלאתי. 
+&gt;&gt; &quot;ארץ אל תכסי דמי ו&lt;אל י&gt;הי מקום לזעקתי&quot;. 
+&gt;&gt; עבדים משלו ?ב?י &lt;...&gt;. 
+&gt;&gt; פוט ולוד וכוב ומ?שפ?חות?יהם?. 
+&gt;&gt; &lt;צ//&gt;&lt;וד צדו&gt;ני כצפור בפח מקשהם. 
+&gt;&gt; &quot;ת&lt;שיב&gt; להם</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001429020205171&page=50' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 56/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] יונה בן אברהם (יונה גירונדי) — שערי תשובה</span> <span class='nli'>· קטלוג NLI: מחזור ליום כפור עם כוונות על דרך קבלת האר&quot;י.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>73</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>36</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ות ורבי ז&#x27; לא בטלו .. מי אלנתחיב סקיל
+או נוכל מן הגג או חיה
+וחנק יכוין ליחד ג&#x27; א</span><mark>ותיות ההי או&#x27; דורפהו י. ומי שנתחייב
+שריפה או נופל בדליקה
+שהם אותיות של שלשה שמות הקדשים . הויה</mark><span class='ctx'> אהיה אדני או נחש מכשו: ומי שנתחי&#x27;
+אשר פגם בהם ועתה ע&#x27;ד&#x27; הוידוי ישובו ויתיחדו הש</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>רבע מיתות ב&#x27;ד. &#x27;&#x27;דין ארבע מיתות לא בטלו. מי שנתחיב סקילה. או נופל מן הגג או חיה דורסתו. ומי שנתחיב שריפה. או נופל בדליקה או נחש מכישו. ומי שנתחיב הריגה. או נמסר למלכות או ליסטים באין עליו. ומי שנתחיב חני</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.50</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990001430460205171&page=14' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 142/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] שמעון בר יצחק — יוצרות</span> <span class='nli'>· קטלוג NLI: סדור מנהג קראים.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>71</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · התאמה בודדת ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>4</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ל תסלתו השם
+נפשינו בחיים ולא נתן למוטראלינו
+הגדיל יני לעשות עמנו הינו שמחים
+ויפר</span><mark>קינו מצרינו כי לעולם חסדו
+ברוך ילי שלא נתננו טרף לשניהם
+תם
+קול
+ברוך אלהינ
+ואלדי
+אבותינו</mark><span class='ctx'>
+אשר עשה נסים וגבורות ונפלאות
+לאבותינו פיטים האלו ופזמן הזכ
+ויצילם ויפדס ויגאלם </span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>נו במזימותיהם. 
+&gt;&gt; רחשו &quot;הבה נתחכמה&quot; נגד אלהיהם. 
+&gt;&gt; ולא הועילום נכליהם ותחבולותיהם. 
+&gt;&gt; &quot;ברוך י&#x27;י שלא נתננו טרף לשיניהם&quot;. 
+&gt;&gt; לולי י&#x27;י שהיה לנו נגפונו צוררינו. 
+&gt;&gt; יום אשר &quot;כל הבן&quot; גזרו עלינו. 
+&gt;&gt; היה אז סחרחר לבינו. 
+&gt;&gt; &quot;אזי המ</div></div>
+ </div>
+</div><h2>P < 0.2 — קרוב לרעש (לניגוד)</h2>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.19</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000850710205171&page=28' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 185/1</b>
+  (RNL)</bdi></a>
+  <span class='work'>[JA] סעדיה בן דוד, מדרש הבאור ב</span> <span class='nli'>· קטלוג NLI: דיואן ר&#x27; יוסף בן אברהם הלוי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>71</bdi> אות · מרחק
+  <bdi dir='ltr'>0.52</bdi> · מוביל בפער קטן (פער 0.03) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>28</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>די הו יסא עדני
+עלי תכועילה ואלדי יעמל בצפתה ויסמיה עלי אסמה
+לאנהו אגר עצ̇ים בעד </span><mark>ופאתה ענד אללהסו&#x27; וענד אל
+אלנאס דכתיב ומצא חן ושכל טוב בעיני אלהים
+אנב
+ואדם
+ונריד אן שא אל</mark><span class='ctx'>לה נגלה אל אלה במעונת אללה
+ובמנתה וכרמה אלואסע עלי אתקיאה ועלי חאפצין
+אלעהד ואלמ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ב בתורה, שנ&#x27;
+והייתם נקיים מה&#x27; ומישראל. שנוי בנביאים שנ&#x27; אל
+אלהים ה&#x27; הוא יודע וישראל הוא ידע. משולש
+בכתובים שנ&#x27; ומצא חן ושכל טוב בעיני אלהים
+ואדם. ויאמר בני גד ובני ראובן, מכאן שהתורה
+ממעטת את המרובה</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.19</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000850900205171&page=94' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 61</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — מדרש הלל</span> <span class='nli'>· קטלוג NLI: קובץ קראי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>77</bdi> אות · מרחק
+  <bdi dir='ltr'>0.52</bdi> · מוביל בפער קטן (פער 0.03) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>27</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>לינו אור פניך נסה והחזק בבתינת כל בדי
+על פי מדותיו תיסרהו עד אשתח במעט מתועלו מש</span><mark>וכח
+להשאיר אחריו ברכה אולי יפתחו לי שערי צדק :
+אבוא בם אודהיה:
+יה פרע וצרי כי פרוע הוא ומים לחשוף מי</mark><span class='ctx'>שועת מעייני :
+פערתי פי לשאוף מריח לבנון ולטעום מעצי עדן ששוני .
+יחד עם מלאכי רומ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>לו. גם זה השער הכנס בו. 
+&gt;&gt; דוד אמר. אני עשיתי את כולם פתחו לי כולם. לכך אמר. &quot;פתחו לי&quot;. &quot;פתחו לי שערי צדק אבוא בם אודה יה&quot;. 
+&gt;&gt; &quot;זה השער לה&#x27; צדיקים יבואו בו&quot;. משל לאדם אחד שהיה מהלך בדרך וסחורתו בידו. כיון שהגיע לחרמים נתן לה</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.19</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000851830205171&page=5' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 620</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Bavli] מחבר לא ידוע — תלמוד בבלי, סנהדרין</span> <span class='nli'>· קטלוג NLI: פרוש התפלות והברכות ליוסף אבן שרגא (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>71</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · מוביל בפער קטן (פער 0.00) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>37</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>לל נחי לעולם
+ועתה נתפרש משם כג פסיעות שיפסע לאחוריו ונתרפק כאילנא רמותא ברכתי
+וי</span><mark>אסוף רגליו אל המנוה ויגוע. ובעבור שאין אדם צדיק בארץ אשר יעשה טוב
+ולח יחטא ניש עונות שאינ</mark><span class='ctx'>ם מכופרים לו עד יום מותו שנאמ אם יטפר העון
+חזה לכם עד תמותון נתקן ליפול אדם על פ</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>רואה את ר&#x27; בצער אני שמח. אמ&#x27; לו. עקיבה. כלום חיסרתי מן התורה דבר. אמ&#x27; לו. למדתנו רבינו &quot;כי [2] אין [1] אדם צדיק בארץ אשר יעש&#x27; טוב ולא יחטא&quot;. 
+&gt;&gt; #ת&#x27;ר#. שוב כשחלה ר&#x27; אליעזר נכנסו ארבעה זקנים לבקרו. ואלו הן. רבי טרפון ור&#x27; יהושע</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.19</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000852760205171&page=22' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 133</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] מחבר לא ידוע — קידוש לפסח</span> <span class='nli'>· קטלוג NLI: קובץ חבורי משה בשיצי.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>76</bdi> אות · מרחק
+  <bdi dir='ltr'>0.51</bdi> · מוביל בפער קטן (פער 0.01) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>43</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ני נשפטה יחד ספר אתה למען
+תצדק ובפריו היות שאנו במך אד מלכיות אדום ויון
+ותוגר וי</span><mark>שמעאל ואנו נברים בעיניהם שנא&#x27; כל רואיהם
+יכירום כי הם זרע ברך ייי ויודעים שתורתינו אמתית עם
+היו</mark><span class='ctx'>ת שאנו תחת יריהם ואנחנו מגלים עדותה וכל זה
+מהשנחתו ית אשר הוא מחופף עלינו תמיד ל</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>או מלכים וקמו. 
+&gt;&gt; שרים וישתחוו. 
+&gt;&gt; למען ייי אשר נאמן. 
+&gt;&gt; קדוש ישראל אשר בם בחר. 
+&gt;&gt; כל רואיהם יכי?רו?ם. 
+&gt;&gt; כי הם זרע בירך ייי. 
+&gt;&gt; ויקדשנו ?ק?ד?וש?ת עולם. 
+&gt;&gt; ושמו הגדול עלינו ?ק?רא. 
+&gt;&gt; אותנו קרא עדה לשמו. 
+&gt;&gt; סגולה ונחלה מימות עולם. 
+&gt;&gt; ויקרבנו ל</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.19</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000853270205171&page=17' target='_blank'><bdi dir='ltr'><b>Ms. EVR ARAB II 1073</b>
+  (RNL)</bdi></a>
+  <span class='work'>[JA] רס&quot;ג, הנבחר באמונות ודעות</span> <span class='nli'>· קטלוג NLI: קובץ קטעים דתיים בערבית-יהודית.</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>72</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · מוביל בפער קטן (פער 0.01) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>43</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>יום הדין לא יט̇הר לכל אחד חא</span><mark>ל מן טאע
+וחאל מן עצא כקולה ושכתם וראיתם בין צדיק
+לרשעא פהנאך יקבץ אלהארב מן דאר אלדניא
+ואמ</mark><span class='ctx'>אתתה נפסה או בקתלהא או בשנקהא
+פלם תג̇ד מפר מן קבצה̈ רב אלעלמין ודלך
+אן תחית המתי</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>ל מן אלעבאד פי
+וקת אלג&#x27;זא אלא פריקאן לא ת&#x27;אלת&#x27; להמא,
+צאלחון וטאלחון פקט, כקולה {ושבתם וראיתם
+בין צדיק לרשע בין עובד וגו&#x27;}.
+וארי אן אג&#x27;על פי אכ&#x27;ר הד&#x27;ה אלמקאלה
+הד&#x27;ה אלקול, ואקול, אן אלטאעה מן אלכ&#x27;ואץ
+אפצ&#x27;ל כקו</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.19</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000872150205171&page=5' target='_blank'><bdi dir='ltr'><b>Ms. EVR II A 516</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] משה בן מיימון (רמב״ם) — משנה תורה, ספר עבודה</span> <span class='nli'>· קטלוג NLI: אגרת המספקת (קטע).</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>82</bdi> אות · מרחק
+  <bdi dir='ltr'>0.54</bdi> · מוביל בפער קטן (פער 0.01) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>39</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'> הכונה להיות הקדבנות .
+כלם תמימים על הטוב שבעניניהם שלא יבוא להקר[
+בקרבן ולביות </span><mark>כמה שהקריבו לשמי ית כמו שאמר ⟦/⟧
+הקריבהו נא&#x27; לפחתך הירצך או הישא פניך . וגו&#x27; . וזאת ⟦/⟧
+אחת מסכות המול בשמיני כי כל ב</mark><span class='ctx'>ח&#x27; כשיולד הוא חלוש .
+מאד בתכלית לחותו . וכאלו הוא עדיין בבטן עד סוף הטמא .
+] הי </span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>לכה י&gt; בהמה שנולד לה אחת מן הטריפות האוסרין אותה באכילה אסורה לגבי המזבח. הרי הוא אומ&#x27; &quot;הקריבהו נא לפחתך הירצך או הישא פניך&quot;. ואע&#x27;פ שאינה ראויה לקרבן אין פודין אותה. שאין פודין את הקדשים להאכילן ל?כ?לבים. אלא יר</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.19</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000885760205171&page=18' target='_blank'><bdi dir='ltr'><b>Ms. EVR IV 50</b>
+  (RNL)</bdi></a>
+  <span class='work'>[Maagarim] משה בן מיימון (רמב״ם) — משנה תורה, ספר המדע</span> <span class='nli'>· קטלוג NLI: טוב טעם : ; פרוש לפיוטים לפרשיות לאהרן הקראי הנדפסים בסדור ת</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>73</bdi> אות · מרחק
+  <bdi dir='ltr'>0.48</bdi> · מוביל בפער קטן (פער 0.01) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>58</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>ל אה אסור לשבל האנוש
+נא רי לו שלא הרויז אללא ישום חסר ממה שהשינ וכן הריירו
+החכמי</span><mark>ם על טה באמרם אין שזאלין מה למעלה מה למטה מה
+לפנים מה לאחור והנה רצון הרב באלמרו קדם רומא למה</mark><span class='ctx'> שאלמרו ר&#x27;
+החכמים לפנים כי לשון קרם בלשון לפנים וכן מלת אלחור חומטת
+גמה שאלמרו ל</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>מים יתור אחר עבודה-זרה. ופעמים יחשב בייחוד הבורא. שמא הוא שמא אינו. מה למעלה מה למטה. מה לפנים מה לאחור. ופעמים בנבואה. שמא היא אמת שמא אינה. ופעמים בתורה. שמא היא מן השמים שמא אינה. ואינו יודע המדות ש</div></div>
+ </div>
+</div>
+<div class='card'>
+ <div class='head'>
+  <span class='p'>P 0.19</span>
+  <a href='https://genizahsearch.com/browse?sys_id=990000885760205171&page=98' target='_blank'><bdi dir='ltr'><b>Ms. EVR IV 50</b>
+  (RNL)</bdi></a>
+  <span class='work'>[JA] סעדיה בן דוד, מדרש הבאור ב</span> <span class='nli'>· קטלוג NLI: טוב טעם : ; פרוש לפיוטים לפרשיות לאהרן הקראי הנדפסים בסדור ת</span>
+ </div>
+ <div class='stats'>אורך התאמה <bdi dir='ltr'>77</bdi> אות · מרחק
+  <bdi dir='ltr'>0.53</bdi> · מוביל בפער קטן (פער 0.01) ·
+  עדים מחמירים לחיבור: <bdi dir='ltr'>28</bdi></div>
+ <div class='panes'>
+  <div class='pane'><div class='lbl'>קטע העמוד (גניזה, מודגש =
+   ההתאמה):</div><div class='ev'><span class='ctx'>אטאן
+הבכורים שנחבא מביניהם עובר העגל וע&#x27;ב&#x27; נפסלן הם ונמנו חקנם
+הלוים שלאל נמבאל </span><mark>מהם אלפי אל עובר לעגל כמו שכחוב ויאלמר משה
+מי להי אללי ויאספן אלין כל בני לוי ועכ&#x27; לקחם אחת הבכורי</mark><span class='ctx'>ם : והגריל
+מעלתם והור ויקר ח נזיל אוחם ברוך שם חשרתם כל היכלו שבג
+גרטון ומררי הי</span></div></div>
+  <div class='pane'><div class='lbl'>המקבילה במהדורה:</div><div class='ev ref'>דת כהן חייב מיתה בידי שמים. ואם
+קדמו עליו פרחי כהונה והרגוהו הלך לו.
+ואני הנה לקחתי, הוא בשעה שאמר משה מי לה&#x27;
+אלי, ויאספו אליו כל בני לוי, וכן הוא אומר
+הבדיל ה&#x27; את שבט הלוי, והיו לי הלוים, מגיד
+שקדושתם קיימת ל</div></div>
+ </div>
+</div>
+</body></html>

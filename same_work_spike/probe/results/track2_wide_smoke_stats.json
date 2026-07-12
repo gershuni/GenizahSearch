@@ -1,0 +1,48 @@
+{
+ "mode": "smoke",
+ "source": "C:\\Genizahsearch\\same_work_spike\\probe\\data\\mapv2_smoke.db",
+ "funnel": {
+  "n_real": 139694,
+  "n_decoy_total": 1200,
+  "n_decoy_per_cohort": {
+   "D25": 600,
+   "D12": 600
+  },
+  "pool_size": 55237,
+  "excluded": 84457,
+  "candidate_pairs": 33745608,
+  "rej_short": 0,
+  "decoy_real": 3,
+  "decoy_decoy": 3404,
+  "strict_pairs_seen": 731737,
+  "strict_purged_raw": 0,
+  "wide_spilled_raw": 584850,
+  "wide_deduped": 584850,
+  "chain_step6_count": 735700,
+  "strict_vs_step6_delta_pct": -0.54
+ },
+ "n_survivors": "537374",
+ "n_deleted_lowvalue": "47476",
+ "flank_classes": {
+  "island": 398069,
+  "edge": 78795,
+  "continuation": 47900,
+  "ambig": 12610
+ },
+ "k_support": 25,
+ "phases": {
+  "engine_done": "2026-07-10T21:07:56",
+  "spill_done": "2026-07-10T21:10:42",
+  "null_done": "2026-07-10T21:10:42",
+  "scored": "2026-07-10T21:10:44",
+  "enriched": "2026-07-10T21:17:25",
+  "cleanup": "2026-07-10T21:17:27"
+ },
+ "null_factor_per_cohort": {
+  "D25": 116.41166666666666,
+  "D12": 116.41166666666666
+ },
+ "observed_real_total": 584850,
+ "envelope_null_total": 349.235,
+ "buckets_with_support": 0
+}

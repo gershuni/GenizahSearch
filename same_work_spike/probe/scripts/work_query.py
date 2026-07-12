@@ -350,6 +350,7 @@ def measure_pairing(con, work_ids):
 
 
 def main():
+    global FULLCORPUS, REF, CANON_MASKS
     ap = argparse.ArgumentParser()
     ap.add_argument('db', nargs='?', default=FULLCORPUS)
     ap.add_argument('tag', nargs='?', default='full')
@@ -365,7 +366,24 @@ def main():
     ap.add_argument('--index-audit', action='store_true',
                      help='build the full-cohort index, print the dw-histogram '
                           '+ per-work retention, then exit (no corpus scan)')
+    # ---- Map-v2 state overrides: the v2 chain passes its own census db
+    # (fullcorpus_v2.db), reference pkl and canonical masks; defaults keep
+    # every pre-Map-v2 invocation byte-identical. ----
+    ap.add_argument('--census-db', default=None,
+                     help='db whose track1_matches defines the cohort census '
+                          '(default: canonical fullcorpus.db)')
+    ap.add_argument('--ref', default=None,
+                     help='reference pkl (default: ref_corpus.pkl)')
+    ap.add_argument('--masks', default=None,
+                     help='ref-side canonical masks json '
+                          '(default: ref_canon_masks.json)')
     args = ap.parse_args()
+    if args.census_db:
+        FULLCORPUS = args.census_db
+    if args.ref:
+        REF = args.ref
+    if args.masks:
+        CANON_MASKS = args.masks
     DB, TAG = args.db, args.tag
     if not re.match(r'^\w+$', TAG):
         raise SystemExit(f"tag must be alphanumeric/underscore: {TAG!r}")

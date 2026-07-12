@@ -1,0 +1,70 @@
+[prio] process priority set BelowNormal
+=== track2_wide_run mode=full src=C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db out=C:\Genizahsearch\same_work_spike\probe\data\track2_wide.db resume=False decoys=12000/cohort ===
+real pages: 667,411; letters=565,207,589 (191s)
+masks[maskcanon]: 126,471 pages, 154,923 Track-1 intervals
+leak-clean decoy pool: 198,873 / 667,411 pages (468,538 excluded)
+  cohort D25: 12,000 decoys (target 12000)
+  cohort D12: 12,000 decoys (target 12000)
+combined index: 691,411 pages (667,411 real + 24,000 decoy: D25=12,000, D12=12,000)
+[engine_np] positions=512,699,267 sorted in 28s
+[engine_np] grams kept=2,996,268 (singleton=463,244, df-dropped=778,949); raw pair-hits=1,512,746,656
+[engine_np] pass1 chunk 1/19: spilled=79,017,225 entries (0.7 GB, 13s)
+[engine_np] pass1 chunk 2/19: spilled=158,128,984 entries (1.5 GB, 27s)
+[engine_np] pass1 chunk 3/19: spilled=236,989,546 entries (2.2 GB, 40s)
+[engine_np] pass1 chunk 4/19: spilled=315,951,864 entries (2.9 GB, 53s)
+[engine_np] pass1 chunk 5/19: spilled=394,857,687 entries (3.7 GB, 67s)
+[engine_np] pass1 chunk 6/19: spilled=473,906,586 entries (4.4 GB, 80s)
+[engine_np] pass1 chunk 7/19: spilled=552,732,902 entries (5.1 GB, 94s)
+[engine_np] pass1 chunk 8/19: spilled=631,385,436 entries (5.9 GB, 108s)
+[engine_np] pass1 chunk 9/19: spilled=710,481,348 entries (6.6 GB, 121s)
+[engine_np] pass1 chunk 10/19: spilled=789,324,864 entries (7.4 GB, 135s)
+[engine_np] pass1 chunk 11/19: spilled=868,376,038 entries (8.1 GB, 148s)
+[engine_np] pass1 chunk 12/19: spilled=947,409,331 entries (8.8 GB, 161s)
+[engine_np] pass1 chunk 13/19: spilled=1,026,314,185 entries (9.6 GB, 175s)
+[engine_np] pass1 chunk 14/19: spilled=1,105,211,017 entries (10.3 GB, 188s)
+[engine_np] pass1 chunk 15/19: spilled=1,184,056,472 entries (11.0 GB, 201s)
+[engine_np] pass1 chunk 16/19: spilled=1,262,748,786 entries (11.8 GB, 215s)
+[engine_np] pass1 chunk 17/19: spilled=1,341,763,023 entries (12.5 GB, 228s)
+[engine_np] pass1 chunk 18/19: spilled=1,420,558,834 entries (13.2 GB, 241s)
+[engine_np] pass1 chunk 19/19: spilled=1,492,482,011 entries (13.9 GB, 254s)
+[engine_np] partition merge: 1,492,482,011 entries -> candidates=56,544,496 (97s)
+[engine_np] pass2 chunk 1/19 (47s)
+[engine_np] pass2 chunk 2/19 (93s)
+[engine_np] pass2 chunk 3/19 (142s)
+[engine_np] pass2 chunk 4/19 (192s)
+[engine_np] pass2 chunk 5/19 (242s)
+[engine_np] pass2 chunk 6/19 (293s)
+[engine_np] pass2 chunk 7/19 (347s)
+[engine_np] pass2 chunk 8/19 (400s)
+[engine_np] pass2 chunk 9/19 (450s)
+[engine_np] pass2 chunk 10/19 (499s)
+[engine_np] pass2 chunk 11/19 (549s)
+[engine_np] pass2 chunk 12/19 (597s)
+[engine_np] pass2 chunk 13/19 (648s)
+[engine_np] pass2 chunk 14/19 (700s)
+[engine_np] pass2 chunk 15/19 (752s)
+[engine_np] pass2 chunk 16/19 (806s)
+[engine_np] pass2 chunk 17/19 (857s)
+[engine_np] pass2 chunk 18/19 (908s)
+[engine_np] pass2 chunk 19/19 (954s)
+[engine_np] spill path done: candidates=56,544,496 in 1339.3s
+candidates: 56,544,496 (1535s)
+[phase] engine_done done @ 01:19:36
+  verify 20,000,000/56,544,496 wide_dict=112,089 spilled=0 strict_pairs=251,379 decoy_real=18 (86s)
+  verify 40,000,000/56,544,496 wide_dict=393,494 spilled=0 strict_pairs=921,038 decoy_real=98 (168s)
+verify done: candidates=56,544,496 spilled_raw=598,026 strict_pairs=1,335,473 wide_segments=641,756 decoy_real=186 decoy_decoy=138,057 rej_short=0 (242s)
+strict-pair purge: 0 spilled raw rows removed
+deduped base rows: 598,026 (from 598,026 spilled, 0 strict-purged)
+[phase] spill_done done @ 01:24:04
+null buckets: 177 rows (observed_real total=598,026, envelope_null total=5006, buckets with support>=25: 2)
+[phase] null_done done @ 01:24:05
+scored 598,026 rows (bucket-level SQL, no fetchall); pruned 45,623 low-value; survivors 552,403
+[phase] scored done @ 01:24:07
+enrich: 552,403 survivors, 238,326 pages loaded
+enriched flank classes: {'island': 392178, 'edge': 75816, 'continuation': 65281, 'ambig': 19128}
+[phase] enriched done @ 01:34:29
+report -> C:\Genizahsearch\same_work_spike\probe\results\track2_wide_report.md
+stats  -> C:\Genizahsearch\same_work_spike\probe\results\track2_wide_stats.json
+VACUUM (db 0.4 GB, free 64.4 GB)
+[phase] cleanup done @ 01:34:31
+=== DONE mode=full in 40.5 min ===

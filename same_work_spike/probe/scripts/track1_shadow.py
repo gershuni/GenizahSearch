@@ -25,7 +25,8 @@ from collections import Counter, defaultdict
 ROOT = r"C:\Genizahsearch"
 DB = sys.argv[1] if len(sys.argv) > 1 else \
     ROOT + r"\same_work_spike\probe\data\fullcorpus.db"
-OUT = ROOT + r"\same_work_spike\probe\results\track1_shadow_full.md"
+TAG = sys.argv[2] if len(sys.argv) > 2 else "full"
+OUT = ROOT + rf"\same_work_spike\probe\results\track1_shadow_{TAG}.md"
 
 OVERLAP_FRAC = 0.6    # of the WORSE row's span
 MIN_DENS_GAP = 0.03   # better must be meaningfully better

@@ -1,0 +1,233 @@
+[
+ {
+  "card_no": 1,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "כותרת NLI גנרית ('פיוט') ו-FJMS ריק. הטקסט המשותף — 'וישלח דברו הנצב בשמים... ומלכיהם יבואו וישתחוו אפים... דברו על לב ירושלם' — הוא סילוק מובחן מקדושתא, לא נוסח תפילה שגור. ההתאמה ארוכה (252 אותיות) וצמודה, ולכן עד חדש של הפיוט שאינו מזוהה בקטלוגים.",
+  "key_evidence": "Generic NLI 'Piyyut', no FJMS ID; 252-letter close match to a distinctive silluk (rhyming poetic frame, not statutory prayer)."
+ },
+ {
+  "card_no": 2,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "הדף הוא פרק שירה מובהק — מבנה 'אריה מהו אומר / זאב מהו אומר / שועל מהו אומר' עם הפסוקים המתאימים, זהה למהדורה. NLI רושם רק 'שירים' ו-FJMS ריק, כך שהזיהוי כפרק שירה הוא ידע חדש. המסגרת (בעל-חי + פסוק) היא היצירה עצמה ולא רק פסוקים משותפים.",
+  "key_evidence": "Unmistakable Perek Shirah creature-frame ('אריה מהו אומר'…) matching the edition; NLI only 'שירים', no FJMS."
+ },
+ {
+  "card_no": 3,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "כותרת NLI ('שירים לשבת') גנרית ואף אינה תואמת ליום הכיפורים; FJMS ריק. הקטע 'ובכן אך חנון אתה ורחום לכל פועל... ושרפי הקודש יודעי טובך' הוא הרחבה פייטנית מובחנת בתוך הקדושתא (לא ה'ובכן' הסטטוטורי הרגיל), עם עד יחיד במפקד. נראה כעד חדש, בזהירות מפני נוסח תפילה קרוב-לשגור.",
+  "key_evidence": "Distinctive kedushta ובכן-expansion (not the standard statutory ובכן), rare (1 witness), generic/mismatched NLI ('שירים לשבת' vs Yom Kippur)."
+ },
+ {
+  "card_no": 4,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI רק 'סדור (קטע)' ו-FJMS ריק. הטקסט — 'ועכשיו באתי ועמדתי על פתחיך... שתפתח לי שערי רחמים ושערי תשובה... תשובה שאתה חפץ בה' — הוא תחינה מוגדרת לאחר העמידה (עד יחיד), לא ברכת קבע. ההתאמה צמודה וממשיכה, ולכן עד חדש; מעט זהירות בגלל אופי התחינה הפורמולאי.",
+  "key_evidence": "Defined post-Amidah penitential prayer (1 witness), generic 'siddur fragment' NLI; close continuing match."
+ },
+ {
+  "card_no": 5,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הדף הוא פירוש בערבית-יהודית לפרשת המנחות, והמהדורה הנטענת (אוצר נחמד לטוביה בן משה) עברית; החפיפה נשענת על שרשרת פסוקי המנחות ('והנותרת מן המנחה לאהרן ולבניו', 'מנחת מחבת ומרחשת') שכל פרשן לויקרא מצטט. הבדל הלשון מוכיח שאין זה אותו עד, והדמיון הוא מקור משותף (הפסוקים).",
+  "key_evidence": "Page is Judeo-Arabic, edition Hebrew; the ~140-letter overlap is the Leviticus meal-offering verse chain both cite — classic shared-source leak."
+ },
+ {
+  "card_no": 6,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI גנרי ('פיוט') ו-FJMS ריק. הטורים המשותפים 'ישוררו ויהללו סלה פזורים / אשר גזו בים עזורים / לגוזר ים סוף לגזרים' הם חריזה פייטנית מובחנת (פזורים/עזורים/גזרים) של יוצר יוסף אלברדאני — עד חדש שאינו בקטלוג.",
+  "key_evidence": "Distinctive rhymed yotzer lines (פזורים/עזורים/גזרים) of Joseph al-Bardani; generic NLI, no FJMS."
+ },
+ {
+  "card_no": 7,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הטקסט 'על הכל יתגדל ויתקדש... שמו של מלך מלכי המלכים הקדוש ברוך הוא, בעולמו שברא' הוא נוסח קבע סטטוטורי הנאמר לפני קריאת התורה, וכל סידור שכולל אותו נושא אותו. NLI אף מציין 'תפילות קבע / קטע סידור'. לפי כלל הזהירות — נוסח תפילה שגור אינו תגלית.",
+  "key_evidence": "'על הכל יתגדל' — standard statutory pre-Torah-reading prayer; NLI itself labels it 'fixed prayers / siddur fragment'. Boilerplate liturgy."
+ },
+ {
+  "card_no": 8,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "כותרת NLI ריקה לגמרי (כתב יד לא מזוהה) ו-FJMS ריק. הטקסט הוא פזמון מחורז מובחן לקדושתא 'ויושע' (אפרים/ממים/כמים/שמים/ידים/מעים), התואם צמוד למהדורה. עד חדש ברור של הפיוט.",
+  "key_evidence": "Empty NLI (uncatalogued MS); distinctive rhymed pizmon for kedushta Vayosha closely matching the edition."
+ },
+ {
+  "card_no": 9,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI ריק ו-FJMS ריק. הדף נושא דו-שיח מדרשי צמוד ('אם עצמותי יעברו את הירדן... אף עצמותיך לא יעברו', 'אמר ר' חלבו') התואם מילולית למהדורת ספרי במדבר (עד מבוסס). ההתאמה הצמודה מלמדת על אותה עריכה ולא מקבילה רופפת — עד חדש בקטע לא מזוהה.",
+  "key_evidence": "Uncatalogued MS; verbatim midrashic dialogue (Moses/Jordan, R. Ḥelbo) matching the Sifrei edition — same redaction, not a loose aggadic parallel."
+ },
+ {
+  "card_no": 10,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI רק 'קובץ קטעים' ו-FJMS ריק. הטקסט 'מחה והעבר פשעינו מנגד עיניך, וכוף את יצרינו... ומול את לבבנו לאהבה אותך' הוא חתימת קדושת-היום פייטנית מובחנת ליום הכיפורים (עם נוסחאות חלופיות במהדורה), לא ברכת קבע. עד חדש בקטע לא מזוהה.",
+  "key_evidence": "Distinctive Yom Kippur kedushat-hayom chatimah (edition shows variant readings); generic 'collection of fragments' NLI, no FJMS."
+ },
+ {
+  "card_no": 11,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI גנרי ('פיוטים') ו-FJMS ריק. הטורים המחורזים 'נחית כצאן עם בנוף עזרתו / חודה ביד ציר וכהן בחרתו / וכגע לים סוף לפניו גזרתו' ומניית עשר השירות הם פזמון מובחן לז' פסח לנחום אלברדאני (עד יחיד). עד חדש.",
+  "key_evidence": "Distinctive rhymed pizmon (…עזרתו/בחרתו/גזרתו) enumerating the ten biblical songs, Naḥum al-Bardani; rare (1 witness), generic NLI."
+ },
+ {
+  "card_no": 12,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "החפיפה היא סדרת ה'הרחמן הוא...' שבסוף ברכת המזון — פורמולה ליטורגית שגורה (אף שמורחבת). לפי כלל הזהירות נוסח תפילה תקני אינו תגלית; NLI ריק אך התוכן עצמו מצוי בכל הנוסחים. דליפה על בסיס פורמולה ליטורגית משותפת.",
+  "key_evidence": "The 'הרחמן הוא…' Grace-after-Meals supplications — a fixed (if expanded) liturgical formula; boilerplate, not a discovery."
+ },
+ {
+  "card_no": 13,
+  "verdict": "KNOWN-DEPENDENCE",
+  "confidence": "high",
+  "title_relation": "known_quoter",
+  "direction": null,
+  "novelty": false,
+  "name_equation": "הגדה של פסח ⊃ ברכת המזון + סדרת 'הרחמן'",
+  "reasoning_he": "NLI ו-FJMS מזהים את כתב היד כ'הגדה של פסח'. היצירה הנטענת ('תוספת לברכת המזון' — סדרת ה'הרחמן') היא חלק מברכת המזון שבתוך ההגדה, ולכן החפיפה צפויה מן הזיהוי עצמו (הגדה כוללת את ברכת המזון). אין כאן ידע חדש.",
+  "key_evidence": "Catalog (NLI + FJMS) identifies the MS as a Passover Haggadah; the הרחמן addition is part of the Haggadah's Birkat HaMazon — overlap expected from the ID."
+ },
+ {
+  "card_no": 14,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הטקסט 'אל מלך יושב על כסא רחמים, מתנהג בחסידות, מעביר ראשון ראשון, מרבה סליחה לחטאים ומחילה לפושעים' הוא הנוסח הסטטוטורי הפותח את אמירת שלוש עשרה מידות בסליחות ובתעניות — נוסח קבע בכל מחזור. NLI אף רושם 'תפילות קבע'. אינו תגלית.",
+  "key_evidence": "'אל מלך יושב על כסא רחמים' — the standard prelude to the Thirteen Attributes in every selichot rite; NLI labels 'fixed prayers'. Boilerplate."
+ },
+ {
+  "card_no": 15,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI גנרי ('פיוט') ו-FJMS ריק. הטורים 'את בני בכורי אנהגהו / ועל מי מנוחות אנהלהו / במישור לים אורידהו' הם חריזה מובחנת (אנהגהו/אנהלהו/אורידהו) מפיוטי שמעון בר' מגס, התואמת למהדורה. עד חדש.",
+  "key_evidence": "Distinctive rhymed piyyut lines (…אנהגהו/אנהלהו/אורידהו) of Shimʿon bar Megas; generic NLI, no FJMS."
+ },
+ {
+  "card_no": 16,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "כמו קלף 12 (אותה יצירה, M:Ytext586191): החפיפה היא סדרת ה'הרחמן הוא...' של ברכת המזון — פורמולה ליטורגית שגורה. NLI ריק, אך התוכן תקני ומצוי בכל הנוסחים; דליפה על בסיס פורמולה משותפת, לא תגלית.",
+  "key_evidence": "Same 'הרחמן הוא…' Birkat HaMazon supplications (work M:Ytext586191, recurring across cards 12/13/16) — fixed liturgical formula; not a discovery."
+ },
+ {
+  "card_no": 17,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI ריק ו-FJMS ריק. הטקסט 'שלא תעלה קנאתנו על לב אדם ולא קנאת אדם תעלה על לבנו... וכל היועץ עלינו... עצה טובה' עם ציטוטי 'יתן לך כלבבך' ו'ותגזר אומר ויקם לך' הוא תפילה מוגדרת נגד קנאה ושנאה, לא ברכת קבע. עד חדש בקטע לא מזוהה, בזהירות (לשון תחינה חלקית שגורה).",
+  "key_evidence": "Defined petitionary prayer against jealousy (framing Ps 20 verses), uncatalogued MS, close match; not standard statutory text."
+ },
+ {
+  "card_no": 18,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI גנרי ('פיוט') ו-FJMS ריק. הדף נושא יוצר עם אקרוסטיכון א-ב מובחן ('אתויי מארץ אדם ולא אל / ביאור מסעתם ביד יקותיאל / גנון והציל...') מיוצרות שלמה סוליימאן לפרשת מסעי, התואם למהדורה. עד חדש.",
+  "key_evidence": "Distinctive alphabetical-acrostic yotzer (א:אתויי, ב:ביאור, ג:גנון…) of Shlomo Suleiman for Masei; generic NLI, no FJMS."
+ },
+ {
+  "card_no": 19,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הדף הוא הלכות עירוב תבשילין בערבית-יהודית, והמהדורה הנטענת (הלכות קצובות) עברית. גרעין החפיפה הוא ברכת העירוב ונוסח ההצהרה הקבוע ('אשר קדשנו... על מצות עירוב, וזה העירוב יהיה לנו ולכל ישראל הדרים במקום הזה מותר לאפות ולבשל...'), פורמולה הלכתית-ליטורגית קבועה. NLI אף רושם 'תפלות'. דליפה על בסיס פורמולה משותפת.",
+  "key_evidence": "Page is Judeo-Arabic eruv-tavshilin halakha; matched core is the fixed eruv berakhah + declaration formula (carried by many works); edition is Hebrew."
+ },
+ {
+  "card_no": 20,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "NLI גנרי ('פיוטים') ו-FJMS ריק. הטורים 'מכל טומאותיכם יום צמתם וסרתם / חוקר לב יקרא כי עדיו שבתם / וזרקתי עליכם מים טהורים וטהרתם' הם חריזה מובחנת (וסרתם/שבתם/וטהרתם/שברתם) של פיוט יצחק אבן גיאת (עד יחיד). עד חדש.",
+  "key_evidence": "Distinctive rhymed piyyut (…וסרתם/שבתם/וטהרתם) of Isaac ibn Ghiyyat, built on Ezek 36:25; rare (1 witness), generic NLI."
+ },
+ {
+  "card_no": 21,
+  "verdict": "CITATION",
+  "confidence": "high",
+  "title_relation": "different_specific",
+  "direction": "page_quotes_work",
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "NLI רושם נכונה 'רשימות ספרים' — הדף הוא רשימת ספרים ערבית-יהודית המצטטת את פתיחת 'אותיות דרבי עקיבא' ('ואבתדאה: אמר עקיבה, אלו עשרים ושתים אותיות...') כדי לזהות את הספר ברשימה. אין זה עד של היצירה אלא ציטוט תמצית-פתיחה; הכיוון: הדף מצטט את היצירה.",
+  "key_evidence": "NLI correctly labels a booklist; the 'match' is the incipit of Otiyot de-R. Akiva quoted to catalog it ('ואבתדאה…'), not a witness of the work."
+ }
+]

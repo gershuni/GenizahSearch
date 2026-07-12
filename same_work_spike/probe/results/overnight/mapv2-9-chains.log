@@ -1,0 +1,6 @@
+
+===== 2026-07-10 21:27:39 chain_pages.py C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db fullv2 accepted_pairs_canonmask =====
+clean substantive pairs: 699,968
+chain-candidate pages: 140,416
+chains (>=2 consecutive parallel pages): 9,336
+wrote C:\Genizahsearch\same_work_spike\probe\results\chains_fullv2.md

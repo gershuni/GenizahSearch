@@ -1,0 +1,33 @@
+clean pairs: 1,330,641
+occurrences: 2,642,808 on 294,417 pages (6s)
+union-find done (26s)
+units (>=2 MSS): 81,498 (30s)
+page lengths: 294,417; stamp-junk pages dropped: 3,077; units after: 81,365 (223s)
+track1 label pages: 72,442 (226s)
+persisted (231s)
+# Shared-passage units — 'full' (accepted_pairs_canonmask)
+
+- units (passage attested in >=2 MSS): **81,365**
+- MS-size distribution: 2:53324 3:14665 4:5620 5:2719 6:1540 7:879 8:589 9:413 10:277 11:223 12:132 13:162 … max 18676
+- confidently labeled: 8,263 · unlabeled/low-conf: **73,101** (the discovery/residue census) · continuum-scale (> 2000 MSS): 1
+- label propagation (high-conf units): 26304 member pages inherit a label their page never matched directly
+
+## Continuum-scale units (chained sequences, NOT single passages)
+- unit 367274: **18,676 MSS** (91,731 pages) — top label candidate 'משה בן מיימון (רמב״ם) — משנה תורה, ספר אהבה' (1150 direct = 1.3% — low confidence); needs sequence-aware decomposition
+
+## Top UNLABELED units by witness count (frequent but unedited)
+- unit 1405798: **167 MSS** (641 pages, med 436 letters) roles {'witness': 572, 'partial': 64, 'embed': 5} libs {'RNL': 619, 'JTS': 9, 'CUL': 8, 'Oxford': 4}
+- unit 59088: **130 MSS** (301 pages, med 396 letters) roles {'witness': 271, 'partial': 29, 'embed': 1} libs {'CUL': 114, 'RNL': 100, 'JTS': 43, 'Oxford': 15}
+- unit 567892: **115 MSS** (201 pages, med 304 letters) roles {'witness': 159, 'partial': 42} libs {'CUL': 80, 'RNL': 71, 'BL': 15, 'JTS': 14}
+- unit 490112: **109 MSS** (164 pages, med 254 letters) roles {'witness': 108, 'partial': 49, 'embed': 7} libs {'RNL': 70, 'CUL': 60, 'JTS': 16, 'BL': 9}
+- unit 1430332: **97 MSS** (628 pages, med 588 letters) roles {'partial': 40, 'witness': 587, 'embed': 1} libs {'RNL': 557, 'Oxford': 38, 'CUL': 12, 'JTS': 11}
+- unit 666840: **76 MSS** (104 pages, med 153 letters) roles {'partial': 47, 'embed': 42, 'witness': 15} libs {'RNL': 93, 'CUL': 9, 'JTS': 2} · label? יוסף אלברדאני — פיוטי מאורה ואהבה (low)
+- unit 568942: **75 MSS** (132 pages, med 300 letters) roles {'witness': 105, 'partial': 24, 'embed': 3} libs {'CUL': 64, 'RNL': 40, 'JTS': 15, 'BL': 8}
+- unit 2201742: **62 MSS** (148 pages, med 400 letters) roles {'witness': 127, 'partial': 21} libs {'RNL': 53, 'CUL': 37, 'JTS': 25, 'Oxford': 20}
+- unit 592464: **60 MSS** (180 pages, med 293 letters) roles {'witness': 107, 'partial': 67, 'embed': 6} libs {'RNL': 173, 'CUL': 5, 'JTS': 2}
+- unit 303006: **57 MSS** (135 pages, med 451 letters) roles {'partial': 41, 'witness': 79, 'embed': 15} libs {'RNL': 100, 'CUL': 23, 'BL': 8, 'Westminster': 2}
+- unit 1648364: **54 MSS** (296 pages, med 680 letters) roles {'partial': 28, 'witness': 261, 'embed': 7} libs {'RNL': 262, 'CUL': 19, 'HUC': 7, 'JTS': 7}
+- unit 645786: **54 MSS** (79 pages, med 233 letters) roles {'witness': 52, 'partial': 25, 'embed': 2} libs {'CUL': 40, 'RNL': 29, 'JTS': 8, 'Oxford': 2}
+- unit 107568: **53 MSS** (246 pages, med 687 letters) roles {'witness': 173, 'partial': 58, 'embed': 15} libs {'RNL': 242, 'CUL': 3, 'AIU': 1} · label? מתרגם לא ידוע — ספר מצוות ללוי בן יפת הלוי, תרגום (low)
+wrote C:\Genizahsearch\same_work_spike\probe\results\units_full.md
+      C:\Genizahsearch\same_work_spike\probe\review\units_full.html (232s)

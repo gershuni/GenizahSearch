@@ -1,0 +1,3 @@
+usage: mapv2_deck.py [-h] [--db DB] [--outdir OUTDIR] [--label LABEL]
+                     [--fresh] [--allow-noshadow] [--pmodel PMODEL]
+mapv2_deck.py: error: unrecognized arguments: המלא (667 אלף עמודים)

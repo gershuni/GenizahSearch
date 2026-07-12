@@ -11,14 +11,14 @@
  "acc_entries": 1457598369,
  "cnt_saturated": 0,
  "candidate_pairs": 56685311,
- "t_total_s": 1786.0,
+ "t_total_s": 1208.9,
  "candidate_unique_pairs": 55090680,
- "verify_s": 179.9,
+ "verify_s": 263.1,
  "rej_short": 0,
  "rej_density": 53027737,
  "span_clipped": 30,
  "accepted_pairs": 3445923,
- "post_s": 2167.5,
+ "post_s": 1847.7,
  "tier1_titles_in_db": 1864,
  "tier1_titles_recall": 0.9657,
  "bh_sys_present": 512,
@@ -31,5 +31,5 @@
  },
  "dup_flagged": 13285,
  "clean_pairs": 3432638,
- "total_s": 4508.9
+ "total_s": 3606.1
 }

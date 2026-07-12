@@ -21,8 +21,14 @@ MAAGARIM = r"C:\Users\gersh\Dropbox\דיקטה\מאגרים\AllTextsOnlyText"
 JA_DIR = r"C:\Users\gersh\Dropbox\דיקטה\JA\ערבית יהודית מעובד\per_doc"
 OUT = r"C:\Genizahsearch\same_work_spike\probe\data\ref_corpus.pkl"
 
-HEADER_RE = re.compile(r'##[^#]*##')
-MESIRAH_RE = re.compile(r'##המסירה:\s*([^#]+)##')
+# Header body may contain a lone '#' ([1050#] date brackets, &#39; entities)
+# but never '##' and never a newline — see results/ref_header_bug.md (fixes
+# 30,677 letters wrongly deleted from ספר הרקמה + 342 leaked location letters;
+# single-# inline text markers #…# preserved byte-for-byte).
+HEADER_RE = re.compile(r'##(?:[^#\n]|#(?!#))*##')
+# Matches BOTH mesirah forms: plain ##המסירה:…## and section-scoped
+# ##סעיף N | המסירה:…## (metadata completeness; stream unaffected).
+MESIRAH_RE = re.compile(r'##[^#]*?המסירה:\s*([^#]+?)\s*##')
 MIN_LETTERS = 150
 
 CANON_CATS = [  # substring of the work/author fields -> coarse category

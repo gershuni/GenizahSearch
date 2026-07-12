@@ -1,0 +1,233 @@
+[
+ {
+  "card_no": 43,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "different_specific",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הכותרת ב-NLI היא \"מעשה תורה\" (חיבור של אמרות מספריות), והקטע המסומן — \"ששה דברים נאמרו בבני אדם, שלושה כבהמה ושלושה כמלאכי השרת\" — הוא אגדה תלמודית מוכרת (חגיגה טז ע\"א, מצויה גם באדר\"נ). הדף (בהקשר ערבי-יהודי הדן בטבעי האדם) מצטט את האגדה, ואבות דרבי נתן מכיל אותה גם — כך שהחפיפה היא מקור משותף ולא עדות לאותו חיבור.",
+  "key_evidence": "Matched span = the aggadah 'ששה דברים נאמרו בבני אדם' shared by Avot de-R. Nathan and Bavli Chagigah 16a; NLI titles the MS מעשה תורה, a different numerical-adage work."
+ },
+ {
+  "card_no": 44,
+  "verdict": "KNOWN-SAME",
+  "confidence": "high",
+  "title_relation": "same_work",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "זיהויי FJMS (מוסדות) כוללים במפורש את הפיוט \"לא בחסד ולא במעשים באנו אליך\" עבור כתב היד הזה, וזהו בדיוק הטקסט המסומן (הסליחה הרגילה: \"אין לנו פה להשיב ולא מצח להרים ראש... לא בחסד ולא במעשים באנו אליך\"). הקטלוג כבר מזהה את היחידה הליטורגית, ולכן אין כאן חידוש.",
+  "key_evidence": "FJMS piyyut list for this MS already names the exact incipit 'לא בחסד ולא במעשים באנו אליך' — the matched supplication."
+ },
+ {
+  "card_no": 45,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הקטע המסומן הוא הברייתא בענייני תפילין — \"כשהוא מניח מניח של יד ואחר כך של ראש, וכשהוא חולץ חולץ של ראש ואחר כך של יד\" (מנחות לו), ולפניה נוסח הבאה ערבי-יהודי \"לקול תאנא\" (=לקולה, תניא). גם תשובת הגאון וגם הדף מצטטים את אותה ברייתא — החפיפה היא במקור התלמודי המשותף, לא בגוף התשובה. הכותרת ב-NLI כללית (\"קבץ בהלכה\").",
+  "key_evidence": "Highlighted span is the tefillin-order baraita (Menachot 36a), headed by JA citation 'לקול תאנא'; both the geonic responsum and the page merely quote it."
+ },
+ {
+  "card_no": 46,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "תוכן הדף הוא ליטורגיה סטנדרטית להוצאת ספר תורה בשני וחמישי (\"אל ארך אפים ורב חסד ואמת... חוסה ה' על ישראל עמך... ונוטל ספר תורה ואומר גדלו לה' אתי\"), נוסח קבע המצוי בכל סידור. אין ref להשוואה, אך זו תפילה סטטוטורית רגילה ולא יחידה נדירה — לכן מקור משותף בלי חידוש.",
+  "key_evidence": "Standard Monday/Thursday Torah-reading liturgy (אל ארך אפים / גדלו ליי); boilerplate in every rite; ref_snippet empty."
+ },
+ {
+  "card_no": 47,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "הדף נושא את הפיוט הפסחי \"אז בפסח גאלת דורשי הוד כבודך... זאת חוקת הפסח טהרת ידידים\" בהתאמה קרובה למהדורה, כולל אותם פסוקי משען (\"וימהר אברהם האהלה... מהרי שלש סאים קמח סולת\"). זהו פיוט ייחודי, לא נוסח קבע; הכותרת ב-NLI כללית (\"הגדה של פסח\"), ולכן זיהוי החיבור המסוים (\"ברכת המזון לפסח\") הוא ידע חדש.",
+  "key_evidence": "Distinctive Passover piyyut 'אז בפסח גאלת / זאת חוקת הפסח' closely matches the edition; NLI only 'הגדה של פסח', no FJMS ID."
+ },
+ {
+  "card_no": 48,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הקטע הוא \"אבינו מלכנו\" — ליטניית הימים הנוראים הרגילה (\"אין לנו מלך אלא אתה... עשה עמנו למען שמך... בטל מעלינו כל גזירות קשות ורעות\"). זהו נוסח קבע שבכל מחזור ולא יחידה ייחודית, ולכן מקור משותף בלי חידוש.",
+  "key_evidence": "Matched text = standard 'Avinu Malkenu' High-Holy-Day litany — boilerplate in every machzor."
+ },
+ {
+  "card_no": 49,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הדף מכיל טקסט של משנת שבת (\"חלבי שבת קרבין ביום הכפורים... ר' עקיבא... כל כתבי הקדש מצילין אותן מפני הדליקה\"), ואילו החיבור הנטען \"ספר הפתרון, תרגום\" הוא פירוש/תרגום המצטט אותה משנה (במהדורה סימוני למה עם #). שני הצדדים נשענים על אותו קטע משנה — מקור משותף; הדף עצמו אינו נושא תרגום ולכן אינו ספר הפתרון.",
+  "key_evidence": "Page carries raw Mishnah Shabbat (חלבי שבת / כל כתבי הקדש); the pitron edition lemmatizes and comments on the same Mishnah — shared Talmudic source."
+ },
+ {
+  "card_no": 50,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "הדף הוא כתב-יד דיואן הנושא שיר של ריה\"ל \"יאור יואר אשר דמה לנחש עקלתון ואורחותיו יעקל\" בהתאמה כמעט מלאה, כולל הכותרת הערבית-יהודית לפני השיר (\"ענד פראקה אבו עלי בן... אלדאמיאטי\"). הכותרת ב-NLI כללית לחלוטין (\"שירים\") ואין עדים אחרים במפקד (0) — עדות חדשה של שיר נדיר.",
+  "key_evidence": "Diwan MS carries Yehuda HaLevi's specific poem incl. its JA superscription; NLI only 'שירים'; n_work_witnesses_tierA=0 (rare)."
+ },
+ {
+  "card_no": 51,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "הדף נושא יוצר לשבועות של שלמה סולימאן (\"שמעו זאת בית יעקב... יום זה להנחילי תורת מחמדי... זכרו תורת משה עבדי... לא תרצח אמצו להודיע\") בהתאמה קרובה למהדורה. זהו פיוט אמנותי ייחודי (סיני ועשרת הדברות), לא נוסח קבע; הכותרת ב-NLI כללית (\"סדור קטע\"), ולכן זיהוי הפיוט הוא ידע חדש.",
+  "key_evidence": "Distinctive named-author Shavuot yotzer (Shlomo Suleiman) matches the edition's stanzas; NLI generic 'סדור (קטע)'."
+ },
+ {
+  "card_no": 52,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "הדף נושא את הליטניה לשמחת תורה \"שמחו ... בשמחת תורה\" (פדויים, צדיקים, קדושים, רחומים, שלמים, תמימים) בסדר הכינויים התואם למהדורה. הכותרת ב-NLI כללית (\"פיוטים\"). ייתכן שהפזמון החוזר משותף לכמה פיוטים, ולכן ביטחון בינוני, אך הרצף הספציפי תואם — כנראה עדות חדשה של הפיוט המסוים.",
+  "key_evidence": "Acrostic 'שמחו X בשמחת תורה' litany matches the edition's epithet sequence; NLI generic 'פיוטים'; refrain-type form leaves some doubt."
+ },
+ {
+  "card_no": 53,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הקטע הוא ברכות קבע — \"שהחיינו וקימנו והגיענו לזמן הזה\", \"בורא פרי הגפן\", \"אשר קדשנו במצותיו וצונו לאכול המצות\" וברכת הגומל (\"גומל לחייבים טובות שגמלני כל טוב\"). זהו נוסח שבכל הגדה/סידור, ואין כאן יחידה ייחודית אלא בואילרפלייט ליטורגי.",
+  "key_evidence": "Standard blessings (shehecheyanu, borei pri hagafen, al achilat matzah, hagomel) — statutory boilerplate every Haggadah carries."
+ },
+ {
+  "card_no": 54,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הקטע המסומן הוא פסוקי תהילים — \"הושיעה את עמך וברך את נחלתך ורעם ונשאם עד העולם\" (תה' כח:ט) ו\"ברוך ה' לעולם אמן ואמן\" (תה' פט:נג), לצד \"מזמור לדוד הבו לה' בני אלים\" (תה' כט). גם הדף וגם ה\"בקשה\" משבצים אותם פסוקים — דליפה של פסוקי מקרא משותפים.",
+  "key_evidence": "Matched text = Psalm verses (28:9, 89:53, Ps 29 opening) both texts embed — classic shared-Bible-verse leak."
+ },
+ {
+  "card_no": 55,
+  "verdict": "CITATION",
+  "confidence": "low",
+  "title_relation": "known_quoter",
+  "direction": "page_quotes_work",
+  "novelty": false,
+  "name_equation": "רשימות הלכה קראית ↔ מצטטות את ספר הדינים לבנימין אלנהאונדי",
+  "reasoning_he": "הכותרת ב-NLI (\"רשימות על הלכות של קראים\") תואמת את הז'אנר הקראי, והדף עצמו מזכיר \"ספר דינים\" בגוף שלישי (\"...שמורה בספר דינים\") ואז מביא את הדין (\"המוציא שטר חוב על חבירו... כל עיר ומדינה הכתובה בשטר גובה מעות של אותה מדינה\"). נראה שהדף הוא חיבור/רשימות קראיות המצטטות את ספר הדינים ולא עד ישיר שלו; ה-HTR משובש והזיהוי אינו ודאי.",
+  "key_evidence": "Page names 'ספר דינים' in the third person then reproduces its ruling — reads as a Karaite digest citing al-Nahawendi, not a direct witness (HTR garbled → low confidence)."
+ },
+ {
+  "card_no": 56,
+  "verdict": "KNOWN-SAME",
+  "confidence": "high",
+  "title_relation": "name_variant",
+  "direction": null,
+  "novelty": false,
+  "name_equation": "תשובות הגאונים ↔ תשובות רב שרירא ורב האיי גאון",
+  "reasoning_he": "הכותרת ב-NLI \"תשובות הגאונים\" תואמת את החיבור הנטען — תשובות רב שרירא ורב האיי; המהדורה נושאת כותרת \"לרבנו שרירא ורבנו האיי ז\"ל\", והתוכן (\"כגדי מסנקי... שילכדו בטיט וברפש\") תואם. הקטלוג כבר מזהה זאת כתשובות הגאונים, אין חידוש (לכל היותר חידוד לתשובה המסוימת אצל לוין).",
+  "key_evidence": "NLI 'תשובות הגאונים' = the claimed Sherira/Hai responsa; the edition's own header names them and the content aligns."
+ },
+ {
+  "card_no": 57,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "different_specific",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "הקטע הוא הדיון הפילוסופי הייחודי של דאוד אלמֻקַמַّץ בששת מובני \"אחד\" (\"אסם אלואחד יקע עלי ו אוגה: אלבסאטה, אלתרכיב, אלגנס, אלנוע, אלעדד, לא מתאל לה\") בהתאמה קרובה וארוכה למהדורת \"עשרים מאמרים\". הכותרת ב-NLI היא \"ספר המצוות\" — חיבור אחר, כך שההתאמה מתקנת/משלימה את הקטלוג. ייתכן שמדובר בחיבור-מצוות/תאולוגיה המשלב את הקטע, ולכן ביטחון בינוני.",
+  "key_evidence": "Distinctive al-Muqammiṣ 'six senses of one' passage matches the Twenty Chapters edition closely; NLI mislabels the MS 'ספר המצוות' (a different work)."
+ },
+ {
+  "card_no": 58,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": "פרוש שיר השירים (ערבי-יהודי) ↔ תפסיר רס״ג לשיר השירים",
+  "reasoning_he": "הדף הוא תרגום-פירוש ערבי-יהודי לשיר השירים (ג:ה-ז: \"אם תעירו ואם תעוררו\", \"מי זאת עולה מן המדבר כתימרות עשן מקוטרת מור ולבונה\") בהתאמה קרובה למהדורת תפסיר רס\"ג, כולל הקריאה האלגורית ההיסטורית (\"אשאר אלא צעודהם מן אלגלות\"). הכותרת ב-NLI כללית (\"פרוש שיר השירים\") בלי שם המחבר, ו-10 דפים באותו כ\"י תואמים ואין עדים במפקד — עדות חדשה משמעותית.",
+  "key_evidence": "Close JA match to Saadia's Song of Songs tafsir (Song 3:5-7 rendering + galut allegory); NLI generic 'commentary'; 10 matched pages, 0 census witnesses."
+ },
+ {
+  "card_no": 59,
+  "verdict": "DISCOVERY",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "הדף עוסק בהשוואת מילים עבריות לתרגום הארמי ולערבית (\"ותפסירה... תרג'ום...\") בשיטה הפילולוגית האופיינית לאיגרת יהודה אבן קריש, עם אותן דוגמאות מקרא (\"ואלו חיה אלף שנים\", \"ואלו לעבדים ולשפחות\"). הכותרת ב-NLI כללית (\"מלון עברי\"), ו-3 דפים בכ\"י תואמים. ההתאמה קצרה ורועשת (HTR), ולכן ביטחון בינוני.",
+  "key_evidence": "Comparative Hebrew↔Targum↔Arabic philology (ibn Quraysh's Risāla method) with matching exempla; NLI generic 'Hebrew lexicon'; 3 pages, but short/noisy span (dens 0.46)."
+ },
+ {
+  "card_no": 60,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "medium",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הקטע הוא ההשוואה המדרשית בין עשרת הדברות (סיני) למקבילות בפרשת קדושים (ויקרא יט): \"בסיני 'לא תשא' / כאן 'ולא תשבעו בשמי לשקר'... 'זכור את השבת' / 'את שבתותי תשמורו'... 'כבד את אביך' / 'איש אמו ואביו תיראו'\". זו מסורת מדרשית מוכרת (ויקרא רבה). הדף הוא פירוש ערבי-יהודי (מסגרת \"וקאל... ההנא...\") הנשען על אותה מסורת יחד עם המדרש הנטען — מקור משותף.",
+  "key_evidence": "Both reproduce the well-known midrash pairing the Decalogue with Leviticus 19 (Vayikra Rabbah tradition); page is a JA commentary framing it 'וקאל...ההנא'."
+ },
+ {
+  "card_no": 61,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": "הדאיה אלקאר ↔ הוראת הקורא (חיבור בטעמי המקרא)",
+  "reasoning_he": "הדף הוא חיבור ערבי-יהודי על טעמי המקרא (זרקא, תביר, תלשא, טרס, פזר, יתיב ו\"משרתיהם\") עם אותן דוגמאות מקרא כמו המהדורה (\"כל הבא אל המקום אשר נפל שם עשה-אל\", \"יוציאו את עצמות מלכי יהודה\", \"וישלח חזקיהו... לכישה\"), ואף מזכיר \"הדאיה אלקאר\" (=הוראת הקורא). ההתאמה מצוינת (p=1.0, dens 0.377, 374 אותיות), הכותרת ב-NLI כללית (\"חבור בדקדוק עברי\"), ו-2 דפים תואמים — זיהוי חיבור הטעמים הוא ידע חדש.",
+  "key_evidence": "Excellent match (dens 0.377, 374 letters) to a JA te'amim treatise (accents + their 'servants', same biblical exemplars); page cites 'הדאיה אלקאר' = Hidāyat al-Qāriʾ; NLI generic 'grammar work'."
+ },
+ {
+  "card_no": 62,
+  "verdict": "SHARED-SOURCE",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": false,
+  "name_equation": null,
+  "reasoning_he": "הקטע המסומן הוא וידוי הכהן הגדול (\"אנא השם חטאתי עויתי פשעתי לפניך אני וביתי... כפר נא\") ותיאור העבודה מ**משנה יומא ג,ח** (במהדורה מסומן במפורש \"משנה יומא ג,ח\") עם \"ברוך שם כבוד מלכותו לעולם ועד\". זהו גרעין משנתי/ליטורגי המשותף לכל סדרי העבודה ולמחזורים; המרווח הזעיר בין 2 מתחרים (0.0059) מאשר שהקטע אינו ייחודי לרס\"ג — הדף בפרוזה משנתית ואילו רס\"ג פייטני.",
+  "key_evidence": "Matched span = High Priest's confession + Temple service from Mishnah Yoma 3:8 (explicitly tagged in the edition), shared by every Seder Avodah; razor-thin margin (0.0059) over 2 competitors confirms non-distinctiveness."
+ },
+ {
+  "card_no": 63,
+  "verdict": "DISCOVERY",
+  "confidence": "high",
+  "title_relation": "generic_or_absent",
+  "direction": null,
+  "novelty": true,
+  "name_equation": null,
+  "reasoning_he": "הדף הוא תרגום ארמי מרחיב לעשרת הדברות (שמות כ) התואם באורך רב (685 אותיות) לתרגום המיוחס ליונתן, עם ההרחבות האופייניות (\"עמי בית ישראל\", \"מדכר חובי אבהת רשיען על בנין מרדין על דר תליתאי ועל דר רביעאי\"). כותרת NLI ריקה לגמרי — כתב יד לא מזוהה. הזיהוי כתרגום (פסאודו-)יונתן על שמות הוא ידע חדש; יש להיזהר בהבחנה בין יונתן לתרגום ארץ-ישראלי אחר (מרווח דק, מתחרה אחד).",
+  "key_evidence": "Long (685-letter) close match to Targum Pseudo-Jonathan Exodus 20 with its signature expansions; NLI title is empty (uncatalogued MS); thin margin over 1 competing Targum recension."
+ }
+]

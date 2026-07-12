@@ -1,0 +1,5 @@
+maagarim: 5274 works (2959 skipped <150 letters), 74,099,884 letters (168s)
+JA: 89 works, total letters 86,850,404
+categories: {'Maagarim': 5182, 'Bible': 1, 'Mishnah': 1, 'Tosefta': 1, 'Bavli': 38, 'Yerushalmi': 51, 'JA': 89}
+top genres: [('פיוט ותפילה', 2026), ('שירת ספרד', 1117), ('ספרות הגאונים', 570), ('איגרות', 510), ('תלמוד ומדרש', 387), ('עיון, עיתונות ופובליציסטיקה', 184), ('ספרות יפה', 134), ('ערבית יהודית', 89), ('תעודות מדבר יהודה', 82), ('ספרות הקראים', 62)]
+wrote C:\Genizahsearch\same_work_spike\probe\data\ref_corpus.pkl (166 MB) in 179s

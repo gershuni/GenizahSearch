@@ -1,0 +1,38 @@
+P model: ../data/p_calibration_pilot.json meta=pilot pooled bins=[40, 60, 80, 100, 150, 200, 300] margin bands=[] singleton bins=[]
+ref-side canonical masks: 522 works (C:\Genizahsearch\same_work_spike\probe\data\ref_canon_masks_v2.json)
+ref index: 632,847 grams canonical-masked
+ref: 5421 works, 28,509 segments, 35,149,989 postings (df-dropped 147,212 codes) (6s)
+fgp_disagree sys_ids: 0
+pages: 139,694 (31s)
+  batch 1/18: A+=3,222 B+=22,409 totA=3,222 totB=22,409 cand=12,346,289 (217s)
+  batch 2/18: A+=10,795 B+=143,318 totA=14,017 totB=165,727 cand=26,403,754 (445s)
+  batch 3/18: A+=5,828 B+=71,912 totA=19,845 totB=237,639 cand=35,327,776 (599s)
+  batch 4/18: A+=9,202 B+=113,571 totA=29,047 totB=351,210 cand=44,879,519 (751s)
+  batch 5/18: A+=7,811 B+=90,810 totA=36,858 totB=442,020 cand=55,347,165 (921s)
+  batch 6/18: A+=3,689 B+=23,777 totA=40,547 totB=465,797 cand=64,552,958 (1091s)
+  batch 7/18: A+=4,484 B+=19,024 totA=45,031 totB=484,821 cand=72,356,307 (1225s)
+  batch 8/18: A+=5,417 B+=33,277 totA=50,448 totB=518,098 cand=79,995,740 (1353s)
+  batch 9/18: A+=2,522 B+=12,034 totA=52,970 totB=530,132 cand=84,741,241 (1432s)
+  batch 10/18: A+=5,063 B+=30,207 totA=58,033 totB=560,339 cand=89,382,875 (1502s)
+  batch 11/18: A+=2,875 B+=13,462 totA=60,908 totB=573,801 cand=93,470,594 (1556s)
+  batch 12/18: A+=2,393 B+=15,498 totA=63,301 totB=589,299 cand=96,439,269 (1596s)
+  batch 13/18: A+=1,219 B+=7,091 totA=64,520 totB=596,390 cand=99,242,053 (1636s)
+  batch 14/18: A+=3,308 B+=16,252 totA=67,828 totB=612,642 cand=102,859,183 (1688s)
+  batch 15/18: A+=2,344 B+=10,904 totA=70,172 totB=623,546 cand=106,732,693 (1742s)
+  batch 16/18: A+=4,464 B+=12,417 totA=74,636 totB=635,963 cand=111,533,941 (1808s)
+  batch 17/18: A+=2,526 B+=13,366 totA=77,162 totB=649,329 cand=115,958,717 (1868s)
+  batch 18/18: A+=1,713 B+=7,876 totA=78,875 totB=657,205 cand=118,644,811 (1919s)
+# Track-1 v2 — tier A/B identification ('smoke', 139,694 pages)
+
+- reference: 5,421 works (v2, header-fix + REF-2), canonical masks: 522 works
+- WIDE verification cutoff: 0.55; production boundary unchanged (0.28/<100, 0.35)
+- **tier A rows: 78,875** on 45,155 pages (track1_matches — census path, shadowing downstream)
+- **tier B rows: 657,205** on 58,669 pages (track1_candidates — P-stamped, census never reads)
+- tier-B storage floor P >= 0.05; dropped-below-floor counts (NO silent caps): {'tierB_dropped_singleton': 14244, 'tierB_dropped_not_best': 95766, 'tierB_dropped_m_0_003': 4257, 'tierB_dropped_m_003_010': 1808, 'tierB_dropped_m_ge_010': 462}
+- margin-band histogram (stored tier B): {'m_003_010': 26492, 'm_0_003': 36373, 'm_ge_010': 5919, 'not_best': 552755, 'singleton': 35666}
+- P histogram (stored tier B): {0.1: 160416, 0.2: 33173, 0.3: 39740, 0.4: 15439, 0.5: 51692, 0.6: 28158, 0.7: 61776, 0.8: 82642, 0.9: 163928, 1.0: 20241}
+- pages merge-flagged (excluded from tier A): 0; weak two-work flags (tier A kept): 5,400
+- engine: hits 1,589,242,472, hull candidates 118,644,811, rej_short 0, rej_wide 117,306,380
+- total 33 min
+
+wrote C:\Genizahsearch\same_work_spike\probe\results\track1_smoke_report.md

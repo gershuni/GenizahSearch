@@ -1,0 +1,58 @@
+transcription sys_ids: FGP 24668, PGP 7126, union 27356 (in corpus: 23445)
+RESUME: 800 sys_ids already done (473 substituted)
+phase B: transcription substitution ...
+  sys 1300/27356 | substituted 579 (fgp 501 / pgp 78) | 0.8 sys/s | ETA 575 min
+  sys 1800/27356 | substituted 892 (fgp 659 / pgp 233) | 1.3 sys/s | ETA 325 min
+  sys 2300/27356 | substituted 1474 (fgp 1148 / pgp 326) | 1.8 sys/s | ETA 235 min
+  sys 2800/27356 | substituted 1861 (fgp 1451 / pgp 410) | 2.2 sys/s | ETA 186 min
+  sys 3300/27356 | substituted 2305 (fgp 1838 / pgp 467) | 2.3 sys/s | ETA 174 min
+  sys 3800/27356 | substituted 3121 (fgp 2644 / pgp 477) | 1.8 sys/s | ETA 215 min
+  sys 4300/27356 | substituted 4002 (fgp 3498 / pgp 504) | 2.1 sys/s | ETA 185 min
+  sys 4800/27356 | substituted 4564 (fgp 3863 / pgp 701) | 2.3 sys/s | ETA 163 min
+  sys 5300/27356 | substituted 5005 (fgp 3960 / pgp 1045) | 2.6 sys/s | ETA 142 min
+  sys 5800/27356 | substituted 5509 (fgp 4101 / pgp 1408) | 2.8 sys/s | ETA 126 min
+  sys 6300/27356 | substituted 5994 (fgp 4217 / pgp 1777) | 3.1 sys/s | ETA 114 min
+  sys 6800/27356 | substituted 6387 (fgp 4378 / pgp 2009) | 3.2 sys/s | ETA 106 min
+  sys 7300/27356 | substituted 6517 (fgp 4483 / pgp 2034) | 3.5 sys/s | ETA 96 min
+  sys 7800/27356 | substituted 6857 (fgp 4658 / pgp 2199) | 3.6 sys/s | ETA 90 min
+  sys 8300/27356 | substituted 7214 (fgp 4759 / pgp 2455) | 3.7 sys/s | ETA 86 min
+  sys 8800/27356 | substituted 7638 (fgp 5065 / pgp 2573) | 3.8 sys/s | ETA 82 min
+  sys 9300/27356 | substituted 7882 (fgp 5274 / pgp 2608) | 4.0 sys/s | ETA 75 min
+  sys 9800/27356 | substituted 8145 (fgp 5467 / pgp 2678) | 4.2 sys/s | ETA 69 min
+  sys 10300/27356 | substituted 8542 (fgp 5713 / pgp 2829) | 4.4 sys/s | ETA 64 min
+  sys 10800/27356 | substituted 8779 (fgp 5949 / pgp 2830) | 4.7 sys/s | ETA 59 min
+  sys 11300/27356 | substituted 8885 (fgp 6054 / pgp 2831) | 4.9 sys/s | ETA 55 min
+  sys 11800/27356 | substituted 9052 (fgp 6221 / pgp 2831) | 5.1 sys/s | ETA 51 min
+  sys 12300/27356 | substituted 9192 (fgp 6361 / pgp 2831) | 5.3 sys/s | ETA 47 min
+  sys 12800/27356 | substituted 9358 (fgp 6527 / pgp 2831) | 5.6 sys/s | ETA 43 min
+  sys 13300/27356 | substituted 9497 (fgp 6666 / pgp 2831) | 5.8 sys/s | ETA 40 min
+  sys 13800/27356 | substituted 9625 (fgp 6794 / pgp 2831) | 6.0 sys/s | ETA 37 min
+  sys 14300/27356 | substituted 9751 (fgp 6914 / pgp 2837) | 6.3 sys/s | ETA 35 min
+  sys 14800/27356 | substituted 9924 (fgp 6987 / pgp 2937) | 6.5 sys/s | ETA 32 min
+  sys 15300/27356 | substituted 10272 (fgp 7185 / pgp 3087) | 6.6 sys/s | ETA 30 min
+  sys 15800/27356 | substituted 10521 (fgp 7284 / pgp 3237) | 6.8 sys/s | ETA 28 min
+  sys 16300/27356 | substituted 11051 (fgp 7813 / pgp 3238) | 7.0 sys/s | ETA 26 min
+  sys 16800/27356 | substituted 11522 (fgp 8249 / pgp 3273) | 7.2 sys/s | ETA 24 min
+  sys 17300/27356 | substituted 12044 (fgp 8771 / pgp 3273) | 7.4 sys/s | ETA 23 min
+  sys 17800/27356 | substituted 12532 (fgp 9259 / pgp 3273) | 7.7 sys/s | ETA 21 min
+  sys 18300/27356 | substituted 12981 (fgp 9681 / pgp 3300) | 7.9 sys/s | ETA 19 min
+  sys 18800/27356 | substituted 13359 (fgp 9987 / pgp 3372) | 8.1 sys/s | ETA 18 min
+  sys 19300/27356 | substituted 13759 (fgp 10385 / pgp 3374) | 8.3 sys/s | ETA 16 min
+  sys 19800/27356 | substituted 14131 (fgp 10753 / pgp 3378) | 8.5 sys/s | ETA 15 min
+  sys 20300/27356 | substituted 14381 (fgp 10987 / pgp 3394) | 8.7 sys/s | ETA 14 min
+  sys 20800/27356 | substituted 14727 (fgp 11231 / pgp 3496) | 8.8 sys/s | ETA 12 min
+  sys 21300/27356 | substituted 15296 (fgp 11724 / pgp 3572) | 8.8 sys/s | ETA 11 min
+  sys 21800/27356 | substituted 15620 (fgp 12046 / pgp 3574) | 9.0 sys/s | ETA 10 min
+  sys 22300/27356 | substituted 15862 (fgp 12196 / pgp 3666) | 9.2 sys/s | ETA 9 min
+  sys 22800/27356 | substituted 16218 (fgp 12540 / pgp 3678) | 9.3 sys/s | ETA 8 min
+  sys 23300/27356 | substituted 16304 (fgp 12587 / pgp 3717) | 9.6 sys/s | ETA 7 min
+  sys 23800/27356 | substituted 16540 (fgp 12783 / pgp 3757) | 9.7 sys/s | ETA 6 min
+  sys 24300/27356 | substituted 17048 (fgp 13290 / pgp 3758) | 9.9 sys/s | ETA 5 min
+  sys 24800/27356 | substituted 17493 (fgp 13692 / pgp 3801) | 10.1 sys/s | ETA 4 min
+  sys 25300/27356 | substituted 17851 (fgp 14037 / pgp 3814) | 10.3 sys/s | ETA 3 min
+  sys 25800/27356 | substituted 18062 (fgp 14233 / pgp 3829) | 10.4 sys/s | ETA 2 min
+  sys 26300/27356 | substituted 18241 (fgp 14396 / pgp 3845) | 10.6 sys/s | ETA 2 min
+  sys 26800/27356 | substituted 18532 (fgp 14621 / pgp 3911) | 10.7 sys/s | ETA 1 min
+  sys 27300/27356 | substituted 18946 (fgp 14899 / pgp 4047) | 10.8 sys/s | ETA 0 min
+report: C:\Genizahsearch\same_work_spike\probe\results\stage0_report.md
+DONE: C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db (40.7 min total)

@@ -89,15 +89,21 @@ def log(msg):
 # reference index (built ONCE from ref_corpus.pkl -- no corpus scan)
 # =====================================================================
 
-def build_reference():
+def build_reference(ref_path=None, masks_path=None):
+    """Defaults preserve the FRAG-1 pilot state (ref_corpus.pkl v1 masks);
+    FINAL CAL-1 passes the frozen v2 paths (ref_corpus_v2.pkl +
+    ref_canon_masks_v2.json) so calibration queries the EXACT deployed
+    index (Codex BLOCKER 1)."""
+    ref_path = ref_path or REF
+    masks_path = masks_path or MASKS
     t0 = time.time()
-    works = pickle.load(open(REF, 'rb'))
+    works = pickle.load(open(ref_path, 'rb'))
     canon_masks = None
     masks_info = "absent"
-    if os.path.exists(MASKS):
-        canon_masks = json.load(open(MASKS, encoding='utf-8'))
+    if os.path.exists(masks_path):
+        canon_masks = json.load(open(masks_path, encoding='utf-8'))
         masks_info = (f"{len(canon_masks)} works, mtime="
-                       f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(MASKS)))}")
+                       f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(masks_path)))}")
     ref_tuple = build_ref_index(works, canon_masks)
     seg_streams, seg_work, seg_off, codes_f, seg_f, pos_f, df_dropped = ref_tuple
     log(f"ref index: {len(works):,} works, {len(seg_streams):,} segments, "

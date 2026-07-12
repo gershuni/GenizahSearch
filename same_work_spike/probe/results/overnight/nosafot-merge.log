@@ -1,0 +1,8 @@
+[harvest PID exited Fri Jul 10 12:08:18     2026]
+Traceback (most recent call last):
+  File "C:\Genizahsearch\same_work_spike\probe\scripts\nosafot_merge_and_measure.py", line 296, in <module>
+    main()
+  File "C:\Genizahsearch\same_work_spike\probe\scripts\nosafot_merge_and_measure.py", line 72, in main
+    nos_works = json.load(open(NOS, encoding='utf-8'))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Genizahsearch\\same_work_spike\\probe\\scripts\\..\\data\\mesirot_nosafot.json'

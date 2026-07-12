@@ -1,0 +1,4 @@
+records streamed: 948549 in 89s
+stage-0 drops: {'short': 231679, 'target_sheet': 9007, 'dup_fl': 40452}
+kept: 667411 (tags: {'all': 664843, 'tier1t': 1357, 'bh': 1211})
+TOTAL pages in fullcorpus.db: 667411

@@ -1,0 +1,12 @@
+ref index: 574,324 grams canonical-masked
+[04:37:59] ref index: 5,363 works, 27,739 segments, 34,466,845 postings, canon_masks=503 works, mtime=2026-07-09 04:13 (6s)
+[04:37:59] page-length cache loaded: 667,411 pages (C:\Genizahsearch\same_work_spike\probe\data\frag1_page_len_cache.pkl)
+[04:38:03] live track1 page_ids: 176,444; canonmask-paired page_ids: 304,143 (shadowed_by gate: applied)
+[04:38:08] candidate pool (confident full-page rows): 38,537 rows, by cat: {'Mishnah': 129, 'Maagarim': 4526, 'Bible': 31758, 'JA': 1905, 'Bavli': 172, 'Yerushalmi': 41, 'Tosefta': 6}
+[04:38:09] sampled 500 full-page witnesses (1s); shortfalls: none
+[04:38:34] truncation query batch: 10,500 crops (26s)
+[04:38:35] unidentified-page pools: lt100=16,420, b100_200=54,756; sampled 300
+[04:38:36] failure-mode diagnosis: 300 pages (1s); histogram: {'no_reference_covers_it': 247, 'density_fail': 50, 'ambiguous': 3}
+[04:38:36] wrote C:\Genizahsearch\same_work_spike\probe\results\frag1_truncation.md
+[04:38:36] wrote C:\Genizahsearch\same_work_spike\probe\results\frag1_curve_data.json
+[04:38:36] TOTAL: 0.7 min

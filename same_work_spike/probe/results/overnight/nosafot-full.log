@@ -1,0 +1,36 @@
+building shelfmark indexes from libraries.csv ...
+  255,709 rows -> 747,236 exact keys (12s)
+scope: 738 works (tier new?/new?known, M:Ytext ids)
+checkpoint: 50 works already harvested; resuming
+  [ 100/738] ok=100 fail=0 new_this_run=50 (315s)
+  [ 150/738] ok=150 fail=0 new_this_run=100 (616s)
+  [ 200/738] ok=200 fail=0 new_this_run=150 (909s)
+  [ 250/738] ok=250 fail=0 new_this_run=200 (1183s)
+  [ 300/738] ok=300 fail=0 new_this_run=250 (1473s)
+  [ 350/738] ok=350 fail=0 new_this_run=300 (1814s)
+  [ 400/738] ok=400 fail=0 new_this_run=350 (2135s)
+  [ 450/738] ok=450 fail=0 new_this_run=400 (2399s)
+  [ 500/738] ok=500 fail=0 new_this_run=450 (2605s)
+  [ 550/738] ok=550 fail=0 new_this_run=500 (2859s)
+  [ 600/738] ok=600 fail=0 new_this_run=550 (3090s)
+  [ 650/738] ok=650 fail=0 new_this_run=600 (3355s)
+  [ 700/738] ok=700 fail=0 new_this_run=650 (3620s)
+  [ 738/738] ok=738 fail=0 new_this_run=688 (3819s)
+
+wrote C:\Genizahsearch\same_work_spike\probe\data\mesirot_nosafot.json (738 works)
+  ok=738 fail=0
+  works whose nosafot tab = additional manuscripts: 427
+  total nosafot raw strings: 2,100
+  total nosafot sys_id matches: 1,429
+done in 3819s
+[harvest done, running merge]
+wrote C:\Genizahsearch\same_work_spike\probe\data\known_witnesses_all.json (15,072 rows)
+queue rows: 1,168
+(a) used_mesirah alone : {'none': 1107, 'high': 59, 'low': 2}
+(b) nosafot alone      : {'none': 1032, 'high': 136}
+(c) union              : {'none': 971, 'high': 195, 'low': 2}
+(d) + msirot_web bonus : {'none': 950, 'high': 215, 'low': 3}
+INCREMENTAL high-conf demotions from nosafot beyond used-mesirah: 136
+  (+ msirot_web too: 156 beyond used-mesirah)
+wrote C:\Genizahsearch\same_work_spike\probe\results\nosafot_harvest.md
+done in 0.6s

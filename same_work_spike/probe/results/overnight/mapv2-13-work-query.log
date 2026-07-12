@@ -1,0 +1,91 @@
+
+===== 2026-07-10 23:08:34 work_query.py C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db fullv2 --census-db C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db --ref C:\Genizahsearch\same_work_spike\probe\data\ref_corpus_v2.pkl --masks C:\Genizahsearch\same_work_spike\probe\data\ref_canon_masks_v2.json =====
+resolved cohort (fullcorpus.db census, MIN_LETTERS=200): 38 works
+query set: 38 works (8,262,980 reference letters)
+  [      big]   4.8% ms= 20 pages= 42 letters= 141173 J:19-ריצ-גיאת-קהלת-פירוש-ספר-הפרישות רי"צ גיאת, קהלת פירוש (ספר הפרישות)
+  [      big]   5.4% ms= 31 pages= 56 letters=  19809 M:Ytext924002 אלעזר החזן — קדושתות י״ח לראשי חדשים
+  [      big]   5.9% ms= 20 pages= 34 letters=  35392 M:Ytext903005 יניי — קדושתות לשבתות השנה, דברים
+  [      big]   6.9% ms= 20 pages= 29 letters= 188055 M:Ytext681000 מחבר לא ידוע — מדרש ״אגור״
+  [      big]   7.4% ms= 22 pages= 27 letters= 148182 M:Ytext95000 מחבר לא ידוע — איכה רבה
+  [      big]   9.1% ms= 27 pages= 66 letters= 656871 J:34-רמבם-פרוש-המשנה-ו-סדר-טהרות רמב"ם, פרוש המשנה ו. סדר טהרות
+  [      big]  12.1% ms= 27 pages=289 letters= 949357 M:Ytext665000 מתרגם לא ידוע — ספר מצוות ללוי בן יפת הלוי, תרגום
+  [      big]  15.0% ms= 20 pages= 40 letters=  43379 M:Ytext903003 יניי — קדושתות לשבתות השנה, ויקרא
+  [      big]  15.5% ms= 26 pages= 84 letters=  38274 J:61-רשבח-עשר-שאלות-לרשבח רשב"ח, עשר שאלות לרשב"ח
+  [      big]  16.5% ms= 45 pages= 91 letters= 559869 J:54-סעדיה-בן-דוד-מדרש-הבאור-א סעדיה בן דוד, מדרש הבאור א
+  [      big]  18.5% ms= 62 pages= 81 letters= 400032 M:Ytext613000 מחבר לא ידוע — והזהיר
+  [      big]  18.7% ms= 52 pages=139 letters= 290331 J:53-ראבש-מלכים-א-פירוש ראב"ש, מלכים א פירוש
+  [      big]  19.0% ms= 33 pages= 42 letters= 253982 M:Ytext24000 מחבר לא ידוע — ויקרא רבה
+  [      big]  19.2% ms= 33 pages= 52 letters= 214039 M:Ytext638000 מחבר לא ידוע — שיר השירים רבה
+  [      big]  19.7% ms= 37 pages= 61 letters= 160533 M:Ytext480001 נטרונאי גאון בר׳ הילאי — תשובות, ברודי
+  [    short]  20.0% ms= 10 pages= 10 letters=   1142 M:Ytext572006 מחבר לא ידוע — הגדה של פסח, ברכת החתימה
+  [      big]  20.8% ms= 34 pages= 96 letters= 223168 J:28-רמבם-פרוש-המשנה-ג-סדר-נשים רמב"ם, פרוש המשנה ג. סדר נשים
+  [      big]  21.1% ms= 25 pages= 38 letters=  16029 M:Ytext975005 שלמה סולימן — יוצרות לשבתות השנה, דברים
+  [      big]  21.4% ms= 22 pages= 28 letters=  43150 M:Ytext537000 מחבר לא ידוע — מתיבות
+  [      big]  21.5% ms= 30 pages= 65 letters= 318163 M:Ytext702000 מחבר לא ידוע — יוסיפון
+  [      big]  22.2% ms= 27 pages= 27 letters=   7243 M:Ytext71019 מחבר לא ידוע — תפילת עמידה, ברכות אחרונות
+  [short,big]  23.5% ms= 33 pages= 34 letters=   1070 M:Ytext599004 מחבר לא ידוע — קידוש לרגלים
+  [      big]  23.5% ms= 22 pages= 34 letters=  17624 M:Ytext990017 יוסף בן אביתור — רהיטים וסדרי פסוקים ליו״כ
+  [short,big]  23.9% ms= 40 pages= 46 letters=   1742 M:Ytext586002 מחבר לא ידוע — תפילת פסוקים לאחר ערבית
+  [      big]  26.3% ms= 20 pages= 38 letters=  18176 M:Ytext950003 רב סעדיה גאון — יוצרות לשבתות השנה, ויקרא
+  [      big]  26.5% ms= 21 pages= 34 letters=  41695 M:Ytext903004 יניי — קדושתות לשבתות השנה, במדבר
+  [      big]  26.5% ms= 36 pages= 49 letters= 261624 M:Ytext21002 מחבר לא ידוע — ספרי דברים
+  [      big]  26.9% ms= 28 pages= 52 letters= 163737 M:Ytext405034 חננאל בן חושיאל — פירוש לתלמוד, סנהדרין (טקסט בלבד)
+  [      big]  28.3% ms= 31 pages= 46 letters=  38998 M:Ytext903002 יניי — קדושתות לשבתות השנה, שמות
+  [      big]  28.7% ms= 40 pages= 87 letters= 370846 J:33-רמבם-פרוש-המשנה-ה-סדר-קדשים רמב"ם, פרוש המשנה ה. סדר קדשים
+  [      big]  29.0% ms=145 pages=252 letters= 816884 M:Ytext773000 מחבר לא ידוע — תנחומא
+  [      big]  29.2% ms= 72 pages= 89 letters=  57232 M:Ytext19000 מחבר לא ידוע — סדר עולם רבה
+  [      big]  29.4% ms= 84 pages=296 letters= 407691 M:Ytext507000 רב אחאי משבחא — שאילתות
+  [      big]  29.5% ms= 45 pages= 78 letters= 295783 M:Ytext75000 מחבר לא ידוע — פסיקתא דרב כהנא
+  [      big]  29.5% ms= 21 pages= 88 letters= 352926 J:57-אבן-עקנין-התגלות-הסודות אבן עקנין, התגלות הסודות
+  [      big]  29.7% ms= 90 pages=195 letters= 706258 J:55-סעדיה-בן-דוד-מדרש-הבאור-ב סעדיה בן דוד, מדרש הבאור ב
+  [    short]  48.9% ms= 46 pages= 47 letters=   1447 M:Ytext599032 מחבר לא ידוע — קדושת היום במוסף לרגלים
+  [    short]  56.5% ms= 58 pages= 62 letters=   1074 M:Ytext599132 מחבר לא ידוע — חתימה לקדושת היום בתפילות יום כיפור
+ref-side canonical masks: 26/38 query works masked (2s)
+ref index: 174,127 grams canonical-masked
+index: 2,311 segments, 1,681,670 postings; distinct-work cap=3 -> dropped 292,222 generic gram-codes; dw-hist {'1': 456114, '2-3': 298180, '4-9': 224162, '10-24': 66974, '25+': 1086} (6s)
+  RETENTION WARN M:Ytext599004: kept 138/1,066 postings (13%) -- generic-heavy work
+  RETENTION WARN M:Ytext19000: kept 7,553/56,984 postings (13%) -- generic-heavy work
+  RETENTION WARN M:Ytext586002: kept 219/1,593 postings (14%) -- generic-heavy work
+  RETENTION WARN M:Ytext599032: kept 217/1,443 postings (15%) -- generic-heavy work
+  RETENTION WARN M:Ytext773000: kept 127,705/847,921 postings (15%) -- generic-heavy work
+  RETENTION WARN M:Ytext681000: kept 29,701/196,587 postings (15%) -- generic-heavy work
+  RETENTION WARN M:Ytext599132: kept 169/1,070 postings (16%) -- generic-heavy work
+  RETENTION WARN M:Ytext572006: kept 181/1,138 postings (16%) -- generic-heavy work
+  RETENTION WARN M:Ytext75000: kept 49,134/305,581 postings (16%) -- generic-heavy work
+  RETENTION WARN J:55-סעדיה-בן-דוד-מדרש-הבאור-ב: kept 114,444/710,334 postings (16%) -- generic-heavy work
+  RETENTION WARN M:Ytext638000: kept 36,638/225,202 postings (16%) -- generic-heavy work
+  RETENTION WARN M:Ytext71019: kept 1,236/7,435 postings (17%) -- generic-heavy work
+'before' pairing measured on target db (7s)
+pages: 667,411 (180s)
+  batch 1/84: cand=578,753 hits=1,009 (11s)
+  batch 9/84: cand=5,614,756 hits=4,235 (111s)
+  batch 17/84: cand=8,842,673 hits=7,629 (172s)
+  batch 25/84: cand=12,244,034 hits=9,399 (232s)
+  batch 33/84: cand=15,822,628 hits=11,474 (291s)
+  batch 41/84: cand=18,417,217 hits=16,730 (338s)
+  batch 49/84: cand=20,748,760 hits=19,184 (381s)
+  batch 57/84: cand=23,157,909 hits=22,291 (427s)
+  batch 65/84: cand=24,275,993 hits=23,931 (450s)
+  batch 73/84: cand=25,262,960 hits=25,002 (471s)
+  batch 81/84: cand=26,820,640 hits=27,071 (500s)
+hit rows: 36,875 (690s total)
+reference-mediated pairing computed (2311s)
+# A2 work-query second pass -- tag 'fullv2' (fullcorpus_v2.db)
+
+- query works: 38 (fullcorpus.db df_damage cohort: short-work <2,000L/>=10MS rate<60% UNION >=20-MS edited-cat rate<30%)
+- reference letters indexed: 8,262,980; ref-canon-masks applied to 26/38 works; segments 2,311, postings 1,681,670; distinct-work DF cap=3 (dropped 292,222 generic gram-codes)
+- runtime: 690s total, 18.2s/work avg (667,411 target-db pages scanned)
+- hit rows: 36,875; works with >=1 hit: 38/38
+- cohort pages in target-db scope: 2,924
+- **metric (b) df_damage-compatible pairing** -- before (Track-2 same-work accepted pairs): 675 (23%); after (reference-mediated, >=200L both sides, distinct sys, dup-clean): 2,774 (95%)
+- added (MS,work) memberships beyond the live track1_matches census: 12,834 (across 38/38 works)
+
+Metric (a) = raw reference-hit coverage (share of census pages the work-query re-hit at all); metric (b) = the honest pairing rate directly comparable to df_damage.py's before-column.
+
+## Per-work before/after (sorted by rate-after (b), worst first)
+| work | reasons | pages(target-db) | rate-before(full-census) | rate-before(local) | rate-after(b) | coverage(a) | hit-pages | added-MS |
+|---|---|---|---|---|---|---|---|---|
+| [Maagarim] מחבר לא ידוע — והזהיר | big | 81 | 19% | 19% | 80% | 96% | 1019 | 545 |
+| [Maagarim] מחבר לא ידוע — תפילת פסוקים לאחר ערבית | short,big | 46 | 24% | 24% | 85% | 100% | 134 | 35 |
+| [Maagarim] מחבר לא ידוע — איכה רבה | big | 27 | 7% | 7% | 85% | 96% | 727 | 400 |
+wrote C:\Genizahsearch\same_work_spike\probe\results\a2_work_query_fullv2_report.md (690s total)

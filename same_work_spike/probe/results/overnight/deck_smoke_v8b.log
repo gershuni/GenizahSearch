@@ -1,0 +1,28 @@
+params overridden from C:\Genizahsearch\same_work_spike\probe\data\deck_params.json
+P model: C:\Genizahsearch\same_work_spike\probe\data\p_calibration_final2.json
+tier A: 43,697 live (ms,work) links, 2,568 works; witness-count q92=41 -> rarity_max=41
+  pages 50,000 · survivors 24,609
+cheap guards done: 70,245 pages, survivors 28,648; stats {'skip_not_best': 552755, 'guard_rarity': 52885, 'known_tierA_pair': 3012, 'guard_canon_citation': 2673, 'band_singleton': 14373, 'guard_bible': 12950, 'band_m_0_003': 8394, 'band_m_003_010': 5156, 'not_best_union': 4282, 'band_m_ge_010': 725} (7s)
+known-sibling (version-group) suppression: dropped 0
+guard v7: +13 well-attested rabbinic-genre works (witnesses > 41)
+guard: +16 guard-only statutory units (refs_staging)
+guard reference: 180 works; bible stream 1,204,678
+guard todo: 28,648 of 28,648
+  guard chunk 1/8 (113s)
+  guard chunk 2/8 (191s)
+  guard chunk 3/8 (256s)
+  guard chunk 4/8 (327s)
+  guard chunk 5/8 (452s)
+  guard chunk 6/8 (663s)
+  guard chunk 7/8 (881s)
+  guard chunk 8/8 (912s)
+guards final: kept 10,946 (canonical 15,096, verse-align 2,606)
+(manuscript, work) rows: 10,143
+  P ≥ 0.8 — כמעט־ודאי: 40 cards
+  P 0.5–0.8 — סביר: 25 cards
+  P 0.2–0.5 — ספק: 15 cards
+  P < 0.2 — קרוב לרעש (לניגוד): 8 cards
+  statutory section: 1 cards
+wrote C:\Genizahsearch\same_work_spike\probe\review\smoke_deck\mapv2_discovery_deck.html
+wrote C:\Genizahsearch\same_work_spike\probe\review\smoke_deck\mapv2_blinded_deck.html + key (55 cards)
+wrote C:\Genizahsearch\same_work_spike\probe\review\smoke_deck\mapv2_deck_report.md; TOTAL 917s

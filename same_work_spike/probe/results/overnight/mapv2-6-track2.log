@@ -1,0 +1,83 @@
+
+===== 2026-07-10 20:30:26 rehearsal_run.py C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db fullv2 maskcanon =====
+pages: 667411
+streams normalized in 220s; letters=565,207,589
+masks[maskcanon]: 126,471 pages, 154,923 Track-1 intervals
+[engine_np] positions=493,507,702 sorted in 29s
+[engine_np] grams kept=2,972,917 (singleton=493,492, df-dropped=753,201); raw pair-hits=1,479,636,746
+[engine_np] pass1 chunk 1/19: spilled=79,153,381 entries (0.7 GB, 15s)
+[engine_np] pass1 chunk 2/19: spilled=158,375,683 entries (1.5 GB, 29s)
+[engine_np] pass1 chunk 3/19: spilled=237,355,162 entries (2.2 GB, 44s)
+[engine_np] pass1 chunk 4/19: spilled=316,467,336 entries (2.9 GB, 59s)
+[engine_np] pass1 chunk 5/19: spilled=395,529,744 entries (3.7 GB, 74s)
+[engine_np] pass1 chunk 6/19: spilled=474,644,208 entries (4.4 GB, 88s)
+[engine_np] pass1 chunk 7/19: spilled=553,597,041 entries (5.2 GB, 103s)
+[engine_np] pass1 chunk 8/19: spilled=632,572,711 entries (5.9 GB, 117s)
+[engine_np] pass1 chunk 9/19: spilled=711,798,551 entries (6.6 GB, 132s)
+[engine_np] pass1 chunk 10/19: spilled=790,847,489 entries (7.4 GB, 146s)
+[engine_np] pass1 chunk 11/19: spilled=870,095,564 entries (8.1 GB, 161s)
+[engine_np] pass1 chunk 12/19: spilled=949,367,383 entries (8.8 GB, 175s)
+[engine_np] pass1 chunk 13/19: spilled=1,028,288,914 entries (9.6 GB, 190s)
+[engine_np] pass1 chunk 14/19: spilled=1,107,270,148 entries (10.3 GB, 205s)
+[engine_np] pass1 chunk 15/19: spilled=1,186,094,667 entries (11.0 GB, 220s)
+[engine_np] pass1 chunk 16/19: spilled=1,265,089,067 entries (11.8 GB, 235s)
+[engine_np] pass1 chunk 17/19: spilled=1,344,256,737 entries (12.5 GB, 250s)
+[engine_np] pass1 chunk 18/19: spilled=1,423,397,975 entries (13.3 GB, 264s)
+[engine_np] pass1 chunk 19/19: spilled=1,462,669,138 entries (13.6 GB, 272s)
+[engine_np] partition merge: 1,462,669,138 entries -> candidates=56,621,514 (99s)
+[engine_np] pass2 chunk 1/19 (52s)
+[engine_np] pass2 chunk 2/19 (103s)
+[engine_np] pass2 chunk 3/19 (156s)
+[engine_np] pass2 chunk 4/19 (208s)
+[engine_np] pass2 chunk 5/19 (262s)
+[engine_np] pass2 chunk 6/19 (317s)
+[engine_np] pass2 chunk 7/19 (375s)
+[engine_np] pass2 chunk 8/19 (427s)
+[engine_np] pass2 chunk 9/19 (477s)
+[engine_np] pass2 chunk 10/19 (527s)
+[engine_np] pass2 chunk 11/19 (575s)
+[engine_np] pass2 chunk 12/19 (624s)
+[engine_np] pass2 chunk 13/19 (678s)
+[engine_np] pass2 chunk 14/19 (730s)
+[engine_np] pass2 chunk 15/19 (783s)
+[engine_np] pass2 chunk 16/19 (836s)
+[engine_np] pass2 chunk 17/19 (888s)
+[engine_np] pass2 chunk 18/19 (940s)
+[engine_np] pass2 chunk 19/19 (965s)
+[engine_np] spill path done: candidates=56,621,514 in 1371.5s
+verified: accepted=1,361,749 in 220.4s (rej short=0 dense=55,155,969)
+{
+ "n_pages": 667411,
+ "n_positions": 493507702,
+ "grams_masked": 69030243,
+ "grams_total": 4219610,
+ "grams_singleton": 493492,
+ "grams_dropped_df": 753201,
+ "grams_kept": 2972917,
+ "pair_hits_total": 1479636746,
+ "same_sys_dropped": 10204701,
+ "acc_entries": 1462669138,
+ "cnt_saturated": 0,
+ "candidate_pairs": 56621514,
+ "t_total_s": 1371.5,
+ "candidate_unique_pairs": 55227518,
+ "verify_s": 220.4,
+ "rej_short": 0,
+ "rej_density": 55155969,
+ "span_clipped": 32,
+ "accepted_pairs": 1361749,
+ "post_s": 1110.5,
+ "tier1_titles_in_db": 1864,
+ "tier1_titles_recall": 0.9657,
+ "bh_sys_present": 512,
+ "bh_sys_connected": 212,
+ "flank_classes": {
+  "continuation": 392326,
+  "island": 603067,
+  "edge": 303008,
+  "ambig": 63348
+ },
+ "dup_flagged": 11603,
+ "clean_pairs": 1350146,
+ "total_s": 2980.9
+}

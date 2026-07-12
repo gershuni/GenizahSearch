@@ -175,3 +175,28 @@ TestLLMAPIsProgram.cs
 # Scratch / working directory — review briefs, CI watch logs, probes, diffs, patches.
 # Never committed; genuine artifacts are relocated into .planning/ instead (SEED-019 #31).
 /_tmp/
+
+# SEED-029 MAPV2 (2026-07-10 full rebuild): multi-GB / regenerable artifacts
+# (DBs rebuilt by the overnight chain; calibration row dumps by cal1; the
+# suspects json by mapv2_tierA_audit (3.3h); checkpoints by their scripts)
+same_work_spike/probe/data/fullcorpus_v2.db
+same_work_spike/probe/data/mapv2_smoke.db
+same_work_spike/probe/data/liturgy.db
+same_work_spike/probe/data/parity_ram.npz
+same_work_spike/probe/data/parity_spill.npz
+same_work_spike/probe/data/track2_wide.db
+same_work_spike/probe/data/track2_wide_smoke.db
+same_work_spike/probe/data/*.db-shm
+same_work_spike/probe/data/*.db-wal
+same_work_spike/probe/data/*.pkl.bak
+same_work_spike/probe/data/cal1_rows_*.json
+same_work_spike/probe/data/p_calibration_pilot-n*.json
+same_work_spike/probe/data/p_calibration_margin_pilot*.json
+same_work_spike/probe/data/p_calibration_final.json
+same_work_spike/probe/data/tierA_verse_suspects.json
+same_work_spike/probe/review/track1_fullv2_testimonies.html
+same_work_spike/probe/review/rehearsal_fullv2_graph.html
+same_work_spike/probe/review/full_deck/mapv2_deck_guard_ckpt.ndjson
+same_work_spike/probe/results/track1_fullv2_testimonies.csv
+same_work_spike/probe/results/tierA_audit_ckpt.ndjson
+same_work_spike/probe/results/p_calibration_final.md

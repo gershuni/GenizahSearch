@@ -1,0 +1,33 @@
+manifest: 58 entries
+staged: 58 ingest candidates, 0 skipped (1s)
+union gram index: 535,807 distinct 5-grams (2s)
+v1: 5363 works loaded (2s)
+  v1 scan 1000/5363 (20s)
+  v1 scan 2000/5363 (30s)
+  v1 scan 3000/5363 (44s)
+  v1 scan 4000/5363 (58s)
+  v1 scan 5000/5363 (84s)
+v1 containment pass done: 1 same-kind pairs + 5 Bible-quotation pairs >= 0.85 (100s)
+  0.939  REF2:liturgy_amidah_shabbat_maariv  ~  M:Ytext599016 [Maagarim] קדושת היום בערבית לשבת
+  BIBLE-QUOTE (no action) 0.967  REF2:liturgy_hallel  ~  M:Ytext1000 [Bible] מקרא
+  BIBLE-QUOTE (no action) 0.929  REF2:liturgy_kiddush_shabbat_day  ~  M:Ytext1000 [Bible] מקרא
+  BIBLE-QUOTE (no action) 0.899  REF2:liturgy_shema_blessings_weekday_maariv  ~  M:Ytext1000 [Bible] מקרא
+  BIBLE-QUOTE (no action) 0.887  REF2:liturgy_shema_blessings_shabbat_maariv  ~  M:Ytext1000 [Bible] מקרא
+  BIBLE-QUOTE (no action) 0.856  REF2:liturgy_kiddush_friday_night  ~  M:Ytext1000 [Bible] מקרא
+new-new pairs >= 0.85: 6
+  0.989  REF2:liturgy_amidah_weekday_shacharit  ~  REF2:liturgy_amidah_weekday_maariv
+  0.985  REF2:liturgy_shema_blessings_weekday_maariv  ~  REF2:liturgy_shema_blessings_shabbat_maariv
+  0.892  REF2:liturgy_amidah_weekday_maariv  ~  REF2:liturgy_amidah_shabbat_maariv
+  0.878  REF2:liturgy_amidah_weekday_shacharit  ~  REF2:liturgy_amidah_shabbat_maariv
+  0.872  REF2:liturgy_hallel  ~  REF2:liturgy_haggadah
+  0.869  REF2:liturgy_amidah_shabbat_shacharit  ~  REF2:liturgy_amidah_shabbat_musaf
+version groups: 4
+  vgroup 1: ['M:Ytext599016', 'REF2:liturgy_amidah_shabbat_maariv', 'REF2:liturgy_amidah_weekday_maariv', 'REF2:liturgy_amidah_weekday_shacharit']
+  vgroup 2: ['REF2:liturgy_amidah_shabbat_musaf', 'REF2:liturgy_amidah_shabbat_shacharit']
+  vgroup 3: ['REF2:liturgy_haggadah', 'REF2:liturgy_hallel']
+  vgroup 4: ['REF2:liturgy_shema_blessings_shabbat_maariv', 'REF2:liturgy_shema_blessings_weekday_maariv']
+wrote C:\Genizahsearch\same_work_spike\probe\data\ref_corpus_v2.pkl (171 MB): 5363 v1 + 58 new = 5421 works
+wrote C:\Genizahsearch\same_work_spike\probe\data\ref2_manifest.json
+TOTAL 102s | v1=5363 ingested=58 dropped=0 skipped=0 vgroups=4
+ANOMALY: new-new containment 0.989 >= 0.98 between REF2:liturgy_amidah_weekday_shacharit and REF2:liturgy_amidah_weekday_maariv (both KEPT; spec drops only vs v1)
+ANOMALY: new-new containment 0.985 >= 0.98 between REF2:liturgy_shema_blessings_weekday_maariv and REF2:liturgy_shema_blessings_shabbat_maariv (both KEPT; spec drops only vs v1)

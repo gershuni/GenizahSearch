@@ -1,0 +1,48 @@
+pages: 139694
+streams normalized in 28s; letters=77,258,346
+masks[maskcanon]: 23,379 pages, 33,256 Track-1 intervals
+[engine_np] positions=66,106,506 sorted in 5s
+[engine_np] grams kept=2,049,098 (singleton=712,032, df-dropped=123,111); raw pair-hits=526,916,542
+[engine_np] chunk 1/7: partial keys=76,843,433 (19s)
+[engine_np] chunk 2/7: partial keys=77,098,397 (38s)
+[engine_np] chunk 3/7: partial keys=76,536,661 (57s)
+[engine_np] chunk 4/7: partial keys=77,196,126 (75s)
+[engine_np] chunk 5/7: partial keys=77,076,206 (94s)
+[engine_np] chunk 6/7: partial keys=75,593,216 (113s)
+[engine_np] chunk 7/7: partial keys=45,542,244 (124s)
+[engine_np] acc entries=467,696,152 -> candidates=33,626,923 in 212.0s
+verified: accepted=735,700 in 126.2s (rej short=0 dense=32,866,825)
+{
+ "n_pages": 139694,
+ "n_positions": 66106506,
+ "grams_masked": 10593064,
+ "grams_total": 2884241,
+ "grams_singleton": 712032,
+ "grams_dropped_df": 123111,
+ "grams_kept": 2049098,
+ "pair_hits_total": 526916542,
+ "same_sys_dropped": 6155022,
+ "acc_entries": 467696152,
+ "candidate_pairs": 33626923,
+ "t_total_s": 212.0,
+ "candidate_unique_pairs": 32158168,
+ "verify_s": 126.2,
+ "rej_short": 0,
+ "rej_density": 32866825,
+ "span_clipped": 17,
+ "accepted_pairs": 735700,
+ "post_s": 573.3,
+ "tier1_titles_in_db": 0,
+ "tier1_titles_recall": 0.0,
+ "bh_sys_present": 506,
+ "bh_sys_connected": 291,
+ "flank_classes": {
+  "island": 389697,
+  "edge": 148487,
+  "continuation": 171981,
+  "ambig": 25535
+ },
+ "dup_flagged": 823,
+ "clean_pairs": 734877,
+ "total_s": 986.5
+}

@@ -1,0 +1,35 @@
+START 20:29:22
+[prio] process priority set BelowNormal
+=== track2_wide_run mode=smoke src=C:\Genizahsearch\same_work_spike\probe\data\mapv2_smoke.db out=C:\Genizahsearch\same_work_spike\probe\data\track2_wide_smoke.db resume=False decoys=600/cohort ===
+real pages: 139,694; letters=77,258,346 (27s)
+masks[maskcanon]: 23,453 pages, 33,463 Track-1 intervals
+leak-clean decoy pool: 55,237 / 139,694 pages (84,457 excluded)
+  cohort D25: 601 decoys (target 600)
+  cohort D12: 601 decoys (target 600)
+combined index: 140,896 pages (139,694 real + 1,202 decoy: D25=601, D12=601)
+[engine_np] positions=66,691,104 sorted in 5s
+[engine_np] grams kept=2,059,961 (singleton=704,755, df-dropped=124,395); raw pair-hits=531,454,678
+[engine_np] chunk 1/7: partial keys=76,824,841 (16s)
+[engine_np] chunk 2/7: partial keys=77,073,650 (33s)
+[engine_np] chunk 3/7: partial keys=76,495,919 (49s)
+[engine_np] chunk 4/7: partial keys=77,237,642 (66s)
+[engine_np] chunk 5/7: partial keys=77,152,815 (83s)
+[engine_np] chunk 6/7: partial keys=75,396,655 (100s)
+[engine_np] chunk 7/7: partial keys=49,740,852 (110s)
+[engine_np] acc entries=471,922,712 -> candidates=33,746,451 in 195.5s
+candidates: 33,746,451 (231s)
+[phase] engine_done done @ 20:33:13
+  verify 20,000,000/33,746,451 wide_dict=451,548 spilled=0 strict_seen=560,211 decoy_real=0 (85s)
+verify done: candidates=33,746,451 spilled_raw=609,667 strict_seen=755,920 decoy_real=3 decoy_decoy=3,406 rej_short=0 (150s)
+deduped wide rows: 609,667 (from 609,667 spilled)
+[phase] spill_done done @ 20:35:48
+null buckets: 177 rows (observed_real total=609,667, envelope_null total=349)
+[phase] null_done done @ 20:35:49
+scored 609,667 rows; DELETEd low-value 0; survivors 609,667
+[phase] scored done @ 20:35:55
+enrich: 609,667 survivors, 69,676 pages loaded
+enriched flank classes: {'island': 439045, 'edge': 100342, 'continuation': 55423, 'ambig': 14857}
+[phase] enriched done @ 20:43:28
+report -> C:\Genizahsearch\same_work_spike\probe\results\track2_wide_smoke_report.md
+stats  -> C:\Genizahsearch\same_work_spike\probe\results\track2_wide_smoke_stats.json
+=== DONE mode=smoke in 14.1 min ===

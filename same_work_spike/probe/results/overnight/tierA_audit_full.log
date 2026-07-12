@@ -1,0 +1,27 @@
+tier A: 87,547 live (ms,work) links, 3,665 works; witness q95=84 -> rarity_max=84
+guard reference: 180 works (+12 attestation rabbinic, +17 guard-only units); guard_ids=163; bible stream 1,204,678 (1s)
+audit set: 75,045 live tier-A rows (non-canon, non-guard); by cat {'Maagarim': 60321, 'JA': 13303, 'Sefaria': 1421}
+checkpoint fingerprint MISMATCH — discarding old verdicts
+guard todo: 75,045 of 75,045 (2s)
+  guard chunk 1/19 (1828s)
+  guard chunk 2/19 (2658s)
+  guard chunk 3/19 (3432s)
+  guard chunk 4/19 (3688s)
+  guard chunk 5/19 (3901s)
+  guard chunk 6/19 (4727s)
+  guard chunk 7/19 (5412s)
+  guard chunk 8/19 (6142s)
+  guard chunk 9/19 (6946s)
+  guard chunk 10/19 (7518s)
+  guard chunk 11/19 (8131s)
+  guard chunk 12/19 (8557s)
+  guard chunk 13/19 (8944s)
+  guard chunk 14/19 (9367s)
+  guard chunk 15/19 (9793s)
+  guard chunk 16/19 (10343s)
+  guard chunk 17/19 (10794s)
+  guard chunk 18/19 (11406s)
+  guard chunk 19/19 (11750s)
+aggregated: audited 75,045, suspects 24,507 (32.7%); missing verdicts 0
+wrote C:\Genizahsearch\same_work_spike\probe\data\tierA_verse_suspects.json
+wrote C:\Genizahsearch\same_work_spike\probe\results\mapv2_tierA_verse_audit.md; TOTAL 11751s
