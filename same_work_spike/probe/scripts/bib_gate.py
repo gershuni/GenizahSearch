@@ -16,11 +16,21 @@ Design (validated on his 12 gold cases):
   - Everything else is DISPLAY: cards carry the top bib rows so human/Opus
     annotators catch what token matching can't (e.g. English-only rows).
 
+v2 (deck v13): GENRE-implication tier — Hillel: "the bib is not always
+explicit. It can be שמידמן, ברכות המזון המפויטות to a certain poetic
+beracha." A bib row that is an EDITION of a genre corpus (Discussion or a
+Full/Partial transcription) covers a same-genre claim on that manuscript
+even when it never names it -> class `known_bib_genre` (softer: routed to
+the known-in-research section, evidence shown).
+
 API:
   bg = BibGate()                      # loads + groups bibliography once
-  cls, ev = bg.classify(sys_id, "author — work name")
-      cls in known_bib / published_full / bib_partial / bib_mentions /
-             bib_empty; ev = matched/loudest row summary or None
+  cls, ev = bg.classify(sys_id, "author — work name",
+                        author=..., title=...)   # author/title optional,
+      # enable the incipit-heuristic (named author + incipit-style title
+      # -> piyyut-genre claim)
+      cls in known_bib / known_bib_genre / published_full / bib_partial /
+             bib_mentions / bib_empty; ev = matched row summary or None
   bg.display(sys_id, k=3) -> [str]    # top rows for card display
 
 Validate: python -X utf8 -u bib_gate.py --validate
@@ -62,6 +72,30 @@ _TOKEN_RE = re.compile(r'[א-ת]+')
 _PREFIXES = ('ו', 'ה', 'ב', 'ל', 'מ', 'כ', 'ש', 'ד')
 _SUFFIXES = ('ותיו', 'אות', 'ות', 'ים', 'ין', 'יהם', 'יו', 'י', 'ה', 'ת')
 
+# ---- genre classes (v2). Hebrew entries match claim/bib TOKENS
+# (prefix-stripped; len>=4 entries also as substring, so פיוט hits
+# המפויטות); lowercase-Latin entries match bib English text by substring.
+GENRES = {
+    'piyyut': ('פיוט', 'יוצרות', 'יוצר', 'קדושתא', 'קדושתאות', 'קרובות',
+               'קרובה', 'סליחות', 'סליחה', 'קינות', 'קינה', 'מחזור',
+               'אופנים', 'זולתות', 'שבעתא', 'פזמון',
+               'piyyut', 'qedushta', 'yotser', 'yotserot', 'selihot',
+               'qinot', 'kinot', 'liturgical poems', 'hymn'),
+    'blessing': ('ברכה', 'ברכות', 'ברכת', 'birkat', 'blessing',
+                 'grace after meals'),
+    'prayer': ('תפילה', 'תפילות', 'סידור', 'וידוי', 'בקשה', 'liturgy',
+               'prayer', 'siddur'),
+    'targum': ('תרגום', 'targum'),
+    'midrash': ('מדרש', 'midrash'),
+    'halakha': ('הלכות', 'halakh'),
+    'masorah': ('מסורה', 'טעמי', 'דקדוק', 'masora', 'accent', 'grammar'),
+    'haggadah': ('הגדה', 'haggada', 'hagada'),
+    'responsa': ('תשובה', 'תשובות', 'responsa', 'responsum'),
+    'booklist': ('רשימות ספרים', 'רשימת ספרים', 'booklist'),
+}
+_UNIT_HEADS = {'אמירה', 'ברכה', 'ברכת', 'תפילה', 'פתיחה', 'בקשה',
+               'הרחבה', 'וידוי', 'תוספת', 'קדושה', 'קדושת'}
+
 _MATCH_FIELDS = ('RunningTitleHeb', 'RunningTitle', 'TitleAcronymHeb',
                  'TitleAcronym', 'ArticleName', 'ArticleAuthorHeb',
                  'NoteForDisplay')
@@ -99,6 +133,40 @@ def _base(t):
     return s
 
 
+def _match_genres(heb_forms, eng_text):
+    """Genre classes present in (hebrew match-forms set, lowercased text)."""
+    hits = set()
+    for g, terms in GENRES.items():
+        for term in terms:
+            if _TOKEN_RE.match(term):                    # Hebrew entry
+                if ' ' in term:
+                    if term in eng_text:                 # multiword phrase
+                        hits.add(g)
+                        break
+                elif term in heb_forms or (len(term) >= 4 and any(
+                        term in f for f in heb_forms)):
+                    hits.add(g)
+                    break
+            elif term in eng_text:                       # Latin entry
+                hits.add(g)
+                break
+    return hits
+
+
+def _claim_genres(claim_text, author=None, title=None):
+    forms = set()
+    for t in heb_tokens(claim_text):
+        forms |= _variants(t)
+    g = _match_genres(forms, (claim_text or '').lower())
+    # incipit heuristic: a NAMED author with an incipit-style title (>=3
+    # tokens, no genre/unit descriptor) is a piyyut claim (אקדישה לאל...)
+    if not g and author and title and 'לא ידוע' not in author:
+        tt = heb_tokens(title)
+        if len(tt) >= 3 and not any(_base(t) in _UNIT_HEADS for t in tt):
+            g = {'piyyut'}
+    return g
+
+
 class BibGate:
     def __init__(self, db=FJMS_DB):
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -132,7 +200,7 @@ class BibGate:
             self._tok_cache[sid] = out
         return self._tok_cache[sid]
 
-    def classify(self, sid, claim_text):
+    def classify(self, sid, claim_text, author=None, title=None):
         sid = str(sid)
         key = (sid, claim_text)
         if key in self._cls_cache:
@@ -159,14 +227,32 @@ class BibGate:
             if best:
                 res = ('known_bib', self._fmt(best[1]))
             else:
-                tt = {str(r[9]) for r in rows}
-                if 'Full' in tt:
-                    res = ('published_full', self._fmt(
-                        next(r for r in rows if str(r[9]) == 'Full')))
-                elif 'Partial' in tt:
-                    res = ('bib_partial', None)
+                # genre tier: an EDITION row (Discussion / Full / Partial
+                # transcription) of the claim's genre corpus covers the
+                # claim even without naming it (שמידמן, ברכות המזון
+                # המפויטות -> a poetic beracha)
+                cg = _claim_genres(claim_text, author, title)
+                gbest = None
+                if cg:
+                    for (heb, eng), raw in zip(self._row_keys(sid), rows):
+                        mt, tt = raw[8], str(raw[9])
+                        if mt != 'Discussion' and tt not in ('Full',
+                                                             'Partial'):
+                            continue
+                        if cg & _match_genres(heb, eng):
+                            gbest = raw
+                            break
+                if gbest is not None:
+                    res = ('known_bib_genre', self._fmt(gbest))
                 else:
-                    res = ('bib_mentions', None)
+                    tt = {str(r[9]) for r in rows}
+                    if 'Full' in tt:
+                        res = ('published_full', self._fmt(
+                            next(r for r in rows if str(r[9]) == 'Full')))
+                    elif 'Partial' in tt:
+                        res = ('bib_partial', None)
+                    else:
+                        res = ('bib_mentions', None)
         self._cls_cache[key] = res
         return res
 
@@ -214,25 +300,44 @@ def _validate():
     cards = {c['card_no']: c for c in json.load(open(
         PROBE + r"\review\full_deck\mapv2_deck_cards_enriched.json",
         encoding='utf-8'))}
-    # gold from Hillel's 2026-07-12 review
+    # gold from Hillel's 2026-07-12 review (v11 card numbering)
     MUST_FIRE = [6, 15, 18, 30, 38, 47]      # bib names the claimed work
-    NICE_FIRE = [5, 39, 40, 63]              # partial/English-only — bonus
+    GENRE_FIRE = [40, 63]                    # genre-edition rows cover it
+    NICE_FIRE = [5, 39]                      # partial — bonus if caught
     MUST_NOT = [20, 21, 31, 32, 33]          # human-confirmed discoveries
     bg = BibGate()
     ok = True
-    for group, nos in (('MUST_FIRE', MUST_FIRE), ('NICE_FIRE', NICE_FIRE),
-                       ('MUST_NOT', MUST_NOT)):
+
+    def split_name(nm):
+        return nm.split(' — ', 1) if ' — ' in nm else (None, nm)
+
+    for group, nos in (('MUST_FIRE', MUST_FIRE), ('GENRE_FIRE', GENRE_FIRE),
+                       ('NICE_FIRE', NICE_FIRE), ('MUST_NOT', MUST_NOT)):
         for n in nos:
             c = cards[n]
-            cls, ev = bg.classify(c['sys_id'], c['work_name'])
-            fired = cls == 'known_bib'
-            bad = (group == 'MUST_FIRE' and not fired) or \
+            au, ti = split_name(c['work_name'])
+            cls, ev = bg.classify(c['sys_id'], c['work_name'],
+                                  author=au, title=ti)
+            fired = cls in ('known_bib', 'known_bib_genre')
+            bad = (group == 'MUST_FIRE' and cls != 'known_bib') or \
+                  (group == 'GENRE_FIRE' and not fired) or \
                   (group == 'MUST_NOT' and fired)
             ok &= not bad
             mark = 'XX' if bad else 'ok'
             print(f"[{mark}] #{n} ({group}) {cls:15s} "
                   f"{c['work_name'][:45]}"
                   + (f" | {ev}" if ev else ""))
+    # Hillel's synthetic: Shmidman's poetic-birkat-hamazon edition must
+    # cover an unnamed poetic beracha claim on the same ms (v11 #47's ms)
+    sid47 = cards[47]['sys_id']
+    cls, ev = bg.classify(sid47, 'ברכה מעין שלוש (ברכה אחרונה)',
+                          author='מחבר לא ידוע',
+                          title='ברכה מעין שלוש (ברכה אחרונה)')
+    bad = cls not in ('known_bib', 'known_bib_genre')
+    ok &= not bad
+    print(f"[{'XX' if bad else 'ok'}] synthetic שמידמן (GENRE_FIRE) "
+          f"{cls:15s} ברכה מעין שלוש @ ms of #47"
+          + (f" | {ev}" if ev else ""))
     print('VALIDATION', 'PASS' if ok else 'FAIL')
 
 

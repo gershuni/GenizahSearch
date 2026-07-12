@@ -781,7 +781,8 @@ def main():
             'url': url, 'page_snippet': _plain(page_htm),
             'ref_snippet': _plain(ref_htm),
             'friedberg_bib': bib_lines,
-            'bib_class': bibgate.classify(sid, name)[0],
+            'bib_class': bibgate.classify(sid, name, author=author,
+                                          title=title)[0],
         }
         return info, f"""
 <div class='card'>
@@ -873,24 +874,51 @@ def main():
         pools[tclass_of(r)].append(r)
     stats_t = {k: len(v) for k, v in pools.items()}
     print(f"title gate over (ms,work) rows: {stats_t}", flush=True)
-    # MAPV2-11: bibliography gate over the discovery pool — rows whose
-    # claimed work/author is already named by a Friedberg bib entry on this
-    # manuscript move to their own "known in research" section
+    # MAPV2-11/12: bibliography gate + witness router over the discovery
+    # pool. Precedence (v13): explicit bib match -> known-in-research;
+    # statutory-unit claim -> עדי נוסח (passage-witness product, Hillel's
+    # review class); genre-edition bib match -> known-in-research (soft).
     bcache = {}
 
     def bclass_of(row):
         key = (row[2], row[3])
         if key not in bcache:
-            bcache[key] = bibgate.classify(row[2], f"{row[5]} {row[6]}")
+            name = f"{row[5]} — {row[6]}" if row[5] else row[6]
+            bcache[key] = bibgate.classify(row[2], name,
+                                           author=row[5], title=row[6])
         return bcache[key][0]
 
+    WITNESS_HEADS = {'אמירה', 'ברכה', 'ברכת', 'תפילה', 'פתיחה', 'בקשה',
+                     'הרחבה', 'וידוי', 'קדושת', 'קדושה'}
+
+    def unit_witness(row):
+        """Anonymous-unit claims (תפילה ל.../ברכת.../וידוי...) are
+        passage-level textual witnesses, not work identifications."""
+        m = re.match(r'[א-ת]+', (row[6] or '').strip())
+        if not m:
+            return False
+        h = m.group(0)
+        if h in WITNESS_HEADS:
+            return True
+        return h == 'תוספת' and (not row[5] or 'לא ידוע' in row[5])
+
     gen = pools['generic_or_absent']
-    pools['known_bib'] = [r for r in gen if bclass_of(r) == 'known_bib']
-    pools['generic_or_absent'] = [r for r in gen
-                                  if bclass_of(r) != 'known_bib']
-    print(f"bibliography gate over the discovery pool: "
-          f"{len(pools['known_bib'])} rows -> known-in-research, "
-          f"{len(pools['generic_or_absent'])} stay", flush=True)
+    stay = []
+    for r in gen:
+        c = bclass_of(r)
+        if c == 'known_bib':
+            pools['known_bib'].append(r)
+        elif unit_witness(r):
+            pools['unit_witness'].append(r)
+        elif c == 'known_bib_genre':
+            pools['known_bib'].append(r)
+        else:
+            stay.append(r)
+    pools['generic_or_absent'] = stay
+    print(f"bib gate + witness router over the discovery pool: "
+          f"known-in-research {len(pools['known_bib'])}, "
+          f"passage-witness {len(pools['unit_witness'])}, "
+          f"stay {len(stay)}", flush=True)
     known_rows = sorted(pools['same_work'] + pools['name_variant'],
                         key=lambda r: -r[0])
     reversed_items = []
@@ -946,8 +974,11 @@ def main():
         ("תגליות בסימן שאלה — P 0.2–0.5 או פער־שוליים קטן",
          fill(pools['generic_or_absent'], 0.2, 0.5, 12, small_any_p=True,
               divert_reversed=True)),
+        ("עדי נוסח לקטעי תפילה — כתב־היד מעיד על נוסח הקטע המסוים "
+         "(אינו זיהוי חיבור; מוצר חדש בעקבות הביקורת, P ≥ 0.5)",
+         fill(pools['unit_witness'], 0.5, 1.01, 16)),
         ("ידוע במחקר — הביבליוגרפיה (פרידברג) כבר קושרת את כתב־היד "
-         "לחיבור (הוסט ממדורי התגליות; P ≥ 0.5)",
+         "לחיבור, במפורש או כמהדורת־סוגה (הוסט ממדורי התגליות; P ≥ 0.5)",
          fill(pools['known_bib'], 0.5, 1.01, 12)),
         ("הקטלוג מזהה חיבור אחר — לרוב מקור משותף, אך כאן מסתתרים "
          "תיקוני־קטלוג (P ≥ 0.8)",
@@ -1001,7 +1032,7 @@ def main():
             continue
         body.append(f"<h2>{label}</h2>")
         body.extend(cards)
-    note = (f"<b>מה זה (v12):</b> רובד התגליות של {args.label} "
+    note = (f"<b>מה זה (v13):</b> רובד התגליות של {args.label} "
             f"({n_pages:,} עמודים עם מועמדים; הרובד המחמיר: {n_a_live:,} "
             f"זיהויים). <b>נתב הכותרות</b> — כל כרטיס הושווה אוטומטית "
             f"מול כותרת NLI וזיהויי FJMS (עם בקרת שמות־נרדפים): "
@@ -1009,11 +1040,16 @@ def main():
             f"מזהה בהם חיבור ספציפי; זיהוי־קיים הופרד ל'אישורי קטלוג'; "
             f"כותרת שמזהה חיבור אחר — למדור חשוד משלה (שם מסתתרים גם "
             f"תיקוני־קטלוג); תלות ספרותית ידועה (ערוך↔ר\"ח וכד') הופרדה. "
-            f"<b>חדש (v12): שער הביבליוגרפיה</b> — בעקבות הביקורת האנושית "
-            f"(2026-07-12) כל טענה מושווה גם מול רשומות הביבליוגרפיה של "
-            f"פרידברג על כתב־היד; כרטיס שהביבליוגרפיה כבר קושרת לחיבור "
-            f"הנטען הוסט למדור 'ידוע במחקר', וכל כרטיס מציג את רשומות "
-            f"הביבליוגרפיה שלו. "
+            f"<b>חדש (v12-13): שער הביבליוגרפיה</b> — בעקבות הביקורת "
+            f"האנושית (2026-07-12) כל טענה מושווה גם מול רשומות "
+            f"הביבליוגרפיה של פרידברג על כתב־היד: התאמה מפורשת לחיבור "
+            f"הנטען, או מהדורת־סוגה המכסה אותו במשתמע (שמידמן, ברכות "
+            f"המזון המפויטות ← ברכה פיוטית) — שתיהן מוסטות למדור 'ידוע "
+            f"במחקר', וכל כרטיס מציג את רשומות הביבליוגרפיה שלו. "
+            f"<b>חדש (v13): מדור עדי נוסח</b> — טענות על יחידות תפילה "
+            f"אנונימיות (ברכה, וידוי, קדושת היום...) אינן זיהוי חיבור אלא "
+            f"עדות נוסח לקטע המסוים — כערך מחקרי בפני עצמו, בדגם עדי "
+            f"ברכת המזון. "
             f"<b>P = טיב הקשר הטקסטואלי</b> (חוזק היחס בין הדף למהדורה), "
             f"לא הסתברות עדות. מסנני הציטוטים כוללים כעת גם את משפחת "
             f"הסימנים הערבית־יהודית (לקו', כמא קאל) ופטור־ציטוט שנבדק "
