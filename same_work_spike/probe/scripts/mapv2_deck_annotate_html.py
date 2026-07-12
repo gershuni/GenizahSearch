@@ -19,15 +19,18 @@ _args = _ap.parse_args()
 MERGED = os.path.join(PROBE, 'results', 'deck_annotation' + _args.tag,
                       'merged_annotations.json')
 OUT = os.path.join(PROBE, 'review', 'full_deck',
-                   'mapv2_discovery_deck_annotated.html')
+                   f'mapv2_discovery_deck_annotated{_args.tag}.html'
+                   if _args.tag else 'mapv2_discovery_deck_annotated.html')
 
 STYLE = {
     'DISCOVERY': ('תגלית — ידע חדש', '#2e7d32', '#e8f5e9'),
+    'WITNESS': ('עד נוסח — עדות קטע', '#1565c0', '#e3f2fd'),
     'CITATION': ('ציטוט', '#e65100', '#fff3e0'),
-    'PARALLEL': ('מקבילה ספרותית', '#1565c0', '#e3f2fd'),
-    'KNOWN-SAME': ('ידוע בקטלוג — אותו חיבור', '#616161', '#f5f5f5'),
+    'PARALLEL': ('מקבילה ספרותית', '#00838f', '#e0f7fa'),
+    'KNOWN-SAME': ('ידוע בקטלוג/ביב\' — אותו חיבור', '#616161', '#f5f5f5'),
     'KNOWN-DEPENDENCE': ('תלות ספרותית ידועה', '#795548', '#efebe9'),
     'SHARED-SOURCE': ('מקור משותף — דליפה', '#c62828', '#ffebee'),
+    'NO-RELATION': ('אין קשר', '#455a64', '#eceff1'),
 }
 CONF_HE = {'high': 'ביטחון גבוה', 'medium': 'ביטחון בינוני',
            'low': 'ביטחון נמוך'}
@@ -65,9 +68,10 @@ def main():
     legend = ("<div class='note' style='margin-top:8px'><b>מקרא ההערות:</b> "
               + " · ".join(f"<b style='color:{c}'>{t}</b>"
                            for t, c, _ in STYLE.values())
-              + " — סווג ע\"י 4 סוכני Opus לפי הטקסטים + כותרות NLI/FJMS "
-                "(בקרת שמות-נרדפים). הדוח המלא: "
-                "results/mapv2_deck_annotation.md</div>")
+              + " — סווג ע\"י סוכני Opus בלתי-תלויים לפי הטקסטים + כותרות "
+                "NLI/FJMS + ביבליוגרפיית פרידברג (בקרת שמות-נרדפים). "
+                f"הדוח המלא: results/mapv2_deck_annotation{_args.tag}.md"
+                "</div>")
     res = "".join(out)
     res = res.replace("</h1>", "</h1>" + legend, 1)
     open(OUT, 'w', encoding='utf-8').write(res)

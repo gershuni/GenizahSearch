@@ -81,9 +81,12 @@ def main():
 
     n = args.chunks
     per = (len(cards) + n - 1) // n
-    # agents must classify blind to the deck's own routing (v11): strip the
-    # section/title-gate fields from the chunk files (kept in enriched)
-    BLIND_DROP = ('section', 'title_class', 'title_evidence')
+    # agents must classify blind to the deck's own routing (v11+v13): strip
+    # section/title-gate/bib-gate routing fields from the chunk files (kept
+    # in enriched). friedberg_bib (3-line card display) is dropped as a
+    # duplicate of the richer friedberg_bibliography added above.
+    BLIND_DROP = ('section', 'title_class', 'title_evidence', 'bib_class',
+                  'friedberg_bib')
     for i in range(n):
         chunk = [{k: v for k, v in c.items() if k not in BLIND_DROP}
                  for c in cards[i * per:(i + 1) * per]]

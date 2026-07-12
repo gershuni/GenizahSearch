@@ -2,18 +2,21 @@
 
 ## Why you exist
 
-The v10 "discovery deck" (88 cards) claims each Genizah page is a NEW witness
-of a specific edited work. Hillel (senior Genizah scholar, product owner)
-reviewed it and said: many cards are **not really discoveries** — either the
-catalogs (NLI / FJMS) already identify the fragment as that work (sometimes
-under a DIFFERENT name for the same work), or the overlap is merely a **shared
-source** both texts quote. Your job: annotate every card in your chunk with an
-honest verdict of what it actually is, using the texts AND the catalog titles,
-**controlling for name variants of the same work**.
+The "discovery deck" (v13: 132 cards) claims each Genizah page is a NEW
+witness of a specific edited work. Hillel (senior Genizah scholar, product
+owner) reviewed earlier cycles and found: many cards are **not really
+discoveries** — the catalogs (NLI / FJMS) already identify the fragment as
+that work (sometimes under a DIFFERENT name), **the Friedberg BIBLIOGRAPHY
+already connects the manuscript to the work** (the #1 blind spot of the v11
+cycle: 9/17 reviewed "discoveries" were known there), or the overlap is
+merely a **shared source** both texts quote. Your job: annotate every card
+in your chunk with an honest verdict, using the texts AND the catalog titles
+AND the bibliography entries, **controlling for name variants of the same
+work**.
 
 The single governing question per card:
 **"Would a Genizah scholar learn anything from this card that is not already
-in the catalogs?"**
+in the catalogs or the published scholarship?"**
 
 ## Input (your chunk JSON)
 
@@ -31,6 +34,15 @@ Each card object:
   catalog/team). Empty list = FJMS has no identification. NOTE: a manuscript
   may hold several works (miscellany) — an identification of a DIFFERENT part
   of the codex does not settle this page.
+- `friedberg_bibliography` — the manuscript's entries in the Friedberg
+  bibliography (scholarly literature on THIS manuscript): title · author ·
+  year · MentionType/TranscriptionType. CRITICAL: an entry that names the
+  claimed work (or its author), OR an edition of the claim's GENRE corpus
+  (e.g. שמידמן, ברכות המזון המפויטות covers a poetic beracha; a Palestinian-
+  Targum edition covers a targum claim — Discussion or Full/Partial
+  transcription entries), means the connection is likely already published.
+  But mere presence of bibliography is NOT disqualifying — a heavily-studied
+  booklist can still yield a new quotation identification.
 - `work_id`, `work_name`, `cat` — the claimed work (edition side).
 - `page_snippet` — the Genizah page text (HTR or human transcription, see
   `text_provenance`; expect HTR noise). The matched span is marked 【…】.
@@ -41,12 +53,15 @@ Each card object:
 
 ## Verdict taxonomy (pick exactly one)
 
-1. **KNOWN-SAME** — a catalog (NLI title or an FJMS identification) already
-   names the claimed work for this manuscript, INCLUDING name variants:
-   Hebrew↔Arabic↔Judeo-Arabic titles (הדאיה אלקארי = הוראת הקורא; תפסיר =
-   Saadia's Arabic translation), abbreviations (ר"ח = רבנו חננאל), author
-   named instead of work, series names (משנה תורה ספר אהבה vs רמב"ם),
-   spelling variants. This is a catalog CONFIRMATION — correct but not new.
+1. **KNOWN-SAME** — a catalog (NLI title or an FJMS identification) OR a
+   Friedberg bibliography entry already names the claimed work for this
+   manuscript, INCLUDING name variants: Hebrew↔Arabic↔Judeo-Arabic titles
+   (הדאיה אלקארי = הוראת הקורא; תפסיר = Saadia's Arabic translation),
+   abbreviations (ר"ח = רבנו חננאל), author named instead of work, series
+   names (משנה תורה ספר אהבה vs רמב"ם), spelling variants, and GENRE-edition
+   bibliography coverage (see the friedberg_bibliography note above). A
+   CONFIRMATION — correct but not new; say in `name_equation`/`reasoning_he`
+   which source (catalog vs bibliography) settles it.
 2. **KNOWN-DEPENDENCE** — the titles alone reveal a known literary dependence
    that fully explains the overlap: e.g. the manuscript is the ערוך (which
    quotes רבנו חננאל verbatim), a halakhic digest quoting Talmud/geonim,
@@ -72,6 +87,16 @@ Each card object:
    translations of the same base text.
 7. **NO-RELATION** — noise; the overlap is coincidental (common names,
    generic phrases).
+8. **WITNESS** — Hillel's class from the v11 review ("עד נוסח"): the claimed
+   "work" is an anonymous statutory liturgical UNIT (a beracha, קדושת היום,
+   וידוי, a תוספת to ברכת המזון...) and the page carries its text. This is
+   NOT a work identification and NOT a discovery — but it IS useful
+   passage-level knowledge: this manuscript is a textual witness of that
+   specific passage (like siddurim/haggadot serving as witnesses of ברכת
+   המזון). Also use for a named-work case where the match only shows the
+   page carries one specific known passage of it. If the flanks DIFFER
+   around the match, note it — a differing-flank witness is indirect
+   (secondary use / quotation), say so in the reasoning.
 
 ## Known failure families (from Hillel's blind grading — watch for them)
 
@@ -119,7 +144,8 @@ Rules:
   `C:\Genizahsearch\libraries.csv`) or the deck HTML — but do NOT modify
   anything, and do NOT open `data\fullcorpus_v2.db`.
 - `novelty=true` only when the card adds identification knowledge beyond the
-  catalogs (DISCOVERY always; CITATION-reversed usually; a KNOWN-SAME never;
-  PARALLEL true only if the parallel itself is non-obvious).
+  catalogs and published scholarship (DISCOVERY always; CITATION-reversed
+  usually; a KNOWN-SAME never; WITNESS false — useful but not identification
+  novelty; PARALLEL true only if the parallel itself is non-obvious).
 - Be decisive; use `confidence` to express doubt, not fence-sitting verdicts.
 - Hebrew reasoning is for Hillel — write it naturally, no jargon.

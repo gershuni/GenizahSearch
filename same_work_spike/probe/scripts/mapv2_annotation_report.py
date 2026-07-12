@@ -24,13 +24,14 @@ OUT = os.path.join(PROBE, 'results',
                    f'mapv2_deck_annotation{_args.tag}.md')
 OUT_JSON = os.path.join(ANN_DIR, 'merged_annotations.json')
 
-VORDER = ['DISCOVERY', 'CITATION', 'PARALLEL', 'KNOWN-SAME',
+VORDER = ['DISCOVERY', 'WITNESS', 'CITATION', 'PARALLEL', 'KNOWN-SAME',
           'KNOWN-DEPENDENCE', 'SHARED-SOURCE', 'NO-RELATION']
 VHE = {
     'DISCOVERY': 'תגלית (זיהוי חדש)',
+    'WITNESS': 'עד נוסח (עדות קטע, לא זיהוי חיבור)',
     'CITATION': 'ציטוט (צד אחד מצטט את השני)',
     'PARALLEL': 'מקבילה ספרותית',
-    'KNOWN-SAME': 'ידוע בקטלוג (אותו חיבור)',
+    'KNOWN-SAME': 'ידוע בקטלוג/ביבליוגרפיה (אותו חיבור)',
     'KNOWN-DEPENDENCE': 'תלות ספרותית ידועה',
     'SHARED-SOURCE': 'מקור משותף (דליפה)',
     'NO-RELATION': 'אין קשר',
