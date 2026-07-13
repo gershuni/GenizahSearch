@@ -17,15 +17,15 @@ mass/len >= 1.0, 16/30 shared caught, 2/26 discovery false.
 Keys are crc32 of the utf-8 n-gram (stable across processes, so the IDF
 model caches to disk and reloads fast).
 """
+import hashlib
 import math
 import os
 import pickle
-import zlib
 from collections import defaultdict
 
 PROBE = r'C:\Genizahsearch\same_work_spike\probe'
 CANON_PKL = PROBE + r'\data\canon_corpus_maagarim.pkl'
-IDF_CACHE = PROBE + r'\data\canon_rarity_idf.pkl'
+IDF_CACHE = PROBE + r'\data\canon_rarity_idf_v2.pkl'   # v2: 64-bit keys + non-neg IDF
 CANON_CATS = {'Bible', 'Mishnah', 'Tosefta', 'Bavli', 'Yerushalmi'}
 N = 8
 SHARED_TH = 1.5     # mass/len at/above -> canonical-quotation (shared).
@@ -36,7 +36,11 @@ SHARED_TH = 1.5     # mass/len at/above -> canonical-quotation (shared).
 
 
 def _g(s):
-    return zlib.crc32(s.encode('utf-8'))
+    # 64-bit stable hash (crc32 collided ~thousands of times over ~7M 8-grams;
+    # blake2b/8 is collision-free at this scale and stable across processes so
+    # the IDF model still caches to disk).
+    return int.from_bytes(
+        hashlib.blake2b(s.encode('utf-8'), digest_size=8).digest(), 'big')
 
 
 class CanonRarity:
@@ -55,7 +59,9 @@ class CanonRarity:
                 seen.add(_g(s[i:i + N]))
             for k in seen:
                 df[k] += 1
-        self.idf = {k: math.log(nw / (1 + c)) for k, c in df.items()}
+        # non-negative IDF: log((nw+1)/(df+1)) is >= 0 for all df<=nw, so a gram
+        # in every work scores ~0 ("ubiquitous -> ~0"), never negative.
+        self.idf = {k: math.log((nw + 1) / (c + 1)) for k, c in df.items()}
         pickle.dump(self.idf, open(IDF_CACHE, 'wb'))
 
     def mass_per_len(self, span_stream):

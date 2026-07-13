@@ -76,8 +76,11 @@ def main():
             "SELECT page_id, merge_flag, weak_two_work_flag FROM mapv2_page_flags"):
         flags[pid] = (mf, wtw)
     chained = {}
+    # ORDER BY for a stable chain-id assignment (else component_key depends on
+    # DB iteration order and the split is not reproducible).
     for i, (a, b) in enumerate(con.execute(
-            "SELECT pages_a, pages_b FROM page_chains_accepted_pairs_canonmask")):
+            "SELECT pages_a, pages_b FROM page_chains_accepted_pairs_canonmask "
+            "ORDER BY sys_a, sys_b, pages_a")):
         for p in set((a or '').split(',')) | set((b or '').split(',')):
             if p:
                 chained.setdefault(p, i)   # page -> chain id
@@ -120,9 +123,11 @@ def main():
     for (r, gb, cell) in enriched:
         by_bucket[gb].append((r, cell))
 
+    # honor --target by scaling the per-bucket targets to hit that total
+    _scale = _args.target / max(1, sum(BUCKET_TARGET.values()))
     picked = []
     for gb, items in by_bucket.items():
-        target = BUCKET_TARGET.get(gb, 20)
+        target = max(3, round(BUCKET_TARGET.get(gb, 20) * _scale))
         cells = defaultdict(list)
         for (r, cell) in items:
             cells[cell].append(r)

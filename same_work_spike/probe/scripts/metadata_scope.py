@@ -68,9 +68,10 @@ def _load_nli_titles():
 
 
 def _sig(title):
-    """A work signature = first two significant (non-weak, len>=3) tokens in
-    TITLE ORDER, for counting DISTINCT works without splitting name-variants
-    apart. Order-preserving (norm_text keeps sequence; tokens() is a set)."""
+    """A work signature = the first two significant (non-weak, len>=3) tokens
+    of the title, returned SORTED so 'X Y' and 'Y X' collapse to one work when
+    counting DISTINCT works (name-variants stay together). Takes the first two
+    in title order, then sorts that pair for a canonical key."""
     sig_tokens = [t for t in norm_text(title).split()
                   if t not in WEAK_TOKENS and len(t) >= 3]
     return ' '.join(sorted(sig_tokens[:2])) if sig_tokens else None
@@ -145,12 +146,12 @@ class ScopeGate:
         else:
             regime = 'miscellany'
             conf = 0.55
-        # weak, leave-target-out tie-break: many DISTINCT matched works on an
-        # otherwise-ambiguous ms nudges toward miscellany (never toward
-        # single_work; never overrides a catalog signal).
+        # NOTE: an earlier n_matched_works tie-break was REMOVED — the count was
+        # built including the current candidate (Codex review: weakly circular,
+        # not true leave-target-out) and only nudged ambiguous->miscellany. The
+        # regime is now purely catalog-derived. n_matched_works is retained in
+        # the output as a descriptor only (never gates the regime).
         nm = self.n_matched.get(sid, 0)
-        if regime in ('ambiguous', 'homogeneous_anthology') and nm >= 5:
-            regime, conf = 'miscellany', max(conf, 0.5)
 
         out = {'sys_id': sid, 'regime': regime, 'confidence': round(conf, 2),
                'n_specific_works': n_specific, 'n_catalog_ids': n_ids,

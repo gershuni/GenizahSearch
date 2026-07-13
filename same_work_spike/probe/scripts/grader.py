@@ -80,8 +80,18 @@ def _canon_scores(pairs, cr):
             out[(pid, wid)] = 0.0
             continue
         st = norm_stream(ptext.get(pid, ''))[0]
-        a0, a1 = max(sp, key=lambda s: s[1] - s[0])[:2]
-        out[(pid, wid)] = cr.mass_per_len(st[a0:a1])
+        # score over ALL matched spans (matched_letters is a sum over spans, so
+        # scoring only the longest mis-scored multi-span matches). Merge
+        # overlapping intervals, concatenate the slices, score the union.
+        iv = sorted(((int(s[0]), int(s[1])) for s in sp), key=lambda x: x[0])
+        merged = []
+        for a, b in iv:
+            if merged and a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        seg = ''.join(st[a:b] for a, b in merged)
+        out[(pid, wid)] = cr.mass_per_len(seg)
     return out
 
 # statutory/liturgical unit heads -> witness when in a liturgical container
@@ -132,7 +142,11 @@ def full_grade(feat, ai_grade):
     g, why = rule_grade(feat)
     if g:
         return g, f'rule:{why}'
-    return (ai_grade or 'tsarich'), 'ai'
+    # Missing AI adjudication is a COVERAGE FAILURE, not a legitimate 'tsarich'
+    # grade — surface it explicitly so it can't masquerade as a real label.
+    if not ai_grade:
+        return 'missing_ai', 'ai-missing'
+    return ai_grade, 'ai'
 
 
 # ------------------------------------------------------------------ measure
@@ -145,13 +159,18 @@ def measure():
         os.path.join(FULL, 'mapv2_v13_critic_grades.json'), encoding='utf-8'))}
 
     GR = ['discovery', 'witness', 'citation', 'shared', 'known', 'formula',
-          'norel', 'tsarich']
+          'norel', 'tsarich', 'missing_ai']
     cr = CanonRarity()
     cscore = _canon_scores([(c['page_id'], c['work_id']) for c in enr.values()
                             if c['card_no'] in gold], cr)
+    # scope_regime for parity with frame() (the deployed rule tier uses it)
+    from metadata_scope import ScopeGate
+    sg = ScopeGate(n_pages={c['sys_id']: c.get('n_pages_this_ms', 0)
+                            for c in enr.values()})
     rule_fired = 0
     rule_correct = 0
     full_correct = 0
+    n_missing_ai = 0
     conf = defaultdict(lambda: defaultdict(int))   # gold -> full pred
     n = 0
     for cn, g in gold.items():
@@ -164,13 +183,15 @@ def measure():
                 'work_name': c.get('work_name'), 'title': c.get('work_name'),
                 'author': None, 'genre': c.get('cat'),
                 'canon_mass': cscore.get((c['page_id'], c['work_id']), 0.0),
-                'scope_regime': None}
+                'scope_regime': sg.scope(c['sys_id'])['regime']}
         rg, _ = rule_grade(feat)
         if rg:
             rule_fired += 1
             if rg == g:
                 rule_correct += 1
         fg, _ = full_grade(feat, critic.get(cn))
+        if fg == 'missing_ai':
+            n_missing_ai += 1
         if fg == g:
             full_correct += 1
         conf[g][fg] += 1
@@ -181,6 +202,9 @@ def measure():
           f"({100*rule_correct//max(1,rule_fired)}%)")
     print(f"FULL grader (rules + AI residual) agrees with Hillel: "
           f"{full_correct}/{n} ({100*full_correct//n}%)")
+    print(f"  (missing AI adjudication: {n_missing_ai}; NOTE: dev-set "
+          f"agreement — the AI layer saw these cards and TH was tuned here, "
+          f"so this is NOT held-out validation.)")
 
     print("\n=== confusion: Hillel (row) x full-grader (col) ===")
     _hdr = 'gold\\pred'
