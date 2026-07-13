@@ -1,0 +1,242 @@
+[
+ {
+  "card_no": 109,
+  "grade": "witness",
+  "verdict": "WITNESS",
+  "agree_with_opus": true,
+  "note_he": "עד נוסח לברכה הפותחת את מזמורי התפילה במנהג א״י ('אשר בחר בדוד עבדו ורצה בתהלתו ובשירי קדשו... מצמיח ישועה שלימה'). הקטלוג כבר רושם תפילות קבע ערבית ר״ה, והדף אכן ממשיך ב'מזמור ראס אלסנה' (למנצח לבני קרח). אין כאן תיקון קטלוג — עד נוסח לברכה בלבד.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 110,
+  "grade": "witness",
+  "verdict": "WITNESS",
+  "agree_with_opus": true,
+  "note_he": "עד נוסח לקטע בקשות/תחנון סטטוטורי ('בנה ביתך ושכלל היכלך... שכינתך תשיב לבית מקדשך... עשה למען שמך, עשה למען תורתך'). פורמולות ליטניה אנונימיות; כותרת הקטלוג (מוסף שבת) מוסבה כנראה על חלק אחר של הקטע, ואין בכך תיקון.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 111,
+  "grade": "witness",
+  "verdict": "WITNESS",
+  "agree_with_opus": true,
+  "note_he": "עד נוסח לברכת יוצר, אך יושם לב: הדף נושא את נוסח יוצר של שבת — 'הפותח בכל יום דלתות שערי מזרח בוקע חלוני רקיע ומוציא חמה ממקומה ולבנה ממכון שבתה' (=הכל יודוך) ו'אל אדון על כל המעשים ברוך ומבורך בפי כל הנשמות' — בעוד הקטלוג (NLI ושבטיאל/ניסן) רושם 'שחרית חול'. נראה שדף זה הוא שחרית של שבת, וייתכן דיוק קטלוגי. צ״ע.",
+  "escalate": true,
+  "escalate_reason": "'אל אדון' + 'הפותח בכל יום דלתות שערי מזרח' = יוצר של שבת, מול 'שחרית חול' שבקטלוג — תיקון קטלוג אפשרי",
+  "catalog_correction": true
+ },
+ {
+  "card_no": 112,
+  "grade": "witness",
+  "verdict": "WITNESS",
+  "agree_with_opus": true,
+  "note_he": "עד נוסח לחתימת קדושת היום לרגלים ('והשיאנו... כי בישראל עמך בחרת ואותנו קידשת... מקדש ישראל ויום חג הסוכות') בתוך סדר קידוש לסוכות. הקטלוג כבר מציין תפילות סוכות (עמידה), ובביב' שמידמן ופליישר. עד נוסח לקטע התפילה, ראה למעלה.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 113,
+  "grade": "known",
+  "verdict": "KNOWN-SAME",
+  "agree_with_opus": true,
+  "note_he": "אישור קטלוג: NLI ו-FJMS נוקבים במפורש פירוש רבנו חננאל לב״מ, וראה ביב' פרידברג 'פירושי רבינו חננאל לתלמוד: מסכת בבא מציעא' ומבוא רובנר. לא חידוש.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 114,
+  "grade": "shared",
+  "verdict": "SHARED-SOURCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד הוא הלכות הרי״ף למועד קטן (חמישה זיהויי FJMS + NLI), והקטע הנחפף הוא הברייתא 'אבל שלשה ימים הראשונים אסור בעשיית מלאכה ואפילו עני המתפרנס מן הצדקה' — טקסט תלמודי שהרי״ף ור״ח שניהם משעתקים. מקור משותף בלבד. אגב, הכרטיס מסווג 'אישורי קטלוג' אך הקטלוג מזהה רי״ף ולא ר״ח — הסיווג אינו מדויק.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 115,
+  "grade": "known",
+  "verdict": "KNOWN-SAME",
+  "agree_with_opus": true,
+  "note_he": "אכן — כותרת NLI נוקבת 'אפודי שש' (יוסף אבן אביתור), קדושתא ליוה״כ, הוא הוא החיבור הנתבע, וה'אפודי שש' נראה בדף עצמו. אישור. (אגב, תג הז'אנר 'שירת חול' שבכותרת שגוי — זו קדושתא — אך הזיהוי הספציפי נכון ואינו מטעה.)",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 116,
+  "grade": "known",
+  "verdict": "KNOWN-SAME",
+  "agree_with_opus": true,
+  "note_he": "הדאיה אלקארי = הוראת הקורא, חיבור טעמי המקרא — מזוהה ב-NLI וב-FJMS ומהודר ונדון בהרחבה (Busi, 'Sulla versione breve (Araba ed Ebraica) della Hidayat al-Qari' ועוד ~45 רשומות). יושם לב שהדף ערבי ומאגרים הוא 'תרגום' — כלומר הדף מן הנוסח הערבי המקורי — אך גם יחסי הנוסחים ידועים במחקר. לא חידוש.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 117,
+  "grade": "witness",
+  "verdict": "WITNESS",
+  "agree_with_opus": true,
+  "note_he": "עד נוסח לברכה רביעית של ברכת המזון בבית האבל ('אל אמת דיין אמת שופט בצדק... גודר פרצות בישראל'), והכותרת עצמה כבר נוקבת 'ברכת המזון בבית האבל'. עד נוסח לברכה, ראה למעלה.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 118,
+  "grade": "known",
+  "verdict": "KNOWN-DEPENDENCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד הוא תלמוד בבלי ב״מ כזיהוי הקטלוג, והתביעה 'פירוש ר״ח (טקסט בלבד)' היא בעצמה שיעתוק הסוגיה ('המגביה מציאה לחבירו... תופס לבעל חוב'). תלות צפויה לחלוטין מן הזיהויים.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 119,
+  "grade": "shared",
+  "verdict": "SHARED-SOURCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד — פירוש עלי הפרנס למשנה תורה, ע״ז (NLI + קאולי), והקטע הנחפף הוא סוגיית 'נכרי מבטל ע״ז שלו ושל חברו' — טקסט תלמודי ששני החיבורים מביאים. מקור משותף בלבד; גם כאן הסיווג 'אישורי קטלוג' אינו מדויק.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 120,
+  "grade": "known",
+  "verdict": "KNOWN-SAME",
+  "agree_with_opus": true,
+  "note_he": "תרגום יונתן לשמואל (שירת דוד, שמ״ב כב) — מזוהה ב-NLI וב-FJMS, וכתב היד 4084 עצמו פורסם ונדון אצל Diez Macho ('El Ms. 4084 ff. 1-11...'). אישור מובהק.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 121,
+  "grade": "known",
+  "verdict": "KNOWN-SAME",
+  "agree_with_opus": true,
+  "note_he": "כותרת NLI נוקבת 'מדרש חסרות ויתרות (קטעים)' — בדיוק החיבור (דרשות מלא וחסר: 'הראותכה מלא... מרכבת חסר וו'). אישור. וראה כרטיס 123 — אותו טקסט דף בדיוק תחת רשומה אחרת.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 122,
+  "grade": "witness",
+  "verdict": "WITNESS",
+  "agree_with_opus": true,
+  "note_he": "עד נוסח לתוספות 'הרחמן' שבסוף ברכת המזון ('הרחמן יפרנסנו בכבוד... עושה שלום במרומיו'); הקטלוג כבר רושם ברכת המזון, ובביב' 'התגלגלות נוסח ברכת ירושלים שבברכת המזון'. עד נוסח לקטע, ראה למעלה.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 123,
+  "grade": "known",
+  "verdict": "KNOWN-SAME",
+  "agree_with_opus": true,
+  "note_he": "אישור — NLI ו-FJMS נוקבים 'מדרש חסרות ויתרות', ובביב' 'בתי מדרשות' וקטלוג Lutzki. אבל יושם לב: טקסט הדף זהה אות באות לכרטיס 121 (BL Or. 13153), כולל אורך ומדדים — כנראה אותו קטע פיזי בשתי רשומות (אוסף גסטר עבר ל-BL) או תקלה בצינור הנתונים. צ״ע.",
+  "escalate": true,
+  "escalate_reason": "טקסט דף זהה לחלוטין בשני sys_id שונים (כרטיסים 121/123, BL Or. 13153 מול 'אוסף גסטר') — רשומה כפולה בקטלוג או באג נתונים",
+  "catalog_correction": false
+ },
+ {
+  "card_no": 124,
+  "grade": "known",
+  "verdict": "KNOWN-SAME",
+  "agree_with_opus": true,
+  "note_he": "לא חידוש: NLI — 'קרובות לפרשת עשר תעשר'; FJMS נוקב את הפתיחה שבדף עצמו 'אם תעשר את כל אשר לך בצביון' ומייחס ((פינחס)); וראה ביב' פרידברג 'פיוטי רבי פנחס הכהן' (אליצור, 2004). מזוהה ומהודר.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 125,
+  "grade": "known",
+  "verdict": "KNOWN-DEPENDENCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד הוא הערוך (אותיות קנדיל-שקץ), והערוך מצטט את פירוש ר״ח מילה במילה — התלות הקלאסית; ההתאמה לר״ח פסחים צפויה כולה מן הזיהוי.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 126,
+  "grade": "shared",
+  "verdict": "SHARED-SOURCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד הוא הלכות גדולות (NLI + ברודי + עוד), והקטע הנחפף הוא סוגיית 'חותם בתוך חותם' ('אמר רבא אגנא אפום דנא...', ע״ז לא) עם סימן חמפ״ג — טקסט תלמודי ששני הקבצים הגאוניים (בה״ג והלכות קצובות) משעתקים. מקור משותף בלבד.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 127,
+  "grade": "shared",
+  "verdict": "SHARED-SOURCE",
+  "agree_with_opus": false,
+  "note_he": "לא תלות באדר״נ דווקא: המימרה 'מיתתן של רשעים הנאה להם והנאה לעולם... יין ושינה... שקט... כנוס' היא משנת סנהדרין ח,ה והברייתא שבגמרא (עא ע״ב–עב ע״א), ומנורת המאור מלקט מן הבבלי במפורש — בדף עצמו 'בסוגיא דפרק בן סורר' ו'ותו גרסינן בפרק חלק'. אדר״נ רק מוסר מקבילה לאותה ברייתא. מקור משותף (בבלי), לא ציטוט אדר״נ.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 128,
+  "grade": "known",
+  "verdict": "KNOWN-DEPENDENCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד הוא תלמוד בבלי שבת (זוסמן, NLI, מוסדות), והתביעה 'הלכות גאונים למסכת שבת' משעתקת את הסוגיה ('אין צרין על עיירות של גוים... עד רדתה'). תלות צפויה מן הזיהויים.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 129,
+  "grade": "shared",
+  "verdict": "SHARED-SOURCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד — מדרש אגדה על בראשית ('ופקד את שרה', כבבראשית רבה נג), והדרשה 'לא איש אל ויכזב — הפסוק הזה לא ראשו סופו ולא סופו ראשו' של ר' שמואל בר נחמני היא דרשה נודדת המשותפת לבר״ר ולמדרש תהלים. מסורת אגדית משותפת, לא זיהוי מדרש תהלים.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 130,
+  "grade": "known",
+  "verdict": "KNOWN-DEPENDENCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד הוא ויקרא רבה — בדף עצמו 'פרשתה ג' ר' יצחק פתח טוב מלא כף נחת' = פתיחת ויק״ר פרשה ג — משועתק במהדורת מרגליות (Full). קהלת רבה שואב מוי״ר, והמהדורה הביקורתית של קה״ר מקטעי גניזה כבר מוזכרת בביב' לכתב יד זה. לא חידוש.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 131,
+  "grade": "known",
+  "verdict": "KNOWN-DEPENDENCE",
+  "agree_with_opus": true,
+  "note_he": "ויקרא רבה שמיני–מצורע (מרגליות, Full), והדרשה על איוב 'אם יעלה לשמים שיאו... כגללו לנצח יאבד... כל רואיו יאמרו איו' משותפת לוי״ר (בהקשר מוציא שם רע) ולאסתר רבה על המן — המדרש המאוחר שואב מן הקדומים. לא תגלית.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ },
+ {
+  "card_no": 132,
+  "grade": "known",
+  "verdict": "KNOWN-DEPENDENCE",
+  "agree_with_opus": true,
+  "note_he": "כתב היד הוא תלמוד בבלי (זוסמן; NLI: פסחים), והתשובה הגאונית שבמאגרים מצטטת את הסוגיה ('עשאן לעצמו אין יוצא בהן, למכור בשוק יוצא בהן... הן הן דברים שנאמרו לו למשה'). תלות צפויה.",
+  "escalate": false,
+  "escalate_reason": null,
+  "catalog_correction": false
+ }
+]

@@ -26,6 +26,8 @@ CARDS = os.path.join(PROBE, 'review', 'full_deck',
                      'mapv2_deck_cards_enriched.json')
 MERGED = os.path.join(PROBE, 'results', 'deck_annotation' + _args.tag,
                       'merged_annotations.json')
+CRITIC = os.path.join(PROBE, 'review', 'full_deck',
+                      f'mapv2{_args.tag}_critic_grades.json')
 OUT = os.path.join(PROBE, 'review', 'full_deck',
                    f'mapv2{_args.tag}_human_review.html')
 
@@ -45,9 +47,14 @@ def main():
     if os.path.exists(MERGED):
         ann = {c['card_no']: c.get('annotation') for c in
                json.load(open(MERGED, encoding='utf-8'))}
+    critic = {}
+    if os.path.exists(CRITIC):
+        critic = {c['card_no']: c for c in
+                  json.load(open(CRITIC, encoding='utf-8'))}
     data = []
     for c in cards:
         a = ann.get(c['card_no']) or {}
+        cr = critic.get(c['card_no']) or {}
         data.append({
             'no': c['card_no'],
             'section': c['section'].split(' — ')[0],
@@ -72,8 +79,14 @@ def main():
             'oreason': a.get('reasoning_he') or '',
             'otr': a.get('title_relation') or '',
             'oeq': a.get('name_equation') or '',
+            'cg': cr.get('grade') or '',
+            'cnote': cr.get('note') or '',
+            'cesc': bool(cr.get('escalate')),
         })
     n_ann = sum(1 for d in data if d['ov'])
+    n_cr = sum(1 for d in data if d['cg'])
+    if n_cr:
+        print(f"critic layer: {n_cr} cards")
     sections = []
     for d in data:
         if d['section'] not in sections:
@@ -188,6 +201,13 @@ function render(){
     <span style="color:#999">(${d.oconf}${d.onov?" · חדש":""}${d.otr?" · "+d.otr:""})</span>
     ${d.oeq?`<bdi> · ${esc(d.oeq)}</bdi>`:""}
     <div style="color:#b8b8b8;margin-top:3px">${esc(d.oreason)}</div></div>` : "";
+ const GHE = {discovery:"תגלית",witness:"עד נוסח",citation:"ציטוט",
+   shared:"מקור משותף",known:"ידוע",formula:"פורמולה בלבד",
+   norel:"לא קשור",tsarich:"צ\\"ע"};
+ const critic = d.cg ? `<div class="opus" style="border-color:#c9a227">
+    <b class="v" style="color:#e6c34a">מבקר Fable: ${GHE[d.cg]||d.cg}</b>
+    ${d.cesc?`<span style="color:#ff8a65;font-weight:bold"> · להכרעתך</span>`:""}
+    <div style="color:#b8b8b8;margin-top:3px">${esc(d.cnote)}</div></div>` : "";
  document.getElementById("app").innerHTML = `
   <div class="card">
    <div class="meta">
@@ -203,6 +223,7 @@ function render(){
     ${d.prov!=="htr"?`<span class="badge" style="background:#4a2c6b">תעתיק ${esc(d.prov)}</span>`:""}
    </div>
    ${opus}
+   ${critic}
    <div class="cols">
     <div class="pane"><h4>כתב־יד: <b>${esc(d.shelf)}</b> · ${esc(d.lib)}
       · <a href="${d.url}" target="_blank">פתח ↗</a><br>
