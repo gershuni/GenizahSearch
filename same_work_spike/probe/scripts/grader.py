@@ -24,10 +24,38 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 from collections import Counter, defaultdict
+
+from shared_source import CANON_CATS, CanonIndex
 
 PROBE = r"C:\Genizahsearch\same_work_spike\probe"
 FULL = PROBE + r"\review\full_deck"
+DB = PROBE + r"\data\fullcorpus_v2.db"
+
+
+def _spans_for(pairs):
+    """{(page_id, work_id): (spans, cat)} from track1_matches."""
+    con = sqlite3.connect('file:' + DB.replace('\\', '/') + '?mode=ro',
+                          uri=True)
+    want = set(pairs)
+    out = {}
+    # index by page to avoid a giant IN clause; pages are few here
+    pages = {p for p, w in want}
+    plist = list(pages)
+    for i in range(0, len(plist), 400):
+        batch = plist[i:i + 400]
+        qm = ','.join('?' * len(batch))
+        for pid, wid, sj, cat in con.execute(
+                f"SELECT page_id, work_id, spans_json, cat FROM track1_matches "
+                f"WHERE page_id IN ({qm})", batch):
+            if (pid, wid) in want:
+                try:
+                    out[(pid, wid)] = (json.loads(sj), cat)
+                except Exception:
+                    out[(pid, wid)] = ([], cat)
+    con.close()
+    return out
 
 # statutory/liturgical unit heads -> witness when in a liturgical container
 WITNESS_HEADS = {'אמירה', 'ברכה', 'ברכת', 'תפילה', 'פתיחה', 'בקשה', 'הרחבה',
@@ -54,6 +82,11 @@ def rule_grade(feat):
     # bib mention defers to the AI layer instead of auto-marking known.
     if tc in ('same_work', 'name_variant'):
         return 'known', f'title:{tc}'
+    # shared canonical source: the matched span is (mostly) Bible/Mishnah/
+    # Talmud that the page and the reference both quote -> shared, not a
+    # discovery of the non-canonical work (MAPV2-15d canonical overlap).
+    if feat.get('canon_class') == 'canonical':
+        return 'shared', f"canon:{feat.get('canon_overlap', 0):.2f}"
     # anonymous statutory unit in a liturgical container -> witness
     title = feat.get('title') or feat.get('work_name') or ''
     author = feat.get('author')
@@ -86,6 +119,9 @@ def measure():
 
     GR = ['discovery', 'witness', 'citation', 'shared', 'known', 'formula',
           'norel', 'tsarich']
+    ci = CanonIndex(DB)
+    spans = _spans_for([(c['page_id'], c['work_id']) for c in enr.values()
+                        if c['card_no'] in gold])
     rule_fired = 0
     rule_correct = 0
     full_correct = 0
@@ -96,10 +132,13 @@ def measure():
         if not c:
             continue
         n += 1
+        sp, cat = spans.get((c['page_id'], c['work_id']), ([], c.get('cat')))
+        ccls, cov = ci.classify_match(c['page_id'], sp, cat)
         feat = {'title_class': c.get('title_class'),
                 'bib_class': c.get('bib_class'),
                 'work_name': c.get('work_name'), 'title': c.get('work_name'),
                 'author': None, 'genre': c.get('cat'),
+                'canon_class': ccls, 'canon_overlap': cov,
                 'scope_regime': None}
         rg, _ = rule_grade(feat)
         if rg:
@@ -151,6 +190,8 @@ def frame():
     frame_cells = d['manifest']['frame_cells']
     frame_total = d['manifest']['frame_total']
 
+    ci = CanonIndex(DB)
+    spans = _spans_for([(it['page_id'], it['work_id']) for it in items])
     rule_lab = Counter()
     residual = 0
     # per-item weight = frame_cell_size / sampled_in_cell (post-stratification)
@@ -159,10 +200,14 @@ def frame():
         samp_cell[f"{it['genre_bucket']}|{it['letters_band']}|{it['stitch_status']}"] += 1
     wsum = defaultdict(float)   # grade/residual -> summed corpus weight
     for it in items:
+        sp, cat = spans.get((it['page_id'], it['work_id']),
+                            ([], it.get('genre')))
+        ccls, cov = ci.classify_match(it['page_id'], sp, it.get('cat'))
         feat = {'title_class': it['title_class'], 'bib_class': it['bib_class'],
                 'work_name': f"{it.get('author') or ''} — {it.get('title') or ''}",
                 'title': it.get('title'), 'author': it.get('author'),
-                'genre': it.get('genre'), 'scope_regime': it['scope_regime']}
+                'genre': it.get('genre'), 'scope_regime': it['scope_regime'],
+                'canon_class': ccls, 'canon_overlap': cov}
         g, _ = rule_grade(feat)
         key = f"{it['genre_bucket']}|{it['letters_band']}|{it['stitch_status']}"
         w = frame_cells.get(key, 0) / max(1, samp_cell[key])
