@@ -48,6 +48,20 @@ def main():
             if n in crit:
                 problems.append(f"duplicate card {n}")
             crit[n] = a
+    # Corrected-rule re-adjudication (Hillel's this-ms-identity fix): regrade
+    # chunks OVERRIDE the first panel's grade for the flagged cards.
+    import glob
+    orig_grade = {n: a['grade'] for n, a in crit.items()}
+    flips = []
+    for p in sorted(glob.glob(os.path.join(CDIR, 'regrade_chunk_*.json'))):
+        for a in json.load(open(p, encoding='utf-8')):
+            n = a.get('card_no')
+            if n not in cards:
+                problems.append(f"regrade: bad card_no {n!r}")
+                continue
+            if n in orig_grade and orig_grade[n] != a['grade']:
+                flips.append((n, orig_grade[n], a['grade']))
+            crit[n] = a
     missing = sorted(set(cards) - set(crit))
     if missing:
         problems.append(f"cards without critic review: {missing}")
@@ -82,6 +96,20 @@ def main():
     L.append(f"\nחילוקי דעות עם ה-Opus: **{n_dis}/{len(rows)}**; "
              f"הסלמות להלל: **{len(esc)}**; "
              f"מועמדי תיקון קטלוג: **{len(corr)}**.\n")
+
+    if flips:
+        L.append("## תיקון כיול — הכרעה מחודשת (כלל הלל: רק זיהוי בכתב־היד עצמו)\n")
+        L.append("הפאנל הראשון הוריד כרטיסים לדרגת 'עד נוסח'/'ידוע' על סמך "
+                 "מהדורות רוחביות של החיבור/הסוגה. לפי כלל הלל, מהדורה הקיימת "
+                 "*במקום אחר* אינה מורידה תגלית — קובע רק זיהוי המצורף לכתב־היד "
+                 "הזה (כותרת NLI/FJMS או שורת ביבליוגרפיה תחת ה-AlmaId שלו). "
+                 f"**{len(flips)} כרטיסים הוכרעו מחדש:**\n")
+        L.append("| # | ציון קודם | ציון מתוקן | חיבור |")
+        L.append("|--|---|---|---|")
+        for n, og, ng in sorted(flips):
+            L.append(f"| {n} | {GHE.get(og, og)} | **{GHE.get(ng, ng)}** | "
+                     f"{cards[n]['work_name'][:46]} |")
+        L.append("")
 
     L.append("## לפי מדור (ציון המבקר)\n")
     hdr = ['discovery', 'witness', 'citation', 'shared', 'known',

@@ -21,17 +21,58 @@ one, say what would make it publishable.
 2. `ANNOTATION-BRIEF.md` (this directory) — the taxonomy the Opus
    annotators used (incl. WITNESS) and the input field definitions.
 
-His known review moves, distilled:
-- **Bibliography first.** A Friedberg bib entry naming the work/author =
-  known. An EDITION of the genre corpus (שמידמן, ברכות המזון המפויטות; a
-  qedushtaot/yotserot/Palestinian-Targum edition — Discussion or
-  Full/Partial transcription) covers a same-genre claim WITHOUT naming it.
-  But presence of bibliography alone is NOT disqualifying (T-S Loan 149:
-  57 entries, its booklist-quotes-Otiyot connection was still a find).
-- **עד נוסח.** An anonymous statutory unit (ברכה, קדושת היום, וידוי,
-  תוספת לברכת המזון) is passage-level witness knowledge — valuable, not a
-  discovery, and not noise. If the flanks DIFFER around the match, it is an
-  INDIRECT witness (secondary use) — say so.
+### THE decision axis (Hillel's rule — read this twice)
+
+The discovery/witness split is **NOT** about whether the matched work is
+edited or famous. It is about whether **THIS manuscript's own metadata**
+— its NLI/FJMS catalog title, and its Friedberg `bibliography` rows keyed
+to its own AlmaId — already told a scholar this content is here.
+
+- **תגלית (discovery)** — the catalog/title/bib **for this ms** does NOT
+  point here; a scholar reading the record would have no reason to expect
+  this content in this fragment. **This holds even if the matched work is
+  edited and has dozens of witnesses elsewhere.** פרק שירה (Beit-Arié's
+  edition, ~29 witnesses) in a fragment catalogued only "שירים" is a
+  DISCOVERY — nobody would know פרק שירה is in *this* ms. Name the edition
+  in the note ("החיבור מהודר אצל X; החידוש הוא שכתב־יד זה עד לא־מוכר"), but
+  the grade is **discovery**. Anchor: Hillel's v11 #31 — "אכן [תגלית],
+  אולי יש עדויות ביבליוגרפיות אך לא ראיתי אצלנו" (edited elsewhere, but not
+  attached to this ms → discovery).
+- **עד נוסח (witness)** — the metadata **for this ms** DOES point here: the
+  ms is identified as a container (a Haggadah, a siddur, an identified
+  work) and the match is a component you would *expect* in it and would
+  check for — a **standard statutory/liturgical unit** (ברכת המזון and its
+  הרחמן additions, קדושת היום, הבדלה, ברכה מעין שלוש, פתיחה לי"ג מידות).
+  The algorithm's value is confirming the specific text/version is present.
+  Hillel: "a passage that may be in this ms according to the title/bib/cat
+  (like Birkat ha-Mazon in a Haggadah) is indeed there — so I would have
+  checked there, and the algorithm showed it's indeed there."
+- **known** — this ms's OWN Friedberg bib row (under its AlmaId)
+  names/transcribes *this* fragment, or the NLI/FJMS title names the same
+  work. The edition already lists this ms. (v11 "ראה ביב' פרידברג
+  [edition]" kills were all this — the row sits under the ms.)
+
+**Corpus-wide bibliography search — use it, but never let it demote.**
+Searching the whole `bibliography` table tells you whether a work is edited
+at all (good for the note). It NEVER by itself turns a discovery into
+known/witness. Demotion requires an identification attached to THIS ms.
+The card fields already encode this: `title_class` (generic_or_absent =
+does not identify; same_work/name_variant = identifies; different_specific
+= names a DIFFERENT work) and `bib_class` (bib_empty/bib_mentions = nothing
+identifying; known_bib/published_full = an attached row names this
+fragment; **known_bib_genre = corpus-wide genre coverage → does NOT
+demote**). Presence of bibliography alone is not disqualifying (T-S Loan
+149: 57 entries, still a find).
+
+Distinguish a **standard statutory unit** (any liturgical container
+predicts it → witness) from a **specific identifiable composition** (a
+named paytan's piyyut, a specific פזמון/קינה/סליחה, פרק שירה, a specific
+seder avoda). A specific composition in a generic-titled ms is a
+**DISCOVERY** even though it is "liturgical" — the catalog did not point to
+*that* composition. If a witness's flanks DIFFER around the match it is an
+INDIRECT witness (secondary use) — say so.
+
+His other review moves, distilled:
 - **Direction.** Hebrew↔Arabic pairs where the reference is a תרגום: the
   page may be the SOURCE ("כלומר כנראה כאן זה המקור הערבי").
 - **Catalog corrections.** A misleading NLI title is itself a finding —
@@ -58,10 +99,15 @@ note: "החיבור מהודר אצל X; החידוש הוא רק העד הזה"
 ## Where to spend your effort
 
 - **Hardest scrutiny: every `opus_annotation.verdict == "DISCOVERY"`.**
-  Attempt refutation via: bibliography (this ms + genre editions + your
-  corpus-wide search), statutory/formulaic character, island flanks
-  (= citation suspicion), NLI/FJMS title re-read with name-variant control
-  (Hebrew↔Arabic↔JA, abbreviations, author-for-work).
+  Attempt refutation ONLY via an identification attached to THIS ms
+  (its AlmaId bib rows / its NLI-FJMS title), statutory/formulaic
+  character, or island flanks (= citation suspicion). A corpus-wide
+  edition alone is NOT grounds to demote — see the decision axis above.
+- **Equally: do not over-demote.** A specific identifiable work in a
+  generic-titled ms with no this-ms bib row is a DISCOVERY even if edited
+  elsewhere (פרק שירה case). Grade witness ONLY for standard statutory
+  units in identified/liturgical containers, or where this ms's own
+  catalog/bib names the work.
 - WITNESS cards: verify the unit identification; direct vs indirect.
 - KNOWN-*/SHARED-SOURCE cards: spot-check; overturn only with a reason.
 - Sections are honest labels — a "תגליות" card that is really known is a
