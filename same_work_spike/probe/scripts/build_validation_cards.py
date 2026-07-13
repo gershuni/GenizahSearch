@@ -106,6 +106,9 @@ def main():
         name = f"{it.get('author') or ''} — {it.get('title') or ''}".strip(' —')
         nli_t = nli.get(sid, '')
         bib_lines = bg.display(sid)
+        if isinstance(bib_lines, (list, tuple)):
+            bib_lines = '\n'.join(str(x) for x in bib_lines)
+        bib_lines = bib_lines or ''
         # hidden grader prediction (NOT shown in the HTML)
         st = norm_stream(ptxt)[0]
         cmass = 0.0
