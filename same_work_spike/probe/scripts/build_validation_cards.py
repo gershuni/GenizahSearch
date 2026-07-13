@@ -206,6 +206,8 @@ font-size:12px;color:#bbb;margin-inline-start:6px}</style></head><body>
  <textarea id=note rows=2 placeholder="הערה חופשית (נשמר אוטומטית)"></textarea>
 </div>
 <script>
+window.onerror=function(m,s,l){var d=document.getElementById('card');
+ if(d)d.innerHTML="<pre style='color:#f88;white-space:pre-wrap'>JS error: "+m+" (line "+l+")</pre>";return false;};
 const CARDS=__DATA__;const KEY='seed029_mapv2_validation100_v1';
 let store=JSON.parse(localStorage.getItem(KEY)||'{}');let i=0;
 const GK={'1':'discovery','2':'witness','3':'citation','4':'shared','5':'known','6':'formula','7':'norel','8':'tsarich'};
@@ -235,7 +237,8 @@ document.getElementById('note').addEventListener('blur',noteSave);
 document.addEventListener('keydown',e=>{if(['TEXTAREA','INPUT'].includes(e.target.tagName))return;
  if(GK[e.key]){grade(GK[e.key]);e.preventDefault();}
  else if(e.key==='ArrowLeft'){next_();}else if(e.key==='ArrowRight'){prev();}});
-render();
+try{render();}catch(err){document.getElementById('card').innerHTML=
+ "<pre style='color:#f88;white-space:pre-wrap'>render error: "+err.message+"</pre>";}
 </script></body></html>"""
 
 
