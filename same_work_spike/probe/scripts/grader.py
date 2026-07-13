@@ -154,6 +154,163 @@ def full_grade(feat, ai_grade):
     return ai_grade, 'ai'
 
 
+# ======================== 4-bucket advisory suggester ======================
+# Post-reframe (Hillel): the four buckets are ADVISORY suggestions, not gates.
+# Nothing is auto-accepted — every candidate carries a suggested bucket + the
+# evidence that drove it, and a human renders the verdict (y/n/?/other). This
+# dissolves the held-out "shared buries discoveries" problem (MAPV2-15h): the
+# canonical-content signal is now one evidence line, never a verdict that can
+# hide a find.
+#
+#   known       this ms's OWN metadata names the content (Maagarim מסירה /
+#               catalog title / page resolved to a known work) — identified.
+#   witness     a statutory unit the catalog PREDICTS by genre (Birkat Hamazon
+#               in a Haggadah), confirmed present -> a new nusach witness.
+#   discovery   the catalog gives no basis to expect this content here.
+#   other       relation is to a THIRD text, not an identity of this page
+#               (shared classical source / citation / formula / no-relation).
+#
+# Discovery-favoring: an ambiguous-scope page is suggested 'discovery' even when
+# the canonical signal is high — the shared reading rides along as a CAVEAT,
+# never overriding.
+
+def _load_late_ref():
+    p = os.path.join(PROBE, 'data', 'late_ref_blocklist.json')
+    return json.load(open(p, encoding='utf-8')) if os.path.exists(p) else {}
+
+
+def _load_witnesses():
+    """{work_id: {sys_id: 'edition'|'nosafot'}} from the Maagarim מסירות list."""
+    p = os.path.join(PROBE, 'data', 'mesirot_nosafot.json')
+    out = defaultdict(dict)
+    if os.path.exists(p):
+        for e in json.load(open(p, encoding='utf-8')):
+            w = e.get('work_id')
+            for r in e.get('msirot_matched') or []:
+                if r.get('sys_id'):
+                    out[w][str(r['sys_id'])] = 'edition'
+            for r in e.get('matched') or []:
+                if r.get('sys_id'):
+                    out[w].setdefault(str(r['sys_id']), 'nosafot')
+    return out
+
+
+def suggest_bucket(feat):
+    """Return (bucket, confidence, evidence[]). bucket in
+    {known,witness,discovery,other}; confidence in {high,medium,low,drop}.
+    A blocklisted (post-1700) reference returns ('other','drop',...) so the
+    caller can exclude it (no silent truncation — the caller logs the count)."""
+    ev = []
+    if feat.get('late_ref'):
+        return 'other', 'drop', [f"anachronistic post-1700 reference: {feat['late_ref']}"]
+    mw = feat.get('maagarim_witness')
+    if mw:
+        tag = ('used for the critical edition' if mw == 'edition'
+               else 'additional witness (מסירה נוספת)')
+        return 'known', 'high', [f"Maagarim lists THIS ms as a witness ({tag})"]
+    tc = feat.get('title_class')
+    bc = feat.get('bib_class')
+    res = feat.get('resolution')
+    canon = feat.get('canon_mass', 0.0)
+    if tc in ('same_work', 'name_variant'):
+        return 'known', 'high', [f"catalog title names this work ({tc})"]
+    # soft evidence carried into the residual regardless of final bucket
+    if canon >= SHARED_TH:
+        ev.append(f"high canonical content ({canon:.2f}) — may be a shared classical source")
+    if bc == 'published_full':
+        ev.append('the matched work is published in full under this ms bibliography')
+    elif bc in ('known_bib', 'known_bib_genre'):
+        ev.append('this ms bibliography references the matched work')
+    if tc == 'known_quoter':
+        ev.append('this ms is a known work that quotes others (the match may be a citation)')
+    # statutory unit predicted by a liturgical / anthology container -> witness
+    title = feat.get('title') or feat.get('work_name') or ''
+    author = feat.get('author')
+    genre = feat.get('genre') or feat.get('cat') or ''
+    head = _head(title.split('—')[-1] if '—' in title else title)
+    anon = (not author) or ('לא ידוע' in str(author)) or \
+        str(feat.get('work_name', '')).startswith('מחבר לא ידוע')
+    if head in WITNESS_HEADS and anon and \
+            (genre in LITURGY_GENRES or feat.get('scope_regime') ==
+             'homogeneous_anthology'):
+        return 'witness', 'medium', ev + [f"statutory unit '{head}' predicted by the container"]
+    if res == 'page_resolved_known':
+        return 'known', 'medium', ev + ['this page resolves to a known work by ms scope']
+    # discovery-favoring residual: ambiguous scope -> discovery (canon = caveat)
+    if res == 'ms_scope_ambiguous' or \
+            feat.get('scope_regime') in ('miscellany', 'ambiguous'):
+        conf = 'low' if canon >= SHARED_TH else 'medium'
+        return 'discovery', conf, ev + ['catalog does not predict this content on this page']
+    # ms globally likely one work / single-work container, no explicit name hit
+    if canon >= SHARED_TH:
+        return 'other', 'medium', ev + ['a shared canonical source dominates the matched span']
+    if tc == 'known_quoter' or bc in ('known_bib', 'known_bib_genre'):
+        return 'other', 'low', ev + ['likely a citation/reference, not this-page content']
+    return 'discovery', 'low', ev + ['no metadata on this ms points to this content']
+
+
+def buckets():
+    """Run the 4-bucket advisory suggester over the frozen 467 frame, with the
+    >17th-c reference cut applied, and report the suggested-bucket mix (sample
+    count + post-stratified corpus estimate). This is the corpus-wide picture:
+    where automatic SUGGESTIONS land, ahead of human verdicts."""
+    d = json.load(open(os.path.join(PROBE, 'data', 'audit_sample_v1.json'),
+                       encoding='utf-8'))
+    items = d['items']
+    frame_cells = d['manifest']['frame_cells']
+    frame_total = d['manifest']['frame_total']
+    late = _load_late_ref()
+    wit = _load_witnesses()
+    cr = CanonRarity()
+    cscore = _canon_scores([(it['page_id'], it['work_id']) for it in items], cr)
+
+    samp_cell = Counter()
+    for it in items:
+        samp_cell[f"{it['genre_bucket']}|{it['letters_band']}|{it['stitch_status']}"] += 1
+
+    lab = Counter()
+    conf_ct = Counter()
+    wsum = defaultdict(float)
+    dropped = 0
+    for it in items:
+        wid = it['work_id']
+        feat = {'title_class': it['title_class'], 'bib_class': it['bib_class'],
+                'work_name': f"{it.get('author') or ''} — {it.get('title') or ''}",
+                'title': it.get('title'), 'author': it.get('author'),
+                'genre': it.get('genre'), 'scope_regime': it['scope_regime'],
+                'resolution': it['resolution'],
+                'canon_mass': cscore.get((it['page_id'], wid), 0.0),
+                'late_ref': (f"{late[wid]['year']} {late[wid]['title']}"
+                             if wid in late else None),
+                'maagarim_witness': wit.get(wid, {}).get(str(it['sys_id']))}
+        b, conf, _ev = suggest_bucket(feat)
+        key = f"{it['genre_bucket']}|{it['letters_band']}|{it['stitch_status']}"
+        w = frame_cells.get(key, 0) / max(1, samp_cell[key])
+        if conf == 'drop':
+            dropped += 1
+            continue
+        lab[b] += 1
+        conf_ct[f"{b}:{conf}"] += 1
+        wsum[b] += w
+
+    kept = len(items) - dropped
+    order = ['discovery', 'witness', 'known', 'other']
+    print(f"audit frame: {len(items)} rows; raw frame {frame_total:,}")
+    print(f">17th-c reference cut dropped: {dropped} rows (anachronistic)")
+    print(f"\n4-bucket SUGGESTIONS over {kept} kept rows (advisory; human decides):")
+    for b in order:
+        print(f"  {b:10s} {lab[b]:4d} ({100*lab[b]//max(1,kept)}%)")
+    print("\nby confidence:")
+    for k in sorted(conf_ct):
+        print(f"  {k:22s} {conf_ct[k]}")
+    tot = sum(wsum.values()) or 1.0
+    print("\n=== post-stratified CORPUS-WIDE suggestion mix ===")
+    for b in order:
+        print(f"  {b:10s} {wsum[b]/tot:6.1%}")
+    print("\n(Every bucket is a SUGGESTION carrying its evidence; everything "
+          "non-'known' routes to human/AI verdict before publication.)")
+
+
 # ------------------------------------------------------------------ measure
 def measure():
     enr = {c['card_no']: c for c in json.load(open(
@@ -291,12 +448,14 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--measure', action='store_true')
     ap.add_argument('--frame', action='store_true')
+    ap.add_argument('--buckets', action='store_true',
+                    help='4-bucket advisory suggestion mix over the frame')
     a = ap.parse_args()
     if a.measure:
         measure()
     if a.frame:
         frame()
-    if not (a.measure or a.frame):
-        measure()
-        print("\n" + "=" * 60 + "\n")
-        frame()
+    if a.buckets:
+        buckets()
+    if not (a.measure or a.frame or a.buckets):
+        buckets()
