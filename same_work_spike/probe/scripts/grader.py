@@ -112,6 +112,11 @@ def rule_grade(feat):
     'discovery' — discoveries are never rule-decided."""
     tc = feat.get('title_class')
     bc = feat.get('bib_class')
+    # THIS fragment is a Maagarim witness (מסירה) of the matched work — the
+    # Academy already edited from / lists this manuscript -> known (strongest
+    # signal; a used-for-edition מסירה or an additional-witness מסירה נוספת).
+    if feat.get('maagarim_witness'):
+        return 'known', f"maagarim:{feat['maagarim_witness']}"
     # this-ms metadata NAMES the work -> known. Only the catalog TITLE naming
     # the work is a safe veto; a bibliography MENTION (known_bib) is NOT —
     # the row may describe another folio, or the matched span may be a shared

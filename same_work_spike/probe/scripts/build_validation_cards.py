@@ -87,6 +87,22 @@ def main():
     bg = BibGate()
     cr = CanonRarity()
     sg = ScopeGate(nli_titles=nli)
+    # Maagarim witness map: work_id -> {sys_id: kind} (מסירה used-for-edition
+    # or מסירה נוספת additional witness). If THIS fragment is a listed witness
+    # of the matched work, that is decisive 'known' evidence.
+    wit = {}
+    try:
+        for r in json.load(open(PROBE + r"\data\mesirot_nosafot.json", encoding='utf-8')):
+            wid_ = r.get('work_id')
+            if not wid_:
+                continue
+            d = {str(m['sys_id']): 'מסירה'
+                 for m in (r.get('msirot_matched') or [])}
+            for m in (r.get('matched') or []):
+                d.setdefault(str(m['sys_id']), 'מסירה נוספת')
+            wit[wid_] = d
+    except FileNotFoundError:
+        pass
 
     cards = []
     for i, it in enumerate(picked, 1):
@@ -121,14 +137,16 @@ def main():
                 else:
                     merged.append([a, b])
             cmass = cr.mass_per_len(''.join(st[a:b] for a, b in merged))
+        mes = wit.get(wid, {}).get(sid)   # 'מסירה' / 'מסירה נוספת' / None
         feat = {'title_class': it['title_class'], 'bib_class': it['bib_class'],
                 'work_name': name, 'title': it.get('title'),
                 'author': it.get('author'), 'genre': it.get('genre'),
-                'scope_regime': it['scope_regime'], 'canon_mass': cmass}
+                'scope_regime': it['scope_regime'], 'canon_mass': cmass,
+                'maagarim_witness': mes}
         rg, why = rule_grade(feat)
         cards.append({
             'no': i, 'page_id': pid, 'work_id': wid, 'sys_id': sid,
-            'work': name, 'nli': nli_t, 'bib': bib_lines,
+            'work': name, 'nli': nli_t, 'bib': bib_lines, 'mesirah': mes,
             'genre': it.get('genre'), 'page_html': page_htm, 'ref_html': ref_htm,
             'url': f"https://genizahsearch.com/browse?sys_id={sid}",
             # hidden fields for scoring only:
@@ -157,7 +175,8 @@ def _write_html(cards):
     # blind cards for the browser: NO prediction fields
     pub = [{'no': c['no'], 'work': c['work'], 'nli': c['nli'], 'bib': c['bib'],
             'genre': c['genre'], 'page_html': c['page_html'],
-            'ref_html': c['ref_html'], 'url': c['url']} for c in cards]
+            'ref_html': c['ref_html'], 'url': c['url'],
+            'mesirah': c.get('mesirah')} for c in cards]
     data = json.dumps(pub, ensure_ascii=False)
     grades = [('discovery', 'תגלית', '1'), ('witness', 'עד נוסח', '2'),
               ('citation', 'ציטוט', '3'), ('shared', 'מקור משותף', '4'),
@@ -220,8 +239,9 @@ function render(){const c=CARDS[i];const rec=store[c.no]||{};
  document.getElementById('done').textContent=Object.keys(store).filter(k=>store[k].grade).length;
  document.getElementById('gr').textContent=rec.grade?HE[rec.grade]:'—';
  let bib=c.bib?`<div class=bib>${c.bib.replace(/</g,'&lt;')}</div>`:'';
+ let mes=c.mesirah?`<div style="color:#7bd88f;font-weight:600;margin:4px 0">🔖 מסירת מאגרים ידועה לחיבור זה: ${c.mesirah} (עד ידוע — לרוב ״ידוע״)</div>`:'';
  document.getElementById('card').innerHTML=
-  `<div class=work>${c.work||'—'}</div>`+
+  `<div class=work>${c.work||'—'}</div>`+mes+
   `<div class=meta>${c.genre||''} `+(c.nli?`<span class=nli>· קטלוג NLI: ${c.nli}</span>`:'')+
   ` <a href="${c.url}" target=_blank>פתח בגניזה↗</a></div>`+bib+
   `<div class=panes><div class=pane><div class=lbl>הדף (גניזה):</div><div class=ev>${c.page_html||''}</div></div>`+
