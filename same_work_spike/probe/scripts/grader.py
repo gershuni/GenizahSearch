@@ -25,36 +25,63 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from collections import Counter, defaultdict
 
-from shared_source import CANON_CATS, CanonIndex
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from canon_rarity import SHARED_TH, CanonRarity
+from normalize import norm_stream
 
 PROBE = r"C:\Genizahsearch\same_work_spike\probe"
 FULL = PROBE + r"\review\full_deck"
 DB = PROBE + r"\data\fullcorpus_v2.db"
 
 
-def _spans_for(pairs):
-    """{(page_id, work_id): (spans, cat)} from track1_matches."""
+def _canon_scores(pairs, cr):
+    """{(page_id, work_id): rarity mass/len of the largest matched span}.
+
+    Spans live in track1_candidates (the discovery pool), NOT track1_matches
+    (confirmed/canonical identifications) — the earlier lookup queried the
+    wrong table, so the canonical signal never reached the grader.
+    """
     con = sqlite3.connect('file:' + DB.replace('\\', '/') + '?mode=ro',
                           uri=True)
     want = set(pairs)
-    out = {}
-    # index by page to avoid a giant IN clause; pages are few here
     pages = {p for p, w in want}
+    # matched spans (candidate pool first, then confirmed)
+    spans = {}
+    for tbl in ('track1_candidates', 'track1_matches'):
+        plist = [p for p in pages]
+        for i in range(0, len(plist), 400):
+            batch = plist[i:i + 400]
+            qm = ','.join('?' * len(batch))
+            for pid, wid, sj in con.execute(
+                    f"SELECT page_id, work_id, spans_json FROM {tbl} "
+                    f"WHERE page_id IN ({qm})", batch):
+                if (pid, wid) in want and (pid, wid) not in spans:
+                    try:
+                        spans[(pid, wid)] = json.loads(sj)
+                    except Exception:
+                        spans[(pid, wid)] = []
+    # page text -> stream, slice the largest span, score
+    ptext = {}
     plist = list(pages)
     for i in range(0, len(plist), 400):
         batch = plist[i:i + 400]
         qm = ','.join('?' * len(batch))
-        for pid, wid, sj, cat in con.execute(
-                f"SELECT page_id, work_id, spans_json, cat FROM track1_matches "
-                f"WHERE page_id IN ({qm})", batch):
-            if (pid, wid) in want:
-                try:
-                    out[(pid, wid)] = (json.loads(sj), cat)
-                except Exception:
-                    out[(pid, wid)] = ([], cat)
+        for pid, tx in con.execute(
+                f"SELECT page_id, text FROM pages WHERE page_id IN ({qm})",
+                batch):
+            ptext[pid] = tx or ''
     con.close()
+    out = {}
+    for (pid, wid), sp in spans.items():
+        if not sp:
+            out[(pid, wid)] = 0.0
+            continue
+        st = norm_stream(ptext.get(pid, ''))[0]
+        a0, a1 = max(sp, key=lambda s: s[1] - s[0])[:2]
+        out[(pid, wid)] = cr.mass_per_len(st[a0:a1])
     return out
 
 # statutory/liturgical unit heads -> witness when in a liturgical container
@@ -82,11 +109,11 @@ def rule_grade(feat):
     # bib mention defers to the AI layer instead of auto-marking known.
     if tc in ('same_work', 'name_variant'):
         return 'known', f'title:{tc}'
-    # shared canonical source: the matched span is (mostly) Bible/Mishnah/
-    # Talmud that the page and the reference both quote -> shared, not a
-    # discovery of the non-canonical work (MAPV2-15d canonical overlap).
-    if feat.get('canon_class') == 'canonical':
-        return 'shared', f"canon:{feat.get('canon_overlap', 0):.2f}"
+    # shared canonical source: the matched span's distinctive content is
+    # Bible/Mishnah/Talmud that page and reference both quote -> shared, not a
+    # discovery of the non-canonical work (MAPV2-15f rarity-weighted canon).
+    if feat.get('canon_mass', 0.0) >= SHARED_TH:
+        return 'shared', f"canon:{feat.get('canon_mass', 0):.2f}"
     # anonymous statutory unit in a liturgical container -> witness
     title = feat.get('title') or feat.get('work_name') or ''
     author = feat.get('author')
@@ -119,9 +146,9 @@ def measure():
 
     GR = ['discovery', 'witness', 'citation', 'shared', 'known', 'formula',
           'norel', 'tsarich']
-    ci = CanonIndex(DB)
-    spans = _spans_for([(c['page_id'], c['work_id']) for c in enr.values()
-                        if c['card_no'] in gold])
+    cr = CanonRarity()
+    cscore = _canon_scores([(c['page_id'], c['work_id']) for c in enr.values()
+                            if c['card_no'] in gold], cr)
     rule_fired = 0
     rule_correct = 0
     full_correct = 0
@@ -132,13 +159,11 @@ def measure():
         if not c:
             continue
         n += 1
-        sp, cat = spans.get((c['page_id'], c['work_id']), ([], c.get('cat')))
-        ccls, cov = ci.classify_match(c['page_id'], sp, cat)
         feat = {'title_class': c.get('title_class'),
                 'bib_class': c.get('bib_class'),
                 'work_name': c.get('work_name'), 'title': c.get('work_name'),
                 'author': None, 'genre': c.get('cat'),
-                'canon_class': ccls, 'canon_overlap': cov,
+                'canon_mass': cscore.get((c['page_id'], c['work_id']), 0.0),
                 'scope_regime': None}
         rg, _ = rule_grade(feat)
         if rg:
@@ -190,8 +215,8 @@ def frame():
     frame_cells = d['manifest']['frame_cells']
     frame_total = d['manifest']['frame_total']
 
-    ci = CanonIndex(DB)
-    spans = _spans_for([(it['page_id'], it['work_id']) for it in items])
+    cr = CanonRarity()
+    cscore = _canon_scores([(it['page_id'], it['work_id']) for it in items], cr)
     rule_lab = Counter()
     residual = 0
     # per-item weight = frame_cell_size / sampled_in_cell (post-stratification)
@@ -200,14 +225,11 @@ def frame():
         samp_cell[f"{it['genre_bucket']}|{it['letters_band']}|{it['stitch_status']}"] += 1
     wsum = defaultdict(float)   # grade/residual -> summed corpus weight
     for it in items:
-        sp, cat = spans.get((it['page_id'], it['work_id']),
-                            ([], it.get('genre')))
-        ccls, cov = ci.classify_match(it['page_id'], sp, it.get('cat'))
         feat = {'title_class': it['title_class'], 'bib_class': it['bib_class'],
                 'work_name': f"{it.get('author') or ''} — {it.get('title') or ''}",
                 'title': it.get('title'), 'author': it.get('author'),
                 'genre': it.get('genre'), 'scope_regime': it['scope_regime'],
-                'canon_class': ccls, 'canon_overlap': cov}
+                'canon_mass': cscore.get((it['page_id'], it['work_id']), 0.0)}
         g, _ = rule_grade(feat)
         key = f"{it['genre_bucket']}|{it['letters_band']}|{it['stitch_status']}"
         w = frame_cells.get(key, 0) / max(1, samp_cell[key])
