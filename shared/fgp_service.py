@@ -573,13 +573,25 @@ def _heb_letter_count(text: Optional[str]) -> int:
     return sum(len(w) for w in _HEBWORD_RE.findall(_NIKUD_RE.sub("", text)))
 
 
+def _fgp_is_whole_doc(source: Dict[str, Any]) -> bool:
+    """A whole-document FGP row: NO per-image alignment key at all — neither a
+    folio label (``_fgp_match_folio``) nor a c-number image id
+    (``_fgp_match_image_number``). Such a row shows its full ``content`` on every
+    folio, so its coverage is judged against the WHOLE manuscript. A foliated OR
+    c-numbered row is per-image (its content is one folio's text) and is judged
+    against the displayed folio's HTR — so c-numbered rows with a null
+    ``image_side`` must NOT be treated as whole-doc (they're 5.8k real per-image
+    editions that would otherwise be wrongly demoted)."""
+    return not _fgp_match_folio(source) and not _fgp_match_image_number(source)
+
+
 def fgp_needs_full_htr(sources: Optional[List[Dict[str, Any]]]) -> bool:
-    """True if any FGP *edition* in ``sources`` is a whole-document row (no
-    per-image folio → ``_fgp_match_folio`` returns ``''``). Those must be measured
-    against the WHOLE-manuscript HTR, so callers can gate the (relatively costly)
-    full-manuscript fetch on this — foliated-only pages skip it entirely."""
+    """True if any FGP *edition* in ``sources`` is a whole-document row (see
+    ``_fgp_is_whole_doc``). Those must be measured against the WHOLE-manuscript
+    HTR, so callers gate the (relatively costly) full-manuscript fetch on this —
+    foliated-/c-numbered-only pages skip it entirely."""
     return any(
-        not _fgp_match_folio(ed)
+        _fgp_is_whole_doc(ed)
         for ed in group_transcription_sources(sources)["fgp_editions"]
     )
 
@@ -642,10 +654,10 @@ def choose_default_source(
     best_known, best_ratio = None, -1.0
     unknown_ed = None
     for ed in eds:
-        if _fgp_match_folio(ed):            # foliated → this folio's HTR
-            baseline_len = folio_htr_len
-        else:                               # whole-doc → whole-MS HTR (else folio)
+        if _fgp_is_whole_doc(ed):           # whole-doc → whole-MS HTR (else folio)
             baseline_len = _full_htr_len() or folio_htr_len
+        else:                               # foliated / c-numbered → this folio's HTR
+            baseline_len = folio_htr_len
         if baseline_len < _COVERAGE_MIN_HTR_LETTERS:
             if unknown_ed is None:
                 unknown_ed = ed

@@ -36,6 +36,12 @@ def _foliated_edition(content, image_side="2r", **kw):
     return _edition(content, image_side=image_side, **kw)
 
 
+def _cnum_edition(content, c_number="C62553", **kw):
+    # A per-image row keyed by c_number with NO folio label — must be treated as
+    # per-image (folio baseline), NOT whole-doc (5.8k such editions exist).
+    return _edition(content, c_number=c_number, **kw)
+
+
 # ── Normalization (_heb_letter_count) ─────────────────────────────────────────
 
 
@@ -182,9 +188,22 @@ class TestWholeDocBaseline:
         assert d["eligible"] is True and d["reason"] == "fgp_sufficient"
         assert not called, "getter must NOT be called for a foliated-only page"
 
+    def test_cnumber_row_is_per_image_not_whole_doc(self):
+        # A c-numbered row with null image_side is per-image (5.8k such editions):
+        # judged against the FOLIO HTR, never the whole MS, and the full-MS getter
+        # must NOT be invoked for it.
+        row = _cnum_edition("אבגד " * 120)  # ≈ folio HTR (_HTR = 400)
+        called = []
+        d = choose_default_source(
+            [row], _HTR, full_htr_getter=lambda: called.append(1) or "x" * 99999
+        )
+        assert d["eligible"] is True and d["reason"] == "fgp_sufficient"
+        assert not called, "c-numbered per-image row must not trigger the full-MS fetch"
+
     def test_needs_full_htr(self):
         assert fgp_needs_full_htr([_edition("x")]) is True            # whole-doc
         assert fgp_needs_full_htr([_foliated_edition("x")]) is False  # foliated
+        assert fgp_needs_full_htr([_cnum_edition("x")]) is False      # c-numbered per-image
         assert fgp_needs_full_htr([]) is False
         # A translation is not an edition → no full-HTR needed for it.
         assert fgp_needs_full_htr([_edition("x", rel="Digital Translation")]) is False
