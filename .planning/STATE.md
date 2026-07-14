@@ -59,6 +59,12 @@ All commits PUSHED to origin/master-main. **Next: `/gsd-new-milestone`.**
 
 None at roadmap creation.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260714-9jc | FGP default demotion via coverage ratio (SEED-030) — show V0.8/HTR when the folio's FGP is a partial excerpt; web+desktop parity | 2026-07-14 | 1d3ef49c | Codex APPROVE; not yet released | [260714-9jc-fgp-default-demotion-via-coverage-ratio-](./quick/260714-9jc-fgp-default-demotion-via-coverage-ratio-/) |
+
 ### Pending Todos
 
 - Begin with `/gsd-discuss-phase 130` (or skip-discuss-if-empty per the standing autonomous directive).
