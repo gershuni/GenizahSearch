@@ -1,19 +1,27 @@
 # -*- coding: utf-8 -*-
-"""MAPV2-15n (v2) — Road 1 as a RICH grading page (like the prior review decks).
+"""MAPV2-15n (v3) — Road 1 rich grading page + Hillel's grading-feedback fixes.
 
-Top-N discovery candidates (data/discovery_scored_flank.jsonl, ranked by
-disc_score2_flank) rendered as cards with: the 4-BUCKET SUGGESTION up front
-(Known / Discovery=תגלית / Textual-witness=עד נוסח / Other), the flank verdict +
-score as supporting evidence, two text panes (the Genizah page vs the reference
-edition), external info (NLI catalog title + Friedberg bib + Maagarim מסירה),
-an open-in-Genizah link, and grading buttons for the four buckets (+ צ"ע).
-Grades persist to localStorage and export to JSON.
+Top-N discovery candidates (data/discovery_scored_flank.jsonl) as rich cards:
+4-bucket SUGGESTION (תגלית/עד נוסח/אחר) + flank verdict + two text panes (page
+vs reference edition) + external info + link + grading buttons (localStorage +
+export).
 
-Not blind (this is a mining/review tool, not the held-out test) — the machine
-suggestion is shown; the human confirms/overrides.
+Grading-feedback fixes (Hillel, 2026-07-14):
+  F1 — מסירה shelfmark cross-check: if the fragment's SHELFMARK appears in the
+       matched work's `mesirah` (##המסירה:## edition-source header), the
+       fragment IS the edition's base ms -> KNOWN, excluded from the discovery
+       pile. Catches works absent from the 738-work resolved mesirot json (card
+       27: פירושי גאונים, Evr. II A 313/20). ~142 corpus-wide.
+  F2 — scripture-catalog companion: if the fragment's NLI catalog title is a
+       Bible section (מקרא/כתובים/תורה/נביאים/חומש/מגילות/…) AND the match is a
+       Targum/Tafsir/commentary, the catalog PREDICTS the companion -> suggest
+       עד נוסח, not תגלית (a Targum in a Ketuvim codex is not surprising).
+       ~3,005 corpus-wide (14%). Kept visible + ranked below true discoveries.
 
-Out: review/discovery_road1_review.html (LOCAL, licensed text) +
-     data/discovery_road1_manifest.json (slim: ids + suggestion + score)
+Cards are keyed by manuscript (sys_id|work), so grades survive regeneration;
+Hillel's first 27 grades are embedded as a seed. Discoveries rank first.
+
+Out: review/discovery_road1_review.html (LOCAL) + data/discovery_road1_manifest.json
 Usage: python -X utf8 -u build_road1_review.py [--top N]
 """
 import argparse
@@ -21,6 +29,8 @@ import csv
 import html
 import json
 import os
+import pickle
+import re
 import sqlite3
 import sys
 from collections import Counter
@@ -32,34 +42,78 @@ from discovery_flank import LITURGY_TITLE
 
 PROBE = r"C:\Genizahsearch\same_work_spike\probe"
 DB = PROBE + r"\data\fullcorpus_v2.db"
+REF_PKL = PROBE + r"\data\ref_corpus_v2.pkl"
 LIB = r"C:\Genizahsearch\libraries.csv"
 IN = PROBE + r"\data\discovery_scored_flank.jsonl"
 OUT_HTML = PROBE + r"\review\discovery_road1_review.html"
 OUT_MAN = PROBE + r"\data\discovery_road1_manifest.json"
 
-# statutory liturgical unit heads -> a same-work witness of these is a TEXTUAL
-# WITNESS (עד נוסח, catalog predicts the unit by genre) rather than a תגלית.
 STAT_HEADS = ('ברכת', 'ברכה', 'תפילה', 'תפיל', 'קדוש', 'הבדלה', 'וידוי',
               'הרחבה', 'פתיחה', 'מעין', 'הושענא', 'תחנון')
+SCRIP_TITLE = ('מקרא', 'כתובים', 'נביאים', 'תורה', 'חומש', 'חמשה חומשי',
+               'מגילות', 'תהלים', 'תנ')             # NLI catalog = a Bible ms
+SCRIP_WORK = ('תרגום', 'אונקלוס', 'יונתן', 'תפסיר', 'פירוש')  # companion match
+SUGG_RANK = {'discovery': 0, 'witness': 1, 'other': 2}
+
+# Hillel's first 27 grades (2026-07-14), keyed by sys_id|work so they survive
+# regeneration and re-ranking. F1 excludes #27 (known); F2 relabels the Targum
+# suggestions to עד נוסח but his 'known' grades stand.
+PRIOR_GRADES = {
+    "990001438230205171|נפש אשר כבד מאוד חולייה (טקסט בלבד)": "discovery",
+    "990001834580205171|פזמונים לשבועות": "discovery",
+    "990001966850205171|פיוט הקפות לשמחת תורה": "witness",
+    "990001232960205171|מפיוט לקרובת ויושע": "discovery",
+    "990001966850205171|מעריב לא׳ דפסח": "witness",
+    "990001445620205171|רהיט מקדושתא לראש השנה": "discovery",
+    "990053953020205171|קחה מן ההדס מנחת ענפיו (טקסט בלבד)": "discovery",
+    "990001232910205171|פיוט לגשם": "discovery",
+    "990001443400205171|האל העירה וראה צר על עם שפל יגאה": "discovery",
+    "997008595470105171|מעריבים": "discovery",
+    "990001966850205171|זמירות ושונות": "witness",
+    "990051505420205171|פיוטים לווידוי מקדושת מנחה ליום הכיפורים": "discovery",
+    "990001665890205171|תרגום רות": "known",
+    "990051213840205171|מלחמות אדוני": "discovery",
+    "990053790550205171|השיר צועק על מפלתו כי פשט בגדי תפארתו": "discovery",
+    "997008595470105171|שבעתא לשבת": "discovery",
+    "990001232940205171|קדושתא לשבועות": "discovery",
+    "990001232890205171|קינה על גזירות בסיליאוס": "discovery",
+    "990001665890205171|תרגום קהלת": "known",
+    "990001438750205171|בעוברי על פני רימון מפחד (טקסט בלבד)": "discovery",
+    "990051370270205171|יושב תהילות שמעה צדק והקשב נאקות חרד": "discovery",
+    "990051518790205171|לבורא כול וכול יכול ועושה עש כסיל וכימה": "discovery",
+    "990001460790205171|אשר הבר שעיפיו ואזניו לאל גלה": "discovery",
+    "990001437150205171|פירושי גאונים וקדמונים לתלמוד, יבמות": "known",
+}
 
 
-def suggest_bucket(r):
-    """4-bucket SUGGESTION from the pipeline signals. Every row is already
-    catalog-silent (bucket2=='discovery', identified-gate ran) so 'known' won't
-    normally appear; the flank verdict splits witness vs citation."""
+def norm_shelf(s):
+    s = (s or '').lower()
+    for j in ('ms.', 'st. petersburg', 'russian national library',
+              'the national library of russia', ' rnl ', 'national library',
+              'cambridge university library', 'bodleian library', 'bodleian'):
+        s = s.replace(j, ' ')
+    return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9]+', ' ', s)).strip()
+
+
+def suggest_bucket(r, nli_title):
     v = r.get('flank', {}).get('verdict', '')
     if v.startswith('likely_citation'):
         return ('other', 'אחר (ציטוט/מקור משותף)')
     if v == 'mixed_multiwork':
         return ('other', 'אחר (טקסט משולב)')
     title = r.get('title') or ''
+    # F2: the ms's own catalog says it is a Bible section, and this is a
+    # Targum/commentary companion -> catalog predicts it -> עד נוסח.
+    if any(k in (nli_title or '') for k in SCRIP_TITLE) and \
+            any(k in title for k in SCRIP_WORK):
+        return ('witness', 'עד נוסח (מלווה מקראי צפוי)')
     genre = r.get('genre') or ''
     liturgical = genre in ('פיוט ותפילה', 'שירת ספרד') or \
         any(k in title for k in LITURGY_TITLE)
     if liturgical and any(title.startswith(h) or (' ' + h) in title
                           for h in STAT_HEADS):
-        return ('witness', 'עד נוסח')       # standard statutory unit
-    return ('discovery', 'תגלית')            # catalog-silent specific content
+        return ('witness', 'עד נוסח')
+    return ('discovery', 'תגלית')
 
 
 def main():
@@ -69,20 +123,33 @@ def main():
 
     rows = [json.loads(l) for l in open(IN, encoding='utf-8')]
     disc = [r for r in rows if r.get('bucket2') == 'discovery']
-    disc.sort(key=lambda r: -r.get('disc_score2_flank', r.get('disc_score2', 0)))
-    top = disc[:a.top]
-    total = len(disc)
-    print(f"discovery {total}; rich cards for top {len(top)}", flush=True)
 
+    mesirah = {w['id']: (w.get('mesirah') or '')
+               for w in pickle.load(open(REF_PKL, 'rb'))}
     nli = {}
-    want = {r['sys_id'] for r in top}
     with open(LIB, encoding='utf-8-sig', newline='') as f:
         rd = csv.reader(f)
         next(rd, None)
         for row in rd:
-            if len(row) >= 8 and row[0] in want:
+            if len(row) >= 8 and row[0]:
                 nli[row[0]] = ((row[2] or '').split('|')[0].strip(),
                                (row[7] or '').strip())
+
+    # F1: drop edition-source fragments (fragment shelfmark in work mesirah)
+    kept, dropped_f1 = [], 0
+    for r in disc:
+        shelf = nli.get(str(r['sys_id']), ('', ''))[0]
+        ns, nm = norm_shelf(shelf), norm_shelf(mesirah.get(r['work_id'], ''))
+        if ns and len(ns) > 4 and nm and ns in nm:
+            dropped_f1 += 1
+            continue
+        kept.append(r)
+    kept.sort(key=lambda r: -r.get('disc_score2_flank', r.get('disc_score2', 0)))
+    total = len(kept)
+    print(f"discovery {len(disc)}; dropped F1(מסירה-source)={dropped_f1}; "
+          f"kept {total}", flush=True)
+
+    top = kept[:a.top]
     bg = BibGate()
     rt = RefText()
     wit = {}
@@ -99,7 +166,7 @@ def main():
 
     con = sqlite3.connect('file:' + DB.replace('\\', '/') + '?mode=ro', uri=True)
     cards = []
-    for i, r in enumerate(top, 1):
+    for r in top:
         pid, wid, sid = r['page_id'], r['work_id'], str(r['sys_id'])
         pr = con.execute("SELECT text FROM pages WHERE page_id=?", (pid,)).fetchone()
         if not pr or not pr[0]:
@@ -115,10 +182,11 @@ def main():
         shelf, nli_t = nli.get(sid, ('', ''))
         bib = bg.display(sid)
         bib = '\n'.join(str(x) for x in bib) if isinstance(bib, (list, tuple)) else (bib or '')
-        bucket, bhe = suggest_bucket(r)
+        bucket, bhe = suggest_bucket(r, nli_t)
         fl = r.get('flank', {})
+        work = r.get('title') or wid
         cards.append({
-            'no': i, 'sys_id': sid, 'work': r.get('title') or wid,
+            'uid': f"{sid}|{work}", 'sys_id': sid, 'work': work,
             'genre': r.get('genre') or r.get('cat') or '', 'nli': nli_t,
             'shelf': shelf, 'bib': bib, 'mesirah': wit.get(wid, {}).get(sid),
             'page_html': page_htm, 'ref_html': ref_htm,
@@ -129,26 +197,32 @@ def main():
             'url': f"https://genizahsearch.com/browse?sys_id={sid}",
         })
     con.close()
+    # discoveries first, then witnesses, then other; by score within
+    cards.sort(key=lambda c: (SUGG_RANK.get(c['sugg'], 3), -c['score']))
+    for i, c in enumerate(cards, 1):
+        c['no'] = i
 
-    json.dump({'total': total, 'n': len(cards),
-               'cards': [{'no': c['no'], 'sys_id': c['sys_id'], 'work': c['work'],
+    json.dump({'total': total, 'n': len(cards), 'dropped_mesirah_source': dropped_f1,
+               'cards': [{'no': c['no'], 'uid': c['uid'], 'work': c['work'],
                           'sugg': c['sugg'], 'score': c['score'],
                           'verdict': c['verdict']} for c in cards]},
               open(OUT_MAN, 'w', encoding='utf-8'), ensure_ascii=False)
-    _write_html(cards, total)
+    _write_html(cards, total, dropped_f1)
     print(f"suggestions: {dict(Counter(c['sugg'] for c in cards))}")
     print(f"wrote {OUT_HTML} + {OUT_MAN} ({len(cards)} cards)")
 
 
-def _write_html(cards, total):
+def _write_html(cards, total, dropped_f1):
     data = json.dumps(cards, ensure_ascii=False)
+    prior = json.dumps(PRIOR_GRADES, ensure_ascii=False)
     grades = [('discovery', 'תגלית', '1'), ('witness', 'עד נוסח', '2'),
               ('known', 'ידוע', '3'), ('other', 'אחר (ציטוט/משותף)', '4'),
               ('tsarich', 'צ"ע', '5')]
     btns = ''.join(f"<button class='g' data-g='{g}' onclick=\"grade('{g}')\">{he} "
                    f"<kbd>{k}</kbd></button>" for g, he, k in grades)
-    doc = (_HTML.replace('__DATA__', data).replace('__BTNS__', btns)
-           .replace('__N__', str(len(cards))).replace('__TOTAL__', f"{total:,}"))
+    doc = (_HTML.replace('__DATA__', data).replace('__PRIOR__', prior)
+           .replace('__BTNS__', btns).replace('__N__', str(len(cards)))
+           .replace('__TOTAL__', f"{total:,}").replace('__DF1__', str(dropped_f1)))
     open(OUT_HTML, 'w', encoding='utf-8', newline='\n').write(doc)
 
 
@@ -178,10 +252,10 @@ border-radius:7px;padding:8px;margin-top:10px;font-family:inherit;font-size:14px
 .s-witness{background:#33310f;color:#ffd479;border:1px solid #6b6321}
 .s-other{background:#3a1f1f;color:#e08a6f;border:1px solid #6b3a2f}
 .chip{display:inline-block;background:#2a2d36;border-radius:6px;padding:1px 8px;font-size:12px;color:#bbb;margin-inline-start:6px}
-.v-strong{color:#57d98a}.v-cit{color:#e0704f}</style></head><body>
+.v-strong{color:#57d98a}.v-cit{color:#e0704f}.seed{color:#8b93a7;font-size:12px}</style></head><body>
 <div id=bar>
  <b>מאגר תגליות — סקירה</b>
- <span>כרטיס <span id=cur>1</span>/__N__ <span class=chip>מתוך __TOTAL__ מועמדים</span></span>
+ <span>כרטיס <span id=cur>1</span>/__N__ <span class=chip>מתוך __TOTAL__ מועמדים · הוסרו __DF1__ (מקור מהדורה)</span></span>
  <span>· דורגו <span id=done>0</span></span>
  <span>· נוכחי: <span id=gr>—</span></span>
  <span class=sp></span>
@@ -199,8 +273,12 @@ border-radius:7px;padding:8px;margin-top:10px;font-family:inherit;font-size:14px
 <script>
 window.onerror=function(m,s,l){var d=document.getElementById('card');
  if(d)d.innerHTML="<pre style='color:#f88;white-space:pre-wrap'>JS error: "+m+" (line "+l+")</pre>";return false;};
-const ALL=__DATA__;const KEY='seed029_discovery_road1_v1';
-let store=JSON.parse(localStorage.getItem(KEY)||'{}');let CARDS=ALL.slice();let i=0;
+const ALL=__DATA__;const PRIOR=__PRIOR__;const KEY='seed029_discovery_road1_v2';
+let store=JSON.parse(localStorage.getItem(KEY)||'{}');
+// seed Hillel's prior grades (keyed by manuscript uid) if not already graded
+for(const u in PRIOR){if(!(store[u]&&store[u].grade))store[u]=Object.assign(store[u]||{},{grade:PRIOR[u],seeded:true});}
+localStorage.setItem(KEY,JSON.stringify(store));
+let CARDS=ALL.slice();let i=0;
 const GK={'1':'discovery','2':'witness','3':'known','4':'other','5':'tsarich'};
 const HE={discovery:'תגלית',witness:'עד נוסח',known:'ידוע',other:'אחר',tsarich:'צ"ע'};
 const VHE={target_continuation_strong:'עד־נוסח חזק (רצף)',target_continuation_weak:'רצף לחיבור',
@@ -209,10 +287,10 @@ const VHE={target_continuation_strong:'עד־נוסח חזק (רצף)',target_co
 function applyFilter(){const f=document.getElementById('fsug').value;
  CARDS=f?ALL.filter(c=>c.sugg===f):ALL.slice();i=0;render();}
 function render(){if(!CARDS.length){document.getElementById('card').innerHTML='(אין כרטיסים)';return;}
- const c=CARDS[i];const rec=store[c.no]||{};
+ const c=CARDS[i];const rec=store[c.uid]||{};
  document.getElementById('cur').textContent=c.no;
  document.getElementById('done').textContent=Object.keys(store).filter(k=>store[k].grade).length;
- document.getElementById('gr').textContent=rec.grade?HE[rec.grade]:'—';
+ document.getElementById('gr').textContent=rec.grade?HE[rec.grade]+(rec.seeded?' (מוזרע)':''):'—';
  let bib=c.bib?`<div class=bib>${c.bib.replace(/</g,'&lt;')}</div>`:'';
  let mes=c.mesirah?`<div style="color:#7bd88f;font-weight:600;margin:4px 0">🔖 מסירת מאגרים ידועה: ${c.mesirah} (→ לרוב ״ידוע״)</div>`:'';
  let vcl=c.verdict.indexOf('citation')>=0?'v-cit':(c.verdict.indexOf('continuation')>=0?'v-strong':'');
@@ -229,14 +307,14 @@ function render(){if(!CARDS.length){document.getElementById('card').innerHTML='(
   `<div class=panes><div class=pane><div class=lbl>הדף (גניזה):</div><div class=ev>${c.page_html||''}</div></div>`+
   `<div class=pane><div class=lbl>המקבילה במהדורה (${c.work}):</div><div class=ev>${c.ref_html||'(לא אותרה לתצוגה)'}</div></div></div>`;
  document.getElementById('note').value=rec.note||'';}
-function grade(g){const c=CARDS[i];store[c.no]=Object.assign(store[c.no]||{},{grade:g,work:c.work,sugg:c.sugg});save();render();setTimeout(next_,120);}
-function noteSave(){const c=CARDS[i];store[c.no]=Object.assign(store[c.no]||{},{note:document.getElementById('note').value});save();}
+function grade(g){const c=CARDS[i];store[c.uid]=Object.assign(store[c.uid]||{},{grade:g,work:c.work,sugg:c.sugg,seeded:false});save();render();setTimeout(next_,120);}
+function noteSave(){const c=CARDS[i];store[c.uid]=Object.assign(store[c.uid]||{},{note:document.getElementById('note').value});save();}
 function save(){localStorage.setItem(KEY,JSON.stringify(store));}
 function next_(){if(i<CARDS.length-1){i++;render();}}
 function prev(){if(i>0){i--;render();}}
-function nextUn(){for(let j=1;j<=CARDS.length;j++){let k=(i+j)%CARDS.length;if(!(store[CARDS[k].no]||{}).grade){i=k;render();return;}}}
+function nextUn(){for(let j=1;j<=CARDS.length;j++){let k=(i+j)%CARDS.length;if(!(store[CARDS[k].uid]||{}).grade){i=k;render();return;}}}
 function exportG(){const out=ALL.map(c=>({no:c.no,sys_id:c.sys_id,work:c.work,sugg:c.sugg,
- grade:(store[c.no]||{}).grade||null,note:(store[c.no]||{}).note||null}));
+ grade:(store[c.uid]||{}).grade||null,note:(store[c.uid]||{}).note||null}));
  const b=new Blob([JSON.stringify(out,null,1)],{type:'application/json'});
  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mapv2_discovery_road1_human.json';a.click();}
 document.getElementById('note').addEventListener('blur',noteSave);
