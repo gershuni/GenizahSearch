@@ -2937,10 +2937,20 @@ class GenizahGUI(QMainWindow):
 
         # === FGP Group (distinct from PGP; FGP-07) ===
         if fgp_sources:
-            from shared.fgp_service import pick_fgp_credit
+            from shared.fgp_service import pick_fgp_credit, choose_default_source
             # Live read (CURRENT_LANG flips at runtime on language switch — the
             # module-level import binds a stale snapshot; see the lines-button site).
             from genizah_core import CURRENT_LANG as _fgp_lang
+            # SEED-030: if the FGP edition is demoted below V0.8 for low folio
+            # coverage, tag it in the combo so the reader knows why V0.8 is the
+            # default (parity with the web menu hint).
+            _fgp_dec = choose_default_source(
+                sources,
+                getattr(self, 'browse_original_page_text', '') or '',
+                self.current_browse_p or 1,
+            )
+            _fgp_demoted = (not _fgp_dec['eligible']
+                            and _fgp_dec['reason'] == 'demote_low_coverage')
             combo.addItem("─────────────", {"source": "header"})
             combo.model().item(combo.count() - 1).setEnabled(False)
             # Show the transcription credit in the FGP group header when the
@@ -2960,6 +2970,8 @@ class GenizahGUI(QMainWindow):
                     label = f"  FGP {lang_part}{tr('Translation')}"
                 else:
                     label = f"  {tr('FGP Transcription')}"
+                    if _fgp_demoted:
+                        label = f"{label} · {tr('shorter than V0.8')}"
                 _credit = pick_fgp_credit(fsrc, _fgp_lang)
                 # No folio suffix: the combo is filtered to the displayed image's
                 # folio, so the folio only routes placement (it's not shown).
@@ -2992,19 +3004,45 @@ class GenizahGUI(QMainWindow):
     def _auto_select_pgp_edition(self, combo):
         """Find the first edition item and set it as current.
 
-        PGP-first (the recommended default); falls back to the first FGP edition
-        when no PGP edition exists, so an FGP-only fragment still defaults to a
-        transcription rather than V0.8 (FGP-07).
+        PGP-first (the recommended default). Falls back to the first FGP edition
+        when no PGP edition exists — UNLESS that FGP edition is a partial/selected
+        excerpt of the folio, in which case it is demoted below V0.8/HTR so the
+        reader sees the fuller MiDRASH transcription (SEED-030); the FGP row stays
+        selectable in the combo. Full FGP editions still default (FGP-07).
 
         Returns:
-            The item data dict if found, None otherwise.
+            The item data dict if an edition was selected, None otherwise.
         """
-        for kind in ('pgp_edition', 'fgp_edition'):
+        # PGP edition always wins.
+        for i in range(combo.count()):
+            data = combo.itemData(i)
+            if data and data.get('source') == 'pgp_edition':
+                combo.setCurrentIndex(i)
+                return data
+
+        # No PGP edition — weigh FGP against V0.8/HTR by folio coverage (shared
+        # policy, parity with web version_selector).
+        from shared.fgp_service import choose_default_source
+        decision = choose_default_source(
+            getattr(self, '_browse_pgp_sources', None),
+            getattr(self, 'browse_original_page_text', '') or '',
+            self.current_browse_p or 1,
+        )
+        if not decision['eligible'] and decision['reason'] == 'demote_low_coverage':
+            # Partial FGP → default to V0.8: select it so the combo reflects the
+            # displayed text (the caller leaves V0.8 shown). FGP stays in the list.
             for i in range(combo.count()):
                 data = combo.itemData(i)
-                if data and data.get('source') == kind:
+                if data and data.get('source') == 'original':
                     combo.setCurrentIndex(i)
-                    return data
+                    break
+            return None
+
+        for i in range(combo.count()):
+            data = combo.itemData(i)
+            if data and data.get('source') == 'fgp_edition':
+                combo.setCurrentIndex(i)
+                return data
         return None
 
     def _check_document_community_status(self):

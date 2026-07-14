@@ -11,6 +11,8 @@ The web (``version_selector``) + desktop (``_auto_select_pgp_edition``) wiring i
 guarded structurally in ``tests/test_fgp_chooser_integration.py``.
 """
 
+import os
+
 import pytest
 
 from shared.fgp_service import (
@@ -144,3 +146,32 @@ class TestChooseDefaultSource:
         assert choose_default_source([partial], _HTR, 1)["eligible"] is False
         monkeypatch.setenv("FGP_DEFAULT_MIN_COVERAGE", "9")
         assert choose_default_source([partial], _HTR, 1)["eligible"] is False
+
+
+# ── Wiring guards (both apps route through the shared policy) ──────────────────
+# The GUI modules can't be imported headlessly, so guard the wiring by source
+# (the project's static-guard pattern; see tests/test_fgp_chooser_integration.py).
+
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read(rel):
+    with open(os.path.join(_REPO, rel), encoding="utf-8") as fh:
+        return fh.read()
+
+
+class TestWiring:
+    def test_web_version_selector_uses_policy(self):
+        src = _read("web/components/version_selector.py")
+        assert "choose_default_source" in src
+        assert "shorter than V0.8" in src  # demotion hint
+
+    def test_desktop_uses_policy(self):
+        src = _read("genizah_app.py")
+        assert "choose_default_source" in src
+        assert "shorter than V0.8" in src
+
+    def test_hint_is_translated(self):
+        import genizah_translations as t
+
+        assert t.TRANSLATIONS.get("shorter than V0.8")
