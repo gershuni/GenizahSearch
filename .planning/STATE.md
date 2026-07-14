@@ -64,7 +64,7 @@ None at roadmap creation.
 | # | Description | Date | Commit | Status | Directory |
 |---|-------------|------|--------|--------|-----------|
 | 260714-9jc | FGP default demotion via coverage ratio (SEED-030) — show V0.8/HTR when the folio's FGP is a partial excerpt; whole-MS baseline for whole-doc rows; all 4 selector surfaces | 2026-07-14 | 6166fdf5 | Codex APPROVE (4 rounds); not yet released | [260714-9jc-fgp-default-demotion-via-coverage-ratio-](./quick/260714-9jc-fgp-default-demotion-via-coverage-ratio-/) |
-| 260714-k56 | Re-ask desktop telemetry consent on update (SEED-031) — throttled non-modal TelemetryConsentBar (30-day cooldown + ~3 lifetime cap + "Don't ask again" hard opt-out); loosens the permanent first-run decline lock; Phase 112–116 anti-dark-pattern invariants preserved | 2026-07-14 | db66a93f + 48183d5d | Auto tasks done (16 new + 28 regression + 20 guard tests green, ruff clean); live desktop-launch smoke PENDING (Task 3 human-verify) | [260714-k56-seed-031-re-ask-desktop-telemetry-consen](./quick/260714-k56-seed-031-re-ask-desktop-telemetry-consen/) |
+| 260714-k56 | Re-ask desktop telemetry consent on update (SEED-031) — throttled non-modal TelemetryConsentBar (30-day cooldown + ~3 lifetime cap + "Don't ask again" hard opt-out); loosens the permanent first-run decline lock; Phase 112–116 anti-dark-pattern invariants preserved | 2026-07-14 | db66a93f + 48183d5d | ✅ Verified (16 new + 28 regression + 20 guard tests green, ruff clean; live desktop-launch smoke approved 2026-07-14). Ships in next desktop build. | [260714-k56-seed-031-re-ask-desktop-telemetry-consen](./quick/260714-k56-seed-031-re-ask-desktop-telemetry-consen/) |
 
 ### Pending Todos
 
