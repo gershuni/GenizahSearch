@@ -4555,3 +4555,12 @@ TRANSLATIONS.update({
     "Search stopped.":
         "החיפוש הופסק.",
 })
+
+# === SEED-030: FGP default demotion via coverage ratio ===
+TRANSLATIONS.update({
+    # Version-menu hint on an FGP edition demoted below V0.8 for low folio
+    # coverage (a partial/selected excerpt). Phrased against the V0.8 baseline,
+    # not "partial", since the HTR baseline is imperfect.
+    "shorter than V0.8":
+        "קצר מ-V0.8",
+})

@@ -17,7 +17,10 @@ from web.supabase_client import get_corrections
 from web.auth_state import GlobalAuthState
 from web.corrections_service import get_pending_corrections_for_page
 from web.supabase_client import get_user_client
-from shared.fgp_service import group_transcription_sources, source_relation_kind, pick_fgp_credit
+from shared.fgp_service import (
+    group_transcription_sources, source_relation_kind, pick_fgp_credit,
+    choose_default_source,
+)
 from typing import Optional, Callable, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -169,29 +172,41 @@ def create_version_selector(
                         })
                     return
 
-                # No PGP edition — fall back to FGP (additive, PGP-first rule).
+                # No PGP edition — fall back to FGP (additive, PGP-first rule),
+                # UNLESS the FGP edition is a partial/selected excerpt of the
+                # folio: choose_default_source demotes low-coverage FGP below the
+                # V0.8/HTR default so the reader sees the fuller MiDRASH
+                # transcription (SEED-030). The FGP source stays in the menu.
                 fgp_sources = get_fgp_sources(all_sources)
                 if fgp_sources:
-                    first_fgp = fgp_sources[0]
-                    version_label.text = 'FGP'
-                    version_label.style(f'color: {_FGP_COLOR};')
-                    # Same bilingual credit + translation labelling as the menu
-                    # path, so the initial auto-loaded FGP source shows the same
-                    # metadata it would after the user reselects it (Codex #309 P2).
-                    _attr = first_fgp.get('attribution') or first_fgp.get('source_scholar', 'FGP')
-                    _credit = pick_fgp_credit(first_fgp, get_language()) or _attr
-                    if on_version_change:
-                        on_version_change(first_fgp.get('content', ''), {
-                            'source': 'fgp',
-                            'attribution': _attr,
-                            'source_credit': _credit,
-                            'is_fgp': True,
-                            'is_translation': source_relation_kind(first_fgp) == 'translation',
-                            'is_default': True,
-                            'source_id': first_fgp.get('id'),
-                            'uid': first_fgp.get('uid'),
-                        })
-                    return
+                    _decision = choose_default_source(all_sources, original_text, page_number)
+                    if _decision['eligible'] or _decision['reason'] == 'no_fgp_edition':
+                        # Default to the coverage-cleared FGP edition; when there
+                        # is no FGP *edition* (translation-only), preserve the
+                        # prior behavior and default to the first FGP source.
+                        first_fgp = _decision['source'] or fgp_sources[0]
+                        version_label.text = 'FGP'
+                        version_label.style(f'color: {_FGP_COLOR};')
+                        # Same bilingual credit + translation labelling as the menu
+                        # path, so the initial auto-loaded FGP source shows the same
+                        # metadata it would after the user reselects it (Codex #309 P2).
+                        _attr = first_fgp.get('attribution') or first_fgp.get('source_scholar', 'FGP')
+                        _credit = pick_fgp_credit(first_fgp, get_language()) or _attr
+                        if on_version_change:
+                            on_version_change(first_fgp.get('content', ''), {
+                                'source': 'fgp',
+                                'attribution': _attr,
+                                'source_credit': _credit,
+                                'is_fgp': True,
+                                'is_translation': source_relation_kind(first_fgp) == 'translation',
+                                'is_default': True,
+                                'source_id': first_fgp.get('id'),
+                                'uid': first_fgp.get('uid'),
+                            })
+                        return
+                    # else: every FGP edition is a low-coverage excerpt of this
+                    # folio → fall through to the HTR/V0.8 default (the FGP rows
+                    # stay selectable in the menu, tagged "shorter than V0.8").
 
             # Fallback to pgp_transcription for backward compatibility
             if pgp_transcription and pgp_transcription.get('content'):
@@ -393,6 +408,13 @@ def create_version_selector(
                     # rendered after the PGP section, before V0.8.
                     fgp_sources = get_fgp_sources(all_sources) if all_sources else []
                     if fgp_sources:
+                        # If the FGP edition was demoted below V0.8 for low folio
+                        # coverage (SEED-030), tag it so the reader knows why it is
+                        # not the default (phrased "shorter than V0.8" — the HTR
+                        # baseline is imperfect, so we do not overclaim "partial").
+                        _fgp_dec = choose_default_source(all_sources, original_text, page_number)
+                        _fgp_demoted = (not _fgp_dec['eligible']
+                                        and _fgp_dec['reason'] == 'demote_low_coverage')
                         if len(fgp_sources) > 1 or editions:
                             ui.label(tr('FGP Transcriptions')).classes(
                                 'text-xs px-4 py-1 font-semibold'
@@ -447,6 +469,11 @@ def create_version_selector(
                                         ui.label(credit).classes('text-xs').style(
                                             'color: var(--text-muted);'
                                         )
+                                        # SEED-030: demoted (partial) FGP edition.
+                                        if _fgp_demoted and not _is_trans:
+                                            ui.label(tr('shorter than V0.8')).classes(
+                                                'text-xs italic'
+                                            ).style('color: var(--text-muted);')
                         ui.separator()
 
                     # Original V0.8
