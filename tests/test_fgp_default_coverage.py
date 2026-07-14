@@ -61,7 +61,7 @@ _HTR = "אבגד " * 100
 class TestChooseDefaultSource:
     def test_partial_fgp_is_demoted(self):
         # Firkovich-like: FGP ~9% of the HTR text → demote below V0.8.
-        d = choose_default_source([_edition("אבגד " * 9)], _HTR, 1)
+        d = choose_default_source([_edition("אבגד " * 9)], _HTR)
         assert d["eligible"] is False
         assert d["reason"] == "demote_low_coverage"
         assert d["source"] is None
@@ -70,7 +70,7 @@ class TestChooseDefaultSource:
     def test_full_fgp_is_kept(self):
         # CUL-like: FGP as full as / fuller than the HTR → stays the default.
         ed = _edition("אבגד " * 120)  # 480 / 400 = 1.2
-        d = choose_default_source([ed], _HTR, 1)
+        d = choose_default_source([ed], _HTR)
         assert d["eligible"] is True
         assert d["reason"] == "fgp_sufficient"
         assert d["source"] is ed
@@ -79,7 +79,7 @@ class TestChooseDefaultSource:
         # Exactly at the default threshold → kept (>= is eligible).
         n = round(_DEFAULT_MIN_COVERAGE * 100)  # letters per side comparable
         ed = _edition("אבגד " * n)  # ratio ≈ threshold
-        d = choose_default_source([ed], _HTR, 1)
+        d = choose_default_source([ed], _HTR)
         assert d["ratio"] == pytest.approx(_DEFAULT_MIN_COVERAGE, abs=0.02)
         assert d["eligible"] is (d["ratio"] >= _DEFAULT_MIN_COVERAGE)
 
@@ -88,7 +88,7 @@ class TestChooseDefaultSource:
         # must NEVER demote FGP (fail toward FGP).
         assert _COVERAGE_MIN_HTR_LETTERS > 3
         ed = _edition("אבגד " * 5)
-        d = choose_default_source([ed], "אבג", 1)
+        d = choose_default_source([ed], "אבג")
         assert d["eligible"] is True
         assert d["reason"] == "htr_too_short"
         assert d["source"] is ed
@@ -96,56 +96,58 @@ class TestChooseDefaultSource:
     def test_translation_only_never_coverage_demoted(self):
         # A translation is a different language — no length ratio; not an edition.
         d = choose_default_source(
-            [_edition("קצר", rel="Digital Translation")], _HTR, 1
+            [_edition("קצר", rel="Digital Translation")], _HTR
         )
         assert d["reason"] == "no_fgp_edition"
         assert d["eligible"] is False
         assert d["source"] is None
 
     def test_no_sources(self):
-        d = choose_default_source([], _HTR, 1)
+        d = choose_default_source([], _HTR)
         assert d["reason"] == "no_fgp_edition" and d["eligible"] is False
-        d = choose_default_source(None, _HTR, 1)
+        d = choose_default_source(None, _HTR)
         assert d["reason"] == "no_fgp_edition" and d["eligible"] is False
 
-    def test_multi_section_uses_per_folio_text_not_whole_row(self):
-        # A multi-section FGP row: page 1 has a tiny section, page 2 a full one.
-        # The ratio must use the CURRENT page's section — not the concatenated
-        # ``content`` — or a big page-2 section would wrongly keep page 1.
-        big = "אבגד " * 120
-        small = "אבגד " * 3
+    def test_measures_displayed_content_not_sections(self):
+        # The chooser DISPLAYS the whole-row ``content`` (FGP text is never
+        # narrowed to a sub-section on display, and ``sources`` is folio-aligned
+        # upstream), so coverage is measured against ``content`` even when a
+        # ``sections`` list is present.
         row = _edition(
-            small + big,  # whole-row content (would be > HTR if misused)
-            sections=[
-                {"page_num": 1, "text": small},
-                {"page_num": 2, "text": big},
-            ],
+            "אבגד " * 120,  # full content ≈ 1.2× HTR
+            sections=[{"page_num": 1, "text": "אבגד "}],  # a tiny section is ignored
         )
-        d1 = choose_default_source([row], _HTR, 1)
-        assert d1["eligible"] is False and d1["reason"] == "demote_low_coverage"
-        d2 = choose_default_source([row], _HTR, 2)
-        assert d2["eligible"] is True and d2["reason"] == "fgp_sufficient"
+        d = choose_default_source([row], _HTR)
+        assert d["eligible"] is True and d["reason"] == "fgp_sufficient"
+
+    def test_no_page_dependence(self):
+        # HIGH regression guard: the decision must NOT depend on a global page
+        # number (the old code measured a recto row on page ≥2 as empty and
+        # wrongly demoted it). The signature carries no page argument — a full
+        # recto-only row (page_info='recto') stays the default on any folio.
+        row = _edition("אבגד " * 120, page_info="recto", sections=None)
+        assert choose_default_source([row], _HTR)["eligible"] is True
 
     def test_best_of_multiple_editions_wins(self):
         # When several editions align to the folio, the highest-coverage one
         # decides (keep if any is full enough).
         partial = _edition("אבגד " * 5)
         full = _edition("אבגד " * 120)
-        d = choose_default_source([partial, full], _HTR, 1)
+        d = choose_default_source([partial, full], _HTR)
         assert d["eligible"] is True and d["source"] is full
 
     def test_env_override(self, monkeypatch):
         partial = _edition("אבגד " * 9)  # ratio 0.09
         # Default threshold 0.33 → demote.
-        assert choose_default_source([partial], _HTR, 1)["eligible"] is False
+        assert choose_default_source([partial], _HTR)["eligible"] is False
         # Lower the bar below 0.09 → kept.
         monkeypatch.setenv("FGP_DEFAULT_MIN_COVERAGE", "0.05")
-        assert choose_default_source([partial], _HTR, 1)["eligible"] is True
+        assert choose_default_source([partial], _HTR)["eligible"] is True
         # Unparseable / out-of-range falls back to the default → demote again.
         monkeypatch.setenv("FGP_DEFAULT_MIN_COVERAGE", "bogus")
-        assert choose_default_source([partial], _HTR, 1)["eligible"] is False
+        assert choose_default_source([partial], _HTR)["eligible"] is False
         monkeypatch.setenv("FGP_DEFAULT_MIN_COVERAGE", "9")
-        assert choose_default_source([partial], _HTR, 1)["eligible"] is False
+        assert choose_default_source([partial], _HTR)["eligible"] is False
 
 
 # ── Wiring guards (both apps route through the shared policy) ──────────────────

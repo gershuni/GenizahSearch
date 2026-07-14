@@ -2947,7 +2947,6 @@ class GenizahGUI(QMainWindow):
             _fgp_dec = choose_default_source(
                 sources,
                 getattr(self, 'browse_original_page_text', '') or '',
-                self.current_browse_p or 1,
             )
             _fgp_demoted = (not _fgp_dec['eligible']
                             and _fgp_dec['reason'] == 'demote_low_coverage')
@@ -3026,7 +3025,6 @@ class GenizahGUI(QMainWindow):
         decision = choose_default_source(
             getattr(self, '_browse_pgp_sources', None),
             getattr(self, 'browse_original_page_text', '') or '',
-            self.current_browse_p or 1,
         )
         if not decision['eligible'] and decision['reason'] == 'demote_low_coverage':
             # Partial FGP → default to V0.8: select it so the combo reflects the
@@ -3038,11 +3036,21 @@ class GenizahGUI(QMainWindow):
                     break
             return None
 
+        # Select the SAME edition the shared policy chose (best-of-multiple parity
+        # with web) by source_id; fall back to the first FGP edition item.
+        chosen_id = (decision.get('source') or {}).get('id')
+        first_fgp_idx = None
         for i in range(combo.count()):
             data = combo.itemData(i)
             if data and data.get('source') == 'fgp_edition':
-                combo.setCurrentIndex(i)
-                return data
+                if first_fgp_idx is None:
+                    first_fgp_idx = i
+                if chosen_id is not None and data.get('source_id') == chosen_id:
+                    combo.setCurrentIndex(i)
+                    return data
+        if first_fgp_idx is not None:
+            combo.setCurrentIndex(first_fgp_idx)
+            return combo.itemData(first_fgp_idx)
         return None
 
     def _check_document_community_status(self):

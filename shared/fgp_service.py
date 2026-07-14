@@ -576,7 +576,6 @@ def _heb_letter_count(text: Optional[str]) -> int:
 def choose_default_source(
     sources: Optional[List[Dict[str, Any]]],
     htr_text: Optional[str],
-    page_num: int,
 ) -> Dict[str, Any]:
     """Decide whether an FGP edition should be the reading-view default for a
     folio, or be demoted below the V0.8/HTR ("MiDRASH") transcription (SEED-030).
@@ -609,13 +608,17 @@ def choose_default_source(
         return {"source": eds[0], "reason": "htr_too_short", "ratio": None, "eligible": True}
 
     # Pick the FGP edition with the most folio coverage (usually exactly one —
-    # editions are similarity-aligned to this folio upstream). Compare the
-    # per-folio SECTION text, never the whole-row ``content``, so a multi-section
-    # row cannot inflate the ratio.
+    # editions are similarity-aligned to this folio upstream). Measure the text
+    # the chooser actually DISPLAYS for this folio: the whole-row ``content``.
+    # ``sources`` is already folio-aligned by ``filter_sources_for_page``, and no
+    # display path narrows FGP ``content`` to a sub-section, so ``content`` IS the
+    # displayed text. (Do NOT use ``get_fgp_section_for_page`` here — its
+    # ``page_num`` is a recto/verso 1/2 flag, not the global displayed page the
+    # callers hold, so it would measure a full recto row on page ≥2 as empty and
+    # wrongly demote it.)
     best, best_ratio = eds[0], -1.0
     for ed in eds:
-        fgp_text = get_fgp_section_for_page(ed, page_num) or ""
-        ratio = _heb_letter_count(fgp_text) / htr_len
+        ratio = _heb_letter_count(ed.get("content")) / htr_len
         if ratio > best_ratio:
             best, best_ratio = ed, ratio
 
