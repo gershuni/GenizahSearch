@@ -164,7 +164,43 @@ Run over the discovery-bucket rows (~27,678), prioritizing the ranked top
 (disc_score2≥0.15). Relocation reuses cached per-work ref streams; page texts
 batched from the DB (main session). Expected minutes, not hours.
 
-## Open questions for Codex pre-flight
+## REVISIONS folded after Codex pre-flight (verdict was REVISE → now build-ready)
+Full pre-flight in `CODEX-PREFLIGHT-15m.md`. All 6 required changes applied:
+1. **Rejoin spans + page text from the DB.** `discovery_scored_gated.jsonl` does
+   NOT carry `spans_json` (discovery_score.py wrote only its `keep` fields). The
+   flank pass reads spans + page text fresh from `track1_matches`/
+   `track1_candidates` + `pages` (main session).
+2. **C = `track1_matches` UNION `track1_candidates`.** Candidates is tier-B only;
+   tier-A competitors live in `track1_matches`. Union both; tier-A rows lack
+   `p_same_work` → treat as strong (they are the confirmed tier).
+3. **Local gap-aware span merge.** `merge_intervals` merges only overlaps, and
+   stored `spans_json` is already merged at gap≤30 — so treat stored spans as
+   coarse and apply a local merge (gap<15) only for chain assembly; don't claim
+   merge_intervals does gap<15.
+4. **Calibration set = 127 human-graded cards** from the 132-card deck (5
+   ungraded: 14,15,16,17,24). Distribution sums to 127. Exclude the 5.
+5. **`score_validation.w` is not import-clean** (runs at import) → reimplement
+   the post-stratification weight (`frame_cells[cell]/samp[cell]`) locally in
+   `calibrate_flank.py`; do not `import score_validation`.
+6. **Multi-span evidence.** `snippet()` returns only the longest span's slice and
+   `RefText.passage(wid,page_slice,pad=40)` takes that slice — so build the
+   evidence line per span/recovered-block, not from snippet's single slice.
+
+Open-question resolutions folded into the algorithm:
+- **Relocation perf:** cache per-work k-gram positions via `_gram_codes`, cap
+  very-frequent in-work grams, verify only top diagonal windows (no naive
+  `gram_anchors` in the hot loop on long works like Mishneh Torah).
+- **Banded aligner recurrence:** enumerate leading edge shift `delta ∈ [-G,G]`,
+  banded Levenshtein around the shifted diagonal, band = `ceil(thr*L)+slack`
+  (edit-cutoff based), trailing ends free, endpoint block ≥ min_len.
+- **'shared' safety:** spot-check ALL 30 dev `shared` cards before freezing the
+  derived island label; keep `known` as a dev-only false-demotion safety class.
+- **formula/norel:** report separately, require the same strong-evidence rule,
+  never tune thresholds from held-out formula/norel.
+- **Leakage:** never use the old broken `flank_class`/`flank_dist` as features;
+  freeze on the 127 dev cards only; run the 100 held-out once.
+
+## Open questions for Codex pre-flight (ANSWERED — see CODEX-PREFLIGHT-15m.md)
 1. Is relocating directly against the full work stream (gram_anchors + a new
    banded verify) sound vs reusing the segmented index — any missed scale/perf
    trap for very long works (e.g. Mishneh Torah)?
