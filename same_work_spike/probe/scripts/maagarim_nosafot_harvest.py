@@ -203,7 +203,51 @@ def save_checkpoint(data):
     os.replace(tmp, CKPT)
 
 
+def rematch_existing():
+    """Network-free: re-run the shelfmark matcher over the raw location strings
+    ALREADY stored in mesirot_nosafot.json and rewrite the matched fields. Use
+    after a mesirah_witnesses.py parser/index improvement (e.g. JTS multi-
+    numbering cores) so existing harvested works pick up the better matches
+    without re-fetching. Only `msirot_matched` / `matched` change; the fetched
+    `msirot_web` / `nosafot` raw strings are the source of truth and untouched."""
+    t0 = time.time()
+    if not os.path.exists(OUT_JSON):
+        print(f'no {OUT_JSON} to re-match', flush=True)
+        return
+    print('building shelfmark indexes from libraries.csv ...', flush=True)
+    main_index, base_index, n_rows = mw.build_indexes()
+    print(f'  {n_rows:,} rows -> {len(main_index):,} exact keys '
+          f'({time.time()-t0:.0f}s)', flush=True)
+    works = json.load(open(OUT_JSON, encoding='utf-8'))
+    before = after = changed = 0
+    for r in works:
+        if not r.get('ok'):
+            continue
+        before += len(r.get('msirot_matched') or []) + len(r.get('matched') or [])
+        ms_new = match_strings(r.get('msirot_web') or [], main_index, base_index)
+        no_new = match_strings(r.get('nosafot') or [], main_index, base_index)
+        old = {m['sys_id'] for m in (r.get('msirot_matched') or [])
+               } | {m['sys_id'] for m in (r.get('matched') or [])}
+        r['msirot_matched'] = ms_new
+        r['matched'] = no_new
+        new = {m['sys_id'] for m in ms_new} | {m['sys_id'] for m in no_new}
+        after += len(ms_new) + len(no_new)
+        if new != old:
+            changed += 1
+    with open(OUT_JSON, 'w', encoding='utf-8') as f:
+        json.dump(works, f, ensure_ascii=False, indent=1)
+    # keep the checkpoint consistent so a later fetch-run doesn't revert matches
+    ckpt = {r['work_id']: r for r in works if r.get('work_id')}
+    save_checkpoint(ckpt)
+    print(f'rematched {len(works):,} works; matched sys_ids {before:,} -> '
+          f'{after:,} (+{after-before:,}); works changed: {changed:,}')
+    print(f'wrote {os.path.abspath(OUT_JSON)} ({time.time()-t0:.0f}s)')
+
+
 def main():
+    if '--rematch' in sys.argv:
+        rematch_existing()
+        return
     t0 = time.time()
     print('building shelfmark indexes from libraries.csv ...', flush=True)
     main_index, base_index, n_rows = mw.build_indexes()

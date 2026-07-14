@@ -126,12 +126,60 @@ def variant_keys(nv: str):
     return keys
 
 
+# ---- JTS multi-numbering cores ----------------------------------------------
+# JTS catalogues the SAME manuscript under parallel numbering systems (ENA,
+# ENA NS, Rab., Ms., and bare Steinschneider/Ms. catalogue numbers). Maagarim
+# frequently cites one system where libraries.csv records another — e.g. mesirah
+# "Rab. 2148" vs libraries.csv "Catalogue Brumer Rab. 2148 | Ms. 9926", or a
+# bare "4391" vs "Ms. 4391, fol. 121" — so the leaf never resolves through the
+# ordinary segment path (the "Catalogue Brumer" prefix / ", fol. N" suffix block
+# the normalized key). Indexing a normalized collection+number "core" from BOTH
+# the library variants AND the mesirah citation reconciles the cross-numbering.
+# Scoped to Rab./Ms. (whole-manuscript identifiers); ENA has fine-grained leaf
+# numbering already resolved by the ordinary path, so coring it would over-match
+# sibling leaves.
+_JTS_CORE_RE = re.compile(r'\b(rab|ms)\b\s*\.?\s*(\d{1,5})', re.I)
+_JTS_MS_NUM_RE = re.compile(r'\bms\b\s*\.?\s*(\d{1,5})', re.I)
+_JTS_ENA_NUM_RE = re.compile(r'\bena\b\s*\.?\s*(\d{1,5})', re.I)
+
+
+def jts_cores(text):
+    """{collection+number} NAMED cores in a JTS shelfmark string
+    ('Catalogue Brumer Rab. 2148 | Ms. 9926' -> {'rab2148', 'ms9926'};
+    'Ms. 4391, fol. 121' -> {'ms4391'}). Named = the collection word is present,
+    so the citation is unambiguous and safe to match verbatim."""
+    return {m.group(1).lower() + m.group(2)
+            for m in _JTS_CORE_RE.finditer(text or '')}
+
+
+def jts_mesirah_cores(raw_segs):
+    """Cores for a JTS mesirah citation. `raw_segs` is the RAW (pre-clean_segs)
+    classmark tail so a Hebrew catalogue annotation can't drop the number.
+    A NAMED Rab./Ms. number -> its verbatim core. A BARE leading number carrying
+    NO collection word (e.g. '4391 (שטיינשניידר 19: 8 א)') is emitted as a
+    'jtsbare<n>' key, which build_indexes resolves ONLY for numbers whose Ms./ENA
+    forms name the same manuscript — ambiguous bare numbers (the 208 disjoint
+    Ms.N != ENA N cases) get no key and safely match nothing (per the
+    'do NOT bare-number match / buries discoveries' constraint)."""
+    joined = ' '.join(raw_segs)
+    cores = jts_cores(joined)
+    if not cores and not re.search(r'\b(ena|rab|ms)\b', joined, re.I):
+        for s in raw_segs:
+            m = re.match(r'^\s*(\d{2,5})\b', s.strip())
+            if m:
+                cores.add('jtsbare' + m.group(1))
+                break
+    return cores
+
+
 def build_indexes():
     """main index: exact normalized classmark -> {(sys_id, lib)};
     base index: classmark minus trailing leaf number -> {(sys_id, lib)}."""
     main_index = defaultdict(set)
     base_index = defaultdict(set)
     base_re = re.compile(r'^(.*[A-Za-z].*?)[\s.,/]+(\d{1,4}[A-Za-z]?)$')
+    jts_ms = defaultdict(set)     # bare number -> sys_ids seen as 'Ms. N'
+    jts_ena = defaultdict(set)    # bare number -> sys_ids seen as 'ENA N'
     n_rows = 0
     with open(LIBCSV, encoding='utf-8-sig', newline='') as f:
         rdr = csv.reader(f)
@@ -159,6 +207,26 @@ def build_indexes():
                     if nb:
                         for k in variant_keys(nb):
                             base_index[k].add(ent)
+            if lib == 'JTS':
+                for c in jts_cores(variants):        # named Rab./Ms. cores
+                    main_index[c].add(ent)
+                # per-variant bare-number tallies (a variant with 'ENA' is an
+                # ENA form even when it also spells 'Ms.', e.g. 'Ms. ENA 2757')
+                for v in variants.split('|'):
+                    ena = _JTS_ENA_NUM_RE.findall(v)
+                    for n in ena:
+                        jts_ena[n].add(sys_id)
+                    if not ena:
+                        for n in _JTS_MS_NUM_RE.findall(v):
+                            jts_ms[n].add(sys_id)
+    # bare-number resolution: only for numbers whose Ms./ENA forms co-refer (same
+    # sys_id) or where one form is absent. Disjoint Ms.N != ENA N numbers are
+    # ambiguous -> no key -> a bare citation abstains instead of mis-mapping.
+    for n in set(jts_ms) | set(jts_ena):
+        ms_s, ena_s = jts_ms.get(n, set()), jts_ena.get(n, set())
+        if not ms_s or not ena_s or (ms_s & ena_s):
+            for sid in ms_s | ena_s:
+                main_index['jtsbare' + n].add((sid, 'JTS'))
     return main_index, base_index, n_rows
 
 
@@ -237,12 +305,14 @@ def clean_segs(segs):
 
 
 class Parsed:
-    __slots__ = ('hint', 'code', 'prefix', 'rest', 'reason')
+    __slots__ = ('hint', 'code', 'prefix', 'rest', 'reason', 'cores')
 
-    def __init__(self, hint=None, code=None, prefix='', rest=None, reason=None):
+    def __init__(self, hint=None, code=None, prefix='', rest=None, reason=None,
+                 cores=None):
         self.hint, self.code, self.prefix = hint, code, prefix
         self.rest = rest or []
         self.reason = reason
+        self.cores = cores or set()
 
 
 def parse_location(s: str) -> Parsed:
@@ -291,7 +361,12 @@ def parse_location(s: str) -> Parsed:
         if 'jewish theological' in L(1):
             # 'ENA' / 'ENA NS' / 'Rab.' stay as ordinary segments — the
             # index variants carry them too ('ENA 1501.1', 'ENA NS 19.3').
-            return Parsed('New York JTS', 'JTS', '', clean_segs(segs[2:]))
+            # JTS multi-numbering: also emit collection+number cores so a
+            # Rab./Ms./bare number cited by Maagarim resolves against the
+            # cross-numbered libraries.csv variant (from the RAW tail so a
+            # Hebrew catalogue annotation doesn't strip the number).
+            return Parsed('New York JTS', 'JTS', '', clean_segs(segs[2:]),
+                          cores=jts_mesirah_cores(segs[2:]))
         return Parsed('New York ' + (segs[1] if len(segs) > 1 else ''),
                       None, '', [], 'non_genizah_location')
 
@@ -441,9 +516,14 @@ def build_candidates(p: Parsed):
     Handles trailing leaf ranges ('1-7') by leaf-by-leaf expansion and
     parenthesized alternatives ('181 (148)'). Bare collection/volume keys
     produced as a side effect of range expansion are exact-only (a base-index
-    hit on e.g. 'antoninb' or 'ts12' would fan out to a whole box)."""
+    hit on e.g. 'antoninb' or 'ts12' would fan out to a whole box).
+
+    JTS collection+number cores (p.cores) are prepended as exact candidates so
+    the cross-numbering leaks resolve — they stand alone even when the classmark
+    tail was Hebrew-only (rest empty)."""
+    cores = sorted(getattr(p, 'cores', None) or ())
     if not p.rest and not p.prefix:
-        return [], set(), set(), ''
+        return cores, set(), set(), (', '.join(cores) if cores else '')
     segs = p.rest
     display = (p.prefix + ' ' + ', '.join(segs)).strip()
     rng = None
@@ -477,9 +557,9 @@ def build_candidates(p: Parsed):
                 if re.search(r'\d[a-z]$', base) and len(base) > 3:
                     cands.append(base[:-1])
                     low_cap.add(base[:-1])
-    # dedupe preserving order
+    # dedupe preserving order (cores first — tried as exact keys)
     seen, out = set(), []
-    for c in cands:
+    for c in cores + cands:
         if c not in seen:
             seen.add(c)
             out.append(c)
