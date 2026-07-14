@@ -1439,8 +1439,13 @@ class ResultDialog(QDialog):
         if not parent:
             return
 
-        # Populate combo with PGP items (clears and rebuilds: PGP Editions > Translations > V0.8)
-        has_pgp = parent._populate_pgp_combo(self.rd_version_combo, sources, pgp_doc)
+        # Populate combo with PGP items (clears and rebuilds: PGP Editions > Translations > V0.8).
+        # Pass THIS dialog's context (sys_id + V0.8 text) so the SEED-030 coverage
+        # check uses the dialog's manuscript, not the Browse tab's.
+        has_pgp = parent._populate_pgp_combo(
+            self.rd_version_combo, sources, pgp_doc,
+            htr_text=self.text_ms.toPlainText(),
+            sys_id=self.current_sys_id)
 
         if has_pgp:
             # Re-add cached corrections/versions after V0.8
@@ -1457,8 +1462,11 @@ class ResultDialog(QDialog):
             if current_text:
                 self._rd_original_text = current_text
 
-            # Auto-select first PGP edition and display it
-            edition_data = parent._auto_select_pgp_edition(self.rd_version_combo)
+            # Auto-select first PGP edition and display it (dialog's own context)
+            edition_data = parent._auto_select_pgp_edition(
+                self.rd_version_combo, sources=sources,
+                htr_text=getattr(self, '_rd_original_text', None) or self.text_ms.toPlainText(),
+                sys_id=self.current_sys_id)
             if edition_data:
                 content = edition_data.get('content', '')
                 if content:

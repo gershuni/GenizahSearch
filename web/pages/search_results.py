@@ -35,7 +35,8 @@ from web.document_service import (
 )
 from shared.fgp_service import (
     get_fgp_sources_for_fragment, filter_sources_for_page, displayed_folio_label,
-    displayed_fgp_image_number,
+    displayed_fgp_image_number, fgp_needs_full_htr, choose_default_source,
+    group_transcription_sources,
 )
 from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
 from urllib.parse import quote
@@ -1351,6 +1352,7 @@ def open_advanced_dialog(search_state, refs, index, result):
         pgp_transcription = None
         pgp_metadata = None
         all_sources = None
+        _fgp_full_htr = None  # SEED-030: whole-MS HTR (set below only when needed)
         if sys_id:
             try:
                 all_sources_raw = get_all_sources_for_fragment(sys_id) or []
@@ -1368,6 +1370,16 @@ def open_advanced_dialog(search_state, refs, index, result):
                 all_sources = filter_sources_for_page(
                     all_sources_raw, current_p_num, _folio, _img_num,
                     page_text=current_text or '') or None
+
+                # SEED-030: whole-MS HTR for the FGP coverage check — only when a
+                # whole-document FGP edition is present (protects the hot path).
+                _fgp_full_htr = None
+                if all_sources and fgp_needs_full_htr(all_sources):
+                    try:
+                        _mpages = get_service().get_full_manuscript(sys_id) or []
+                        _fgp_full_htr = "\n".join((getattr(p, 'text', '') or '') for p in _mpages)
+                    except Exception:
+                        _fgp_full_htr = None
 
                 pgp_doc = get_document_for_fragment(sys_id, current_p_num)
                 if pgp_doc:
@@ -1447,13 +1459,22 @@ def open_advanced_dialog(search_state, refs, index, result):
             library_name = get_library_display(library_code, short=False, lang=get_language())
         display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
 
-        # Use PGP transcription content if available, otherwise fall back to original
+        # Use PGP transcription content if available, otherwise fall back to original.
+        # PGP-first; then FGP only if it clears the SEED-030 coverage bar (a partial
+        # /selected FGP excerpt must not default over the V0.8/HTR — same policy as
+        # the browse version chooser).
         if all_sources:
-            editions = [s for s in all_sources if 'Edition' in (s.get('doc_relation') or '') and s.get('content')]
-            if editions:
-                display_text = editions[0].get('content', current_text or '')
+            _groups = group_transcription_sources(all_sources)
+            if _groups['pgp_editions']:
+                display_text = _groups['pgp_editions'][0].get('content', current_text or '')
             else:
-                display_text = current_text or snippet.replace('*', '') if snippet else ''
+                _dec = choose_default_source(
+                    all_sources, current_text or '',
+                    full_htr_getter=lambda: _fgp_full_htr)
+                if _dec.get('eligible') and _dec.get('source'):
+                    display_text = _dec['source'].get('content', current_text or '')
+                else:
+                    display_text = current_text or (snippet.replace('*', '') if snippet else '')
         elif pgp_transcription and pgp_transcription.get('content'):
             display_text = pgp_transcription['content']
         else:
@@ -2174,7 +2195,8 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 original_text=current_text,
                                 on_version_change=handle_version_change,
                                 pgp_transcription=pgp_transcription,
-                                all_sources=all_sources
+                                all_sources=all_sources,
+                                full_original_text=_fgp_full_htr,
                             )
 
                             create_comment_button(

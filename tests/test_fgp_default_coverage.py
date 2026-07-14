@@ -247,11 +247,36 @@ class TestWiring:
         src = _read("web/components/version_selector.py")
         assert "choose_default_source" in src
         assert "shorter than V0.8" in src  # demotion hint
+        assert "full_original_text" in src  # whole-MS baseline plumbed in
+
+    def test_web_search_results_uses_policy(self):
+        # The Advanced/search-result reading view is a SECOND web selector surface.
+        src = _read("web/pages/search_results.py")
+        assert "choose_default_source" in src
+        assert "full_original_text" in src
+
+    def test_web_browse_passes_full_htr(self):
+        assert "fgp_full_htr_text" in _read("web/pages/browse_enrichment.py")
+        assert "fgp_needs_full_htr" in _read("web/pages/browse_enrichment.py")
 
     def test_desktop_uses_policy(self):
         src = _read("genizah_app.py")
         assert "choose_default_source" in src
         assert "shorter than V0.8" in src
+
+    def test_desktop_selector_methods_are_context_parametrized(self):
+        # Regression guard (Codex F3): the shared desktop selector helpers must
+        # take sys_id/htr_text from the CALLER, never read self.browse_* — else
+        # the ResultDialog would score against the Browse tab's manuscript.
+        src = _read("genizah_app.py")
+        for sig in (
+            "def _auto_select_pgp_edition(self, combo, sources=None, htr_text=None, sys_id=None)",
+            "def _populate_pgp_combo(self, combo, sources, pgp_doc, htr_text=None, sys_id=None)",
+        ):
+            assert sig in src, sig
+        # The ResultDialog threads its OWN context through.
+        rd = _read("desktop/result_dialog.py")
+        assert "sys_id=self.current_sys_id" in rd
 
     def test_hint_is_translated(self):
         import genizah_translations as t

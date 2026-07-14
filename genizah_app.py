@@ -2853,8 +2853,13 @@ class GenizahGUI(QMainWindow):
         imgs, page_1b, total = self._displayed_page_for_pgp()
         return fgp_image_number_for_displayed_page(imgs, page_1b, total)
 
-    def _populate_pgp_combo(self, combo, sources, pgp_doc):
+    def _populate_pgp_combo(self, combo, sources, pgp_doc, htr_text=None, sys_id=None):
         """Build combo items with PGP editions and translations grouped.
+
+        ``htr_text`` / ``sys_id`` supply the CALLER's context for the SEED-030 FGP
+        coverage check (the Browse tab and the ResultDialog each pass their own —
+        never read ``self.browse_*`` here, or the dialog would use the browse
+        tab's manuscript). Omitted → coverage hint is skipped.
 
         Matches the web app grouping pattern:
         PGP Editions (header) -> edition items -> separator ->
@@ -2944,10 +2949,10 @@ class GenizahGUI(QMainWindow):
             # SEED-030: if the FGP edition is demoted below V0.8 for low folio
             # coverage, tag it in the combo so the reader knows why V0.8 is the
             # default (parity with the web menu hint).
-            _sid = self.current_browse_sid
+            _sid = sys_id
             _fgp_dec = choose_default_source(
                 sources,
-                getattr(self, 'browse_original_page_text', '') or '',
+                htr_text or '',
                 full_htr_getter=lambda: self._browse_full_htr_text(_sid),
             )
             _fgp_demoted = (not _fgp_dec['eligible']
@@ -3019,7 +3024,7 @@ class GenizahGUI(QMainWindow):
                 self._browse_full_htr_cached = ''
         return self._browse_full_htr_cached
 
-    def _auto_select_pgp_edition(self, combo):
+    def _auto_select_pgp_edition(self, combo, sources=None, htr_text=None, sys_id=None):
         """Find the first edition item and set it as current.
 
         PGP-first (the recommended default). Falls back to the first FGP edition
@@ -3027,6 +3032,10 @@ class GenizahGUI(QMainWindow):
         excerpt of the folio, in which case it is demoted below V0.8/HTR so the
         reader sees the fuller MiDRASH transcription (SEED-030); the FGP row stays
         selectable in the combo. Full FGP editions still default (FGP-07).
+
+        ``sources`` / ``htr_text`` / ``sys_id`` are the CALLER's context for the
+        coverage check (Browse tab vs ResultDialog each pass their own — never
+        read ``self.browse_*`` here). Omitted → no coverage demotion (old behavior).
 
         Returns:
             The item data dict if an edition was selected, None otherwise.
@@ -3041,10 +3050,10 @@ class GenizahGUI(QMainWindow):
         # No PGP edition — weigh FGP against V0.8/HTR by folio coverage (shared
         # policy, parity with web version_selector).
         from shared.fgp_service import choose_default_source
-        _sid = self.current_browse_sid
+        _sid = sys_id
         decision = choose_default_source(
-            getattr(self, '_browse_pgp_sources', None),
-            getattr(self, 'browse_original_page_text', '') or '',
+            sources,
+            htr_text or '',
             full_htr_getter=lambda: self._browse_full_htr_text(_sid),
         )
         if not decision['eligible'] and decision['reason'] == 'demote_low_coverage':
@@ -7144,7 +7153,10 @@ class GenizahGUI(QMainWindow):
                 saved_corrections.append((self.browse_version_combo.itemText(i), data))
 
         # Populate combo with PGP items (clears and rebuilds: PGP Editions > Translations > V0.8)
-        has_pgp = self._populate_pgp_combo(self.browse_version_combo, sources, pgp_doc)
+        has_pgp = self._populate_pgp_combo(
+            self.browse_version_combo, sources, pgp_doc,
+            htr_text=getattr(self, 'browse_original_page_text', '') or '',
+            sys_id=self.current_browse_sid)
 
         if has_pgp:
             # Re-add saved corrections/versions after V0.8
@@ -7162,7 +7174,10 @@ class GenizahGUI(QMainWindow):
             # clobber the V0.8 baseline with the wrong text.
 
             # Auto-select first PGP edition and display it
-            edition_data = self._auto_select_pgp_edition(self.browse_version_combo)
+            edition_data = self._auto_select_pgp_edition(
+                self.browse_version_combo, sources=sources,
+                htr_text=getattr(self, 'browse_original_page_text', '') or '',
+                sys_id=self.current_browse_sid)
             if edition_data:
                 content = edition_data.get('content', '')
                 if content:
