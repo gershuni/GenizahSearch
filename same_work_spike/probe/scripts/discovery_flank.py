@@ -71,6 +71,31 @@ def fam(cat, genre, title=''):
             or any(k in (title or '') for k in LITURGY_TITLE):
         return 'liturgy'
     return 'prose'
+
+
+# Scriptural companions: Bible / Targum / Tafsir / verse-commentary that
+# INTERLEAVE verse-by-verse on the same folio. When BOTH the target and a flank
+# competitor are scriptural companions, the "cross-genre" flank is interleaving
+# (a witness of both), NOT a citation (Codex pitfall 4; known discovery class).
+BIBLE_BOOKS = ('בראשית', 'שמות', 'ויקרא', 'במדבר', 'דברים', 'יהושע', 'שופטים',
+               'שמואל', 'מלכים', 'ישעיה', 'ירמיה', 'יחזקאל', 'הושע', 'יואל',
+               'עמוס', 'עובדיה', 'יונה', 'מיכה', 'נחום', 'חבקוק', 'צפניה',
+               'חגי', 'זכריה', 'מלאכי', 'תהלים', 'משלי', 'איוב', 'שיר',
+               'רות', 'איכה', 'קהלת', 'אסתר', 'דניאל', 'עזרא', 'נחמיה',
+               'דברי הימים')
+SCRIP_KW = ('תרגום', 'אונקלוס', 'יונתן', 'תפסיר')
+
+
+def is_scriptural(cat, genre, title=''):
+    if cat in ('Bible', 'Targum'):
+        return True
+    t = title or ''
+    if any(k in t for k in SCRIP_KW):
+        return True
+    if ('פירוש' in t or 'פרוש' in t) and \
+            ('תורה' in t or 'מקרא' in t or any(b in t for b in BIBLE_BOOKS)):
+        return True
+    return False
 FLANK_OUT = 220          # letters of flank to consider
 MERGE_GAP = 15           # local gap-aware span merge (stored spans already <=30)
 C_MIN_LETTERS = 90       # competitor must cover >=90 flank letters or >=45%
@@ -195,7 +220,8 @@ def flank_signals(r, ps, spans, wstream, gpos, comps):
     sig = {'reloc_ok': False, 'left_dist': None, 'right_dist': None,
            'page_letters': len(ps), 'adj_cov': 0.0, 'recovered': 0,
            'c_left': None, 'c_right': None,
-           'tgt_fam': fam(r.get('cat'), r.get('genre'), r.get('title'))}
+           'tgt_fam': fam(r.get('cat'), r.get('genre'), r.get('title')),
+           'tgt_scrip': is_scriptural(r.get('cat'), r.get('genre'), r.get('title'))}
     if not (wstream and gpos and spans and ps):
         return sig
     cs, ce = spans[0][0], spans[-1][1]
@@ -257,6 +283,13 @@ def decide(sig, cont=0.42, island=0.58):
         return bool(c) and fam(c[3], c[4], c[1]) != tf
 
     island_l, island_r = lc == 'island', rc == 'island'
+    # interleaved scriptural companion (Bible/Targum/commentary verse-by-verse):
+    # a witness of BOTH, not a citation -> mixed, never demoted.
+    if sig.get('tgt_scrip'):
+        def _sc(c):
+            return bool(c) and is_scriptural(c[3], c[4], c[1])
+        if _sc(sig['c_left']) or _sc(sig['c_right']):
+            return 'mixed_multiwork', 'interleaved scriptural companion (Bible/Targum/commentary)'
     cl_diff, cr_diff = is_diff(sig['c_left']), is_diff(sig['c_right'])
     parts = []
     if island_l:
