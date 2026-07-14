@@ -206,6 +206,16 @@ class ConsentDialog(QDialog):
         genizah_core.save_app_config({FIRST_RUN_SHOWN_KEY: True})
         # Opt-in ONLY when the user explicitly clicked Enable.
         telemetry.set_consent(True if self._accepted_telemetry else False)
+        if not self._accepted_telemetry:
+            # SEED-031: a decline starts the re-ask clock (count=1, last-asked
+            # version/timestamp stamped) so a later new-version launch can
+            # gently re-invite via the throttled, non-modal bar. Wrapped in
+            # try/except — the finalizer must always complete regardless.
+            try:
+                from version import APP_VERSION
+                telemetry.record_consent_ask(APP_VERSION)
+            except Exception:
+                pass
         super().done(result)
 
 

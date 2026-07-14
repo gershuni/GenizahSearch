@@ -38,7 +38,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from genizah_core import load_app_config, save_app_config
 from version import APP_VERSION
@@ -102,6 +102,21 @@ CONSENT_TIMESTAMP_KEY    = 'telemetry_consent_ts'       # ISO-8601 str
 CONSENT_APP_VERSION_KEY  = 'telemetry_consent_version'  # str — app version at consent time
 CONSENT_UI_VERSION_KEY   = 'telemetry_consent_ui_ver'   # str e.g. "1"
 IDENTIFIED_USER_KEY      = 'telemetry_identified_user'  # str | None — current Supabase user.id
+
+# ---------------------------------------------------------------------------
+# Re-ask config-key constants (SEED-031 / quick-260714-k56)
+# Consent-INDEPENDENT bookkeeping — these keys exist and update BEFORE opt-in
+# and must never themselves open a data path (T-k56-03). Gated exclusively by
+# should_reask_consent() below; the chokepoint / property allowlist / fixed
+# event-name registry are untouched.
+# ---------------------------------------------------------------------------
+TELEMETRY_LAST_ASKED_VERSION_KEY = 'telemetry_last_asked_version'  # str — app version at last ask
+TELEMETRY_LAST_ASKED_TS_KEY      = 'telemetry_last_asked_ts'       # ISO-8601 str — last ask timestamp
+TELEMETRY_ASK_COUNT_KEY          = 'telemetry_ask_count'           # int — lifetime re-ask counter
+TELEMETRY_NEVER_ASK_KEY          = 'telemetry_never_ask'           # bool — hard opt-out from re-asking
+
+REASK_COOLDOWN_DAYS = 30   # minimum days between re-asks
+REASK_MAX_ASKS = 3         # lifetime cap on re-ask surfacings
 
 # ---------------------------------------------------------------------------
 # Module-level state (mirror nli_circuit_breaker.py singleton pattern)
@@ -680,6 +695,107 @@ def set_consent(enabled: bool) -> None:
                 )
     except Exception:
         logger.debug('telemetry: set_consent silently failed', exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Re-ask gate + bookkeeping (SEED-031 / quick-260714-k56)
+#
+# Loosens the too-strict FIRST_RUN_SHOWN_KEY lock: a decliner is re-invited via
+# a throttled, NON-MODAL bar (desktop/update_ui.py::TelemetryConsentBar) instead
+# of being permanently opted out by a reflexive "Not now". should_reask_consent
+# is the SOLE gate — pure, config.pkl-only, never raises. record_consent_ask /
+# set_never_ask are the SOLE writers of the four re-ask keys above; they are
+# consent-INDEPENDENT bookkeeping and never call set_consent() themselves
+# (T-k56-01 / T-k56-03 — no data path opens before an explicit set_consent(True)).
+# ---------------------------------------------------------------------------
+
+def should_reask_consent(current_version: str, now: 'datetime | None' = None) -> bool:
+    """Pure gate: True ONLY when every re-ask condition holds. Never raises.
+
+    Evaluated in order (short-circuit on the first failing condition):
+      A. is_enabled() is True                              -> False (already opted in)
+      B. FIRST_RUN_SHOWN_KEY absent/False                  -> False (first-run owns the initial ask)
+      C. telemetry_never_ask is True                        -> False (hard opt-out)
+      D. telemetry_ask_count >= REASK_MAX_ASKS              -> False (lifetime cap)
+      E. telemetry_last_asked_version == current_version    -> False (already asked this version)
+      F. telemetry_last_asked_ts within REASK_COOLDOWN_DAYS -> False (cooldown active)
+      G. otherwise                                          -> True
+
+    An absent or unparseable last-asked timestamp counts as cooldown-satisfied
+    (migration case — a pre-feature decliner has FIRST_RUN_SHOWN_KEY=True but
+    none of the re-ask bookkeeping keys yet).
+
+    `now` lets tests inject a fixed instant instead of freezing the real clock.
+    """
+    try:
+        if is_enabled():
+            return False
+        cfg = load_app_config()
+        if not cfg.get(FIRST_RUN_SHOWN_KEY, False):
+            return False
+        if cfg.get(TELEMETRY_NEVER_ASK_KEY, False):
+            return False
+        try:
+            ask_count = int(cfg.get(TELEMETRY_ASK_COUNT_KEY, 0) or 0)
+        except (TypeError, ValueError):
+            ask_count = 0
+        if ask_count >= REASK_MAX_ASKS:
+            return False
+        last_version = cfg.get(TELEMETRY_LAST_ASKED_VERSION_KEY)
+        if last_version is not None and last_version == current_version:
+            return False
+        last_ts_raw = cfg.get(TELEMETRY_LAST_ASKED_TS_KEY)
+        if last_ts_raw:
+            try:
+                last_ts = datetime.fromisoformat(last_ts_raw)
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.replace(tzinfo=timezone.utc)
+                now_dt = now if now is not None else datetime.now(timezone.utc)
+                if now_dt.tzinfo is None:
+                    now_dt = now_dt.replace(tzinfo=timezone.utc)
+                if (now_dt - last_ts) < timedelta(days=REASK_COOLDOWN_DAYS):
+                    return False
+            except (TypeError, ValueError):
+                pass  # unparseable timestamp -> treat cooldown as satisfied
+        return True
+    except Exception:
+        return False
+
+
+def record_consent_ask(current_version: str, now: 'datetime | None' = None) -> None:
+    """Stamp one re-ask surfacing: +1 ask_count, last_asked_version, last_asked_ts.
+
+    Called from BOTH the first-run decline path (ConsentDialog.done — starts the
+    30-day clock at count=1) and the re-ask bar's own surfacing
+    (genizah_app._maybe_show_telemetry_reask). Consent-INDEPENDENT: never
+    touches TELEMETRY_ENABLED_KEY or any chokepoint state. Never raises.
+    """
+    try:
+        cfg = load_app_config()
+        try:
+            ask_count = int(cfg.get(TELEMETRY_ASK_COUNT_KEY, 0) or 0)
+        except (TypeError, ValueError):
+            ask_count = 0
+        now_dt = now if now is not None else datetime.now(timezone.utc)
+        save_app_config({
+            TELEMETRY_ASK_COUNT_KEY: ask_count + 1,
+            TELEMETRY_LAST_ASKED_VERSION_KEY: current_version,
+            TELEMETRY_LAST_ASKED_TS_KEY: now_dt.isoformat(),
+        })
+    except Exception:
+        logger.debug('telemetry: record_consent_ask silently failed', exc_info=True)
+
+
+def set_never_ask() -> None:
+    """Persist a hard, permanent opt-out from future re-asks (T-k56-04).
+
+    Checked FIRST-class (Test C) in should_reask_consent — once set, no future
+    launch will surface the re-ask bar again. Never raises.
+    """
+    try:
+        save_app_config({TELEMETRY_NEVER_ASK_KEY: True})
+    except Exception:
+        logger.debug('telemetry: set_never_ask silently failed', exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1770,6 +1886,10 @@ __all__ = [
     'identify',
     'reset_identity',
     'run_selftest',
+    # Re-ask gate + bookkeeping (SEED-031)
+    'should_reask_consent',
+    'record_consent_ask',
+    'set_never_ask',
     # Phase 115 public perf API
     'accumulate_performance',
     'flush_perf_if_due',
@@ -1788,6 +1908,13 @@ __all__ = [
     'CONSENT_APP_VERSION_KEY',
     'CONSENT_UI_VERSION_KEY',
     'IDENTIFIED_USER_KEY',
+    # Re-ask config-key constants + policy (SEED-031)
+    'TELEMETRY_LAST_ASKED_VERSION_KEY',
+    'TELEMETRY_LAST_ASKED_TS_KEY',
+    'TELEMETRY_ASK_COUNT_KEY',
+    'TELEMETRY_NEVER_ASK_KEY',
+    'REASK_COOLDOWN_DAYS',
+    'REASK_MAX_ASKS',
     # Internal (test seam + helpers — excluded from PRIV-03)
     '_reset_for_tests',
     '_load_consent_state',
