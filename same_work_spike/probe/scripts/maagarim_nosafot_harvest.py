@@ -155,15 +155,31 @@ def match_strings(raw_strings, main_index, base_index):
             for sid, (lib, conf, cm) in sorted(best.items())]
 
 
+FLANK = os.path.join(HERE, '..', 'data', 'discovery_scored_flank.jsonl')
+
+
 def load_scope():
-    with open(TESTIMONIES, encoding='utf-8-sig', newline='') as f:
-        rows = list(csv.DictReader(f))
-    works = sorted({r['work_id'] for r in rows
-                    if r['tier'] in ('new?', 'new?known')
-                    and r['work_id'].startswith('M:Ytext')})
-    # -> [(work_id, misyzira int)]
+    """UNION of the original testimonies new?/new?known works AND every
+    distinct discovery-candidate work (MAPV2-15n gap fix): the discovery pile's
+    works were 77% uncovered, so their known witnesses leaked as false finds.
+    Only Maagarim M:Ytext works have a misyzira to query (JA/Sefaria skip)."""
+    ids = set()
+    try:
+        with open(TESTIMONIES, encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                if r['tier'] in ('new?', 'new?known') \
+                        and r['work_id'].startswith('M:Ytext'):
+                    ids.add(r['work_id'])
+    except FileNotFoundError:
+        pass
+    if os.path.exists(FLANK):
+        for line in open(FLANK, encoding='utf-8'):
+            r = json.loads(line)
+            if r.get('bucket2') == 'discovery' \
+                    and str(r.get('work_id', '')).startswith('M:Ytext'):
+                ids.add(r['work_id'])
     out = []
-    for w in works:
+    for w in sorted(ids):
         try:
             out.append((w, int(w.replace('M:Ytext', ''))))
         except ValueError:
@@ -199,9 +215,18 @@ def main():
           flush=True)
 
     results = load_checkpoint()
+    # seed from the already-written output so the original 738 harvested works
+    # are NOT re-fetched when the scope is expanded (no data loss, no re-query).
+    if os.path.exists(OUT_JSON):
+        try:
+            for r in json.load(open(OUT_JSON, encoding='utf-8')):
+                if r.get('work_id'):
+                    results.setdefault(r['work_id'], r)
+        except Exception:  # noqa: BLE001
+            pass
     done = set(results.keys())
-    print(f'checkpoint: {len(done):,} works already harvested; resuming',
-          flush=True)
+    print(f'checkpoint+existing: {len(done):,} works already harvested; '
+          f'resuming', flush=True)
 
     n_ok = n_fail = n_new = 0
     for i, (work_id, mid) in enumerate(scope):

@@ -135,15 +135,35 @@ def main():
                 nli[row[0]] = ((row[2] or '').split('|')[0].strip(),
                                (row[7] or '').strip())
 
-    # F1: drop edition-source fragments (fragment shelfmark in work mesirah)
-    kept, dropped_f1 = [], 0
+    # resolved (work_id, sys_id) witness pairs from the EXPANDED מסירה registry
+    # (maagarim_nosafot_harvest over all discovery works; 738 -> 1,641 works).
+    wit_pairs = set()
+    try:
+        for e in json.load(open(PROBE + r"\data\mesirot_nosafot.json", encoding='utf-8')):
+            w = e.get('work_id')
+            for m in (e.get('msirot_matched') or []) + (e.get('matched') or []):
+                if m.get('sys_id'):
+                    wit_pairs.add((w, str(m['sys_id'])))
+    except FileNotFoundError:
+        pass
+
+    # F1: drop fragments that are KNOWN witnesses — either a resolved witness in
+    # the מסירה registry (sys_id matched to the work) OR the fragment shelfmark
+    # appears in the work's ##המסירה:## edition-source header.
+    kept, dropped_mes, dropped_hdr = [], 0, 0
     for r in disc:
+        if (r['work_id'], str(r['sys_id'])) in wit_pairs:
+            dropped_mes += 1
+            continue
         shelf = nli.get(str(r['sys_id']), ('', ''))[0]
         ns, nm = norm_shelf(shelf), norm_shelf(mesirah.get(r['work_id'], ''))
         if ns and len(ns) > 4 and nm and ns in nm:
-            dropped_f1 += 1
+            dropped_hdr += 1
             continue
         kept.append(r)
+    dropped_f1 = dropped_mes + dropped_hdr
+    print(f"F1 drops: מסירה-registry witness={dropped_mes}, "
+          f"edition-source-header={dropped_hdr}", flush=True)
     kept.sort(key=lambda r: -r.get('disc_score2_flank', r.get('disc_score2', 0)))
     total = len(kept)
     print(f"discovery {len(disc)}; dropped F1(מסירה-source)={dropped_f1}; "
