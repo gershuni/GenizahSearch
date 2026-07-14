@@ -525,6 +525,111 @@ def _heb_token_set(text: Optional[str]) -> Set[str]:
     return set(_HEBWORD_RE.findall(_NIKUD_RE.sub("", text)))
 
 
+# ── FGP-vs-HTR default-coverage policy (SEED-030) ──────────────────────────────
+# The reading-view default cascade (web ``version_selector.load_and_apply_latest``
+# + desktop ``_auto_select_pgp_edition``) auto-selects an FGP source over the
+# V0.8/HTR ("MiDRASH") transcription whenever one exists. For most collections FGP
+# is as full as — or fuller than — the HTR, but some FGP editions are *partial /
+# selected* excerpts of the folio (notably the Firkovich collections: median ~9%
+# of the folio's text). ``choose_default_source`` demotes such partial FGP
+# editions below the HTR so the reader sees the fuller transcription by default;
+# the FGP edition stays selectable in the version menu. Coverage is measured in
+# base Hebrew LETTERS (nikud/te'amim/punctuation and the HTR's ``][`` lacuna
+# markers stripped, letters inside editorial brackets kept) so neither HTR
+# artefacts nor an FGP edition's vocalization skew the ratio.
+
+# Minimum coverage (FGP letters / HTR letters) for an FGP edition to remain the
+# default; below it the edition is demoted to the HTR. Overridable per-request via
+# ``FGP_DEFAULT_MIN_COVERAGE`` so ops can retune without a redeploy.
+_DEFAULT_MIN_COVERAGE = 0.33
+# The HTR is a fullness BASELINE, not ground truth: when a folio's HTR has too few
+# letters to be a reliable denominator (blank / heavily-garbled / wrong-page) the
+# coverage ratio is UNKNOWN and we fail toward KEEPING FGP — never demote on a bad
+# baseline.
+_COVERAGE_MIN_HTR_LETTERS = 40
+
+
+def _min_coverage() -> float:
+    """Coverage threshold, overridable via ``FGP_DEFAULT_MIN_COVERAGE`` (re-read
+    per call). Falls back to the module default on a missing / unparseable /
+    out-of-[0,1] value."""
+    raw = os.environ.get("FGP_DEFAULT_MIN_COVERAGE")
+    if raw:
+        try:
+            v = float(raw)
+            if 0.0 <= v <= 1.0:
+                return v
+        except ValueError:
+            pass
+    return _DEFAULT_MIN_COVERAGE
+
+
+def _heb_letter_count(text: Optional[str]) -> int:
+    """Count base Hebrew letters in ``text`` — a normalized length immune to
+    whitespace, punctuation, nikud/te'amim and the HTR's ``][`` lacuna markers,
+    while KEEPING letters inside editorial brackets (they are still text)."""
+    if not text:
+        return 0
+    return sum(len(w) for w in _HEBWORD_RE.findall(_NIKUD_RE.sub("", text)))
+
+
+def choose_default_source(
+    sources: Optional[List[Dict[str, Any]]],
+    htr_text: Optional[str],
+    page_num: int,
+) -> Dict[str, Any]:
+    """Decide whether an FGP edition should be the reading-view default for a
+    folio, or be demoted below the V0.8/HTR ("MiDRASH") transcription (SEED-030).
+
+    PURE and side-effect-free so the web ``version_selector`` and the desktop
+    ``_auto_select_pgp_edition`` share ONE policy (and it is unit-testable without
+    a GUI or the sidecar DB). Does NOT touch the PGP-first rule — callers still
+    prefer a PGP edition; this governs only the FGP-vs-HTR fallback.
+
+    ``sources`` is the page-filtered merged source list (already aligned to the
+    displayed folio upstream by ``filter_sources_for_page``). Only FGP EDITIONS
+    are weighed: translations are a different language than the Hebrew HTR, so a
+    length ratio against them is meaningless and they are never coverage-demoted.
+
+    Returns ``{source, reason, ratio, eligible}``:
+      * ``source``   — the FGP edition dict to default to, or ``None`` to demote.
+      * ``eligible`` — ``True`` → default to ``source``; ``False`` → fall through
+                       to the HTR default (FGP stays selectable in the menu).
+      * ``reason``   — ``'no_fgp_edition'`` / ``'htr_too_short'`` /
+                       ``'fgp_sufficient'`` / ``'demote_low_coverage'``.
+      * ``ratio``    — FGP/HTR letter ratio, or ``None`` when not computed.
+    """
+    eds = group_transcription_sources(sources)["fgp_editions"]
+    if not eds:
+        return {"source": None, "reason": "no_fgp_edition", "ratio": None, "eligible": False}
+
+    htr_len = _heb_letter_count(htr_text)
+    if htr_len < _COVERAGE_MIN_HTR_LETTERS:
+        # Unreliable baseline → keep FGP (the already-aligned first/best edition).
+        return {"source": eds[0], "reason": "htr_too_short", "ratio": None, "eligible": True}
+
+    # Pick the FGP edition with the most folio coverage (usually exactly one —
+    # editions are similarity-aligned to this folio upstream). Compare the
+    # per-folio SECTION text, never the whole-row ``content``, so a multi-section
+    # row cannot inflate the ratio.
+    best, best_ratio = eds[0], -1.0
+    for ed in eds:
+        fgp_text = get_fgp_section_for_page(ed, page_num) or ""
+        ratio = _heb_letter_count(fgp_text) / htr_len
+        if ratio > best_ratio:
+            best, best_ratio = ed, ratio
+
+    threshold = _min_coverage()
+    logger.debug(
+        "FGP default coverage: ratio=%.3f threshold=%.2f htr_letters=%d -> %s",
+        best_ratio, threshold, htr_len,
+        "keep" if best_ratio >= threshold else "demote",
+    )
+    if best_ratio < threshold:
+        return {"source": None, "reason": "demote_low_coverage", "ratio": best_ratio, "eligible": False}
+    return {"source": best, "reason": "fgp_sufficient", "ratio": best_ratio, "eligible": True}
+
+
 def _content_similarity(page_tokens: Set[str], content: Optional[str]) -> float:
     """Word-overlap of a page's tokens vs an FGP source's content (0..1).
 
