@@ -38,7 +38,6 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bib_gate import BibGate
 from build_smoke_preview2 import RefText, snippet
-from discovery_flank import LITURGY_TITLE
 
 PROBE = r"C:\Genizahsearch\same_work_spike\probe"
 DB = PROBE + r"\data\fullcorpus_v2.db"
@@ -48,11 +47,6 @@ IN = PROBE + r"\data\discovery_scored_flank.jsonl"
 OUT_HTML = PROBE + r"\review\discovery_road1_review.html"
 OUT_MAN = PROBE + r"\data\discovery_road1_manifest.json"
 
-STAT_HEADS = ('ברכת', 'ברכה', 'תפילה', 'תפיל', 'קדוש', 'הבדלה', 'וידוי',
-              'הרחבה', 'פתיחה', 'מעין', 'הושענא', 'תחנון')
-SCRIP_TITLE = ('מקרא', 'כתובים', 'נביאים', 'תורה', 'חומש', 'חמשה חומשי',
-               'מגילות', 'תהלים', 'תנ')             # NLI catalog = a Bible ms
-SCRIP_WORK = ('תרגום', 'אונקלוס', 'יונתן', 'תפסיר', 'פירוש')  # companion match
 SUGG_RANK = {'discovery': 0, 'witness': 1, 'other': 2}
 
 # Hillel's first 27 grades (2026-07-14), keyed by sys_id|work so they survive
@@ -96,23 +90,25 @@ def norm_shelf(s):
 
 
 def suggest_bucket(r, nli_title):
+    # The LLM title gate (refined 5-way, validated 99% vs Hillel's grades) is
+    # authoritative — the test is "could the catalogue title predict this
+    # content?". witness = catalogue names a specific predictive rite/ceremony/
+    # Bible-section; discovery = generic catalogue can't predict it (a specific ID
+    # beyond a generic title is a real find). 'known'(high) rows were demoted
+    # upstream; 'known'(medium, kept) get a "likely catalogued" witness label.
+    # The old mechanical F2/statutory fallback is RETIRED — it wrongly called
+    # generic-catalogue rows witness (Hillel's 2nd-round grading); every titled
+    # row now carries an LLM verdict, and untitled rows default to discovery.
     v = r.get('flank', {}).get('verdict', '')
+    lv = r.get('llm_verdict')
+    if lv == 'witness':
+        return ('witness', 'עד נוסח (הכותרת צופה את התוכן)')
+    if lv == 'known':
+        return ('witness', 'עד נוסח (כנראה בקטלוג)')
     if v.startswith('likely_citation'):
         return ('other', 'אחר (ציטוט/מקור משותף)')
     if v == 'mixed_multiwork':
         return ('other', 'אחר (טקסט משולב)')
-    title = r.get('title') or ''
-    # F2: the ms's own catalog says it is a Bible section, and this is a
-    # Targum/commentary companion -> catalog predicts it -> עד נוסח.
-    if any(k in (nli_title or '') for k in SCRIP_TITLE) and \
-            any(k in title for k in SCRIP_WORK):
-        return ('witness', 'עד נוסח (מלווה מקראי צפוי)')
-    genre = r.get('genre') or ''
-    liturgical = genre in ('פיוט ותפילה', 'שירת ספרד') or \
-        any(k in title for k in LITURGY_TITLE)
-    if liturgical and any(title.startswith(h) or (' ' + h) in title
-                          for h in STAT_HEADS):
-        return ('witness', 'עד נוסח')
     return ('discovery', 'תגלית')
 
 
@@ -212,6 +208,8 @@ def main():
             'page_html': page_htm, 'ref_html': ref_htm,
             'sugg': bucket, 'sugg_he': bhe,
             'verdict': fl.get('verdict', ''), 'flank_why': fl.get('why', ''),
+            'llm_flag': r.get('llm_flag'), 'llm_verdict': r.get('llm_verdict') or '',
+            'llm_reason': r.get('llm_reason') or '',
             'score': round(r.get('disc_score2_flank', 0), 3),
             'letters': r.get('matched_letters', 0), 'wit': r.get('work_nms', 0),
             'url': f"https://genizahsearch.com/browse?sys_id={sid}",
@@ -319,7 +317,8 @@ function render(){if(!CARDS.length){document.getElementById('card').innerHTML='(
    `<span class=chip>ציון ${c.score.toFixed(2)}</span>`+
    `<span class="chip ${vcl}">flank: ${VHE[c.verdict]||c.verdict}</span>`+
    `<span class=chip>${c.letters} אותיות · ${c.wit} עדים</span>`+
-   (c.flank_why?`<span class=chip>${c.flank_why.replace(/</g,'&lt;')}</span>`:'')+`</div>`+
+   (c.flank_why?`<span class=chip>${c.flank_why.replace(/</g,'&lt;')}</span>`:'')+
+   (c.llm_flag?`<span class=chip style="background:#3a2f10;color:#ffd479;border:1px solid #6b6321">⚠ ייתכן שכבר בקטלוג: ${(c.llm_reason||'').replace(/</g,'&lt;')}</span>`:'')+`</div>`+
   `<div class=work>${c.work||'—'}</div>`+mes+
   `<div class=meta>${c.genre||''} `+(c.nli?`<span class=nli>· קטלוג NLI: ${c.nli}</span>`:'')+
    ` · <a href="${c.url}" target=_blank>פתח בגניזה↗</a>`+

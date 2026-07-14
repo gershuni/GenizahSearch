@@ -1,26 +1,26 @@
 # Already-identified gate (MAPV2-15l)
 
-- discovery-bucket candidates: 27678
-- NAMED by an existing source (-> known): **5906** (21%)
-- studied-only (score halved, kept): 7425
-- catalog-silent across ALL sources (genuine): **14347** (51%)
+- discovery-bucket candidates: 23801
+- NAMED by an existing source (-> known): **4168** (17%)
+- studied-only (score halved, kept): 5905
+- catalog-silent across ALL sources (genuine): **13728** (57%)
 
 ## NAMED by source (a candidate can hit several)
 
-- bib: 5686
-- pgp: 545
-- fgp: 135
+- bib: 3987
+- pgp: 464
+- fgp: 91
 
 ## studied-only presence by source
 
-- bib: 7185
-- fgp: 2381
-- catalog_ref: 1691
+- bib: 5631
+- fgp: 1965
+- catalog_ref: 1236
 
 ## surviving genuine discovery — before vs after the gate
 
-- score >= 0.3: 5145 -> **2181**
-- score >= 0.5 (cream): 99 -> **13**
+- score >= 0.3: 4233 -> **1992**
+- score >= 0.5 (cream): 78 -> **13**
 
 ## top 30 surviving discoveries (score | letters | work | ms | wit)
 
@@ -73,10 +73,10 @@
 - **תרגום אונקלוס על דברים** — 28 fragments (best 0.39)
 - **רס"ג, דברים תרגום (תפסיר תורה)** — 27 fragments (best 0.39)
 - **תרגום אונקלוס על ויקרא** — 26 fragments (best 0.39)
-- **רהיטי ברכי נפשי ליו״כ** — 24 fragments (best 0.38)
 - **תרגום אונקלוס על שמות** — 22 fragments (best 0.39)
-- **תוכחה** — 21 fragments (best 0.39)
 - **רס"ג, שמות פירוש** — 21 fragments (best 0.39)
+- **רס"ג, דניאל תרגום** — 18 fragments (best 0.42)
+- **רס"ג, בראשית פירוש** — 18 fragments (best 0.39)
 
 ## notable demotions
 
