@@ -19,6 +19,13 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   demoted. Applies across search, browse, and the reading views on web and desktop. New
   shared policy `shared/fgp_service.py::choose_default_source` (threshold env-tunable via
   `FGP_DEFAULT_MIN_COVERAGE`, default 0.33). Origin: reader feedback (Gregor Schwarb).
+- **Respectful telemetry re-ask on update (SEED-031, desktop).** The anonymous-usage-stats
+  invitation is no longer a one-time, first-launch-only prompt. If you dismissed it once
+  without opting in, the app now gently re-invites you via a small **non-modal** bar on a
+  later version update — at most a few times, never more than once a month, with a "Don't ask
+  again" button that stops it permanently. Opting in stays entirely your choice; the app still
+  never transmits your searches or your library, and telemetry can be turned off any time in
+  Settings.
 
 ---
 
