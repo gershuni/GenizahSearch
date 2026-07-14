@@ -1,36 +1,37 @@
-# Discovery flank pass (MAPV2-15m) — limit 800
+# Discovery flank pass (MAPV2-15m) — FULL
 
-- flanked discovery rows: 800 (38s)
+- flanked discovery rows: 21772 (459s)
 
 ## verdict distribution
 
-- abstain: 369 (46%) x1.0
-- target_continuation_weak: 360 (45%) x1.04
-- likely_citation_strong: 52 (6%) x0.45
-- target_continuation_strong: 18 (2%) x1.1
-- mixed_multiwork: 1 (0%) x1.0
+- abstain: 12207 (56%) x1.0
+- target_continuation_weak: 7245 (33%) x1.04
+- likely_citation_strong: 963 (4%) x0.45
+- likely_citation_weak: 758 (3%) x0.75
+- target_continuation_strong: 370 (1%) x1.1
+- mixed_multiwork: 229 (1%) x1.0
 
 ## effect (advisory)
-- demoted (citation, x<1): 52
-- boosted (continuation, x>1): 378
+- demoted (citation, x<1): 1721
+- boosted (continuation, x>1): 7615
 
 ## sample strong-citation demotions
 
-- `0.64`->`0.29` נפש אשר כבד מאוד חולייה (טקסט בלבד · right island; right=עזוב לראות אשר יהיה והיה
-- `0.49`->`0.22` קינה על גזירות בסיליאוס · right island; left=בקשה לגאולה; right=פיוטים לשבת
-- `0.49`->`0.22` תרגום קהלת · left island; right island
-- `0.48`->`0.22` לבורא כול וכול יכול ועושה עש כסיל  · left island; right island
-- `0.44`->`0.20` יצא לבבי יצוא יום מר ממחוז חפצו · left=חרדה לבשה תבל ואימה להוו; right=יזיל כל איש ע
-- `0.44`->`0.20` זמירות ושונות · left island; left=יוצרות
-- `0.43`->`0.19` דמעה בעיניי מאנה לרדת אולי צפוניי  · right island; right=רמב"ע, העיונים והדיונים
-- `0.43`->`0.19` תרגום יונתן על עמוס · left island; right island
-- `0.41`->`0.19` שיר לכבוד בחירת נשיא · left island; right island
-- `0.41`->`0.18` רס"ג, תהלים תרגום · left island; right island
-- `0.41`->`0.18` יוצרות לשבתות השנה, דברים · right island; right=רשויות ליוצר לשבתות מצוי
-- `0.40`->`0.18` רס"ג, איוב: תרגום (ספר הצידוק) · left island; right island
-- `0.40`->`0.18` רשב"ח, פירוש התורה לרשב"ח · left island; left=רס"ג, בראשית תרגום (תפסי
-- `0.40`->`0.18` רס"ג, תהלים תרגום · left island; right island
-- `0.39`->`0.18` רס"ג, תהלים פירוש · left island; right island
+- `0.36`->`0.16` רס"ג, תהלים פירוש · left island; right island; left=קדושתות לשבתות השנ
+- `0.35`->`0.16` תרגום על שיר השירים · left island; right island; left=נפש רצוצה
+- `0.35`->`0.16` תרגום (פסאודו-)יונתן על ויקרא · left island; right island; left=פירוש לתורה
+- `0.34`->`0.15` ראב"ש, שופטים פירוש · left island; right island; right=תרגום אונקלוס על 
+- `0.33`->`0.15` פירוש לתורה · left island; right island; left=תרגום אונקלוס על ב
+- `0.33`->`0.15` הימנון · left island; right island; right=תפילה לבאים בשערי
+- `0.32`->`0.14` תרגום אונקלוס על במדבר · left island; right island; left=פירוש לתורה
+- `0.32`->`0.14` ברכת המזון · left island; right island; left=משנה תורה, ספר אהב
+- `0.31`->`0.14` תרגום אונקלוס על ויקרא · left island; right island; left=פירוש לתורה
+- `0.31`->`0.14` מעשה מרכבה · left island; right island; right=תקיעתא לראש השנה 
+- `0.31`->`0.14` תרגום אונקלוס על במדבר · left island; right island; left=פירוש לתורה
+- `0.31`->`0.14` תרגום אונקלוס על במדבר · left island; right island; left=פירוש לתורה; right
+- `0.30`->`0.14` ראב"ש, שמואל א פירוש · left island; right island; right=תרגום יונתן על שמ
+- `0.30`->`0.13` פירוש לתורה · left island; right island; right=תרגום אונקלוס על 
+- `0.30`->`0.13` ברכת המזון · left island; right island; left=משנה תורה, ספר אהב
 
 ## sample strong continuations (witness)
 
