@@ -1092,10 +1092,10 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                # Link the banner to Search — where the v8.4.0 dual-mode library
-                # filter lives.
+                # Link the banner to Search — the reading view (where the smarter
+                # transcription default applies) is reached by opening a result.
                 ui.link(
-                    tr("New: choose Show only or Hide for the library filter — on Search, Browse, and now Parallels — with live per-library counts, sorting, and type-to-find. Give it a try!"),
+                    tr("New: when an FGP transcription covers only a small part of the folio, the reading view now shows the fuller MiDRASH transcription by default — the FGP text is still available in the version menu."),
                     '/search',
                 ).classes('text-xs flex-1 truncate text-primary hover:underline')
                 def dismiss_whats_new():

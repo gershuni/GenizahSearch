@@ -9,6 +9,12 @@ extend-exclude = [
     "extension",
     "dist",
     "build",
+    # Non-app research / spike / one-off addon trees (not imported by web/ or the
+    # desktop app). Kept out of the app's import-hygiene lint so their throwaway
+    # scripts don't gate CI on the shipped codebase.
+    "same_work_spike",
+    "seewald_addition",
+    "ephraim_meiri_pdf_converter",
 ]
 
 [lint]

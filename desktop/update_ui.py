@@ -135,7 +135,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: the library filter now has two modes — Show only or Hide — with live per-library counts, sort, and type-to-find in Browse by Identification."))
+        self.lbl_msg.setText(tr("New: when an FGP transcription covers only a small part of the folio, the fuller MiDRASH (V0.8) transcription now shows by default. FGP stays available in the version chooser."))
         self.show()
 
     def on_learn_more(self):
@@ -172,9 +172,10 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Show only or Hide: the 'Browse by Identification' library filter now has two modes \u2014 show only the libraries you pick, or hide them. In Hide mode a newly-appearing library stays visible unless you've hidden it, and your choice is remembered."),
-            tr("Per-library counts: each library shows how many manuscripts it holds, updating live as you toggle the PGP and scholarly-edition filters."),
-            tr("Sort and type-to-find: sort the library list by count or A\u2013Z, and type to filter it. Each row shows its English code (e.g. CUL) in both the Hebrew and English interface."),
+            tr("Smarter default transcription: when an FGP transcription covers only a small part of the folio, the fuller MiDRASH (V0.8) transcription is shown by default instead."),
+            tr("The FGP transcription stays available in the version chooser, tagged \u201cshorter than V0.8\u201d."),
+            tr("Manuscripts where FGP is a full transcription are unchanged \u2014 FGP still shows by default there."),
+            tr("Applies across search, browse, and the reading views."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

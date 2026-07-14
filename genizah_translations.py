@@ -4564,3 +4564,22 @@ TRANSLATIONS.update({
     "shorter than V0.8":
         "קצר מ-V0.8",
 })
+
+# === v8.5.0 What's New — Smarter Default Transcription (SEED-030) ===
+TRANSLATIONS.update({
+    # Web What's New banner
+    "New: when an FGP transcription covers only a small part of the folio, the reading view now shows the fuller MiDRASH transcription by default — the FGP text is still available in the version menu.":
+        "חדש: כאשר תעתוק ה־FGP מכסה רק חלק קטן מהדף, תצוגת הקריאה מציגה כעת את תעתוק ה־MiDRASH המלא כברירת מחדל — תעתוק ה־FGP עדיין זמין בתפריט הגרסאות.",
+    # Desktop What's New bar
+    "New: when an FGP transcription covers only a small part of the folio, the fuller MiDRASH (V0.8) transcription now shows by default. FGP stays available in the version chooser.":
+        "חדש: כאשר תעתוק ה־FGP מכסה רק חלק קטן מהדף, מוצג כעת תעתוק ה־MiDRASH (V0.8) המלא כברירת מחדל. ה־FGP נשאר זמין בבורר הגרסאות.",
+    # Desktop What's New dialog bullets
+    "Smarter default transcription: when an FGP transcription covers only a small part of the folio, the fuller MiDRASH (V0.8) transcription is shown by default instead.":
+        "ברירת מחדל חכמה לתעתוק: כאשר תעתוק FGP מכסה רק חלק קטן מהדף, מוצג במקומו תעתוק ה־MiDRASH (V0.8) המלא.",
+    "The FGP transcription stays available in the version chooser, tagged “shorter than V0.8”.":
+        "תעתוק ה־FGP נשאר זמין בבורר הגרסאות, מסומן \"קצר מ־V0.8\".",
+    "Manuscripts where FGP is a full transcription are unchanged — FGP still shows by default there.":
+        "כתבי יד שבהם ה־FGP הוא תעתוק מלא — ללא שינוי; ה־FGP נשאר ברירת המחדל שם.",
+    "Applies across search, browse, and the reading views.":
+        "חל בחיפוש, בעיון ובתצוגות הקריאה.",
+})

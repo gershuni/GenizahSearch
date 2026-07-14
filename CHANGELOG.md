@@ -4,6 +4,24 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [8.5.0] - 2026-07-14 — Smarter Default Transcription (both apps)
+
+### Improvements
+- **Smarter default transcription (SEED-030, both apps).** When a manuscript's FGP
+  transcription covers only a small part of the displayed folio (a brief selected excerpt),
+  the "Manuscript Text" panel now shows the fuller **MiDRASH (V0.8)** transcription by
+  default instead of the partial FGP text. The FGP transcription stays one click away in the
+  version chooser, tagged "shorter than V0.8". Manuscripts where FGP is a full transcription
+  (the majority) are unchanged — FGP still shows by default there. Coverage is measured per
+  folio by base-Hebrew-letter ratio; **whole-document** FGP transcriptions (no per-image
+  folio) are weighed against the **whole manuscript** so a comprehensive one is kept while a
+  selective excerpt (e.g. many Firkovich transcriptions, ~a few % of the manuscript) is
+  demoted. Applies across search, browse, and the reading views on web and desktop. New
+  shared policy `shared/fgp_service.py::choose_default_source` (threshold env-tunable via
+  `FGP_DEFAULT_MIN_COVERAGE`, default 0.33). Origin: reader feedback (Gregor Schwarb).
+
+---
+
 ## [8.4.1] - 2026-07-01 — Public API Dual-Mode (web)
 
 Web point-release. The public **Search API** counterpart to the v8.4.0 dual-mode library

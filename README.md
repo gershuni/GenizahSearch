@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.4.0
+# Dicta Genizah Search Pro 8.5.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,19 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.4.0?
+## What's New in Version 8.5.0?
+
+### v8.5.0: Smarter Default Transcription
+
+Public release (both apps). The reading view now picks a better default transcription:
+
+- **Fuller text by default** — when a manuscript's FGP transcription covers only a small
+  part of the folio (a brief selected excerpt), the "Manuscript Text" panel shows the fuller
+  **MiDRASH (V0.8)** transcription instead. The FGP transcription is still one click away in
+  the version chooser, marked *"shorter than V0.8"*.
+- **Only where it helps** — manuscripts whose FGP transcription is full (the majority) are
+  unchanged; FGP still shows by default there. The choice is made per folio by how much of
+  the text each source covers, so you consistently see the more complete transcription.
 
 ### v8.4.0: Dual-Mode Library Filter (Show-only / Hide)
 
@@ -486,7 +498,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.4.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.5.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
