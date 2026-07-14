@@ -91,6 +91,43 @@ def load_npages():
     return npg
 
 
+def _targum_key(work_id):
+    """(targum_family, book) for a REF2 Targum work_id, else None. Lets us tell
+    'two DIFFERENT Targumim of the SAME book' (Onkelos + Pseudo-Jonathan on
+    Exodus; Targum + Targum Sheni on Esther) apart from 'the SAME Targum on
+    different books' (Samuel I vs II — same family, distinct two-token book, so
+    NOT a sibling)."""
+    wid = work_id or ''
+    if 'targum' not in wid:
+        return None
+    rest = wid.split('targum_', 1)[-1]          # tail after 'REF2:targum_'
+    if rest.endswith('_targum_sheni'):          # Targum Sheni (of a book)
+        return ('sheni', rest[:-len('_targum_sheni')].split('_')[-1])
+    for fam in ('onkelos', 'jonathan', 'ketuvim'):
+        if rest.startswith(fam + '_'):
+            return (fam, rest[len(fam) + 1:])
+    return ('?', rest)
+
+
+_PENT_TARGUM_FAM = {'onkelos', 'jonathan'}
+
+
+def _catalog_targum_family(nli_title):
+    """Pentateuch-Targum family named by an NLI catalogue title, or None.
+    Lets us catch a fragment CATALOGUED as one Targum (e.g. אונקלוס) but matched
+    to a DIFFERENT one (פסאודו-יונתן) of the same book — the catalogue makes the
+    real identity clear, so the labelled Targum is not a discovery."""
+    t = nli_title or ''
+    tl = t.lower()
+    if 'אונקלוס' in t or 'onqelos' in tl or 'onkelos' in tl:
+        return 'onkelos'
+    if ('יונתן' in t or 'פסאודו' in t or 'pseudo' in tl or 'jonathan' in tl
+            or 'ירושלמי' in t or 'palestinian' in tl or 'ניאופיטי' in t
+            or 'neofiti' in tl):
+        return 'jonathan'          # Palestinian/Ps-Jonathan/Neofiti cluster
+    return None
+
+
 def bucket_of(r):
     """4-bucket label from corpus-available fields (scope resolution already
     encodes the title-class signal via TitleGate)."""
@@ -98,6 +135,9 @@ def bucket_of(r):
         return 'known'
     if r['resolution'] == 'page_resolved_known':
         return 'known'
+    # a DIFFERENT Targum of the same book on this ms is a parallel, not a find
+    if r.get('targum_parallel'):
+        return 'parallel'
     # statutory unit in a liturgical/anthology container -> textual witness
     title = r.get('title') or ''
     head = _head(title.split('—')[-1] if '—' in title else title)
@@ -179,6 +219,46 @@ def main():
         r['resolution'] = sg.resolution(r['sys_id'], claim)
     print(f"scope resolved ({time.time()-t0:.0f}s; {len(sg._cache)} MSS)", flush=True)
 
+    # --- Targum same-book sibling detection (fix B) ---
+    # Two DIFFERENT Targumim of the SAME book on one manuscript (Onkelos +
+    # Pseudo-Jonathan on Exodus; Targum + Targum Sheni on Esther) share the
+    # verse text, so the subordinate one surfaces as a false "discovery". Keep
+    # the manuscript's PRIMARY Targum (most matched text); relabel the rest
+    # 'parallel'. A lone Targum of a book (Targum Sheni on Esther with no plain
+    # Esther Targum on the ms) stays a discovery — no sibling to be parallel to.
+    tg_letters = defaultdict(int)      # (sys_id, book, family) -> total letters
+    tg_families = defaultdict(set)     # (sys_id, book) -> {family}
+    for r in rows:
+        tk = _targum_key(r['work_id']) if r['cat'] == 'Targum' else None
+        r['_tg'] = tk
+        if tk:
+            fam, book = tk
+            tg_letters[(r['sys_id'], book, fam)] += r['matched_letters']
+            tg_families[(r['sys_id'], book)].add(fam)
+    tg_primary = {}                    # (sys_id, book) -> primary family
+    for (sid, book), fams in tg_families.items():
+        if len(fams) >= 2:
+            tg_primary[(sid, book)] = max(
+                fams, key=lambda f: (tg_letters[(sid, book, f)], f))
+    n_parallel = n_cat = 0
+    for r in rows:
+        tk = r['_tg']
+        par = bool(tk and (r['sys_id'], tk[1]) in tg_primary
+                   and tk[0] != tg_primary[(r['sys_id'], tk[1])])
+        # catalogue-based sibling: the ms is catalogued as a DIFFERENT Pentateuch
+        # Targum than the matched work -> the labelled Targum is a parallel
+        # (the fragment really is the catalogued one).
+        if tk and not par and tk[0] in _PENT_TARGUM_FAM:
+            cf = _catalog_targum_family(sg.nli.get(r['sys_id'], ''))
+            if cf in _PENT_TARGUM_FAM and cf != tk[0]:
+                par = True
+                n_cat += 1
+        r['targum_parallel'] = par
+        n_parallel += par
+    print(f"targum siblings -> parallel: {n_parallel} rows "
+          f"({len(tg_primary)} multi-targum (ms,book) groups; "
+          f"{n_cat} via catalogue-Targum mismatch)", flush=True)
+
     dropped = 0
     out_rows = []
     for r in rows:
@@ -214,7 +294,7 @@ def main():
          "", f"- matches scored: {kept} (dropped {dropped} anachronistic)",
          f"- runtime {time.time()-t0:.0f}s", "",
          "## bucket mix (labels)", ""]
-    for b in ('discovery', 'witness', 'known', 'other'):
+    for b in ('discovery', 'witness', 'known', 'parallel', 'other'):
         L.append(f"- {b}: {buck[b]} ({100*buck[b]//max(1,kept)}%)")
     L += ["", "## discovery-score bands (ALL matches)", ""]
     for k in ('>=0.5', '0.3-0.5', '0.15-0.3', '<0.15'):
