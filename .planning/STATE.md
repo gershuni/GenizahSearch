@@ -63,7 +63,7 @@ None at roadmap creation.
 
 | # | Description | Date | Commit | Status | Directory |
 |---|-------------|------|--------|--------|-----------|
-| 260714-9jc | FGP default demotion via coverage ratio (SEED-030) — show V0.8/HTR when the folio's FGP is a partial excerpt; web+desktop parity | 2026-07-14 | 1d3ef49c | Codex APPROVE; not yet released | [260714-9jc-fgp-default-demotion-via-coverage-ratio-](./quick/260714-9jc-fgp-default-demotion-via-coverage-ratio-/) |
+| 260714-9jc | FGP default demotion via coverage ratio (SEED-030) — show V0.8/HTR when the folio's FGP is a partial excerpt; whole-MS baseline for whole-doc rows; all 4 selector surfaces | 2026-07-14 | 6166fdf5 | Codex APPROVE (4 rounds); not yet released | [260714-9jc-fgp-default-demotion-via-coverage-ratio-](./quick/260714-9jc-fgp-default-demotion-via-coverage-ratio-/) |
 
 ### Pending Todos
 
