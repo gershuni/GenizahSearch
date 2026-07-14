@@ -281,3 +281,51 @@ def test_accept_path_does_not_record_ask(monkeypatch, _reset_telemetry_state):
 
     assert record_calls == [], f"record_consent_ask must not fire on accept; got {record_calls}"
     assert tel.TELEMETRY_ASK_COUNT_KEY not in fake_config
+
+
+# ===========================================================================
+# Qt-OFFSCREEN SECTION (Task 2) — TelemetryConsentBar construct + signals
+# Run with: GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen \
+#           python -m pytest tests/test_telemetry_reask_consent.py -q
+# Deep render/interaction is covered by the Task 3 live smoke.
+# ===========================================================================
+
+def test_telemetry_consent_bar_constructs_with_four_signals():
+    """TelemetryConsentBar exposes the four signals; show_reask()/hide() do not raise."""
+    _skip_if_no_qt()
+    from desktop.update_ui import TelemetryConsentBar
+
+    bar = TelemetryConsentBar()
+    # Hidden by default (bars mount hidden, shown by the startup gate).
+    assert bar.isVisible() is False
+
+    # The four pyqtSignals must exist and be connectable.
+    for sig_name in ('enable_requested', 'learn_more', 'never_ask_requested', 'dismissed'):
+        assert hasattr(bar, sig_name), f"TelemetryConsentBar must expose {sig_name}"
+        getattr(bar, sig_name).connect(lambda *a: None)
+
+    # show_reask()/hide() must not raise and must set the invite label text.
+    bar.show_reask()
+    assert bar.lbl_msg.text(), "show_reask() must populate the invite label"
+    bar.hide()
+    assert bar.isVisible() is False
+
+
+def test_telemetry_consent_bar_button_slots_emit_signals():
+    """The Enable / Learn more / Don't-ask-again / dismiss slots emit their signals."""
+    _skip_if_no_qt()
+    from desktop.update_ui import TelemetryConsentBar
+
+    bar = TelemetryConsentBar()
+    fired: dict = {'enable': 0, 'learn': 0, 'never': 0, 'dismiss': 0}
+    bar.enable_requested.connect(lambda: fired.__setitem__('enable', fired['enable'] + 1))
+    bar.learn_more.connect(lambda: fired.__setitem__('learn', fired['learn'] + 1))
+    bar.never_ask_requested.connect(lambda: fired.__setitem__('never', fired['never'] + 1))
+    bar.dismissed.connect(lambda: fired.__setitem__('dismiss', fired['dismiss'] + 1))
+
+    bar.on_enable()
+    bar.on_learn_more()
+    bar.on_never_ask()
+    bar.on_dismiss()
+
+    assert fired == {'enable': 1, 'learn': 1, 'never': 1, 'dismiss': 1}

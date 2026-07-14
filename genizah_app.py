@@ -76,7 +76,7 @@ from desktop.pdf_page_renderer import PdfRenderWorker  # Phase 100 D-07
 from desktop.pdf_image_controller import PdfImageController  # Phase 100 D-07b
 from desktop.ui_widgets import ShelfmarkTableWidgetItem, CheckBoxHeader, HiddenScrollArea, ListsTreeWidget
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
-from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog  # Phase 127 update_ui
+from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar  # Phase 127 update_ui; SEED-031 re-ask bar
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -1502,6 +1502,12 @@ class GenizahGUI(QMainWindow):
             if cfg.get('whats_new_seen') != APP_VERSION:
                 self.whats_new_bar.show_whats_new(APP_VERSION)
 
+            # SEED-031: gently re-invite not-yet-opted-in decliners (throttled,
+            # non-modal). Mutually exclusive with the first-run modal by
+            # construction — should_reask_consent returns False when
+            # FIRST_RUN_SHOWN_KEY is absent, so a fresh install never gets both.
+            self._maybe_show_telemetry_reask()
+
             # One-time citation reminder (shown once per installation)
             if not cfg.get('citation_reminder_seen', False):
                 QTimer.singleShot(500, self._show_citation_reminder)
@@ -1964,6 +1970,16 @@ class GenizahGUI(QMainWindow):
         self.whats_new_bar.dismissed.connect(self.on_whats_new_dismissed)
         self.whats_new_bar.learn_more.connect(self.show_whats_new_dialog)
         main_layout.addWidget(self.whats_new_bar)
+
+        # Telemetry re-ask Bar (SEED-031, Hidden by default) — a throttled,
+        # non-modal re-invite for not-yet-opted-in decliners. Gated by
+        # desktop.telemetry.should_reask_consent in _maybe_show_telemetry_reask.
+        self.telemetry_consent_bar = TelemetryConsentBar()
+        self.telemetry_consent_bar.enable_requested.connect(self.on_telemetry_reask_enable)
+        self.telemetry_consent_bar.learn_more.connect(self.on_telemetry_reask_learn_more)
+        self.telemetry_consent_bar.never_ask_requested.connect(self.on_telemetry_reask_never)
+        self.telemetry_consent_bar.dismissed.connect(self.on_telemetry_reask_dismissed)
+        main_layout.addWidget(self.telemetry_consent_bar)
 
         main_layout.addWidget(self.tabs)
 
@@ -14794,6 +14810,69 @@ class GenizahGUI(QMainWindow):
         except Exception:
             # Never block startup; log at debug rather than swallowing silently (WR-04).
             logger.debug("first-run consent prompt gate failed", exc_info=True)
+
+    # ---------------------------------------------------------------------------
+    # SEED-031 — throttled, non-modal telemetry re-ask (quick-260714-k56)
+    # ---------------------------------------------------------------------------
+
+    def _maybe_show_telemetry_reask(self) -> None:
+        """Startup gate for the non-modal telemetry re-ask bar. Never blocks.
+
+        Shows the bar ONLY when desktop.telemetry.should_reask_consent allows it
+        (not opted in, first-run already shown, not "never ask", under the ~3
+        lifetime cap, version differs, 30-day cooldown elapsed). Records THIS
+        surfacing via record_consent_ask so the counter advances even if the
+        user ignores the bar. Wrapped in try/except — a failure here must never
+        block startup.
+        """
+        try:
+            from desktop.telemetry import should_reask_consent, record_consent_ask
+            from version import APP_VERSION
+            if not should_reask_consent(APP_VERSION):
+                return
+            record_consent_ask(APP_VERSION)  # counts this surfacing (cap + cooldown)
+            self.telemetry_consent_bar.show_reask()
+        except Exception:
+            logger.debug("telemetry re-ask gate failed", exc_info=True)
+
+    def on_telemetry_reask_enable(self) -> None:
+        """User clicked Enable on the re-ask bar — the sole implicit opt-in path.
+
+        Explicit user action, so set_consent(True) is called (mints the install
+        UUID). Then re-run the startup telemetry coordinator so identify /
+        session_start fire now, mirroring the post-first-run-optin re-run.
+        """
+        try:
+            from desktop.telemetry import set_consent
+            set_consent(True)
+            self.telemetry_consent_bar.hide()
+            self._run_startup_telemetry_coordinator()
+        except Exception:
+            logger.debug("telemetry re-ask enable failed", exc_info=True)
+
+    def on_telemetry_reask_learn_more(self) -> None:
+        """Open the full bilingual privacy disclosure (same as first-run Learn more)."""
+        try:
+            from desktop.consent_dialog import PrivacyDialog
+            PrivacyDialog(self, bilingual=True).exec()
+        except Exception:
+            logger.debug("telemetry re-ask learn-more failed", exc_info=True)
+
+    def on_telemetry_reask_never(self) -> None:
+        """User clicked Don't ask again — persist a hard, permanent opt-out."""
+        try:
+            from desktop.telemetry import set_never_ask
+            set_never_ask()
+            self.telemetry_consent_bar.hide()
+        except Exception:
+            logger.debug("telemetry re-ask never-ask failed", exc_info=True)
+
+    def on_telemetry_reask_dismissed(self) -> None:
+        """User dismissed the bar with ✕ — ignored this time (count already recorded)."""
+        try:
+            self.telemetry_consent_bar.hide()
+        except Exception:
+            logger.debug("telemetry re-ask dismiss failed", exc_info=True)
 
     # --- HELP TEXTS ---
     def open_help_center(self, anchor=None):

@@ -4583,3 +4583,16 @@ TRANSLATIONS.update({
     "Applies across search, browse, and the reading views.":
         "חל בחיפוש, בעיון ובתצוגות הקריאה.",
 })
+
+# === SEED-031 — Telemetry re-ask consent bar (quick-260714-k56) ===
+TRANSLATIONS.update({
+    # Non-modal re-invite bar (desktop/update_ui.py::TelemetryConsentBar)
+    "Help improve Dicta Genizah Search Pro? You can share anonymous usage data — never your searches or your library.":
+        "לעזור לשפר את Dicta Genizah Search Pro? אפשר לשתף נתוני שימוש אנונימיים — לעולם לא את החיפושים או הספרייה שלכם.",
+    "Enable":
+        "הפעל",
+    "Learn more":
+        "מידע נוסף",
+    "Don't ask again":
+        "אל תשאל שוב",
+})

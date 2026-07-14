@@ -146,6 +146,103 @@ class WhatsNewBar(QFrame):
         self.dismissed.emit()
 
 
+class TelemetryConsentBar(QFrame):
+    """Non-modal re-invite bar for telemetry consent (SEED-031).
+
+    Mirrors WhatsNewBar (QFrame, 40px, tr() strings, pyqtSignal slots,
+    self.hide() in __init__) rather than adding a new blocking modal. Shown at
+    most ~3 times, throttled by desktop.telemetry.should_reask_consent — this
+    class is purely the surface; the gate + bookkeeping live in telemetry.
+
+    Signals:
+      enable_requested    — user clicked "Enable" (the ONLY implicit-opt-in path;
+                            the handler calls set_consent(True)).
+      learn_more          — user clicked "Learn more" (opens PrivacyDialog).
+      never_ask_requested — user clicked "Don't ask again" (hard opt-out).
+      dismissed           — user clicked "✕" (ignored this time; ask already counted).
+
+    The copy is an honest invite with no pressure and no default action.
+    GUARD-01: NO module-level ``import genizah_app`` — tr()/CURRENT_LANG come
+    from genizah_core.
+    """
+
+    enable_requested = pyqtSignal()
+    learn_more = pyqtSignal()
+    never_ask_requested = pyqtSignal()
+    dismissed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("background-color: #e0e7ff; color: #3730a3; border-bottom: 1px solid #c7d2fe;")
+        self.setFixedHeight(40)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+
+        self.lbl_msg = QLabel()
+        self.lbl_msg.setStyleSheet("font-weight: bold; font-size: 13px; border: none; background: transparent;")
+
+        self.btn_enable = QPushButton(tr("Enable"))
+        self.btn_enable.setStyleSheet("background-color: #10b981; color: white; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
+        self.btn_enable.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_enable.clicked.connect(self.on_enable)
+
+        self.btn_learn_more = QPushButton(tr("Learn more"))
+        self.btn_learn_more.setFlat(True)
+        self.btn_learn_more.setStyleSheet("color: #3730a3; text-decoration: underline; border: none; background: transparent;")
+        self.btn_learn_more.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_learn_more.clicked.connect(self.on_learn_more)
+
+        self.btn_never = QPushButton(tr("Don't ask again"))
+        self.btn_never.setFlat(True)
+        self.btn_never.setStyleSheet("color: #6b7280; border: none; background: transparent;")
+        self.btn_never.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_never.clicked.connect(self.on_never_ask)
+
+        self.btn_dismiss = QPushButton("✕")
+        self.btn_dismiss.setToolTip(tr("Dismiss"))
+        self.btn_dismiss.setStyleSheet("""
+            QPushButton { background: transparent; color: #3730a3; font-weight: bold; border: none; font-size: 16px; }
+            QPushButton:hover { color: #dc3545; }
+        """)
+        self.btn_dismiss.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_dismiss.clicked.connect(self.on_dismiss)
+
+        layout.addWidget(self.lbl_msg)
+        layout.addStretch()
+        layout.addWidget(self.btn_enable)
+        layout.addSpacing(6)
+        layout.addWidget(self.btn_learn_more)
+        layout.addSpacing(6)
+        layout.addWidget(self.btn_never)
+        layout.addSpacing(10)
+        layout.addWidget(self.btn_dismiss)
+
+        self.hide()
+
+    def show_reask(self):
+        self.lbl_msg.setText(tr(
+            "Help improve Dicta Genizah Search Pro? You can share anonymous "
+            "usage data — never your searches or your library."
+        ))
+        self.show()
+
+    def on_enable(self):
+        self.enable_requested.emit()
+
+    def on_learn_more(self):
+        self.learn_more.emit()
+
+    def on_never_ask(self):
+        self.hide()
+        self.never_ask_requested.emit()
+
+    def on_dismiss(self):
+        self.hide()
+        self.dismissed.emit()
+
+
 class WhatsNewDialog(QDialog):
     """Dialog showing detailed What's New information."""
 
