@@ -42,6 +42,35 @@ OUT = PROBE + r"\data\discovery_scored_flank.jsonl"
 MD = PROBE + r"\results\discovery_flank_report.md"
 
 CANON = {'Bible', 'Bavli', 'Mishnah', 'Yerushalmi', 'Tosefta'}
+LITURGY_GENRES = {'פיוט ותפילה', 'שירת ספרד'}
+# frozen calibrated cutoffs (calibrate_flank.py -> data/flank_thresholds.json)
+_THR = PROBE + r"\data\flank_thresholds.json"
+try:
+    _t = json.load(open(_THR, encoding='utf-8'))
+    CONT_THR, ISLAND_THR = _t['cont_thr'], _t['island_thr']
+except (OSError, ValueError, KeyError):
+    CONT_THR, ISLAND_THR = 0.42, 0.58
+# liturgy is often mis-/un-labelled by genre; detect it from the title too so a
+# statutory prayer or piyyut isn't mistaken for 'prose' (which would make a
+# liturgical neighbour look like a cross-genre citation competitor).
+LITURGY_TITLE = ('תפיל', 'תפל', 'ברכה', 'ברכת', 'סליח', 'פיוט', 'קדוש', 'פתיחה',
+                 'הרחבה', 'וידוי', 'קינה', 'קינות', 'קרוב', 'יוצר', 'מעריב',
+                 'זולת', 'אופן', 'רהיט', 'פזמון', 'הושענא', 'מזמור', 'זמיר',
+                 'שבעתא', 'עבודה', 'סילוק', 'מגן', 'מחיה')
+
+
+def fam(cat, genre, title=''):
+    """Coarse genre family. 'different flanks' is only citation evidence when
+    the flank work is a DIFFERENT family — liturgy amid liturgy (or piyyut amid
+    piyyut) is an anthology, where each unit is still a witness, not a citation."""
+    if cat in CANON:
+        return 'canon'
+    if cat == 'Targum':
+        return 'targum'
+    if cat == 'Liturgy' or genre in LITURGY_GENRES \
+            or any(k in (title or '') for k in LITURGY_TITLE):
+        return 'liturgy'
+    return 'prose'
 FLANK_OUT = 220          # letters of flank to consider
 MERGE_GAP = 15           # local gap-aware span merge (stored spans already <=30)
 C_MIN_LETTERS = 90       # competitor must cover >=90 flank letters or >=45%
@@ -98,19 +127,19 @@ def load_competitors(pages):
     pl = list(pages)
     seen = set()
     for tbl, tierA in (('track1_matches', True), ('track1_candidates', False)):
-        cols = ("page_id, work_id, cat, title, matched_letters, spans_json"
+        cols = ("page_id, work_id, cat, genre, title, matched_letters, spans_json"
                 if tierA else
-                "page_id, work_id, cat, title, matched_letters, p_same_work, spans_json")
+                "page_id, work_id, cat, genre, title, matched_letters, p_same_work, spans_json")
         for i in range(0, len(pl), 400):
             b = pl[i:i + 400]
             qm = ','.join('?' * len(b))
             for row in con.execute(
                     f"SELECT {cols} FROM {tbl} WHERE page_id IN ({qm})", b):
                 if tierA:
-                    pid, wid, cat, ti, ml, sj = row
+                    pid, wid, cat, gen, ti, ml, sj = row
                     strong = True
                 else:
-                    pid, wid, cat, ti, ml, psw, sj = row
+                    pid, wid, cat, gen, ti, ml, psw, sj = row
                     strong = (psw or 0) >= 0.65 or (ml or 0) >= 100
                 if (pid, wid) in seen:
                     continue
@@ -119,7 +148,7 @@ def load_competitors(pages):
                     sp = merge_spans(json.loads(sj))
                 except Exception:
                     continue
-                out[pid].append((wid, cat, ti or '', sp, strong))
+                out[pid].append((wid, cat, gen or '', ti or '', sp, strong))
     con.close()
     return out
 
@@ -141,12 +170,13 @@ def _same_family(t_toks, comp_title):
 
 
 def competitor_on(region, comps, target_wid, target_canon, t_toks):
-    """Strong non-equivalent, non-canonical competitor covering `region`?"""
+    """Strong non-equivalent, non-canonical competitor covering `region`.
+    Returns (wid, title, cov, cat, genre) or None."""
     r0, r1 = region
     span_len = r1 - r0
     if span_len < 60:
         return None
-    for wid, cat, ti, sp, strong in comps:
+    for wid, cat, gen, ti, sp, strong in comps:
         if wid == target_wid or not strong:
             continue
         if cat in CANON and not target_canon:
@@ -155,8 +185,45 @@ def competitor_on(region, comps, target_wid, target_canon, t_toks):
             continue
         cov = _cover(region, sp)
         if cov >= C_MIN_LETTERS or cov >= C_MIN_FRAC * span_len:
-            return (wid, ti, cov)
+            return (wid, ti, cov, cat, gen)
     return None
+
+
+def flank_signals(r, ps, spans, wstream, gpos, comps):
+    """Compute the raw flank signals for one match. SHARED by the detector and
+    the calibrator so dev/production can never drift."""
+    sig = {'reloc_ok': False, 'left_dist': None, 'right_dist': None,
+           'page_letters': len(ps), 'adj_cov': 0.0, 'recovered': 0,
+           'c_left': None, 'c_right': None,
+           'tgt_fam': fam(r.get('cat'), r.get('genre'), r.get('title'))}
+    if not (wstream and gpos and spans and ps):
+        return sig
+    cs, ce = spans[0][0], spans[-1][1]
+    span_slice = ps[cs:ce]
+    span_letters = sum(b - a for a, b in spans)
+    rel = relocate(span_slice, wstream, gpos)
+    if not rel:
+        return sig
+    r0, r1, _red, _na = rel
+    sig['reloc_ok'] = True
+    pl_f = ps[max(0, cs - FLANK_OUT):cs][::-1]        # reverse -> span-adjacent leads
+    wl_f = wstream[max(0, r0 - FLANK_OUT):r0][::-1]
+    pr_f = ps[ce:ce + FLANK_OUT]
+    wr_f = wstream[r1:r1 + FLANK_OUT]
+    sig['left_dist'] = flank_dist(pl_f, wl_f)
+    sig['right_dist'] = flank_dist(pr_f, wr_f)
+    rec = 0
+    if classify(sig['left_dist']) == 'continuation':
+        rec += min(len(pl_f), WINDOW)
+    if classify(sig['right_dist']) == 'continuation':
+        rec += min(len(pr_f), WINDOW)
+    sig['recovered'] = rec
+    sig['adj_cov'] = (span_letters + rec) / max(1, len(ps))
+    tcanon = r.get('cat') in CANON
+    ttoks = set(heb_tokens(r.get('title') or ''))
+    sig['c_left'] = competitor_on((max(0, cs - FLANK_OUT), cs), comps, r['work_id'], tcanon, ttoks)
+    sig['c_right'] = competitor_on((ce, ce + FLANK_OUT), comps, r['work_id'], tcanon, ttoks)
+    return sig
 
 
 def decide(sig, cont=0.42, island=0.58):
@@ -179,32 +246,32 @@ def decide(sig, cont=0.42, island=0.58):
                   sig['page_letters'] >= 120)
         return ('target_continuation_strong' if (cont_side and (strong or cov_ok))
                 else 'target_continuation_weak'), 'reconverges to the work'
-    # citation: no continuation AND >=2 independent negatives
-    negs = 0
+    # citation needs a NAMED, DIFFERENT-genre competitor on a flank. A
+    # same-genre neighbour is an anthology sibling (liturgy amid liturgy), not a
+    # citation; bare "flanks differ from the target" can be recension/HTR/
+    # anthology -> abstain. Discovery-recall first (never bury a real find on
+    # weak evidence); the survivor is human-reviewed anyway.
+    tf = sig.get('tgt_fam', 'prose')
+
+    def is_diff(c):                          # c=(wid,title,cov,cat,genre)
+        return bool(c) and fam(c[3], c[4], c[1]) != tf
+
+    island_l, island_r = lc == 'island', rc == 'island'
+    cl_diff, cr_diff = is_diff(sig['c_left']), is_diff(sig['c_right'])
     parts = []
-    if lc == 'island':
-        negs += 1
+    if island_l:
         parts.append('left island')
-    if rc == 'island':
-        negs += 1
+    if island_r:
         parts.append('right island')
-    if sig['c_left']:
-        negs += 1
+    if cl_diff:
         parts.append(f"left={sig['c_left'][1][:24]}")
-    if sig['c_right']:
-        negs += 1
+    if cr_diff:
         parts.append(f"right={sig['c_right'][1][:24]}")
-    both_island = lc == 'island' and rc == 'island'
-    island_plus_c = (lc == 'island' and sig['c_right']) or \
-        (rc == 'island' and sig['c_left']) or \
-        (lc == 'island' and sig['c_left']) or (rc == 'island' and sig['c_right'])
-    c_both_lowcov = sig['c_left'] and sig['c_right'] and \
-        sig['page_letters'] >= 200 and sig['adj_cov'] < 0.4
-    if negs >= 2 and (both_island or island_plus_c or c_both_lowcov):
-        return 'likely_citation_strong', '; '.join(parts)
-    if (lc == 'island' or rc == 'island') and strong_c:
-        return 'likely_citation_weak', '; '.join(parts)
-    return 'abstain', 'insufficient flank evidence'
+    if (island_l or island_r) and (cl_diff or cr_diff):
+        strong = (island_l and island_r) or (cl_diff and cr_diff)
+        return ('likely_citation_strong' if strong else 'likely_citation_weak',
+                '; '.join(parts))
+    return 'abstain', 'flanks differ but no different-genre work identified'
 
 
 def main():
@@ -254,40 +321,8 @@ def main():
             pid = r['page_id']
             ps = ptext.get(pid, '')
             spans = tgt.get((pid, wid), [])
-            sig = {'reloc_ok': False, 'left_dist': None, 'right_dist': None,
-                   'page_letters': len(ps), 'adj_cov': 0.0, 'recovered': 0,
-                   'c_left': None, 'c_right': None}
-            if wstream and gpos and spans and ps:
-                cs, ce = spans[0][0], spans[-1][1]
-                span_slice = ps[cs:ce]
-                span_letters = sum(b - a for a, b in spans)
-                rel = relocate(span_slice, wstream, gpos)
-                if rel:
-                    r0, r1, red, na = rel
-                    sig['reloc_ok'] = True
-                    # left flank (reversed so span-adjacent text leads)
-                    pl_f = ps[max(0, cs - FLANK_OUT):cs][::-1]
-                    wl_f = wstream[max(0, r0 - FLANK_OUT):r0][::-1]
-                    pr_f = ps[ce:ce + FLANK_OUT]
-                    wr_f = wstream[r1:r1 + FLANK_OUT]
-                    sig['left_dist'] = flank_dist(pl_f, wl_f)
-                    sig['right_dist'] = flank_dist(pr_f, wr_f)
-                    rec = 0
-                    if classify(sig['left_dist']) == 'continuation':
-                        rec += min(len(pl_f), WINDOW)
-                    if classify(sig['right_dist']) == 'continuation':
-                        rec += min(len(pr_f), WINDOW)
-                    sig['recovered'] = rec
-                    sig['adj_cov'] = (span_letters + rec) / max(1, len(ps))
-                    # C: competing works on the page flanks (page coords)
-                    tcanon = r.get('cat') in CANON
-                    ttoks = set(heb_tokens(r.get('title') or ''))
-                    cl = comps.get(pid, [])
-                    sig['c_left'] = competitor_on(
-                        (max(0, cs - FLANK_OUT), cs), cl, wid, tcanon, ttoks)
-                    sig['c_right'] = competitor_on(
-                        (ce, ce + FLANK_OUT), cl, wid, tcanon, ttoks)
-            verdict, why = decide(sig)
+            sig = flank_signals(r, ps, spans, wstream, gpos, comps.get(pid, []))
+            verdict, why = decide(sig, CONT_THR, ISLAND_THR)
             mult = MULT[verdict]
             r['flank'] = {
                 'verdict': verdict, 'multiplier': mult,
