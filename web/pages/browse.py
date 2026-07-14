@@ -4242,7 +4242,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             original_text=page.text,
                                             on_version_change=handle_version_change,
                                             pgp_transcription=state.pgp_transcription,
-                                            all_sources=state.all_sources
+                                            all_sources=state.all_sources,
+                                            full_original_text=getattr(state, 'fgp_full_htr_text', None),
                                         )
 
                             # Initial render

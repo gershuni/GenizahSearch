@@ -103,7 +103,8 @@ def create_version_selector(
     on_version_change: Optional[Callable[[str, dict], None]] = None,
     size: str = "sm",
     pgp_transcription: Optional[Dict[str, Any]] = None,
-    all_sources: Optional[List[Dict[str, Any]]] = None
+    all_sources: Optional[List[Dict[str, Any]]] = None,
+    full_original_text: Optional[str] = None,
 ):
     """Create a version selector dropdown.
 
@@ -179,7 +180,7 @@ def create_version_selector(
                 # transcription (SEED-030). The FGP source stays in the menu.
                 fgp_sources = get_fgp_sources(all_sources)
                 if fgp_sources:
-                    _decision = choose_default_source(all_sources, original_text)
+                    _decision = choose_default_source(all_sources, original_text, full_htr_getter=lambda: full_original_text)
                     if _decision['eligible'] or _decision['reason'] == 'no_fgp_edition':
                         # Default to the coverage-cleared FGP edition; when there
                         # is no FGP *edition* (translation-only), preserve the
@@ -412,7 +413,7 @@ def create_version_selector(
                         # coverage (SEED-030), tag it so the reader knows why it is
                         # not the default (phrased "shorter than V0.8" — the HTR
                         # baseline is imperfect, so we do not overclaim "partial").
-                        _fgp_dec = choose_default_source(all_sources, original_text)
+                        _fgp_dec = choose_default_source(all_sources, original_text, full_htr_getter=lambda: full_original_text)
                         _fgp_demoted = (not _fgp_dec['eligible']
                                         and _fgp_dec['reason'] == 'demote_low_coverage')
                         if len(fgp_sources) > 1 or editions:

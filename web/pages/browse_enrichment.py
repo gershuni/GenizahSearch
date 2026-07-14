@@ -27,7 +27,7 @@ from web.document_service import get_document_for_fragment, get_section_for_page
 from web.feature_flags import web_fgp_enabled
 from shared.fgp_service import (
     get_fgp_sources_for_fragment, filter_sources_for_page, folio_label_for_displayed_page,
-    fgp_image_number_for_displayed_page,
+    fgp_image_number_for_displayed_page, fgp_needs_full_htr,
 )
 from web.pages.browse_state import BrowseState, _crossref_cache
 from shared.synthetic_sys_id import is_synthetic_sys_id
@@ -83,13 +83,25 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             if web_fgp_enabled():
                 all_sources = all_sources + (get_fgp_sources_for_fragment(_page_sys_id) or [])
             pgp_doc = get_document_for_fragment(_page_sys_id, _page_p_num)
-            return all_sources, pgp_doc
+            # SEED-030: a whole-document FGP edition must be judged against the
+            # WHOLE-manuscript HTR (to demote selective excerpts while keeping
+            # comprehensive ones). Fetch it here — off the event loop — but ONLY
+            # when such a row exists, so the browse hot path is unaffected otherwise.
+            full_htr = None
+            if all_sources and fgp_needs_full_htr(all_sources):
+                try:
+                    from web.services import get_service
+                    pages = get_service().get_full_manuscript(_page_sys_id) or []
+                    full_htr = "\n".join((getattr(p, 'text', '') or '') for p in pages)
+                except Exception as _e:
+                    logger.debug("full-MS HTR fetch failed for %s: %s", _page_sys_id, _e)
+            return all_sources, pgp_doc, full_htr
 
         try:
             return await run.io_bound(_pgp_sync)
         except Exception as e:
             logger.error(f"Failed to fetch PGP data: {e}")
-            return None, None
+            return None, None, None
 
     async def fetch_fjms():
         _page_sys_id = page.sys_id
@@ -294,7 +306,7 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             return {}
 
     try:
-        (all_sources, pgp_doc), fjms_data, crossref_data, browse_enrich = await asyncio.gather(
+        (all_sources, pgp_doc, full_htr_text), fjms_data, crossref_data, browse_enrich = await asyncio.gather(
             fetch_pgp(), fetch_fjms(), fetch_crossref(), fetch_browse_enrichment()
         )
     except Exception as e:
@@ -320,6 +332,9 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             page_text=getattr(page, 'text', '') or '') or None
     else:
         state.all_sources = None
+    # SEED-030: whole-MS HTR for the FGP coverage check (None unless a whole-doc
+    # FGP edition is present; see fetch_pgp/_pgp_sync).
+    state.fgp_full_htr_text = full_htr_text
 
     # Process PGP document metadata
     if pgp_doc:
@@ -503,7 +518,8 @@ def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
                     original_text=page.text,
                     on_version_change=handler,
                     pgp_transcription=state.pgp_transcription,
-                    all_sources=state.all_sources
+                    all_sources=state.all_sources,
+                    full_original_text=getattr(state, 'fgp_full_htr_text', None),
                 )
 
     # Joins button

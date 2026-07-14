@@ -2944,9 +2944,11 @@ class GenizahGUI(QMainWindow):
             # SEED-030: if the FGP edition is demoted below V0.8 for low folio
             # coverage, tag it in the combo so the reader knows why V0.8 is the
             # default (parity with the web menu hint).
+            _sid = self.current_browse_sid
             _fgp_dec = choose_default_source(
                 sources,
                 getattr(self, 'browse_original_page_text', '') or '',
+                full_htr_getter=lambda: self._browse_full_htr_text(_sid),
             )
             _fgp_demoted = (not _fgp_dec['eligible']
                             and _fgp_dec['reason'] == 'demote_low_coverage')
@@ -3000,6 +3002,23 @@ class GenizahGUI(QMainWindow):
         combo.blockSignals(False)
         return True
 
+    def _browse_full_htr_text(self, sys_id):
+        """Whole-manuscript HTR (V0.8) text — all folios concatenated — for the
+        FGP coverage check (SEED-030). Cached single-entry per browsed document;
+        invoked LAZILY (only when a whole-document FGP edition is present), so the
+        get_full_manuscript fetch runs at most once per document that needs it."""
+        if not sys_id or not getattr(self, 'searcher', None):
+            return ''
+        if getattr(self, '_browse_full_htr_sid', None) != sys_id:
+            self._browse_full_htr_sid = sys_id
+            try:
+                pages = self.searcher.get_full_manuscript(sys_id) or []
+                self._browse_full_htr_cached = "\n".join(
+                    p.get('text', '') for p in pages if p.get('text'))
+            except Exception:
+                self._browse_full_htr_cached = ''
+        return self._browse_full_htr_cached
+
     def _auto_select_pgp_edition(self, combo):
         """Find the first edition item and set it as current.
 
@@ -3022,9 +3041,11 @@ class GenizahGUI(QMainWindow):
         # No PGP edition — weigh FGP against V0.8/HTR by folio coverage (shared
         # policy, parity with web version_selector).
         from shared.fgp_service import choose_default_source
+        _sid = self.current_browse_sid
         decision = choose_default_source(
             getattr(self, '_browse_pgp_sources', None),
             getattr(self, 'browse_original_page_text', '') or '',
+            full_htr_getter=lambda: self._browse_full_htr_text(_sid),
         )
         if not decision['eligible'] and decision['reason'] == 'demote_low_coverage':
             # Partial FGP → default to V0.8: select it so the combo reflects the

@@ -20,13 +20,20 @@ from shared.fgp_service import (
     _DEFAULT_MIN_COVERAGE,
     _heb_letter_count,
     choose_default_source,
+    fgp_needs_full_htr,
 )
 
 
 def _edition(content, rel="Digital Edition", **kw):
+    # Default: a WHOLE-DOCUMENT row (no per-image folio) — _fgp_match_folio → ''.
     d = {"source": "fgp", "doc_relation": rel, "content": content}
     d.update(kw)
     return d
+
+
+def _foliated_edition(content, image_side="2r", **kw):
+    # A per-image (foliated) row — _fgp_match_folio → the image_side.
+    return _edition(content, image_side=image_side, **kw)
 
 
 # ── Normalization (_heb_letter_count) ─────────────────────────────────────────
@@ -123,10 +130,64 @@ class TestChooseDefaultSource:
     def test_no_page_dependence(self):
         # HIGH regression guard: the decision must NOT depend on a global page
         # number (the old code measured a recto row on page ≥2 as empty and
-        # wrongly demoted it). The signature carries no page argument — a full
-        # recto-only row (page_info='recto') stays the default on any folio.
-        row = _edition("אבגד " * 120, page_info="recto", sections=None)
+        # wrongly demoted it). A full foliated row stays the default on any folio.
+        row = _foliated_edition("אבגד " * 120, image_side="3r")
         assert choose_default_source([row], _HTR)["eligible"] is True
+
+
+# ── Whole-document vs foliated baseline (SEED-030 follow-up) ───────────────────
+
+
+class TestWholeDocBaseline:
+    # The 990000925330205171 case: a whole-document *selective* transcription
+    # (772 letters ≈ 2.6% of a 26-folio, ~29,780-letter MS) must be demoted even
+    # though it is longer than any single folio's HTR.
+    _FULL_MS = "אבגד " * 7445  # ~29,780 base letters
+
+    def test_whole_doc_selective_demoted_against_full_ms(self):
+        row = _edition("אבגד " * 193)  # ~772 letters
+        getter = lambda: self._FULL_MS  # noqa: E731
+        # Even if the displayed folio's HTR is large, the whole-doc row is judged
+        # against the WHOLE MS → 2.6% → demote.
+        d = choose_default_source([row], "אבגד " * 300, full_htr_getter=getter)
+        assert d["eligible"] is False and d["reason"] == "demote_low_coverage"
+        assert d["ratio"] == pytest.approx(0.026, abs=0.01)
+
+    def test_whole_doc_selective_kept_on_blank_folio_without_full_ms(self):
+        # Regression: on folio 1 (blank HTR) with NO full-MS getter, the old code
+        # kept FGP via the htr-too-short floor. With the getter it correctly
+        # demotes — the fix depends on the caller supplying the getter.
+        row = _edition("אבגד " * 193)
+        # No getter → whole-doc falls back to the (blank) folio baseline → unknown
+        # → keep (documents the degraded fallback).
+        assert choose_default_source([row], "", full_htr_getter=None)["eligible"] is True
+        # With getter + blank folio → judged against whole MS → demote.
+        d = choose_default_source([row], "", full_htr_getter=lambda: self._FULL_MS)
+        assert d["eligible"] is False and d["reason"] == "demote_low_coverage"
+
+    def test_whole_doc_comprehensive_kept(self):
+        # A comprehensive whole-doc transcription (≈ the whole MS) stays default.
+        row = _edition("אבגד " * 7000)  # ≈ full MS
+        d = choose_default_source([row], "אבגד " * 300, full_htr_getter=lambda: self._FULL_MS)
+        assert d["eligible"] is True and d["reason"] == "fgp_sufficient"
+
+    def test_foliated_row_uses_folio_baseline_not_full_ms(self):
+        # A foliated row is this folio's transcription → judged against the folio
+        # HTR, NOT the whole MS (else every foliated row would be demoted).
+        row = _foliated_edition("אבגד " * 120)  # ≈ folio HTR (_HTR = 400)
+        called = []
+        d = choose_default_source(
+            [row], _HTR, full_htr_getter=lambda: called.append(1) or "x" * 99999
+        )
+        assert d["eligible"] is True and d["reason"] == "fgp_sufficient"
+        assert not called, "getter must NOT be called for a foliated-only page"
+
+    def test_needs_full_htr(self):
+        assert fgp_needs_full_htr([_edition("x")]) is True            # whole-doc
+        assert fgp_needs_full_htr([_foliated_edition("x")]) is False  # foliated
+        assert fgp_needs_full_htr([]) is False
+        # A translation is not an edition → no full-HTR needed for it.
+        assert fgp_needs_full_htr([_edition("x", rel="Digital Translation")]) is False
 
     def test_best_of_multiple_editions_wins(self):
         # When several editions align to the folio, the highest-coverage one

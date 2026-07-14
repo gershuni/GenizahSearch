@@ -52,6 +52,9 @@ class BrowseState:
         self.pgp_metadata: Optional[Dict[str, Any]] = None
         # Multi-source data (all editions and translations for this document)
         self.all_sources: Optional[List[Dict[str, Any]]] = None
+        # SEED-030: whole-manuscript HTR text for the FGP default-coverage check
+        # (populated only when a whole-document FGP edition is present).
+        self.fgp_full_htr_text: Optional[str] = None
         # Joined fragments view mode
         self.view_joined: bool = False
         self.joined_fragments_info: list = []  # [{shelfmark, sys_id}]

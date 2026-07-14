@@ -50,7 +50,7 @@ import os
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from shared.thread_local_db import ThreadLocalConnection
 
@@ -573,9 +573,21 @@ def _heb_letter_count(text: Optional[str]) -> int:
     return sum(len(w) for w in _HEBWORD_RE.findall(_NIKUD_RE.sub("", text)))
 
 
+def fgp_needs_full_htr(sources: Optional[List[Dict[str, Any]]]) -> bool:
+    """True if any FGP *edition* in ``sources`` is a whole-document row (no
+    per-image folio → ``_fgp_match_folio`` returns ``''``). Those must be measured
+    against the WHOLE-manuscript HTR, so callers can gate the (relatively costly)
+    full-manuscript fetch on this — foliated-only pages skip it entirely."""
+    return any(
+        not _fgp_match_folio(ed)
+        for ed in group_transcription_sources(sources)["fgp_editions"]
+    )
+
+
 def choose_default_source(
     sources: Optional[List[Dict[str, Any]]],
     htr_text: Optional[str],
+    full_htr_getter: Optional[Callable[[], Optional[str]]] = None,
 ) -> Dict[str, Any]:
     """Decide whether an FGP edition should be the reading-view default for a
     folio, or be demoted below the V0.8/HTR ("MiDRASH") transcription (SEED-030).
@@ -585,10 +597,23 @@ def choose_default_source(
     a GUI or the sidecar DB). Does NOT touch the PGP-first rule — callers still
     prefer a PGP edition; this governs only the FGP-vs-HTR fallback.
 
-    ``sources`` is the page-filtered merged source list (already aligned to the
-    displayed folio upstream by ``filter_sources_for_page``). Only FGP EDITIONS
-    are weighed: translations are a different language than the Hebrew HTR, so a
-    length ratio against them is meaningless and they are never coverage-demoted.
+    Coverage = FGP edition's displayed base-Hebrew-letter count ÷ the HTR letter
+    count of the RIGHT baseline. The baseline depends on the edition's scope:
+      * **Foliated** row (``_fgp_match_folio`` → a folio): the DISPLAYED folio's
+        HTR (``htr_text``) — the row IS that folio's transcription.
+      * **Whole-document** row (no per-image folio): the WHOLE-manuscript HTR,
+        obtained lazily via ``full_htr_getter`` — a whole-doc row shows its full
+        ``content`` on every folio, so a *comprehensive* one (≈ the whole MS)
+        stays default while a *selective excerpt* (e.g. Firkovich, ~a few % of the
+        MS) is demoted. Comparing it against a single folio would spuriously keep
+        it. When no getter is supplied, whole-doc rows fall back to the folio
+        baseline (degraded — callers SHOULD pass a getter; see fgp_needs_full_htr).
+
+    Only FGP EDITIONS are weighed — translations are a different language than the
+    Hebrew HTR, so a length ratio is meaningless and they are never demoted. The
+    displayed text is the whole-row ``content`` (no display path narrows FGP
+    ``content`` to a sub-section), NOT ``get_fgp_section_for_page`` (whose page_num
+    is a recto/verso 1/2 flag, not the global displayed page).
 
     Returns ``{source, reason, ratio, eligible}``:
       * ``source``   — the FGP edition dict to default to, or ``None`` to demote.
@@ -602,35 +627,43 @@ def choose_default_source(
     if not eds:
         return {"source": None, "reason": "no_fgp_edition", "ratio": None, "eligible": False}
 
-    htr_len = _heb_letter_count(htr_text)
-    if htr_len < _COVERAGE_MIN_HTR_LETTERS:
-        # Unreliable baseline → keep FGP (the already-aligned first/best edition).
-        return {"source": eds[0], "reason": "htr_too_short", "ratio": None, "eligible": True}
+    folio_htr_len = _heb_letter_count(htr_text)
+    _full_len_cache: Dict[str, int] = {}
 
-    # Pick the FGP edition with the most folio coverage (usually exactly one —
-    # editions are similarity-aligned to this folio upstream). Measure the text
-    # the chooser actually DISPLAYS for this folio: the whole-row ``content``.
-    # ``sources`` is already folio-aligned by ``filter_sources_for_page``, and no
-    # display path narrows FGP ``content`` to a sub-section, so ``content`` IS the
-    # displayed text. (Do NOT use ``get_fgp_section_for_page`` here — its
-    # ``page_num`` is a recto/verso 1/2 flag, not the global displayed page the
-    # callers hold, so it would measure a full recto row on page ≥2 as empty and
-    # wrongly demote it.)
-    best, best_ratio = eds[0], -1.0
+    def _full_htr_len() -> int:
+        if "v" not in _full_len_cache:
+            txt = full_htr_getter() if full_htr_getter else None
+            _full_len_cache["v"] = _heb_letter_count(txt)
+        return _full_len_cache["v"]
+
+    # Score each edition against the baseline appropriate to its scope. An edition
+    # whose baseline is too short to trust (blank/garbled folio, or a whole-doc row
+    # with no full-HTR available) is "unknown" → keep-eligible (fail toward FGP).
+    best_known, best_ratio = None, -1.0
+    unknown_ed = None
     for ed in eds:
-        ratio = _heb_letter_count(ed.get("content")) / htr_len
+        if _fgp_match_folio(ed):            # foliated → this folio's HTR
+            baseline_len = folio_htr_len
+        else:                               # whole-doc → whole-MS HTR (else folio)
+            baseline_len = _full_htr_len() or folio_htr_len
+        if baseline_len < _COVERAGE_MIN_HTR_LETTERS:
+            if unknown_ed is None:
+                unknown_ed = ed
+            continue
+        ratio = _heb_letter_count(ed.get("content")) / baseline_len
         if ratio > best_ratio:
-            best, best_ratio = ed, ratio
+            best_known, best_ratio = ed, ratio
 
     threshold = _min_coverage()
-    logger.debug(
-        "FGP default coverage: ratio=%.3f threshold=%.2f htr_letters=%d -> %s",
-        best_ratio, threshold, htr_len,
-        "keep" if best_ratio >= threshold else "demote",
-    )
-    if best_ratio < threshold:
-        return {"source": None, "reason": "demote_low_coverage", "ratio": best_ratio, "eligible": False}
-    return {"source": best, "reason": "fgp_sufficient", "ratio": best_ratio, "eligible": True}
+    if best_known is not None and best_ratio >= threshold:
+        logger.debug("FGP default coverage: ratio=%.3f threshold=%.2f -> keep", best_ratio, threshold)
+        return {"source": best_known, "reason": "fgp_sufficient", "ratio": best_ratio, "eligible": True}
+    if unknown_ed is not None:
+        # No measurable edition cleared the bar, but at least one has no reliable
+        # baseline → keep it rather than demote on an unknown.
+        return {"source": unknown_ed, "reason": "htr_too_short", "ratio": None, "eligible": True}
+    logger.debug("FGP default coverage: ratio=%.3f threshold=%.2f -> demote", best_ratio, threshold)
+    return {"source": None, "reason": "demote_low_coverage", "ratio": best_ratio, "eligible": False}
 
 
 def _content_similarity(page_tokens: Set[str], content: Optional[str]) -> float:
