@@ -1,11 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: none
-milestone_name: "(none — v8.4.0 + v8.4.1 CLOSED 2026-07-01; awaiting /gsd-new-milestone)"
-status: no_active_milestone
-stopped_at: "v8.4.0 + v8.4.1 SHIPPED & CLOSED 2026-07-01. v8.4.0 (Phases 130-131, both apps): web deployed + desktop installer published to GitHub Release v8.4.0 @ 16fcf7a1 (latest, verified state:uploaded). v8.4.1 (Phase 132, web): public-API library_filter_mode deployed + live-verified. Both milestones archived (v8.4.0-* + v8.4.1-*); phase dirs moved to milestones/; REQUIREMENTS.md removed (fresh next milestone). No active milestone — run /gsd-new-milestone."
-last_updated: "2026-07-14T11:30:00.000Z"
-last_activity: 2026-07-14
+milestone: v9.0.0
+milestone_name: Discovery — Same-Work Identification & Connection Atlas (web)
+status: planning
+last_updated: "2026-07-19T17:56:19.000Z"
+last_activity: 2026-07-19
 progress:
   total_phases: 0
   completed_phases: 0
@@ -25,23 +24,10 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-**No active milestone.** v8.4.0 (Dual-Mode Library Filter, Phases 130-131) and v8.4.1 (Public
-API Dual-Mode, Phase 132) both SHIPPED & CLOSED 2026-07-01.
-
-- **v8.4.0 (both apps):** web deployed to production (`deploy.sh master-main`); desktop
-  installer `GenizahSearchPro_V8.4.0_Setup.exe` (531,242,765 bytes) uploaded + published to
-  GitHub Release `v8.4.0` @ `16fcf7a1` (marked latest; verified `state:uploaded`,
-  `isDraft:false`).
-- **v8.4.1 (web):** public-API `library_filter_mode` (DMF-11) deployed to genizahsearch.com
-  on the 8.4.0 tree + live-verified on the 255K corpus (exclude CUL→0 CUL; include CUL→all
-  CUL; bad mode→400). Web point-release — no `version.py` bump / git tag (desktop stays 8.4.0).
-- **Milestone close DONE:** both archived (`v8.4.0-ROADMAP.md`/`-REQUIREMENTS.md` +
-  `v8.4.1-ROADMAP.md`/`-REQUIREMENTS.md`); phase dirs moved to `milestones/v8.4.0-phases/`
-  (130,131) + `milestones/v8.4.1-phases/` (132); ROADMAP collapsed; MILESTONES.md + PROJECT.md
-  evolved; `.planning/REQUIREMENTS.md` removed (fresh next milestone). DMF-01..12 Validated;
-  DMF-13 Partial (behaviorally safe, carried forward).
-
-All commits PUSHED to origin/master-main. **Next: `/gsd-new-milestone`.**
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-07-19 — Milestone v9.0.0 started
 
 ## Accumulated Context
 

@@ -8,6 +8,22 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current Milestone: v9.0.0 Discovery — Same-Work Identification & Connection Atlas (web)
+
+**Goal:** Fold the SEED-029 corpus-wide same-work text-reuse map into genizahsearch.com as a fairly-complete, multi-band discovery module — precision-labeled identifications by default, high-recall screening lanes on demand, and community judgment capture on every work-witness claim. The first product surface of the `same_work_spike/probe` research program (275,894 tier-A page-level identifications on 52,497 MSS across 4,093 works, plus certified/screening bands R-A 0.889 / R-B 0.859 / R-CANON 0.647).
+
+**Target features:**
+- **Discovery sidecar + band schema** — distill the 2.9 GB research DB (`same_work_spike/probe/data/fullcorpus_v2.db`) into a product SQLite sidecar: tier-A identifications, band memberships with per-row confidence labels, connection edges, work metadata. Snapshot ship + documented rebuild recipe (refresh pipeline out of scope).
+- **Maagarim masking (hard constraint)** — work naming and displayed data must never reveal Maagarim provenance: neutral canonical work titles, no "מאגרים"/obvious Maagarim naming conventions, never display Maagarim reference text — only our manuscript text (MiDRASH HTR / transcriptions).
+- **Tier-A stratified precision certificate** — one pre-registered measurement round (~200–250 cards, canon/non-canon/liturgy strata, existing gold + OC machinery from the E1 certification rounds) so the module's main band ships with a measured precision number.
+- **MS connections panel** — on browse pages: "identified as ⟨work⟩" + related manuscripts with band labels. High bands by default; visible "show uncertified leads" toggle.
+- **Work → witnesses browse** — per-work witness-map page listing all carrier manuscripts, filterable by band/library.
+- **Atlas / graph explorer** — corpus connection-graph page; Atlas + discovery suggestions promoted prominently on the homepage as the new flagship modules.
+- **Leads queue** — R-B / R-CANON screening leads as a reviewable queue, explicitly labeled not-certified (the high-recall lane).
+- **Community judgment capture** — logged-in users confirm/reject/annotate work-witness claims (Supabase, corrections-style), feeding future certification rounds.
+
+**Key context:** Web-only (desktop parity deferred). v9.0.0 flagship release. R-A independent audit still pending → UI labels say "expert-verified" until it passes; recall honesty labeled in-UI ("no identification shown ≠ none exists"). UX vision gets a discuss-phase before planning (Phase 11 lesson). Future (explicitly deferred by user 2026-07-19): the text-reuse engine as an alternative/main backend for `/parallels` (desktop: composition) search. Research provenance: `.planning/seeds/SEED-029-*.md` + `same_work_spike/probe/` (PROBE-RESULTS.md, METHOD.md, E1 certification registry).
+
 ## Shipped Milestone: v8.4.0 Dual-Mode Library Filter + v8.4.1 Public API Dual-Mode — ✅ SHIPPED & CLOSED 2026-07-01
 
 > **CLOSED.** Two related releases shipped 2026-07-01 and closed the same day.
@@ -515,7 +531,7 @@ The per-phase Current State notes below are retained as the milestone's executio
 
 ### Active
 
-**(No active milestone — v8.4.0 + v8.4.1 closed 2026-07-01; planning next milestone.)** Run `/gsd-new-milestone` to open the next cycle. Leading carried-forward candidates: DMF-13 zero-count exclusion per-surface verification (behaviorally safe today), cross-device sync of the library-filter preference, and D-F12 (regular Search ~8s wall-clock, profile-first).
+**Milestone v9.0.0 Discovery (web) — requirements being defined.** See "Current Milestone" above; REQ-IDs land in `.planning/REQUIREMENTS.md` (DISC-* / ATLAS-* / BAND-* / JUDGE-* categories expected). Carried-forward candidates NOT in this milestone: DMF-13 zero-count exclusion per-surface verification, cross-device sync of the library-filter preference, D-F12 (regular Search ~8s wall-clock).
 
 **Still deferred — Component B Join Workbench search-support algorithms (both apps; user decision 2026-06-08, reaffirmed 2026-06-17 — NOT in v8.2.0):**
 - **JSA-01** (seed parallels/composition from the anchor passage), **JSA-02** (corpus-driven suggest-then-search completion of a torn line's first/last N words), **JSA-03** (`[`/`]`-aware torn-word completion), and **JWB-05** (conservative tear-side assist; corrected rule start-`]` = LEFT / end-`[` = RIGHT; "both edges torn" first-class; silent when unclear). These ride the completed Component A and are cross-app (mostly shared-core work). v8.2.0 is the Component-A web port only.
@@ -658,7 +674,9 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-01 — **v8.4.0 Dual-Mode Library Filter + v8.4.1 Public API Dual-Mode milestones CLOSED.** v8.4.0 shipped both apps 2026-07-01 (web deployed; desktop installer `GenizahSearchPro_V8.4.0_Setup.exe` published to GitHub Release `v8.4.0` @ 16fcf7a1, latest); v8.4.1 shipped web the same day (public-API `library_filter_mode`, DMF-11, Phase 132; live-verified on the 255K corpus; web point-release on the 8.4.0 tree). Full evolution review done: DMF-01..12 moved to Validated (DMF-13 Partial), Active cleared, v8.4.0/v8.4.1 Key Decisions logged, roadmap collapsed + archived (`v8.4.0-*` + `v8.4.1-*`), `.planning/REQUIREMENTS.md` removed (fresh for next). NEXT: /gsd-new-milestone.*
+*Last updated: 2026-07-19 — **v9.0.0 Discovery milestone OPENED** via `/gsd-new-milestone`. Goal: fold the SEED-029 same-work map into the web app as a multi-band discovery module (sidecar distillation + tier-A stratified precision certificate + MS connections panel + work→witnesses browse + Atlas/graph explorer with homepage promotion + screening-leads queue + community judgment capture). Web-only; v9.0.0 flagship; Maagarim-masking hard constraint; phase numbering continues from 132. NEXT: define requirements → roadmap.*
+
+*Prior: 2026-07-01 — **v8.4.0 Dual-Mode Library Filter + v8.4.1 Public API Dual-Mode milestones CLOSED.** v8.4.0 shipped both apps 2026-07-01 (web deployed; desktop installer `GenizahSearchPro_V8.4.0_Setup.exe` published to GitHub Release `v8.4.0` @ 16fcf7a1, latest); v8.4.1 shipped web the same day (public-API `library_filter_mode`, DMF-11, Phase 132; live-verified on the 255K corpus; web point-release on the 8.4.0 tree). Full evolution review done: DMF-01..12 moved to Validated (DMF-13 Partial), Active cleared, v8.4.0/v8.4.1 Key Decisions logged, roadmap collapsed + archived (`v8.4.0-*` + `v8.4.1-*`), `.planning/REQUIREMENTS.md` removed (fresh for next). NEXT: /gsd-new-milestone.*
 
 *Prior: 2026-06-30 — **v8.3.0 God-File Decomposition + Search & Browse UX milestone CLOSED.** Shipped both apps 2026-06-29 (web @ c01e8842; desktop installer on GitHub latest @ v8.3.0; CI green). Decomposition (122-127, zero behavior change) + SEED-025 Space-scroll + SEED-026 library filter validated.*
 
