@@ -1,25 +1,19 @@
 # Feature Research
 
-**Domain:** Opt-in, privacy-first desktop telemetry for a scholarly PyQt6 research tool
-**Researched:** 2026-06-13
-**Confidence:** HIGH
+**Domain:** Same-work / text-reuse discovery + witness-mapping + community-verification module for a scholarly manuscript research platform (Cairo Genizah; scholars + interested laypeople; bilingual EN/HE)
+**Researched:** 2026-07-19
+**Confidence:** MEDIUM (precedent systems are HIGH-confidence on *what they do*; the mapping to this specific mixed scholar/lay Genizah audience and the "right" UX is inferential — MEDIUM. The band schema + masking constraint are internal-brief facts — HIGH.)
 
----
+## Scope note
 
-## Context: What Already Exists
+This file covers ONLY the five NEW v9.0.0 surfaces:
+1. Per-MS **connections panel** ("identified as ⟨work⟩" + related MSS, band-labeled) on browse pages
+2. Per-work **witness-map page** (all carrier MSS of a work)
+3. Corpus **connection atlas / graph explorer** (homepage-promoted flagship)
+4. **Leads queue** (high-recall screening lane, labeled not-certified)
+5. **Community judgment capture** (logged-in confirm / reject / annotate)
 
-The project does NOT start from zero. These pieces are already built and constrain the design:
-
-- `shared/posthog_server.py` — fire-and-forget, thread-safe, daemon-queue emit to EU PostHog.
-  Accepts `event`, `properties`, `distinct_id`. Already used by `shared/nli_circuit_breaker.py`.
-  The desktop just needs to call `enqueue_event()` after checking the opt-in flag.
-- `web/api_hardening.py` — already has `latency_bucket()` and `result_count_bucket()` helpers,
-  and the proven pattern of bucketed metrics (no raw values). Reuse these.
-- The web app already captures `search_executed` (with query text!), `browse_manuscript`,
-  `parallels_search`, `result_opened`, `login_success/failed`. **The desktop must NOT copy the
-  web's `query` field** — the web's `search_executed` includes `query: clean_query[:100]` which
-  violates the hard rule for the desktop ("never transmit search/query content"). Desktop events
-  are strictly counts, modes, enums, durations, and booleans.
+Everything is read from the Discovery sidecar (band schema: tier-A algorithmic; R-A "expert-verified" 0.889; R-B screening 0.859; R-CANON 0.647). The cross-cutting hard constraint — **reference-corpus provenance masking** (neutral canonical titles; never display reference-edition text; only our MS text) — is treated as a dependency of every display surface below.
 
 ---
 
@@ -27,384 +21,115 @@ The project does NOT start from zero. These pieces are already built and constra
 
 ### Table Stakes (Users Expect These)
 
-Features users assume exist if an app claims "privacy-respecting telemetry." Missing any of these
-makes the feature feel untrustworthy or incomplete.
+Missing these = the module feels broken or, worse, untrustworthy to a scholarly audience.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Opt-in default (OFF) | Any privacy-respecting app must default to OFF; pre-ticked boxes are dark patterns under GDPR and general scholarly-tool norms | LOW | Consent flag stored in the desktop's persistent config file, not the registry. UUID minted only AFTER the user explicitly consents. |
-| Bilingual first-run consent dialog | The app already has full EN/HE i18n infrastructure (tr()); a consent dialog only in English contradicts the app's design | LOW | Reuse tr() and existing TRANSLATIONS dict; both languages must say what IS and IS NOT collected. |
-| Settings/About toggle to change anytime | Users must be able to revoke consent post-hoc without reinstalling | LOW | Wire into the existing desktop About/Settings dialog. Changing to OFF must immediately stop all enqueue_event() calls (flag checked before every emit). |
-| Clear "what is collected / what is NOT" disclosure | Scholarly users distrust opaque telemetry; listing excluded categories (no query text, no My Library paths) is load-bearing for trust | LOW | Can be a bulleted list in the dialog body or a "Learn more" expander within the same dialog. |
-| Anonymous per-install UUID | Correlate events per install without account or PII linkage | LOW | Use `uuid.uuid4()`, store in the app's config dir (e.g., `%APPDATA%\GenizahSearchPro\telemetry_id`). Only mint on first consent, delete on opt-out. |
-| PostHog `$process_person_profile: false` on every event | Keeps events in PostHog's anonymous-tier table; 4x cheaper ingestion; no person profile ever created | LOW | Add this property to every `enqueue_event()` call's properties dict in the desktop emitter wrapper. The existing `shared/posthog_server.py` passes through whatever properties dict is given. |
-| Hard code-level guard: no query/path content in any event | Without a code guard, content can creep into events via copy-paste bugs | MEDIUM | Static AST test (like `tests/test_no_raw_storage_access.py`) that asserts no desktop telemetry call passes a property named `query`, `path`, `filename`, `text`, `content`, or `shelfmark_raw`. Only allow an allowlist of safe property names. |
-| Crash reporting: global exception hook + scrubbed traceback | Users expect crash data to be useful without leaking their environment | MEDIUM | `sys.excepthook` replacement + `threading.excepthook` (Python 3.8+) for background threads. Scrub: replace all OS path strings in frame filenames with basename-only. Strip frame `locals` entirely (locals can contain query text, file objects, etc.). |
-| Crash reporting: handled/non-fatal error counts | Important errors that are caught (e.g., indexing failure, NLI fetch error) must still surface in telemetry even though they don't crash | LOW | Call `enqueue_event('desktop_error', {...})` in existing except blocks at high-value sites (LocalIndexer, search thread, NLI fetches). |
+| **Connection panel on the manuscript reading page** ("identified as ⟨work⟩" + related MSS) | Sefaria's "Related Texts" resource panel is the archetype every user of Jewish digital texts already knows — click a text, a side panel shows what it connects to. A manuscript viewer that shows images/transcription but no connections reads as incomplete. | MEDIUM | Reuse the existing browse-page layout; new accordion/panel section keyed on `sys_id`. High bands render by default; a visible "show uncertified leads" toggle expands to screening bands. |
+| **Explicit, glanceable confidence labels on every claim** | Scholarly databases communicate certainty on a gradient (high/medium/low); users of a research tool must know instantly whether a claim is *verified* or *a machine guess*. An unlabeled claim is either over-trusted or dismissed. | MEDIUM | Named bands with color + word (e.g., "Expert-verified" / "Screening lead"), NOT bare decimals like "0.889" for the lay half of the audience. Tooltip/legend explains each band + links to the precision certificate. Color must never be the *only* signal (accessibility + the "color = glanceable credibility" over-trust risk). |
+| **Click-through navigation from a connection to its target** | A connection the user cannot open is dead weight. Sefaria, KITAB, impresso all make every listed relation a link to the related text/MS/passage. | LOW | Connection row → related MS browse page; work name → witness-map page. Standard routing. |
+| **On-demand evidence: the shared passage, side-by-side** | Scholars will not accept "these are related — trust us." Every text-reuse viewer (Passim/KITAB DiffViewer, impresso Passages tab) lets the user *see* the aligned shared span. For a research platform this is table stakes, not a differentiator. | HIGH | **This is where masking bites.** Show OUR MS text (MiDRASH HTR / transcription) for the identified span, highlighted. NEVER render the reference-edition/Maagarim text on the other side. For MS↔MS pairs you can show both MSS' text; for MS↔work you show only our MS's span against a neutral work label. Design this asymmetry deliberately. |
+| **Work → witness list page** (all carrier MSS of a work) | The "witness list" is the oldest primitive in textual scholarship (stemmatology): given a work, which manuscripts bear it. Clicking a work name and NOT getting its carriers would be surprising. | MEDIUM | List/table of carrier MSS with band, library, folio, thumbnail; links to each MS browse page. Reuse the existing library-filter component. |
+| **Filter the witness list by band and by library** | The platform already trained users to filter by library (v8.3.0/v8.4.0 dual-mode filter). Band filtering is the new expectation given the multi-band design. | LOW | Reuse `library_filter` machinery; add a band facet. |
+| **Recall-honesty disclaimer surfaced in-UI** | The corpus is HTR-noisy and coverage is partial. A scholar who sees an empty connections panel must not conclude "no such connection exists." The brief mandates "no identification shown ≠ none exists." | LOW | Persistent, quiet in-panel note + a help link. Ethical table stake for this specific corpus; cheap to build, expensive to omit (credibility damage). |
+| **Bilingual EN/HE + RTL parity on all new surfaces** | Baseline for the whole platform; a Hebrew-first user base expects it from line one (Phase 121 lesson). | MEDIUM | New strings through `tr()`; RTL layout for panel, witness table, atlas labels. CI i18n guard already exists. |
+| **Login-gated community actions following the existing corrections pattern** | Users already know the corrections/comments/lists flow (Supabase auth). Judgment capture must feel identical, not a new paradigm. | LOW–MEDIUM | Mirror `corrections_service` write path + RLS/GRANT conventions; anonymous users read, logged-in users act. |
 
 ### Differentiators (Competitive Advantage)
 
-Features that set this telemetry implementation apart from a generic analytics bolt-on and make
-it trustworthy to scholarly users.
+Where v9.0.0 competes. These align with the Core Value ("researchers can find what they need") and the SEED-029 research program.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Session-summary performance event (not per-search) | Reduces volume ~50x for heavy users (50 searches/day) while still providing accurate aggregate performance data; shows thoughtful volume design | MEDIUM | Emit one `desktop_session_performance_summary` at app close or periodic flush (e.g., every 30 min), containing bucketed aggregates: search count by mode, median/p95 duration bucket, result count distribution. See Performance Metrics section below. |
-| Feature/tab usage as counts (not presence/absence) | Counts of how many times each tab or feature was used per session are more actionable than a binary "used yes/no" | LOW | Use in-memory counters per session; flush in the session_summary event. |
-| Responsa search mode breakdown | This app's unique grammar-expansion search is the research differentiator; knowing which Responsa sub-options are toggled (expansion, fuzzy, Judeo-Arabic) drives development priority | LOW | Enum property `responsa_options_bitmask` — a compact integer encoding which sub-options were active. Never includes the query text itself. |
-| Per-crash deduplication key | Prevents a single reproducible crash from inflating crash counts; the `error_fingerprint` property (exception type + scrubbed module + line number) lets PostHog deduplicate | LOW | Compute from: `type(exc).__name__` + sanitized module (basename only, no full path) + line number only. |
-| Opt-out removes the UUID file | An app that says "anonymous" but retains a persistent ID after opt-out is not fully anonymous | LOW | On opt-out: delete the `telemetry_id` file, stop all enqueue_event() calls. PostHog EU data residency already applies; local cleanup is the UX signal. |
-| "What this helps us improve" copy in the dialog | A consent dialog that only lists what is collected reads as corporate compliance; one that explains what decisions the data drives (e.g., "which search modes to invest in", "which OS versions to support") reads as a genuine value exchange | LOW | Copywrite both EN and HE. One paragraph. |
+| **Multi-band dual-lane design (precision by default + high-recall "leads" on demand)** | Almost every precedent (Passim, KITAB, FGP joins) ships ONE operating point. Exposing a precision-labeled default lane AND a high-recall screening lane — clearly separated — lets cautious scholars and aggressive hunters use the same data without either misleading the other. This is the module's signature. | MEDIUM | Default view = tier-A / R-A only. A single toggle reveals R-B / R-CANON as visibly-demoted "leads." Never blend the lanes silently. |
+| **Corpus connection atlas / graph explorer** | Trismegistos proved network views over a text corpus generate genuinely new research questions (who/what connects across documents). A work-connection graph at Genizah scale (52K MSS, 4K works) is something no existing Genizah tool offers; strong homepage flagship. | HIGH | **Highest-risk feature — see anti-features on the hairball.** Must be work-centric ego-graphs / filtered / aggregated, never a raw force-directed dump of the 89%-liturgical giant component. Prefer work→work edges (shared carriers) as the primary graph, MS-level as drill-down. |
+| **Indirect-witness / citation surfacing** | The SEED-029 flank-contrast "island" class identifies a MS that *quotes* a non-canonical work — an indirect textual witness, the highest-value scholarly class in the research program. Surfacing "this fragment preserves a citation of ⟨lost/rare work⟩" is a discovery no image-based join tool and no keyword search can produce. | MEDIUM–HIGH | Depends on the flank-contrast classifier's output being in the sidecar. Present as a distinct connection *type* ("cites / preserves a passage of"), not conflated with "is a copy of." |
+| **Evidence viewer showing only our manuscript's scholarly text** | The masking constraint, inverted into a feature: instead of a canned printed edition, the user sees *this manuscript's own words* (MiDRASH HTR / human transcription) for the identified passage — exactly what a Genizah scholar wants and what the platform already renders well. | MEDIUM | Reuses the existing transcription/version-selector display. The "we show you the manuscript, not a book" framing is a positioning win over edition-centric tools. |
+| **Measured-precision certificate surfaced in the UI** | Scholarly databases rarely publish a measured precision for their algorithmic claims. Linking each band label to a pre-registered, stratified precision number ("this band was measured at N% precision on an M-card audit") is a credibility differentiator and pre-empts "how do you know?" | LOW (UI) / (measurement is a separate work item) | A short methods/confidence page + per-band tooltip. Honesty about the R-A audit still being pending ("expert-verified" until the independent audit passes) is itself trust-building. |
+| **Community judgment capture that feeds future certification** | FromThePage-style review + Zooniverse-style multi-judgment, but expert-grade: logged-in users confirm/reject/annotate a work-witness claim, and those judgments become a labeled pool for the *next* certification round. Turns the user base into a recall/precision flywheel without polluting the shipped bands. | MEDIUM–HIGH | The critical design is that judgments are an ADDITIVE annotation layer with full provenance (who/when/what), NOT edits to the band data. See anti-features. |
+| **Homepage promotion of Atlas + discovery suggestions as flagship modules** | Repositions the platform from "search the Genizah" to "the Genizah's connections revealed" — a positioning differentiator for the v9.0.0 flagship release. | LOW (UI) | Product decision; cheap once the atlas + panel exist. |
 
-### Anti-Features (Explicitly Excluded)
+### Anti-Features (Commonly Requested, Often Problematic)
 
-Features that seem natural but violate the privacy constraints or are inappropriate for a
-scholarly research tool. Document these so scope creep is prevented.
-
-| Anti-Feature | Why Requested | Why Excluded | Alternative |
-|--------------|---------------|-------------|-------------|
-| Transmit query / search text | "Real search queries would show what users are actually looking for" | Hard rule from project owner: query content is research data and may be unpublished. Even truncated queries (the web's `query[:100]`) are excluded for desktop. | Transmit only `search_mode` enum and `result_count_bucket`. Query patterns are visible in Responsa option usage. |
-| Transmit My Library file paths, filenames, or document count | "Path info helps debug indexing problems" | My Library is personal documents. Paths reveal research subjects and file naming habits. Even an MD5 of a path is re-identifiable. | Use error type + indexing stage only (e.g., `stage: 'extract_pdf'`, `error_type: 'CorruptPDF'`). |
-| Transmit shelfmark or sys_id of opened manuscripts | "Would show which manuscripts are being studied" | Shelfmarks identify research subjects. A scholar studying a specific manuscript may not want that visible even aggregately. | Use count-of-results-opened per session (integer), not identifiers. |
-| Hardware fingerprinting (MAC address, CPU ID, screen resolution) | "Would improve install uniqueness" | Fingerprinting is not "anonymous" in any meaningful sense; MAC and CPU IDs are stable identifiers. Violates the spirit of opt-in consent. | Random UUID stored in the app config dir. If the user reinstalls, a new UUID is minted. |
-| Always-on default (opt-out instead of opt-in) | "Higher participation rate" | VSCode's opt-out model has generated years of community friction and GDPR objections. For a scholarly tool, trust matters more than participation rate. | Accept lower numbers; be explicit that the data represents volunteers. |
-| Third-party ad / marketing SDKs | No one would request this explicitly, but generic "add analytics" tickets can end up including SDKs with their own data collection (e.g., Google Analytics, Amplitude free tier with data sharing) | Violates consent; EU data residency policy. Already using EU PostHog self-serve — this is the only analytics destination. | Continue using EU PostHog exclusively. |
-| Session recording / screen capture | "Would help diagnose UX issues" | Captures research content verbatim. Completely incompatible with any privacy promise. | Structured event taxonomy covers UX flows without capturing screen state. |
-| Transmit Supabase user ID or email | "Would correlate desktop with web usage" | The desktop opt-in is for anonymous telemetry; linking it to an authenticated identity breaks the anonymity guarantee. | Track desktop as an independent anonymous install. The user ID is never passed to `enqueue_event()`. |
-| Automatic opt-in upgrade on app update | "User already said yes once to something" | Consent must be fresh and specific. An update that silently enables telemetry for users who previously declined is a dark pattern. | If the user declined, keep declined across updates. Only re-ask if the collected data categories change materially. |
-| Per-search performance events at full rate (~50/day) | "Granular data is better" | 50 searches/day x 30 users = 1,500 events/day just for search performance — noisy and expensive. PostHog EU free tier is 1M events/month; keeping headroom is good practice. | Session-summary aggregation (see Differentiators). |
-| Crash dialog that shows raw traceback to user | "Transparency" | Raw tracebacks include full file paths (exposes My Library folder structure) and local variable values (may include query text or document content) | Show a friendly generic error message in the UI; send the scrubbed report silently in the background. |
-
----
-
-## Detailed Specifications
-
-### 1. Consent UX Specification
-
-**First-run dialog behavior:**
-- Appears exactly once, on first launch after install (or after a fresh config)
-- Modal (blocks app launch until dismissed — no "skip for now" that defers indefinitely)
-- Default: "No thanks" / decline is the visually equal option; the "Yes" button is not pre-selected or more prominent
-- Two explicit action buttons only: "Yes, help improve the app" / "No thanks" (both EN/HE via tr())
-- No checkbox pre-ticked. No "I agree to Terms" pattern.
-
-**Dialog body must contain (both languages):**
-
-```
-Help improve Dicta Genizah Search Pro
-
-We'd like to collect anonymous usage data to understand
-which features are most useful and which platforms to support.
-
-What IS collected:
-  - Which tabs and search modes you use (counts only)
-  - How long searches take (time ranges, not exact times)
-  - App version, OS version, UI language
-  - Crash reports (error type and location, no content)
-
-What is NOT collected:
-  - Your search queries or any search content
-  - My Library filenames, folder paths, or document content
-  - Your identity, account, or IP address
-  - Any manuscript shelfmarks you look up
-
-You can change this anytime in Settings / About.
-```
-
-**Settings/About toggle:**
-- A single checkbox / toggle: "Send anonymous usage data" (bilingual)
-- Changing it takes effect immediately (checked at the call site, not just at startup)
-- When the user turns it OFF: the UUID file is deleted; subsequent enqueue_event() calls are no-ops
-
-**What mature privacy-respecting apps do (reference patterns):**
-
-VSCode defaults to opt-out and has faced years of GDPR community friction — this is the
-anti-pattern. Zotero only transmits site-translator error reports (not usage) and gates them
-on a user-visible "Report errors" setting. The best scholarly tool pattern (used by tools like
-OpenRefine, JOSM the OSM editor) is: opt-in dialog at first run, clear disclosure, toggle
-in settings, open-source code so users can audit. The app already has all of these traits
-except the dialog.
-
-### 2. Event Taxonomy
-
-All events go through `shared/posthog_server.py::enqueue_event()` with:
-- `distinct_id`: the per-install UUID (checked from config; assert it exists before calling)
-- `properties`: always includes `$process_person_profile: False` + base properties below
-
-**Base properties on every event (set once, included everywhere):**
-```python
-BASE_PROPS = {
-    '$process_person_profile': False,   # anonymous tier, no person profile
-    'app_version': VERSION,             # e.g. '8.1.0'
-    'os': platform.system(),            # 'Windows' / 'Linux' / 'Darwin'
-    'os_version': platform.version(),   # e.g. '10.0.26200' — safe, no PII
-    'ui_lang': current_language(),      # 'he' or 'en'
-    'install_id': _get_install_uuid(),  # the per-install UUID (also distinct_id)
-}
-```
-
-Note on `os_version`: `platform.version()` on Windows returns a string like `10.0.26200`.
-This is safe — it contains no PII. Do NOT include username, hostname, or
-the result of `os.environ.get('USERNAME')`.
-
-**Event catalog:**
-
-| Event name | When emitted | Key properties |
-|------------|-------------|----------------|
-| `desktop_session_start` | App launch, after consent check passes | `app_version`, `os`, `os_version`, `ui_lang` |
-| `desktop_tab_activated` | User switches to a tab | `tab_name` (enum: `search`, `browse`, `parallels`, `composition`, `my_library`, `joins_lab`, `puzzle`, `reading_desk`, `lists`) |
-| `desktop_search_executed` | Search completes (SearchThread finishes) | `search_mode` (enum: `keyword`, `responsa`, `composition`, `parallels`), `corpus` (enum: `genizah`, `local`, `all`), `result_count_bucket`, `was_cancelled` (bool), `has_filters` (bool) |
-| `desktop_responsa_options` | Responsa search executed | `expansion_enabled` (bool), `fuzzy_enabled` (bool), `judeo_arabic_enabled` (bool), `spacing_enabled` (bool), `option_count` (int 0-4) |
-| `desktop_result_opened` | User opens a result in detail view (ResultDialog) | (no properties beyond BASE_PROPS — count only; no shelfmark/sys_id) |
-| `desktop_browse_opened` | User opens Browse tab for a manuscript | (no properties beyond BASE_PROPS — count only) |
-| `desktop_joins_lab_action` | User performs a Joins Lab action | `action` (enum: `anchor_set`, `search_run`, `candidate_compared`, `join_added`, `add_to_puzzle`) |
-| `desktop_puzzle_action` | User performs a Puzzle action | `action` (enum: `opened`, `fragment_added`, `exported`, `published`) |
-| `desktop_my_library_action` | User performs a My Library action | `action` (enum: `folder_added`, `folder_removed`, `reindex_all`, `search_executed`) |
-| `desktop_export` | User exports results | `format` (enum: `xlsx`, `csv`, `txt`, `docx`), `row_count_bucket` |
-| `desktop_session_performance_summary` | App close OR every 30 minutes | See Performance Metrics section |
-| `desktop_crash` | Unhandled exception via sys.excepthook | `error_type`, `error_module`, `error_line`, `error_fingerprint`, `is_background_thread` (bool) |
-| `desktop_error` | Caught non-fatal error at instrumented sites | `error_type`, `stage` (enum: `indexing`, `search`, `nli_fetch`, `export`, `puzzle`), `error_module` |
-
-**Property name allowlist for the static guard test:**
-
-Safe properties (allowed in telemetry calls): `app_version`, `os`, `os_version`, `ui_lang`,
-`install_id`, `$process_person_profile`, `tab_name`, `search_mode`, `corpus`,
-`result_count_bucket`, `duration_bucket`, `was_cancelled`, `has_filters`,
-`expansion_enabled`, `fuzzy_enabled`, `judeo_arabic_enabled`, `spacing_enabled`,
-`option_count`, `action`, `format`, `row_count_bucket`, `search_count`,
-`median_duration_bucket`, `p95_duration_bucket`, `error_type`, `error_module`,
-`error_line`, `error_fingerprint`, `is_background_thread`, `stage`,
-`session_duration_seconds`, `mode_counts`.
-
-Forbidden properties (blocked by AST guard): `query`, `text`, `content`, `path`,
-`filename`, `shelfmark`, `sys_id`, `fl_id`, `email`, `user_id`, `username`,
-`supabase_id`, `jwt`, `token`, `clean_query`, `query_text`.
-
-### 3. Performance Metrics — Volume Strategy
-
-**The problem:** 50 searches/day x 30 users = 1,500 raw search-performance events/day.
-With multiple properties per event, these events accumulate quickly and are the noisiest
-part of the stream. The web API uses `SEARCH_API_POSTHOG_SAMPLE_N` as a sampling valve.
-The desktop needs a different approach because the user count is low (dozens, not thousands)
-and total daily event volume is already low, but the per-user density is high.
-
-**Recommended approach: session-summary aggregation**
-
-Rather than emitting one performance event per search, accumulate in-memory counters for
-the session and emit a single `desktop_session_performance_summary` event at app close
-(or every 30 minutes for long-running sessions). This reduces search-performance events
-from ~1,500/day to ~30-90/day (one per session per user).
-
-```python
-# In-memory accumulator (reset at session start), protected by a threading.Lock
-_perf = {
-    'search_count': 0,
-    'search_durations': [],           # collect raw seconds, bucket at emit time
-    'mode_counts': defaultdict(int),  # keyword/responsa/composition/parallels
-}
-
-# At app close or 30-min flush:
-def _emit_performance_summary():
-    durations = sorted(_perf['search_durations'])
-    if not durations:
-        return
-    n = len(durations)
-    median = durations[n // 2]
-    p95 = durations[int(n * 0.95)] if n >= 20 else durations[-1]
-    enqueue_event('desktop_session_performance_summary', {
-        **BASE_PROPS,
-        'search_count': _perf['search_count'],
-        'median_duration_bucket': latency_bucket(median),
-        'p95_duration_bucket': latency_bucket(p95),
-        'mode_counts': dict(_perf['mode_counts']),  # {'keyword': 3, 'responsa': 47}
-        'session_duration_seconds': int(time.monotonic() - _session_start),
-        '$process_person_profile': False,
-    })
-```
-
-**Bucket helpers to reuse from `web/api_hardening.py`:**
-- `latency_bucket(seconds)` — `'lt_100ms' | 'lt_500ms' | 'lt_2s' | 'lt_10s' | 'gte_10s'`
-- `result_count_bucket(n)` — `'zero' | 'count_1_10' | 'count_11_50' | ... | 'count_1001_plus'`
-
-Both are already exported in `api_hardening.__all__` so the desktop can import them from there.
-
-**Per-search events that ARE still emitted immediately (not deferred to summary):**
-
-`desktop_search_executed` is still emitted per-search because it carries `was_cancelled`
-and `has_filters` which are meaningful per-event. BUT: omit raw `duration_seconds` from it
-(duration data goes only into the performance summary accumulator, bucketed at flush time).
-`result_count_bucket` per-search is kept (it answers "what fraction of Responsa searches
-return zero results?" which needs per-search granularity).
-
-Final volume split for 50 searches/day x 30 users:
-- `desktop_search_executed`: ~1,500/day (mode, corpus, result count, filters, no duration)
-- `desktop_session_performance_summary`: ~60-90/day (all duration/performance data)
-- All other events: ~200-400/day (tabs, actions, crash, errors)
-- Total: ~1,800-2,000/day vs PostHog EU free tier of ~33,000/day (1M/month). Comfortable.
-
-**My Library indexing duration:** Indexing is a background task that can run for minutes or
-hours. Emit a single `desktop_my_library_action` with `action: 'reindex_all'` + an optional
-`duration_bucket` when the indexing job completes. Do NOT emit per-file events.
-
-### 4. Crash and Error Reporting
-
-**Hard-crash capture (unhandled exceptions):**
-
-```python
-import sys, threading, re, os
-
-def _scrub_path(s: str) -> str:
-    """Replace Windows absolute paths with basename only."""
-    return re.sub(r'[A-Za-z]:\\(?:[^\n"\\]+\\)*([^\n"\\]+)', r'<path>/\1', s)
-
-def _make_crash_props(exc_type, exc_tb, is_background: bool) -> dict:
-    error_module = 'unknown'
-    error_line = 0
-    if exc_tb:
-        frame = exc_tb
-        while frame.tb_next:
-            frame = frame.tb_next
-        error_module = os.path.basename(frame.tb_frame.f_code.co_filename)
-        error_line = frame.tb_lineno
-    return {
-        **BASE_PROPS,
-        'error_type': exc_type.__name__,
-        'error_module': error_module,      # basename only, e.g. 'gui_threads.py'
-        'error_line': error_line,          # integer
-        'error_fingerprint': f'{exc_type.__name__}:{error_module}:{error_line}',
-        'is_background_thread': is_background,
-        '$process_person_profile': False,
-    }
-
-def _desktop_excepthook(exc_type, exc_value, exc_tb):
-    if _telemetry_enabled():
-        enqueue_event('desktop_crash', _make_crash_props(exc_type, exc_tb, False))
-    sys.__excepthook__(exc_type, exc_value, exc_tb)
-
-sys.excepthook = _desktop_excepthook
-
-def _thread_excepthook(args):
-    if _telemetry_enabled():
-        enqueue_event('desktop_crash', _make_crash_props(
-            args.exc_type, args.exc_traceback, True))
-
-threading.excepthook = _thread_excepthook
-```
-
-**What a scrubbed crash report contains:**
-- `error_type`: Python exception class name (`TypeError`, `AttributeError`, `KeyError`, etc.)
-- `error_module`: basename of the innermost frame's file (`gui_threads.py`, not the full path)
-- `error_line`: integer line number only
-- `error_fingerprint`: `{ExcType}:{module}:{line}` — deterministic dedup key in PostHog
-- BASE_PROPS: `app_version`, `os`, `os_version`, `ui_lang`
-
-**What a scrubbed crash report does NOT contain:**
-- Any OS path strings (basename only)
-- Frame local variables (never included — they can contain query strings, file handles, document content)
-- The exception message string. Exception messages commonly contain file paths
-  (`FileNotFoundError: [Errno 2] No such file or directory: 'C:\Users\hillel\manuscript.pdf'`)
-  or query content (`ValueError` with repr of bad input). Type name only is safe.
-- The full traceback text (only the innermost frame's location, not the call chain)
-
-**Exception message is NOT safe.** Do not include `str(exc_value)` in the crash payload.
-`exc_type.__name__` only.
-
-**Handled / non-fatal errors — instrumented sites:**
-
-Instrument the following existing except-blocks (HIGH value, currently invisible):
-- `LocalIndexerWorker` file extraction failures — `stage: 'indexing'`
-- `SearchThread.run()` search engine errors — `stage: 'search'`
-- NLI fetch paths in `genizah_core.py` — `stage: 'nli_fetch'`
-- Export functions on format-specific failures — `stage: 'export'`
-
-Do NOT instrument every except block. Only places where a failure is invisible to the user
-but important to see in aggregate. Each site passes `error_type: type(e).__name__` only.
+| Anti-Feature | Why Requested | Why Problematic | Alternative |
+|--------------|---------------|-----------------|-------------|
+| **Unlabeled algorithmic claims presented as established facts** | "Just tell me what it is" reads cleaner than hedged labels. | The cardinal sin the brief calls out. An algorithmic identification shown as a bare fact will be cited as ground truth, then a wrong one damages the platform's scholarly credibility irreparably. | Every claim carries its band + confidence label inline; the label is not optional chrome. |
+| **Crowd majority-vote auto-certification (Zooniverse consensus retirement)** | Zooniverse "retires" a subject once N volunteers agree; tempting to auto-promote community-confirmed claims into the certified band. | A lay majority can be confidently wrong on a scholarly identification; auto-promotion lets volume overwrite expertise and *pollutes the certified data*. Zooniverse's model works for "is there a galaxy here," not "is this Mishnah Shabbat 3." | Community judgments stay a **separate, visible layer**; they inform a *curated* re-certification round run by the research program, never auto-mutate a band. This is the direct answer to "how judgment capture avoids polluting data." |
+| **Editable / overwritable identifications** | Wiki-style "just fix it" feels empowering. | Overwriting destroys provenance and the audit trail; one bad edit silently corrupts a claim used by others. | FromThePage's lesson: keep versions. Capture confirm/reject/annotate as append-only annotations with attribution + timestamp; the underlying claim is immutable in the shipped snapshot. |
+| **Displaying the reference-edition / Maagarim text** | Showing both sides of a match is the obvious "complete" evidence view. | Hard constraint violation (provenance masking + licensing). Reveals Maagarim provenance and may expose non-redistributable reference text. | Show only OUR MS text against a neutral canonical work label; for MS↔MS pairs both MSS' own text is fine. |
+| **Full critical apparatus / variant collation ("stemma")** | The "witness list" framing invites the expectation of a collated variorum with variant readings and a stemma tree. | We have "MS carries work" evidence, not aligned collated variants; a stemma view would misrepresent the data and is a massive scope explosion. | Ship the witness *list* (carriers + band + evidence span). Frame it explicitly as a witness census, not a critical edition. Defer collation indefinitely. |
+| **Raw full-corpus force-directed graph as the primary atlas view** | "Show me everything connected" is the intuitive ask for a network. | The rehearsal found an 89%-liturgical giant component (a hairball); a raw whole-corpus graph is unreadable and slow. impresso's evaluators already flagged "a lot going on." | Work-centric ego-graphs, aggregated work→work edges, mandatory filtering, and Track-1 canon masking as the gate before any census graph. Progressive disclosure from a curated overview. |
+| **Live / real-time recomputation of the map** | Users expect modern apps to update as data changes. | The refresh pipeline is explicitly out of scope; the sidecar ships as a dated snapshot. Promising freshness you can't deliver erodes trust. | Ship a clearly dated snapshot ("Discovery data as of ⟨date⟩") + a documented rebuild recipe. Set the expectation honestly. |
+| **False-precision numeric scores in the lay-facing UI** | The raw confidence numbers (0.889, 0.647) exist and look authoritative. | Presenting three-decimal probabilities to interested laypeople implies a precision the data doesn't have and confuses more than it informs. | Map to named bands + plain-language tooltips; expose the exact number only in an expert/methods view or on hover. |
+| **Gamification / leaderboards / notifications for community verification** | Zooniverse-style engagement mechanics drive volume. | Wrong incentive for an expert scholarly audience — rewards throughput over care and cheapens the tool's tone. | Quiet, credit-attributed contribution (mirroring corrections); recognition through attribution, not points. |
+| **Auto-suggesting physical-fragment joins here** | The connection data looks join-like; users may expect "find the other half." | That's the Joins Lab's job (image + physical join); same-work text identification is a different claim (two MSS of the same *work* are usually NOT physical joins). Conflating them misleads. | Keep the vocabulary distinct ("same work / carries / cites" vs "physical join"); cross-link to Joins Lab where relevant, don't merge. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Consent dialog + UUID minting
-    └──required by──> All telemetry emission (gate checked before every enqueue_event())
-                          └──required by──> Usage events (tab, search, actions)
-                          └──required by──> Performance summary
-                          └──required by──> Crash reporting
+[Discovery sidecar + band schema]  ← foundation; everything reads from it
+    ├──requires──> [Reference-corpus masking logic]   (cross-cutting; gates ALL display)
+    │
+    ├──> [MS connections panel]
+    │        └──requires──> [Evidence viewer (our-text-only)]
+    │                            └──requires──> [existing transcription/version-selector display]
+    │
+    ├──> [Work → witness-map page]
+    │        └──requires──> [existing library-filter component] (band facet added)
+    │
+    ├──> [Leads queue]  (reads R-B / R-CANON rows; = the panel's "show leads" lane as a dedicated page)
+    │
+    └──> [Connection atlas / graph explorer]
+             ├──requires──> [Track-1 canon masking as the giant-component gate]
+             └──enhances/enhanced-by──> [Work → witness-map page] (atlas node → witness page drill-down)
 
-BASE_PROPS (version, OS, lang)
-    └──required by──> Every event (included in every properties dict)
+[Community judgment capture]
+    ├──requires──> [existing Supabase auth + corrections write pattern]
+    ├──requires──> [MS connections panel + witness page] (the surfaces judgments attach to)
+    └──feeds (does NOT overwrite)──> [future certification round → new band snapshot]
 
-latency_bucket() + result_count_bucket() from web/api_hardening.py
-    └──required by──> desktop_search_executed (result_count_bucket)
-    └──required by──> desktop_session_performance_summary (latency_bucket)
-
-Settings/About toggle
-    └──extends──> Consent dialog (change-anytime affordance; same flag)
-
-Static AST guard (forbidden property names)
-    └──enforces──> Privacy hard rule across all current and future events
-
-sys.excepthook scrubber
-    └──required by──> desktop_crash
-    └──required by──> desktop_error (same _make_crash_props helper)
-
-In-memory perf accumulator (threading.Lock-protected)
-    └──required by──> desktop_session_performance_summary
-    └──fed by──> desktop_search_executed (duration measured in SearchThread)
+[Homepage promotion] ──requires──> [Atlas] + [connections panel] exist first
 ```
 
 ### Dependency Notes
 
-- **Consent dialog required before any event.** The UUID is only minted on opt-in, and
-  `enqueue_event()` must be wrapped in a `_telemetry_enabled()` guard at every call site.
-  All other features depend on this gate working correctly.
-- **BASE_PROPS requires `version.py` + `platform` stdlib.** Both are already available in
-  the desktop app. No new dependencies.
-- **Session performance summary requires a thread-safe in-memory accumulator.** SearchThread
-  runs in a background thread and increments counters there; the accumulator needs a
-  `threading.Lock`. The flush can happen on the main thread at app close.
-- **Crash hook must fire regardless of telemetry state**, but `enqueue_event()` inside it
-  must still check `_telemetry_enabled()`. Even in opted-out state, `sys.__excepthook__()`
-  must be called for normal crash behavior.
-- **`latency_bucket()` and `result_count_bucket()` can be imported from `web/api_hardening.py`**
-  directly from the desktop — they have no NiceGUI dependencies and are pure functions.
+- **Sidecar + band schema is the hard prerequisite for all five surfaces.** No UI phase can start before the schema is stable. This is the natural Phase-1 spine.
+- **Masking logic is cross-cutting, not a feature** — it must be a shared display helper enforced (and CI-guarded) on every surface that renders work identity or passage text. Treat it like the `safe_storage` chokepoint: one enforced path, tested.
+- **Evidence viewer depends on the existing transcription display**, so it's cheap to reuse — but the masking asymmetry (show our MS, hide the reference) is new logic.
+- **Community judgment capture depends on the panel + witness page existing** (there's nothing to judge otherwise) and on Supabase auth — so it lands AFTER the read surfaces, mirroring how corrections/comments layered onto browse.
+- **Atlas depends on the giant-component / masking problem being solved first** — the rehearsal already proved a naive graph is a blob. It is the highest-complexity, highest-risk surface and should be the capstone, not the opener, even though it's the marketed flagship.
+- **Leads queue and the panel's "show uncertified leads" toggle are the same data at two scales** — build the band-lane logic once; the queue is the corpus-wide view of what the panel shows per-MS.
 
 ---
 
 ## MVP Definition
 
-### Launch With (v8.1.0)
+Interpreting v1 / v1.x / v2 as **within-v9.0.0 phase ordering + explicitly-deferred**:
 
-Minimum viable feature set to make the telemetry useful and trustworthy from day one.
+### Launch With (v1 — the de-risking spine + core value)
 
-- [ ] Consent dialog (first-run, bilingual, modal, opt-in default OFF) — gate for everything
-- [ ] UUID generation and storage in app config dir (only on consent; deleted on opt-out)
-- [ ] Settings/About toggle (change anytime; takes effect immediately)
-- [ ] `_telemetry_enabled()` guard checked before every `enqueue_event()` call
-- [ ] BASE_PROPS helper (version + OS + lang, `$process_person_profile: False`)
-- [ ] `desktop_session_start` event (version adoption + OS distribution)
-- [ ] `desktop_tab_activated` event (which features are used)
-- [ ] `desktop_search_executed` event (mode + corpus + result_count_bucket + was_cancelled + has_filters; no content)
-- [ ] In-memory perf accumulator + `desktop_session_performance_summary` at app close
-- [ ] `desktop_crash` via `sys.excepthook` + `threading.excepthook` with scrubbed props
-- [ ] Static AST guard test (forbidden property names; CI-enforced, like test_no_raw_storage_access.py)
-- [ ] Privacy disclosure text (bilingual, in consent dialog and in Settings/About)
+- [ ] **Discovery sidecar + band schema** — nothing works without it; also the object of the discuss-phase.
+- [ ] **Masking display helper (enforced + CI-guarded)** — hard constraint; must exist before any surface renders.
+- [ ] **MS connections panel** with high-bands-by-default + a visible "show uncertified leads" toggle — the single highest-value, most-expected surface; validates the whole concept on the page users already visit.
+- [ ] **Evidence viewer (our-MS-text-only, masked)** — a scholarly audience will not trust bare claims; the panel is not credible without it.
+- [ ] **Confidence-labeling system** (named bands + legend + recall-honesty disclaimer) — the ethical + credibility core.
+- [ ] **Work → witness-map page** — the second-most-expected primitive; the click-through target for every work name in the panel.
 
-### Add After Validation (v8.1.x)
+### Add After Validation (v1.x — same milestone, later phases)
 
-Features to add once core telemetry is working and PostHog dashboards are built.
+- [ ] **Community judgment capture** (confirm/reject/annotate, additive layer) — trigger: read surfaces are live and users are engaging; needs auth wiring + the "don't pollute the bands" guardrail designed carefully.
+- [ ] **Leads queue as a dedicated page** — trigger: the panel's lead-lane logic is proven; promotes the high-recall lane to a browsable corpus-wide queue.
+- [ ] **Indirect-witness / citation connection type** — trigger: flank-contrast classifier output is confirmed clean enough to surface as its own class.
 
-- [ ] `desktop_responsa_options` event (Responsa sub-option usage — needs dashboard to be useful)
-- [ ] `desktop_joins_lab_action` (Join Lab adoption — helps decide Component B priority)
-- [ ] `desktop_error` at high-value handled-error sites (identify sites from early crash data)
-- [ ] `desktop_export` (format breakdown)
+### Future Consideration (v2+ / explicitly deferred)
 
-### Future Consideration (v2+)
-
-- [ ] Aggregate session summaries across users into a PostHog dashboard insight — operational,
-  not a code change
-- [ ] Re-ask consent dialog if data categories materially expand (e.g., adding composition
-  search performance not in the original disclosure)
+- [ ] **Connection atlas / graph explorer** — the marketed flagship, but highest-complexity + highest-risk (hairball / giant-component problem). *Judgment call for the roadmap:* if v9.0.0 must ship the atlas as its flagship, treat it as the capstone phase AFTER panel + witness page de-risk the data, and scope it to work-centric ego-graphs, not a full-corpus dump. If schedule pressure appears, this is the first thing to cut to a fast-follow.
+- [ ] **Precision-certificate auto-refresh / re-certification pipeline** — refresh pipeline is out of scope this cycle (snapshot ship).
+- [ ] **Text-reuse engine as the `/parallels` (desktop: composition) backend** — explicitly deferred by the user (2026-07-19).
+- [ ] **Desktop parity** — web-only this milestone.
+- [ ] **Collation / variant apparatus / stemma** — deliberately never (anti-feature).
 
 ---
 
@@ -412,56 +137,60 @@ Features to add once core telemetry is working and PostHog dashboards are built.
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| Consent dialog (bilingual, opt-in OFF) | HIGH — trust foundation | LOW | P1 |
-| UUID + persistence + opt-out deletion | HIGH — anonymity guarantee | LOW | P1 |
-| Settings/About toggle | HIGH — revocability | LOW | P1 |
-| BASE_PROPS + `$process_person_profile: false` | HIGH — PostHog cost + anonymity | LOW | P1 |
-| `desktop_session_start` | HIGH — version adoption dashboard | LOW | P1 |
-| `desktop_tab_activated` | HIGH — feature usage distribution | LOW | P1 |
-| `desktop_search_executed` (mode + corpus + result bucket, no content) | HIGH — core usage metric | LOW | P1 |
-| `desktop_session_performance_summary` (aggregated) | HIGH — performance visibility without volume | MEDIUM | P1 |
-| `desktop_crash` via excepthook (scrubbed) | HIGH — crash visibility | MEDIUM | P1 |
-| Static AST guard test | HIGH — prevents future content leaks | LOW | P1 |
-| Privacy disclosure text | HIGH — legal + trust | LOW | P1 |
-| `desktop_responsa_options` | MEDIUM — Responsa tuning insight | LOW | P2 |
-| `desktop_joins_lab_action` | MEDIUM — new feature adoption signal | LOW | P2 |
-| `desktop_error` (handled errors) | MEDIUM — silent failure visibility | MEDIUM | P2 |
-| `desktop_export` | LOW — nice to have | LOW | P3 |
-| `desktop_puzzle_action` | LOW — puzzle is secondary feature | LOW | P3 |
+| Discovery sidecar + band schema | HIGH (enabling) | MEDIUM | P1 |
+| Masking display helper | HIGH (constraint) | MEDIUM | P1 |
+| MS connections panel (bands + leads toggle) | HIGH | MEDIUM | P1 |
+| Evidence viewer (our-text-only) | HIGH | HIGH | P1 |
+| Confidence labels + recall-honesty disclaimer | HIGH | MEDIUM | P1 |
+| Work → witness-map page | HIGH | MEDIUM | P1 |
+| Community judgment capture | MEDIUM–HIGH | MEDIUM–HIGH | P2 |
+| Leads queue (dedicated page) | MEDIUM | LOW–MEDIUM | P2 |
+| Indirect-witness / citation type | HIGH (niche) | MEDIUM | P2 |
+| Connection atlas / graph explorer | MEDIUM–HIGH | HIGH | P2/P3 (flagship-but-risky) |
+| Homepage promotion | MEDIUM | LOW | P2 (rides on atlas + panel) |
+| Precision-certificate page | MEDIUM | LOW (UI) | P2 |
+
+**Priority key:** P1 = must have for launch · P2 = should have · P3 = defer.
 
 ---
 
-## Reference Analysis
+## Competitor / Precedent Feature Analysis
 
-This is not a competitive market (Cairo Genizah research tools are niche), so "competitor"
-means comparable scholarly/developer desktop tools with telemetry.
+| Feature area | Sefaria | KITAB / OpenITI (Passim-backed) | impresso Text Reuse at Scale | Zooniverse / FromThePage | Our v9.0.0 approach |
+|---|---|---|---|---|---|
+| **Connection surfacing** | "Related Texts" resource side-panel; 110K+ text-to-text links; one-click open (does well: familiar, instant). Weakness: links are curated/rule-based, no confidence gradient. | Book→corpus and book↔book reuse views. | Cluster-centric "Passages" tab. | n/a | Side panel on the MS page (Sefaria-familiar) BUT every connection carries a confidence band — the gradient Sefaria lacks. |
+| **Evidence / alignment display** | Shows the connected text itself. | DiffViewer: side-by-side color-coded aligned passage; sub-word Arabic-aware (does well). Scroll view highlights shared spans + preserves order. | Passages tab: pick a start passage, cycle others, matching text highlighted in contrasting colors. | FromThePage: image ↔ transcription side-by-side. | Side-by-side highlighted span, BUT masked: our MS text only vs a neutral work label (no reference edition). |
+| **Corpus overview / graph** | Seven thematic link visualizations. | Book-to-corpus reuse heatmap (which parts reused most); network of related books. | Overview + Statistics tabs (small-multiples, matrix of co-occurring clusters, time charts). Lesson: powerful but "a lot going on," learning curve, needs domain expertise. | n/a | Work-centric atlas; must avoid the impresso "too much at once" trap AND our own giant-component blob → aggregated, filtered, progressive. |
+| **Confidence / uncertainty** | Minimal — links presented as facts. | Reuse *amount* encoded (heatmap intensity) but not a certainty band. | Lexical-overlap / cluster-size as sortable metrics (quantitative, not certainty labels). | Zooniverse: Bayesian consensus probability per subject; volunteer weighting; uncertainty estimates. | Named bands (algorithmic / expert-verified / screening) + measured precision certificate; numeric scores hidden behind bands for laypeople. |
+| **Community verification** | Editorial + "Voices" sheets (not claim-verification). | n/a (algorithmic + scholar-curated corpus). | User collections, not verification. | Zooniverse: N-fold redundant classification → majority/Bayesian retirement (does well at scale; BAD model to copy for expert claims). FromThePage: "needs review" flag, version control, page comments, trusted-collaborator tiers (does well: provenance, no overwrite). | FromThePage's provenance/versioning model (append-only, attributed) — NOT Zooniverse auto-retirement. Judgments feed a curated re-certification; never auto-mutate a band. |
+| **Witness list** | Manuscript images linked to Talmud/Mishnah/Tanakh via NLI. | Corpus is work-centric by design. | Newspaper "witnesses" per cluster. | n/a | Per-work carrier-MS list (stemmatology witness-census framing), band + library filterable — but explicitly NOT a collated critical apparatus. |
 
-| Practice | VSCode | Zotero | OpenRefine | Our Approach |
-|----------|--------|--------|------------|-------------|
-| Default | Opt-out (sends before consent) | Error reports opt-out; no usage telemetry | No telemetry | Opt-in, OFF by default |
-| First-run dialog | No (just a settings note) | No | N/A | Yes, modal, bilingual |
-| What is collected | Usage, errors, performance | Translator error reports only | Nothing | Usage (modes/tabs), performance (aggregated), crashes (scrubbed) |
-| Query / content | No query text | No content | N/A | No query text, no content (hard rule + AST guard) |
-| PII scrubbing | Basic (no file paths in crash) | N/A | N/A | Explicit: basename-only frames, no locals, no exception message string |
-| Revocability | Settings toggle | Preferences toggle | N/A | Settings/About toggle + UUID deletion |
-| EU data residency | Azure (EU regions configurable) | Zotero servers | N/A | EU PostHog (already configured) |
+---
+
+## Answers to the downstream consumer's specific questions
+
+**What a witness-map page shows:** a work's neutral canonical title + a filterable (band, library) table/list of every carrier MS — thumbnail, shelfmark/folio, band label, and a link into each MS browse page and its evidence span. It is a *census* of carriers, not a variant collation. Optional summary counts (e.g., N carriers across M libraries, band breakdown). It must carry the recall-honesty note.
+
+**How confidence is communicated:** named bands with color + plain-language word (not bare decimals), a legend, per-band tooltips, and a link to a measured-precision certificate page. Default view shows only high bands; a single explicit toggle reveals screening leads, visibly demoted. Color is never the sole signal. "Expert-verified" labeling is used honestly (R-A audit pending) and the recall disclaimer ("no identification shown ≠ none exists") is persistent.
+
+**How judgment capture avoids polluting data:** community confirm/reject/annotate is an **append-only, attributed annotation layer** (FromThePage provenance model) stored in Supabase like corrections — it never edits the shipped band data and is never auto-promoted by majority vote (the explicit rejection of the Zooniverse consensus-retirement model). Judgments display as community signal alongside — not merged into — the algorithmic/expert bands, and feed a later *curated* certification round that produces the next snapshot.
 
 ---
 
 ## Sources
 
-- `shared/posthog_server.py` — existing fire-and-forget emission infrastructure
-- `web/api_hardening.py` — existing `latency_bucket`, `result_count_bucket`, `capture_api_event` patterns
-- `web/pages/search.py:4439` — web `search_executed` event (note: sends `query` text; desktop must NOT copy this)
-- `.planning/PROJECT.md` — v8.1.0 milestone target features and fixed constraints
-- [PostHog anonymous vs identified events](https://posthog.com/docs/data/anonymous-vs-identified-events) — `$process_person_profile: false` semantics and anonymous-tier cost
-- [PostHog person properties](https://posthog.com/docs/product-analytics/person-properties) — anonymous tier ingestion
-- [VSCode telemetry docs](https://code.visualstudio.com/docs/configure/telemetry) — reference for opt-out anti-pattern
-- [Zotero privacy policy](https://www.zotero.org/support/privacy) — scholarly tool minimal-telemetry pattern
-- [Sentry Python options](https://docs.sentry.io/platforms/python/configuration/options/) — `before_send` + scrubbing hooks reference
-- [GDPR telemetry guidance — activeMind.legal](https://www.activemind.legal/guides/telemetry-data/) — consent before first collection requirement
-- Archon project telemetry issues — UUID-per-install, `$process_person_profile: false`, config-dir storage pattern
+- Sefaria Help / Voices — Related Texts resource panel, 110K+ interconnections, manuscript links: https://help.sefaria.org/hc/en-us/articles/18613227644316-How-to-Find-Interconnected-Texts · https://www.sefaria.org/sheets/299491
+- Passim (dasmiq) + Programming Historian lesson — n-gram filtering + local/global alignment, cluster/witness output, OCR-noise tolerance: https://github.com/dasmiq/passim · https://programminghistorian.org/en/lessons/detecting-text-reuse-with-passim
+- KITAB text-reuse visualizations — pairwise scroll view, DiffViewer (color-coded aligned diff), reuse heatmap, book↔corpus explore: https://kitab-project.org/New-KITAB-visualizations/ · https://kitab-project.org/methods/text-reuse · https://github.com/kitab-project-org/explore
+- impresso Text Reuse at Scale — Overview/Statistics/Passages tabs, cluster filtering, drill-down, "learning curve / a lot going on" evaluation finding: https://pmc.ncbi.nlm.nih.gov/articles/PMC10654985/
+- Zooniverse — redundant classification, majority/Bayesian consensus (SWAP), volunteer weighting, retirement thresholds, uncertainty estimates: https://arxiv.org/pdf/1903.07776 · https://arxiv.org/pdf/2511.03016
+- FromThePage — review workflows, "needs review" flag, version control / track changes, page comments, trusted-collaborator tiers: https://content.fromthepage.com/review-workflows-and-quality-control/ · https://github.com/benwbrum/fromthepage
+- Trismegistos Networks — SNA over people/places across documents, graph metrics, research vs add-on network modes: https://wiki.digitalclassicist.org/Trismegistos · https://link.springer.com/chapter/10.1007/978-3-319-15168-7_38
+- Scholarly certainty / provenance UI research — certainty gradient classification, provenance display, color-as-glanceable-credibility over-trust risk: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7182025/ · https://arxiv.org/pdf/2303.12118
+- Stemmatology / witness lists — witness = independent bearer, collation, variorum (framing + scope boundary): https://en.wikipedia.org/wiki/Textual_criticism
+- FGP join suggestions (Genizah domain precedent) — ranked algorithmic candidates for expert inspection, human confirmation as gold standard: https://en.wikipedia.org/wiki/Friedberg_Geniza_Project
+- Internal: `.planning/PROJECT.md` (v9.0.0 milestone), `.planning/seeds/SEED-029-*.md` (band schema, flank-contrast/indirect-witness class, masking rationale, rehearsal giant-component finding).
 
 ---
-*Feature research for: opt-in privacy-first desktop telemetry (v8.1.0)*
-*Researched: 2026-06-13*
+*Feature research for: same-work discovery + witness-mapping + community-verification module (Cairo Genizah)*
+*Researched: 2026-07-19*

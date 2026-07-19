@@ -1,303 +1,159 @@
-# Stack Research: Desktop Telemetry (v8.1.0)
+# Stack Research
 
-**Domain:** Opt-in PostHog telemetry + crash/error reporting for a PyQt6 frozen-binary desktop app
-**Researched:** 2026-06-13
-**Confidence:** HIGH (PostHog SDK verified via Context7 + PyPI; packaging verified via direct download + spec inspection; key safety verified via PostHog docs; exception hooks verified via official Python docs + PyQt-specific sources)
+**Domain:** Discovery module for a scholarly manuscript web app (NiceGUI) — same-work identification tables + a corpus connection/network visualization ("Atlas") over ~52K manuscripts / ~4K works / hundreds of thousands of edges. Web-only, v9.0.0.
+**Researched:** 2026-07-19
+**Confidence:** HIGH (grounded in the existing working full-corpus atlas prototype + the installed dependency baseline + verified library versions/licenses; MEDIUM on exact browser-renderer node-count thresholds, which are corroborated across sources but not benchmarked on this corpus)
 
 ---
 
-## Decision 1: PostHog Python SDK vs. Raw `shared/posthog_server.py` Queue
+## TL;DR verdict
 
-**Recommendation: DO NOT add the `posthog` SDK. Wrap and extend `shared/posthog_server.py` instead.**
+The discovery module needs **almost no new runtime stack.** Split the visualization into three surfaces and match each to the lightest sufficient tool:
 
-### What the posthog SDK provides (version 7.18.3)
+| Surface | Scale rendered at once | Recommendation | New runtime dep? |
+|---------|------------------------|----------------|------------------|
+| MS connections panel (ego-network on browse) | tens–low hundreds of nodes | **`ui.echart` graph series** (native, bundled) | **None** |
+| Work → witnesses browse | table (0 graph) | **plain NiceGUI** table/list | **None** |
+| Interactive graph explorer (server-extracted bounded neighborhood) | ≤ ~1–2K nodes | **`ui.echart` graph series** (native) | **None** |
+| Whole-corpus "stun" Atlas (all ~52K nodes) | ~52K nodes / 100Ks edges | **Reuse the existing precomputed-layout Canvas 2D starfield, served as a static asset + embedded via `<iframe>`** | **None** (escalate to sigma.js only if live interop over all 52K is required) |
 
-| Capability | SDK | Raw queue |
-|-----------|-----|-----------|
-| Internal batching (default: flush every 0.5s, max 100 events/batch) | YES | NO — one HTTP POST per event |
-| Automatic retry with exponential backoff (via `backoff` dep) | YES | NO — silent drop on error |
-| `capture_exception()` + `enable_exception_autocapture=True` | YES | NO |
-| `before_send` hook (callable → event dict or None) | YES | NO |
-| `posthog.disabled = True` / `posthog.disabled = False` runtime toggle | YES | Requires wrapper |
-| EU host config (`host="https://eu.posthog.com"`) | YES | YES — already hardcoded to EU |
-| Anonymous events (no `distinct_id` context) | YES | YES — uses `distinct_id='system'` |
-| Feature flags + local evaluation | YES | NO |
-| `shutdown()` / `flush()` for process-exit drain | YES | NO — daemon thread silently drops in-flight queue on exit |
-| `super_properties` (appended to every event) | YES | NO — must include manually |
-| `capture_exception_code_variables=True` (local variable values in tracebacks) | YES | NO |
-
-### Why the raw queue is the right choice for THIS project
-
-**Four reasons the SDK is overkill and introduces risk:**
-
-1. **`capture_exception_code_variables=True` is a privacy hazard.** The SDK's `capture_exception` sends frame-local variable values to PostHog servers. For this app, local variables in a search-related frame can contain the user's query text, My Library file paths, or transcription snippets. The `before_send` hook scrubs properties dict entries but does NOT suppress the `$exception_list[].frames[].vars` payload unless you explicitly strip it. This is exactly the PII leak the milestone requirements prohibit. The raw queue forces you to construct exception payloads manually — no accidental variable capture.
-
-2. **No feature flags needed.** Feature flags require a `personal_api_key` (a server-side secret) for local evaluation. The desktop app has no secret key. Cloud evaluation would add 100-400ms per flag check. There is no use case for feature flags in this milestone.
-
-3. **One new transitive dependency (`backoff 2.2.1`, ~15 KB wheel).** The rest of the SDK's deps (`requests`, `typing-extensions`, `distro`) are already in requirements-lock.txt. `backoff` is not. The raw queue already uses `requests` directly. Adding `backoff` for retry logic is the only real gap — and it is unnecessary: the fire-and-forget design intentionally accepts silent drops on network failure (the drain loop in `posthog_server.py` swallows exceptions). At this app's event volume (~50 searches/day × 30 desktop users = ~1500 events/day), dropped events are not operationally meaningful.
-
-4. **`shared/posthog_server.py` is already production-proven.** It drains the NLI circuit-breaker telemetry (Phase 98) successfully. Its API (`enqueue_event(event, properties, distinct_id)`) is exactly what is needed. Adding `posthog.disabled`-equivalent behavior requires only a module-level `_telemetry_enabled: bool` flag checked at `enqueue_event` entry.
-
-**Verdict: extend the existing raw queue.** The SDK adds capabilities this project cannot use and introduces opt-out complexity (the SDK's `disabled` flag is set at `Posthog()` construction time and is not trivially changeable at runtime without re-instantiating — `posthog.disabled = True` works at module level but the `Posthog` instance approach used in production requires careful wiring for runtime opt-out toggles). The raw queue's opt-out is one boolean check.
-
-**The one capability gap worth adding to the raw queue: `before_send` equivalent.** A simple `_scrub_hook: Callable | None` at the `enqueue_event` level covers the privacy requirement without the SDK.
+The one genuinely load-bearing decision: **graph layout for the whole-corpus view MUST be precomputed offline (Python, on the dev box) and baked to a positions asset.** No browser library force-lays-out 52K nodes / hundreds of thousands of edges interactively. This is already how the prototype works (`same_work_spike/probe/scripts/build_atlas_draft.py`), and the layout/community libraries it uses (`networkx`, `python-louvain`, `python-igraph`, `leidenalg`) are installed on the dev box but **deliberately absent from `requirements.txt`/`requirements-lock.txt`** — that separation is correct and must be preserved.
 
 ---
 
 ## Recommended Stack
 
-### Core Technologies
+### Core Technologies (for the NEW capabilities only)
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| `shared/posthog_server.py` (existing) | — | Fire-and-forget event queue to EU PostHog | Already production-proven, web-independent, thread-safe. Needs 3 additions: opt-in gate, scrub hook, desktop-specific UUID distinct_id injection |
-| `uuid` (stdlib) | 3.10+ | Generate anonymous per-install UUID | `uuid.uuid4()` is the correct choice — pure random, no MAC address, no PII. Store as text in `%LOCALAPPDATA%\GenizahSearchPro\telemetry_id.txt`. Generate ONLY when user opts in |
-| `sys.excepthook` | stdlib | Catch unhandled main-thread exceptions | Standard Python global exception hook. MUST be installed after `QApplication.__init__()` — PyQt6's C++ layer has its own exception handling that can suppress Python exceptions in slot callbacks |
-| `threading.excepthook` | stdlib (3.8+) | Catch unhandled exceptions in background threads (QThread excluded — see pitfall below) | Covers `SearchThread`, `LocalIndexerWorker`, and other `threading.Thread` subclasses. Python 3.8+ availability confirmed; project requires Python 3.10+ |
-| `faulthandler` | stdlib | Low-level signal/segfault handler for native crashes (C extension crashes, PyMuPDF/Tantivy faults) | `faulthandler.enable()` at startup; writes stack trace to stderr/log file. Does NOT integrate with Python's exception system but captures crashes `sys.excepthook` cannot |
-| `pathlib` / `os` (stdlib) | 3.10+ | Persist telemetry opt-in state and install UUID | Write opt-in flag to `%LOCALAPPDATA%\GenizahSearchPro\telemetry_opt_in.json` |
+| **NiceGUI `ui.echart`** (Apache ECharts) | NiceGUI **3.8.0** (installed; `ui.echart` present since 1.2.8), ECharts **5.x** bundled | Render bounded graphs: the MS ego-network panel + the interactive explorer's server-extracted neighborhoods | Already in the framework — **zero new dependency, zero added prod RAM, zero JS to vendor/audit.** Accepts any ECharts option dict incl. `series:[{type:'graph', layout:'force'\|'circular'\|'none'}]`; native Hebrew/RTL label rendering (canvas text); click interop via `on('chart:click')` / `on_point_click`; drive from Python via `run_chart_method`; `:`-prefixed JS formatters for custom labels. Comfortable to ~3K nodes on Canvas — well above any *bounded* neighborhood. |
+| **Existing Canvas 2D starfield + precomputed layout** | in-repo (`build_atlas_draft.py`), no library | The whole-corpus flagship "Atlas" (all ~52K nodes, pan/zoom, LOD, click→/browse) | **Already built and proven at full corpus scale.** Server-precomputed positions + pre-rendered sprites + additive-blend draw loop + a spatial picking grid render 52K "stars" and level-of-detail edges smoothly. Self-contained HTML, no CDN, no runtime lib. Serve as a static/generated asset; prod cost is just file serving. |
+| **SQLite (stdlib `sqlite3`)** | Python 3.10+ stdlib | The distilled discovery **product sidecar** (tier-A identifications, band memberships + confidence labels, connection edges, work metadata) **and** server-side bounded-subgraph extraction | Same read-only mmap'd sidecar pattern as `pgp.db`/`fjms_enrichment.db`/`nli_crossref.db`. An indexed edge table (`idx(sys_a)`, `idx(sys_b)`) supports N-hop ego-graph BFS in plain Python — no graph DB, no new runtime dep. Distilling the 3.08 GB `fullcorpus_v2.db` → a compact product DB is a plain build-time Python script. |
+| **Supabase (existing)** | `supabase==2.28.0` (installed) | Community judgment capture (confirm / reject / annotate work-witness claims) | Confirmed: **no new stack.** Reuse the existing corrections/comments RLS + explicit-GRANT pattern (new table(s), 4/5-way verdict, `user.id` FK). Same auth, same `web/safe_storage.py` chokepoint discipline. |
 
-### Supporting Libraries (NEW additions required)
+### Supporting Libraries
 
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `posthog` SDK | **NOT recommended** | — | Do not add. See Decision 1. |
-| `backoff` | **NOT recommended** | Retry logic for telemetry POSTs | Not needed — fire-and-forget accepts silent drops. Adding it adds a new transitive dep for no meaningful benefit at this event volume |
+#### Build-time only (offline, on the dev box — MUST NOT enter `requirements.txt`)
 
-**Net new pip dependencies: ZERO.** All required capabilities use stdlib or the existing `shared/posthog_server.py` queue with extensions.
+| Library | Version (installed) | License | Purpose | When to Use |
+|---------|--------------------|---------|---------|-------------|
+| **numpy** | 2.4.3 (already a prod dep) | BSD-3 | Vectorized force-layout refinement; typed-array position/edge asset emission | Layout precompute + baking positions to a compact binary/JSON asset |
+| **scipy** | 1.17.1 (already a prod dep) | BSD-3 | `sparse.csgraph.connected_components` for the same-work backbone | Component decomposition before per-community layout |
+| **networkx** | 3.6.1 (dev box only) | BSD-3 | Graph model, Louvain/ego-graph helpers, community split | Offline layout/community build; **optional** at runtime for ego-graph BFS (pure-Python, safe to add if wanted — see note below) |
+| **python-louvain** (`community`) | 0.16 (dev box only) | **BSD** | Louvain community detection for cluster coloring | Offline community detection — **preferred** over igraph/leidenalg because BSD (no copyleft) |
+| **python-igraph** | 1.0.0 (dev box only) | **GPL** | Fast graph ops / Leiden backing | Offline only; acceptable at build time. **Do not add to the shipped app** (see What NOT to Use) |
+| **leidenalg** | 0.12.0 (dev box only) | **GPL** | Leiden community detection (higher-quality than Louvain) | Offline only, same GPL caveat |
+| **zstandard** | 0.25.0 (already a prod dep) | BSD | Compress large text/blob columns in the sidecar if needed | Sidecar distillation, only if size matters |
 
-### Extensions to `shared/posthog_server.py`
+> **Runtime note:** bounded-subgraph extraction can be done with **plain Python + SQLite adjacency BFS (zero new dep)**. If richer runtime graph ops are wanted (shortest paths, ego_graph), `networkx` (BSD-3, pure-Python, lightweight) is the only graph library safe to add to `requirements.txt`. Do **not** add igraph/leidenalg to runtime (GPL + native-compiled).
 
-Three additions to the existing module. All backward-compatible (existing callers — `shared/nli_circuit_breaker.py` and `web/api_hardening.py` — are unaffected):
+#### Escalation renderer (add ONLY if the whole-corpus view needs live WebGL interactivity beyond the canvas)
 
-| Addition | Purpose | Implementation |
-|----------|---------|----------------|
-| `_telemetry_enabled: bool = False` module flag + `set_telemetry_enabled(bool)` | Runtime opt-in/opt-out gate; `enqueue_event` no-ops when False | Simple module-level boolean; thread-safe read (GIL protects bool reads) |
-| `_scrub_hook: Callable[[dict], dict | None] | None` + `register_scrub_hook(fn)` | `before_send` equivalent; lets the desktop layer strip search query text, file paths, frame vars from exception payloads | Called synchronously inside `enqueue_event` before queue put; if it raises, original event is dropped (not sent) |
-| `set_default_distinct_id(uid: str)` | Injects the per-install UUID as default `distinct_id` for all events | Replaces the `'system'` default when user has opted in |
+| Library | Version | License | Purpose | When to Use |
+|---------|---------|---------|---------|-------------|
+| **sigma.js** | **3.0.3** (stable; avoid the v4 **alpha**) | **MIT** | WebGL renderer for large graphs | Only if the whole-corpus Atlas must become a *live* pan/zoom/filter WebGL graph with tight NiceGUI node-click interop, exceeding the canvas prototype. Renders ~100K edges comfortably; still consumes **precomputed** positions (does not force-lay-out 52K live). |
+| **graphology** | latest 0.26.x | **MIT** | Graph data model backing sigma.js | Ships with sigma.js; supply nodes with `{x, y}` precomputed positions |
 
-### New Desktop Module: `desktop/telemetry.py`
+### Development / Build Tools
 
-| Responsibility | Detail |
-|----------------|--------|
-| Opt-in state persistence | Read/write `%LOCALAPPDATA%\GenizahSearchPro\telemetry_opt_in.json` |
-| Install UUID management | Generate `uuid.uuid4()` on first opt-in, persist to `%LOCALAPPDATA%\GenizahSearchPro\telemetry_id.txt`, never regenerate |
-| Exception hook installation | `sys.excepthook`, `threading.excepthook`, QThread exception forwarding |
-| Scrub hook registration | Strip `$exception_list[].frames[].vars`, redact file paths matching My Library directories, assert no search query text in payload |
-| Consent dialog | Bilingual (EN+HE) first-run dialog; default OFF; also surfaced in Settings/About toggle |
-| Event helpers | Thin wrappers: `track_tab_switch(tab)`, `track_search_started(mode, corpus)`, `track_crash(exc)` etc. |
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| Offline layout builder | Precompute positions + communities → bake typed-array/JSON positions asset | Model directly on `same_work_spike/probe/scripts/build_atlas_draft.py`; runs on the dev box (12C/24T, 63 GB), **never on the memory-constrained prod EC2** |
+| Sidecar distill script | 3.08 GB `fullcorpus_v2.db` → product SQLite sidecar | Plain Python + `sqlite3`; snapshot-ship + documented rebuild recipe (refresh pipeline out of scope per PROJECT.md) |
+| Static asset serving | Serve the baked Atlas HTML / positions binary | Existing FastAPI route pattern (`web/api.py::init_api_routes`); `ui.element('iframe')` or `ui.html('<iframe>')` to embed in the NiceGUI page |
 
----
+## Installation
 
-## PyInstaller Packaging Impact
+```bash
+# RUNTIME (web app): NOTHING NEW.
+#   ui.echart ships with nicegui==3.8.0 (already pinned)
+#   sqlite3 is stdlib; numpy/scipy/zstandard/supabase already pinned
+#   -> requirements.txt is UNCHANGED for the core recommendation.
 
-**Impact: minimal. No spec file changes needed.**
+# BUILD-TIME ONLY (dev box; keep OUT of requirements.txt / requirements-lock.txt):
+pip install networkx python-louvain   # BSD — layout + community precompute
+# python-igraph / leidenalg already present on the dev box (GPL — offline only)
 
-### Analysis
-
-The `posthog` SDK is NOT being added. The raw queue (`shared/posthog_server.py`) is already included via the spec's `datas` tuple:
-
-```python
-('shared', 'shared'),  # already in GenizahSearchPro.spec line 9
+# ESCALATION (only if adopting sigma.js as a NiceGUI custom component):
+#   vendor the JS bundle into web/static/ (do NOT rely on a CDN for a scholarly site):
+npm pack sigma@3.0.3 graphology@latest graphology-layout-forceatlas2@latest
+#   then commit the built bundle; no Python dependency is added.
 ```
 
-The new `desktop/telemetry.py` module is discovered by PyInstaller's static analysis automatically because it is a pure Python module imported by `genizah_app.py`.
+## NiceGUI integration paths (concrete, per candidate)
 
-### Dep delta
-
-| Dep | Already bundled? | Action |
-|-----|-----------------|--------|
-| `requests` | YES (in spec `hiddenimports` + lock file) | None |
-| `uuid` | YES (stdlib) | None |
-| `sys`, `threading`, `faulthandler` | YES (stdlib) | None |
-| `pathlib`, `os`, `json` | YES (stdlib) | None |
-| `posthog` SDK | NOT added | None |
-
-**Bundle size delta: ~0 KB.** No new wheels, no new C extensions, no `collect_all(...)` entries.
-
-### PyInstaller gotchas to avoid
-
-1. **`__file__` is unreliable in frozen binaries.** Any telemetry code that tries to determine the installation directory via `__file__` will get a path inside the frozen executable's temp dir, not `%LOCALAPPDATA%`. Use `pathlib.Path(os.environ.get('LOCALAPPDATA', '')) / 'GenizahSearchPro'` for persistent storage. The codebase already handles this pattern correctly for other data (Tantivy index, joins.db).
-
-2. **`faulthandler` log file path.** `faulthandler.enable(file=open(...))` must use an absolute path resolved at runtime, not a compile-time path. Resolve via `LOCALAPPDATA` at startup, before `faulthandler.enable()`.
-
-3. **No `collect_all('posthog')` needed** because the SDK is not used. If the SDK were added, it would need `hiddenimports += ['posthog', 'posthog.client', 'posthog.consumer', 'posthog.request']` because the SDK uses internal imports that PyInstaller's static analysis may miss. Verified: no existing hook for `posthog` exists in `pyinstaller-hooks-contrib==2026.3` (confirmed by filesystem check).
-
----
-
-## PostHog Project API Key Embedding
-
-**Verdict: SAFE to embed in the distributed binary. This is standard practice.**
-
-### Key type distinction
-
-| Key type | Format | Purpose | Safe to distribute? |
-|----------|--------|---------|---------------------|
-| **Project API key** ("publishable key") | `phc_...` | Write-only event ingestion (`/capture` endpoint) | YES — by design |
-| **Personal API key** | `phx_...` | Admin API, feature flag local eval, data read | NO — never embed |
-| **Feature flags secret** (secure mode) | per-project | Server-side flag evaluation | NO — never embed |
-
-The project API key (`phc_...`) is a **write-only ingest token**. It cannot be used to read events, query PostHog data, modify settings, or identify other users. PostHog's own documentation confirms this: "Every project has its own distinct write-only token, which you can use to initialize your integration." Browser-side PostHog JS (already shipped in this project's web app) embeds this same key in public HTML source — that is the intended use model.
-
-This project already embeds `POSTHOG_API_KEY` in the web server's environment. The desktop binary embedding the same key (as a Python string constant, not an env var) is equivalent in security posture to the web app's `<script>posthog.init('phc_...')</script>`.
-
-### Abuse considerations
-
-Someone who extracts the key from the binary can only POST fake ingest events to your PostHog project. Mitigations if this becomes a problem (not needed now at this user scale):
-
-- PostHog project-level ingestion filters (block events with unusual `distinct_id` patterns)
-- Rotate the project API key — existing installs simply stop sending until updated (acceptable at this user count)
-
-**Implementation:** embed as a Python string constant in `desktop/telemetry.py`, gated so it is never logged and never included in event properties. Do not use an env var — the frozen binary has no shell environment and `%POSTHOG_API_KEY%` would be empty for end users.
-
----
-
-## Crash and Error Handling Primitives
-
-### Coverage map
-
-| Hook | What it covers | Limitation for PyQt6 |
-|------|---------------|---------------------|
-| `sys.excepthook(type, value, tb)` | Unhandled exceptions on the **main thread** that reach Python's top level | PyQt6 wraps slot invocations in C++ try/catch; Python exceptions raised in slots are often printed to stderr rather than propagated to `sys.excepthook`. Must also call `sys.__excepthook__` to preserve default behavior |
-| `threading.excepthook(args)` | Unhandled exceptions in `threading.Thread` subclasses (Python threads only) | Does NOT cover `QThread` subclasses — their `run()` is called from C++ and exceptions are suppressed by Qt's C++ layer, not Python's |
-| `QThread.run()` wrap | Unhandled exceptions in `QThread` subclasses | Requires explicit `try/except` in each `QThread.run()` override. The codebase already does this in many workers; the telemetry phase should audit and enforce it |
-| `faulthandler` | Native crashes: C extension segfaults, stack overflow, `SIGSEGV` from Tantivy/PyMuPDF/PyQt6 | Only writes to a file/stderr; does not call Python code; cannot POST to PostHog; useful for crash log correlation |
-| `QApplication.notify()` override | ALL Qt events and slot dispatches | Can catch Python exceptions Qt would otherwise swallow. Override `notify()`, call `super().notify()` in try/except; gives most comprehensive Qt coverage |
-
-### Recommended combination
-
-Install ALL of these at app startup in `desktop/telemetry.py::install_exception_hooks()`:
-
-1. `sys.excepthook` — main thread fallback
-2. `threading.excepthook` — background Python threads (`SearchThread`, `LocalIndexerWorker`, `FolderWalkWorker`, etc.)
-3. `QApplication.notify()` override — Qt slot exceptions (the most common PyQt6 crash path)
-4. `faulthandler.enable(file=<log_path>)` — native crashes only (write to file, cannot POST)
-
-**Do NOT use `enable_exception_autocapture=True` on the posthog SDK** (not added). Implement the exception hooks manually to maintain full control over what gets scrubbed.
-
-### Traceback scrubbing
-
-**Do NOT use `capture_exception_code_variables=True`.** The SDK feature sends frame-local variable values to PostHog servers. This is not configurable via `before_send` because the variable extraction happens inside the SDK before `before_send` is called. (HIGH confidence — confirmed by reviewing SDK source and PostHog error-tracking docs.)
-
-Manual scrubbing approach via the `_scrub_hook` in `shared/posthog_server.py`:
-
-```python
-import re
-import traceback
-
-_MY_LIBRARY_ROOT = pathlib.Path(os.environ.get('LOCALAPPDATA', '')) / 'GenizahSearchPro'
-
-def scrub_traceback_payload(event: dict) -> dict | None:
-    props = event.get('properties', {})
-    # Strip any frame-level variable dicts (should not exist in our payloads,
-    # but guard defensively)
-    for frame in props.get('$exception_list', [{}])[0].get('stacktrace', {}).get('frames', []):
-        frame.pop('vars', None)
-    # Redact absolute file paths to basename only
-    tb_text = props.get('$exception_list', [{}])[0].get('value', '')
-    if tb_text:
-        # Replace Windows absolute paths with just the filename
-        props.setdefault('$exception_list', [{}])[0]['value'] = re.sub(
-            r'[A-Za-z]:\\(?:[^\\]+\\)*([^\\]+\.py)', r'...\\\1', tb_text
-        )
-    return event
-```
-
-The actual payload construction for exceptions uses `traceback.format_exception()` output, manually stripped of local variable values (never passed in) and path prefixes.
-
-### Anonymous per-install UUID
-
-**Use `uuid.uuid4()` stored to a local file. Do not use hardware IDs.**
-
-`uuid.uuid1()` encodes the MAC address — it is PII. `uuid4()` is pure random with no hardware linkage.
-
-```python
-def get_or_create_install_id() -> str:
-    id_path = pathlib.Path(os.environ['LOCALAPPDATA']) / 'GenizahSearchPro' / 'telemetry_id.txt'
-    if id_path.exists():
-        return id_path.read_text(encoding='utf-8').strip()
-    new_id = str(uuid.uuid4())
-    id_path.parent.mkdir(parents=True, exist_ok=True)
-    id_path.write_text(new_id, encoding='utf-8')
-    return new_id
-```
-
-Key properties:
-- Generated only when user opts in (not at install time or first launch)
-- Stable across app restarts and updates
-- No linkage to user account, machine, or network address
-- Survives app updates (stored in `LOCALAPPDATA`, not in the install dir which Inno Setup may clean)
-- Disclosure: bilingual "We generate a random, anonymous identifier for your installation" in consent dialog
-
----
+| Candidate | How it embeds in NiceGUI | Interop (node click → /browse) | Verdict |
+|-----------|--------------------------|--------------------------------|---------|
+| **`ui.echart` graph series** | Native: `ui.echart({'series':[{'type':'graph','layout':'none','data':nodes,'links':edges,...}]})`. Positions passed as `x`/`y` with `layout:'none'` (precomputed), or `layout:'force'` for small live graphs. | Server-side: `.on('chart:click', handler)` → `ui.navigate.to(f'/browse?sys_id=...')`. Fully within NiceGUI's event loop. | **Recommended for bounded neighborhoods.** No custom component, no vendored JS. |
+| **Custom Canvas 2D (existing prototype)** | Serve generated self-contained HTML via a FastAPI route; embed with `ui.element('iframe').props('src=/atlas/full')`. Data baked into the asset (or fetched as a binary typed-array). | Prototype already does `window.open(base+'/browse?sys_id='+id)`. Tighter NiceGUI interop via `window.postMessage` if needed. | **Recommended for the whole-corpus flagship.** Lowest risk — it exists and works at 52K. |
+| **sigma.js v3 + graphology** | Custom NiceGUI Vue component: subclass `ui.element`, declare the vendored JS bundle as a component dependency, pass nodes/edges/positions as props, emit node-click via `emitEvent` → Python handler. | First-class via the component's emitted events. | **Escalation only.** Best-in-class WebGL scale, but adds a vendored bundle + a component to maintain. |
+| **cytoscape.js** | Custom Vue component (same pattern as sigma). | First-class. | Alternative to sigma; see table below. |
+| **vis-network** | Custom Vue component. | First-class. | Not recommended (see below). |
 
 ## Alternatives Considered
 
-| Recommended | Alternative | Why Not |
-|-------------|-------------|---------|
-| Extend `shared/posthog_server.py` | Add `posthog` SDK 7.18.3 | SDK brings `capture_exception_code_variables` PII risk, feature flags we cannot use, and one new dep (`backoff`). The raw queue is production-proven and fully sufficient |
-| Manual `sys.excepthook` + `threading.excepthook` + `QApplication.notify()` | `posthog` SDK `enable_exception_autocapture=True` | SDK's autocapture hooks cannot be fully controlled via `before_send` — local variable capture happens before the hook fires. Manual gives full scrub control |
-| `uuid.uuid4()` persisted to file | Hardware ID (MAC, WMIC, Windows machine GUID) | MAC address is PII; hardware IDs change after hardware replacement; `uuid4` is zero-PII and stable enough for analytics |
-| `uuid.uuid4()` persisted to file | Windows registry | Registry requires admin rights on some configs; `LOCALAPPDATA` does not. The app already uses `LOCALAPPDATA` for Tantivy index and joins.db |
-| Embed key as string constant | `POSTHOG_API_KEY` env var | End users run from a GUI launcher with no shell; env var would be empty in all installs |
-| Embed key as string constant | Fetch key from server at runtime | Adds a network dependency at startup; the key is write-only and safe to embed |
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| Canvas 2D starfield (whole-corpus) | **sigma.js v3** (WebGL, MIT) | When the whole-corpus Atlas must be a *live* WebGL graph (real-time pan/zoom over all 52K with dynamic filtering/highlighting and node-level interop) rather than a precomputed starfield. Sigma renders ~100K edges comfortably; still needs precomputed positions. |
+| `ui.echart` (bounded views) | **cytoscape.js 3.34.0** (MIT) | When you need rich graph *styling/analysis* (compound nodes, complex selectors, built-in graph algorithms) on bounded neighborhoods and are willing to build a custom Vue component. Canvas renderer ~1–3K nodes; a WebGL renderer landed in preview (v3.31+). Heavier than `ui.echart` for our needs. |
+| `ui.echart` (bounded views) | **d3-force** | When a fully bespoke, custom-drawn small interactive graph is needed. More control, much more code; only if `ui.echart`'s graph series proves too constraining. |
+| Precompute layout in Python | **In-browser ForceAtlas2** (graphology-layout-forceatlas2, WebWorker) | Only for *small, live* subgraphs (hundreds of nodes) where a fresh layout per view is desired. Never for the full corpus. |
+| python-louvain (BSD) | **leidenalg + python-igraph** (GPL) | When Leiden's higher community-quality is worth it AND the run stays strictly offline (build-time). Already used in `motif_v2_communities.py`. |
 
----
-
-## What NOT to Add
+## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `posthog` SDK (PyPI package) | Brings `capture_exception_code_variables` PII risk; feature flags need a personal API key not appropriate for distribution; `backoff` adds a new dep for no meaningful benefit at this event volume | Extend `shared/posthog_server.py` |
-| `capture_exception_code_variables=True` | Sends frame-local variable values to PostHog servers — catastrophic PII leak for a search app (query text, file paths) | Manual traceback serialization with explicit scrubbing |
-| Sentry / Rollbar / Bugsnag | Third-party crash reporters with their own SDKs, data retention policies, and EU compliance requirements; PostHog is already the analytics platform | PostHog error tracking via `shared/posthog_server.py` |
-| `faulthandler` events to PostHog | Native crashes produce no Python stack; the `faulthandler` output is a raw C stack trace that cannot be safely POST'd | Write `faulthandler` output to a local log file; include the file path in the next session's startup event |
-| Per-query search text in telemetry | Privacy requirement: no query text, no My Library content | Track mode (keyword/Responsa/composition), result count, duration — never the query string |
-| `psutil` for system metrics | Already in lock file but adds telemetry coupling to OS-level data | Limit to `platform.version()` + `sys.platform` for environment data |
+| **Live in-browser force layout over the full 52K graph** (ECharts `layout:'force'`, cytoscape layouts, sigma ForceAtlas2 on all nodes) | Perf cliff: ECharts high-FPS ceiling is ~3K nodes; sigma's force layout degrades past ~50K *edges*; we have hundreds of thousands. Also produces a misleading "hairball." | **Precompute layout offline** (numpy + networkx/louvain), ship positions; render with `layout:'none'` |
+| **`ui.echart` (or any DOM/SVG renderer) for the whole-corpus view** | ECharts/SVG choke at a few thousand nodes; SVG/DOM cannot hold 52K nodes + 100Ks edges | Canvas 2D starfield (WebGL sigma if live interactivity is required) |
+| **Adding `python-igraph` / `leidenalg` to `requirements.txt`** | **GPL** copyleft in a distributed context; also native-compiled → heavier install/CI. They are build-time layout tools, not runtime. | Keep them dev-box-only; prefer BSD `python-louvain`/`networkx` for anything that could drift toward runtime |
+| **Neo4j / any graph database** | The graph is static, read-only, and fits in SQLite; a graph DB is operational overhead (a new service, new auth, new backups) on a memory-constrained shared box with zero payoff | Indexed SQLite edge table + Python BFS for bounded-subgraph extraction |
+| **Plotly / Dash / Bokeh / Streamlit** | Redundant with NiceGUI; a second UI/dashboard stack, heavier payloads, and a duplicate rendering path | `ui.echart` (native) + the Canvas asset |
+| **A separate React/Vue SPA frontend** | NiceGUI already supports custom Vue components for the one place we might need them (sigma); a full SPA fractures the app | NiceGUI page + optional single custom component |
+| **3D graphs (three.js / echarts-gl 3D graph)** | 3D node-link "wows" but hurts legibility, honesty, and accessibility — the brief explicitly requires *scholarly-credible, not misleading*; occlusion + no stable reading order | 2D precomputed layout with domain/library color + glow |
+| **CDN-loaded graph libraries** | A public scholarly site must not depend on third-party CDN availability/privacy; also breaks offline/air-gapped review builds | Vendor any JS (sigma/graphology) into `web/static/` and commit it |
+| **A new DB engine or ORM for the sidecar** | The sidecar is a read-only reference file exactly like the existing sidecars | stdlib `sqlite3`, no ORM |
+| **Upgrading NiceGUI to 3.14.0 for this milestone** | `ui.echart` is fully present in the pinned 3.8.0; a framework-wide bump is a separate, risky change touching the whole app | Stay on `nicegui==3.8.0`; scope any bump to its own task |
 
----
+## Stack Patterns by Variant
 
-## Installation (requirements changes)
+**If the whole-corpus Atlas stays a "stun + explore-then-drill" experience (browse, pan/zoom, click → /browse):**
+- Use the **existing Canvas 2D starfield** with an offline-precomputed positions asset, embedded via `<iframe>`.
+- Because it is already proven at 52K scale, adds no dependency, and costs the prod box only static file serving.
 
-```bash
-# requirements.txt — NO CHANGES needed
-# requirements-lock.txt — NO CHANGES needed
-# GenizahSearchPro.spec — NO CHANGES needed
+**If product feedback demands a *live* whole-corpus graph (dynamic filter/highlight/select across all 52K with server round-trips per node):**
+- Escalate to **sigma.js v3 + graphology** as a single NiceGUI custom Vue component; keep positions precomputed offline.
+- Because sigma's WebGL renderer is the only browser option that handles 100K edges interactively.
 
-# The ONLY code changes are:
-# 1. shared/posthog_server.py  — add opt-in gate + scrub hook + default distinct_id
-# 2. desktop/telemetry.py      — new module (consent, UUID, hooks, event helpers)
-# 3. genizah_app.py            — wire telemetry.init() at startup, consent dialog
-```
+**If the interactive explorer is scoped as "pick a manuscript/work → server extracts an N-hop neighborhood → render it":**
+- Use **`ui.echart` graph series** with `layout:'none'` (precomputed) or `layout:'force'` (small live), server-side BFS over the SQLite edge table.
+- Because bounded neighborhoods are ≤ ~1–2K nodes — comfortably inside ECharts' native envelope, with zero new dependency.
 
----
+**If community detection quality matters for cluster coloring:**
+- Prefer **python-louvain (BSD)** for a clean-license default; use **leidenalg (GPL)** offline only when Leiden's quality is needed.
 
 ## Version Compatibility
 
-| Component | Version | Notes |
-|-----------|---------|-------|
-| `shared/posthog_server.py` (existing) | — | Already uses `requests==2.32.5`, `queue`, `threading` (all available in frozen binary) |
-| `threading.excepthook` | Python 3.8+ | Project requires Python 3.10+; no compatibility issue |
-| `faulthandler` | Python 3.3+ stdlib | Always available |
-| `uuid.uuid4()` | Python 3.x stdlib | Always available |
-| PostHog EU ingest (`https://eu.i.posthog.com/capture`) | — | Already hardcoded in `POSTHOG_CAPTURE_URL`; matches project's existing EU PostHog account (`eu.posthog.com`) |
-| PyInstaller | 6.19.0 (in lock) | No spec changes needed; `shared/` already in `datas`; `desktop/telemetry.py` auto-discovered |
-
----
+| Package A | Compatible With | Notes |
+|-----------|-----------------|-------|
+| `nicegui==3.8.0` | ECharts 5.x (bundled), FastAPI 0.135.1, Starlette 0.52.1, uvicorn 0.41.0 | `ui.echart` + `ui.element('iframe')` + custom Vue components all supported; no upgrade required |
+| `numpy==2.4.3` | `scipy==1.17.1`, `networkx>=3.4` | Already the prod baseline; networkx 3.6.1 (dev) is numpy-2-compatible |
+| `sigma@3.0.3` | `graphology@0.26.x`, `graphology-layout-forceatlas2` | Use v3 **stable**; sigma v4 is alpha — do not adopt until GA |
+| `python-igraph==1.0.0` | `leidenalg==0.12.0` | leidenalg links against igraph; pin together if used offline |
+| product sidecar (SQLite) | same mmap/read-only pattern as `pgp.db`/`fjms_enrichment.db` | Ships as a bundled read-only reference file; WAL not needed (read-only) |
 
 ## Sources
 
-- `/posthog/posthog-python` via Context7 CLI — SDK init options, `capture_exception`, `before_send`, `disabled`, lifecycle (HIGH confidence)
-- `https://pypi.org/pypi/posthog/json` — Latest version 7.18.3, `install_requires`: `requests<3.0,>=2.7`, `backoff>=1.10.0`, `distro>=1.5.0`, `typing-extensions>=4.2.0` (HIGH confidence — authoritative PyPI API)
-- Direct wheel download: `posthog-7.18.3-py3-none-any.whl` = 273 KB; `backoff-2.2.1-py3-none-any.whl` = 15 KB (HIGH confidence — measured)
-- PostHog error tracking docs `https://posthog.com/docs/error-tracking/installation/python` — exception autocapture installs `sys.excepthook` + `threading.excepthook`; `capture_exception_code_variables` sends local vars (HIGH confidence — official docs)
-- PostHog project API key safety: `https://posthog.com/questions/is-it-ok-to-expose-the-posthog-project-api-key-to-the-public` — confirmed write-only ingest key (HIGH confidence)
-- `C:\Genizahsearch\GenizahSearchPro.spec` — direct inspection: `('shared', 'shared')` already in `datas`; no existing posthog hook in `pyinstaller-hooks-contrib==2026.3` confirmed by filesystem search (HIGH confidence)
-- `C:\Genizahsearch\requirements-lock.txt` — `backoff` not present; `distro`, `typing-extensions`, `python-dateutil`, `requests` all present (HIGH confidence — direct file read)
-- PyQt exception hook patterns: `https://fman.io/blog/pyqt-excepthook/` — PyQt truncates tracebacks in slot callbacks; `sys.excepthook` alone insufficient (MEDIUM confidence — well-known blog, consistent with PyQt6 behavior)
-- Python `uuid.uuid1()` MAC address issue: `https://docs.python.org/3/library/uuid.html` — uuid1 uses MAC; uuid4 is random (HIGH confidence — official Python docs)
+- Repo: `same_work_spike/probe/scripts/build_atlas_draft.py`, `build_rehearsal_atlas.py`, `motif_v2_communities.py`, `same_work_spike/probe/results/CODEX-BRIEF-atlas.md`, `ROAD2-DESIGN-OPTIONS.md` — **HIGH** (first-party working prototype: Canvas 2D + precomputed numpy/networkx/louvain layout at 52K/1.34M scale; confirms scale and constraints)
+- `requirements.txt` + `requirements-lock.txt` (nicegui 3.8.0, numpy 2.4.3, scipy 1.17.1, supabase 2.28.0, zstandard 0.25.0) and `pip index/show` (networkx 3.6.1, python-louvain 0.16 BSD, python-igraph 1.0.0 GPL, leidenalg 0.12.0 — all dev-box-only, absent from prod deps) — **HIGH** (installed-environment ground truth)
+- https://nicegui.io/documentation/echart — `ui.echart` events (`on('chart:click')`, `on_point_click`), `run_chart_method`, `:`-prefixed JS formatters — **HIGH**
+- https://github.com/jacomyal/sigma.js + https://www.sigmajs.org/ — WebGL, "thousands of nodes," ~100K edges, accepts precomputed positions, v4 alpha — **HIGH**; sigma@3.0.3 latest stable, MIT — **MEDIUM** (version via npm listing; MIT is well-established)
+- https://graphology.github.io/ + https://github.com/graphology/graphology — MIT, data backend for sigma.js — **HIGH**
+- https://github.com/cytoscape/cytoscape.js/releases + https://js.cytoscape.org/ + WebGL preview blog — v3.34.0 (2026-06), MIT, canvas ~1–3K nodes / WebGL renderer preview — **HIGH**
+- Apache ECharts docs + PMC "Graph visualization efficiency of popular web-based libraries" (PMC12061801) — ECharts-Canvas high-FPS to ~3K nodes; D3-WebGL ~7K; motivates precompute for large graphs — **MEDIUM** (cross-source corroborated, not benchmarked on this corpus)
+- `.planning/PROJECT.md` (v9.0.0 milestone) + `.planning/seeds/SEED-029-*.md` — scope, corpus counts (52,497 MSS / 4,093 works / 275,894 tier-A ids), sidecar/distillation + community-judgment requirements — **HIGH**
 
 ---
-
-*Stack research for: v8.1.0 Desktop Telemetry — opt-in PostHog + crash reporting for PyQt6 frozen binary*
-*Researched: 2026-06-13*
+*Stack research for: NiceGUI discovery module — same-work identification + corpus connection Atlas*
+*Researched: 2026-07-19*
