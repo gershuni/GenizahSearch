@@ -70,7 +70,12 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
   4. The page meets its performance basics — static payload within the PERF-01 atlas byte cap, no request-time computation, CLS-safe render — and EN/HE + RTL basics for this page only (page chrome + labels).
   5. The beta page is live in production ahead of every claim surface, clearly labeled as a beta/preview, per the owner's first-deployable-artifact priority.
   6. A small claim-free homepage teaser card links to `/atlas` under the widened ATLAS-PREVIEW exception — CLS-safe, no claim-level statements, gated by the dedicated atlas-preview flag, masking-scan-clean, EN/HE + RTL, and `noindex` until the REL-01 gate (the full homepage discovery band remains Phase 139).
-**Plans**: TBD
+**Plans**: 5 plans (3 waves)
+- [ ] 133-01-PLAN.md — Masking scan (D-07) + working-tree M-source scrub
+- [ ] 133-02-PLAN.md — Offline atlas bake: strip overlay, node-gap fix (>=62,414), typed-array + Brotli asset
+- [ ] 133-03-PLAN.md — ATLAS_PREVIEW flag + /atlas route + Brotli data route + page chrome + clean-hide
+- [ ] 133-04-PLAN.md — Canvas 2D renderer + interactions + /browse click-through + render-smoke
+- [ ] 133-05-PLAN.md — Claim-free homepage teaser card (noindex /atlas target)
 **UI hint**: yes
 
 ### Phase 134: Discovery Data Spine
@@ -153,7 +158,7 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 133. Visual Atlas Preview (early quick win) | 0/TBD | Not started | - |
+| 133. Visual Atlas Preview (early quick win) | 0/5 | Planned | - |
 | 134. Discovery Data Spine | 0/TBD | Not started | - |
 | 135. Precision Certificate & Confidence Bands | 0/TBD | Not started | - |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
