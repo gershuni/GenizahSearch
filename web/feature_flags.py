@@ -14,6 +14,15 @@ def _env_enabled(name: str, default: bool) -> bool:
 
 WEB_PUZZLE_ENABLED = _env_enabled("WEB_PUZZLE_ENABLED", True)
 
+# Phase 133 (ATLAS-01) — Visual Atlas Preview. Default OFF: the flag is the
+# safety mechanism that keeps the not-yet-released beta surface (the /atlas
+# page, its data routes, and the nav link) hidden in production until the
+# REL-01 launch gate. Enable in the beta environment with ATLAS_PREVIEW_ENABLED=1.
+# NOTE: this flag is necessary but NOT sufficient — the single authoritative
+# predicate web/atlas_assets.py::atlas_preview_available() ANDs it with the
+# baked-asset readiness state, so a flag-ON/asset-missing window still hides.
+ATLAS_PREVIEW_ENABLED = _env_enabled("ATLAS_PREVIEW_ENABLED", False)
+
 
 def web_fgp_enabled() -> bool:
     """Whether FGP transcriptions surface in the WEB version chooser.

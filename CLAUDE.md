@@ -136,6 +136,8 @@ SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
 POSTHOG_API_KEY=phc_xxxxx (optional - enables PostHog analytics)
 WEB_PUZZLE_ENABLED=true (default: true)
+ATLAS_PREVIEW_ENABLED=false   # web-only (Phase 133, ATLAS-01). Default OFF — gates the Visual Atlas Preview beta: the /atlas page, its /atlas-data/* routes, and the nav link. The flag is necessary but NOT sufficient: web/atlas_assets.py::atlas_preview_available() ANDs it with the baked-asset readiness (manifest + plain .bin loaded at startup from repo-root atlas_data/, OUTSIDE web/static/), so a flag-ON/asset-missing window still hides cleanly. Set to 1/true to enable in the beta env.
+MASKING_SCAN_PATTERNS_FILE=/path/to/.masking_patterns   # dev/CI-only (Phase 133+). Points scripts/check_atlas_masking.py at a gitignored, newline-delimited restricted-string ("M-source") pattern file (never committed in cleartext; same secret-handling posture as .env). Unset/empty => the masking scan fails safe (exit 1, never a silent green). Forerunner of the permanent DATA-05 CI guard (Phase 134).
 FGP_TRANSCRIPTIONS_ENABLED=true   # shared (both apps): show FGP transcriptions as a distinct, selectable source in the version chooser. Default ON (2026-06-22 go-live) — surfaces wherever the gitignored fgp_data/fgp_transcriptions.db is present; graceful no-op when the DB is absent. Kill-switch: set to 0/false/no/off. Read live in shared/fgp_service.py.
 WEB_FGP_ENABLED=...               # optional web-only override of the above (web/feature_flags.py::web_fgp_enabled); defaults to FGP_TRANSCRIPTIONS_ENABLED (ON). Disable on web only with WEB_FGP_ENABLED=0.
 PUZZLE_UPLOAD_SECRET=xxx (optional - HMAC secret for puzzle upload tokens; auto-generated if unset)

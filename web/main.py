@@ -685,7 +685,16 @@ from web.state import state
 from web.api import init_api_routes
 from web.search_api import init_search_api
 from web.translations import tr, set_language, get_language
-from web.feature_flags import WEB_PUZZLE_ENABLED
+from web.feature_flags import WEB_PUZZLE_ENABLED, ATLAS_PREVIEW_ENABLED
+from web.atlas_assets import (
+    load_atlas_state,
+    atlas_preview_available,
+    atlas_bin_name,
+    atlas_plain_bytes,
+    atlas_br_bytes,
+    atlas_manifest_bytes,
+    atlas_manifest_etag,
+)
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
 
 # App configuration
@@ -738,6 +747,14 @@ app.mount("/api", _search_helper_app)
 # Serve static files for SEO images
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
 app.add_static_files('/static', STATIC_DIR)
+
+# Phase 133 (ATLAS-01): load the baked Visual Atlas Preview asset ONCE at
+# startup from repo-root atlas_data/ (web.atlas_assets.ATLAS_DATA_DIR), which is
+# deliberately OUTSIDE STATIC_DIR (HIGH-1) so the asset is NEVER reachable via
+# the public /static mount above. It is served ONLY through the flag+readiness-
+# gated /atlas-data/* routes registered below. Fail-closed: a missing/broken
+# asset just leaves atlas_preview_available() False and the beta hides cleanly.
+load_atlas_state()
 
 # ============================================================================
 # Website Metadata - SEO & Social Sharing
@@ -1157,6 +1174,13 @@ def create_layout():
                 ]
                 if WEB_PUZZLE_ENABLED:
                     nav_items.append(('/puzzle', 'extension', tr('Fragment Puzzle'), None))
+                # Phase 133 (ATLAS-01, MEDIUM-6): gate on the SAME availability
+                # predicate as the /atlas route + data routes (NOT just the flag)
+                # so a flag-ON/asset-missing window never advertises a broken
+                # link. "Connections Atlas" / "Beta" — never "Discoveries"
+                # (Pitfall #8: the existing /discoveries nav item is unrelated).
+                if atlas_preview_available():
+                    nav_items.append(('/atlas', 'hub', tr('Connections Atlas'), tr('Beta')))
 
                 for path, icon, label, badge in nav_items:
                     is_active = current_page == path
@@ -1953,6 +1977,58 @@ def puzzle_page_route(add: str = None, doc: str = None):
             return
         from web.pages.puzzle import create_puzzle_page
         create_puzzle_page(initial_add=add, initial_doc=doc)
+
+@ui.page('/atlas', title='Connections Atlas | אטלס החיבורים — Dicta Genizah Search')
+def atlas_page_route():
+    """Phase 133 (ATLAS-01): the Visual Atlas Preview beta page.
+
+    Gated on the single authoritative atlas_preview_available() predicate (flag
+    ON *and* the baked asset loaded). When unavailable — flag OFF (default) OR
+    the asset is not loaded — the page clean-hides with a "temporarily
+    unavailable" card and NEVER delegates to create_atlas_page (D-12/D-13).
+    noindex until the REL-01 gate (D-16).
+    """
+    safe_user_set('current_page', '/atlas')
+    ui.add_head_html(page_meta(
+        '/atlas',
+        title='Connections Atlas | אטלס החיבורים — Dicta Genizah Search',
+        description='A claim-free preview of the Cairo Genizah connections atlas — an algorithmically laid-out overview of textual connections across the connected corpus.',
+        noindex=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        # Clean-hide gate: gated on atlas_preview_available() (the shared
+        # predicate), NOT os.path.exists — so a flag-ON/asset-not-loaded window
+        # shows the unavailable card instead of broken chrome over a 404ing
+        # fetch. Early return means create_atlas_page is unreachable when
+        # unavailable.
+        if not atlas_preview_available():
+            is_hebrew = get_language() == 'he'
+            with ui.column().classes('w-full max-w-3xl mx-auto p-6'):
+                with ui.card().classes('w-full p-8'):
+                    ui.icon('construction').classes('text-4xl text-amber-600 mb-3')
+                    ui.label(
+                        'אטלס החיבורים אינו זמין כרגע' if is_hebrew
+                        else 'The Connections Atlas is temporarily unavailable'
+                    ).classes('text-2xl font-bold mb-2')
+                    ui.label(
+                        'תצוגת התצוגה המקדימה תופיע כאן ברגע שהיא תהיה מוכנה.'
+                        if is_hebrew else
+                        'The preview will appear here as soon as it is ready.'
+                    ).classes('text-base').style('color: var(--text-secondary);')
+                    with ui.row().classes('gap-2 mt-4'):
+                        ui.button(
+                            'עמוד הבית' if is_hebrew else 'Home',
+                            on_click=lambda: ui.navigate.to('/'),
+                        ).props('flat')
+            return
+        from web.pages.atlas import create_atlas_page
+        create_atlas_page()
 
 @ui.page('/privacy-extension', title='GenizahSearch Image Helper — Privacy Policy')
 def privacy_extension_route():

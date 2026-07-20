@@ -54,6 +54,8 @@ SUPABASE_ANON_KEY=your-anon-key
 # Optional
 GENIZAH_PORT=8081
 WEB_PUZZLE_ENABLED=true   # enables web puzzle page (set false to hide)
+ATLAS_PREVIEW_ENABLED=false  # Phase 133 Visual Atlas Preview beta (/atlas); default OFF, ANDed with baked-asset readiness
+MASKING_SCAN_PATTERNS_FILE=  # path to a gitignored restricted-string pattern file for scripts/check_atlas_masking.py (dev/CI only)
 PUZZLE_UPLOAD_SECRET=xxx  # HMAC secret for puzzle upload tokens (auto-generated if unset)
 NLI_DISK_CACHE_TTL=2592000  # restart-persistent NLI FL-ID cache TTL in seconds (default 30 days)
 NLI_MAX_CONCURRENT_FETCHES=4  # concurrent NLI manifest fetch cap
@@ -291,6 +293,9 @@ results = engine.execute_search('שלום', mode='variants', gap=2, limit=100)
 | `POSTHOG_API_KEY` | No | PostHog analytics (optional, enables session recordings) |
 | `GENIZAH_PORT` | No | Web app port (default: 8081) |
 | `NICEGUI_RELOAD` | No | Hot reload (default: true in dev) |
+| `WEB_PUZZLE_ENABLED` | No | Show the web Fragment Puzzle page (default: true) |
+| `ATLAS_PREVIEW_ENABLED` | No | Phase 133 Visual Atlas Preview beta `/atlas` (default: false). Necessary but not sufficient — `web/atlas_assets.py::atlas_preview_available()` ANDs it with baked-asset readiness (manifest + plain `.bin` loaded from repo-root `atlas_data/`, outside `web/static/`) |
+| `MASKING_SCAN_PATTERNS_FILE` | No (dev/CI) | Path to a gitignored, newline-delimited restricted-string pattern file for `scripts/check_atlas_masking.py`; unset/empty fails the scan safe (exit 1) |
 | `NLI_DISK_CACHE_TTL` | No | Persistent NLI FL-ID cache TTL in seconds (default: 2592000 / 30 days) |
 | `NLI_MAX_CONCURRENT_FETCHES` | No | Concurrent NLI manifest fetch cap (default: 4) |
 | `NLI_SEMAPHORE_TIMEOUT` | No | Seconds to wait for an NLI semaphore slot before returning empty (default: 20) |

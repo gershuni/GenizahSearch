@@ -923,9 +923,27 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `catalog_browse_page_route` (Line 1026) — FJMS catalog browse route
 - **Function** `lists_page_route` (Line 1070) — user lists route
 - **Function** `puzzle_page_route` (Line 1084) — fragment puzzle route
+- **Function** `atlas_page_route` — Phase 133 Visual Atlas Preview beta `/atlas` route; gated on `atlas_preview_available()`, clean-hides + `noindex` when unavailable
+- **Function** `_negotiate_encoding` — Accept-Encoding q-value negotiation (br/identity/`*`, honoring `q=0`) for the atlas data route; returns `'br' | 'identity' | None` (None → 406)
+- **Function** `_register_atlas_data_routes` — registers `/atlas-data/manifest.json` (no-cache + ETag + 304) and `/atlas-data/{asset_name}` (content-hashed, immutable, Brotli) onto the app; both gated on `atlas_preview_available()`
 - **Function** `auth_callback_route` (Line 1317) — OAuth callback handler
 - **Function** `initialize_engine` (Line 1404) — async startup: load search engine, metadata, variants
 - **Function** `_find_free_port` (Line 1465) — dev-mode port auto-discovery
+
+## web/atlas_assets.py
+
+Phase 133 (ATLAS-01) — the SINGLE authoritative asset-state source for the Visual Atlas Preview. Loads the baked binary once at startup from repo-root `atlas_data/` (deliberately OUTSIDE `web/static/`, HIGH-1) and exposes the shared availability predicate + byte accessors the `/atlas` page, nav link, and `/atlas-data/*` routes all consume.
+
+- **Constant** `ATLAS_DATA_DIR` — repo-root `atlas_data/` (outside `STATIC_DIR`)
+- **Function** `load_atlas_state` — read manifest + plain `.bin` (required) + `.bin.br` (optional) once at startup; fail-closed (`ready=False`) on any error
+- **Function** `atlas_preview_available` — `ATLAS_PREVIEW_ENABLED and state.ready`; the one predicate gating page/nav/data routes (and the 133-05 teaser)
+- **Functions** `atlas_bin_name` / `atlas_plain_bytes` / `atlas_br_bytes` / `atlas_manifest_bytes` / `atlas_manifest_etag` — byte + ETag accessors for the data routes
+
+## web/pages/atlas.py
+
+Phase 133 (ATLAS-01) — the Visual Atlas Preview page chrome (shared-shell embedded, Pattern 1).
+
+- **Function** `create_atlas_page` — Beta badge + honesty banner + one-line intro (EN/HE + RTL via `tr`/`is_rtl`), a CLS-reserved fixed-dimension `<canvas>` container, and a documented JS injection point the 133-04 Canvas 2D renderer fills in
 
 ## web/framework_patches.py
 
