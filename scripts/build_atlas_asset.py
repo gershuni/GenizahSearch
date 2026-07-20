@@ -82,6 +82,7 @@ LABEL_MIN_N = 25        # clusters below this size get no label (matches the lay
 CONT_MIN_CLUSTER = 2    # continuation components are always >= 2 (an edge implies 2 endpoints) -- kept for parity/clarity
 ISLAND_MIN_CLUSTER = 1  # RESOLVED decision: island-only components are NEVER dropped, incl. singletons
 BYTE_BUDGET_CAP = 6_000_000  # D-10 / PERF-01 preview byte cap (Brotli-compressed)
+REGRESSION_FLOOR = 62_414  # historical node-count floor for a REAL research-DB bake (D-09)
 
 _SYS_ID_MAX = 2 ** 64
 _PURE_DIGIT_RE = re.compile(r"^[0-9]+$")
@@ -330,6 +331,22 @@ def synthetic_dataset(n: int, seed: int = SEED, malicious: bool = False, n_islan
     return ms_pairs, sys_meta, domains, sys_ids
 
 
+# Canonical input for the COMMITTED golden fixture. Shared by the CLI
+# --golden path and the encoder-output-lock test (MEDIUM-1) so the two can
+# never drift. n=40 with n_island=6 yields a 34-node continuation component
+# (>= LABEL_MIN_N=25) so the cluster-label sections are actually exercised
+# (MEDIUM-2), plus the island chain + true-singleton edge cases and the
+# fabricated XSS-shaped title (malicious=True).
+_GOLDEN_N = 40
+_GOLDEN_N_ISLAND = 6
+
+
+def golden_dataset():
+    """Build the exact synthetic dataset the committed golden fixture is baked
+    from (deterministic, fabricated, masking-safe -- never M-source)."""
+    return synthetic_dataset(_GOLDEN_N, seed=SEED, malicious=True, n_island=_GOLDEN_N_ISLAND)
+
+
 # ---------------------------------------------------------------------------
 # Recursive Louvain split (oversized components -> legible sub-regions, D-03)
 # ---------------------------------------------------------------------------
@@ -386,17 +403,69 @@ def _ms_group(sys_id, domains: dict) -> int:
     return top[0][0]
 
 
+# ---------------------------------------------------------------------------
+# sys_id canonicalization -- HIGH-2. Pair endpoints, graph node keys,
+# libraries.csv metadata keys and FJMS domain keys can arrive as a MIX of
+# `str` and `int` (sqlite TEXT columns vs INTEGER columns, libraries.csv is
+# always text). Left unnormalized, `eligible` (canonicalized to int) never
+# matches the raw graph/metadata keys, so lookups silently miss (losing
+# title/domain/library) and set operations produce phantom duplicate/extra
+# nodes. Everything is reduced to the SINGLE canonical int representation
+# (validate_sys_id) BEFORE the bake so every lookup and set op uses one type.
+# ---------------------------------------------------------------------------
+
+def _canonicalize_ms_pairs(ms_pairs: dict) -> dict:
+    """Reduce every pair endpoint to its canonical int sys_id. An invalid
+    endpoint FAILS the bake (validate_sys_id raises) -- pair endpoints are
+    eligible nodes. Re-orders each key by INT value (string order != int
+    order) and merges any pairs that collapse onto the same canonical
+    endpoints (n summed, best_len maxed, cont/island summed)."""
+    out: dict = defaultdict(lambda: [0, 0, 0, 0])
+    for (a, b), r in ms_pairs.items():
+        ca, cb = validate_sys_id(a), validate_sys_id(b)
+        key = (ca, cb) if ca <= cb else (cb, ca)
+        acc = out[key]
+        acc[0] += r[0]
+        acc[1] = max(acc[1], r[1] or 0)
+        acc[2] += r[2]
+        acc[3] += r[3]
+    return dict(out)
+
+
+def _canonicalize_meta(meta: dict) -> dict:
+    """Re-key metadata (libraries.csv titles / FJMS domains) by the canonical
+    int sys_id so lookups match the canonicalized pair endpoints. Metadata for
+    a non-conforming sys_id (one that could never be an eligible node) is
+    dropped rather than failing the whole bake -- only pair endpoints are hard
+    invariants."""
+    out: dict = {}
+    for k, v in meta.items():
+        try:
+            ck = validate_sys_id(k)
+        except ValueError:
+            continue
+        out[ck] = v
+    return out
+
+
 def run_bake(ms_pairs: dict, sys_meta: dict, domains: dict, *, seed: int = SEED,
              split_at: int = SPLIT_AT, label_min_n: int = LABEL_MIN_N) -> BakeResult:
     """Pure function: clusters + lays out + validates the bake. Raises
     ValueError if any eligible sys_id fails the BigUint64 pure-digit-<2**64
     invariant (no fallback -- see validate_sys_id / schema §7)."""
 
+    # ---- HIGH-2: canonicalize EVERY sys_id to its single int representation ----
+    # (pair endpoints, graph node keys, and libraries.csv/domain metadata keys)
+    # so lookups and set operations all use one type. Invalid pair endpoints
+    # FAIL the bake; non-conforming metadata keys are dropped (they can never
+    # match an eligible node).
+    ms_pairs = _canonicalize_ms_pairs(ms_pairs)
+    sys_meta = _canonicalize_meta(sys_meta)
+    domains = _canonicalize_meta(domains)
+
     # ---- eligible set = every sys_id in ANY manuscript-pair relation ----
-    eligible_raw = {s for k in ms_pairs for s in k}
-    for s in eligible_raw:
-        validate_sys_id(s)  # FAILS the bake (raises) on any violation
-    eligible = {int(validate_sys_id(s)) for s in eligible_raw}
+    # (keys are already canonical ints after _canonicalize_ms_pairs)
+    eligible = {s for k in ms_pairs for s in k}
 
     # ---- continuation ("same-work") backbone ----
     cont_keys = [k for k, r in ms_pairs.items() if r[2] >= max(1, r[3])]
@@ -607,14 +676,36 @@ def run_bake(ms_pairs: dict, sys_meta: dict, domains: dict, *, seed: int = SEED,
     for node in nodes:
         node[4] = lib_pos[node[4]]  # replace library code text with its index
 
+    # ---- HIGH-3 defense-in-depth: the ENCODED node set must be duplicate-free
+    # and exactly equal to the eligible connected-endpoint set. Correct
+    # canonicalization (HIGH-2) + island-inclusion (ISLAND_MIN_CLUSTER=1)
+    # guarantee this; a violation here is a bake bug, not a recoverable
+    # condition, so it raises rather than silently emitting a wrong asset. ----
+    encoded_ids = {nd[6] for nd in nodes}
+    if len(encoded_ids) != len(nodes):
+        raise ValueError(
+            f"duplicate node sys_id in encoded output: {len(nodes)} nodes, "
+            f"{len(encoded_ids)} unique"
+        )
+    if encoded_ids != eligible:
+        raise ValueError(
+            "encoded node-id set does not equal the eligible connected-endpoint "
+            f"set (encoded={len(encoded_ids)}, eligible={len(eligible)})"
+        )
+
     # ---- manuscript<->manuscript edges (node-index pairs; class byte) ----
+    # EDGE_CLASS polarity is fixed by the FROZEN schema (§4 id 11): 0 =
+    # continuation (same-work evidence), 1 = island (citation/quotation). A
+    # continuation-DOMINANT pair (r[2] >= max(1, r[3])) is class 0; everything
+    # else is class 1. (HIGH-1 — the encoder must match the authoritative
+    # schema doc, not the reverse.)
     edges = []
     for (a, b), r in ms_pairs.items():
         ia, ib = node_idx.get(a), node_idx.get(b)
         if ia is None or ib is None:
             continue
         src, tgt = (ia, ib) if ia <= ib else (ib, ia)
-        edges.append([src, tgt, 1 if r[2] >= max(1, r[3]) else 0])
+        edges.append([src, tgt, 0 if r[2] >= max(1, r[3]) else 1])
     edges.sort(key=lambda e: (e[0], e[1]))
 
     cluster_labels = [
@@ -1003,6 +1094,27 @@ def assert_byte_budget(nbytes: int, cap: int = BYTE_BUDGET_CAP) -> None:
         raise ValueError(f"byte budget exceeded: {nbytes:,} bytes > cap {cap:,} bytes")
 
 
+def assert_bake_complete(result: BakeResult) -> None:
+    """HIGH-3: the bake REFUSES to emit an asset unless the placed node set
+    exactly equals the eligible connected-endpoint set -- missing AND extra
+    both empty (D-09 / HIGH-5; no ">=" fudge). Raises ValueError (bake FAILS)
+    on any mismatch. Enforced before any bytes are written, and by main() for
+    every mode (incl. --report), so a node-set mismatch can never be reported
+    as a successful bake."""
+    if result.missing or result.extra:
+        raise ValueError(
+            "node-set mismatch -- bake refuses to write: "
+            f"{len(result.missing)} missing, {len(result.extra)} extra "
+            f"(eligible={result.eligible_count}, placed={result.placed_count}); "
+            "the bake requires EXACT set equality (missing==0 and extra==0)"
+        )
+    if result.placed_count != result.eligible_count:
+        raise ValueError(
+            f"placed_count ({result.placed_count}) != eligible_count "
+            f"({result.eligible_count}) despite empty missing/extra"
+        )
+
+
 def build_manifest(result: BakeResult, encoded: EncodedAsset, content_hash: str,
                     asset_basename: str, source_db_hash: str) -> dict:
     """Schema §8 companion manifest. NO discovery-overlay fields (D-04)."""
@@ -1090,8 +1202,7 @@ def main(argv=None) -> int:
 
     t0 = time.time()
     if args.golden is not None:
-        ms_pairs, sys_meta, domains, _ids = synthetic_dataset(
-            30, seed=SEED, malicious=True, n_island=6)
+        ms_pairs, sys_meta, domains, _ids = golden_dataset()
         source_db_hash = "golden-synthetic-v1"
     elif args.smoke is not None:
         ms_pairs, sys_meta, domains, _ids = synthetic_dataset(args.smoke, seed=SEED)
@@ -1106,6 +1217,9 @@ def main(argv=None) -> int:
     print_stats(result)
     print(f"(bake pipeline complete in {time.time() - t0:.1f}s)")
 
+    # HIGH-3: FAIL every mode (incl. --report) unless eligible == placed exactly.
+    assert_bake_complete(result)
+
     if args.golden is not None:
         return _write_golden(result, args.golden)
     if args.report:
@@ -1118,6 +1232,7 @@ def _write_golden(result: BakeResult, golden_path: str) -> int:
         print("ERROR: Brotli is required (pip install -r requirements-atlas-bake.txt)",
               file=sys.stderr)
         return 1
+    assert_bake_complete(result)  # HIGH-3: refuse to write on any node-set mismatch
     encoded = encode_asset(result)
     bin_path = Path(golden_path)
     br_path = bin_path.with_name(bin_path.name + ".br")
@@ -1139,6 +1254,19 @@ def _write_production(result: BakeResult, out_dir: Optional[str], source_db_hash
         print("ERROR: Brotli is required (pip install -r requirements-atlas-bake.txt)",
               file=sys.stderr)
         return 1
+    # HIGH-3: refuse to write on any node-set mismatch (missing/extra non-empty).
+    assert_bake_complete(result)
+    # HIGH-3 additional regression floor: a REAL research-DB bake must place at
+    # least REGRESSION_FLOOR nodes (D-09 historical floor). Synthetic --smoke /
+    # --golden bakes are far smaller by design, so the floor is scoped to real
+    # bakes via the source-DB marker.
+    if (not source_db_hash.startswith(("smoke-", "golden-"))
+            and result.placed_count < REGRESSION_FLOOR):
+        raise ValueError(
+            f"regression floor: placed_count {result.placed_count:,} < "
+            f"{REGRESSION_FLOOR:,} (a real research-DB bake is expected to place "
+            "at least this many nodes)"
+        )
     encoded = encode_asset(result)
     content_hash = hashlib.sha256(encoded.plain_bytes).hexdigest()[:12]
     basename = f"atlas-v1-{content_hash}"

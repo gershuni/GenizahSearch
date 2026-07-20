@@ -1,148 +1,199 @@
 {
-  "cluster_labels": [],
+  "cluster_labels": [
+    {
+      "ci": 0,
+      "dgrp": 0,
+      "dom": "מקרא",
+      "n": 34,
+      "r": 23.5,
+      "title": "Piyyut fragment for the Sabbath",
+      "x": 28.100000381469727,
+      "y": 25.0
+    }
+  ],
   "edges": [
     {
-      "cls": 1,
+      "cls": 0,
       "source": 0,
       "target": 1
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 0,
-      "target": 9
+      "target": 15
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 0,
-      "target": 11
+      "target": 17
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 1,
       "target": 2
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 1,
-      "target": 12
+      "target": 18
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 2,
       "target": 3
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 2,
-      "target": 13
+      "target": 19
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 3,
       "target": 4
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 3,
-      "target": 14
+      "target": 20
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 4,
       "target": 5
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 4,
-      "target": 15
+      "target": 21
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 5,
       "target": 6
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 5,
-      "target": 16
+      "target": 22
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 6,
       "target": 7
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 6,
-      "target": 17
+      "target": 23
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 7,
       "target": 8
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 7,
-      "target": 18
+      "target": 24
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 8,
-      "target": 19
+      "target": 9
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 8,
-      "target": 20
+      "target": 25
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 9,
       "target": 10
     },
     {
       "cls": 0,
       "source": 9,
-      "target": 29
+      "target": 26
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 10,
       "target": 11
     },
     {
-      "cls": 1,
+      "cls": 0,
+      "source": 10,
+      "target": 27
+    },
+    {
+      "cls": 0,
+      "source": 11,
+      "target": 12
+    },
+    {
+      "cls": 0,
+      "source": 11,
+      "target": 28
+    },
+    {
+      "cls": 0,
       "source": 12,
       "target": 13
     },
     {
-      "cls": 1,
+      "cls": 0,
+      "source": 12,
+      "target": 29
+    },
+    {
+      "cls": 0,
+      "source": 13,
+      "target": 14
+    },
+    {
+      "cls": 0,
+      "source": 13,
+      "target": 30
+    },
+    {
+      "cls": 0,
       "source": 14,
-      "target": 15
+      "target": 31
+    },
+    {
+      "cls": 0,
+      "source": 14,
+      "target": 32
+    },
+    {
+      "cls": 0,
+      "source": 15,
+      "target": 16
     },
     {
       "cls": 1,
+      "source": 15,
+      "target": 39
+    },
+    {
+      "cls": 0,
       "source": 16,
       "target": 17
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 18,
       "target": 19
     },
     {
-      "cls": 1,
+      "cls": 0,
       "source": 20,
       "target": 21
     },
     {
-      "cls": 1,
-      "source": 21,
-      "target": 22
-    },
-    {
-      "cls": 1,
+      "cls": 0,
       "source": 22,
       "target": 23
     },
@@ -153,18 +204,43 @@
     },
     {
       "cls": 0,
-      "source": 24,
+      "source": 26,
       "target": 27
     },
     {
       "cls": 0,
-      "source": 25,
-      "target": 26
+      "source": 28,
+      "target": 29
     },
     {
       "cls": 0,
-      "source": 26,
-      "target": 28
+      "source": 30,
+      "target": 31
+    },
+    {
+      "cls": 0,
+      "source": 32,
+      "target": 33
+    },
+    {
+      "cls": 1,
+      "source": 34,
+      "target": 35
+    },
+    {
+      "cls": 1,
+      "source": 34,
+      "target": 37
+    },
+    {
+      "cls": 1,
+      "source": 35,
+      "target": 36
+    },
+    {
+      "cls": 1,
+      "source": 36,
+      "target": 38
     }
   ],
   "flows": [
@@ -183,8 +259,8 @@
       "shelfmark": "SYN 0003.4",
       "sys_id": "990000000000000003",
       "title": "Liturgical poem for festivals",
-      "x": 29.600000381469727,
-      "y": 23.799999237060547
+      "x": 31.299999237060547,
+      "y": 25.299999237060547
     },
     {
       "cluster": 0,
@@ -194,8 +270,8 @@
       "shelfmark": "SYN 0004.5",
       "sys_id": "990000000000000004",
       "title": "Talmudic gloss",
-      "x": 22.200000762939453,
-      "y": 27.5
+      "x": 24.0,
+      "y": 28.799999237060547
     },
     {
       "cluster": 0,
@@ -205,8 +281,8 @@
       "shelfmark": "SYN 0007.1",
       "sys_id": "990000000000000007",
       "title": "Bible commentary leaf",
-      "x": 27.200000762939453,
-      "y": 17.600000381469727
+      "x": 29.0,
+      "y": 19.399999618530273
     },
     {
       "cluster": 0,
@@ -216,8 +292,8 @@
       "shelfmark": "SYN 0008.2",
       "sys_id": "990000000000000008",
       "title": "Halakhic responsum",
-      "x": 30.399999618530273,
-      "y": 29.5
+      "x": 31.899999618530273,
+      "y": 30.600000381469727
     },
     {
       "cluster": 0,
@@ -227,8 +303,8 @@
       "shelfmark": "SYN 0011.5",
       "sys_id": "990000000000000011",
       "title": "",
-      "x": 17.799999237060547,
-      "y": 22.600000381469727
+      "x": 19.899999618530273,
+      "y": 24.200000762939453
     },
     {
       "cluster": 0,
@@ -238,8 +314,8 @@
       "shelfmark": "SYN 0012.6",
       "sys_id": "990000000000000012",
       "title": "Piyyut fragment for the Sabbath",
-      "x": 34.400001525878906,
-      "y": 18.899999618530273
+      "x": 35.79999923706055,
+      "y": 20.600000381469727
     },
     {
       "cluster": 0,
@@ -249,8 +325,8 @@
       "shelfmark": "SYN 0015.2",
       "sys_id": "990000000000000015",
       "title": "Liturgical poem for festivals",
-      "x": 23.600000381469727,
-      "y": 33.099998474121094
+      "x": 25.5,
+      "y": 34.0
     },
     {
       "cluster": 0,
@@ -260,8 +336,8 @@
       "shelfmark": "SYN 0016.3",
       "sys_id": "990000000000000016",
       "title": "Talmudic gloss",
-      "x": 21.299999237060547,
-      "y": 13.300000190734863
+      "x": 23.299999237060547,
+      "y": 15.100000381469727
     },
     {
       "cluster": 0,
@@ -271,8 +347,74 @@
       "shelfmark": "SYN 0019.6",
       "sys_id": "990000000000000019",
       "title": "Bible commentary leaf",
-      "x": 37.70000076293945,
-      "y": 27.700000762939453
+      "x": 39.0,
+      "y": 29.0
+    },
+    {
+      "cluster": 0,
+      "domain": 7,
+      "library": 1,
+      "prominence": 8,
+      "shelfmark": "SYN 0020.7",
+      "sys_id": "990000000000000020",
+      "title": "Halakhic responsum",
+      "x": 17.5,
+      "y": 29.299999237060547
+    },
+    {
+      "cluster": 0,
+      "domain": 10,
+      "library": 3,
+      "prominence": 8,
+      "shelfmark": "SYN 0023.3",
+      "sys_id": "990000000000000023",
+      "title": "",
+      "x": 34.0,
+      "y": 14.300000190734863
+    },
+    {
+      "cluster": 0,
+      "domain": 11,
+      "library": 0,
+      "prominence": 8,
+      "shelfmark": "SYN 0024.4",
+      "sys_id": "990000000000000024",
+      "title": "Piyyut fragment for the Sabbath",
+      "x": 32.29999923706055,
+      "y": 36.900001525878906
+    },
+    {
+      "cluster": 0,
+      "domain": 1,
+      "library": 4,
+      "prominence": 8,
+      "shelfmark": "SYN 0027.7",
+      "sys_id": "990000000000000027",
+      "title": "Liturgical poem for festivals",
+      "x": 16.299999237060547,
+      "y": 17.600000381469727
+    },
+    {
+      "cluster": 0,
+      "domain": 2,
+      "library": 3,
+      "prominence": 8,
+      "shelfmark": "SYN 0028.1",
+      "sys_id": "990000000000000028",
+      "title": "Talmudic gloss",
+      "x": 41.29999923706055,
+      "y": 22.200000762939453
+    },
+    {
+      "cluster": 0,
+      "domain": 5,
+      "library": 2,
+      "prominence": 8,
+      "shelfmark": "SYN 0031.4",
+      "sys_id": "990000000000000031",
+      "title": "Bible commentary leaf",
+      "x": 20.0,
+      "y": 37.599998474121094
     },
     {
       "cluster": 0,
@@ -282,8 +424,8 @@
       "shelfmark": "SYN 0000.1",
       "sys_id": "990000000000000000",
       "title": "Piyyut fragment for the Sabbath",
-      "x": 15.199999809265137,
-      "y": 28.100000381469727
+      "x": 25.899999618530273,
+      "y": 9.899999618530273
     },
     {
       "cluster": 0,
@@ -293,8 +435,8 @@
       "shelfmark": "SYN 0001.2",
       "sys_id": "990000000000000001",
       "title": "Bible commentary leaf",
-      "x": 32.400001525878906,
-      "y": 12.300000190734863
+      "x": 39.900001525878906,
+      "y": 34.599998474121094
     },
     {
       "cluster": 0,
@@ -304,8 +446,8 @@
       "shelfmark": "SYN 0002.3",
       "sys_id": "990000000000000002",
       "title": "Halakhic responsum",
-      "x": 30.700000762939453,
-      "y": 36.20000076293945
+      "x": 11.600000381469727,
+      "y": 25.600000381469727
     },
     {
       "cluster": 0,
@@ -315,8 +457,8 @@
       "shelfmark": "SYN 0005.6",
       "sys_id": "990000000000000005",
       "title": "",
-      "x": 14.0,
-      "y": 15.899999618530273
+      "x": 39.400001525878906,
+      "y": 13.600000381469727
     },
     {
       "cluster": 0,
@@ -326,8 +468,8 @@
       "shelfmark": "SYN 0006.7",
       "sys_id": "990000000000000006",
       "title": "Piyyut fragment for the Sabbath",
-      "x": 40.29999923706055,
-      "y": 20.600000381469727
+      "x": 27.200000762939453,
+      "y": 42.29999923706055
     },
     {
       "cluster": 0,
@@ -337,8 +479,8 @@
       "shelfmark": "SYN 0009.3",
       "sys_id": "990000000000000009",
       "title": "Liturgical poem for festivals",
-      "x": 17.799999237060547,
-      "y": 36.599998474121094
+      "x": 17.200000762939453,
+      "y": 11.399999618530273
     },
     {
       "cluster": 0,
@@ -348,8 +490,8 @@
       "shelfmark": "SYN 0010.4",
       "sys_id": "990000000000000010",
       "title": "Talmudic gloss",
-      "x": 24.100000381469727,
-      "y": 7.699999809265137
+      "x": 46.099998474121094,
+      "y": 27.799999237060547
     },
     {
       "cluster": 0,
@@ -359,8 +501,8 @@
       "shelfmark": "SYN 0013.7",
       "sys_id": "990000000000000013",
       "title": "Bible commentary leaf",
-      "x": 38.70000076293945,
-      "y": 33.70000076293945
+      "x": 13.0,
+      "y": 35.099998474121094
     },
     {
       "cluster": 0,
@@ -370,8 +512,8 @@
       "shelfmark": "SYN 0014.1",
       "sys_id": "990000000000000014",
       "title": "Halakhic responsum",
-      "x": 9.100000381469727,
-      "y": 24.200000762939453
+      "x": 32.400001525878906,
+      "y": 6.400000095367432
     },
     {
       "cluster": 0,
@@ -381,8 +523,8 @@
       "shelfmark": "SYN 0017.4",
       "sys_id": "990000000000000017",
       "title": "",
-      "x": 38.20000076293945,
-      "y": 11.600000381469727
+      "x": 37.099998474121094,
+      "y": 40.70000076293945
     },
     {
       "cluster": 0,
@@ -392,19 +534,8 @@
       "shelfmark": "SYN 0018.5",
       "sys_id": "990000000000000018",
       "title": "Piyyut fragment for the Sabbath",
-      "x": 25.399999618530273,
-      "y": 41.70000076293945
-    },
-    {
-      "cluster": 0,
-      "domain": 7,
-      "library": 1,
-      "prominence": 6,
-      "shelfmark": "SYN 0020.7",
-      "sys_id": "990000000000000020",
-      "title": "Halakhic responsum",
-      "x": 14.899999618530273,
-      "y": 9.399999618530273
+      "x": 10.100000381469727,
+      "y": 19.299999237060547
     },
     {
       "cluster": 0,
@@ -414,8 +545,8 @@
       "shelfmark": "SYN 0021.1",
       "sys_id": "990000000000000021",
       "title": "Liturgical poem for festivals",
-      "x": 45.20000076293945,
-      "y": 26.399999618530273
+      "x": 46.20000076293945,
+      "y": 17.100000381469727
     },
     {
       "cluster": 0,
@@ -425,85 +556,140 @@
       "shelfmark": "SYN 0022.2",
       "sys_id": "990000000000000022",
       "title": "Talmudic gloss",
-      "x": 10.5,
-      "y": 34.20000076293945
+      "x": 20.299999237060547,
+      "y": 43.599998474121094
     },
     {
       "cluster": 0,
-      "domain": 10,
-      "library": 3,
-      "prominence": 3,
-      "shelfmark": "SYN 0023.3",
-      "sys_id": "990000000000000023",
-      "title": "",
-      "x": 30.799999237060547,
-      "y": 4.099999904632568
-    },
-    {
-      "cluster": 1,
       "domain": 12,
       "library": 1,
-      "prominence": 4,
+      "prominence": 6,
       "shelfmark": "SYN 0025.5",
       "sys_id": "990000000000000025",
       "title": "Bible commentary leaf",
-      "x": 6.0,
-      "y": -59.5
+      "x": 20.600000381469727,
+      "y": 5.199999809265137
     },
     {
-      "cluster": 1,
+      "cluster": 0,
       "domain": 0,
       "library": 2,
-      "prominence": 4,
+      "prominence": 6,
       "shelfmark": "SYN 0026.6",
       "sys_id": "990000000000000026",
       "title": "Halakhic responsum",
-      "x": -2.200000047683716,
-      "y": -54.5
+      "x": 46.70000076293945,
+      "y": 34.599998474121094
+    },
+    {
+      "cluster": 0,
+      "domain": 3,
+      "library": 0,
+      "prominence": 6,
+      "shelfmark": "SYN 0029.2",
+      "sys_id": "990000000000000029",
+      "title": "",
+      "x": 7.699999809265137,
+      "y": 30.700000762939453
+    },
+    {
+      "cluster": 0,
+      "domain": 4,
+      "library": 1,
+      "prominence": 6,
+      "shelfmark": "SYN 0030.3",
+      "sys_id": "990000000000000030",
+      "title": "Piyyut fragment for the Sabbath",
+      "x": 39.900001525878906,
+      "y": 7.0
+    },
+    {
+      "cluster": 0,
+      "domain": 6,
+      "library": 4,
+      "prominence": 6,
+      "shelfmark": "SYN 0032.5",
+      "sys_id": "990000000000000032",
+      "title": "Halakhic responsum",
+      "x": 31.799999237060547,
+      "y": 46.20000076293945
+    },
+    {
+      "cluster": 0,
+      "domain": 7,
+      "library": 3,
+      "prominence": 3,
+      "shelfmark": "SYN 0033.6",
+      "sys_id": "990000000000000033",
+      "title": "Liturgical poem for festivals",
+      "x": 9.899999618530273,
+      "y": 11.300000190734863
     },
     {
       "cluster": 1,
-      "domain": 1,
-      "library": 4,
+      "domain": 9,
+      "library": 1,
       "prominence": 4,
-      "shelfmark": "SYN 0027.7",
-      "sys_id": "990000000000000027",
-      "title": "Liturgical poem for festivals",
-      "x": 3.299999952316284,
-      "y": -67.4000015258789
+      "shelfmark": "SYN 0035.1",
+      "sys_id": "990000000000000035",
+      "title": "",
+      "x": 6.199999809265137,
+      "y": -63.099998474121094
+    },
+    {
+      "cluster": 1,
+      "domain": 10,
+      "library": 2,
+      "prominence": 4,
+      "shelfmark": "SYN 0036.2",
+      "sys_id": "990000000000000036",
+      "title": "Piyyut fragment for the Sabbath",
+      "x": -2.0,
+      "y": -58.79999923706055
     },
     {
       "cluster": 1,
       "domain": 11,
-      "library": 0,
-      "prominence": 2,
-      "shelfmark": "SYN 0024.4",
-      "sys_id": "990000000000000024",
-      "title": "Piyyut fragment for the Sabbath",
-      "x": 8.5,
-      "y": -51.099998474121094
+      "library": 4,
+      "prominence": 4,
+      "shelfmark": "SYN 0037.3",
+      "sys_id": "990000000000000037",
+      "title": "Bible commentary leaf",
+      "x": 3.0,
+      "y": -71.69999694824219
     },
     {
       "cluster": 1,
-      "domain": 2,
+      "domain": 8,
+      "library": 0,
+      "prominence": 2,
+      "shelfmark": "SYN 0034.7",
+      "sys_id": "990000000000000034",
+      "title": "Talmudic gloss",
+      "x": 8.600000381469727,
+      "y": -54.900001525878906
+    },
+    {
+      "cluster": 1,
+      "domain": 12,
       "library": 3,
       "prominence": 2,
-      "shelfmark": "SYN 0028.1",
-      "sys_id": "990000000000000028",
-      "title": "Talmudic gloss",
-      "x": -9.100000381469727,
-      "y": -61.400001525878906
+      "shelfmark": "SYN 0038.4",
+      "sys_id": "990000000000000038",
+      "title": "Halakhic responsum",
+      "x": -8.699999809265137,
+      "y": -64.80000305175781
     },
     {
       "cluster": 2,
-      "domain": 3,
+      "domain": 0,
       "library": 0,
       "prominence": 1,
-      "shelfmark": "SYN 0029.2",
-      "sys_id": "990000000000000029",
+      "shelfmark": "SYN 0039.5",
+      "sys_id": "990000000000000039",
       "title": "<img src=x onerror=alert(1)></script>‮-fake-evil-title",
-      "x": -45.70000076293945,
-      "y": 14.100000381469727
+      "x": -49.400001525878906,
+      "y": 15.100000381469727
     }
   ],
   "schema_version": 1

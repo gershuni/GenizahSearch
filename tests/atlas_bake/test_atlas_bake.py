@@ -36,6 +36,7 @@ pytestmark = pytest.mark.atlas_bake
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "atlas"
 GOLDEN_BIN = FIXTURES_DIR / "golden-v1.bin"
+GOLDEN_BR = FIXTURES_DIR / "golden-v1.bin.br"
 GOLDEN_EXPECTED = FIXTURES_DIR / "golden-v1-expected.json"
 
 _FORBIDDEN_SUBSTRINGS = ("discovery", "gold_candidate", "gold_star", "is_discovery", "\"gold\"")
@@ -92,6 +93,126 @@ def test_exact_node_set_equality():
     assert manifest["eligible_count"] == manifest["placed_count"] == len(eligible_ids)
     assert manifest["missing"] == []
     assert manifest["extra"] == []
+
+
+# ---------------------------------------------------------------------------
+# 2b. test_edge_class_semantics (HIGH-1 -- FROZEN schema §4 id 11 polarity:
+#     0 = continuation (same-work), 1 = island (citation/quotation))
+# ---------------------------------------------------------------------------
+
+def test_edge_class_semantics():
+    # A synthetic graph with a KNOWN continuation pair and a KNOWN island pair.
+    n, n_island = 40, 8
+    n_cont = n - n_island
+    ms_pairs, sys_meta, domains, sys_ids = bake.synthetic_dataset(
+        n, seed=42, n_island=n_island)
+    result = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+
+    # sys_id -> node index, then an undirected {frozenset(node_idx): cls} map.
+    idx = {node[6]: i for i, node in enumerate(result.nodes)}
+    edge_cls = {frozenset((src, tgt)): cls for src, tgt, cls in result.edges}
+
+    # (sys_ids[0], sys_ids[1]) is a continuation-dominant pair (cont=3, isl=0).
+    cont_pair = frozenset((idx[sys_ids[0]], idx[sys_ids[1]]))
+    assert edge_cls[cont_pair] == 0, "continuation edge MUST encode as 0 (schema §4 id 11)"
+
+    # (sys_ids[n_cont], sys_ids[n_cont+1]) is an island-chain pair (cont=0, isl=2).
+    island_pair = frozenset((idx[sys_ids[n_cont]], idx[sys_ids[n_cont + 1]]))
+    assert edge_cls[island_pair] == 1, "island edge MUST encode as 1 (schema §4 id 11)"
+
+    # And globally: every continuation-dominant ms_pair -> 0, every other -> 1.
+    for (a, b), r in ms_pairs.items():
+        ca, cb = bake.validate_sys_id(a), bake.validate_sys_id(b)
+        key = frozenset((idx[ca], idx[cb]))
+        expected = 0 if r[2] >= max(1, r[3]) else 1
+        assert edge_cls[key] == expected
+
+
+# ---------------------------------------------------------------------------
+# 2c. test_mixed_sys_id_key_types_canonicalized (HIGH-2 -- one canonical int
+#     representation for pair endpoints AND metadata keys)
+# ---------------------------------------------------------------------------
+
+def test_mixed_sys_id_key_types_canonicalized():
+    # The SAME three manuscripts referenced with a deliberate MIX of str and
+    # int sys_id forms across pairs, titles, and domains. Before canonicalizing
+    # every id, str endpoints spawn phantom/duplicate nodes and int endpoints
+    # miss their str-keyed metadata (title/domain/library lost).
+    ms_pairs = {
+        ("100", 200): [3, 40, 3, 0],    # str + int endpoints, continuation
+        (200, "300"): [2, 30, 2, 0],    # int + str endpoints, continuation
+        ("300", "100"): [1, 20, 0, 1],  # both str, island (closes the triangle)
+    }
+    sys_meta = {
+        100: ("SM-100", "CUL", "Title A"),    # int key
+        "200": ("SM-200", "JTS", "Title B"),  # str key
+        300: ("SM-300", "RNL", "Title C"),    # int key
+    }
+    domains = {
+        "100": (Counter({0: 2}), Counter({"Bible-he": 2})),    # str key -> group 0
+        200: (Counter({6: 1}), Counter({"Talmud-he": 1})),     # int key -> group 6
+        "300": (Counter({2: 3}), Counter({"Piyyut-he": 3})),   # str key -> group 2
+    }
+
+    result = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+
+    # Exactly three nodes, no duplicate/extra, no missing.
+    assert len(result.nodes) == 3
+    assert result.missing == []
+    assert result.extra == []
+
+    by_sysid = {node[6]: node for node in result.nodes}
+    assert set(by_sysid) == {100, 200, 300}  # all canonical ints, no phantom nodes
+
+    # Node fields: [x, y, ci, domain_idx, lib_idx, prom, sys_id, title, shelfmark]
+    assert by_sysid[100][7] == "Title A" and by_sysid[100][8] == "SM-100"
+    assert by_sysid[200][7] == "Title B" and by_sysid[200][8] == "SM-200"
+    assert by_sysid[300][7] == "Title C" and by_sysid[300][8] == "SM-300"
+
+    # Domain index resolved from the correctly-typed key (not the OTHER fallback).
+    assert by_sysid[100][3] == 0
+    assert by_sysid[200][3] == 6
+    assert by_sysid[300][3] == 2
+
+    # Library index maps back to the right catalogue code for every node.
+    libs = result.libraries
+    assert libs[by_sysid[100][4]] == "CUL"
+    assert libs[by_sysid[200][4]] == "JTS"
+    assert libs[by_sysid[300][4]] == "RNL"
+
+
+# ---------------------------------------------------------------------------
+# 2d. test_bake_rejects_node_set_mismatch (HIGH-3 -- exact set equality is
+#     ENFORCED, not merely reported)
+# ---------------------------------------------------------------------------
+
+def test_bake_rejects_node_set_mismatch(tmp_path):
+    ms_pairs, sys_meta, domains, _ids = bake.synthetic_dataset(40, seed=42)
+    result = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+
+    # Healthy result passes the gate.
+    bake.assert_bake_complete(result)
+
+    # A missing eligible id must FAIL the bake (refuse to write).
+    result.missing = [result.nodes[0][6]]
+    with pytest.raises(ValueError):
+        bake.assert_bake_complete(result)
+    with pytest.raises(ValueError):
+        bake._write_production(result, str(tmp_path), "some-real-db-hash")
+
+    # An extra placed id must also FAIL the bake.
+    result2 = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+    result2.extra = [10 ** 18 + 7]
+    with pytest.raises(ValueError):
+        bake.assert_bake_complete(result2)
+    with pytest.raises(ValueError):
+        bake._write_golden(result2, str(tmp_path / "reject.bin"))
+
+    # A placed/eligible count skew with empty lists is still rejected.
+    result3 = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+    result3.placed_count = result3.eligible_count - 1
+    with pytest.raises(ValueError):
+        bake.assert_bake_complete(result3)
 
 
 # ---------------------------------------------------------------------------
@@ -217,12 +338,57 @@ def test_golden_python_decode():
     assert decoded["flows"] == expected["flows"]
     assert decoded["cluster_labels"] == expected["cluster_labels"]
 
+    # MEDIUM-2: the golden dataset is sized so at least one cluster clears
+    # LABEL_MIN_N -- otherwise the CLUSTER_LABEL_* sections pass vacuously.
+    # Assert the label sections are non-empty AND field-correct.
+    labels = decoded["cluster_labels"]
+    assert len(labels) >= 1, "golden fixture must exercise the cluster-label sections"
+    node_clusters = {n["cluster"] for n in decoded["nodes"]}
+    for lab in labels:
+        assert lab["ci"] in node_clusters                # references a real cluster
+        assert lab["n"] >= bake.LABEL_MIN_N              # only >= LABEL_MIN_N clusters get labelled
+        assert 0 <= lab["dgrp"] < len(bake.DOMAIN_GROUPS)  # valid domain-group index
+        assert isinstance(lab["title"], str) and lab["title"]  # non-empty representative title
+        assert isinstance(lab["dom"], str) and lab["dom"]      # non-empty domain text label
+        assert isinstance(lab["x"], float) and isinstance(lab["y"], float)
+        assert isinstance(lab["r"], float) and lab["r"] > 0
+
     # The golden fixture carries a deliberately fabricated (never-real)
     # XSS-shaped catalogue string for the downstream 133-04 DOM-XSS decode
     # test -- confirm it round-tripped byte-for-byte.
     malicious = [n for n in decoded["nodes"] if "onerror" in n["title"]]
     assert len(malicious) == 1
     assert "</script" in malicious[0]["title"]
+
+
+# ---------------------------------------------------------------------------
+# 8b. test_golden_encoder_output_locked (MEDIUM-1 -- lock the ENCODER, not
+#     just the committed bytes' decodability, so encoder drift fails the test)
+# ---------------------------------------------------------------------------
+
+def test_golden_encoder_output_locked():
+    # Rebuild the canonical golden input in-test and assert the encoder
+    # reproduces the committed golden bytes EXACTLY. Without this, encode_asset
+    # could silently drift (e.g. the EDGE_CLASS polarity flip in HIGH-1) while
+    # test_golden_python_decode stays green, because that test only decodes the
+    # already-committed binary.
+    ms_pairs, sys_meta, domains, _ids = bake.golden_dataset()
+    result = bake.run_bake(ms_pairs, sys_meta, domains, seed=bake.SEED)
+    encoded = bake.encode_asset(result)
+
+    assert encoded.plain_bytes == GOLDEN_BIN.read_bytes(), (
+        "encode_asset() drifted from the committed golden-v1.bin -- regenerate "
+        "via `python scripts/build_atlas_asset.py --golden tests/fixtures/atlas/golden-v1.bin` "
+        "if the change is intentional (and re-review the schema contract)"
+    )
+    assert brotli.compress(encoded.plain_bytes, quality=11) == GOLDEN_BR.read_bytes(), (
+        "Brotli-compressed golden output drifted from the committed golden-v1.bin.br"
+    )
+
+    # Encoder drift on a KNOWN edge would silently pass a decode-only test:
+    # assert the semantic polarity holds in the freshly-encoded asset too.
+    assert any(cls == 0 for _, _, cls in result.edges)  # continuation edges present
+    assert any(cls == 1 for _, _, cls in result.edges)  # island edges present
 
 
 # ---------------------------------------------------------------------------
