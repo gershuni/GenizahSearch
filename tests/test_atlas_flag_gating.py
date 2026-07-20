@@ -23,6 +23,12 @@ Groups 1, 6, 7-structural do not need a running app. Groups 2, 3-clean-hide driv
 the real (decorated) route body inside a minimal NiceGUI client context. Groups
 3-404, 4, 5, 7-behavioral register the real data routes onto a BARE FastAPI so
 they exercise the response behavior without the full NiceGUI startup.
+
+Group 3B (Codex round-4 MEDIUM-1/2/3 hardening): binary header/section-table
+structural validation, a content-hash-verified basename, and a Brotli-integrity
+check on the (optional) ``.bin.br`` sidecar -- each fails closed independently
+of the others. Group 4 additionally covers MEDIUM-4 (RFC 9110 weighted
+Accept-Encoding preference, not "always prefer br").
 """
 
 import ast
@@ -31,7 +37,9 @@ import hashlib
 import json
 import os
 import pathlib
+import struct
 
+import brotli
 import pytest
 from fastapi import FastAPI
 from starlette.staticfiles import StaticFiles
@@ -45,6 +53,14 @@ from web.translations import set_language, tr
 MAIN_PY = pathlib.Path(wm.__file__)
 MAIN_SRC = MAIN_PY.read_text(encoding="utf-8")
 
+# The committed golden fixture -- a REAL, structurally valid ATLAS001 binary
+# (see tests/fixtures/atlas/golden-v1.bin + docs/specs/atlas-asset-schema-v1.md).
+# Used as the base for every synthetic ready-asset in this module so the new
+# MEDIUM-1 header/section-table validation in web.atlas_assets genuinely
+# exercises real bytes, not an arbitrary marker blob.
+_FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures" / "atlas"
+_GOLDEN_BIN = (_FIXTURES_DIR / "golden-v1.bin").read_bytes()
+
 # Route/nav functions that MUST gate on the single availability predicate.
 _PREDICATE_SURFACES = (
     "atlas_page_route",     # the /atlas page route
@@ -55,22 +71,34 @@ _PREDICATE_SURFACES = (
 
 
 # ---------------------------------------------------------------------------
-# Synthetic ready-asset helpers (self-contained — no dependency on a real bake)
+# Real-atlas-bytes ready-asset helpers (built from the golden fixture, not an
+# arbitrary marker blob -- MEDIUM-1 header/section-table validation requires
+# genuinely valid bytes to reach ready=True)
 # ---------------------------------------------------------------------------
-def _write_asset(dir_path: pathlib.Path, marker: bytes = b"ATLAS-TEST", with_br: bool = True):
-    """Write manifest.json + <basename>.bin (+ optional .bin.br) into dir_path.
+def _write_asset(dir_path: pathlib.Path, marker: bytes = b"", with_br: bool = True):
+    """Write manifest.json + <basename>.bin (+ optional REAL .bin.br) into
+    dir_path, built from the committed golden-v1.bin fixture with an optional
+    inert trailing ``marker`` appended to vary the content_hash across
+    fixtures. The appended bytes sit past every section's
+    ``[byte_offset, byte_offset+byte_length)`` range, so they are never
+    referenced by the section table and don't affect header/section-table
+    validity (MEDIUM-1).
 
-    content_hash matches sha256(plain)[:12] so web.atlas_assets.load_atlas_state()
-    accepts it. Returns (basename, content_hash, plain_bytes)."""
-    plain = marker + b"\x00" * 64
+    content_hash matches sha256(plain)[:12] and asset_basename is the
+    canonical ``atlas-v1-<content_hash>`` form (MEDIUM-2) so
+    ``web.atlas_assets.load_atlas_state()`` accepts it. The ``.bin.br``
+    sidecar (when written) is REAL Brotli compression of ``plain`` -- MEDIUM-3
+    requires it to actually decompress back to the exact plain bytes.
+
+    Returns (basename, content_hash, plain_bytes, br_bytes_or_None)."""
+    plain = _GOLDEN_BIN + marker
     content_hash = hashlib.sha256(plain).hexdigest()[:12]
     basename = f"atlas-v1-{content_hash}"
     (dir_path / f"{basename}.bin").write_bytes(plain)
+    br_bytes = None
     if with_br:
-        # Deliberately NOT real brotli — the route only echoes these bytes with
-        # Content-Encoding: br; the br-branch tests assert headers/status, never
-        # decode the body (so no valid-brotli requirement here).
-        (dir_path / f"{basename}.bin.br").write_bytes(b"BR" + plain)
+        br_bytes = brotli.compress(plain, quality=11)
+        (dir_path / f"{basename}.bin.br").write_bytes(br_bytes)
     manifest = {
         "schema_version": 1,
         "content_hash": content_hash,
@@ -78,18 +106,19 @@ def _write_asset(dir_path: pathlib.Path, marker: bytes = b"ATLAS-TEST", with_br:
         "node_count": 1,
     }
     (dir_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    return basename, content_hash, plain
+    return basename, content_hash, plain, br_bytes
 
 
 @pytest.fixture
 def ready_asset(tmp_path, monkeypatch):
-    """A loaded, flag-ON atlas state backed by a synthetic temp asset dir."""
+    """A loaded, flag-ON atlas state backed by a real (golden-fixture-derived)
+    temp asset dir."""
     monkeypatch.setattr(aa, "ATLAS_DATA_DIR", str(tmp_path))
-    basename, chash, plain = _write_asset(tmp_path)
+    basename, chash, plain, br_bytes = _write_asset(tmp_path)
     assert aa.load_atlas_state() is True
     monkeypatch.setattr(aa, "ATLAS_PREVIEW_ENABLED", True)
     assert aa.atlas_preview_available() is True
-    yield {"dir": tmp_path, "basename": basename, "content_hash": chash, "plain": plain}
+    yield {"dir": tmp_path, "basename": basename, "content_hash": chash, "plain": plain, "br": br_bytes}
     # Restore module state so later tests / the real app are unaffected.
     aa.load_atlas_state()
 
@@ -281,6 +310,117 @@ def test_data_routes_404_when_flag_off(ready_asset, monkeypatch):
 
 
 # ===========================================================================
+# GROUP 3B — structural/hash/brotli-integrity hardening (Codex round-4
+# MEDIUM-1/2/3): each failure mode fails ready=False (or drops brotli only)
+# independently of the others, with no traceback escaping load_atlas_state().
+# ===========================================================================
+def test_malformed_magic_fails_closed(tmp_path, monkeypatch):
+    # MEDIUM-1: bad magic bytes -> ready=False.
+    monkeypatch.setattr(aa, "ATLAS_DATA_DIR", str(tmp_path))
+    bad_plain = b"NOTMAGIC" + struct.pack("<II", 1, 0)
+    content_hash = hashlib.sha256(bad_plain).hexdigest()[:12]
+    basename = f"atlas-v1-{content_hash}"
+    (tmp_path / f"{basename}.bin").write_bytes(bad_plain)
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "content_hash": content_hash, "asset_basename": basename}),
+        encoding="utf-8",
+    )
+    assert aa.load_atlas_state() is False
+    aa.load_atlas_state()  # restore
+
+
+def test_truncated_section_table_fails_closed(tmp_path, monkeypatch):
+    # MEDIUM-1: header claims 5 sections but the buffer holds none of them.
+    monkeypatch.setattr(aa, "ATLAS_DATA_DIR", str(tmp_path))
+    bad_plain = struct.pack("<8sII", b"ATLAS001", 1, 5) + b"\x00" * 8
+    content_hash = hashlib.sha256(bad_plain).hexdigest()[:12]
+    basename = f"atlas-v1-{content_hash}"
+    (tmp_path / f"{basename}.bin").write_bytes(bad_plain)
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "content_hash": content_hash, "asset_basename": basename}),
+        encoding="utf-8",
+    )
+    assert aa.load_atlas_state() is False
+    aa.load_atlas_state()
+
+
+def test_out_of_bounds_section_fails_closed(tmp_path, monkeypatch):
+    # MEDIUM-1: a well-formed header/table entry whose byte range overruns
+    # the actual buffer (count*elem_size is internally consistent, but the
+    # data simply isn't there).
+    monkeypatch.setattr(aa, "ATLAS_DATA_DIR", str(tmp_path))
+    header = struct.pack("<8sII", b"ATLAS001", 1, 1)
+    entry = struct.pack("<IIIIQQ", 1, 1, 4, 1000, 48, 4000)  # claims 4000 bytes at offset 48
+    bad_plain = header + entry + b"\x00" * 16  # buffer is only 64 bytes total
+    content_hash = hashlib.sha256(bad_plain).hexdigest()[:12]
+    basename = f"atlas-v1-{content_hash}"
+    (tmp_path / f"{basename}.bin").write_bytes(bad_plain)
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "content_hash": content_hash, "asset_basename": basename}),
+        encoding="utf-8",
+    )
+    assert aa.load_atlas_state() is False
+    aa.load_atlas_state()
+
+
+def test_missing_content_hash_fails_closed(tmp_path, monkeypatch):
+    # MEDIUM-2: manifest omits content_hash entirely -> refuse (no verified
+    # content-hashed filename to apply an immutable cache to).
+    monkeypatch.setattr(aa, "ATLAS_DATA_DIR", str(tmp_path))
+    plain = _GOLDEN_BIN
+    basename = f"atlas-v1-{hashlib.sha256(plain).hexdigest()[:12]}"
+    (tmp_path / f"{basename}.bin").write_bytes(plain)
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "asset_basename": basename}),  # no content_hash
+        encoding="utf-8",
+    )
+    assert aa.load_atlas_state() is False
+    aa.load_atlas_state()
+
+
+def test_non_content_hashed_basename_fails_closed(tmp_path, monkeypatch):
+    # MEDIUM-2: content_hash is correct, but asset_basename does not encode
+    # it -> refuse rather than apply an immutable 1-year cache to an
+    # unverified filename.
+    monkeypatch.setattr(aa, "ATLAS_DATA_DIR", str(tmp_path))
+    plain = _GOLDEN_BIN
+    content_hash = hashlib.sha256(plain).hexdigest()[:12]
+    basename = "atlas-v1-not-the-real-hash"
+    (tmp_path / f"{basename}.bin").write_bytes(plain)
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "content_hash": content_hash, "asset_basename": basename}),
+        encoding="utf-8",
+    )
+    assert aa.load_atlas_state() is False
+    aa.load_atlas_state()
+
+
+def test_corrupt_brotli_sidecar_falls_back_to_plain(tmp_path, monkeypatch):
+    # MEDIUM-3: a garbage (non-Brotli) .bin.br must never be served -- the
+    # brotli representation drops, plain stays servable, readiness unaffected.
+    monkeypatch.setattr(aa, "ATLAS_DATA_DIR", str(tmp_path))
+    basename, _chash, plain, _br = _write_asset(tmp_path, with_br=False)
+    (tmp_path / f"{basename}.bin.br").write_bytes(b"THIS-IS-NOT-VALID-BROTLI-DATA")
+    assert aa.load_atlas_state() is True
+    assert aa.atlas_br_bytes() is None
+    assert aa.atlas_plain_bytes() == plain
+    aa.load_atlas_state()
+
+
+def test_mismatched_brotli_sidecar_falls_back_to_plain(tmp_path, monkeypatch):
+    # MEDIUM-3: a VALID Brotli stream that decompresses to the WRONG content
+    # (a stale/mismatched sidecar) must also be dropped, never served.
+    monkeypatch.setattr(aa, "ATLAS_DATA_DIR", str(tmp_path))
+    basename, _chash, plain, _br = _write_asset(tmp_path, with_br=False)
+    wrong_br = brotli.compress(plain + b"tampered-extra-bytes", quality=11)
+    (tmp_path / f"{basename}.bin.br").write_bytes(wrong_br)
+    assert aa.load_atlas_state() is True
+    assert aa.atlas_br_bytes() is None
+    assert aa.atlas_plain_bytes() == plain
+    aa.load_atlas_state()
+
+
+# ===========================================================================
 # GROUP 4 — response-level br/identity/* q-value negotiation + reachable 406
 # ===========================================================================
 def _ce(resp):
@@ -298,7 +438,7 @@ def test_encoding_negotiation_response_level(ready_asset):
     assert _ce(r) == "br"
     assert r.headers.get("vary") == "Accept-Encoding"
     assert "immutable" in r.headers.get("cache-control", "")
-    assert r.body == b"BR" + plain  # the (synthetic) br bytes, verbatim
+    assert r.body == ready_asset["br"]  # the REAL (integrity-verified) br bytes, verbatim
 
     # No Accept-Encoding header -> plain (identity default-acceptable), no CE
     r = asset(asset_name=name, accept_encoding="")
@@ -326,6 +466,38 @@ def test_encoding_negotiation_response_level(ready_asset):
     assert asset(asset_name="atlas-v1-deadbeef00.bin", accept_encoding="").status_code == 404
     # a traversal-shaped name is also just a non-matching name -> 404
     assert asset(asset_name="../../etc/passwd", accept_encoding="").status_code == 404
+
+
+def test_weighted_preference_negotiation_response_level(ready_asset):
+    # MEDIUM-4 (RFC 9110 S12.5.3): the HIGHEST non-zero q-value wins -- a
+    # client strongly preferring identity over br must get identity even
+    # though a valid br representation is loaded and would otherwise be
+    # merely-acceptable.
+    _manifest_ep, asset = _data_endpoints()
+    name = f"{ready_asset['basename']}.bin"
+    r = asset(asset_name=name, accept_encoding="br;q=0.1, identity;q=1")
+    assert r.status_code == 200
+    assert _ce(r) is None
+    assert r.body == ready_asset["plain"]
+
+    # The reverse weighting still prefers br.
+    r = asset(asset_name=name, accept_encoding="br;q=1, identity;q=0.1")
+    assert r.status_code == 200
+    assert _ce(r) == "br"
+
+
+def test_negotiate_encoding_unit_weighted_preference():
+    # Direct unit coverage of the negotiation function's RFC 9110 tie-break
+    # and highest-non-zero-q selection (MEDIUM-4).
+    assert wm._negotiate_encoding("br;q=0.1, identity;q=1", have_br=True, have_plain=True) == "identity"
+    assert wm._negotiate_encoding("br;q=1, identity;q=0.1", have_br=True, have_plain=True) == "br"
+    # Equal non-zero q -> tie-break prefers br.
+    assert wm._negotiate_encoding("br;q=0.5, identity;q=0.5", have_br=True, have_plain=True) == "br"
+    assert wm._negotiate_encoding("br;q=1", have_br=True, have_plain=True) == "br"
+    assert wm._negotiate_encoding("", have_br=True, have_plain=True) == "identity"
+    # br unavailable server-side (no .bin.br loaded) -> identity regardless of
+    # the client's stated br preference.
+    assert wm._negotiate_encoding("br;q=1", have_br=False, have_plain=True) == "identity"
 
 
 def test_brotli_absent_fallback_and_reachable_406(ready_asset, monkeypatch):
@@ -377,7 +549,7 @@ def test_stale_manifest_transition_after_rebake(ready_asset):
     # Rebake: a NEW payload -> new content_hash -> new asset_basename.
     for f in ready_asset["dir"].iterdir():
         f.unlink()
-    new_name, _new_hash, _new_plain = _write_asset(ready_asset["dir"], marker=b"ATLAS-TEST-V2")
+    new_name, _new_hash, _new_plain, _new_br = _write_asset(ready_asset["dir"], marker=b"ATLAS-TEST-V2")
     assert aa.load_atlas_state() is True
     assert new_name != old_name
 

@@ -758,16 +758,22 @@ load_atlas_state()
 
 
 def _negotiate_encoding(accept_encoding_header: str, have_br: bool, have_plain: bool):
-    """Phase 133 (ATLAS-01, MEDIUM-3): pick the response encoding for the atlas
-    asset route by parsing Accept-Encoding tokens AND q-values over br, identity,
-    and the wildcard ``*``.
+    """Phase 133 (ATLAS-01, MEDIUM-3/MEDIUM-4): pick the response encoding for
+    the atlas asset route by parsing Accept-Encoding tokens AND q-values over
+    br, identity, and the wildcard ``*``, then selecting the representation
+    with the HIGHEST non-zero effective q-value (RFC 9110 §12.5.3) rather than
+    always preferring br whenever it is merely acceptable — a client that sends
+    e.g. ``br;q=0.1, identity;q=1`` is expressing a STRONG preference for
+    identity, and previously got br anyway.
 
     Returns ``'br'`` (serve Brotli), ``'identity'`` (serve plain), or ``None``
     (no acceptable representation -> the caller returns a REACHABLE 406). This
     honors ``br;q=0`` (fall back to plain), ``identity;q=0`` / ``*;q=0`` (refuse
-    plain -> 406 when br is also unavailable), and a bare ``*`` (br via wildcard).
-    A request with no Accept-Encoding header gets plain (identity is
-    default-acceptable), never br.
+    plain -> 406 when br is also unavailable), a bare ``*`` (br via wildcard),
+    and weighted preferences like ``br;q=0.1, identity;q=1`` (-> identity). A
+    request with no Accept-Encoding header gets plain (identity is
+    default-acceptable), never br. Ties (equal non-zero q, or a bare wildcard
+    offering both equally) prefer br.
     """
     q: dict[str, float] = {}
     for part in (accept_encoding_header or '').split(','):
@@ -788,27 +794,27 @@ def _negotiate_encoding(accept_encoding_header: str, have_br: bool, have_plain: 
             q[coding] = qval
     star = q.get('*')
 
-    # br acceptable only when the .br bytes exist AND br is accepted (explicit
-    # q>0, or via a positive wildcard when br is not explicitly listed).
-    if have_br and ('br' in q and q['br'] > 0 or 'br' not in q and star is not None and star > 0):
-        br_ok = True
-    else:
-        br_ok = False
+    def _effective_quality(coding: str) -> float:
+        # Explicit token wins; else fall back to a wildcard's q-value; else the
+        # RFC 9110 default -- identity is always acceptable unless explicitly
+        # excluded, but NO other coding (br included) has that default-accept
+        # rule, so an unlisted/no-wildcard br is simply not acceptable (0.0).
+        if coding in q:
+            return q[coding]
+        if star is not None:
+            return star
+        return 1.0 if coding == 'identity' else 0.0
 
-    # identity is default-acceptable unless explicitly refused (identity;q=0) or
-    # refused via the wildcard (*;q=0 with no explicit identity token).
-    if not have_plain:
-        identity_ok = False
-    elif 'identity' in q:
-        identity_ok = q['identity'] > 0
-    elif star is not None:
-        identity_ok = star > 0
-    else:
-        identity_ok = True
+    br_q = _effective_quality('br') if have_br else 0.0
+    identity_q = _effective_quality('identity') if have_plain else 0.0
 
-    if br_ok:
+    if br_q <= 0 and identity_q <= 0:
+        return None
+    # Highest non-zero q wins; a tie (incl. both offered equally via a bare
+    # wildcard) prefers br for the bandwidth saving.
+    if br_q >= identity_q and br_q > 0:
         return 'br'
-    if identity_ok:
+    if identity_q > 0:
         return 'identity'
     return None
 
