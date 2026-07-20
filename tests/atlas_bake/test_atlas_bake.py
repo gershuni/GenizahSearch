@@ -182,8 +182,72 @@ def test_mixed_sys_id_key_types_canonicalized():
 
 
 # ---------------------------------------------------------------------------
+# 2c-bis. test_metadata_canonical_key_collision_merges (HIGH-2 real bug --
+#     _canonicalize_meta() used to be last-write-wins on a canonical-key
+#     collision, silently DROPPING one source's data. Here the SAME sys_id
+#     appears as BOTH `100` (int) and `"100"` (str) in the SAME metadata
+#     dict, so canonicalization itself creates the collision (unlike
+#     test_mixed_sys_id_key_types_canonicalized above, which uses one
+#     representation per dict and never collides).)
+# ---------------------------------------------------------------------------
+
+def test_metadata_canonical_key_collision_merges():
+    ms_pairs = {(100, 200): [1, 10, 1, 0]}  # continuation-dominant -> both eligible
+
+    # sys_meta: the SAME canonical sys_id 100 keyed as BOTH int and str, with
+    # IDENTICAL scalar metadata -- must be retained, not dropped by
+    # last-write-wins (whichever key iterates last would otherwise win).
+    sys_meta = {
+        100: ("SM-100", "CUL", "Title A"),
+        "100": ("SM-100", "CUL", "Title A"),
+        200: ("SM-200", "JTS", "Title B"),
+    }
+    # domains: the SAME canonical sys_id 100 keyed as BOTH int and str, with
+    # DIFFERENT Counter tallies -- both sources' counts must be SUMMED, not
+    # one silently overwriting the other.
+    domains = {
+        100: (Counter({0: 2}), Counter({"Bible-he": 2})),
+        "100": (Counter({1: 3}), Counter({"Piyyut-he": 3})),
+        200: (Counter({6: 1}), Counter({"Talmud-he": 1})),
+    }
+
+    result = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+    by_sysid = {node[6]: node for node in result.nodes}
+    assert set(by_sysid) == {100, 200}
+
+    # Scalar metadata (title/shelfmark) preserved -- nothing dropped.
+    assert by_sysid[100][7] == "Title A"
+    assert by_sysid[100][8] == "SM-100"
+
+    # Domain Counters SUMMED across both colliding keys: group 1 (count 3)
+    # now outweighs group 0 (count 2), which is only possible if BOTH
+    # sources' tallies survived the merge (last-write-wins would show
+    # whichever of {0, 1} happened to be inserted last, not the true max).
+    assert by_sysid[100][3] == 1
+
+    # A GENUINE conflict between colliding keys' scalar metadata must fail
+    # closed (this is our own per-sys_id catalogue data -- a real
+    # disagreement is a hard error, not something to silently resolve).
+    conflicting_sys_meta = {
+        100: ("SM-100", "CUL", "Title A"),
+        "100": ("SM-100-DIFFERENT", "CUL", "Title A"),  # shelfmark disagrees
+        200: ("SM-200", "JTS", "Title B"),
+    }
+    with pytest.raises(ValueError):
+        bake.run_bake(ms_pairs, conflicting_sys_meta, domains, seed=42)
+
+
+# ---------------------------------------------------------------------------
 # 2d. test_bake_rejects_node_set_mismatch (HIGH-3 -- exact set equality is
 #     ENFORCED, not merely reported)
+#
+# HIGH-3 writer-boundary hardening: assert_bake_complete() no longer trusts
+# the cached result.missing/result.extra/result.placed_count scalar fields --
+# it RE-DERIVES the missing/extra/duplicate sets from the ACTUAL node
+# collection (result.nodes) against result.eligible_ids. So this test mutates
+# the real node collection (add/remove/duplicate a node) rather than the
+# cached status fields, which would otherwise no longer exercise the gate at
+# all (a mutated-but-untrusted scalar can no longer bypass -- or trip -- it).
 # ---------------------------------------------------------------------------
 
 def test_bake_rejects_node_set_mismatch(tmp_path):
@@ -193,26 +257,44 @@ def test_bake_rejects_node_set_mismatch(tmp_path):
     # Healthy result passes the gate.
     bake.assert_bake_complete(result)
 
-    # A missing eligible id must FAIL the bake (refuse to write).
-    result.missing = [result.nodes[0][6]]
+    # A missing eligible id must FAIL the bake (refuse to write) -- drop a
+    # real, eligible node from the ACTUAL node collection.
+    result_missing = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+    del result_missing.nodes[0]
     with pytest.raises(ValueError):
-        bake.assert_bake_complete(result)
+        bake.assert_bake_complete(result_missing)
     with pytest.raises(ValueError):
-        bake._write_production(result, str(tmp_path), "some-real-db-hash")
+        bake._write_production(result_missing, str(tmp_path), "some-real-db-hash")
 
-    # An extra placed id must also FAIL the bake.
-    result2 = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
-    result2.extra = [10 ** 18 + 7]
+    # An extra placed id must also FAIL the bake -- append a fabricated node
+    # whose sys_id is NOT a member of the actual eligible id set.
+    result_extra = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+    fake_sys_id = max(result_extra.eligible_ids) + 10 ** 6
+    assert fake_sys_id not in result_extra.eligible_ids
+    result_extra.nodes.append([0.0, 0.0, 0, 0, 0, 1, fake_sys_id, "Fabricated", "FAB-1"])
     with pytest.raises(ValueError):
-        bake.assert_bake_complete(result2)
+        bake.assert_bake_complete(result_extra)
     with pytest.raises(ValueError):
-        bake._write_golden(result2, str(tmp_path / "reject.bin"))
+        bake._write_golden(result_extra, str(tmp_path / "reject.bin"))
 
-    # A placed/eligible count skew with empty lists is still rejected.
-    result3 = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
-    result3.placed_count = result3.eligible_count - 1
+    # A duplicate node sys_id must ALSO fail -- even though the resulting
+    # node-id SET still equals the eligible set exactly (no id is genuinely
+    # missing or extra at the set level), the placed node COUNT disagrees
+    # with the eligible count purely because of the duplicate.
+    result_dup = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+    result_dup.nodes.append(result_dup.nodes[0])
     with pytest.raises(ValueError):
-        bake.assert_bake_complete(result3)
+        bake.assert_bake_complete(result_dup)
+
+    # Defense-in-depth confirmation: mutating ONLY the cached scalar fields
+    # (the old, no-longer-trusted attack surface) must NOT be sufficient to
+    # either trip or bypass the gate -- the real node collection is untouched
+    # and still agrees with eligible_ids, so the bake correctly still passes.
+    result_scalar_only = bake.run_bake(ms_pairs, sys_meta, domains, seed=42)
+    result_scalar_only.missing = [result_scalar_only.nodes[0][6]]
+    result_scalar_only.extra = [10 ** 18 + 7]
+    result_scalar_only.placed_count = result_scalar_only.eligible_count - 1
+    bake.assert_bake_complete(result_scalar_only)  # must NOT raise
 
 
 # ---------------------------------------------------------------------------

@@ -213,7 +213,8 @@ def load_domains(fjms_db_path: Path) -> dict:
 
 def load_ms_pairs_from_db(db_path: str, table: str = "accepted_pairs_canonmask") -> dict:
     """Aggregate canon-masked page-pairs -> manuscript-pairs.
-    Returns {(sys_a, sys_b) with sys_a < sys_b: [n, best_len, cont_count, isl_count]}."""
+    Returns {(sys_a, sys_b) with sys_a <= sys_b (canonical INT order):
+    [n, best_len, cont_count, isl_count]}."""
     con = sqlite3.connect("file:" + Path(db_path).as_posix() + "?mode=ro", uri=True)
     try:
         rows = con.execute(
@@ -224,7 +225,16 @@ def load_ms_pairs_from_db(db_path: str, table: str = "accepted_pairs_canonmask")
         con.close()
     ms_pairs: dict = defaultdict(lambda: [0, 0, 0, 0])
     for sa, sb, alen, _dens, fc in rows:
-        key = (sa, sb) if sa < sb else (sb, sa)
+        # HIGH: canonicalize BOTH endpoints to the single int sys_id
+        # representation BEFORE any ordering compare. sqlite columns can carry
+        # mixed per-row affinity (e.g. sys_a stored as INTEGER in one row and
+        # TEXT in another for the same logical id), so a raw `sa < sb` compare
+        # can raise TypeError on a mixed (int, str) pair -- and even when it
+        # doesn't raise, ordering/dedup on mismatched types never collapses
+        # onto one canonical key. Invalid endpoints FAIL the bake here (pair
+        # endpoints are hard invariants -- see validate_sys_id).
+        ca, cb = validate_sys_id(sa), validate_sys_id(sb)
+        key = (ca, cb) if ca <= cb else (cb, ca)
         r = ms_pairs[key]
         r[0] += 1
         r[1] = max(r[1], alen or 0)
@@ -389,6 +399,12 @@ class BakeResult:
     missing: list                # sys_id ints present in eligible but not placed (must be empty)
     extra: list                  # sys_id ints present in placed but not eligible (must be empty)
     libraries: list               # bake-discovered library codes, index-matched to node[4]
+    # HIGH-3 defense-in-depth: the actual eligible connected-endpoint id SET
+    # (not just its count) -- lets assert_bake_complete() re-derive missing/
+    # extra from the ACTUAL node collection instead of trusting the cached
+    # scalar fields above, which a mutated/fabricated BakeResult could
+    # otherwise set to anything.
+    eligible_ids: frozenset = frozenset()
     seed: int = SEED
     algo_version: str = ALGO_VERSION
 
@@ -432,19 +448,64 @@ def _canonicalize_ms_pairs(ms_pairs: dict) -> dict:
     return dict(out)
 
 
+def _merge_meta_values(ck: int, existing, incoming):
+    """Merge two metadata values that canonicalize onto the SAME sys_id `ck`
+    (e.g. a source key `100` and a source key `"100"`). Both `existing` and
+    `incoming` are the fixed-shape tuples produced by `load_lib_meta`
+    (shelfmark, library_code, title -- all scalars) or `load_domains`
+    (Counter[group_idx], Counter[label_text]). Element-wise:
+      - Counter elements are SUMMED (a collision must not lose either source's
+        tally -- this is exactly the domain-Counter data loss HIGH-2 flags).
+      - scalar elements are kept when both sides agree, and raise a clear,
+        fail-closed ValueError when they genuinely disagree -- this is OUR OWN
+        per-sys_id catalogue data, so a real conflict must fail the bake
+        rather than be silently resolved by last-write-wins.
+    Order-independent: Counter addition is commutative and equality is
+    symmetric, so the merged result never depends on dict iteration order."""
+    if (not isinstance(existing, tuple) or not isinstance(incoming, tuple)
+            or len(existing) != len(incoming)):
+        raise ValueError(
+            f"cannot merge metadata for canonical sys_id {ck}: incompatible "
+            f"shapes {existing!r} vs {incoming!r}"
+        )
+    merged = []
+    for a, b in zip(existing, incoming):
+        if isinstance(a, Counter) or isinstance(b, Counter):
+            merged.append((a if isinstance(a, Counter) else Counter())
+                           + (b if isinstance(b, Counter) else Counter()))
+        elif a == b:
+            merged.append(a)
+        else:
+            raise ValueError(
+                f"conflicting metadata for canonical sys_id {ck}: {a!r} != "
+                f"{b!r} (two source keys canonicalize onto the same sys_id "
+                "but disagree -- refusing to silently drop either)"
+            )
+    return tuple(merged)
+
+
 def _canonicalize_meta(meta: dict) -> dict:
     """Re-key metadata (libraries.csv titles / FJMS domains) by the canonical
     int sys_id so lookups match the canonicalized pair endpoints. Metadata for
     a non-conforming sys_id (one that could never be an eligible node) is
     dropped rather than failing the whole bake -- only pair endpoints are hard
-    invariants."""
+    invariants.
+
+    If two distinct source keys canonicalize onto the SAME sys_id (e.g. an
+    int `100` and a str `"100"`, from mixed-affinity sqlite columns or
+    multiple loader passes), the values are MERGED via `_merge_meta_values`
+    rather than one silently overwriting the other (HIGH-2 -- last-write-wins
+    dropped Counter tallies for domain classifications)."""
     out: dict = {}
     for k, v in meta.items():
         try:
             ck = validate_sys_id(k)
         except ValueError:
             continue
-        out[ck] = v
+        if ck in out:
+            out[ck] = _merge_meta_values(ck, out[ck], v)
+        else:
+            out[ck] = v
     return out
 
 
@@ -719,7 +780,8 @@ def run_bake(ms_pairs: dict, sys_meta: dict, domains: dict, *, seed: int = SEED,
     return BakeResult(
         nodes=nodes, edges=edges, clusters=crecs, cluster_labels=cluster_labels,
         flows=flows, eligible_count=len(eligible), placed_count=len(placed_so_far),
-        missing=missing, extra=extra, libraries=libraries, seed=seed,
+        missing=missing, extra=extra, libraries=libraries,
+        eligible_ids=frozenset(eligible), seed=seed,
     )
 
 
@@ -1100,18 +1162,53 @@ def assert_bake_complete(result: BakeResult) -> None:
     both empty (D-09 / HIGH-5; no ">=" fudge). Raises ValueError (bake FAILS)
     on any mismatch. Enforced before any bytes are written, and by main() for
     every mode (incl. --report), so a node-set mismatch can never be reported
-    as a successful bake."""
-    if result.missing or result.extra:
+    as a successful bake.
+
+    Defense-in-depth (HIGH-3 writer-boundary hardening): this does NOT trust
+    the cached `result.missing` / `result.extra` / `result.placed_count`
+    scalar fields -- those are just informational bookkeeping set by
+    `run_bake()` and a mutated/hand-constructed BakeResult could set them to
+    anything (e.g. all-empty) while the ACTUAL `result.nodes` collection
+    disagrees. Instead this RE-DERIVES the missing/extra/duplicate sets from
+    the real node collection (`result.nodes`) against `result.eligible_ids`
+    (the actual eligible id SET, not just its count), so the writer gate
+    cannot be bypassed by a stale or fabricated summary."""
+    node_sys_ids = [nd[6] for nd in result.nodes]
+    node_id_set = set(node_sys_ids)
+    has_duplicates = len(node_sys_ids) != len(node_id_set)
+    eligible_ids = set(result.eligible_ids)
+    actual_missing = sorted(eligible_ids - node_id_set)
+    actual_extra = sorted(node_id_set - eligible_ids)
+    if has_duplicates or actual_missing or actual_extra:
         raise ValueError(
             "node-set mismatch -- bake refuses to write: "
-            f"{len(result.missing)} missing, {len(result.extra)} extra "
-            f"(eligible={result.eligible_count}, placed={result.placed_count}); "
-            "the bake requires EXACT set equality (missing==0 and extra==0)"
+            f"{len(actual_missing)} missing, {len(actual_extra)} extra, "
+            f"duplicate_nodes={has_duplicates} "
+            f"(eligible={len(eligible_ids)}, placed={len(node_id_set)}); "
+            "the bake requires EXACT set equality (missing==0 and extra==0, "
+            "no duplicate node sys_ids)"
         )
-    if result.placed_count != result.eligible_count:
+    if len(node_id_set) != len(eligible_ids):
         raise ValueError(
-            f"placed_count ({result.placed_count}) != eligible_count "
-            f"({result.eligible_count}) despite empty missing/extra"
+            f"placed node count ({len(node_id_set)}) != eligible count "
+            f"({len(eligible_ids)}) despite empty missing/extra/duplicates"
+        )
+
+
+def _enforce_regression_floor(result: BakeResult, source_db_hash: str) -> None:
+    """MEDIUM: a REAL research-DB bake (never --smoke/--golden, identified via
+    the `source_db_hash` marker) must place at least REGRESSION_FLOOR nodes
+    (D-09 historical floor). Enforced on EVERY real-DB code path -- including
+    `--report`, which used to return before `_write_production()` (where this
+    check used to live exclusively), letting an undersized real-DB `--report`
+    run succeed despite the documented phase-exit floor. Synthetic
+    --smoke/--golden bakes stay correctly exempt via the source-DB marker."""
+    if (not source_db_hash.startswith(("smoke-", "golden-"))
+            and result.placed_count < REGRESSION_FLOOR):
+        raise ValueError(
+            f"regression floor: placed_count {result.placed_count:,} < "
+            f"{REGRESSION_FLOOR:,} (a real research-DB bake is expected to place "
+            "at least this many nodes)"
         )
 
 
@@ -1219,6 +1316,9 @@ def main(argv=None) -> int:
 
     # HIGH-3: FAIL every mode (incl. --report) unless eligible == placed exactly.
     assert_bake_complete(result)
+    # MEDIUM: FAIL every mode (incl. --report) on an undersized real-DB bake --
+    # not just the _write_production() path, which --report exits before reaching.
+    _enforce_regression_floor(result, source_db_hash)
 
     if args.golden is not None:
         return _write_golden(result, args.golden)
@@ -1256,17 +1356,9 @@ def _write_production(result: BakeResult, out_dir: Optional[str], source_db_hash
         return 1
     # HIGH-3: refuse to write on any node-set mismatch (missing/extra non-empty).
     assert_bake_complete(result)
-    # HIGH-3 additional regression floor: a REAL research-DB bake must place at
-    # least REGRESSION_FLOOR nodes (D-09 historical floor). Synthetic --smoke /
-    # --golden bakes are far smaller by design, so the floor is scoped to real
-    # bakes via the source-DB marker.
-    if (not source_db_hash.startswith(("smoke-", "golden-"))
-            and result.placed_count < REGRESSION_FLOOR):
-        raise ValueError(
-            f"regression floor: placed_count {result.placed_count:,} < "
-            f"{REGRESSION_FLOOR:,} (a real research-DB bake is expected to place "
-            "at least this many nodes)"
-        )
+    # MEDIUM / HIGH-3 defense-in-depth: re-enforced here too (not just in
+    # main()) for callers that invoke _write_production() directly (e.g. tests).
+    _enforce_regression_floor(result, source_db_hash)
     encoded = encode_asset(result)
     content_hash = hashlib.sha256(encoded.plain_bytes).hexdigest()[:12]
     basename = f"atlas-v1-{content_hash}"
