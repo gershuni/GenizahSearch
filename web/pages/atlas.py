@@ -103,6 +103,14 @@ def _inject_atlas_renderer() -> None:
         'manifestUrl': _ATLAS_MANIFEST_URL,
         'dataBase': _ATLAS_DATA_BASE,
         'canvasId': 'atlas-canvas',
+        # Reserved-box + loading-placeholder ids (Codex MEDIUM-2/-3 hardening):
+        # the renderer hides #atlas-loading on a successful first draw AND
+        # before showing the load-error overlay (never a stuck "Loading…"
+        # under either the canvas or the error state), and falls back to
+        # #atlas-canvas-box (or document.body) to surface the error UI if the
+        # canvas itself never mounts within the poll window (MEDIUM-3).
+        'loadingId': 'atlas-loading',
+        'boxId': 'atlas-canvas-box',
         'lang': get_language(),
         'rtl': is_rtl(),
         'labels': _renderer_labels(),
@@ -160,7 +168,7 @@ def create_atlas_page() -> None:
         with ui.element('div').classes('w-full rounded-lg overflow-hidden').style(
             f'position: relative; width: 100%; height: {_ATLAS_CANVAS_HEIGHT_PX}px; '
             f'background: var(--bg-secondary); border: 1px solid var(--border-light);'
-        ):
+        ).props('id="atlas-canvas-box"'):
             # The canvas the renderer draws into. Sized to fill the reserved box.
             ui.html(
                 f'<canvas id="atlas-canvas" '
@@ -168,9 +176,12 @@ def create_atlas_page() -> None:
                 f'aria-label="{tr("Connections Atlas")}"></canvas>'
             )
             # Loading placeholder (centered), shown until 133-04's renderer draws.
+            # The JS renderer removes this element (by id) on a successful first
+            # draw AND before showing the load-error overlay, so it never sits
+            # stuck over either state (Codex MEDIUM-2).
             with ui.element('div').classes('flex items-center justify-center').style(
                 'position: absolute; inset: 0; pointer-events: none;'
-            ):
+            ).props('id="atlas-loading"'):
                 ui.label(tr('Loading the atlas…')).classes('text-sm').style(
                     'color: var(--text-secondary);'
                 )

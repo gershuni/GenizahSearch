@@ -67,6 +67,186 @@
   // pairwise web is an illegible hairball at overview scale).
   var EDGE_ZOOM = 1.7;
 
+  // -----------------------------------------------------------------------
+  // Structural validation (Codex MEDIUM-1 — defense-in-depth). The 133-03
+  // server loader already validates header + section-table bounds before
+  // ever serving the asset, and the asset is our own content-hashed bake, so
+  // this is NOT a live attack vector — but the decoder should never trust a
+  // structurally-servable-yet-malformed payload into an OOB read, an
+  // uncaught throw, a hang, or silently-wrong (truncated/undefined) data.
+  // Any violation raises a plain Error, caught by init()'s .catch() and
+  // surfaced via the normal load-error UI (never regresses valid-asset
+  // decode — every check below holds for anything build_atlas_asset.py's
+  // encoder can produce).
+  // -----------------------------------------------------------------------
+
+  // Sane upper bounds so a corrupted section-table count/section_count (each
+  // an independent uint32, so up to 2**32-1) can never drive a pathological
+  // allocation or loop. Real bakes are orders of magnitude smaller than these
+  // (the D-10/PERF-01 byte-budget cap keeps the whole compressed asset under
+  // ~6 MB) — generous headroom for corpus growth, still a hard ceiling.
+  var MAX_SECTION_COUNT = 64;       // schema §4 defines 23 named sections
+  var MAX_ELEMENT_COUNT = 20000000; // per-section element cap (nodes/edges/etc.)
+  var MAX_HEAP_BYTES = 256 * 1024 * 1024; // STRING_HEAP is byte-addressed, not element-addressed
+
+  // Every section §4 requires MUST be present (by construction the section-id
+  // keyed `sections` map could otherwise silently omit one and leave a later
+  // `viewOf()` throw as the only signal — this gives a clearer diagnostic and
+  // fails BEFORE any typed-array view is constructed over a partial table).
+  var REQUIRED_SECTIONS = [
+    SEC.NODE_POS, SEC.NODE_CLUSTER, SEC.NODE_DOMAIN, SEC.NODE_LIBRARY,
+    SEC.NODE_PROMINENCE, SEC.NODE_SYS_ID, SEC.NODE_TITLE_REF, SEC.NODE_SHELFMARK_REF,
+    SEC.EDGE_SOURCE_DELTA, SEC.EDGE_TARGET_DELTA, SEC.EDGE_CLASS,
+    SEC.FLOW_SOURCE_CLUSTER, SEC.FLOW_TARGET_CLUSTER, SEC.FLOW_WEIGHT,
+    SEC.CLUSTER_LABEL_CI, SEC.CLUSTER_LABEL_X, SEC.CLUSTER_LABEL_Y,
+    SEC.CLUSTER_LABEL_R, SEC.CLUSTER_LABEL_N, SEC.CLUSTER_LABEL_DGRP,
+    SEC.CLUSTER_LABEL_TITLE_REF, SEC.CLUSTER_LABEL_DOM_REF, SEC.STRING_HEAP
+  ];
+  // dtype_code -> elem_size the schema mandates (§5) — cross-checks the
+  // table's own (possibly inconsistent) dtype/elem_size pair.
+  var ELEM_SIZE_BY_DTYPE = { 1: 4, 2: 1, 3: 2, 4: 4, 5: 8 };
+  // Fixed dtype per section (§4) for every section EXCEPT the four whose
+  // width is bake-dependent (§3 "dynamic dtype").
+  var FIXED_DTYPE = {};
+  FIXED_DTYPE[SEC.NODE_POS] = 1;
+  FIXED_DTYPE[SEC.NODE_DOMAIN] = 3;
+  FIXED_DTYPE[SEC.NODE_LIBRARY] = 3;
+  FIXED_DTYPE[SEC.NODE_PROMINENCE] = 3;
+  FIXED_DTYPE[SEC.NODE_SYS_ID] = 5;
+  FIXED_DTYPE[SEC.NODE_TITLE_REF] = 4;
+  FIXED_DTYPE[SEC.NODE_SHELFMARK_REF] = 4;
+  FIXED_DTYPE[SEC.EDGE_SOURCE_DELTA] = 4;
+  FIXED_DTYPE[SEC.EDGE_TARGET_DELTA] = 4;
+  FIXED_DTYPE[SEC.EDGE_CLASS] = 2;
+  FIXED_DTYPE[SEC.FLOW_WEIGHT] = 1;
+  FIXED_DTYPE[SEC.CLUSTER_LABEL_X] = 1;
+  FIXED_DTYPE[SEC.CLUSTER_LABEL_Y] = 1;
+  FIXED_DTYPE[SEC.CLUSTER_LABEL_R] = 1;
+  FIXED_DTYPE[SEC.CLUSTER_LABEL_N] = 4;
+  FIXED_DTYPE[SEC.CLUSTER_LABEL_DGRP] = 3;
+  FIXED_DTYPE[SEC.CLUSTER_LABEL_TITLE_REF] = 4;
+  FIXED_DTYPE[SEC.CLUSTER_LABEL_DOM_REF] = 4;
+  FIXED_DTYPE[SEC.STRING_HEAP] = 2;
+  // §3: NODE_CLUSTER / FLOW_SOURCE_CLUSTER / FLOW_TARGET_CLUSTER /
+  // CLUSTER_LABEL_CI all share ONE bake-chosen dtype (UINT16 or UINT32) —
+  // must be internally consistent across all four.
+  var DYNAMIC_DTYPE_SECTIONS = [
+    SEC.NODE_CLUSTER, SEC.FLOW_SOURCE_CLUSTER, SEC.FLOW_TARGET_CLUSTER, SEC.CLUSTER_LABEL_CI
+  ];
+
+  function _decodeFail(msg) {
+    throw new Error('atlas decode: ' + msg);
+  }
+
+  /**
+   * Validate the parsed section table BEFORE any typed-array view or DOM
+   * string is built from it: presence of every required section, dtype/
+   * elem_size agreement (incl. the shared dynamic cluster-index dtype),
+   * every section's byte range within the buffer and 8-byte aligned, every
+   * related count internally consistent (schema §4's `2 * node_count` /
+   * `node_count` / `edge_count` / `flow_count` / `label_count` relations),
+   * and every count capped to a sane limit. Returns the cross-checked
+   * {nodeCount, edgeCount, flowCount, labelCount}.
+   */
+  function validateSections(sections, bufferByteLength) {
+    for (var r = 0; r < REQUIRED_SECTIONS.length; r++) {
+      if (!sections[REQUIRED_SECTIONS[r]]) {
+        _decodeFail('missing required section ' + REQUIRED_SECTIONS[r]);
+      }
+    }
+
+    var dynDtype = null;
+    for (var idKey in sections) {
+      if (!Object.prototype.hasOwnProperty.call(sections, idKey)) continue;
+      var id = Number(idKey);
+      var s = sections[id];
+
+      var expectedElem = ELEM_SIZE_BY_DTYPE[s.dtype];
+      if (!expectedElem) _decodeFail('section ' + id + ': unknown dtype_code ' + s.dtype);
+      if (expectedElem !== s.elemSize) {
+        _decodeFail('section ' + id + ': elem_size ' + s.elemSize +
+          ' does not match dtype_code ' + s.dtype);
+      }
+
+      if (DYNAMIC_DTYPE_SECTIONS.indexOf(id) >= 0) {
+        if (s.dtype !== 3 && s.dtype !== 4) {
+          _decodeFail('section ' + id + ': cluster-index dtype must be UINT16 or UINT32, got ' + s.dtype);
+        }
+        if (dynDtype === null) { dynDtype = s.dtype; }
+        else if (dynDtype !== s.dtype) {
+          _decodeFail('cluster-index sections disagree on dtype (NODE_CLUSTER/FLOW_*/CLUSTER_LABEL_CI must share one)');
+        }
+      } else if (FIXED_DTYPE[id] !== undefined && FIXED_DTYPE[id] !== s.dtype) {
+        _decodeFail('section ' + id + ': expected dtype ' + FIXED_DTYPE[id] + ', got ' + s.dtype);
+      }
+
+      var maxCount = (id === SEC.STRING_HEAP) ? MAX_HEAP_BYTES : MAX_ELEMENT_COUNT;
+      if (s.count > maxCount) {
+        _decodeFail('section ' + id + ': count ' + s.count + ' exceeds the sane limit ' + maxCount);
+      }
+      if (s.byteOffset % 8 !== 0) {
+        _decodeFail('section ' + id + ': byte_offset ' + s.byteOffset + ' is not 8-byte aligned');
+      }
+      if (s.byteLength !== s.count * s.elemSize) {
+        _decodeFail('section ' + id + ': byte_length does not match count * elem_size');
+      }
+      if (s.byteOffset + s.byteLength > bufferByteLength) {
+        _decodeFail('section ' + id + ': [' + s.byteOffset + ', ' + (s.byteOffset + s.byteLength) +
+          ') extends past the end of the buffer (' + bufferByteLength + ' bytes)');
+      }
+    }
+
+    // -- related-count consistency (schema §4) --
+    var nodeCount = sections[SEC.NODE_SYS_ID].count;
+    var nodeCountSections = [SEC.NODE_CLUSTER, SEC.NODE_DOMAIN, SEC.NODE_LIBRARY, SEC.NODE_PROMINENCE];
+    for (var n = 0; n < nodeCountSections.length; n++) {
+      if (sections[nodeCountSections[n]].count !== nodeCount) {
+        _decodeFail('section ' + nodeCountSections[n] + ': count does not match node_count');
+      }
+    }
+    var doubleNodeCountSections = [SEC.NODE_POS, SEC.NODE_TITLE_REF, SEC.NODE_SHELFMARK_REF];
+    for (var d = 0; d < doubleNodeCountSections.length; d++) {
+      if (sections[doubleNodeCountSections[d]].count !== 2 * nodeCount) {
+        _decodeFail('section ' + doubleNodeCountSections[d] + ': count does not match 2 * node_count');
+      }
+    }
+
+    var edgeCount = sections[SEC.EDGE_SOURCE_DELTA].count;
+    if (sections[SEC.EDGE_TARGET_DELTA].count !== edgeCount) {
+      _decodeFail('EDGE_TARGET_DELTA: count does not match EDGE_SOURCE_DELTA (edge_count)');
+    }
+    if (sections[SEC.EDGE_CLASS].count !== edgeCount) {
+      _decodeFail('EDGE_CLASS: count does not match edge_count');
+    }
+
+    var flowCount = sections[SEC.FLOW_SOURCE_CLUSTER].count;
+    if (sections[SEC.FLOW_TARGET_CLUSTER].count !== flowCount) {
+      _decodeFail('FLOW_TARGET_CLUSTER: count does not match flow_count');
+    }
+    if (sections[SEC.FLOW_WEIGHT].count !== flowCount) {
+      _decodeFail('FLOW_WEIGHT: count does not match flow_count');
+    }
+
+    var labelCount = sections[SEC.CLUSTER_LABEL_CI].count;
+    var labelSections = [
+      SEC.CLUSTER_LABEL_X, SEC.CLUSTER_LABEL_Y, SEC.CLUSTER_LABEL_R,
+      SEC.CLUSTER_LABEL_N, SEC.CLUSTER_LABEL_DGRP
+    ];
+    for (var l = 0; l < labelSections.length; l++) {
+      if (sections[labelSections[l]].count !== labelCount) {
+        _decodeFail('label section ' + labelSections[l] + ': count does not match label_count');
+      }
+    }
+    if (sections[SEC.CLUSTER_LABEL_TITLE_REF].count !== 2 * labelCount) {
+      _decodeFail('CLUSTER_LABEL_TITLE_REF: count does not match 2 * label_count');
+    }
+    if (sections[SEC.CLUSTER_LABEL_DOM_REF].count !== 2 * labelCount) {
+      _decodeFail('CLUSTER_LABEL_DOM_REF: count does not match 2 * label_count');
+    }
+
+    return { nodeCount: nodeCount, edgeCount: edgeCount, flowCount: flowCount, labelCount: labelCount };
+  }
+
   // =======================================================================
   // 1. Binary decode — implements docs/specs/atlas-asset-schema-v1.md §10.
   // =======================================================================
@@ -92,12 +272,22 @@
       throw new Error('atlas decode: unsupported schema_version ' + schemaVersion);
     }
     var sectionCount = dv.getUint32(12, true);
+    // MEDIUM-1: bound section_count BEFORE looping the table with it — an
+    // uncapped uint32 here could otherwise walk the DataView far past the
+    // buffer (each entry read would eventually RangeError, but not before a
+    // confusing partial parse; failing fast with a clean message is safer).
+    if (sectionCount > MAX_SECTION_COUNT || 16 + 32 * sectionCount > buffer.byteLength) {
+      throw new Error('atlas decode: invalid section_count ' + sectionCount);
+    }
 
     // -- section table (32 bytes per entry, from byte 16) --
     var sections = {};
     var off = 16;
     for (i = 0; i < sectionCount; i++) {
       var secId = dv.getUint32(off, true);
+      if (sections[secId]) {
+        throw new Error('atlas decode: duplicate section_id ' + secId);
+      }
       var dtype = dv.getUint32(off + 4, true);
       var elemSize = dv.getUint32(off + 8, true);
       var count = dv.getUint32(off + 12, true);
@@ -109,6 +299,11 @@
       };
       off += 32;
     }
+
+    // MEDIUM-1: validate the whole table (required sections present, dtype/
+    // elem_size/count relations, every byte range in-bounds + aligned)
+    // BEFORE any typed-array view or heap string is built from it.
+    validateSections(sections, buffer.byteLength);
 
     // -- typed-array view over a section (dtype from the table — never assumed) --
     function viewOf(secId) {
@@ -129,6 +324,13 @@
     function heapStr(refArr, idx) {
       var o = refArr[2 * idx], l = refArr[2 * idx + 1];
       if (l === 0) return '';
+      // MEDIUM-1: a malformed (offset, length) pair would otherwise clamp
+      // silently in .subarray() and decode to a truncated/wrong string
+      // instead of failing — refuse it explicitly.
+      if (o < 0 || l < 0 || o + l > heap.length) {
+        _decodeFail('string heap reference out of bounds (offset=' + o + ', length=' + l +
+          ', heap_length=' + heap.length + ')');
+      }
       return decoder.decode(heap.subarray(o, o + l));
     }
 
@@ -166,6 +368,12 @@
       var sd = srcDelta[i], td = tgtDelta[i];
       runS += sd;
       if (sd > 0 || i === 0) { runT = td; } else { runT += td; }
+      // MEDIUM-1: refuse an edge whose decoded endpoint falls outside the
+      // node array rather than silently drawing (or dropping) a corrupt edge.
+      if (runS < 0 || runS >= nodeCount || runT < 0 || runT >= nodeCount) {
+        _decodeFail('edge ' + i + ' endpoint out of node range (source=' + runS +
+          ', target=' + runT + ', node_count=' + nodeCount + ')');
+      }
       edges[i] = { source: runS, target: runT, cls: edgeClass[i] };
     }
 
@@ -453,14 +661,48 @@
 
   // Locate the reserved canvas, then poll until it exists (NiceGUI renders the
   // element after the websocket connects, so it may not be present synchronously).
-  function whenCanvasReady(canvasId, cb) {
+  // If the canvas never mounts within the poll window, `onTimeout` (if given)
+  // is invoked instead of returning silently (Codex MEDIUM-3 — an indefinite
+  // silent spinner with no diagnostic is a bug, not acceptable degradation).
+  function whenCanvasReady(canvasId, cb, onTimeout) {
     var tries = 0;
     (function poll() {
       var c = document.getElementById(canvasId);
       if (c) { cb(c); return; }
-      if (tries++ > 200) return; // ~10s at 50ms
+      if (tries++ > 200) { // ~10s at 50ms
+        if (onTimeout) onTimeout();
+        return;
+      }
       setTimeout(poll, 50);
     })();
+  }
+
+  // Remove the server-rendered "Loading…" placeholder (Codex MEDIUM-2). Safe
+  // to call multiple times / when the id is absent (config-less callers, or a
+  // page variant without a placeholder) — always a no-op in that case.
+  function hideLoadingPlaceholder(config) {
+    if (!config || !config.loadingId || typeof document === 'undefined') return;
+    var el = document.getElementById(config.loadingId);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  // Surface the SAME normal, tr()'d load-error UI from every failure path
+  // (fetch/decode failure OR the canvas never mounting — MEDIUM-3). Always
+  // hides the loading placeholder first so at most one of {canvas, error} is
+  // ever visible, never a stuck "Loading…" underneath either (MEDIUM-2).
+  function showLoadError(container, config, err) {
+    if (err && typeof window !== 'undefined' && window.console) {
+      window.console.error('atlas init failed', err);
+    }
+    hideLoadingPlaceholder(config);
+    if (!container || typeof document === 'undefined') return;
+    var msg = document.createElement('div');
+    msg.textContent = (config && config.labels && config.labels.loadError) ||
+      'The atlas could not be loaded.';
+    msg.setAttribute('style',
+      'position:absolute;inset:0;display:flex;align-items:center;' +
+      'justify-content:center;color:#8b93a7;font-size:14px;');
+    container.appendChild(msg);
   }
 
   // Global handle so the browser page (and Task 2 interaction wiring) can reach
@@ -499,6 +741,10 @@
     var canvasId = config.canvasId || 'atlas-canvas';
     whenCanvasReady(canvasId, function (canvas) {
       fetchDecoded(config).then(function (res) {
+        // MEDIUM-2: hide the "Loading…" placeholder on the successful first
+        // draw — BEFORE the bloom-in intro starts — so it never persists
+        // over the rendered canvas.
+        hideLoadingPlaceholder(config);
         var state = makeState(canvas, res.manifest, res.decoded, config);
         window.__atlasRenderer = state;
         resizeCanvas(state);
@@ -514,19 +760,21 @@
         attachInteractions(state);
         if (config.onReady) config.onReady(state);
       }).catch(function (err) {
-        if (window && window.console) window.console.error('atlas init failed', err);
         // Surface the claim-free error copy without any markup interpolation.
-        var box = canvas.parentElement;
-        if (box) {
-          var msg = document.createElement('div');
-          msg.textContent = (config.labels && config.labels.loadError) ||
-            'The atlas could not be loaded.';
-          msg.setAttribute('style',
-            'position:absolute;inset:0;display:flex;align-items:center;' +
-            'justify-content:center;color:#8b93a7;font-size:14px;');
-          box.appendChild(msg);
-        }
+        // showLoadError() hides the loading placeholder first (MEDIUM-2), so
+        // exactly one of {canvas, error} is ever visible.
+        showLoadError(canvas.parentElement, config, err);
       });
+    }, function () {
+      // MEDIUM-3: the canvas never mounted within the ~10s poll window.
+      // Surface the SAME normal load-error UI instead of an indefinite,
+      // undiagnosable silent spinner. Fall back to the reserved box (by id)
+      // or document.body if even that never mounted.
+      var box = (config.boxId && typeof document !== 'undefined' &&
+        document.getElementById(config.boxId)) ||
+        (typeof document !== 'undefined' ? document.body : null);
+      showLoadError(box, config,
+        new Error('atlas canvas #' + canvasId + ' did not mount within the poll window'));
     });
   }
 
