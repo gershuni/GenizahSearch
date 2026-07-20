@@ -1,8 +1,0 @@
-final model loaded: margin bands ['m_003_010', 'm_0_003', 'm_ge_010', 'not_best'], singleton bins [40, 60, 80, 100, 150, 200, 300]
-bible stream: 1,204,678 letters
-pages with rows: 70,245; tier-B rows: 657,205
-  kept 5,000 ... stats {'guard_rarity': 46602, 'guard_bible': 44763, 'not_best': 32231, 'band_singleton': 2560, 'band_m_0_003': 1527, 'band_m_003_010': 828, 'guard_verse_content': 2192, 'band_m_ge_010': 85}
-  kept 10,000 ... stats {'guard_rarity': 98877, 'guard_bible': 96635, 'not_best': 65171, 'band_singleton': 4990, 'band_m_0_003': 3151, 'band_m_003_010': 1689, 'guard_verse_content': 4799, 'band_m_ge_010': 170}
-  kept 15,000 ... stats {'guard_rarity': 152094, 'guard_bible': 149849, 'not_best': 98964, 'band_singleton': 7340, 'band_m_0_003': 4823, 'band_m_003_010': 2581, 'guard_verse_content': 7456, 'band_m_ge_010': 256}
-  kept 20,000 ... stats {'guard_rarity': 188380, 'guard_bible': 179026, 'not_best': 120669, 'band_singleton': 10607, 'band_m_0_003': 5822, 'band_m_003_010': 3221, 'guard_verse_content': 8136, 'band_m_ge_010': 350}
-  kept 25,000 ... stats {'guard_rarity': 225530, 'guard_bible': 201763, 'not_best': 136652, 'band_singleton': 14151, 'band_m_0_003': 6587, 'band_m_003_010': 3792, 'guard_verse_content': 8525, 'band_m_ge_010': 470}

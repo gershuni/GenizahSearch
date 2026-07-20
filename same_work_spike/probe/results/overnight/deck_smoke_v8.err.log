@@ -1,6 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Genizahsearch\same_work_spike\probe\scripts\mapv2_deck.py", line 795, in <module>
-    main()
-  File "C:\Genizahsearch\same_work_spike\probe\scripts\mapv2_deck.py", line 461, in main
-    os.remove(ckpt_path)
-PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\Genizahsearch\\same_work_spike\\probe\\review\\smoke_deck\\mapv2_deck_guard_ckpt.ndjson'

@@ -1,7 +1,0 @@
-
-===== 2026-07-10 21:20:34 build_reuse_graph.py C:\Genizahsearch\same_work_spike\probe\data\fullcorpus_v2.db fullv2 accepted_pairs_canonmask =====
-domain records for 203,202 sys_ids (3s)
-clusters after Louvain split: 2721 (23s)
-links: 14052 kept 4000 (25s)
-layout done (423s)
-wrote C:\Genizahsearch\same_work_spike\probe\review\rehearsal_fullv2_graph.html (14223 KB, 2721 clusters, 50,402 MSS, 4000 links)

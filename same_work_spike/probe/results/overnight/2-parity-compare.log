@@ -1,9 +1,0 @@
-rows: ram=40,549,024 spill=40,549,024
-  pa: OK
-  pb: OK
-  cnt: OK
-  mina: OK
-  maxa: OK
-  minb: OK
-  maxb: OK
-PARITY OK — 40,549,024 segments, 38,232,433 unique pairs

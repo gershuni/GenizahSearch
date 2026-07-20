@@ -1,5 +1,0 @@
-records streamed: 948549 in 131s
-stage-0 drops: {'short': 231679, 'target_sheet': 9007, 'dup_fl': 40452}
-tracer pages kept: 2568 (Counter({'tier1t': 1357, 'bh': 1211}))
-background pool (passing): 664843, sampled: 100000
-TOTAL pages in rehearsal.db: 102568

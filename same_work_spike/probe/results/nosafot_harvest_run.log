@@ -1,6 +1,0 @@
-building shelfmark indexes from libraries.csv ...
-  255,709 rows -> 747,236 exact keys (11s)
-scope: 738 works (tier new?/new?known, M:Ytext ids)
-checkpoint: 0 works already harvested; resuming
-  [  50/738] ok=50 fail=0 new_this_run=50 (291s)
-  [ 100/738] ok=100 fail=0 new_this_run=100 (590s)
