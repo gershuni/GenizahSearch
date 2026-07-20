@@ -158,6 +158,15 @@ def pytest_collection_modifyitems(config, items):
         # a dedicated fresh-process job runs them (-m render_smoke).
         if "render_smoke" in Path(str(item.fspath)).parts:
             item.add_marker(_pytest.mark.render_smoke)
+        # Auto-apply `atlas_bake` to tests under tests/atlas_bake/ (Phase 133 ATLAS-01).
+        # These require the pinned bake-time deps in requirements-atlas-bake.txt
+        # (networkx/python-louvain/Brotli), NOT installed in the main `tests` job
+        # (requirements-lock.txt only) — the test module itself self-skips there via
+        # `pytest.importorskip`, and this marker additionally lets the main job
+        # deselect them explicitly (-m "not atlas_bake"); a dedicated
+        # `atlas-bake-tests` CI job installs the pinned deps and runs them for real.
+        if "atlas_bake" in Path(str(item.fspath)).parts:
+            item.add_marker(_pytest.mark.atlas_bake)
     if config.getoption("--run-scale"):
         return  # run everything including scale tests
     skip_scale = _pytest.mark.skip(reason="scale test; use --run-scale to enable")

@@ -54,7 +54,13 @@ jobs:
       # closing the event loop + deleting the auto-index client, which poisons any
       # later NiceGUI test in the same process. They run in the `render-smoke-tests`
       # job below (fresh process).
-      - run: pytest tests/ -m "not gui and not render_smoke"
+      # `not atlas_bake` deselects the Phase 133 atlas-bake invariant tests
+      # (auto-marked in tests/conftest.py): they require the pinned bake-time deps
+      # in requirements-atlas-bake.txt (networkx/python-louvain/Brotli), which are
+      # NOT installed in this job (the test module also self-skips via
+      # pytest.importorskip as defense in depth). They run for real in the
+      # dedicated `atlas-bake-tests` job below.
+      - run: pytest tests/ -m "not gui and not render_smoke and not atlas_bake"
 
   render-smoke-tests:
     needs: lint-and-docs
@@ -129,3 +135,26 @@ jobs:
       # the existing tests/e2e/test_performance.py also runs there. This job is
       # ADDITIONAL coverage, NOT a replacement.
       - run: pytest -m slow tests/
+
+  atlas-bake-tests:
+    needs: lint-and-docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      # Node is provisioned here (not needed by the Python bake tests
+      # themselves) so the companion 133-04 golden JS-decode + DOM-XSS tests
+      # -- also tagged `atlas_bake` under tests/atlas_bake/ -- can run in this
+      # same dedicated job once that plan lands.
+      - run: pip install -r requirements-lock.txt
+      # Bake-time-only deps (Phase 133 ATLAS-01, scripts/build_atlas_asset.py)
+      # -- deliberately NOT in requirements.txt/requirements-lock.txt; this
+      # tooling never runs inside the web process.
+      - run: pip install -r requirements-atlas-bake.txt
+      - run: pip install pytest
+      - run: pytest tests/atlas_bake -m atlas_bake

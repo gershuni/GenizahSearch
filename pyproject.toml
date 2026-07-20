@@ -17,6 +17,7 @@ markers = [
     "scale: marks tests requiring large synthesised corpora; run with --run-scale",
     "gui: marks PyQt6 tests that construct a real QApplication and dispatch widget events; deselected from the main `tests` job (-m 'not gui') and run in a dedicated fresh-process `gui-tests` CI job to avoid the accumulated-Qt-state segfault in the full suite",
     "render_smoke: marks NiceGUI render-smoke tests (tests/render_smoke/) that enter+tear down the app lifespan via asyncio.run; deselected from the main `tests` job (-m 'not render_smoke') and run in a dedicated fresh-process `render-smoke-tests` CI job because the lifespan teardown closes the event loop and deletes the auto-index client, polluting any later NiceGUI test in the same process",
+    "atlas_bake: marks bake-invariant tests (tests/atlas_bake/) that require the pinned bake-time deps in requirements-atlas-bake.txt (networkx/python-louvain/Brotli) -- NOT installed in the main `tests` job (requirements-lock.txt only), so those tests self-skip there via `pytest.importorskip`; deselected from the main `tests` job (-m 'not atlas_bake') and run for real in a dedicated `atlas-bake-tests` CI job that installs the pinned deps + Node (for the companion 133-04 JS golden-decode/DOM-XSS tests, also tagged atlas_bake under the same directory)",
 ]
 
 # Phase 85 (Plan 85-03 cross-plan integration fix): restrict collection to
