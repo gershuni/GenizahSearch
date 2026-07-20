@@ -4596,3 +4596,46 @@ TRANSLATIONS.update({
     "Don't ask again":
         "אל תשאל שוב",
 })
+
+# === Connections Atlas / Visual Atlas Preview (Phase 133, ATLAS-01) ===
+# English is the source/key; every NEW string this phase introduces gets a real
+# Hebrew value here so web/pages/atlas.py chrome (133-03), the renderer
+# interactions (133-04), and the homepage teaser (133-05) can tr() them without
+# English leaking under HE. Reuses existing keys where present (Title,
+# Shelfmark, Domain, Library, Home). No M-source strings — this is our own
+# claim-free UI copy.
+TRANSLATIONS.update({
+    # chrome (133-03)
+    "Connections Atlas": "אטלס החיבורים",
+    "Beta": "בטא",
+    "A preview map of textual connections across the connected Cairo Genizah corpus.":
+        "מפת תצוגה מקדימה של חיבורים טקסטואליים ברחבי קורפוס גניזת קהיר המקושר.",
+    "Positions and clusters are algorithmically derived from textual "
+    "connections — proximity reflects textual similarity, not physical provenance.":
+        "המיקומים והאשכולות מחושבים אלגוריתמית מתוך חיבורים טקסטואליים — "
+        "הקִרבה משקפת דמיון טקסטואלי, לא מקור פיזי משותף.",
+    "Loading the atlas…": "טוען את האטלס…",
+    # interactions (133-04, D-08)
+    "Search by title or shelfmark…": "חיפוש לפי כותרת או סימן מדף…",
+    "Color by domain": "צביעה לפי תחום",
+    "Color by library": "צביעה לפי ספרייה",
+    "Hide library": "הסתר ספרייה",
+    "Show only this library": "הצג רק ספרייה זו",
+    "Focus constellation": "מיקוד קבוצה",
+    "Connections": "חיבורים",
+    "Continuation (same-work evidence)": "המשך (עדות לאותו חיבור)",
+    "Citation / quotation": "ציטוט / מובאה",
+    "Skip intro": "דלג על ההקדמה",
+    "Reduced motion": "תנועה מופחתת",
+    # homepage teaser (133-05)
+    "Explore the Connections Atlas": "חקרו את אטלס החיבורים",
+    "A preview map of textual connections across the Cairo Genizah — "
+    "a claim-free, algorithmically laid-out overview.":
+        "מפת תצוגה מקדימה של חיבורים טקסטואליים בגניזת קהיר — "
+        "סקירה אלגוריתמית, ללא טענות זיהוי.",
+    # error / unavailable copy
+    "The Connections Atlas is temporarily unavailable": "אטלס החיבורים אינו זמין כרגע",
+    "The preview will appear here as soon as it is ready.":
+        "התצוגה המקדימה תופיע כאן ברגע שהיא תהיה מוכנה.",
+    "The atlas could not be loaded.": "לא ניתן היה לטעון את האטלס.",
+})

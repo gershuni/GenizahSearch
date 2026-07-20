@@ -685,7 +685,7 @@ from web.state import state
 from web.api import init_api_routes
 from web.search_api import init_search_api
 from web.translations import tr, set_language, get_language
-from web.feature_flags import WEB_PUZZLE_ENABLED, ATLAS_PREVIEW_ENABLED
+from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
     load_atlas_state,
     atlas_preview_available,
