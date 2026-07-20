@@ -37,7 +37,16 @@ import check_atlas_masking as cam  # noqa: E402
 FAKE = 'ZZZ_FAKE_MASKING_TOKEN_ZZZ'
 FAKE_HE = 'צצצ_מסך_בדיקה_צצצ'
 FAKE_DOMAIN = 'fake-mask.invalid'
-ALL_FAKES = (FAKE, FAKE_HE, FAKE_DOMAIN)
+# A lowercase-Greek token whose UPPERCASE haystack form casefolds to it but has
+# entirely different UTF-8 bytes -- proves Unicode casefolding of the HAYSTACK
+# (a plain ASCII `bytes.lower()` fold can NEVER bridge Ζ<->ζ) -- HIGH-1.
+FAKE_GREEK = 'ζζζ_masking_token_ζζζ'
+# A precomposed-accent token whose NFC and NFD forms differ byte-for-byte.
+FAKE_ACC = 'zzz_café_tökén_zzz'
+# A spaces-bearing token so URL percent-/form-encoding actually transforms it
+# (the byte pass alone cannot match `%20`/`+` against a space) -- HIGH-5.
+FAKE_SPACE = 'zzz fake mask token'
+ALL_FAKES = (FAKE, FAKE_HE, FAKE_DOMAIN, FAKE_GREEK, FAKE_ACC, FAKE_SPACE)
 
 GIT = shutil.which('git')
 
@@ -76,7 +85,7 @@ def _git(repo, *args):
 
 @pytest.fixture
 def matcher():
-    return cam.build_matcher([FAKE, FAKE_HE, FAKE_DOMAIN])
+    return cam.build_matcher([FAKE, FAKE_HE, FAKE_DOMAIN, FAKE_GREEK, FAKE_ACC, FAKE_SPACE])
 
 
 @pytest.fixture
@@ -118,9 +127,33 @@ def test_hebrew_literal(matcher):
 
 
 def test_unicode_nfd_form(matcher):
-    nfd = unicodedata.normalize('NFD', FAKE_HE)
+    # FAKE_ACC's NFD form (decomposed accents) is byte-distinct from its NFC
+    # form; the pattern set carries the NFC token, so this exercises the NFD
+    # variant genuinely (plain Hebrew consonants have NFC == NFD, which is why
+    # the previous FAKE_HE fixture here was vacuous).
+    nfd = unicodedata.normalize('NFD', FAKE_ACC)
+    assert nfd.encode('utf-8') != unicodedata.normalize('NFC', FAKE_ACC).encode('utf-8')
     issues = matcher.scan(f"x {nfd} y".encode('utf-8'), 'fx')
     assert issues, "NFD-normalized form not detected"
+
+
+def test_unicode_casefold_haystack_non_ascii(matcher):
+    """HIGH-1: a non-ASCII UPPERCASE haystack whose casefold equals the
+    (lowercase) pattern is caught -- a plain ASCII `bytes.lower()` fold leaves
+    Greek capitals untouched and would miss it. Coverage comes from the
+    exhaustive case/normalization byte forms (matched fast, CI-viable) rather
+    than casefolding the whole multi-gigabyte haystack."""
+    upper = FAKE_GREEK.upper()  # 'ΖΖΖ_MASKING_TOKEN_ΖΖΖ'
+    assert upper.encode('utf-8') != FAKE_GREEK.encode('utf-8')
+    issues = matcher.scan(f"x {upper} y".encode('utf-8'), 'fx')
+    assert issues, "Unicode-casefold (upper-case Greek) haystack match not detected"
+    _assert_never_echoes(issues)
+
+
+def test_unicode_casefold_haystack_title_and_lower(matcher):
+    """Title-case and lower-case non-ASCII renditions are covered too."""
+    assert matcher.scan(f"x {FAKE_GREEK.title()} y".encode('utf-8'), 'fx')
+    assert matcher.scan(f"x {FAKE_GREEK.lower()} y".encode('utf-8'), 'fx')
 
 
 def test_utf16_bom(matcher):
@@ -139,8 +172,25 @@ def test_utf16_no_bom_dense(matcher):
 
 
 def test_url_encoded_full(matcher):
-    data = f"q={urllib.parse.quote(FAKE, safe='')}".encode('ascii')
-    assert matcher.scan(data, 'fx')
+    # FAKE_SPACE contains spaces, so quote() genuinely rewrites them to %20 --
+    # the raw byte pass cannot match; only the URL byte-decoding does (HIGH-5).
+    encoded = urllib.parse.quote(FAKE_SPACE, safe='')
+    assert '%20' in encoded
+    data = f"q={encoded}".encode('ascii')
+    issues = matcher.scan(data, 'fx')
+    assert issues and any(i.surface == 'url' for i in issues), (
+        "percent-encoded space-bearing token not caught via the URL surface"
+    )
+    _assert_never_echoes(issues)
+
+
+def test_url_form_plus_decoded(matcher):
+    # `+` must be decoded as a space (application/x-www-form-urlencoded) -- HIGH-5.
+    data = FAKE_SPACE.replace(' ', '+').encode('ascii')  # 'zzz+fake+mask+token'
+    issues = matcher.scan(data, 'fx')
+    assert issues and any(i.surface == 'url' for i in issues), (
+        "form (+ -> space) encoded token not caught"
+    )
 
 
 def test_url_encoded_mixed(matcher):
@@ -196,9 +246,9 @@ def test_never_echo_in_issue(matcher):
 
 
 def test_dense_escape_introducers_wholefile(matcher):
-    """A blob dense in escape introducers de-escapes whole-file (not windowed)
-    and still catches a mixed form buried in the noise."""
-    noise = b'&#65;' * (cam._DENSE_INTRO_LIMIT + 50)
+    """A blob dense in escape introducers de-escapes whole-file and still
+    catches a mixed literal+escaped form buried deep in the noise."""
+    noise = b'&#65;' * 5000
     mixed = (FAKE[:2] + ''.join(f'\\u{ord(c):04x}' for c in FAKE[2:])).encode('ascii')
     assert matcher.scan(noise + mixed + noise, 'fx')
 
@@ -566,6 +616,240 @@ def test_cli_scan_asset_clean_exits_zero(tmp_path):
     result = _run_cli({'MASKING_SCAN_PATTERNS_FILE': str(pf)},
                       ['--scan-asset', str(asset)])
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# ---------------------------------------------------------------------------
+# 10. Round-3 adversarial coverage -- every plausible wide decoding (HIGH-2),
+#     layered encodings (HIGH-3), streaming boundaries + Brotli caps (HIGH-4),
+#     URL fail-closed (HIGH-5), HEAD-probe distinction (HIGH-7), traversal /
+#     metadata / symlink handling (HIGH-8), diagnostic never-echo (HIGH-9),
+#     and the un-bypassable self-test (HIGH-10). Every fail-closed branch is
+#     asserted at the PROCESS EXIT-STATUS level too, with no sensitive output.
+# ---------------------------------------------------------------------------
+
+def test_utf16be_no_bom(matcher):
+    issues = matcher.scan((FAKE * 3).encode('utf-16-be'), 'fx')
+    assert issues and any(i.surface == 'decoded' for i in issues), (
+        "BOM-less UTF-16BE not detected (only LE was tried before -- HIGH-2)"
+    )
+
+
+def test_utf32le_no_bom(matcher):
+    issues = matcher.scan((FAKE * 3).encode('utf-32-le'), 'fx')
+    assert issues and any(i.surface == 'decoded' for i in issues), (
+        "BOM-less UTF-32LE not detected (HIGH-2)"
+    )
+
+
+def test_utf32be_no_bom(matcher):
+    issues = matcher.scan((FAKE * 3).encode('utf-32-be'), 'fx')
+    assert issues and any(i.surface == 'decoded' for i in issues), (
+        "BOM-less UTF-32BE not detected (HIGH-2)"
+    )
+
+
+def test_layered_js_escape_inside_utf16(matcher):
+    """HIGH-3: a JS-escaped ASCII leak stored as UTF-16LE bytes -- the escape
+    decoding must COMPOSE with the wide character decoding."""
+    escaped = '"' + ''.join(f'\\u{ord(c):04x}' for c in FAKE) + '"'
+    data = escaped.encode('utf-16-le')
+    issues = matcher.scan(data, 'fx')
+    assert issues and any(i.surface in ('escape', 'decoded') for i in issues), (
+        "escape-within-wide-encoding leak not caught (decode+unescape did not compose)"
+    )
+
+
+def test_layered_url_encoded_hebrew_via_url_surface(matcher):
+    """Percent-encoded non-ASCII must be caught via the casefolded URL pass."""
+    data = ('q=' + urllib.parse.quote(FAKE_HE, safe='')).encode('ascii')
+    issues = matcher.scan(data, 'fx')
+    assert issues and any(i.surface == 'url' for i in issues)
+
+
+def test_chunk_boundary_straddle(tmp_path, monkeypatch):
+    """HIGH-4b: a leak that straddles a streaming chunk boundary is still caught
+    because the carried overlap is sized to the longest matchable byte span."""
+    monkeypatch.setattr(cam, '_WHOLE_READ_CAP', 4096)
+    monkeypatch.setattr(cam, '_CHUNK_SIZE', 8192)
+    boundary = 8192
+    pre = b'.' * (boundary - len(FAKE) // 2)
+    body = pre + FAKE.encode('ascii') + b'.' * 4000
+    f = tmp_path / 'huge.bin'
+    f.write_bytes(body)
+    assert f.stat().st_size > cam._WHOLE_READ_CAP  # forces the streaming path
+    issues = cam.scan_asset(str(f), [FAKE])
+    assert issues, "leak straddling a chunk boundary was not caught while streaming"
+
+
+def test_brotli_decompress_cap_fails_closed(tmp_path, monkeypatch):
+    """HIGH-4a: a `.br` that decompresses beyond the sane cap is fail-closed."""
+    brotli = pytest.importorskip('brotli')
+    monkeypatch.setattr(cam, '_BR_DECOMPRESSED_CAP', 1024)
+    payload = b'A' * 50000  # clean content, but expands past the cap
+    f = tmp_path / 'big.bin.br'
+    f.write_bytes(brotli.compress(payload))
+    with pytest.raises(cam.ScanError):
+        cam.scan_asset(str(f), [FAKE])
+
+
+def test_url_decoder_failure_fails_closed(matcher, monkeypatch):
+    """HIGH-5: a URL-decoder failure is fail-CLOSED, never fail-open-to-clean."""
+    def boom(*a, **k):
+        raise ValueError("simulated URL decoder failure")
+    monkeypatch.setattr(cam.urllib.parse, 'unquote_to_bytes', boom)
+    with pytest.raises(cam.ScanError):
+        matcher.scan(b'x=%41%42%43', 'fx')  # contains '%', triggers the URL pass
+
+
+def test_empty_repo_unborn_head_ok(git_repo):
+    """HIGH-7: a real work tree with an UNBORN HEAD (zero commits) is a PROVEN
+    empty-HEAD, scanned cleanly -- not confused with an operational failure."""
+    (git_repo / 'untracked.txt').write_text('clean\n', encoding='utf-8')
+    assert cam.scan_repo([FAKE, FAKE_HE, FAKE_DOMAIN]) == []
+
+
+def test_scan_asset_traversal_error_fails_closed(tmp_path, monkeypatch):
+    """HIGH-8: a directory that cannot be enumerated is fail-closed (not a
+    silently-skipped subtree)."""
+    d = tmp_path / 'assets'
+    d.mkdir()
+    (d / 'manifest.json').write_text('{"ok": true}', encoding='utf-8')
+    real_scandir = cam.os.scandir
+
+    def boom(path, *a, **k):
+        if str(path).startswith(str(d)):
+            raise OSError("simulated scandir failure")
+        return real_scandir(path, *a, **k)
+
+    monkeypatch.setattr(cam.os, 'scandir', boom)
+    with pytest.raises(cam.ScanError):
+        cam.scan_asset(str(d), [FAKE], strict=True)
+
+
+def test_scan_asset_stat_error_fails_closed(tmp_path, monkeypatch):
+    """HIGH-8: an OSError on a file's metadata (not a benign not-a-regular-file)
+    is fail-closed in --strict."""
+    d = tmp_path / 'assets'
+    d.mkdir()
+    target = d / 'a.txt'
+    target.write_text('clean\n', encoding='utf-8')
+    real_lstat = cam.os.lstat
+
+    def boom(path, *a, **k):
+        if str(path).endswith('a.txt'):
+            raise OSError("simulated lstat failure")
+        return real_lstat(path, *a, **k)
+
+    monkeypatch.setattr(cam.os, 'lstat', boom)
+    with pytest.raises(cam.ScanError):
+        cam.scan_asset(str(d), [FAKE], strict=True)
+
+
+def test_scan_asset_symlink_not_followed(tmp_path):
+    """HIGH-8: a symlink's link TEXT is scanned; the target is never followed."""
+    d = tmp_path / 'assets'
+    d.mkdir()
+    link = d / 'link.txt'
+    try:
+        os.symlink(f'./{FAKE}_target', link)  # dangling; the link TEXT is leaky
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation not permitted on this platform")
+    issues = cam.scan_asset(str(d), [FAKE, FAKE_HE, FAKE_DOMAIN], strict=True)
+    assert issues, "leaky symlink target-text not caught"
+    _assert_never_echoes(issues)
+
+
+def test_unreadable_leaky_named_file_diagnostic_no_echo(git_repo, monkeypatch):
+    """HIGH-9: a fail-closed diagnostic about a file whose NAME is leaky must
+    redact the name -- the raised error must not echo the pattern."""
+    (git_repo / 'base.txt').write_text('base\n', encoding='utf-8')
+    _git(git_repo, 'add', 'base.txt')
+    _git(git_repo, 'commit', '-q', '-m', 'base')
+    leaky = git_repo / f'{FAKE}_secret.txt'
+    leaky.write_text('present but unreadable\n', encoding='utf-8')
+
+    real_read = Path.read_bytes
+
+    def boom(self, *a, **k):
+        if FAKE in self.name:
+            raise OSError("simulated unreadable file")
+        return real_read(self, *a, **k)
+
+    monkeypatch.setattr(Path, 'read_bytes', boom)
+    with pytest.raises(cam.ScanError) as ei:
+        cam.scan_repo([FAKE, FAKE_HE, FAKE_DOMAIN])
+    for tok in ALL_FAKES:
+        assert tok not in str(ei.value), "fail-closed diagnostic echoed a pattern"
+
+
+def test_issue_format_enforces_redaction(matcher):
+    """HIGH-9: Issue.format() re-sanitizes its own path, so even a caller that
+    handed it an UN-redacted leaky path cannot leak on print."""
+    iss = cam.Issue(path=f'notes_{FAKE}.txt', offset=7, pattern_index=0, surface='content')
+    rendered = iss.format()
+    assert FAKE not in rendered
+    assert '<redacted' in rendered
+
+
+def test_git_stderr_never_echoed():
+    """HIGH-9: a git failure raises WITHOUT embedding raw subprocess stderr."""
+    with pytest.raises(cam.ScanError) as ei:
+        cam._git(['definitely-not-a-git-subcommand-xyz'])
+    msg = str(ei.value)
+    assert 'not a git command' not in msg and 'Usage' not in msg
+
+
+# --- CLI-level fail-closed EXIT STATUS + no-sensitive-output (MEDIUM-11) ----
+
+def test_cli_self_test_empty_asset_bypass_rejected():
+    """HIGH-10: `--self-test --scan-asset ""` must NOT silently run the
+    self-test and exit 0 -- the empty asset arg is a hard usage error."""
+    result = _run_cli({}, ['--self-test', '--scan-asset', ''])
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert 'PASS' not in result.stdout
+
+
+def test_cli_scan_asset_whitespace_path_rejected(tmp_path):
+    pf = _write_patterns_file(tmp_path, [FAKE])
+    result = _run_cli({'MASKING_SCAN_PATTERNS_FILE': str(pf)},
+                      ['--scan-asset', '   '])
+    assert result.returncode == 2, result.stdout + result.stderr
+
+
+def test_cli_nongit_repo_exit_nonzero_no_echo(tmp_path, monkeypatch, capsys):
+    """A repo scan against a non-git dir fails closed with a non-zero process
+    exit and no pattern in the output (MEDIUM-11)."""
+    pf = _write_patterns_file(tmp_path, [FAKE])
+    monkeypatch.setenv('MASKING_SCAN_PATTERNS_FILE', str(pf))
+    monkeypatch.setattr(cam, 'ROOT_DIR', tmp_path)  # not a git repo
+    rc = cam.main(['--scan-repo'])
+    assert rc == 1
+    out = capsys.readouterr()
+    assert FAKE not in (out.out + out.err)
+
+
+def test_cli_asset_bom_decode_failure_exit_nonzero_no_echo(tmp_path):
+    """A BOM-declared file that fails to decode makes the CLI exit non-zero
+    with no pattern echoed (MEDIUM-11)."""
+    pf = _write_patterns_file(tmp_path, [FAKE])
+    asset = tmp_path / 'asset'
+    asset.mkdir()
+    (asset / 'bad.bin').write_bytes(b'\xff\xfe' + b'A\x00B')  # UTF-16 BOM, odd tail
+    result = _run_cli({'MASKING_SCAN_PATTERNS_FILE': str(pf)},
+                      ['--scan-asset', str(asset)])
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert FAKE not in (result.stdout + result.stderr)
+
+
+def test_cli_corrupt_brotli_exit_nonzero(tmp_path):
+    pytest.importorskip('brotli')
+    pf = _write_patterns_file(tmp_path, [FAKE])
+    asset = tmp_path / 'asset'
+    asset.mkdir()
+    (asset / 'broken.bin.br').write_bytes(b'\x00\x01\x02 not valid brotli \xff\xfe')
+    result = _run_cli({'MASKING_SCAN_PATTERNS_FILE': str(pf)},
+                      ['--scan-asset', str(asset)])
+    assert result.returncode == 1, result.stdout + result.stderr
 
 
 if __name__ == '__main__':

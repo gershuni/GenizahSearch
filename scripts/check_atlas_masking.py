@@ -16,18 +16,31 @@ in committed material only by the internal codename "M-source") across:
     redacted (opaque id) in output, never echoed.
   - `scan_asset(path)` -- a built product asset (a single file OR a whole
     directory, recursively), including Brotli (`.br`) payloads which are
-    decompressed and scanned in BOTH their compressed and decompressed forms.
+    ALWAYS fully decompressed and scanned in BOTH compressed and decompressed
+    forms (never streamed raw).
 
 ONE semantically-complete, fail-CLOSED matcher runs on EVERY surface (repo and
-asset alike): every restricted pattern is matched as literal bytes, as
-Unicode-normalized (NFC/NFD) + casefolded variants, across explicitly supported
-byte encodings (UTF-8 / UTF-16 / UTF-32 with BOM- and content-aware decoding),
-and in URL, HTML-entity, and JS/JSON `\\u`/`\\x` escaped forms -- decoded back
-into canonical text so that FULLY *and* PARTIALLY (mixed literal+escaped)
-encoded leaks are caught. Performance over a large working tree is achieved with
-the fast C `bytes.find` primitive, a single `unquote_to_bytes` URL buffer, and a
-windowed de-escape around the (sparse) HTML/JS escape introducers -- coverage is
-never traded for speed.
+asset alike). Its single canonical pipeline is uniform for every byte source:
+
+    for each candidate CHARACTER-DECODING of the bytes
+        (UTF-8 always; the BOM-declared codec when a BOM is present -- decode
+         failure there is fail-closed; and, for BOM-less input whose NUL-lane
+         ratio looks wide, EVERY plausible wide decoding -- UTF-16LE, UTF-16BE,
+         UTF-32LE, UTF-32BE -- so a hit in any candidate is a hit):
+        for each UNESCAPE of that decoded text
+        (identity; URL percent- AND form-decoded `+`->space; HTML entities;
+         JS/JSON `\\u{..}` / surrogate-pair / `\\uXXXX` / `\\xXX`):
+            Unicode `.casefold()` the text and match the casefolded needles.
+
+Because the needles are precomputed as the casefold of the pattern's NFC and
+NFD normalization forms, casefolding the haystack alone (no per-blob re-NFC)
+collapses BOTH case and canonical-normalization differences -- so a non-ASCII
+uppercase leak (which a plain `bytes.lower()` ASCII fold would miss entirely)
+is caught. A fast C `bytes.find` pre-pass over `data.lower()` (and over the
+URL/form byte-decodings) keeps the common literal/ASCII-case case cheap; the
+canonical text pass runs whenever the buffer is non-ASCII, carries a percent,
+carries an HTML/JS escape introducer, or looks wide -- i.e. wherever a
+transformation could hide a leak. Coverage is NEVER traded for speed.
 
 SECURITY CONTROLS (do not weaken):
   - NEVER hardcode the restricted patterns in this file. `load_patterns()`
@@ -36,14 +49,20 @@ SECURITY CONTROLS (do not weaken):
     as PUZZLE_UPLOAD_SECRET (web/puzzle_tokens.py).
   - FAIL-CLOSED: EVERY condition that could hide a leak is a hard error (raised
     as ScanError, converted to a non-zero exit by main()): an empty/absent
-    pattern set at ANY public scan entry point; a non-zero git result; a
-    missing expected blob or malformed `cat-file --batch` record; a file that
-    stats-as-regular but cannot be read; a BOM-declared encoding that fails to
-    decode; a Brotli payload that fails to decompress. The scan must NEVER
-    exit 0 while any surface was silently lost.
-  - NEVER ECHO: reported issues include only the (redacted-if-leaky) relative
-    file path, an approximate byte offset, and a pattern INDEX -- never the
-    matched pattern text, and never a path that itself contains a pattern.
+    pattern set at ANY public scan entry point; ANY operational git failure (a
+    non-zero result that is NOT a proven unborn HEAD); a missing expected blob
+    or malformed `cat-file --batch` record; an enumerated file whose metadata
+    (`os.lstat`) or bytes cannot be read; a directory that cannot be walked
+    (`os.scandir`); a BOM-declared encoding that fails to decode; a URL decoder
+    failure; a Brotli payload that fails to decompress or exceeds a sane cap; a
+    pattern too long to safely straddle a streaming-chunk boundary. The scan
+    must NEVER exit 0 while any surface was silently lost.
+  - NEVER ECHO: reported issues carry only the (redacted-if-leaky) relative
+    file path, an approximate offset, and a pattern INDEX -- never the matched
+    pattern text, and never a path that itself contains a pattern. `Issue.format`
+    and EVERY diagnostic (including any surfaced subprocess context) are routed
+    through a pattern-aware sanitizer; raw subprocess stderr and raw asset paths
+    are never printed.
 
 Usage:
     python scripts/check_atlas_masking.py --scan-repo
@@ -54,9 +73,9 @@ Usage:
 """
 
 import argparse
-import html
 import os
 import re
+import stat
 import subprocess
 import sys
 import unicodedata
@@ -71,24 +90,28 @@ ROOT_DIR = SCRIPT_DIR.parent
 # ---------------------------------------------------------------------------
 # Tunables (all bound the work done; none affect coverage)
 # ---------------------------------------------------------------------------
-# Window (bytes) taken on each side of an HTML/JS escape introducer for the
-# de-escape pass. A mixed literal+escaped occurrence of a pattern is bounded in
-# length by max_pattern_chars * max_bytes_per_escaped_char; 2 KiB is generously
-# larger than any plausible pattern's escaped span.
-_WINDOW = 2048
-# Above this many escape introducers in a single blob, de-escape the whole blob
-# rather than windowing (windows would have merged to cover it anyway).
-_DENSE_INTRO_LIMIT = 4096
-# A blob is treated as (no-BOM) UTF-16/UTF-32 when at least this fraction of its
-# bytes are NUL -- real wide-encoded ASCII text is ~50% NUL; scattered NULs in
-# otherwise-8-bit content stay well below this.
+# A blob is treated as (no-BOM) UTF-16/UTF-32 when at least this fraction of a
+# head sample is NUL -- real wide-encoded ASCII text is ~50% NUL; scattered
+# NULs in otherwise-8-bit content stay well below this.
 _WIDE_NULL_RATIO = 0.20
-# Files at/under this size are read whole; larger files are streamed in
+# Every plausible BOM-less wide decoding is scanned (HIGH-2): a hit in any is a hit.
+_WIDE_CODECS = ('utf-16-le', 'utf-16-be', 'utf-32-le', 'utf-32-be')
+# Files at/under this size are read whole; larger NON-.br files are streamed in
 # overlapping chunks so we never hold a giant file (or the whole tree) in RAM.
 _WHOLE_READ_CAP = 256 * 1024 * 1024
 _CHUNK_SIZE = 64 * 1024 * 1024
-# Overlap must exceed the longest byte-form/window a match could straddle.
-_CHUNK_OVERLAP = _WINDOW * 8
+# Brotli payloads are ALWAYS fully read + decompressed, never streamed raw
+# (HIGH-4). The project's assets are bounded (<6 MB per docs/specs); anything
+# past these caps is fail-closed rather than trusted or streamed.
+_BR_COMPRESSED_CAP = 64 * 1024 * 1024
+_BR_DECOMPRESSED_CAP = 512 * 1024 * 1024
+# Byte-level introducers whose PRESENCE gates the HTML/JS de-escape pass.
+_HTML_JS_INTRODUCERS = (b'&#', b'\\u', b'\\U', b'\\x', b'\\X')
+# The HTML/JS de-escape pass windows around each (sparse) escape introducer
+# rather than de-escaping whole multi-gigabyte blobs; the window radius is
+# recomputed per matcher from the longest escaped form. Above this many
+# introducers in one blob, de-escape the whole thing (windows would have merged).
+_DENSE_INTRO_LIMIT = 4096
 
 # Directory-walk suffix allowlist for a NON-strict `scan_asset` on a directory
 # (a single explicit file argument is always scanned; --strict scans EVERY
@@ -105,18 +128,38 @@ class ScanError(RuntimeError):
     converts an uncaught ScanError into a non-zero exit."""
 
 
+# ---------------------------------------------------------------------------
+# Pattern-aware diagnostic sanitizer (never-echo, HIGH-9)
+# ---------------------------------------------------------------------------
+# The most-recently-built matcher acts as the active redactor for ALL diagnostic
+# strings (ScanError messages, reported paths, CLI output). Set by build_matcher.
+_ACTIVE_MATCHER = None
+
+
+def _sanitize(text) -> str:
+    """Route any diagnostic string through the active matcher's redactor so a
+    restricted pattern (or a path that embeds one) can never be echoed, even
+    from an error message or a subprocess-context string (HIGH-9)."""
+    s = str(text)
+    matcher = _ACTIVE_MATCHER
+    if matcher is None:
+        return s
+    return matcher.redact_diagnostic(s)
+
+
 @dataclass(frozen=True)
 class Issue:
     """One masking hit. Deliberately carries NO pattern text and NO un-redacted
-    path (never-echo). `path` is already redacted by the matcher when the path
-    itself contains a restricted pattern."""
+    path (never-echo). `path` is redacted by the matcher when the path itself
+    contains a restricted pattern; `format()` ALSO re-sanitizes defensively so a
+    trusting caller cannot leak (HIGH-9)."""
     path: str
     offset: int
     pattern_index: int
     surface: str = 'content'
 
     def format(self) -> str:
-        return (f"MASK HIT [{self.surface}]: {self.path} "
+        return (f"MASK HIT [{self.surface}]: {_sanitize(self.path)} "
                 f"@byte {self.offset} (pattern #{self.pattern_index})")
 
 
@@ -163,13 +206,14 @@ def _require_patterns(patterns) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Brotli (fail-closed)
+# Brotli (fail-closed, always fully decompressed with caps -- HIGH-4)
 # ---------------------------------------------------------------------------
 
 def _brotli_decompress(data: bytes) -> bytes:
-    """Decompress a Brotli payload. A MISSING brotli library OR a failed
-    decompression is fail-closed (ScanError) -- a `.br` whose decompressed
-    bytes we cannot inspect could hide a leak (HIGH-4)."""
+    """Decompress a Brotli payload incrementally with a decompressed-size cap.
+    A MISSING brotli library, a failed decompression, OR a payload that expands
+    beyond `_BR_DECOMPRESSED_CAP` is fail-closed (ScanError) -- a `.br` whose
+    decompressed bytes we cannot fully + safely inspect could hide a leak."""
     try:
         import brotli  # noqa: PLC0415 (lazy: only needed for .br payloads)
     except ImportError as exc:
@@ -177,10 +221,32 @@ def _brotli_decompress(data: bytes) -> bytes:
             "brotli library unavailable -- cannot inspect a Brotli (.br) "
             "payload; refusing to pass it unscanned (fail-closed)."
         ) from exc
+
+    decompressor_cls = getattr(brotli, 'Decompressor', None)
     try:
-        return brotli.decompress(data)
+        if decompressor_cls is not None:
+            dec = decompressor_cls()
+            feed = getattr(dec, 'process', None) or getattr(dec, 'decompress')
+            out = bytearray()
+            step = 1 << 20
+            for i in range(0, len(data), step):
+                out += feed(data[i:i + step])
+                if len(out) > _BR_DECOMPRESSED_CAP:
+                    raise ScanError(
+                        "Brotli payload decompressed beyond the sane cap (fail-closed)"
+                    )
+            result = bytes(out)
+        else:  # binding without an incremental decompressor
+            result = brotli.decompress(data)
+            if len(result) > _BR_DECOMPRESSED_CAP:
+                raise ScanError(
+                    "Brotli payload decompressed beyond the sane cap (fail-closed)"
+                )
+    except ScanError:
+        raise
     except Exception as exc:  # brotli raises brotli.error / generic
         raise ScanError("Brotli decompression failed (fail-closed)") from exc
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +269,7 @@ def _js_u_form(v: str) -> bytes:
     parts = []
     for c in v:
         o = ord(c)
-        if o > 0xFFFF:  # non-BMP -> UTF-16 surrogate pair (HIGH-5)
+        if o > 0xFFFF:  # non-BMP -> UTF-16 surrogate pair
             o2 = o - 0x10000
             hi = 0xD800 + (o2 >> 10)
             lo = 0xDC00 + (o2 & 0x3FF)
@@ -219,18 +285,31 @@ def _js_x_form(v: str) -> bytes:
     return ''.join(f'\\x{ord(c):02x}' for c in v).encode('ascii', 'ignore')
 
 
-# One combined JS/JSON escape de-escaper (a SINGLE sub pass rather than four --
-# the per-call regex overhead over a large tree dominates otherwise). Alternation
-# order matters: `\u{..}` and surrogate PAIRS are tried before a lone `\uXXXX`.
+# HTML NUMERIC character references only (`&#NNN;` / `&#xHH;`). Masking patterns
+# are corpus names/sigla, never HTML named entities, so we deliberately do NOT
+# use `html.unescape` here: its pure-Python named-entity machinery fires a
+# callback on EVERY `&` and turns a de-escape of binary content into a
+# multi-second-per-megabyte pathology. This C-scanned regex only invokes its
+# callback on a genuine numeric ref.
+_HTML_NUMREF = re.compile(r'&#(?:x([0-9a-f]+)|([0-9]+));?', re.IGNORECASE)
+
+
+def _html_numref_repl(m: 're.Match') -> str:
+    if m.group(1) is not None:  # &#xHH; hexadecimal
+        return _safe_chr(int(m.group(1), 16))
+    return _safe_chr(int(m.group(2)))  # &#NNN; decimal (base 10)
+
+
+# One combined JS/JSON escape de-escaper (a SINGLE sub pass rather than four).
+# Alternation order matters: `\u{..}` and surrogate PAIRS are tried before a
+# lone `\uXXXX`.
 _JS_COMBINED = re.compile(
-    r'\\u\{([0-9a-f]{1,6})\}'                       # 1: \u{HHHH}
-    r'|\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})'  # 2,3: UTF-16 surrogate pair
-    r'|\\u([0-9a-f]{4})'                            # 4: \uXXXX
-    r'|\\x([0-9a-f]{2})',                           # 5: \xXX
+    r'\\u\{([0-9a-f]{1,6})\}'                            # 1: \u{HHHH}
+    r'|\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})'   # 2,3: UTF-16 surrogate pair
+    r'|\\u([0-9a-f]{4})'                                # 4: \uXXXX
+    r'|\\x([0-9a-f]{2})',                               # 5: \xXX
     re.IGNORECASE,
 )
-# Byte-level introducers whose PRESENCE gates the HTML/JS de-escape pass.
-_HTML_JS_INTRODUCERS = (b'&#', b'\\u', b'\\U', b'\\x', b'\\X')
 
 
 def _safe_chr(codepoint: int) -> str:
@@ -261,29 +340,28 @@ def _js_repl(m: 're.Match') -> str:
 
 def _deescape_js(text: str) -> str:
     """Decode JS/JSON string escapes (`\\u{..}`, surrogate pairs, `\\uXXXX`,
-    `\\xXX`) into their canonical characters in ONE pass. Runs only on small
-    windowed text that actually contains a backslash."""
+    `\\xXX`) into their canonical characters in ONE pass."""
     return _JS_COMBINED.sub(_js_repl, text)
 
 
 def _deescape_html_js(text: str) -> str:
-    """Decode HTML numeric/named entities AND JS/JSON string escapes into their
-    canonical characters (HIGH-5). Runs only on small windowed text."""
-    if '&' in text:
-        text = html.unescape(text)  # &#NNN; &#xHH; &name;
+    """Decode HTML numeric char refs AND JS/JSON string escapes into their
+    canonical characters. Handles mixed literal+escaped occurrences uniformly."""
+    if '&#' in text:
+        text = _HTML_NUMREF.sub(_html_numref_repl, text)
     if '\\' in text:
         text = _deescape_js(text)
     return text
 
 
 # ---------------------------------------------------------------------------
-# The one semantically-complete matcher (used on EVERY surface)
+# Small helpers
 # ---------------------------------------------------------------------------
 
 def _norm_case_variants(pattern: str) -> list[str]:
-    """The canonical text variants of a pattern: NFC/NFD normalization forms and
-    their casefolds. Case-insensitivity for the byte passes is additionally
-    achieved by lowercasing the data, so ASCII variants collapse there."""
+    """The canonical text variants of a pattern: raw + NFC/NFD normalization
+    forms and their casefolds. Used for the escaped-form encoders and the
+    casefolded text needles."""
     out: list[str] = []
     seen: set[str] = set()
     for norm in (pattern,
@@ -296,42 +374,110 @@ def _norm_case_variants(pattern: str) -> list[str]:
     return out
 
 
-class PatternMatcher:
-    """Precomputes every search form ONCE and applies them to a blob's bytes.
+def _byte_form_variants(pattern: str) -> list[str]:
+    """Exhaustive case + normalization variants of a pattern for the fast
+    `bytes.find` pass (HIGH-1). Because `bytes.lower()` folds ONLY ASCII, a
+    non-ASCII leak written in upper/title/casefold form would slip past a
+    lowercase-only byte needle; precomputing every case rendition under BOTH
+    NFC and NFD (the two standard normalization forms) lets the hot byte pass
+    catch non-ASCII case/normalization variants for EVERY file -- without
+    Unicode-casefolding multi-gigabyte haystacks (which is CI-prohibitive). The
+    rarer wide (UTF-16/32) and escaped surfaces additionally casefold their
+    (small / rare) decoded text directly."""
+    forms: set[str] = set()
+    for base in (pattern,
+                 unicodedata.normalize('NFC', pattern),
+                 unicodedata.normalize('NFD', pattern)):
+        for cased in (base, base.casefold(), base.upper(), base.lower(), base.title()):
+            for norm in (cased,
+                         unicodedata.normalize('NFC', cased),
+                         unicodedata.normalize('NFD', cased)):
+                if norm:
+                    forms.add(norm)
+    return list(forms)
 
-    Byte passes search `data.lower()` (ASCII-only fold, matching lowercased
-    forms) so arbitrary ASCII case is covered in a single fast pass. Wide
-    encodings (UTF-16/UTF-32) and mixed HTML/JS escapes are covered by
-    content-aware decode + windowed de-escape passes."""
+
+def _needs_surrogatepass(s: str) -> bool:
+    return any('\ud800' <= c <= '\udfff' for c in s)
+
+
+def _encode_text(s: str) -> bytes:
+    return s.encode('utf-8', 'surrogatepass' if _needs_surrogatepass(s) else 'ignore')
+
+
+def _detect_bom(data: bytes):
+    if data[:3] == b'\xef\xbb\xbf':
+        return 'utf-8-sig'
+    if data[:4] == b'\xff\xfe\x00\x00':
+        return 'utf-32'
+    if data[:4] == b'\x00\x00\xfe\xff':
+        return 'utf-32'
+    if data[:2] == b'\xff\xfe':
+        return 'utf-16'
+    if data[:2] == b'\xfe\xff':
+        return 'utf-16'
+    return None
+
+
+def _looks_wide(data: bytes) -> bool:
+    sample = data[:65536]
+    if not sample:
+        return False
+    return sample.count(b'\x00') / len(sample) >= _WIDE_NULL_RATIO
+
+
+def _align4(n: int) -> int:
+    return (n + 3) & ~3
+
+
+def _merge_windows(positions, length, radius):
+    spans = []
+    for p in positions:
+        a = max(0, p - radius)
+        b = min(length, p + radius)
+        if spans and a <= spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(spans[-1][1], b))
+        else:
+            spans.append((a, b))
+    return spans
+
+
+# ---------------------------------------------------------------------------
+# The one semantically-complete matcher (used on EVERY surface)
+# ---------------------------------------------------------------------------
+
+class PatternMatcher:
+    """Precomputes every search form ONCE and applies the single canonical
+    pipeline (decode -> unescape -> casefold -> match) to a blob's bytes."""
 
     def __init__(self, patterns):
         patterns = _require_patterns(patterns)
         self.n = len(patterns)
-        # utf-8 byte forms (lowercased) -- the HOT content pass + URL/decoded
-        # buffers. Fully-encoded (URL/HTML/JS) forms are NOT searched in the hot
-        # content pass: the dedicated URL buffer (Pass 2) and windowed HTML/JS
-        # de-escape (Pass 3) already catch both FULLY and PARTIALLY encoded
-        # leaks -- carrying the encoded forms as extra full-tree find-passes
-        # would multiply the cost several-fold for zero added coverage.
+        # Literal UTF-8 byte forms (ASCII-lowered) -- the fast `bytes.find`
+        # pre-pass over the raw and URL/form byte-decodings.
         self.utf8_forms: list[tuple[bytes, int]] = []
-        # fully URL/HTML/JS-encoded ASCII forms -- used ONLY for scanning short
-        # path strings (cheap) as defense-in-depth against an encoded filename.
+        # Fully URL/HTML/JS-encoded ASCII forms -- used ONLY as a cheap
+        # defense-in-depth pre-check when scanning short path strings.
         self.encoded_forms: list[tuple[bytes, int]] = []
-        # casefolded str needles for the windowed-de-escape and decoded-text passes.
+        # Casefolded str needles for the canonical text pass (include the
+        # casefold of both the NFC and NFD normalization forms, so casefolding
+        # the haystack alone bridges case AND normalization -- HIGH-1).
         self.text_needles: list[tuple[str, int]] = []
-        # dynamic de-escape window: large enough that any pattern's fully-escaped
-        # byte span fits inside a window anchored on any one of its introducers.
-        max_escaped = 256
+        max_form_bytes = 1
         for idx, pattern in enumerate(patterns):
-            variants = _norm_case_variants(pattern)
             u8_seen: set[bytes] = set()
             enc_seen: set[bytes] = set()
             txt_seen: set[str] = set()
-            for v in variants:
+            # Fast-pass byte forms: exhaustive case + NFC/NFD variants (HIGH-1).
+            for v in _byte_form_variants(pattern):
                 u8 = v.encode('utf-8', 'ignore').lower()
                 if u8 and u8 not in u8_seen:
                     u8_seen.add(u8)
                     self.utf8_forms.append((u8, idx))
+                    max_form_bytes = max(max_form_bytes, len(u8))
+            # Escaped-form encoders (for the de-escape composition) + casefolded
+            # text needles (for the wide/BOM + de-escape passes).
+            for v in _norm_case_variants(pattern):
                 for form in (
                     _url_form(v).lower(),
                     _html_dec_form(v).lower(),
@@ -339,103 +485,174 @@ class PatternMatcher:
                     _js_u_form(v).lower(),
                     _js_x_form(v).lower(),
                 ):
-                    if form:
-                        max_escaped = max(max_escaped, len(form))
-                        if form not in enc_seen and form not in u8_seen:
-                            enc_seen.add(form)
-                            self.encoded_forms.append((form, idx))
+                    if form and form not in enc_seen and form not in u8_seen:
+                        enc_seen.add(form)
+                        self.encoded_forms.append((form, idx))
+                        max_form_bytes = max(max_form_bytes, len(form))
                 cf = v.casefold()
                 if cf and cf not in txt_seen:
                     txt_seen.add(cf)
                     self.text_needles.append((cf, idx))
-        self.window = max(512, 2 * max_escaped)
-        # If NO pattern itself contains a literal '%', the URL-decoded buffer is
-        # a strict superset of the raw buffer for literal matching (unquote only
-        # rewrites valid %XX triplets, copying everything else verbatim), so we
-        # can search ONE buffer per file instead of two. If a pattern DOES carry
-        # a '%', unquote could mangle a literal occurrence, so we search both.
-        self._patterns_have_pct = any('%' in p for p in patterns)
+        # Window radius for the de-escape pass: large enough that any pattern's
+        # fully-escaped byte span fits inside a window anchored on one introducer.
+        self.window = max(512, 2 * max_form_bytes)
+        # Worst-case matched byte span: any ASCII escaped form (or UTF-8 form)
+        # could additionally be stored in a wide encoding (up to *4 bytes/unit),
+        # so a straddling streaming match must fit inside that window.
+        self.max_form_bytes = max_form_bytes * 4
+        self.stream_overlap = max(4096, _align4(self.max_form_bytes - 1))
+        global _ACTIVE_MATCHER
+        _ACTIVE_MATCHER = self
 
-    # -- path redaction / filename scanning (HIGH-8) ------------------------
+    # -- redaction (never-echo, HIGH-8 / HIGH-9) ----------------------------
 
-    def path_hit_index(self, path: str):
-        """Return a matching pattern index if the path string itself contains a
-        restricted pattern (in any supported form), else None."""
-        pb = path.encode('utf-8', 'surrogatepass' if _needs_surrogatepass(path) else 'ignore')
-        pl = pb.lower()
+    def _text_hit_index(self, s: str):
+        """Return a matching pattern index if the string `s` contains a
+        restricted pattern in ANY supported form (literal, encoded, or via
+        URL/HTML/JS unescape + casefold), else None. Used for leaky filenames
+        AND for sanitizing arbitrary diagnostic strings."""
+        if not s:
+            return None
+        low = _encode_text(s).lower()
         for form, idx in self.utf8_forms:
-            if form in pl:
+            if form in low:
                 return idx
         for form, idx in self.encoded_forms:
-            if form in pl:
+            if form in low:
                 return idx
-        cf = path.casefold()
-        for needle, idx in self.text_needles:
-            if needle in cf:
-                return idx
+        # Canonical: casefold the string itself, then its unescaped variants
+        # (a partially-escaped name is caught here -- HIGH-9).
+        variants = [s]
+        if '%' in s or '+' in s:
+            try:
+                variants.append(urllib.parse.unquote(s))
+                variants.append(urllib.parse.unquote_plus(s))
+            except (UnicodeDecodeError, ValueError):
+                pass  # best-effort on names; content passes are the fail-closed ones
+        if '&' in s or '\\' in s:
+            variants.append(_deescape_html_js(s))
+        for variant in variants:
+            cf = variant.casefold()
+            for needle, idx in self.text_needles:
+                if needle in cf:
+                    return idx
         return None
+
+    def path_hit_index(self, path: str):
+        """Public: return a matching pattern index if the path itself is leaky."""
+        return self._text_hit_index(path)
 
     def redact_path(self, path: str) -> str:
         """A path that itself contains a restricted pattern MUST NOT be echoed;
         replace it with an opaque, non-reversible id (HIGH-8)."""
-        if self.path_hit_index(path) is not None:
-            digest = sha256(path.encode('utf-8', 'surrogatepass'
-                                       if _needs_surrogatepass(path) else 'ignore')).hexdigest()[:12]
-            return f"<redacted-path:{digest}>"
+        if self._text_hit_index(path) is not None:
+            return f"<redacted-path:{sha256(_encode_text(path)).hexdigest()[:12]}>"
         return path
 
-    # -- content scanning ----------------------------------------------------
+    def redact_diagnostic(self, s: str) -> str:
+        """Redact ANY diagnostic string that embeds a restricted pattern
+        (HIGH-9). Idempotent for already-redacted placeholders."""
+        if self._text_hit_index(s) is not None:
+            return f"<redacted:{sha256(_encode_text(s)).hexdigest()[:12]}>"
+        return s
 
-    def scan(self, data: bytes, rel_path: str) -> list[Issue]:
-        """Apply the full matcher to one blob's bytes. `rel_path` MUST already
-        be redaction-safe (callers pass the output of `redact_path`)."""
+    # -- content scanning ---------------------------------------------------
+
+    def scan(self, data: bytes, rel_path: str, *, stream_mode: bool = False) -> list[Issue]:
+        """Apply the full canonical pipeline to one blob's bytes. `rel_path`
+        MUST already be redaction-safe (callers pass the output of `redact_path`).
+        `stream_mode` relaxes BOM strict-decode fail-closure to tolerate a chunk
+        boundary that splits a code unit (the caller carries an overlap window
+        wide enough to re-capture any straddling match -- HIGH-4)."""
         if not data:
             return []
         issues: list[Issue] = []
-        _seen_offsets: set[tuple[int, int, str]] = set()
+        seen: set[tuple[int, int, str]] = set()
 
-        def _emit(offset: int, idx: int, surface: str):
+        def emit(offset: int, idx: int, surface: str):
             key = (offset, idx, surface)
-            if key not in _seen_offsets:
-                _seen_offsets.add(key)
+            if key not in seen:
+                seen.add(key)
                 issues.append(Issue(path=rel_path, offset=offset,
                                     pattern_index=idx, surface=surface))
 
-        def _find_forms(buf: bytes, surface: str):
-            for form, idx in self.utf8_forms:
-                pos = buf.find(form)
-                while pos != -1:
-                    _emit(pos, idx, surface)
-                    pos = buf.find(form, pos + 1)
+        # Fast literal byte pass over the raw bytes (covers literal + ASCII-case
+        # + the exhaustive non-ASCII case/normalization forms -- HIGH-1).
+        self._find_bytes(data.lower(), self.utf8_forms, 'raw', emit)
 
-        # Passes 1+2 -- literal UTF-8 forms over the raw buffer AND (for files
-        # carrying percent-escapes) the URL-decoded buffer. The URL-decoded
-        # buffer subsumes the raw buffer for literal matching, so in the common
-        # case we search exactly ONE buffer per file. Fully / partially
-        # HTML/JS-encoded forms are covered by Pass 3.
-        if b'%' in data:
-            try:
-                ub = urllib.parse.unquote_to_bytes(data).lower()
-            except Exception:  # pragma: no cover - unquote_to_bytes is total
-                ub = data.lower()
-            _find_forms(ub, 'url')
-            if self._patterns_have_pct:
-                _find_forms(data.lower(), 'raw')
-        else:
-            _find_forms(data.lower(), 'raw')
+        # URL/form byte-decodings (byte-level `unquote_to_bytes` is total -- no
+        # false-failure on stray `%XX`; a defensive failure is still fail-CLOSED,
+        # never fail-open -- HIGH-5). A URL/form-encoded leak lives in TEXT (a
+        # query string / attribute / JSON value), which never contains NUL; NUL
+        # marks binary content where `%`/`+` are just stray bytes, so decoding it
+        # would be pure wasted work. The byte pass alone suffices on the decoded
+        # buffers (their `%` are already resolved to literal bytes).
+        if b'\x00' not in data and (b'%' in data or b'+' in data):
+            for buf in self._url_byte_buffers(data):
+                self._find_bytes(buf.lower(), self.utf8_forms, 'url', emit)
 
-        # Pass 3 -- windowed HTML/JS de-escape (fully AND mixed HTML/JS-escaped).
-        self._scan_html_js(data, _emit)
-
-        # Pass 4 -- content-aware decode for BOM'd / wide (UTF-16/32) text.
-        self._scan_decoded_text(data, _emit)
+        # Canonical wide/BOM decode + windowed HTML/JS de-escape over the raw bytes.
+        self._scan_canonical(data, 'decoded', emit, stream_mode=stream_mode)
 
         return issues
 
-    def _scan_html_js(self, data: bytes, emit):
-        # Cheap presence gate: only the introducers actually present are worth
-        # locating (each find-loop that follows would otherwise scan the whole
-        # blob for an absent introducer).
+    def _url_byte_buffers(self, data: bytes) -> list[bytes]:
+        out: list[bytes] = []
+        try:
+            if b'%' in data:
+                out.append(urllib.parse.unquote_to_bytes(data))
+            if b'+' in data:
+                out.append(urllib.parse.unquote_to_bytes(data.replace(b'+', b' ')))
+        except Exception as exc:  # unquote_to_bytes is total; defensive fail-closed (HIGH-5)
+            raise ScanError("URL byte-decoding failed (fail-closed)") from exc
+        return out
+
+    def _find_bytes(self, low: bytes, forms, surface: str, emit):
+        for form, idx in forms:
+            pos = low.find(form)
+            while pos != -1:
+                emit(pos, idx, surface)
+                pos = low.find(form, pos + 1)
+
+    def _scan_canonical(self, buf: bytes, decoded_surface: str, emit, *, stream_mode: bool):
+        # (1) Wide (UTF-16/UTF-32) and BOM-declared text -- RARE, so their
+        # decoded string is casefolded and de-escaped whole (escapes compose with
+        # the wide decoding -- HIGH-3). A BOM that will not decode is fail-closed;
+        # BOM-less wide input is scanned under EVERY plausible codec (HIGH-2).
+        for text in self._iter_wide_texts(buf, stream_mode=stream_mode):
+            if not text:
+                continue
+            self._match_casefold(text, decoded_surface, emit)
+            if '&' in text or '\\' in text:
+                self._match_casefold(_deescape_html_js(text), 'escape', emit)
+        # (2) HTML/JS escapes in the UTF-8 view -- de-escaped in bounded windows
+        # anchored on the (sparse) introducers, then casefolded and matched
+        # (catches FULLY and PARTIALLY escaped leaks without whole-blob work).
+        self._scan_windowed_escapes(buf, emit)
+
+    def _iter_wide_texts(self, data: bytes, *, stream_mode: bool):
+        """Yield each WIDE/BOM character-decoding of `data` (HIGH-2, HIGH-3).
+        The plain UTF-8 view is covered by the exhaustive byte-form pass and the
+        windowed de-escape, so it is NOT re-casefolded whole here."""
+        codec = _detect_bom(data)
+        if codec is not None:
+            if stream_mode:
+                # A chunk boundary can split a wide code unit mid-stream; decode
+                # leniently (the overlap window re-captures straddling matches)
+                # rather than fail-closing on benign boundary misalignment.
+                yield data.decode(codec, 'replace')
+            else:
+                try:
+                    yield data.decode(codec)
+                except UnicodeDecodeError as exc:
+                    raise ScanError(
+                        f"BOM-declared {codec} content failed to decode (fail-closed)"
+                    ) from exc
+        elif _looks_wide(data):
+            for wide_codec in _WIDE_CODECS:
+                yield data.decode(wide_codec, 'replace')
+
+    def _scan_windowed_escapes(self, data: bytes, emit):
         present = [intro for intro in _HTML_JS_INTRODUCERS if intro in data]
         if not present:
             return
@@ -463,9 +680,8 @@ class PatternMatcher:
             spans = _merge_windows(positions, len(data), self.window)
         for a, b in spans:
             text = data[a:b].decode('utf-8', 'replace')
-            # Only run the de-escaper whose introducer is actually in the window.
-            if '&' in text:
-                text = html.unescape(text)
+            if '&#' in text:
+                text = _HTML_NUMREF.sub(_html_numref_repl, text)
             if '\\' in text:
                 text = _deescape_js(text)
             de = text.casefold()
@@ -477,119 +693,19 @@ class PatternMatcher:
                     emit(a, idx, 'escape')
                     pos = de.find(needle, pos + 1)
 
-    def _scan_decoded_text(self, data: bytes, emit):
-        codec = _detect_bom(data)
-        text = None
-        if codec is not None:
-            try:
-                text = data.decode(codec)
-            except UnicodeDecodeError as exc:
-                # A file that DECLARES an encoding (BOM) but will not decode is
-                # fail-closed -- it could hide a leak behind malformed bytes.
-                raise ScanError(
-                    f"BOM-declared {codec} content failed to decode (fail-closed)"
-                ) from exc
-        else:
-            # Bounded null-ratio probe (a real BOM-less UTF-16/32 blob is ~50%
-            # NUL uniformly, so a head sample is representative) -- avoids a
-            # full-file NUL count on every blob.
-            sample = data[:65536]
-            if sample.count(b'\x00') / len(sample) >= _WIDE_NULL_RATIO:
-                text = _decode_wide_no_bom(data)
-        if not text:
-            return
+    def _match_casefold(self, text: str, surface: str, emit):
         cf = text.casefold()
         for needle, idx in self.text_needles:
             pos = cf.find(needle)
             while pos != -1:
-                emit(pos, idx, 'decoded')
+                emit(pos, idx, surface)
                 pos = cf.find(needle, pos + 1)
 
 
 def build_matcher(patterns) -> PatternMatcher:
-    """Public constructor -- enforces the non-empty pattern set (HIGH-9)."""
+    """Public constructor -- enforces the non-empty pattern set (HIGH-9) and
+    registers the matcher as the active diagnostic redactor."""
     return PatternMatcher(patterns)
-
-
-def _merge_windows(positions, length, radius):
-    spans = []
-    for p in positions:
-        a = max(0, p - radius)
-        b = min(length, p + radius)
-        if spans and a <= spans[-1][1]:
-            spans[-1] = (spans[-1][0], max(spans[-1][1], b))
-        else:
-            spans.append((a, b))
-    return spans
-
-
-def _detect_bom(data: bytes):
-    if data[:3] == b'\xef\xbb\xbf':
-        return 'utf-8-sig'
-    if data[:4] == b'\xff\xfe\x00\x00':
-        return 'utf-32'
-    if data[:4] == b'\x00\x00\xfe\xff':
-        return 'utf-32'
-    if data[:2] == b'\xff\xfe':
-        return 'utf-16'
-    if data[:2] == b'\xfe\xff':
-        return 'utf-16'
-    return None
-
-
-def _decode_wide_no_bom(data: bytes):
-    """Best-effort decode of BOM-less UTF-16 content (the realistic wide-encoding
-    leak vector). Picks the endianness that yields the fewest replacement
-    characters; falls back to None if neither is plausibly text."""
-    best = None
-    best_bad = None
-    for codec in ('utf-16-le', 'utf-16-be'):
-        try:
-            text = data.decode(codec, 'replace')
-        except (LookupError, UnicodeDecodeError):
-            continue
-        bad = text.count('�')
-        if best is None or bad < best_bad:
-            best = text
-            best_bad = bad
-    return best
-
-
-def _needs_surrogatepass(s: str) -> bool:
-    return any('\ud800' <= c <= '\udfff' for c in s)
-
-
-def _scan_blob(matcher: PatternMatcher, data: bytes, raw_path: str) -> list[Issue]:
-    """Scan one in-memory blob. Redacts the display path if the path itself
-    leaks and emits a dedicated filename Issue (HIGH-8). Streams the content in
-    overlapping chunks if it exceeds the whole-read cap."""
-    display = matcher.redact_path(raw_path)
-    issues: list[Issue] = []
-    path_idx = matcher.path_hit_index(raw_path)
-    if path_idx is not None:
-        issues.append(Issue(path=display, offset=-1, pattern_index=path_idx,
-                            surface='filename'))
-    if len(data) <= _WHOLE_READ_CAP:
-        issues += matcher.scan(data, display)
-    else:
-        base = 0
-        n = len(data)
-        while base < n:
-            end = min(n, base + _CHUNK_SIZE)
-            chunk = data[base:end]
-            for iss in matcher.scan(chunk, display):
-                issues.append(Issue(path=display,
-                                    offset=iss.offset + base if iss.offset >= 0 else iss.offset,
-                                    pattern_index=iss.pattern_index,
-                                    surface=iss.surface))
-            if end >= n:
-                break
-            base = end - _CHUNK_OVERLAP
-    # A Brotli blob (e.g. a committed atlas-*.bin.br) is decompressed and its
-    # payload scanned too (HIGH-4) -- the compressed bytes were scanned above.
-    if raw_path.rstrip('/').lower().endswith('.br'):
-        issues += matcher.scan(_brotli_decompress(data), display + '::brotli-decompressed')
-    return issues
 
 
 # ---------------------------------------------------------------------------
@@ -597,23 +713,32 @@ def _scan_blob(matcher: PatternMatcher, data: bytes, raw_path: str) -> list[Issu
 # ---------------------------------------------------------------------------
 
 def _git(args, *, check=True):
+    """Run git. Raise ScanError on a non-zero result when `check` (never echoing
+    raw stderr -- HIGH-9). Returns (returncode, stdout, stderr)."""
     proc = subprocess.run(['git'] + args, cwd=str(ROOT_DIR), capture_output=True)
     if check and proc.returncode != 0:
-        err = proc.stderr.decode('utf-8', 'replace').strip()
-        raise ScanError(f"git {' '.join(args)} failed (rc={proc.returncode}): {err}")
+        raise ScanError(f"git {' '.join(args)} failed (rc={proc.returncode}) (fail-closed)")
     return proc.returncode, proc.stdout, proc.stderr
 
 
 def _git_z(args) -> list[bytes]:
-    """Run a git plumbing command and split its NUL-delimited stdout (HIGH-3).
-    Fail-closed on a non-zero result (HIGH-2)."""
+    """Run a git plumbing command and split its NUL-delimited stdout.
+    Fail-closed on a non-zero result."""
     _, out, _ = _git(args, check=True)
     return [rec for rec in out.split(b'\x00') if rec]
 
 
 def _head_exists() -> bool:
+    """True if HEAD resolves. A PROVEN unborn HEAD (a real work tree with zero
+    commits) returns False; ANY other non-zero result is an operational error
+    and is fail-closed (HIGH-7)."""
     rc, _, _ = _git(['rev-parse', '--verify', '--quiet', 'HEAD'], check=False)
-    return rc == 0
+    if rc == 0:
+        return True
+    rc2, out2, _ = _git(['rev-parse', '--is-inside-work-tree'], check=False)
+    if rc2 == 0 and out2.strip() == b'true':
+        return False  # proven unborn HEAD in a real work tree
+    raise ScanError("git HEAD probe failed operationally (not a work tree) -- fail-closed")
 
 
 def _parse_ls_tree_z(records):
@@ -645,9 +770,9 @@ def _parse_ls_files_stage_z(records):
 
 
 def _batch_read_shas(shas) -> dict:
-    """Bulk-read blob content by OBJECT ID via `git cat-file --batch` (HIGH-3).
+    """Bulk-read blob content by OBJECT ID via `git cat-file --batch`.
     Fail-closed (ScanError) on a non-zero git exit, a `<sha> missing` record, a
-    malformed header, or a truncated stream (HIGH-2)."""
+    malformed header, or a truncated stream (never echoing raw stderr -- HIGH-9)."""
     uniq = sorted(set(shas))
     if not uniq:
         return {}
@@ -659,12 +784,9 @@ def _batch_read_shas(shas) -> dict:
         stderr=subprocess.PIPE,
     )
     payload = ('\n'.join(uniq) + '\n').encode('ascii')
-    out, err = proc.communicate(payload)
+    out, _err = proc.communicate(payload)
     if proc.returncode != 0:
-        raise ScanError(
-            f"git cat-file --batch failed (rc={proc.returncode}): "
-            f"{err.decode('utf-8', 'replace').strip()}"
-        )
+        raise ScanError(f"git cat-file --batch failed (rc={proc.returncode}) (fail-closed)")
     result: dict[str, bytes] = {}
     pos = 0
     out_len = len(out)
@@ -702,86 +824,65 @@ def _display_path(prefix: str, path_bytes: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
-# scan_repo -- three separate git surfaces + filename scanning
+# Shared byte / streaming scanning helpers
 # ---------------------------------------------------------------------------
 
-def scan_repo(patterns) -> list[Issue]:
-    """Scan HEAD/index blobs, tracked worktree files, and non-ignored untracked
-    candidates as SEPARATE passes; a hit on ANY is a failure. Every path is also
-    scanned for a leaky NAME. Fail-closed throughout (HIGH-1, HIGH-2, HIGH-3,
-    HIGH-8, HIGH-9)."""
-    matcher = build_matcher(patterns)
+def _is_brotli(name: str) -> bool:
+    return name.rstrip('/').lower().endswith('.br')
+
+
+def _scan_bytes_maybe_brotli(matcher: PatternMatcher, data: bytes, display: str,
+                             *, is_br: bool) -> list[Issue]:
+    """Scan an in-memory blob. Brotli payloads are ALWAYS fully decompressed and
+    both forms scanned (HIGH-4a); large non-.br blobs stream with a
+    pattern-length overlap (HIGH-4b)."""
     issues: list[Issue] = []
-
-    # Pass 1 -- HEAD blobs + staged index blobs, read BY OBJECT ID.
-    blob_entries: list[tuple[str, bytes, str]] = []  # (sha, path_bytes, prefix)
-    if _head_exists():
-        for sha, path in _parse_ls_tree_z(_git_z(['ls-tree', '-r', '-z', 'HEAD'])):
-            blob_entries.append((sha, path, 'HEAD:'))
-    for sha, path in _parse_ls_files_stage_z(_git_z(['ls-files', '-s', '-z'])):
-        blob_entries.append((sha, path, 'INDEX:'))
-    blobs = _batch_read_shas([sha for sha, _, _ in blob_entries])
-    for sha, path, prefix in blob_entries:
-        if sha not in blobs:
-            raise ScanError("expected blob absent after cat-file batch (fail-closed)")
-        display = _display_path(prefix, path)
-        issues += _scan_named(matcher, blobs[sha], display)
-
-    # Pass 2 -- tracked worktree files (read from disk).
-    for path in _git_z(['ls-files', '-z']):
-        issues += _scan_worktree_file(matcher, path, prefix='')
-
-    # Pass 3 -- non-ignored untracked candidates.
-    for path in _git_z(['ls-files', '--others', '--exclude-standard', '-z']):
-        issues += _scan_worktree_file(matcher, path, prefix='UNTRACKED:')
-
-    return issues
-
-
-def _scan_named(matcher: PatternMatcher, data: bytes, raw_display: str) -> list[Issue]:
-    return _scan_blob(matcher, data, raw_display)
-
-
-def _scan_worktree_file(matcher, path_bytes, *, prefix) -> list[Issue]:
-    fs_path = _decode_path_for_fs(path_bytes)
-    p = ROOT_DIR / fs_path
-    raw_display = _display_path(prefix, path_bytes)
-    issues: list[Issue] = []
-    # Scan the filename itself even if the file cannot be read as content.
-    path_idx = matcher.path_hit_index(raw_display)
-    if path_idx is not None:
-        issues.append(Issue(path=matcher.redact_path(raw_display), offset=-1,
-                            pattern_index=path_idx, surface='filename'))
-    try:
-        if p.is_symlink():
-            # A symlink's own bytes are its target text; scan that (cheap) but do
-            # not follow it (avoids escaping the tree / cycles).
-            target = os.readlink(p)
-            issues += matcher.scan(target.encode('utf-8', 'surrogatepass'
-                                                 if _needs_surrogatepass(target) else 'ignore'),
-                                   matcher.redact_path(raw_display))
-            return issues
-        if not p.is_file():
-            return issues  # sockets/fifos/etc. hold no committable content
-        size = p.stat().st_size
-    except OSError as exc:
-        raise ScanError(f"cannot stat enumerated file (fail-closed): {matcher.redact_path(raw_display)}") from exc
-    if size <= _WHOLE_READ_CAP:
-        try:
-            data = p.read_bytes()
-        except OSError as exc:
-            raise ScanError(
-                f"cannot read enumerated file (fail-closed): {matcher.redact_path(raw_display)}"
-            ) from exc
-        issues += matcher.scan(data, matcher.redact_path(raw_display))
-        issues += _scan_compressed_variants(matcher, p, data, matcher.redact_path(raw_display))
+    if is_br:
+        if len(data) > _BR_COMPRESSED_CAP:
+            raise ScanError("Brotli payload exceeds the compressed size cap (fail-closed)")
+        issues += matcher.scan(data, display)
+        issues += matcher.scan(_brotli_decompress(data), display + '::brotli-decompressed')
+        return issues
+    if len(data) <= _WHOLE_READ_CAP:
+        issues += matcher.scan(data, display)
     else:
-        issues += _scan_streamed_file(matcher, p, matcher.redact_path(raw_display))
+        issues += _scan_big_bytes(matcher, data, display)
     return issues
 
 
-def _scan_streamed_file(matcher, p: Path, display: str) -> list[Issue]:
+def _stream_guard(matcher: PatternMatcher) -> int:
+    overlap = matcher.stream_overlap
+    if matcher.max_form_bytes - 1 > _CHUNK_SIZE // 2:
+        raise ScanError("a masking pattern is too long to safely stream (fail-closed)")
+    return overlap
+
+
+def _scan_big_bytes(matcher: PatternMatcher, data: bytes, display: str) -> list[Issue]:
+    overlap = _stream_guard(matcher)
     issues: list[Issue] = []
+    seen: set[tuple[int, int, str]] = set()
+    base = 0
+    n = len(data)
+    while base < n:
+        end = min(n, base + _CHUNK_SIZE)
+        start = max(0, base - overlap)
+        buf = data[start:end]
+        for iss in matcher.scan(buf, display, stream_mode=True):
+            off = iss.offset + start if iss.offset >= 0 else iss.offset
+            key = (off, iss.pattern_index, iss.surface)
+            if key in seen:
+                continue
+            seen.add(key)
+            issues.append(Issue(path=display, offset=off,
+                                pattern_index=iss.pattern_index, surface=iss.surface))
+        base = end
+    return issues
+
+
+def _scan_streamed_file(matcher: PatternMatcher, p: Path, display: str) -> list[Issue]:
+    overlap = _stream_guard(matcher)
+    issues: list[Issue] = []
+    seen: set[tuple[int, int, str]] = set()
     try:
         fh = p.open('rb')
     except OSError as exc:
@@ -797,12 +898,106 @@ def _scan_streamed_file(matcher, p: Path, display: str) -> list[Issue]:
             if not chunk:
                 break
             buf = carry + chunk
-            for iss in matcher.scan(buf, display):
-                off = iss.offset + (base - len(carry)) if iss.offset >= 0 else iss.offset
+            boff = base - len(carry)
+            for iss in matcher.scan(buf, display, stream_mode=True):
+                off = iss.offset + boff if iss.offset >= 0 else iss.offset
+                key = (off, iss.pattern_index, iss.surface)
+                if key in seen:
+                    continue
+                seen.add(key)
                 issues.append(Issue(path=display, offset=off,
                                     pattern_index=iss.pattern_index, surface=iss.surface))
-            carry = buf[-_CHUNK_OVERLAP:]
+            carry = buf[-overlap:] if overlap else b''
             base += len(chunk)
+    return issues
+
+
+def _read_bytes_or_fail(p: Path, display: str) -> bytes:
+    try:
+        return p.read_bytes()
+    except OSError as exc:
+        raise ScanError(f"cannot read enumerated file (fail-closed): {display}") from exc
+
+
+# ---------------------------------------------------------------------------
+# scan_repo -- three separate git surfaces + filename scanning
+# ---------------------------------------------------------------------------
+
+def scan_repo(patterns) -> list[Issue]:
+    """Scan HEAD/index blobs, tracked worktree files, and non-ignored untracked
+    candidates as SEPARATE passes; a hit on ANY is a failure. Every path is also
+    scanned for a leaky NAME. Fail-closed throughout."""
+    matcher = build_matcher(patterns)
+    issues: list[Issue] = []
+
+    # Pass 1 -- HEAD blobs + staged index blobs, read BY OBJECT ID.
+    blob_entries: list[tuple[str, bytes, str]] = []  # (sha, path_bytes, prefix)
+    if _head_exists():
+        for sha, path in _parse_ls_tree_z(_git_z(['ls-tree', '-r', '-z', 'HEAD'])):
+            blob_entries.append((sha, path, 'HEAD:'))
+    for sha, path in _parse_ls_files_stage_z(_git_z(['ls-files', '-s', '-z'])):
+        blob_entries.append((sha, path, 'INDEX:'))
+    blobs = _batch_read_shas([sha for sha, _, _ in blob_entries])
+    for sha, path, prefix in blob_entries:
+        if sha not in blobs:
+            raise ScanError("expected blob absent after cat-file batch (fail-closed)")
+        raw_display = _display_path(prefix, path)
+        display = matcher.redact_path(raw_display)
+        idx = matcher.path_hit_index(raw_display)
+        if idx is not None:
+            issues.append(Issue(path=display, offset=-1, pattern_index=idx, surface='filename'))
+        issues += _scan_bytes_maybe_brotli(matcher, blobs[sha], display,
+                                           is_br=_is_brotli(raw_display))
+
+    # Pass 2 -- tracked worktree files (read from disk).
+    for path in _git_z(['ls-files', '-z']):
+        issues += _scan_worktree_file(matcher, path, prefix='')
+
+    # Pass 3 -- non-ignored untracked candidates.
+    for path in _git_z(['ls-files', '--others', '--exclude-standard', '-z']):
+        issues += _scan_worktree_file(matcher, path, prefix='UNTRACKED:')
+
+    return issues
+
+
+def _scan_worktree_file(matcher, path_bytes, *, prefix) -> list[Issue]:
+    fs_path = _decode_path_for_fs(path_bytes)
+    p = ROOT_DIR / fs_path
+    raw_display = _display_path(prefix, path_bytes)
+    display = matcher.redact_path(raw_display)
+    issues: list[Issue] = []
+    # Scan the filename itself even if the file cannot be read as content.
+    idx = matcher.path_hit_index(raw_display)
+    if idx is not None:
+        issues.append(Issue(path=display, offset=-1, pattern_index=idx, surface='filename'))
+    # Explicit os.lstat (never follows symlinks; raises on any metadata error -- HIGH-8).
+    try:
+        st = os.lstat(p)
+    except OSError as exc:
+        raise ScanError(f"cannot stat enumerated file (fail-closed): {display}") from exc
+    mode = st.st_mode
+    if stat.S_ISLNK(mode):
+        # Scan the symlink's own target-path bytes; do NOT follow it (avoids
+        # escaping the tree / cycles -- HIGH-8).
+        try:
+            target = os.readlink(p)
+        except OSError as exc:
+            raise ScanError(f"cannot read symlink (fail-closed): {display}") from exc
+        issues += matcher.scan(_encode_text(target), display)
+        return issues
+    if not stat.S_ISREG(mode):
+        return issues  # sockets/fifos/etc. hold no committable content
+    if _is_brotli(fs_path):
+        if st.st_size > _BR_COMPRESSED_CAP:
+            raise ScanError("Brotli file exceeds the compressed size cap (fail-closed)")
+        data = _read_bytes_or_fail(p, display)
+        issues += _scan_bytes_maybe_brotli(matcher, data, display, is_br=True)
+        return issues
+    if st.st_size <= _WHOLE_READ_CAP:
+        data = _read_bytes_or_fail(p, display)
+        issues += matcher.scan(data, display)
+    else:
+        issues += _scan_streamed_file(matcher, p, display)
     return issues
 
 
@@ -811,72 +1006,142 @@ def _scan_streamed_file(matcher, p: Path, display: str) -> list[Issue]:
 # ---------------------------------------------------------------------------
 
 def _is_asset_file(p: Path) -> bool:
-    name = p.name.lower()
-    return name.endswith(_ASSET_SUFFIXES)
+    return p.name.lower().endswith(_ASSET_SUFFIXES)
 
 
-def _scan_compressed_variants(matcher, p: Path, data: bytes, display: str) -> list[Issue]:
-    """If the file is a Brotli payload, additionally scan its DECOMPRESSED bytes
-    (HIGH-4). The compressed bytes were already scanned by the caller."""
-    if p.name.lower().endswith('.br'):
-        decompressed = _brotli_decompress(data)
-        return matcher.scan(decompressed, display + '::brotli-decompressed')
-    return []
+def _rel_display(c: Path) -> str:
+    try:
+        return str(c.relative_to(ROOT_DIR))
+    except ValueError:
+        return str(c)
+
+
+def _walk_entries(root: Path):
+    """Recursively yield (Path, kind) under `root` via os.scandir, raising
+    ScanError on ANY enumeration/classification error (HIGH-8). kind is
+    'file' or 'symlink'; symlinks are yielded (never followed into)."""
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                entries = list(it)
+        except OSError as exc:
+            raise ScanError(
+                f"cannot enumerate asset directory (fail-closed): {_sanitize(d)}"
+            ) from exc
+        for e in entries:
+            try:
+                if e.is_symlink():
+                    yield Path(e.path), 'symlink'
+                elif e.is_dir(follow_symlinks=False):
+                    stack.append(Path(e.path))
+                elif e.is_file(follow_symlinks=False):
+                    yield Path(e.path), 'file'
+            except OSError as exc:
+                raise ScanError(
+                    f"cannot classify asset entry (fail-closed): {_sanitize(e.path)}"
+                ) from exc
 
 
 def scan_asset(path, patterns, *, strict: bool = False) -> list[Issue]:
     """Scan a single file OR recursively walk a whole directory. In --strict
     mode the path MUST exist and be non-empty, EVERY regular file is scanned
-    (no suffix filter, includes .js), and any traversal/read error is
-    fail-closed (HIGH-7). In non-strict mode a directory walk is limited to
-    asset-relevant suffixes; a single explicit file is always scanned."""
+    (no suffix filter), and any traversal/read/metadata error is fail-closed
+    (HIGH-7/HIGH-8). In non-strict mode a directory walk is limited to
+    asset-relevant suffixes; a single explicit file is always scanned. Brotli
+    payloads are always fully decompressed + scanned (HIGH-4a). Symlinks are
+    never followed -- only their link text is scanned (HIGH-8)."""
     matcher = build_matcher(patterns)
     p = Path(path)
     issues: list[Issue] = []
 
-    if not p.exists():
+    try:
+        top = os.lstat(p)
+        exists = True
+    except FileNotFoundError:
+        exists = False
+    except OSError as exc:
+        raise ScanError(
+            f"cannot stat asset path (fail-closed): {matcher.redact_diagnostic(str(path))}"
+        ) from exc
+
+    if not exists:
         if strict:
-            raise ScanError(f"--strict asset path does not exist (fail-closed): {path}")
+            raise ScanError(
+                f"--strict asset path does not exist (fail-closed): "
+                f"{matcher.redact_diagnostic(str(path))}"
+            )
         return issues
 
-    if p.is_file():
-        candidates = [p]
+    if stat.S_ISREG(top.st_mode):
+        candidates: list[tuple[Path, str]] = [(p, 'file')]
+    elif stat.S_ISLNK(top.st_mode):
+        candidates = [(p, 'symlink')]
+    elif stat.S_ISDIR(top.st_mode):
+        walked = list(_walk_entries(p))
+        if not strict:
+            walked = [(c, k) for (c, k) in walked if k == 'symlink' or _is_asset_file(c)]
+        if strict and not walked:
+            raise ScanError(
+                f"--strict asset directory is empty (fail-closed): "
+                f"{matcher.redact_diagnostic(str(path))}"
+            )
+        candidates = sorted(walked, key=lambda t: str(t[0]))
     else:
-        if strict:
-            candidates = sorted(c for c in p.rglob('*') if c.is_file())
-            if not candidates:
-                raise ScanError(f"--strict asset directory is empty (fail-closed): {path}")
-        else:
-            candidates = sorted(c for c in p.rglob('*') if c.is_file() and _is_asset_file(c))
+        return issues
 
-    for c in candidates:
-        try:
-            rel = str(c.relative_to(ROOT_DIR))
-        except ValueError:
-            rel = str(c)
+    for c, kind in candidates:
+        rel = _rel_display(c)
         display = matcher.redact_path(rel)
+        idx = matcher.path_hit_index(rel)
+        if idx is not None:
+            issues.append(Issue(path=display, offset=-1, pattern_index=idx, surface='filename'))
+
+        if kind == 'symlink':
+            try:
+                target = os.readlink(c)
+            except OSError as exc:
+                if strict:
+                    raise ScanError(f"cannot read asset symlink (fail-closed): {display}") from exc
+                continue
+            issues += matcher.scan(_encode_text(target), display)
+            continue
+
         try:
-            size = c.stat().st_size
+            size = os.lstat(c).st_size
         except OSError as exc:
             if strict:
                 raise ScanError(f"cannot stat asset file (fail-closed): {display}") from exc
             continue
-        path_idx = matcher.path_hit_index(rel)
-        if path_idx is not None:
-            issues.append(Issue(path=display, offset=-1, pattern_index=path_idx,
-                                surface='filename'))
+
+        if _is_brotli(c.name):
+            if size > _BR_COMPRESSED_CAP:
+                raise ScanError("Brotli asset exceeds the compressed size cap (fail-closed)")
+            data = _read_asset_bytes(c, display, strict)
+            if data is None:
+                continue
+            issues += _scan_bytes_maybe_brotli(matcher, data, display, is_br=True)
+            continue
+
         if size <= _WHOLE_READ_CAP:
-            try:
-                data = c.read_bytes()
-            except OSError as exc:
-                if strict:
-                    raise ScanError(f"cannot read asset file (fail-closed): {display}") from exc
+            data = _read_asset_bytes(c, display, strict)
+            if data is None:
                 continue
             issues += matcher.scan(data, display)
-            issues += _scan_compressed_variants(matcher, c, data, display)
         else:
             issues += _scan_streamed_file(matcher, c, display)
+
     return issues
+
+
+def _read_asset_bytes(c: Path, display: str, strict: bool):
+    try:
+        return c.read_bytes()
+    except OSError as exc:
+        if strict:
+            raise ScanError(f"cannot read asset file (fail-closed): {display}") from exc
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -908,6 +1173,7 @@ def _run_self_test() -> int:
         ("JS \\u escape", ('"' + ''.join(f'\\u{ord(c):04x}' for c in pattern) + '"').encode('ascii')),
         ("mixed literal+escape",
          (pattern[:3] + ''.join(f'\\u{ord(c):04x}' for c in pattern[3:])).encode('ascii')),
+        ("UTF-16LE no BOM", (pattern * 3).encode('utf-16-le')),
     ]
     for label, blob in checks:
         if not matcher.scan(blob, 'synthetic'):
@@ -941,20 +1207,30 @@ def parse_args(argv=None):
 def main(argv=None) -> int:
     args = parse_args(argv)
 
-    # HIGH-9: a self-test may never be mixed with a real scan invocation.
+    # An empty/whitespace --scan-asset value is a hard usage error, never a
+    # silently-absent option (HIGH-10): `--self-test --scan-asset ""` must NOT
+    # slip through as a bare self-test.
+    if args.scan_asset is not None and not args.scan_asset.strip():
+        print("ERROR: --scan-asset requires a non-empty path.", file=sys.stderr)
+        return 2
+
+    asset_requested = args.scan_asset is not None
+
+    # HIGH-10: presence is tested with `is not None` / the store_true flags --
+    # NEVER truthiness of the option value.
     if args.self_test:
-        if args.scan_repo or args.scan_asset or args.strict:
+        if args.scan_repo or asset_requested or args.strict:
             print("ERROR: --self-test cannot be combined with --scan-repo / "
                   "--scan-asset / --strict.", file=sys.stderr)
             return 2
         return _run_self_test()
 
-    if args.strict and not (args.scan_repo and args.scan_asset):
-        print("ERROR: --strict requires BOTH --scan-repo and --scan-asset PATH "
-              "(HIGH-7).", file=sys.stderr)
+    if args.strict and not (args.scan_repo and asset_requested):
+        print("ERROR: --strict requires BOTH --scan-repo and --scan-asset PATH.",
+              file=sys.stderr)
         return 2
 
-    if not args.scan_repo and not args.scan_asset:
+    if not args.scan_repo and not asset_requested:
         print("Nothing to do -- pass --scan-repo and/or --scan-asset PATH "
               "(or --self-test)", file=sys.stderr)
         return 2
@@ -963,17 +1239,17 @@ def main(argv=None) -> int:
     try:
         _require_patterns(patterns)
     except ScanError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"ERROR: {_sanitize(exc)}", file=sys.stderr)
         return 1
 
     try:
         issues: list[Issue] = []
         if args.scan_repo:
             issues += scan_repo(patterns)
-        if args.scan_asset:
+        if asset_requested:
             issues += scan_asset(args.scan_asset, patterns, strict=args.strict)
     except ScanError as exc:
-        print(f"ERROR (fail-closed): {exc}", file=sys.stderr)
+        print(f"ERROR (fail-closed): {_sanitize(exc)}", file=sys.stderr)
         return 1
 
     _report(issues)
