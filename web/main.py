@@ -756,6 +756,140 @@ app.add_static_files('/static', STATIC_DIR)
 # asset just leaves atlas_preview_available() False and the beta hides cleanly.
 load_atlas_state()
 
+
+def _negotiate_encoding(accept_encoding_header: str, have_br: bool, have_plain: bool):
+    """Phase 133 (ATLAS-01, MEDIUM-3): pick the response encoding for the atlas
+    asset route by parsing Accept-Encoding tokens AND q-values over br, identity,
+    and the wildcard ``*``.
+
+    Returns ``'br'`` (serve Brotli), ``'identity'`` (serve plain), or ``None``
+    (no acceptable representation -> the caller returns a REACHABLE 406). This
+    honors ``br;q=0`` (fall back to plain), ``identity;q=0`` / ``*;q=0`` (refuse
+    plain -> 406 when br is also unavailable), and a bare ``*`` (br via wildcard).
+    A request with no Accept-Encoding header gets plain (identity is
+    default-acceptable), never br.
+    """
+    q: dict[str, float] = {}
+    for part in (accept_encoding_header or '').split(','):
+        part = part.strip()
+        if not part:
+            continue
+        toks = part.split(';')
+        coding = toks[0].strip().lower()
+        qval = 1.0
+        for extra in toks[1:]:
+            extra = extra.strip().lower()
+            if extra.startswith('q='):
+                try:
+                    qval = float(extra[2:])
+                except ValueError:
+                    qval = 0.0
+        if coding:
+            q[coding] = qval
+    star = q.get('*')
+
+    # br acceptable only when the .br bytes exist AND br is accepted (explicit
+    # q>0, or via a positive wildcard when br is not explicitly listed).
+    if have_br and ('br' in q and q['br'] > 0 or 'br' not in q and star is not None and star > 0):
+        br_ok = True
+    else:
+        br_ok = False
+
+    # identity is default-acceptable unless explicitly refused (identity;q=0) or
+    # refused via the wildcard (*;q=0 with no explicit identity token).
+    if not have_plain:
+        identity_ok = False
+    elif 'identity' in q:
+        identity_ok = q['identity'] > 0
+    elif star is not None:
+        identity_ok = star > 0
+    else:
+        identity_ok = True
+
+    if br_ok:
+        return 'br'
+    if identity_ok:
+        return 'identity'
+    return None
+
+
+def _register_atlas_data_routes(target_app):
+    """Register the two Visual Atlas Preview data routes onto ``target_app``.
+
+    Called with the real NiceGUI ``app`` below; tests register the SAME routes
+    onto a bare FastAPI so they can exercise the negotiation/cache behavior
+    without the full NiceGUI startup. Both routes are gated on the single
+    ``atlas_preview_available()`` predicate and return 404 while the flag is OFF
+    or the asset is not loaded (HIGH-1: the asset is NEVER reachable then, and
+    no ``/static/atlas/*`` URL exists).
+    """
+
+    @target_app.get('/atlas-data/manifest.json')
+    def atlas_manifest_route(if_none_match: str = Header(default='')):
+        # The manifest is the MUTABLE pointer to the content-hashed asset:
+        # no-cache + must-revalidate + ETag (NOT immutable), so after a rebake a
+        # client revalidates and picks up the new asset_basename instead of
+        # requesting a stale old hash that would 404 (T-133-05).
+        if not atlas_preview_available():
+            return _StarletteResponse(status_code=404)
+        etag = atlas_manifest_etag()
+        headers = {
+            'Cache-Control': 'no-cache, must-revalidate',
+            'Vary': 'Accept-Encoding',
+        }
+        if etag:
+            headers['ETag'] = etag
+        if if_none_match and etag and if_none_match == etag:
+            return _StarletteResponse(status_code=304, headers=headers)
+        return _StarletteResponse(
+            content=atlas_manifest_bytes(),
+            media_type='application/json',
+            headers=headers,
+        )
+
+    @target_app.get('/atlas-data/{asset_name}')
+    def atlas_asset_route(asset_name: str, accept_encoding: str = Header(default='')):
+        # Content-hashed asset: immutable 1-year cache is safe because the
+        # filename changes on any payload byte change (MEDIUM-4).
+        if not atlas_preview_available():
+            return _StarletteResponse(status_code=404)
+        # Path-traversal mitigation (T-133-04): the untrusted segment ONLY ever
+        # gates a whitelist comparison against the pre-loaded in-memory bin name;
+        # it is never used to build a filesystem path.
+        if asset_name != atlas_bin_name():
+            return _StarletteResponse(status_code=404)
+        choice = _negotiate_encoding(
+            accept_encoding,
+            have_br=atlas_br_bytes() is not None,
+            have_plain=atlas_plain_bytes() is not None,
+        )
+        immutable_cache = 'public, max-age=31536000, immutable'
+        if choice == 'br':
+            return _StarletteResponse(
+                content=atlas_br_bytes(),
+                media_type='application/octet-stream',
+                headers={
+                    'Content-Encoding': 'br',
+                    'Vary': 'Accept-Encoding',
+                    'Cache-Control': immutable_cache,
+                },
+            )
+        if choice == 'identity':
+            return _StarletteResponse(
+                content=atlas_plain_bytes(),
+                media_type='application/octet-stream',
+                headers={
+                    'Vary': 'Accept-Encoding',
+                    'Cache-Control': immutable_cache,
+                },
+            )
+        # No acceptable representation (e.g. identity;q=0 / *;q=0 with no br) ->
+        # a REACHABLE 406, never an invalid/empty 200 (T-133-14).
+        return _StarletteResponse(status_code=406, headers={'Vary': 'Accept-Encoding'})
+
+
+_register_atlas_data_routes(app)
+
 # ============================================================================
 # Website Metadata - SEO & Social Sharing
 # ============================================================================
