@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 133-01-PLAN.md
-last_updated: "2026-07-20T15:44:46.192Z"
+stopped_at: Completed 133-02-PLAN.md
+last_updated: "2026-07-20T16:38:54.640Z"
 last_activity: 2026-07-20
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 1
-  percent: 17
+  completed_plans: 2
+  percent: 0
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 133 (visual-atlas-preview-early-quick-win) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-07-20
 
@@ -85,9 +85,9 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-20T15:44:32.855Z
-Stopped at: Completed 133-01-PLAN.md
-Resume file: .planning/phases/133-visual-atlas-preview-early-quick-win/133-02-PLAN.md
+Last session: 2026-07-20T16:38:54.633Z
+Stopped at: Completed 133-02-PLAN.md
+Resume file: .planning/phases/133-visual-atlas-preview-early-quick-win/133-03-PLAN.md
 Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
 
 ## Performance Metrics
@@ -95,8 +95,10 @@ Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
 | Phase 133 P01 | 55min | 1 tasks | 4 files |
+| Phase 133 P02 | 40min | 3 tasks | 12 files |
 
 ## Decisions
 
 - [Phase 133 P01]: scan_repo uses a fast literal-byte matcher (not the rich normalized/encoded matcher) to stay practical over a real working tree with large non-ignored untracked content — A full --scan-repo run against the actual working tree (~24GB unrelated ACL2026_papers/) exceeded 3 minutes with a shared rich matcher; splitting scan_repo (fast) from scan_asset (rich) matches the plan's own acceptance-criteria wording and completes in ~2 minutes
 - [Phase 133 P01]: M-source leak in genizah_translations.py scrubbed via codename rename (M-source), not deletion, preserving the unwired Discovery Review deck glossary's structure
+- [Phase 133]: [Phase 133 P02]: Small fixed/dynamic lookup tables (domain groups, library codes) live in manifest.json rather than the binary string heap; edge deltas are plain unsigned (no zigzag) via a group-reset rule; island-only clusters reuse the SAME force-layout/dust-ring code path as continuation clusters with MIN_CLUSTER=1

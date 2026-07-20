@@ -77,7 +77,7 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
 **Plans**: 6 plans (5 waves)
 
 - [x] 133-01-PLAN.md — (wave 1, atomic precondition) Masking scan (D-07, multi-surface + recursive) + working-tree M-source scrub + gitignore-first + atlas_data/ off `/static`
-- [ ] 133-02-PLAN.md — (wave 2) Frozen binary schema + offline atlas bake: strip overlay, EXACT eligible==placed node-set, content-hashed typed-array + Brotli asset, golden fixture + pinned atlas-bake CI
+- [x] 133-02-PLAN.md — (wave 2) Frozen binary schema + offline atlas bake: strip overlay, EXACT eligible==placed node-set, content-hashed typed-array + Brotli asset, golden fixture + pinned atlas-bake CI
 - [ ] 133-03-PLAN.md — (wave 3) ATLAS_PREVIEW flag + authoritative web/atlas_assets loader + `atlas_preview_available()` predicate + /atlas route + off-static Brotli data routes (q-negotiation) + page chrome + HE strings + env/CODE_INDEX docs
 - [ ] 133-04-PLAN.md — (wave 4) Frozen-schema decoder JS + XSS-safe interactions + /browse click-through + render-smoke + Node golden cross-language decode + DOM-XSS test
 - [ ] 133-05-PLAN.md — (wave 4) Claim-free homepage teaser card gated on the shared availability predicate (noindex /atlas target)
@@ -183,7 +183,7 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 133. Visual Atlas Preview (early quick win) | 1/6 | In Progress|  |
+| 133. Visual Atlas Preview (early quick win) | 2/6 | In Progress|  |
 | 134. Discovery Data Spine | 0/TBD | Not started | - |
 | 135. Precision Certificate & Confidence Bands | 0/TBD | Not started | - |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
