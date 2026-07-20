@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Phase 133 context gathered
-last_updated: "2026-07-20T11:20:10.789Z"
-last_activity: 2026-07-20 -- Phase 133 planning complete
+stopped_at: Completed 133-01-PLAN.md
+last_updated: "2026-07-20T15:44:46.192Z"
+last_activity: 2026-07-20
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 17
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-20)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 133 — Visual Atlas Preview (early quick win; roadmap created, awaiting UX discuss-phase + planning)
+**Current focus:** Phase 133 — visual-atlas-preview-early-quick-win
 
 ## Current Position
 
-Phase: 133 of 139 (Visual Atlas Preview — early quick win) — 7 phases (133-139)
-Plan: — (not yet planned)
+Phase: 133 (visual-atlas-preview-early-quick-win) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-07-20 -- Phase 133 planning complete
+Last activity: 2026-07-20
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 17%
 
 ## Roadmap Summary (v9.0.0)
 
@@ -85,7 +85,18 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-20T08:32:02.789Z
-Stopped at: Phase 133 context gathered
-Resume file: .planning/phases/133-visual-atlas-preview-early-quick-win/133-CONTEXT.md
+Last session: 2026-07-20T15:44:32.855Z
+Stopped at: Completed 133-01-PLAN.md
+Resume file: .planning/phases/133-visual-atlas-preview-early-quick-win/133-02-PLAN.md
 Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
+
+## Performance Metrics
+
+| Phase | Plan | Duration | Notes |
+|-------|------|----------|-------|
+| Phase 133 P01 | 55min | 1 tasks | 4 files |
+
+## Decisions
+
+- [Phase 133 P01]: scan_repo uses a fast literal-byte matcher (not the rich normalized/encoded matcher) to stay practical over a real working tree with large non-ignored untracked content — A full --scan-repo run against the actual working tree (~24GB unrelated ACL2026_papers/) exceeded 3 minutes with a shared rich matcher; splitting scan_repo (fast) from scan_asset (rich) matches the plan's own acceptance-criteria wording and completes in ~2 minutes
+- [Phase 133 P01]: M-source leak in genizah_translations.py scrubbed via codename rename (M-source), not deletion, preserving the unwired Discovery Review deck glossary's structure
