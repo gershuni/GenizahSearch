@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 133-05-PLAN.md
-last_updated: "2026-07-20T22:29:43.336Z"
-last_activity: 2026-07-20
+stopped_at: "133-06 Tasks 1-2 (LOCAL bake+capture+four-surface test+deploy docs) done & committed — Tasks 3-4 (human production deploy + live smoke + rollback) PENDING"
+last_updated: "2026-07-20T23:24:14Z"
+last_activity: 2026-07-21
 progress:
   total_phases: 7
   completed_phases: 0
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 133 (visual-atlas-preview-early-quick-win) — EXECUTING
-Plan: 6 of 6
-Status: Ready to execute
-Last activity: 2026-07-20
+Plan: 6 of 6 — IN PROGRESS (NOT complete)
+Status: 133-06 Tasks 1-2 (LOCAL: real bake + capture helper + four-surface test + deploy docs) done & committed; Tasks 3-4 (human production deploy → live smoke → rollback drill) PENDING. Phase 133 completes only after the human deploy.
+Last activity: 2026-07-21
 
-Progress: [███████░░░] 67%
+Progress: [███████░░░] 67% (5/6 plans complete; 133-06 in progress)
 
 ## Roadmap Summary (v9.0.0)
 
@@ -64,7 +64,7 @@ Condensed 7-phase roadmap: an early atlas quick win, then the REL-01 gate sequen
 
 ### Blockers/Concerns
 
-None at roadmap creation.
+- **133-06 awaiting human production deploy.** The LOCAL portion (Tasks 1-2) is done: the REAL atlas asset is baked into gitignored `atlas_data/` (`atlas-v1-61519a85a2d0`, eligible==placed==62,645, Brotli 2,259,052 B ≤ 6 MB, both masking gates exit 0), the four-surface test passes (12), and the deploy docs are committed. Tasks 3-4 are `checkpoint:human-verify` PRODUCTION steps (asset-first scp → `deploy.sh master-main` → set `ATLAS_PREVIEW_ENABLED=1` → restart → live smoke → rollback drill) and need explicit human go-ahead. ATLAS-01 SC#5 and Phase 133 complete only after the human deploy.
 
 ## Deferred Items
 
@@ -85,10 +85,10 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-20T22:29:43.329Z
-Stopped at: Completed 133-05-PLAN.md
-Resume file: None
-Next step: Execute 133-05-PLAN.md (homepage teaser), then 133-06 (deploy checkpoint).
+Last session: 2026-07-20T23:24:14Z
+Stopped at: 133-06 Tasks 1-2 (LOCAL) done & committed — Tasks 3-4 (human production deploy) PENDING
+Resume file: .planning/phases/133-visual-atlas-preview-early-quick-win/133-06-PLAN.md (resume at Task 3, checkpoint:human-verify)
+Next step: Human production deploy — 133-06 Task 3 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart) then Task 4 (live smoke + browser-DOM masking scan + rollback drill). The baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
 ## Performance Metrics
 
@@ -99,6 +99,7 @@ Next step: Execute 133-05-PLAN.md (homepage teaser), then 133-06 (deploy checkpo
 | Phase 133 P03 | 55min | 3 tasks | 9 files |
 | Phase 133 P04 | 55min | 3 tasks | 4 files |
 | Phase 133 P05 | 45min | 2 tasks | 2 files |
+| Phase 133 P06 (Tasks 1-2, LOCAL) | 90min | 2 tasks | 5 files (Tasks 3-4 = human deploy, pending) |
 
 ## Decisions
 

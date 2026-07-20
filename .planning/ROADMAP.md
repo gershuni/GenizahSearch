@@ -81,7 +81,7 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
 - [x] 133-03-PLAN.md — (wave 3) ATLAS_PREVIEW flag + authoritative web/atlas_assets loader + `atlas_preview_available()` predicate + /atlas route + off-static Brotli data routes (q-negotiation) + page chrome + HE strings + env/CODE_INDEX docs
 - [x] 133-04-PLAN.md — (wave 4) Frozen-schema decoder JS + XSS-safe interactions + /browse click-through + render-smoke + Node golden cross-language decode + DOM-XSS test
 - [x] 133-05-PLAN.md — (wave 4) Claim-free homepage teaser card gated on the shared availability predicate (noindex /atlas target)
-- [ ] 133-06-PLAN.md — (wave 5, checkpoint) Production deploy: asset-first upload (off static root) → flag set → restart → live render/Brotli/noindex/EN-HE/masking smoke → rollback drill (SC#5)
+- [ ] 133-06-PLAN.md — (wave 5, checkpoint) Production deploy: asset-first upload (off static root) → flag set → restart → live render/Brotli/noindex/EN-HE/masking smoke → rollback drill (SC#5) — **LOCAL portion done (Tasks 1-2: real bake `atlas-v1-61519a85a2d0` + capture helper + four-surface test + deploy docs, both masking gates exit 0); Tasks 3-4 = human production deploy PENDING**
 
 **UI hint**: yes
 
