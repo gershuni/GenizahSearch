@@ -42,7 +42,7 @@
 
 ### Atlas & Homepage
 
-- [ ] **ATLAS-01**: An offline-precomputed, canon-masked aggregated corpus overview ships as a static asset (layout never computed at request time); OWNER PRIORITY (2026-07-20): this is the milestone's FIRST deployable artifact — an early standalone beta page, shipped before the claim surfaces, under the REL-01 atlas-preview exception
+- [x] **ATLAS-01**: An offline-precomputed, canon-masked aggregated corpus overview ships as a static asset (layout never computed at request time); OWNER PRIORITY (2026-07-20): this is the milestone's FIRST deployable artifact — an early standalone beta page, shipped before the claim surfaces, under the REL-01 atlas-preview exception
 - [ ] **ATLAS-02**: A server-bounded drill-down explorer serves capped neighborhoods (PERF-01 node/edge/byte caps, single-hop server-side expansion); the client never loads the full edge set; the graph's primary object (works vs manuscripts vs clusters) is fixed in the UX discuss-phase BEFORE sidecar/layout design
 - [ ] **ATLAS-03**: Homepage promotion is a CLS-safe static band (no live suggestions/graph in v9), enabled only via the REL-01 gates. ATLAS-PREVIEW EXCEPTION (owner, 2026-07-20, Phase 133 discuss): a small claim-free homepage TEASER card linking to the Phase 133 `/atlas` beta may ship early — a CLS-safe static card with NO claim-level statements, gated by the dedicated atlas-preview flag, passing the DATA-05 masking scan + i18n/RTL basics, and `noindex` until the full REL-01 gate; the full homepage discovery band (promoting claims) still waits for Phase 139
 
@@ -100,7 +100,7 @@ Every v9.0.0 requirement maps to exactly one phase. Phases continue from the pre
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ATLAS-01 | Phase 133 | Pending |
+| ATLAS-01 | Phase 133 | Complete |
 | DATA-01 | Phase 134 | Pending |
 | DATA-02 | Phase 134 | Pending |
 | DATA-03 | Phase 134 | Pending |

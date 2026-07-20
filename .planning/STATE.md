@@ -4,13 +4,13 @@ milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
 stopped_at: Completed 133-02-PLAN.md
-last_updated: "2026-07-20T16:38:54.640Z"
+last_updated: "2026-07-20T20:57:04.410Z"
 last_activity: 2026-07-20
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 133 (visual-atlas-preview-early-quick-win) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-07-20
 
@@ -85,9 +85,9 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-20T16:38:54.633Z
+Last session: 2026-07-20T20:52:43.586Z
 Stopped at: Completed 133-02-PLAN.md
-Resume file: .planning/phases/133-visual-atlas-preview-early-quick-win/133-03-PLAN.md
+Resume file: None
 Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
 
 ## Performance Metrics
@@ -96,6 +96,7 @@ Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
 |-------|------|----------|-------|
 | Phase 133 P01 | 55min | 1 tasks | 4 files |
 | Phase 133 P02 | 40min | 3 tasks | 12 files |
+| Phase 133 P03 | 55min | 3 tasks | 9 files |
 
 ## Decisions
 
@@ -106,3 +107,4 @@ Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
 - [Phase 133 P01 gap-fix, fix(133-01) 3922be48]: The masking scanner (scripts/check_atlas_masking.py) was hardened against an adversarial Codex review (9 HIGH + 1 MEDIUM). This SUPERSEDES the earlier "fast literal matcher on scan_repo, rich matcher on scan_asset" decision — that split was a coverage gap (normalized/encoded/multi-byte-encoding leaks could enter the repo undetected). ONE semantically-complete, fail-CLOSED matcher now runs on EVERY surface (repo + asset): literal + NFC/NFD+casefold + UTF-8/16/32 + URL/HTML/JS (incl. mixed literal+escaped) forms. Speed is preserved with the bytes.find primitive (~21GB/s), a single unquote_to_bytes URL buffer, and a windowed de-escape around sparse HTML/JS introducers — NOT by dropping coverage. git enumeration is now NUL-delimited (-z) + object-id cat-file batch; Brotli payloads are decompressed and scanned; leaky file NAMES are scanned and redacted; every git/read/decode/empty-pattern failure is fail-closed (non-zero exit). --scan-repo runs ~4.1min over the local 24.9GB untracked scratch tree (seconds on a clean CI checkout). Tests rebuilt to be load-bearing (real temp git repos, real Brotli, encoded/mixed forms, fail-closed sims): 59 pass; ruff clean.
 - [Phase 133 P02 Wave-2 fix, fix(133-02) e4b66d1f]: Closed 3 HIGH + 2 MEDIUM correctness defects Codex found in the frozen atlas schema bake (the decode contract Wave-3's JS decoder/renderer build on). HIGH-1: EDGE_CLASS polarity was reversed vs the FROZEN schema doc — encoder now emits 0=continuation, 1=island per docs/specs/atlas-asset-schema-v1.md (doc is authoritative, left unchanged); added a semantic edge-class test. HIGH-2: canonicalize EVERY sys_id (pair endpoints, graph node keys, libraries.csv + FJMS domain metadata keys) through validate_sys_id() before baking so all lookups/set-ops use ONE int representation (mixed str/int keys were producing phantom/duplicate nodes and dropping title/domain/library); added a mixed-id-type metadata test. HIGH-3: EXACT eligible==placed set equality is now ENFORCED (raise before writing, no >= fudge) in run_bake + write paths + main() for every mode incl. --report, plus an encoded-node-set==eligible defense and the 62,414 real-bake regression floor; added a rejection test. MEDIUM-1: added an encoder-output-lock test (encode_asset reproduces the committed golden bytes) so encoder drift fails even a green decode-only test — this is exactly how HIGH-1 hid. MEDIUM-2: golden dataset sized (n=40) to yield a >=25-node cluster so CLUSTER_LABEL_* sections are exercised, with non-empty/field-correct assertions. HIGH-4 (shelfmark in heap) is a REJECTED false positive — shelfmark is an intended masking-safe per-star catalogue field, retained. Golden fixtures regenerated deterministically via --golden. Gates: 14 atlas_bake tests pass, smoke bake within byte budget, masking scan clean (exit 0), ruff clean.
 - [Phase 133 P02 Wave-2 re-review fix, fix(133-02) 56bbeb9a]: A Codex re-review of the HIGH-2/HIGH-3 hardening above found the fixes were still incomplete on 3 points (1 real HIGH + 1 defense-in-depth HIGH + 1 MEDIUM). HIGH (real, metadata collision): `_canonicalize_meta()` was last-write-wins on a canonical-key collision (e.g. source keys `100` and `"100"`), silently DROPPING one source's Counter tallies — new `_merge_meta_values()` sums Counter elements and keeps-if-equal/raises-if-conflicting on scalar elements (fail-closed on our own per-sys_id catalogue data), order-independent; `load_ms_pairs_from_db()` also canonicalized pair endpoints via `validate_sys_id()` AFTER the raw `sa < sb` ordering compare, which could TypeError on a mixed int/str pair — canonicalize now happens BEFORE the compare. HIGH (defense-in-depth, writer boundary): `assert_bake_complete()` trusted the cached `missing`/`extra`/`placed_count` scalar fields on `BakeResult`, so a mutated/fabricated result could pass the writer gate even though the real node collection disagreed — it now RE-DERIVES missing/extra/duplicates from the actual `result.nodes` against a new `BakeResult.eligible_ids` field (the real eligible id set, not just its count). MEDIUM: the `REGRESSION_FLOOR` check lived only in `_write_production()`, so `main()`'s `--report` path returned before reaching it — extracted to `_enforce_regression_floor()` and enforced in `main()` before the `--report` early return (still smoke/golden-exempt), kept in `_write_production()` too for direct callers. Tests: added `test_metadata_canonical_key_collision_merges` (same sys_id as both int and str across metadata sources — Counter summed, scalar retained, conflicting scalar raises) and rewrote `test_bake_rejects_node_set_mismatch` to mutate the actual node collection (drop/append/duplicate a node) instead of the now-untrusted cached scalar fields, plus a confirmation that scalar-only mutation no longer bypasses or trips the gate. 15/15 atlas_bake tests pass, smoke bake succeeds, masking scan clean (exit 0), ruff clean; golden fixture bytes unchanged.
+- [Phase ?]: [Phase 133 P03]: ONE authoritative web/atlas_assets.py loader (plain required, brotli optional, fail-closed) whose single atlas_preview_available() predicate gates the /atlas page, nav, and both off-/static data routes; manifest is a no-cache+ETag+304 mutable pointer to the immutable content-hashed asset; routes negotiate Accept-Encoding br/identity/* by q-value with a reachable 406. Windows-CRLF staging used a hunk-filter (drop R2-1 embed hunks) for web/main.py and a synthetic HEAD->HEAD+atlas patch for genizah_translations.py to keep the discovery-deck glossary uncommitted.
