@@ -558,11 +558,32 @@ def dedupe_browse_map(browse_map):
         is_multi_ie = sid in ie_volume_map
 
         if not is_multi_ie:
-            # Single-IE: tag ie_id but no dedup needed (p_nums are unique)
+            # Not registered in ie_volume_map. Historically this branch tagged
+            # ie_id and skipped dedup entirely, assuming a single-IE manuscript
+            # always has unique p_nums. That assumption fails for bundled browse
+            # maps that carry literal duplicate page entries (same IE + same
+            # p_num + same FL) for a manuscript absent from ie_volume_map — those
+            # duplicates doubled BOTH the transcription "view all" and the
+            # per-page image navigator on desktop (get_browse_page.total_pages =
+            # len(pages)). Web's rebuilt map is clean, so this dedup is a no-op
+            # there. Dedup by (ie_id, p_num) — the SAME "true duplicate"
+            # definition the multi-IE branch below uses — preserving first-seen
+            # order and never removing genuinely distinct pages (distinct pages
+            # have distinct (ie_id, p_num) keys). An un-registered manuscript
+            # that DOES carry multiple real IEs still keeps every IE, since a
+            # different ie_id yields a different key.
+            seen_keys = set()
+            deduped_pages = []
             for page in pages:
                 if 'ie_id' not in page:
                     page['ie_id'] = _extract_ie_from_header(page.get('full_header', ''))
-            cleaned[sid] = pages
+                key = (page.get('ie_id'), page.get('p_num'))
+                if key in seen_keys:
+                    changed = True
+                    continue
+                seen_keys.add(key)
+                deduped_pages.append(page)
+            cleaned[sid] = deduped_pages
             continue
 
         # Multi-IE: tag ie_id, dedup within each IE (same ie+p_num), keep all IEs
