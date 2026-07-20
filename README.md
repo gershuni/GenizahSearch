@@ -10,6 +10,15 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ## What's New in Version 8.5.0?
 
+### Connections Atlas (beta, web)
+
+A new preview page at `/atlas` renders an interactive, algorithmically laid-out overview map
+of the textual connections across the connected Cairo Genizah corpus — zoom and pan, search
+by title or shelfmark, toggle the coloring between subject domain and library, focus on a
+region, and click through to the manuscript in Browse. Positions and clusters reflect textual
+similarity, not physical provenance, and the page makes no identification claims. Bilingual
+EN/HE. The atlas is an opt-in beta (off by default) and is not yet indexed by search engines.
+
 ### v8.5.0: Smarter Default Transcription
 
 Public release (both apps). The reading view now picks a better default transcription:

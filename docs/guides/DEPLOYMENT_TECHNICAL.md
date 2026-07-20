@@ -125,6 +125,10 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 │   └── transcriptions_linked.csv # Linked transcription sources
 ├── libraries.csv          # Master manuscript metadata (~217K records)
 ├── libraries_translations.db # Dicta translations sidecar (76MB, NOT in git)
+├── atlas_data/            # Connections Atlas beta asset (NOT in git; OUTSIDE web/static/)
+│   ├── manifest.json      # Mutable pointer -> the content-hashed asset (no-cache + ETag)
+│   ├── atlas-v1-<hash>.bin    # Offline-baked, content-hashed binary payload
+│   └── atlas-v1-<hash>.bin.br # Brotli-precompressed representation (optional)
 ├── genizah_core.py        # Core search logic
 ├── venv/                  # Python virtual environment
 ├── Transcriptions.txt     # Source transcription data (1.4GB)
@@ -369,6 +373,45 @@ Then reload and restart:
 sudo systemctl daemon-reload
 sudo systemctl restart genizah-web
 ```
+
+### Deploy the Connections Atlas Beta (asset-first)
+
+The Connections Atlas is a claim-free preview page (`/atlas`), gated by the
+`ATLAS_PREVIEW_ENABLED` flag (default **OFF**). Its data is a single, offline-baked,
+content-hashed binary asset that lives in a **new sidecar-style directory** `atlas_data/`
+at the repo root — **OUTSIDE** `web/static/` so it can never be served through the public
+static mount and thereby bypass the flag. It is served ONLY through the flag- and
+readiness-gated `/atlas-data/*` routes, and it is **gitignored** (like the SQLite sidecars),
+so `deploy.sh`'s `git reset --hard` never carries it.
+
+Because the asset is gitignored, it must be uploaded **asset-first** — exactly the same
+scp-first posture as the SQLite reference sidecars (upload the data, THEN push code). This
+ordering guarantees there is never a flag-ON / asset-missing window (a broken beta):
+
+```bash
+# 1. Bake the asset locally (offline; bake-time deps are in requirements-atlas-bake.txt,
+#    NOT requirements.txt — this tooling never runs inside the web process):
+pip install -r requirements-atlas-bake.txt
+python scripts/build_atlas_asset.py <research-db>        # writes atlas_data/
+
+# 2. Upload atlas_data/ to the server FIRST (outside the static root), like the sidecars:
+scp -r atlas_data/ ubuntu@<server>:/home/ubuntu/GenizahSearch/atlas_data/
+
+# 3. THEN deploy code:
+ssh ubuntu@<server> 'cd /home/ubuntu/GenizahSearch && ./deploy.sh master-main'
+
+# 4. THEN set the flag and restart so web/atlas_assets.load_atlas_state() re-runs and loads
+#    the asset (ready=True) BEFORE the flag is observed live:
+sudo systemctl edit genizah-web     # add: Environment=ATLAS_PREVIEW_ENABLED=1
+sudo systemctl daemon-reload && sudo systemctl restart genizah-web
+```
+
+The asset load is authoritative at startup (there is deliberately no per-request
+`os.path.exists`). Confirm the manifest route serves the expected content-hashed asset:
+`GET /atlas-data/manifest.json` should return `200` with `Cache-Control: no-cache` + an
+`ETag`. **Rollback** is the flag: setting `ATLAS_PREVIEW_ENABLED` OFF (and restarting)
+clean-hides `/atlas`, drops the nav link + homepage teaser, and 404s the `/atlas-data/*`
+routes — with the rest of the app untouched.
 
 ### Rebuild Search Indexes
 

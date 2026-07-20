@@ -4,6 +4,24 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] — Connections Atlas (beta, web)
+
+### New Features
+- **Connections Atlas (beta, web).** A new claim-free preview page at `/atlas` that renders
+  an interactive, algorithmically laid-out overview map of the textual connections across the
+  connected Cairo Genizah corpus (zoom/pan, title/shelfmark search, a domain↔library color
+  toggle, a click-to-focus constellation, and click-through to the manuscript in Browse). A
+  standing honesty banner makes clear that positions and clusters are algorithmically derived
+  from textual similarity — **not** physical provenance — and the page carries no
+  identification claims. The map is drawn client-side from a single offline-baked,
+  content-hashed binary asset (Brotli-negotiated, served with an immutable cache behind a
+  revalidated manifest pointer). The beta is behind the `ATLAS_PREVIEW_ENABLED` flag
+  (default **OFF**) and is `noindex`; when enabled it also surfaces a nav link and a homepage
+  teaser, all gated on the same availability predicate so a not-yet-ready beta hides cleanly
+  everywhere. Bilingual EN/HE.
+
+---
+
 ## [8.5.0] - 2026-07-14 — Smarter Default Transcription (both apps)
 
 ### Improvements
