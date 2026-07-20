@@ -15,6 +15,7 @@ from nicegui import ui
 from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
+from web.atlas_assets import atlas_preview_available
 
 
 def create_page():
@@ -414,6 +415,34 @@ def create_page():
                         with ui.row().classes('gap-2 flex-wrap'):
                             ui.badge(tr('Discoveries')).props('outline color=pink-9').classes('text-xs')
                             ui.badge(tr('Corrections')).props('outline color=pink-9').classes('text-xs')
+
+            # Connections Atlas Teaser Card (Phase 133, ATLAS-01 — beta, claim-free)
+            # Gated on the SAME atlas_preview_available() predicate as the /atlas
+            # page route, its nav link, and the data routes (MEDIUM-6) — a
+            # flag-ON/asset-missing window must never advertise a broken link
+            # from a fourth surface (the homepage). Static card (no async data
+            # fetch) — CLS-safe — and carries no claim-level statements (no
+            # counts, no "identifications", no "discoveries found").
+            if atlas_preview_available():
+                with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+                    'role=button tabindex=0'
+                ).on('click', lambda: ui.navigate.to('/atlas')).on('keydown.enter', lambda: ui.navigate.to('/atlas')).on('keydown.space', lambda: ui.navigate.to('/atlas')).mark('atlas-teaser-card'):
+                    with ui.column().classes('w-full'):
+                        with ui.row().classes('w-full p-4 items-center gap-3').style(
+                            'background: linear-gradient(135deg, #14b8a6, #0f766e);'
+                        ):
+                            ui.icon('hub').classes('text-3xl text-white')
+                            with ui.column().classes('gap-0'):
+                                h3(tr('Connections Atlas'), classes='text-base font-bold text-white')
+                                ui.label(tr('Explore the Connections Atlas')).classes('text-xs text-white/80')
+
+                        with ui.column().classes('p-4 gap-3'):
+                            ui.label(
+                                tr('A preview map of textual connections across the Cairo Genizah — '
+                                   'a claim-free, algorithmically laid-out overview.')
+                            ).classes('text-sm').style('color: var(--text-secondary);')
+                            with ui.row().classes('gap-2 flex-wrap'):
+                                ui.badge(tr('Beta')).props('outline color=teal-9').classes('text-xs')
 
         # === Secondary Actions Row ===
         with ui.row().classes('w-full gap-6 mt-4 flex-wrap'):
