@@ -98,9 +98,11 @@ Use the same `?mode=ro` URI style when opening the gitignored research DB
 (`fullcorpus_v2.db`) and `fjms_enrichment.db` from the bake script — the bake
 never writes to either input DB.
 
-**Output-location convention:** write the baked asset under a **gitignored**
-static directory (e.g. `web/static/atlas/`), never a committed path — see
-the `.gitignore` Shared Pattern below. Bake-time-only dependencies
+**Output-location convention:** write the baked asset into a **gitignored**
+served-data directory OUTSIDE the `/static` mount — repo-root `atlas_data/`
+(per plans 133-01/133-03; NOT `web/static/atlas/`, which the `/static` mount
+serves publicly and would let the asset bypass the ATLAS_PREVIEW_ENABLED flag,
+Codex HIGH-1) — never a committed path — see the `.gitignore` Shared Pattern below. Bake-time-only dependencies
 (`networkx`, `python-louvain`, `Brotli`) must **not** be added to
 `requirements.txt`/`requirements-lock.txt` (RESEARCH.md: "this tooling never
 runs inside the web process").
@@ -478,8 +480,8 @@ here).
 ...
 same_work_spike/
 ```
-Add an entry for the baked atlas output directory (e.g.
-`web/static/atlas/` or wherever the plan locates it), following this exact
+Add an entry for the baked atlas output directory — repo-root `atlas_data/`
+(OUTSIDE `web/static/`, per Codex HIGH-1) — following this exact
 convention — the generated, masking-sensitive, potentially multi-MB asset is
 deployed via scp alongside code (like the other sidecar DBs), never
 committed to git.
