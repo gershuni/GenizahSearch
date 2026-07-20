@@ -78,7 +78,7 @@ emit those shingles **into the same shingle set** (union), not a second index; v
 (~ΔJ +0.06–0.08 expected) on known plene/defective witness pairs before keeping.
 
 **Track 1 — fragment ↔ canon (identification):** run **Shmidman-Koppel skip-grams against CLEAN
-reference corpora** (Maagarim/Sefaria: Bible, Mishnah, Bavli, Siddur/liturgy). Method (arXiv:1602.08715):
+reference corpora** (M-source/Sefaria: Bible, Mishnah, Bavli, Siddur/liturgy). Method (arXiv:1602.08715):
 per-word reduction to the **2 rarest letters** (order kept; matres/prefixes are frequent letters →
 plene/defective collapses free); 4-word skip-grams — from every 5-word window, 4 variants each
 omitting one word; collision-free 64-bit codes (22⁸ < 2⁶⁴); cluster validation i=3 matches / gaps ≤8
@@ -242,7 +242,7 @@ No NiceGUI/PyQt integration this cycle. Internal milestone, no version bump, unt
 ## Requirement themes (draft → REQUIREMENTS.md at trigger)
 1. Stage-0 corpus hygiene (empty pages; near-dup/V0.7-V0.8; same-sys_id exclusion; language ID).
 2. Union-view normalization (NFC; nikud/diacritics; final-letter fold; space-strip; matres-light union).
-3. Track 1 canon identification (Shmidman skip-grams + maxDF + i=2 vs clean Maagarim/Sefaria; span
+3. Track 1 canon identification (Shmidman skip-grams + maxDF + i=2 vs clean M-source/Sefaria; span
    labels; direct canonical-copy identification; separate reporting channel).
 4. Track 2 discovery engine (DF-banded char-5-gram inverted index; canon-masked; diagonal two-hit;
    Shmidman-code second generator).

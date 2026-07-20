@@ -59,8 +59,8 @@
 
 | Component | Responsibility | New / Modified | House pattern it mirrors |
 |-----------|----------------|----------------|--------------------------|
-| **Distillation script** (`scripts/build_discovery_sidecar.py`) | Read `same_work_spike/probe/data/fullcorpus_v2.db`, select tier-A ids + bands + MS-MS edges + work metadata, **apply Maagarim masking**, emit `discovery.db`. Offline only — never shipped, never on the event loop. | NEW | `scripts/*` build scripts; the "scp DB first" deploy posture |
-| **`discovery.db`** sidecar | Read-only product data: `work`, `identification`, `connection_edge`, `meta`. No reference text, no Maagarim strings. | NEW | `fjms_enrichment.db`, `pgp.db`, `nli_crossref.db` |
+| **Distillation script** (`scripts/build_discovery_sidecar.py`) | Read `same_work_spike/probe/data/fullcorpus_v2.db`, select tier-A ids + bands + MS-MS edges + work metadata, **apply M-source masking**, emit `discovery.db`. Offline only — never shipped, never on the event loop. | NEW | `scripts/*` build scripts; the "scp DB first" deploy posture |
+| **`discovery.db`** sidecar | Read-only product data: `work`, `identification`, `connection_edge`, `meta`. No reference text, no M-source strings. | NEW | `fjms_enrichment.db`, `pgp.db`, `nli_crossref.db` |
 | **`shared/discovery_service.py`** | The ONLY reader of `discovery.db`. `DiscoveryService` class + `get_discovery_service(thread_safe=True)` singleton; graceful degrade when file absent. | NEW | `shared/fjms_service.py::FjmsService` / `get_fjms_service()` verbatim |
 | **MS connections panel** | Browse-page enrichment section: "identified as ⟨work⟩" + related manuscripts with band labels + "show uncertified leads" toggle. | MODIFIED (`web/pages/browse_enrichment.py`, `browse_state.py`, `browse.py`) | the existing PGP/FJMS `fetch_*` enrichment coroutines |
 | **`/work/{work_id}`** witness page | Per-work witness map: all carrier MSS, filter by band/library. | NEW (`web/pages/work.py`) | `web/pages/catalog_browse.py` |
@@ -107,7 +107,7 @@ migrations/
 
 tests/
 ▓ test_discovery_service.py       # graceful-degrade, band filtering, off-thread
-▓ test_discovery_masking.py       # HARD GATE: no "מאגרים"/Maagarim/reference-text leakage in shipped DB
+▓ test_discovery_masking.py       # HARD GATE: no "M-source"/M-source/reference-text leakage in shipped DB
 ```
 
 ### Structure Rationale
@@ -212,8 +212,8 @@ def create_work_judgment(user_id, sys_id, work_id, verdict, band, note=''):
 
 ### Pattern 4: Distill-time masking (the hard constraint enforced in the build, not the UI)
 
-**What:** The Maagarim provenance ban is impossible to violate at runtime if the sidecar never contains it. The distillation step (a) replaces every displayed work title with a **neutral canonical title** from a curated `discovery_work_titles.csv` — measured: 3,468 of 4,093 non-shadowed works have `cat='Maagarim'` and 224 `cat='Sefaria'`, so nearly every title needs the de-provenancing pass; (b) drops the `cat`/reference-source columns or rewrites them to neutral genre buckets; (c) **never copies `pages.text` or reference spans** — only character offsets into OUR HTR text, which the display layer already renders from Tantivy/PGP/FGP sources.
-**When to use:** Always, in `build_discovery_sidecar.py`; verified by a CI test (`tests/test_discovery_masking.py`) that scans the shipped DB for banned strings (`מאגרים`, "Maagarim", raw `REF2:`-style ids in display columns, Maagarim-convention title patterns).
+**What:** The M-source provenance ban is impossible to violate at runtime if the sidecar never contains it. The distillation step (a) replaces every displayed work title with a **neutral canonical title** from a curated `discovery_work_titles.csv` — measured: 3,468 of 4,093 non-shadowed works have `cat='M-source'` and 224 `cat='Sefaria'`, so nearly every title needs the de-provenancing pass; (b) drops the `cat`/reference-source columns or rewrites them to neutral genre buckets; (c) **never copies `pages.text` or reference spans** — only character offsets into OUR HTR text, which the display layer already renders from Tantivy/PGP/FGP sources.
+**When to use:** Always, in `build_discovery_sidecar.py`; verified by a CI test (`tests/test_discovery_masking.py`) that scans the shipped DB for banned strings (`M-source`, "M-source", raw `REF2:`-style ids in display columns, M-source-convention title patterns).
 **Trade-offs:** Requires a one-time human-curated title map (~4k works — bulk-derivable from existing titles, then reviewed), but converts a "remember to hide it on every surface" UI discipline into a single structural gate.
 
 ---
@@ -231,7 +231,7 @@ def create_work_judgment(user_id, sys_id, work_id, verdict, band, note=''):
    • SELECT tier-A: track1_matches WHERE shadowed_by IS NULL          → 275,894 page ids / 52,497 MSS / 4,093 works
    • JOIN band labels + precision from the E1 band frame (R-A 0.889 / R-B 0.859 / R-CANON 0.647)
    • aggregate accepted_pairs_canonmask → DISTINCT (sys_a, sys_b)     → 442,696 MS-MS edges (keep flank_class)
-   • MASK: work title → neutral (discovery_work_titles.csv); DROP cat/Maagarim/Sefaria provenance; DROP pages.text
+   • MASK: work title → neutral (discovery_work_titles.csv); DROP cat/M-source/Sefaria provenance; DROP pages.text
         │
         ▼
 [discovery.db  ~130-160 MB]  (discovery_data/ — scp'd to prod FIRST, then code — deploy posture)
@@ -267,7 +267,7 @@ def create_work_judgment(user_id, sys_id, work_id, verdict, band, note=''):
 ## Sidecar schema sketch (`discovery.db`)
 
 ```sql
--- Work metadata (MASKED titles; NO cat/Maagarim/Sefaria provenance)
+-- Work metadata (MASKED titles; NO cat/M-source/Sefaria provenance)
 CREATE TABLE work (
     work_id      TEXT PRIMARY KEY,      -- opaque internal id (kept for joins; never displayed raw)
     title        TEXT NOT NULL,         -- NEUTRAL canonical title (from discovery_work_titles.csv)
@@ -377,7 +377,7 @@ CREATE TRIGGER update_wwj_updated_at BEFORE UPDATE ON work_witness_judgments
 De-risk the data spine first (a wrong sidecar shape invalidates every surface), then the lowest-risk UI (reuses existing enrichment machinery), then progressively heavier surfaces.
 
 1. **Sidecar schema + distillation script + masking gate** *(spine — everything depends on it)*
-   `scripts/build_discovery_sidecar.py` + `discovery_work_titles.csv` + `tests/test_discovery_masking.py`. Ship a snapshot `discovery.db`; document the rebuild recipe in the script header. **Gate:** masking audit finds zero Maagarim/reference-text strings in the shipped file.
+   `scripts/build_discovery_sidecar.py` + `discovery_work_titles.csv` + `tests/test_discovery_masking.py`. Ship a snapshot `discovery.db`; document the rebuild recipe in the script header. **Gate:** masking audit finds zero M-source/reference-text strings in the shipped file.
 2. **`shared/discovery_service.py`** *(depends on 1)* — copy `FjmsService`: singleton factory, thread-local RO conn, `is_available()`, graceful degrade. Unit tests incl. absent-file no-op + band filtering.
 3. **MS connections panel on `/browse`** *(depends on 2; lowest UI risk, highest reach)* — `fetch_discovery()` in `browse_enrichment.py`, fields on `BrowseState`, render section + "show uncertified leads" toggle. First user-visible surface; reuses the proven enrichment path. Requires a live render-smoke test (NiceGUI headless-pytest gap — house lesson).
 4. **`/work/{work_id}` witness page** *(depends on 2)* — new `@ui.page` route in `web/main.py` + `web/pages/work.py`; band/library filters; rows link to `/browse`.
@@ -409,9 +409,9 @@ Note the **tier-A stratified precision certificate** (milestone target) is a mea
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: Displaying (or shipping) Maagarim-derived text/provenance
+### Anti-Pattern 1: Displaying (or shipping) M-source-derived text/provenance
 **What people do:** Copy `pages.text`/reference spans into the sidecar "so the UI can show the matched passage," or carry the `cat`/`work_id` provenance strings into display columns.
-**Why it's wrong:** Violates the v9.0.0 hard masking constraint — 3,468/4,093 works trace to Maagarim (plus 224 Sefaria); provenance and reference text must never surface. Also an HTR-license consideration (model is CC-BY-NC-SA).
+**Why it's wrong:** Violates the v9.0.0 hard masking constraint — 3,468/4,093 works trace to M-source (plus 224 Sefaria); provenance and reference text must never surface. Also an HTR-license consideration (model is CC-BY-NC-SA).
 **Do this instead:** Ship only offsets into OUR HTR text; render passages from the Tantivy/PGP/FGP surfaces the browse page already uses; neutralize every title at distill time; CI-scan the shipped DB.
 
 ### Anti-Pattern 2: Querying the sidecar on the event loop
@@ -470,7 +470,7 @@ Note the **tier-A stratified precision certificate** (milestone target) is a mea
 - `supabase_setup.sql` (corrections/discoveries tables + RLS :90-146, :309-334; confirmed NO GRANT statements → 2026-05-30 rule applies to new tables) — HIGH
 - `web/main.py` (`@ui.page` routes :1473-2082; `init_api_routes` :698; `init_search_api` sub-app mount :717-736) — page/API registration — HIGH
 - `web/pages/home.py` (flagship `ui.card()`s :314-464) — homepage promotion pattern — HIGH
-- `same_work_spike/probe/data/fullcorpus_v2.db` — schema + counts measured directly via sqlite3: tier-A 275,894 (shadowed_by IS NULL) / 4,093 works / 52,497 MSS; accepted_pairs 1,332,099 page-pairs → 442,696 distinct MS-MS; works-per-cat (Maagarim 3,468, Sefaria 224); flank_class distribution; byte-size estimates — HIGH
+- `same_work_spike/probe/data/fullcorpus_v2.db` — schema + counts measured directly via sqlite3: tier-A 275,894 (shadowed_by IS NULL) / 4,093 works / 52,497 MSS; accepted_pairs 1,332,099 page-pairs → 442,696 distinct MS-MS; works-per-cat (M-source 3,468, Sefaria 224); flank_class distribution; byte-size estimates — HIGH
 - `same_work_spike/probe/data/e1_band_frame.jsonl` / `e1_ra_confirmed.jsonl` (band2 R-A, band_precision 0.889) / `e1_rb_screening.jsonl` (7,498 rows) / `e1_certification_registry.json` (independent_audit: pending) — band structure — HIGH
 - `.planning/PROJECT.md` "Current Milestone: v9.0.0" + `.planning/seeds/SEED-029-fragment-textual-similarity-same-work-detection.md` — milestone scope + research provenance — HIGH
 

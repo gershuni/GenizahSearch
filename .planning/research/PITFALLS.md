@@ -4,23 +4,23 @@
 **Researched:** 2026-07-19
 **Confidence:** HIGH (grounded in the SEED-029 probe artifacts — PROBE-RESULTS.md, METHOD.md, E1-ROUND2/3-RELEASE.md, rehearsal atlases — plus direct inspection of `supabase_setup.sql`, `shared/corrections_service.py`, and the CLS/NLI-breaker/`safe_storage`/deploy-ordering history in CLAUDE.md + MEMORY.md)
 
-> This file is scoped to the mistakes specific to bolting THIS module onto THIS system. Generic "validate input / use HTTPS" advice is omitted. Every pitfall carries a concrete guard/test/design rule and the phase that should own it. The Maagarim provenance-masking pitfall (P1) is treated as a hard release blocker with a per-vector leak checklist.
+> This file is scoped to the mistakes specific to bolting THIS module onto THIS system. Generic "validate input / use HTTPS" advice is omitted. Every pitfall carries a concrete guard/test/design rule and the phase that should own it. The M-source provenance-masking pitfall (P1) is treated as a hard release blocker with a per-vector leak checklist.
 
 ---
 
 ## Critical Pitfalls
 
-### P1: Maagarim provenance leaks through titles, URLs, API fields, exports, or SEO (HARD RELEASE BLOCKER)
+### P1: M-source provenance leaks through titles, URLs, API fields, exports, or SEO (HARD RELEASE BLOCKER)
 
 **What goes wrong:**
-The reference corpus that powers Track-1 identification derives partly from a licensed scholarly text site (Maagarim). The hard constraint is that this provenance must never be revealed: work titles must be neutral canonical names, no reference-edition text is ever displayed, and no naming convention (`מאגרים`, Maagarim sigla, DB-internal source tags, reference-edition locus formats) may leak through any surface. Because the module touches *every* output surface (browse panel, work pages, atlas labels, leads queue, community payloads, JSON API, XLSX/CSV exports, SEO/JSON-LD), a single un-audited surface breaks the constraint — and once a title string or a `source='maagarim'` field ships in an export or a cached SEO snippet, it is effectively unrecallable.
+The reference corpus that powers Track-1 identification derives partly from a licensed scholarly text site (M-source). The hard constraint is that this provenance must never be revealed: work titles must be neutral canonical names, no reference-edition text is ever displayed, and no naming convention (`M-source`, M-source sigla, DB-internal source tags, reference-edition locus formats) may leak through any surface. Because the module touches *every* output surface (browse panel, work pages, atlas labels, leads queue, community payloads, JSON API, XLSX/CSV exports, SEO/JSON-LD), a single un-audited surface breaks the constraint — and once a title string or a `source='maagarim'` field ships in an export or a cached SEO snippet, it is effectively unrecallable.
 
 **Why it happens:**
 The research DB (`fullcorpus_v2.db`) was built by researchers for researchers — it carries raw provenance in table/column names, work-title strings, span-locus references, and reference-edition text columns because that was useful during the probe. Distilling it into a product sidecar without a *deny-by-default* projection lets research-internal fields ride along. Developers naturally add "just show the matched reference text so the scholar can compare" — which is exactly the forbidden display.
 
 **How to avoid:**
-- Treat masking as a **projection at the sidecar-build boundary, not a filter at render time.** The product sidecar must physically NOT CONTAIN reference-edition text, Maagarim sigla, or source-provenance columns. If the string isn't in the sidecar, it cannot leak downstream. Never ship `fullcorpus_v2.db`; ship a distilled sidecar whose schema was designed masked-first.
-- Maintain a **canonical work-title allowlist**: every `work_id` maps to ONE neutral Hebrew canonical title + optional English, curated/reviewed, with a guard that rejects any title matching a Maagarim-convention denylist regex (`מאגרים`, known siglum patterns, reference-locus formats).
+- Treat masking as a **projection at the sidecar-build boundary, not a filter at render time.** The product sidecar must physically NOT CONTAIN reference-edition text, M-source sigla, or source-provenance columns. If the string isn't in the sidecar, it cannot leak downstream. Never ship `fullcorpus_v2.db`; ship a distilled sidecar whose schema was designed masked-first.
+- Maintain a **canonical work-title allowlist**: every `work_id` maps to ONE neutral Hebrew canonical title + optional English, curated/reviewed, with a guard that rejects any title matching a M-source-convention denylist regex (`M-source`, known siglum patterns, reference-locus formats).
 - Add a **leak-vector CI test** (see checklist below) that scans EVERY output surface for the denylist. This is a permanent guard, in the spirit of `tests/test_no_raw_storage_access.py` and `tests/test_web_library_options_no_local.py`.
 - Only ever display **our** manuscript text (MiDRASH HTR / PGP / FGP transcriptions) — never the reference-edition text used to make the identification. The "compare against the reference" affordance is forbidden; the comparison is scholar-vs-our-manuscript-text only.
 
@@ -461,7 +461,7 @@ Bible identifications topping the leads queue; Targum IDs shown with no caveat; 
 ## Sources
 
 - `same_work_spike/probe/PROBE-RESULTS.md` — candidate recall 1.00; giant liturgical component; join≠parallel 1%; CER 16–20%; scale frontier (personal research artifact, HIGH)
-- `same_work_spike/probe/METHOD.md` — Track-1 canon masking as the gate before the works census; Maagarim/Sefaria reference use (HIGH)
+- `same_work_spike/probe/METHOD.md` — Track-1 canon masking as the gate before the works census; M-source/Sefaria reference use (HIGH)
 - `same_work_spike/probe/results/E1-ROUND2-RELEASE.md` — R-A 0.889 "single-expert, uncertified, valid-with-deviation, independent audit pending"; R-B 0.859 screening (HIGH)
 - `same_work_spike/probe/results/E1-ROUND3-RELEASE.md` — R-CANON 0.647 → gate REFUSED → screening; Bible-only sub-stratum "certifies nothing"; Targum 0.483 systematic confusion (HIGH)
 - `same_work_spike/probe/results/CODEX-BRIEF-atlas.md` — ego-network model decided; per-manuscript bounded neighborhood (HIGH)
