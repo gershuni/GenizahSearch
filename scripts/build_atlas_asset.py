@@ -37,10 +37,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import math
 import os
 import re
 import sqlite3
+import struct
 import sys
 import time
 from collections import Counter, defaultdict
@@ -630,6 +632,417 @@ def run_bake(ms_pairs: dict, sys_meta: dict, domains: dict, *, seed: int = SEED,
     )
 
 
+# ---------------------------------------------------------------------------
+# Binary encoding -- implements docs/specs/atlas-asset-schema-v1.md field-for-
+# field. See that document for the frozen contract this code MUST match.
+# ---------------------------------------------------------------------------
+
+MAGIC = b"ATLAS001"
+SCHEMA_VERSION = 1
+
+DTYPE_FLOAT32 = 1
+DTYPE_UINT8 = 2
+DTYPE_UINT16 = 3
+DTYPE_UINT32 = 4
+DTYPE_UINT64 = 5
+_NP_DTYPE = {DTYPE_FLOAT32: "<f4", DTYPE_UINT8: "<u1", DTYPE_UINT16: "<u2",
+             DTYPE_UINT32: "<u4", DTYPE_UINT64: "<u8"}
+_ELEM_SIZE = {DTYPE_FLOAT32: 4, DTYPE_UINT8: 1, DTYPE_UINT16: 2, DTYPE_UINT32: 4, DTYPE_UINT64: 8}
+
+# Section IDs -- schema §4. Order here matches file layout order (not load-bearing
+# for decoding since the section table is self-describing, but kept consistent
+# for readability).
+SEC_NODE_POS = 1
+SEC_NODE_CLUSTER = 2
+SEC_NODE_DOMAIN = 3
+SEC_NODE_LIBRARY = 4
+SEC_NODE_PROMINENCE = 5
+SEC_NODE_SYS_ID = 6
+SEC_NODE_TITLE_REF = 7
+SEC_NODE_SHELFMARK_REF = 8
+SEC_EDGE_SOURCE_DELTA = 9
+SEC_EDGE_TARGET_DELTA = 10
+SEC_EDGE_CLASS = 11
+SEC_FLOW_SOURCE_CLUSTER = 12
+SEC_FLOW_TARGET_CLUSTER = 13
+SEC_FLOW_WEIGHT = 14
+SEC_CLUSTER_LABEL_CI = 15
+SEC_CLUSTER_LABEL_X = 16
+SEC_CLUSTER_LABEL_Y = 17
+SEC_CLUSTER_LABEL_R = 18
+SEC_CLUSTER_LABEL_N = 19
+SEC_CLUSTER_LABEL_DGRP = 20
+SEC_CLUSTER_LABEL_TITLE_REF = 21
+SEC_CLUSTER_LABEL_DOM_REF = 22
+SEC_STRING_HEAP = 23
+
+_SECTION_NAMES = {
+    SEC_NODE_POS: "NODE_POS", SEC_NODE_CLUSTER: "NODE_CLUSTER",
+    SEC_NODE_DOMAIN: "NODE_DOMAIN", SEC_NODE_LIBRARY: "NODE_LIBRARY",
+    SEC_NODE_PROMINENCE: "NODE_PROMINENCE", SEC_NODE_SYS_ID: "NODE_SYS_ID",
+    SEC_NODE_TITLE_REF: "NODE_TITLE_REF", SEC_NODE_SHELFMARK_REF: "NODE_SHELFMARK_REF",
+    SEC_EDGE_SOURCE_DELTA: "EDGE_SOURCE_DELTA", SEC_EDGE_TARGET_DELTA: "EDGE_TARGET_DELTA",
+    SEC_EDGE_CLASS: "EDGE_CLASS", SEC_FLOW_SOURCE_CLUSTER: "FLOW_SOURCE_CLUSTER",
+    SEC_FLOW_TARGET_CLUSTER: "FLOW_TARGET_CLUSTER", SEC_FLOW_WEIGHT: "FLOW_WEIGHT",
+    SEC_CLUSTER_LABEL_CI: "CLUSTER_LABEL_CI", SEC_CLUSTER_LABEL_X: "CLUSTER_LABEL_X",
+    SEC_CLUSTER_LABEL_Y: "CLUSTER_LABEL_Y", SEC_CLUSTER_LABEL_R: "CLUSTER_LABEL_R",
+    SEC_CLUSTER_LABEL_N: "CLUSTER_LABEL_N", SEC_CLUSTER_LABEL_DGRP: "CLUSTER_LABEL_DGRP",
+    SEC_CLUSTER_LABEL_TITLE_REF: "CLUSTER_LABEL_TITLE_REF",
+    SEC_CLUSTER_LABEL_DOM_REF: "CLUSTER_LABEL_DOM_REF", SEC_STRING_HEAP: "STRING_HEAP",
+}
+
+# Section groups for the human-readable byte-breakdown report (Task 2 acceptance).
+_BYTE_BREAKDOWN_GROUPS = {
+    "nodes": {SEC_NODE_POS, SEC_NODE_CLUSTER, SEC_NODE_DOMAIN, SEC_NODE_LIBRARY,
+              SEC_NODE_PROMINENCE, SEC_NODE_SYS_ID, SEC_NODE_TITLE_REF, SEC_NODE_SHELFMARK_REF},
+    "edges": {SEC_EDGE_SOURCE_DELTA, SEC_EDGE_TARGET_DELTA, SEC_EDGE_CLASS},
+    "flows_and_labels": {
+        SEC_FLOW_SOURCE_CLUSTER, SEC_FLOW_TARGET_CLUSTER, SEC_FLOW_WEIGHT,
+        SEC_CLUSTER_LABEL_CI, SEC_CLUSTER_LABEL_X, SEC_CLUSTER_LABEL_Y, SEC_CLUSTER_LABEL_R,
+        SEC_CLUSTER_LABEL_N, SEC_CLUSTER_LABEL_DGRP, SEC_CLUSTER_LABEL_TITLE_REF,
+        SEC_CLUSTER_LABEL_DOM_REF,
+    },
+    "string_heap": {SEC_STRING_HEAP},
+}
+
+
+def _pad8(n: int) -> int:
+    return (n + 7) // 8 * 8
+
+
+class _StringHeapBuilder:
+    """Single shared UTF-8 string heap with content-dedup -- identical strings
+    (e.g. a repeated catalogue title) share one heap slice (schema §4 id 23)."""
+
+    def __init__(self):
+        self._buf = bytearray()
+        self._cache: dict = {}
+
+    def add(self, s: Optional[str]):
+        s = s or ""
+        cached = self._cache.get(s)
+        if cached is not None:
+            return cached
+        raw = s.encode("utf-8")
+        ref = (len(self._buf), len(raw))
+        self._buf.extend(raw)
+        self._cache[s] = ref
+        return ref
+
+    @property
+    def raw(self) -> bytes:
+        return bytes(self._buf)
+
+
+@dataclass
+class EncodedAsset:
+    plain_bytes: bytes
+    sections: list  # [{id, name, dtype, elem_size, count, byte_offset, byte_length}]
+    node_count: int
+    edge_count: int
+    cluster_count: int
+    label_count: int
+    flow_count: int
+
+
+def encode_asset(result: BakeResult) -> EncodedAsset:
+    """Encode a BakeResult per docs/specs/atlas-asset-schema-v1.md. Raises
+    ValueError if any node's sys_id fails the BigUint64 invariant (defense in
+    depth -- run_bake already validates the eligible set, but a caller could
+    hand-construct a BakeResult directly, as the tests do)."""
+    nodes = result.nodes
+    edges = result.edges
+    labels = result.cluster_labels
+    flows = result.flows
+    n_clusters = len(result.clusters)
+
+    cluster_dtype = DTYPE_UINT16 if n_clusters <= 0xFFFF else DTYPE_UINT32
+    cluster_np = _NP_DTYPE[cluster_dtype]
+
+    heap = _StringHeapBuilder()
+
+    node_count = len(nodes)
+    node_pos = np.empty(node_count * 2, dtype="<f4")
+    node_cluster = np.empty(node_count, dtype=cluster_np)
+    node_domain = np.empty(node_count, dtype="<u2")
+    node_library = np.empty(node_count, dtype="<u2")
+    node_prominence = np.empty(node_count, dtype="<u2")
+    node_sys_id = np.empty(node_count, dtype="<u8")
+    node_title_ref = np.empty(node_count * 2, dtype="<u4")
+    node_shelfmark_ref = np.empty(node_count * 2, dtype="<u4")
+
+    for i, nd in enumerate(nodes):
+        x, y, ci, dgrp, lib_idx, prom, sys_id, title, shelfmark = nd
+        node_pos[2 * i] = x
+        node_pos[2 * i + 1] = y
+        node_cluster[i] = ci
+        node_domain[i] = dgrp
+        node_library[i] = lib_idx
+        node_prominence[i] = prom
+        node_sys_id[i] = validate_sys_id(sys_id)
+        to, tl = heap.add(title)
+        node_title_ref[2 * i], node_title_ref[2 * i + 1] = to, tl
+        so, sl = heap.add(shelfmark)
+        node_shelfmark_ref[2 * i], node_shelfmark_ref[2 * i + 1] = so, sl
+
+    edge_count = len(edges)
+    edge_source_delta = np.empty(edge_count, dtype="<u4")
+    edge_target_delta = np.empty(edge_count, dtype="<u4")
+    edge_class = np.empty(edge_count, dtype="<u1")
+    running_source = 0
+    running_target = 0
+    for i, (src, tgt, cls) in enumerate(edges):
+        sd = src - running_source
+        running_source = src
+        if sd > 0 or i == 0:
+            td = tgt
+        else:
+            td = tgt - running_target
+        running_target = tgt
+        edge_source_delta[i] = sd
+        edge_target_delta[i] = td
+        edge_class[i] = cls
+
+    flow_count = len(flows)
+    flow_source = np.empty(flow_count, dtype=cluster_np)
+    flow_target = np.empty(flow_count, dtype=cluster_np)
+    flow_weight = np.empty(flow_count, dtype="<f4")
+    for i, (a, b, w) in enumerate(flows):
+        flow_source[i] = a
+        flow_target[i] = b
+        flow_weight[i] = w
+
+    label_count = len(labels)
+    cl_ci = np.empty(label_count, dtype=cluster_np)
+    cl_x = np.empty(label_count, dtype="<f4")
+    cl_y = np.empty(label_count, dtype="<f4")
+    cl_r = np.empty(label_count, dtype="<f4")
+    cl_n = np.empty(label_count, dtype="<u4")
+    cl_dgrp = np.empty(label_count, dtype="<u2")
+    cl_title_ref = np.empty(label_count * 2, dtype="<u4")
+    cl_dom_ref = np.empty(label_count * 2, dtype="<u4")
+    for i, lab in enumerate(labels):
+        cl_ci[i] = lab["ci"]
+        cl_x[i] = lab["x"]
+        cl_y[i] = lab["y"]
+        cl_r[i] = lab["r"]
+        cl_n[i] = lab["n"]
+        cl_dgrp[i] = lab["dgrp"]
+        to, tl = heap.add(lab["title"])
+        cl_title_ref[2 * i], cl_title_ref[2 * i + 1] = to, tl
+        do, dl = heap.add(lab["dom"])
+        cl_dom_ref[2 * i], cl_dom_ref[2 * i + 1] = do, dl
+
+    heap_arr = np.frombuffer(heap.raw, dtype="<u1")
+
+    section_defs = [
+        (SEC_NODE_POS, DTYPE_FLOAT32, node_pos),
+        (SEC_NODE_CLUSTER, cluster_dtype, node_cluster),
+        (SEC_NODE_DOMAIN, DTYPE_UINT16, node_domain),
+        (SEC_NODE_LIBRARY, DTYPE_UINT16, node_library),
+        (SEC_NODE_PROMINENCE, DTYPE_UINT16, node_prominence),
+        (SEC_NODE_SYS_ID, DTYPE_UINT64, node_sys_id),
+        (SEC_NODE_TITLE_REF, DTYPE_UINT32, node_title_ref),
+        (SEC_NODE_SHELFMARK_REF, DTYPE_UINT32, node_shelfmark_ref),
+        (SEC_EDGE_SOURCE_DELTA, DTYPE_UINT32, edge_source_delta),
+        (SEC_EDGE_TARGET_DELTA, DTYPE_UINT32, edge_target_delta),
+        (SEC_EDGE_CLASS, DTYPE_UINT8, edge_class),
+        (SEC_FLOW_SOURCE_CLUSTER, cluster_dtype, flow_source),
+        (SEC_FLOW_TARGET_CLUSTER, cluster_dtype, flow_target),
+        (SEC_FLOW_WEIGHT, DTYPE_FLOAT32, flow_weight),
+        (SEC_CLUSTER_LABEL_CI, cluster_dtype, cl_ci),
+        (SEC_CLUSTER_LABEL_X, DTYPE_FLOAT32, cl_x),
+        (SEC_CLUSTER_LABEL_Y, DTYPE_FLOAT32, cl_y),
+        (SEC_CLUSTER_LABEL_R, DTYPE_FLOAT32, cl_r),
+        (SEC_CLUSTER_LABEL_N, DTYPE_UINT32, cl_n),
+        (SEC_CLUSTER_LABEL_DGRP, DTYPE_UINT16, cl_dgrp),
+        (SEC_CLUSTER_LABEL_TITLE_REF, DTYPE_UINT32, cl_title_ref),
+        (SEC_CLUSTER_LABEL_DOM_REF, DTYPE_UINT32, cl_dom_ref),
+        (SEC_STRING_HEAP, DTYPE_UINT8, heap_arr),
+    ]
+
+    header_size = 16 + 32 * len(section_defs)
+    assert header_size % 8 == 0, "fixed header + section table must land on an 8-byte boundary"
+    running_offset = header_size
+    table_entries = []
+    data_chunks = []
+    for sec_id, dtype_code, arr in section_defs:
+        arr = np.ascontiguousarray(arr)
+        raw = arr.tobytes()
+        byte_offset = running_offset
+        byte_length = len(raw)
+        table_entries.append({
+            "id": sec_id, "name": _SECTION_NAMES[sec_id], "dtype": dtype_code,
+            "elem_size": _ELEM_SIZE[dtype_code], "count": int(arr.size),
+            "byte_offset": byte_offset, "byte_length": byte_length,
+        })
+        data_chunks.append(raw)
+        running_offset += byte_length
+        pad = _pad8(running_offset) - running_offset
+        if pad:
+            data_chunks.append(b"\x00" * pad)
+            running_offset += pad
+
+    header = struct.pack("<8sII", MAGIC, SCHEMA_VERSION, len(section_defs))
+    table_bytes = b"".join(
+        struct.pack("<IIIIQQ", e["id"], e["dtype"], e["elem_size"], e["count"],
+                    e["byte_offset"], e["byte_length"])
+        for e in table_entries
+    )
+    plain_bytes = header + table_bytes + b"".join(data_chunks)
+
+    return EncodedAsset(
+        plain_bytes=plain_bytes, sections=table_entries, node_count=node_count,
+        edge_count=edge_count, cluster_count=n_clusters, label_count=label_count,
+        flow_count=flow_count,
+    )
+
+
+def decode_asset(data: bytes) -> dict:
+    """Pure-Python reference decoder implementing schema §10 step-by-step.
+    Returns a friendly dict (not raw section byte arrays) -- sys_id is always
+    a decimal string (schema §7), never a float/Number, to avoid precision
+    loss above 2**53."""
+    magic, schema_version, section_count = struct.unpack_from("<8sII", data, 0)
+    if magic != MAGIC:
+        raise ValueError(f"bad magic bytes: {magic!r}")
+    if schema_version != SCHEMA_VERSION:
+        raise ValueError(f"unsupported schema_version: {schema_version}")
+
+    sections = {}
+    off = 16
+    for _ in range(section_count):
+        sec_id, dtype_code, _elem_size, count, byte_offset, byte_length = \
+            struct.unpack_from("<IIIIQQ", data, off)
+        sections[sec_id] = (dtype_code, count, byte_offset, byte_length)
+        off += 32
+
+    def _arr(sec_id):
+        dtype_code, count, byte_offset, _byte_length = sections[sec_id]
+        return np.frombuffer(data, dtype=_NP_DTYPE[dtype_code], count=count, offset=byte_offset)
+
+    heap = _arr(SEC_STRING_HEAP).tobytes()
+
+    def _heap_str(ref_arr, i):
+        offset, length = int(ref_arr[2 * i]), int(ref_arr[2 * i + 1])
+        return heap[offset:offset + length].decode("utf-8")
+
+    node_pos = _arr(SEC_NODE_POS)
+    node_cluster = _arr(SEC_NODE_CLUSTER)
+    node_domain = _arr(SEC_NODE_DOMAIN)
+    node_library = _arr(SEC_NODE_LIBRARY)
+    node_prominence = _arr(SEC_NODE_PROMINENCE)
+    node_sys_id = _arr(SEC_NODE_SYS_ID)
+    node_title_ref = _arr(SEC_NODE_TITLE_REF)
+    node_shelfmark_ref = _arr(SEC_NODE_SHELFMARK_REF)
+    node_count = sections[SEC_NODE_SYS_ID][1]
+
+    nodes = [
+        {
+            "x": float(node_pos[2 * i]), "y": float(node_pos[2 * i + 1]),
+            "cluster": int(node_cluster[i]), "domain": int(node_domain[i]),
+            "library": int(node_library[i]), "prominence": int(node_prominence[i]),
+            "sys_id": str(int(node_sys_id[i])),
+            "title": _heap_str(node_title_ref, i),
+            "shelfmark": _heap_str(node_shelfmark_ref, i),
+        }
+        for i in range(node_count)
+    ]
+
+    edge_source_delta = _arr(SEC_EDGE_SOURCE_DELTA)
+    edge_target_delta = _arr(SEC_EDGE_TARGET_DELTA)
+    edge_class = _arr(SEC_EDGE_CLASS)
+    edges = []
+    running_source = 0
+    running_target = 0
+    for i in range(len(edge_source_delta)):
+        sd, td = int(edge_source_delta[i]), int(edge_target_delta[i])
+        running_source += sd
+        if sd > 0 or i == 0:
+            running_target = td
+        else:
+            running_target += td
+        edges.append({"source": running_source, "target": running_target, "cls": int(edge_class[i])})
+
+    flow_source = _arr(SEC_FLOW_SOURCE_CLUSTER)
+    flow_target = _arr(SEC_FLOW_TARGET_CLUSTER)
+    flow_weight = _arr(SEC_FLOW_WEIGHT)
+    flows = [
+        {"source_cluster": int(flow_source[i]), "target_cluster": int(flow_target[i]),
+         "weight": float(flow_weight[i])}
+        for i in range(len(flow_source))
+    ]
+
+    cl_ci = _arr(SEC_CLUSTER_LABEL_CI)
+    cl_x = _arr(SEC_CLUSTER_LABEL_X)
+    cl_y = _arr(SEC_CLUSTER_LABEL_Y)
+    cl_r = _arr(SEC_CLUSTER_LABEL_R)
+    cl_n = _arr(SEC_CLUSTER_LABEL_N)
+    cl_dgrp = _arr(SEC_CLUSTER_LABEL_DGRP)
+    cl_title_ref = _arr(SEC_CLUSTER_LABEL_TITLE_REF)
+    cl_dom_ref = _arr(SEC_CLUSTER_LABEL_DOM_REF)
+    cluster_labels = [
+        {
+            "ci": int(cl_ci[i]), "x": float(cl_x[i]), "y": float(cl_y[i]),
+            "r": float(cl_r[i]), "n": int(cl_n[i]), "dgrp": int(cl_dgrp[i]),
+            "title": _heap_str(cl_title_ref, i), "dom": _heap_str(cl_dom_ref, i),
+        }
+        for i in range(len(cl_ci))
+    ]
+
+    return {
+        "schema_version": int(schema_version),
+        "nodes": nodes, "edges": edges, "flows": flows, "cluster_labels": cluster_labels,
+    }
+
+
+def assert_byte_budget(nbytes: int, cap: int = BYTE_BUDGET_CAP) -> None:
+    """The D-10 / PERF-01 preview byte-budget gate. Raises ValueError (bake
+    FAILS) if the Brotli-compressed payload exceeds the cap."""
+    if nbytes > cap:
+        raise ValueError(f"byte budget exceeded: {nbytes:,} bytes > cap {cap:,} bytes")
+
+
+def build_manifest(result: BakeResult, encoded: EncodedAsset, content_hash: str,
+                    asset_basename: str, source_db_hash: str) -> dict:
+    """Schema §8 companion manifest. NO discovery-overlay fields (D-04)."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "content_hash": content_hash,
+        "asset_basename": asset_basename,
+        "algo_version": result.algo_version,
+        "seed": result.seed,
+        "eligible_count": result.eligible_count,
+        "placed_count": result.placed_count,
+        "missing": [str(s) for s in result.missing],
+        "extra": [str(s) for s in result.extra],
+        "node_count": encoded.node_count,
+        "edge_count": encoded.edge_count,
+        "cluster_count": encoded.cluster_count,
+        "flow_count": encoded.flow_count,
+        "label_count": encoded.label_count,
+        "source_db_hash": source_db_hash,
+        "domain_groups": [[en, he, color] for en, he, color in DOMAIN_GROUPS],
+        "libraries": result.libraries,
+        "sections": encoded.sections,
+    }
+
+
+def print_byte_breakdown(encoded: EncodedAsset, brotli_size: int) -> None:
+    totals = {name: 0 for name in _BYTE_BREAKDOWN_GROUPS}
+    for e in encoded.sections:
+        for name, ids in _BYTE_BREAKDOWN_GROUPS.items():
+            if e["id"] in ids:
+                totals[name] += e["byte_length"]
+    total_plain = len(encoded.plain_bytes)
+    print("byte breakdown (raw, pre-Brotli):")
+    for name, nbytes in totals.items():
+        print(f"  {name}: {nbytes:,} bytes")
+    print(f"  header+section-table: {total_plain - sum(totals.values()):,} bytes")
+    print(f"  total plain: {total_plain:,} bytes")
+    print(f"  total brotli: {brotli_size:,} bytes")
+
+
 def print_stats(result: BakeResult) -> None:
     print(f"eligible_count={result.eligible_count}")
     print(f"placed_count={result.placed_count}")
@@ -701,17 +1114,51 @@ def main(argv=None) -> int:
 
 
 def _write_golden(result: BakeResult, golden_path: str) -> int:
-    raise NotImplementedError(
-        "encode_asset/decode_asset land in Task 2 of plan 133-02 -- --golden "
-        "is wired once the binary encoder exists."
-    )
+    if brotli is None:
+        print("ERROR: Brotli is required (pip install -r requirements-atlas-bake.txt)",
+              file=sys.stderr)
+        return 1
+    encoded = encode_asset(result)
+    bin_path = Path(golden_path)
+    br_path = bin_path.with_name(bin_path.name + ".br")
+    expected_path = bin_path.with_name(bin_path.stem + "-expected.json")
+    bin_path.parent.mkdir(parents=True, exist_ok=True)
+    bin_path.write_bytes(encoded.plain_bytes)
+    br_bytes = brotli.compress(encoded.plain_bytes, quality=11)
+    br_path.write_bytes(br_bytes)
+    decoded = decode_asset(encoded.plain_bytes)
+    expected_path.write_text(
+        json.dumps(decoded, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    print(f"wrote golden fixture: {bin_path} ({len(encoded.plain_bytes)} bytes), "
+          f"{br_path} ({len(br_bytes)} bytes), {expected_path}")
+    return 0
 
 
 def _write_production(result: BakeResult, out_dir: Optional[str], source_db_hash: str) -> int:
-    raise NotImplementedError(
-        "encode_asset/write-to-disk lands in Task 2 of plan 133-02 -- the "
-        "production (non --report) path is wired once the binary encoder exists."
-    )
+    if brotli is None:
+        print("ERROR: Brotli is required (pip install -r requirements-atlas-bake.txt)",
+              file=sys.stderr)
+        return 1
+    encoded = encode_asset(result)
+    content_hash = hashlib.sha256(encoded.plain_bytes).hexdigest()[:12]
+    basename = f"atlas-v1-{content_hash}"
+    br_bytes = brotli.compress(encoded.plain_bytes, quality=11)
+    try:
+        assert_byte_budget(len(br_bytes))
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    out_path = Path(out_dir) if out_dir else (REPO_ROOT / "atlas_data")
+    out_path.mkdir(parents=True, exist_ok=True)
+    (out_path / f"{basename}.bin").write_bytes(encoded.plain_bytes)
+    (out_path / f"{basename}.bin.br").write_bytes(br_bytes)
+    manifest = build_manifest(result, encoded, content_hash, basename, source_db_hash)
+    (out_path / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    print_byte_breakdown(encoded, len(br_bytes))
+    print(f"wrote {out_path / (basename + '.bin')} + .bin.br + manifest.json "
+          f"(content_hash={content_hash})")
+    return 0
 
 
 if __name__ == "__main__":
