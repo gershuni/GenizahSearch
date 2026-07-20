@@ -207,3 +207,15 @@ same_work_spike/
 # Research tooling with restricted-source references (internal — not for GitHub)
 corpus_mapper/
 corpus_mapper_output/
+
+# Phase 133 (Visual Atlas Preview) D-07 masking scan: the local pattern-list
+# file the scan reads via MASKING_SCAN_PATTERNS_FILE. Repo-root-anchored
+# (`/.masking_patterns`, NOT the filesystem root `/`); mirrors the
+# PUZZLE_UPLOAD_SECRET env-sourced-secret posture. NEVER commit this file.
+/.masking_patterns
+
+# Phase 133 baked atlas asset (offline bake output). Lives OUTSIDE web/static/
+# on purpose -- the /static mount at web/main.py:740 serves web/static/
+# publicly, which would let the asset bypass the atlas-preview feature flag.
+# scp'd to the server like the other sidecar DBs; never committed.
+/atlas_data/
