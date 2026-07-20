@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 133-04-PLAN.md
-last_updated: "2026-07-20T22:01:32.975Z"
+stopped_at: Completed 133-05-PLAN.md
+last_updated: "2026-07-20T22:29:43.336Z"
 last_activity: 2026-07-20
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 133 (visual-atlas-preview-early-quick-win) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
-Last activity: 2026-07-21
+Last activity: 2026-07-20
 
 Progress: [███████░░░] 67%
 
@@ -85,8 +85,8 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-20T21:58:38.786Z
-Stopped at: Completed 133-04-PLAN.md
+Last session: 2026-07-20T22:29:43.329Z
+Stopped at: Completed 133-05-PLAN.md
 Resume file: None
 Next step: Execute 133-05-PLAN.md (homepage teaser), then 133-06 (deploy checkpoint).
 
@@ -98,6 +98,7 @@ Next step: Execute 133-05-PLAN.md (homepage teaser), then 133-06 (deploy checkpo
 | Phase 133 P02 | 40min | 3 tasks | 12 files |
 | Phase 133 P03 | 55min | 3 tasks | 9 files |
 | Phase 133 P04 | 55min | 3 tasks | 4 files |
+| Phase 133 P05 | 45min | 2 tasks | 2 files |
 
 ## Decisions
 
@@ -112,3 +113,5 @@ Next step: Execute 133-05-PLAN.md (homepage teaser), then 133-06 (deploy checkpo
 - [Phase 133 P03 Wave-3 re-review, fix(133-03) b830ad64]: Closed 4 MEDIUM findings from a follow-up Codex review of the atlas loader/data-routes (no HIGHs; hardens the fail-closed go-live path, no plan/ROADMAP change). MEDIUM-1: `load_atlas_state()` now validates the binary header + section-table BOUNDS (magic/schema_version/per-section dtype-elem_size/count*elem_size/8-byte-aligned offset/in-buffer range) per docs/specs/atlas-asset-schema-v1.md before ready=True — any structural violation fails closed. MEDIUM-2: manifest MUST carry a `content_hash` matching sha256(plain)[:12] AND `asset_basename` MUST be exactly `atlas-v1-<content_hash>` before the 1-year immutable cache is applied to that name. MEDIUM-3: a present `.bin.br` is Brotli-decompressed and compared byte-for-byte to the plain payload — corrupt/mismatched sidecars just drop the brotli representation (readiness unaffected); added `Brotli==1.2.0` as a genuine (already-vetted, per requirements-atlas-bake.txt's Phase-133 legitimacy audit) runtime dependency in requirements.txt/requirements-lock.txt, import-guarded so a not-yet-installed env degrades to brotli-unavailable rather than crashing. MEDIUM-4: `_negotiate_encoding` now computes each representation's effective RFC 9110 §12.5.3 quality and picks the highest non-zero one (tie -> br) instead of always preferring br whenever merely acceptable — `br;q=0.1, identity;q=1` now correctly yields identity. Tests rebuilt on the real committed `golden-v1.bin`/`.bin.br` fixtures (structurally valid ATLAS001 bytes + real Brotli) instead of a fake marker blob, plus new malformed-header/truncated-section-table/out-of-bounds-section/missing-or-non-hashed-basename/corrupt-or-mismatched-brotli/weighted-preference cases (24 tests, all pass); ruff clean; masking scan clean (exit 0). web/main.py staged via a targeted 2-hunk patch (only `_negotiate_encoding`) to avoid sweeping in the pre-existing uncommitted R2-1 embed change.
 - [Phase ?]: 133-04: atlas renderer shipped as a static /static/js/atlas_decode.js UMD module (browser + Node) so the Node golden-decode + DOM-XSS tests exercise the exact same decode + DOM-builder code (cross-language proof); payload fetched from the manifest+content-hashed route, never inlined
 - [Phase ?]: 133-04: every catalogue-derived DOM node built via createElement/textContent (zero innerHTML) — the fabricated malicious golden string renders as inert text (HIGH-7, Node DOM-XSS proof); sys_id decoded as BigUint64 .toString() single path (no fallback)
+- [Phase ?]: Gated the homepage teaser on atlas_preview_available() (imported directly), not the bare flag, so a flag-ON/asset-missing window never advertises a broken /atlas link from this fourth surface (MEDIUM-6)
+- [Phase ?]: Reused the two 133-03 pre-registered teaser translation keys verbatim; genizah_translations.py was never touched by this plan
