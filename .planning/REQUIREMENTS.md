@@ -42,7 +42,7 @@
 
 ### Atlas & Homepage
 
-- [ ] **ATLAS-01**: An offline-precomputed, canon-masked aggregated corpus overview ships as a static asset (layout never computed at request time)
+- [ ] **ATLAS-01**: An offline-precomputed, canon-masked aggregated corpus overview ships as a static asset (layout never computed at request time); OWNER PRIORITY (2026-07-20): this is the milestone's FIRST deployable artifact — an early standalone beta page, shipped before the claim surfaces, under the REL-01 atlas-preview exception
 - [ ] **ATLAS-02**: A server-bounded drill-down explorer serves capped neighborhoods (PERF-01 node/edge/byte caps, single-hop server-side expansion); the client never loads the full edge set; the graph's primary object (works vs manuscripts vs clusters) is fixed in the UX discuss-phase BEFORE sidecar/layout design
 - [ ] **ATLAS-03**: Homepage promotion is a CLS-safe static band (no live suggestions/graph in v9), enabled only via the REL-01 gates
 
@@ -68,7 +68,7 @@
 - [ ] **SEO-01**: `/work/{id}` + atlas pages get canonical URLs, EN/HE hreflang, titles/descriptions, sitemap inclusion; `/leads` and uncertified-toggle states are `noindex`; JSON-LD carries neutral work metadata only (no algorithmic witness associations); all SEO outputs inside the DATA-05 masking gate; activation gated by REL-01
 - [ ] **OBS-01**: Privacy-allowlisted PostHog product events (panel impressions, lead-toggle use, evidence opens, work/atlas navigation, judgment completion) with an explicit denylist: never work titles, manuscript text, shelfmarks, raw research IDs, or annotation/free text in any event property
 - [ ] **OBS-02**: Operational metrics cover query timeouts, result truncation, sidecar unavailable/incompatible events, atlas payload sizes, and judgment rate-limit/moderation activity
-- [ ] **REL-01**: Release order is gated: claim semantics + masked schema → validated title map + sidecar + frozen-frame artifact → certificate card draw → read surfaces (panel/work) → Supabase migration + security smoke → judgment UI → leads → bounded atlas → public promotion; the feature flag, sitemap/SEO discovery, and homepage band stay OFF until: the CERT-01 measurement is graded to completion, the BAND-05 immutable methods report is published, the CERT-02 outcome-specific copy is applied (tier-A goes public WITH its measured number), and the masking (DATA-05), RTL (I18N-02), accessibility (A11Y-01/02), performance (PERF-01), and deployment (DATA-08) checks pass
+- [ ] **REL-01**: Release order is gated: claim semantics + masked schema → validated title map + sidecar + frozen-frame artifact → certificate card draw → read surfaces (panel/work) → Supabase migration + security smoke → judgment UI → leads → bounded atlas → public promotion; the feature flag, sitemap/SEO discovery, and homepage band stay OFF until: the CERT-01 measurement is graded to completion, the BAND-05 immutable methods report is published, the CERT-02 outcome-specific copy is applied (tier-A goes public WITH its measured number), and the masking (DATA-05), RTL (I18N-02), accessibility (A11Y-01/02), performance (PERF-01), and deployment (DATA-08) checks pass. ATLAS-PREVIEW EXCEPTION (owner, 2026-07-20): the static atlas overview (ATLAS-01) may deploy EARLY as a standalone beta page, before the certificate and the claim surfaces, PROVIDED it displays no claim-level statements (no work–witness identifications, no bands, no precision numbers — cluster/shelfmark-level visualization only), any work labels come only from reviewed neutral titles (or are omitted), an asset-level masking scan passes, its PERF/i18n basics hold, and it sits behind the feature flag
 
 ## Future Requirements (deferred)
 
@@ -96,7 +96,55 @@
 
 ## Traceability
 
-(Populated by roadmapper.)
+Every v9.0.0 requirement maps to exactly one phase. Phases continue from the previous milestone (last phase 132), starting at 133. Owner revision 2026-07-20: Phase 133 = Visual Atlas Preview (ATLAS-01, the milestone's first deployable artifact under the REL-01 atlas-preview exception); the remaining phases run 134-139.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| ATLAS-01 | Phase 133 | Pending |
+| DATA-01 | Phase 134 | Pending |
+| DATA-02 | Phase 134 | Pending |
+| DATA-03 | Phase 134 | Pending |
+| DATA-04 | Phase 134 | Pending |
+| DATA-05 | Phase 134 | Pending |
+| DATA-06 | Phase 134 | Pending |
+| DATA-07 | Phase 134 | Pending |
+| DATA-08 | Phase 134 | Pending |
+| DATA-10 | Phase 134 | Pending |
+| PERF-01 | Phase 134 | Pending |
+| BAND-01 | Phase 135 | Pending |
+| BAND-02 | Phase 135 | Pending |
+| BAND-03 | Phase 135 | Pending |
+| BAND-04 | Phase 135 | Pending |
+| BAND-05 | Phase 135 | Pending |
+| CERT-01 | Phase 135 | Pending |
+| CERT-02 | Phase 135 | Pending |
+| PANEL-01 | Phase 136 | Pending |
+| PANEL-02 | Phase 136 | Pending |
+| PANEL-03 | Phase 136 | Pending |
+| WORK-01 | Phase 136 | Pending |
+| WORK-02 | Phase 136 | Pending |
+| JUDGE-01 | Phase 137 | Pending |
+| JUDGE-02 | Phase 137 | Pending |
+| JUDGE-03 | Phase 137 | Pending |
+| JUDGE-04 | Phase 137 | Pending |
+| JUDGE-05 | Phase 137 | Pending |
+| LEADS-01 | Phase 138 | Pending |
+| LEADS-02 | Phase 138 | Pending |
+| ATLAS-02 | Phase 139 | Pending |
+| ATLAS-03 | Phase 139 | Pending |
+| SEO-01 | Phase 139 | Pending |
+| I18N-01 | Phase 139 | Pending |
+| I18N-02 | Phase 139 | Pending |
+| A11Y-01 | Phase 139 | Pending |
+| A11Y-02 | Phase 139 | Pending |
+| OBS-01 | Phase 139 | Pending |
+| OBS-02 | Phase 139 | Pending |
+| REL-01 | Phase 139 | Pending |
+
+**Coverage:** 40 / 40 v9.0.0 requirements mapped ✓ (no orphans, no duplicates). Note: the requirement set skips DATA-09 by design — the Claim Model & Data Spine block runs DATA-01..08 then DATA-10.
+
+**Cross-cutting note:** I18N-01/02, A11Y-01/02, SEO-01, OBS-01/02, and REL-01 are homed in Phase 139 (the release-hardening capstone) because their completion criterion is a comprehensive cross-surface gate and several explicitly reference graph/atlas labels. Translations, RTL, and accessibility are nonetheless BUILT INTO every UI surface (Phases 133, 136–139) from line one per house convention — Phase 133's atlas-preview page carries its own PERF/i18n basics per the REL-01 atlas-preview exception; Phase 139 owns their final verification. Likewise PERF-01, DATA-05, and DATA-08 are delivered in Phase 134 but re-verified at the REL-01 gate.
 
 ---
 *Requirements defined: 2026-07-19 (draft v5 after Codex rounds 1–4; R1 critique at .planning/research/REQUIREMENTS-CODEX-CRITIQUE.md)*
+*Traceability populated: 2026-07-20 (roadmapper — Phases 133-139; owner atlas-preview revision applied same day)*

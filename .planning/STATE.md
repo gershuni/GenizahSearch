@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas (web)
 status: planning
-last_updated: "2026-07-19T17:56:19.000Z"
-last_activity: 2026-07-19
+last_updated: "2026-07-20T00:00:00.000Z"
+last_activity: 2026-07-20
 progress:
-  total_phases: 0
+  total_phases: 7
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,134 +17,74 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md
+See: .planning/PROJECT.md (updated 2026-07-20)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** None — v8.4.0 + v8.4.1 shipped & closed 2026-07-01. Awaiting `/gsd-new-milestone`.
+**Current focus:** Phase 133 — Visual Atlas Preview (early quick win; roadmap created, awaiting UX discuss-phase + planning)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-07-19 — Milestone v9.0.0 started
+Phase: 133 of 139 (Visual Atlas Preview — early quick win) — 7 phases (133-139)
+Plan: — (not yet planned)
+Status: Roadmap created (owner revision applied 2026-07-20: atlas preview promoted to first deployable artifact); ready for UX discuss-phase then plan-phase 133
+Last activity: 2026-07-20 — v9.0.0 roadmap restructured to Phases 133-139 (Phase 133 = Visual Atlas Preview under the REL-01 atlas-preview exception), 40/40 requirements mapped
+
+Progress: [░░░░░░░░░░] 0%
+
+## Roadmap Summary (v9.0.0)
+
+Condensed 7-phase roadmap: an early atlas quick win, then the REL-01 gate sequence (thin de-risk spine first):
+
+| Phase | Goal | Requirements |
+|-------|------|--------------|
+| 133 Visual Atlas Preview (early quick win) | Static, canon-masked corpus-overview atlas on a standalone `/atlas` beta page; offline layout bake; FIRST deployable artifact under the REL-01 atlas-preview exception | ATLAS-01 |
+| 134 Discovery Data Spine | Masked, versioned sidecar + async service + frozen-frame/budget artifacts | DATA-01..08, DATA-10, PERF-01 |
+| 135 Precision Certificate & Confidence Bands | Data-driven band display + methods page + pre-registered tier-A measurement | BAND-01..05, CERT-01, CERT-02 |
+| 136 Read Surfaces — Panel & Work→Witnesses | Browse connections panel + `/work/{id}` witness-map | PANEL-01..03, WORK-01, WORK-02 |
+| 137 Community Judgments | Supabase migration + ✓/?/✗ voting layer (never affects bands) | JUDGE-01..05 |
+| 138 Leads Queue | `/leads` R-B screening lane, uncertified, canon caveated | LEADS-01, LEADS-02 |
+| 139 Atlas Drill-down, Homepage & Release Hardening | Server-bounded drill-down (absorbs the preview) + homepage band + SEO/i18n/RTL/a11y/obs + REL-01 flag-flip | ATLAS-02/03, SEO-01, I18N-01/02, A11Y-01/02, OBS-01/02, REL-01 |
 
 ## Accumulated Context
 
-### Key Decisions (v8.4.0 roadmap)
+### Key Decisions (v9.0.0 roadmap)
 
-- **Three phases, theme-grouped (condensed roadmap):** Phase 130 (lead — web `/search` core model + persistence + migration + edge states + button/label), Phase 131 (the three parity surfaces: desktop catalog dialog + web Browse-by-Identification + web `/parallels`), Phase 132 (public API mode). One phase per requirement was explicitly rejected per the project's condensed-roadmap preference.
-- **Phase 130 settles the shared (mode + set) shape FIRST:** Phases 131/132 mirror it. The mode toggle + persistence + migration + edge-state semantics must be locked before any parity surface or the API extends the model.
-- **Show-only = allowlist, Hide = denylist:** consistent with the existing `domain_exclusions` / printed-filter exclusion semantics. The Hide intent must persist as NEW libraries surface on later searches (the core "hide RNL stays hidden" behavior).
-- **Migration interpretation (DMF-05):** existing v8.3.0 `search_library_filter` allowlist values load as **Show-only with the existing set** — no error, no re-entry required.
-- **Edge-state sentinels (DMF-06):** empty selection in Show-only = "show all" (must not collide with the all-unchecked sentinel); a fully-populated Hide set (everything hidden) handled predictably.
-- **DMF-10 is a cross-cutting invariant, not a phase:** the `'LOCAL'` guard is folded into every web phase's success criteria. It tripped the v8.3.0 release-commit CI — sanitize against `'LOCAL'` (not just `LIBRARY_CODES`) on every new web filter path.
-- **API exclude = complement (DMF-11):** `mode=exclude` resolves to sys_ids whose `library_code` is NOT in the given set, intersected into `restrict_sys_ids` (mirrors the UI). Omitted mode defaults to `include` (today's allowlist behavior) — backward-compatible.
+- **OWNER REVISION (2026-07-20): Visual Atlas Preview is the milestone's FIRST deployable artifact** — new self-contained Phase 133 (ATLAS-01, offline bake from the research data via the `build_atlas_draft.py` prototype approach; no claim-model sidecar dependency), deployed early under the REL-01 ATLAS-PREVIEW EXCEPTION: no claim-level statements (no identifications/bands/numbers, cluster/shelfmark-level only), work labels only from reviewed neutral titles or omitted, asset-level masking scan, PERF/i18n basics, behind the feature flag. The full REL-01 gates still govern everything else.
+- **7 theme-grouped phases (condensed):** one-phase-per-requirement rejected per the house condensed-roadmap preference.
+- **REL-01 ordering is the spine (Phases 134-139):** claim model + masked schema → title map + sidecar + frozen-frame (both in 134) → certificate card draw (135) → read surfaces (136) → Supabase migration + security smoke → judgment UI (both in 137) → leads (138) → bounded atlas → public promotion (both in 139). No reorder across these gates.
+- **CERT-01 is a parallel research track:** its frame freezes AFTER Phase 134 distillation stabilizes; cards drawn in Phase 135; owner grading runs in parallel with the Phase 136–138 UI build; the completed certificate gates the Phase 139 REL-01 public-promotion flag-flip.
+- **Cross-cutting reqs homed in Phase 139** (I18N-01/02, A11Y-01/02, SEO-01, OBS-01/02, REL-01) as the comprehensive release-hardening gate — but translations/RTL/a11y are built into every UI surface from line one; 139 owns final verification.
+- **Two hard blockers drive Phase 134:** M-source provenance masking (structural, at the sidecar-build boundary + permanent leak-vector CI scan) and event-loop safety (all sidecar/graph queries off the loop via the DiscoveryService, timeouts + concurrency cap).
+- **UX discuss-phase precedes Phase 133/134 planning** and settles: ATLAS-02 graph primary object (before the Phase 133 layout bake), DATA-01 relation-vocabulary bilingual wording, BAND-04 per-surface disclaimer wording, final band-selection/row counts, neutral work-title curation workflow, atlas scope.
+
+### Pending Todos
+
+- Run the UX discuss-phase (atlas graph object / atlas scope / relation wording / disclaimer wording / band-selection / title curation), then `/gsd-plan-phase 133`.
 
 ### Blockers/Concerns
 
 None at roadmap creation.
 
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Status | Directory |
-|---|-------------|------|--------|--------|-----------|
-| 260714-9jc | FGP default demotion via coverage ratio (SEED-030) — show V0.8/HTR when the folio's FGP is a partial excerpt; whole-MS baseline for whole-doc rows; all 4 selector surfaces | 2026-07-14 | 6166fdf5 | Codex APPROVE (4 rounds); not yet released | [260714-9jc-fgp-default-demotion-via-coverage-ratio-](./quick/260714-9jc-fgp-default-demotion-via-coverage-ratio-/) |
-| 260714-k56 | Re-ask desktop telemetry consent on update (SEED-031) — throttled non-modal TelemetryConsentBar (30-day cooldown + ~3 lifetime cap + "Don't ask again" hard opt-out); loosens the permanent first-run decline lock; Phase 112–116 anti-dark-pattern invariants preserved | 2026-07-14 | db66a93f + 48183d5d | ✅ Verified (16 new + 28 regression + 20 guard tests green, ruff clean; live desktop-launch smoke approved 2026-07-14). Ships in next desktop build. | [260714-k56-seed-031-re-ask-desktop-telemetry-consen](./quick/260714-k56-seed-031-re-ask-desktop-telemetry-consen/) |
-
-### Pending Todos
-
-- Begin with `/gsd-discuss-phase 130` (or skip-discuss-if-empty per the standing autonomous directive).
-
 ## Deferred Items
 
-Items carried forward from v8.3.0 and earlier:
+Carried forward from prior milestones (unchanged; see MILESTONES.md for full context):
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| DMF-11 (Phase 132) | Public API dual-mode: `mode` (include/exclude) on `POST /api/search` + `/api/parallels` — complement resolution into `restrict_sys_ids`, docs + skill `api_contract.md`. Roadmap detail + 3-plan-shaped success criteria already written in ROADMAP.md Phase 132. | Deferred → v8.4.1 | v8.4.0 (2026-07-01) |
-| DMF-future | Cross-device sync of the library-filter preference (currently device-local via safe_storage) | Future | v8.4.0 |
-| CONSENT-F1 | "Reset telemetry id" affordance in Settings | Future | v8.1.0 |
-| ERR-01 | Handled/non-fatal error counting at high-value sites | Future | v8.1.0 |
-| CRASH-F1 | "Send logs" flow for local faulthandler log | Future | v8.1.0 |
-| WEB-F1 | Clean web `search_executed` query-text property | Future | v8.1.0 |
-| FLAG-F1 | PostHog feature flags / remote config on desktop | Future | v8.1.0 |
-| PST-F1 | Cloud cross-device sync of Joins Lab candidate lists / triage | Future | v8.2.0 |
-| D-F12 | Regular Search ~8s wall-clock (profile-first) | Future | v8.1.0 |
-| D-F18 | Context-menu LOCAL detection via `display` | Future | v8.0.0 |
-| JSA-01/02/03 | Anchor parallels, corpus completion, torn-word (Component B) | Future | v8.0.0 |
-| JWB-05 | Tear-side assist (Component B) | Future | v8.0.0 |
-| DEFER-01 | SearchEngine internal sub-split (LineBreakSearcher/CompositionSearcher) | After CORE-10 ships | v8.3.0 |
-| DEFER-02 | CompositionState dataclass refactor | Own seed | v8.3.0 |
-| DEFER-03 | Desktop composition-tab extraction | Blocked on DEFER-02 | v8.3.0 |
-| DEFER-04 | Desktop startup/session remainder extraction | Blocked on DESK-04/05/06/07 | v8.3.0 |
-| DEFER-05 | Method-based desktop panel extraction (DESK-03..07: catalog tab, search-results, browse, reading-desk, lists) → SEED-028 | Needs widget-ownership refactor first; draft plans in 126/deferred-method-panels/ | v8.3.0 (Phase 126 re-scope, 2026-06-26) |
+| FUT-01 | Text-reuse engine as `/parallels` (desktop: composition) backend | Future (v9-deferred by user) | v9.0.0 |
+| FUT-02 | Public API endpoints for discovery (band-labeled, masked) + skill parity | Future | v9.0.0 |
+| FUT-03 | Desktop parity for the discovery module | Future | v9.0.0 |
+| FUT-04 | Refresh pipeline/cadence for the discovery snapshot | Future | v9.0.0 |
+| FUT-05 | Live-interactive full-corpus WebGL atlas (sigma.js) + multi-hop | Future | v9.0.0 |
+| FUT-06 | Public rendering of moderated free-text annotations | Future | v9.0.0 |
+| FUT-07 | R-B / gen-2-at-scale certification; R-A independent audit (external gate) | Future | v9.0.0 |
+| FUT-08 | New generalized discovery exports (xlsx/CSV) | Future | v9.0.0 |
 
-### v8.3.0 milestone close (2026-06-30)
-
-Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
-
-| Category | Item | Status |
-|----------|------|--------|
-| debug | desktop-tabular-rtl | diagnosed |
-| debug | joins-lab-image-resolution | fix_implemented_pending_uat |
-| debug | puzzle-nli-tiny-images | unknown |
-| debug | web-catalog-browse-columns-broken | investigating |
-| quick_task | 260322-jtk-brown-bg-removal-open-issues-md | missing |
-| todo | 2026-02-11-migrate-desktop-corrections-to-shared-service | pending |
-| todo | 2026-03-07-server-side-search-email-notification | pending |
-| todo | 2026-03-08-nli-marc-crawl-and-translate | pending |
-| todo | 2026-03-09-unified-metadata-text-search | pending |
-| todo | 2026-04-16-reading-desk-ux-fixes | pending |
-| todo | (1 more pending todo) | pending |
-| seed | SEED-001-server-iiif-image-cache | dormant |
-| seed | SEED-003-optional-ocr-extension | dormant |
-| seed | SEED-005-thin-installer-data-manager | dormant |
-| seed | SEED-012-supabase-startup-hang-hardening | dormant |
-| seed | SEED-028-method-based-desktop-panel-extraction | dormant |
-| uat | Phase 129 129-HUMAN-UAT.md (3 live-render scenarios) | partial |
-| verification | Phase 128 128-VERIFICATION.md (live render smoke) | human_needed |
-| verification | Phase 129 129-VERIFICATION.md (live render smoke) | human_needed |
-
-**Note:** SEED-025 (Space-scroll), SEED-026 (library filter), and SEED-027 (refresh CODE_INDEX) were flagged as "dormant" by the audit but were in fact **DELIVERED in v8.3.0** — not deferred. Their seed state files are stale; treat them as complete. v8.4.0 is the planned **evolution** of SEED-026 (dual-mode).
+Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition, D-F12, etc.) remain tracked in `docs/OPEN_ISSUES.md` and the v8.4.0 archive; not v9.0.0-relevant.
 
 ## Session Continuity
 
-Last session: 2026-07-01
-Stopped at: v8.4.0 + v8.4.1 milestone close COMPLETE — both archived (ROADMAP collapsed, MILESTONES.md + PROJECT.md evolved, REQUIREMENTS.md removed); v8.4.0 desktop installer published + verified; v8.4.1 web live-verified.
+Last session: 2026-07-20
+Stopped at: v9.0.0 roadmap restructured per owner revision — Phase 133 = Visual Atlas Preview (ATLAS-01, REL-01 atlas-preview exception); former phases shifted to 134-139; ROADMAP.md + REQUIREMENTS.md traceability (40/40) + STATE.md consistent.
 Resume file: None
-Next step: `/gsd-new-milestone` to open the next cycle. No active milestone.
-
-## Performance Metrics
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| (none yet — milestone just started) | - | - | - |
-| Phase 130 P01 | 5 | 2 tasks | 1 files |
-| Phase 130 P02 | 8 | 3 tasks | 3 files |
-| Phase 130 P03 | 8 | 3 tasks | 2 files |
-| 130 | 3 | - | - |
-| Phase 131 P02 | 20m | 3 tasks | 2 files |
-| Phase 131 P03 | 15 | 2 tasks | 2 files |
-| Phase 131 P05 | 60 | 2 tasks | 1 files |
-| Phase 131 P07 | 20 | 3 tasks | 3 files |
-| 131 | 10 | - | - |
-| Phase 132 P03 | 8 | 2 tasks | 2 files |
-| 132 | 3 | - | - |
-
-## Decisions
-
-- [Phase 130]: (lead) define the shared (mode + set) state shape on web `/search` — mode toggle + safe_storage persistence + legacy-allowlist migration + edge-state sentinels + button/label, all settled before parity surfaces extend it.
-- [Phase ?]: library_mode defaults to 'hide': D-05 fresh-user default, Hide mode with empty set = show all
-- [Phase ?]: clear_search_snapshot resets search_library_filter to {'mode':'hide','codes':[]}: D-09 dict shape settles (mode+set) persistence contract for Plan 02
-- [Phase ?]: show-all normalized to neutral hide/[] on Apply (D-05/DMF)
-- [Phase ?]: browse->search handoff stamps mode=show_only + persists dict shape (prevents misread as Hide-set)
-- [Phase 132 Plan 01]: library_filter_mode default=None (not 'include') — model_dump(exclude_none=True) drops it → omitted callers' echo stays byte-for-byte unchanged (Codex R1 HIGH); _intersect_library_filter normalises None→'include' internally
-
-- [Phase 132 Plan 02]: resolve_library_complement_sys_ids is a separate module-level function in shared/fjms_service.py (not inlined) — mirrors naming convention, independently testable; mode read AFTER `if not libs` short-circuit so exclude+empty is a clean no-op
-
-- [Phase 132 Plan 03]: Document behavioral default (include) not Pydantic internal (None) — callers see include when omitting the field; unknown_filter_key Error Codes entry clarified: code reserved in ERROR_CODES but Pydantic extra=forbid fires first returning invalid_request
-
-## Operator Next Steps
-
-- v8.4.0 + v8.4.1 CLOSED (2026-07-01). No active milestone — run `/gsd-new-milestone` to open the next cycle.
+Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
