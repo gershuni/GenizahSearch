@@ -203,3 +203,7 @@ same_work_spike/probe/results/p_calibration_final.md
 
 # SEED-029 research spike (internal — not for GitHub)
 same_work_spike/
+
+# Research tooling with restricted-source references (internal — not for GitHub)
+corpus_mapper/
+corpus_mapper_output/
