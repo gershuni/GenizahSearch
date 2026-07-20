@@ -1,7 +1,8 @@
 # Phase 133: Visual Atlas Preview (early quick win) - Pattern Map
 
 **Mapped:** 2026-07-20
-**Files analyzed:** 9 new/modified committed files + 4 test files
+**Updated:** 2026-07-20 (Codex confirmation pass round 2 — three-pass scanner, shared `atlas_preview_available()` predicate on all four surfaces, exact-node-set test, current test paths)
+**Files analyzed:** 9 new/modified committed files + test files
 **Analogs found:** 13 / 13 (all have at least a role-match analog; the offline
 graph-math/typed-array-binary/Canvas-2D-renderer *content* itself has no
 committed analog and is called out explicitly in "No Analog Found")
@@ -27,7 +28,7 @@ committed analog and is called out explicitly in "No Analog Found")
 | `web/pages/atlas.py` (NEW) | UI component / page chrome | request-response | `web/pages/puzzle.py::create_puzzle_page` (flag-gated page body) + `web/main.py::_resolve_ui_language`/`apply_theme_immediately` (bilingual/RTL primitives) | role-match |
 | `web/pages/home.py` (+ teaser card) | UI component | request-response (render) | `web/pages/home.py` "Main Action Cards Grid" card block (Community Card, same file) | exact |
 | `.gitignore` (+ atlas static-asset dir entry) | config | n/a | `.gitignore` sidecar entries (`/fjms_enrichment.db`, `/pgp.db`, `same_work_spike/`) | exact |
-| `tests/test_atlas_bake.py` (NEW) | test (unit) | batch (assert on bake output) | any `tests/test_*` asserting counts/assertions on a generated artifact — closest shape: `tests/test_no_back_edges_core.py`'s smoke-assertion style | role-match |
+| `tests/atlas_bake/test_atlas_bake.py` (NEW) | test (unit) | batch (assert on bake output) | any `tests/test_*` asserting counts/assertions on a generated artifact — closest shape: `tests/test_no_back_edges_core.py`'s smoke-assertion style | role-match |
 | `tests/test_atlas_flag_gating.py` (NEW) | test (static/headless) | request-response (headless) | `tests/test_web_library_options_no_local.py` (AST scan for a required guard pattern) | role-match |
 | `tests/test_atlas_masking_scan.py` (NEW) | test (self-test) | batch (sanity-injection) | `tests/test_no_raw_storage_access.py::test_lint_rejects_synthetic_violation` (inject a known-bad pattern, assert the scanner catches it) | exact |
 | `tests/render_smoke/test_atlas_render_smoke.py` (NEW) | test (live render) | request-response (async, in-process) | `tests/render_smoke/test_joins_lab_render_smoke.py` | exact |
@@ -82,9 +83,12 @@ force-layout + phyllotaxis-scatter step, then a final HTML/JSON write to an
 Hand-Roll" — the graph math is already proven); the *new* work is (a)
 stripping the discovery-overlay load entirely (D-04 — no `discovery_scored_flank`-
 style read at all), (b) extending node inclusion to the full manuscript-pair
-universe (Pitfall #1 in RESEARCH.md), (c) re-encoding the payload as
-struct-of-typed-arrays instead of `json.dumps` + `str.replace('__DATA__', ...)`,
-and (d) a final `Brotli`-compress step writing both `.bin` and `.bin.br`.
+universe (Pitfall #1 in RESEARCH.md) and proving EXACT eligible==placed set
+equality (missing==0, extra==0 — Codex HIGH-5), (c) re-encoding the payload as
+struct-of-typed-arrays instead of `json.dumps` + `str.replace('__DATA__', ...)`
+(sys_id is BigUint64-only, no fallback — the bake FAILS on any non-pure-digit/
+>=2^64 sys_id, NEW LOW), and (d) a final `Brotli`-compress step writing both
+`.bin` and `.bin.br` with a content-hashed filename.
 
 **DB access pattern** (source: `scripts/fgp_fill_credits_bilingual.py` lines
 288-304 — read-only attach + `PRAGMA table_info` capability probe before
@@ -152,15 +156,31 @@ def main():
 if __name__ == '__main__':
     exit(main())
 ```
-Replicate this exact shape for `check_atlas_masking.py`: a `scan_repo()`
-function that walks `git ls-files` (or `Path.rglob`) over the committed tree,
-and a `scan_asset(path)` function that reads every embedded string out of the
-built HTML/JSON/binary asset — both checking against a pattern list, both
-returning `issues: list`, with `main()` aggregating and `return 0 if
-total_issues == 0 else 1`. Per D-07/RESEARCH.md Security Domain, the pattern
-list itself must **never be hardcoded** in this committed `.py` file — source
-it from a gitignored/env-var location, following the exact existing
-sensitive-value idiom in this repo:
+Replicate the issue-collection + exit-code shape, but `check_atlas_masking.py`
+is deliberately STRONGER than `check_docs.py`'s single `rglob` pass:
+
+- `scan_repo()` runs **THREE SEPARATE PASSES** (Codex HIGH-4), NOT a single
+  `git ls-files`: (1) HEAD/index blobs — `git ls-tree -r HEAD` + staged
+  `git diff --cached` blobs read via `git show` (catches a staged blob that
+  differs from the worktree); (2) tracked worktree files — `git ls-files`
+  (read bytes from disk); (3) non-ignored untracked candidates —
+  `git ls-files --others --exclude-standard` (files about to be added). A hit
+  on **any** surface is a failure.
+- `scan_asset(path)` accepts a FILE **or a DIRECTORY** and RECURSIVELY walks
+  the whole tree (every `.bin` / `.bin.br` / `manifest.json` / rendered-HTML
+  file), matching each pattern as text, as its UTF-8 byte encoding, and in
+  normalized (Unicode NFC/NFD + casefold) and common encoded/escaped (URL `%`,
+  HTML-entity, JS `\uXXXX`) forms.
+- Both return `issues: list`; `main()` aggregates and `return 0 if
+  total_issues == 0 else 1`, with argparse flags `--scan-repo`,
+  `--scan-asset <path>`, `--self-test`.
+- **FAIL-SAFE:** exit 1 (never a false green) when `MASKING_SCAN_PATTERNS_FILE`
+  is unset / missing / empty. **NEVER-ECHO:** report only relative file path,
+  byte offset, and a pattern-INDEX — never the matched pattern text.
+
+Per D-07/RESEARCH.md Security Domain, the pattern list itself must **never be
+hardcoded** in this committed `.py` file — source it from a gitignored/env-var
+location, following the exact existing sensitive-value idiom in this repo:
 
 **Sensitive-value-from-env idiom to reuse** (source: `web/puzzle_tokens.py`
 lines 16-18):
@@ -172,10 +192,11 @@ PUZZLE_SECRET = os.environ.get('PUZZLE_UPLOAD_SECRET', os.urandom(32).hex())
 Model `MASKING_SCAN_PATTERNS_FILE = os.environ.get('MASKING_SCAN_PATTERNS_FILE')`
 on this same shape (env var pointing at a gitignored local file — RESEARCH.md
 Open Question #3's recommendation), never a literal pattern string in the
-script itself. `web/main.py`/`web/auth_state.py`/`web/user_lists.py` all
-`from dotenv import load_dotenv; load_dotenv()` at module top — call the same
-in this script if `.env`-based loading is preferred over a standalone file
-path.
+script itself. LOCALLY the file is the repo-root `<repo-root>/.masking_patterns`
+(gitignored via the `/.masking_patterns` rule — NOT the filesystem root `/`);
+in CI a `run:` step writes `${{ secrets.MASKING_SCAN_PATTERNS }}` to
+`${GITHUB_WORKSPACE}/.masking_patterns` with `chmod 600`, runs the scan, and
+deletes it in an `if: always()` step (Codex NEW MEDIUM — CI secret path).
 
 **Self-test / sanity-injection pattern to mirror** (source:
 `tests/test_no_raw_storage_access.py::test_lint_rejects_synthetic_violation`,
@@ -198,8 +219,10 @@ def test_lint_rejects_synthetic_violation():
 ```
 `tests/test_atlas_masking_scan.py` should do the same: inject a fabricated
 "known-bad" test-only pattern (NOT the real restricted string) into a temp
-file/string and assert `check_atlas_masking` flags it — proving the scan is
-load-bearing, not a no-op.
+file/string and assert `check_atlas_masking` flags it across each surface
+(worktree file, UTF-8 bytes in a binary, encoded/escaped form) — proving the
+scan is load-bearing, not a no-op — plus the fail-safe (no patterns → exit 1)
+and never-echo (caught-fixture output does NOT contain the pattern) cases.
 
 ---
 
@@ -219,10 +242,11 @@ WEB_PUZZLE_ENABLED = _env_enabled("WEB_PUZZLE_ENABLED", True)
 ```
 Add directly below: `ATLAS_PREVIEW_ENABLED = _env_enabled("ATLAS_PREVIEW_ENABLED", False)`
 (default **OFF** — D-13 says the flag is the safety mechanism controlling
-exposure; matches `web_fgp_enabled()`'s pattern of a plain module-level
-constant for a simple on/off gate rather than needing the more complex
-web-override-of-shared-default shape `web_fgp_enabled()` uses, since there is
-no "shared vs web-only" split here).
+exposure). NOTE: the flag is only the DEFINITION. Every runtime GATE
+(`/atlas` route body, nav item, homepage teaser card, and both `/atlas-data/*`
+routes) uses the shared `web.atlas_assets.atlas_preview_available()` predicate
+(= `ATLAS_PREVIEW_ENABLED AND asset loaded`), NOT the bare flag, so no surface
+advertises the atlas when the asset is not actually loaded (Codex MEDIUM-6).
 
 ---
 
@@ -259,14 +283,15 @@ def puzzle_page_route(add: str = None, doc: str = None):
         from web.pages.puzzle import create_puzzle_page
         create_puzzle_page(initial_add=add, initial_doc=doc)
 ```
-Replicate exactly for `/atlas`: `@ui.page('/atlas', title='Connections Atlas | ... — Dicta Genizah Search')`,
+Replicate for `/atlas`: `@ui.page('/atlas', title='Connections Atlas | ... — Dicta Genizah Search')`,
 `ui.add_head_html(page_meta('/atlas', ..., noindex=True))` (per D-16/Pitfall's
-`noindex` requirement — see the `page_meta` excerpt below), gate on
-`ATLAS_PREVIEW_ENABLED` **inside the route handler itself** (not just the nav
-link — RESEARCH.md Security Domain flags nav-only gating as a real
-access-control gap), fall through to a clean "temporarily unavailable" card
-identical in shape to the puzzle one when the flag is OFF or the baked asset
-file is missing, and delegate the real chrome to `web/pages/atlas.py`.
+`noindex` requirement — see the `page_meta` excerpt below), gate the route
+handler itself on `atlas_preview_available()` (the SHARED predicate — flag AND
+loaded asset — RESEARCH.md Security Domain flags nav-only gating as a real
+access-control gap, and MEDIUM-6 requires the same predicate as nav/data-route/
+teaser), fall through to a clean "temporarily unavailable" card identical in
+shape to the puzzle one when the predicate is False (flag OFF **or** asset not
+loaded), and delegate the real chrome to `web/pages/atlas.py` only when True.
 
 **Bilingual language resolution to reuse verbatim** (source: `web/main.py`
 lines 851-859, already used by every other page):
@@ -294,8 +319,9 @@ def page_meta(
 # usage elsewhere in the same file, e.g. /lists:
 ui.add_head_html(page_meta('/lists', noindex=True))
 ```
-Use `noindex=True` on **both** `/atlas` and the homepage teaser's target link
-per D-16 ("set `noindex` until the REL-01 gate").
+Use `noindex=True` on `/atlas` per D-16 ("set `noindex` until the REL-01 gate").
+The homepage teaser lives on the indexed `/` but is claim-free (see the teaser
+section); only `/atlas` itself is noindex.
 
 ---
 
@@ -324,21 +350,23 @@ def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: in
         headers={"Cache-Control": "public, max-age=600"},
     )
 ```
-Replicate this exact `Response(content=..., media_type=..., headers={...})`
-shape for the new atlas-data route (per RESEARCH.md Pattern 3): a hardcoded
-server-side file path (no user-supplied path segment — closes the
-path-traversal surface noted in RESEARCH.md Security Domain), an
-`Accept-Encoding: br` check on the incoming request, `Content-Encoding: br`
-+ a far-future immutable `Cache-Control` on the compressed branch, and a
-plain-bytes fallback branch with no `Content-Encoding` header for the ~4% of
-clients without Brotli support. Register it either directly on the NiceGUI
-`app` singleton in `web/main.py` (alongside the existing
-`app.add_static_files('/static', STATIC_DIR)` call, source: line 740) or via
-`init_api_routes()` in `web/api.py` (source: `def init_api_routes(app_override=None):`
-line 391) — either location follows this same established
-`@target_app.get(...) -> Response(...)` idiom; **do not** attempt to serve
-the `.br` file through `add_static_files` (confirmed in RESEARCH.md Pitfall 5
-that `CacheControlledStaticFiles` does not set `Content-Encoding`).
+Replicate this `Response(content=..., media_type=..., headers={...})` shape for
+TWO routes (per RESEARCH.md Pattern 3), both gated on `atlas_preview_available()`
+(404 when unavailable): (1) `/atlas-data/manifest.json` — the MUTABLE pointer,
+served `Cache-Control: no-cache, must-revalidate` + an `ETag` + `Vary:
+Accept-Encoding`, with `If-None-Match` → 304 (Codex NEW MEDIUM stale-manifest —
+NOT immutable, so a rebake never strands a client on an old hash); (2)
+`/atlas-data/{asset_name}` — the content-hashed asset, `asset_name`
+whitelist-compared to the loaded bin name (no filesystem use of user input —
+path-traversal mitigation), with `_negotiate_encoding(header, have_br,
+have_plain)` parsing q-values for `br`, `identity`, AND the wildcard `*`
+(honoring `br;q=0` / `identity;q=0` / `*;q=0`): br when acceptable+present
+(`Content-Encoding: br`), plain when identity acceptable+present, else a
+REACHABLE 406 — never an invalid 200; the asset uses far-future immutable
+`Cache-Control` (safe because content-hashed). **Do not** serve the payload
+through `add_static_files` (confirmed in RESEARCH.md Pitfall 5 that
+`CacheControlledStaticFiles` does not set `Content-Encoding`), and the asset
+must NOT live under `web/static/` (Codex HIGH-1).
 
 ---
 
@@ -371,13 +399,16 @@ for path, icon, label, badge in nav_items:
 ```
 The 4-tuple already supports a badge string (rendered via `nav-item-badge`
 class) — this is the exact mechanism for D-14/D-15's **"beta"-tagged nav
-link**:
+link**, but gate it on the SHARED PREDICATE, not the bare flag (Codex MEDIUM-6):
 ```python
-if ATLAS_PREVIEW_ENABLED:
+if atlas_preview_available():
     nav_items.append(('/atlas', 'hub', tr('Connections Atlas'), tr('Beta')))
 ```
-(Import `ATLAS_PREVIEW_ENABLED` from `web.feature_flags` alongside the
-existing `from web.feature_flags import WEB_PUZZLE_ENABLED`, source: line 688.)
+Import `atlas_preview_available` from `web.atlas_assets` (= flag AND loaded
+asset, so a missing asset never advertises a broken nav link);
+`ATLAS_PREVIEW_ENABLED` itself is imported from `web.feature_flags` alongside
+`WEB_PUZZLE_ENABLED` (source: line 688) only for the flag definition — the nav
+GATE uses the predicate.
 
 ---
 
@@ -413,13 +444,13 @@ def create_page():
 ```
 `web/pages/atlas.py` should follow this exact `create_atlas_page()` function
 shape: a top-level `ui.column`/`ui.element` container, `tr()`/`is_rtl()` for
-every string and layout direction, and a dismissible-banner pattern (see
-Shared Patterns below) for the standing D-15 honesty banner + "Beta /
-preview" badge. The Canvas-2D renderer + typed-array decode JS itself has
-**no committed analog** (see "No Analog Found") — port it from the
-prototype's existing JS (described structurally, not quoted), fetching the
-binary payload from the new Brotli route instead of an inlined `<script>`
-(Pitfall 3 — avoids the `</script>`-breakout injection class).
+every string and layout direction, a "Beta / preview" badge + the standing
+D-15 honesty banner, and a CLS-reserved fixed-dimension canvas container. The
+Canvas-2D renderer + typed-array decode JS itself has **no committed analog**
+(see "No Analog Found") — port it from the prototype's existing JS (described
+structurally, not quoted), fetching the binary payload from the new data route
+instead of an inlined `<script>` (Pitfall 3 — avoids the `</script>`-breakout
+injection class), decoding sys_id as BigUint64-only (no fallback).
 
 ---
 
@@ -452,11 +483,12 @@ with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl trans
 ```
 This card block is naturally **CLS-safe** — fixed structure, no async
 content fetch, no layout shift — exactly what D-16's teaser requires.
-Fork this card verbatim into the grid, gated:
+Fork this card verbatim into the grid, gated on the SHARED PREDICATE (the
+FOURTH availability surface — Codex MEDIUM-6, NOT the bare flag):
 ```python
-from web.feature_flags import ATLAS_PREVIEW_ENABLED
+from web.atlas_assets import atlas_preview_available
 ...
-if ATLAS_PREVIEW_ENABLED:
+if atlas_preview_available():
     with ui.card()...on('click', lambda: ui.navigate.to('/atlas')):
         ...
         ui.badge(tr('Beta')).props('outline color=...').classes('text-xs')
@@ -465,7 +497,7 @@ Keep the card **claim-free**: no counts, no "discoveries found," no dynamic
 data — a static label + description + click-through only, per D-16 (mirrors
 this Community Card's own static-only content, unlike the async `recent_container`
 pattern elsewhere in the same file at line 487, which must NOT be the model
-here).
+here). The teaser's HE strings are the keys pre-registered by plan 133-03.
 
 ---
 
@@ -480,56 +512,80 @@ here).
 ...
 same_work_spike/
 ```
-Add an entry for the baked atlas output directory — repo-root `atlas_data/`
-(OUTSIDE `web/static/`, per Codex HIGH-1) — following this exact
-convention — the generated, masking-sensitive, potentially multi-MB asset is
-deployed via scp alongside code (like the other sidecar DBs), never
-committed to git.
+Add TWO entries following this exact convention: (a) `/.masking_patterns` (the
+repo-root-anchored gitignored pattern file — NOT the filesystem root), and (b)
+`/atlas_data/` (the baked atlas output directory, OUTSIDE `web/static/` per
+Codex HIGH-1) — the generated, masking-sensitive, multi-MB asset is deployed
+via scp alongside code (like the other sidecar DBs), never committed to git.
 
 ---
 
-## Tests (grouped — all four follow an existing committed shape 1:1)
+## Tests (grouped — all follow an existing committed shape 1:1)
 
-### `tests/test_atlas_bake.py`
-Assert on the bake script's own output (node/edge/cluster counts match the
-62,414-target post-Pitfall-#1-fix; no discovery-overlay fields present;
-`assert brotli_size <= 6_000_000` byte-budget gate per RESEARCH.md Code
-Examples). No single existing file is an exact analog (no prior "assert
-counts on a generated binary artifact" test exists in this repo) — write it
-as a plain pytest module with straightforward `assert` statements reading the
-bake script's output files, mirroring the general "read fixture, assert
-counts" style already used throughout `tests/test_*.py`.
+Current atlas test paths (executors: use these EXACT paths):
+`tests/test_atlas_masking_scan.py`, `tests/atlas_bake/test_atlas_bake.py`,
+`tests/atlas_bake/test_atlas_golden_js.py`, `tests/test_atlas_flag_gating.py`,
+`tests/render_smoke/test_atlas_render_smoke.py`,
+`tests/render_smoke/test_home_teaser_render_smoke.py`,
+`tests/render_smoke/test_atlas_four_surface.py`.
+
+### `tests/atlas_bake/test_atlas_bake.py`
+Assert on the bake script's own `--smoke`/`--golden` output (no research DB):
+**EXACT node-set equality** — the placed node-id set EQUALS the eligible
+connected-endpoint set (missing==0, extra==0; the live DB currently yields
+~62,645 and 62,414 is only a historical regression FLOOR — Codex HIGH-5, NOT a
+`>=` count target); no discovery-overlay fields (D-04); `assert brotli_size <=
+6_000_000` byte-budget gate; sys_id BigUint64 round-trip AND a non-pure-digit/
+>=2^64 sys_id FAILS the bake (no fallback — NEW LOW); determinism; content-hash-
+changes-on-byte-change; and a golden per-field Python decode against
+`tests/fixtures/atlas/golden-v1-expected.json` (sys_id as a decimal STRING,
+compared via `int(str)`). Lives under `tests/atlas_bake/` (auto-tagged
+`atlas_bake` via conftest, run in the dedicated pinned `atlas-bake-tests` CI
+job with Node available for the cross-language `test_atlas_golden_js.py`).
 
 ### `tests/test_atlas_flag_gating.py`
 **Analog:** `tests/test_web_library_options_no_local.py` (AST-scan-for-a-
-required-guard-pattern shape, source: whole file read above) — write a
-similar static check (or a lightweight `TestClient`/`httpx.ASGITransport`
-smoke, matching `tests/test_no_raw_storage_access.py`'s file-scan style) that
-asserts the `/atlas` route handler itself references
-`ATLAS_PREVIEW_ENABLED` (not just the nav-list gate), closing the exact
-access-control gap RESEARCH.md's Security Domain calls out.
+required-guard-pattern shape) + a lightweight `httpx.ASGITransport` behavioral
+smoke (matching `tests/test_no_raw_storage_access.py`'s file-scan style). Assert
+the `/atlas` route handler, the nav-append, and BOTH data routes reference the
+SHARED `atlas_preview_available()` predicate (flag AND loaded asset — not the
+bare flag; three of the four MEDIUM-6 surfaces, the teaser being 133-05 and the
+behavioral four-surface test being `tests/render_smoke/test_atlas_four_surface.py`
+in 133-06); the three states (flag-OFF clean-hide, flag-ON/asset-not-loaded
+clean-hide + data-route 404, ready); the response-level br/identity/* q-value
+negotiation with a REACHABLE 406; the manifest no-cache + ETag + 304 + a
+stale-manifest transition; HE translated values; and a flag-independent
+`/static/atlas/*` → 404 regression guard (Codex HIGH-1 structural fix).
 
 ### `tests/test_atlas_masking_scan.py`
 **Analog:** `tests/test_no_raw_storage_access.py::test_lint_rejects_synthetic_violation`
-(exact — see excerpt already given above under `check_atlas_masking.py`).
+(exact — see excerpt above under `check_atlas_masking.py`). Inject a fabricated
+known-bad pattern across each surface (worktree/bytes/encoded), assert exit 1;
+clean content → exit 0; no patterns → exit 1 (fail-safe); caught-fixture output
+never echoes the pattern (never-echo).
 
-### `tests/render_smoke/test_atlas_render_smoke.py`
-**Analog:** `tests/render_smoke/test_joins_lab_render_smoke.py` (exact —
-source: lines 1-90 read above). Reuses the same `nicegui.testing.User` +
-`httpx.ASGITransport(core.app)` harness (auto-tagged `render_smoke` marker via
-`tests/conftest.py`'s path-based injection for anything under
-`tests/render_smoke/`), with heavy seams (the baked asset load, any
-DB-backed enrichment) mocked. Cover: flag ON+asset-present renders; flag
-OFF/asset-absent clean-hides (no 500); EN/HE + RTL chrome; CLS (canvas
-dimensions reserved before data loads); homepage teaser renders/click-throughs
-to `/atlas`.
+### `tests/render_smoke/test_atlas_render_smoke.py` + `test_home_teaser_render_smoke.py` + `test_atlas_four_surface.py`
+**Analog:** `tests/render_smoke/test_joins_lab_render_smoke.py` (exact). Reuse the
+`nicegui.testing.User` + `httpx.ASGITransport(core.app)` harness (auto-tagged
+`render_smoke` via `tests/conftest.py`'s path-based injection for anything under
+`tests/render_smoke/`), with heavy seams (the baked asset load, DB-backed
+enrichment) mocked. `test_atlas_render_smoke.py` covers ONLY server render
+(chrome/CLS/EN-HE-RTL/decoder injection — NOT fetch/decode/interactions, which
+are Node-golden + manual UAT, MEDIUM-2). `test_home_teaser_render_smoke.py`
+covers the teaser present/absent across ready/OFF/asset-missing.
+`test_atlas_four_surface.py` (133-06) is the PARAMETRIZED four-surface
+(page/data/nav/teaser) × three-state (OFF/asset-missing/ready) behavioral test
+that covers nav + teaser behaviorally (Codex MEDIUM-6).
 
 ## Shared Patterns
 
 ### Feature-flag env idiom
 **Source:** `web/feature_flags.py::_env_enabled` (lines 8-12)
-**Apply to:** `ATLAS_PREVIEW_ENABLED` definition, and every gate site
-(`/atlas` route body, nav item, homepage teaser card).
+**Apply to:** the `ATLAS_PREVIEW_ENABLED` DEFINITION only. Every runtime GATE
+site (`/atlas` route body, nav item, homepage teaser card, AND both
+`/atlas-data/*` routes) uses the shared `web.atlas_assets.atlas_preview_available()`
+predicate (= flag AND loaded asset), NOT the bare flag — so no surface
+advertises the atlas when the asset is not loaded (Codex MEDIUM-6).
 ```python
 def _env_enabled(name: str, default: bool) -> bool:
     value = os.environ.get(name)
@@ -548,16 +604,16 @@ def _env_enabled(name: str, default: bool) -> bool:
 ### Custom `Response` with headers (no `add_static_files`)
 **Source:** `web/api.py` (lines 407-449, 1068-1091) — `Response(content=...,
 media_type=..., headers={...})`
-**Apply to:** the Brotli-serving atlas-data route exclusively (never route
-the compressed payload through `app.add_static_files`, per RESEARCH.md
-Pitfall 5).
+**Apply to:** the atlas-data routes exclusively — the immutable content-hashed
+asset (Brotli via `_negotiate_encoding`) and the no-cache + ETag manifest
+(never route either through `app.add_static_files`, per RESEARCH.md Pitfall 5).
 
 ### `noindex` SEO gate
 **Source:** `web/main.py::page_meta(noindex=True)` (lines 752-765), used
 already at `/lists`, `/settings`, `/corrections`, `/admin`, `/profile` (line
 1909, 2007, 2039, 2071, 2085)
-**Apply to:** `/atlas` page meta and the homepage teaser's link target, per
-D-16.
+**Apply to:** the `/atlas` page meta per D-16 (the homepage teaser stays on the
+indexed `/` but is claim-free).
 
 ### Dismissible-banner + auto-dismiss-without-premature-persist shape
 **Source:** `web/pages/home.py` OCR disclaimer banner (lines 26-61) and
@@ -576,18 +632,21 @@ made dismissible.
 os.environ.get('PUZZLE_UPLOAD_SECRET', os.urandom(32).hex())`)
 **Apply to:** `scripts/check_atlas_masking.py`'s restricted-pattern-list
 sourcing (D-07 hard constraint — the pattern list must never be committed in
-cleartext, including inside this script itself).
+cleartext, including inside this script itself). Local file = repo-root
+`/.masking_patterns`; CI = `${GITHUB_WORKSPACE}/.masking_patterns` (chmod 600,
+delete-after).
 
 ### Sidecar/gitignored-generated-artifact convention
 **Source:** `.gitignore` lines 155-157 (`/fjms_enrichment.db`, `/nli_crossref.db`,
 `/pgp.db`) and line 205 (`same_work_spike/`)
-**Apply to:** the new baked atlas static-asset output directory.
+**Apply to:** the new baked atlas static-asset output directory (`/atlas_data/`)
+and the gitignored pattern file (`/.masking_patterns`).
 
 ## No Analog Found
 
 | File / Concern | Role | Data Flow | Reason |
 |---|---|---|---|
-| Typed/delta-encoded binary payload format (nodes/edges struct-of-arrays + header) | data-encoding utility | transform | No existing committed code in this repo builds a custom binary asset format — the closest *conceptual* precedent is the prototype's JSON-in-`<script>` embedding (gitignored, being explicitly replaced per D-10/Pitfall 3), not a committed pattern. Follow RESEARCH.md's "Don't Hand-Roll" guidance (fixed header + `numpy.tobytes()`/`np.frombuffer`) rather than inventing further. |
+| Typed/delta-encoded binary payload format (nodes/edges struct-of-arrays + header) | data-encoding utility | transform | No existing committed code in this repo builds a custom binary asset format — the closest *conceptual* precedent is the prototype's JSON-in-`<script>` embedding (gitignored, being explicitly replaced per D-10/Pitfall 3), not a committed pattern. Follow RESEARCH.md's "Don't Hand-Roll" guidance (fixed header + `numpy.tobytes()`/`np.frombuffer`) rather than inventing further. sys_id is BigUint64-only (no fallback). |
 | Client-side Canvas 2D renderer (zoom/pan/search/filter/focus/click-through/intro JS) | browser/client script | event-driven | No existing page in `web/` ships a hand-written Canvas 2D interactive renderer of this complexity (other pages use NiceGUI components or Fabric.js in `web/pages/puzzle.py`, a different rendering model). Port from the prototype's JS (described structurally in CONTEXT.md/RESEARCH.md, never quoted here) rather than searching for a closer committed analog. |
 | Offline Louvain/force-layout/phyllotaxis graph math | build/offline-batch (algorithm) | batch | No existing `scripts/*.py` performs graph-community-detection or force-directed layout; this is genuinely new algorithmic territory for the committed codebase, sourced entirely from the (gitignored, described-only) prototype per RESEARCH.md "Don't Hand-Roll." |
 
@@ -603,4 +662,4 @@ gitignored prototype (`same_work_spike/probe/scripts/build_atlas_draft.py`)
 was read for structural understanding only, per the phase's masking
 constraint.
 **Files scanned:** ~20 (committed) + 1 (gitignored, read-only, structure-only)
-**Pattern extraction date:** 2026-07-20
+**Pattern extraction date:** 2026-07-20 (updated 2026-07-20 — Codex confirmation pass round 2)
