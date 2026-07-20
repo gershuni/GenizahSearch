@@ -20,7 +20,7 @@ same_work_spike/probe/data/rehearsal.db
 same_work_spike/probe/data/fullcorpus.db
 # SEED-029 engine spill scratch (two-pass disk-partitioned merge)
 same_work_spike/probe/data/spill/
-# SEED-029 Track 1: Maagarim+JA reference pickle, regenerable (track1_build_ref.py)
+# SEED-029 Track 1: M-source+JA reference pickle, regenerable (track1_build_ref.py)
 same_work_spike/probe/data/ref_corpus.pkl
 same_work_spike/probe/data/canon/
 # SEED-029 C1-prep: Phase-0 JABERT training dataset (JSONL, regenerable via
