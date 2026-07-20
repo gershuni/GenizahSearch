@@ -219,7 +219,7 @@ docs\specs\JOINS_TECHNICAL_SPEC.md
 docs\specs\JOINS_SIMPLIFIED_SPEC.md
 docs\SEARCH_API.md
 corpus_mapper\parsers\__init__.py
-corpus_mapper\parsers\maagarim_parser.py
+corpus_mapper\parsers\m_source_parser.py
 corpus_mapper\parsers\ja_parser.py
 extension\build.py
 extension\background.js
