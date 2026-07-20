@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 133-02-PLAN.md
-last_updated: "2026-07-20T20:57:04.410Z"
+stopped_at: Completed 133-04-PLAN.md
+last_updated: "2026-07-20T22:01:32.975Z"
 last_activity: 2026-07-20
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 6
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 133 (visual-atlas-preview-early-quick-win) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
-Last activity: 2026-07-20
+Last activity: 2026-07-21
 
-Progress: [██░░░░░░░░] 17%
+Progress: [███████░░░] 67%
 
 ## Roadmap Summary (v9.0.0)
 
@@ -85,10 +85,10 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-20T20:52:43.586Z
-Stopped at: Completed 133-02-PLAN.md
+Last session: 2026-07-20T21:58:38.786Z
+Stopped at: Completed 133-04-PLAN.md
 Resume file: None
-Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
+Next step: Execute 133-05-PLAN.md (homepage teaser), then 133-06 (deploy checkpoint).
 
 ## Performance Metrics
 
@@ -97,6 +97,7 @@ Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
 | Phase 133 P01 | 55min | 1 tasks | 4 files |
 | Phase 133 P02 | 40min | 3 tasks | 12 files |
 | Phase 133 P03 | 55min | 3 tasks | 9 files |
+| Phase 133 P04 | 55min | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -109,3 +110,5 @@ Next step: UX discuss-phase, then `/gsd-plan-phase 133`.
 - [Phase 133 P02 Wave-2 re-review fix, fix(133-02) 56bbeb9a]: A Codex re-review of the HIGH-2/HIGH-3 hardening above found the fixes were still incomplete on 3 points (1 real HIGH + 1 defense-in-depth HIGH + 1 MEDIUM). HIGH (real, metadata collision): `_canonicalize_meta()` was last-write-wins on a canonical-key collision (e.g. source keys `100` and `"100"`), silently DROPPING one source's Counter tallies — new `_merge_meta_values()` sums Counter elements and keeps-if-equal/raises-if-conflicting on scalar elements (fail-closed on our own per-sys_id catalogue data), order-independent; `load_ms_pairs_from_db()` also canonicalized pair endpoints via `validate_sys_id()` AFTER the raw `sa < sb` ordering compare, which could TypeError on a mixed int/str pair — canonicalize now happens BEFORE the compare. HIGH (defense-in-depth, writer boundary): `assert_bake_complete()` trusted the cached `missing`/`extra`/`placed_count` scalar fields on `BakeResult`, so a mutated/fabricated result could pass the writer gate even though the real node collection disagreed — it now RE-DERIVES missing/extra/duplicates from the actual `result.nodes` against a new `BakeResult.eligible_ids` field (the real eligible id set, not just its count). MEDIUM: the `REGRESSION_FLOOR` check lived only in `_write_production()`, so `main()`'s `--report` path returned before reaching it — extracted to `_enforce_regression_floor()` and enforced in `main()` before the `--report` early return (still smoke/golden-exempt), kept in `_write_production()` too for direct callers. Tests: added `test_metadata_canonical_key_collision_merges` (same sys_id as both int and str across metadata sources — Counter summed, scalar retained, conflicting scalar raises) and rewrote `test_bake_rejects_node_set_mismatch` to mutate the actual node collection (drop/append/duplicate a node) instead of the now-untrusted cached scalar fields, plus a confirmation that scalar-only mutation no longer bypasses or trips the gate. 15/15 atlas_bake tests pass, smoke bake succeeds, masking scan clean (exit 0), ruff clean; golden fixture bytes unchanged.
 - [Phase ?]: [Phase 133 P03]: ONE authoritative web/atlas_assets.py loader (plain required, brotli optional, fail-closed) whose single atlas_preview_available() predicate gates the /atlas page, nav, and both off-/static data routes; manifest is a no-cache+ETag+304 mutable pointer to the immutable content-hashed asset; routes negotiate Accept-Encoding br/identity/* by q-value with a reachable 406. Windows-CRLF staging used a hunk-filter (drop R2-1 embed hunks) for web/main.py and a synthetic HEAD->HEAD+atlas patch for genizah_translations.py to keep the discovery-deck glossary uncommitted.
 - [Phase 133 P03 Wave-3 re-review, fix(133-03) b830ad64]: Closed 4 MEDIUM findings from a follow-up Codex review of the atlas loader/data-routes (no HIGHs; hardens the fail-closed go-live path, no plan/ROADMAP change). MEDIUM-1: `load_atlas_state()` now validates the binary header + section-table BOUNDS (magic/schema_version/per-section dtype-elem_size/count*elem_size/8-byte-aligned offset/in-buffer range) per docs/specs/atlas-asset-schema-v1.md before ready=True — any structural violation fails closed. MEDIUM-2: manifest MUST carry a `content_hash` matching sha256(plain)[:12] AND `asset_basename` MUST be exactly `atlas-v1-<content_hash>` before the 1-year immutable cache is applied to that name. MEDIUM-3: a present `.bin.br` is Brotli-decompressed and compared byte-for-byte to the plain payload — corrupt/mismatched sidecars just drop the brotli representation (readiness unaffected); added `Brotli==1.2.0` as a genuine (already-vetted, per requirements-atlas-bake.txt's Phase-133 legitimacy audit) runtime dependency in requirements.txt/requirements-lock.txt, import-guarded so a not-yet-installed env degrades to brotli-unavailable rather than crashing. MEDIUM-4: `_negotiate_encoding` now computes each representation's effective RFC 9110 §12.5.3 quality and picks the highest non-zero one (tie -> br) instead of always preferring br whenever merely acceptable — `br;q=0.1, identity;q=1` now correctly yields identity. Tests rebuilt on the real committed `golden-v1.bin`/`.bin.br` fixtures (structurally valid ATLAS001 bytes + real Brotli) instead of a fake marker blob, plus new malformed-header/truncated-section-table/out-of-bounds-section/missing-or-non-hashed-basename/corrupt-or-mismatched-brotli/weighted-preference cases (24 tests, all pass); ruff clean; masking scan clean (exit 0). web/main.py staged via a targeted 2-hunk patch (only `_negotiate_encoding`) to avoid sweeping in the pre-existing uncommitted R2-1 embed change.
+- [Phase ?]: 133-04: atlas renderer shipped as a static /static/js/atlas_decode.js UMD module (browser + Node) so the Node golden-decode + DOM-XSS tests exercise the exact same decode + DOM-builder code (cross-language proof); payload fetched from the manifest+content-hashed route, never inlined
+- [Phase ?]: 133-04: every catalogue-derived DOM node built via createElement/textContent (zero innerHTML) — the fabricated malicious golden string renders as inert text (HIGH-7, Node DOM-XSS proof); sys_id decoded as BigUint64 .toString() single path (no fallback)
