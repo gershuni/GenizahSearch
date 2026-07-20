@@ -23,9 +23,11 @@ True (the /atlas route clean-hides otherwise), so this module assumes the asset
 is loaded and does NOT itself re-check readiness.
 """
 
+import json
+
 from nicegui import ui
 
-from web.translations import tr, is_rtl
+from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
 
 # Fixed canvas dimensions — reserved up front so the (later-injected) renderer
@@ -34,20 +36,87 @@ from web.components.typography import h1
 _ATLAS_CANVAS_HEIGHT_PX = 720
 
 # ---------------------------------------------------------------------------
-# 133-04 RENDERER INJECTION POINT (contract):
-#   Plan 133-04 injects the Canvas 2D renderer here. The expected shape is a
-#   ``ui.add_body_html(...)`` / ``ui.run_javascript(...)`` (client-side) block
-#   that, once the page is connected:
-#     1. fetch('/atlas-data/manifest.json')  -> read asset_basename + counts
+# 133-04 RENDERER (contract fulfilled):
+#   web/static/js/atlas_decode.js is the self-contained Canvas 2D renderer. On
+#   the client it:
+#     1. fetch('/atlas-data/manifest.json')  -> reads asset_basename + counts
 #     2. fetch('/atlas-data/' + asset_basename + '.bin')  (browser negotiates
-#        Content-Encoding: br transparently)
-#     3. decode the ArrayBuffer per docs/specs/atlas-asset-schema-v1.md
+#        Content-Encoding: br transparently) — NEVER an inline blob (Pitfall #3)
+#     3. decodes the ArrayBuffer per docs/specs/atlas-asset-schema-v1.md
 #        (BigUint64Array for NODE_SYS_ID — never Number(), §7)
-#     4. draw into the '#atlas-canvas' element reserved below, wiring the D-08
-#        interactions (search, color toggle, library filter, focus constellation,
-#        click-through to /browse, reduced-motion-aware intro).
-#   The renderer MUST NOT compute layout at request time — positions are baked.
+#     4. draws into the '#atlas-canvas' element reserved below and wires the D-08
+#        interactions (zoom/pan, title+shelfmark search, domain<->library color
+#        toggle, library filter, focus constellation, reduced-motion intro,
+#        click-through to /browse). Positions are baked — no request-time layout.
+#   ``_inject_atlas_renderer()`` loads the module + hands it a tr()'d, language-
+#   aware config; the module (not Python) owns all drawing + DOM building, and
+#   builds every catalogue-derived DOM node XSS-safely (createElement/textContent
+#   — HIGH-7), never via innerHTML string interpolation.
 # ---------------------------------------------------------------------------
+
+# The decoder/renderer module, served from the public /static mount (it carries
+# no data — the data is fetched from the flag+readiness-gated /atlas-data routes).
+_ATLAS_DECODER_SRC = '/static/js/atlas_decode.js'
+# The mutable manifest pointer the renderer fetches first (revalidated); it then
+# reads asset_basename from it and fetches the immutable content-hashed .bin.
+_ATLAS_MANIFEST_URL = '/atlas-data/manifest.json'
+_ATLAS_DATA_BASE = '/atlas-data/'
+
+
+def _renderer_labels() -> dict:
+    """tr()'d UI strings handed to the client renderer. Every catalogue-derived
+    label the JS paints/builds is selected from this dict (D-15 bilingual) so no
+    English leaks under a Hebrew UI. All keys are pre-registered in
+    genizah_translations.py (133-03)."""
+    return {
+        'searchPlaceholder': tr('Search by title or shelfmark…'),
+        'colorByDomain': tr('Color by domain'),
+        'colorByLibrary': tr('Color by library'),
+        'hideLibrary': tr('Hide library'),
+        'showOnly': tr('Show only this library'),
+        'showAll': tr('Show all'),
+        'focusConstellation': tr('Focus constellation'),
+        'connections': tr('Connections'),
+        'continuation': tr('Continuation (same-work evidence)'),
+        'citation': tr('Citation / quotation'),
+        'skipIntro': tr('Skip intro'),
+        'zoomIn': tr('Zoom in'),
+        'zoomOut': tr('Zoom out'),
+        'resetView': tr('Reset view'),
+        'title': tr('Title'),
+        'shelfmark': tr('Shelfmark'),
+        'domain': tr('Domain'),
+        'library': tr('Library'),
+        'loadError': tr('The atlas could not be loaded.'),
+    }
+
+
+def _inject_atlas_renderer() -> None:
+    """Load web/static/js/atlas_decode.js and start it with a tr()'d config.
+
+    The manifest URL + data base are passed as data (never the bytes — Pitfall
+    #3); the renderer fetches /atlas-data/manifest.json, then the content-hashed
+    asset, decodes per the frozen schema, and draws into '#atlas-canvas'. The
+    bootstrap polls for ``window.AtlasDecode`` because the external module loads
+    asynchronously and NiceGUI mounts the canvas after the socket connects."""
+    config = {
+        'manifestUrl': _ATLAS_MANIFEST_URL,
+        'dataBase': _ATLAS_DATA_BASE,
+        'canvasId': 'atlas-canvas',
+        'lang': get_language(),
+        'rtl': is_rtl(),
+        'labels': _renderer_labels(),
+    }
+    ui.add_body_html(f'<script src="{_ATLAS_DECODER_SRC}"></script>')
+    ui.add_body_html(
+        '<script>(function(){'
+        f'window.__ATLAS_CONFIG__ = {json.dumps(config, ensure_ascii=False)};'
+        'var tries=0;(function boot(){'
+        'if(window.AtlasDecode&&typeof window.AtlasDecode.init==="function"){'
+        'window.AtlasDecode.init(window.__ATLAS_CONFIG__);return;}'
+        'if(tries++>200)return;setTimeout(boot,50);})();'
+        '})();</script>'
+    )
 
 
 def create_atlas_page() -> None:
@@ -105,3 +174,8 @@ def create_atlas_page() -> None:
                 ui.label(tr('Loading the atlas…')).classes('text-sm').style(
                     'color: var(--text-secondary);'
                 )
+
+    # Load + start the client-side Canvas 2D renderer (fetch manifest -> asset ->
+    # decode per the frozen schema -> draw + D-08 interactions). All drawing and
+    # catalogue-derived DOM building happens client-side in atlas_decode.js.
+    _inject_atlas_renderer()
