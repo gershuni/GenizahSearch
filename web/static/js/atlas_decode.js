@@ -508,10 +508,10 @@
           resizeCanvas(state);
           draw(state, false);
         });
-        if (typeof AtlasDecodeInteractions !== 'undefined') {
-          // Interaction layer (Task 2) attaches here when present.
-          AtlasDecodeInteractions(state, draw);
-        }
+        // Wire the full D-08 interactive experience (zoom/pan, search, color
+        // toggle, library filter, focus constellation, reduced-motion intro,
+        // click-through). All catalogue-derived DOM is built XSS-safely.
+        attachInteractions(state);
         if (config.onReady) config.onReady(state);
       }).catch(function (err) {
         if (window && window.console) window.console.error('atlas init failed', err);
@@ -530,6 +530,546 @@
     });
   }
 
+  // =======================================================================
+  // 3. XSS-safe DOM builders (HIGH-7 / T-133-15).
+  //
+  //    EVERY catalogue-derived UI node (tooltip fields, focus-constellation
+  //    rows, search results, legend, library chips) is built with
+  //    document.createElement + .textContent / .setAttribute. A catalogue
+  //    title / shelfmark / domain / library string is NEVER interpolated into
+  //    an innerHTML assignment — so a hostile string in the payload (the
+  //    committed reference fixture carries a fabricated one) renders as inert
+  //    text, never parsed as markup. The Node DOM-XSS test drives the two
+  //    builders below over that fabricated string via an injected fake document.
+  // =======================================================================
+
+  // Document handle: the live document in the browser, or a fake injected by
+  // the Node test via setDocument(). Accessed lazily so require()-ing the module
+  // in Node (no global document) never throws at load time.
+  var _doc = (typeof document !== 'undefined') ? document : null;
+  function setDocument(d) { _doc = d; }
+
+  function _el(tag, cls) {
+    var e = _doc.createElement(tag);
+    if (cls) e.className = cls;
+    return e;
+  }
+  // The single primitive that binds catalogue text to the DOM — .textContent
+  // ONLY (never innerHTML). All data-bearing nodes funnel through here.
+  function _txt(tag, text, cls) {
+    var e = _el(tag, cls);
+    e.textContent = (text == null) ? '' : String(text);
+    return e;
+  }
+  function _clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  /**
+   * Tooltip body for a hovered manuscript: shelfmark + catalogue title + domain
+   * + library, all masking-safe catalogue data (D-06), all via textContent.
+   */
+  function buildTooltipContent(state, node) {
+    var box = _el('div', 'atlas-tip-inner');
+    box.appendChild(_txt('div', node.shelfmark || node.sys_id, 'atlas-tip-shelf'));
+    if (node.title) box.appendChild(_txt('div', node.title, 'atlas-tip-title'));
+    var meta = _el('div', 'atlas-tip-meta');
+    meta.appendChild(_txt('span', state.labels.domain + ': ' + domainLabel(state, node.domain)));
+    meta.appendChild(_txt('span', '  ·  ' + state.labels.library + ': ' + libraryLabel(state, node.library)));
+    box.appendChild(meta);
+    return box;
+  }
+
+  /**
+   * A focus-constellation member row: a domain-colored dot + catalogue title,
+   * with the shelfmark + domain beneath. data-sys carries the sys_id for the
+   * click-through the caller wires. All text via textContent.
+   */
+  function buildFocusRow(state, node) {
+    var row = _el('div', 'atlas-prow');
+    row.setAttribute('data-sys', node.sys_id);
+    var head = _el('div', 'atlas-prow-head');
+    var dot = _txt('span', '●', 'atlas-dot');
+    dot.setAttribute('style', 'color:' + nodeColor(state, node) + ';');
+    head.appendChild(dot);
+    head.appendChild(_txt('span', ' ' + (node.title || node.shelfmark || node.sys_id), 'atlas-prow-t'));
+    row.appendChild(head);
+    row.appendChild(_txt('div', (node.shelfmark || '') + '  ·  ' + domainLabel(state, node.domain), 'atlas-prow-d'));
+    return row;
+  }
+
+  // =======================================================================
+  // 4. Interaction layer — zoom/pan, hover tooltip, search, color toggle,
+  //    library filter (hide-one / solo-one), focus constellation, reduced-motion
+  //    bloom-in intro, same-origin /browse click-through (D-08).
+  // =======================================================================
+
+  function openBrowse(sysId) {
+    // Same-origin click-through. sys_id is a decimal string (BigUint64 .toString);
+    // .toString() keeps every digit above 2^53 intact (Pitfall #4).
+    window.open(window.location.origin + '/browse?sys_id=' + sysId.toString(), '_blank');
+  }
+
+  // Spatial hash grid over world coords for O(1)-ish hover/click picking.
+  function buildPickGrid(state) {
+    var nodes = state.decoded.nodes;
+    var b = state.bounds;
+    var span = Math.max(b.maxx - b.minx, b.maxy - b.miny, 1);
+    var cell = span / 120;
+    var grid = {};
+    function key(cx, cy) { return cx + '_' + cy; }
+    for (var i = 0; i < nodes.length; i++) {
+      var cx = Math.floor((nodes[i].x - b.minx) / cell);
+      var cy = Math.floor((nodes[i].y - b.miny) / cell);
+      var k = key(cx, cy);
+      (grid[k] || (grid[k] = [])).push(i);
+    }
+    state._grid = { grid: grid, cell: cell, b: b, key: key };
+  }
+
+  function pick(state, sx, sy) {
+    if (!state._grid) return -1;
+    var w = toWorld(state, sx, sy);
+    var g = state._grid;
+    var cx = Math.floor((w[0] - g.b.minx) / g.cell);
+    var cy = Math.floor((w[1] - g.b.miny) / g.cell);
+    var nodes = state.decoded.nodes;
+    var best = -1, bestD = 14 * 14; // ~14px screen radius
+    for (var dx = -1; dx <= 1; dx++) {
+      for (var dy = -1; dy <= 1; dy++) {
+        var bucket = g.grid[g.key(cx + dx, cy + dy)];
+        if (!bucket) continue;
+        for (var j = 0; j < bucket.length; j++) {
+          var idx = bucket[j];
+          if (isHidden(state, idx)) continue;
+          if (state.focusCluster >= 0 && nodes[idx].cluster !== state.focusCluster) continue;
+          var p = toScreen(state, nodes[idx].x, nodes[idx].y);
+          var d = (p[0] - sx) * (p[0] - sx) + (p[1] - sy) * (p[1] - sy);
+          if (d < bestD) { bestD = d; best = idx; }
+        }
+      }
+    }
+    return best;
+  }
+
+  function zoomBy(state, factor, sx, sy) {
+    // Zoom toward the cursor world point.
+    var before = toWorld(state, sx, sy);
+    state.cam.k = Math.max(0.02, Math.min(2000, state.cam.k * factor));
+    var after = toWorld(state, sx, sy);
+    state.cam.x += before[0] - after[0];
+    state.cam.y += before[1] - after[1];
+  }
+
+  // --- search filter: title + shelfmark + sys_id ONLY (never domain/library,
+  //     which would flood the map). Builds a match set of node indices. ---
+  function applySearch(state, query) {
+    var s = (query || '').trim().toLowerCase();
+    if (!s) { state.matchSet = null; return; }
+    var nodes = state.decoded.nodes;
+    var set = new Set();
+    for (var i = 0; i < nodes.length; i++) {
+      var nd = nodes[i];
+      if ((nd.title && nd.title.toLowerCase().indexOf(s) >= 0) ||
+          (nd.shelfmark && nd.shelfmark.toLowerCase().indexOf(s) >= 0) ||
+          (nd.sys_id.indexOf(s) >= 0)) {
+        set.add(i);
+      }
+    }
+    state.matchSet = set;
+  }
+
+  function focusOn(state, idx) {
+    var nodes = state.decoded.nodes;
+    state.focusCluster = nodes[idx].cluster;
+    state.focusMembers = [];
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].cluster === state.focusCluster) state.focusMembers.push(i);
+    }
+    state.focusEdges = state.decoded.edges.filter(function (ed) {
+      return nodes[ed.source].cluster === state.focusCluster &&
+             nodes[ed.target].cluster === state.focusCluster;
+    });
+    // Fit the constellation to the view.
+    var minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (var m = 0; m < state.focusMembers.length; m++) {
+      var nd = nodes[state.focusMembers[m]];
+      if (nd.x < minx) minx = nd.x; if (nd.x > maxx) maxx = nd.x;
+      if (nd.y < miny) miny = nd.y; if (nd.y > maxy) maxy = nd.y;
+    }
+    if (isFinite(minx)) {
+      state.cam.x = (minx + maxx) / 2;
+      state.cam.y = (miny + maxy) / 2;
+      var spanX = Math.max(1, maxx - minx), spanY = Math.max(1, maxy - miny);
+      state.cam.k = Math.max(0.2, Math.min(state.viewW / (spanX * 1.4), state.viewH / (spanY * 1.4)));
+    }
+  }
+
+  function backToGalaxy(state) {
+    state.focusCluster = -1;
+    state.focusMembers = null;
+    state.focusEdges = null;
+  }
+
+  function attachInteractions(state) {
+    var canvas = state.canvas;
+    var box = canvas.parentElement || canvas;
+    buildPickGrid(state);
+
+    // --- overlay scaffolding (absolute over the reserved relative box) ---
+    var dirStyle = state.rtl ? 'direction:rtl;' : 'direction:ltr;';
+
+    // Toolbar (top): search + color toggle + library toggle + zoom buttons.
+    var toolbar = _el('div', 'atlas-toolbar');
+    toolbar.setAttribute('style',
+      'position:absolute;top:8px;left:8px;right:8px;z-index:8;display:flex;gap:6px;' +
+      'flex-wrap:wrap;align-items:center;' + dirStyle);
+
+    var search = _el('input', 'atlas-search');
+    search.setAttribute('type', 'search');
+    search.setAttribute('placeholder', state.labels.searchPlaceholder || '');
+    search.setAttribute('aria-label', state.labels.searchPlaceholder || '');
+    search.setAttribute('style',
+      'flex:0 1 240px;padding:5px 9px;border-radius:6px;border:1px solid #33405c;' +
+      'background:#0d1526cc;color:#dfe8f5;font-size:13px;');
+
+    var colorBtn = _btn(state.labels.colorByLibrary || 'Color by library');
+    var libBtn = _btn(state.labels.showAll || 'Libraries');
+    var zoomInBtn = _btn('+');
+    zoomInBtn.setAttribute('aria-label', state.labels.zoomIn || 'Zoom in');
+    var zoomOutBtn = _btn('−');
+    zoomOutBtn.setAttribute('aria-label', state.labels.zoomOut || 'Zoom out');
+    var resetBtn = _btn(state.labels.resetView || 'Reset view');
+
+    toolbar.appendChild(search);
+    toolbar.appendChild(colorBtn);
+    toolbar.appendChild(libBtn);
+    toolbar.appendChild(zoomInBtn);
+    toolbar.appendChild(zoomOutBtn);
+    toolbar.appendChild(resetBtn);
+    box.appendChild(toolbar);
+
+    // Tooltip (hover).
+    var tip = _el('div', 'atlas-tip');
+    tip.setAttribute('style',
+      'position:absolute;z-index:9;display:none;pointer-events:none;max-width:260px;' +
+      'padding:7px 9px;border-radius:7px;background:#0d1526f2;border:1px solid #33405c;' +
+      'color:#dfe8f5;font-size:12px;' + dirStyle);
+    box.appendChild(tip);
+
+    // Legend (bottom).
+    var legend = _el('div', 'atlas-legend');
+    legend.setAttribute('style',
+      'position:absolute;bottom:8px;left:8px;right:8px;z-index:7;display:flex;gap:10px;' +
+      'flex-wrap:wrap;font-size:11px;color:#aab4c8;pointer-events:none;' + dirStyle);
+    box.appendChild(legend);
+
+    // Library filter panel (toggled).
+    var libPanel = _el('div', 'atlas-libpanel');
+    libPanel.setAttribute('style',
+      'position:absolute;top:46px;right:8px;z-index:8;display:none;flex-wrap:wrap;gap:6px;' +
+      'max-width:320px;padding:8px;border-radius:8px;background:#0d1526f2;' +
+      'border:1px solid #33405c;' + dirStyle);
+    box.appendChild(libPanel);
+
+    // Focus constellation member panel (shown in focus mode).
+    var focusPanel = _el('div', 'atlas-focus');
+    focusPanel.setAttribute('style',
+      'position:absolute;top:46px;right:8px;bottom:34px;width:300px;z-index:7;display:none;' +
+      'flex-direction:column;padding:10px;border-radius:8px;background:#0d1526f2;' +
+      'border:1px solid #33405c;color:#dfe8f5;' + dirStyle);
+    box.appendChild(focusPanel);
+
+    // --- legend builder (domain groups or library palette) ---
+    function rebuildLegend() {
+      _clear(legend);
+      // edge-class key first (continuation vs island — never a physical join).
+      legend.appendChild(_swatch(EDGE_CONT_COLOR, state.labels.continuation || 'Continuation'));
+      legend.appendChild(_swatch(EDGE_ISLAND_COLOR, state.labels.citation || 'Citation'));
+      if (state.colorBy === 'domain') {
+        for (var d = 0; d < state.domainGroups.length; d++) {
+          legend.appendChild(_swatch(state.domainGroups[d][2], domainLabel(state, d)));
+        }
+      } else {
+        for (var l = 0; l < state.libraries.length; l++) {
+          legend.appendChild(_swatch(LIB_PALETTE[l % LIB_PALETTE.length], state.libraries[l]));
+        }
+      }
+    }
+
+    // --- library filter panel (hide-one / solo-one) ---
+    function rebuildLibPanel() {
+      _clear(libPanel);
+      var hint = _txt('div', (state.labels.hideLibrary || 'Hide library') +
+        '  ·  ' + (state.labels.showOnly || 'Show only this'), 'atlas-lhint');
+      hint.setAttribute('style', 'flex-basis:100%;color:#8b93a7;font-size:11px;margin-bottom:3px;');
+      libPanel.appendChild(hint);
+      var allChip = _txt('span', '✓ ' + (state.labels.showAll || 'Show all'), 'atlas-libchip');
+      allChip.setAttribute('style', _chipStyle(false));
+      allChip.onclick = function () { state.libHidden.clear(); rebuildLibPanel(); redraw(); };
+      libPanel.appendChild(allChip);
+      for (var l = 0; l < state.libraries.length; l++) {
+        (function (idx) {
+          var off = state.libHidden.has(idx);
+          var chip = _el('span', 'atlas-libchip');
+          chip.setAttribute('style', _chipStyle(off));
+          var sw = _txt('span', '', 'atlas-sw');
+          sw.setAttribute('style',
+            'display:inline-block;width:9px;height:9px;border-radius:2px;margin-inline-end:5px;' +
+            'background:' + (LIB_PALETTE[idx % LIB_PALETTE.length]) + ';');
+          chip.appendChild(sw);
+          chip.appendChild(_txt('span', state.libraries[idx]));
+          chip.onclick = function (ev) {
+            if (ev && ev.shiftKey) {
+              // solo-one: hide every OTHER library.
+              state.libHidden.clear();
+              for (var k = 0; k < state.libraries.length; k++) {
+                if (k !== idx) state.libHidden.add(k);
+              }
+            } else if (state.libHidden.has(idx)) {
+              state.libHidden.delete(idx);
+            } else {
+              state.libHidden.add(idx);
+            }
+            rebuildLibPanel();
+            redraw();
+          };
+          libPanel.appendChild(chip);
+        })(l);
+      }
+    }
+
+    // --- focus constellation panel ---
+    function rebuildFocusPanel() {
+      _clear(focusPanel);
+      if (state.focusCluster < 0 || !state.focusMembers) {
+        focusPanel.style.display = 'none';
+        return;
+      }
+      var nodes = state.decoded.nodes;
+      var vis = state.focusMembers.filter(function (i) { return !state.libHidden.has(nodes[i].library); });
+      var head = _el('div', 'atlas-focus-head');
+      head.setAttribute('style', 'display:flex;align-items:center;gap:8px;margin-bottom:4px;');
+      var backBtn = _btn('✕');
+      backBtn.setAttribute('aria-label', 'Back');
+      backBtn.onclick = function () { backToGalaxy(state); rebuildFocusPanel(); redraw(); };
+      head.appendChild(backBtn);
+      head.appendChild(_txt('span', state.labels.focusConstellation || 'Focus constellation', 'atlas-focus-title'));
+      focusPanel.appendChild(head);
+      focusPanel.appendChild(_txt('div',
+        vis.length.toLocaleString() + '  ·  ' + (state.labels.connections || 'Connections') +
+        ': ' + state.focusEdges.length.toLocaleString(), 'atlas-focus-meta'));
+      var list = _el('div', 'atlas-focus-list');
+      list.setAttribute('style', 'overflow:auto;flex:1 1 auto;margin-top:4px;min-height:0;');
+      // Bound the number of rows built for very large constellations.
+      var cap = Math.min(vis.length, 400);
+      for (var r = 0; r < cap; r++) {
+        (function (nodeIdx) {
+          var nd = nodes[nodeIdx];
+          var row = buildFocusRow(state, nd);
+          row.setAttribute('style', 'padding:3px 5px;border-radius:5px;cursor:pointer;');
+          row.onclick = function () { openBrowse(nd.sys_id); };
+          list.appendChild(row);
+        })(vis[r]);
+      }
+      focusPanel.appendChild(list);
+      focusPanel.style.display = 'flex';
+    }
+
+    function redraw() { draw(state, false); }
+
+    // draw() calls this after each paint so DOM overlays stay in sync with mode.
+    state.onAfterDraw = function () { /* overlays are event-driven; no per-frame DOM work */ };
+
+    // --- pointer: pan + hover ---
+    var dragging = false, dragMoved = false, lastX = 0, lastY = 0;
+    function relPos(ev) {
+      var rect = canvas.getBoundingClientRect();
+      return [ev.clientX - rect.left, ev.clientY - rect.top];
+    }
+    canvas.style.cursor = 'grab';
+    canvas.addEventListener('pointerdown', function (ev) {
+      dragging = true; dragMoved = false;
+      var p = relPos(ev); lastX = p[0]; lastY = p[1];
+      canvas.style.cursor = 'grabbing';
+      canvas.setPointerCapture && canvas.setPointerCapture(ev.pointerId);
+    });
+    canvas.addEventListener('pointermove', function (ev) {
+      var p = relPos(ev);
+      if (dragging) {
+        var dx = (p[0] - lastX) / state.cam.k, dy = (p[1] - lastY) / state.cam.k;
+        if (Math.abs(p[0] - lastX) + Math.abs(p[1] - lastY) > 2) dragMoved = true;
+        state.cam.x -= dx; state.cam.y -= dy;
+        lastX = p[0]; lastY = p[1];
+        tip.style.display = 'none';
+        draw(state, true);
+        return;
+      }
+      // hover -> tooltip
+      var idx = pick(state, p[0], p[1]);
+      if (idx !== state.hover) {
+        state.hover = idx;
+        if (idx >= 0) {
+          _clear(tip);
+          tip.appendChild(buildTooltipContent(state, state.decoded.nodes[idx]));
+          tip.style.display = 'block';
+        } else {
+          tip.style.display = 'none';
+        }
+        draw(state, false);
+      }
+      if (idx >= 0) {
+        tip.style.left = Math.min(p[0] + 14, state.viewW - 250) + 'px';
+        tip.style.top = Math.min(p[1] + 14, state.viewH - 90) + 'px';
+      }
+    });
+    function endDrag(ev) {
+      if (!dragging) return;
+      dragging = false;
+      canvas.style.cursor = 'grab';
+      // A click (no drag) either enters a focus constellation or opens a star.
+      if (!dragMoved) {
+        var p = relPos(ev);
+        var idx = pick(state, p[0], p[1]);
+        if (idx >= 0) {
+          if (state.focusCluster >= 0) {
+            openBrowse(state.decoded.nodes[idx].sys_id);
+          } else {
+            focusOn(state, idx);
+            rebuildFocusPanel();
+            redraw();
+          }
+        }
+      }
+    }
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', function () { dragging = false; canvas.style.cursor = 'grab'; });
+
+    // --- wheel zoom (toward cursor) ---
+    canvas.addEventListener('wheel', function (ev) {
+      ev.preventDefault();
+      var p = relPos(ev);
+      zoomBy(state, ev.deltaY < 0 ? 1.15 : 1 / 1.15, p[0], p[1]);
+      tip.style.display = 'none';
+      redraw();
+    }, { passive: false });
+
+    // --- keyboard: Esc leaves focus mode ---
+    window.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && state.focusCluster >= 0) {
+        backToGalaxy(state);
+        rebuildFocusPanel();
+        redraw();
+      }
+    });
+
+    // --- toolbar wiring ---
+    search.addEventListener('input', function () {
+      applySearch(state, search.value);
+      redraw();
+    });
+    colorBtn.onclick = function () {
+      state.colorBy = (state.colorBy === 'domain') ? 'library' : 'domain';
+      colorBtn.textContent = (state.colorBy === 'domain')
+        ? (state.labels.colorByLibrary || 'Color by library')
+        : (state.labels.colorByDomain || 'Color by domain');
+      rebuildLegend();
+      redraw();
+    };
+    libBtn.onclick = function () {
+      var open = libPanel.style.display === 'flex';
+      libPanel.style.display = open ? 'none' : 'flex';
+      if (!open) rebuildLibPanel();
+    };
+    zoomInBtn.onclick = function () { zoomBy(state, 1.3, state.viewW / 2, state.viewH / 2); redraw(); };
+    zoomOutBtn.onclick = function () { zoomBy(state, 1 / 1.3, state.viewW / 2, state.viewH / 2); redraw(); };
+    resetBtn.onclick = function () { backToGalaxy(state); rebuildFocusPanel(); fitView(state); redraw(); };
+
+    rebuildLegend();
+
+    // --- reduced-motion-aware bloom-in intro (skippable) ---
+    runIntro(state, box, redraw);
+  }
+
+  // Small toolbar button (textContent label).
+  function _btn(label) {
+    var b = _el('button', 'atlas-btn');
+    b.textContent = label;
+    b.setAttribute('type', 'button');
+    b.setAttribute('style',
+      'padding:5px 10px;border-radius:6px;border:1px solid #33405c;background:#141d33cc;' +
+      'color:#dfe8f5;font-size:12px;cursor:pointer;');
+    return b;
+  }
+  // Legend swatch: a colored square + a text label (textContent).
+  function _swatch(color, label) {
+    var wrap = _el('span', 'atlas-legend-item');
+    wrap.setAttribute('style', 'display:inline-flex;align-items:center;gap:4px;');
+    var sw = _el('span');
+    sw.setAttribute('style',
+      'display:inline-block;width:10px;height:10px;border-radius:2px;background:' + color + ';');
+    wrap.appendChild(sw);
+    wrap.appendChild(_txt('span', label));
+    return wrap;
+  }
+  function _chipStyle(off) {
+    return 'display:inline-flex;align-items:center;padding:3px 7px;border-radius:12px;cursor:pointer;' +
+      'font-size:11px;border:1px solid #33405c;' +
+      (off ? 'background:#0d1526;color:#67708a;opacity:0.5;' : 'background:#1c2334;color:#dfe8f5;');
+  }
+
+  // Bloom-in intro: a count-up of the node total, skippable by click. Honors
+  // prefers-reduced-motion — under reduce, the final count shows immediately
+  // with no animation, then the overlay clears.
+  function runIntro(state, box, redraw) {
+    var reduce = false;
+    try {
+      reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) { reduce = false; }
+
+    var overlay = _el('div', 'atlas-intro');
+    overlay.setAttribute('style',
+      'position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;' +
+      'align-items:center;justify-content:center;background:#05070de6;cursor:pointer;');
+    var big = _txt('div', '0', 'atlas-intro-n');
+    big.setAttribute('style', 'font-size:min(11vw,96px);font-weight:700;color:#cfe3ff;');
+    var sub = _txt('div', state.labels.connections || 'Connections', 'atlas-intro-l');
+    sub.setAttribute('style', 'color:#8fb2d8;font-size:15px;margin-top:6px;');
+    var skip = _txt('div', state.labels.skipIntro || 'Skip intro', 'atlas-intro-s');
+    skip.setAttribute('style', 'margin-top:20px;color:#67708a;font-size:12px;');
+    overlay.appendChild(big);
+    overlay.appendChild(sub);
+    overlay.appendChild(skip);
+    box.appendChild(overlay);
+
+    var total = state.decoded.nodes.length;
+    var done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      redraw();
+    }
+    overlay.onclick = finish;
+
+    if (reduce) {
+      big.textContent = total.toLocaleString();
+      finish();
+      return;
+    }
+    var start = null, dur = 900;
+    function step(ts) {
+      if (done) return;
+      if (start == null) start = ts;
+      var t = Math.min(1, (ts - start) / dur);
+      var eased = 1 - Math.pow(1 - t, 3);
+      big.textContent = Math.round(total * eased).toLocaleString();
+      if (t >= 1) { finish(); return; }
+      window.requestAnimationFrame(step);
+    }
+    window.requestAnimationFrame(step);
+  }
+
   return {
     SEC: SEC,
     decodeAtlas: decodeAtlas,
@@ -540,6 +1080,9 @@
     nodeColor: nodeColor,
     fetchDecoded: fetchDecoded,
     draw: draw,
-    init: init
+    init: init,
+    setDocument: setDocument,
+    buildTooltipContent: buildTooltipContent,
+    buildFocusRow: buildFocusRow
   };
 });
