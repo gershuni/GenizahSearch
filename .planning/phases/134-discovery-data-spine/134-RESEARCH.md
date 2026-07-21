@@ -4,6 +4,8 @@
 **Domain:** Offline data distillation → masked versioned SQLite sidecar + async read-only service (event-loop safety, provenance masking, fail-open). No UI, no LLM/model calls.
 **Confidence:** HIGH (all findings verified against the actual probe DB, the shipped Phase 133 code, and the repo service layer; only forward-looking budget numbers are ASSUMED and flagged)
 
+> ⚠️ **DOCUMENT-WIDE SUPERSEDED NOTICE (2026-07-21 CONTRACT CORRECTION + ground-truth REWORK).** This RESEARCH.md is **PRE-correction**. Wherever it describes the claim MODEL — the relation vocabulary / old `claim_type` set (`textual_parallel`/`direct_text_overlap`), "two stored claim families", the 6-table / MS-MS-alignment DDL sketch, "one band per key", `claim_id` that hashes `claim_type`, flank→claim_type routing, or the OQ1/OQ2/OQ3 open questions — it is **SUPERSEDED by `134-CONTEXT.md` C-1..C-9** (two-table `discovery_claim`+`discovery_evidence`, `evidence_source` axis + `evidence_kind` discriminator, per-source bands, evidence-row-combination invariants, `claim_id = sha256(namespace,page_id,work_id)`, Q2 recall-ladder). **Downstream agents: for the claim model read ONLY C-1..C-9 and the PLAN files; use this document solely for the UNCHANGED machinery** (sidecar/service/loader/masking/deploy patterns, the Pattern-4 hashing recipe shape, the probe-DB field confirmations). Individual stale sections may lack an inline marker — treat any model description here as superseded by default.
+
 <user_constraints>
 ## User Constraints (from 134-CONTEXT.md)
 
