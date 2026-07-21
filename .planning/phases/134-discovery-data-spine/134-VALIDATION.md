@@ -14,7 +14,9 @@ updated: 2026-07-21
 > Derived from `134-RESEARCH.md` → "Validation Architecture". The planner wires the
 > Per-Task Verification Map with concrete task IDs; the phase-level infra/sampling/Wave-0
 > rows below are authoritative. Updated 2026-07-21 for the Codex pre-flight rework
-> (D1–D7 / DC1–DC14) and the round-2 rework (D3, DC3/N2, DC5, DC7, DC12, DC13, N1, N3, N4, N5, N6).
+> (D1–D7 / DC1–DC14), the round-2 rework (D3, DC3/N2, DC5, DC7, DC12, DC13, N1, N3, N4, N5, N6),
+> and the round-3 polish (F1 lazy providers + import-before-load; F2 projection band-filter + anchor;
+> F3 staged pre-swap verify; F4 source_corpus cross-table consistency).
 
 ---
 
@@ -34,14 +36,16 @@ is now a first-class `--strict` surface, so the VALID ship-gate invocation is:
 (the old `--scan-sqlite <db> --scan-repo --strict` form was rejected by the CLI arg rules).
 The shipped-DB scan is the BLOCKING gate (DC13); the gitignored review/approved artifacts get only a
 REGISTERED-TOKEN defense-in-depth `--scan-asset` (surfaces, does NOT block).
-**N6 — `<DB>` MUST be the EXACT filename resolved from `discovery_data/manifest.json`
-(asset_basename → `discovery_data/<asset_basename>.db`), NEVER a native-arg shell glob
-like `discovery-v1-*.db` (this repo's primary shell is PowerShell, which does not expand
-a glob for a native program — the literal `*` would reach Python as a nonexistent path).**
+**N6 — `<DB>` MUST be the EXACT filename resolved from a manifest (asset_basename →
+`discovery_data/<asset_basename>.db`; the STAGED manifest for pre-swap verify, the LIVE manifest
+afterwards), NEVER a native-arg shell glob like `discovery-v1-*.db` (this repo's primary shell is
+PowerShell, which does not expand a glob for a native program — the literal `*` would reach Python as
+a nonexistent path).**
 
 **Standalone verifier is a first-class release gate** (DC7):
 `python scripts/verify_discovery_sidecar.py <DB> --expected-frame-hash <expected>` must exit 0 — the SAME
-path-parameterized verifier CI runs over the fixture is run over the real DB in 134-07. The frame-hash check
+path-parameterized verifier CI runs over the fixture is run over the real DB in 134-07. It runs ALL invariants
+(incl the F4 source_corpus cross-table consistency check). The frame-hash check
 takes the EXPECTED hash as input (fixture CI mode passes the pinned golden; real-DB mode passes the value
 recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.frame_content_hash`
 (membership-based recipe, DC3/N2). `<DB>` is the exact manifest-resolved filename (N6).
@@ -52,7 +56,7 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 
 - **After every task commit:** `pytest tests/test_discovery_*.py -x` + masking `--scan-sqlite` on any freshly built fixture DB.
 - **After every plan wave:** full discovery test set + `check_atlas_masking.py --scan-repo` (committed-content leak check).
-- **Before `/gsd:verify-work`:** the VALID strict masking gate (`--scan-sqlite <DB> --scan-asset <DB> --scan-repo --strict`, `<DB>` = exact manifest-resolved filename) over the real built `.db` + `scripts/verify_discovery_sidecar.py <DB> --expected-frame-hash <discovery-frames.md value>` exit 0; loader fail-open matrix green (incl siblings-ignored); overload + slot-recycling + web-composition tests green.
+- **Before `/gsd:verify-work`:** the VALID strict masking gate (`--scan-sqlite <DB> --scan-asset <DB> --scan-repo --strict`, `<DB>` = exact manifest-resolved filename) over the real built `.db` + `scripts/verify_discovery_sidecar.py <DB> --expected-frame-hash <discovery-frames.md value>` exit 0; loader fail-open matrix green (incl siblings-ignored); overload + slot-recycling + web-composition (incl import-before-load) tests green.
 - **Max feedback latency:** < 60 s for the discovery subset.
 
 ---
@@ -70,7 +74,8 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 | Task 2 | 134-02 | 1 | DATA-05 | T-134-leak | Valid `--strict` combination accepted (D4) | unit | `pytest tests/test_masking_sqlite.py -k strict` | ❌ (134-02) | ⬜ pending |
 | Task 1 | 134-03 | 2 | DATA-03 | T-134-leak | No EXACT-name `text`/`cat`/`provenance`/raw-`work_id`/`title`/`author`/`genre` reference columns (text_layer/text_layer_a/text_layer_b + source_corpus allowed); only offsets + snapshot hash | unit | `pytest tests/test_discovery_schema.py::test_no_reference_columns` | ❌ (134-03) | ⬜ pending |
 | Task 1 | 134-03 | 2 | DATA-03 | T-134-tamper | Per-side drift fields present + non-null (work_witness_pages text_layer+hash; ms_ms_alignments text_layer_a/b + hash_a/b); a nulled per-side hash FAILS (N1) | unit | `pytest tests/test_discovery_release_contract.py -k drift` | ❌ (134-03) | ⬜ pending |
-| Task 1 (verifier) | 134-03 | 2 | DATA-01/02/03/08/10 | T-134-tamper | Path-parameterized verifier runs ALL invariants over any DB path; frame-hash takes --expected-frame-hash (DC7) | integration | `python scripts/verify_discovery_sidecar.py <fixture-db> --expected-frame-hash <pinned-golden>` exit 0 | ❌ (134-03) | ⬜ pending |
+| Task 1 (verify) / Task 3 (corrupt) | 134-03 | 2 | DATA-03 | T-134-tamper | `work_witness_claims.source_corpus` == the joined `works.source_corpus`; a valid-but-mismatched code FAILS (F4) | unit | `pytest tests/test_discovery_release_contract.py -k source_corpus` | ❌ (134-03) | ⬜ pending |
+| Task 1 (verifier) | 134-03 | 2 | DATA-01/02/03/08/10 | T-134-tamper | Path-parameterized verifier runs ALL invariants over any DB path (incl source_corpus cross-table consistency, F4); frame-hash takes --expected-frame-hash (DC7) | integration | `python scripts/verify_discovery_sidecar.py <fixture-db> --expected-frame-hash <pinned-golden>` exit 0 | ❌ (134-03) | ⬜ pending |
 | Task 4 | 134-01 | 1 | DATA-01/02 | — | Deterministic `claim_id`/`unit_id` stable across rebuilds | unit (golden) | `pytest tests/test_discovery_ids.py::test_claim_id_golden` | ❌ (134-01) | ⬜ pending |
 | Task 4 | 134-01 | 1 | DATA-03 | T-134-leak | `validate_source_corpus_code` raises on non-codes; NO raw literal committed (DC1) | unit | `pytest tests/test_discovery_ids.py::test_validate_source_corpus_code` | ❌ (134-01) | ⬜ pending |
 | Task 4 | 134-01 | 1 | DATA-01 | — | `claim_type_for_flank` TOTAL incl edge + ambig -> one code or EXCLUDE (DC9) | unit | `pytest tests/test_discovery_ids.py::test_claim_type_routing_total` | ❌ (134-01) | ⬜ pending |
@@ -84,9 +89,9 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 | Task 2 | 134-06 | 4 | DATA-06 | T-134-dos | Overload → `DiscoveryUnavailable` within timeout; loop stays responsive (never hangs) | async unit | `pytest tests/test_discovery_service.py::test_overload_returns_unavailable` | ❌ (134-06) | ⬜ pending |
 | Task 2 | 134-06 | 4 | DATA-06 | T-134-dos | Timed-out heavy slot NOT recycled until the thread finishes (add_done_callback release, not finally) (DC6) | async unit | `pytest tests/test_discovery_service.py::test_timed_out_slot_not_recycled_until_thread_finishes` | ❌ (134-06) | ⬜ pending |
 | Task 1 | 134-06 | 4 | DATA-06 | T-134-layer | `shared/discovery_service.py` has no runtime `web.*` import (D5) | unit (AST guard) | `pytest tests/test_no_back_edges_discovery.py` | ❌ (134-06) | ⬜ pending |
-| Task 1 | 134-06 | 4 | DATA-10 | — | DiscoveryService unit×work projection: unit shown once at highest member band; members on expansion; same-unit suppressed (N4) | unit | `pytest tests/test_discovery_service.py::test_data10_projection` | ❌ (134-06) | ⬜ pending |
-| Task 3 | 134-06 | 4 | DATA-06 | T-134-layer | web/discovery.py composes DiscoveryService with the LIVE discovery_available callable (DC12) | unit | `pytest tests/test_discovery_composition.py` | ❌ (134-06) | ⬜ pending |
-| Task 1 | 134-06 | 4 | DATA-06 | — | Every list query bounded (`LIMIT`) + server-side pagination; injected (path/availability/token) | unit | `pytest tests/test_discovery_service.py::test_pagination_bounds` | ❌ (134-06) | ⬜ pending |
+| Task 1 | 134-06 | 4 | DATA-10 | — | DiscoveryService unit×work projection: unit shown once at DISPLAYED (highest member) band; enabled-band filter acts on the displayed band BEFORE pagination; anchor_sys_id excludes the anchor's own unit; members on expansion; same-unit suppressed (N4/F2) | unit | `pytest tests/test_discovery_service.py -k data10` | ❌ (134-06) | ⬜ pending |
+| Task 3 | 134-06 | 4 | DATA-06 | T-134-layer | web/discovery.py composes DiscoveryService with the LIVE discovery_available callable + LAZY path/version providers; import-before-load → load fixture → query + correct version (DC12/F1) | unit | `pytest tests/test_discovery_composition.py` | ❌ (134-06) | ⬜ pending |
+| Task 1 | 134-06 | 4 | DATA-06 | — | Every list query bounded (`LIMIT`) + server-side pagination; injected LAZY providers (path_provider/availability_callable/sidecar_version_provider, read at call time) | unit | `pytest tests/test_discovery_service.py::test_pagination_bounds` | ❌ (134-06) | ⬜ pending |
 | Task 3 | 134-05 | 3 | DATA-07 | — | Flag OFF → `discovery_available()` False; all reads no-op | unit | `pytest tests/test_discovery_flag.py::test_flag_off_hides` | ❌ (134-05) | ⬜ pending |
 | Task 2 | 134-05 | 3 | DATA-07/08 | T-134-tamper | Sidecar resolved by EXACT asset_basename (siblings ignored, rollback-safe); named-file-absent / hash-mismatch / corrupt / incompatible / missing-meta-key / missing-table / invalid-vocab → `ready=False`; app stays up (DC5/DC11) | unit | `pytest tests/test_discovery_loader.py` | ❌ (134-05) | ⬜ pending |
 | Task 3 | 134-03 | 2 | DATA-08 | — | `PRAGMA integrity_check == ok`; release-contract row counts match actuals; source-DB + crosswalk hash recorded | integration | `pytest tests/test_discovery_release_contract.py` | ❌ (134-03) | ⬜ pending |
@@ -98,8 +103,9 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 
 > Witness-unit merging (DATA-10) is authored in `134-04` Task 3 (`units.py`) and PROVEN against the
 > fixture in `134-03` Task 3 (`test_discovery_units.py`, via `scripts/verify_discovery_sidecar.py`); the DATA-10
-> unit×work PROJECTION rule is exposed + tested in `134-06` (`test_discovery_service.py::test_data10_projection`)
-> with the fixture projection scenario built in `134-03`.
+> unit×work PROJECTION rule (highest-member-band display + enabled-band filter before pagination + anchor-unit
+> suppression + same-unit suppression, F2) is exposed + tested in `134-06`
+> (`test_discovery_service.py -k data10`) with the fixture projection scenario built in `134-03`.
 
 ---
 
@@ -110,10 +116,10 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 > loader/flag (Wave 3) → service (Wave 4) → bench (Wave 5). Each item below is allocated to a plan.
 
 - [x] Extend `scripts/check_atlas_masking.py` with a `--scan-sqlite` mode (str + BLOB; first-class `--strict` surface) + `tests/test_masking_sqlite.py`. → **134-02** (Wave 1)
-- [x] `scripts/verify_discovery_sidecar.py` (path-parameterized all-invariant verifier; frame-hash takes --expected-frame-hash, DC7) + `tests/test_discovery_schema.py`, `test_discovery_bands.py`, `test_discovery_frame.py`, `test_discovery_units.py`, `test_discovery_release_contract.py` (incl per-side drift-corruption, N1) — build-output invariants over a small deterministic fixture DB → **134-03** (Wave 2); `test_discovery_ids.py` (golden id recipe + validate_source_corpus_code + total routing) → **134-01** (Wave 1).
-- [x] `tests/test_discovery_service.py` (incl DATA-10 projection, N4) + `tests/test_no_back_edges_discovery.py` (layering guard) + `tests/test_discovery_composition.py` (web composition, DC12) → **134-06** (Wave 4); `test_discovery_flag.py`, `test_discovery_loader.py` (exact-basename manifest + siblings-ignored + full fail-closed matrix, DC5/DC11) → **134-05** (Wave 3); `test_discovery_release_contract.py` → **134-03** (Wave 2). (Loader tests model on the existing `atlas_assets` tests.)
+- [x] `scripts/verify_discovery_sidecar.py` (path-parameterized all-invariant verifier incl F4 source_corpus cross-table consistency; frame-hash takes --expected-frame-hash, DC7) + `tests/test_discovery_schema.py`, `test_discovery_bands.py`, `test_discovery_frame.py`, `test_discovery_units.py`, `test_discovery_release_contract.py` (incl per-side drift-corruption, N1, + source_corpus-mismatch corruption, F4) — build-output invariants over a small deterministic fixture DB → **134-03** (Wave 2); `test_discovery_ids.py` (golden id recipe + validate_source_corpus_code + total routing) → **134-01** (Wave 1).
+- [x] `tests/test_discovery_service.py` (incl DATA-10 projection w/ band-filter + anchor, N4/F2) + `tests/test_no_back_edges_discovery.py` (layering guard) + `tests/test_discovery_composition.py` (web composition + import-before-load lazy resolution, DC12/F1) → **134-06** (Wave 4); `test_discovery_flag.py`, `test_discovery_loader.py` (exact-basename manifest + siblings-ignored + full fail-closed matrix, DC5/DC11) → **134-05** (Wave 3); `test_discovery_release_contract.py` → **134-03** (Wave 2). (Loader tests model on the existing `atlas_assets` tests.)
 - [x] A benchmark/RSS script feeding `discovery-budgets.md` (measurable PERF-01 numbers measured, not asserted; exact manifest-resolved DB path, no glob; later-surface caps PENDING) → **134-08** (Wave 5); the budgets doc itself created in **134-02** (Wave 1).
-- [x] A tiny committed fixture `discovery.db` (+ manifest.json) builder (deterministic, masking-safe synthetic data, frozen constant timestamps; per-side drift fields; source_corpus on claims; unit×work projection scenario) so CI never needs the 3.1 GB research DB → **134-03** (Wave 2).
+- [x] A tiny committed fixture `discovery.db` (+ manifest.json) builder (deterministic, masking-safe synthetic data, frozen constant timestamps; per-side drift fields; source_corpus on claims matching the parent work; unit×work projection scenario) so CI never needs the 3.1 GB research DB → **134-03** (Wave 2).
 
 ---
 
@@ -124,7 +130,7 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 | Per-family E1 band-source file + join key + raw->band translation + TOTAL flank->claim_type routing (OQ1/D1/DC9) confirmation | DATA-02 | Domain fact, not a computable invariant; CERT-01 (Phase 135) freezes against this frame (RESEARCH §OQ1 / A5) | Owner/researcher confirms, PER CLAIM FAMILY (MS-MS AND work-witness), the E1 file + join key + band translation + a total routing at the 134-01 Task 2 blocking checkpoint before the schema sections are frozen |
 | Neutral-title owner review (approve/hand-pick M-source literary subset) | DATA-04 | Human curation gate — fail-closed; owner is the authority (D-06/D-08). Guarantee = only approved neutral columns ship (not a token scan of the artifact) | Owner edits the generated review artifact (CANDIDATE schema); only approved rows (APPROVED schema) re-distill; unreviewed = excluded |
 | PERF-01 latency/RSS budgets on the real prod-scale `.db` | PERF-01 | PERF-01 mandates measurement (not assertion); prod box RSS not reproducible in CI; later-surface caps unmeasurable this phase | Run the benchmark/RSS script over the built `discovery.db` (exact manifest-resolved path); record measurable actuals in `discovery-budgets.md`; leave later-surface caps PENDING |
-| Deploy: temp-upload → verify → ATOMIC manifest swap → code | DATA-08 | Requires live server access + asset-first deploy posture | Follow the documented rollback (repoint manifest) + rebuild recipe on the web box; every command uses the exact manifest-resolved filename (no glob; N6) |
+| Deploy: temp-upload → STAGE candidate manifest → verify the STAGED target → ATOMIC live-manifest swap → code | DATA-08 | Requires live server access + asset-first deploy posture | Follow the documented rollback (repoint the live manifest to the prior basename) + rebuild recipe on the web box; pre-swap verify resolves the db from the STAGED manifest (NEVER the live/old one); every command uses the exact manifest-resolved filename (staged pre-swap, live after; no glob; N6) |
 
 ---
 
@@ -137,6 +143,6 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 - [x] Feedback latency < 60s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** 2026-07-21 (updated for Codex pre-flight rework D1–D7 / DC1–DC14 + round-2 rework D3/DC3/DC5/DC7/DC12/DC13/N1–N6)
+**Approval:** 2026-07-21 (updated for Codex pre-flight rework D1–D7 / DC1–DC14 + round-2 rework D3/DC3/DC5/DC7/DC12/DC13/N1–N6 + round-3 polish F1–F4)
 </content>
 </invoke>
