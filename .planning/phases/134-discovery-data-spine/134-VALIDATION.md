@@ -63,8 +63,8 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 
 ## Per-Task Verification Map
 
-> Task ID / Plan / Wave filled from the FINAL 8-plan / 5-wave breakdown (incl. the 134-01 OQ1
-> checkpoint and the 134-04 works/claims/units split). Requirement → observable-signal → command rows
+> Task ID / Plan / Wave filled from the FINAL 8-plan / 5-wave breakdown (incl. the 134-01 id/router split — OQ1 RESOLVED via the CONTEXT.md CONTRACT
+> CORRECTION C-4, no live checkpoint — and the 134-04 works/claims/units split). Requirement → observable-signal → command rows
 > are pre-derived from research + the Codex-rework fixes. Status is execution-time (⬜ until the owning plan runs).
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
@@ -76,13 +76,13 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 | Task 1 | 134-03 | 2 | DATA-03 | T-134-tamper | Per-side drift fields present + non-null (work_witness_pages text_layer+hash; ms_ms_alignments text_layer_a/b + hash_a/b); a nulled per-side hash FAILS (N1) | unit | `pytest tests/test_discovery_release_contract.py -k drift` | ❌ (134-03) | ⬜ pending |
 | Task 1 (verify) / Task 3 (corrupt) | 134-03 | 2 | DATA-03 | T-134-tamper | `work_witness_claims.source_corpus` == the joined `works.source_corpus`; a valid-but-mismatched code FAILS (F4) | unit | `pytest tests/test_discovery_release_contract.py -k source_corpus` | ❌ (134-03) | ⬜ pending |
 | Task 1 (verifier) | 134-03 | 2 | DATA-01/02/03/08/10 | T-134-tamper | Path-parameterized verifier runs ALL invariants over any DB path (incl source_corpus cross-table consistency, F4); frame-hash takes --expected-frame-hash (DC7) | integration | `python scripts/verify_discovery_sidecar.py <fixture-db> --expected-frame-hash <pinned-golden>` exit 0 | ❌ (134-03) | ⬜ pending |
-| Task 4 | 134-01 | 1 | DATA-01/02 | — | Deterministic `claim_id`/`unit_id` stable across rebuilds | unit (golden) | `pytest tests/test_discovery_ids.py::test_claim_id_golden` | ❌ (134-01) | ⬜ pending |
-| Task 4 | 134-01 | 1 | DATA-03 | T-134-leak | `validate_source_corpus_code` raises on non-codes; NO raw literal committed (DC1) | unit | `pytest tests/test_discovery_ids.py::test_validate_source_corpus_code` | ❌ (134-01) | ⬜ pending |
-| Task 4 | 134-01 | 1 | DATA-01 | — | `claim_type_for_flank` TOTAL incl edge + ambig -> one code or EXCLUDE (DC9) | unit | `pytest tests/test_discovery_ids.py::test_claim_type_routing_total` | ❌ (134-01) | ⬜ pending |
+| Task 3 | 134-01 | 1 | DATA-01/02 | — | Deterministic `claim_id`/`unit_id` stable across rebuilds | unit (golden) | `pytest tests/test_discovery_ids.py::test_claim_id_golden` | ❌ (134-01) | ⬜ pending |
+| Task 3 | 134-01 | 1 | DATA-03 | T-134-leak | `validate_source_corpus_code` raises on non-codes; NO raw literal committed (DC1) | unit | `pytest tests/test_discovery_ids.py::test_validate_source_corpus_code` | ❌ (134-01) | ⬜ pending |
+| Task 3 | 134-01 | 1 | DATA-01 | — | `claim_type_for_flank` TOTAL incl edge + ambig -> one code or EXCLUDE (DC9) | unit | `pytest tests/test_discovery_ids.py::test_claim_type_routing_total` | ❌ (134-01) | ⬜ pending |
 | Task 1 | 134-04 | 3 | DATA-01 | — | Opaque work_id stable across two builds (crosswalk-anchored; absent crosswalk aborts) (DC2) | unit | `pytest tests/test_discovery_build.py -k work_id_stable` | ❌ (134-04) | ⬜ pending |
 | Task 1 | 134-04 | 3 | DATA-04 | T-134-leak | Only owner-approved neutral columns reach works rows; two CSV schemas + exact headers + `--from-approved` round-trip (D6/DC13/N5) | unit | `pytest tests/test_discovery_build.py -k "approved or header"` | ❌ (134-04) | ⬜ pending |
 | Task 2 | 134-04 | 3 | DATA-01/03 | — | MS-MS claim_type <- flank_class; work-witness <- track1 semantics; `shadowed_by IS NULL` on track1_matches ONLY; frozen chain columns (D3); source_corpus on both claim tables (N3); per-side drift populated (N1) | unit | `pytest tests/test_discovery_build.py -k claims` | ❌ (134-04) | ⬜ pending |
-| Task 4 | 134-04 | 3 | DATA-05 | T-134-leak | Blocking DB scan gates finalization; registered-token artifact scan surfaces but does NOT block (DC13) | unit | `pytest tests/test_discovery_build.py -k "orchestrat or artifact"` | ❌ (134-04) | ⬜ pending |
+| Task 3 | 134-04 | 3 | DATA-05 | T-134-leak | Blocking DB scan gates finalization; registered-token artifact scan surfaces but does NOT block (DC13) | unit | `pytest tests/test_discovery_build.py -k "orchestrat or artifact"` | ❌ (134-04) | ⬜ pending |
 | Task 2 | 134-03 | 2 | DATA-02 | — | Exactly one band per claim key post-precedence; within-key only (multi-work-per-MS preserved) | unit | `pytest tests/test_discovery_bands.py::test_one_band_per_key` | ❌ (134-03) | ⬜ pending |
 | Task 3 | 134-03 | 2 | DATA-02 | — | Fixture logical `frame_content_hash` == pinned golden AND == meta; membership-based (band mutation / claim drop changes it) (DC3/N2/DC10) | integration | `pytest tests/test_discovery_frame.py::test_frame_hash_golden` | ❌ (134-03) | ⬜ pending |
 | Task 3 | 134-03 | 2 | DATA-08 | T-134-tamper | `PRAGMA foreign_key_check` clean + child-row composite UNIQUE enforced (DC4) | unit | `pytest tests/test_discovery_release_contract.py` | ❌ (134-03) | ⬜ pending |
@@ -127,7 +127,7 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Per-family E1 band-source file + join key + raw->band translation + TOTAL flank->claim_type routing (OQ1/D1/DC9) confirmation | DATA-02 | Domain fact, not a computable invariant; CERT-01 (Phase 135) freezes against this frame (RESEARCH §OQ1 / A5) | Owner/researcher confirms, PER CLAIM FAMILY (MS-MS AND work-witness), the E1 file + join key + band translation + a total routing at the 134-01 Task 2 blocking checkpoint before the schema sections are frozen |
+| Per-family E1 band-source file + join key + raw->band translation + TOTAL flank->claim_type routing (OQ1/D1/DC9) confirmation | DATA-02 | Domain fact, not a computable invariant; CERT-01 (Phase 135) freezes against this frame (RESEARCH §OQ1 / A5) | OQ1 was CONFIRMED via the CONTEXT.md CONTRACT CORRECTION (C-4 — the per-evidence_source band-source map matches the schema doc's OQ1(A) proposal verbatim); there is NO live checkpoint (134-01 Task 2 is the id/router module, not a checkpoint). 134-01 Task 1 freezes the C-4 band-source map + the TOTAL flank→claim_type routing directly; owner confirmation is recorded in CONTEXT.md C-1..C-9 |
 | Neutral-title owner review (approve/hand-pick M-source literary subset) | DATA-04 | Human curation gate — fail-closed; owner is the authority (D-06/D-08). Guarantee = only approved neutral columns ship (not a token scan of the artifact) | Owner edits the generated review artifact (CANDIDATE schema); only approved rows (APPROVED schema) re-distill; unreviewed = excluded |
 | PERF-01 latency/RSS budgets on the real prod-scale `.db` | PERF-01 | PERF-01 mandates measurement (not assertion); prod box RSS not reproducible in CI; later-surface caps unmeasurable this phase | Run the benchmark/RSS script over the built `discovery.db` (exact manifest-resolved path); record measurable actuals in `discovery-budgets.md`; leave later-surface caps PENDING |
 | Deploy: temp-upload → STAGE candidate manifest → verify the STAGED target → ATOMIC live-manifest swap → code | DATA-08 | Requires live server access + asset-first deploy posture | Follow the documented rollback (repoint the live manifest to the prior basename) + rebuild recipe on the web box; pre-swap verify resolves the db from the STAGED manifest (NEVER the live/old one); every command uses the exact manifest-resolved filename (staged pre-swap, live after; no glob; N6) |
@@ -144,5 +144,3 @@ recorded in `discovery-frames.md`) and requires recomputed == expected == `meta.
 - [x] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** 2026-07-21 (updated for Codex pre-flight rework D1–D7 / DC1–DC14 + round-2 rework D3/DC3/DC5/DC7/DC12/DC13/N1–N6 + round-3 polish F1–F4)
-</content>
-</invoke>

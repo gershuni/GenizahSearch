@@ -488,7 +488,7 @@ def scan_sqlite(db_path, patterns) -> list[Issue]:
 
 **If this table looks long:** it reflects honest scoping — the distillation's *semantic* choices (band source, claim-type routing, work provenance) are owned by the researcher/owner and the E1 track (Phase 135), and the planner should schedule a short confirmation with the researcher (A3/A4/A5) before Wave 1 freezes the schema doc.
 
-## Open Questions
+## Open Questions (RESOLVED — see CONTEXT.md CONTRACT CORRECTION + discovery-sidecar-schema-v1.md OQ2/OQ3)
 
 1. **Which E1 artifact is the authoritative band source for the distillation?**
    - What we know: bands + the frozen frame live in the E1 track (`e1_band_frame.py`, `e1_r3_frame.jsonl`, `e1_r3_freeze.json`, `e1_certification_registry.json`); R-A/R-B/R-CANON precision values are recorded there; `accepted_pairs_canonmask` carries the raw signals (`flank_class`, `density`, `aligned_len`) but not the final band label.
