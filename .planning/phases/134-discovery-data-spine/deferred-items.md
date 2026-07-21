@@ -38,3 +38,16 @@ committed). Re-ran the gate after the fix: exit 0.
   addressed. A dedicated `/gsd-quick` or manual `--scan-repo` pass over the
   full `tmp/` tree is recommended before any of those files are ever
   staged.
+
+## Future work — catalog/title/FGP-identity propagation (owner-flagged 2026-07-21, NOT built)
+
+A THIRD work-identification mechanism the SEED-029 spike never investigated,
+surfaced by the owner at the 134-01 contract-correction gate: use a MS-to-MS
+(Track-2) connection + an EXTERNAL catalog/title/FGP identity on a connected
+fragment to identify works that are NOT in the reference corpus (potentially
+very prolific — most Genizah works). Q2-as-built only propagates identities
+that originate in Track-1 (work must be in the reference corpus); this pathway
+does not. RESERVED in the v1 contract as a future `evidence_source =
+catalog_propagated` (added via a versioned rebuild, never a v1 migration —
+see 134-CONTEXT C-9). Documented in the `project_seed029_catalog_identity_propagation`
+memory. Candidate future spike/phase (v9 milestone 135-139); does NOT ship in 134.
