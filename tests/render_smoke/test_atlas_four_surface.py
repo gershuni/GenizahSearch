@@ -176,6 +176,20 @@ def _html_contents(user) -> list[str]:
         return [(e.content or "") for e in ElementFilter(kind=ui.html)]
 
 
+def _has_atlas_canvas(user) -> bool:
+    """True iff a native <canvas id="atlas-canvas"> element rendered.
+
+    The canvas is a ui.element('canvas') (NOT ui.html — whose default client-side
+    sanitize strips the id), so it carries no .content string; inspect the element
+    tree for the id prop instead.
+    """
+    with user._client:
+        for el in user._client.elements.values():
+            if (getattr(el, "_props", {}) or {}).get("id") == "atlas-canvas":
+                return True
+    return False
+
+
 def _nav_badge_present(user) -> bool:
     """True iff a label carrying the unique atlas nav badge class is rendered.
     The atlas nav item is the ONLY badged nav item, and the page-chrome 'Beta'
@@ -218,8 +232,7 @@ def test_page_surface(state, monkeypatch):
 
     async def driver(user, client):
         await user.open("/atlas")
-        htmls = _html_contents(user)
-        has_canvas = any("atlas-canvas" in c for c in htmls)
+        has_canvas = _has_atlas_canvas(user)
         labels = _label_texts(user)
         has_unavailable = any("temporarily unavailable" in t.lower() for t in labels)
 

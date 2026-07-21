@@ -154,6 +154,44 @@ def create_page():
                     ui.icon(icon_name).classes('text-sm').style('color: var(--primary-600);')
                     ui.label(label).classes('text-xs').style('color: var(--text-secondary);')
 
+        # === Genizah Atlas Launch Announcement (#7, 2026-07-21) — prominent, claim-free ===
+        # A loud, above-the-fold banner announcing the new beta feature. Kept
+        # separate from — and more prominent than — the subtle teaser card lower
+        # on the page (the long-run home for the link). Same atlas_preview_available()
+        # gate as the /atlas route + nav + data routes, so a flag-ON/asset-missing
+        # window never advertises a broken link. Claim-free: no counts, no
+        # "identifications" — just names the interactive map.
+        if atlas_preview_available():
+            _adir = 'rtl' if is_rtl() else 'ltr'
+            with ui.element('div').classes(
+                'w-full mt-2 rounded-xl overflow-hidden cursor-pointer hover:shadow-2xl transition-all'
+            ).props('role=button tabindex=0').style(
+                'background: linear-gradient(120deg, #0f766e 0%, #14b8a6 45%, #6366f1 100%); '
+                'box-shadow: 0 6px 24px rgba(20,184,166,0.28);'
+            ).on('click', lambda: ui.navigate.to('/atlas')
+                 ).on('keydown.enter', lambda: ui.navigate.to('/atlas')
+                      ).on('keydown.space', lambda: ui.navigate.to('/atlas')).mark('atlas-announcement'):
+                with ui.row().classes('w-full items-center gap-4 px-6 py-4 flex-wrap').style(
+                    f'direction: {_adir};'
+                ):
+                    ui.icon('hub').classes('text-4xl text-white')
+                    with ui.column().classes('gap-1 flex-1 min-w-0'):
+                        with ui.row().classes('items-center gap-2 flex-wrap'):
+                            ui.label(tr('New')).classes('px-2 py-0.5 rounded-full text-xs font-bold').style(
+                                'background: rgba(255,255,255,0.92); color: #0f766e; letter-spacing: 0.05em;'
+                            )
+                            h2(tr('The Visual Genizah Atlas'), classes='text-xl font-bold text-white',
+                               style='margin: 0;')
+                            ui.label(tr('Beta')).classes('px-2 py-0.5 rounded-full text-xs font-semibold').style(
+                                'background: rgba(255,255,255,0.20); color: white;'
+                            )
+                        ui.label(
+                            tr('A new interactive map of textual connections across the Cairo Genizah.')
+                        ).classes('text-sm text-white/90')
+                    ui.button(tr('Explore the Genizah Atlas'), icon='travel_explore').props(
+                        'unelevated color=white text-color=teal-9'
+                    ).classes('font-bold')
+
         # === Corpus Stats Band (SEED-023) — advertises the scale of the corpus ===
         # Five HARDCODED headline numbers (web/stats_service.CORPUS_STATS). Rendered
         # synchronously — no async/placeholder/readiness poll, so no layout shift.
@@ -433,8 +471,8 @@ def create_page():
                         ):
                             ui.icon('hub').classes('text-3xl text-white')
                             with ui.column().classes('gap-0'):
-                                h3(tr('Connections Atlas'), classes='text-base font-bold text-white')
-                                ui.label(tr('Explore the Connections Atlas')).classes('text-xs text-white/80')
+                                h3(tr('The Genizah Atlas'), classes='text-base font-bold text-white')
+                                ui.label(tr('Explore the Genizah Atlas')).classes('text-xs text-white/80')
 
                         with ui.column().classes('p-4 gap-3'):
                             ui.label(

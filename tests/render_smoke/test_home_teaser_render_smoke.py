@@ -283,9 +283,10 @@ def test_teaser_present_when_available_he_real_hebrew_values(monkeypatch):
             "Home teaser (HE) FAIL: raw English 'Beta' leaked under the "
             "Hebrew UI -- the tr() key must resolve to the Hebrew value."
         )
-        # The Hebrew title/CTA values (from genizah_translations.py, 133-03).
-        assert any('אטלס החיבורים' in t for t in texts), (
-            f"Home teaser (HE) FAIL: Hebrew 'אטלס החיבורים' title not found. Texts: {texts}"
+        # The Hebrew title value (renamed 2026-07-21: the card uses the short
+        # sidebar name 'The Genizah Atlas' -> 'אטלס הגניזה').
+        assert any('אטלס הגניזה' in t for t in texts), (
+            f"Home teaser (HE) FAIL: Hebrew 'אטלס הגניזה' title not found. Texts: {texts}"
         )
 
         # Claim-free in Hebrew too: no digits, no HE claim-level substrings

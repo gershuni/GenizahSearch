@@ -4597,6 +4597,90 @@ TRANSLATIONS.update({
         "אל תשאל שוב",
 })
 
+# === Discovery Review deck (SEED-029 / Road 2 — same-work discovery review) ===
+# English is the source/key; Hebrew pulled from here by the deck builder and by
+# the future in-app R2-2 component via tr(). Reuses existing keys where present
+# (Author, Score, Bibliography, All, Sort, Discovery, Mishnah, Loading..., Next,
+# Suggestion, Continuation, Citation, Tosefta, Judeo-Arabic).
+TRANSLATIONS.update({
+    # bar
+    "Discovery Register": "מאגר תגליות",
+    "Card": "כרטיס",
+    "Prev": "הקודם",
+    "Next ungraded": "הבא ללא דירוג",
+    "Browse server:": "שרת עיון:",
+    "Graded": "דורגו",
+    "Ungraded": "לא דורגו",
+    "current:": "נוכחי:",
+    "of {total} · {removed} removed (edition source)":
+        "מתוך {total} · {removed} הוסרו (מקור מהדורה)",
+    # rail facet headers / controls
+    "Relation": "סוג יחס",
+    "Corpus type": "סוג קורפוס",
+    "Genre / work": "סוגה / חיבור",
+    "Search genre/work…": "חיפוש סוגה/חיבור…",
+    "Search author…": "חיפוש מחבר…",
+    "Grade state": "מצב דירוג",
+    "Score (desc)": "ציון (יורד)",
+    "Work, then score": "חיבור, ואז ציון",
+    "Clear filters": "נקה סינון",
+    # suggestion / grade vocab
+    "Witness": "עד נוסח",
+    "Other": "אחר",
+    "Known": "ידוע",
+    "Other (citation/shared source)": "אחר (ציטוט/מקור משותף)",
+    "Needs review": 'צ"ע',
+    "Print / late": "דפוס/מאוחר",
+    # relation (flank) facet values
+    "Mixed": "משולב",
+    "Undetermined": "לא הוכרע",
+    # corpus-type facet values
+    "Bible": "מקרא",
+    "Targum": "תרגום",
+    "Bavli": "בבלי",
+    "Yerushalmi": "ירושלמי",
+    "Liturgy": "ליטורגיה",
+    "M-source": "M-source",
+    "Sefaria": "ספריא",
+    # bibliography facet values
+    "Has bibliography": "יש ביבליוגרפיה",
+    "No bibliography": "ללא ביבליוגרפיה",
+    # card body
+    "letters": "אותיות",
+    "witnesses": "עדים",
+    "⚠ possibly already catalogued:": "⚠ ייתכן שכבר בקטלוג:",
+    "🔖 Known M-source witness:": "🔖 מסירת M-source ידועה:",
+    "(→ usually 'Known')": "(→ לרוב ״ידוע״)",
+    "NLI catalog:": "קטלוג NLI:",
+    "Open full browse ↗": "פתח בעיון מלא ↗",
+    "Parallel in the edition": "המקבילה במהדורה",
+    "Open in Sefaria ↗": "פתח בספריא ↗",
+    "Open in M-source ↗": "פתח ב-M-source ↗",
+    "Open source ↗": "פתח מקור ↗",
+    "(not located for display)": "(לא אותרה לתצוגה)",
+    "Genizah excerpt (index text — may differ from the live transcription at right):":
+        "קטע הגניזה (טקסט האינדוקס — עשוי להיות שונה מהתמלול החי מימין):",
+    # flank verdict labels (card)
+    "Strong witness (continuation)": "עד־נוסח חזק (רצף)",
+    "Continuation to work": "רצף לחיבור",
+    "Mixed text": "טקסט משולב",
+    "Undetermined (short run)": "לא הוכרע (רצף קצר)",
+    "Possibly citation": "אולי ציטוט",
+    "Citation (rejected)": "ציטוט (דחוי)",
+    # suggestion reasons (suggest_bucket)
+    "Witness (title predicts content)": "עד נוסח (הכותרת צופה את התוכן)",
+    "Witness (likely catalogued)": "עד נוסח (כנראה בקטלוג)",
+    "Other (mixed text)": "אחר (טקסט משולב)",
+    "Other (citation — catalogued as {w})": "אחר (ציטוט — הקטלוג מזהה כ״{w}״)",
+    # grade state / misc
+    "(prior)": "(דירוג קודם)",
+    "Select a card…": "בחר/י כרטיס…",
+    "Loading browse…": "טוען עיון…",
+    "Load error": "שגיאת טעינה",
+    "(no cards in current filter)": "(אין כרטיסים בסינון הנוכחי)",
+    "Free note (autosaved)": "הערה חופשית (נשמר אוטומטית)",
+})
+
 # === Connections Atlas / Visual Atlas Preview (Phase 133, ATLAS-01) ===
 # English is the source/key; every NEW string this phase introduces gets a real
 # Hebrew value here so web/pages/atlas.py chrome (133-03), the renderer
@@ -4633,6 +4717,28 @@ TRANSLATIONS.update({
     "a claim-free, algorithmically laid-out overview.":
         "מפת תצוגה מקדימה של חיבורים טקסטואליים בגניזת קהיר — "
         "סקירה אלגוריתמית, ללא טענות זיהוי.",
+    # === Post-launch corrections (2026-07-21 owner feedback) ===
+    # Rename: sidebar uses the short name, the page title/announcement the full.
+    "The Genizah Atlas": "אטלס הגניזה",
+    "The Visual Genizah Atlas": "אטלס הגניזה החזותי",
+    "Explore the Genizah Atlas": "סיור באטלס הגניזה",
+    # elaborated intro / how-to (2026-07-21) — two paragraphs; replaces the old one-liner.
+    "A graphical view of textual connections between manuscripts across the Genizah. Manuscripts containing similar text are grouped together into clusters, and connections between manuscripts are marked with a thin line. Alongside the clusters and manuscripts, catalogue information from the National Library and the Friedberg Genizah Project is shown. You can zoom in and out, focus on a particular cluster, and open a preview of a specific manuscript to read it. For the best experience, we recommend viewing the atlas on a computer in full-screen mode.": "תצוגה גרפית של קשרים טקסטואליים בין כתבי יד ברחבי הגניזה. כתבי יד המכילים טקסט דומה מקובצים יחד לאשכולות. קשרים בין כתבי יד מסומנים בקו דק. לצד הקבוצות וכתבי היד מובא המידע הקטלוגי מהספרייה הלאומית ומפרויקט הגניזה של פרידברג. ניתן להתמקד או להתרחק, לעיין בקבוצה מסוימת, לפתוח בתצוגה מקדימה כתב יד מסוים ולעיין בו. לנוחות מרבית, מומלץ לעיין באטלס מן המחשב ובמצב מסך מלא.",
+    "Use the atlas to get an overall sense of the structure of the Genizah corpus and the connections within it, and to discover new, previously unknown connections. For example, if within a cluster of linguistics manuscripts you find a manuscript identified as 'Biblical fragments,' this manuscript too may be a work of linguistics.": 'השתמשו באטלס כדי להתרשם כללית ממבנה קורפוס הגניזה ומן הקשרים בתוכו, וכן למציאת קשרים חדשים ולא ידועים. לדוגמה, אם מצאתם בקבוצה המכילה כתבי יד של בלשנות כתב יד המזוהה כ"קטעי מקרא", ייתכן שגם כתב יד זה הוא חיבור בבלשנות.',
+    # new renderer controls (#3 fullscreen, #4 domain-label toggle)
+    "Full screen": "מסך מלא",
+    "Exit full screen": "יציאה ממסך מלא",
+    "Hide domain labels": "הסתר שמות תחומים",
+    "Show domain labels": "הצג שמות תחומים",
+    # in-atlas browse pane (#6) — click a dot to open the manuscript in a drawer
+    # (an ?embed=1 iframe) instead of leaving the atlas.
+    "Manuscript viewer": "מציג כתב היד",
+    "Open full browse ↗": "פתח בעיון מלא ↗",
+    # homepage launch announcement (#7)
+    "New": "חדש",
+    "A new interactive map of textual connections across the Cairo Genizah.":
+        "מפה אינטראקטיבית חדשה של חיבורים טקסטואליים ברחבי גניזת קהיר.",
+    "The Genizah Atlas is temporarily unavailable": "אטלס הגניזה אינו זמין כרגע",
     # error / unavailable copy
     "The Connections Atlas is temporarily unavailable": "אטלס החיבורים אינו זמין כרגע",
     "The preview will appear here as soon as it is ready.":

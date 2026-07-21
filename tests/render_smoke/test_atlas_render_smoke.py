@@ -128,6 +128,22 @@ def _column_directions(user) -> list[str]:
     return dirs
 
 
+def _canvas_element(user):
+    """The native <canvas id='atlas-canvas'> element, or None.
+
+    It is a ui.element('canvas') (NOT ui.html — whose default client-side
+    sanitize strips the id, so getElementById('atlas-canvas') would never
+    resolve and the renderer's mount-poll would time out -> "could not be
+    loaded"). Such an element carries no .content string, so inspect the
+    element tree for the id prop rather than scanning ui.html contents.
+    """
+    with user._client:
+        for e in user._client.elements.values():
+            if (getattr(e, '_props', {}) or {}).get('id') == 'atlas-canvas':
+                return e
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -149,16 +165,24 @@ def test_atlas_renders_chrome_canvas_and_decoder_injection():
             "Atlas render FAIL: honesty banner text not found in any label."
         )
 
-        # CLS-reserved canvas: a ui.html carrying #atlas-canvas with a FIXED
-        # 720px height (not just max-height).
-        htmls = _html_contents(user)
-        canvas_html = next((c for c in htmls if 'atlas-canvas' in c), None)
-        assert canvas_html is not None, (
-            "Atlas render FAIL: no #atlas-canvas element rendered."
+        # CLS-reserved canvas: a native <canvas id="atlas-canvas"> element with a
+        # FIXED 720px height (not just max-height). It must be ui.element('canvas'),
+        # NOT ui.html — whose client-side sanitize strips the id, breaking the
+        # renderer's getElementById mount ("could not be loaded"). Asserting the
+        # element + id + native tag guards that regression at the render layer.
+        from web.pages.atlas import _ATLAS_CANVAS_HEIGHT_PX
+        canvas = _canvas_element(user)
+        assert canvas is not None, (
+            "Atlas render FAIL: no <canvas id='atlas-canvas'> element rendered."
         )
-        assert '720px' in canvas_html, (
-            "Atlas render FAIL: canvas is not CLS-reserved with a fixed 720px "
-            f"height. Canvas html: {canvas_html!r}"
+        assert getattr(canvas, 'tag', None) == 'canvas', (
+            "Atlas render FAIL: #atlas-canvas is not a native <canvas> element "
+            "(must be ui.element('canvas'), not ui.html which strips the id)."
+        )
+        cstyle = getattr(canvas, '_style', None) or {}
+        assert cstyle.get('height') == f'{_ATLAS_CANVAS_HEIGHT_PX}px', (
+            "Atlas render FAIL: canvas is not CLS-reserved with a fixed "
+            f"{_ATLAS_CANVAS_HEIGHT_PX}px height. style={cstyle!r}"
         )
 
         # Decoder module + bootstrap injected into the page body.

@@ -83,6 +83,13 @@ def _renderer_labels() -> dict:
         'zoomIn': tr('Zoom in'),
         'zoomOut': tr('Zoom out'),
         'resetView': tr('Reset view'),
+        'fullScreen': tr('Full screen'),
+        'exitFullScreen': tr('Exit full screen'),
+        'hideDomainLabels': tr('Hide domain labels'),
+        'showDomainLabels': tr('Show domain labels'),
+        'close': tr('Close'),
+        'openFullBrowse': tr('Open full browse ↗'),
+        'manuscriptViewer': tr('Manuscript viewer'),
         'title': tr('Title'),
         'shelfmark': tr('Shelfmark'),
         'domain': tr('Domain'),
@@ -138,15 +145,19 @@ def create_atlas_page() -> None:
     ):
         # --- Header: title + Beta badge -----------------------------------
         with ui.row().classes('w-full items-center gap-3 flex-wrap'):
-            h1(tr('Connections Atlas'))
+            h1(tr('The Visual Genizah Atlas'))
             ui.label(tr('Beta')).classes('px-2 py-0.5 rounded-full text-xs font-bold').style(
                 'background: var(--primary-600); color: white; letter-spacing: 0.05em;'
             )
 
-        # --- One-line intro (names it a preview of the connections work) ---
+        # --- Intro / how-to (elaborated 2026-07-21) — describes the map, its
+        #     interactions, and how to read it to spot connections. Two paragraphs.
         ui.label(
-            tr('A preview map of textual connections across the connected Cairo Genizah corpus.')
-        ).classes('text-base').style('color: var(--text-secondary);')
+            tr("A graphical view of textual connections between manuscripts across the Genizah. Manuscripts containing similar text are grouped together into clusters, and connections between manuscripts are marked with a thin line. Alongside the clusters and manuscripts, catalogue information from the National Library and the Friedberg Genizah Project is shown. You can zoom in and out, focus on a particular cluster, and open a preview of a specific manuscript to read it. For the best experience, we recommend viewing the atlas on a computer in full-screen mode.")
+        ).classes('text-sm').style('color: var(--text-secondary); line-height: 1.7;')
+        ui.label(
+            tr("Use the atlas to get an overall sense of the structure of the Genizah corpus and the connections within it, and to discover new, previously unknown connections. For example, if within a cluster of linguistics manuscripts you find a manuscript identified as 'Biblical fragments,' this manuscript too may be a work of linguistics.")
+        ).classes('text-sm').style('color: var(--text-secondary); line-height: 1.7;')
 
         # --- Standing honesty banner (D-15) --------------------------------
         # Positions & clusters are algorithmic; proximity is not physical
@@ -170,10 +181,16 @@ def create_atlas_page() -> None:
             f'background: var(--bg-secondary); border: 1px solid var(--border-light);'
         ).props('id="atlas-canvas-box"'):
             # The canvas the renderer draws into. Sized to fill the reserved box.
-            ui.html(
-                f'<canvas id="atlas-canvas" '
-                f'style="display:block; width:100%; height:{_ATLAS_CANVAS_HEIGHT_PX}px;" '
-                f'aria-label="{tr("Connections Atlas")}"></canvas>'
+            # Rendered as a native NiceGUI element (mirrors the proven puzzle
+            # Fabric.js canvas at web/pages/puzzle.py) — NOT ui.html, whose
+            # default sanitize=True (client-side setHTML/DOMPurify) strips the
+            # id, so document.getElementById('atlas-canvas') never resolves and
+            # the renderer's whenCanvasReady poll times out ("could not be
+            # loaded"). Setting id via .props() keeps it queryable in the DOM.
+            ui.element('canvas').props('id=atlas-canvas').props(
+                f'aria-label="{tr("The Visual Genizah Atlas")}"'
+            ).style(
+                f'display:block; width:100%; height:{_ATLAS_CANVAS_HEIGHT_PX}px;'
             )
             # Loading placeholder (centered), shown until 133-04's renderer draws.
             # The JS renderer removes this element (by id) on a successful first

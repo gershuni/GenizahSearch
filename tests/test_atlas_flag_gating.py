@@ -267,16 +267,36 @@ def test_real_atlas_chrome_renders_banner_and_cls_reserved_canvas():
 
     set_language("en")
     texts: list[str] = []
+    canvas_info: dict = {"present": False, "tag": None, "style": {}}
     with Client(ui.page("/_atlas_chrome_probe")) as client:
         with client:
             create_atlas_page()
         texts.extend(_collect_texts(client))
+        # The canvas is a native ui.element('canvas') (NOT ui.html — whose
+        # client-side sanitize strips the id, so getElementById('atlas-canvas')
+        # would never resolve -> the renderer's mount-poll times out -> "could
+        # not be loaded"). It carries no .text/.content, so _collect_texts can't
+        # see it; capture it from the element tree HERE, inside the client scope.
+        _cv = next(
+            (el for el in client.elements.values()
+             if (getattr(el, "_props", {}) or {}).get("id") == "atlas-canvas"),
+            None,
+        )
+        canvas_info["present"] = _cv is not None
+        canvas_info["tag"] = getattr(_cv, "tag", None)
+        canvas_info["style"] = (getattr(_cv, "_style", None) or {})
 
     blob = "\n".join(texts)
-    assert "Connections Atlas" in blob
+    assert "The Visual Genizah Atlas" in blob
     assert "algorithmically derived" in blob, "honesty banner (D-15) must render"
-    assert "atlas-canvas" in blob, "the <canvas> container must render"
-    assert f"height:{_ATLAS_CANVAS_HEIGHT_PX}px" in blob, "canvas must reserve a fixed height (CLS-safe)"
+    assert canvas_info["present"], "the <canvas id=atlas-canvas> element must render"
+    assert canvas_info["tag"] == "canvas", (
+        "atlas-canvas must be a native <canvas> element, not ui.html "
+        "(sanitize would strip the id)"
+    )
+    assert canvas_info["style"].get("height") == f"{_ATLAS_CANVAS_HEIGHT_PX}px", (
+        f"canvas must reserve a fixed height (CLS-safe); style={canvas_info['style']!r}"
+    )
 
 
 # ===========================================================================
@@ -568,7 +588,8 @@ def test_stale_manifest_transition_after_rebake(ready_asset):
 # GROUP 6 — every new string has a real Hebrew translation value
 # ===========================================================================
 _SAMPLE_HE_KEYS = [
-    "Connections Atlas",
+    "The Genizah Atlas",
+    "The Visual Genizah Atlas",
     "Beta",
     "Loading the atlas…",
     "Color by domain",
@@ -578,8 +599,13 @@ _SAMPLE_HE_KEYS = [
     "Connections",
     "Search by title or shelfmark…",
     "Continuation (same-work evidence)",
-    "Explore the Connections Atlas",
-    "The Connections Atlas is temporarily unavailable",
+    # post-launch controls + announcement (2026-07-21)
+    "Full screen",
+    "Hide domain labels",
+    "Show domain labels",
+    "New",
+    "Explore the Genizah Atlas",
+    "The Genizah Atlas is temporarily unavailable",
     "The atlas could not be loaded.",
 ]
 

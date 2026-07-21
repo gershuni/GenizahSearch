@@ -1317,10 +1317,10 @@ def create_layout():
                 # Phase 133 (ATLAS-01, MEDIUM-6): gate on the SAME availability
                 # predicate as the /atlas route + data routes (NOT just the flag)
                 # so a flag-ON/asset-missing window never advertises a broken
-                # link. "Connections Atlas" / "Beta" — never "Discoveries"
+                # link. "The Genizah Atlas" / "Beta" — never "Discoveries"
                 # (Pitfall #8: the existing /discoveries nav item is unrelated).
                 if atlas_preview_available():
-                    nav_items.append(('/atlas', 'hub', tr('Connections Atlas'), tr('Beta')))
+                    nav_items.append(('/atlas', 'hub', tr('The Genizah Atlas'), tr('Beta')))
 
                 for path, icon, label, badge in nav_items:
                     is_active = current_page == path
@@ -1866,8 +1866,13 @@ def parallels_page_route(text: str = None):
         create_parallels_page(initial_text=text)
 
 @ui.page('/browse', title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search')
-def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None):
-    safe_user_set('current_page', '/browse')
+def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None, embed: str = None):
+    # R2-1 discovery-review iframe: ?embed=1 renders a bare viewer (no nav shell,
+    # no snapshot write, no current_page write) so it can be framed inside the
+    # standalone discovery-review deck without stomping normal browse state.
+    _embed = (embed or '').strip().lower() in ('1', 'true', 'yes', 'on')
+    if not _embed:
+        safe_user_set('current_page', '/browse')
     # Dynamic metadata for manuscript pages when sys_id is provided
     if sys_id:
         # Resolve the real shelfmark from csv_bank when the URL only has sys_id
@@ -1972,10 +1977,10 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     if not sys_id and shelfmark and shelfmark.strip().isdigit() and shelfmark.strip().startswith('99'):
         sys_id = shelfmark.strip()
 
-    content = create_layout()
+    content = ui.column().classes('w-full items-stretch').style('padding:0;margin:0') if _embed else create_layout()
     with content:
         from web.pages.browse import create_browse_page
-        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie)
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie, embedded=_embed)
 
 @ui.page('/joins-lab', title='Joins Lab | Dicta Genizah Search')
 def joins_lab_page_route(
@@ -2118,7 +2123,7 @@ def puzzle_page_route(add: str = None, doc: str = None):
         from web.pages.puzzle import create_puzzle_page
         create_puzzle_page(initial_add=add, initial_doc=doc)
 
-@ui.page('/atlas', title='Connections Atlas | אטלס החיבורים — Dicta Genizah Search')
+@ui.page('/atlas', title='The Visual Genizah Atlas | אטלס הגניזה החזותי — Dicta Genizah Search')
 def atlas_page_route():
     """Phase 133 (ATLAS-01): the Visual Atlas Preview beta page.
 
@@ -2131,7 +2136,7 @@ def atlas_page_route():
     safe_user_set('current_page', '/atlas')
     ui.add_head_html(page_meta(
         '/atlas',
-        title='Connections Atlas | אטלס החיבורים — Dicta Genizah Search',
+        title='The Visual Genizah Atlas | אטלס הגניזה החזותי — Dicta Genizah Search',
         description='A claim-free preview of the Cairo Genizah connections atlas — an algorithmically laid-out overview of textual connections across the connected corpus.',
         noindex=True,
     ))
@@ -2153,8 +2158,8 @@ def atlas_page_route():
                 with ui.card().classes('w-full p-8'):
                     ui.icon('construction').classes('text-4xl text-amber-600 mb-3')
                     ui.label(
-                        'אטלס החיבורים אינו זמין כרגע' if is_hebrew
-                        else 'The Connections Atlas is temporarily unavailable'
+                        'אטלס הגניזה אינו זמין כרגע' if is_hebrew
+                        else 'The Genizah Atlas is temporarily unavailable'
                     ).classes('text-2xl font-bold mb-2')
                     ui.label(
                         'תצוגת התצוגה המקדימה תופיע כאן ברגע שהיא תהיה מוכנה.'

@@ -501,8 +501,14 @@ VIEWER_STYLES = '''
 # BrowsePageRefs imported from web.pages.browse_enrichment (Phase 73, Plan 01)
 
 
-def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None):
-    """Create the professional manuscript viewer page UI."""
+def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False):
+    """Create the professional manuscript viewer page UI.
+
+    embedded=True (R2-1 discovery-review iframe): renders a bare viewer — the
+    page-title h1 and shelfmark-search card are hidden, and browse-position
+    snapshot restore/persist is disabled so an embedded candidate never stomps a
+    normal /browse tab's remembered position (browse_state.py:120 tab-stomping).
+    """
     state = BrowseState()
     refs = BrowsePageRefs()
     service = get_service()
@@ -800,8 +806,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if page.volume_ie:
                     state.volume_ie = page.volume_ie
 
-                # Save position to storage for persistence (Phase 74: via helper)
-                persist_browse_snapshot(state, page)
+                # Save position to storage for persistence (Phase 74: via helper).
+                # R2-1 embed: skip — an embedded candidate must not overwrite a
+                # normal /browse tab's remembered position (shared cookie).
+                if not embedded:
+                    persist_browse_snapshot(state, page)
 
                 # Phase 85 D-06: expose synthetic-row flag to client-side JS
                 # (web/static/manuscript_viewer.js gates NLI manifest fetch +
@@ -4546,10 +4555,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     with ui.column().classes('w-full max-w-7xl mx-auto p-4'):
         # Page title
         # Changed to H1
-        h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800')
+        if not embedded:
+            h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800')
 
         # Shelfmark Search Box - Simple and Working
-        with ui.card().classes('w-full p-4 mb-6').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);'):
+        with ui.card().classes('w-full p-4 mb-6').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);') as _search_card:
             with ui.row().classes('w-full gap-4 items-center'):
                 # Search icon
                 ui.icon('search', size='md').classes('text-green-600')
@@ -4585,6 +4595,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             search_error_container = ui.row().classes('w-full mt-2 items-center')
             slider_refs['search_error_container'] = search_error_container
 
+        if embedded and _search_card is not None:
+            _search_card.set_visibility(False)  # R2-1 embed: hide the search card in the iframe
+
         # Service status warning
         if not service.is_ready:
             with ui.card().classes('w-full p-4 bg-yellow-50 border border-yellow-300 mb-4'):
@@ -4603,7 +4616,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # requires deferred init - the UI container must mount (update_content spinner)
         # before load_page() begins async work. Pure scheduling stays with this caller;
         # precedence logic is unit-tested separately.
-        saved_position, saved_reading_desk = restore_browse_snapshot(state)
+        if embedded:
+            saved_position, saved_reading_desk = None, None  # R2-1 embed: no snapshot restore
+        else:
+            saved_position, saved_reading_desk = restore_browse_snapshot(state)
         bootstrap = resolve_browse_bootstrap(
             initial_fl_id=initial_fl_id_value,
             initial_sys_id=initial_sys_id,

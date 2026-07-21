@@ -593,27 +593,98 @@
     }
   }
 
+  // Axis-aligned bounding-box overlap test (label declutter, #5).
+  function _rectsOverlap(a, b) {
+    return !(a.x1 < b.x0 || a.x0 > b.x1 || a.y1 < b.y0 || a.y0 > b.y1);
+  }
+
+  // Rounded-rect path (label backing plate). Uses the native ctx.roundRect when
+  // available, else builds the path with arcTo so it degrades on older engines.
+  function _roundRectPath(ctx, x, y, w, h, r) {
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, r);
+      return;
+    }
+    var rr = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
   // Cluster region labels painted on the canvas (not the DOM — pixels, not
   // markup, so no DOM-XSS surface; still masking-safe catalogue text).
+  //   #4: the whole layer is suppressed when the user hides domain labels.
+  //   #2: while a search is active, only labels whose text/domain/title match
+  //       the query stay up (so the map isn't left cluttered with unrelated
+  //       domain titles when the stars themselves are filtered).
+  //   #5: labels are placed biggest-cluster-first and any whose box would
+  //       collide with an already-placed label is skipped — so a zoomed-out
+  //       (crowded) view shows only the few that fit, and more reveal
+  //       themselves as the user zooms in and screen positions spread apart.
   function drawClusterLabels(ctx, state) {
     if (state.focusCluster >= 0) return;
+    if (!state.showLabels) return;
     var labels = state.decoded.cluster_labels;
-    ctx.textAlign = 'center';
+    var q = state.matchSet ? (state.matchQuery || '') : '';
+
+    // 1. Gather on-screen candidates (applying the #2 search filter).
+    var cand = [];
     for (var i = 0; i < labels.length; i++) {
       var lab = labels[i];
       var p = toScreen(state, lab.x, lab.y);
       if (p[0] < 0 || p[0] > state.viewW || p[1] < 0 || p[1] > state.viewH) continue;
       var text = domainLabel(state, lab.dgrp) || lab.dom || lab.title || '';
       if (!text) continue;
+      if (q) {
+        var hay = (text + ' ' + (lab.title || '') + ' ' + (lab.dom || '')).toLowerCase();
+        if (hay.indexOf(q) < 0) continue;
+      }
+      cand.push({ x: p[0], y: p[1], n: lab.n || 0, text: text });
+    }
+    // 2. Biggest clusters first so they win the space when crowded (#5).
+    cand.sort(function (a, b) { return b.n - a.n; });
+
+    // 3. Greedy placement: draw a candidate only if its box is clear.
+    ctx.textAlign = 'center';
+    var placed = [];
+    var PAD = 6;
+    for (var c = 0; c < cand.length; c++) {
+      var d = cand[c];
       ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
-      ctx.fillStyle = '#ffffffdd';
-      ctx.shadowColor = '#000';
-      ctx.shadowBlur = 4;
-      ctx.fillText(text, p[0], p[1] - 2);
-      ctx.font = '10px "Segoe UI", system-ui, sans-serif';
-      ctx.fillStyle = '#ffffff88';
-      ctx.fillText(lab.n.toLocaleString(), p[0], p[1] + 12);
+      var w = ctx.measureText(d.text).width;
+      var box = { x0: d.x - w / 2 - PAD, x1: d.x + w / 2 + PAD, y0: d.y - 14, y1: d.y + 16 };
+      var clash = false;
+      for (var pI = 0; pI < placed.length; pI++) {
+        if (_rectsOverlap(box, placed[pI])) { clash = true; break; }
+      }
+      if (clash) continue;
+      placed.push(box);
+      // Legibility: a semi-opaque dark rounded PLATE behind the label guarantees
+      // contrast over the bright/white star cores as well as the dark void — a
+      // stroke/shadow alone vanished on pure white (owner feedback 2026-07-21).
+      // On the near-black background the plate is barely visible; over white it
+      // darkens enough for the white text to read. Reuses the declutter box.
       ctx.shadowBlur = 0;
+      _roundRectPath(ctx, box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0, 6);
+      ctx.fillStyle = 'rgba(6,9,16,0.66)';
+      ctx.fill();
+      ctx.lineJoin = 'round';
+      // title — thin dark outline + white fill on top of the plate.
+      ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = 2;
+      ctx.strokeText(d.text, d.x, d.y - 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(d.text, d.x, d.y - 2);
+      // member count (dimmer).
+      ctx.font = '10px "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = '#c9d4e6';
+      ctx.fillText(d.n.toLocaleString(), d.x, d.y + 12);
     }
   }
 
@@ -727,6 +798,8 @@
       // interaction state (Task 2 mutates these; draw() already respects them)
       hover: -1,
       matchSet: null,
+      matchQuery: '',      // lowercased active search string (drives label filtering, #2)
+      showLabels: true,    // domain-label visibility toggle (#4)
       libHidden: new Set(),
       focusCluster: -1,
       focusMembers: null,
@@ -852,12 +925,6 @@
   //    bloom-in intro, same-origin /browse click-through (D-08).
   // =======================================================================
 
-  function openBrowse(sysId) {
-    // Same-origin click-through. sys_id is a decimal string (BigUint64 .toString);
-    // .toString() keeps every digit above 2^53 intact (Pitfall #4).
-    window.open(window.location.origin + '/browse?sys_id=' + sysId.toString(), '_blank');
-  }
-
   // Spatial hash grid over world coords for O(1)-ish hover/click picking.
   function buildPickGrid(state) {
     var nodes = state.decoded.nodes;
@@ -913,7 +980,7 @@
   //     which would flood the map). Builds a match set of node indices. ---
   function applySearch(state, query) {
     var s = (query || '').trim().toLowerCase();
-    if (!s) { state.matchSet = null; return; }
+    if (!s) { state.matchSet = null; state.matchQuery = ''; return; }
     var nodes = state.decoded.nodes;
     var set = new Set();
     for (var i = 0; i < nodes.length; i++) {
@@ -925,6 +992,9 @@
       }
     }
     state.matchSet = set;
+    // #2: remember the query so drawClusterLabels can keep only the domain
+    // labels that match the searched term (instead of leaving them all up).
+    state.matchQuery = s;
   }
 
   function focusOn(state, idx) {
@@ -988,13 +1058,19 @@
     var zoomOutBtn = _btn('−');
     zoomOutBtn.setAttribute('aria-label', state.labels.zoomOut || 'Zoom out');
     var resetBtn = _btn(state.labels.resetView || 'Reset view');
+    // #4: toggle the domain-title layer. Starts visible -> button offers "Hide".
+    var labelsBtn = _btn(state.labels.hideDomainLabels || 'Hide domain labels');
+    // #3: fullscreen the reserved box. Starts collapsed -> button offers "Full screen".
+    var fsBtn = _btn(state.labels.fullScreen || 'Full screen');
 
     toolbar.appendChild(search);
     toolbar.appendChild(colorBtn);
     toolbar.appendChild(libBtn);
+    toolbar.appendChild(labelsBtn);
     toolbar.appendChild(zoomInBtn);
     toolbar.appendChild(zoomOutBtn);
     toolbar.appendChild(resetBtn);
+    toolbar.appendChild(fsBtn);
     box.appendChild(toolbar);
 
     // Tooltip (hover).
@@ -1116,7 +1192,7 @@
           var nd = nodes[nodeIdx];
           var row = buildFocusRow(state, nd);
           row.setAttribute('style', 'padding:3px 5px;border-radius:5px;cursor:pointer;');
-          row.onclick = function () { openBrowse(nd.sys_id); };
+          row.onclick = function () { openBrowsePane(nd.sys_id); };
           list.appendChild(row);
         })(vis[r]);
       }
@@ -1129,22 +1205,110 @@
     // draw() calls this after each paint so DOM overlays stay in sync with mode.
     state.onAfterDraw = function () { /* overlays are event-driven; no per-frame DOM work */ };
 
-    // --- pointer: pan + hover ---
-    var dragging = false, dragMoved = false, lastX = 0, lastY = 0;
+    // --- in-atlas browse pane (#6): a drawer against the inner edge (right in
+    //     LTR, left in RTL) holding an <iframe> onto the bare ?embed=1 browse
+    //     viewer, so clicking a dot opens the manuscript WITHOUT leaving the
+    //     atlas. The header offers Close + a link to the full standalone /browse
+    //     page (new tab). Built lazily on first open. ---
+    var browsePane = null, browseFrame = null, browseFull = null;
+    function ensureBrowsePane() {
+      if (browsePane) return;
+      var side = state.rtl ? 'left:0;' : 'right:0;';
+      browsePane = _el('div', 'atlas-browse-pane');
+      browsePane.setAttribute('style',
+        'position:absolute;top:0;bottom:0;' + side +
+        'width:min(560px,46%);z-index:15;display:none;flex-direction:column;' +
+        'background:#0b1120;border-inline-start:1px solid #33405c;' +
+        'box-shadow:0 0 26px rgba(0,0,0,0.55);' + dirStyle);
+      var hdr = _el('div', 'atlas-bp-head');
+      hdr.setAttribute('style',
+        'display:flex;align-items:center;gap:8px;padding:7px 9px;' +
+        'border-bottom:1px solid #33405c;background:#0d1526;');
+      var closeBtn = _btn('✕');
+      closeBtn.setAttribute('aria-label', state.labels.close || 'Close');
+      closeBtn.onclick = closeBrowsePane;
+      browseFull = _el('a', 'atlas-bp-full');
+      browseFull.textContent = state.labels.openFullBrowse || 'Open full browse ↗';
+      browseFull.setAttribute('target', '_blank');
+      browseFull.setAttribute('rel', 'noopener');
+      browseFull.setAttribute('style',
+        'margin-inline-start:auto;color:#8fb2d8;font-size:12px;text-decoration:none;');
+      hdr.appendChild(closeBtn);
+      hdr.appendChild(browseFull);
+      browsePane.appendChild(hdr);
+      browseFrame = _el('iframe', 'atlas-bp-frame');
+      browseFrame.setAttribute('title', state.labels.manuscriptViewer || 'Manuscript viewer');
+      browseFrame.setAttribute('style', 'flex:1 1 auto;width:100%;border:0;background:#fff;');
+      browsePane.appendChild(browseFrame);
+      box.appendChild(browsePane);
+    }
+    function openBrowsePane(sysId) {
+      // sys_id is a decimal string (BigUint64 .toString) — all digits, but
+      // encodeURIComponent it anyway. Same-origin; never interpolated into
+      // markup (setAttribute only), so no attribute/URL injection (HIGH-7).
+      var qs = 'sys_id=' + encodeURIComponent('' + sysId);
+      ensureBrowsePane();
+      browseFrame.setAttribute('src', '/browse?embed=1&' + qs);
+      browseFull.setAttribute('href', '/browse?' + qs);
+      browsePane.style.display = 'flex';
+    }
+    function closeBrowsePane() {
+      if (!browsePane) return false;
+      var wasOpen = browsePane.style.display !== 'none';
+      browsePane.style.display = 'none';
+      // Stop the framed page loading / free its resources while hidden.
+      if (browseFrame) browseFrame.setAttribute('src', 'about:blank');
+      return wasOpen;
+    }
+
+    // --- pointer: pan (1 finger/mouse) + pinch-zoom (2 fingers) + hover ---
+    // Multi-touch is tracked in a pointer map so phones/tablets can pinch to
+    // zoom (there is no wheel on touch). touch-action:none stops the browser
+    // swallowing the gesture as page scroll/zoom before our handlers see it.
+    if (canvas.style) canvas.style.touchAction = 'none';
+    var pointers = {};           // active pointerId -> {x, y} in canvas px
+    var dragMoved = false;       // gate: a drag/pinch is never treated as a tap
+    var lastX = 0, lastY = 0;    // single-pointer pan anchor
+    var pinchDist = 0;           // last two-pointer separation (screen px)
     function relPos(ev) {
       var rect = canvas.getBoundingClientRect();
       return [ev.clientX - rect.left, ev.clientY - rect.top];
     }
+    function _pids() { return Object.keys(pointers); }
+    function _dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
     canvas.style.cursor = 'grab';
     canvas.addEventListener('pointerdown', function (ev) {
-      dragging = true; dragMoved = false;
-      var p = relPos(ev); lastX = p[0]; lastY = p[1];
-      canvas.style.cursor = 'grabbing';
+      var p = relPos(ev);
+      pointers[ev.pointerId] = { x: p[0], y: p[1] };
+      dragMoved = false;
+      var ids = _pids();
+      if (ids.length === 1) {
+        lastX = p[0]; lastY = p[1];
+        canvas.style.cursor = 'grabbing';
+      } else if (ids.length === 2) {
+        pinchDist = _dist(pointers[ids[0]], pointers[ids[1]]);
+        dragMoved = true;  // a two-finger gesture is a zoom, not a tap
+      }
       canvas.setPointerCapture && canvas.setPointerCapture(ev.pointerId);
     });
     canvas.addEventListener('pointermove', function (ev) {
       var p = relPos(ev);
-      if (dragging) {
+      if (pointers[ev.pointerId]) { pointers[ev.pointerId].x = p[0]; pointers[ev.pointerId].y = p[1]; }
+      var ids = _pids();
+      if (ids.length >= 2) {
+        // Pinch-zoom toward the midpoint of the first two pointers.
+        var a = pointers[ids[0]], b = pointers[ids[1]];
+        var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        var d = _dist(a, b);
+        if (pinchDist > 0 && d > 0) zoomBy(state, d / pinchDist, mx, my);
+        pinchDist = d;
+        dragMoved = true;
+        tip.style.display = 'none';
+        draw(state, true);
+        return;
+      }
+      if (ids.length === 1 && pointers[ev.pointerId]) {
+        // Single-pointer pan.
         var dx = (p[0] - lastX) / state.cam.k, dy = (p[1] - lastY) / state.cam.k;
         if (Math.abs(p[0] - lastX) + Math.abs(p[1] - lastY) > 2) dragMoved = true;
         state.cam.x -= dx; state.cam.y -= dy;
@@ -1153,7 +1317,7 @@
         draw(state, true);
         return;
       }
-      // hover -> tooltip
+      // No active pointer (mouse hover) -> tooltip.
       var idx = pick(state, p[0], p[1]);
       if (idx !== state.hover) {
         state.hover = idx;
@@ -1171,27 +1335,35 @@
         tip.style.top = Math.min(p[1] + 14, state.viewH - 90) + 'px';
       }
     });
-    function endDrag(ev) {
-      if (!dragging) return;
-      dragging = false;
-      canvas.style.cursor = 'grab';
-      // A click (no drag) either enters a focus constellation or opens a star.
-      if (!dragMoved) {
-        var p = relPos(ev);
-        var idx = pick(state, p[0], p[1]);
-        if (idx >= 0) {
-          if (state.focusCluster >= 0) {
-            openBrowse(state.decoded.nodes[idx].sys_id);
-          } else {
-            focusOn(state, idx);
-            rebuildFocusPanel();
-            redraw();
+    function endPointer(ev) {
+      if (!(ev.pointerId in pointers)) return;
+      var releasePos = relPos(ev);
+      delete pointers[ev.pointerId];
+      var ids = _pids();
+      if (ids.length === 0) {
+        canvas.style.cursor = 'grab';
+        // A tap (single pointer, no drag/pinch) enters a focus constellation or
+        // opens the manuscript pane.
+        if (!dragMoved) {
+          var idx = pick(state, releasePos[0], releasePos[1]);
+          if (idx >= 0) {
+            if (state.focusCluster >= 0) {
+              openBrowsePane(state.decoded.nodes[idx].sys_id);
+            } else {
+              focusOn(state, idx);
+              rebuildFocusPanel();
+              redraw();
+            }
           }
         }
+      } else if (ids.length === 1) {
+        // Dropped 2 -> 1: re-anchor the surviving finger so pan doesn't jump.
+        lastX = pointers[ids[0]].x; lastY = pointers[ids[0]].y;
+        pinchDist = 0;
       }
     }
-    canvas.addEventListener('pointerup', endDrag);
-    canvas.addEventListener('pointercancel', function () { dragging = false; canvas.style.cursor = 'grab'; });
+    canvas.addEventListener('pointerup', endPointer);
+    canvas.addEventListener('pointercancel', endPointer);
 
     // --- wheel zoom (toward cursor) ---
     canvas.addEventListener('wheel', function (ev) {
@@ -1204,10 +1376,14 @@
 
     // --- keyboard: Esc leaves focus mode ---
     window.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape' && state.focusCluster >= 0) {
-        backToGalaxy(state);
-        rebuildFocusPanel();
-        redraw();
+      if (ev.key === 'Escape') {
+        // #6: close the browse pane first if it is open; otherwise leave focus.
+        if (closeBrowsePane()) return;
+        if (state.focusCluster >= 0) {
+          backToGalaxy(state);
+          rebuildFocusPanel();
+          redraw();
+        }
       }
     });
 
@@ -1232,6 +1408,48 @@
     zoomInBtn.onclick = function () { zoomBy(state, 1.3, state.viewW / 2, state.viewH / 2); redraw(); };
     zoomOutBtn.onclick = function () { zoomBy(state, 1 / 1.3, state.viewW / 2, state.viewH / 2); redraw(); };
     resetBtn.onclick = function () { backToGalaxy(state); rebuildFocusPanel(); fitView(state); redraw(); };
+
+    // #4: show/hide the domain-title layer (button label flips with the state).
+    labelsBtn.onclick = function () {
+      state.showLabels = !state.showLabels;
+      labelsBtn.textContent = state.showLabels
+        ? (state.labels.hideDomainLabels || 'Hide domain labels')
+        : (state.labels.showDomainLabels || 'Show domain labels');
+      redraw();
+    };
+
+    // #3: fullscreen the reserved box. On enter/exit we resize the backing
+    // store to the new viewport and repaint, and flip the button label.
+    // Vendor-prefixed fallbacks cover older WebKit.
+    _injectAtlasStyleOnce();
+    if (box.classList && box.classList.add) box.classList.add('atlas-fs-box');
+    function _isFs() {
+      return document.fullscreenElement === box || document.webkitFullscreenElement === box;
+    }
+    function _reqFs(el) {
+      if (el.requestFullscreen) return el.requestFullscreen();
+      if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+    }
+    function _exitFs() {
+      if (document.exitFullscreen) return document.exitFullscreen();
+      if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+    }
+    fsBtn.onclick = function () {
+      try { if (_isFs()) { _exitFs(); } else { _reqFs(box); } }
+      catch (e) { /* fullscreen may be blocked by the environment; non-fatal */ }
+    };
+    function _onFsChange() {
+      fsBtn.textContent = _isFs()
+        ? (state.labels.exitFullScreen || 'Exit full screen')
+        : (state.labels.fullScreen || 'Full screen');
+      // The box (hence the canvas) just changed size — re-fit after the layout
+      // settles, then repaint.
+      setTimeout(function () { resizeCanvas(state); redraw(); }, 60);
+    }
+    if (document.addEventListener) {
+      document.addEventListener('fullscreenchange', _onFsChange);
+      document.addEventListener('webkitfullscreenchange', _onFsChange);
+    }
 
     rebuildLegend();
 
@@ -1264,6 +1482,34 @@
     return 'display:inline-flex;align-items:center;padding:3px 7px;border-radius:12px;cursor:pointer;' +
       'font-size:11px;border:1px solid #33405c;' +
       (off ? 'background:#0d1526;color:#67708a;opacity:0.5;' : 'background:#1c2334;color:#dfe8f5;');
+  }
+
+  // Fullscreen sizing CSS (#3), injected once. In fullscreen the reserved box
+  // (and its canvas) must fill the whole screen; :fullscreen + the WebKit
+  // prefix are written as SEPARATE rules because an unknown pseudo in a
+  // selector list drops the whole rule in some engines.
+  function _injectAtlasStyleOnce() {
+    // Progressive enhancement: skip silently if the DOM surface is missing (a
+    // minimal SSR/test document has no head/documentElement) — fullscreen still
+    // works, just without the fill-screen sizing rule.
+    try {
+      if (!document || typeof document.getElementById !== 'function') return;
+      if (document.getElementById('atlas-decode-style')) return;
+      var host = document.head || document.documentElement;
+      if (!host || typeof host.appendChild !== 'function') return;
+      var st = document.createElement('style');
+      st.id = 'atlas-decode-style';
+      st.textContent =
+        '.atlas-fs-box:fullscreen{width:100vw !important;height:100vh !important;border-radius:0 !important;}' +
+        '.atlas-fs-box:fullscreen>canvas{height:100% !important;}' +
+        '.atlas-fs-box:-webkit-full-screen{width:100vw !important;height:100vh !important;border-radius:0 !important;}' +
+        '.atlas-fs-box:-webkit-full-screen>canvas{height:100% !important;}' +
+        // On narrow screens the ~46% browse drawer is unreadably thin, so let
+        // it cover the whole atlas (a full-screen manuscript viewer with a
+        // Close button in its header). #6 mobile.
+        '@media (max-width:640px){.atlas-browse-pane{width:100% !important;}}';
+      host.appendChild(st);
+    } catch (e) { /* non-fatal */ }
   }
 
   // Bloom-in intro: a count-up of the node total, skippable by click. Honors
