@@ -777,6 +777,19 @@
     container.appendChild(msg);
   }
 
+  // Best-effort analytics: the page already loads PostHog globally, so capture a
+  // few semantic atlas events (pageviews are already auto-captured). NEVER sends
+  // the raw search text — only its length — matching the project's "never
+  // transmit search text" telemetry posture. Never throws.
+  function _track(event, props) {
+    try {
+      if (typeof window !== 'undefined' && window.posthog &&
+          typeof window.posthog.capture === 'function') {
+        window.posthog.capture(event, props || {});
+      }
+    } catch (e) { /* analytics must never break the render */ }
+  }
+
   // Global handle so the browser page (and Task 2 interaction wiring) can reach
   // the live renderer state; also handy for debugging.
   function makeState(canvas, manifest, decoded, config) {
@@ -825,6 +838,10 @@
         resizeCanvas(state);
         fitView(state);
         draw(state, false);
+        _track('atlas_loaded', {
+          nodes: res.decoded.nodes.length,
+          edges: res.decoded.edges.length
+        });
         window.addEventListener('resize', function () {
           resizeCanvas(state);
           draw(state, false);
@@ -1296,6 +1313,7 @@
       // encodeURIComponent it anyway. Same-origin; never interpolated into
       // markup (setAttribute only), so no attribute/URL injection (HIGH-7).
       var qs = 'sys_id=' + encodeURIComponent('' + sysId);
+      _track('atlas_manuscript_opened', { sys_id: '' + sysId });
       ensureBrowsePane();
       browseFrame.setAttribute('src', '/browse?embed=1&' + qs);
       browseFull.setAttribute('href', '/browse?' + qs);
@@ -1400,6 +1418,12 @@
               openBrowsePane(state.decoded.nodes[idx].sys_id);
             } else {
               focusOn(state, idx);
+              var _fnode = state.decoded.nodes[idx];
+              var _fgrp = _fnode && state.domainGroups[_fnode.domain];
+              _track('atlas_cluster_focused', {
+                members: state.focusMembers ? state.focusMembers.length : 0,
+                domain: (_fgrp && _fgrp[0]) || ''   // English domain label (cross-language stable)
+              });
               // Wide: auto-open the member list (side drawer). Narrow: keep it
               // closed so the focused cluster is visible — the user opens the
               // bottom sheet via the "Titles" control. This also avoids the
@@ -1442,9 +1466,20 @@
     });
 
     // --- toolbar wiring ---
+    var _searchTrackTimer = null;
     search.addEventListener('input', function () {
       applySearch(state, search.value);
       redraw();
+      // Debounced so a search "burst" logs once. Sends only the query LENGTH +
+      // result count, never the raw text.
+      if (_searchTrackTimer) clearTimeout(_searchTrackTimer);
+      _searchTrackTimer = setTimeout(function () {
+        var q = (search.value || '').trim();
+        if (q) _track('atlas_search', {
+          query_len: q.length,
+          matches: state.matchSet ? state.matchSet.size : 0
+        });
+      }, 700);
     });
     colorBtn.onclick = function () {
       state.colorBy = (state.colorBy === 'domain') ? 'library' : 'domain';
@@ -1493,9 +1528,11 @@
       catch (e) { /* fullscreen may be blocked by the environment; non-fatal */ }
     };
     function _onFsChange() {
-      fsBtn.textContent = _isFs()
+      var on = _isFs();
+      fsBtn.textContent = on
         ? (state.labels.exitFullScreen || 'Exit full screen')
         : (state.labels.fullScreen || 'Full screen');
+      _track('atlas_fullscreen', { on: on });
       // The box (hence the canvas) just changed size — re-fit after the layout
       // settles, then repaint.
       setTimeout(function () { resizeCanvas(state); redraw(); }, 60);
