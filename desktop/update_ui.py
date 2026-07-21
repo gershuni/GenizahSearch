@@ -135,7 +135,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: when an FGP transcription covers only a small part of the folio, the fuller MiDRASH (V0.8) transcription now shows by default. FGP stays available in the version chooser."))
+        self.lbl_msg.setText(tr("Fixed: some manuscripts showed each folio twice in Browse. This is now corrected."))
         self.show()
 
     def on_learn_more(self):
@@ -269,10 +269,8 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Smarter default transcription: when an FGP transcription covers only a small part of the folio, the fuller MiDRASH (V0.8) transcription is shown by default instead."),
-            tr("The FGP transcription stays available in the version chooser, tagged \u201cshorter than V0.8\u201d."),
-            tr("Manuscripts where FGP is a full transcription are unchanged \u2014 FGP still shows by default there."),
-            tr("Applies across search, browse, and the reading views."),
+            tr("Browse no longer shows doubled folios: manuscripts with a single image set could display each page twice. This is now fixed."),
+            tr("No changes to search or transcriptions \u2014 this release is a targeted fix."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

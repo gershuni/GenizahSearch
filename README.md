@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.5.0
+# Dicta Genizah Search Pro 8.5.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,16 +8,22 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.5.0?
+## What's New in Version 8.5.1?
 
-### Connections Atlas (beta, web)
+### v8.5.1: Browse doubled-folios fix (desktop)
 
-A new preview page at `/atlas` renders an interactive, algorithmically laid-out overview map
-of the textual connections across the connected Cairo Genizah corpus — zoom and pan, search
-by title or shelfmark, toggle the coloring between subject domain and library, focus on a
-region, and click through to the manuscript in Browse. Positions and clusters reflect textual
-similarity, not physical provenance, and the page makes no identification claims. Bilingual
-EN/HE. The atlas is an opt-in beta (off by default) and is not yet indexed by search engines.
+Fixes a display bug where some manuscripts (those with a single image set) showed each folio
+twice in the Browse view. This is a targeted fix — no changes to search or transcriptions.
+
+### The Visual Genizah Atlas (beta, web)
+
+A new preview page at `/atlas` on genizahsearch.com renders an interactive, algorithmically
+laid-out overview map of the textual connections across the connected Cairo Genizah corpus —
+zoom and pan (pinch on touch), search by title or shelfmark, toggle the coloring between
+subject domain and library, focus on a region, open a manuscript in an in-atlas preview pane,
+and view it full screen. Positions and clusters reflect textual similarity, not physical
+provenance, and the page makes no identification claims. Bilingual EN/HE. (Web only — not part
+of the desktop app.)
 
 ### v8.5.0: Smarter Default Transcription
 
@@ -507,7 +513,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.5.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.5.1_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

@@ -4745,3 +4745,13 @@ TRANSLATIONS.update({
         "התצוגה המקדימה תופיע כאן ברגע שהיא תהיה מוכנה.",
     "The atlas could not be loaded.": "לא ניתן היה לטעון את האטלס.",
 })
+
+# === Desktop What's New — v8.5.1 (2026-07-21 bug-fix patch) ===
+TRANSLATIONS.update({
+    "Fixed: some manuscripts showed each folio twice in Browse. This is now corrected.":
+        "תוקן: בחלק מכתבי היד הופיע כל דף פעמיים בתצוגת העיון. התקלה תוקנה.",
+    "Browse no longer shows doubled folios: manuscripts with a single image set could display each page twice. This is now fixed.":
+        "תצוגת העיון אינה מציגה עוד דפים כפולים: בכתבי יד עם סדרת תמונות אחת הופיע לעתים כל דף פעמיים. התקלה תוקנה.",
+    "No changes to search or transcriptions — this release is a targeted fix.":
+        "אין שינוי בחיפוש או בתמלולים — מהדורה זו היא תיקון ממוקד.",
+})

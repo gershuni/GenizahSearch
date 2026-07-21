@@ -20,6 +20,34 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   teaser, all gated on the same availability predicate so a not-yet-ready beta hides cleanly
   everywhere. Bilingual EN/HE.
 
+### Post-launch refinements (2026-07-21) — enabled in production
+- **Enabled on genizahsearch.com** (`ATLAS_PREVIEW_ENABLED=1`) with the baked asset served
+  from the gitignored `atlas_data/`.
+- **Renamed** to **The Visual Genizah Atlas** (nav: *The Genizah Atlas*; HE אטלס הגניזה החזותי /
+  אטלס הגניזה); retired the "Connections Atlas" name in user-facing strings.
+- **Search scopes the domain labels** — while a search is active only labels matching the query
+  stay up. **Full-screen** control. **Hide/Show domain labels** toggle. **Declutter** — labels
+  are placed biggest-cluster-first and colliding ones are skipped (more reveal on zoom-in).
+  **Readable labels** on a dark backing plate (legible over the bright cluster cores).
+- **In-atlas browse pane** — clicking a manuscript opens it in a drawer via an `?embed=1`
+  bare-viewer iframe (Close / Open-full-browse), instead of leaving the atlas.
+- **Mobile** — one-finger pan + two-finger pinch-zoom; the browse drawer goes full-width on
+  narrow screens.
+- **Elaborated bilingual intro** describing the map and how to read it; a prominent, claim-free
+  homepage launch announcement (alongside the existing subtle teaser).
+
+---
+
+## [8.5.1] - 2026-07-21 — Browse doubled-folios fix (desktop)
+
+### Fixed
+- **Desktop:** Browse no longer shows doubled folios for single-IE manuscripts (e.g. CUL
+  T-S AS 2.3). `shared/browse_map_utils.dedupe_browse_map` now deduplicates single-IE browse
+  maps by `(ie_id, p_num)` — matching the multi-IE path — so the desktop-built map, which
+  previously skipped dedup assuming a single inventory entry, can no longer emit each page
+  twice. The web app was unaffected (its rebuilt map is already clean, so the dedup is a
+  no-op there). Test: `tests/test_browse_map_dedup_single_ie.py`.
+
 ---
 
 ## [8.5.0] - 2026-07-14 — Smarter Default Transcription (both apps)
