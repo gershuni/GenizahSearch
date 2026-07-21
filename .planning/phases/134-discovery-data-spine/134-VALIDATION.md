@@ -27,6 +27,15 @@ updated: 2026-07-21
 > F10 status matrix (registry-gated, no audit_passed, no "certified"); F11 physical-MS dedup;
 > F12 FK ownership (UNIQUE(claim_id,evidence_id) + display-pointer belongs-to-same-claim);
 > F13 band_precision populated BEFORE hashing; F14 bench flag-bypass readiness predicate + nonzero-result; F15 lazy conn; F16 work_id 1:1 crosswalk + canonical_work_id default.
+> ROUND-3 (2026-07-21, Codex pre-flight round 2 REWORK) R1-R8 (verified against the actual files):
+> R1 the 0.926 is a PROPAGATED-WITNESS-COLLECTION-level number (corroborated UNION weak; 90+110 draw, 176/190), NOT corroborated-only (amends CONTEXT C-4/C-7);
+> R2 evidence_kind in {witness, shared_text} discriminator — the valid-combination matrix keys on evidence_kind, NOT the parent claim_type (so the witness+shared_text collision validates);
+> R3 family-router rows (tafsir_targum 106 / with_arabic 108) are NON-witness — corroborated_predicate NEVER run on them; ingest as shared_text/not_evaluated/review_only/co_citation;
+> R4 1,912 of 4,367 witness rows are multi-span (up to 14) -> ONE evidence row + a structured seed_spans list, evidence_id folds its digest;
+> R5 NO physical-MS claim collapse — claims keyed on the REAL (page_id, work_id), evidence carries a_page_id/sys_id, physical-MS dedup is the DATA-10 projection via witness_units (amends CONTEXT C-5 parenthetical);
+> R6 human_confirmed ONLY for the 174 individually-adjudicated (e1_adjudicated_a); the 1,570 e1_ra_confirmed are unreviewed/audit_pending (both band expert_verified);
+> R7 spans_json is [start,end,density] TRIPLES (292,981 span records unshadowed) — largest-span selection uses elements [0],[1], ignores density [2];
+> R8 a 134-06 conn-swap test (query A -> swap path/version -> observe B -> prior ThreadLocalConnection pool CLOSED).
 
 ---
 
@@ -55,7 +64,7 @@ a nonexistent path).**
 **Standalone verifier is a first-class release gate** (DC7):
 `python scripts/verify_discovery_sidecar.py <DB> --expected-frame-hash <expected>` must exit 0 — the SAME
 path-parameterized verifier CI runs over the fixture is run over the real DB in 134-07. It runs ALL invariants
-(column allowlist; the VALID (claim_type × evidence_source × confidence_band) combinations; no duplicate
+(column allowlist; the VALID (evidence_kind × evidence_source × confidence_band) combinations — R2; no duplicate
 (claim_id, evidence_id); nonempty evidence per claim; exactly one display_evidence_id BELONGING to its claim [F12];
 F4 source_corpus cross-table consistency; per-side drift with nullable shared_text b-side offsets [F2/N1];
 integrity/FK; release-contract counts). The frame-hash check takes the EXPECTED hash as input (fixture CI mode
@@ -98,13 +107,13 @@ manifest-resolved filename (N6).
 | Task 2 | 134-04 | 3 | DATA-02 | — | Registry-gated status matrix (no audit_passed, no "certified") + routing matrix (family routers → review_only/co_citation) (F9/F10) | unit | `pytest tests/test_discovery_build.py -k "routing or status"` | ❌ (134-04) | ⬜ pending |
 | Task 2 | 134-04 | 3 | DATA-01 | T-134-tamper | Claims physical-MS-deduped before insert (deterministic representative + supporting_page_ids) (F11) | unit | `pytest tests/test_discovery_build.py -k dedup` | ❌ (134-04) | ⬜ pending |
 | Task 3 | 134-04 | 3 | DATA-05/08 | T-134-leak | Blocking DB scan gates finalization; registered-token artifact scan surfaces but does NOT block; band_precision populated BEFORE hashing (F13); DC13 | unit | `pytest tests/test_discovery_build.py -k "orchestrat or artifact or band_precision"` | ❌ (134-04) | ⬜ pending |
-| Task 3 | 134-03 | 2 | DATA-02 | — | Valid (claim_type × evidence_source × confidence_band) evidence combinations; a claim MAY carry multiple bands (one-band-per-key DROPPED, F8); multi-work-per-MS preserved | unit | `pytest tests/test_discovery_bands.py::test_valid_evidence_combinations` | ❌ (134-03) | ⬜ pending |
+| Task 3 | 134-03 | 2 | DATA-02 | — | Valid (evidence_kind × evidence_source × confidence_band) evidence combinations (R2); a claim MAY carry multiple bands (one-band-per-key DROPPED, F8); multi-work-per-MS preserved | unit | `pytest tests/test_discovery_bands.py::test_valid_evidence_combinations` | ❌ (134-03) | ⬜ pending |
 | Task 3 | 134-03 | 2 | DATA-02 | — | Fixture logical `frame_content_hash` == pinned golden AND == meta; membership-based (band mutation / claim drop changes it) (DC3/N2/DC10) | integration | `pytest tests/test_discovery_frame.py::test_frame_hash_golden` | ❌ (134-03) | ⬜ pending |
 | Task 3 | 134-03 | 2 | DATA-08 | T-134-tamper | `PRAGMA foreign_key_check` clean + child-row UNIQUE(claim_id,evidence_id) enforced (DC4/F12) | unit | `pytest tests/test_discovery_release_contract.py` | ❌ (134-03) | ⬜ pending |
 | Task 2 | 134-06 | 4 | DATA-06 | T-134-dos | Overload → `DiscoveryUnavailable` within timeout; loop stays responsive (never hangs) | async unit | `pytest tests/test_discovery_service.py::test_overload_returns_unavailable` | ❌ (134-06) | ⬜ pending |
 | Task 2 | 134-06 | 4 | DATA-06 | T-134-dos | Timed-out heavy slot NOT recycled until the thread finishes (add_done_callback release, not finally) (DC6) | async unit | `pytest tests/test_discovery_service.py::test_timed_out_slot_not_recycled_until_thread_finishes` | ❌ (134-06) | ⬜ pending |
 | Task 1 | 134-06 | 4 | DATA-06 | T-134-layer | NEW essential back-edge guard: `shared/discovery_service.py` + `shared/discovery_errors.py` have no module-level web/nicegui/fastapi import (ast.Import + ast.ImportFrom + guarded top-level) (F6/D5) | unit (AST guard) | `pytest tests/test_no_back_edges_discovery.py` | ❌ (134-06) | ⬜ pending |
-| Task 1 | 134-06 | 4 | DATA-06 | T-134-stale | ThreadLocalConnection built LAZILY on first use (not in __init__); recreated on path/version change; browse LRU keyed incl sidecar version (F15) | unit | `pytest tests/test_discovery_service.py -k "lru or lazy"` | ❌ (134-06) | ⬜ pending |
+| Task 1/2 | 134-06 | 4 | DATA-06 | T-134-stale | ThreadLocalConnection built LAZILY on first use (not in __init__); recreated on path/version change AND prior pool CLOSED via .close() (no leaked handles — R8); browse LRU keyed incl sidecar version (F15) | unit | `pytest tests/test_discovery_service.py -k "lru or lazy or swap"` | ❌ (134-06) | ⬜ pending |
 | Task 1 | 134-06 | 4 | DATA-10 | — | DiscoveryService unit×work projection: unit shown once at DISPLAYED (highest member) band; enabled-band filter BEFORE pagination; anchor_sys_id excludes the anchor's own unit; members on expansion; same-unit suppressed (N4/F2) | unit | `pytest tests/test_discovery_service.py -k data10` | ❌ (134-06) | ⬜ pending |
 | Task 3 | 134-06 | 4 | DATA-06 | T-134-layer | web/discovery.py composes DiscoveryService with the LIVE discovery_available callable + LAZY path/version providers; import-before-load → load fixture → query + correct version (DC12/F1) | unit | `pytest tests/test_discovery_composition.py` | ❌ (134-06) | ⬜ pending |
 | Task 3 | 134-05 | 3 | DATA-07 | — | Flag OFF → `discovery_available()` False; all reads no-op | unit | `pytest tests/test_discovery_flag.py::test_flag_off_hides` | ❌ (134-05) | ⬜ pending |
@@ -142,7 +151,7 @@ manifest-resolved filename (N6).
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| The corrected per-evidence_source band map + the LITERAL corroborated predicate + the ground-truth field/key contract (C-1..C-9 + F1..F3/F7) confirmation | DATA-02 | Domain fact, not a computable invariant; CERT-01 (Phase 135) freezes against this frame | CONFIRMED via the CONTEXT.md CONTRACT CORRECTION (C-1..C-9) + the ground-truth data investigation (this rework: E1 files disjoint, corroborated = the literal two-seed predicate, shared_text one-side offsets). There is NO live checkpoint (134-01 Task 2 is the id/router module, not a checkpoint). 134-01 Task 1 freezes the C-4 band-source map + the corroborated predicate + the work-witness claim_type routing directly; owner confirmation is recorded in CONTEXT.md C-1..C-9 |
+| The corrected per-evidence_source band map + the LITERAL corroborated predicate + the ground-truth field/key contract (C-1..C-9 + F1..F3/F7) confirmation | DATA-02 | Domain fact, not a computable invariant; CERT-01 (Phase 135) freezes against this frame | CONFIRMED via the CONTEXT.md CONTRACT CORRECTION (C-1..C-9) + the ground-truth data investigation (this rework: E1 files disjoint, corroborated = the literal two-seed predicate, shared_text one-side offsets; ROUND-3 R1-R8 verified against the actual files — 0.926 collection-level, evidence_kind discriminator, router rows non-witness, multi-span seed_spans, per-page claims + projection-layer dedup, adjudication split 174/1,570, spans_json triples, conn-swap-close). There is NO live checkpoint (134-01 Task 2 is the id/router module, not a checkpoint). 134-01 Task 1 freezes the C-4 band-source map + the corroborated predicate + the work-witness claim_type routing directly; owner confirmation is recorded in CONTEXT.md C-1..C-9 |
 | Neutral-title owner review (approve/hand-pick M-source literary subset) | DATA-04 | Human curation gate — fail-closed; owner is the authority (D-06/D-08). Guarantee = only approved neutral columns ship (not a token scan of the artifact) | Owner edits the generated review artifact (CANDIDATE schema); only approved rows (APPROVED schema) re-distill via the NEW --from-approved reader; unreviewed = excluded |
 | PERF-01 latency/RSS budgets on the real prod-scale `.db` | PERF-01 | PERF-01 mandates measurement (not assertion); prod box RSS not reproducible in CI; later-surface caps unmeasurable this phase | Run the benchmark/RSS script over the built `discovery.db` (exact manifest-resolved path; flag-bypassing readiness predicate + nonzero-result assertion, F14); record measurable actuals in `discovery-budgets.md`; leave later-surface caps PENDING |
 | Deploy: temp-upload → STAGE candidate manifest → verify the STAGED target → ATOMIC live-manifest swap → code | DATA-08 | Requires live server access + asset-first deploy posture | Follow the documented rollback (repoint the live manifest to the prior basename) + rebuild recipe on the web box; pre-swap verify resolves the db from the STAGED manifest (NEVER the live/old one); every command uses the exact manifest-resolved filename (staged pre-swap, live after; no glob; N6); live smoke uses a flag-bypassing readiness probe (flag stays OFF) |
@@ -158,4 +167,4 @@ manifest-resolved filename (N6).
 - [x] Feedback latency < 60s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** 2026-07-21 (updated for Codex pre-flight rework D1–D7 / DC1–DC14 + round-2 rework D3/DC3/DC5/DC7/DC12/DC13/N1–N6 + round-3 polish F1–F4 + the ground-truth data REWORK F1–F16)
+**Approval:** 2026-07-21 (updated for Codex pre-flight rework D1–D7 / DC1–DC14 + round-2 rework D3/DC3/DC5/DC7/DC12/DC13/N1–N6 + round-3 polish F1–F4 + the ground-truth data REWORK F1–F16 + Codex pre-flight round-2 REWORK R1–R8)
