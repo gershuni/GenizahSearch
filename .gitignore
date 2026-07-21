@@ -227,3 +227,11 @@ corpus_mapper_output/
 # bundled with the desktop installer, not tracked in git (DATA-08 deploy
 # posture: temp upload -> verify -> atomic rename -> code deploy).
 /discovery_data/
+
+# Ephemeral external-AI (Codex/Gemini) CLI transcripts. These may contain
+# restricted M-source/R-source content echoed by the review tool despite
+# instructions (confirmed in phase 134 pre-flight rounds r2/r3), so they must
+# never be committed -- masking hard constraint. See the project_msource_codename_rule
+# memory + .planning/phases/134-discovery-data-spine/deferred-items.md.
+tmp/CODEX-*
+tmp/codex_*
