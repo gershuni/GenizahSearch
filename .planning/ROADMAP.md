@@ -101,13 +101,27 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
 **Plans**: 8 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 134-01-PLAN.md — Freeze the sidecar schema + deterministic claim_id/unit_id id module (wave 1)
 - [ ] 134-02-PLAN.md — Masking guard --scan-sqlite + R-source tokens + gitignore + PERF-01 budgets doc (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 134-03-PLAN.md — Deterministic masking-safe fixture DB + build-output invariant tests (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 134-04-PLAN.md — Offline distillation build script (opaque ids, both claim families, bands, witness units, evidence offsets, review artifact) (wave 3)
 - [ ] 134-05-PLAN.md — Fail-closed versioned loader + DISCOVERY_ENABLED flag + startup wiring (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 134-06-PLAN.md — Async DiscoveryService chokepoint (off-loop, timeouts, bounded concurrency, LRU, pagination) (wave 4)
 - [ ] 134-07-PLAN.md — Owner title-review -> re-distill real discovery.db -> freeze discovery-frames.md (wave 4, human gate)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 134-08-PLAN.md — PERF-01 measurement + budgets finalization + deploy/rollback/rebuild recipe (wave 5, human gate)
 
 ### Phase 135: Precision Certificate & Confidence Bands
