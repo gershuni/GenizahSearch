@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Phase 134 context gathered
-last_updated: "2026-07-21T12:09:32.803Z"
-last_activity: 2026-07-21 -- Phase 134 planning complete
+stopped_at: 134-01 Task 1 complete + committed; Task 2 blocking checkpoint reached (OQ1 per-family band-source/routing owner sign-off)
+last_updated: "2026-07-21T12:45:20.666Z"
+last_activity: 2026-07-21 -- Phase 134 execution started
 progress:
   total_phases: 7
   completed_phases: 1
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-20)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 133 — visual-atlas-preview-early-quick-win
+**Current focus:** Phase 134 — discovery-data-spine
 
 ## Current Position
 
-Phase: 133 (visual-atlas-preview-early-quick-win) — EXECUTING
-Plan: 6 of 6 — IN PROGRESS (NOT complete)
-Status: Ready to execute
-Last activity: 2026-07-21 -- Phase 134 planning complete
+Phase: 134 (discovery-data-spine) — EXECUTING
+Plan: 1 of 8
+Status: Executing Phase 134
+Last activity: 2026-07-21 -- Phase 134 execution started
 
 Progress: [███████░░░] 67% (5/6 plans complete; 133-06 in progress)
 
@@ -65,6 +65,7 @@ Condensed 7-phase roadmap: an early atlas quick win, then the REL-01 gate sequen
 ### Blockers/Concerns
 
 - **133-06 awaiting human production deploy.** The LOCAL portion (Tasks 1-2) is done: the REAL atlas asset is baked into gitignored `atlas_data/` (`atlas-v1-61519a85a2d0`, eligible==placed==62,645, Brotli 2,259,052 B ≤ 6 MB, both masking gates exit 0), the four-surface test passes (12), and the deploy docs are committed. Tasks 3-4 are `checkpoint:human-verify` PRODUCTION steps (asset-first scp → `deploy.sh master-main` → set `ATLAS_PREVIEW_ENABLED=1` → restart → live smoke → rollback drill) and need explicit human go-ahead. ATLAS-01 SC#5 and Phase 133 complete only after the human deploy.
+- **134-01 Task 2 blocking checkpoint (owner/researcher domain decision).** Task 1 investigated the gitignored E1 research track and recorded PROPOSED (not frozen) answers in `docs/specs/discovery-sidecar-schema-v1.md` ("Resolved Design Questions"): per-claim-family (work-witness AND MS-MS) authoritative E1 band-source artifact, join key, raw->product-band translation, and a TOTAL flank_class->claim_type routing (incl edge/ambig). Work-witness proposal is well-grounded (e1_ra_confirmed.jsonl/e1_rb_screening.jsonl/e1_r3_frame.jsonl + track1_matches WHERE shadowed_by IS NULL, verified against fullcorpus_v2.db). MS-MS proposal is HIGH-UNCERTAINTY — no E1-equivalent certified band source exists for that family; a flank_class+canonical-overlap stand-in rule was proposed pending confirmation. Tasks 3 (schema FREEZE) and 4 (ids.py implementation) of plan 134-01 cannot proceed until the owner/researcher confirms or corrects the proposal, per family, at this blocking gate.
 
 ## Deferred Items
 
@@ -85,10 +86,10 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-21T09:05:44.214Z
-Stopped at: Phase 134 context gathered
-Resume file: .planning/phases/134-discovery-data-spine/134-CONTEXT.md
-Next step: Human production deploy — 133-06 Task 3 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart) then Task 4 (live smoke + browser-DOM masking scan + rollback drill). The baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
+Last session: 2026-07-21T12:45:20.658Z
+Stopped at: 134-01 Task 1 complete + committed; Task 2 blocking checkpoint reached (OQ1 per-family band-source/routing owner sign-off)
+Resume file: .planning/phases/134-discovery-data-spine/134-01-PLAN.md
+Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 band-source artifact + join key + raw->band translation + TOTAL flank->claim_type routing proposed in docs/specs/discovery-sidecar-schema-v1.md; then resume 134-01 at Task 3 (schema FREEZE) -> Task 4 (ids.py + golden tests). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
 ## Performance Metrics
 
