@@ -4734,6 +4734,11 @@ TRANSLATIONS.update({
     # (an ?embed=1 iframe) instead of leaving the atlas.
     "Manuscript viewer": "מציג כתב היד",
     "Open full browse ↗": "פתח בעיון מלא ↗",
+    # mobile/narrow focus controls (2026-07-21) — Back exits the cluster; Titles
+    # toggles the member-list sheet (auto-hidden on narrow so it never blocks).
+    "Back to map": "חזרה למפה",
+    "Titles": "כותרות",
+    "Hide titles": "הסתר כותרות",
     # homepage launch announcement (#7)
     "New": "חדש",
     "A new interactive map of textual connections across the Cairo Genizah.":

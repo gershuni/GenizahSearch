@@ -726,6 +726,7 @@
     state.dpr = Math.min(window.devicePixelRatio || 1, 2);
     state.viewW = cssW;
     state.viewH = cssH;
+    state.narrow = cssW <= 640;   // phones/narrow windows get the mobile focus UX
     state.canvas.width = Math.round(cssW * state.dpr);
     state.canvas.height = Math.round(cssH * state.dpr);
   }
@@ -791,6 +792,7 @@
       cam: { x: 0, y: 0, k: 1 },
       baseK: 1,
       dpr: 1, viewW: 800, viewH: 720,
+      narrow: false,       // viewW <= 640 -> mobile focus UX (bottom sheet, no auto-open)
       colorBy: 'domain',
       lang: config.lang || 'he',
       rtl: !!config.rtl,
@@ -1036,6 +1038,7 @@
 
     // --- overlay scaffolding (absolute over the reserved relative box) ---
     var dirStyle = state.rtl ? 'direction:rtl;' : 'direction:ltr;';
+    var focusPanelOpen = false;   // is the focus member-list panel currently open?
 
     // Toolbar (top): search + color toggle + library toggle + zoom buttons.
     var toolbar = _el('div', 'atlas-toolbar');
@@ -1096,13 +1099,26 @@
       'border:1px solid #33405c;' + dirStyle);
     box.appendChild(libPanel);
 
-    // Focus constellation member panel (shown in focus mode).
+    // Focus constellation member panel (shown in focus mode; positioned as a
+    // bottom sheet on narrow screens, a side drawer on wide — set in rebuildFocusPanel).
     var focusPanel = _el('div', 'atlas-focus');
-    focusPanel.setAttribute('style',
-      'position:absolute;top:46px;right:8px;bottom:34px;width:300px;z-index:7;display:none;' +
-      'flex-direction:column;padding:10px;border-radius:8px;background:#0d1526f2;' +
-      'border:1px solid #33405c;color:#dfe8f5;' + dirStyle);
+    focusPanel.setAttribute('style', 'position:absolute;z-index:9;display:none;');
     box.appendChild(focusPanel);
+
+    // Floating focus controls (Back to map + Titles toggle), shown only while a
+    // cluster is focused. Kept clear of the top toolbar (which wraps on narrow
+    // screens and used to hide the panel's ✕) — this is the reliable way to
+    // exit a cluster on mobile. Sits just above the bottom sheet when open.
+    var focusBar = _el('div', 'atlas-focusbar');
+    focusBar.setAttribute('style', 'position:absolute;left:8px;bottom:8px;z-index:11;display:none;gap:6px;' + dirStyle);
+    var backBtn = _btn('← ' + (state.labels.backToMap || 'Back to map'));
+    backBtn.setAttribute('aria-label', state.labels.backToMap || 'Back to map');
+    backBtn.onclick = function () { backToGalaxy(state); focusPanelOpen = false; rebuildFocusPanel(); redraw(); };
+    var titlesToggle = _btn(state.labels.titles || 'Titles');
+    titlesToggle.onclick = function () { focusPanelOpen = !focusPanelOpen; rebuildFocusPanel(); };
+    focusBar.appendChild(backBtn);
+    focusBar.appendChild(titlesToggle);
+    box.appendChild(focusBar);
 
     // --- legend builder (domain groups or library palette) ---
     function rebuildLegend() {
@@ -1167,17 +1183,51 @@
     function rebuildFocusPanel() {
       _clear(focusPanel);
       if (state.focusCluster < 0 || !state.focusMembers) {
+        // Back in the galaxy: hide the focus UI and restore the legend.
         focusPanel.style.display = 'none';
+        focusBar.style.display = 'none';
+        focusPanelOpen = false;
+        legend.style.display = 'flex';
         return;
       }
       var nodes = state.decoded.nodes;
       var vis = state.focusMembers.filter(function (i) { return !state.libHidden.has(nodes[i].library); });
+
+      // Focus controls: always shown while focused. The legend is hidden so it
+      // doesn't collide with the bottom controls / sheet.
+      legend.style.display = 'none';
+      focusBar.style.display = 'flex';
+      // Lift the bar above the sheet when the sheet is open on a narrow screen.
+      focusBar.style.bottom = (state.narrow && focusPanelOpen) ? '48%' : '8px';
+      titlesToggle.textContent =
+        (focusPanelOpen ? (state.labels.hideTitles || 'Hide titles')
+                        : (state.labels.titles || 'Titles')) +
+        ' (' + vis.length.toLocaleString() + ')';
+
+      // The member list: a bottom sheet on narrow screens (leaves the cluster
+      // visible above it), a side drawer on wide. Only rendered when opened.
+      var vis_css = focusPanelOpen ? 'flex' : 'none';
+      if (state.narrow) {
+        focusPanel.setAttribute('style',
+          'position:absolute;left:0;right:0;bottom:0;top:auto;width:auto;max-height:46%;z-index:9;' +
+          'display:' + vis_css + ';flex-direction:column;padding:10px;' +
+          'border-radius:12px 12px 0 0;background:#0d1526f6;border-top:1px solid #33405c;' +
+          'color:#dfe8f5;' + dirStyle);
+      } else {
+        focusPanel.setAttribute('style',
+          'position:absolute;top:46px;bottom:34px;width:300px;z-index:9;' +
+          (state.rtl ? 'left:8px;' : 'right:8px;') +
+          'display:' + vis_css + ';flex-direction:column;padding:10px;' +
+          'border-radius:8px;background:#0d1526f2;border:1px solid #33405c;color:#dfe8f5;' + dirStyle);
+      }
+      if (!focusPanelOpen) return;   // controls shown; list stays collapsed
+
       var head = _el('div', 'atlas-focus-head');
       head.setAttribute('style', 'display:flex;align-items:center;gap:8px;margin-bottom:4px;');
-      var backBtn = _btn('✕');
-      backBtn.setAttribute('aria-label', 'Back');
-      backBtn.onclick = function () { backToGalaxy(state); rebuildFocusPanel(); redraw(); };
-      head.appendChild(backBtn);
+      var hideBtn = _btn('✕');
+      hideBtn.setAttribute('aria-label', state.labels.hideTitles || 'Hide titles');
+      hideBtn.onclick = function () { focusPanelOpen = false; rebuildFocusPanel(); };
+      head.appendChild(hideBtn);
       head.appendChild(_txt('span', state.labels.focusConstellation || 'Focus constellation', 'atlas-focus-title'));
       focusPanel.appendChild(head);
       focusPanel.appendChild(_txt('div',
@@ -1197,7 +1247,6 @@
         })(vis[r]);
       }
       focusPanel.appendChild(list);
-      focusPanel.style.display = 'flex';
     }
 
     function redraw() { draw(state, false); }
@@ -1351,6 +1400,11 @@
               openBrowsePane(state.decoded.nodes[idx].sys_id);
             } else {
               focusOn(state, idx);
+              // Wide: auto-open the member list (side drawer). Narrow: keep it
+              // closed so the focused cluster is visible — the user opens the
+              // bottom sheet via the "Titles" control. This also avoids the
+              // mobile ghost-click where a panel row opened under the tap point.
+              focusPanelOpen = !state.narrow;
               rebuildFocusPanel();
               redraw();
             }
@@ -1452,6 +1506,13 @@
     }
 
     rebuildLegend();
+
+    // Reposition the focus panel (bottom sheet <-> side drawer) on viewport /
+    // orientation change. init's resize listener (registered earlier) refreshes
+    // state.narrow via resizeCanvas before this fires.
+    window.addEventListener('resize', function () {
+      if (state.focusCluster >= 0) rebuildFocusPanel();
+    });
 
     // --- reduced-motion-aware bloom-in intro (skippable) ---
     runIntro(state, box, redraw);
