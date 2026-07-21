@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: "134-01 complete (Tasks 1-3 committed: frozen schema doc, discovery_ids.py, golden tests). Resume at 134-02."
-last_updated: "2026-07-21T21:42:20.170Z"
+stopped_at: "134-02 complete (Tasks 1-3 committed: --scan-sqlite mode, fabricated-token tests, discovery-budgets.md + gitignore). Resume at 134-03."
+last_updated: "2026-07-21T22:06:02.177Z"
 last_activity: 2026-07-21
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 14
-  completed_plans: 7
+  completed_plans: 8
   percent: 14
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 134 (discovery-data-spine) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-07-21
 
@@ -65,6 +65,7 @@ Condensed 7-phase roadmap: an early atlas quick win, then the REL-01 gate sequen
 ### Blockers/Concerns
 
 - **133-06 awaiting human production deploy.** The LOCAL portion (Tasks 1-2) is done: the REAL atlas asset is baked into gitignored `atlas_data/` (`atlas-v1-61519a85a2d0`, eligible==placed==62,645, Brotli 2,259,052 B ≤ 6 MB, both masking gates exit 0), the four-surface test passes (12), and the deploy docs are committed. Tasks 3-4 are `checkpoint:human-verify` PRODUCTION steps (asset-first scp → `deploy.sh master-main` → set `ATLAS_PREVIEW_ENABLED=1` → restart → live smoke → rollback drill) and need explicit human go-ahead. ATLAS-01 SC#5 and Phase 133 complete only after the human deploy.
+- Masking leak recurrence (2nd occurrence, tmp/ Codex-review scratch files): tmp/CODEX-REVIEW-134-replan-r2.md and tmp/CODEX-REVIEW-134-replan-r3.md (untracked, uncommitted) contain restricted-corpus mask hits per --scan-repo. tmp/ is still not gitignored. Recommend gitignoring tmp/**/*.md + tmp/**/*.log, or the owner manually redacting/deleting these two files. See .planning/phases/134-discovery-data-spine/deferred-items.md 134-02 entry.
 
 ## Deferred Items
 
@@ -85,8 +86,8 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-21T21:40:50.309Z
-Stopped at: 134-01 complete (Tasks 1-3 committed: frozen schema doc, discovery_ids.py, golden tests). Resume at 134-02.
+Last session: 2026-07-21T22:04:23.252Z
+Stopped at: 134-02 complete (Tasks 1-3 committed: --scan-sqlite mode, fabricated-token tests, discovery-budgets.md + gitignore). Resume at 134-03.
 Resume file: None
 Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 band-source artifact + join key + raw->band translation + TOTAL flank->claim_type routing proposed in docs/specs/discovery-sidecar-schema-v1.md; then resume 134-01 at Task 3 (schema FREEZE) -> Task 4 (ids.py + golden tests). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
@@ -101,6 +102,7 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 | Phase 133 P05 | 45min | 2 tasks | 2 files |
 | Phase 133 P06 (Tasks 1-2, LOCAL) | 90min | 2 tasks | 5 files (Tasks 3-4 = human deploy, pending) |
 | Phase 134 P01 | 25min | 3 tasks | 3 files |
+| Phase 134 P02 | 50min | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -120,3 +122,6 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 - [Phase 133 P04 Codex MEDIUM follow-up, fix(133-04) 746b3386]: Closed 3 MEDIUM findings from a Codex review of the Wave-4 atlas renderer (no HIGHs; hardens UX + malformed-asset robustness, no plan/ROADMAP change). MEDIUM-2: the "Loading…" placeholder (now `#atlas-loading`, inside `#atlas-canvas-box`) is removed on a successful first draw (before the bloom-in intro starts) AND before the load-error overlay is shown — exactly one of {canvas, error} is ever visible, never a stuck placeholder. MEDIUM-3: `whenCanvasReady()` now takes an `onTimeout` callback instead of returning silently after its ~10s poll window; `init()` wires it to the SAME normal load-error UI (falls back to `#atlas-canvas-box`, then `document.body`, if the box itself never mounted either). MEDIUM-1 (defense-in-depth — the 133-03 server loader already bounds-checks before serving, and the asset is our own content-hashed bake, so not a live vector): `decodeAtlas()` now validates required-unique sections, dtype/elem_size agreement (incl. the one shared dynamic cluster-index dtype across NODE_CLUSTER/FLOW_*/CLUSTER_LABEL_CI), every section's byte range in-bounds + 8-byte aligned, every related count consistent (node/edge/flow/label relations per schema §4), every STRING_HEAP `(offset,length)` ref within heap bounds, every edge endpoint within node range, and caps every count to a sane limit — all BEFORE any typed-array view or DOM string is built; any violation raises a clean Error caught by `init()`'s `.catch()` and surfaced via the same load-error UI (never OOB-read/uncaught-throw/hang/silently-truncated data). Valid-asset decode is unchanged (golden/XSS tests still pass byte-for-byte). New Node-driven coverage in `tests/atlas_bake/test_atlas_golden_js.py`: 5 malformed-asset cases (duplicate section id, out-of-bounds heap ref, out-of-range edge endpoint, dtype/schema mismatch, absurd section_count) each proven to make `decodeAtlas()` throw, and 3 full `AtlasDecode.init()` UX scenarios (success / fetch-error / canvas-timeout) driven against a minimal fake-browser harness, proving the placeholder-hidden + single-error-surface contract end-to-end — each new test was manually confirmed to catch its target regression (temporarily reverted the fix, saw the test fail, restored). 13/13 atlas tests pass (Node v24 available locally, ran for real, not skipped); ruff clean; masking scan clean (exit 0).
 - [Phase 134]: 134-01: skipped requirements mark-complete for DATA-01/02/03/10 (shared frontmatter IDs across 134-01/03/04/06/07); premature to flip Complete until the later distillation/release-contract plans land
 - [Phase 134]: 134-01: reworded superseded-identifier mentions (work_witness_claims, ms_ms_claims, textual_parallel, direct_text_overlap) to hyphenated prose forms so the doc both explains what was dropped and survives its own literal-substring negative verify check
+- [Phase 134]: 134-02: skipped requirements mark-complete for DATA-05/PERF-01 (shared frontmatter IDs across 134-02/04/08); premature to flip Complete until the sidecar-wired scan (134-04) and measured actuals (134-08) land
+- [Phase 134]: 134-02: --scan-sqlite surface strings redacted via matcher.redact_path before Issue construction (Rule-1 fix caught by the new never-echo test) -- repr(issue) bypasses .format()'s sanitizer, so a leaky TABLE/COLUMN identifier could otherwise reach the raw dataclass field
+- [Phase 134]: 134-02: R-source token pre-registration in the gitignored MASKING_SCAN_PATTERNS_FILE (D-03c) deferred as an owner-only operational step -- the executor does not have and must not fabricate the real R-source name/aliases/sigla; documented in the SUMMARY as a pending manual action

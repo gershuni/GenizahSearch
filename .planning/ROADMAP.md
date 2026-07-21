@@ -104,7 +104,7 @@ Plans:
 **Wave 1**
 
 - [x] 134-01-PLAN.md — Freeze the CORRECTED two-table schema (discovery_claim + discovery_evidence, evidence_source axis, per-source bands) + deterministic claim_id/evidence_id/unit_id id module (wave 1)
-- [ ] 134-02-PLAN.md — Masking guard --scan-sqlite + R-source tokens + gitignore + PERF-01 budgets doc (wave 1)
+- [x] 134-02-PLAN.md — Masking guard --scan-sqlite + R-source tokens + gitignore + PERF-01 budgets doc (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -208,7 +208,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
-| 134. Discovery Data Spine | 1/8 | In Progress|  |
+| 134. Discovery Data Spine | 2/8 | In Progress|  |
 | 135. Precision Certificate & Confidence Bands | 0/TBD | Not started | - |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
 | 137. Community Judgments | 0/TBD | Not started | - |
