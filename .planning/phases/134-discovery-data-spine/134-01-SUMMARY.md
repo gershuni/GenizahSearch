@@ -141,3 +141,14 @@ None — no external service configuration required.
 ---
 *Phase: 134-discovery-data-spine*
 *Completed: 2026-07-22*
+
+## Self-Check: PASSED
+
+- FOUND: docs/specs/discovery-sidecar-schema-v1.md
+- FOUND: scripts/discovery_ids.py
+- FOUND: tests/test_discovery_ids.py
+- FOUND: .planning/phases/134-discovery-data-spine/134-01-SUMMARY.md
+- FOUND commit: 425c7ee2 (Task 1)
+- FOUND commit: 4394d5a1 (Task 2)
+- FOUND commit: 0288ad9a (Task 3)
+- FOUND commit: c9e57835 (SUMMARY)

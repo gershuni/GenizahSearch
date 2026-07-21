@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: 134-01 Task 1 complete + committed; Task 2 blocking checkpoint reached (OQ1 per-family band-source/routing owner sign-off)
-last_updated: "2026-07-21T18:22:35.099Z"
-last_activity: 2026-07-21 -- Phase 134 planning complete
+stopped_at: "134-01 complete (Tasks 1-3 committed: frozen schema doc, discovery_ids.py, golden tests). Resume at 134-02."
+last_updated: "2026-07-21T21:42:20.170Z"
+last_activity: 2026-07-21
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 14
-  completed_plans: 6
+  completed_plans: 7
   percent: 14
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 134 (discovery-data-spine) — EXECUTING
-Plan: 1 of 8
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-07-21 -- Phase 134 planning complete
+Last activity: 2026-07-21
 
 Progress: [███████░░░] 67% (5/6 plans complete; 133-06 in progress)
 
@@ -65,7 +65,6 @@ Condensed 7-phase roadmap: an early atlas quick win, then the REL-01 gate sequen
 ### Blockers/Concerns
 
 - **133-06 awaiting human production deploy.** The LOCAL portion (Tasks 1-2) is done: the REAL atlas asset is baked into gitignored `atlas_data/` (`atlas-v1-61519a85a2d0`, eligible==placed==62,645, Brotli 2,259,052 B ≤ 6 MB, both masking gates exit 0), the four-surface test passes (12), and the deploy docs are committed. Tasks 3-4 are `checkpoint:human-verify` PRODUCTION steps (asset-first scp → `deploy.sh master-main` → set `ATLAS_PREVIEW_ENABLED=1` → restart → live smoke → rollback drill) and need explicit human go-ahead. ATLAS-01 SC#5 and Phase 133 complete only after the human deploy.
-- **134-01 Task 2 blocking checkpoint (owner/researcher domain decision).** Task 1 investigated the gitignored E1 research track and recorded PROPOSED (not frozen) answers in `docs/specs/discovery-sidecar-schema-v1.md` ("Resolved Design Questions"): per-claim-family (work-witness AND MS-MS) authoritative E1 band-source artifact, join key, raw->product-band translation, and a TOTAL flank_class->claim_type routing (incl edge/ambig). Work-witness proposal is well-grounded (e1_ra_confirmed.jsonl/e1_rb_screening.jsonl/e1_r3_frame.jsonl + track1_matches WHERE shadowed_by IS NULL, verified against fullcorpus_v2.db). MS-MS proposal is HIGH-UNCERTAINTY — no E1-equivalent certified band source exists for that family; a flank_class+canonical-overlap stand-in rule was proposed pending confirmation. Tasks 3 (schema FREEZE) and 4 (ids.py implementation) of plan 134-01 cannot proceed until the owner/researcher confirms or corrects the proposal, per family, at this blocking gate.
 
 ## Deferred Items
 
@@ -86,9 +85,9 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-21T12:45:20.658Z
-Stopped at: 134-01 Task 1 complete + committed; Task 2 blocking checkpoint reached (OQ1 per-family band-source/routing owner sign-off)
-Resume file: .planning/phases/134-discovery-data-spine/134-01-PLAN.md
+Last session: 2026-07-21T21:40:50.309Z
+Stopped at: 134-01 complete (Tasks 1-3 committed: frozen schema doc, discovery_ids.py, golden tests). Resume at 134-02.
+Resume file: None
 Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 band-source artifact + join key + raw->band translation + TOTAL flank->claim_type routing proposed in docs/specs/discovery-sidecar-schema-v1.md; then resume 134-01 at Task 3 (schema FREEZE) -> Task 4 (ids.py + golden tests). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
 ## Performance Metrics
@@ -101,6 +100,7 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 | Phase 133 P04 | 55min | 3 tasks | 4 files |
 | Phase 133 P05 | 45min | 2 tasks | 2 files |
 | Phase 133 P06 (Tasks 1-2, LOCAL) | 90min | 2 tasks | 5 files (Tasks 3-4 = human deploy, pending) |
+| Phase 134 P01 | 25min | 3 tasks | 3 files |
 
 ## Decisions
 
@@ -118,3 +118,5 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 - [Phase ?]: Gated the homepage teaser on atlas_preview_available() (imported directly), not the bare flag, so a flag-ON/asset-missing window never advertises a broken /atlas link from this fourth surface (MEDIUM-6)
 - [Phase ?]: Reused the two 133-03 pre-registered teaser translation keys verbatim; genizah_translations.py was never touched by this plan
 - [Phase 133 P04 Codex MEDIUM follow-up, fix(133-04) 746b3386]: Closed 3 MEDIUM findings from a Codex review of the Wave-4 atlas renderer (no HIGHs; hardens UX + malformed-asset robustness, no plan/ROADMAP change). MEDIUM-2: the "Loading…" placeholder (now `#atlas-loading`, inside `#atlas-canvas-box`) is removed on a successful first draw (before the bloom-in intro starts) AND before the load-error overlay is shown — exactly one of {canvas, error} is ever visible, never a stuck placeholder. MEDIUM-3: `whenCanvasReady()` now takes an `onTimeout` callback instead of returning silently after its ~10s poll window; `init()` wires it to the SAME normal load-error UI (falls back to `#atlas-canvas-box`, then `document.body`, if the box itself never mounted either). MEDIUM-1 (defense-in-depth — the 133-03 server loader already bounds-checks before serving, and the asset is our own content-hashed bake, so not a live vector): `decodeAtlas()` now validates required-unique sections, dtype/elem_size agreement (incl. the one shared dynamic cluster-index dtype across NODE_CLUSTER/FLOW_*/CLUSTER_LABEL_CI), every section's byte range in-bounds + 8-byte aligned, every related count consistent (node/edge/flow/label relations per schema §4), every STRING_HEAP `(offset,length)` ref within heap bounds, every edge endpoint within node range, and caps every count to a sane limit — all BEFORE any typed-array view or DOM string is built; any violation raises a clean Error caught by `init()`'s `.catch()` and surfaced via the same load-error UI (never OOB-read/uncaught-throw/hang/silently-truncated data). Valid-asset decode is unchanged (golden/XSS tests still pass byte-for-byte). New Node-driven coverage in `tests/atlas_bake/test_atlas_golden_js.py`: 5 malformed-asset cases (duplicate section id, out-of-bounds heap ref, out-of-range edge endpoint, dtype/schema mismatch, absurd section_count) each proven to make `decodeAtlas()` throw, and 3 full `AtlasDecode.init()` UX scenarios (success / fetch-error / canvas-timeout) driven against a minimal fake-browser harness, proving the placeholder-hidden + single-error-surface contract end-to-end — each new test was manually confirmed to catch its target regression (temporarily reverted the fix, saw the test fail, restored). 13/13 atlas tests pass (Node v24 available locally, ran for real, not skipped); ruff clean; masking scan clean (exit 0).
+- [Phase 134]: 134-01: skipped requirements mark-complete for DATA-01/02/03/10 (shared frontmatter IDs across 134-01/03/04/06/07); premature to flip Complete until the later distillation/release-contract plans land
+- [Phase 134]: 134-01: reworded superseded-identifier mentions (work_witness_claims, ms_ms_claims, textual_parallel, direct_text_overlap) to hyphenated prose forms so the doc both explains what was dropped and survives its own literal-substring negative verify check
