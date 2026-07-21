@@ -103,22 +103,22 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
 Plans:
 **Wave 1**
 
-- [ ] 134-01-PLAN.md — Freeze the sidecar schema + deterministic claim_id/unit_id id module (wave 1)
+- [ ] 134-01-PLAN.md — Freeze the CORRECTED two-table schema (discovery_claim + discovery_evidence, evidence_source axis, per-source bands) + deterministic claim_id/evidence_id/unit_id id module (wave 1)
 - [ ] 134-02-PLAN.md — Masking guard --scan-sqlite + R-source tokens + gitignore + PERF-01 budgets doc (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 134-03-PLAN.md — Deterministic masking-safe fixture DB + build-output invariant tests (wave 2)
+- [ ] 134-03-PLAN.md — Deterministic masking-safe fixture DB (two-table model, both evidence_sources) + standalone all-invariant verifier + build-output tests (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 134-04-PLAN.md — Offline distillation build script (opaque ids, both claim families, bands, witness units, evidence offsets, review artifact) (wave 3)
+- [ ] 134-04-PLAN.md — Offline distillation: unified witness family (track1_direct + PROPAGATED Q2) + shared_text family, per-source bands, witness units, offsets-only evidence, review artifact (wave 3)
 - [ ] 134-05-PLAN.md — Fail-closed versioned loader + DISCOVERY_ENABLED flag + startup wiring (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [ ] 134-06-PLAN.md — Async DiscoveryService chokepoint (off-loop, timeouts, bounded concurrency, LRU, pagination) (wave 4)
-- [ ] 134-07-PLAN.md — Owner title-review -> re-distill real discovery.db -> freeze discovery-frames.md (wave 4, human gate)
+- [ ] 134-07-PLAN.md — Owner title-review -> re-distill real discovery.db -> freeze discovery-frames.md (corrected per-band+evidence_source counts + C-7 precision reporting) (wave 4, human gate)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -208,7 +208,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
-| 134. Discovery Data Spine | 0/TBD | Not started | - |
+| 134. Discovery Data Spine | 0/8 | Not started | - |
 | 135. Precision Certificate & Confidence Bands | 0/TBD | Not started | - |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
 | 137. Community Judgments | 0/TBD | Not started | - |
