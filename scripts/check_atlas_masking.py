@@ -18,9 +18,19 @@ in committed material only by the internal codename "M-source") across:
     directory, recursively), including Brotli (`.br`) payloads which are
     ALWAYS fully decompressed and scanned in BOTH compressed and decompressed
     forms (never streamed raw).
+  - `scan_sqlite(db_path, patterns)` -- (Phase 134 DATA-05 extension) a SQLite
+    sidecar (e.g. the future `discovery.db`), scanned CELL-BY-CELL rather than
+    as an opaque byte blob: `sqlite_master.sql` (schema/DDL/identifiers -- this
+    also covers a leak hiding in a column NAME), then every row of every table,
+    every column, both TEXT and BLOB cells. Opened strictly read-only
+    (`file:...?mode=ro`); ANY connect/read/decode failure is fail-closed
+    (ScanError) -- a cell we cannot fully inspect could hide a leak that a
+    raw byte-blob scan would miss if it straddles SQLite's own page/overflow
+    structure.
 
-ONE semantically-complete, fail-CLOSED matcher runs on EVERY surface (repo and
-asset alike). Its single canonical pipeline is uniform for every byte source:
+ONE semantically-complete, fail-CLOSED matcher runs on EVERY surface (repo,
+asset, and sqlite sidecar alike). Its single canonical pipeline is uniform for
+every byte source:
 
     for each candidate CHARACTER-DECODING of the bytes
         (UTF-8 always; the BOM-declared codec when a BOM is present -- decode
@@ -69,12 +79,16 @@ Usage:
     python scripts/check_atlas_masking.py --scan-asset atlas_data/
     python scripts/check_atlas_masking.py --scan-repo --scan-asset atlas_data/
     python scripts/check_atlas_masking.py --strict --scan-repo --scan-asset atlas_data/
+    python scripts/check_atlas_masking.py --scan-sqlite discovery_data/discovery.db
+    python scripts/check_atlas_masking.py --scan-sqlite discovery_data/discovery.db \\
+        --scan-asset discovery_data/discovery.db --scan-repo --strict
     python scripts/check_atlas_masking.py --self-test
 """
 
 import argparse
 import os
 import re
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -1145,6 +1159,114 @@ def _read_asset_bytes(c: Path, display: str, strict: bool):
 
 
 # ---------------------------------------------------------------------------
+# scan_sqlite -- a SQLite sidecar, scanned cell-by-cell (Phase 134 DATA-05)
+# ---------------------------------------------------------------------------
+
+def _quote_ident(name: str) -> str:
+    """Double-quote a SQLite identifier, escaping embedded quotes -- these
+    identifiers come from our OWN `sqlite_master` enumeration (never
+    attacker-controlled at this scan boundary), but quoting defensively costs
+    nothing."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def scan_sqlite(db_path, patterns) -> list[Issue]:
+    """Scan a SQLite database READ-ONLY, cell-by-cell -- the FROZEN signature
+    (F4): a `patterns` LIST (mirroring `scan_asset(path, patterns)`); the
+    matcher is built INTERNALLY via `build_matcher(patterns)` (never a new
+    matcher, never pre-built by the caller).
+
+    Scans TWO surfaces through the SAME canonical `matcher.scan` pipeline:
+      - `sqlite_master.sql` (every CREATE TABLE/INDEX/... statement -- schema,
+        identifiers, and column NAMES all live here) tagged
+        f"{db}::schema";
+      - every table's every row, every column, BOTH str/TEXT values and
+        bytes/BLOB cells, tagged f"{db}::{table}.{column}".
+
+    A raw byte-blob scan of the whole `.db` file can miss a value split across
+    SQLite pages/overflow records and gives no cell-level provenance for
+    triage (RESEARCH.md Landmine 4) -- this scans the LOGICAL cell content via
+    sqlite3, not the physical file bytes (use `scan_asset` alongside this for
+    the physical-byte view).
+
+    Connects via `file:<path>?mode=ro` (never opens read-write). ANY connect,
+    read, or text-decode failure raises `ScanError` (fail-closed) -- mirrors
+    the blanket fail-closed convention used by scan_repo/scan_asset: a cell we
+    cannot fully inspect could hide a leak.
+    """
+    matcher = build_matcher(patterns)
+    issues: list[Issue] = []
+    db_path_str = str(db_path)
+    display_db = matcher.redact_path(db_path_str)
+    name_idx = matcher.path_hit_index(db_path_str)
+    if name_idx is not None:
+        issues.append(Issue(path=display_db, offset=-1, pattern_index=name_idx,
+                            surface='filename'))
+
+    try:
+        db_uri = Path(db_path_str).resolve().as_uri() + '?mode=ro'
+    except (OSError, ValueError) as exc:
+        raise ScanError(
+            f"cannot resolve sqlite db path (fail-closed): {display_db}"
+        ) from exc
+
+    try:
+        conn = sqlite3.connect(db_uri, uri=True)
+    except sqlite3.Error as exc:
+        raise ScanError(
+            f"cannot open sqlite db read-only (fail-closed): {display_db}"
+        ) from exc
+
+    try:
+        try:
+            cur = conn.cursor()
+
+            # -- schema / DDL / identifiers (also covers a leaky column NAME) --
+            cur.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL")
+            schema_surface = f"{display_db}::schema"
+            for (sql,) in cur.fetchall():
+                if sql:
+                    issues += matcher.scan(_encode_text(sql), schema_surface)
+
+            # -- every table, every row, every column (str + BLOB cells) --
+            cur.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+            tables = [row[0] for row in cur.fetchall()]
+
+            for tbl in tables:
+                quoted_tbl = _quote_ident(tbl)
+                cur.execute(f'PRAGMA table_info({quoted_tbl})')
+                cols = [row[1] for row in cur.fetchall()]
+                if not cols:
+                    continue
+                cur.execute(f'SELECT * FROM {quoted_tbl}')  # noqa: S608 (identifiers from our own sqlite_master)
+                while True:
+                    row = cur.fetchone()
+                    if row is None:
+                        break
+                    for col_name, cell in zip(cols, row):
+                        if cell is None:
+                            continue
+                        cell_surface = f"{display_db}::{tbl}.{col_name}"
+                        if isinstance(cell, bytes):
+                            issues += matcher.scan(cell, cell_surface)
+                        elif isinstance(cell, str):
+                            issues += matcher.scan(_encode_text(cell), cell_surface)
+                        # int/float/other scalar sqlite types cannot carry a
+                        # text-form leak.
+        except sqlite3.Error as exc:
+            raise ScanError(
+                f"sqlite read failed (fail-closed): {display_db}"
+            ) from exc
+    finally:
+        conn.close()
+
+    return issues
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1196,6 +1318,9 @@ def parse_args(argv=None):
                         help='Scan HEAD/index blobs + tracked worktree + untracked candidates')
     parser.add_argument('--scan-asset', metavar='PATH', default=None,
                         help='Scan a built asset file or directory (recursive)')
+    parser.add_argument('--scan-sqlite', metavar='PATH', default=None,
+                        help='Scan a SQLite database read-only, cell-by-cell '
+                             '(schema + every table row/column, str + BLOB)')
     parser.add_argument('--strict', action='store_true',
                         help='CI mode: require BOTH surfaces; scan every asset file; '
                              'fail on any traversal/read error')
@@ -1207,21 +1332,25 @@ def parse_args(argv=None):
 def main(argv=None) -> int:
     args = parse_args(argv)
 
-    # An empty/whitespace --scan-asset value is a hard usage error, never a
-    # silently-absent option (HIGH-10): `--self-test --scan-asset ""` must NOT
-    # slip through as a bare self-test.
+    # An empty/whitespace --scan-asset/--scan-sqlite value is a hard usage
+    # error, never a silently-absent option (HIGH-10): `--self-test
+    # --scan-asset ""` must NOT slip through as a bare self-test.
     if args.scan_asset is not None and not args.scan_asset.strip():
         print("ERROR: --scan-asset requires a non-empty path.", file=sys.stderr)
         return 2
+    if args.scan_sqlite is not None and not args.scan_sqlite.strip():
+        print("ERROR: --scan-sqlite requires a non-empty path.", file=sys.stderr)
+        return 2
 
     asset_requested = args.scan_asset is not None
+    sqlite_requested = args.scan_sqlite is not None
 
     # HIGH-10: presence is tested with `is not None` / the store_true flags --
     # NEVER truthiness of the option value.
     if args.self_test:
-        if args.scan_repo or asset_requested or args.strict:
+        if args.scan_repo or asset_requested or sqlite_requested or args.strict:
             print("ERROR: --self-test cannot be combined with --scan-repo / "
-                  "--scan-asset / --strict.", file=sys.stderr)
+                  "--scan-asset / --scan-sqlite / --strict.", file=sys.stderr)
             return 2
         return _run_self_test()
 
@@ -1230,9 +1359,9 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
 
-    if not args.scan_repo and not asset_requested:
+    if not args.scan_repo and not asset_requested and not sqlite_requested:
         print("Nothing to do -- pass --scan-repo and/or --scan-asset PATH "
-              "(or --self-test)", file=sys.stderr)
+              "and/or --scan-sqlite PATH (or --self-test)", file=sys.stderr)
         return 2
 
     patterns = load_patterns()
@@ -1248,6 +1377,8 @@ def main(argv=None) -> int:
             issues += scan_repo(patterns)
         if asset_requested:
             issues += scan_asset(args.scan_asset, patterns, strict=args.strict)
+        if sqlite_requested:
+            issues += scan_sqlite(args.scan_sqlite, patterns)
     except ScanError as exc:
         print(f"ERROR (fail-closed): {_sanitize(exc)}", file=sys.stderr)
         return 1
