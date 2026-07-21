@@ -1223,7 +1223,11 @@ def scan_sqlite(db_path, patterns) -> list[Issue]:
 
             # -- schema / DDL / identifiers (also covers a leaky column NAME) --
             cur.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL")
-            schema_surface = f"{display_db}::schema"
+            # Redact the constructed surface string itself (never just the DB
+            # part) BEFORE it ever becomes an Issue.path -- a leak could hide
+            # in a TABLE/INDEX/COLUMN identifier, and the raw dataclass field
+            # (e.g. via repr()) is not re-sanitized the way .format() is.
+            schema_surface = matcher.redact_path(f"{display_db}::schema")
             for (sql,) in cur.fetchall():
                 if sql:
                     issues += matcher.scan(_encode_text(sql), schema_surface)
@@ -1241,15 +1245,21 @@ def scan_sqlite(db_path, patterns) -> list[Issue]:
                 cols = [row[1] for row in cur.fetchall()]
                 if not cols:
                     continue
+                # Redact each column's surface tag ONCE (a leaky TABLE/COLUMN
+                # identifier must never reach Issue.path unredacted -- same
+                # never-echo guarantee as the filename/schema surfaces above).
+                col_surfaces = [
+                    matcher.redact_path(f"{display_db}::{tbl}.{col_name}")
+                    for col_name in cols
+                ]
                 cur.execute(f'SELECT * FROM {quoted_tbl}')  # noqa: S608 (identifiers from our own sqlite_master)
                 while True:
                     row = cur.fetchone()
                     if row is None:
                         break
-                    for col_name, cell in zip(cols, row):
+                    for cell_surface, cell in zip(col_surfaces, row):
                         if cell is None:
                             continue
-                        cell_surface = f"{display_db}::{tbl}.{col_name}"
                         if isinstance(cell, bytes):
                             issues += matcher.scan(cell, cell_surface)
                         elif isinstance(cell, str):
