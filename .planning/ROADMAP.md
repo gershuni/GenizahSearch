@@ -98,7 +98,17 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
   4. With the feature flag OFF, or the sidecar absent / corrupt / incompatible, every discovery surface hides cleanly with zero errors and the rest of the app stays fully available; deploy is temp-upload → verify → atomic rename → code, with a documented rollback + reproducible rebuild recipe.
   5. The version-controlled frozen-frame artifact (`discovery-frames.md`: per-band dedup counts, page→claim dedup formula, overlap-resolution counts, frame content hash) and the acceptance-budget artifact (`discovery-budgets.md`: browse-enrichment p95 ≤ 150 ms, atlas/work/leads caps + timeouts, ≤ 250 MB added RSS) are committed as phase exit criteria — frame frozen so CERT-01 can freeze against it.
 
-**Plans**: TBD
+**Plans**: 8 plans
+
+Plans:
+- [ ] 134-01-PLAN.md — Freeze the sidecar schema + deterministic claim_id/unit_id id module (wave 1)
+- [ ] 134-02-PLAN.md — Masking guard --scan-sqlite + R-source tokens + gitignore + PERF-01 budgets doc (wave 1)
+- [ ] 134-03-PLAN.md — Deterministic masking-safe fixture DB + build-output invariant tests (wave 2)
+- [ ] 134-04-PLAN.md — Offline distillation build script (opaque ids, both claim families, bands, witness units, evidence offsets, review artifact) (wave 3)
+- [ ] 134-05-PLAN.md — Fail-closed versioned loader + DISCOVERY_ENABLED flag + startup wiring (wave 3)
+- [ ] 134-06-PLAN.md — Async DiscoveryService chokepoint (off-loop, timeouts, bounded concurrency, LRU, pagination) (wave 4)
+- [ ] 134-07-PLAN.md — Owner title-review -> re-distill real discovery.db -> freeze discovery-frames.md (wave 4, human gate)
+- [ ] 134-08-PLAN.md — PERF-01 measurement + budgets finalization + deploy/rollback/rebuild recipe (wave 5, human gate)
 
 ### Phase 135: Precision Certificate & Confidence Bands
 
