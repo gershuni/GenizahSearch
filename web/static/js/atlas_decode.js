@@ -688,6 +688,65 @@
     }
   }
 
+  // First words of a title (or shelfmark), truncated for a compact per-dot label.
+  function _firstWords(s, maxChars) {
+    s = (s || '').trim();
+    if (s.length <= maxChars) return s;
+    var cut = s.slice(0, maxChars);
+    var sp = cut.lastIndexOf(' ');
+    if (sp > maxChars * 0.5) cut = cut.slice(0, sp);
+    return cut + '…';
+  }
+
+  // Per-dot titles inside a focused constellation. Mobile has no hover tooltip,
+  // so the dots are otherwise anonymous there; this shows the first words of each
+  // dot's title. Greedy overlap-avoidance keeps it sparse — a dense cluster shows
+  // only the labels that fit, and more appear as you zoom in. Bounded per frame
+  // (<= CAP drawn, <= MAX_MEASURE measured) and only on settled (non-drag) frames.
+  function drawFocusLabels(ctx, state) {
+    if (state.focusCluster < 0 || !state.focusMembers) return;
+    var nodes = state.decoded.nodes;
+    ctx.textAlign = 'center';
+    ctx.font = '10px "Segoe UI", system-ui, sans-serif';
+    var placed = [];
+    var CAP = 60, MAX_MEASURE = 400, PAD = 4;
+    // Label the hovered node first so it always wins its space (desktop bonus).
+    var order = [];
+    if (state.hover >= 0 && nodes[state.hover] &&
+        nodes[state.hover].cluster === state.focusCluster) {
+      order.push(state.hover);
+    }
+    for (var m = 0; m < state.focusMembers.length; m++) {
+      if (state.focusMembers[m] !== state.hover) order.push(state.focusMembers[m]);
+    }
+    var measured = 0;
+    for (var i = 0; i < order.length && placed.length < CAP && measured < MAX_MEASURE; i++) {
+      var idx = order[i];
+      if (isHidden(state, idx)) continue;
+      var nd = nodes[idx];
+      var p = toScreen(state, nd.x, nd.y);
+      if (p[0] < 0 || p[0] > state.viewW || p[1] < 0 || p[1] > state.viewH) continue;
+      var raw = nd.title || nd.shelfmark || '';
+      if (!raw) continue;
+      var text = _firstWords(raw, 18);
+      var w = ctx.measureText(text).width;
+      measured++;
+      var lx = p[0], ly = p[1] - 9;   // just above the dot
+      var box = { x0: lx - w / 2 - PAD, x1: lx + w / 2 + PAD, y0: ly - 9, y1: ly + 4 };
+      var clash = false;
+      for (var pI = 0; pI < placed.length; pI++) {
+        if (_rectsOverlap(box, placed[pI])) { clash = true; break; }
+      }
+      if (clash) continue;
+      placed.push(box);
+      _roundRectPath(ctx, box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0, 4);
+      ctx.fillStyle = 'rgba(6,9,16,0.62)';
+      ctx.fill();
+      ctx.fillStyle = '#eaf1fb';
+      ctx.fillText(text, lx, ly);
+    }
+  }
+
   function draw(state, dragMode) {
     var ctx = state.ctx;
     ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
@@ -707,6 +766,7 @@
       // Focus: dim the rest, draw the constellation's own edges + members.
       if (!dragMode && state.focusEdges) drawEdges(ctx, state, state.focusEdges, '88', dragMode);
       drawStars(ctx, state, dragMode);
+      if (!dragMode) drawFocusLabels(ctx, state);
     } else {
       // Overview: aggregate flows + stars; per-MS edges only once zoomed in.
       if (!dragMode && state.cam.k <= EDGE_ZOOM && !filtering) drawFlows(ctx, state);
