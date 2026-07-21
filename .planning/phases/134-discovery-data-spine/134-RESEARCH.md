@@ -16,7 +16,7 @@
 - **D-06:** "Large literary works" is a **curation policy, not a mechanical filter.** Researcher proposes candidate set (primary signal = exclude-by-genre: drop piyyut + documentary); **owner is final gate** via the D-08 review artifact.
 - **D-07:** Every shown work carries a **human-reviewed neutral title** (+ reviewed author/genre). **NO fallback to research titles** — **fail-closed**: unreviewed = EXCLUDED.
 - **D-08:** Curation via a **generated review artifact**: opaque `work_id` + candidate neutral title + author + genre, **source MASKED**. Owner approves; only approved rows distill. **Auto-adopt open-corpus (Sefaria/JA) canonical titles** with a light spot-check; concentrate FULL owner review on the M-source literary subset. Model on `scripts/export_translation_audit_sample.py` + `web/components/translation_report.py`.
-- **D-09:** **All four bands** populate the sidecar — `expert_verified` (R-A) > `tier_a` > `screening_rb` (R-B) > `screening_canon` (R-CANON); exactly one band per claim key post-precedence.
+- **D-09:** **[SUPERSEDED — see 134-CONTEXT.md CONTRACT CORRECTION C-4/C-5/F8: bands are per-`evidence_source`, a claim carries MULTIPLE evidence rows/bands, and "one band per claim key" is DROPPED.]** **All four bands** populate the sidecar — `expert_verified` (R-A) > `tier_a` > `screening_rb` (R-B) > `screening_canon` (R-CANON); exactly one band per claim key post-precedence.
 - **D-10:** Canon lane (`screening_canon`) ships but is separately caveated (Targum-confusion class) per LEADS-01.
 - **D-11:** Trim to fit **≤300 MB** (DATA-08). Planner sets per-band inclusion caps against `discovery-frames.md` + `discovery-budgets.md`; frozen-frame records per-band deduped counts BEFORE any certificate cards.
 - **D-12:** `claim_type` semantic set is **FROZEN** (direct witness / quotes-this-work / textual parallel / direct text overlap), stored as a stable code. Bilingual EN/HE wording DEFERRED to 135/136.
@@ -283,6 +283,9 @@ CREATE TABLE works (
   source_corpus TEXT NOT NULL          -- masked codename ('sefaria'|'ja'|'msource'); internal-only
 );
 
+-- SUPERSEDED: this 6-table sketch (work_witness_claims / work_witness_pages / ms_ms_claims / ms_ms_alignments)
+-- is HISTORICAL research output. The FROZEN model is the two-table split in 134-CONTEXT.md CONTRACT CORRECTION
+-- (discovery_claim PK (page_id, work_id) + discovery_evidence with an evidence_kind discriminator) — see docs/specs/discovery-sidecar-schema-v1.md.
 -- work–witness claims (DATA-01 family a)
 CREATE TABLE work_witness_claims (
   claim_id TEXT PRIMARY KEY,           -- sha256(work_witness|sys_id|work_id|claim_type)
@@ -538,7 +541,7 @@ def scan_sqlite(db_path, patterns) -> list[Issue]:
 | DATA-03/05 | Zero provenance leak in the shipped `.db` (schema + every cell) + committed repo | integration (CI gate) | `MASKING_SCAN_PATTERNS_FILE=... python scripts/check_atlas_masking.py --scan-sqlite discovery_data/discovery-v1-*.db --scan-repo --strict` (exit 0) | ❌ Wave 0 (extend scanner + test) |
 | DATA-03 | No `text`/`cat`/raw-`work_id`/`title`/`author`/`genre`/`provenance` columns carry reference content; only offsets + snapshot hash | unit | `pytest tests/test_discovery_schema.py::test_no_reference_columns` (assert column allowlist; assert no `M:`/`J:`/`REF` in any `work_id`) | ❌ Wave 0 |
 | DATA-01/02 | Deterministic `claim_id`/`unit_id` stable across rebuilds | unit (golden) | `pytest tests/test_discovery_ids.py::test_claim_id_golden` (frozen inputs → committed hashes) | ❌ Wave 0 |
-| DATA-02 | Exactly one band per claim key (post-precedence); precedence within-key only | unit | `pytest tests/test_discovery_bands.py::test_one_band_per_key` (GROUP BY key HAVING COUNT(DISTINCT band)>1 == 0; multi-work-per-MS preserved) | ❌ Wave 0 |
+| DATA-02 | ~~Exactly one band per claim key~~ **SUPERSEDED (F8 — DROPPED; see 134-VALIDATION.md)**: enforce VALID (evidence_kind × evidence_source × confidence_band) combinations instead | unit | `pytest tests/test_discovery_bands.py::test_valid_evidence_combinations` (multi-band claims allowed; multi-work-per-MS preserved) | ❌ Wave 0 |
 | DATA-02 | Frozen-frame reproducibility: rebuild → identical frame content hash | integration | `pytest tests/test_discovery_frame.py::test_frame_hash_reproducible` (two builds from fixture → equal hash; matches `discovery-frames.md`) | ❌ Wave 0 |
 | DATA-06 | Service never blocks the loop under overload; timeout → "temporarily unavailable" not hang | async unit | `pytest tests/test_discovery_service.py::test_overload_returns_unavailable` (monkeypatch a slow sync query; assert `DiscoveryUnavailable` within timeout + loop still responsive) | ❌ Wave 0 |
 | DATA-06 | Every list query is bounded (`LIMIT`) + paginated server-side | unit | `pytest tests/test_discovery_service.py::test_pagination_bounds` | ❌ Wave 0 |
