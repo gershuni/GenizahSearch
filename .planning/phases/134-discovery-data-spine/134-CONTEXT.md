@@ -76,7 +76,7 @@ Delivers **DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-07, DATA-0
 
 ### Existing sidecars, services & scripts (the build model)
 - `shared/fjms_service.py`, `shared/document_service.py`, `shared/nli_crossref_service.py` (+ 10 more `shared/*_service.py`) — the read-only SQLite-sidecar service pattern → new `shared/discovery_service.py`.
-- `web/search_api.py` — the `run_in_executor` + `asyncio.wait_for` off-event-loop precedent for the DATA-06 async chokepoint (heavy queries never block the loop; timeout → overload response).
+- `web/search_api.py` — the `run_in_executor` + `asyncio.wait` (NOT `wait_for` — `run_in_executor` threads are not cancellable) off-event-loop precedent for the DATA-06 async chokepoint (heavy queries never block the loop; timeout → overload response).
 - `web/feature_flags.py::_env_enabled` — the discovery feature-flag pattern (DATA-07; distinct from the Phase 133 atlas-preview flag).
 - `scripts/check_atlas_masking.py` + the `MASKING_SCAN_PATTERNS_FILE` env — the DATA-05 masking guard forerunner to **extend to the sidecar** (schema + every cell) + **register R-source tokens**. Already scans committed repo + product surfaces.
 - `scripts/export_translation_audit_sample.py` + `web/components/translation_report.py` — the audit-review-artifact pattern to model the **D-08 neutral-title review file**.
@@ -90,7 +90,7 @@ Delivers **DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-07, DATA-0
 
 ### Reusable Assets
 - **`shared/*_service.py` (13 services)** — module-level sidecar open, indexed bounded queries, graceful-absent; `shared/discovery_service.py` follows this shape with async wrappers added for DATA-06.
-- **`web/search_api.py` `run_in_executor` + `asyncio.wait_for`** — the exact async off-loop + per-query-timeout → overload-response pattern DATA-06 needs.
+- **`web/search_api.py` `run_in_executor` + `asyncio.wait`** (NOT `wait_for` — threads are not cancellable) — the exact async off-loop + per-query-timeout → overload-response pattern DATA-06 needs.
 - **`scripts/check_atlas_masking.py`** — the hardened, fail-closed, multi-surface masking scanner from Phase 133 (literal + NFC/NFD + casefold + UTF-8/16/32 + URL/HTML/JS forms; scans committed repo + assets). Extend its scan set to the sidecar (schema + every cell) and add R-source patterns.
 - **`web/feature_flags.py::_env_enabled`** — the discovery flag.
 - **Phase 133 `atlas_data/` + `web/atlas_assets.py`** — the versioned-asset + content-hash + fail-closed availability-predicate loader; the model for the DATA-08 schema-versioned filename + startup integrity-check + reject-incompatible-sidecar loader.
