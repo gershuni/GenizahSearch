@@ -1493,6 +1493,11 @@
               redraw();
             }
           }
+        } else {
+          // A pan/pinch just ended. Labels (cluster + per-dot titles) are skipped
+          // on drag frames for performance, so repaint once now that motion has
+          // stopped — otherwise they'd stay hidden until the next interaction.
+          redraw();
         }
       } else if (ids.length === 1) {
         // Dropped 2 -> 1: re-anchor the surviving finger so pan doesn't jump.
