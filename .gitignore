@@ -219,3 +219,11 @@ corpus_mapper_output/
 # publicly, which would let the asset bypass the atlas-preview feature flag.
 # scp'd to the server like the other sidecar DBs; never committed.
 /atlas_data/
+
+# Phase 134 (Discovery Data Spine) built sidecar payload: discovery.db (+ any
+# schema-versioned siblings) plus the offline distillation's review/frame
+# artifacts. Never commit the built .db -- like the other sidecar DBs
+# (pgp.db, fjms_enrichment.db, atlas_data/), it is scp'd to the server /
+# bundled with the desktop installer, not tracked in git (DATA-08 deploy
+# posture: temp upload -> verify -> atomic rename -> code deploy).
+/discovery_data/
