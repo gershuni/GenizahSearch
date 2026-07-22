@@ -955,6 +955,102 @@ def test_finalize_build_release_true_with_no_collections_raises_incomplete(tmp_p
 
 
 # ===========================================================================
+# Codex R2 MED (gate-ordering fix): the H2/H3 gates must run BEFORE any
+# output/crosswalk/review-artifact mutation -- a failed release build must
+# leave every prior artifact completely untouched.
+# ===========================================================================
+
+def test_finalize_build_h2_gate_failure_leaves_prior_artifacts_untouched(tmp_path):
+    """A release=True call that fails the H2 completeness gate must NOT
+    have deleted the prior output .db, persisted a crosswalk update, or
+    overwritten the review artifact -- all three mutations must run AFTER
+    the gate, never before."""
+    fx = _build_minimal_finalize_fixture(tmp_path)
+    review_artifact_path = fx["out_db_path"].parent / "candidates.csv"
+
+    # First, a successful non-release build to create the "prior" artifacts.
+    stats = sidecar_build.finalize_build(
+        source_db_path=str(fx["research_db"]),
+        from_approved_path=str(fx["approved_csv"]),
+        crosswalk_path=str(fx["crosswalk_path"]),
+        out_db_path=str(fx["out_db_path"]),
+        review_artifact_path=str(review_artifact_path),
+        masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+    )
+    assert Path(stats["db_path"]).exists()
+    prior_db_bytes = Path(stats["db_path"]).read_bytes()
+    prior_crosswalk_bytes = fx["crosswalk_path"].read_bytes()
+    prior_review_bytes = review_artifact_path.read_bytes()
+
+    # A release=True call with NO Q2/E1 collections must fail the H2 gate
+    # WITHOUT touching any of the three prior artifacts.
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError):
+        sidecar_build.finalize_build(
+            source_db_path=str(fx["research_db"]),
+            from_approved_path=str(fx["approved_csv"]),
+            crosswalk_path=str(fx["crosswalk_path"]),
+            out_db_path=str(fx["out_db_path"]),
+            review_artifact_path=str(review_artifact_path),
+            masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+            release=True,
+            frozen_precision_defaults=True,
+        )
+
+    assert Path(stats["db_path"]).read_bytes() == prior_db_bytes, (
+        "H2 gate failure must never have deleted the prior output .db"
+    )
+    assert fx["crosswalk_path"].read_bytes() == prior_crosswalk_bytes, (
+        "H2 gate failure must never have persisted a crosswalk update"
+    )
+    assert review_artifact_path.read_bytes() == prior_review_bytes, (
+        "H2 gate failure must never have overwritten the review artifact"
+    )
+
+
+def test_finalize_build_h3_gate_failure_leaves_prior_artifacts_untouched(tmp_path):
+    """A release=True call with NEITHER --precision-spec NOR
+    --frozen-precision-defaults must fail the H3 gate WITHOUT touching any
+    prior artifact -- H3 is a pure argument-validation gate that must run
+    before ANY file mutation, regardless of collection completeness."""
+    fx = _build_minimal_finalize_fixture(tmp_path)
+    review_artifact_path = fx["out_db_path"].parent / "candidates.csv"
+
+    stats = sidecar_build.finalize_build(
+        source_db_path=str(fx["research_db"]),
+        from_approved_path=str(fx["approved_csv"]),
+        crosswalk_path=str(fx["crosswalk_path"]),
+        out_db_path=str(fx["out_db_path"]),
+        review_artifact_path=str(review_artifact_path),
+        masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+    )
+    prior_db_bytes = Path(stats["db_path"]).read_bytes()
+    prior_crosswalk_bytes = fx["crosswalk_path"].read_bytes()
+    prior_review_bytes = review_artifact_path.read_bytes()
+
+    with pytest.raises(ValueError, match="precision-spec"):
+        sidecar_build.finalize_build(
+            source_db_path=str(fx["research_db"]),
+            from_approved_path=str(fx["approved_csv"]),
+            crosswalk_path=str(fx["crosswalk_path"]),
+            out_db_path=str(fx["out_db_path"]),
+            review_artifact_path=str(review_artifact_path),
+            masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+            release=True,
+            # neither precision_spec nor frozen_precision_defaults supplied
+        )
+
+    assert Path(stats["db_path"]).read_bytes() == prior_db_bytes, (
+        "H3 gate failure must never have deleted the prior output .db"
+    )
+    assert fx["crosswalk_path"].read_bytes() == prior_crosswalk_bytes, (
+        "H3 gate failure must never have persisted a crosswalk update"
+    )
+    assert review_artifact_path.read_bytes() == prior_review_bytes, (
+        "H3 gate failure must never have overwritten the review artifact"
+    )
+
+
+# ===========================================================================
 # H3: real/release band_precision -- never a fabricated tier_a number
 # ===========================================================================
 

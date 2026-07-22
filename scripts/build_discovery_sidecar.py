@@ -2251,35 +2251,31 @@ def finalize_build(
     payload must never silently default. A non-release call (unit tests,
     `--allow-partial-sources` smoke builds) defaults to
     `_frozen_real_band_precision_rows()` when neither is supplied.
+
+    Codex R2 MED (gate-ordering fix): the H2 (`_assert_release_inputs_complete`)
+    and H3 (`_resolve_band_precision_spec`) gates now run BEFORE ANY output
+    mutation -- before the prior output `.db` is deleted, before the output
+    directory is created, before the crosswalk is persisted (inside
+    `assign_opaque_work_ids`), and before the review artifact is emitted.
+    A failed release build (either gate) leaves every prior artifact (the
+    existing output `.db`, the crosswalk file, the review CSV) COMPLETELY
+    untouched -- previously those four mutations ran FIRST, so a release
+    build that failed H2/H3 had already deleted the prior `.db`, persisted
+    a crosswalk update, and (if requested) overwritten the review artifact
+    before ever raising.
     """
+    # H3 FIRST -- a pure argument-validation gate with NO file I/O at all,
+    # so it can run before even opening the read-only research connection.
+    bp_rows = _resolve_band_precision_spec(
+        precision_spec=precision_spec,
+        frozen_precision_defaults=frozen_precision_defaults,
+        release=release,
+    )
+
     out_path = Path(out_db_path)
-    if out_path.exists():
-        out_path.unlink()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn_research = _connect_research_ro(source_db_path)
     try:
-        candidates = select_shown_works(conn_research)
-        candidates = assign_opaque_work_ids(
-            candidates, crosswalk_path, create_if_missing=create_crosswalk_if_missing
-        )
-        if review_artifact_path:
-            emit_review_artifact(candidates, review_artifact_path)
-
-        crosswalk = json.loads(Path(crosswalk_path).read_text(encoding="utf-8"))
-        valid_work_ids = set(crosswalk.values())
-
-        approved = load_approved_works(from_approved_path, valid_work_ids=valid_work_ids)
-        raw_by_opaque = {c["work_id"]: c["raw_work_id"] for c in candidates}
-        works = []
-        for a in approved:
-            raw_work_id = raw_by_opaque.get(a["work_id"])
-            if raw_work_id is None:
-                continue
-            works.append({**a, "raw_work_id": raw_work_id})
-
-        page_index = PageTextIndex(conn_research)
-
         def _load(path):
             return load_jsonl(path) if path else []
 
@@ -2304,9 +2300,11 @@ def finalize_build(
             )
 
         # H2: in release mode, REQUIRE every frozen input present at its
-        # EXACT expected count BEFORE any ingest -- a missing collection
+        # EXACT expected count BEFORE any ingest AND before any output/
+        # crosswalk/review-artifact mutation below -- a missing collection
         # must never silently ingest as empty and produce a tier-A-only
-        # sidecar that still passes every other gate.
+        # sidecar that still passes every other gate, and a failed release
+        # build must never have already deleted/overwritten prior artifacts.
         tier_a_row_count = _count_tier_a_rows(conn_research) if release else None
         _assert_release_inputs_complete(
             release=release,
@@ -2319,13 +2317,34 @@ def finalize_build(
             tier_a_row_count=tier_a_row_count,
         )
 
-        # H3: resolve the band_precision spec BEFORE any further work -- a
-        # real/release build must NEVER fabricate a tier_a number.
-        bp_rows = _resolve_band_precision_spec(
-            precision_spec=precision_spec,
-            frozen_precision_defaults=frozen_precision_defaults,
-            release=release,
+        # Every gate passed -- ONLY NOW is it safe to mutate: delete any
+        # prior output .db, create the output directory, mint/persist
+        # opaque work_ids (crosswalk write, inside assign_opaque_work_ids),
+        # and emit the review artifact.
+        if out_path.exists():
+            out_path.unlink()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        candidates = select_shown_works(conn_research)
+        candidates = assign_opaque_work_ids(
+            candidates, crosswalk_path, create_if_missing=create_crosswalk_if_missing
         )
+        if review_artifact_path:
+            emit_review_artifact(candidates, review_artifact_path)
+
+        crosswalk = json.loads(Path(crosswalk_path).read_text(encoding="utf-8"))
+        valid_work_ids = set(crosswalk.values())
+
+        approved = load_approved_works(from_approved_path, valid_work_ids=valid_work_ids)
+        raw_by_opaque = {c["work_id"]: c["raw_work_id"] for c in candidates}
+        works = []
+        for a in approved:
+            raw_work_id = raw_by_opaque.get(a["work_id"])
+            if raw_work_id is None:
+                continue
+            works.append({**a, "raw_work_id": raw_work_id})
+
+        page_index = PageTextIndex(conn_research)
 
         result = build_claims_and_evidence(
             conn=conn_research, works=works, page_index=page_index,
