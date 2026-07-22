@@ -44,6 +44,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -852,6 +853,15 @@ class MaskingGateFailure(RuntimeError):
     raising -- a half-finalized leaking artifact must never linger on disk."""
 
 
+class CrosswalkValidationError(RuntimeError):
+    """Raised (M1) when a PERSISTED raw->opaque work_id crosswalk value fails
+    format or 1:1-uniqueness validation. Defense-in-depth: a corrupted or
+    hand-edited crosswalk file could otherwise place a raw identifier or a
+    filename stem straight into an emitted surface (the review artifact's
+    `work_id` column, or `works.work_id` in the shipped sidecar) -- this
+    aborts BEFORE any review-artifact or sidecar emission."""
+
+
 class EvidenceIdCollisionError(RuntimeError):
     """Raised (L2) when two evidence rows collide on the SAME `evidence_id`
     at EQUAL routing priority (both shipped, or both review_only) but carry
@@ -970,6 +980,49 @@ def select_shown_works(conn: sqlite3.Connection) -> List[Dict]:
 # 6.2 Opaque work_id minting (crosswalk-anchored, F16/DC2)
 # ---------------------------------------------------------------------------
 
+# Mirrors (never imports/edits) the FROZEN opaque work_id shape minted by
+# `scripts/discovery_ids.py::mint_work_id` -- a plain "w" + a zero-padded
+# 6-digit counter (e.g. "w000001"). Used ONLY as a defensive re-validation
+# pattern for PERSISTED crosswalk values (M1); the frozen recipe module
+# itself stays untouched.
+_OPAQUE_WORK_ID_PATTERN = re.compile(r"^w\d{6}$")
+
+
+def _validate_crosswalk(crosswalk: Dict[str, str]) -> None:
+    """Defense-in-depth (M1): validate every crosswalk value matches the
+    frozen opaque work_id format AND that the mapping is 1:1 (no two raw
+    work_ids sharing the same opaque id). Raises `CrosswalkValidationError`
+    on ANY malformed or duplicated value -- a corrupted/hand-edited
+    crosswalk file could otherwise place a raw identifier or filename stem
+    straight into an emitted surface (the review artifact's `work_id`
+    column, or `works.work_id` in the shipped sidecar); this must run
+    BEFORE any review-artifact or sidecar emission."""
+    malformed = sorted(
+        raw_id for raw_id, opaque in crosswalk.items()
+        if not (isinstance(opaque, str) and _OPAQUE_WORK_ID_PATTERN.match(opaque))
+    )
+    if malformed:
+        raise CrosswalkValidationError(
+            f"crosswalk contains {len(malformed)} value(s) not matching the frozen "
+            f"opaque work_id format (^w\\d{{6}}$) for raw_work_id(s): {malformed[:5]} "
+            "(M1 -- refusing to emit any review artifact/sidecar with a "
+            "potentially-raw crosswalk value)"
+        )
+    seen_opaque: Dict[str, str] = {}
+    duplicates: List[str] = []
+    for raw_id, opaque in sorted(crosswalk.items()):
+        prior_raw = seen_opaque.get(opaque)
+        if prior_raw is None:
+            seen_opaque[opaque] = raw_id
+        elif prior_raw != raw_id:
+            duplicates.append(f"{opaque} <- {prior_raw!r} AND {raw_id!r}")
+    if duplicates:
+        raise CrosswalkValidationError(
+            f"crosswalk is not 1:1 -- {len(duplicates)} opaque work_id(s) are shared "
+            f"by multiple raw work_ids (M1): {duplicates[:5]}"
+        )
+
+
 def assign_opaque_work_ids(
     candidates: List[Dict], crosswalk_path, *, create_if_missing: bool = False
 ) -> List[Dict]:
@@ -981,11 +1034,15 @@ def assign_opaque_work_ids(
 
     If the crosswalk file is absent and `create_if_missing` is False (the
     default), raises `CrosswalkAbortError` -- an absent crosswalk NEVER
-    silently re-mints (DC2).
+    silently re-mints (DC2). Every crosswalk value (on load AND again before
+    persisting) is validated via `_validate_crosswalk` (M1) -- a malformed or
+    non-1:1 value aborts BEFORE any candidate/work_id is ever assigned or
+    written out.
     """
     crosswalk_file = Path(crosswalk_path)
     if crosswalk_file.exists():
         crosswalk: Dict[str, str] = json.loads(crosswalk_file.read_text(encoding="utf-8"))
+        _validate_crosswalk(crosswalk)  # M1: re-validate the PERSISTED file on load
     elif create_if_missing:
         crosswalk = {}
     else:
@@ -997,8 +1054,7 @@ def assign_opaque_work_ids(
 
     counter = 0
     for opaque in crosswalk.values():
-        if isinstance(opaque, str) and opaque.startswith("w") and opaque[1:].isdigit():
-            counter = max(counter, int(opaque[1:]))
+        counter = max(counter, int(opaque[1:]))  # already format-validated above
 
     for c in candidates:
         raw_id = c["raw_work_id"]
@@ -1009,6 +1065,8 @@ def assign_opaque_work_ids(
             opaque = ids.mint_work_id(counter)
             crosswalk[raw_id] = opaque
             c["work_id"] = opaque
+
+    _validate_crosswalk(crosswalk)  # M1: re-validate BEFORE persisting/returning
 
     crosswalk_file.parent.mkdir(parents=True, exist_ok=True)
     crosswalk_file.write_text(

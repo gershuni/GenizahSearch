@@ -157,6 +157,52 @@ def test_assign_opaque_work_ids_absent_crosswalk_aborts(tmp_path):
         sidecar_build.assign_opaque_work_ids([{"raw_work_id": "raw:x"}], missing_path)
 
 
+def test_assign_opaque_work_ids_malformed_persisted_value_aborts(tmp_path):
+    """M1: a persisted crosswalk value NOT matching the frozen opaque
+    work_id format (e.g. a raw-shaped identifier or filename stem) must
+    abort BEFORE any candidate/work_id is assigned -- never silently
+    echoed through to a candidate's work_id."""
+    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_path.write_text(
+        json.dumps({"raw:a": "M:some-raw-identifier"}), encoding="utf-8",
+    )
+    with pytest.raises(sidecar_build.CrosswalkValidationError):
+        sidecar_build.assign_opaque_work_ids(
+            [{"raw_work_id": "raw:a"}], crosswalk_path, create_if_missing=False,
+        )
+
+
+def test_assign_opaque_work_ids_duplicate_opaque_value_aborts(tmp_path):
+    """M1: two DIFFERENT raw work_ids sharing the SAME persisted opaque
+    work_id (a non-1:1 crosswalk) must abort, never silently pick one."""
+    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_path.write_text(
+        json.dumps({"raw:a": "w000001", "raw:b": "w000001"}), encoding="utf-8",
+    )
+    with pytest.raises(sidecar_build.CrosswalkValidationError):
+        sidecar_build.assign_opaque_work_ids(
+            [{"raw_work_id": "raw:a"}, {"raw_work_id": "raw:b"}],
+            crosswalk_path, create_if_missing=False,
+        )
+
+
+def test_assign_opaque_work_ids_valid_persisted_crosswalk_passes(tmp_path):
+    """Positive case: a well-formed, 1:1 persisted crosswalk still round-trips
+    exactly as before (M1 must not reject legitimate crosswalks)."""
+    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_path.write_text(
+        json.dumps({"raw:a": "w000001", "raw:b": "w000002"}), encoding="utf-8",
+    )
+    candidates = sidecar_build.assign_opaque_work_ids(
+        [{"raw_work_id": "raw:a"}, {"raw_work_id": "raw:b"}, {"raw_work_id": "raw:c"}],
+        crosswalk_path, create_if_missing=False,
+    )
+    by_raw = {c["raw_work_id"]: c["work_id"] for c in candidates}
+    assert by_raw["raw:a"] == "w000001"
+    assert by_raw["raw:b"] == "w000002"
+    assert by_raw["raw:c"] == "w000003"
+
+
 def test_candidate_and_approved_headers_are_frozen():
     assert sidecar_build.CANDIDATE_HEADER == [
         "work_id", "candidate_neutral_title", "author", "genre",
