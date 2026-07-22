@@ -1990,6 +1990,12 @@ def _insert_witness_units_real(cur: sqlite3.Cursor, unit_specs: List[Dict]) -> i
 # a test's small synthetic slice, since tests never pass these *_path args).
 _EXPECTED_TAFSIR_TARGUM_ROWS = 106
 _EXPECTED_WITH_ARABIC_ROWS = 108
+# Frozen two-seed (trials>=2) subset counts within each router collection (C-1):
+# 106 total / 18 two-seed, 108 total / 57 two-seed. The release gate (H2) must
+# pin the SUBSET counts + bucket identity, not just the totals -- a shape-drifted
+# input with the same total but a different trials>=2 distribution must not pass.
+_EXPECTED_TAFSIR_TARGUM_TWO_SEED = 18
+_EXPECTED_WITH_ARABIC_TWO_SEED = 57
 
 # H2: the FULL frozen release-input contract (docs/specs/discovery-sidecar-
 # schema-v1.md SS4.1/SS4.2/SS4.3, C-1). Enforced ONLY when finalize_build is
@@ -2083,6 +2089,46 @@ def _assert_release_inputs_complete(
         for name, actual, expected in checks
         if actual != expected
     ]
+
+    # Codex R5 MED: pin each router collection's frozen SHAPE, not just its
+    # total -- the two-seed (trials>=2) subset count AND per-row bucket identity.
+    # (Masking: messages name only the param name, the frozen-safe expected
+    # bucket literal, and counts -- never a supplied row value.)
+    def _two_seed_count(collection_rows) -> int:
+        n = 0
+        for r in collection_rows:
+            t = r.get("trials") if isinstance(r, dict) else None
+            try:
+                if t is not None and float(t) >= 2:
+                    n += 1
+            except (TypeError, ValueError):
+                pass
+        return n
+
+    def _wrong_bucket_count(collection_rows, expected_bucket) -> int:
+        return sum(
+            1 for r in collection_rows
+            if not (isinstance(r, dict) and r.get("_bucket") == expected_bucket)
+        )
+
+    for name, coll, expected_bucket, expected_two_seed in (
+        ("q2_collection_tafsir_targum", q2_collection_tafsir_targum,
+         "tafsir_targum", _EXPECTED_TAFSIR_TARGUM_TWO_SEED),
+        ("q2_collection_with_arabic", q2_collection_with_arabic,
+         "with_arabic", _EXPECTED_WITH_ARABIC_TWO_SEED),
+    ):
+        actual_two_seed = _two_seed_count(coll)
+        if actual_two_seed != expected_two_seed:
+            problems.append(
+                f"{name}: expected {expected_two_seed} two-seed (trials>=2) rows, "
+                f"got {actual_two_seed}"
+            )
+        wrong_bucket = _wrong_bucket_count(coll, expected_bucket)
+        if wrong_bucket:
+            problems.append(
+                f"{name}: {wrong_bucket} row(s) have _bucket != {expected_bucket!r}"
+            )
+
     if problems:
         raise ReleaseInputsIncompleteError(
             "release build (H2) requires every frozen input present at its EXACT "
@@ -2212,9 +2258,11 @@ def _validate_precision_spec(rows: List[Dict]) -> None:
     else:
         c = matching_collection[0]
         if not _precision_matches(c.get("precision"), frozen_collection["precision"]):
+            # masking (Codex R5): never render the SUPPLIED precision -- a spec
+            # could supply an arbitrary string there; name only the frozen value.
             problems.append(
-                f"scope='collection' precision {c.get('precision')!r} != frozen "
-                f"{frozen_collection['precision']}"
+                "scope='collection' precision mismatch (expected frozen "
+                f"{frozen_collection['precision']})"
             )
         if c.get("evidence_source") is not None or c.get("confidence_band") is not None:
             problems.append(
@@ -2240,16 +2288,18 @@ def _validate_precision_spec(rows: List[Dict]) -> None:
         actual_precision = matches[0].get("precision")
         expected_precision = frozen_row["precision"]
         if not _precision_matches(actual_precision, expected_precision):
+            # masking (Codex R5): `key` is frozen-safe (iterated from
+            # frozen_band_by_key) but the SUPPLIED precision is not -- name only
+            # the frozen expected value, never the supplied one.
             problems.append(
-                f"band {key}: precision {actual_precision!r} != frozen {expected_precision!r}"
+                f"band {key}: precision mismatch (expected frozen {expected_precision!r})"
             )
 
-    extra_keys = sorted(set(band_rows_by_key) - set(frozen_band_by_key), key=str)
-    if extra_keys:
-        problems.append(
-            f"{len(extra_keys)} unexpected scope='band' row(s) outside the frozen "
-            f"row-set: {extra_keys}"
-        )
+    # NOTE: an extra/wrong-collection band row can never reach here -- the
+    # structural key-multiset check above fails fast on it (Codex R3/R4/R5), so
+    # once we get here the band key-set is EXACTLY the frozen set. The old
+    # `extra_keys` diagnostic (which rendered supplied-derived keys) is therefore
+    # both unreachable-with-content and a masking risk, and has been removed.
 
     if problems:
         raise InvalidPrecisionSpecError(

@@ -960,9 +960,19 @@ def test_finalize_build_artifact_scan_is_nonblocking(tmp_path):
 # H2: release-mode input-completeness gate
 # ===========================================================================
 
+def _router_rows(bucket, total, two_seed):
+    """Build `total` router rows for `bucket`, exactly `two_seed` of which carry
+    trials>=2 (the rest trials=1), matching the frozen 106/18 & 108/57 shape."""
+    return [
+        {"_bucket": bucket, "trials": 2 if i < two_seed else 1}
+        for i in range(total)
+    ]
+
+
 def _h2_complete_kwargs(**overrides):
     """A fully-conforming set of _assert_release_inputs_complete kwargs
-    (every collection at its EXACT frozen expected count) -- individual
+    (every collection at its EXACT frozen expected count, and each router
+    collection at its frozen two-seed subset + bucket identity) -- individual
     tests override just the field(s) they want to break."""
     kwargs = dict(
         release=True, allow_partial_sources=False,
@@ -972,8 +982,14 @@ def _h2_complete_kwargs(**overrides):
         e1_r3_frame=[{}] * sidecar_build._EXPECTED_E1_R3_FRAME_ROWS,
         q2_witness_collection=[{}] * sidecar_build._EXPECTED_Q2_WITNESS_COLLECTION_ROWS,
         q2_shared_text=[{}] * sidecar_build._EXPECTED_Q2_SHARED_TEXT_ROWS,
-        q2_collection_tafsir_targum=[{}] * sidecar_build._EXPECTED_TAFSIR_TARGUM_ROWS,
-        q2_collection_with_arabic=[{}] * sidecar_build._EXPECTED_WITH_ARABIC_ROWS,
+        q2_collection_tafsir_targum=_router_rows(
+            "tafsir_targum", sidecar_build._EXPECTED_TAFSIR_TARGUM_ROWS,
+            sidecar_build._EXPECTED_TAFSIR_TARGUM_TWO_SEED,
+        ),
+        q2_collection_with_arabic=_router_rows(
+            "with_arabic", sidecar_build._EXPECTED_WITH_ARABIC_ROWS,
+            sidecar_build._EXPECTED_WITH_ARABIC_TWO_SEED,
+        ),
         tier_a_row_count=sidecar_build._EXPECTED_TIER_A_ROWS,
     )
     kwargs.update(overrides)
@@ -1016,6 +1032,30 @@ def test_assert_release_inputs_complete_tier_a_count_mismatch_raises():
     with pytest.raises(sidecar_build.ReleaseInputsIncompleteError, match="tier_a"):
         sidecar_build._assert_release_inputs_complete(
             **_h2_complete_kwargs(tier_a_row_count=1)
+        )
+
+
+def test_assert_release_inputs_complete_router_two_seed_subset_mismatch_raises():
+    """Codex R5 MED: a router collection with the correct TOTAL but a drifted
+    two-seed (trials>=2) subset count must be rejected -- the frozen contract
+    pins 106/18 & 108/57, not just the totals."""
+    # correct total (106) but only 5 two-seed rows instead of the frozen 18
+    bad = _router_rows("tafsir_targum", sidecar_build._EXPECTED_TAFSIR_TARGUM_ROWS, 5)
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError, match="two-seed"):
+        sidecar_build._assert_release_inputs_complete(
+            **_h2_complete_kwargs(q2_collection_tafsir_targum=bad)
+        )
+
+
+def test_assert_release_inputs_complete_router_wrong_bucket_identity_raises():
+    """Codex R5 MED: every router row's _bucket must match the expected bucket
+    identity (a wrong file / mixed collection must not pass H2)."""
+    bad = _router_rows("with_arabic", sidecar_build._EXPECTED_WITH_ARABIC_ROWS,
+                       sidecar_build._EXPECTED_WITH_ARABIC_TWO_SEED)
+    bad[0] = {**bad[0], "_bucket": "tafsir_targum"}  # one row on the wrong bucket
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError, match="_bucket"):
+        sidecar_build._assert_release_inputs_complete(
+            **_h2_complete_kwargs(q2_collection_with_arabic=bad)
         )
 
 
@@ -1266,6 +1306,31 @@ def test_validate_precision_spec_message_never_echoes_supplied_key_values():
             precision_spec=custom, frozen_precision_defaults=False, release=True,
         )
     assert sentinel not in str(exc_info.value)
+
+
+def test_validate_precision_spec_value_message_never_echoes_supplied_precision():
+    """Codex R5 MED (masking): a supplied precision VALUE (not just key fields)
+    could embed restricted text if given as a string. Neither the collection-
+    nor the band-precision mismatch message may render the supplied value."""
+    sentinel = "RESTRICTED_PRECISION_SENTINEL"
+    coll_bad = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    for r in coll_bad:
+        if r["scope"] == "collection":
+            r["precision"] = sentinel
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError) as ei1:
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=coll_bad, frozen_precision_defaults=False, release=True,
+        )
+    assert sentinel not in str(ei1.value)
+    band_bad = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    for r in band_bad:
+        if r["scope"] == "band" and r["confidence_band"] == "expert_verified":
+            r["precision"] = sentinel
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError) as ei2:
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=band_bad, frozen_precision_defaults=False, release=True,
+        )
+    assert sentinel not in str(ei2.value)
 
 
 def test_resolve_band_precision_spec_rejects_the_old_minimal_fabricated_spec():
