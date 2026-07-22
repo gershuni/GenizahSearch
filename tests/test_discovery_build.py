@@ -12,6 +12,7 @@ touches the gitignored research tree -- everything here is self-contained.
 """
 import csv
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -270,10 +271,30 @@ def test_validate_crosswalk_rejects_non_ascii_digit_opaque_value(tmp_path):
 
 def test_validate_crosswalk_accepts_genuine_mint_work_id_output():
     """Positive case: every real `mint_work_id(...)` output for a range of
-    counters must match the (now ASCII-only) frozen pattern."""
+    counters must match the (now ASCII-only, whole-string) frozen pattern."""
     for counter in (1, 42, 999999):
         opaque = ids.mint_work_id(counter)
-        assert sidecar_build._OPAQUE_WORK_ID_PATTERN.match(opaque) is not None
+        assert sidecar_build._OPAQUE_WORK_ID_PATTERN.fullmatch(opaque) is not None
+
+
+def test_validate_crosswalk_rejects_terminal_newline_opaque_value(tmp_path):
+    """Codex R3 MED: Python's `$` matches just before a TERMINAL newline, so
+    the old `^w[0-9]{6}$`.match() accepted "w000001\\n" -- which
+    `format(int, "06d")` can never emit. The fix (`re.fullmatch(r"w[0-9]{6}")`)
+    requires the WHOLE string to be consumed, rejecting the trailing newline so
+    a non-frozen opaque id can never reach the crosswalk/review artifact."""
+    trailing_newline_value = "w000001\n"
+    # Contrast: the OLD `$`-anchored `.match` WOULD have wrongly accepted it ...
+    assert re.compile(r"^w[0-9]{6}$").match(trailing_newline_value) is not None
+    # ... but the fixed whole-string `fullmatch` rejects it.
+    assert sidecar_build._OPAQUE_WORK_ID_PATTERN.fullmatch(trailing_newline_value) is None
+    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_path.write_text(json.dumps({"raw:a": trailing_newline_value}), encoding="utf-8")
+    with pytest.raises(sidecar_build.CrosswalkValidationError) as exc_info:
+        sidecar_build.assign_opaque_work_ids(
+            [{"raw_work_id": "raw:a"}], crosswalk_path, create_if_missing=False,
+        )
+    assert trailing_newline_value not in str(exc_info.value)
 
 
 def test_candidate_and_approved_headers_are_frozen():
@@ -1184,6 +1205,42 @@ def test_resolve_band_precision_spec_rejects_extra_band_row():
         "sampling_frame": None, "ins_policy": None, "weighting": None, "notes": None,
     })
     with pytest.raises(sidecar_build.InvalidPrecisionSpecError, match="unexpected"):
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=custom, frozen_precision_defaults=False, release=True,
+        )
+
+
+def test_resolve_band_precision_spec_rejects_extra_collection_row():
+    """Codex R3 HIGH: an EXTRA scope='collection' row with a DIFFERENT
+    collection_id was previously ignored (the value check only located the ONE
+    frozen collection_id and never counted total collection rows). The exact
+    frozen key multiset must reject it before any output/artifact write."""
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    custom.append({
+        "scope": "collection", "collection_id": "some_other_collection_v1",
+        "evidence_source": None, "confidence_band": None,
+        "numerator": 1, "denominator": 1, "precision": 0.5,
+        "ci_low": 0.4, "ci_high": 0.6, "method": "bogus",
+        "sampling_frame": "x", "ins_policy": "x", "weighting": "x", "notes": None,
+    })
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError):
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=custom, frozen_precision_defaults=False, release=True,
+        )
+
+
+def test_resolve_band_precision_spec_rejects_band_on_wrong_collection_id():
+    """Codex R3 HIGH: a band with a valid (evidence_source, confidence_band)
+    pair but the WRONG collection_id previously passed (the band value check
+    keyed on (source, band) ONLY, ignoring collection_id). The full
+    (scope, collection_id, evidence_source, confidence_band) key multiset must
+    reject it."""
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    for row in custom:
+        if row["scope"] == "band" and row["confidence_band"] == "expert_verified":
+            # move a real track1 measured band onto the propagated collection id
+            row["collection_id"] = "propagated_witness_collection_v1"
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError):
         sidecar_build._resolve_band_precision_spec(
             precision_spec=custom, frozen_precision_defaults=False, release=True,
         )

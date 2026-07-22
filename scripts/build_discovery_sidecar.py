@@ -1083,7 +1083,14 @@ def select_shown_works(conn: sqlite3.Connection) -> List[Dict]:
 # `mint_work_id` actually calls) always emits ASCII '0'-'9' ONLY -- so a
 # value matching `\d` but NOT `[0-9]` is PROVABLY not a real mint_work_id
 # output and must be rejected, never silently admitted as "digit-shaped".
-_OPAQUE_WORK_ID_PATTERN = re.compile(r"^w[0-9]{6}$")
+#
+# Codex R3 fix: this pattern is applied via `re.fullmatch` (below), NOT
+# `.match` with a `$` anchor. Python's `$` matches just before a TERMINAL
+# newline, so "w000000\n" (which `format(int, "06d")` can never emit) would
+# have passed a `^w[0-9]{6}$`.match() check and leaked a non-frozen opaque id
+# into the crosswalk/review artifact. `fullmatch` on an unanchored pattern
+# requires the WHOLE string to be consumed, rejecting any trailing newline.
+_OPAQUE_WORK_ID_PATTERN = re.compile(r"w[0-9]{6}")
 
 
 def _validate_crosswalk(crosswalk: Dict[str, str]) -> None:
@@ -1106,12 +1113,12 @@ def _validate_crosswalk(crosswalk: Dict[str, str]) -> None:
 
     malformed_positions = [
         i for i, (_raw_id, opaque) in enumerate(items)
-        if not (isinstance(opaque, str) and _OPAQUE_WORK_ID_PATTERN.match(opaque))
+        if not (isinstance(opaque, str) and _OPAQUE_WORK_ID_PATTERN.fullmatch(opaque))
     ]
     if malformed_positions:
         raise CrosswalkValidationError(
             f"crosswalk contains {len(malformed_positions)} value(s) not matching the frozen "
-            f"opaque work_id format (^w[0-9]{{6}}$) at crosswalk position(s) "
+            f"opaque work_id format (whole-string w[0-9]{{6}}) at crosswalk position(s) "
             f"{malformed_positions[:5]} (M1/masking -- refusing to emit any review "
             "artifact/sidecar with a potentially-raw crosswalk value; the raw key/value "
             "is deliberately NOT included in this message)"
@@ -2123,6 +2130,41 @@ def _validate_precision_spec(rows: List[Dict]) -> None:
             and not isinstance(actual, bool)
             and abs(actual - expected) <= _PRECISION_SPEC_TOLERANCE
         )
+
+    # Codex R3 HIGH: enforce the EXACT frozen key MULTISET before the value
+    # checks below. Those checks key collection rows by collection_id and band
+    # rows by (evidence_source, confidence_band) ONLY, so an EXTRA collection
+    # row (different collection_id), a band assigned to the WRONG collection_id,
+    # a duplicated key, a non-dict row, or an unknown scope would otherwise slip
+    # through. Compare the full (scope, collection_id, evidence_source,
+    # confidence_band) key multiset up front. (These keys are contract
+    # enum/collection-id values -- never restricted content -- so naming a
+    # mismatched key in the message is masking-safe.)
+    from collections import Counter
+
+    def _spec_key(r: Dict) -> Tuple:
+        return (
+            r.get("scope"), r.get("collection_id"),
+            r.get("evidence_source"), r.get("confidence_band"),
+        )
+
+    for i, r in enumerate(rows):
+        if not isinstance(r, dict):
+            problems.append(f"row at position {i} is not a dict")
+        elif r.get("scope") not in ("collection", "band"):
+            problems.append(f"row at position {i} has unknown/invalid scope {r.get('scope')!r}")
+
+    frozen_key_counts = Counter(_spec_key(r) for r in frozen)
+    actual_key_counts = Counter(_spec_key(r) for r in rows if isinstance(r, dict))
+    if actual_key_counts != frozen_key_counts:
+        missing = sorted((frozen_key_counts - actual_key_counts).elements(), key=str)
+        extra = sorted((actual_key_counts - frozen_key_counts).elements(), key=str)
+        if missing:
+            problems.append(f"missing {len(missing)} required frozen row-key(s): {missing}")
+        if extra:
+            problems.append(
+                f"{len(extra)} row-key(s) outside/duplicated beyond the frozen set: {extra}"
+            )
 
     collection_rows = [r for r in rows if isinstance(r, dict) and r.get("scope") == "collection"]
     matching_collection = [
