@@ -112,7 +112,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 134-04-PLAN.md — Offline distillation: unified witness family (track1_direct + PROPAGATED Q2) + shared_text family, per-source bands, witness units, offsets-only evidence, review artifact (wave 3)
+- [x] 134-04-PLAN.md — Offline distillation: unified witness family (track1_direct + PROPAGATED Q2) + shared_text family, per-source bands, witness units, offsets-only evidence, review artifact (wave 3)
 - [ ] 134-05-PLAN.md — Fail-closed versioned loader + DISCOVERY_ENABLED flag + startup wiring (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
@@ -208,7 +208,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
-| 134. Discovery Data Spine | 3/8 | In Progress|  |
+| 134. Discovery Data Spine | 4/8 | In Progress|  |
 | 135. Precision Certificate & Confidence Bands | 0/TBD | Not started | - |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
 | 137. Community Judgments | 0/TBD | Not started | - |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: "134-03 complete (Tasks 1-3 committed: build_discovery_sidecar.py DDL+fixture, verify_discovery_sidecar.py, 5 invariant test files, 69 tests green). Resume at 134-04."
-last_updated: "2026-07-22T02:59:43.317Z"
+stopped_at: Completed 134-04-PLAN.md
+last_updated: "2026-07-22T03:59:12.051Z"
 last_activity: 2026-07-22
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 14
-  completed_plans: 9
+  completed_plans: 10
   percent: 14
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 134 (discovery-data-spine) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Last activity: 2026-07-22
 
@@ -86,8 +86,8 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-22T02:59:43.310Z
-Stopped at: 134-03 complete (Tasks 1-3 committed: build_discovery_sidecar.py DDL+fixture, verify_discovery_sidecar.py, 5 invariant test files, 69 tests green). Resume at 134-04.
+Last session: 2026-07-22T03:59:12.042Z
+Stopped at: Completed 134-04-PLAN.md
 Resume file: None
 Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 band-source artifact + join key + raw->band translation + TOTAL flank->claim_type routing proposed in docs/specs/discovery-sidecar-schema-v1.md; then resume 134-01 at Task 3 (schema FREEZE) -> Task 4 (ids.py + golden tests). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
@@ -104,6 +104,7 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 | Phase 134 P01 | 25min | 3 tasks | 3 files |
 | Phase 134 P02 | 50min | 3 tasks | 4 files |
 | Phase 134 P03 | 55min | 3 tasks | 10 files |
+| Phase 134 P04 | 120 | 3 tasks | 2 files |
 
 ## Decisions
 
@@ -132,3 +133,6 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 - [Phase ?]: [Phase 134 P03]: R5/duplicate-evidence-key corruption tests use a CREATE TABLE ... AS SELECT recreate-without-constraints trick because the frozen DDL's own NOT NULL/PRIMARY KEY constraints would otherwise reject those mutations outright via sqlite3.IntegrityError -- exercises the verifier's own redundant Python-level checks rather than leaving them untestable
 - [Phase ?]: [Phase 134 P03]: plain (non-router) shared_text rows default to routing_status=shipped/routing_reason=none in the fixture -- the frozen schema doc's routing matrix does not explicitly enumerate this family; 134-04/134-07 should confirm or override against the real q2_shared_text.jsonl ingest
 - [Phase ?]: [Phase 134] 134-03: skipped requirements mark-complete for DATA-01/02/03/08/10 (shared frontmatter IDs across 134-01/03/04/06/07/08, same precedent as 134-01/134-02); premature to flip Complete until 134-04's real distillation + 134-07's release-contract finalization land
+- [Phase ?]: 134-04: evidence_id collision (shared_text vs family-router same-span) resolved by build-side dedup, never by amending the FROZEN discovery_ids.evidence_id() recipe
+- [Phase ?]: 134-04: absent-crosswalk aborts by default (create_if_missing=False) in assign_opaque_work_ids -- never silently re-mints opaque work_ids for an already-shipped work
+- [Phase ?]: 134-04: real dev-box smoke build validated against actual research corpus (625 works/231,604 claims/251,976 evidence rows) -- passed verify_discovery_sidecar.py and the blocking masking gate with 0 hits
