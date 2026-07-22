@@ -26,14 +26,26 @@ atlas): the sidecar is scp'd asset-first, THEN the process restarts, so the
 startup load is authoritative -- there is deliberately NO per-request
 ``os.path.exists``.
 
-NOTE (Task 1 skeleton -- completed in Task 2): this revision resolves the
-sidecar by its EXACT manifest ``asset_basename`` (siblings ignored,
-rollback-safe), verifies the manifest ``content_hash`` against the actual
-bytes, opens the file read-only, and checks ``PRAGMA integrity_check`` +
-``meta.schema_version``. The full release-contract matrix (required meta
-keys, required tables, release-contract row counts, frozen enum vocab
-spot-check) is completed in Task 2 against
-``docs/specs/discovery-sidecar-schema-v1.md``.
+Fail-closed validation matrix (docs/specs/discovery-sidecar-schema-v1.md is
+the frozen contract this validates against): the sidecar is resolved by the
+EXACT ``asset_basename`` named in ``manifest.json`` -- a sibling ``*.db`` file
+that is NOT that exact name is deliberately IGNORED (rollback-safe: a
+rollback that leaves an old sibling behind is never picked up, T-134-rollback).
+ANY of the following leaves the state ``ready=False`` with no traceback
+escaping the loader (T-134-tamper / T-134-failopen):
+  - the named file is absent (only a stale sibling present, or nothing at all)
+  - the manifest's ``content_hash`` does not match the actual sidecar bytes
+  - ``PRAGMA integrity_check`` does not return ``'ok'`` (corrupt/malformed DB)
+  - ``meta.schema_version`` != the frozen ``_EXPECTED_SCHEMA_VERSION``
+    (reject-incompatible)
+  - any required ``meta`` release-contract key is missing
+  - any required table (per the frozen schema doc) is missing
+  - a release-contract expected row count does not match the actual count
+  - a ``confidence_band``/``claim_type`` value falls outside the frozen enum
+    vocab for its family (a cheap startup spot-check; the FULL 8-invariant
+    release verifier that gates the real offline build lives in
+    ``scripts/verify_discovery_sidecar.py`` -- this loader does not duplicate
+    that machinery, it re-checks only what matters for safe runtime reads)
 """
 
 from __future__ import annotations
@@ -67,6 +79,55 @@ MANIFEST_FILENAME = "manifest.json"
 # field. A future incompatible schema bump mints a new string constant here
 # (reject-incompatible, never a silent int comparison).
 _EXPECTED_SCHEMA_VERSION = "discovery-v1"
+
+# Required tables (docs/specs/discovery-sidecar-schema-v1.md SS1) -- the full
+# two-table claim model + its supporting tables.
+_REQUIRED_TABLES = frozenset({
+    "works",
+    "discovery_claim",
+    "discovery_evidence",
+    "witness_units",
+    "witness_unit_members",
+    "meta",
+    "band_precision",
+})
+
+# Required release-contract meta keys (docs/specs/discovery-sidecar-schema-v1.md SS1.5).
+_REQUIRED_META_KEYS = frozenset({
+    "schema_version",
+    "sidecar_version",
+    "source_db_sha256",
+    "build_date",
+    "data_as_of",
+    "htr_snapshot_hash",
+    "expected_rows_claims",
+    "expected_rows_evidence",
+    "expected_rows_works",
+    "expected_rows_units",
+    "frame_content_hash",
+})
+
+# (meta release-contract key, table) pairs cross-checked against actual counts.
+_RELEASE_CONTRACT_COUNTS = (
+    ("expected_rows_claims", "discovery_claim"),
+    ("expected_rows_evidence", "discovery_evidence"),
+    ("expected_rows_works", "works"),
+    ("expected_rows_units", "witness_units"),
+)
+
+# Frozen enum vocab spot-check (docs/specs/discovery-sidecar-schema-v1.md
+# "Frozen Enum Vocabularies" / scripts/discovery_ids.py). Deliberately
+# inlined as plain string constants here rather than importing
+# scripts/discovery_ids.py -- this module must stay a lightweight web/
+# runtime dependency, not couple to the offline-build script tree. This is a
+# defense-in-depth cell-value spot-check only; it is NOT a substitute for the
+# full (evidence_kind x evidence_source x confidence_band) combination
+# invariant enforced by scripts/verify_discovery_sidecar.py at build time.
+_CLAIM_TYPES = frozenset({"direct_witness", "quotes_this_work", "shared_text"})
+_CONFIDENCE_BANDS_BY_SOURCE: Dict[str, frozenset] = {
+    "track1_direct": frozenset({"expert_verified", "tier_a", "screening_rb", "screening_canon"}),
+    "propagated": frozenset({"corroborated", "weak", "not_evaluated"}),
+}
 
 
 @dataclass
@@ -125,16 +186,16 @@ def _resolve_versioned_db() -> Tuple[str, dict]:
 
 
 def load_discovery_state() -> bool:
-    """Load + validate the discovery.db sidecar ONCE at startup. Fail-closed:
-    any error anywhere leaves the module state ``ready=False`` with no
-    traceback escaping this function -- the app stays fully up and
-    ``discovery_available()`` then reads False.
+    """Load + fully validate the discovery.db sidecar ONCE at startup.
 
-    Task 1 (this revision) validates: exact-basename manifest resolution
-    (siblings ignored), the manifest ``content_hash`` against the actual
-    sidecar bytes, ``PRAGMA integrity_check``, and ``meta.schema_version``.
-    Task 2 completes the release-contract matrix (required meta keys,
-    required tables, release-contract row counts, frozen enum vocab).
+    Fail-closed: EVERY failure mode (missing/malformed manifest, absent named
+    file, a sibling *.db that isn't the manifest's exact basename,
+    content_hash mismatch, failed PRAGMA integrity_check, an incompatible
+    schema_version, a missing required meta key or table, a release-contract
+    row-count mismatch, or an out-of-vocab enum value) leaves the module
+    state ``ready=False`` with no traceback ever escaping this function --
+    the app stays fully up and ``discovery_available()`` then reads False, so
+    every future discovery surface hides cleanly.
 
     Safe to call more than once (a rebuild + restart, or a test re-point of
     ``DISCOVERY_DATA_DIR``) -- it atomically replaces the module state under
@@ -164,12 +225,53 @@ def load_discovery_state() -> bool:
         meta_rows = conn.execute("SELECT key, value FROM meta").fetchall()
         meta = {row["key"]: row["value"] for row in meta_rows}
 
+        missing_meta_keys = _REQUIRED_META_KEYS - meta.keys()
+        if missing_meta_keys:
+            raise ValueError(f"meta missing required key(s): {sorted(missing_meta_keys)}")
+
         schema_version = meta.get("schema_version")
         if schema_version != _EXPECTED_SCHEMA_VERSION:
             raise ValueError(
                 f"incompatible schema_version {schema_version!r} "
                 f"(expected {_EXPECTED_SCHEMA_VERSION!r}) -- reject-incompatible"
             )
+
+        table_rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        actual_tables = {row["name"] for row in table_rows}
+        missing_tables = _REQUIRED_TABLES - actual_tables
+        if missing_tables:
+            raise ValueError(f"missing required table(s): {sorted(missing_tables)}")
+
+        for meta_key, table in _RELEASE_CONTRACT_COUNTS:
+            expected = meta.get(meta_key)
+            (actual,) = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()  # noqa: S608 -- table is one of the fixed allowlisted names above, never user input
+            if expected is None or int(expected) != actual:
+                raise ValueError(
+                    f"release-contract row-count mismatch: meta.{meta_key}={expected!r}, "
+                    f"actual {table} count={actual}"
+                )
+
+        # Frozen enum vocab spot-check (defense-in-depth). The full
+        # (evidence_kind x evidence_source x confidence_band) combination
+        # invariant is enforced by scripts/verify_discovery_sidecar.py at
+        # build time; this is a cheap runtime sanity re-check only.
+        claim_type_rows = conn.execute("SELECT DISTINCT claim_type FROM discovery_claim").fetchall()
+        invalid_claim_types = {row[0] for row in claim_type_rows} - _CLAIM_TYPES
+        if invalid_claim_types:
+            raise ValueError(f"invalid claim_type value(s): {sorted(invalid_claim_types)}")
+
+        band_rows = conn.execute(
+            "SELECT DISTINCT evidence_source, confidence_band FROM discovery_evidence"
+        ).fetchall()
+        for evidence_source, confidence_band in band_rows:
+            valid_bands = _CONFIDENCE_BANDS_BY_SOURCE.get(evidence_source)
+            if valid_bands is None or confidence_band not in valid_bands:
+                raise ValueError(
+                    "invalid (evidence_source, confidence_band) combination: "
+                    f"({evidence_source!r}, {confidence_band!r})"
+                )
 
         new_state = _DiscoveryState(
             ready=True,
