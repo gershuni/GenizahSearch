@@ -409,6 +409,63 @@ def test_m4_strict_check_never_fires_on_synthetic_fixture_sidecar_version(tmp_pa
     assert not any("(M4)" in v for v in violations)
 
 
+def test_m4_release_mode_strict_check_rejects_duplicate_measured_band_row(tmp_path):
+    """Codex R2 MED (dict-collapse fix): TWO rows sharing the SAME
+    (collection_id, evidence_source, confidence_band) key for an
+    already-satisfied expected band must be REJECTED -- even when the
+    SECOND (later, higher rowid) row carries the frozen-correct value,
+    which a naive dict keyed only on (source, band) (last-value-wins on
+    plain assignment) would have let slip through silently."""
+    rows = list(sidecar_build._frozen_real_band_precision_rows())
+    expert_verified_row = next(
+        r for r in rows if r["scope"] == "band" and r["confidence_band"] == "expert_verified"
+    )
+    # A wrong/extra duplicate inserted BEFORE the valid row -- a
+    # last-value-wins dict collapse would keep only the (valid) second row
+    # and never notice the extra, wrong one sharing its key.
+    bogus_extra = {**expert_verified_row, "precision": 0.111}
+    idx = rows.index(expert_verified_row)
+    rows.insert(idx, bogus_extra)
+
+    db_path = _make_band_precision_only_db(
+        tmp_path, rows, sidecar_version=sidecar_build.REAL_SIDECAR_VERSION,
+    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        violations = verify_mod.check_band_precision(conn, meta)
+    finally:
+        conn.close()
+    assert any("expert_verified" in v and "exactly 1" in v for v in violations)
+
+
+def test_m4_release_mode_strict_check_rejects_extra_unexpected_band_row(tmp_path):
+    """Codex R2 MED: an entirely extra band row (a confidence_band outside
+    the frozen 6-key release row-set) must be rejected regardless of its
+    own precision value -- even when that value is NULL, which the OLD
+    "only reject non-null-and-unexpected" check would have missed
+    entirely."""
+    rows = list(sidecar_build._frozen_real_band_precision_rows())
+    rows.append({
+        "scope": "band", "collection_id": "e1_certification_registry_v1",
+        "evidence_source": "track1_direct", "confidence_band": "bogus_extra_band",
+        "numerator": None, "denominator": None, "precision": None,
+        "ci_low": None, "ci_high": None, "method": None,
+        "sampling_frame": None, "ins_policy": None, "weighting": None, "notes": None,
+    })
+
+    db_path = _make_band_precision_only_db(
+        tmp_path, rows, sidecar_version=sidecar_build.REAL_SIDECAR_VERSION,
+    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        violations = verify_mod.check_band_precision(conn, meta)
+    finally:
+        conn.close()
+    assert any("bogus_extra_band" in v for v in violations)
+
+
 def test_m4_committed_synthetic_fixture_never_triggers_strict_checks():
     """The committed 134-03 golden fixture keeps its synthetic sidecar_version
     -- confirms the full verify() pipeline never runs the M4 strict checks

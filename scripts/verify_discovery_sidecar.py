@@ -76,6 +76,27 @@ _EXPECTED_MEASURED_BAND_PRECISIONS = {
     (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_CANON): 0.647,
 }
 
+# Mirrors (never imports/edits) the literal collection_id
+# `scripts/build_discovery_sidecar.py::_frozen_real_band_precision_rows`
+# uses for the E1-certification-registry `scope='band'` rows (Codex R2 MED
+# dict-collapse fix) -- used ONLY to build the exact expected
+# (collection_id, evidence_source, confidence_band) key-set below.
+_E1_REGISTRY_COLLECTION_ID = "e1_certification_registry_v1"
+
+# Codex R2 MED: the COMPLETE frozen release band_precision row-set, keyed
+# on (collection_id, evidence_source, confidence_band) -- used to require
+# EXACTLY ONE row per expected key (never a bare (source, band) dict
+# collapse, which let a duplicate/extra row for an already-satisfied key
+# silently overwrite a valid one and slip through undetected).
+_EXPECTED_BAND_KEYS = {
+    (_COLLECTION_ID, ids.EVIDENCE_SOURCE_PROPAGATED, ids.CONFIDENCE_BAND_CORROBORATED),
+    (_COLLECTION_ID, ids.EVIDENCE_SOURCE_PROPAGATED, ids.CONFIDENCE_BAND_WEAK),
+    (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_EXPERT_VERIFIED),
+    (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A),
+    (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_RB),
+    (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_CANON),
+}
+
 _RELEASE_CONTRACT_COUNTS = [
     ("expected_rows_claims", "discovery_claim"),
     ("expected_rows_evidence", "discovery_evidence"),
@@ -358,15 +379,27 @@ def _check_band_precision_release_strict(rows) -> List[str]:
     non-null numerator/denominator/ci/method); BOTH propagated bands
     (corroborated, weak) present with NULL precision/ci; the THREE measured
     track1_direct bands present at their frozen values; tier_a present with
-    NULL precision; and no OTHER band carries a non-null precision."""
+    NULL precision; and no OTHER band carries a non-null precision.
+
+    Codex R2 MED (dict-collapse fix): band rows are grouped by the FULL
+    (collection_id, evidence_source, confidence_band) key into a LIST of
+    matches per key (never a bare dict keyed on (source, band) alone, which
+    let a duplicate/extra row silently overwrite a valid one via a plain
+    dict assignment and slip through undetected). Every expected key must
+    have EXACTLY ONE matching row -- a count of 0 (missing) or >1
+    (duplicate) is rejected BEFORE any value is even inspected; any row
+    keyed OUTSIDE the frozen expected set at all is rejected too, whether
+    or not its own precision happens to be non-null."""
     violations: List[str] = []
     collection_rows = []
-    by_band_key: Dict[Tuple[Optional[str], Optional[str]], Tuple] = {}
+    band_rows_by_key: Dict[Tuple[Optional[str], Optional[str], Optional[str]], List[Tuple]] = {}
     for scope, collection_id, source, band, numerator, denominator, precision, ci_low, ci_high, method in rows:
         if scope == "collection":
             collection_rows.append((collection_id, precision, numerator, denominator, ci_low, ci_high, method))
         elif scope == "band":
-            by_band_key[(source, band)] = (precision, ci_low, ci_high, numerator, denominator)
+            band_rows_by_key.setdefault((collection_id, source, band), []).append(
+                (precision, ci_low, ci_high, numerator, denominator)
+            )
 
     matching = [r for r in collection_rows if r[0] == _COLLECTION_ID]
     if len(matching) != 1:
@@ -386,45 +419,62 @@ def _check_band_precision_release_strict(rows) -> List[str]:
                 f"{_COLLECTION_PRECISION_VALUE}"
             )
 
+    # R2 MED: require EXACTLY ONE row for EVERY expected
+    # (collection_id, evidence_source, confidence_band) key -- BEFORE any
+    # value is checked, so a duplicate/extra row can never silently
+    # overwrite a valid one via dict-assignment ordering.
+    for key in sorted(_EXPECTED_BAND_KEYS):
+        count = len(band_rows_by_key.get(key, []))
+        if count != 1:
+            violations.append(
+                f"release band_precision (M4): expected exactly 1 row for "
+                f"(collection_id, evidence_source, confidence_band)={key}, found {count}"
+            )
+
+    # Any band row keyed OUTSIDE the frozen expected set at all is rejected
+    # -- regardless of its own precision value (a fully-NULL bogus/extra
+    # band row would previously slip through the old "only reject
+    # non-null-and-unexpected" check silently).
+    extra_keys = sorted(set(band_rows_by_key) - _EXPECTED_BAND_KEYS)
+    for key in extra_keys:
+        violations.append(
+            f"release band_precision (M4): unexpected band row for "
+            f"(collection_id, evidence_source, confidence_band)={key} -- not part of the "
+            "frozen release row-set"
+        )
+
+    def _single_row(key):
+        matches = band_rows_by_key.get(key)
+        return matches[0] if matches and len(matches) == 1 else None
+
     for band in (ids.CONFIDENCE_BAND_CORROBORATED, ids.CONFIDENCE_BAND_WEAK):
-        key = (ids.EVIDENCE_SOURCE_PROPAGATED, band)
-        if key not in by_band_key:
-            violations.append(f"release band_precision (M4): missing propagated/{band} band row")
-            continue
-        precision, ci_low, ci_high, _numerator, _denominator = by_band_key[key]
+        row = _single_row((_COLLECTION_ID, ids.EVIDENCE_SOURCE_PROPAGATED, band))
+        if row is None:
+            continue  # already flagged above (missing/duplicate)
+        precision, ci_low, ci_high, _numerator, _denominator = row
         if precision is not None or ci_low is not None or ci_high is not None:
             violations.append(
                 f"release band_precision (M4): propagated/{band} carries non-null precision/CI"
             )
 
     for (source, band), expected_precision in _EXPECTED_MEASURED_BAND_PRECISIONS.items():
-        key = (source, band)
-        if key not in by_band_key:
-            violations.append(f"release band_precision (M4): missing measured band {key}")
-            continue
-        precision = by_band_key[key][0]
+        row = _single_row((_E1_REGISTRY_COLLECTION_ID, source, band))
+        if row is None:
+            continue  # already flagged above (missing/duplicate)
+        precision = row[0]
         if precision is None or abs(precision - expected_precision) > _PRECISION_TOLERANCE:
             violations.append(
-                f"release band_precision (M4): {key} precision {precision} != "
+                f"release band_precision (M4): ({source}, {band}) precision {precision} != "
                 f"expected {expected_precision}"
             )
 
-    tier_a_key = (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A)
-    if tier_a_key not in by_band_key:
-        violations.append("release band_precision (M4): missing tier_a band row")
-    else:
-        precision = by_band_key[tier_a_key][0]
+    tier_a_key = (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A)
+    tier_a_row = _single_row(tier_a_key)
+    if tier_a_row is not None:
+        precision = tier_a_row[0]
         if precision is not None:
             violations.append(
                 f"release band_precision (M4): tier_a precision must be NULL, got {precision}"
-            )
-
-    allowed_nonnull_keys = set(_EXPECTED_MEASURED_BAND_PRECISIONS.keys())
-    for (source, band), (precision, *_rest) in by_band_key.items():
-        if precision is not None and (source, band) not in allowed_nonnull_keys:
-            violations.append(
-                f"release band_precision (M4): unexpected non-null precision on band "
-                f"({source}, {band})={precision}"
             )
 
     return violations
