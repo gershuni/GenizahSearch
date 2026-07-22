@@ -88,6 +88,37 @@ def _write_approved_csv(path, rows):
         writer.writerows(rows)
 
 
+def _build_fjms_db(tmp_path, *, domains=(), catalog=(), titles=(), persons=(), name="fjms.db"):
+    """Tiny in-repo-shape fjms_enrichment.db slice for FJMS-enrichment tests.
+
+    Every value here is FABRICATED (synthetic domain/author labels) -- never
+    real FJMS content. Schema mirrors ONLY the columns the enrichment queries
+    touch:
+      domains(AlmaId, Domain, DomainHeb, ParentDomain)
+      catalog(AlmaId, GenizahTitleId, Author, CopyName)  -- CopyName present to
+        prove the composition-author query never reads the scribe column
+      genizah_titles(GenizahTitleId, AuthorId)
+      genizah_persons(GenizahPersonId, EngDesc, HebDesc)
+    """
+    db_path = tmp_path / name
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE domains (AlmaId TEXT, Domain TEXT, DomainHeb TEXT, ParentDomain TEXT);
+        CREATE TABLE catalog (AlmaId TEXT, GenizahTitleId INTEGER, Author INTEGER, CopyName TEXT);
+        CREATE TABLE genizah_titles (GenizahTitleId INTEGER, AuthorId INTEGER);
+        CREATE TABLE genizah_persons (GenizahPersonId INTEGER, EngDesc TEXT, HebDesc TEXT);
+        """
+    )
+    conn.executemany("INSERT INTO domains VALUES (?, ?, ?, ?)", domains)
+    conn.executemany("INSERT INTO catalog VALUES (?, ?, ?, ?)", catalog)
+    conn.executemany("INSERT INTO genizah_titles VALUES (?, ?)", titles)
+    conn.executemany("INSERT INTO genizah_persons VALUES (?, ?, ?)", persons)
+    conn.commit()
+    conn.close()
+    return db_path
+
+
 # ===========================================================================
 # Task 1: shown-work selection + opaque work_id + review artifact + approved reader
 # ===========================================================================
@@ -419,12 +450,14 @@ def test_emit_review_artifact_excludes_zero_claim_works(tmp_path):
     assert [r["work_id"] for r in rows] == ["w000001"]
 
 
-def test_emit_review_artifact_masked_metadata_flag_default_off_and_opt_in(tmp_path):
-    """Owner opt-in (owner decision 2026-07-22): --include-masked-metadata
-    populates author + genre for masked (none-owner-supplies) rows; DEFAULT
-    OFF keeps them blank (fail-closed). candidate_title stays blank for the
-    masked row regardless -- the owner supplies the neutral title. The
-    open-corpus row is unaffected either way."""
+def test_emit_review_artifact_masked_metadata_flag_gates_raw_fallback(tmp_path):
+    """--include-masked-metadata gates the RAW M-source genre/author FALLBACK
+    (owner decision 2026-07-22). With NO fjms_meta supplied, a masked row
+    falls through to the raw path: DEFAULT OFF keeps author/genre blank
+    (fail-closed); the flag ON surfaces the raw research author/genre.
+    candidate_title stays blank for the masked row regardless -- the owner
+    supplies the neutral title. The open-corpus row is unaffected either
+    way (its raw fallback is public, always allowed)."""
     candidates = [
         {"raw_work_id": "raw:open", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA,
          "title": "Open Title", "author": "Open Author", "genre": "canon"},
@@ -436,7 +469,7 @@ def test_emit_review_artifact_masked_metadata_flag_default_off_and_opt_in(tmp_pa
         "w000002": {"claim_count": 1, "tier_a_witnesses": 0},
     }
 
-    # DEFAULT OFF -- masked row author/genre stay blank (fail-closed).
+    # DEFAULT OFF, no FJMS -- masked row raw fallback withheld (fail-closed).
     off_csv = tmp_path / "off.csv"
     off_rows = sidecar_build.emit_review_artifact(candidates, off_csv, impact_counts=impact_counts)
     off_by_id = {r["work_id"]: r for r in off_rows}
@@ -445,8 +478,8 @@ def test_emit_review_artifact_masked_metadata_flag_default_off_and_opt_in(tmp_pa
     assert off_by_id["w000002"]["candidate_title"] == ""
     assert off_by_id["w000002"]["confidence_basis"] == sidecar_build.CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES
 
-    # OPT-IN ON -- masked row gets non-empty author + genre skim signals,
-    # but candidate_title STILL blank (owner supplies the neutral title).
+    # OPT-IN ON, no FJMS -- masked row raw fallback surfaces; candidate_title
+    # STILL blank (owner supplies the neutral title).
     on_csv = tmp_path / "on.csv"
     on_rows = sidecar_build.emit_review_artifact(
         candidates, on_csv, impact_counts=impact_counts, include_masked_metadata=True,
@@ -460,6 +493,195 @@ def test_emit_review_artifact_masked_metadata_flag_default_off_and_opt_in(tmp_pa
     # The open-corpus row is identical under both modes (flag only affects masked rows).
     assert off_by_id["w000001"]["candidate_title"] == "Open Title"
     assert on_by_id["w000001"] == off_by_id["w000001"]
+
+
+def test_emit_review_artifact_fjms_first_over_raw(tmp_path):
+    """FJMS PUBLIC vocabulary wins over the raw-research value whenever
+    present -- for BOTH open-corpus and M-source rows -- and needs NO flag
+    (FJMS domain/composition-author are public Genizah catalog data)."""
+    candidates = [
+        {"raw_work_id": "raw:open", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA,
+         "title": "Open Title", "author": "Raw Open Author", "genre": "raw open genre"},
+        {"raw_work_id": "raw:msource", "work_id": "w000002", "source_corpus": ids.SOURCE_CORPUS_MSOURCE,
+         "title": "raw research title", "author": "raw msource author", "genre": "raw msource genre"},
+    ]
+    impact_counts = {
+        "w000001": {"claim_count": 1, "tier_a_witnesses": 0},
+        "w000002": {"claim_count": 1, "tier_a_witnesses": 0},
+    }
+    fjms_meta = {
+        "w000001": {"genre": "FJMS Domain A", "author": "FJMS Author A"},
+        "w000002": {"genre": "FJMS Domain B", "author": "FJMS Author B"},
+    }
+    out_csv = tmp_path / "candidates.csv"
+    # NOTE: include_masked_metadata is OFF -- the FJMS value must STILL populate
+    # the masked row (only the RAW fallback is gated, never the FJMS value).
+    rows = sidecar_build.emit_review_artifact(
+        candidates, out_csv, impact_counts=impact_counts, fjms_meta=fjms_meta,
+        include_masked_metadata=False,
+    )
+    by_id = {r["work_id"]: r for r in rows}
+    assert by_id["w000001"]["genre"] == "FJMS Domain A"
+    assert by_id["w000001"]["author"] == "FJMS Author A"
+    assert by_id["w000002"]["genre"] == "FJMS Domain B"  # masked row, FJMS value, no flag needed
+    assert by_id["w000002"]["author"] == "FJMS Author B"
+    assert by_id["w000002"]["candidate_title"] == ""  # still owner-supplied
+
+
+def test_emit_review_artifact_raw_fallback_only_when_fjms_empty(tmp_path):
+    """When FJMS has nothing for a work, fall back to raw -- open-corpus raw
+    ALWAYS allowed (public); M-source raw gated by the flag (default OFF =>
+    blank even though the raw value exists)."""
+    candidates = [
+        {"raw_work_id": "raw:open", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA,
+         "title": "Open Title", "author": "Raw Open Author", "genre": "raw open genre"},
+        {"raw_work_id": "raw:msource", "work_id": "w000002", "source_corpus": ids.SOURCE_CORPUS_MSOURCE,
+         "title": "raw research title", "author": "raw msource author", "genre": "raw msource genre"},
+    ]
+    impact_counts = {
+        "w000001": {"claim_count": 1, "tier_a_witnesses": 0},
+        "w000002": {"claim_count": 1, "tier_a_witnesses": 0},
+    }
+    fjms_meta = {}  # FJMS empty for every work
+
+    off = {r["work_id"]: r for r in sidecar_build.emit_review_artifact(
+        candidates, tmp_path / "off.csv", impact_counts=impact_counts, fjms_meta=fjms_meta,
+        include_masked_metadata=False,
+    )}
+    # open-corpus raw fallback ALWAYS allowed
+    assert off["w000001"]["genre"] == "raw open genre"
+    assert off["w000001"]["author"] == "Raw Open Author"
+    # M-source raw fallback withheld without the flag
+    assert off["w000002"]["genre"] == ""
+    assert off["w000002"]["author"] == ""
+
+    on = {r["work_id"]: r for r in sidecar_build.emit_review_artifact(
+        candidates, tmp_path / "on.csv", impact_counts=impact_counts, fjms_meta=fjms_meta,
+        include_masked_metadata=True,
+    )}
+    assert on["w000002"]["genre"] == "raw msource genre"  # now allowed
+    assert on["w000002"]["author"] == "raw msource author"
+
+
+def test_compute_fjms_enrichment_modal_domain_count_distinct_almaid(tmp_path):
+    """genre = MODAL FJMS domain by COUNT(DISTINCT AlmaId) across a work's
+    witness sys_ids; exact-duplicate (AlmaId, Domain) rows dedup by AlmaId;
+    tie-break domain name ASC."""
+    fjms_db = _build_fjms_db(tmp_path, domains=[
+        # work-1 witnesses A1/A2/A3: D1 on all three (3), D2 on A1 (1), D3 on A3 (1)
+        ("A1", "D1", "", None), ("A1", "D2", "", None),
+        ("A1", "D1", "", None),  # exact-duplicate (A1, D1) -- must dedup by AlmaId
+        ("A2", "D1", "", None),
+        ("A3", "D1", "", None), ("A3", "D3", "", None),
+        # work-2 witnesses B1/B2: tie AAA(1) vs BBB(1) -> domain name ASC -> AAA
+        ("B1", "BBB", "", None), ("B2", "AAA", "", None),
+    ])
+    conn = sqlite3.connect(f"file:{fjms_db}?mode=ro", uri=True)
+    try:
+        enrichment = sidecar_build.compute_fjms_enrichment(conn, {
+            "w000001": {"A1", "A2", "A3"},
+            "w000002": {"B1", "B2"},
+        })
+    finally:
+        conn.close()
+    assert enrichment["w000001"]["genre"] == "D1"  # modal, carried by 3 distinct AlmaIds
+    assert enrichment["w000002"]["genre"] == "AAA"  # tie -> domain name ASC
+
+
+def test_compute_fjms_enrichment_author_two_path_union_not_scribe(tmp_path):
+    """author = MODAL FJMS COMPOSITION-author via the two-path union
+    (catalog->genizah_titles->genizah_persons UNION catalog.Author->
+    genizah_persons); modal by COUNT(DISTINCT AlmaId), tie-break person_id
+    ASC; EngDesc as the value. The scribe column (CopyName) is NEVER read."""
+    fjms_db = _build_fjms_db(
+        tmp_path,
+        catalog=[
+            # work-1: A1 via title-path -> P1; A2 direct -> P1; A3 direct -> P2
+            ("A1", 10, None, "SCRIBE-SHOULD-NEVER-APPEAR"),
+            ("A2", None, 1, "SCRIBE-SHOULD-NEVER-APPEAR"),
+            ("A3", None, 2, None),
+            # work-2: C1 direct -> P5, C2 direct -> P3 (tie 1-1 -> person_id ASC -> P3)
+            ("C1", None, 5, None),
+            ("C2", None, 3, None),
+        ],
+        titles=[(10, 1)],  # GenizahTitleId 10 -> AuthorId 1 (P1)
+        persons=[
+            (1, "Author One", "he1"),
+            (2, "Author Two", "he2"),
+            (3, "Person Three", "he3"),
+            (5, "Person Five", "he5"),
+        ],
+    )
+    conn = sqlite3.connect(f"file:{fjms_db}?mode=ro", uri=True)
+    try:
+        enrichment = sidecar_build.compute_fjms_enrichment(conn, {
+            "w000001": {"A1", "A2", "A3"},
+            "w000002": {"C1", "C2"},
+        })
+    finally:
+        conn.close()
+    # P1 carried by 2 distinct AlmaIds (A1 via title, A2 direct) vs P2 by 1 -> P1
+    assert enrichment["w000001"]["author"] == "Author One"
+    # scribe/CopyName never leaks into the author cell
+    assert "SCRIBE" not in enrichment["w000001"]["author"]
+    # tie 1-1 between P5 and P3 -> person_id ASC -> P3
+    assert enrichment["w000002"]["author"] == "Person Three"
+
+
+def test_compute_fjms_enrichment_empty_when_no_fjms_match(tmp_path):
+    """A work whose witness sys_ids have no FJMS domain/author rows resolves
+    to empty strings (author is SPARSE ~10-23% coverage -- expected, not a
+    bug)."""
+    fjms_db = _build_fjms_db(tmp_path, domains=[("OTHER", "D1", "", None)])
+    conn = sqlite3.connect(f"file:{fjms_db}?mode=ro", uri=True)
+    try:
+        enrichment = sidecar_build.compute_fjms_enrichment(conn, {"w000001": {"A1", "A2"}})
+    finally:
+        conn.close()
+    assert enrichment["w000001"] == {"genre": "", "author": ""}
+
+
+def test_collect_work_witness_sys_ids_ignores_shared_text(tmp_path):
+    """collect_work_witness_sys_ids maps work_id -> its WITNESS sys_ids only;
+    shared_text evidence rows contribute no sys_id (the genre/author signal is
+    a property of the physical witness manuscripts)."""
+    works = [{"raw_work_id": "raw:w1", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA}]
+    page_idx = sidecar_build.PageTextIndex(_pages_conn([
+        ("p1", "htr", "x" * 100), ("seedp1", "htr", "y" * 40),
+    ]))
+    e1_ra = [{"page_id": "p1", "sys_id": "SYS-WITNESS-1", "work_id": "raw:w1",
+              "o0": 0, "o1": 50, "ml": 50, "dens": 0.9, "n_spans": 1}]
+    q2_shared = [{
+        "cpage": "p1", "csys": "SYS-SHARED-TEXT-ONLY", "work_id": "raw:w1", "cat": "Sefaria",
+        "tier": "T2", "aligned_len": 120, "occ_class": "core", "n_seed_ms": 2,
+        "occ0": 60, "occ1": 90, "seed_page": "seedp1", "cross_language": False, "is_new": False,
+    }]
+    result = sidecar_build.build_claims_and_evidence(
+        conn=None, works=works, page_index=page_idx, e1_ra_confirmed=e1_ra, q2_shared_text=q2_shared,
+    )
+    work_sys_ids = sidecar_build.collect_work_witness_sys_ids(
+        result["claim_rows"], result["evidence_rows"]
+    )
+    assert work_sys_ids == {"w000001": {"SYS-WITNESS-1"}}
+
+
+def test_resolve_fjms_db_path_prefers_explicit_and_skips_empty(tmp_path, monkeypatch):
+    """resolve_fjms_db_path returns an explicit path verbatim; with no
+    explicit path and no non-empty candidate, returns None (enrichment
+    silently skipped). A 0-byte file (the repo-root placeholder shape) is
+    never returned."""
+    # explicit wins
+    assert sidecar_build.resolve_fjms_db_path("some/explicit/path.db") == "some/explicit/path.db"
+    # no candidates -> None (point the resolver's repo-root + LOCALAPPDATA at
+    # empty temp dirs so the real dev-box fist_data/ DB can't be picked up)
+    monkeypatch.setattr(sidecar_build, "_REPO_ROOT", str(tmp_path / "norepo"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "noappdata"))
+    assert sidecar_build.resolve_fjms_db_path(None) is None
+    # a 0-byte placeholder under the (patched) repo root is skipped
+    placeholder_dir = tmp_path / "norepo" / "fist_data"
+    placeholder_dir.mkdir(parents=True)
+    (placeholder_dir / "fjms_enrichment.db").touch()  # 0 bytes
+    assert sidecar_build.resolve_fjms_db_path(None) is None
 
 
 def test_compute_work_impact_counts_matches_assembled_data(tmp_path):

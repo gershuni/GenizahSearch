@@ -1276,8 +1276,41 @@ def compute_work_impact_counts(claim_rows: List[Tuple], evidence_rows: List[Tupl
     return counts
 
 
+def _pick_public_first_value(
+    fjms_value, raw_value, *, is_open: bool, include_masked_metadata: bool,
+) -> str:
+    """FJMS-first with a masking-gated raw-research fallback (owner decision
+    2026-07-22).
+
+    The FJMS value (public Genizah catalog vocabulary -- domain / composition
+    author) is masking-SAFE for ANY row, so it is used verbatim whenever
+    non-empty, with NO gating. Only when FJMS has nothing do we fall back to
+    the raw-research value, and that fallback is masking-gated:
+      - open-corpus (sefaria/ja) raw is public -> ALWAYS allowed;
+      - M-source raw is restricted -> allowed ONLY under the explicit
+        --include-masked-metadata owner opt-in (`include_masked_metadata`).
+    Returns '' when there is no safe value to surface.
+
+    NOTE (masking-correctness): the gate keys on `is_open` (== source_corpus
+    in {sefaria, ja}), NOT on confidence_basis. A title-less open-corpus row
+    (confidence_basis='none-owner-supplies' but still public sefaria/ja)
+    therefore still gets its public raw fallback -- resolving that edge in
+    the masking-correct direction while matching the owner's rule ("open-corpus
+    raw always; M-source raw gated")."""
+    fjms_value = (fjms_value or "").strip()
+    if fjms_value:
+        return fjms_value
+    raw_value = (raw_value or "").strip()
+    if not raw_value:
+        return ""
+    if is_open:
+        return raw_value
+    return raw_value if include_masked_metadata else ""
+
+
 def emit_review_artifact(
     candidates: List[Dict], out_csv_path, *, impact_counts: Dict[str, Dict[str, int]],
+    fjms_meta: Optional[Dict[str, Dict[str, str]]] = None,
     include_masked_metadata: bool = False,
 ) -> List[Dict]:
     """Write the enriched, source-MASKED, impact-prioritized CANDIDATE review
@@ -1293,28 +1326,26 @@ def emit_review_artifact(
     distillation and is silently excluded rather than shown as a dead row.
     This is NOT a sample -- every surfacing work is included.
 
-    `candidate_title`/`author`/`genre` are auto-derived from the research
-    row ONLY when the candidate is already open-corpus (sefaria/ja) AND
-    carries a non-empty research `title` (`confidence_basis=
-    'open-corpus-title'`) -- ALL THREE columns come verbatim from the
-    open-corpus research row in that case.
+    `candidate_title` is auto-derived (verbatim) ONLY when the candidate is
+    already open-corpus (sefaria/ja) AND carries a non-empty research `title`
+    (`confidence_basis='open-corpus-title'`); it is ALWAYS blank for a
+    `none-owner-supplies` row (the owner supplies the neutral title --
+    regardless of any flag).
 
-    For every OTHER row (`confidence_basis='none-owner-supplies'` -- M-source,
-    or a title-less open-corpus candidate):
-      - `candidate_title` is ALWAYS blank (the owner supplies the neutral
-        title -- regardless of `include_masked_metadata`);
-      - `author` and `genre` are blank by DEFAULT (fail-closed -- the safe
-        artifact anyone gets without the opt-in), OR populated verbatim from
-        the research row when `include_masked_metadata=True`. The latter is
-        an EXPLICIT owner opt-in (owner decision 2026-07-22): the CSV is a
-        gitignored, dev-box-only review artifact the owner is authorized to
-        see, and only owner-APPROVED NEUTRAL titles ship downstream through
-        Task 2's strict blocking masking gate -- so richer author/genre skim
-        signals in THIS gitignored review CSV are acceptable, PROVIDED the
-        BLOCKING masking scan over the finished CSV still passes (that gate
-        is never waived -- masked author/genre are generic bibliographic
-        free text, not a corpus name/siglum/raw work_id/reference text, but
-        the scan decides, not the flag).
+    `genre`/`author` are sourced FJMS-FIRST from the CANONICAL PUBLIC FJMS
+    vocabularies (owner decision 2026-07-22), passed in via `fjms_meta`
+    (`{work_id: {"genre": <modal FJMS domain>, "author": <modal FJMS
+    composition-author EngDesc>}}` from `compute_fjms_enrichment`). FJMS
+    domain/composition-author are public Genizah catalog data (NOT restricted
+    M-source), so the FJMS value is masking-safe for ALL rows and is used
+    whenever non-empty with NO gating. When FJMS has nothing, fall back to
+    the raw-research value (`select_shown_works` genre/author) -- gated for
+    masking safety by `_pick_public_first_value`: open-corpus (sefaria/ja)
+    raw is public and always allowed; M-source raw is allowed ONLY under the
+    explicit `include_masked_metadata` owner opt-in (the flag now gates the
+    RAW M-SOURCE FALLBACK specifically, since the FJMS-sourced value needs no
+    gating). The finished CSV is ALWAYS subject to the blocking masking scan
+    (never waived -- the scan decides, not the flag).
 
     Rows are sorted by `(tier_a_witnesses DESC, claim_count DESC, work_id
     ASC)` -- deterministic, highest-impact titles first, long tail still
@@ -1329,6 +1360,7 @@ def emit_review_artifact(
     `scripts/export_translation_audit_sample.py`'s `write_csv` convention
     (utf-8-sig, trailing review columns).
     """
+    fjms_meta = fjms_meta or {}
     rows = []
     for c in candidates:
         work_id = c["work_id"]
@@ -1340,25 +1372,26 @@ def emit_review_artifact(
 
         is_open = c["source_corpus"] in (ids.SOURCE_CORPUS_SEFARIA, ids.SOURCE_CORPUS_JA)
         title = (c.get("title") or "").strip()
-        if is_open and title:
-            candidate_title = title
-            author = c.get("author") or ""
-            genre = c.get("genre") or ""
-            confidence_basis = CONFIDENCE_BASIS_OPEN_CORPUS_TITLE
-        else:
-            # none-owner-supplies: candidate_title ALWAYS blank (owner
-            # supplies the neutral title). author/genre are blank by
-            # default (fail-closed), OR populated verbatim under the
-            # explicit owner opt-in (owner decision 2026-07-22) -- still
-            # subject to the finished-CSV blocking masking scan.
-            candidate_title = ""
-            if include_masked_metadata:
-                author = c.get("author") or ""
-                genre = c.get("genre") or ""
-            else:
-                author = ""
-                genre = ""
-            confidence_basis = CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES
+        confidence_basis = (
+            CONFIDENCE_BASIS_OPEN_CORPUS_TITLE if (is_open and title)
+            else CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES
+        )
+        # candidate_title UNCHANGED: the verbatim open-corpus title only,
+        # blank for every none-owner-supplies row (owner supplies it).
+        candidate_title = title if confidence_basis == CONFIDENCE_BASIS_OPEN_CORPUS_TITLE else ""
+
+        # genre/author: FJMS PUBLIC vocabulary FIRST (safe for ALL rows),
+        # raw-research FALLBACK only when FJMS is empty (masking-gated -- see
+        # _pick_public_first_value).
+        work_fjms = fjms_meta.get(work_id) or {}
+        genre = _pick_public_first_value(
+            work_fjms.get("genre"), c.get("genre"),
+            is_open=is_open, include_masked_metadata=include_masked_metadata,
+        )
+        author = _pick_public_first_value(
+            work_fjms.get("author"), c.get("author"),
+            is_open=is_open, include_masked_metadata=include_masked_metadata,
+        )
 
         rows.append({
             "work_id": work_id,
@@ -2126,6 +2159,190 @@ def _insert_witness_units_real(cur: sqlite3.Cursor, unit_specs: List[Dict]) -> i
 
 
 # ---------------------------------------------------------------------------
+# 6.9a FJMS public-vocabulary enrichment (owner decision 2026-07-22): genre =
+# modal FJMS domain, author = modal FJMS composition-author, over each work's
+# witness sys_ids. Batched `IN (...)` loads (mirrors fjms_service._batch_domains
+# / _query_browse_authors_v5), modal computed in Python -- NEVER one round-trip
+# per work. FJMS domain/composition-author are public Genizah catalog data, so
+# these values are masking-safe for ALL rows (see _pick_public_first_value).
+# ---------------------------------------------------------------------------
+
+# The REAL 1.59 GB fjms_enrichment.db lives under fist_data/ (resolved at
+# runtime by shared/fjms_service.py); the repo-root fjms_enrichment.db is a
+# 0-byte placeholder and must NEVER be used. Mirror fjms_service's
+# _SIDECAR_DIR/_SIDECAR_FILENAME rather than importing the (web-framework-
+# dependent) service class into this stdlib-only build script.
+_FJMS_SIDECAR_DIR = "fist_data"
+_FJMS_SIDECAR_FILENAME = "fjms_enrichment.db"
+_FJMS_BATCH_SIZE = 500
+
+
+def resolve_fjms_db_path(explicit_path=None) -> Optional[str]:
+    """Resolve the REAL fjms_enrichment.db (never the 0-byte repo-root
+    placeholder). An explicit path always wins; otherwise prefer
+    `fist_data/fjms_enrichment.db` under the repo root, then the LOCALAPPDATA
+    user sidecar (mirroring shared/fjms_service.py). Returns None if no
+    candidate is a NON-EMPTY file -- callers then skip FJMS enrichment
+    entirely (genre/author fall back to the masking-gated raw path)."""
+    if explicit_path:
+        return explicit_path
+    candidates = [Path(_REPO_ROOT) / _FJMS_SIDECAR_DIR / _FJMS_SIDECAR_FILENAME]
+    localappdata = os.environ.get("LOCALAPPDATA")
+    if localappdata:
+        candidates.append(
+            Path(localappdata) / "GenizahSearchPro" / "data"
+            / _FJMS_SIDECAR_DIR / _FJMS_SIDECAR_FILENAME
+        )
+    for c in candidates:
+        try:
+            if c.is_file() and c.stat().st_size > 0:
+                return str(c)
+        except OSError:
+            continue
+    return None
+
+
+def _connect_fjms_ro(fjms_db_path) -> sqlite3.Connection:
+    """Read-only connection to fjms_enrichment.db (join key AlmaId == sys_id)."""
+    uri = Path(fjms_db_path).resolve().as_uri() + "?mode=ro"
+    return sqlite3.connect(uri, uri=True)
+
+
+def collect_work_witness_sys_ids(claim_rows: List[Tuple], evidence_rows: List[Tuple]) -> Dict[str, set]:
+    """Map each work_id -> the SET of its WITNESS-evidence sys_ids, straight
+    from the in-memory distillation (no physical-MS collapse). `evidence_rows`
+    is the `assemble_claims_and_evidence` tuple shape: index 1 = claim_id,
+    index 2 = evidence_kind, index 11 = sys_id; `claim_rows` index 1 =
+    work_id, index 2 = claim_id. shared_text evidence rows are ignored -- the
+    genre/author signal is a property of the physical WITNESS manuscripts."""
+    claim_id_to_work_id = {row[2]: row[1] for row in claim_rows}
+    work_sys_ids: Dict[str, set] = {}
+    for ev in evidence_rows:
+        if ev[2] != _WITNESS:
+            continue
+        work_id = claim_id_to_work_id.get(ev[1])
+        if work_id is None:
+            continue
+        work_sys_ids.setdefault(work_id, set()).add(str(ev[11]))
+    return work_sys_ids
+
+
+def _batch_fjms_domains(conn: sqlite3.Connection, sys_ids: List[str]) -> Dict[str, set]:
+    """sys_id -> SET of distinct FJMS `domains.Domain` (English) values.
+    Batched `IN (...)` (mirrors fjms_service._batch_domains). A set per
+    sys_id inherently dedups the 22,006 exact-duplicate (AlmaId, Domain)
+    rows, so a later per-work tally over these sets counts COUNT(DISTINCT
+    AlmaId) per domain."""
+    result: Dict[str, set] = {}
+    for i in range(0, len(sys_ids), _FJMS_BATCH_SIZE):
+        batch = sys_ids[i:i + _FJMS_BATCH_SIZE]
+        placeholders = ",".join("?" * len(batch))
+        cur = conn.execute(
+            f"SELECT AlmaId, Domain FROM domains WHERE AlmaId IN ({placeholders})",
+            batch,
+        )
+        for alma_id, domain in cur.fetchall():
+            if domain is None or str(domain).strip() == "":
+                continue
+            result.setdefault(str(alma_id), set()).add(domain)
+    return result
+
+
+def _batch_fjms_composition_authors(conn: sqlite3.Connection, sys_ids: List[str]) -> Dict[str, set]:
+    """sys_id -> SET of (person_id, EngDesc) COMPOSITION authors, via the
+    verified two-path UNION (the `_query_browse_authors_v5` pattern):
+      Path 1: catalog(DISTINCT AlmaId, GenizahTitleId, Author)
+              JOIN genizah_titles gt ON GenizahTitleId
+              JOIN genizah_persons gp ON gt.AuthorId = gp.GenizahPersonId
+              WHERE gp.GenizahPersonId > 0
+      Path 2: catalog.Author -> genizah_persons.GenizahPersonId
+              WHERE GenizahTitleId IS NULL AND Author > 0
+    This is the COMPOSITION author (Saadiah Gaon etc.) -- NOT the scribe
+    (CopyName) or mentioned-persons (catalog_mentions). Author is SPARSE
+    (~10-23% coverage) so most works legitimately resolve to none."""
+    result: Dict[str, set] = {}
+    for i in range(0, len(sys_ids), _FJMS_BATCH_SIZE):
+        batch = sys_ids[i:i + _FJMS_BATCH_SIZE]
+        placeholders = ",".join("?" * len(batch))
+        sql = f"""
+            WITH dc AS (
+                SELECT DISTINCT AlmaId, GenizahTitleId, Author
+                FROM catalog WHERE AlmaId IN ({placeholders})
+            )
+            SELECT dc.AlmaId AS alma_id, gp.GenizahPersonId AS person_id, gp.EngDesc AS eng_desc
+            FROM dc
+            INNER JOIN genizah_titles gt ON dc.GenizahTitleId = gt.GenizahTitleId
+            INNER JOIN genizah_persons gp ON gt.AuthorId = gp.GenizahPersonId
+            WHERE gp.GenizahPersonId > 0
+            UNION
+            SELECT dc.AlmaId AS alma_id, gp.GenizahPersonId AS person_id, gp.EngDesc AS eng_desc
+            FROM dc
+            INNER JOIN genizah_persons gp ON dc.Author = gp.GenizahPersonId
+            WHERE dc.GenizahTitleId IS NULL AND dc.Author IS NOT NULL AND dc.Author > 0
+        """
+        cur = conn.execute(sql, batch)
+        for alma_id, person_id, eng_desc in cur.fetchall():
+            if person_id is None:
+                continue
+            result.setdefault(str(alma_id), set()).add((int(person_id), eng_desc or ""))
+    return result
+
+
+def _modal_domain(work_sys_ids: set, sys_domains: Dict[str, set]) -> str:
+    """Modal FJMS domain across the work's witness sys_ids, counting
+    COUNT(DISTINCT AlmaId) per domain (each sys_id contributes at most 1 per
+    domain -- sys_domains values are sets); tie-break domain name ASC."""
+    counts: Dict[str, int] = {}
+    for sid in work_sys_ids:
+        for domain in sys_domains.get(sid, ()):
+            counts[domain] = counts.get(domain, 0) + 1
+    if not counts:
+        return ""
+    return min(counts.items(), key=lambda kv: (-kv[1], str(kv[0])))[0]
+
+
+def _modal_author(work_sys_ids: set, sys_authors: Dict[str, set]) -> str:
+    """Modal FJMS composition-author across the work's witness sys_ids,
+    counting COUNT(DISTINCT AlmaId) per (person_id, EngDesc); tie-break
+    person_id ASC. Returns the EngDesc of the winner ('' if none)."""
+    counts: Dict[tuple, int] = {}
+    for sid in work_sys_ids:
+        for author_key in sys_authors.get(sid, ()):
+            counts[author_key] = counts.get(author_key, 0) + 1
+    if not counts:
+        return ""
+    return min(counts.items(), key=lambda kv: (-kv[1], kv[0][0]))[0][1]
+
+
+def compute_fjms_enrichment(
+    conn: sqlite3.Connection, work_witness_sys_ids: Dict[str, set],
+) -> Dict[str, Dict[str, str]]:
+    """Return `{work_id: {"genre": <modal FJMS domain>, "author": <modal FJMS
+    composition-author EngDesc>}}`. Batch-loads domains + composition authors
+    ONCE for ALL witness sys_ids (no per-work round-trip), then computes each
+    work's modal value in Python. Empty string where FJMS has nothing."""
+    all_sys_ids = sorted({sid for sids in work_witness_sys_ids.values() for sid in sids})
+    sys_domains = _batch_fjms_domains(conn, all_sys_ids)
+    sys_authors = _batch_fjms_composition_authors(conn, all_sys_ids)
+    out: Dict[str, Dict[str, str]] = {}
+    for work_id, sids in work_witness_sys_ids.items():
+        out[work_id] = {
+            "genre": _modal_domain(sids, sys_domains),
+            "author": _modal_author(sids, sys_authors),
+        }
+    return out
+
+
+def _value_provenance(final_value: str, fjms_value) -> str:
+    """Report-only provenance of an emitted genre/author cell: 'fjms' when the
+    FJMS value was non-empty (FJMS-first always wins then), 'raw' when FJMS
+    was empty but a raw fallback filled the cell, 'blank' otherwise."""
+    if (fjms_value or "").strip():
+        return "fjms"
+    return "raw" if (final_value or "").strip() else "blank"
+
+
+# ---------------------------------------------------------------------------
 # 6.9b Enriched CANDIDATE review-artifact emission (134-07 Task A) -- a
 # SHARED helper so `finalize_build`'s own optional re-emission and the
 # standalone `build_candidate_review_artifact` (the owner title-review gate's
@@ -2140,19 +2357,26 @@ def _emit_enriched_review_artifact(
     e1_rb_screening: Iterable[Dict] = (), e1_r3_frame: Iterable[Dict] = (),
     q2_witness_collection: Iterable[Dict] = (), q2_collection_tafsir_targum: Iterable[Dict] = (),
     q2_collection_with_arabic: Iterable[Dict] = (), q2_shared_text: Iterable[Dict] = (),
+    fjms_conn: Optional[sqlite3.Connection] = None,
     include_masked_metadata: bool = False,
 ) -> Dict:
     """Assemble claims/evidence over ALL `candidates` (pre-owner-review --
     NOT just a prior approved set) so the emitted CANDIDATE csv's
     `tier_a_witnesses`/`claim_count` columns reflect the ACTUAL real
-    distillation, then emit the enriched review artifact. Returns the
-    emitted rows + the `evidence_id_collisions` count (surfaced for caller
-    visibility, never blocking this emission step).
+    distillation, then FJMS-enrich (genre/author) and emit the review
+    artifact. Returns the emitted rows, the `evidence_id_collisions` count,
+    and per-column genre/author provenance tallies (fjms/raw/blank) for
+    reporting -- none of which blocks this emission step.
 
-    `include_masked_metadata` (default False) is threaded straight to
-    `emit_review_artifact`: when True, masked (`none-owner-supplies`) rows
-    carry non-empty author/genre skim signals (owner opt-in) -- always
-    subject to the finished-CSV blocking masking scan."""
+    `fjms_conn` (optional): a read-only fjms_enrichment.db connection. When
+    given, genre/author are sourced FJMS-first (public Genizah vocabulary,
+    masking-safe for all rows) via `compute_fjms_enrichment`, with a
+    masking-gated raw-research fallback. When None, genre/author resolve
+    purely from the (masking-gated) raw path.
+
+    `include_masked_metadata` (default False) gates ONLY the RAW M-source
+    fallback (the FJMS-sourced value is never gated) -- always subject to
+    the finished-CSV blocking masking scan."""
     result = build_claims_and_evidence(
         conn=conn_research, works=candidates, page_index=page_index,
         e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
@@ -2164,11 +2388,32 @@ def _emit_enriched_review_artifact(
         sidecar_version=REAL_SIDECAR_VERSION,
     )
     impact_counts = compute_work_impact_counts(result["claim_rows"], result["evidence_rows"])
+
+    fjms_meta: Dict[str, Dict[str, str]] = {}
+    if fjms_conn is not None:
+        work_witness_sys_ids = collect_work_witness_sys_ids(
+            result["claim_rows"], result["evidence_rows"]
+        )
+        fjms_meta = compute_fjms_enrichment(fjms_conn, work_witness_sys_ids)
+
     rows = emit_review_artifact(
         candidates, out_csv_path, impact_counts=impact_counts,
-        include_masked_metadata=include_masked_metadata,
+        fjms_meta=fjms_meta, include_masked_metadata=include_masked_metadata,
     )
-    return {"rows": rows, "evidence_id_collisions": result.get("evidence_id_collisions", 0)}
+
+    genre_prov: Dict[str, int] = {"fjms": 0, "raw": 0, "blank": 0}
+    author_prov: Dict[str, int] = {"fjms": 0, "raw": 0, "blank": 0}
+    for r in rows:
+        wf = fjms_meta.get(r["work_id"]) or {}
+        genre_prov[_value_provenance(r["genre"], wf.get("genre"))] += 1
+        author_prov[_value_provenance(r["author"], wf.get("author"))] += 1
+
+    return {
+        "rows": rows,
+        "evidence_id_collisions": result.get("evidence_id_collisions", 0),
+        "genre_provenance": genre_prov,
+        "author_provenance": author_prov,
+    }
 
 
 def build_candidate_review_artifact(
@@ -2184,6 +2429,7 @@ def build_candidate_review_artifact(
     q2_collection_tafsir_targum_path=None,
     q2_collection_with_arabic_path=None,
     q2_shared_text_path=None,
+    fjms_db_path=None,
     create_crosswalk_if_missing: bool = False,
     include_masked_metadata: bool = False,
 ) -> Dict:
@@ -2195,15 +2441,22 @@ def build_candidate_review_artifact(
     (`create_crosswalk_if_missing=False` by default, DC2) so opaque work_ids
     stay stable with any prior/subsequent real build.
 
+    `fjms_db_path` (optional): path to the REAL fjms_enrichment.db for the
+    FJMS-first genre/author enrichment. Auto-resolved via `resolve_fjms_db_path`
+    (the fist_data/ sidecar, never the 0-byte repo-root placeholder) when not
+    given; enrichment is silently skipped when no non-empty DB is found.
+
     `include_masked_metadata` (default False) is the explicit owner opt-in
-    (owner decision 2026-07-22) that populates author/genre for masked
-    (`none-owner-supplies`) rows -- see `emit_review_artifact`. Default OFF
+    (owner decision 2026-07-22) gating ONLY the RAW M-source genre/author
+    fallback -- the FJMS-sourced (public) value is never gated. Default OFF
     keeps the conservative fail-closed artifact for anyone running the tool
     without the flag.
 
     Raises `CrosswalkAbortError` if the crosswalk is required-but-absent
     (mirrors `assign_opaque_work_ids`'s own DC2 contract).
     """
+    resolved_fjms = resolve_fjms_db_path(fjms_db_path)
+    fjms_conn = _connect_fjms_ro(resolved_fjms) if resolved_fjms else None
     conn_research = _connect_research_ro(source_db_path)
     try:
         def _load(path):
@@ -2231,15 +2484,21 @@ def build_candidate_review_artifact(
             q2_collection_tafsir_targum=q2_collection_tafsir_targum,
             q2_collection_with_arabic=q2_collection_with_arabic,
             q2_shared_text=q2_shared_text,
+            fjms_conn=fjms_conn,
             include_masked_metadata=include_masked_metadata,
         )
     finally:
         conn_research.close()
+        if fjms_conn is not None:
+            fjms_conn.close()
 
     return {
         "candidate_count": len(candidates),
         "emitted_row_count": len(outcome["rows"]),
         "evidence_id_collisions": outcome["evidence_id_collisions"],
+        "fjms_db_used": resolved_fjms or "(none -- raw-only fallback)",
+        "genre_provenance": outcome["genre_provenance"],
+        "author_provenance": outcome["author_provenance"],
         "out_csv_path": str(out_csv_path),
     }
 
@@ -2744,16 +3003,24 @@ def finalize_build(
             # Reuses the SAME build_claims_and_evidence assembly (over ALL
             # candidates, not just the approved subset below) so the
             # re-emitted CANDIDATE csv's impact columns can never diverge
-            # from the real distillation (134-07 Task A).
-            _emit_enriched_review_artifact(
-                conn_research, candidates, review_artifact_path, page_index=page_index,
-                e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
-                e1_rb_screening=e1_rb_screening, e1_r3_frame=e1_r3_frame,
-                q2_witness_collection=q2_witness_collection,
-                q2_collection_tafsir_targum=q2_collection_tafsir_targum,
-                q2_collection_with_arabic=q2_collection_with_arabic,
-                q2_shared_text=q2_shared_text,
-            )
+            # from the real distillation (134-07 Task A). FJMS enrichment is
+            # applied ONLY when fjms_db_path was explicitly supplied (unit
+            # tests pass None -> no enrichment, no 1.59 GB DB opened).
+            review_fjms_conn = _connect_fjms_ro(fjms_db_path) if fjms_db_path else None
+            try:
+                _emit_enriched_review_artifact(
+                    conn_research, candidates, review_artifact_path, page_index=page_index,
+                    e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
+                    e1_rb_screening=e1_rb_screening, e1_r3_frame=e1_r3_frame,
+                    q2_witness_collection=q2_witness_collection,
+                    q2_collection_tafsir_targum=q2_collection_tafsir_targum,
+                    q2_collection_with_arabic=q2_collection_with_arabic,
+                    q2_shared_text=q2_shared_text,
+                    fjms_conn=review_fjms_conn,
+                )
+            finally:
+                if review_fjms_conn is not None:
+                    review_fjms_conn.close()
 
         crosswalk = json.loads(Path(crosswalk_path).read_text(encoding="utf-8"))
         valid_work_ids = set(crosswalk.values())
@@ -3102,6 +3369,7 @@ def main(argv=None) -> int:
             q2_collection_tafsir_targum_path=collection_paths["q2_collection_tafsir_targum"],
             q2_collection_with_arabic_path=collection_paths["q2_collection_with_arabic"],
             q2_shared_text_path=collection_paths["q2_shared_text"],
+            fjms_db_path=args.fjms_db,
             create_crosswalk_if_missing=args.init_crosswalk,
             include_masked_metadata=args.include_masked_metadata,
         )
