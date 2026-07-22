@@ -852,6 +852,21 @@ class MaskingGateFailure(RuntimeError):
     raising -- a half-finalized leaking artifact must never linger on disk."""
 
 
+class EvidenceIdCollisionError(RuntimeError):
+    """Raised (L2) when two evidence rows collide on the SAME `evidence_id`
+    at EQUAL routing priority (both shipped, or both review_only) but carry
+    SEMANTICALLY DIFFERENT content. The FROZEN `evidence_id` recipe has no
+    "which source collection" discriminator by design (see the
+    shipped-over-review_only preference above), so a genuine equal-priority
+    collision with differing content would otherwise be resolved by
+    first-seen-in-`evidence_specs` order -- an accident of ingestion order,
+    not a deterministic build property. An IDENTICAL-content collision (a
+    true duplicate row, e.g. a repeated JSONL line) is harmless and is
+    deduped silently without raising; only a content-DIVERGENT equal-priority
+    collision raises here, fail-closed, so the build never silently discards
+    real evidence based on input order."""
+
+
 # ---------------------------------------------------------------------------
 # 6.1 Shown-work selection (D-05/D-06) + cat/genre masking policy (Landmine 2)
 # ---------------------------------------------------------------------------
@@ -1388,6 +1403,35 @@ def _ingest_shared_text(
 
 
 # ---------------------------------------------------------------------------
+# 6.6b L2: equal-priority evidence_id collision content comparison
+# ---------------------------------------------------------------------------
+
+# The full set of PERSISTED evidence-row fields (mirrors the discovery_evidence
+# INSERT column list, minus the identity/bookkeeping keys) -- used ONLY to
+# decide whether an equal-routing-priority evidence_id collision is a
+# harmless true duplicate (identical content) or a genuine content-divergent
+# collision that must raise (L2), never to alter what gets persisted.
+_EVIDENCE_CONTENT_FIELDS = (
+    "evidence_kind", "evidence_source", "confidence_band",
+    "adjudication_status", "audit_status", "routing_status", "routing_reason",
+    "is_new", "page_id", "sys_id",
+    "tier", "aligned_len", "occ_class", "cross_language", "n_seed_ms", "trials",
+    "runner_up", "community", "ge3", "rung", "router_bucket", "matched_letters",
+    "density", "n_spans", "span_start", "span_end", "text_layer", "snapshot_hash",
+    "seed_spans", "seed_ms_ids", "other_page_id", "b_start", "b_end",
+    "text_layer_b", "snapshot_hash_b", "rule_version", "community_id",
+)
+
+
+def _evidence_content_key(e: Dict) -> tuple:
+    """A comparable snapshot of an evidence-spec dict's PERSISTED content
+    (L2) -- two rows with an equal key are semantically identical (a
+    harmless true duplicate); a differing key at equal routing priority is
+    a genuine, non-deterministic-to-resolve collision."""
+    return tuple(e.get(f) for f in _EVIDENCE_CONTENT_FIELDS)
+
+
+# ---------------------------------------------------------------------------
 # 6.7 Claim/evidence assembly (independent of populate_synthetic, fixture-safety)
 # ---------------------------------------------------------------------------
 
@@ -1470,6 +1514,24 @@ def assemble_claims_and_evidence(
             new_priority = _ROUTING_PRIORITY.get(e["routing_status"], 99)
             if new_priority < existing_priority:
                 evidence_by_id[evidence_id] = e
+            elif new_priority == existing_priority:
+                # L2: an EQUAL-priority collision (both shipped, or both
+                # review_only) is only safe to resolve by first-seen order
+                # when the two rows are semantically IDENTICAL (a true
+                # duplicate, e.g. a repeated JSONL line -- harmless, either
+                # is fine to keep). A content-DIVERGENT equal-priority
+                # collision has no deterministic winner under the frozen
+                # evidence_id recipe (which carries no "which source
+                # collection" discriminator) -- raise fail-closed rather
+                # than silently pick one based on ingestion order.
+                if _evidence_content_key(existing) != _evidence_content_key(e):
+                    raise EvidenceIdCollisionError(
+                        f"evidence_id {evidence_id} collision at EQUAL routing "
+                        f"priority (routing_status={e['routing_status']!r}) between "
+                        f"two semantically DIFFERENT evidence rows for claim "
+                        f"(page_id={page_id!r}, work_id={work_id!r}) -- refusing to "
+                        "silently pick one based on ingestion order (L2)."
+                    )
 
     evidence_rows_by_claim: Dict[str, List[Dict]] = {}
     for e in evidence_by_id.values():

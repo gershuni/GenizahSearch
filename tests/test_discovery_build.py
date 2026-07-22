@@ -496,6 +496,47 @@ def test_evidence_id_collision_shared_text_vs_family_router_prefers_shipped():
     assert winning[8] == ids.ROUTING_REASON_NONE
 
 
+def test_evidence_id_collision_equal_priority_identical_content_deduped_without_raising():
+    """L2: the exact SAME logical row appearing twice (e.g. a duplicate
+    JSONL line) collides on evidence_id at EQUAL routing priority (both
+    shipped) -- this is a harmless true duplicate and must dedupe
+    deterministically WITHOUT raising."""
+    works = [{"raw_work_id": "raw:w1", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA}]
+    page_idx = sidecar_build.PageTextIndex(_pages_conn([("cp1", "htr", "x" * 100), ("seedp1", "htr", "y" * 40)]))
+    row = {
+        "cpage": "cp1", "csys": "s1", "work_id": "raw:w1", "cat": "Sefaria",
+        "tier": "T2", "aligned_len": 120, "occ_class": "core", "n_seed_ms": 2,
+        "occ0": 0, "occ1": 30, "seed_page": "seedp1", "cross_language": False, "is_new": True,
+    }
+    result = sidecar_build.build_claims_and_evidence(
+        conn=None, works=works, page_index=page_idx,
+        q2_shared_text=[row, dict(row)],
+    )
+    assert result["evidence_id_collisions"] == 1
+    assert len(result["evidence_rows"]) == 1
+
+
+def test_evidence_id_collision_equal_priority_different_content_raises():
+    """L2: two rows sharing every evidence_id-KEY field (work_id, a_page_id,
+    sys_id, evidence_kind, evidence_source, confidence_band, span, other_page_id)
+    but carrying DIFFERENT non-key attributes (tier/aligned_len) collide at
+    EQUAL routing priority with no deterministic winner -- must raise
+    fail-closed rather than silently pick one based on ingestion order."""
+    works = [{"raw_work_id": "raw:w1", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA}]
+    page_idx = sidecar_build.PageTextIndex(_pages_conn([("cp1", "htr", "x" * 100), ("seedp1", "htr", "y" * 40)]))
+    row_a = {
+        "cpage": "cp1", "csys": "s1", "work_id": "raw:w1", "cat": "Sefaria",
+        "tier": "T1", "aligned_len": 300, "occ_class": "core", "n_seed_ms": 2,
+        "occ0": 0, "occ1": 30, "seed_page": "seedp1", "cross_language": False, "is_new": True,
+    }
+    row_b = {**row_a, "tier": "T3", "aligned_len": 45}
+    with pytest.raises(sidecar_build.EvidenceIdCollisionError):
+        sidecar_build.build_claims_and_evidence(
+            conn=None, works=works, page_index=page_idx,
+            q2_shared_text=[row_a, row_b],
+        )
+
+
 def test_claim_type_dominance_across_works_on_same_page():
     works = [
         {"raw_work_id": "raw:w1", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA},
