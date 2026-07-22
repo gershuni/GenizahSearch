@@ -649,6 +649,92 @@ def test_browse_lru_non_positive_max_entries_disables_and_clears_cache(monkeypat
     asyncio.run(_run())
 
 
+# ---------------------------------------------------------------------------
+# H1: get_work_witnesses must never silently drop units on a work with more
+# raw claims than the old (removed) 5000-row pre-projection cap -- the full
+# unit set must be reachable across pages via server-side SQL pagination
+# over the GROUPED units, not the raw claim rows.
+# ---------------------------------------------------------------------------
+
+def _build_large_single_work_db(tmp_path, *, n_claims):
+    """A synthetic sidecar with ONE work carrying `n_claims` witness claims,
+    each on its own page/sys_id and deliberately left UNMERGED (no
+    witness_units row at all) -- so unit count == claim count exactly,
+    letting a dropped-unit bug surface as a simple missing-count assertion.
+    `n_claims` is chosen by the caller to exceed the old
+    _MAX_RAW_CLAIMS_PER_WORK=5000 cap this test guards against (H1)."""
+    work_id = "w999999"
+    evidence_specs = []
+    for i in range(n_claims):
+        page_id = f"lp{i:06d}"
+        sys_id = f"9900000000000{i:05d}"
+        evidence_specs.append(sidecar_build._mk_evidence(
+            page_id=page_id, work_id=work_id, sys_id=sys_id,
+            evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+            confidence_band=sidecar_build._TIER_A,
+            adjudication_status=sidecar_build._UNREVIEWED, audit_status=sidecar_build._NA,
+            routing_status=sidecar_build._SHIPPED, routing_reason=sidecar_build._NONE_REASON,
+            span_start=0, span_end=10,
+        ))
+    result = sidecar_build.assemble_claims_and_evidence(
+        evidence_specs, {work_id: "sefaria"}, sidecar_version="test-large-work",
+    )
+
+    db_path = tmp_path / "discovery-large-work.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        sidecar_build.create_schema(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, source_corpus) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (work_id, work_id, "Synthetic Large Work", None, None, "sefaria"),
+        )
+        sidecar_build._insert_claims_and_evidence_real(cur, result["claim_rows"], result["evidence_rows"])
+        meta_rows = [
+            ("schema_version", "discovery-v1"), ("sidecar_version", "test-large-work"),
+            ("source_db_sha256", "test"), ("build_date", "2026-01-01T00:00:00Z"),
+            ("data_as_of", "2026-01-01"), ("htr_snapshot_hash", "test"),
+            ("expected_rows_claims", str(n_claims)), ("expected_rows_evidence", str(n_claims)),
+            ("expected_rows_works", "1"), ("expected_rows_units", "0"),
+            ("frame_content_hash", "test"),
+        ]
+        cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
+        conn.commit()
+    finally:
+        conn.close()
+    return str(db_path), work_id
+
+
+def test_get_work_witnesses_no_truncation_beyond_old_5000_claim_cap(tmp_path):
+    n_claims = 5200  # > the old (removed) _MAX_RAW_CLAIMS_PER_WORK = 5000
+    db_path, work_id = _build_large_single_work_db(tmp_path, n_claims=n_claims)
+    service = DiscoveryService(
+        path_provider=lambda: db_path,
+        availability_callable=lambda: True,
+        sidecar_version_provider=lambda: "test-large-work",
+    )
+
+    seen_representative_sys_ids = set()
+    page = 1
+    page_size = 200  # the frozen absolute page-size ceiling
+    while True:
+        items = service.get_work_witnesses(work_id, page=page, page_size=page_size)
+        if not items:
+            break
+        for it in items:
+            assert it["unit_id"] is None  # every sys_id here is an unmerged singleton
+            seen_representative_sys_ids.add(it["representative_sys_id"])
+        page += 1
+        assert page < 100, "pagination did not terminate -- possible infinite loop"
+
+    assert len(seen_representative_sys_ids) == n_claims, (
+        f"expected all {n_claims} unmerged singleton units reachable across pages, got "
+        f"{len(seen_representative_sys_ids)} -- units silently dropped (H1 regression)"
+    )
+
+
 def test_band_rank_orders_strongest_first():
     assert _band_rank("track1_direct", "expert_verified") < _band_rank("track1_direct", "tier_a")
     assert _band_rank("track1_direct", "tier_a") < _band_rank("propagated", "corroborated")

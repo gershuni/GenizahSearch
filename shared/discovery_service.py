@@ -81,12 +81,12 @@ _DEFAULT_PAGE_SIZE_MAX = 200
 # may only ever TIGHTEN this value, never raise it -- see _clamp_page_size.
 _ABSOLUTE_PAGE_SIZE_CEILING = 200
 
-# Defensive internal row caps -- protect against a pathological work_id with
-# an enormous claim count / a corrupted witness_unit_members table blowing
-# memory, while never binding in the normal case (every list query stays
-# "indexed + LIMIT-bounded" per DATA-06, even the pre-grouping fetch below).
-_MAX_RAW_CLAIMS_PER_WORK = 5000
-_MAX_UNIT_MEMBER_ROWS = 200_000
+# H1: there is NO pre-grouping raw-claim cap here (a previous
+# _MAX_RAW_CLAIMS_PER_WORK=5000 / _MAX_UNIT_MEMBER_ROWS=200_000 pair silently
+# dropped units on any work with more claims than that -- get_work_witnesses
+# now performs the whole DATA-10 unit x work projection IN SQL, so
+# LIMIT/OFFSET paginates over UNITS post-grouping, never over a truncated
+# pre-grouping raw-claim scan; see get_work_witnesses below).
 
 
 def _get_float_env(name: str, default: float) -> float:
@@ -169,11 +169,63 @@ def _band_rank(evidence_source: Optional[str], confidence_band: Optional[str]) -
     return _BAND_RANK_INDEX.get((evidence_source, confidence_band), _UNRANKED_BAND)
 
 
+def _build_band_rank_case_sql() -> str:
+    """Build the frozen band-rank lattice as a SQL CASE expression (H1) --
+    ``_BAND_RANK_ORDER`` is a frozen module-level constant (never user
+    input), so building SQL via string formatting here is safe. Used to
+    perform the DATA-10 unit x work projection's "highest member band"
+    selection IN SQL (a ``ROW_NUMBER() OVER (PARTITION BY unit_key ...)``
+    window-function query) instead of in Python, so ``LIMIT``/``OFFSET``
+    can paginate over UNITS post-grouping rather than a pre-grouping
+    raw-claim cap."""
+    lines = ["CASE"]
+    for i, (source, band) in enumerate(_BAND_RANK_ORDER):
+        lines.append(
+            f"    WHEN de.evidence_source = '{source}' AND de.confidence_band = '{band}' THEN {i}"
+        )
+    lines.append(f"    ELSE {_UNRANKED_BAND}")
+    lines.append("  END")
+    return "\n".join(lines)
+
+
+_BAND_RANK_CASE_SQL = _build_band_rank_case_sql()
+
+# The per-work "ranked" CTE body (H1): every witness claim's display
+# evidence for `work_id`, its physical-MS unit_key (a real unit_id, or a
+# `sys:<sys_id>` singleton discriminator -- unit_id values are always
+# 64-hex-char sha256 digests so they can never collide with the "sys:"
+# prefix form), and its frozen band_rank. Reused (with the SAME `work_id`
+# bind parameter) by both the paginated projection query and the
+# member-sys_ids follow-up query below, so the two queries can never drift
+# out of sync with each other.
+_WORK_WITNESSES_RANKED_CTE_SQL = f"""
+  SELECT
+    COALESCE(wum.unit_id, 'sys:' || de.sys_id) AS unit_key,
+    wum.unit_id AS unit_id,
+    dc.page_id AS page_id,
+    dc.work_id AS work_id,
+    dc.claim_id AS claim_id,
+    dc.claim_type AS claim_type,
+    de.sys_id AS sys_id,
+    de.evidence_source AS evidence_source,
+    de.confidence_band AS confidence_band,
+    {_BAND_RANK_CASE_SQL} AS band_rank
+  FROM discovery_claim dc
+  JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
+  LEFT JOIN witness_unit_members wum ON wum.sys_id = de.sys_id
+  WHERE dc.work_id = ?
+    AND dc.claim_type IN ('direct_witness', 'quotes_this_work')
+"""
+
+
 # ---------------------------------------------------------------------------
-# Pure, DB-free DATA-10 unit x work projection helper. Kept separate from
-# the DB-touching get_work_witnesses() below so the grouping / highest-band
-# / anchor-exclusion / same-unit-suppression / pagination rules are directly
-# unit-testable with fabricated data (no fixture DB required).
+# Pure, DB-free DATA-10 unit x work projection helper. Kept as the reference
+# implementation of the SAME grouping/highest-band/anchor-exclusion/
+# same-unit-suppression/pagination rules the SQL projection in
+# get_work_witnesses() below implements directly in the database -- used
+# for member-claim expansion callers that already hold an in-memory row set
+# with no DB handle, and directly unit-tested with fabricated data (no
+# fixture DB required) so the rules stay pinned independent of the SQL.
 # ---------------------------------------------------------------------------
 
 def _project_work_witnesses(
@@ -560,8 +612,23 @@ class DiscoveryService:
         per physical-MS witness_unit at its highest member band, the
         enabled-band filter applied on that displayed band BEFORE
         pagination, the anchor's own unit excluded, same-unit members
-        suppressed. Delegates the actual grouping to the pure
-        ``_project_work_witnesses`` helper."""
+        suppressed.
+
+        H1 fix: the grouping / highest-member-band selection / anchor
+        exclusion / enabled-band filtering / deterministic ordering ALL run
+        IN SQL (a ``ROW_NUMBER() OVER (PARTITION BY unit_key ...)`` window
+        query over ``_WORK_WITNESSES_RANKED_CTE_SQL``), so ``LIMIT``/
+        ``OFFSET`` paginate over UNITS post-grouping -- never over a
+        pre-grouping raw-claim cap. There is no cap on the number of raw
+        claims scanned for this ONE work_id (an indexed, work_id-bounded
+        scan); ``witness_unit_members`` is never loaded wholesale into a
+        Python dict -- only the sys_ids that actually have a witness claim
+        on THIS work are ever looked up, via the LEFT JOIN inside the CTE.
+        A second, small follow-up query (bounded to this page's unit
+        count, <= page_size) fetches each returned unit's member sys_ids
+        for on-demand expansion. ``_project_work_witnesses`` remains the
+        pure-Python reference implementation of these SAME rules for
+        callers that already hold an in-memory row set."""
         if not self.is_available():
             return []
         conn = self._get_conn()
@@ -569,38 +636,83 @@ class DiscoveryService:
             return []
         page = self._clamp_page(page)
         page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+
+        # Mirrors _project_work_witnesses: a given-but-empty enabled_bands
+        # iterable means "filter to nothing" (every unit excluded), not
+        # "no filter" -- short-circuit before building an invalid `IN ()`.
+        enabled_bands_list = list(enabled_bands) if enabled_bands else None
+        if enabled_bands_list is not None and len(enabled_bands_list) == 0:
+            return []
+
         try:
-            cur = conn.execute(
-                """
-                SELECT dc.page_id, dc.work_id, dc.claim_id, dc.claim_type,
-                       de.sys_id, de.evidence_source, de.confidence_band
-                FROM discovery_claim dc
-                JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
-                WHERE dc.work_id = ?
-                  AND dc.claim_type IN ('direct_witness', 'quotes_this_work')
-                ORDER BY de.sys_id, dc.page_id
-                LIMIT ?
-                """,
-                (work_id, _MAX_RAW_CLAIMS_PER_WORK),
-            )
-            claim_rows = [dict(row) for row in cur.fetchall()]
-            if not claim_rows:
+            anchor_unit_key = None
+            if anchor_sys_id:
+                arow = conn.execute(
+                    "SELECT unit_id FROM witness_unit_members WHERE sys_id = ?",
+                    (anchor_sys_id,),
+                ).fetchone()
+                anchor_unit_id = arow["unit_id"] if arow else None
+                anchor_unit_key = anchor_unit_id if anchor_unit_id is not None else f"sys:{anchor_sys_id}"
+
+            extra_clauses: List[str] = []
+            extra_params: List[Any] = []
+            if anchor_unit_key is not None:
+                extra_clauses.append("unit_key != ?")
+                extra_params.append(anchor_unit_key)
+            if enabled_bands_list is not None:
+                placeholders = ",".join("?" for _ in enabled_bands_list)
+                extra_clauses.append(f"confidence_band IN ({placeholders})")
+                extra_params.extend(enabled_bands_list)
+            where_extra = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
+
+            page_sql = f"""
+                WITH ranked AS ({_WORK_WITNESSES_RANKED_CTE_SQL}),
+                unit_best AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY unit_key ORDER BY band_rank ASC, sys_id ASC
+                           ) AS rn
+                    FROM ranked
+                )
+                SELECT unit_key, unit_id, page_id, work_id, claim_id, claim_type,
+                       sys_id, evidence_source, confidence_band
+                FROM unit_best
+                WHERE rn = 1{where_extra}
+                ORDER BY band_rank ASC, sys_id ASC
+                LIMIT ? OFFSET ?
+            """
+            page_params = [work_id, *extra_params, page_size, offset]
+            cur = conn.execute(page_sql, page_params)
+            page_rows = [dict(row) for row in cur.fetchall()]
+            if not page_rows:
                 return []
 
-            cur2 = conn.execute(
-                "SELECT sys_id, unit_id FROM witness_unit_members LIMIT ?",
-                (_MAX_UNIT_MEMBER_ROWS,),
-            )
-            unit_by_sys = {row["sys_id"]: row["unit_id"] for row in cur2.fetchall()}
+            unit_keys = [r["unit_key"] for r in page_rows]
+            member_placeholders = ",".join("?" for _ in unit_keys)
+            member_sql = f"""
+                WITH ranked AS ({_WORK_WITNESSES_RANKED_CTE_SQL})
+                SELECT unit_key, sys_id FROM ranked WHERE unit_key IN ({member_placeholders})
+            """
+            member_cur = conn.execute(member_sql, [work_id, *unit_keys])
+            members_by_key: Dict[str, set] = {}
+            for row in member_cur.fetchall():
+                members_by_key.setdefault(row["unit_key"], set()).add(row["sys_id"])
 
-            return _project_work_witnesses(
-                claim_rows,
-                unit_by_sys,
-                enabled_bands=enabled_bands,
-                anchor_sys_id=anchor_sys_id,
-                page=page,
-                page_size=page_size,
-            )
+            return [
+                {
+                    "work_id": r["work_id"],
+                    "unit_id": r["unit_id"],
+                    "representative_sys_id": r["sys_id"],
+                    "representative_page_id": r["page_id"],
+                    "representative_claim_id": r["claim_id"],
+                    "claim_type": r["claim_type"],
+                    "evidence_source": r["evidence_source"],
+                    "confidence_band": r["confidence_band"],
+                    "member_sys_ids": sorted(members_by_key.get(r["unit_key"], {r["sys_id"]})),
+                }
+                for r in page_rows
+            ]
         except Exception as e:
             logger.error("DiscoveryService.get_work_witnesses error for %s: %s", work_id, e)
             return []
