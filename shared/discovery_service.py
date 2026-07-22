@@ -387,10 +387,19 @@ class DiscoveryService:
             return None
 
     def get_claims_for_page(
-        self, page_id: str, page: int = 1, page_size: Optional[int] = None
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
     ) -> List[Dict[str, Any]]:
         """PANEL-01/02: the manuscript's banded claims on this page, each at
-        its display_evidence_id-selected band."""
+        its display_evidence_id-selected band.
+
+        L1 fix: defaults to SHIPPED-only -- a review_only display evidence
+        row (e.g. a family-router co-citation collection, C-1/R3/F9) is
+        excluded unless the caller explicitly opts in via
+        ``include_review=True``. Review-only rows still PERSIST in the
+        sidecar (queryable) -- they are only hidden from this default read
+        surface, never deleted (docs/specs/discovery-sidecar-schema-v1.md
+        SS7)."""
         if not self.is_available():
             return []
         conn = self._get_conn()
@@ -399,9 +408,10 @@ class DiscoveryService:
         page = self._clamp_page(page)
         page_size = self._clamp_page_size(page_size)
         offset = (page - 1) * page_size
+        routing_clause = "" if include_review else "AND de.routing_status = 'shipped'"
         try:
             cur = conn.execute(
-                """
+                f"""
                 SELECT dc.page_id, dc.work_id, dc.claim_id, dc.claim_type, dc.source_corpus,
                        de.evidence_id, de.evidence_kind, de.evidence_source, de.confidence_band,
                        de.adjudication_status, de.audit_status, de.routing_status, de.routing_reason,
@@ -412,6 +422,7 @@ class DiscoveryService:
                 JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
                 JOIN works w ON w.work_id = dc.work_id
                 WHERE dc.page_id = ?
+                {routing_clause}
                 ORDER BY dc.work_id
                 LIMIT ? OFFSET ?
                 """,
@@ -423,10 +434,15 @@ class DiscoveryService:
             return []
 
     def get_pages_related_to_page(
-        self, page_id: str, page: int = 1, page_size: Optional[int] = None
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
     ) -> List[Dict[str, Any]]:
         """PANEL-02: shared_text alignments touching this page, from EITHER
-        side (a_page_id or other_page_id) -- both columns are indexed."""
+        side (a_page_id or other_page_id) -- both columns are indexed.
+
+        L1 fix: defaults to SHIPPED-only -- review_only rows (e.g. the
+        family-router tafsir_targum/with_arabic co-citation collections)
+        are excluded unless ``include_review=True``."""
         if not self.is_available():
             return []
         conn = self._get_conn()
@@ -435,12 +451,14 @@ class DiscoveryService:
         page = self._clamp_page(page)
         page_size = self._clamp_page_size(page_size)
         offset = (page - 1) * page_size
+        routing_clause = "" if include_review else "AND routing_status = 'shipped'"
         try:
             cur = conn.execute(
-                """
+                f"""
                 SELECT * FROM discovery_evidence
                 WHERE evidence_kind = 'shared_text'
                   AND (a_page_id = ? OR other_page_id = ?)
+                  {routing_clause}
                 ORDER BY evidence_id
                 LIMIT ? OFFSET ?
                 """,
@@ -661,15 +679,33 @@ class DiscoveryService:
         return await self._run_off_loop(self.get_version, timeout=self._browse_timeout())
 
     async def get_claims_for_page_async(
-        self, page_id: str, page: int = 1, page_size: Optional[int] = None
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
     ) -> List[Dict[str, Any]]:
+        if include_review:
+            # A distinct cache_name (rather than appending include_review to
+            # the sync call's positional args) keeps the DEFAULT call shape
+            # unchanged -- callers/tests that monkeypatch get_claims_for_page
+            # with a 3-positional-arg fake keep working (L1).
+            return await self._browse_cached_call(
+                "claims_for_page_include_review",
+                lambda p, pg, ps: self.get_claims_for_page(p, pg, ps, include_review=True),
+                (page_id, page, page_size),
+            )
         return await self._browse_cached_call(
             "claims_for_page", self.get_claims_for_page, (page_id, page, page_size)
         )
 
     async def get_pages_related_to_page_async(
-        self, page_id: str, page: int = 1, page_size: Optional[int] = None
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
     ) -> List[Dict[str, Any]]:
+        if include_review:
+            return await self._browse_cached_call(
+                "pages_related_to_page_include_review",
+                lambda p, pg, ps: self.get_pages_related_to_page(p, pg, ps, include_review=True),
+                (page_id, page, page_size),
+            )
         return await self._browse_cached_call(
             "pages_related_to_page", self.get_pages_related_to_page, (page_id, page, page_size)
         )

@@ -164,6 +164,31 @@ def test_get_pages_related_to_page_is_bidirectional():
     assert from_b[0]["related_page_id"] == "p004"
 
 
+def test_get_claims_for_page_hides_review_only_by_default_and_opt_in_reveals_it():
+    # p010/w000008 is the family-router (review_only) claim (C10 in the
+    # synthetic fixture) -- its sole evidence row IS the display_evidence_id,
+    # so the whole claim must be invisible by default (L1) and reachable
+    # only via the explicit include_review opt-in.
+    service = _make_service()
+    default_claims = service.get_claims_for_page("p010")
+    assert default_claims == []
+
+    review_claims = service.get_claims_for_page("p010", include_review=True)
+    assert len(review_claims) == 1
+    assert review_claims[0]["routing_status"] == "review_only"
+    assert review_claims[0]["work_id"] == "w000008"
+
+
+def test_get_pages_related_to_page_hides_review_only_by_default_and_opt_in_reveals_it():
+    service = _make_service()
+    default_related = service.get_pages_related_to_page("p010")
+    assert default_related == []
+
+    review_related = service.get_pages_related_to_page("p010", include_review=True)
+    assert len(review_related) == 1
+    assert review_related[0]["routing_status"] == "review_only"
+
+
 def test_get_evidence_parses_seed_spans_json():
     service = _make_service()
     claim_id = "e843bafbcb1ec1b85cf641899775fa6fcca405bfc497c210c547effbcd7840e0"  # p002/w000002
