@@ -1430,8 +1430,25 @@ def assemble_claims_and_evidence(
         ]
         claim_type_by_key[(page_id, work_id)] = ids.resolve_claim_type(resolver_input)
 
-    evidence_rows = []
-    evidence_rows_by_claim: Dict[str, List[Dict]] = {}
+    # Deduplicate on evidence_id (discovery_evidence's actual PK). A genuine
+    # content-hash collision has been OBSERVED in the real research corpus
+    # (deferred-items.md "evidence_id collision: shared_text vs family-router
+    # same-span"): a plain q2_shared_text.jsonl row and a family-router
+    # (tafsir_targum/with_arabic) row can independently resolve to the IDENTICAL
+    # (work_id, a_page_id, sys_id, evidence_kind=shared_text,
+    # evidence_source=propagated, confidence_band=not_evaluated, span_start,
+    # span_end, other_page_id) tuple -- the FROZEN evidence_id recipe
+    # (docs/specs/discovery-sidecar-schema-v1.md SS2) has no "which source
+    # collection" discriminator by design, so this is NOT a bug in the
+    # recipe's implementation; it is a real-data gap flagged for a future
+    # dated schema amendment (never silently patched here). Deterministic
+    # resolution: prefer the SHIPPED row over a review_only one (never let a
+    # co-citation-only signal silently displace a shipped recall-widening
+    # row); otherwise keep the first-seen row. Both source rows are never
+    # dropped silently -- the collision count is returned for visibility.
+    _ROUTING_PRIORITY = {_SHIPPED: 0, _REVIEW_ONLY: 1}
+    evidence_by_id: Dict[str, Dict] = {}
+    evidence_id_collisions = 0
     for (page_id, work_id), rows in claims.items():
         claim_id = claim_id_by_key[(page_id, work_id)]
         for e in rows:
@@ -1443,22 +1460,38 @@ def assemble_claims_and_evidence(
                 seed_spans=e.get("seed_spans"),
             )
             e["_evidence_id"] = evidence_id
-            evidence_rows_by_claim.setdefault(claim_id, []).append(e)
-            evidence_rows.append((
-                evidence_id, claim_id, e["evidence_kind"], e["evidence_source"], e["confidence_band"],
-                e["adjudication_status"], e["audit_status"], e["routing_status"], e["routing_reason"],
-                int(e["is_new"]), e["page_id"], e["sys_id"],
-                e.get("tier"), e.get("aligned_len"), e.get("occ_class"), e.get("cross_language"),
-                e.get("n_seed_ms"), e.get("trials"), e.get("runner_up"), e.get("community"),
-                e.get("ge3"), e.get("rung"), e.get("router_bucket"), e.get("matched_letters"),
-                e.get("density"), e.get("n_spans"),
-                e["span_start"], e["span_end"], e.get("text_layer"), e.get("snapshot_hash"),
-                json.dumps(e["seed_spans"]) if e.get("seed_spans") else None,
-                json.dumps(e["seed_ms_ids"]) if e.get("seed_ms_ids") else None,
-                e.get("other_page_id"), e.get("b_start"), e.get("b_end"),
-                e.get("text_layer_b"), e.get("snapshot_hash_b"),
-                e.get("rule_version"), e.get("community_id"),
-            ))
+            e["_claim_id"] = claim_id
+            existing = evidence_by_id.get(evidence_id)
+            if existing is None:
+                evidence_by_id[evidence_id] = e
+                continue
+            evidence_id_collisions += 1
+            existing_priority = _ROUTING_PRIORITY.get(existing["routing_status"], 99)
+            new_priority = _ROUTING_PRIORITY.get(e["routing_status"], 99)
+            if new_priority < existing_priority:
+                evidence_by_id[evidence_id] = e
+
+    evidence_rows_by_claim: Dict[str, List[Dict]] = {}
+    for e in evidence_by_id.values():
+        evidence_rows_by_claim.setdefault(e["_claim_id"], []).append(e)
+
+    evidence_rows = []
+    for e in evidence_by_id.values():
+        evidence_rows.append((
+            e["_evidence_id"], e["_claim_id"], e["evidence_kind"], e["evidence_source"], e["confidence_band"],
+            e["adjudication_status"], e["audit_status"], e["routing_status"], e["routing_reason"],
+            int(e["is_new"]), e["page_id"], e["sys_id"],
+            e.get("tier"), e.get("aligned_len"), e.get("occ_class"), e.get("cross_language"),
+            e.get("n_seed_ms"), e.get("trials"), e.get("runner_up"), e.get("community"),
+            e.get("ge3"), e.get("rung"), e.get("router_bucket"), e.get("matched_letters"),
+            e.get("density"), e.get("n_spans"),
+            e["span_start"], e["span_end"], e.get("text_layer"), e.get("snapshot_hash"),
+            json.dumps(e["seed_spans"]) if e.get("seed_spans") else None,
+            json.dumps(e["seed_ms_ids"]) if e.get("seed_ms_ids") else None,
+            e.get("other_page_id"), e.get("b_start"), e.get("b_end"),
+            e.get("text_layer_b"), e.get("snapshot_hash_b"),
+            e.get("rule_version"), e.get("community_id"),
+        ))
 
     display_choices: Dict[str, str] = {}
     for claim_id, rows in evidence_rows_by_claim.items():
@@ -1480,6 +1513,7 @@ def assemble_claims_and_evidence(
         "claim_rows": claim_rows,
         "evidence_rows": evidence_rows,
         "display_choices": display_choices,
+        "evidence_id_collisions": evidence_id_collisions,
     }
 
 
@@ -1932,6 +1966,7 @@ def finalize_build(
         "content_hash": content_hash,
         "band_precision_rows": len(bp_rows),
         "artifact_masking_issues": artifact_issue_count,
+        "evidence_id_collisions": result.get("evidence_id_collisions", 0),
         "manifest_path": str(manifest_path),
         "db_path": str(out_path),
     }
@@ -2105,6 +2140,7 @@ def main(argv=None) -> int:
     print(f"real build OK: {stats['row_counts']}")
     print(f"content_hash={stats['content_hash']}")
     print(f"frame_content_hash={stats['frame_content_hash']}")
+    print(f"evidence_id_collisions={stats['evidence_id_collisions']}")
     print(f"db_path={stats['db_path']}")
     return 0
 

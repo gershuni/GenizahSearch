@@ -463,6 +463,39 @@ def test_shared_text_collision_onto_witness_claim_f7():
     assert claim_row[3] in (ids.CLAIM_TYPE_DIRECT_WITNESS, ids.CLAIM_TYPE_QUOTES_THIS_WORK)
 
 
+def test_evidence_id_collision_shared_text_vs_family_router_prefers_shipped():
+    """Real-data-observed edge case (see deferred-items.md): a plain
+    q2_shared_text row and a family-router row can independently resolve to
+    the IDENTICAL (work_id, a_page_id, sys_id, evidence_kind, evidence_source,
+    confidence_band, span, other_page_id) tuple -- the FROZEN evidence_id
+    recipe has no "which collection" discriminator by design. The build must
+    NEVER crash (UNIQUE(claim_id, evidence_id) would otherwise reject the
+    second insert) and must deterministically prefer the SHIPPED row over a
+    review_only one."""
+    works = [{"raw_work_id": "raw:w1", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA}]
+    page_idx = sidecar_build.PageTextIndex(_pages_conn([("cp1", "htr", "x" * 100), ("seedp1", "htr", "y" * 40)]))
+    q2_shared = [{
+        "cpage": "cp1", "csys": "s1", "work_id": "raw:w1", "cat": "Sefaria",
+        "tier": "T1", "aligned_len": 400, "occ_class": "core", "n_seed_ms": 2,
+        "occ0": 0, "occ1": 30, "seed_page": "seedp1", "cross_language": False, "is_new": True,
+    }]
+    router_rows = [{
+        "cpage": "cp1", "csys": "s1", "work_id": "raw:w1", "_bucket": "tafsir_targum",
+        "is_new": True, "impurity": False, "trials": 4,
+        "seeds": [{"occ0": 0, "occ1": 30, "occ_class": "core", "seed_page": "seedp1", "seed_sys": "ss1"}],
+    }]
+    result = sidecar_build.build_claims_and_evidence(
+        conn=None, works=works, page_index=page_idx,
+        q2_shared_text=q2_shared, q2_collection_tafsir_targum=router_rows,
+    )
+    assert result["evidence_id_collisions"] == 1
+    assert len(result["claim_rows"]) == 1
+    assert len(result["evidence_rows"]) == 1  # deduped -- only ONE row persists
+    winning = result["evidence_rows"][0]
+    assert winning[7] == ids.ROUTING_STATUS_SHIPPED  # shipped kept over review_only
+    assert winning[8] == ids.ROUTING_REASON_NONE
+
+
 def test_claim_type_dominance_across_works_on_same_page():
     works = [
         {"raw_work_id": "raw:w1", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA},
