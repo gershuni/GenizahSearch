@@ -742,3 +742,123 @@ def test_band_rank_orders_strongest_first():
     assert _band_rank("track1_direct", "screening_rb") < _band_rank("track1_direct", "screening_canon")
     assert _band_rank("track1_direct", "screening_canon") < _band_rank("propagated", "weak")
     assert _band_rank("propagated", "weak") < _band_rank("propagated", "not_evaluated")
+
+
+# ---------------------------------------------------------------------------
+# MED (Codex R2): get_work_witnesses' ROW_NUMBER() OVER (PARTITION BY
+# unit_key ORDER BY band_rank ASC, sys_id ASC) is not a TOTAL order when a
+# unit/sys_id carries >=2 same-band page claims (2,829 tied units observed
+# in the cited real-corpus large work) -- the representative must be
+# deterministic (page_id, claim_id secondary tie-breakers), never dependent
+# on scan/insertion order. _project_work_witnesses must agree with the SQL.
+# ---------------------------------------------------------------------------
+
+def _build_two_page_tied_unit_db(tmp_path, *, name, page_ids):
+    """A synthetic sidecar with ONE work carrying TWO witness claims that
+    share the SAME sys_id (an unmerged singleton unit) and the SAME
+    (evidence_source, confidence_band) -- a genuine band_rank tie within
+    ONE unit_key partition, differing only by page_id/claim_id. `page_ids`
+    controls the evidence_specs (and therefore INSERT) order, so a test
+    can prove the chosen representative is independent of that order."""
+    work_id = "w778899"
+    sys_id = "9900000000000777001"
+    evidence_specs = [
+        sidecar_build._mk_evidence(
+            page_id=page_id, work_id=work_id, sys_id=sys_id,
+            evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+            confidence_band=sidecar_build._TIER_A,
+            adjudication_status=sidecar_build._UNREVIEWED, audit_status=sidecar_build._NA,
+            routing_status=sidecar_build._SHIPPED, routing_reason=sidecar_build._NONE_REASON,
+            span_start=0, span_end=10,
+        )
+        for page_id in page_ids
+    ]
+    result = sidecar_build.assemble_claims_and_evidence(
+        evidence_specs, {work_id: "sefaria"}, sidecar_version="test-tied-unit",
+    )
+
+    db_path = tmp_path / name
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        sidecar_build.create_schema(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, source_corpus) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (work_id, work_id, "Synthetic Tied Unit Work", None, None, "sefaria"),
+        )
+        sidecar_build._insert_claims_and_evidence_real(cur, result["claim_rows"], result["evidence_rows"])
+        meta_rows = [
+            ("schema_version", "discovery-v1"), ("sidecar_version", "test-tied-unit"),
+            ("source_db_sha256", "test"), ("build_date", "2026-01-01T00:00:00Z"),
+            ("data_as_of", "2026-01-01"), ("htr_snapshot_hash", "test"),
+            ("expected_rows_claims", "2"), ("expected_rows_evidence", "2"),
+            ("expected_rows_works", "1"), ("expected_rows_units", "0"),
+            ("frame_content_hash", "test"),
+        ]
+        cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
+        conn.commit()
+    finally:
+        conn.close()
+    return str(db_path), work_id
+
+
+def test_get_work_witnesses_tied_same_band_representative_is_stable_across_insertion_order(tmp_path):
+    db_asc, work_id = _build_two_page_tied_unit_db(
+        tmp_path, name="tied-asc.db", page_ids=["lp000A", "lp000B"],
+    )
+    db_desc, _ = _build_two_page_tied_unit_db(
+        tmp_path, name="tied-desc.db", page_ids=["lp000B", "lp000A"],
+    )
+
+    service_asc = DiscoveryService(
+        path_provider=lambda: db_asc, availability_callable=lambda: True,
+        sidecar_version_provider=lambda: "test-tied-unit",
+    )
+    service_desc = DiscoveryService(
+        path_provider=lambda: db_desc, availability_callable=lambda: True,
+        sidecar_version_provider=lambda: "test-tied-unit",
+    )
+
+    items_asc = service_asc.get_work_witnesses(work_id)
+    items_desc = service_desc.get_work_witnesses(work_id)
+
+    # Both claims share one sys_id and are unmerged -- they collapse into
+    # exactly ONE unit regardless of insertion order.
+    assert len(items_asc) == 1
+    assert len(items_desc) == 1
+    # The deterministic tie-break (page_id ASC) must pick the SAME
+    # representative page_id in BOTH databases, even though db_desc
+    # inserted the rows in the opposite order -- proving the choice does
+    # not depend on scan/insertion order (the pre-fix regression).
+    assert items_asc[0]["representative_page_id"] == "lp000A"
+    assert items_desc[0]["representative_page_id"] == "lp000A"
+    # Stable across repeated calls too.
+    assert service_asc.get_work_witnesses(work_id)[0]["representative_page_id"] == "lp000A"
+    assert service_desc.get_work_witnesses(work_id)[0]["representative_page_id"] == "lp000A"
+
+
+def test_project_work_witnesses_tied_same_band_representative_is_stable_across_input_order():
+    """Mirrors the SQL test above at the pure-Python reference-implementation
+    level: page_id (NOT claim_id) is the primary tie-breaker after
+    band_rank/sys_id, deliberately using claim_id values that would pick
+    the OPPOSITE winner if claim_id were compared first -- proving the two
+    implementations use the SAME tie-break key order."""
+    rows_a = [
+        {"page_id": "lp000A", "work_id": "w1", "claim_id": "zzz_high_claim_id",
+         "claim_type": "direct_witness", "sys_id": "s1",
+         "evidence_source": "track1_direct", "confidence_band": "tier_a"},
+        {"page_id": "lp000B", "work_id": "w1", "claim_id": "aaa_low_claim_id",
+         "claim_type": "direct_witness", "sys_id": "s1",
+         "evidence_source": "track1_direct", "confidence_band": "tier_a"},
+    ]
+    rows_b = list(reversed(rows_a))
+
+    items_a = _project_work_witnesses(rows_a, unit_by_sys={})
+    items_b = _project_work_witnesses(rows_b, unit_by_sys={})
+
+    assert len(items_a) == 1
+    assert len(items_b) == 1
+    assert items_a[0]["representative_page_id"] == "lp000A"
+    assert items_b[0]["representative_page_id"] == "lp000A"

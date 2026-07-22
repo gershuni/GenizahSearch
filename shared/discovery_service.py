@@ -297,9 +297,23 @@ def _project_work_witnesses(
         if anchor_unit_key is not None and unit_key == anchor_unit_key:
             continue  # exclude the anchor's own unit entirely
 
+        # MED (Codex R2): band_rank + sys_id alone is NOT a total order --
+        # a unit/sys_id can carry >=2 same-band page claims (2,829 tied
+        # units observed in the cited real-corpus large work), leaving the
+        # representative dependent on unspecified scan/insertion order.
+        # page_id/claim_id are stable, deterministic secondary tie-breakers
+        # -- MIRRORED exactly (same key order) in the SQL projection below
+        # (_WORK_WITNESSES_RANKED_CTE_SQL's ROW_NUMBER() ORDER BY) so the
+        # pure-Python reference implementation and the SQL projection can
+        # never disagree on which row wins a tie.
         best_row = min(
             members,
-            key=lambda r: (_band_rank(r["evidence_source"], r["confidence_band"]), r["sys_id"]),
+            key=lambda r: (
+                _band_rank(r["evidence_source"], r["confidence_band"]),
+                r["sys_id"],
+                r["page_id"],
+                r["claim_id"],
+            ),
         )
         displayed_band = best_row["confidence_band"]
         if enabled_bands_set is not None and displayed_band not in enabled_bands_set:
@@ -322,6 +336,8 @@ def _project_work_witnesses(
         key=lambda it: (
             _band_rank(it["evidence_source"], it["confidence_band"]),
             it["representative_sys_id"],
+            it["representative_page_id"],
+            it["representative_claim_id"],
         )
     )
 
@@ -666,12 +682,22 @@ class DiscoveryService:
                 extra_params.extend(enabled_bands_list)
             where_extra = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
 
+            # MED (Codex R2): band_rank + sys_id ASC alone is not a TOTAL
+            # order -- a unit/sys_id can carry >=2 same-band page claims,
+            # leaving the ROW_NUMBER()-selected representative dependent on
+            # unspecified scan/insertion order. page_id, claim_id are
+            # appended as stable secondary tie-breakers (both the window
+            # PARTITION's ORDER BY and the outer pagination ORDER BY) --
+            # MIRRORED exactly by _project_work_witnesses's `best_row`
+            # selection above, so SQL and the pure-Python reference
+            # implementation can never disagree on which row wins a tie.
             page_sql = f"""
                 WITH ranked AS ({_WORK_WITNESSES_RANKED_CTE_SQL}),
                 unit_best AS (
                     SELECT *,
                            ROW_NUMBER() OVER (
-                               PARTITION BY unit_key ORDER BY band_rank ASC, sys_id ASC
+                               PARTITION BY unit_key
+                               ORDER BY band_rank ASC, sys_id ASC, page_id ASC, claim_id ASC
                            ) AS rn
                     FROM ranked
                 )
@@ -679,7 +705,7 @@ class DiscoveryService:
                        sys_id, evidence_source, confidence_band
                 FROM unit_best
                 WHERE rn = 1{where_extra}
-                ORDER BY band_rank ASC, sys_id ASC
+                ORDER BY band_rank ASC, sys_id ASC, page_id ASC, claim_id ASC
                 LIMIT ? OFFSET ?
             """
             page_params = [work_id, *extra_params, page_size, offset]
