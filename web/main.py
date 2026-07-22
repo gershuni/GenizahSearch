@@ -695,6 +695,7 @@ from web.atlas_assets import (
     atlas_manifest_bytes,
     atlas_manifest_etag,
 )
+from web.discovery_assets import load_discovery_state, discovery_available  # noqa: F401 -- discovery_available is the Phase 135+ gating predicate; no surface calls it yet in Phase 134 (NO discovery UI ships this phase), imported now so downstream plans wire it without touching this import block
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
 
 # App configuration
@@ -755,6 +756,16 @@ app.add_static_files('/static', STATIC_DIR)
 # gated /atlas-data/* routes registered below. Fail-closed: a missing/broken
 # asset just leaves atlas_preview_available() False and the beta hides cleanly.
 load_atlas_state()
+
+# Phase 134 (DATA-07/DATA-08): load + fully validate the discovery.db sidecar
+# ONCE at startup from repo-root discovery_data/ (web.discovery_assets.
+# DISCOVERY_DATA_DIR), deliberately OUTSIDE STATIC_DIR -- the sidecar is NEVER
+# reachable via the public /static mount and, this phase, is not served by any
+# route at all (NO discovery UI ships in Phase 134). Fail-closed, mirroring the
+# atlas load above: a missing/corrupt/incompatible sidecar just leaves
+# discovery_available() False and every future discovery surface hides
+# cleanly; the rest of the app is completely untouched.
+load_discovery_state()
 
 
 def _negotiate_encoding(accept_encoding_header: str, have_br: bool, have_plain: bool):
