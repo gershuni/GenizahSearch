@@ -2043,20 +2043,30 @@ def finalize_build(
             cur.close()
         out_conn.close()
 
-    # BLOCKING masking gate (DC13) -- runs over the FINALIZED, already-committed
-    # .db; ANY hit deletes the file and aborts (never a half-finalized leak).
-    patterns = masking_patterns if masking_patterns is not None else _cam.load_patterns()
-    _cam._require_patterns(patterns)
-    issues = _cam.scan_sqlite(str(out_path), patterns)
-    if issues:
+    # BLOCKING masking gate (DC13/M2) -- runs over the FINALIZED,
+    # already-committed .db. M2: pattern-loading and the scan itself are
+    # wrapped in the SAME try/except as the hit check, so ANY exception
+    # from this block (a ScanError from _require_patterns/scan_sqlite --
+    # e.g. an empty pattern set, an unreadable pattern file, or a scan
+    # failure -- not just an actual masking HIT) deletes the just-written
+    # output .db before propagating. Previously only a HIT deleted the
+    # file; a pattern-load or scan-time exception left a half-finalized
+    # (unscanned, therefore unproven-clean) artifact on disk.
+    try:
+        patterns = masking_patterns if masking_patterns is not None else _cam.load_patterns()
+        patterns = _cam._require_patterns(patterns)
+        issues = _cam.scan_sqlite(str(out_path), patterns)
+        if issues:
+            raise MaskingGateFailure(
+                f"blocking masking scan found {len(issues)} issue(s) -- finalization ABORTED "
+                f"(DC13); {out_path} removed"
+            )
+    except Exception:
         try:
             out_path.unlink()
         except OSError:
             pass
-        raise MaskingGateFailure(
-            f"blocking masking scan found {len(issues)} issue(s) -- finalization ABORTED "
-            f"(DC13); {out_path} removed"
-        )
+        raise
 
     # Non-blocking registered-token scan of the gitignored review artifact --
     # surfaces (returned in stats) but NEVER blocks finalization (DC13).

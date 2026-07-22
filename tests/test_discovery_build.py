@@ -776,6 +776,31 @@ def test_finalize_build_masking_gate_blocks_and_removes_db(tmp_path):
     assert not fx["out_db_path"].exists()
 
 
+def test_finalize_build_masking_scan_exception_still_removes_db(tmp_path, monkeypatch):
+    """M2: ANY exception raised while loading patterns or scanning (a
+    ScanError from a broken pattern file, an unreadable db, etc.) -- NOT
+    just an actual masking HIT -- must still delete the just-written
+    output .db before propagating. Previously only the HIT branch cleaned
+    up; a scan-time exception left a half-finalized, unproven-clean
+    artifact on disk."""
+    fx = _build_minimal_finalize_fixture(tmp_path)
+
+    def _boom(*_args, **_kwargs):
+        raise cam.ScanError("simulated scan-time failure (M2 regression)")
+
+    monkeypatch.setattr(sidecar_build._cam, "scan_sqlite", _boom)
+
+    with pytest.raises(cam.ScanError):
+        sidecar_build.finalize_build(
+            source_db_path=str(fx["research_db"]),
+            from_approved_path=str(fx["approved_csv"]),
+            crosswalk_path=str(fx["crosswalk_path"]),
+            out_db_path=str(fx["out_db_path"]),
+            masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+        )
+    assert not fx["out_db_path"].exists()
+
+
 def test_finalize_build_requires_nonempty_masking_patterns(tmp_path):
     fx = _build_minimal_finalize_fixture(tmp_path)
     with pytest.raises(cam.ScanError):
@@ -786,6 +811,11 @@ def test_finalize_build_requires_nonempty_masking_patterns(tmp_path):
             out_db_path=str(fx["out_db_path"]),
             masking_patterns=[],
         )
+    # M2: an empty pattern set is a _require_patterns ScanError, NOT an
+    # actual masking hit -- it must ALSO trigger cleanup of the
+    # just-written .db (previously only a HIT deleted the file, leaving
+    # an unscanned, unproven-clean artifact on disk on this path).
+    assert not fx["out_db_path"].exists()
 
 
 def test_finalize_build_artifact_scan_is_nonblocking(tmp_path):
