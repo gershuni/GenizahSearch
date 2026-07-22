@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 134-04-PLAN.md
-last_updated: "2026-07-22T03:59:12.051Z"
+stopped_at: Completed 134-05-PLAN.md
+last_updated: "2026-07-22T04:22:01.391Z"
 last_activity: 2026-07-22
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 14
-  completed_plans: 10
+  completed_plans: 11
   percent: 14
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 134 (discovery-data-spine) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-07-22
 
@@ -86,8 +86,8 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-22T03:59:12.042Z
-Stopped at: Completed 134-04-PLAN.md
+Last session: 2026-07-22T04:21:39.991Z
+Stopped at: Completed 134-05-PLAN.md
 Resume file: None
 Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 band-source artifact + join key + raw->band translation + TOTAL flank->claim_type routing proposed in docs/specs/discovery-sidecar-schema-v1.md; then resume 134-01 at Task 3 (schema FREEZE) -> Task 4 (ids.py + golden tests). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
@@ -105,6 +105,7 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 | Phase 134 P02 | 50min | 3 tasks | 4 files |
 | Phase 134 P03 | 55min | 3 tasks | 10 files |
 | Phase 134 P04 | 120 | 3 tasks | 2 files |
+| Phase 134 P05 | 35min | 3 tasks | 6 files |
 
 ## Decisions
 
@@ -136,3 +137,5 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 - [Phase ?]: 134-04: evidence_id collision (shared_text vs family-router same-span) resolved by build-side dedup, never by amending the FROZEN discovery_ids.evidence_id() recipe
 - [Phase ?]: 134-04: absent-crosswalk aborts by default (create_if_missing=False) in assign_opaque_work_ids -- never silently re-mints opaque work_ids for an already-shipped work
 - [Phase ?]: 134-04: real dev-box smoke build validated against actual research corpus (625 works/231,604 claims/251,976 evidence rows) -- passed verify_discovery_sidecar.py and the blocking masking gate with 0 hits
+- [Phase 134]: 134-05: meta.schema_version is a versioned STRING ("discovery-v1"), not int -- ground-truth-verified against build_discovery_sidecar.py/manifest.json, corrected from the plan's literal int() cast which would have permanently broken the ready case — A literal int(meta['schema_version']) would raise ValueError on every valid sidecar since schema_version is stored as a string marker
+- [Phase 134]: 134-05: web/main.py imports only load_discovery_state/discovery_available (not the raw DISCOVERY_ENABLED flag), mirroring the ACTUAL atlas precedent -- avoids a ruff F401 unused-import violation — web/main.py never imports the raw ATLAS_PREVIEW_ENABLED flag either, only atlas_preview_available()
