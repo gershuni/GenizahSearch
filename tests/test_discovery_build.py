@@ -959,11 +959,86 @@ def test_finalize_build_release_true_with_no_collections_raises_incomplete(tmp_p
 # ===========================================================================
 
 def test_resolve_band_precision_spec_explicit_spec_wins():
-    custom = [{"scope": "collection", "collection_id": "x"}]
+    """H3: an explicit --precision-spec wins verbatim (identity) -- but
+    (Codex R2 HIGH) only once it is validated as a frozen-conforming spec;
+    a fabricated/incomplete spec like the old
+    `[{"scope": "collection", "collection_id": "x"}]` must now be REJECTED
+    (see test_resolve_band_precision_spec_explicit_spec_* rejection tests
+    below), so this positive case uses a legitimately-shaped owner override
+    (a copy of the frozen rows with a non-validated metadata field tweaked,
+    modeling a 134-07 owner annotation) to prove verbatim pass-through
+    still holds for a VALID spec."""
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    custom[0] = {**custom[0], "notes": "owner override at 134-07"}
     result = sidecar_build._resolve_band_precision_spec(
         precision_spec=custom, frozen_precision_defaults=False, release=True,
     )
     assert result is custom
+    assert result[0]["notes"] == "owner override at 134-07"
+
+
+# ---------------------------------------------------------------------------
+# Codex R2 HIGH: _resolve_band_precision_spec / _validate_precision_spec --
+# an explicit --precision-spec must be validated against the EXACT frozen
+# release row-set BEFORE any output/artifact write, never trusted verbatim.
+# ---------------------------------------------------------------------------
+
+def test_resolve_band_precision_spec_rejects_fabricated_tier_a():
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    for row in custom:
+        if row["scope"] == "band" and row["confidence_band"] == "tier_a":
+            row["precision"] = 0.90  # fabricated -- must never be accepted
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError, match="tier_a"):
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=custom, frozen_precision_defaults=False, release=True,
+        )
+
+
+def test_resolve_band_precision_spec_rejects_missing_frozen_row():
+    custom = [
+        r for r in sidecar_build._frozen_real_band_precision_rows()
+        if not (r["scope"] == "band" and r["confidence_band"] == "screening_canon")
+    ]
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError, match="screening_canon"):
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=custom, frozen_precision_defaults=False, release=True,
+        )
+
+
+def test_resolve_band_precision_spec_rejects_extra_band_row():
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    custom.append({
+        "scope": "band", "collection_id": "e1_certification_registry_v1",
+        "evidence_source": "track1_direct", "confidence_band": "bogus_extra_band",
+        "numerator": None, "denominator": None, "precision": None,
+        "ci_low": None, "ci_high": None, "method": None,
+        "sampling_frame": None, "ins_policy": None, "weighting": None, "notes": None,
+    })
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError, match="unexpected"):
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=custom, frozen_precision_defaults=False, release=True,
+        )
+
+
+def test_resolve_band_precision_spec_rejects_the_old_minimal_fabricated_spec():
+    """The EXACT scenario the HIGH finding cites: a spec that is basically
+    just `[{"scope": "collection", "collection_id": "x"}]` (missing every
+    frozen row, wrong collection_id, no measured bands at all) must be
+    rejected outright rather than reaching a real/release build verbatim."""
+    custom = [{"scope": "collection", "collection_id": "x"}]
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError):
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=custom, frozen_precision_defaults=False, release=True,
+        )
+
+
+def test_resolve_band_precision_spec_accepts_frozen_rows_unchanged():
+    """Positive case: the exact frozen rows (unmodified) must always pass."""
+    frozen = sidecar_build._frozen_real_band_precision_rows()
+    result = sidecar_build._resolve_band_precision_spec(
+        precision_spec=frozen, frozen_precision_defaults=False, release=True,
+    )
+    assert result is frozen
 
 
 def test_resolve_band_precision_spec_frozen_defaults_tier_a_is_null():

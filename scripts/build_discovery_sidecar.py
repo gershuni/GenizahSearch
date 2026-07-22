@@ -1989,6 +1989,17 @@ class ReleaseInputsIncompleteError(RuntimeError):
     smoke/unit path."""
 
 
+class InvalidPrecisionSpecError(ValueError):
+    """Raised (Codex R2 HIGH) when an explicit `--precision-spec` does not
+    match the EXACT frozen release band_precision row-set (docs/specs/
+    discovery-sidecar-schema-v1.md SS1.6). Without this check, an
+    owner-supplied spec carrying a fabricated `tier_a` precision, a missing
+    frozen row, or an extra/duplicate measured band could reach a
+    finalized real/release `.db` + manifest BEFORE the separate
+    `scripts/verify_discovery_sidecar.py` process (run only AFTER this one
+    exits) ever gets a chance to catch it."""
+
+
 def _count_tier_a_rows(conn: sqlite3.Connection) -> int:
     (n,) = conn.execute(
         "SELECT COUNT(*) FROM track1_matches WHERE shadowed_by IS NULL"
@@ -2052,22 +2063,126 @@ def _assert_release_inputs_complete(
         )
 
 
+_PRECISION_SPEC_TOLERANCE = 1e-6
+
+
+def _validate_precision_spec(rows: List[Dict]) -> None:
+    """Codex R2 HIGH: validate an explicit `--precision-spec` against the
+    EXACT frozen release band_precision row-set (docs/specs/discovery-
+    sidecar-schema-v1.md SS1.6) BEFORE it is used for any output/artifact
+    write. Cross-checked against `_frozen_real_band_precision_rows()` --
+    the ONE source of truth for the frozen row-set already defined in this
+    module -- rather than a second hardcoded copy of the same contract
+    (which would risk drifting out of sync).
+
+    Requires EXACTLY: the collection row (`propagated_witness_collection_v1`,
+    precision ~= 0.926, non-null numerator/denominator/ci_low/ci_high/method);
+    both propagated bands (corroborated, weak) present with NULL precision;
+    the three measured track1_direct bands (expert_verified/screening_rb/
+    screening_canon) present at their frozen values; `tier_a` present with
+    NULL precision. Any missing/duplicate/extra row, or a value outside the
+    frozen tolerance, raises `InvalidPrecisionSpecError` -- a spec with a
+    fabricated `tier_a` precision or a missing frozen row must never reach
+    a real/release build's output before the separate verifier ever runs.
+    """
+    frozen = _frozen_real_band_precision_rows()
+    frozen_collection = next(r for r in frozen if r["scope"] == "collection")
+    frozen_band_by_key = {
+        (r["evidence_source"], r["confidence_band"]): r
+        for r in frozen if r["scope"] == "band"
+    }
+
+    problems: List[str] = []
+
+    def _precision_matches(actual, expected) -> bool:
+        if expected is None:
+            return actual is None
+        return (
+            actual is not None
+            and isinstance(actual, (int, float))
+            and not isinstance(actual, bool)
+            and abs(actual - expected) <= _PRECISION_SPEC_TOLERANCE
+        )
+
+    collection_rows = [r for r in rows if isinstance(r, dict) and r.get("scope") == "collection"]
+    matching_collection = [
+        r for r in collection_rows if r.get("collection_id") == frozen_collection["collection_id"]
+    ]
+    if len(matching_collection) != 1:
+        problems.append(
+            f"expected exactly 1 scope='collection' row with collection_id="
+            f"{frozen_collection['collection_id']!r}, found {len(matching_collection)}"
+        )
+    else:
+        c = matching_collection[0]
+        if not _precision_matches(c.get("precision"), frozen_collection["precision"]):
+            problems.append(
+                f"scope='collection' precision {c.get('precision')!r} != frozen "
+                f"{frozen_collection['precision']}"
+            )
+        if c.get("evidence_source") is not None or c.get("confidence_band") is not None:
+            problems.append(
+                "scope='collection' row must carry NULL evidence_source/confidence_band"
+            )
+        for field in ("numerator", "denominator", "ci_low", "ci_high", "method"):
+            if c.get(field) is None:
+                problems.append(f"scope='collection' row missing required field {field!r}")
+
+    band_rows = [r for r in rows if isinstance(r, dict) and r.get("scope") == "band"]
+    band_rows_by_key: Dict[Tuple[Optional[str], Optional[str]], List[Dict]] = {}
+    for r in band_rows:
+        band_rows_by_key.setdefault((r.get("evidence_source"), r.get("confidence_band")), []).append(r)
+
+    for key, frozen_row in frozen_band_by_key.items():
+        matches = band_rows_by_key.get(key, [])
+        if len(matches) != 1:
+            problems.append(
+                f"expected exactly 1 scope='band' row for (evidence_source, "
+                f"confidence_band)={key}, found {len(matches)}"
+            )
+            continue
+        actual_precision = matches[0].get("precision")
+        expected_precision = frozen_row["precision"]
+        if not _precision_matches(actual_precision, expected_precision):
+            problems.append(
+                f"band {key}: precision {actual_precision!r} != frozen {expected_precision!r}"
+            )
+
+    extra_keys = sorted(set(band_rows_by_key) - set(frozen_band_by_key), key=str)
+    if extra_keys:
+        problems.append(
+            f"{len(extra_keys)} unexpected scope='band' row(s) outside the frozen "
+            f"row-set: {extra_keys}"
+        )
+
+    if problems:
+        raise InvalidPrecisionSpecError(
+            "explicit --precision-spec does not match the frozen release band_precision "
+            "row-set (docs/specs/discovery-sidecar-schema-v1.md SS1.6): " + "; ".join(problems)
+        )
+
+
 def _resolve_band_precision_spec(
     *, precision_spec: Optional[List[Dict]], frozen_precision_defaults: bool, release: bool,
 ) -> List[Dict]:
     """H3: resolve the band_precision rows to write, BEFORE any further
     build work begins. An explicit `precision_spec` (owner-supplied at
-    134-07) always wins; otherwise an explicit `frozen_precision_defaults`
-    acknowledgement uses the documented frozen-contract defaults (tier_a
-    precision NULL -- never the SYNTHETIC-mode-only 0.90 placeholder). A
-    `release=True` build with NEITHER supplied is refused outright -- a
-    real/release payload must never silently fabricate a number. A
-    non-release call (unit tests, `--allow-partial-sources` smoke builds)
-    defaults to the SAME frozen-contract rows when neither is supplied.
-    Extracted as its own function so H3's raise path is directly
-    unit-testable without needing to satisfy the (unrelated) H2 input-
-    completeness gate."""
+    134-07) always wins -- but is FIRST validated against the exact frozen
+    release row-set (Codex R2 HIGH, `_validate_precision_spec`) so a
+    fabricated/incomplete spec is rejected before any output/artifact
+    write, never merely relying on the separate `verify_discovery_sidecar.py`
+    process to catch it after the fact; otherwise an explicit
+    `frozen_precision_defaults` acknowledgement uses the documented
+    frozen-contract defaults (tier_a precision NULL -- never the
+    SYNTHETIC-mode-only 0.90 placeholder). A `release=True` build with
+    NEITHER supplied is refused outright -- a real/release payload must
+    never silently fabricate a number. A non-release call (unit tests,
+    `--allow-partial-sources` smoke builds) defaults to the SAME
+    frozen-contract rows when neither is supplied. Extracted as its own
+    function so H3's raise path is directly unit-testable without needing
+    to satisfy the (unrelated) H2 input-completeness gate."""
     if precision_spec is not None:
+        _validate_precision_spec(precision_spec)
         return precision_spec
     if frozen_precision_defaults:
         return _frozen_real_band_precision_rows()
