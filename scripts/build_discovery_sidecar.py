@@ -1278,6 +1278,7 @@ def compute_work_impact_counts(claim_rows: List[Tuple], evidence_rows: List[Tupl
 
 def emit_review_artifact(
     candidates: List[Dict], out_csv_path, *, impact_counts: Dict[str, Dict[str, int]],
+    include_masked_metadata: bool = False,
 ) -> List[Dict]:
     """Write the enriched, source-MASKED, impact-prioritized CANDIDATE review
     CSV (134-07 Task A). The exact header is `CANDIDATE_HEADER`;
@@ -1292,15 +1293,28 @@ def emit_review_artifact(
     distillation and is silently excluded rather than shown as a dead row.
     This is NOT a sample -- every surfacing work is included.
 
-    `candidate_title`/`author`/`genre` are auto-derived ONLY when the
-    candidate is already open-corpus (sefaria/ja) AND carries a non-empty
-    research `title` (`confidence_basis='open-corpus-title'`) -- ALL THREE
-    columns come verbatim from the open-corpus research row in that case.
-    Every other case -- M-source, or an open-corpus candidate with no title
-    -- emits ALL THREE columns BLANK with `confidence_basis=
-    'none-owner-supplies'`: fail-closed, never a restricted-title/author/
-    genre fallback (masking -- an M-source `author`/`genre` value is
-    research-derived free text and must never reach this artifact).
+    `candidate_title`/`author`/`genre` are auto-derived from the research
+    row ONLY when the candidate is already open-corpus (sefaria/ja) AND
+    carries a non-empty research `title` (`confidence_basis=
+    'open-corpus-title'`) -- ALL THREE columns come verbatim from the
+    open-corpus research row in that case.
+
+    For every OTHER row (`confidence_basis='none-owner-supplies'` -- M-source,
+    or a title-less open-corpus candidate):
+      - `candidate_title` is ALWAYS blank (the owner supplies the neutral
+        title -- regardless of `include_masked_metadata`);
+      - `author` and `genre` are blank by DEFAULT (fail-closed -- the safe
+        artifact anyone gets without the opt-in), OR populated verbatim from
+        the research row when `include_masked_metadata=True`. The latter is
+        an EXPLICIT owner opt-in (owner decision 2026-07-22): the CSV is a
+        gitignored, dev-box-only review artifact the owner is authorized to
+        see, and only owner-APPROVED NEUTRAL titles ship downstream through
+        Task 2's strict blocking masking gate -- so richer author/genre skim
+        signals in THIS gitignored review CSV are acceptable, PROVIDED the
+        BLOCKING masking scan over the finished CSV still passes (that gate
+        is never waived -- masked author/genre are generic bibliographic
+        free text, not a corpus name/siglum/raw work_id/reference text, but
+        the scan decides, not the flag).
 
     Rows are sorted by `(tier_a_witnesses DESC, claim_count DESC, work_id
     ASC)` -- deterministic, highest-impact titles first, long tail still
@@ -1332,11 +1346,18 @@ def emit_review_artifact(
             genre = c.get("genre") or ""
             confidence_basis = CONFIDENCE_BASIS_OPEN_CORPUS_TITLE
         else:
-            # fail-closed (masking): M-source (or a title-less open-corpus
-            # row) never surfaces ANY research-derived free text here.
+            # none-owner-supplies: candidate_title ALWAYS blank (owner
+            # supplies the neutral title). author/genre are blank by
+            # default (fail-closed), OR populated verbatim under the
+            # explicit owner opt-in (owner decision 2026-07-22) -- still
+            # subject to the finished-CSV blocking masking scan.
             candidate_title = ""
-            author = ""
-            genre = ""
+            if include_masked_metadata:
+                author = c.get("author") or ""
+                genre = c.get("genre") or ""
+            else:
+                author = ""
+                genre = ""
             confidence_basis = CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES
 
         rows.append({
@@ -2119,13 +2140,19 @@ def _emit_enriched_review_artifact(
     e1_rb_screening: Iterable[Dict] = (), e1_r3_frame: Iterable[Dict] = (),
     q2_witness_collection: Iterable[Dict] = (), q2_collection_tafsir_targum: Iterable[Dict] = (),
     q2_collection_with_arabic: Iterable[Dict] = (), q2_shared_text: Iterable[Dict] = (),
+    include_masked_metadata: bool = False,
 ) -> Dict:
     """Assemble claims/evidence over ALL `candidates` (pre-owner-review --
     NOT just a prior approved set) so the emitted CANDIDATE csv's
     `tier_a_witnesses`/`claim_count` columns reflect the ACTUAL real
     distillation, then emit the enriched review artifact. Returns the
     emitted rows + the `evidence_id_collisions` count (surfaced for caller
-    visibility, never blocking this emission step)."""
+    visibility, never blocking this emission step).
+
+    `include_masked_metadata` (default False) is threaded straight to
+    `emit_review_artifact`: when True, masked (`none-owner-supplies`) rows
+    carry non-empty author/genre skim signals (owner opt-in) -- always
+    subject to the finished-CSV blocking masking scan."""
     result = build_claims_and_evidence(
         conn=conn_research, works=candidates, page_index=page_index,
         e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
@@ -2137,7 +2164,10 @@ def _emit_enriched_review_artifact(
         sidecar_version=REAL_SIDECAR_VERSION,
     )
     impact_counts = compute_work_impact_counts(result["claim_rows"], result["evidence_rows"])
-    rows = emit_review_artifact(candidates, out_csv_path, impact_counts=impact_counts)
+    rows = emit_review_artifact(
+        candidates, out_csv_path, impact_counts=impact_counts,
+        include_masked_metadata=include_masked_metadata,
+    )
     return {"rows": rows, "evidence_id_collisions": result.get("evidence_id_collisions", 0)}
 
 
@@ -2155,6 +2185,7 @@ def build_candidate_review_artifact(
     q2_collection_with_arabic_path=None,
     q2_shared_text_path=None,
     create_crosswalk_if_missing: bool = False,
+    include_masked_metadata: bool = False,
 ) -> Dict:
     """134-07 Task 1/A entry point: emit ONLY the enriched, source-masked,
     impact-prioritized CANDIDATE review csv against the real research corpus
@@ -2163,6 +2194,12 @@ def build_candidate_review_artifact(
     the owner review gate this feeds). REUSES the persisted crosswalk
     (`create_crosswalk_if_missing=False` by default, DC2) so opaque work_ids
     stay stable with any prior/subsequent real build.
+
+    `include_masked_metadata` (default False) is the explicit owner opt-in
+    (owner decision 2026-07-22) that populates author/genre for masked
+    (`none-owner-supplies`) rows -- see `emit_review_artifact`. Default OFF
+    keeps the conservative fail-closed artifact for anyone running the tool
+    without the flag.
 
     Raises `CrosswalkAbortError` if the crosswalk is required-but-absent
     (mirrors `assign_opaque_work_ids`'s own DC2 contract).
@@ -2194,6 +2231,7 @@ def build_candidate_review_artifact(
             q2_collection_tafsir_targum=q2_collection_tafsir_targum,
             q2_collection_with_arabic=q2_collection_with_arabic,
             q2_shared_text=q2_shared_text,
+            include_masked_metadata=include_masked_metadata,
         )
     finally:
         conn_research.close()
@@ -3021,6 +3059,13 @@ def build_parser() -> argparse.ArgumentParser:
                              "and exit -- does NOT require --from-approved and does NOT "
                              "write a discovery.db. Reuses --crosswalk WITHOUT re-minting "
                              "(pass --init-crosswalk only for a genuinely first-ever build).")
+    real_group.add_argument("--include-masked-metadata", action="store_true",
+                        help="Owner opt-in (owner decision 2026-07-22): populate author + "
+                             "genre for masked (none-owner-supplies) rows of the gitignored "
+                             "CANDIDATE review csv as skim signals. candidate_title stays "
+                             "blank regardless (owner supplies the neutral title). DEFAULT "
+                             "OFF (fail-closed -- author/genre blank for masked rows). The "
+                             "finished CSV is still subject to the blocking masking scan.")
     return parser
 
 
@@ -3058,6 +3103,7 @@ def main(argv=None) -> int:
             q2_collection_with_arabic_path=collection_paths["q2_collection_with_arabic"],
             q2_shared_text_path=collection_paths["q2_shared_text"],
             create_crosswalk_if_missing=args.init_crosswalk,
+            include_masked_metadata=args.include_masked_metadata,
         )
         print(f"review artifact OK: {stats}")
         return 0

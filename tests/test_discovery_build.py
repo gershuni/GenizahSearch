@@ -419,6 +419,49 @@ def test_emit_review_artifact_excludes_zero_claim_works(tmp_path):
     assert [r["work_id"] for r in rows] == ["w000001"]
 
 
+def test_emit_review_artifact_masked_metadata_flag_default_off_and_opt_in(tmp_path):
+    """Owner opt-in (owner decision 2026-07-22): --include-masked-metadata
+    populates author + genre for masked (none-owner-supplies) rows; DEFAULT
+    OFF keeps them blank (fail-closed). candidate_title stays blank for the
+    masked row regardless -- the owner supplies the neutral title. The
+    open-corpus row is unaffected either way."""
+    candidates = [
+        {"raw_work_id": "raw:open", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA,
+         "title": "Open Title", "author": "Open Author", "genre": "canon"},
+        {"raw_work_id": "raw:msource", "work_id": "w000002", "source_corpus": ids.SOURCE_CORPUS_MSOURCE,
+         "title": "raw research title", "author": "raw research author", "genre": "ספרות יפה"},
+    ]
+    impact_counts = {
+        "w000001": {"claim_count": 1, "tier_a_witnesses": 0},
+        "w000002": {"claim_count": 1, "tier_a_witnesses": 0},
+    }
+
+    # DEFAULT OFF -- masked row author/genre stay blank (fail-closed).
+    off_csv = tmp_path / "off.csv"
+    off_rows = sidecar_build.emit_review_artifact(candidates, off_csv, impact_counts=impact_counts)
+    off_by_id = {r["work_id"]: r for r in off_rows}
+    assert off_by_id["w000002"]["author"] == ""
+    assert off_by_id["w000002"]["genre"] == ""
+    assert off_by_id["w000002"]["candidate_title"] == ""
+    assert off_by_id["w000002"]["confidence_basis"] == sidecar_build.CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES
+
+    # OPT-IN ON -- masked row gets non-empty author + genre skim signals,
+    # but candidate_title STILL blank (owner supplies the neutral title).
+    on_csv = tmp_path / "on.csv"
+    on_rows = sidecar_build.emit_review_artifact(
+        candidates, on_csv, impact_counts=impact_counts, include_masked_metadata=True,
+    )
+    on_by_id = {r["work_id"]: r for r in on_rows}
+    assert on_by_id["w000002"]["author"] == "raw research author"
+    assert on_by_id["w000002"]["genre"] == "ספרות יפה"
+    assert on_by_id["w000002"]["candidate_title"] == ""  # never auto-derived for masked rows
+    assert on_by_id["w000002"]["confidence_basis"] == sidecar_build.CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES
+
+    # The open-corpus row is identical under both modes (flag only affects masked rows).
+    assert off_by_id["w000001"]["candidate_title"] == "Open Title"
+    assert on_by_id["w000001"] == off_by_id["w000001"]
+
+
 def test_compute_work_impact_counts_matches_assembled_data(tmp_path):
     """`tier_a_witnesses`/`claim_count` must be derived from the SAME
     build_claims_and_evidence/assemble_claims_and_evidence assembly used by
