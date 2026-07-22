@@ -860,3 +860,176 @@ def test_finalize_build_artifact_scan_is_nonblocking(tmp_path):
     assert Path(stats["db_path"]).exists()
     # the unapproved work never reached the shipped works table
     assert stats["row_counts"]["works"] == 1
+
+
+# ===========================================================================
+# H2: release-mode input-completeness gate
+# ===========================================================================
+
+def _h2_complete_kwargs(**overrides):
+    """A fully-conforming set of _assert_release_inputs_complete kwargs
+    (every collection at its EXACT frozen expected count) -- individual
+    tests override just the field(s) they want to break."""
+    kwargs = dict(
+        release=True, allow_partial_sources=False,
+        e1_ra_confirmed=[{}] * sidecar_build._EXPECTED_E1_RA_CONFIRMED_ROWS,
+        e1_adjudicated_a=[{}] * sidecar_build._EXPECTED_E1_ADJUDICATED_A_ROWS,
+        e1_rb_screening=[{}] * sidecar_build._EXPECTED_E1_RB_SCREENING_ROWS,
+        e1_r3_frame=[{}] * sidecar_build._EXPECTED_E1_R3_FRAME_ROWS,
+        q2_witness_collection=[{}] * sidecar_build._EXPECTED_Q2_WITNESS_COLLECTION_ROWS,
+        q2_shared_text=[{}] * sidecar_build._EXPECTED_Q2_SHARED_TEXT_ROWS,
+        q2_collection_tafsir_targum=[{}] * sidecar_build._EXPECTED_TAFSIR_TARGUM_ROWS,
+        q2_collection_with_arabic=[{}] * sidecar_build._EXPECTED_WITH_ARABIC_ROWS,
+        tier_a_row_count=sidecar_build._EXPECTED_TIER_A_ROWS,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+def test_assert_release_inputs_complete_passes_when_every_count_matches():
+    # Must NOT raise.
+    sidecar_build._assert_release_inputs_complete(**_h2_complete_kwargs())
+
+
+def test_assert_release_inputs_complete_non_release_is_a_noop():
+    # release=False -- the gate never fires, regardless of how incomplete
+    # the inputs are (unit tests / build_claims_and_evidence-level tests
+    # rely on this).
+    sidecar_build._assert_release_inputs_complete(**_h2_complete_kwargs(
+        release=False, e1_ra_confirmed=[], q2_witness_collection=[], tier_a_row_count=0,
+    ))
+
+
+def test_assert_release_inputs_complete_missing_collection_raises():
+    """H2: a MISSING collection (empty list, as if the path were never
+    supplied) must abort a release build -- never silently ingest as
+    empty and produce a tier-A-only sidecar that still passes every
+    other gate."""
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError, match="q2_witness_collection"):
+        sidecar_build._assert_release_inputs_complete(
+            **_h2_complete_kwargs(q2_witness_collection=[])
+        )
+
+
+def test_assert_release_inputs_complete_short_collection_raises():
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError, match="e1_r3_frame"):
+        sidecar_build._assert_release_inputs_complete(
+            **_h2_complete_kwargs(e1_r3_frame=[{}] * 100)
+        )
+
+
+def test_assert_release_inputs_complete_tier_a_count_mismatch_raises():
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError, match="tier_a"):
+        sidecar_build._assert_release_inputs_complete(
+            **_h2_complete_kwargs(tier_a_row_count=1)
+        )
+
+
+def test_assert_release_inputs_complete_allow_partial_sources_with_release_raises():
+    """H2: --allow-partial-sources may NEVER be combined with release=True --
+    a release build must never silently accept a partial source set."""
+    with pytest.raises(ValueError, match="allow-partial-sources"):
+        sidecar_build._assert_release_inputs_complete(
+            **_h2_complete_kwargs(allow_partial_sources=True)
+        )
+
+
+def test_finalize_build_release_true_with_no_collections_raises_incomplete(tmp_path):
+    """End-to-end (H2): finalize_build(release=True) with NO Q2/E1
+    collection paths supplied (every collection loads as an empty list,
+    and the fixture's tiny research DB has only 1 track1_matches row) must
+    raise ReleaseInputsIncompleteError -- confirms the gate is actually
+    wired into finalize_build, not just unit-tested in isolation."""
+    fx = _build_minimal_finalize_fixture(tmp_path)
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError):
+        sidecar_build.finalize_build(
+            source_db_path=str(fx["research_db"]),
+            from_approved_path=str(fx["approved_csv"]),
+            crosswalk_path=str(fx["crosswalk_path"]),
+            out_db_path=str(fx["out_db_path"]),
+            masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+            release=True,
+            frozen_precision_defaults=True,
+        )
+    assert not fx["out_db_path"].exists()
+
+
+# ===========================================================================
+# H3: real/release band_precision -- never a fabricated tier_a number
+# ===========================================================================
+
+def test_resolve_band_precision_spec_explicit_spec_wins():
+    custom = [{"scope": "collection", "collection_id": "x"}]
+    result = sidecar_build._resolve_band_precision_spec(
+        precision_spec=custom, frozen_precision_defaults=False, release=True,
+    )
+    assert result is custom
+
+
+def test_resolve_band_precision_spec_frozen_defaults_tier_a_is_null():
+    result = sidecar_build._resolve_band_precision_spec(
+        precision_spec=None, frozen_precision_defaults=True, release=True,
+    )
+    tier_a_row = next(
+        r for r in result
+        if r["scope"] == "band" and r["evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+        and r["confidence_band"] == ids.CONFIDENCE_BAND_TIER_A
+    )
+    assert tier_a_row["precision"] is None
+    # the three MEASURED track1_direct bands are still present at their
+    # frozen values.
+    by_band = {
+        r["confidence_band"]: r["precision"] for r in result
+        if r["scope"] == "band" and r["evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+    }
+    assert by_band[ids.CONFIDENCE_BAND_EXPERT_VERIFIED] == 0.889
+    assert by_band[ids.CONFIDENCE_BAND_SCREENING_RB] == 0.859
+    assert by_band[ids.CONFIDENCE_BAND_SCREENING_CANON] == 0.647
+
+
+def test_resolve_band_precision_spec_release_without_explicit_choice_raises():
+    """H3: a --release build with NEITHER --precision-spec NOR
+    --frozen-precision-defaults must raise -- never silently default."""
+    with pytest.raises(ValueError, match="precision-spec"):
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=None, frozen_precision_defaults=False, release=True,
+        )
+
+
+def test_resolve_band_precision_spec_non_release_defaults_to_frozen_rows_tier_a_null():
+    """Non-release calls (unit tests, --allow-partial-sources smoke builds)
+    default to the frozen-contract rows -- tier_a NULL, never the
+    SYNTHETIC-fixture-only 0.90 placeholder from _band_precision_rows."""
+    result = sidecar_build._resolve_band_precision_spec(
+        precision_spec=None, frozen_precision_defaults=False, release=False,
+    )
+    tier_a_row = next(
+        r for r in result
+        if r["scope"] == "band" and r["evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+        and r["confidence_band"] == ids.CONFIDENCE_BAND_TIER_A
+    )
+    assert tier_a_row["precision"] is None
+
+
+def test_finalize_build_default_never_writes_fabricated_tier_a_precision(tmp_path):
+    """End-to-end (H3): a finalize_build call with NO release/precision
+    flags (the existing test-suite calling convention) must still never
+    write the synthetic-mode 0.90 tier_a placeholder into a real build."""
+    fx = _build_minimal_finalize_fixture(tmp_path)
+    stats = sidecar_build.finalize_build(
+        source_db_path=str(fx["research_db"]),
+        from_approved_path=str(fx["approved_csv"]),
+        crosswalk_path=str(fx["crosswalk_path"]),
+        out_db_path=str(fx["out_db_path"]),
+        masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+    )
+    conn = sqlite3.connect(f"file:{stats['db_path']}?mode=ro", uri=True)
+    try:
+        row = conn.execute(
+            "SELECT precision FROM band_precision WHERE scope='band' "
+            "AND evidence_source='track1_direct' AND confidence_band='tier_a'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] is None

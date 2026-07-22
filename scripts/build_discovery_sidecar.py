@@ -584,6 +584,15 @@ def synthetic_discovery_dataset():
 # ---------------------------------------------------------------------------
 
 def _band_precision_rows() -> List[Dict]:
+    """SYNTHETIC-mode-ONLY band_precision rows (H3) -- used exclusively by
+    `populate_synthetic` (and therefore the pinned 134-03 golden fixture,
+    which MUST stay byte-identical). Carries a placeholder `tier_a`
+    precision (0.90) that is fabricated and must NEVER reach a real/release
+    build -- `finalize_build`'s real-mode path uses
+    `_frozen_real_band_precision_rows` instead (tier_a precision NULL, per
+    the FROZEN band_precision contract, docs/specs/discovery-sidecar-schema-v1.md
+    SS1.6: only expert_verified/screening_rb/screening_canon carry a
+    measured track1_direct precision; tier_a does not)."""
     rows = [
         {
             "scope": "collection", "collection_id": "propagated_witness_collection_v1",
@@ -645,6 +654,87 @@ def _band_precision_rows() -> List[Dict]:
             "ci_low": None, "ci_high": None, "method": "E1 registry pre-registered measurement",
             "sampling_frame": None, "ins_policy": None, "weighting": None,
             "notes": "R-CANON figure; D-10 canon caveat (known Targum-confusion class).",
+        },
+    ]
+    return rows
+
+
+def _frozen_real_band_precision_rows() -> List[Dict]:
+    """The FROZEN real/release-mode band_precision default spec (H3, C-7/G8,
+    docs/specs/discovery-sidecar-schema-v1.md SS1.6). Used by
+    `finalize_build`'s real-mode path whenever the caller does not supply a
+    custom `--precision-spec` -- unlike `_band_precision_rows` (the
+    SYNTHETIC-mode-only fixture rows), `tier_a` here carries NULL precision:
+    there is NO measured tier_a interval in the frozen contract, so a real
+    build must never write the 0.90 synthetic placeholder. The three
+    MEASURED track1_direct bands (expert_verified/screening_rb/
+    screening_canon) and the collection-level 0.926 are the frozen contract
+    values documented in the schema doc; the owner may override this whole
+    spec at 134-07 via an explicit `--precision-spec <json>` file."""
+    rows = [
+        {
+            "scope": "collection", "collection_id": "propagated_witness_collection_v1",
+            "evidence_source": None, "confidence_band": None,
+            "numerator": 176, "denominator": 190, "precision": 0.926,
+            "ci_low": 0.875, "ci_high": 0.968, "method": "work-cluster bootstrap",
+            "sampling_frame": "held-out 200-card draw (90 corroborated + 110 weak); "
+                               "frame_size 2109 after ledger+neighborhood+shelf exclusion",
+            "ins_policy": "locked-rule evaluation", "weighting": "unweighted",
+            "notes": "C-7/R1 frozen collection-level precision over corroborated UNION weak; "
+                     "NEVER a corroborated-only (81/86) or weak-only (95/104) split.",
+        },
+        {
+            "scope": "band", "collection_id": "propagated_witness_collection_v1",
+            "evidence_source": _PROPAGATED, "confidence_band": _CORROBORATED,
+            "numerator": None, "denominator": None, "precision": None,
+            "ci_low": None, "ci_high": None, "method": "locked-rule evaluation",
+            "sampling_frame": None, "ins_policy": None, "weighting": None,
+            "notes": "No valid band-specific measurement exists (G8) -- see the "
+                     "scope='collection' row for the single measured collection-level number.",
+        },
+        {
+            "scope": "band", "collection_id": "propagated_witness_collection_v1",
+            "evidence_source": _PROPAGATED, "confidence_band": _WEAK,
+            "numerator": None, "denominator": None, "precision": None,
+            "ci_low": None, "ci_high": None, "method": "locked-rule evaluation",
+            "sampling_frame": None, "ins_policy": None, "weighting": None,
+            "notes": "No valid band-specific measurement exists (G8) -- see the "
+                     "scope='collection' row for the single measured collection-level number.",
+        },
+        {
+            "scope": "band", "collection_id": "e1_certification_registry_v1",
+            "evidence_source": _TRACK1, "confidence_band": _EXPERT_VERIFIED,
+            "numerator": None, "denominator": None, "precision": 0.889,
+            "ci_low": None, "ci_high": None, "method": "E1 registry pre-registered measurement",
+            "sampling_frame": None, "ins_policy": None, "weighting": None,
+            "notes": "R-A figure (frozen contract, docs/specs SS1.6/SS4.1).",
+        },
+        {
+            "scope": "band", "collection_id": "e1_certification_registry_v1",
+            "evidence_source": _TRACK1, "confidence_band": _TIER_A,
+            "numerator": None, "denominator": None, "precision": None,
+            "ci_low": None, "ci_high": None, "method": None,
+            "sampling_frame": None, "ins_policy": None, "weighting": None,
+            "notes": "H3: tier_a carries NO measured precision in the frozen contract -- "
+                     "NEVER a fabricated number in a real/release build (unlike the "
+                     "SYNTHETIC-fixture-only 0.90 placeholder in _band_precision_rows).",
+        },
+        {
+            "scope": "band", "collection_id": "e1_certification_registry_v1",
+            "evidence_source": _TRACK1, "confidence_band": _SCREENING_RB,
+            "numerator": None, "denominator": None, "precision": 0.859,
+            "ci_low": None, "ci_high": None, "method": "E1 registry pre-registered measurement",
+            "sampling_frame": None, "ins_policy": None, "weighting": None,
+            "notes": "R-B figure (frozen contract, docs/specs SS1.6/SS4.1).",
+        },
+        {
+            "scope": "band", "collection_id": "e1_certification_registry_v1",
+            "evidence_source": _TRACK1, "confidence_band": _SCREENING_CANON,
+            "numerator": None, "denominator": None, "precision": 0.647,
+            "ci_low": None, "ci_high": None, "method": "E1 registry pre-registered measurement",
+            "sampling_frame": None, "ins_policy": None, "weighting": None,
+            "notes": "R-CANON figure (frozen contract, docs/specs SS1.6/SS4.1); "
+                     "D-10 canon caveat (known Targum-confusion class).",
         },
     ]
     return rows
@@ -1874,6 +1964,121 @@ def _insert_witness_units_real(cur: sqlite3.Cursor, unit_specs: List[Dict]) -> i
 _EXPECTED_TAFSIR_TARGUM_ROWS = 106
 _EXPECTED_WITH_ARABIC_ROWS = 108
 
+# H2: the FULL frozen release-input contract (docs/specs/discovery-sidecar-
+# schema-v1.md SS4.1/SS4.2/SS4.3, C-1). Enforced ONLY when finalize_build is
+# called with release=True -- a missing/short collection must never
+# silently ingest as empty and produce a tier-A-only sidecar that still
+# passes every OTHER gate. Non-release calls (unit tests, --allow-partial-
+# sources smoke builds) are exempt by design.
+_EXPECTED_E1_RA_CONFIRMED_ROWS = 1570
+_EXPECTED_E1_ADJUDICATED_A_ROWS = 174
+_EXPECTED_E1_RB_SCREENING_ROWS = 7498
+_EXPECTED_E1_R3_FRAME_ROWS = 9996
+_EXPECTED_Q2_WITNESS_COLLECTION_ROWS = 4367
+_EXPECTED_Q2_SHARED_TEXT_ROWS = 60156
+_EXPECTED_TIER_A_ROWS = 275894  # track1_matches WHERE shadowed_by IS NULL
+
+
+class ReleaseInputsIncompleteError(RuntimeError):
+    """Raised (H2) when `finalize_build(release=True, ...)` is missing any
+    frozen release input, or an input's row count drifts from the frozen
+    contract. A missing collection must never silently ingest as empty --
+    that would produce a tier-A-only sidecar that still passes every other
+    release gate. `--allow-partial-sources` (never combined with
+    `release=True`) is the ONLY sanctioned escape hatch, reserved for the
+    smoke/unit path."""
+
+
+def _count_tier_a_rows(conn: sqlite3.Connection) -> int:
+    (n,) = conn.execute(
+        "SELECT COUNT(*) FROM track1_matches WHERE shadowed_by IS NULL"
+    ).fetchone()
+    return n
+
+
+def _assert_release_inputs_complete(
+    *,
+    release: bool,
+    allow_partial_sources: bool,
+    e1_ra_confirmed: List[Dict],
+    e1_adjudicated_a: List[Dict],
+    e1_rb_screening: List[Dict],
+    e1_r3_frame: List[Dict],
+    q2_witness_collection: List[Dict],
+    q2_shared_text: List[Dict],
+    q2_collection_tafsir_targum: List[Dict],
+    q2_collection_with_arabic: List[Dict],
+    tier_a_row_count: Optional[int],
+) -> None:
+    """H2: in release mode, REQUIRE every frozen release input present at
+    its EXACT expected count -- abort (raise) on any absent/short/long
+    input, BEFORE any ingest of the (possibly-partial) collections into
+    claims/evidence. This is the PRIMARY fix (not the verifier's
+    release-contract check, which only re-checks build-written `meta`
+    counts against the ACTUAL row counts in the finished .db -- a
+    self-consistent-but-wrong check that a partial-but-internally-
+    consistent build would still pass)."""
+    if not release:
+        return
+    if allow_partial_sources:
+        raise ValueError(
+            "--allow-partial-sources cannot be combined with --release (H2) -- "
+            "a release build must never silently accept a partial source set"
+        )
+    checks = [
+        ("e1_ra_confirmed", len(e1_ra_confirmed), _EXPECTED_E1_RA_CONFIRMED_ROWS),
+        ("e1_adjudicated_a", len(e1_adjudicated_a), _EXPECTED_E1_ADJUDICATED_A_ROWS),
+        ("e1_rb_screening", len(e1_rb_screening), _EXPECTED_E1_RB_SCREENING_ROWS),
+        ("e1_r3_frame", len(e1_r3_frame), _EXPECTED_E1_R3_FRAME_ROWS),
+        ("q2_witness_collection", len(q2_witness_collection), _EXPECTED_Q2_WITNESS_COLLECTION_ROWS),
+        ("q2_shared_text", len(q2_shared_text), _EXPECTED_Q2_SHARED_TEXT_ROWS),
+        ("q2_collection_tafsir_targum", len(q2_collection_tafsir_targum), _EXPECTED_TAFSIR_TARGUM_ROWS),
+        ("q2_collection_with_arabic", len(q2_collection_with_arabic), _EXPECTED_WITH_ARABIC_ROWS),
+        (
+            "tier_a (track1_matches WHERE shadowed_by IS NULL)",
+            tier_a_row_count if tier_a_row_count is not None else 0,
+            _EXPECTED_TIER_A_ROWS,
+        ),
+    ]
+    problems = [
+        f"{name}: expected {expected}, got {actual}"
+        for name, actual, expected in checks
+        if actual != expected
+    ]
+    if problems:
+        raise ReleaseInputsIncompleteError(
+            "release build (H2) requires every frozen input present at its EXACT "
+            "expected row count -- mismatches: " + "; ".join(problems)
+        )
+
+
+def _resolve_band_precision_spec(
+    *, precision_spec: Optional[List[Dict]], frozen_precision_defaults: bool, release: bool,
+) -> List[Dict]:
+    """H3: resolve the band_precision rows to write, BEFORE any further
+    build work begins. An explicit `precision_spec` (owner-supplied at
+    134-07) always wins; otherwise an explicit `frozen_precision_defaults`
+    acknowledgement uses the documented frozen-contract defaults (tier_a
+    precision NULL -- never the SYNTHETIC-mode-only 0.90 placeholder). A
+    `release=True` build with NEITHER supplied is refused outright -- a
+    real/release payload must never silently fabricate a number. A
+    non-release call (unit tests, `--allow-partial-sources` smoke builds)
+    defaults to the SAME frozen-contract rows when neither is supplied.
+    Extracted as its own function so H3's raise path is directly
+    unit-testable without needing to satisfy the (unrelated) H2 input-
+    completeness gate."""
+    if precision_spec is not None:
+        return precision_spec
+    if frozen_precision_defaults:
+        return _frozen_real_band_precision_rows()
+    if release:
+        raise ValueError(
+            "--release requires --precision-spec <json> or an explicit "
+            "--frozen-precision-defaults acknowledgement (H3) -- a real/release "
+            "build must never silently fabricate band_precision numbers"
+        )
+    return _frozen_real_band_precision_rows()
+
 
 def finalize_build(
     *,
@@ -1893,9 +2098,12 @@ def finalize_build(
     q2_collection_with_arabic_path=None,
     q2_shared_text_path=None,
     precision_spec=None,
+    frozen_precision_defaults: bool = False,
     masking_patterns=None,
     create_crosswalk_if_missing: bool = False,
     data_as_of: Optional[str] = None,
+    release: bool = False,
+    allow_partial_sources: bool = False,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
     (claims/evidence, NO physical-MS collapse) -> `build_witness_units` ->
@@ -1905,8 +2113,29 @@ def finalize_build(
     of the review artifact (surfaces only) -> file content_hash + manifest.
 
     Raises `CrosswalkAbortError` (via `assign_opaque_work_ids`) if the
-    crosswalk is required-but-absent, and `MaskingGateFailure` if the
-    BLOCKING scan finds any hit.
+    crosswalk is required-but-absent, `MaskingGateFailure` if the BLOCKING
+    scan finds any hit, `ReleaseInputsIncompleteError` (H2) if `release=True`
+    and any frozen input is absent/short/long, and `ValueError` (H3) if
+    `release=True` and neither `precision_spec` nor
+    `frozen_precision_defaults=True` was supplied.
+
+    `release` (H2/H3): when True, REQUIRES every frozen Q2/E1 input present
+    at its exact expected row count (see `_assert_release_inputs_complete`)
+    AND an explicit precision-spec choice (see below) -- never combined with
+    `allow_partial_sources`. `allow_partial_sources` is the ONLY sanctioned
+    way to ingest a partial/subset source set, reserved for the smoke/unit
+    path (never `release=True`).
+
+    `precision_spec`/`frozen_precision_defaults` (H3): a real/release build
+    NEVER fabricates a `tier_a` precision number. If `precision_spec` (an
+    explicit list of band_precision row dicts, owner-supplied at 134-07) is
+    given, it is used verbatim. Otherwise, if `frozen_precision_defaults=True`
+    is explicitly acknowledged, `_frozen_real_band_precision_rows()` (the
+    documented frozen-contract defaults, tier_a precision NULL) is used. A
+    `release=True` build with NEITHER supplied raises -- a real/release
+    payload must never silently default. A non-release call (unit tests,
+    `--allow-partial-sources` smoke builds) defaults to
+    `_frozen_real_band_precision_rows()` when neither is supplied.
     """
     out_path = Path(out_db_path)
     if out_path.exists():
@@ -1959,6 +2188,30 @@ def finalize_build(
                 f"(expected {_EXPECTED_WITH_ARABIC_ROWS}, got {len(q2_collection_with_arabic)})"
             )
 
+        # H2: in release mode, REQUIRE every frozen input present at its
+        # EXACT expected count BEFORE any ingest -- a missing collection
+        # must never silently ingest as empty and produce a tier-A-only
+        # sidecar that still passes every other gate.
+        tier_a_row_count = _count_tier_a_rows(conn_research) if release else None
+        _assert_release_inputs_complete(
+            release=release,
+            allow_partial_sources=allow_partial_sources,
+            e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
+            e1_rb_screening=e1_rb_screening, e1_r3_frame=e1_r3_frame,
+            q2_witness_collection=q2_witness_collection, q2_shared_text=q2_shared_text,
+            q2_collection_tafsir_targum=q2_collection_tafsir_targum,
+            q2_collection_with_arabic=q2_collection_with_arabic,
+            tier_a_row_count=tier_a_row_count,
+        )
+
+        # H3: resolve the band_precision spec BEFORE any further work -- a
+        # real/release build must NEVER fabricate a tier_a number.
+        bp_rows = _resolve_band_precision_spec(
+            precision_spec=precision_spec,
+            frozen_precision_defaults=frozen_precision_defaults,
+            release=release,
+        )
+
         result = build_claims_and_evidence(
             conn=conn_research, works=works, page_index=page_index,
             e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
@@ -1990,7 +2243,9 @@ def finalize_build(
         _insert_claims_and_evidence_real(cur, result["claim_rows"], result["evidence_rows"])
         n_units = _insert_witness_units_real(cur, unit_specs)
 
-        bp_rows = precision_spec if precision_spec is not None else _band_precision_rows()
+        # bp_rows was already resolved above (H3), BEFORE any research-DB
+        # work began -- reused here unchanged, now that the output schema
+        # exists to insert it into.
         cur.executemany(
             """
             INSERT INTO band_precision (
@@ -2224,6 +2479,25 @@ def build_parser() -> argparse.ArgumentParser:
     real_group.add_argument("--review-artifact", metavar="PATH", default=None,
                         help="Output CANDIDATE review-artifact CSV path "
                              "(default: discovery_data/discovery-review-candidates.csv)")
+    real_group.add_argument("--release", action="store_true",
+                        help="H2/H3: real RELEASE build -- REQUIRES every frozen Q2/E1 "
+                             "input present at its exact expected row count, and an "
+                             "explicit --precision-spec or --frozen-precision-defaults "
+                             "choice. Mutually exclusive with --allow-partial-sources.")
+    real_group.add_argument("--allow-partial-sources", action="store_true",
+                        help="H2: explicitly allow ingesting a partial/subset set of "
+                             "Q2/E1 collections -- ONLY for the smoke/unit path, NEVER "
+                             "combined with --release.")
+    real_group.add_argument("--precision-spec", metavar="PATH", default=None,
+                        help="H3: JSON file with an explicit list of band_precision row "
+                             "dicts (owner-supplied at 134-07) -- overrides the frozen "
+                             "real-mode defaults.")
+    real_group.add_argument("--frozen-precision-defaults", action="store_true",
+                        help="H3: explicitly acknowledge using the frozen-contract "
+                             "band_precision defaults (docs/specs/discovery-sidecar-"
+                             "schema-v1.md SS1.6, tier_a=NULL) instead of a custom "
+                             "--precision-spec. Required (together with --precision-spec "
+                             "being one-or-the-other) for --release.")
     return parser
 
 
@@ -2242,6 +2516,26 @@ def main(argv=None) -> int:
     # Real-mode distillation (134-04).
     if not args.from_approved or not args.crosswalk:
         parser.error("--from-approved and --crosswalk are required for real-mode distillation")
+
+    # H2: there is NO silent default -- the operator must explicitly choose
+    # between a strict --release build or an --allow-partial-sources
+    # smoke/unit build. Never both.
+    if args.release and args.allow_partial_sources:
+        parser.error("--release and --allow-partial-sources are mutually exclusive (H2)")
+    if not args.release and not args.allow_partial_sources:
+        parser.error(
+            "real-mode distillation requires an explicit --release or "
+            "--allow-partial-sources choice (H2) -- no default is silently permitted"
+        )
+    # H3: a --release build must explicitly choose a precision source.
+    if args.release and not args.precision_spec and not args.frozen_precision_defaults:
+        parser.error(
+            "--release requires --precision-spec <json> or --frozen-precision-defaults (H3)"
+        )
+
+    precision_spec = None
+    if args.precision_spec:
+        precision_spec = json.loads(Path(args.precision_spec).read_text(encoding="utf-8"))
 
     out_db_path = args.out or str(Path(_REPO_ROOT) / "discovery_data" / "discovery-v1.db")
     review_artifact_path = args.review_artifact or str(
@@ -2266,6 +2560,10 @@ def main(argv=None) -> int:
         q2_collection_tafsir_targum_path=collection_paths["q2_collection_tafsir_targum"],
         q2_collection_with_arabic_path=collection_paths["q2_collection_with_arabic"],
         q2_shared_text_path=collection_paths["q2_shared_text"],
+        precision_spec=precision_spec,
+        frozen_precision_defaults=args.frozen_precision_defaults,
+        release=args.release,
+        allow_partial_sources=args.allow_partial_sources,
     )
     print(f"real build OK: {stats['row_counts']}")
     print(f"content_hash={stats['content_hash']}")
