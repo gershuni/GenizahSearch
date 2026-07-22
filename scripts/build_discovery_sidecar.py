@@ -7,32 +7,48 @@ Implements the FROZEN two-table claim model from
 `create_schema()` DDL (works, discovery_claim, discovery_evidence,
 witness_units, witness_unit_members, meta, band_precision) plus a synthetic
 fixture-generation mode (`synthetic_discovery_dataset` / `--golden PATH` /
-`--smoke N`). This plan (134-03) ships ONLY the DDL + synthetic mode; the
-real-mode distillation (consuming the gitignored research DB) is deferred to
-134-04 -- calling this script with a bare `db_path` raises `NotImplementedError`.
+`--smoke N`) from 134-03, PLUS (134-04) the REAL offline distillation --
+shown-work selection + opaque work_id minting (`select_shown_works` /
+`assign_opaque_work_ids`), the masked CANDIDATE review artifact + the NEW
+fail-closed `--from-approved` reader (`emit_review_artifact` /
+`load_approved_works`), the unified witness family across the
+evidence_source axis (`build_claims_and_evidence`: track1_direct 4-disjoint-
+source banding + propagated corroborated/weak) + the shared_text family +
+the family-router collections, `build_witness_units` (DATA-10), and
+`finalize_build` -- the full real-mode orchestration behind the BLOCKING
+masking gate (`--from-approved`/`--crosswalk`/`--source-db`).
 
-Masking note: every identifier/title/span value fabricated here is
-SYNTHETIC -- never derived from real research data (mirrors
-`scripts/build_atlas_asset.py`'s `synthetic_dataset`/`golden_dataset`
-convention). `source_corpus` values are the masked codes {sefaria, ja,
-msource} only; work_ids are minted via `scripts.discovery_ids.mint_work_id`
-(a plain zero-padded counter, never a raw M:/J:/REF token).
+Masking note (synthetic path, 134-03): every identifier/title/span value
+fabricated in `synthetic_discovery_dataset` is SYNTHETIC -- never derived
+from real research data (mirrors `scripts/build_atlas_asset.py`'s
+`synthetic_dataset`/`golden_dataset` convention). `source_corpus` values are
+the masked codes {sefaria, ja, msource} only; work_ids are minted via
+`scripts.discovery_ids.mint_work_id` (a plain zero-padded counter, never a
+raw M:/J:/REF token). The REAL distillation path (134-04) mints opaque
+work_ids the SAME way (never echoing a raw research work_id) and runs the
+BLOCKING `check_atlas_masking.scan_sqlite` gate over the finalized `.db`
+before it is ever considered buildable output (aborts + deletes on any hit).
 
 Usage:
     python scripts/build_discovery_sidecar.py --golden tests/fixtures/discovery/discovery-v1-fixture.db
     python scripts/build_discovery_sidecar.py --smoke 10
-    python scripts/build_discovery_sidecar.py <db_path>   # NotImplementedError until 134-04
+    python scripts/build_discovery_sidecar.py <source_db_path> --from-approved <APPROVED.csv> \\
+        --crosswalk <crosswalk.json> [--init-crosswalk] [--research-data-dir <DIR>] \\
+        [--libraries-csv libraries.csv] [--fjms-db fist_data/fjms_enrichment.db] \\
+        [--out discovery_data/discovery-v1.db] [--review-artifact discovery_data/candidates.csv]
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Iterable, List, Optional, Tuple
 
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(_SCRIPTS_DIR)
@@ -41,9 +57,15 @@ for _p in (_REPO_ROOT, _SCRIPTS_DIR):
         sys.path.insert(0, _p)
 
 import discovery_ids as ids  # scripts/discovery_ids.py -- FROZEN id/enum/routing primitives
+import check_atlas_masking as _cam  # scripts/check_atlas_masking.py -- DATA-05 masking gate
 
 SCHEMA_VERSION = "discovery-v1"
 SIDECAR_VERSION = "discovery-v1-synthetic-fixture"
+
+# Real-mode (134-04) distillation's own sidecar_version -- kept DISTINCT from the
+# synthetic-fixture constant above so the two build paths can never be confused by
+# a reader inspecting discovery_claim.sidecar_version.
+REAL_SIDECAR_VERSION = "discovery-v1-real"
 
 # Frozen constant timestamps (F13/determinism) -- NEVER wall-clock, so a
 # rebuild in any environment reproduces byte-identical output.
@@ -803,7 +825,1143 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
 
 
 # ---------------------------------------------------------------------------
-# 6. CLI
+# 6. REAL-MODE DISTILLATION (Phase 134, plan 134-04)
+#
+# Consumes the gitignored research DB (`fullcorpus_v2.db`) + the Q2/E1
+# collections + `libraries.csv` + `fjms_enrichment.db` to build the masked
+# `discovery.db`. Deliberately INDEPENDENT of `populate_synthetic` above (a
+# small amount of INSERT-statement duplication is accepted here) so the
+# pinned 134-03 golden fixture can never drift as a side effect of a change
+# made in this section.
+# ---------------------------------------------------------------------------
+
+class CrosswalkAbortError(RuntimeError):
+    """Raised when a raw->opaque work_id crosswalk is REQUIRED but absent.
+
+    DC2: an absent crosswalk must never be silently treated as "first build" --
+    that would re-mint fresh opaque ids for works that may already have shipped
+    under a prior opaque id, breaking id stability across rebuilds. Callers
+    that really mean "this is the very first build" must say so explicitly via
+    `assign_opaque_work_ids(..., create_if_missing=True)` (CLI: --init-crosswalk).
+    """
+
+
+class MaskingGateFailure(RuntimeError):
+    """Raised when the BLOCKING masking scan (DC13) finds ANY hit in the
+    finalized `.db`. `finalize_build` deletes the offending file before
+    raising -- a half-finalized leaking artifact must never linger on disk."""
+
+
+# ---------------------------------------------------------------------------
+# 6.1 Shown-work selection (D-05/D-06) + cat/genre masking policy (Landmine 2)
+# ---------------------------------------------------------------------------
+
+# Raw research `cat` values that are the ALREADY-OPEN reference corpora
+# (auto-adopt, D-05) -- NEVER the masked corpus's own raw name (Landmine 2):
+# any `cat` value that is not one of these, and not the JA corpus, is treated
+# as the SINGLE masked M-source bucket by construction (an else-branch), so
+# this module never needs to name that corpus at all.
+_OPEN_CORPUS_CATS_SEFARIA = frozenset({
+    "Sefaria", "Bible", "Bavli", "Mishnah", "Tosefta", "Yerushalmi", "Targum", "Liturgy",
+})
+_OPEN_CORPUS_CAT_JA = "JA"
+
+
+def _map_cat_to_source_corpus(cat: Optional[str]) -> Optional[str]:
+    """Map a raw research `cat` value to a masked `source_corpus` code.
+
+    `cat` in the open-corpus set -> 'sefaria'; `cat == 'JA'` -> 'ja'; any
+    OTHER non-empty `cat` -> 'msource' (the masked bucket, reached purely by
+    elimination -- the corpus's own raw name is never compared against or
+    written here, Landmine 2). Empty/None `cat` -> None (excluded, unmapped).
+    """
+    if not cat:
+        return None
+    if cat == _OPEN_CORPUS_CAT_JA:
+        return ids.SOURCE_CORPUS_JA
+    if cat in _OPEN_CORPUS_CATS_SEFARIA:
+        return ids.SOURCE_CORPUS_SEFARIA
+    return ids.SOURCE_CORPUS_MSOURCE
+
+
+# D-06 exclude-by-genre curation policy over the masked bucket's OWN `genre`
+# column values (RESEARCH.md "Genre signal", verified against the research
+# corpus): keeps the Geonic / Talmud&Midrash / Karaite / rabbinic /
+# belles-lettres / science / philology / Arabic-translation classes as
+# literary CANDIDATES (owner is the final gate, D-06 -- this only produces
+# the pre-owner-review candidate set); drops piyyut / documentary /
+# modern-other / unrecognized classes. These are standard Hebrew
+# bibliographic genre-taxonomy labels (not a corpus name or siglum).
+_GENRE_CLASS_LITERARY_KEEP = frozenset({
+    "ספרות הגאונים",                     # Geonic literature
+    "תלמוד ומדרש",                        # Talmud and Midrash
+    "ספרות הקראים",                      # Karaite literature
+    "ספרות רבנית",                        # rabbinic literature
+    "ספרות יפה",                          # belles-lettres
+    "ספרות מדע",                          # science literature
+    "בלשנות׃ מסורה, דקדוק ומילונות",       # philology (masorah/grammar/lexicography)
+    "ספרות התרגומים מערבית",              # translations from Arabic
+})
+
+
+def _is_literary_genre(genre: Optional[str]) -> bool:
+    """True iff `genre` is in the D-06 literary-keep class; False (fail-closed
+    conservative default) for piyyut/documentary/modern-other/unknown/empty."""
+    return bool(genre) and genre in _GENRE_CLASS_LITERARY_KEEP
+
+
+def select_shown_works(conn: sqlite3.Connection) -> List[Dict]:
+    """Curation POLICY producing shown-work CANDIDATES (D-05/D-06) -- NOT the
+    final shipped set (the owner is the final gate via the review artifact,
+    134-07). Auto-adopts ALL open-corpus (Sefaria/JA, incl the canonical
+    strata cat values) works; selects the M-source large-literary subset via
+    the exclude-by-genre policy. Reads ONE representative row per raw
+    work_id (first by page_id, for determinism) from `track1_matches WHERE
+    shadowed_by IS NULL` (Landmine 9) -- the OQ2-frozen shown-work source
+    (reference-catalogue identification, never unsupervised clustering).
+
+    Returns a list of dicts: {raw_work_id, cat, genre, author, title,
+    source_corpus} -- sorted by raw_work_id for deterministic downstream
+    opaque-id assignment ordering.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT work_id, cat, genre, author, title, page_id "
+        "FROM track1_matches WHERE shadowed_by IS NULL "
+        "ORDER BY work_id, page_id"
+    )
+    seen: Dict[str, Dict] = {}
+    for work_id, cat, genre, author, title, _page_id in cur.fetchall():
+        if work_id in seen:
+            continue
+        seen[work_id] = {
+            "raw_work_id": work_id, "cat": cat, "genre": genre,
+            "author": author, "title": title,
+        }
+
+    candidates = []
+    for raw_work_id in sorted(seen):
+        info = seen[raw_work_id]
+        source_corpus = _map_cat_to_source_corpus(info["cat"])
+        if source_corpus is None:
+            continue
+        if source_corpus == ids.SOURCE_CORPUS_MSOURCE and not _is_literary_genre(info["genre"]):
+            continue
+        candidates.append({**info, "source_corpus": source_corpus})
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# 6.2 Opaque work_id minting (crosswalk-anchored, F16/DC2)
+# ---------------------------------------------------------------------------
+
+def assign_opaque_work_ids(
+    candidates: List[Dict], crosswalk_path, *, create_if_missing: bool = False
+) -> List[Dict]:
+    """Mint stable opaque work_ids 1:1 per raw research work_id, anchored on a
+    PERSISTED raw->opaque crosswalk file (gitignored, dev-box) so the SAME raw
+    work keeps the SAME opaque id across rebuilds (F16). Mutates + returns
+    `candidates` with a `work_id` key added; persists the updated crosswalk
+    back to `crosswalk_path`.
+
+    If the crosswalk file is absent and `create_if_missing` is False (the
+    default), raises `CrosswalkAbortError` -- an absent crosswalk NEVER
+    silently re-mints (DC2).
+    """
+    crosswalk_file = Path(crosswalk_path)
+    if crosswalk_file.exists():
+        crosswalk: Dict[str, str] = json.loads(crosswalk_file.read_text(encoding="utf-8"))
+    elif create_if_missing:
+        crosswalk = {}
+    else:
+        raise CrosswalkAbortError(
+            f"crosswalk file not found: {crosswalk_path} -- refusing to mint fresh opaque "
+            "work_ids without an explicit create_if_missing=True / --init-crosswalk "
+            "(DC2: an absent-but-required crosswalk aborts, never silently re-mints)"
+        )
+
+    counter = 0
+    for opaque in crosswalk.values():
+        if isinstance(opaque, str) and opaque.startswith("w") and opaque[1:].isdigit():
+            counter = max(counter, int(opaque[1:]))
+
+    for c in candidates:
+        raw_id = c["raw_work_id"]
+        if raw_id in crosswalk:
+            c["work_id"] = crosswalk[raw_id]
+        else:
+            counter += 1
+            opaque = ids.mint_work_id(counter)
+            crosswalk[raw_id] = opaque
+            c["work_id"] = opaque
+
+    crosswalk_file.parent.mkdir(parents=True, exist_ok=True)
+    crosswalk_file.write_text(
+        json.dumps(crosswalk, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# 6.3 Source-masked CANDIDATE review artifact + NEW --from-approved reader (F5)
+# ---------------------------------------------------------------------------
+
+CANDIDATE_HEADER = [
+    "work_id", "candidate_neutral_title", "author", "genre",
+    "source_corpus", "review_status", "review_notes",
+]
+APPROVED_HEADER = [
+    "work_id", "neutral_title", "author", "genre", "source_corpus", "review_status",
+]
+
+
+def _validate_csv_header(actual_fieldnames, expected_header, csv_kind: str) -> None:
+    if list(actual_fieldnames or []) != list(expected_header):
+        raise ValueError(
+            f"{csv_kind} CSV header mismatch: expected {expected_header}, got {actual_fieldnames}"
+        )
+
+
+def emit_review_artifact(candidates: List[Dict], out_csv_path) -> List[Dict]:
+    """Write the source-MASKED CANDIDATE review CSV (D-08). The FROZEN exact
+    header is `CANDIDATE_HEADER`; `source_corpus` is the masked code only (no
+    M-source/R-source name or siglum in any cell). Open-corpus (sefaria/ja)
+    rows auto-fill `candidate_neutral_title` + `review_status='approved'`
+    (D-08's "light spot-check", never a full review); the M-source literary
+    subset is left with an EMPTY `candidate_neutral_title` + `review_status`
+    for the owner to fill in during full manual review.
+
+    Modeled (EMISSION-shape only, F5) on
+    `scripts/export_translation_audit_sample.py`'s `write_csv`/AUDIT_COLUMNS
+    convention (utf-8-sig, trailing review_status/review_notes columns).
+    """
+    rows = []
+    for c in candidates:
+        is_open = c["source_corpus"] in (ids.SOURCE_CORPUS_SEFARIA, ids.SOURCE_CORPUS_JA)
+        rows.append({
+            "work_id": c["work_id"],
+            "candidate_neutral_title": (c.get("title") or "") if is_open else "",
+            "author": c.get("author") or "",
+            "genre": c.get("genre") or "",
+            "source_corpus": c["source_corpus"],
+            "review_status": "approved" if is_open else "",
+            "review_notes": "auto-adopted (open corpus, light spot-check)" if is_open else "",
+        })
+    out_path = Path(out_csv_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CANDIDATE_HEADER)
+        writer.writeheader()
+        writer.writerows(rows)
+    return rows
+
+
+def load_approved_works(approved_csv_path, *, valid_work_ids: Optional[Iterable[str]] = None) -> List[Dict]:
+    """NEW fail-closed `--from-approved` reader (F5 -- genuinely new behavior;
+    no existing approved-round-trip reader analog). Reads ONLY rows meeting
+    ALL rejection-rule gates:
+      - `review_status == 'approved'`
+      - a non-empty `neutral_title`
+      - `work_id` present AND (if `valid_work_ids` given) crosswalk-known
+      - a valid `source_corpus` masked code
+
+    Anything else is EXCLUDED -- never a research-title fallback (D-07).
+    Enforces the FROZEN exact `APPROVED_HEADER`.
+    """
+    valid_ids = set(valid_work_ids) if valid_work_ids is not None else None
+    approved = []
+    with open(approved_csv_path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        _validate_csv_header(reader.fieldnames, APPROVED_HEADER, "APPROVED")
+        for row in reader:
+            if (row.get("review_status") or "").strip() != "approved":
+                continue
+            neutral_title = (row.get("neutral_title") or "").strip()
+            if not neutral_title:
+                continue
+            work_id = (row.get("work_id") or "").strip()
+            if not work_id:
+                continue
+            if valid_ids is not None and work_id not in valid_ids:
+                continue
+            source_corpus = row.get("source_corpus")
+            try:
+                ids.validate_source_corpus_code(source_corpus)
+            except ValueError:
+                continue
+            approved.append({
+                "work_id": work_id,
+                "neutral_title": neutral_title,
+                "author": (row.get("author") or None),
+                "genre": (row.get("genre") or None),
+                "source_corpus": source_corpus,
+            })
+    return approved
+
+
+# ---------------------------------------------------------------------------
+# 6.4 Per-page OUR-side text lookup (text_layer + snapshot_hash, OQ3)
+# ---------------------------------------------------------------------------
+
+class PageTextIndex:
+    """Lazy, cached (text_layer, snapshot_hash) lookup over the research DB's
+    `pages` table. NEVER exposes/copies the raw `text` value into the sidecar
+    -- only its per-page sha256 digest + `provenance` (-> `text_layer`), per
+    OQ3. Duck-typed: any object exposing `.get(page_id) -> (text_layer,
+    snapshot_hash)` can stand in for this (tests use tiny in-memory doubles).
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self._cache: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+
+    def get(self, page_id: str) -> Tuple[Optional[str], Optional[str]]:
+        if page_id in self._cache:
+            return self._cache[page_id]
+        row = self._conn.execute(
+            "SELECT provenance, text FROM pages WHERE page_id = ?", (page_id,)
+        ).fetchone()
+        if row is None:
+            result: Tuple[Optional[str], Optional[str]] = (None, None)
+        else:
+            provenance, text = row
+            snapshot_hash = hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+            result = (provenance, snapshot_hash)
+        self._cache[page_id] = result
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 6.5 Span-selection helpers (R7 tier_a largest-span; R4 propagated seed_spans)
+# ---------------------------------------------------------------------------
+
+def _largest_track1_span(spans_json_str: str) -> Tuple[int, int]:
+    """Parse `track1_matches.spans_json` (a JSON list of `[start, end,
+    density]` TRIPLES) and return `(start, end)` of the largest span by
+    `end - start`, tie-broken `start` ASC then `end` ASC (R7). The density
+    element `[2]` is NEVER used for selection -- `track1_matches` has no
+    `alen`/`offsets` columns."""
+    spans = json.loads(spans_json_str)
+    best_key = None
+    best_span = (0, 0)
+    for s in spans:
+        start, end = s[0], s[1]
+        key = (-(end - start), start, end)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_span = (start, end)
+    return best_span
+
+
+def _largest_occurrence_span(seeds: List[Dict]) -> Tuple[int, int, Optional[str]]:
+    """Return `(occ0, occ1, occ_class)` of the largest DISTINCT candidate-side
+    occurrence among `seeds[]`, tie-broken `(occ1-occ0)` DESC, `occ0` ASC,
+    `occ1` ASC (the frozen R4 primary-span tie-break)."""
+    best_key = None
+    best = (0, 0, None)
+    for s in seeds:
+        occ0, occ1 = s["occ0"], s["occ1"]
+        key = (-(occ1 - occ0), occ0, occ1)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (occ0, occ1, s.get("occ_class"))
+    return best
+
+
+def _distinct_seed_spans(seeds: List[Dict]) -> List[Dict]:
+    """Collapse raw seed records to DISTINCT `(occ0, occ1)` occurrences (R4),
+    each carrying `occ_class` + the sorted distinct `seed_page_ids`/
+    `seed_sys_ids` that contributed to it. Up to 14 distinct occurrences per
+    row (raw seeds up to 32 collapse by `(occ0, occ1)`)."""
+    by_occ: Dict[Tuple[int, int], Dict] = {}
+    for s in seeds:
+        key = (s["occ0"], s["occ1"])
+        entry = by_occ.setdefault(key, {
+            "occ0": s["occ0"], "occ1": s["occ1"], "occ_class": s.get("occ_class"),
+            "seed_page_ids": set(), "seed_sys_ids": set(),
+        })
+        if s.get("seed_page") is not None:
+            entry["seed_page_ids"].add(s["seed_page"])
+        if s.get("seed_sys") is not None:
+            entry["seed_sys_ids"].add(s["seed_sys"])
+    spans = []
+    for (occ0, occ1) in sorted(by_occ):
+        entry = by_occ[(occ0, occ1)]
+        spans.append({
+            "occ0": entry["occ0"], "occ1": entry["occ1"], "occ_class": entry["occ_class"],
+            "seed_page_ids": sorted(entry["seed_page_ids"]),
+            "seed_sys_ids": sorted(entry["seed_sys_ids"]),
+        })
+    return spans
+
+
+def _seed_ms_ids(seeds: List[Dict]) -> List[str]:
+    """Distinct OUR-side seed page_ids/sys_ids (both), sorted."""
+    ids_set = set()
+    for s in seeds:
+        if s.get("seed_page") is not None:
+            ids_set.add(s["seed_page"])
+        if s.get("seed_sys") is not None:
+            ids_set.add(s["seed_sys"])
+    return sorted(ids_set)
+
+
+def _selected_other_page_for_occurrence(seeds: List[Dict], occ0: int, occ1: int) -> Optional[str]:
+    """The `seed_page` of the seed(s) contributing the SELECTED occurrence
+    `(occ0, occ1)`; when multiple seeds contribute the SAME occurrence, pick
+    the lexicographically-MIN `seed_page` (deterministic, family-router rows)."""
+    candidates = sorted(
+        s["seed_page"] for s in seeds
+        if s.get("occ0") == occ0 and s.get("occ1") == occ1 and s.get("seed_page") is not None
+    )
+    return candidates[0] if candidates else None
+
+
+# ---------------------------------------------------------------------------
+# 6.6 Per-source ingestion (C-4 band map; §4 of the frozen schema doc)
+# ---------------------------------------------------------------------------
+
+def _ingest_e1_rows(
+    rows: Iterable[Dict], *, work_index: Dict[str, Dict], page_index,
+    confidence_band: str, adjudication_status: str, audit_status: str,
+) -> List[Dict]:
+    """Ingest ONE of the four DISJOINT E1 track1_direct source populations
+    (e1_ra_confirmed / e1_adjudicated_a / e1_rb_screening / e1_r3_frame) --
+    all four share the same row shape (page_id, sys_id, work_id, o0, o1, ml,
+    dens, n_spans); band assignment is BY-SOURCE (the caller fixes
+    `confidence_band`), no within-track1_direct fall-through (F1)."""
+    out = []
+    for row in rows:
+        work = work_index.get(row["work_id"])
+        if work is None:
+            continue
+        text_layer, snapshot_hash = page_index.get(row["page_id"])
+        out.append(_mk_evidence(
+            page_id=row["page_id"], work_id=work["work_id"], sys_id=row["sys_id"],
+            evidence_kind=_WITNESS, evidence_source=_TRACK1, confidence_band=confidence_band,
+            adjudication_status=adjudication_status, audit_status=audit_status,
+            routing_status=_SHIPPED, routing_reason=_NONE_REASON,
+            span_start=row["o0"], span_end=row["o1"],
+            matched_letters=row.get("ml"), density=row.get("dens"), n_spans=row.get("n_spans"),
+            text_layer=text_layer, snapshot_hash=snapshot_hash,
+        ))
+    return out
+
+
+def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_index) -> List[Dict]:
+    """Ingest `track1_matches WHERE shadowed_by IS NULL` (Landmine 9) -> the
+    `tier_a` band; offsets = the largest `spans_json` span (R7)."""
+    out = []
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json "
+        "FROM track1_matches WHERE shadowed_by IS NULL"
+    )
+    for page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json in cur:
+        work = work_index.get(work_id)
+        if work is None:
+            continue
+        start, end = _largest_track1_span(spans_json)
+        text_layer, snapshot_hash = page_index.get(page_id)
+        out.append(_mk_evidence(
+            page_id=page_id, work_id=work["work_id"], sys_id=sys_id,
+            evidence_kind=_WITNESS, evidence_source=_TRACK1, confidence_band=_TIER_A,
+            adjudication_status=_UNREVIEWED, audit_status=_NA,
+            routing_status=_SHIPPED, routing_reason=_NONE_REASON,
+            span_start=start, span_end=end,
+            matched_letters=matched_letters, density=best_density, n_spans=n_spans,
+            text_layer=text_layer, snapshot_hash=snapshot_hash,
+        ))
+    return out
+
+
+def _ingest_propagated_witness(
+    rows: Iterable[Dict], work_index: Dict[str, Dict], page_index
+) -> List[Dict]:
+    """Ingest `q2_witness_collection.jsonl` (keyed cpage/csys) -> corroborated
+    (via the LITERAL `ids.corroborated_predicate`) or weak; R4 multi-occurrence
+    seed_spans + seed_ms_ids; primary a-side span = the largest distinct
+    occurrence (tie-break per `_largest_occurrence_span`)."""
+    out = []
+    for row in rows:
+        work = work_index.get(row["work_id"])
+        if work is None:
+            continue
+        seeds = row.get("seeds") or []
+        span_start, span_end, occ_class = _largest_occurrence_span(seeds)
+        seed_spans = _distinct_seed_spans(seeds)
+        seed_ms_ids = _seed_ms_ids(seeds)
+        if ids.corroborated_predicate(row):
+            band = _CORROBORATED
+            adjudication_status, audit_status = _UNREVIEWED, _AUDIT_PENDING
+        else:
+            band = _WEAK
+            adjudication_status, audit_status = _PROVISIONAL, _NA
+        text_layer, snapshot_hash = page_index.get(row["cpage"])
+        ge3_val = None
+        if "ge3" in row:
+            ge3_val = 1 if row.get("ge3") else 0
+        out.append(_mk_evidence(
+            page_id=row["cpage"], work_id=work["work_id"], sys_id=row["csys"],
+            evidence_kind=_WITNESS, evidence_source=_PROPAGATED, confidence_band=band,
+            adjudication_status=adjudication_status, audit_status=audit_status,
+            routing_status=_SHIPPED, routing_reason=_NONE_REASON,
+            span_start=span_start, span_end=span_end, occ_class=occ_class,
+            is_new=1 if row.get("is_new") else 0,
+            trials=row.get("trials"), runner_up=row.get("runner_up"),
+            community=row.get("community"), ge3=ge3_val, rung=row.get("rung"),
+            seed_spans=seed_spans, seed_ms_ids=seed_ms_ids,
+            text_layer=text_layer, snapshot_hash=snapshot_hash,
+        ))
+    return out
+
+
+def _ingest_family_router(
+    rows: Iterable[Dict], work_index: Dict[str, Dict], page_index, *, router_bucket: str
+) -> List[Dict]:
+    """Ingest a NON-witness family-router collection (tafsir_targum /
+    with_arabic, R3 -- `corroborated_predicate` is NEVER run on these) as
+    `evidence_kind=shared_text` / `confidence_band=not_evaluated` /
+    `routing_status=review_only` / `routing_reason=co_citation` (F9), with
+    the FULL shared_text two-side shape (G2): a-side = the largest seed
+    occurrence into `cpage`; `other_page_id` = the seed_page of the seed(s)
+    contributing that SAME occurrence (lex-min tie-break); b-side offsets
+    LEFT NULL (the router collections carry no b-side span)."""
+    out = []
+    for row in rows:
+        work = work_index.get(row["work_id"])
+        if work is None:
+            continue
+        seeds = row.get("seeds") or []
+        span_start, span_end, _occ_class = _largest_occurrence_span(seeds)
+        other_page_id = _selected_other_page_for_occurrence(seeds, span_start, span_end)
+        text_layer, snapshot_hash = page_index.get(row["cpage"])
+        text_layer_b, snapshot_hash_b = (
+            page_index.get(other_page_id) if other_page_id else (None, None)
+        )
+        out.append(_mk_evidence(
+            page_id=row["cpage"], work_id=work["work_id"], sys_id=row["csys"],
+            evidence_kind=_SHARED_TEXT, evidence_source=_PROPAGATED, confidence_band=_NOT_EVALUATED,
+            adjudication_status=_UNREVIEWED, audit_status=_NA,
+            routing_status=_REVIEW_ONLY, routing_reason=_CO_CITATION,
+            span_start=span_start, span_end=span_end, router_bucket=router_bucket,
+            is_new=1 if row.get("is_new") else 0,
+            text_layer=text_layer, snapshot_hash=snapshot_hash,
+            other_page_id=other_page_id, text_layer_b=text_layer_b, snapshot_hash_b=snapshot_hash_b,
+        ))
+    return out
+
+
+def _ingest_shared_text(
+    rows: Iterable[Dict], work_index: Dict[str, Dict], page_index
+) -> List[Dict]:
+    """Ingest `q2_shared_text.jsonl` (keyed cpage/csys) -> `evidence_kind=
+    shared_text` / `evidence_source=propagated` / `confidence_band=
+    not_evaluated`, ACTUAL attributes only (tier/aligned_len/occ_class/
+    n_seed_ms/cross_language/is_new -- never flank_class/ge3/cluster_size/
+    router_bucket/rung, C-4); a-side occ0/occ1 into cpage; b-side
+    `other_page_id=seed_page` (page id ONLY -- b_start/b_end stay NULL)."""
+    out = []
+    for row in rows:
+        work = work_index.get(row["work_id"])
+        if work is None:
+            continue
+        text_layer, snapshot_hash = page_index.get(row["cpage"])
+        other_page_id = row.get("seed_page")
+        text_layer_b, snapshot_hash_b = (
+            page_index.get(other_page_id) if other_page_id else (None, None)
+        )
+        out.append(_mk_evidence(
+            page_id=row["cpage"], work_id=work["work_id"], sys_id=row["csys"],
+            evidence_kind=_SHARED_TEXT, evidence_source=_PROPAGATED, confidence_band=_NOT_EVALUATED,
+            adjudication_status=_UNREVIEWED, audit_status=_NA,
+            routing_status=_SHIPPED, routing_reason=_NONE_REASON,
+            span_start=row["occ0"], span_end=row["occ1"],
+            tier=row.get("tier"), aligned_len=row.get("aligned_len"), occ_class=row.get("occ_class"),
+            n_seed_ms=row.get("n_seed_ms"), cross_language=1 if row.get("cross_language") else 0,
+            is_new=1 if row.get("is_new") else 0,
+            text_layer=text_layer, snapshot_hash=snapshot_hash,
+            other_page_id=other_page_id, text_layer_b=text_layer_b, snapshot_hash_b=snapshot_hash_b,
+        ))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 6.7 Claim/evidence assembly (independent of populate_synthetic, fixture-safety)
+# ---------------------------------------------------------------------------
+
+def assemble_claims_and_evidence(
+    evidence_specs: List[Dict], work_source_corpus: Dict[str, str],
+    *, sidecar_version: str = REAL_SIDECAR_VERSION,
+) -> Dict:
+    """Group a flat evidence-spec list (the `_mk_evidence` shape) into
+    `discovery_claim` + `discovery_evidence` rows: resolves `claim_type`
+    (largest-span-dominates across ALL witness evidence sharing a `page_id`,
+    regardless of which work it belongs to) and the `display_evidence_id`
+    (the frozen TOTAL selector). Claims key on the REAL `(page_id, work_id)`
+    -- NO physical-MS collapse (R5).
+
+    Independent of `populate_synthetic`'s inline synthetic-fixture assembly
+    loop by design (a small amount of duplication is accepted) so the pinned
+    134-03 golden fixture can never drift as a side effect of a change made
+    here.
+    """
+    spans_by_page: Dict[str, List[int]] = {}
+    for e in evidence_specs:
+        if e["evidence_kind"] == _WITNESS:
+            spans_by_page.setdefault(e["page_id"], []).append(e["span_end"] - e["span_start"])
+    for e in evidence_specs:
+        if e["evidence_kind"] == _WITNESS:
+            this_len = e["span_end"] - e["span_start"]
+            e["_row_claim_type"] = ids.claim_type_for_work_witness(spans_by_page[e["page_id"]], this_len)
+
+    claims: Dict[tuple, List[Dict]] = {}
+    for e in evidence_specs:
+        claims.setdefault((e["page_id"], e["work_id"]), []).append(e)
+
+    claim_id_by_key = {(p, w): ids.claim_id(p, w) for (p, w) in claims}
+
+    claim_type_by_key = {}
+    for (page_id, work_id), rows in claims.items():
+        resolver_input = [
+            {"evidence_kind": r["evidence_kind"], "claim_type": r.get("_row_claim_type")}
+            for r in rows
+        ]
+        claim_type_by_key[(page_id, work_id)] = ids.resolve_claim_type(resolver_input)
+
+    evidence_rows = []
+    evidence_rows_by_claim: Dict[str, List[Dict]] = {}
+    for (page_id, work_id), rows in claims.items():
+        claim_id = claim_id_by_key[(page_id, work_id)]
+        for e in rows:
+            evidence_id = ids.evidence_id(
+                work_id=e["work_id"], a_page_id=e["page_id"], sys_id=e["sys_id"],
+                evidence_kind=e["evidence_kind"], evidence_source=e["evidence_source"],
+                confidence_band=e["confidence_band"], span_start=e["span_start"],
+                span_end=e["span_end"], other_page_id=e.get("other_page_id"),
+                seed_spans=e.get("seed_spans"),
+            )
+            e["_evidence_id"] = evidence_id
+            evidence_rows_by_claim.setdefault(claim_id, []).append(e)
+            evidence_rows.append((
+                evidence_id, claim_id, e["evidence_kind"], e["evidence_source"], e["confidence_band"],
+                e["adjudication_status"], e["audit_status"], e["routing_status"], e["routing_reason"],
+                int(e["is_new"]), e["page_id"], e["sys_id"],
+                e.get("tier"), e.get("aligned_len"), e.get("occ_class"), e.get("cross_language"),
+                e.get("n_seed_ms"), e.get("trials"), e.get("runner_up"), e.get("community"),
+                e.get("ge3"), e.get("rung"), e.get("router_bucket"), e.get("matched_letters"),
+                e.get("density"), e.get("n_spans"),
+                e["span_start"], e["span_end"], e.get("text_layer"), e.get("snapshot_hash"),
+                json.dumps(e["seed_spans"]) if e.get("seed_spans") else None,
+                json.dumps(e["seed_ms_ids"]) if e.get("seed_ms_ids") else None,
+                e.get("other_page_id"), e.get("b_start"), e.get("b_end"),
+                e.get("text_layer_b"), e.get("snapshot_hash_b"),
+                e.get("rule_version"), e.get("community_id"),
+            ))
+
+    display_choices: Dict[str, str] = {}
+    for claim_id, rows in evidence_rows_by_claim.items():
+        selector_rows = [
+            {"evidence_id": e["_evidence_id"], "evidence_source": e["evidence_source"],
+             "confidence_band": e["confidence_band"], "adjudication_status": e["adjudication_status"]}
+            for e in rows
+        ]
+        display_choices[claim_id] = ids.select_display_evidence(selector_rows)
+
+    claim_rows = []
+    for (page_id, work_id), claim_id in claim_id_by_key.items():
+        claim_rows.append((
+            page_id, work_id, claim_id, claim_type_by_key[(page_id, work_id)],
+            display_choices[claim_id], work_source_corpus[work_id], sidecar_version,
+        ))
+
+    return {
+        "claim_rows": claim_rows,
+        "evidence_rows": evidence_rows,
+        "display_choices": display_choices,
+    }
+
+
+def build_claims_and_evidence(
+    *, conn: Optional[sqlite3.Connection], works: List[Dict], page_index,
+    e1_ra_confirmed: Iterable[Dict] = (), e1_adjudicated_a: Iterable[Dict] = (),
+    e1_rb_screening: Iterable[Dict] = (), e1_r3_frame: Iterable[Dict] = (),
+    q2_witness_collection: Iterable[Dict] = (), q2_collection_tafsir_targum: Iterable[Dict] = (),
+    q2_collection_with_arabic: Iterable[Dict] = (), q2_shared_text: Iterable[Dict] = (),
+    sidecar_version: str = REAL_SIDECAR_VERSION,
+) -> Dict:
+    """Assemble the UNIFIED witness family (track1_direct 4-disjoint-source
+    banding + propagated corroborated/weak) + the shared_text family + the
+    family-router collections into claim/evidence rows. `works` = the
+    SHOWN-work set (list of dicts carrying `raw_work_id`/`work_id`/
+    `source_corpus`) -- any row whose raw work_id is not in this set is
+    EXCLUDED (no claim can exist without a `works` FK anchor, §10).
+
+    `conn` (the research DB connection) is used ONLY for the `tier_a` read
+    (`track1_matches WHERE shadowed_by IS NULL`); pass None to skip it (unit
+    tests that only exercise the E1/Q2 JSONL-shaped sources).
+    """
+    work_index = {w["raw_work_id"]: w for w in works}
+    work_source_corpus = {w["work_id"]: w["source_corpus"] for w in works}
+
+    evidence_specs: List[Dict] = []
+    evidence_specs += _ingest_e1_rows(
+        e1_ra_confirmed, work_index=work_index, page_index=page_index,
+        confidence_band=_EXPERT_VERIFIED, adjudication_status=_UNREVIEWED, audit_status=_AUDIT_PENDING,
+    )
+    evidence_specs += _ingest_e1_rows(
+        e1_adjudicated_a, work_index=work_index, page_index=page_index,
+        confidence_band=_EXPERT_VERIFIED, adjudication_status=_HUMAN_CONFIRMED, audit_status=_AUDIT_PENDING,
+    )
+    evidence_specs += _ingest_e1_rows(
+        e1_rb_screening, work_index=work_index, page_index=page_index,
+        confidence_band=_SCREENING_RB, adjudication_status=_PROVISIONAL, audit_status=_NA,
+    )
+    evidence_specs += _ingest_e1_rows(
+        e1_r3_frame, work_index=work_index, page_index=page_index,
+        confidence_band=_SCREENING_CANON, adjudication_status=_PROVISIONAL, audit_status=_NA,
+    )
+    if conn is not None:
+        evidence_specs += _ingest_tier_a(conn, work_index, page_index)
+    evidence_specs += _ingest_propagated_witness(q2_witness_collection, work_index, page_index)
+    evidence_specs += _ingest_family_router(
+        q2_collection_tafsir_targum, work_index, page_index, router_bucket="tafsir_targum"
+    )
+    evidence_specs += _ingest_family_router(
+        q2_collection_with_arabic, work_index, page_index, router_bucket="with_arabic"
+    )
+    evidence_specs += _ingest_shared_text(q2_shared_text, work_index, page_index)
+
+    return assemble_claims_and_evidence(evidence_specs, work_source_corpus, sidecar_version=sidecar_version)
+
+
+# ---------------------------------------------------------------------------
+# 6.8 Witness units (DATA-10) -- Oxford codicological parts + physical joins
+# ---------------------------------------------------------------------------
+
+_MERGEABLE_JOIN_TYPES = frozenset({
+    "Physical Join", "Codex join", "Partial Physical Join", "Unspecified join",
+})
+
+
+def build_witness_units(
+    oxford_parts: Iterable[Tuple[str, str]], physical_joins: Iterable[Tuple[str, int, Optional[str]]]
+) -> List[Dict]:
+    """Merge sys_ids into witness units via (a) catalogued Oxford
+    codicological parts (`libraries.csv` `(sys_id, oxford_part_id)` pairs,
+    non-empty part id only) then (b) physical joins (`(sys_id,
+    join_group_id, join_type)` triples) where `join_type` in
+    `_MERGEABLE_JOIN_TYPES` -- NEVER `'Scribe join'`, and NEVER on
+    NULL/ambiguous `join_type` (conservative, DATA-10). Each sys_id lands in
+    AT MOST ONE unit: Oxford-part groups are formed FIRST; any sys_id already
+    assigned is excluded from a subsequent physical-join group. Returns unit
+    specs `[{"members": [...], "merge_basis": ...}, ...]` (>=2 members each).
+    """
+    assigned: set = set()
+    unit_specs: List[Dict] = []
+
+    by_part: Dict[str, set] = {}
+    for sys_id, part_id in oxford_parts:
+        if not part_id:
+            continue
+        by_part.setdefault(part_id, set()).add(sys_id)
+    for part_id in sorted(by_part):
+        members = sorted(by_part[part_id])
+        if len(members) < 2:
+            continue
+        unit_specs.append({"members": members, "merge_basis": ids.MERGE_BASIS_OXFORD_PART})
+        assigned.update(members)
+
+    by_group: Dict[int, set] = {}
+    for sys_id, join_group_id, join_type in physical_joins:
+        if join_type not in _MERGEABLE_JOIN_TYPES:
+            continue
+        if sys_id in assigned:
+            continue
+        by_group.setdefault(join_group_id, set()).add(sys_id)
+    for group_id in sorted(by_group):
+        members = sorted(m for m in by_group[group_id] if m not in assigned)
+        if len(members) < 2:
+            continue
+        unit_specs.append({"members": members, "merge_basis": ids.MERGE_BASIS_PHYSICAL_JOIN})
+        assigned.update(members)
+
+    return unit_specs
+
+
+def _load_oxford_parts(libraries_csv_path) -> List[Tuple[str, str]]:
+    """Read `(system_number, oxford_part_id)` pairs from `libraries.csv`
+    (col 0 = sys_id, col 1 = oxford_part_id per CLAUDE.md); non-empty
+    part id only."""
+    pairs = []
+    with open(libraries_csv_path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f)
+        next(reader, None)  # header
+        for row in reader:
+            if len(row) < 2:
+                continue
+            sys_id, part_id = row[0], row[1]
+            if part_id and part_id.strip():
+                pairs.append((sys_id, part_id.strip()))
+    return pairs
+
+
+def _load_physical_joins(fjms_db_path) -> List[Tuple[str, int, Optional[str]]]:
+    """Read `(AlmaId, JoinGroupId, JoinType)` from `fjms_enrichment.db`'s
+    `joins` table (AlmaId == sys_id)."""
+    conn = sqlite3.connect(f"file:{Path(fjms_db_path).resolve().as_posix()}?mode=ro", uri=True)
+    try:
+        cur = conn.execute("SELECT AlmaId, JoinGroupId, JoinType FROM joins")
+        return [(alma_id, join_group_id, join_type) for alma_id, join_group_id, join_type in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 6.9 Misc real-mode helpers
+# ---------------------------------------------------------------------------
+
+def load_jsonl(path) -> List[Dict]:
+    """Read a newline-delimited JSON collection into a list of dicts."""
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    return rows
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _compute_htr_snapshot_hash(conn: sqlite3.Connection) -> str:
+    """ONE corpus-level "did the underlying HTR corpus change" signal (OQ3) --
+    a cheap deterministic digest over the page count + total char count (the
+    cheapest sufficient granularity per OQ3; per-page drift is separately
+    covered by each evidence row's own `snapshot_hash`/`snapshot_hash_b`)."""
+    (n_pages, total_chars) = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(n_chars), 0) FROM pages"
+    ).fetchone()
+    key = f"htr_snapshot_v1|{n_pages}|{total_chars}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _connect_research_ro(db_path) -> sqlite3.Connection:
+    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    return sqlite3.connect(uri, uri=True)
+
+
+def _insert_works_real(cur: sqlite3.Cursor, works: List[Dict]) -> None:
+    rows = [
+        (w["work_id"], ids.canonical_work_id(w["work_id"]), w["neutral_title"],
+         w.get("author"), w.get("genre"), w["source_corpus"])
+        for w in works
+    ]
+    cur.executemany(
+        "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, source_corpus) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+
+
+def _insert_claims_and_evidence_real(cur: sqlite3.Cursor, claim_rows, evidence_rows) -> None:
+    cur.executemany(
+        "INSERT INTO discovery_claim "
+        "(page_id, work_id, claim_id, claim_type, display_evidence_id, source_corpus, sidecar_version) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        claim_rows,
+    )
+    cur.executemany(
+        """
+        INSERT INTO discovery_evidence (
+            evidence_id, claim_id, evidence_kind, evidence_source, confidence_band,
+            adjudication_status, audit_status, routing_status, routing_reason,
+            is_new, a_page_id, sys_id,
+            tier, aligned_len, occ_class, cross_language, n_seed_ms, trials, runner_up,
+            community, ge3, rung, router_bucket, matched_letters, density, n_spans,
+            span_start, span_end, text_layer, snapshot_hash,
+            seed_spans, seed_ms_ids,
+            other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
+            rule_version, community_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        evidence_rows,
+    )
+
+
+def _insert_witness_units_real(cur: sqlite3.Cursor, unit_specs: List[Dict]) -> int:
+    unit_rows = []
+    member_rows = []
+    for spec in unit_specs:
+        unit_id = ids.unit_id(spec["members"])
+        unit_rows.append((unit_id,))
+        for sys_id in spec["members"]:
+            member_rows.append((unit_id, sys_id, spec["merge_basis"]))
+    cur.executemany("INSERT INTO witness_units (unit_id) VALUES (?)", unit_rows)
+    cur.executemany(
+        "INSERT INTO witness_unit_members (unit_id, sys_id, merge_basis) VALUES (?, ?, ?)",
+        member_rows,
+    )
+    return len(unit_rows)
+
+
+# ---------------------------------------------------------------------------
+# 6.10 finalize_build -- the full real-mode orchestration (DATA-05/08, F13)
+# ---------------------------------------------------------------------------
+
+# Frozen real-data contract facts (verified against the research corpus this
+# rework, docs/specs C-4/§4.2) -- a hard integrity assertion ONLY when the
+# collection is actually loaded from its real file path (never fired against
+# a test's small synthetic slice, since tests never pass these *_path args).
+_EXPECTED_TAFSIR_TARGUM_ROWS = 106
+_EXPECTED_WITH_ARABIC_ROWS = 108
+
+
+def finalize_build(
+    *,
+    source_db_path,
+    from_approved_path,
+    crosswalk_path,
+    out_db_path,
+    review_artifact_path=None,
+    libraries_csv_path=None,
+    fjms_db_path=None,
+    e1_ra_confirmed_path=None,
+    e1_adjudicated_a_path=None,
+    e1_rb_screening_path=None,
+    e1_r3_frame_path=None,
+    q2_witness_collection_path=None,
+    q2_collection_tafsir_targum_path=None,
+    q2_collection_with_arabic_path=None,
+    q2_shared_text_path=None,
+    precision_spec=None,
+    masking_patterns=None,
+    create_crosswalk_if_missing: bool = False,
+    data_as_of: Optional[str] = None,
+) -> Dict:
+    """Orchestrate the REAL distillation end to end (F13 order): distill
+    (claims/evidence, NO physical-MS collapse) -> `build_witness_units` ->
+    populate `band_precision` -> write `meta` (incl `frame_content_hash`) ->
+    `PRAGMA integrity_check` -> commit -> BLOCKING masking scan (aborts +
+    deletes the `.db` on ANY hit, DC13) -> non-blocking registered-token scan
+    of the review artifact (surfaces only) -> file content_hash + manifest.
+
+    Raises `CrosswalkAbortError` (via `assign_opaque_work_ids`) if the
+    crosswalk is required-but-absent, and `MaskingGateFailure` if the
+    BLOCKING scan finds any hit.
+    """
+    out_path = Path(out_db_path)
+    if out_path.exists():
+        out_path.unlink()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn_research = _connect_research_ro(source_db_path)
+    try:
+        candidates = select_shown_works(conn_research)
+        candidates = assign_opaque_work_ids(
+            candidates, crosswalk_path, create_if_missing=create_crosswalk_if_missing
+        )
+        if review_artifact_path:
+            emit_review_artifact(candidates, review_artifact_path)
+
+        crosswalk = json.loads(Path(crosswalk_path).read_text(encoding="utf-8"))
+        valid_work_ids = set(crosswalk.values())
+
+        approved = load_approved_works(from_approved_path, valid_work_ids=valid_work_ids)
+        raw_by_opaque = {c["work_id"]: c["raw_work_id"] for c in candidates}
+        works = []
+        for a in approved:
+            raw_work_id = raw_by_opaque.get(a["work_id"])
+            if raw_work_id is None:
+                continue
+            works.append({**a, "raw_work_id": raw_work_id})
+
+        page_index = PageTextIndex(conn_research)
+
+        def _load(path):
+            return load_jsonl(path) if path else []
+
+        e1_ra_confirmed = _load(e1_ra_confirmed_path)
+        e1_adjudicated_a = _load(e1_adjudicated_a_path)
+        e1_rb_screening = _load(e1_rb_screening_path)
+        e1_r3_frame = _load(e1_r3_frame_path)
+        q2_witness_collection = _load(q2_witness_collection_path)
+        q2_collection_tafsir_targum = _load(q2_collection_tafsir_targum_path)
+        q2_collection_with_arabic = _load(q2_collection_with_arabic_path)
+        q2_shared_text = _load(q2_shared_text_path)
+
+        if q2_collection_tafsir_targum_path and len(q2_collection_tafsir_targum) != _EXPECTED_TAFSIR_TARGUM_ROWS:
+            raise ValueError(
+                "q2_collection_tafsir_targum row count drifted from the frozen contract "
+                f"(expected {_EXPECTED_TAFSIR_TARGUM_ROWS}, got {len(q2_collection_tafsir_targum)})"
+            )
+        if q2_collection_with_arabic_path and len(q2_collection_with_arabic) != _EXPECTED_WITH_ARABIC_ROWS:
+            raise ValueError(
+                "q2_collection_with_arabic row count drifted from the frozen contract "
+                f"(expected {_EXPECTED_WITH_ARABIC_ROWS}, got {len(q2_collection_with_arabic)})"
+            )
+
+        result = build_claims_and_evidence(
+            conn=conn_research, works=works, page_index=page_index,
+            e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
+            e1_rb_screening=e1_rb_screening, e1_r3_frame=e1_r3_frame,
+            q2_witness_collection=q2_witness_collection,
+            q2_collection_tafsir_targum=q2_collection_tafsir_targum,
+            q2_collection_with_arabic=q2_collection_with_arabic,
+            q2_shared_text=q2_shared_text,
+            sidecar_version=REAL_SIDECAR_VERSION,
+        )
+
+        oxford_parts = _load_oxford_parts(libraries_csv_path) if libraries_csv_path else []
+        physical_joins = _load_physical_joins(fjms_db_path) if fjms_db_path else []
+        unit_specs = build_witness_units(oxford_parts, physical_joins)
+
+        source_db_sha256 = _hash_file(Path(source_db_path))
+        crosswalk_sha256 = _hash_file(Path(crosswalk_path))
+        htr_snapshot_hash = _compute_htr_snapshot_hash(conn_research)
+    finally:
+        conn_research.close()
+
+    out_conn = sqlite3.connect(str(out_path))
+    out_conn.execute("PRAGMA foreign_keys = ON")
+    cur = None
+    try:
+        create_schema(out_conn)
+        cur = out_conn.cursor()
+        _insert_works_real(cur, works)
+        _insert_claims_and_evidence_real(cur, result["claim_rows"], result["evidence_rows"])
+        n_units = _insert_witness_units_real(cur, unit_specs)
+
+        bp_rows = precision_spec if precision_spec is not None else _band_precision_rows()
+        cur.executemany(
+            """
+            INSERT INTO band_precision (
+                scope, collection_id, evidence_source, confidence_band, numerator, denominator,
+                precision, ci_low, ci_high, method, sampling_frame, ins_policy, weighting, notes
+            ) VALUES (:scope, :collection_id, :evidence_source, :confidence_band, :numerator,
+                       :denominator, :precision, :ci_low, :ci_high, :method, :sampling_frame,
+                       :ins_policy, :weighting, :notes)
+            """,
+            bp_rows,
+        )
+
+        (n_works,) = cur.execute("SELECT COUNT(*) FROM works").fetchone()
+        (n_claims,) = cur.execute("SELECT COUNT(*) FROM discovery_claim").fetchone()
+        (n_evidence,) = cur.execute("SELECT COUNT(*) FROM discovery_evidence").fetchone()
+
+        # F13: band_precision is ALREADY committed by the time frame_content_hash
+        # / meta / the file-level content_hash are computed below.
+        frame_content_hash = compute_frame_content_hash(out_conn)
+
+        build_date = _now_iso()
+        meta_rows = [
+            ("schema_version", SCHEMA_VERSION),
+            ("sidecar_version", REAL_SIDECAR_VERSION),
+            ("source_db_sha256", source_db_sha256),
+            ("crosswalk_sha256", crosswalk_sha256),
+            ("build_date", build_date),
+            ("data_as_of", data_as_of or build_date[:10]),
+            ("htr_snapshot_hash", htr_snapshot_hash),
+            ("expected_rows_claims", str(n_claims)),
+            ("expected_rows_evidence", str(n_evidence)),
+            ("expected_rows_works", str(n_works)),
+            ("expected_rows_units", str(n_units)),
+            ("frame_content_hash", frame_content_hash),
+        ]
+        cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
+
+        (integrity_result,) = out_conn.execute("PRAGMA integrity_check").fetchone()
+        if integrity_result != "ok":
+            raise RuntimeError(f"PRAGMA integrity_check failed: {integrity_result}")
+
+        out_conn.commit()
+    finally:
+        # Windows sqlite3 gotcha: a live Cursor object with an un-finalized
+        # statement can keep the underlying OS file handle open even after
+        # Connection.close() -- explicitly close the cursor FIRST so the
+        # BLOCKING masking-gate scan (and any caller-side unlink-on-abort)
+        # below never races a stale handle on the just-written .db file.
+        if cur is not None:
+            cur.close()
+        out_conn.close()
+
+    # BLOCKING masking gate (DC13) -- runs over the FINALIZED, already-committed
+    # .db; ANY hit deletes the file and aborts (never a half-finalized leak).
+    patterns = masking_patterns if masking_patterns is not None else _cam.load_patterns()
+    _cam._require_patterns(patterns)
+    issues = _cam.scan_sqlite(str(out_path), patterns)
+    if issues:
+        try:
+            out_path.unlink()
+        except OSError:
+            pass
+        raise MaskingGateFailure(
+            f"blocking masking scan found {len(issues)} issue(s) -- finalization ABORTED "
+            f"(DC13); {out_path} removed"
+        )
+
+    # Non-blocking registered-token scan of the gitignored review artifact --
+    # surfaces (returned in stats) but NEVER blocks finalization (DC13).
+    artifact_issue_count = 0
+    if review_artifact_path and os.path.exists(review_artifact_path):
+        try:
+            artifact_issue_count = len(_cam.scan_asset(review_artifact_path, patterns))
+        except _cam.ScanError:
+            artifact_issue_count = 0
+
+    content_hash = _hash_file(out_path)
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "asset_basename": out_path.stem,
+        "content_hash": content_hash,
+        "frame_content_hash": frame_content_hash,
+    }
+    manifest_path = out_path.parent / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    return {
+        "row_counts": {
+            "works": n_works, "discovery_claim": n_claims,
+            "discovery_evidence": n_evidence, "witness_units": n_units,
+        },
+        "frame_content_hash": frame_content_hash,
+        "content_hash": content_hash,
+        "band_precision_rows": len(bp_rows),
+        "artifact_masking_issues": artifact_issue_count,
+        "manifest_path": str(manifest_path),
+        "db_path": str(out_path),
+    }
+
+
+_DEFAULT_COLLECTION_FILENAMES = {
+    "e1_ra_confirmed": "e1_ra_confirmed.jsonl",
+    "e1_adjudicated_a": "e1_adjudicated_a.jsonl",
+    "e1_rb_screening": "e1_rb_screening.jsonl",
+    "e1_r3_frame": "e1_r3_frame.jsonl",
+    "q2_witness_collection": "q2_witness_collection.jsonl",
+    "q2_collection_tafsir_targum": "q2_collection_tafsir_targum.jsonl",
+    "q2_collection_with_arabic": "q2_collection_with_arabic.jsonl",
+    "q2_shared_text": "q2_shared_text.jsonl",
+}
+
+
+def _resolve_collection_paths(research_data_dir) -> Dict[str, Optional[str]]:
+    paths: Dict[str, Optional[str]] = {}
+    for key, filename in _DEFAULT_COLLECTION_FILENAMES.items():
+        if not research_data_dir:
+            paths[key] = None
+            continue
+        candidate = Path(research_data_dir) / filename
+        paths[key] = str(candidate) if candidate.exists() else None
+    return paths
+
+
+# ---------------------------------------------------------------------------
+# 7. CLI
 # ---------------------------------------------------------------------------
 
 def _hash_file(path: Path) -> str:
@@ -872,8 +2030,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("db_path", nargs="?", default=None,
-                        help="Path to the research DB for real-mode distillation "
-                             "(NotImplementedError until 134-04)")
+                        help="Path to the gitignored research DB (fullcorpus_v2.db) for "
+                             "real-mode distillation (134-04; requires --from-approved + --crosswalk)")
     parser.add_argument("--golden", metavar="PATH", default=None,
                         help="Write the deterministic committed fixture to PATH "
                              "(+ manifest.json + PATH-expected.json alongside)")
@@ -881,6 +2039,26 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Build the synthetic dataset in-memory and print stats "
                              "(N accepted for CLI-shape parity with build_atlas_asset.py; "
                              "the curated synthetic dataset is fixed/comprehensive, not scaled by N)")
+    real_group = parser.add_argument_group("real-mode distillation (134-04)")
+    real_group.add_argument("--from-approved", metavar="PATH", default=None,
+                        help="Owner-APPROVED neutral-title CSV (APPROVED_HEADER) -- required")
+    real_group.add_argument("--crosswalk", metavar="PATH", default=None,
+                        help="Persisted raw->opaque work_id crosswalk JSON -- required")
+    real_group.add_argument("--init-crosswalk", action="store_true",
+                        help="Allow creating a NEW crosswalk file if --crosswalk doesn't exist yet "
+                             "(first-ever build only; otherwise an absent crosswalk aborts, DC2)")
+    real_group.add_argument("--research-data-dir", metavar="DIR", default=None,
+                        help="Directory containing the Q2/E1 *.jsonl collections "
+                             "(filenames resolved via _DEFAULT_COLLECTION_FILENAMES)")
+    real_group.add_argument("--libraries-csv", metavar="PATH", default=None,
+                        help="libraries.csv path (DATA-10 Oxford codicological parts)")
+    real_group.add_argument("--fjms-db", metavar="PATH", default=None,
+                        help="fjms_enrichment.db path (DATA-10 physical joins)")
+    real_group.add_argument("--out", metavar="PATH", default=None,
+                        help="Output discovery.db path (default: discovery_data/discovery-v1.db)")
+    real_group.add_argument("--review-artifact", metavar="PATH", default=None,
+                        help="Output CANDIDATE review-artifact CSV path "
+                             "(default: discovery_data/discovery-review-candidates.csv)")
     return parser
 
 
@@ -896,11 +2074,39 @@ def main(argv=None) -> int:
     if args.smoke is not None:
         return _run_smoke(args.smoke)
 
-    raise NotImplementedError(
-        "real-mode distillation (consuming the gitignored research DB) is "
-        "deferred to Phase 134 plan 134-04; this plan (134-03) ships only the "
-        "DDL + synthetic/--golden fixture mode."
+    # Real-mode distillation (134-04).
+    if not args.from_approved or not args.crosswalk:
+        parser.error("--from-approved and --crosswalk are required for real-mode distillation")
+
+    out_db_path = args.out or str(Path(_REPO_ROOT) / "discovery_data" / "discovery-v1.db")
+    review_artifact_path = args.review_artifact or str(
+        Path(_REPO_ROOT) / "discovery_data" / "discovery-review-candidates.csv"
     )
+    collection_paths = _resolve_collection_paths(args.research_data_dir)
+
+    stats = finalize_build(
+        source_db_path=args.db_path,
+        from_approved_path=args.from_approved,
+        crosswalk_path=args.crosswalk,
+        out_db_path=out_db_path,
+        review_artifact_path=review_artifact_path,
+        libraries_csv_path=args.libraries_csv,
+        fjms_db_path=args.fjms_db,
+        create_crosswalk_if_missing=args.init_crosswalk,
+        e1_ra_confirmed_path=collection_paths["e1_ra_confirmed"],
+        e1_adjudicated_a_path=collection_paths["e1_adjudicated_a"],
+        e1_rb_screening_path=collection_paths["e1_rb_screening"],
+        e1_r3_frame_path=collection_paths["e1_r3_frame"],
+        q2_witness_collection_path=collection_paths["q2_witness_collection"],
+        q2_collection_tafsir_targum_path=collection_paths["q2_collection_tafsir_targum"],
+        q2_collection_with_arabic_path=collection_paths["q2_collection_with_arabic"],
+        q2_shared_text_path=collection_paths["q2_shared_text"],
+    )
+    print(f"real build OK: {stats['row_counts']}")
+    print(f"content_hash={stats['content_hash']}")
+    print(f"frame_content_hash={stats['frame_content_hash']}")
+    print(f"db_path={stats['db_path']}")
+    return 0
 
 
 if __name__ == "__main__":
