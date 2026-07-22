@@ -23,6 +23,15 @@ WEB_PUZZLE_ENABLED = _env_enabled("WEB_PUZZLE_ENABLED", True)
 # baked-asset readiness state, so a flag-ON/asset-missing window still hides.
 ATLAS_PREVIEW_ENABLED = _env_enabled("ATLAS_PREVIEW_ENABLED", False)
 
+# Phase 134 (DATA-07) — Discovery Data Spine. Default OFF: the flag gates the
+# not-yet-released discovery surfaces (no UI ships in Phase 134 itself; this
+# flag is plumbing for Phase 135+). Enable with DISCOVERY_ENABLED=1.
+# NOTE: this flag is necessary but NOT sufficient — the single authoritative
+# predicate web/discovery_assets.py::discovery_available() ANDs it with the
+# discovery.db sidecar's startup-loaded readiness state, so a flag-ON/sidecar-
+# missing (or incompatible/corrupt) window still hides cleanly.
+DISCOVERY_ENABLED = _env_enabled("DISCOVERY_ENABLED", False)
+
 
 def web_fgp_enabled() -> bool:
     """Whether FGP transcriptions surface in the WEB version chooser.
