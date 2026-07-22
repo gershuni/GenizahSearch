@@ -27,7 +27,7 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional, Tuple
 
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(_SCRIPTS_DIR)
@@ -64,6 +64,17 @@ VALID_EVIDENCE_COMBOS = frozenset(
 # must NEVER carry this value (G8).
 _COLLECTION_PRECISION_VALUE = 0.926
 _PRECISION_TOLERANCE = 1e-6
+_COLLECTION_ID = "propagated_witness_collection_v1"
+
+# M4: the THREE measured track1_direct band precisions (docs/specs SS1.6/
+# SS4.1) -- these are the ONLY (evidence_source, confidence_band) pairs
+# permitted to carry a non-NULL precision in a real/release build; tier_a
+# and every propagated band must stay NULL (H3/G8).
+_EXPECTED_MEASURED_BAND_PRECISIONS = {
+    (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_EXPERT_VERIFIED): 0.889,
+    (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_RB): 0.859,
+    (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_CANON): 0.647,
+}
 
 _RELEASE_CONTRACT_COUNTS = [
     ("expected_rows_claims", "discovery_claim"),
@@ -288,11 +299,12 @@ def check_release_contract_counts(conn: sqlite3.Connection):
 # 7. band_precision scope discrimination (G8)
 # ---------------------------------------------------------------------------
 
-def check_band_precision(conn: sqlite3.Connection) -> List[str]:
+def check_band_precision(conn: sqlite3.Connection, meta: dict) -> List[str]:
     violations = []
     cur = conn.cursor()
     cur.execute(
-        "SELECT scope, evidence_source, confidence_band, precision, ci_low, ci_high FROM band_precision"
+        "SELECT scope, collection_id, evidence_source, confidence_band, numerator, "
+        "denominator, precision, ci_low, ci_high, method FROM band_precision"
     )
     rows = cur.fetchall()
     collection_rows = [r for r in rows if r[0] == "collection"]
@@ -306,14 +318,14 @@ def check_band_precision(conn: sqlite3.Connection) -> List[str]:
             f"band_precision: {len(collection_rows)} scope='collection' rows found, expected exactly 1 (G8)"
         )
     else:
-        precision = collection_rows[0][3]
+        precision = collection_rows[0][6]
         if precision is None or abs(precision - _COLLECTION_PRECISION_VALUE) > _PRECISION_TOLERANCE:
             violations.append(
                 f"band_precision: scope='collection' precision {precision} != frozen "
                 f"{_COLLECTION_PRECISION_VALUE} (G8)"
             )
 
-    for scope, source, band, precision, ci_low, ci_high in rows:
+    for scope, _collection_id, source, band, _numerator, _denominator, precision, ci_low, ci_high, _method in rows:
         if scope != "band":
             continue
         if precision is not None and abs(precision - _COLLECTION_PRECISION_VALUE) <= _PRECISION_TOLERANCE:
@@ -329,6 +341,92 @@ def check_band_precision(conn: sqlite3.Connection) -> List[str]:
                     f"band_precision: propagated scope='band' row ({band}) carries non-null "
                     f"precision/CI (G8) -- no valid band-specific measurement exists"
                 )
+
+    # M4: STRICT release-mode-only validation, gated so it never applies to
+    # the pinned 134-03 synthetic golden fixture (which keeps its looser,
+    # expected.json-driven checks above). Detected via the build's own
+    # sidecar_version meta flag (REAL_SIDECAR_VERSION) rather than the mere
+    # presence of collection_id (present in BOTH modes).
+    if meta.get("sidecar_version") == sidecar_build.REAL_SIDECAR_VERSION:
+        violations += _check_band_precision_release_strict(rows)
+    return violations
+
+
+def _check_band_precision_release_strict(rows) -> List[str]:
+    """M4: strict release-mode-only band_precision validation -- exactly
+    one scope='collection' row (id=`_COLLECTION_ID`, precision~=0.926,
+    non-null numerator/denominator/ci/method); BOTH propagated bands
+    (corroborated, weak) present with NULL precision/ci; the THREE measured
+    track1_direct bands present at their frozen values; tier_a present with
+    NULL precision; and no OTHER band carries a non-null precision."""
+    violations: List[str] = []
+    collection_rows = []
+    by_band_key: Dict[Tuple[Optional[str], Optional[str]], Tuple] = {}
+    for scope, collection_id, source, band, numerator, denominator, precision, ci_low, ci_high, method in rows:
+        if scope == "collection":
+            collection_rows.append((collection_id, precision, numerator, denominator, ci_low, ci_high, method))
+        elif scope == "band":
+            by_band_key[(source, band)] = (precision, ci_low, ci_high, numerator, denominator)
+
+    matching = [r for r in collection_rows if r[0] == _COLLECTION_ID]
+    if len(matching) != 1:
+        violations.append(
+            f"release band_precision (M4): expected exactly 1 scope='collection' row with "
+            f"collection_id={_COLLECTION_ID!r}, found {len(matching)}"
+        )
+    else:
+        _cid, precision, numerator, denominator, ci_low, ci_high, method = matching[0]
+        if None in (numerator, denominator, ci_low, ci_high, method):
+            violations.append(
+                "release band_precision (M4): collection row missing numerator/denominator/ci/method"
+            )
+        if precision is None or abs(precision - _COLLECTION_PRECISION_VALUE) > _PRECISION_TOLERANCE:
+            violations.append(
+                f"release band_precision (M4): collection precision {precision} != "
+                f"{_COLLECTION_PRECISION_VALUE}"
+            )
+
+    for band in (ids.CONFIDENCE_BAND_CORROBORATED, ids.CONFIDENCE_BAND_WEAK):
+        key = (ids.EVIDENCE_SOURCE_PROPAGATED, band)
+        if key not in by_band_key:
+            violations.append(f"release band_precision (M4): missing propagated/{band} band row")
+            continue
+        precision, ci_low, ci_high, _numerator, _denominator = by_band_key[key]
+        if precision is not None or ci_low is not None or ci_high is not None:
+            violations.append(
+                f"release band_precision (M4): propagated/{band} carries non-null precision/CI"
+            )
+
+    for (source, band), expected_precision in _EXPECTED_MEASURED_BAND_PRECISIONS.items():
+        key = (source, band)
+        if key not in by_band_key:
+            violations.append(f"release band_precision (M4): missing measured band {key}")
+            continue
+        precision = by_band_key[key][0]
+        if precision is None or abs(precision - expected_precision) > _PRECISION_TOLERANCE:
+            violations.append(
+                f"release band_precision (M4): {key} precision {precision} != "
+                f"expected {expected_precision}"
+            )
+
+    tier_a_key = (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A)
+    if tier_a_key not in by_band_key:
+        violations.append("release band_precision (M4): missing tier_a band row")
+    else:
+        precision = by_band_key[tier_a_key][0]
+        if precision is not None:
+            violations.append(
+                f"release band_precision (M4): tier_a precision must be NULL, got {precision}"
+            )
+
+    allowed_nonnull_keys = set(_EXPECTED_MEASURED_BAND_PRECISIONS.keys())
+    for (source, band), (precision, *_rest) in by_band_key.items():
+        if precision is not None and (source, band) not in allowed_nonnull_keys:
+            violations.append(
+                f"release band_precision (M4): unexpected non-null precision on band "
+                f"({source}, {band})={precision}"
+            )
+
     return violations
 
 
@@ -372,7 +470,7 @@ def verify(db_path, expected_frame_hash=None) -> int:
         violations += check_integrity_and_fk(conn)
         count_violations, meta = check_release_contract_counts(conn)
         violations += count_violations
-        violations += check_band_precision(conn)
+        violations += check_band_precision(conn, meta)
         violations += check_frame_content_hash(conn, meta, expected_frame_hash)
     finally:
         conn.close()

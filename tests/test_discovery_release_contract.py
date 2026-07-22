@@ -20,6 +20,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+from scripts import build_discovery_sidecar as sidecar_build
 from scripts import verify_discovery_sidecar as verify_mod
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "discovery"
@@ -310,3 +311,112 @@ def test_release_contract_row_count_mismatch_fails(tmp_path):
     conn.commit()
     conn.close()
     assert verify_mod.verify(str(db_path), EXPECTED_FRAME_HASH) != 0
+
+
+# ---------------------------------------------------------------------------
+# M4: strict release-mode-only band_precision validation -- gated so it
+# NEVER fires against the synthetic fixture (sidecar_version stays
+# "discovery-v1-synthetic-fixture"), only against a REAL_SIDECAR_VERSION db.
+# ---------------------------------------------------------------------------
+
+def _make_band_precision_only_db(tmp_path, band_precision_rows, *, sidecar_version):
+    """A minimal db carrying ONLY a `meta.sidecar_version` + `band_precision`
+    rows -- enough to exercise `check_band_precision` in isolation without
+    needing a full claims/evidence/works graph."""
+    db_path = tmp_path / "band-precision-only.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        sidecar_build.create_schema(conn)
+        conn.executemany(
+            """
+            INSERT INTO band_precision (
+                scope, collection_id, evidence_source, confidence_band, numerator, denominator,
+                precision, ci_low, ci_high, method, sampling_frame, ins_policy, weighting, notes
+            ) VALUES (:scope, :collection_id, :evidence_source, :confidence_band, :numerator,
+                       :denominator, :precision, :ci_low, :ci_high, :method, :sampling_frame,
+                       :ins_policy, :weighting, :notes)
+            """,
+            band_precision_rows,
+        )
+        conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("sidecar_version", sidecar_version))
+        conn.commit()
+    finally:
+        conn.close()
+    return db_path
+
+
+def test_m4_release_mode_strict_check_passes_on_frozen_rows(tmp_path):
+    db_path = _make_band_precision_only_db(
+        tmp_path, sidecar_build._frozen_real_band_precision_rows(),
+        sidecar_version=sidecar_build.REAL_SIDECAR_VERSION,
+    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        violations = verify_mod.check_band_precision(conn, meta)
+    finally:
+        conn.close()
+    assert violations == []
+
+
+def test_m4_release_mode_strict_check_rejects_fabricated_tier_a(tmp_path):
+    """M4: in release mode, a non-null tier_a precision (the OLD fabricated
+    0.90 synthetic-placeholder shape) must be REJECTED -- the lax
+    fixture-only checks above wouldn't have caught this on their own."""
+    db_path = _make_band_precision_only_db(
+        tmp_path, sidecar_build._band_precision_rows(),  # carries tier_a=0.90
+        sidecar_version=sidecar_build.REAL_SIDECAR_VERSION,
+    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        violations = verify_mod.check_band_precision(conn, meta)
+    finally:
+        conn.close()
+    assert any("tier_a" in v for v in violations)
+
+
+def test_m4_release_mode_strict_check_rejects_missing_measured_band(tmp_path):
+    rows = [r for r in sidecar_build._frozen_real_band_precision_rows()
+            if not (r["scope"] == "band" and r["confidence_band"] == "screening_canon")]
+    db_path = _make_band_precision_only_db(
+        tmp_path, rows, sidecar_version=sidecar_build.REAL_SIDECAR_VERSION,
+    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        violations = verify_mod.check_band_precision(conn, meta)
+    finally:
+        conn.close()
+    assert any("screening_canon" in v for v in violations)
+
+
+def test_m4_strict_check_never_fires_on_synthetic_fixture_sidecar_version(tmp_path):
+    """M4 gating: the SAME fabricated-tier_a rows that fail strict release
+    validation above must NOT be flagged when sidecar_version is the
+    synthetic-fixture constant -- the strict gate must never fire against
+    the pinned 134-03 golden fixture."""
+    db_path = _make_band_precision_only_db(
+        tmp_path, sidecar_build._band_precision_rows(),  # carries tier_a=0.90
+        sidecar_version=sidecar_build.SIDECAR_VERSION,  # synthetic-fixture constant
+    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        violations = verify_mod.check_band_precision(conn, meta)
+    finally:
+        conn.close()
+    assert not any("(M4)" in v for v in violations)
+
+
+def test_m4_committed_synthetic_fixture_never_triggers_strict_checks():
+    """The committed 134-03 golden fixture keeps its synthetic sidecar_version
+    -- confirms the full verify() pipeline never runs the M4 strict checks
+    against it (byte-identical fixture requirement)."""
+    conn = sqlite3.connect(f"file:{FIXTURE_DB}?mode=ro", uri=True)
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        violations = verify_mod.check_band_precision(conn, meta)
+    finally:
+        conn.close()
+    assert not any("(M4)" in v for v in violations)
