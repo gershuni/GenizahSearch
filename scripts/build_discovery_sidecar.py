@@ -1071,11 +1071,19 @@ def select_shown_works(conn: sqlite3.Connection) -> List[Dict]:
 # ---------------------------------------------------------------------------
 
 # Mirrors (never imports/edits) the FROZEN opaque work_id shape minted by
-# `scripts/discovery_ids.py::mint_work_id` -- a plain "w" + a zero-padded
-# 6-digit counter (e.g. "w000001"). Used ONLY as a defensive re-validation
-# pattern for PERSISTED crosswalk values (M1); the frozen recipe module
-# itself stays untouched.
-_OPAQUE_WORK_ID_PATTERN = re.compile(r"^w\d{6}$")
+# `scripts/discovery_ids.py::mint_work_id` -- `f"w{int(counter):06d}"`,
+# i.e. a plain "w" + a zero-padded 6-digit ASCII-decimal counter (e.g.
+# "w000001"). Used ONLY as a defensive re-validation pattern for PERSISTED
+# crosswalk values (M1); the frozen recipe module itself stays untouched.
+#
+# Codex R2 masking fix: `[0-9]` here, NEVER bare `\d` -- Python's `\d` (with
+# the default str-pattern UNICODE flag) matches ANY Unicode decimal-digit
+# codepoint (Nd category), e.g. fullwidth digits U+FF10-FF19 or
+# Arabic-Indic digits, not just ASCII '0'-'9'. `format(int, "06d")` (what
+# `mint_work_id` actually calls) always emits ASCII '0'-'9' ONLY -- so a
+# value matching `\d` but NOT `[0-9]` is PROVABLY not a real mint_work_id
+# output and must be rejected, never silently admitted as "digit-shaped".
+_OPAQUE_WORK_ID_PATTERN = re.compile(r"^w[0-9]{6}$")
 
 
 def _validate_crosswalk(crosswalk: Dict[str, str]) -> None:
@@ -1086,30 +1094,42 @@ def _validate_crosswalk(crosswalk: Dict[str, str]) -> None:
     crosswalk file could otherwise place a raw identifier or filename stem
     straight into an emitted surface (the review artifact's `work_id`
     column, or `works.work_id` in the shipped sidecar); this must run
-    BEFORE any review-artifact or sidecar emission."""
-    malformed = sorted(
-        raw_id for raw_id, opaque in crosswalk.items()
+    BEFORE any review-artifact or sidecar emission.
+
+    Masking (Codex R2): the raised message NEVER echoes a raw crosswalk key
+    or value -- a malformed opaque VALUE could itself be, or embed, a raw
+    restricted M-source identifier, and a raw_id KEY could carry one too.
+    Only counts and positional indices (stable dict-iteration-order
+    position) are reported, so a CLI invocation or an uncaught traceback
+    can never surface a restricted string via this validation path."""
+    items = list(crosswalk.items())
+
+    malformed_positions = [
+        i for i, (_raw_id, opaque) in enumerate(items)
         if not (isinstance(opaque, str) and _OPAQUE_WORK_ID_PATTERN.match(opaque))
-    )
-    if malformed:
+    ]
+    if malformed_positions:
         raise CrosswalkValidationError(
-            f"crosswalk contains {len(malformed)} value(s) not matching the frozen "
-            f"opaque work_id format (^w\\d{{6}}$) for raw_work_id(s): {malformed[:5]} "
-            "(M1 -- refusing to emit any review artifact/sidecar with a "
-            "potentially-raw crosswalk value)"
+            f"crosswalk contains {len(malformed_positions)} value(s) not matching the frozen "
+            f"opaque work_id format (^w[0-9]{{6}}$) at crosswalk position(s) "
+            f"{malformed_positions[:5]} (M1/masking -- refusing to emit any review "
+            "artifact/sidecar with a potentially-raw crosswalk value; the raw key/value "
+            "is deliberately NOT included in this message)"
         )
-    seen_opaque: Dict[str, str] = {}
-    duplicates: List[str] = []
-    for raw_id, opaque in sorted(crosswalk.items()):
-        prior_raw = seen_opaque.get(opaque)
-        if prior_raw is None:
-            seen_opaque[opaque] = raw_id
-        elif prior_raw != raw_id:
-            duplicates.append(f"{opaque} <- {prior_raw!r} AND {raw_id!r}")
-    if duplicates:
+
+    seen_opaque: Dict[str, int] = {}
+    duplicate_positions: List[int] = []
+    for i, (_raw_id, opaque) in enumerate(items):
+        if opaque in seen_opaque:
+            duplicate_positions.append(i)
+        else:
+            seen_opaque[opaque] = i
+    if duplicate_positions:
         raise CrosswalkValidationError(
-            f"crosswalk is not 1:1 -- {len(duplicates)} opaque work_id(s) are shared "
-            f"by multiple raw work_ids (M1): {duplicates[:5]}"
+            f"crosswalk is not 1:1 -- {len(duplicate_positions)} opaque work_id(s) at "
+            f"crosswalk position(s) {duplicate_positions[:5]} are shared with an earlier "
+            "entry (M1/masking -- the raw key/value is deliberately NOT included in "
+            "this message)"
         )
 
 

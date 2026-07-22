@@ -203,6 +203,79 @@ def test_assign_opaque_work_ids_valid_persisted_crosswalk_passes(tmp_path):
     assert by_raw["raw:c"] == "w000003"
 
 
+# ---------------------------------------------------------------------------
+# Codex R2 masking finding: _validate_crosswalk must NEVER echo a raw
+# crosswalk key/value into its exception message (only counts/positions),
+# and the opaque-id regex must accept ASCII digits ONLY (mirrors
+# discovery_ids.mint_work_id's actual `format(..., "06d")` output alphabet).
+# ---------------------------------------------------------------------------
+
+def test_validate_crosswalk_malformed_value_message_never_echoes_raw_value(tmp_path):
+    """MASKING: a malformed persisted crosswalk value's exception message
+    must NEVER include the raw crosswalk key or value -- only counts and
+    positions. A restricted M-source raw identifier could otherwise leak
+    via a CLI invocation or an uncaught traceback."""
+    crosswalk_path = tmp_path / "crosswalk.json"
+    raw_secret_value = "M:SECRET-RAW-RESEARCH-IDENTIFIER-XYZ"
+    crosswalk_path.write_text(
+        json.dumps({"raw:a": raw_secret_value}), encoding="utf-8",
+    )
+    with pytest.raises(sidecar_build.CrosswalkValidationError) as exc_info:
+        sidecar_build.assign_opaque_work_ids(
+            [{"raw_work_id": "raw:a"}], crosswalk_path, create_if_missing=False,
+        )
+    message = str(exc_info.value)
+    assert raw_secret_value not in message
+    assert "raw:a" not in message
+    assert "position" in message.lower()
+
+
+def test_validate_crosswalk_duplicate_value_message_never_echoes_raw_value(tmp_path):
+    """MASKING: same guarantee for the duplicate-value (non-1:1) branch."""
+    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_path.write_text(
+        json.dumps({"raw:a": "w000001", "raw:b": "w000001"}), encoding="utf-8",
+    )
+    with pytest.raises(sidecar_build.CrosswalkValidationError) as exc_info:
+        sidecar_build.assign_opaque_work_ids(
+            [{"raw_work_id": "raw:a"}, {"raw_work_id": "raw:b"}],
+            crosswalk_path, create_if_missing=False,
+        )
+    message = str(exc_info.value)
+    assert "raw:a" not in message
+    assert "raw:b" not in message
+    assert "w000001" not in message
+    assert "position" in message.lower()
+
+
+def test_validate_crosswalk_rejects_non_ascii_digit_opaque_value(tmp_path):
+    """HIGH/masking: the frozen `mint_work_id` output alphabet is ASCII
+    digits ONLY (`format(int, "06d")` never emits a non-ASCII decimal
+    digit) -- a value using non-ASCII Unicode decimal digits (which the
+    OLD bare `\\d` pattern, under Python's default UNICODE regex flag,
+    would have wrongly accepted) must be rejected by the fixed
+    `[0-9]`-only pattern."""
+    crosswalk_path = tmp_path / "crosswalk.json"
+    non_ascii_digit_value = "w" + "０" * 5 + "１"  # fullwidth "000001"
+    crosswalk_path.write_text(
+        json.dumps({"raw:a": non_ascii_digit_value}, ensure_ascii=False), encoding="utf-8",
+    )
+    assert sidecar_build._OPAQUE_WORK_ID_PATTERN.match(non_ascii_digit_value) is None
+    with pytest.raises(sidecar_build.CrosswalkValidationError) as exc_info:
+        sidecar_build.assign_opaque_work_ids(
+            [{"raw_work_id": "raw:a"}], crosswalk_path, create_if_missing=False,
+        )
+    assert non_ascii_digit_value not in str(exc_info.value)
+
+
+def test_validate_crosswalk_accepts_genuine_mint_work_id_output():
+    """Positive case: every real `mint_work_id(...)` output for a range of
+    counters must match the (now ASCII-only) frozen pattern."""
+    for counter in (1, 42, 999999):
+        opaque = ids.mint_work_id(counter)
+        assert sidecar_build._OPAQUE_WORK_ID_PATTERN.match(opaque) is not None
+
+
 def test_candidate_and_approved_headers_are_frozen():
     assert sidecar_build.CANDIDATE_HEADER == [
         "work_id", "candidate_neutral_title", "author", "genre",
