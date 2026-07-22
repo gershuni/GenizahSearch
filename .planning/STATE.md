@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 134-05-PLAN.md
-last_updated: "2026-07-22T04:22:01.391Z"
+stopped_at: Completed 134-06-PLAN.md
+last_updated: "2026-07-22T04:51:28.229Z"
 last_activity: 2026-07-22
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 14
-  completed_plans: 11
+  completed_plans: 12
   percent: 14
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 134 (discovery-data-spine) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-07-22
 
-Progress: [███████░░░] 67% (5/6 plans complete; 133-06 in progress)
+Progress: [███████░░] 75% (6/8 plans complete; 133-06 human-deploy checkpoint still pending separately)
 
 ## Roadmap Summary (v9.0.0)
 
@@ -86,10 +86,10 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-22T04:21:39.991Z
-Stopped at: Completed 134-05-PLAN.md
+Last session: 2026-07-22T04:51:28.214Z
+Stopped at: Completed 134-06-PLAN.md
 Resume file: None
-Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 band-source artifact + join key + raw->band translation + TOTAL flank->claim_type routing proposed in docs/specs/discovery-sidecar-schema-v1.md; then resume 134-01 at Task 3 (schema FREEZE) -> Task 4 (ids.py + golden tests). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
+Next step: 134-07 (owner title-review -> re-distill the real discovery.db -> freeze discovery-frames.md; a human gate) is next in wave 4/5, followed by 134-08 (PERF-01 measurement + budgets finalization + deploy/rollback/rebuild recipe; wave 5, human gate). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
 ## Performance Metrics
 
@@ -106,6 +106,7 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 | Phase 134 P03 | 55min | 3 tasks | 10 files |
 | Phase 134 P04 | 120 | 3 tasks | 2 files |
 | Phase 134 P05 | 35min | 3 tasks | 6 files |
+| Phase 134 P06 | 70min | 3 tasks | 6 files |
 
 ## Decisions
 
@@ -139,3 +140,5 @@ Next step: Owner/researcher confirms (or corrects), PER CLAIM FAMILY, the E1 ban
 - [Phase ?]: 134-04: real dev-box smoke build validated against actual research corpus (625 works/231,604 claims/251,976 evidence rows) -- passed verify_discovery_sidecar.py and the blocking masking gate with 0 hits
 - [Phase 134]: 134-05: meta.schema_version is a versioned STRING ("discovery-v1"), not int -- ground-truth-verified against build_discovery_sidecar.py/manifest.json, corrected from the plan's literal int() cast which would have permanently broken the ready case — A literal int(meta['schema_version']) would raise ValueError on every valid sidecar since schema_version is stored as a string marker
 - [Phase 134]: 134-05: web/main.py imports only load_discovery_state/discovery_available (not the raw DISCOVERY_ENABLED flag), mirroring the ACTUAL atlas precedent -- avoids a ruff F401 unused-import violation — web/main.py never imports the raw ATLAS_PREVIEW_ENABLED flag either, only atlas_preview_available()
+- [Phase ?]: 134-06: Task 2's async wrapper implementation was authored together with Task 1's sync core (tightly coupled in one class); Task 2 delivers its own independent 33-test suite proving every async invariant
+- [Phase ?]: 134-06: DATA-10 unit x work projection factored into a pure, DB-free helper (_project_work_witnesses) so the highest-band-wins rule across differing member bands is directly unit-testable
