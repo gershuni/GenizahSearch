@@ -1246,6 +1246,28 @@ def test_resolve_band_precision_spec_rejects_band_on_wrong_collection_id():
         )
 
 
+def test_validate_precision_spec_message_never_echoes_supplied_key_values():
+    """Codex R4 MED (masking): a supplied --precision-spec is potentially
+    hand-/owner-authored, so a malformed key field could embed restricted
+    text. The structural diagnostic must report unexpected/duplicate rows by
+    POSITION only -- never rendering a supplied scope/collection_id/
+    evidence_source/confidence_band value into the raised message."""
+    sentinel = "RESTRICTED_SENTINEL_DO_NOT_LEAK"
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    custom.append({
+        "scope": "band", "collection_id": sentinel,
+        "evidence_source": sentinel, "confidence_band": sentinel,
+        "numerator": None, "denominator": None, "precision": None,
+        "ci_low": None, "ci_high": None, "method": None,
+        "sampling_frame": None, "ins_policy": None, "weighting": None, "notes": None,
+    })
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError) as exc_info:
+        sidecar_build._resolve_band_precision_spec(
+            precision_spec=custom, frozen_precision_defaults=False, release=True,
+        )
+    assert sentinel not in str(exc_info.value)
+
+
 def test_resolve_band_precision_spec_rejects_the_old_minimal_fabricated_spec():
     """The EXACT scenario the HIGH finding cites: a spec that is basically
     just `[{"scope": "collection", "collection_id": "x"}]` (missing every

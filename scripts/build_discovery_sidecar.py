@@ -2131,15 +2131,20 @@ def _validate_precision_spec(rows: List[Dict]) -> None:
             and abs(actual - expected) <= _PRECISION_SPEC_TOLERANCE
         )
 
-    # Codex R3 HIGH: enforce the EXACT frozen key MULTISET before the value
-    # checks below. Those checks key collection rows by collection_id and band
-    # rows by (evidence_source, confidence_band) ONLY, so an EXTRA collection
-    # row (different collection_id), a band assigned to the WRONG collection_id,
-    # a duplicated key, a non-dict row, or an unknown scope would otherwise slip
-    # through. Compare the full (scope, collection_id, evidence_source,
-    # confidence_band) key multiset up front. (These keys are contract
-    # enum/collection-id values -- never restricted content -- so naming a
-    # mismatched key in the message is masking-safe.)
+    # Codex R3 HIGH / R4 MED (masking): enforce the EXACT frozen key MULTISET
+    # up front and FAIL FAST, separately from the value checks below. Those
+    # checks key collection rows by collection_id and band rows by
+    # (evidence_source, confidence_band) ONLY, so an EXTRA collection row, a
+    # band on the WRONG collection_id, a duplicated key, a non-dict row, or an
+    # unknown scope would otherwise slip through.
+    #
+    # Masking (Codex R4): the supplied spec is potentially owner-/hand-authored,
+    # so a malformed key field could embed restricted text. This structural
+    # diagnostic therefore NEVER renders a SUPPLIED value -- unexpected/duplicate
+    # rows are reported by POSITION only; only MISSING keys (which come from the
+    # FROZEN row-set, never the supplied spec) are named. Same discipline as
+    # _validate_crosswalk. It raises immediately, before any value check runs, so
+    # the value-check messages below only ever render frozen-safe keys.
     from collections import Counter
 
     def _spec_key(r: Dict) -> Tuple:
@@ -2148,23 +2153,52 @@ def _validate_precision_spec(rows: List[Dict]) -> None:
             r.get("evidence_source"), r.get("confidence_band"),
         )
 
-    for i, r in enumerate(rows):
-        if not isinstance(r, dict):
-            problems.append(f"row at position {i} is not a dict")
-        elif r.get("scope") not in ("collection", "band"):
-            problems.append(f"row at position {i} has unknown/invalid scope {r.get('scope')!r}")
+    structural: List[str] = []
+    non_dict_positions = [i for i, r in enumerate(rows) if not isinstance(r, dict)]
+    if non_dict_positions:
+        structural.append(
+            f"{len(non_dict_positions)} row(s) are not dicts at position(s) "
+            f"{non_dict_positions[:5]}"
+        )
+    bad_scope_positions = [
+        i for i, r in enumerate(rows)
+        if isinstance(r, dict) and r.get("scope") not in ("collection", "band")
+    ]
+    if bad_scope_positions:
+        structural.append(
+            f"{len(bad_scope_positions)} row(s) have an unknown/invalid scope at "
+            f"position(s) {bad_scope_positions[:5]}"
+        )
 
     frozen_key_counts = Counter(_spec_key(r) for r in frozen)
-    actual_key_counts = Counter(_spec_key(r) for r in rows if isinstance(r, dict))
-    if actual_key_counts != frozen_key_counts:
-        missing = sorted((frozen_key_counts - actual_key_counts).elements(), key=str)
-        extra = sorted((actual_key_counts - frozen_key_counts).elements(), key=str)
-        if missing:
-            problems.append(f"missing {len(missing)} required frozen row-key(s): {missing}")
-        if extra:
-            problems.append(
-                f"{len(extra)} row-key(s) outside/duplicated beyond the frozen set: {extra}"
-            )
+    seen = Counter()
+    unexpected_positions: List[int] = []
+    for i, r in enumerate(rows):
+        if not isinstance(r, dict):
+            continue
+        key = _spec_key(r)
+        seen[key] += 1
+        if seen[key] > frozen_key_counts.get(key, 0):
+            unexpected_positions.append(i)
+    if unexpected_positions:
+        structural.append(
+            f"{len(unexpected_positions)} unexpected/duplicate precision-spec row(s) at "
+            f"position(s) {unexpected_positions[:5]} (outside the frozen row-set)"
+        )
+    missing_keys = sorted((frozen_key_counts - seen).elements(), key=str)
+    if missing_keys:
+        structural.append(
+            f"missing {len(missing_keys)} required frozen row-key(s): {missing_keys}"
+        )
+
+    if structural:
+        # fail fast: never proceed to value validation with a structurally-wrong
+        # key set (and never having rendered a supplied value -- masking)
+        raise InvalidPrecisionSpecError(
+            "explicit --precision-spec does not match the frozen release band_precision "
+            "key-set (docs/specs/discovery-sidecar-schema-v1.md SS1.6): "
+            + "; ".join(structural)
+        )
 
     collection_rows = [r for r in rows if isinstance(r, dict) and r.get("scope") == "collection"]
     matching_collection = [
