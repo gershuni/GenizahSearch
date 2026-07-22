@@ -108,7 +108,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 134-03-PLAN.md — Deterministic masking-safe fixture DB (two-table model, both evidence_sources) + standalone all-invariant verifier + build-output tests (wave 2)
+- [x] 134-03-PLAN.md — Deterministic masking-safe fixture DB (two-table model, both evidence_sources) + standalone all-invariant verifier + build-output tests (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -208,7 +208,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
-| 134. Discovery Data Spine | 2/8 | In Progress|  |
+| 134. Discovery Data Spine | 3/8 | In Progress|  |
 | 135. Precision Certificate & Confidence Bands | 0/TBD | Not started | - |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
 | 137. Community Judgments | 0/TBD | Not started | - |
