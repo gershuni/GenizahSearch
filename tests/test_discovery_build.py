@@ -299,12 +299,28 @@ def test_validate_crosswalk_rejects_terminal_newline_opaque_value(tmp_path):
 
 def test_candidate_and_approved_headers_are_frozen():
     assert sidecar_build.CANDIDATE_HEADER == [
-        "work_id", "candidate_neutral_title", "author", "genre",
-        "source_corpus", "review_status", "review_notes",
+        "work_id", "candidate_title", "author", "genre", "source_label",
+        "confidence_basis", "tier_a_witnesses", "claim_count",
+        "owner_title", "owner_verdict", "owner_note",
     ]
-    assert sidecar_build.APPROVED_HEADER == [
-        "work_id", "neutral_title", "author", "genre", "source_corpus", "review_status",
-    ]
+    # The APPROVED csv IS the CANDIDATE csv shape -- the owner edits the
+    # SAME 11-column file in place and returns it (134-07 Task A/B).
+    assert sidecar_build.APPROVED_HEADER == sidecar_build.CANDIDATE_HEADER
+
+
+def _candidate_row(*, work_id, candidate_title="", author="", genre="",
+                    source_label=ids.SOURCE_CORPUS_SEFARIA,
+                    confidence_basis=sidecar_build.CONFIDENCE_BASIS_OPEN_CORPUS_TITLE,
+                    tier_a_witnesses=0, claim_count=1,
+                    owner_title="", owner_verdict="", owner_note=""):
+    """Build one enriched review-csv row dict (CANDIDATE_HEADER/APPROVED_HEADER
+    shape) with sensible defaults, for `--from-approved` reader tests."""
+    return {
+        "work_id": work_id, "candidate_title": candidate_title, "author": author,
+        "genre": genre, "source_label": source_label, "confidence_basis": confidence_basis,
+        "tier_a_witnesses": tier_a_witnesses, "claim_count": claim_count,
+        "owner_title": owner_title, "owner_verdict": owner_verdict, "owner_note": owner_note,
+    }
 
 
 def test_emit_review_artifact_and_load_approved_roundtrip(tmp_path):
@@ -314,55 +330,184 @@ def test_emit_review_artifact_and_load_approved_roundtrip(tmp_path):
         {"raw_work_id": "raw:msource-lit", "work_id": "w000002", "source_corpus": ids.SOURCE_CORPUS_MSOURCE,
          "title": "raw research title", "author": "raw author", "genre": "ספרות יפה"},
     ]
+    impact_counts = {
+        "w000001": {"claim_count": 3, "tier_a_witnesses": 2},
+        "w000002": {"claim_count": 1, "tier_a_witnesses": 0},
+    }
     candidate_csv = tmp_path / "candidates.csv"
-    rows = sidecar_build.emit_review_artifact(candidates, candidate_csv)
+    rows = sidecar_build.emit_review_artifact(candidates, candidate_csv, impact_counts=impact_counts)
 
     open_row = next(r for r in rows if r["work_id"] == "w000001")
-    assert open_row["review_status"] == "approved"
-    assert open_row["candidate_neutral_title"] == "Open Corpus Title"
+    assert open_row["candidate_title"] == "Open Corpus Title"
+    assert open_row["confidence_basis"] == sidecar_build.CONFIDENCE_BASIS_OPEN_CORPUS_TITLE
+    assert open_row["owner_title"] == "" and open_row["owner_verdict"] == "" and open_row["owner_note"] == ""
     msource_row = next(r for r in rows if r["work_id"] == "w000002")
-    assert msource_row["review_status"] == ""
-    assert msource_row["candidate_neutral_title"] == ""
+    assert msource_row["candidate_title"] == ""
+    assert msource_row["confidence_basis"] == sidecar_build.CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES
     # source provenance is masked in every row -- only the code, never a name.
-    assert {r["source_corpus"] for r in rows} <= ids.SOURCE_CORPUS_CODES
+    assert {r["source_label"] for r in rows} <= ids.SOURCE_CORPUS_CODES
 
     with open(candidate_csv, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         assert reader.fieldnames == sidecar_build.CANDIDATE_HEADER
 
-    # Simulate the owner's edit pass: approve BOTH rows on the APPROVED schema.
+    # Simulate the owner's edit pass: approve w000001 as-is, EDIT w000002's title.
     approved_csv = tmp_path / "approved.csv"
-    _write_approved_csv(approved_csv, [
-        {"work_id": "w000001", "neutral_title": "Open Corpus Title", "author": "Open Author",
-         "genre": "canon", "source_corpus": ids.SOURCE_CORPUS_SEFARIA, "review_status": "approved"},
-        {"work_id": "w000002", "neutral_title": "Owner Chosen Neutral Title", "author": "Owner Author",
-         "genre": "literary", "source_corpus": ids.SOURCE_CORPUS_MSOURCE, "review_status": "approved"},
-    ])
+    approved_rows = []
+    for r in rows:
+        r = dict(r)
+        if r["work_id"] == "w000001":
+            r["owner_verdict"] = "approve"
+        else:
+            r["owner_title"] = "Owner Chosen Neutral Title"
+            r["owner_verdict"] = "edit"
+        approved_rows.append(r)
+    _write_approved_csv(approved_csv, approved_rows)
 
     approved = sidecar_build.load_approved_works(approved_csv, valid_work_ids={"w000001", "w000002"})
     by_id = {a["work_id"]: a for a in approved}
     assert set(by_id) == {"w000001", "w000002"}
-    assert by_id["w000002"]["neutral_title"] == "Owner Chosen Neutral Title"
+    assert by_id["w000001"]["neutral_title"] == "Open Corpus Title"  # candidate_title, no owner override
+    assert by_id["w000002"]["neutral_title"] == "Owner Chosen Neutral Title"  # owner_title wins
     assert by_id["w000001"]["source_corpus"] == ids.SOURCE_CORPUS_SEFARIA
+
+
+def test_emit_review_artifact_columns_present_and_ordered(tmp_path):
+    candidates = [
+        {"raw_work_id": "raw:a", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA,
+         "title": "T", "author": "A", "genre": "G"},
+    ]
+    impact_counts = {"w000001": {"claim_count": 1, "tier_a_witnesses": 0}}
+    out_csv = tmp_path / "candidates.csv"
+    rows = sidecar_build.emit_review_artifact(candidates, out_csv, impact_counts=impact_counts)
+    assert list(rows[0].keys()) == sidecar_build.CANDIDATE_HEADER
+    with open(out_csv, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        assert reader.fieldnames == sidecar_build.CANDIDATE_HEADER
+
+
+def test_emit_review_artifact_sorted_by_impact_then_work_id(tmp_path):
+    candidates = [
+        {"raw_work_id": f"raw:{wid}", "work_id": wid, "source_corpus": ids.SOURCE_CORPUS_SEFARIA, "title": "T"}
+        for wid in ["w000003", "w000001", "w000002", "w000004"]
+    ]
+    impact_counts = {
+        "w000001": {"claim_count": 5, "tier_a_witnesses": 1},
+        "w000002": {"claim_count": 5, "tier_a_witnesses": 1},  # ties w000001 -> work_id ASC tiebreak
+        "w000003": {"claim_count": 10, "tier_a_witnesses": 0},  # highest claim_count, but tier_a 0
+        "w000004": {"claim_count": 2, "tier_a_witnesses": 2},  # highest tier_a_witnesses -> sorts first
+    }
+    out_csv = tmp_path / "candidates.csv"
+    rows = sidecar_build.emit_review_artifact(candidates, out_csv, impact_counts=impact_counts)
+    assert [r["work_id"] for r in rows] == ["w000004", "w000001", "w000002", "w000003"]
+
+
+def test_emit_review_artifact_excludes_zero_claim_works(tmp_path):
+    """SCOPE (134-07 Task A): the PRIORITIZED FULL set is every work with
+    >=1 claim in the assembled distillation -- a work absent from
+    `impact_counts` (zero claims) must never surface in the review csv."""
+    candidates = [
+        {"raw_work_id": "raw:a", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA, "title": "T1"},
+        {"raw_work_id": "raw:b", "work_id": "w000002", "source_corpus": ids.SOURCE_CORPUS_SEFARIA, "title": "T2"},
+    ]
+    impact_counts = {
+        "w000001": {"claim_count": 1, "tier_a_witnesses": 0},
+        # w000002 absent entirely -- zero claims, never surfaces in the real distillation.
+    }
+    out_csv = tmp_path / "candidates.csv"
+    rows = sidecar_build.emit_review_artifact(candidates, out_csv, impact_counts=impact_counts)
+    assert [r["work_id"] for r in rows] == ["w000001"]
+
+
+def test_compute_work_impact_counts_matches_assembled_data(tmp_path):
+    """`tier_a_witnesses`/`claim_count` must be derived from the SAME
+    build_claims_and_evidence/assemble_claims_and_evidence assembly used by
+    the real build -- never a hand-rolled divergent counter."""
+    works = [
+        {"raw_work_id": "raw:w1", "work_id": "w000001", "source_corpus": ids.SOURCE_CORPUS_SEFARIA},
+        {"raw_work_id": "raw:w2", "work_id": "w000002", "source_corpus": ids.SOURCE_CORPUS_SEFARIA},
+    ]
+    page_idx = sidecar_build.PageTextIndex(_pages_conn([
+        ("p1", "htr", "x" * 100), ("p2", "htr", "x" * 100), ("p3", "htr", "x" * 100),
+    ]))
+    track1_rows = [
+        _mk_track1_row("p1", "s1", "raw:w1", "Sefaria", spans_json="[[0, 50, 0.9]]"),
+        _mk_track1_row("p2", "s2", "raw:w1", "Sefaria", spans_json="[[0, 50, 0.9]]"),
+        _mk_track1_row("p3", "s3", "raw:w2", "Sefaria", spans_json="[[0, 50, 0.9]]"),
+    ]
+    db_path = _build_track1_db(tmp_path, track1_rows)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    # p1 ALSO carries a non-overlapping shared_text row -- same claim
+    # (page_id=p1, work_id=w000001), a SECOND evidence row, NOT a second claim.
+    q2_shared = [{
+        "cpage": "p1", "csys": "s1", "work_id": "raw:w1", "cat": "Sefaria",
+        "tier": "T2", "aligned_len": 120, "occ_class": "core", "n_seed_ms": 2,
+        "occ0": 60, "occ1": 90, "seed_page": "sp1", "cross_language": False, "is_new": False,
+    }]
+    try:
+        result = sidecar_build.build_claims_and_evidence(
+            conn=conn, works=works, page_index=page_idx, q2_shared_text=q2_shared,
+        )
+    finally:
+        conn.close()
+    counts = sidecar_build.compute_work_impact_counts(result["claim_rows"], result["evidence_rows"])
+    assert counts["w000001"] == {"claim_count": 2, "tier_a_witnesses": 2}
+    assert counts["w000002"] == {"claim_count": 1, "tier_a_witnesses": 1}
+
+
+def test_load_approved_works_ships_approve_with_candidate_title(tmp_path):
+    approved_csv = tmp_path / "approved.csv"
+    _write_approved_csv(approved_csv, [
+        _candidate_row(work_id="w000001", candidate_title="Candidate Title A", owner_verdict="approve"),
+    ])
+    approved = sidecar_build.load_approved_works(approved_csv, valid_work_ids={"w000001"})
+    assert len(approved) == 1
+    assert approved[0]["neutral_title"] == "Candidate Title A"
+
+
+def test_load_approved_works_ships_edit_with_owner_title_wins(tmp_path):
+    approved_csv = tmp_path / "approved.csv"
+    _write_approved_csv(approved_csv, [
+        _candidate_row(work_id="w000001", candidate_title="Candidate Title A",
+                       owner_title="Owner Corrected Title", owner_verdict="edit"),
+    ])
+    approved = sidecar_build.load_approved_works(approved_csv, valid_work_ids={"w000001"})
+    assert approved[0]["neutral_title"] == "Owner Corrected Title"
 
 
 def test_load_approved_works_rejection_rules(tmp_path):
     approved_csv = tmp_path / "approved.csv"
     _write_approved_csv(approved_csv, [
-        {"work_id": "w000001", "neutral_title": "Good Title", "author": "", "genre": "",
-         "source_corpus": "sefaria", "review_status": "approved"},  # kept
-        {"work_id": "w000002", "neutral_title": "Unapproved", "author": "", "genre": "",
-         "source_corpus": "sefaria", "review_status": ""},  # rejected: not approved
-        {"work_id": "w000003", "neutral_title": "", "author": "", "genre": "",
-         "source_corpus": "sefaria", "review_status": "approved"},  # rejected: empty title
-        {"work_id": "w000999", "neutral_title": "Not In Crosswalk", "author": "", "genre": "",
-         "source_corpus": "sefaria", "review_status": "approved"},  # rejected: unknown work_id
-        {"work_id": "w000004", "neutral_title": "Bad Corpus", "author": "", "genre": "",
-         "source_corpus": "not-a-real-code", "review_status": "approved"},  # rejected: bad code
+        _candidate_row(work_id="w000001", candidate_title="Good Title", owner_verdict="approve"),  # kept
+        _candidate_row(work_id="w000002", candidate_title="Rejected", owner_verdict="reject"),  # excluded
+        _candidate_row(work_id="w000003", candidate_title="Suppressed", owner_verdict="suppress"),  # excluded
+        _candidate_row(work_id="w000004", candidate_title="Unverdicted", owner_verdict=""),  # excluded: blank verdict
+        _candidate_row(work_id="w000005", candidate_title="", owner_title="",
+                       owner_verdict="approve"),  # excluded: empty resolved title
+        _candidate_row(work_id="w000999", candidate_title="Not In Crosswalk", owner_verdict="approve"),  # unknown id
+        _candidate_row(work_id="w000006", candidate_title="Bad Corpus", source_label="not-a-real-code",
+                       owner_verdict="approve"),  # excluded: bad source_label code
     ])
-    valid_work_ids = {"w000001", "w000002", "w000003", "w000004"}
+    valid_work_ids = {"w000001", "w000002", "w000003", "w000004", "w000005", "w000006"}
     approved = sidecar_build.load_approved_works(approved_csv, valid_work_ids=valid_work_ids)
     assert [a["work_id"] for a in approved] == ["w000001"]
+
+
+def test_load_approved_works_excludes_reject_suppress_blank_and_empty_title(tmp_path):
+    """Explicit ship/exclude-rule regression (134-07 Task B): reject,
+    suppress, blank owner_verdict, and an empty resolved title ALL exclude
+    -- fail-closed, no research-title fallback."""
+    approved_csv = tmp_path / "approved.csv"
+    _write_approved_csv(approved_csv, [
+        _candidate_row(work_id="w000001", candidate_title="T1", owner_verdict="reject"),
+        _candidate_row(work_id="w000002", candidate_title="T2", owner_verdict="suppress"),
+        _candidate_row(work_id="w000003", candidate_title="T3", owner_verdict=""),
+        _candidate_row(work_id="w000004", candidate_title="", owner_title="", owner_verdict="approve"),
+    ])
+    approved = sidecar_build.load_approved_works(
+        approved_csv, valid_work_ids={"w000001", "w000002", "w000003", "w000004"},
+    )
+    assert approved == []
 
 
 def test_load_approved_works_header_mismatch_raises(tmp_path):
@@ -372,6 +517,21 @@ def test_load_approved_works_header_mismatch_raises(tmp_path):
         writer.writeheader()
     with pytest.raises(ValueError):
         sidecar_build.load_approved_works(bad_csv)
+
+
+def test_load_approved_works_header_mismatch_never_echoes_cell_masking_sentinel(tmp_path):
+    """MASKING: a malformed-header csv raises with COLUMN NAMES only -- even
+    when the file's data ROWS carry a masking-sentinel-shaped value in some
+    cell, that cell value must never be echoed into the raised message."""
+    bad_csv = tmp_path / "bad.csv"
+    sentinel = "RESTRICTED-MSOURCE-SENTINEL-VALUE"
+    with open(bad_csv, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["work_id", "title"])
+        writer.writeheader()
+        writer.writerow({"work_id": sentinel, "title": sentinel})
+    with pytest.raises(ValueError) as exc_info:
+        sidecar_build.load_approved_works(bad_csv)
+    assert sentinel not in str(exc_info.value)
 
 
 # ===========================================================================
@@ -818,10 +978,9 @@ def _build_minimal_finalize_fixture(tmp_path, *, neutral_title="Clean Neutral Ti
     work_id = candidates[0]["work_id"]
 
     approved_csv = tmp_path / "approved.csv"
-    _write_approved_csv(approved_csv, [{
-        "work_id": work_id, "neutral_title": neutral_title, "author": "",
-        "genre": "", "source_corpus": ids.SOURCE_CORPUS_SEFARIA, "review_status": "approved",
-    }])
+    _write_approved_csv(approved_csv, [
+        _candidate_row(work_id=work_id, candidate_title=neutral_title, owner_verdict="approve"),
+    ])
 
     return {
         "research_db": research_db,
@@ -913,10 +1072,15 @@ def test_finalize_build_requires_nonempty_masking_patterns(tmp_path):
 
 
 def test_finalize_build_artifact_scan_is_nonblocking(tmp_path):
+    """The non-blocking artifact scan targets the CANDIDATE csv, never the
+    shipped .db. Under the enriched schema an M-source (masked) candidate's
+    author/genre are ALWAYS blanked (fail-closed, Task A) -- so the sentinel
+    must instead ride an auto-adopted OPEN-CORPUS candidate's verbatim
+    `candidate_title` to still exercise "leaked into the artifact, never
+    shipped because left unapproved"."""
     research_rows = [
         _mk_track1_row("p1", "s1", "raw:w1", "Sefaria", spans_json="[[0, 40, 0.9]]"),
-        _mk_track1_row("p2", "s2", "raw:w2-lit", "MaskedCorpus", genre="ספרות יפה",
-                        author="SECRET-RAW-TITLE-XYZ", title="unused"),
+        _mk_track1_row("p2", "s2", "raw:w2-open", "Sefaria", title="SECRET-RAW-TITLE-XYZ"),
     ]
     research_db = _build_track1_db(tmp_path, research_rows, name="research.db")
     conn = sqlite3.connect(str(research_db))
@@ -932,13 +1096,12 @@ def test_finalize_build_artifact_scan_is_nonblocking(tmp_path):
     candidates = sidecar_build.assign_opaque_work_ids(candidates, crosswalk_path, create_if_missing=True)
     by_raw = {c["raw_work_id"]: c for c in candidates}
     work_id_1 = by_raw["raw:w1"]["work_id"]
-    # raw:w2-lit is deliberately left UNAPPROVED -- candidate-only, never shipped.
+    # raw:w2-open is deliberately left UNAPPROVED -- candidate-only, never shipped.
 
     approved_csv = tmp_path / "approved.csv"
-    _write_approved_csv(approved_csv, [{
-        "work_id": work_id_1, "neutral_title": "Clean Neutral Title", "author": "",
-        "genre": "", "source_corpus": ids.SOURCE_CORPUS_SEFARIA, "review_status": "approved",
-    }])
+    _write_approved_csv(approved_csv, [
+        _candidate_row(work_id=work_id_1, candidate_title="Clean Neutral Title", owner_verdict="approve"),
+    ])
 
     out_db_path = tmp_path / "discovery_data" / "discovery-v1.db"
     review_artifact_path = tmp_path / "candidates.csv"

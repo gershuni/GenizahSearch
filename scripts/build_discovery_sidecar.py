@@ -9,9 +9,12 @@ witness_units, witness_unit_members, meta, band_precision) plus a synthetic
 fixture-generation mode (`synthetic_discovery_dataset` / `--golden PATH` /
 `--smoke N`) from 134-03, PLUS (134-04) the REAL offline distillation --
 shown-work selection + opaque work_id minting (`select_shown_works` /
-`assign_opaque_work_ids`), the masked CANDIDATE review artifact + the NEW
-fail-closed `--from-approved` reader (`emit_review_artifact` /
-`load_approved_works`), the unified witness family across the
+`assign_opaque_work_ids`), the masked, impact-prioritized CANDIDATE review
+artifact (134-07 Task A: `compute_work_impact_counts` / `emit_review_artifact`
+/ `build_candidate_review_artifact` / `--emit-review-artifact-only`) + the
+fail-closed owner-verdict `--from-approved` reader (134-07 Task B:
+`load_approved_works` -- ships iff `owner_verdict` in {approve, edit} AND a
+non-empty resolved title), the unified witness family across the
 evidence_source axis (`build_claims_and_evidence`: track1_direct 4-disjoint-
 source banding + propagated corroborated/weak) + the shared_text family +
 the family-router collections, `build_witness_units` (DATA-10), and
@@ -32,6 +35,9 @@ before it is ever considered buildable output (aborts + deletes on any hit).
 Usage:
     python scripts/build_discovery_sidecar.py --golden tests/fixtures/discovery/discovery-v1-fixture.db
     python scripts/build_discovery_sidecar.py --smoke 10
+    python scripts/build_discovery_sidecar.py <source_db_path> --emit-review-artifact-only \\
+        --crosswalk <crosswalk.json> [--init-crosswalk] --research-data-dir <DIR> \\
+        [--review-artifact discovery_data/candidates.csv]
     python scripts/build_discovery_sidecar.py <source_db_path> --from-approved <APPROVED.csv> \\
         --crosswalk <crosswalk.json> [--init-crosswalk] [--research-data-dir <DIR>] \\
         [--libraries-csv libraries.csv] [--fjms-db fist_data/fjms_enrichment.db] \\
@@ -1194,16 +1200,35 @@ def assign_opaque_work_ids(
 
 
 # ---------------------------------------------------------------------------
-# 6.3 Source-masked CANDIDATE review artifact + NEW --from-approved reader (F5)
+# 6.3 Source-masked, impact-prioritized CANDIDATE review artifact + the
+# owner-verdict `--from-approved` reader (134-07 Task A/B).
+#
+# The CANDIDATE csv IS the APPROVED csv shape (APPROVED_HEADER ==
+# CANDIDATE_HEADER): the owner receives the emitted file, fills in the three
+# trailing owner_* columns in place, and returns the SAME 11-column file --
+# there is no separate round-trip schema to keep in sync.
 # ---------------------------------------------------------------------------
 
+# `confidence_basis` fixed vocabulary (134-07 Task A) -- do NOT invent a
+# basis this module doesn't actually compute:
+#   - open-corpus-title: the candidate is already-open-corpus (sefaria/ja)
+#     AND carries a non-empty research `title` -- auto-adopted verbatim.
+#   - none-owner-supplies: EVERY other case (M-source, or an open-corpus
+#     candidate with no title) -- fail-closed, candidate_title stays BLANK,
+#     never a restricted-title fallback.
+CONFIDENCE_BASIS_OPEN_CORPUS_TITLE = "open-corpus-title"
+CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES = "none-owner-supplies"
+
 CANDIDATE_HEADER = [
-    "work_id", "candidate_neutral_title", "author", "genre",
-    "source_corpus", "review_status", "review_notes",
+    "work_id", "candidate_title", "author", "genre", "source_label",
+    "confidence_basis", "tier_a_witnesses", "claim_count",
+    "owner_title", "owner_verdict", "owner_note",
 ]
-APPROVED_HEADER = [
-    "work_id", "neutral_title", "author", "genre", "source_corpus", "review_status",
-]
+APPROVED_HEADER = CANDIDATE_HEADER
+
+# Owner verdicts that ship a work (134-07 Task B) -- 'reject'/'suppress'/a
+# blank verdict all EXCLUDE, fail-closed.
+_SHIP_OWNER_VERDICTS = frozenset({"approve", "edit"})
 
 
 def _validate_csv_header(actual_fieldnames, expected_header, csv_kind: str) -> None:
@@ -1213,31 +1238,123 @@ def _validate_csv_header(actual_fieldnames, expected_header, csv_kind: str) -> N
         )
 
 
-def emit_review_artifact(candidates: List[Dict], out_csv_path) -> List[Dict]:
-    """Write the source-MASKED CANDIDATE review CSV (D-08). The FROZEN exact
-    header is `CANDIDATE_HEADER`; `source_corpus` is the masked code only (no
-    M-source/R-source name or siglum in any cell). Open-corpus (sefaria/ja)
-    rows auto-fill `candidate_neutral_title` + `review_status='approved'`
-    (D-08's "light spot-check", never a full review); the M-source literary
-    subset is left with an EMPTY `candidate_neutral_title` + `review_status`
-    for the owner to fill in during full manual review.
+def compute_work_impact_counts(claim_rows: List[Tuple], evidence_rows: List[Tuple]) -> Dict[str, Dict[str, int]]:
+    """Compute the review-artifact impact signal (134-07 Task A) DIRECTLY
+    from the ASSEMBLED claim/evidence rows produced by
+    `build_claims_and_evidence`/`assemble_claims_and_evidence` -- never a
+    hand-rolled divergent counter, so the review CSV's `tier_a_witnesses`/
+    `claim_count` columns can never drift from what the real distillation
+    actually ships.
 
-    Modeled (EMISSION-shape only, F5) on
-    `scripts/export_translation_audit_sample.py`'s `write_csv`/AUDIT_COLUMNS
-    convention (utf-8-sig, trailing review_status/review_notes columns).
+    `claim_rows`: `(page_id, work_id, claim_id, claim_type,
+    display_evidence_id, source_corpus, sidecar_version)` tuples (the
+    `assemble_claims_and_evidence` "claim_rows" shape).
+    `evidence_rows`: `(evidence_id, claim_id, evidence_kind, evidence_source,
+    confidence_band, ...)` tuples (the "evidence_rows" shape).
+
+    Returns `{work_id: {"claim_count": int, "tier_a_witnesses": int}}` --
+    `claim_count` = distinct `(page_id, work_id)` claims for that work;
+    `tier_a_witnesses` = count of that work's evidence rows with
+    `evidence_source == 'track1_direct'` AND `confidence_band == 'tier_a'`
+    (the `track1_matches WHERE shadowed_by IS NULL` band).
+    """
+    claim_id_to_work_id: Dict[str, str] = {}
+    counts: Dict[str, Dict[str, int]] = {}
+    for row in claim_rows:
+        work_id, claim_id = row[1], row[2]
+        claim_id_to_work_id[claim_id] = work_id
+        entry = counts.setdefault(work_id, {"claim_count": 0, "tier_a_witnesses": 0})
+        entry["claim_count"] += 1
+    for row in evidence_rows:
+        claim_id, evidence_source, confidence_band = row[1], row[3], row[4]
+        if evidence_source == _TRACK1 and confidence_band == _TIER_A:
+            work_id = claim_id_to_work_id.get(claim_id)
+            if work_id is None:
+                continue
+            entry = counts.setdefault(work_id, {"claim_count": 0, "tier_a_witnesses": 0})
+            entry["tier_a_witnesses"] += 1
+    return counts
+
+
+def emit_review_artifact(
+    candidates: List[Dict], out_csv_path, *, impact_counts: Dict[str, Dict[str, int]],
+) -> List[Dict]:
+    """Write the enriched, source-MASKED, impact-prioritized CANDIDATE review
+    CSV (134-07 Task A). The exact header is `CANDIDATE_HEADER`;
+    `source_label` is the masked `source_corpus` code only (no M-source/
+    R-source name or siglum in any cell).
+
+    SCOPE: the PRIORITIZED FULL set -- only candidates carrying >=1 claim in
+    the assembled real distillation (`impact_counts`, as returned by
+    `compute_work_impact_counts` over the SAME `build_claims_and_evidence`/
+    `assemble_claims_and_evidence` assembly the real build uses) are
+    emitted; a work with zero claims will never surface in the real
+    distillation and is silently excluded rather than shown as a dead row.
+    This is NOT a sample -- every surfacing work is included.
+
+    `candidate_title`/`author`/`genre` are auto-derived ONLY when the
+    candidate is already open-corpus (sefaria/ja) AND carries a non-empty
+    research `title` (`confidence_basis='open-corpus-title'`) -- ALL THREE
+    columns come verbatim from the open-corpus research row in that case.
+    Every other case -- M-source, or an open-corpus candidate with no title
+    -- emits ALL THREE columns BLANK with `confidence_basis=
+    'none-owner-supplies'`: fail-closed, never a restricted-title/author/
+    genre fallback (masking -- an M-source `author`/`genre` value is
+    research-derived free text and must never reach this artifact).
+
+    Rows are sorted by `(tier_a_witnesses DESC, claim_count DESC, work_id
+    ASC)` -- deterministic, highest-impact titles first, long tail still
+    included.
+
+    `owner_title`/`owner_verdict`/`owner_note` are ALWAYS blank in this
+    CANDIDATE emission -- even an auto-derived open-corpus title still
+    requires the owner's explicit verdict; `load_approved_works` (Task B)
+    is the fail-closed gate applied to the file the owner RETURNS.
+
+    Modeled (EMISSION-shape only) on
+    `scripts/export_translation_audit_sample.py`'s `write_csv` convention
+    (utf-8-sig, trailing review columns).
     """
     rows = []
     for c in candidates:
+        work_id = c["work_id"]
+        counts = impact_counts.get(work_id)
+        claim_count = counts.get("claim_count", 0) if counts else 0
+        if claim_count < 1:
+            continue  # SCOPE: excluded -- never surfaces in the real distillation
+        tier_a_witnesses = counts.get("tier_a_witnesses", 0) if counts else 0
+
         is_open = c["source_corpus"] in (ids.SOURCE_CORPUS_SEFARIA, ids.SOURCE_CORPUS_JA)
+        title = (c.get("title") or "").strip()
+        if is_open and title:
+            candidate_title = title
+            author = c.get("author") or ""
+            genre = c.get("genre") or ""
+            confidence_basis = CONFIDENCE_BASIS_OPEN_CORPUS_TITLE
+        else:
+            # fail-closed (masking): M-source (or a title-less open-corpus
+            # row) never surfaces ANY research-derived free text here.
+            candidate_title = ""
+            author = ""
+            genre = ""
+            confidence_basis = CONFIDENCE_BASIS_NONE_OWNER_SUPPLIES
+
         rows.append({
-            "work_id": c["work_id"],
-            "candidate_neutral_title": (c.get("title") or "") if is_open else "",
-            "author": c.get("author") or "",
-            "genre": c.get("genre") or "",
-            "source_corpus": c["source_corpus"],
-            "review_status": "approved" if is_open else "",
-            "review_notes": "auto-adopted (open corpus, light spot-check)" if is_open else "",
+            "work_id": work_id,
+            "candidate_title": candidate_title,
+            "author": author,
+            "genre": genre,
+            "source_label": c["source_corpus"],
+            "confidence_basis": confidence_basis,
+            "tier_a_witnesses": tier_a_witnesses,
+            "claim_count": claim_count,
+            "owner_title": "",
+            "owner_verdict": "",
+            "owner_note": "",
         })
+
+    rows.sort(key=lambda r: (-r["tier_a_witnesses"], -r["claim_count"], r["work_id"]))
+
     out_path = Path(out_csv_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
@@ -1248,16 +1365,20 @@ def emit_review_artifact(candidates: List[Dict], out_csv_path) -> List[Dict]:
 
 
 def load_approved_works(approved_csv_path, *, valid_work_ids: Optional[Iterable[str]] = None) -> List[Dict]:
-    """NEW fail-closed `--from-approved` reader (F5 -- genuinely new behavior;
-    no existing approved-round-trip reader analog). Reads ONLY rows meeting
-    ALL rejection-rule gates:
-      - `review_status == 'approved'`
-      - a non-empty `neutral_title`
-      - `work_id` present AND (if `valid_work_ids` given) crosswalk-known
-      - a valid `source_corpus` masked code
+    """Fail-closed `--from-approved` reader (134-07 Task B) over the owner's
+    RETURNED enriched review csv (`APPROVED_HEADER == CANDIDATE_HEADER` --
+    the owner edits the SAME 11-column file in place).
 
-    Anything else is EXCLUDED -- never a research-title fallback (D-07).
-    Enforces the FROZEN exact `APPROVED_HEADER`.
+    SHIP iff `owner_verdict` in `{'approve', 'edit'}` AND the RESOLVED title
+    is non-empty, where resolved title = `owner_title` if non-empty else
+    `candidate_title`. Everything else -- `owner_verdict` in
+    `{'reject', 'suppress'}`, a blank verdict, or an empty resolved title --
+    is EXCLUDED. NO research-title fallback (D-07): a row can never ship
+    with an empty resolved title.
+
+    Enforces the FROZEN exact `APPROVED_HEADER`; never renders any CSV cell
+    value in a raised message (masking) -- the header-mismatch message
+    below names only expected/actual COLUMN NAMES, never row data.
     """
     valid_ids = set(valid_work_ids) if valid_work_ids is not None else None
     approved = []
@@ -1265,9 +1386,12 @@ def load_approved_works(approved_csv_path, *, valid_work_ids: Optional[Iterable[
         reader = csv.DictReader(f)
         _validate_csv_header(reader.fieldnames, APPROVED_HEADER, "APPROVED")
         for row in reader:
-            if (row.get("review_status") or "").strip() != "approved":
+            verdict = (row.get("owner_verdict") or "").strip()
+            if verdict not in _SHIP_OWNER_VERDICTS:
                 continue
-            neutral_title = (row.get("neutral_title") or "").strip()
+            owner_title = (row.get("owner_title") or "").strip()
+            candidate_title = (row.get("candidate_title") or "").strip()
+            neutral_title = owner_title or candidate_title
             if not neutral_title:
                 continue
             work_id = (row.get("work_id") or "").strip()
@@ -1275,7 +1399,7 @@ def load_approved_works(approved_csv_path, *, valid_work_ids: Optional[Iterable[
                 continue
             if valid_ids is not None and work_id not in valid_ids:
                 continue
-            source_corpus = row.get("source_corpus")
+            source_corpus = row.get("source_label")
             try:
                 ids.validate_source_corpus_code(source_corpus)
             except ValueError:
@@ -1981,6 +2105,108 @@ def _insert_witness_units_real(cur: sqlite3.Cursor, unit_specs: List[Dict]) -> i
 
 
 # ---------------------------------------------------------------------------
+# 6.9b Enriched CANDIDATE review-artifact emission (134-07 Task A) -- a
+# SHARED helper so `finalize_build`'s own optional re-emission and the
+# standalone `build_candidate_review_artifact` (the owner title-review gate's
+# actual entry point, Task 1) can never compute the impact signal two
+# divergent ways.
+# ---------------------------------------------------------------------------
+
+def _emit_enriched_review_artifact(
+    conn_research: sqlite3.Connection, candidates: List[Dict], out_csv_path, *,
+    page_index,
+    e1_ra_confirmed: Iterable[Dict] = (), e1_adjudicated_a: Iterable[Dict] = (),
+    e1_rb_screening: Iterable[Dict] = (), e1_r3_frame: Iterable[Dict] = (),
+    q2_witness_collection: Iterable[Dict] = (), q2_collection_tafsir_targum: Iterable[Dict] = (),
+    q2_collection_with_arabic: Iterable[Dict] = (), q2_shared_text: Iterable[Dict] = (),
+) -> Dict:
+    """Assemble claims/evidence over ALL `candidates` (pre-owner-review --
+    NOT just a prior approved set) so the emitted CANDIDATE csv's
+    `tier_a_witnesses`/`claim_count` columns reflect the ACTUAL real
+    distillation, then emit the enriched review artifact. Returns the
+    emitted rows + the `evidence_id_collisions` count (surfaced for caller
+    visibility, never blocking this emission step)."""
+    result = build_claims_and_evidence(
+        conn=conn_research, works=candidates, page_index=page_index,
+        e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
+        e1_rb_screening=e1_rb_screening, e1_r3_frame=e1_r3_frame,
+        q2_witness_collection=q2_witness_collection,
+        q2_collection_tafsir_targum=q2_collection_tafsir_targum,
+        q2_collection_with_arabic=q2_collection_with_arabic,
+        q2_shared_text=q2_shared_text,
+        sidecar_version=REAL_SIDECAR_VERSION,
+    )
+    impact_counts = compute_work_impact_counts(result["claim_rows"], result["evidence_rows"])
+    rows = emit_review_artifact(candidates, out_csv_path, impact_counts=impact_counts)
+    return {"rows": rows, "evidence_id_collisions": result.get("evidence_id_collisions", 0)}
+
+
+def build_candidate_review_artifact(
+    *,
+    source_db_path,
+    crosswalk_path,
+    out_csv_path,
+    e1_ra_confirmed_path=None,
+    e1_adjudicated_a_path=None,
+    e1_rb_screening_path=None,
+    e1_r3_frame_path=None,
+    q2_witness_collection_path=None,
+    q2_collection_tafsir_targum_path=None,
+    q2_collection_with_arabic_path=None,
+    q2_shared_text_path=None,
+    create_crosswalk_if_missing: bool = False,
+) -> Dict:
+    """134-07 Task 1/A entry point: emit ONLY the enriched, source-masked,
+    impact-prioritized CANDIDATE review csv against the real research corpus
+    -- does NOT write a discovery.db and does NOT require an
+    `--from-approved` csv (there isn't one yet; that is the whole point of
+    the owner review gate this feeds). REUSES the persisted crosswalk
+    (`create_crosswalk_if_missing=False` by default, DC2) so opaque work_ids
+    stay stable with any prior/subsequent real build.
+
+    Raises `CrosswalkAbortError` if the crosswalk is required-but-absent
+    (mirrors `assign_opaque_work_ids`'s own DC2 contract).
+    """
+    conn_research = _connect_research_ro(source_db_path)
+    try:
+        def _load(path):
+            return load_jsonl(path) if path else []
+
+        e1_ra_confirmed = _load(e1_ra_confirmed_path)
+        e1_adjudicated_a = _load(e1_adjudicated_a_path)
+        e1_rb_screening = _load(e1_rb_screening_path)
+        e1_r3_frame = _load(e1_r3_frame_path)
+        q2_witness_collection = _load(q2_witness_collection_path)
+        q2_collection_tafsir_targum = _load(q2_collection_tafsir_targum_path)
+        q2_collection_with_arabic = _load(q2_collection_with_arabic_path)
+        q2_shared_text = _load(q2_shared_text_path)
+
+        candidates = select_shown_works(conn_research)
+        candidates = assign_opaque_work_ids(
+            candidates, crosswalk_path, create_if_missing=create_crosswalk_if_missing,
+        )
+        page_index = PageTextIndex(conn_research)
+        outcome = _emit_enriched_review_artifact(
+            conn_research, candidates, out_csv_path, page_index=page_index,
+            e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
+            e1_rb_screening=e1_rb_screening, e1_r3_frame=e1_r3_frame,
+            q2_witness_collection=q2_witness_collection,
+            q2_collection_tafsir_targum=q2_collection_tafsir_targum,
+            q2_collection_with_arabic=q2_collection_with_arabic,
+            q2_shared_text=q2_shared_text,
+        )
+    finally:
+        conn_research.close()
+
+    return {
+        "candidate_count": len(candidates),
+        "emitted_row_count": len(outcome["rows"]),
+        "evidence_id_collisions": outcome["evidence_id_collisions"],
+        "out_csv_path": str(out_csv_path),
+    }
+
+
+# ---------------------------------------------------------------------------
 # 6.10 finalize_build -- the full real-mode orchestration (DATA-05/08, F13)
 # ---------------------------------------------------------------------------
 
@@ -2475,8 +2701,21 @@ def finalize_build(
         candidates = assign_opaque_work_ids(
             candidates, crosswalk_path, create_if_missing=create_crosswalk_if_missing
         )
+        page_index = PageTextIndex(conn_research)
         if review_artifact_path:
-            emit_review_artifact(candidates, review_artifact_path)
+            # Reuses the SAME build_claims_and_evidence assembly (over ALL
+            # candidates, not just the approved subset below) so the
+            # re-emitted CANDIDATE csv's impact columns can never diverge
+            # from the real distillation (134-07 Task A).
+            _emit_enriched_review_artifact(
+                conn_research, candidates, review_artifact_path, page_index=page_index,
+                e1_ra_confirmed=e1_ra_confirmed, e1_adjudicated_a=e1_adjudicated_a,
+                e1_rb_screening=e1_rb_screening, e1_r3_frame=e1_r3_frame,
+                q2_witness_collection=q2_witness_collection,
+                q2_collection_tafsir_targum=q2_collection_tafsir_targum,
+                q2_collection_with_arabic=q2_collection_with_arabic,
+                q2_shared_text=q2_shared_text,
+            )
 
         crosswalk = json.loads(Path(crosswalk_path).read_text(encoding="utf-8"))
         valid_work_ids = set(crosswalk.values())
@@ -2489,8 +2728,6 @@ def finalize_build(
             if raw_work_id is None:
                 continue
             works.append({**a, "raw_work_id": raw_work_id})
-
-        page_index = PageTextIndex(conn_research)
 
         result = build_claims_and_evidence(
             conn=conn_research, works=works, page_index=page_index,
@@ -2778,6 +3015,12 @@ def build_parser() -> argparse.ArgumentParser:
                              "schema-v1.md SS1.6, tier_a=NULL) instead of a custom "
                              "--precision-spec. Required (together with --precision-spec "
                              "being one-or-the-other) for --release.")
+    real_group.add_argument("--emit-review-artifact-only", action="store_true",
+                        help="134-07 Task 1/A: emit ONLY the enriched, impact-prioritized "
+                             "CANDIDATE review csv (reusing the real distillation assembly) "
+                             "and exit -- does NOT require --from-approved and does NOT "
+                             "write a discovery.db. Reuses --crosswalk WITHOUT re-minting "
+                             "(pass --init-crosswalk only for a genuinely first-ever build).")
     return parser
 
 
@@ -2792,6 +3035,32 @@ def main(argv=None) -> int:
         return _write_golden(args.golden)
     if args.smoke is not None:
         return _run_smoke(args.smoke)
+
+    if args.emit_review_artifact_only:
+        # 134-07 Task 1/A: emit ONLY the enriched CANDIDATE csv, no
+        # --from-approved required (there isn't one yet), no .db written.
+        if not args.crosswalk:
+            parser.error("--crosswalk is required for --emit-review-artifact-only")
+        review_artifact_path = args.review_artifact or str(
+            Path(_REPO_ROOT) / "discovery_data" / "discovery-review-candidates.csv"
+        )
+        collection_paths = _resolve_collection_paths(args.research_data_dir)
+        stats = build_candidate_review_artifact(
+            source_db_path=args.db_path,
+            crosswalk_path=args.crosswalk,
+            out_csv_path=review_artifact_path,
+            e1_ra_confirmed_path=collection_paths["e1_ra_confirmed"],
+            e1_adjudicated_a_path=collection_paths["e1_adjudicated_a"],
+            e1_rb_screening_path=collection_paths["e1_rb_screening"],
+            e1_r3_frame_path=collection_paths["e1_r3_frame"],
+            q2_witness_collection_path=collection_paths["q2_witness_collection"],
+            q2_collection_tafsir_targum_path=collection_paths["q2_collection_tafsir_targum"],
+            q2_collection_with_arabic_path=collection_paths["q2_collection_with_arabic"],
+            q2_shared_text_path=collection_paths["q2_shared_text"],
+            create_crosswalk_if_missing=args.init_crosswalk,
+        )
+        print(f"review artifact OK: {stats}")
+        return 0
 
     # Real-mode distillation (134-04).
     if not args.from_approved or not args.crosswalk:
