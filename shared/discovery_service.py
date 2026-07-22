@@ -76,6 +76,11 @@ _DEFAULT_BROWSE_LRU_MAX_ENTRIES = 5000
 _DEFAULT_PAGE_SIZE_DEFAULT = 50
 _DEFAULT_PAGE_SIZE_MAX = 200
 
+# M3: the frozen ABSOLUTE row-per-page ceiling (docs/specs/discovery-budgets.md
+# SS3: "hard ceiling; never overridable above this"). DISCOVERY_PAGE_SIZE_MAX
+# may only ever TIGHTEN this value, never raise it -- see _clamp_page_size.
+_ABSOLUTE_PAGE_SIZE_CEILING = 200
+
 # Defensive internal row caps -- protect against a pathological work_id with
 # an enormous claim count / a corrupted witness_unit_members table blowing
 # memory, while never binding in the normal case (every list query stays
@@ -102,6 +107,25 @@ def _get_int_env(name: str, default: int) -> int:
         except (TypeError, ValueError):
             pass
     return default
+
+
+def _get_positive_int_env(name: str, default: int) -> int:
+    """Like ``_get_int_env``, but coerces to >= 1 (M3) -- a non-positive or
+    unparsable env value falls back to ``default`` rather than propagating
+    into ``asyncio.Semaphore(n)`` (which raises ValueError for n < 0 and
+    means "always locked" for n == 0, either of which would silently break
+    or permanently overload the service from a single bad env var)."""
+    value = _get_int_env(name, default)
+    return value if value >= 1 else default
+
+
+def _get_positive_float_env(name: str, default: float) -> float:
+    """Like ``_get_float_env``, but coerces to > 0 (M3) -- a non-positive
+    timeout would make ``asyncio.wait(..., timeout=X)`` return immediately
+    on every call, permanently overloading the service from a single bad
+    env var; falls back to ``default`` instead."""
+    value = _get_float_env(name, default)
+    return value if value > 0 else default
 
 
 def _parse_json_field(value: Optional[str]) -> Any:
@@ -288,7 +312,9 @@ class DiscoveryService:
         # _HeavySemaphoreState, kept per-instance since this class -- unlike
         # the module-function shape of search_api.py -- IS the natural
         # single-owner scope for its own concurrency budget).
-        capacity = _get_int_env("DISCOVERY_MAX_CONCURRENT_QUERIES", _DEFAULT_MAX_CONCURRENT_QUERIES)
+        capacity = _get_positive_int_env(
+            "DISCOVERY_MAX_CONCURRENT_QUERIES", _DEFAULT_MAX_CONCURRENT_QUERIES
+        )
         self._heavy_sem = asyncio.Semaphore(capacity)
         self._heavy_capacity = capacity
 
@@ -356,8 +382,20 @@ class DiscoveryService:
 
     @staticmethod
     def _clamp_page_size(page_size: Any) -> int:
+        # M3: DISCOVERY_PAGE_SIZE_MAX can only TIGHTEN the frozen absolute
+        # ceiling, never raise it -- a misconfigured env var (0, negative,
+        # or > _ABSOLUTE_PAGE_SIZE_CEILING) falls back to the ceiling itself
+        # rather than being trusted as-is.
+        raw_maximum = _get_int_env("DISCOVERY_PAGE_SIZE_MAX", _DEFAULT_PAGE_SIZE_MAX)
+        if raw_maximum <= 0 or raw_maximum > _ABSOLUTE_PAGE_SIZE_CEILING:
+            maximum = _ABSOLUTE_PAGE_SIZE_CEILING
+        else:
+            maximum = raw_maximum
+
         default = _get_int_env("DISCOVERY_PAGE_SIZE_DEFAULT", _DEFAULT_PAGE_SIZE_DEFAULT)
-        maximum = _get_int_env("DISCOVERY_PAGE_SIZE_MAX", _DEFAULT_PAGE_SIZE_MAX)
+        if default <= 0 or default > maximum:
+            default = min(_DEFAULT_PAGE_SIZE_DEFAULT, maximum)
+
         if page_size is None:
             page_size = default
         try:
@@ -575,7 +613,9 @@ class DiscoveryService:
     # ------------------------------------------------------------------
 
     async def _acquire_heavy_slot(self) -> Callable[[], None]:
-        desired = _get_int_env("DISCOVERY_MAX_CONCURRENT_QUERIES", _DEFAULT_MAX_CONCURRENT_QUERIES)
+        desired = _get_positive_int_env(
+            "DISCOVERY_MAX_CONCURRENT_QUERIES", _DEFAULT_MAX_CONCURRENT_QUERIES
+        )
         if desired != self._heavy_capacity:
             # Only safe to rebuild when fully idle (no held slots) -- mirrors
             # web/search_api.py's _HeavySemaphoreState rebuild guard exactly,
@@ -637,10 +677,10 @@ class DiscoveryService:
                 _release()
 
     def _browse_timeout(self) -> float:
-        return _get_float_env("DISCOVERY_QUERY_TIMEOUT_BROWSE", _DEFAULT_QUERY_TIMEOUT_BROWSE)
+        return _get_positive_float_env("DISCOVERY_QUERY_TIMEOUT_BROWSE", _DEFAULT_QUERY_TIMEOUT_BROWSE)
 
     def _work_timeout(self) -> float:
-        return _get_float_env("DISCOVERY_QUERY_TIMEOUT_WORK", _DEFAULT_QUERY_TIMEOUT_WORK)
+        return _get_positive_float_env("DISCOVERY_QUERY_TIMEOUT_WORK", _DEFAULT_QUERY_TIMEOUT_WORK)
 
     # ------------------------------------------------------------------
     # Browse-enrichment version-keyed LRU (F15) -- wraps the cheap,
@@ -648,6 +688,18 @@ class DiscoveryService:
     # ------------------------------------------------------------------
 
     async def _browse_cached_call(self, cache_name: str, sync_fn: Callable, args: tuple):
+        max_entries = _get_int_env("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", _DEFAULT_BROWSE_LRU_MAX_ENTRIES)
+        if max_entries <= 0:
+            # M3: a non-positive size means "disable caching" (bounded to
+            # zero), NEVER "unbounded" -- also proactively clears any
+            # entries cached under a previously-valid size so a live env
+            # flip to <=0 frees memory immediately rather than merely
+            # freezing further growth.
+            with self._browse_lru_lock:
+                if self._browse_lru:
+                    self._browse_lru.clear()
+            return await self._run_off_loop(sync_fn, *args, timeout=self._browse_timeout())
+
         version = None
         if self._sidecar_version_provider is not None:
             try:
@@ -666,8 +718,7 @@ class DiscoveryService:
         with self._browse_lru_lock:
             self._browse_lru[key] = result
             self._browse_lru.move_to_end(key)
-            max_entries = _get_int_env("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", _DEFAULT_BROWSE_LRU_MAX_ENTRIES)
-            while max_entries > 0 and len(self._browse_lru) > max_entries:
+            while len(self._browse_lru) > max_entries:
                 self._browse_lru.popitem(last=False)
         return result
 

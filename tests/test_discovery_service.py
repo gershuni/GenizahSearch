@@ -577,6 +577,78 @@ def test_browse_lru_bounded_by_max_entries(monkeypatch):
     asyncio.run(_run())
 
 
+# ---------------------------------------------------------------------------
+# M3: env-var clamps -- a misconfigured value can never widen a frozen
+# ceiling, crash construction, or disable a bound (it must always fall
+# back to a sane default, or -- for the LRU size -- disable-and-clear).
+# ---------------------------------------------------------------------------
+
+def test_page_size_max_env_cannot_raise_absolute_ceiling(monkeypatch):
+    monkeypatch.setenv("DISCOVERY_PAGE_SIZE_MAX", "999999")
+    assert DiscoveryService._clamp_page_size(999999) <= 200
+    service = _make_service()
+    items = service.get_work_witnesses("w000005", page=1, page_size=999999)
+    assert len(items) <= 200
+
+
+def test_page_size_max_env_non_positive_falls_back_to_ceiling(monkeypatch):
+    monkeypatch.setenv("DISCOVERY_PAGE_SIZE_MAX", "0")
+    assert DiscoveryService._clamp_page_size(50) == 50
+    monkeypatch.setenv("DISCOVERY_PAGE_SIZE_MAX", "-10")
+    assert DiscoveryService._clamp_page_size(50) == 50
+
+
+def test_concurrency_env_negative_falls_back_to_default_without_crashing(monkeypatch):
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_QUERIES", "-3")
+    # asyncio.Semaphore(negative) raises ValueError -- construction must not
+    # crash on a misconfigured env var (M3).
+    service = _make_service()
+    assert service._heavy_capacity >= 1
+
+
+def test_concurrency_env_zero_falls_back_to_default_without_crashing(monkeypatch):
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_QUERIES", "0")
+    service = _make_service()
+    assert service._heavy_capacity >= 1
+
+
+def test_timeout_env_non_positive_falls_back_to_default():
+    import os
+
+    os.environ["DISCOVERY_QUERY_TIMEOUT_BROWSE"] = "0"
+    try:
+        service = _make_service()
+        assert service._browse_timeout() > 0
+    finally:
+        del os.environ["DISCOVERY_QUERY_TIMEOUT_BROWSE"]
+
+    os.environ["DISCOVERY_QUERY_TIMEOUT_WORK"] = "-5"
+    try:
+        service = _make_service()
+        assert service._work_timeout() > 0
+    finally:
+        del os.environ["DISCOVERY_QUERY_TIMEOUT_WORK"]
+
+
+def test_browse_lru_non_positive_max_entries_disables_and_clears_cache(monkeypatch):
+    service = _make_service()
+
+    async def _run():
+        await service.get_claims_for_page_async("p001")
+        assert len(service._browse_lru) == 1
+
+        monkeypatch.setenv("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", "0")
+        await service.get_claims_for_page_async("p002")
+        # M3: a non-positive size disables AND clears -- never unbounded.
+        assert service._browse_lru == {}
+
+        # Confirms caching stays OFF (never re-populated) while disabled.
+        await service.get_claims_for_page_async("p003")
+        assert service._browse_lru == {}
+
+    asyncio.run(_run())
+
+
 def test_band_rank_orders_strongest_first():
     assert _band_rank("track1_direct", "expert_verified") < _band_rank("track1_direct", "tier_a")
     assert _band_rank("track1_direct", "tier_a") < _band_rank("propagated", "corroborated")
