@@ -117,6 +117,21 @@ In response to the "ready for context?" prompt, the owner reported the twin cens
 
 **Notes:** Three return-questions the parallel session posed back to 135 (output-shape mapping, filter-merges-to-1,270, ref_corpus_v2.pkl stability) are to be resolved in the v2-bake-plan update + its Codex review. RCh-Shabbat three-way auto-resolution (canonical flips to M-source w000452 so the drop doesn't orphan it) captured. Artifact is masking-sensitive (`title_msource`) — consumed by the build, never rendered/committed.
 
+## Provisional relations → date-driven rule (owner reframe, 2026-07-23)
+
+The owner rejected hand-judging the 174 as a list: "The list is random — only counts what we encountered. It should be generalized to a *rule*, not a *list*: later works may cite earlier ones. So each רי"ף can contain each משנה, בבלי, תוספתא etc. Each ראשון work may contain תפילות וברכות (Rambam an extreme). We can use the date [M-source works spreadsheet, column תאריך] to help."
+
+Coverage scouted: M-source date table = ~8,233 works, 100% dated (descriptive Hebrew ranges); Sefaria/JA sidecar works dated only via twin/crosswalk inheritance; needs a clean join to w000xxx.
+
+### Rule reach
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Represent + measure (route later) | Rule generates directional work_relations + labels quotation-FP claims as a CERT-01 diagnostic family; NO auto-demotion (routing = Lever 2 / v2.1) | ✓ |
+| Route it out now in v2 | Rule actively demotes later-quotes-earlier witness claims out of tier_a before the CERT-01 frame freeze | |
+| Represent only | Rule populates work_relations only; no band/measurement effect | |
+
+**User's choice:** Option 1. Instruction: "Fold it into the CONTEXT.md, and we will send the file to Codex for adversarial review, pointing also on this as a new unresearched option." → captured as D-17 with an explicit ⚠ Codex-adversarial-review flag.
+
 ## Claude's Discretion
 
 - Band-label values module = hand-authored + guard test (vs auto-parsing the markdown); numbers/status stay data-driven from the sidecar `band_precision` table.
