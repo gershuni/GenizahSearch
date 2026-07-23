@@ -132,6 +132,20 @@ Coverage scouted: M-source date table = ~8,233 works, 100% dated (descriptive He
 
 **User's choice:** Option 1. Instruction: "Fold it into the CONTEXT.md, and we will send the file to Codex for adversarial review, pointing also on this as a new unresearched option." → captured as D-17 with an explicit ⚠ Codex-adversarial-review flag.
 
+## Codex adversarial review + SEED-029 demotion-rule reframe (2026-07-23)
+
+Ran the owner-requested Codex adversarial review of CONTEXT (focus D-17) → **VERDICT: REWORK** (3 BLOCKER / 9 HIGH / 2 MED), saved to `135-CODEX-CRITIQUE.md`. Key blockers: (1) the v2-bake-plan is stale; (2) chronology can't NAME a semantic relation, only flag "later + overlapping"; (3) the release sequencing let unmeasured/quotation-contaminated tier_a be default-shown.
+
+The SEED-029 track then delivered a reframe that resolves #2 and #3:
+- 16 merges are **text-confirmed ratified** canonical data (jac 0.98–1.00 + author), NOT candidates.
+- Containment (part_of) is deliberately **not enumerated** — replaced by ONE general **chronological co-claim demotion rule** (`same_work_spike/probe/rsource/results/chronological_demotion_rule.md`): keep the earliest-dated co-claimant on a shared span, demote materially-later ones (≥ DELTA) to `review_only` + tag `later_shared_text`; names no relation; runs at bake; no Track-1 dependency → the launch-grade coarse router (fine span router = v2.1, not a blocker).
+
+Owner decisions this session:
+- **Sequencing (blocker #3):** HOLD tier_a behind the "show more possible matches" toggle until CERT-01 passes (D-18). (Options offered: hold-until-certified ✓ / bring Lever 2 forward / other.)
+- Adopted the SEED-029 demotion rule (supersedes the earlier D-17 "represent+measure, route later" framing; the 174-pair review CSV is now obsolete).
+
+Folded into CONTEXT: D-05 (canonical estimand F7), D-07 (no "certified" + real routing flip F11 + measured-vs-insufficient F13), D-08 (graders blind F6), D-13 (merges ratified), D-15 (no relations table), D-17 (demotion rule), D-18 (sequencing), D-19 (date-coverage audit REQUESTED). Routed to the v2-bake-plan rewrite + its Codex pass: F4/F5/F9/F10/F12/F14.
+
 ## Claude's Discretion
 
 - Band-label values module = hand-authored + guard test (vs auto-parsing the markdown); numbers/status stay data-driven from the sidecar `band_precision` table.
