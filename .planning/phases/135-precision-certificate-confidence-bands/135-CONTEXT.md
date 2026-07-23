@@ -54,7 +54,7 @@ The phase runs as **two tracks**:
 
 ### Sequencing, audit & Codex disposition (2026-07-23)
 - **D-18 (sequencing — resolves Codex blocker #3):** `tier_a` is **held behind the "show more possible matches" toggle until its CERT-01 certificate passes** (owner choice). Until then the DEFAULT view shows only `human_confirmed` rows + the already-measured top algorithmic band (0.889, audit-pending). The D-17 demotion rule fixes the *contamination* half of the blocker (anthology FPs → `review_only` at bake, no Lever-2 wait); D-18 covers the *unmeasured* half. When CERT-01 passes, tier_a promotes to default and "show-all-shipped" is safe because the FPs are already demoted. **Amends band-labels-v1 §4** (tier_a not-default-until-certified) — a versioned label-contract change to fold into v2.
-- **D-19 (DELTA + date-coverage audit — Codex F4/F14):** the SEED-029 track offered to run a date-coverage audit against `ref_corpus_v2` (dated-direct / inherited-by-ratified-twin / ambiguous / conflicting / missing — by corpus and by real shared-text pairs) to set `DELTA` and quantify undated coverage before the rule is adopted. **REQUESTED** (owner-facing open item — see Specifics).
+- **D-19 (DELTA + date-coverage audit — Codex F4/F14):** the SEED-029 track offered to run a date-coverage audit against `ref_corpus_v2` (dated-direct / inherited-by-ratified-twin / ambiguous / conflicting / missing — by corpus and by real shared-text pairs) to set `DELTA` and quantify undated coverage before the rule is adopted. **REQUESTED — owner-confirmed 2026-07-23**; handed back to the SEED-029 track. DELTA is set on the audit result before the bake adopts the rule.
 - **Codex R1 disposition (`135-CODEX-CRITIQUE.md`, VERDICT REWORK):** BLOCKER-1 (stale bake plan) → the v2-bake-plan rewrite is the gating Track-B task (D-13/D-16), re-Codex-reviewed before code. BLOCKER-2 (no semantic relations) → RESOLVED by D-17 (demote + neutral tag, no `work_relations`). BLOCKER-3 (default sequencing) → RESOLVED by D-17 (coarse router in v2) + D-18 (hold-until-certified). FOLDED here: F6 (graders blind → D-08), F7 (canonical estimand → D-05), F11 (no "certified" + real routing flip → D-07), F13 (measured-vs-insufficient → D-07). ROUTED to the bake-plan rewrite + its Codex pass: F4/F5/F9/F10/F12/F14 (coverage audit, interval/UNKNOWN date parsing, crosswalk-join safety, self-loop/contested guards, full survey-design spec, shared-text threshold). F8 mitigated by the per-span + non-overlapping-multi-register invariants; residual routing accuracy → the fine span router (v2.1).
 
 ### Claude's Discretion
@@ -133,7 +133,7 @@ The phase runs as **two tracks**:
 - **Estimand:** (page, work) unit; CI clustered by physical MS.
 - **Posture:** "expert-measured · independent audit pending" — never "certified".
 - **Sequencing:** tier_a stays behind the toggle until CERT-01 passes (D-18); the coarse chronological demotion (D-17) runs at bake to clear anthology FPs first.
-- **⚠ OWNER OPEN ITEM:** confirm requesting the SEED-029 date-coverage audit against `ref_corpus_v2` to set `DELTA` (D-19) before the demotion rule is adopted.
+- **SEED-029 request (owner-confirmed 2026-07-23):** the date-coverage audit against `ref_corpus_v2` sets `DELTA` and quantifies undated coverage (D-19) before the demotion rule is adopted.
 </specifics>
 
 <deferred>
