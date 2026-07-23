@@ -4,7 +4,12 @@
 "(B) band-label honesty" lane of the discovery-spine / SEED-029 split).
 Amended 2026-07-23: §4 gains the **multi-register invariant** (a page may carry
 N shipped witnesses; the band filter must never suppress a shipped co-register) —
-surfaced by SEED-029 live adjudication of multi-register targum MSS.
+surfaced by SEED-029 live adjudication of multi-register targum MSS. §3 gains the
+**decision-unit caveat** (Codex): band precision was calibrated on (manuscript,
+work) grades but the spine routes/displays (page, work) — the figures are
+provisional/review-prioritization at the page unit, never production precision,
+and must not drive page-level routing until a page-level catalogue-blind deck
+validates them.
 
 **Tunable ONLY by versioning this artifact** (same discipline as
 `docs/specs/discovery-budgets.md`). This file is the SINGLE source of truth for
@@ -78,6 +83,20 @@ per-item probabilities. Present them under these rules:
 3. All current numbers are **pre-registered / prior-adjudication estimates**,
    explicitly **provisional pending the Phase 135 owner grading** (CERT-01 /
    BAND-02), which MEASURES them on a fresh stratified draw and MAY reband.
+4. **Decision-unit caveat (Codex, 2026-07-23) — load-bearing.** These figures
+   were calibrated on **(manuscript, work)** grades, but the spine routes and
+   displays **(page, work)** claims. A precision measured on one decision unit
+   does NOT transfer to a different unit, so at the page/claim level the
+   0.85–0.93 numbers are **provisional metadata / review-prioritization ONLY —
+   never production precision** — until a **page-level catalogue-blind
+   validation deck** (SEED-029, forthcoming) re-measures the bands on the routed
+   `(page, work)` unit. Two hard consequences until that deck lands: (a) do NOT
+   cite the 87–91% figures as production precision on any page-level surface;
+   (b) do NOT drive page-level routing off the (MS,work)-calibrated bands — in
+   particular, do **not** route the coverage `<0.45` bucket to `review_only` at
+   page level yet (coverage ships as provisional metadata, not a routing
+   driver). The **never-demote-on-catalogue-mismatch invariant stands**
+   regardless.
 
 | scope | band | estimated precision | note |
 |---|---|---|---|
