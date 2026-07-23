@@ -4,12 +4,13 @@
 "(B) band-label honesty" lane of the discovery-spine / SEED-029 split).
 Amended 2026-07-23: §4 gains the **multi-register invariant** (a page may carry
 N shipped witnesses; the band filter must never suppress a shipped co-register) —
-surfaced by SEED-029 live adjudication of multi-register targum MSS. §3 gains the
-**decision-unit caveat** (Codex): band precision was calibrated on (manuscript,
-work) grades but the spine routes/displays (page, work) — the figures are
-provisional/review-prioritization at the page unit, never production precision,
-and must not drive page-level routing until a page-level catalogue-blind deck
-validates them.
+surfaced by SEED-029 live adjudication of multi-register targum MSS. §3 gained the
+**decision-unit caveat** (Codex) then its **resolution**: the page-level
+catalogue-blind deck PASSED (200 `(page, work)` grades), so band precision is
+now citeable at the routed unit from the frozen `track1_pagelevel_manifest.json`
+and **Lever-1 coverage page-routing is re-enabled** (ship cov ≥ 0.45, route
+cov < 0.45 → `review_only`; cliff at 0.45). See §3.1. The ~6% high-coverage
+quoted-works residual remains for Lever 2 (after S1).
 
 **Tunable ONLY by versioning this artifact** (same discipline as
 `docs/specs/discovery-budgets.md`). This file is the SINGLE source of truth for
@@ -83,20 +84,17 @@ per-item probabilities. Present them under these rules:
 3. All current numbers are **pre-registered / prior-adjudication estimates**,
    explicitly **provisional pending the Phase 135 owner grading** (CERT-01 /
    BAND-02), which MEASURES them on a fresh stratified draw and MAY reband.
-4. **Decision-unit caveat (Codex, 2026-07-23) — load-bearing.** These figures
-   were calibrated on **(manuscript, work)** grades, but the spine routes and
-   displays **(page, work)** claims. A precision measured on one decision unit
-   does NOT transfer to a different unit, so at the page/claim level the
-   0.85–0.93 numbers are **provisional metadata / review-prioritization ONLY —
-   never production precision** — until a **page-level catalogue-blind
-   validation deck** (SEED-029, forthcoming) re-measures the bands on the routed
-   `(page, work)` unit. Two hard consequences until that deck lands: (a) do NOT
-   cite the 87–91% figures as production precision on any page-level surface;
-   (b) do NOT drive page-level routing off the (MS,work)-calibrated bands — in
-   particular, do **not** route the coverage `<0.45` bucket to `review_only` at
-   page level yet (coverage ships as provisional metadata, not a routing
-   driver). The **never-demote-on-catalogue-mismatch invariant stands**
-   regardless.
+4. **Decision-unit validation (RESOLVED 2026-07-23) — page-level deck PASSED.**
+   The earlier hold (band precision was calibrated on `(manuscript, work)` grades
+   while the spine routes/displays `(page, work)`) is **lifted**: SEED-029 ran a
+   catalogue-blind validation deck of **200 grades on an independent
+   `(page, work)` set** from the launch3 shipped frame, re-measuring the bands at
+   the routed unit. Page-level band precision is now citeable as **"estimated
+   band precision [CI]"** sourced from the frozen `track1_pagelevel_manifest.json`
+   — see §3.1 for the numbers + the validated **Lever-1** routing rule. The
+   **never-demote-on-catalogue-mismatch invariant still stands**: catalogue
+   mismatch ran 52% and is confounded with coverage, so it is NEVER a routing
+   signal.
 
 | scope | band | estimated precision | note |
 |---|---|---|---|
@@ -105,6 +103,34 @@ per-item probabilities. Present them under these rules:
 | band (track1_direct) | tier_a | *not yet measured* | 89% of the spine; no estimate exists — must be shown as "precision not yet measured" |
 | band (track1_direct) | screening_rb | **0.859** (pre-registered; CI pending Ph135) | screening tier |
 | band (track1_direct) | screening_canon | **0.647** (pre-registered; CI pending Ph135) | screening tier — genuinely low by design |
+
+### 3.1 Page-level validated bands + Lever-1 routing (`track1_pagelevel_manifest.json`)
+
+Validated at the routed **`(page, work)`** unit — 200 catalogue-blind grades,
+independent set, launch3 frame. These are the **coverage bands** (the Lever-1
+routing basis), distinct from the §2 stored `confidence_band` enum; the mapping
+between the two is pinned producer-side at the v2 bake.
+
+| coverage band | coverage range | est. page-level precision | routing |
+|---|---|---|---|
+| high | ≥ 0.60 | **94.0%** | ship |
+| med | 0.45–0.60 | **91.7%** (~92%) | ship |
+| low | < 0.45 | **37.5%** (witness — recoverable) | **`review_only`** |
+
+- **Operating point:** the ship/demote **cliff is at coverage 0.45, not 0.60** —
+  everything **≥ 0.45 ships**, **< 0.45 → `review_only`**. (The 0.50 reference
+  point measures **94.3%**, one-sided 95% lower bound **90.1%**.)
+- **Lever 1 (coverage page-routing) is RE-ENABLED** on this validated basis:
+  route `cov < 0.45 → review_only` at the page unit; ship `cov ≥ 0.45`. The
+  `review_only` low bucket is recoverable (queryable, behind the §4 toggle),
+  never deleted.
+- **Residual → Lever 2:** the ~6% error remaining at high coverage is the
+  **quoted-works class** (a page whose high-coverage match is to a work that
+  merely quotes its actual text). Routing that out is **Lever 2** — the
+  direction-aware ref-subspan router — which lands after S1; until then a small
+  quoted-works residual persists in the high band and is not yet routed out.
+  §4's "show all shipped is safe" statement is therefore true modulo this
+  documented high-band residual until Lever 2 ships.
 
 ## 4. Default-shown policy (BAND-03 precursor)
 
