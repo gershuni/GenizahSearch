@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
-status: (B) band-label contract LANDED; (A) canonical merge + (C) direction-aware shadow router on the SEED-029 track (blocked on Track-1 ref-subspan re-instrumentation); Task 3 prod deploy HELD until v2
+status: executing
 stopped_at: Phase 135 context COMPLETE — census in; SEED-029 chronological demotion rule adopted (D-17); Codex REWORK integrated; tier_a held behind toggle until CERT-01 (D-18); date-coverage audit requested (D-19). Gating Track-B task = rewrite discovery-v2-bake-plan.md + re-Codex.
-last_updated: "2026-07-23T18:56:14.712Z"
-last_activity: 2026-07-23
+last_updated: "2026-07-23T23:45:04.821Z"
+last_activity: 2026-07-23 -- Phase 135 planning complete
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 14
+  total_plans: 23
   completed_plans: 13
   percent: 14
 ---
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 
 Phase: 134 (discovery-data-spine) — REMEDIATION (owner review re-opened the frame)
 Plan: 8 of 8 (Tasks 1-2 done; Task 3 held); frame superseded-pending -> discovery-v2
-Status: (B) band-label contract LANDED; (A) canonical merge + (C) direction-aware shadow router on the SEED-029 track (blocked on Track-1 ref-subspan re-instrumentation); Task 3 prod deploy HELD until v2
-Last activity: 2026-07-23
+Status: Ready to execute
+Last activity: 2026-07-23 -- Phase 135 planning complete
 
 Progress: [████████░] 94% plumbing (7/8 plans); GATED by data-quality remediation — v1 build NOT shippable (dup works / band overclaim / anthology FPs); 133-06 human-deploy checkpoint still pending separately
 
