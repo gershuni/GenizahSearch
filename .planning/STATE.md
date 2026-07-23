@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 134-06-PLAN.md
-last_updated: "2026-07-22T04:51:28.229Z"
-last_activity: 2026-07-22
+stopped_at: 134 REMEDIATION — owner review found 3 defects in the discovery-v1 build (cross-corpus dup works / band-label overclaim / anthology-quotation FPs); frame SUPERSEDED-PENDING -> discovery-v2. (B) band-label honesty contract LANDED (docs/specs/discovery-band-labels-v1.md). 134-08 Tasks 1-2 (bench+budgets+deploy runbook) done. Task 3 (prod deploy) HELD; (A) canonical merge + (C) direction-aware shadow router on the SEED-029/R-source track (blocked on Track-1 ref-subspan re-instrumentation).
+last_updated: "2026-07-23T00:00:00.000Z"
+last_activity: 2026-07-23
 progress:
   total_phases: 7
   completed_phases: 1
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 
 ## Current Position
 
-Phase: 134 (discovery-data-spine) — EXECUTING
-Plan: 7 of 8
-Status: Ready to execute
-Last activity: 2026-07-22
+Phase: 134 (discovery-data-spine) — REMEDIATION (owner review re-opened the frame)
+Plan: 8 of 8 (Tasks 1-2 done; Task 3 held); frame superseded-pending -> discovery-v2
+Status: (B) band-label contract LANDED; (A) canonical merge + (C) direction-aware shadow router on the SEED-029 track (blocked on Track-1 ref-subspan re-instrumentation); Task 3 prod deploy HELD until v2
+Last activity: 2026-07-23
 
-Progress: [███████░░] 75% (6/8 plans complete; 133-06 human-deploy checkpoint still pending separately)
+Progress: [████████░] 94% plumbing (7/8 plans); GATED by data-quality remediation — v1 build NOT shippable (dup works / band overclaim / anthology FPs); 133-06 human-deploy checkpoint still pending separately
 
 ## Roadmap Summary (v9.0.0)
 
@@ -86,10 +86,10 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-22T04:51:28.214Z
-Stopped at: Completed 134-06-PLAN.md
+Last session: 2026-07-23
+Stopped at: 134-08 Tasks 1-2 complete — scripts/bench_discovery.py (PERF-01 probe: flag-bypass readiness predicate, nonzero-result assertion, over the real 368.5MB sidecar through DiscoveryService) + docs/specs/discovery-budgets.md §4 dev-box MEASURED ACTUALS (browse-enrichment p95 ~0.6ms vs 150ms cap; get_work_witnesses p95 ~116ms/max ~476ms; added RSS ~11MB vs 250MB cap) + docs/specs/discovery-deploy.md (asset-first deploy→stage→verify→atomic manifest swap→restart→flag-bypass smoke; rollback; reproducible rebuild). Gates: Task1+Task2 auto-verify exit 0, ruff clean, check_atlas_masking --scan-repo --scan-asset --strict exit 0. 134-08-SUMMARY.md written.
 Resume file: None
-Next step: 134-07 (owner title-review -> re-distill the real discovery.db -> freeze discovery-frames.md; a human gate) is next in wave 4/5, followed by 134-08 (PERF-01 measurement + budgets finalization + deploy/rollback/rebuild recipe; wave 5, human gate). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
+Next step: REMEDIATION to discovery-v2 (owner review 2026-07-23 re-opened the frame). (B) band-label honesty contract LANDED (docs/specs/discovery-band-labels-v1.md) + inspection view relabeled. Blocked on the SEED-029/R-source track for (A) relation-aware canonical cross-corpus merge (gen2_workid_registry.json → w000xxx via crosswalk; ≥2-author groups held for owner; whole-vs-part granularity = Codex #1) + (C) direction-aware shadow router. Key correction: the current shadow is DENSITY-ONLY (no direction; mis-routes ~26% of anthology co-claims), so "direction-first for free" does NOT hold — direction must be built INTO the shadow (producer-side). (C) is itself blocked on Track-1 re-instrumentation to persist per-match ref-subspans+provenance (page-side [start,end,density] only today). (C) integration is no-schema-change: shadow → routing_status='review_only' + claim_type reclass; NEW INVARIANT — a review_only row must NEVER dominate a shipped row (else the base is orphaned). v2 order-of-ops (Codex-blessed, demotion BEFORE shadow finalizes): canonical/vgroup → span-paired claim gen → distinctive/shared routing → relation-aware shadow → tier-A → bake (full shadow recompute every bake; shadowing non-monotone under row addition). 134-08 Task 3 (prod deploy) + Phase 135 grading HELD until v2. Masking: R-source tokens in .masking_patterns (owner action, still pending) HARD-BLOCK any R-source build/scan. 134-07 COMPLETE 2026-07-22 (1,270-work real discovery.db; frame_content_hash 17bf5601…; DB content_hash 8e434513…; 368.5MB owner-accepted; discovery-frames.md FROZEN). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
 ## Performance Metrics
 

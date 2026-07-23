@@ -118,11 +118,13 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 134-06-PLAN.md — Async DiscoveryService chokepoint (off-loop, timeouts, bounded concurrency, LRU, pagination) (wave 4)
-- [ ] 134-07-PLAN.md — Owner title-review -> re-distill real discovery.db -> freeze discovery-frames.md (corrected per-band+evidence_source counts + C-7 precision reporting) (wave 4, human gate)
+- [x] 134-07-PLAN.md — Owner title-review -> re-distill real discovery.db -> freeze discovery-frames.md (corrected per-band+evidence_source counts + C-7 precision reporting) (wave 4, human gate) — DONE 2026-07-22: 1,270 works (508 sefaria+106 ja+656 owner-titled M-source), 268,490 claims / 297,559 evidence / 5,547 units; frame_content_hash 17bf5601…; verify + strict masking gate clean; discovery-frames.md FROZEN; DB 368.5MB (owner-accepted)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 134-08-PLAN.md — PERF-01 measurement + budgets finalization + deploy/rollback/rebuild recipe (wave 5, human gate)
+- [ ] 134-08-PLAN.md — PERF-01 measurement + budgets finalization + deploy/rollback/rebuild recipe (wave 5, human gate) — Tasks 1-2 DONE 2026-07-23: scripts/bench_discovery.py (flag-bypass predicate, nonzero-result assertion, over the real 368.5MB sidecar via DiscoveryService) + discovery-budgets.md §4 dev-box actuals (browse-enrichment p95 ~0.6ms vs 150ms; get_work_witnesses p95 ~116ms; added RSS ~11MB vs 250MB) + docs/specs/discovery-deploy.md (asset-first deploy/rollback/rebuild); Task1+2 auto-verify + ruff + strict masking scan all clean. **Task 3 (prod deploy) HELD.**
+
+> **⚠ PHASE 134 RE-OPENED — DATA-QUALITY REMEDIATION (2026-07-23).** Owner review of the discovery-v1 build found 3 disqualifying defects: cross-corpus duplicate works (`canonical_work_id` unpopulated), band-label overclaim (`expert_verified`=121 confirmed+1,067 unreviewed; `tier_a`=238,618 all unreviewed), and anthology/quotation false positives (T-S C 2.191). Frame → **SUPERSEDED-PENDING**, re-distill to **discovery-v2**. Fix ownership: **(B) band-label honesty contract LANDED** (`docs/specs/discovery-band-labels-v1.md`, this track); **(A) relation-aware canonical merge + (C) direction-aware shadow router = SEED-029/R-source track** (its current shadow is density-only, mis-routes ~26% of anthology co-claims; blocked on Track-1 ref-subspan re-instrumentation). Task 3 + Phase 135 grading gate on v2. See STATE.md "Next step" for the Codex-blessed v2 order-of-ops.
 
 ### Phase 135: Precision Certificate & Confidence Bands
 

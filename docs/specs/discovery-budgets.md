@@ -103,25 +103,50 @@ None of these env vars exist in code yet -- this section only fixes the
 NAMES and DEFAULTS 134-06 must implement against, so this artifact and the
 DiscoveryService code stay in lockstep from the first line of that plan.
 
-## 4. Measured Actuals — PENDING
+## 4. Measured Actuals — dev-box measured (prod-box PENDING)
 
-**PENDING** (recorded in 134-08, later in this phase, against the real
-prod-scale `discovery.db` and production traffic). This section will be
-filled in with:
+Measured 2026-07-23 by `scripts/bench_discovery.py` over the real sidecar
+`discovery-v1-8e43451300429ed4ace5e29e5513359a29674ac49731d5c969eb1d607e0ca065.db` (368.5 MB on disk), through the
+`shared.discovery_service.DiscoveryService` async chokepoint, using a
+benchmark-only readiness predicate that ANDs the loader's `_state.ready`
+WITHOUT the `DISCOVERY_ENABLED` UI flag (F14 — the flag was never set) and
+asserting every measured query returns nonzero rows (never an empty no-op).
+Browse-path latency was measured with the browse LRU DISABLED
+(`DISCOVERY_BROWSE_LRU_MAX_ENTRIES=0`), so every timed call is a real
+cache-miss DB query (worst case; the production cache only lowers this).
 
-- Actual measured p95 added latency for browse-enrichment (vs. the ≤150 ms cap).
-- Actual measured server p95 / response size for work/leads pages (vs. §1.2).
-- Actual measured server p95 / response size / node-edge counts for atlas
-  drill-down (vs. §1.3), once ATLAS-02's bounded explorer ships (Phase 139).
-- Actual measured additional RSS on the prod box (vs. the ≤250 MB cap).
-- Any retuned default from §2 that measurement showed was mis-set (would
-  require a version bump per the "tunable only by versioning" rule above).
+### 4.1 Query latency + RSS (dev-box actuals vs §1 caps)
 
-Later-surface caps for the `/work/{id}` panel and atlas drill-down pages
-remain PENDING until Phases 136 and 139 respectively actually ship those
-surfaces — this document's §1/§2 caps and defaults exist now so those later
-plans have a stable contract to implement against, not because they are
-measured yet.
+| Metric | Cap | Dev-box actual | Note |
+|---|---|---|---|
+| Browse-enrichment added latency (p95) | ≤ 150 ms | **0.57 ms** | max of the two browse reads below; cache OFF (worst case) |
+| &nbsp;&nbsp;• `get_claims_for_page` (p95 / max) | — | 0.57 / 6.99 ms | 200 distinct pages, 326 rows total |
+| &nbsp;&nbsp;• `get_pages_related_to_page` (p95 / max) | — | 0.54 / 0.95 ms | 200 distinct pages, 425 rows total |
+| `get_work_witnesses` query (p95 / max) | (request cap ≤ 1.5 s) | 117.21 / 478.95 ms | 200 works incl. the heaviest; 9930 unit rows total |
+| **Additional RSS (dev-box, sidecar+service+LRU warm)** | ≤ 250 MB | **11.1 MB** | dev-box indicative; prod-box authoritative (Task 3) |
+
+**Executed-query counts (nonzero-result assertion passed for all):**
+`get_claims_for_page` = 200 queries / 326 rows;
+`get_pages_related_to_page` = 200 queries / 425 rows;
+`get_work_witnesses` = 200 queries / 9930 unit rows.
+
+### 4.2 Prod-box + later-surface caps — PENDING
+
+- **Additional RSS on the prod box (vs the ≤ 250 MB cap)** — PENDING: the
+  authoritative measurement is the 134-08 Task 3 human/live-server step (owner
+  runs `bench_discovery.py` / samples the web process RSS around restart on the
+  web box); recorded here as **MEASURED ACTUALS (prod-box)** after that run.
+- **Work/Leads request-time p95 / response size (§1.2)** — PENDING until Phase
+  136 ships the `/work/{id}` + `/leads` surfaces (the query-latency figures
+  above are the DB-side cost only; the full request-time budget is measured
+  when the surface exists).
+- **Atlas drill-down p95 / node-edge counts / response size (§1.3)** — PENDING
+  until Phase 139 ships the bounded explorer (ATLAS-02).
+- Any §2 default that measurement shows is mis-set would require a version bump
+  per the "tunable only by versioning" rule above.
+
+These later-surface caps and defaults exist now so those plans have a stable
+contract to implement against, not because they are measured yet.
 
 ---
 
