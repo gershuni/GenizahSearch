@@ -2,6 +2,9 @@
 
 **Status:** ACTIVE. Version 1, created 2026-07-23 (Phase 134 remediation; the
 "(B) band-label honesty" lane of the discovery-spine / SEED-029 split).
+Amended 2026-07-23: §4 gains the **multi-register invariant** (a page may carry
+N shipped witnesses; the band filter must never suppress a shipped co-register) —
+surfaced by SEED-029 live adjudication of multi-register targum MSS.
 
 **Tunable ONLY by versioning this artifact** (same discipline as
 `docs/specs/discovery-budgets.md`). This file is the SINGLE source of truth for
@@ -86,18 +89,55 @@ per-item probabilities. Present them under these rules:
 
 ## 4. Default-shown policy (BAND-03 precursor)
 
+**Multi-register invariant (frame-level, NOT an edge case).** A page can
+legitimately carry MULTIPLE shipped witnesses at once — owner-confirmed on real
+Genizah targum MSS: Bible + Targum verse-after-verse (two), Bible + Onkelos +
+Judeo-Arabic Tafsir (three), all correct, occupying different non-overlapping
+spans / scripts / languages. The claim key is `(page_id, work_id)` and
+`display_evidence_id` is **per-claim, never per-page**, so N shipped works per
+page is native to the schema (~20% of pages already carry ≥2 shipped
+witness-works; some 5+). **No surface may collapse a page to one work, and the
+band filter below MUST NOT suppress a shipped co-register.** (Producer-side, the
+relation-aware shadow does not shadow across non-overlapping-span registers —
+they co-exist, they don't compete.)
+
 On any default (non-expanded) surface:
 
-- **Show:** rows with `adjudication_status='human_confirmed'` (any band), PLUS
-  the single **top algorithmic band's** `routing_status='shipped'` rows.
+- **Show every `routing_status='shipped'` witness claim on the page** (all
+  registers), PLUS every `adjudication_status='human_confirmed'` row (any band).
+  A shipped claim is **never** hidden merely because a sibling claim on the same
+  page sits in a higher band — the band governs per-claim DISCLOSURE, not
+  per-page collapse. (Earlier drafts said "top algorithmic band only"; that would
+  have hidden a legit co-register on ~3,241 multi-band multi-work pages — removed.)
 - **Behind an explicit "show screening / algorithmic matches" toggle:** the
-  lower algorithmic tiers, `routing_status='review_only'`, and shadowed rows.
+  `screening_rb` / `screening_canon` tiers, `routing_status='review_only'`, and
+  shadowed rows.
 - Each shown algorithmic row is marked per §2 ("unreviewed · algorithmic
   estimate") unless it carries the review badge.
+
+This default is trustworthy **only in concert with (C)**: the direction-aware
+shadow router demotes anthology/quotation false positives to
+`routing_status='review_only'` (hidden here), so "show all shipped" is safe
+because the shipped set has already had the wrong-direction claims routed out.
+Band disclosure (this §) and false-positive routing (C) are complementary, not
+substitutes.
 
 This is the yardstick-not-evidence / provisional-not-certified discipline the
 whole discovery program runs under; it does not delete any row (everything stays
 queryable) — it governs what the DEFAULT view asserts.
+
+## 4a. Bake-time integrity checks (v2 verifier — from the SEED-029 handoff)
+
+Two page-coverage checks the v2 bake/verifier owns (counts supplied by the
+router output):
+
+- **Shadow-orphan (HARD FAIL):** any page with ≥1 claim but **0 shipped** claims
+  → the bake dies. A base was shadowed with nothing surviving on the shipped
+  surface; that is a real bug (`review_only` must never dominate `shipped`).
+- **Coverage-gap / P4 "no base target" (LOG + REPORT, not fatal):** pages that
+  drop from ≥1 claim pre-merge to **0 claims post-merge** — a base witness fell
+  out and nothing caught it. Different cause from the orphan; reported, not
+  hard-failed.
 
 ## 5. v2 enum-rename lockstep
 
