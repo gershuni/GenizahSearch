@@ -139,7 +139,29 @@ Plans:
   4. A bilingual methods/confidence page documents each band (population, unit of measurement, sample size, strata, weighted estimate, confidence interval, measurement date, grader + audit status, immutable report identifier) and every band tooltip links to it.
   5. A pre-registered stratified tier-A precision measurement with a written protocol (estimand + dedup unit, frozen eligible-frame hash, mutually-exclusive strata + weights, seed, blindness, gold treatment, exclusion/indeterminate rules, CI method, pass/fail gates, per-outcome release copy, and the FAIL action = reband `tier_a` to screening) has its ~200–250 cards drawn against the frozen frame and enters owner grading.
 
-**Plans**: TBD
+**Plans**: 9 plans (6 waves)
+
+Plans:
+**Wave 1** *(Track A parallel + Track B leadoff, no deps)*
+- [ ] 135-01-PLAN.md — Band-label values module + band_precision reader + drift-guard test (BAND-01/02/03/04, CERT-02)
+- [ ] 135-03-PLAN.md — Written pre-registered CERT-01 tier-A protocol doc (CERT-01)
+- [ ] 135-04-PLAN.md — REWRITE discovery-v2-bake-plan.md + BLOCKING Codex re-review gate (autonomous: false)
+
+**Wave 2**
+- [ ] 135-02-PLAN.md — Bilingual methods/confidence Help section + /help noindex + render-smoke (BAND-05)
+- [ ] 135-05-PLAN.md — v2 vocabulary lockstep: routing_reason += later_shared_text + expert_verified→high_confidence_algorithmic rename + spec amendments
+
+**Wave 3**
+- [ ] 135-06-PLAN.md — v2 build logic: canonical merge + drop + Lever-1 routing + D-17 chronological demotion (DELTA=100y) + verifier invariants + fixture tests
+
+**Wave 4**
+- [ ] 135-07-PLAN.md — Run v2 bake + verifier + strict masking gate + freeze discovery-frames-v2.md
+
+**Wave 5**
+- [ ] 135-08-PLAN.md — v2 production deploy (asset-first, human-approved checkpoint, ONCE) (autonomous: false)
+
+**Wave 6**
+- [ ] 135-09-PLAN.md — CERT-01 frame freeze + pre-outcome OC table + ~200–250 card draw → grading STARTED (phase close)
 
 ### Phase 136: Read Surfaces — Connections Panel & Work→Witnesses
 
@@ -211,7 +233,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
-| 135. Precision Certificate & Confidence Bands | 0/TBD | Not started | - |
+| 135. Precision Certificate & Confidence Bands | 0/9 | In Progress|  |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |
