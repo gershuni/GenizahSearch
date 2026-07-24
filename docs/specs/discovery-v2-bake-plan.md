@@ -89,11 +89,12 @@ rather than leaving implicit.
 R5-HIGH fix, closing the "initial population unspecified" gap).** On the
 FIRST v2 build (no `--precision-spec` supplied; §6 step 0 resolves "no
 override"), EVERY `band_precision` row's `measurement_status` is populated
-by ONE rule, applied uniformly so gate 12's exact five-field consistency
-predicate holds for EVERY row with NO exception: default
+by ONE rule — with exactly ONE named, pre-existing exception (the
+`scope='collection'` row, detailed below) — applied uniformly so gate 12's
+exact five-field consistency predicate holds for EVERY row: default
 `measurement_status='not_measured'` with ALL FIVE of
 `precision`/`ci_low`/`ci_high`/`numerator`/`denominator` set NULL, for EVERY
-band — INCLUDING `screening_rb`'s pre-existing legacy figure
+`scope='band'` row — INCLUDING `screening_rb`'s pre-existing legacy figure
 (`discovery-band-labels-v1.md` §3.1's `0.859 (pre-registered; CI pending
 Ph135)`). That legacy value is a precision POINT ESTIMATE WITHOUT a computed
 `ci_low`/`ci_high` (explicitly "CI pending" — not yet a real confidence
@@ -108,12 +109,46 @@ fields populated. The ONLY row eligible for a non-`not_measured` initial
 status on the FIRST build is one that ALREADY carries a genuine, complete,
 previously-computed CI (non-NULL `precision` AND `ci_low` AND `ci_high` AND
 `numerator` AND `denominator` from a prior, already-completed measurement) —
-none exists at v2 first-build time for ANY band, so in practice EVERY
-`band_precision` row starts the v2 era as `measurement_status='not_measured'`
-with all five fields NULL, no exception. This is a ONE-TIME first-build
-migration rule, distinct from (and never invoked by) the §4.5 reband's own
-atomic invalidation, which applies ONLY on a LATER reband-triggering
-rebuild.
+**exactly ONE such row already exists at v2 first-build time (Codex round-9
+HIGH-1 fix — the prior draft's "none exists ... for ANY band" claim was
+wrong: it is correct for every `scope='band'` row, but NOT for the
+`scope='collection'` row, which this section previously overlooked and
+would have discarded):** `discovery-sidecar-schema-v1.md` §1.6's frozen
+population rule already carries the `scope='collection'`,
+`collection_id='propagated_witness_collection_v1'` row —
+`precision=0.926`, `ci_low=0.875`, `ci_high=0.968`, `numerator=176`,
+`denominator=190` (a work-cluster bootstrap over the FULL router-cleaned
+propagated witness collection; held-out 200-card draw, determinate
+176/190) — a GENUINE, COMPLETE, previously-computed CI satisfying the
+eligibility test in the sentence above exactly. This measurement is over
+the PROPAGATED-witness-collection population
+(`evidence_source='propagated'`'s corroborated/weak union, at the
+COLLECTION level) — a population this rewrite's census-merge, drop-list,
+D-17, and §4.5 reband changes NEVER touch (those act on `track1_direct`
+claims and the `tier_a`/`screening_rb` BAND scope only; the schema's own
+no-pooling discipline already forbids deriving any `scope='band'` figure
+from this collection-level number, per §1.6). **The FIRST-build migration
+therefore PRESERVES this ONE row UNCHANGED — its `precision`, `ci_low`,
+`ci_high`, `numerator`, and `denominator` are left exactly as stored, and
+its `measurement_status` is populated (never left NULL, since the column
+is required on every row) as `measurement_status='measured_pass'`** — the
+value consistent with its OWN stored `ci_low=0.875 >= 0.85` per gate 12's
+exhaustive five-field/status predicate (§7 gate 12); this is a retroactive
+CLASSIFICATION of an existing, already-owner-reviewed measurement, never a
+new measurement performed by this rewrite. No OTHER `band_precision` row
+qualifies for this exception at v2 first-build time — in particular,
+`screening_rb`'s pre-existing legacy point estimate above still fails the
+eligibility test (it lacks a computed `ci_low`/`ci_high`) and is still
+nulled to `not_measured` exactly as specified. So, with this ONE named
+exception, EVERY `scope='band'` `band_precision` row starts the v2 era as
+`measurement_status='not_measured'` with all five fields NULL, no
+exception. This is a ONE-TIME first-build migration rule, distinct from
+(and never invoked by) the §4.5 reband's own atomic invalidation, which
+applies ONLY on a LATER reband-triggering rebuild — **only band
+populations ACTUALLY CHANGED by a reband, or lacking any prior
+measurement, are ever nulled; a row with a genuine prior measurement over
+an untouched population, like this one, is never discarded for the sake of
+a uniform default.**
 
 ---
 
@@ -1060,6 +1095,75 @@ self-referential anchor with an INDEPENDENT measurement:
   exactly like the other hash-pinned inputs in §4.1/§4.3 above), and its
   coverage figure PLUS its SHA-256 are recorded in `meta` AND the v2 frame
   doc (joining the provenance list below and §7 gate 11).
+
+**FROZEN exact-shape schema for `--chrono-coverage-anchor` (Codex round-9
+HIGH-2 fix — a matching SHA-256 alone proves only which BYTES were read,
+never that they represent the claimed same-basis measurement; this closes
+that gap with a fully closed, typed, mechanically-checked contract, the
+same discipline already applied to every OTHER hash-pinned input in this
+document).** The file is a single JSON object with EXACTLY five top-level
+keys, no more and no fewer:
+- `pair_coverage` — a JSON number (float), REQUIRED to satisfy
+  `0.0 <= pair_coverage <= 1.0` inclusive; the independent measurement's own
+  `|R|/|U|` figure (§ above), computed under the IDENTICAL span-overlap-gated
+  methodology as the main build's own `pair_coverage`.
+- `numerator` — a JSON integer, REQUIRED `>= 0`: the independent
+  measurement's own `|R|` count (pairs where both sides resolved a year).
+- `denominator` — a JSON integer, REQUIRED `>= 1`: the independent
+  measurement's own `|U|` count (the full candidate universe it enumerated).
+  REQUIRED: `numerator <= denominator` (a numerator exceeding its own
+  denominator is structurally invalid regardless of the reported
+  `pair_coverage` value).
+- `candidate_universe_id` — a JSON string: a SHA-256 hex digest computed by
+  the independent measurement script over the SORTED list of
+  `(page_id, canonical_work_id_lo, canonical_work_id_hi)` triples
+  comprising the `|U|` it enumerated (the SAME lexicographic pair-key and
+  dedup rule as `discovery_routing_audit`'s own key, § above) — a
+  content-derived fingerprint of WHICH candidate universe was measured, not
+  merely a label. **Mechanically verified at build time, not just parsed
+  (this is the "universe-identity mismatch" reject condition, below):**
+  gate 9 (or a preflight step immediately before it) independently
+  recomputes this SAME digest over the MAIN build's own
+  `discovery_routing_audit` population (the exact set of
+  `(page_id, canonical_work_id_lo, canonical_work_id_hi)` triples the main
+  build itself shipped) and REJECTS (`--release` HALTS) if the two digests
+  do not match byte-for-byte — this is what proves the anchor's `R`/`U`
+  were computed over the FROZEN production co-claim universe the current
+  build actually ships, not a similar-looking but stale or different
+  universe from an earlier corpus/date-table revision; a matching
+  `--chrono-coverage-anchor-sha256` alone (proving only which anchor FILE
+  bytes were read) can never substitute for this universe-identity check.
+- `methodology_version` — a JSON string, REQUIRED to equal EXACTLY the
+  frozen literal `"chrono_coverage_prebuild_v1"` — a version tag for the
+  independent measurement's methodology (span-overlap gate, `MIN_ML=200`,
+  the dedup key, the `R`-membership predicate); a future methodology change
+  mints a NEW version literal rather than silently reusing this one, so an
+  anchor measured under a since-changed methodology can never be silently
+  compared against by an old `methodology_version` string.
+- `measurement_basis` — a JSON string, REQUIRED to equal EXACTLY the frozen
+  literal `"span_overlap_gated_post_lever1"` — names the measured
+  population basis (the currently-shipped, post-Lever-1, span-overlap-gated
+  co-claim universe, § above) so the anchor is self-documenting about WHAT
+  it measured, independent of and in addition to the mechanically-checked
+  `candidate_universe_id` digest.
+
+**Reject conditions (`--release` HALTS on any one of these; enumerated
+exhaustively, not "reject anything that looks wrong"):** a top-level JSON
+value that is not an object; an object with a MISSING key from the five
+above; an object with an EXTRA key beyond the five above; `pair_coverage`
+not a JSON number, or outside `[0.0, 1.0]`; `numerator` or `denominator` not
+a JSON integer, `denominator < 1`, or `numerator > denominator`;
+`candidate_universe_id` not a JSON string, or not matching the
+mechanically-recomputed digest of the main build's own candidate universe
+(the universe-identity mismatch check above); `methodology_version` not
+equal to the frozen literal `"chrono_coverage_prebuild_v1"`;
+`measurement_basis` not equal to the frozen literal
+`"span_overlap_gated_post_lever1"`. The SHA-256 pin on the anchor FILE
+(`--chrono-coverage-anchor-sha256`) is verified BEFORE any of the above
+structural/semantic checks, exactly like every other hash-pinned input in
+this document — the pin and the schema/universe-identity checks are BOTH
+required, neither substitutes for the other.
+
 - **Gate 9's FIRST-build check** regression-tests the FIRST v2 build's OWN
   measured `pair_coverage` against THIS independent `chrono_coverage_prebuild`
   figure (same `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` tolerance as
