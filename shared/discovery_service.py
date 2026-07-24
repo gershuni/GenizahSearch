@@ -492,6 +492,101 @@ class DiscoveryService:
             logger.error("DiscoveryService.get_version error: %s", e)
             return None
 
+    def get_band_precision(
+        self, evidence_source: Optional[str], confidence_band: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """BAND-02: the matching ``scope='band'`` ``band_precision`` row, or
+        None when absent/unavailable (never raises -- mirrors ``get_version``
+        exactly).
+
+        Uses ``SELECT *`` (never a fixed column list) so the 135-05-added
+        columns (``measurement_status``/``measurement_date``/``grader``/
+        ``audit_status``/``report_id``) surface when present and are simply
+        absent (via ``dict.get`` downstream) against a v1-shaped fixture."""
+        if not self.is_available():
+            return None
+        conn = self._get_conn()
+        if conn is None:
+            return None
+        try:
+            cur = conn.execute(
+                "SELECT * FROM band_precision WHERE scope = 'band' "
+                "AND evidence_source = ? AND confidence_band = ?",
+                (evidence_source, confidence_band),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(
+                "DiscoveryService.get_band_precision error for (%s, %s): %s",
+                evidence_source, confidence_band, e,
+            )
+            return None
+
+    def get_band_precision_collection(
+        self, collection_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """The ``scope='collection'`` ``band_precision`` row -- the
+        propagated-witness COLLECTION-level number (e.g. 0.926) that never
+        lives on any band row. With ``collection_id=None``, returns the sole
+        collection row when exactly one exists; None when zero or more than
+        one (ambiguous -- never raises, mirrors ``get_version``)."""
+        if not self.is_available():
+            return None
+        conn = self._get_conn()
+        if conn is None:
+            return None
+        try:
+            if collection_id is not None:
+                cur = conn.execute(
+                    "SELECT * FROM band_precision WHERE scope = 'collection' AND collection_id = ?",
+                    (collection_id,),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
+            cur = conn.execute("SELECT * FROM band_precision WHERE scope = 'collection'")
+            rows = cur.fetchall()
+            if len(rows) != 1:
+                return None
+            return dict(rows[0])
+        except Exception as e:
+            logger.error("DiscoveryService.get_band_precision_collection error: %s", e)
+            return None
+
+    def get_band_claim_counts(self) -> Dict[Tuple[str, str], int]:
+        """Codex #9/#B1: the version-aware, SHIPPED, DISPLAY-DEDUPLICATED
+        per-(evidence_source, confidence_band) CLAIM-count population --
+        each ``discovery_claim`` counted ONCE via its single
+        ``display_evidence_id`` (per docs/specs/discovery-frames.md §4), NOT
+        raw ``discovery_evidence`` rows (a claim owning >1 evidence row, e.g.
+        the witness + shared_text collision, must not inflate the count).
+        ``{}`` on unavailable/error (never raises). This is the BAND-05
+        "population" source -- reflects whatever sidecar asset is currently
+        loaded (v1 pre-bake, v2 post-deploy), never ``band_precision.
+        denominator`` (the graded-sample size, a different number)."""
+        if not self.is_available():
+            return {}
+        conn = self._get_conn()
+        if conn is None:
+            return {}
+        try:
+            cur = conn.execute(
+                """
+                SELECT e.evidence_source, e.confidence_band, COUNT(*) AS n
+                FROM discovery_claim c
+                JOIN discovery_evidence e ON e.evidence_id = c.display_evidence_id
+                WHERE e.routing_status = 'shipped'
+                GROUP BY e.evidence_source, e.confidence_band
+                """
+            )
+            return {
+                (row["evidence_source"], row["confidence_band"]): row["n"]
+                for row in cur.fetchall()
+            }
+        except Exception as e:
+            logger.error("DiscoveryService.get_band_claim_counts error: %s", e)
+            return {}
+
     def get_claims_for_page(
         self, page_id: str, page: int = 1, page_size: Optional[int] = None,
         include_review: bool = False,
@@ -866,6 +961,24 @@ class DiscoveryService:
 
     async def get_version_async(self) -> Optional[str]:
         return await self._run_off_loop(self.get_version, timeout=self._browse_timeout())
+
+    async def get_band_precision_async(
+        self, evidence_source: Optional[str], confidence_band: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        return await self._run_off_loop(
+            self.get_band_precision, evidence_source, confidence_band,
+            timeout=self._browse_timeout(),
+        )
+
+    async def get_band_precision_collection_async(
+        self, collection_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        return await self._run_off_loop(
+            self.get_band_precision_collection, collection_id, timeout=self._browse_timeout()
+        )
+
+    async def get_band_claim_counts_async(self) -> Dict[Tuple[str, str], int]:
+        return await self._run_off_loop(self.get_band_claim_counts, timeout=self._browse_timeout())
 
     async def get_claims_for_page_async(
         self, page_id: str, page: int = 1, page_size: Optional[int] = None,
