@@ -16,9 +16,12 @@ name. All page_id/sys_id/work_id fixture values in this file are synthetic
 placeholders, not real research-data identifiers.
 """
 
+import sqlite3
+
 import pytest
 
 import scripts.discovery_ids as d
+from scripts import build_discovery_sidecar as sidecar_build
 
 # ---------------------------------------------------------------------------
 # Committed golden digests -- computed once from the frozen fixed inputs
@@ -358,3 +361,164 @@ def test_display_precedence_deterministic_evidence_id_tiebreak():
 def test_display_precedence_raises_on_empty():
     with pytest.raises(ValueError):
         d.select_display_evidence([])
+
+
+# ---------------------------------------------------------------------------
+# Phase 135-05: v2 vocabulary + schema lockstep (Task 1 TDD + Task 3 golden).
+#
+# routing_reason gains `later_shared_text`; the stored track1_direct band adds
+# the v2 key `high_confidence_algorithmic` (renaming `expert_verified` in the
+# v2 vocabulary while RETAINING the v1 key for read-compat -- Codex #8);
+# band_precision gains the five registry columns with a CLOSED-vocab
+# `measurement_status` CHECK (Codex #B3); and the masking-safe
+# `discovery_routing_audit` table is created. The DDL CHECKs, the frozen
+# frozensets, and the build DDL must all agree (T-135-05-01 lockstep).
+#
+# All fixture values below are synthetic placeholders, never real research
+# identifiers (masking discipline, matches the header note).
+# ---------------------------------------------------------------------------
+
+
+def _fresh_schema_conn():
+    """An in-memory DB with the FROZEN build DDL applied. Foreign keys are
+    turned OFF afterwards so the CHECK-constraint tests below can insert a
+    single row without satisfying every cross-table FK -- CHECK constraints
+    are still enforced regardless of the FK pragma."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    return conn
+
+
+def _insert_evidence(conn, *, routing_reason):
+    conn.execute(
+        """
+        INSERT INTO discovery_evidence (
+            evidence_id, claim_id, evidence_kind, evidence_source, confidence_band,
+            adjudication_status, audit_status, routing_status, routing_reason,
+            is_new, a_page_id, sys_id, span_start, span_end
+        ) VALUES (?, 'claim_x', 'witness', 'track1_direct', 'tier_a',
+                   'unreviewed', 'n/a', 'shipped', ?, 0, 'p001', '990000000000000001', 1, 5)
+        """,
+        (f"ev_{routing_reason}", routing_reason),
+    )
+    conn.commit()
+
+
+# -- routing_reason frozen enum + discovery_evidence DDL CHECK --------------
+
+def test_routing_reason_later_shared_text_constant_and_membership():
+    assert d.ROUTING_REASON_LATER_SHARED_TEXT == "later_shared_text"
+    assert "later_shared_text" in d.ROUTING_REASONS
+    assert len(d.ROUTING_REASONS) == 5
+
+
+def test_discovery_evidence_routing_reason_check_accepts_later_shared_text():
+    conn = _fresh_schema_conn()
+    try:
+        _insert_evidence(conn, routing_reason="later_shared_text")  # must insert cleanly
+        (n,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_evidence WHERE routing_reason = 'later_shared_text'"
+        ).fetchone()
+        assert n == 1
+    finally:
+        conn.close()
+
+
+def test_discovery_evidence_routing_reason_check_rejects_bogus():
+    conn = _fresh_schema_conn()
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_evidence(conn, routing_reason="ZZZ_FAKE_ROUTING_REASON_ZZZ")
+    finally:
+        conn.close()
+
+
+# -- band rename with v1-read-compat (Codex #8) -----------------------------
+
+def test_confidence_band_high_confidence_algorithmic_constant_and_membership():
+    assert d.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC == "high_confidence_algorithmic"
+    track1 = d.CONFIDENCE_BANDS_BY_SOURCE[d.EVIDENCE_SOURCE_TRACK1_DIRECT]
+    assert "high_confidence_algorithmic" in track1
+    # v1-read-compat: the v1 stored key is RETAINED until the v2 manifest is
+    # live (the live v1 asset + the v1 fixture tests still read it).
+    assert "expert_verified" in track1
+
+
+# -- band_precision registry columns + closed-vocab measurement_status CHECK -
+
+def test_band_precision_has_all_registry_columns():
+    conn = _fresh_schema_conn()
+    try:
+        cols = {r[1] for r in conn.execute('PRAGMA table_info("band_precision")')}
+    finally:
+        conn.close()
+    assert {
+        "measurement_status", "measurement_date", "grader", "audit_status", "report_id"
+    } <= cols
+
+
+def test_band_precision_measurement_status_accepts_closed_vocab():
+    conn = _fresh_schema_conn()
+    try:
+        for status in (
+            "not_measured", "measured_pass", "measured_fail", "insufficient_evidence", None,
+        ):
+            conn.execute(
+                "INSERT INTO band_precision (scope, collection_id, measurement_status) "
+                "VALUES ('band', 'c1', ?)",
+                (status,),
+            )
+        conn.commit()
+        (n,) = conn.execute("SELECT COUNT(*) FROM band_precision").fetchone()
+        assert n == 5
+    finally:
+        conn.close()
+
+
+def test_band_precision_measurement_status_rejects_bogus():
+    conn = _fresh_schema_conn()
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO band_precision (scope, collection_id, measurement_status) "
+                "VALUES ('band', 'c1', 'ZZZ_FAKE_STATUS_ZZZ')"
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
+# -- masking-safe discovery_routing_audit table -----------------------------
+
+def test_discovery_routing_audit_accepts_valid_row():
+    conn = _fresh_schema_conn()
+    try:
+        conn.execute(
+            """
+            INSERT INTO discovery_routing_audit
+                (page_id, kept_work_id, demoted_work_id, kept_year, demoted_year,
+                 delta_years, decision, routing_reason)
+            VALUES ('p001', 'w000001', 'w000002', 900, 1100, 200, 'demoted', 'later_shared_text')
+            """
+        )
+        conn.commit()
+        (n,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_routing_audit WHERE decision = 'demoted'"
+        ).fetchone()
+        assert n == 1
+    finally:
+        conn.close()
+
+
+def test_discovery_routing_audit_rejects_bogus_decision():
+    conn = _fresh_schema_conn()
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO discovery_routing_audit (page_id, decision) "
+                "VALUES ('p001', 'ZZZ_FAKE_DECISION_ZZZ')"
+            )
+            conn.commit()
+    finally:
+        conn.close()
