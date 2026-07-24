@@ -61,6 +61,14 @@ EVIDENCE_SOURCES = frozenset({EVIDENCE_SOURCE_TRACK1_DIRECT, EVIDENCE_SOURCE_PRO
 RESERVED_EVIDENCE_SOURCE_CATALOG_PROPAGATED = "catalog_propagated"
 
 CONFIDENCE_BAND_EXPERT_VERIFIED = "expert_verified"
+# v2 rename of the track1_direct top band (discovery-band-labels-v1.md §5).
+# `expert_verified` renames to `high_confidence_algorithmic` at the
+# discovery-v2 bake; the v1 key is RETAINED here through the transition for
+# read-compat (the live v1 asset + the v1 fixture tests still read it) and is
+# not dropped until the v2 manifest is live (Codex #8). The 135-01 values
+# module's `_canon_band_key` maps the v1 key to the v2 key for display so one
+# label serves both.
+CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC = "high_confidence_algorithmic"
 CONFIDENCE_BAND_TIER_A = "tier_a"
 CONFIDENCE_BAND_SCREENING_RB = "screening_rb"
 CONFIDENCE_BAND_SCREENING_CANON = "screening_canon"
@@ -70,6 +78,12 @@ CONFIDENCE_BAND_NOT_EVALUATED = "not_evaluated"
 
 CONFIDENCE_BANDS_BY_SOURCE: Dict[str, frozenset] = {
     EVIDENCE_SOURCE_TRACK1_DIRECT: frozenset({
+        # Both the v2 key and the v1 key are accepted through the rename
+        # transition (v1-read-compat, Codex #8) -- the built v2 asset uses
+        # ONLY the v2 key (the verifier's no-mixed-enum-state check enforces
+        # that at 135-06/135-07), while the runtime accepts whichever key the
+        # currently-loaded asset carries.
+        CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
         CONFIDENCE_BAND_EXPERT_VERIFIED,
         CONFIDENCE_BAND_TIER_A,
         CONFIDENCE_BAND_SCREENING_RB,
@@ -104,11 +118,18 @@ ROUTING_REASON_IMPURITY = "impurity"
 ROUTING_REASON_RUNNER_UP_CONFLICT = "runner_up_conflict"
 ROUTING_REASON_CO_CITATION = "co_citation"
 ROUTING_REASON_NONE = "none"
+# D-17 coarse chronological demotion (Phase 135, v2 bake): the later of two
+# co-claiming works whose text is shared is routed to review_only with this
+# reason. Added to the frozen vocab in 135-05; the demotion that WRITES it
+# (and the discovery_routing_audit row recording each decision) lands in the
+# v2 build logic (135-06).
+ROUTING_REASON_LATER_SHARED_TEXT = "later_shared_text"
 ROUTING_REASONS = frozenset({
     ROUTING_REASON_IMPURITY,
     ROUTING_REASON_RUNNER_UP_CONFLICT,
     ROUTING_REASON_CO_CITATION,
     ROUTING_REASON_NONE,
+    ROUTING_REASON_LATER_SHARED_TEXT,
 })
 
 MERGE_BASIS_OXFORD_PART = "oxford_part"

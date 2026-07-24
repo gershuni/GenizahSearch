@@ -122,7 +122,7 @@ CREATE TABLE discovery_evidence (
   adjudication_status TEXT NOT NULL CHECK (adjudication_status IN ('human_confirmed','provisional','unreviewed')),
   audit_status      TEXT NOT NULL CHECK (audit_status IN ('audit_pending','audit_passed','n/a')),
   routing_status    TEXT NOT NULL CHECK (routing_status IN ('shipped','review_only')),
-  routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none')),
+  routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none','later_shared_text')),
   is_new            INTEGER NOT NULL DEFAULT 0,
 
   a_page_id         TEXT NOT NULL,
@@ -193,7 +193,39 @@ CREATE TABLE band_precision (
   sampling_frame  TEXT,
   ins_policy      TEXT,
   weighting       TEXT,
-  notes           TEXT
+  notes           TEXT,
+
+  -- CERT-01 measurement-registry columns (Phase 135, plan 135-05). All
+  -- NULLABLE: the CERT-01 grading write fills them later (135-09+). The
+  -- CLOSED-vocab measurement_status CHECK (Codex #B3) mirrors
+  -- shared/discovery_band_labels.MEASUREMENT_STATUSES exactly, so a free-text
+  -- status can never reach the default-eligibility predicate.
+  measurement_status TEXT CHECK (measurement_status IN
+                        ('not_measured','measured_pass','measured_fail','insufficient_evidence')
+                        OR measurement_status IS NULL),
+  measurement_date   TEXT,
+  grader             TEXT,
+  audit_status       TEXT,
+  report_id          TEXT
+);
+
+-- Masking-safe D-17 chronological-routing audit trail (Phase 135, plan
+-- 135-05 DDL; ROWS written by the v2 bake demotion in 135-06). Opaque work
+-- ids + numeric years ONLY -- no title, no reference text, no raw id: this
+-- table carries no restricted content by construction. `decision` and
+-- `routing_reason` record which demotion rule fired; `routing_reason` is a
+-- plain annotation column here (the constrained routing_reason enum lives on
+-- discovery_evidence).
+CREATE TABLE discovery_routing_audit (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  page_id         TEXT,
+  kept_work_id    TEXT,
+  demoted_work_id TEXT,
+  kept_year       INTEGER,
+  demoted_year    INTEGER,
+  delta_years     INTEGER,
+  decision        TEXT CHECK (decision IN ('demoted','kept_tie','fail_safe_unknown_date')),
+  routing_reason  TEXT
 );
 """
 
@@ -266,6 +298,13 @@ _REVIEW_ONLY = ids.ROUTING_STATUS_REVIEW_ONLY
 
 _NONE_REASON = ids.ROUTING_REASON_NONE
 _CO_CITATION = ids.ROUTING_REASON_CO_CITATION
+# v2-vocabulary constants (Phase 135, 135-05). Referenced by the v2 build
+# logic (135-06: the D-17 later_shared_text demotion + the v2 band rename).
+# Established here in lockstep with the frozen enum + DDL; the synthetic
+# fixture (byte-identical) and the current real build keep writing
+# `_EXPERT_VERIFIED` until the v2 bake flips them (NO bake logic in 135-05).
+_LATER_SHARED_TEXT = ids.ROUTING_REASON_LATER_SHARED_TEXT
+_HIGH_CONFIDENCE_ALGORITHMIC = ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC
 
 _OXFORD_PART = ids.MERGE_BASIS_OXFORD_PART
 _PHYSICAL_JOIN = ids.MERGE_BASIS_PHYSICAL_JOIN

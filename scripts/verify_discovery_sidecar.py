@@ -51,6 +51,18 @@ FORBIDDEN_EXACT_COLUMNS = {"text", "cat", "provenance"}
 RESTRICTED_TO_WORKS_COLUMNS = {"title", "author", "genre"}
 _RAW_WORK_ID_PREFIXES = ("M:", "J:", "REF")
 
+# The verifier's evidence-combination enum check DERIVES its valid
+# track1_direct bands straight from `ids.CONFIDENCE_BANDS_BY_SOURCE`, so the
+# 135-05 v2 rename lands here automatically and IN LOCKSTEP: it accepts BOTH
+# the v1 stored key (`expert_verified`) AND the v2 key
+# (`high_confidence_algorithmic`) through the transition (v1-read-compat,
+# Codex #8) with no manual edit. The routing_reason enum (now including
+# `later_shared_text`) is enforced at the discovery_evidence DDL CHECK layer
+# mirroring `ids.ROUTING_REASONS` -- the verifier does not re-validate it.
+# (The release-strict `_EXPECTED_BAND_KEYS` / `_EXPECTED_MEASURED_BAND_PRECISIONS`
+# below still key on `expert_verified`: they gate the REAL v2 asset, whose
+# band_precision rename lands together with the build's band-assignment flip in
+# 135-06 -- NOT in 135-05.)
 VALID_EVIDENCE_COMBOS = frozenset(
     {(ids.EVIDENCE_KIND_WITNESS, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, b)
      for b in ids.CONFIDENCE_BANDS_BY_SOURCE[ids.EVIDENCE_SOURCE_TRACK1_DIRECT]}
