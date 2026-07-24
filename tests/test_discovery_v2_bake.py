@@ -531,6 +531,58 @@ def test_parse_seftja_dates_sha_mismatch_halts(tmp_path):
         sidecar_build.parse_seftja_dates(path, sha256="beef" * 16)
 
 
+def test_parse_seftja_dates_classical_years_accepted(tmp_path):
+    """135-07 amendment: the SEF/JA window is DECOUPLED from the M-source
+    [500,1600] floor and lowered to admit genuine classical base texts
+    (Mishnaic ~150, Talmudic ~300) -- the earlier-side D-17 anchors the
+    frozen artifact deliberately carries. These must PARSE, not HALT."""
+    path = _write_json(tmp_path / "s.json", {
+        "raw:mishnah": {"year": 150, "basis": "x"},
+        "raw:talmud": {"year": 300, "basis": "x"},
+        "raw:medieval": {"year": 1100, "basis": "x"},
+    })
+    assert sidecar_build.parse_seftja_dates(path) == {
+        "raw:mishnah": 150, "raw:talmud": 300, "raw:medieval": 1100}
+
+
+def test_parse_seftja_dates_floor_boundary(tmp_path):
+    """The decoupled SEF/JA floor is 100 inclusive: 100 parses, 99 HALTs
+    (the anti-corruption gate still rejects near-zero/absurd years)."""
+    ok = _write_json(tmp_path / "ok.json", {"raw:w1": {"year": 100, "basis": "x"}})
+    assert sidecar_build.parse_seftja_dates(ok) == {"raw:w1": 100}
+    bad = _write_json(tmp_path / "bad.json", {"raw:w1": {"year": 99, "basis": "x"}})
+    with pytest.raises(sidecar_build.SeftjaDatesError):
+        sidecar_build.parse_seftja_dates(bad)
+
+
+def test_parse_seftja_dates_high_boundary_unchanged(tmp_path):
+    """The SEF/JA upper bound is unchanged at 1600 inclusive: 1600 parses,
+    1601 HALTs."""
+    ok = _write_json(tmp_path / "ok.json", {"raw:w1": {"year": 1600, "basis": "x"}})
+    assert sidecar_build.parse_seftja_dates(ok) == {"raw:w1": 1600}
+    bad = _write_json(tmp_path / "bad.json", {"raw:w1": {"year": 1601, "basis": "x"}})
+    with pytest.raises(sidecar_build.SeftjaDatesError):
+        sidecar_build.parse_seftja_dates(bad)
+
+
+def test_parse_seftja_dates_real_frozen_artifact_smoke_parse():
+    """Smoke-parse the REAL frozen SEF/JA artifact (the orchestrator-pinned
+    seftja_dates.json, 407 entries incl. 61 pre-500 classical dates): under the
+    DECOUPLED [100,1600] window it parses cleanly; every value is an int; min
+    is the Mishnaic-era 150. No SHA arg (the pin is a runtime gate, not a test
+    gate). Skips gracefully if the gitignored artifact is not on this box."""
+    import pathlib
+    p = pathlib.Path("same_work_spike/probe/rsource/data/seftja_dates.json")
+    if not p.exists():
+        pytest.skip("frozen seftja artifact not present on this box")
+    out = sidecar_build.parse_seftja_dates(str(p))
+    assert len(out) == 407
+    assert all(type(v) is int for v in out.values())
+    assert min(out.values()) == 150
+    assert max(out.values()) == 1470
+    assert sum(1 for v in out.values() if v < 500) == 61
+
+
 # --- Lever-1 coverage routing ----------------------------------------------
 
 def test_lever1_routes_low_coverage_to_review_only():

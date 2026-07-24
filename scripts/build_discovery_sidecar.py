@@ -421,8 +421,21 @@ def load_canonical_merges(
 
 # The plausible-composition window (bake plan §4.3): a normalized year outside
 # this inclusive bound HALTS the build (never silently UNKNOWN / clamped).
+# This bound governs the M-source `--composition-dates` corpus, which is
+# entirely medieval Genizah-era literary composition (all in [500, 1587]).
 _COMPOSITION_YEAR_MIN = 500
 _COMPOSITION_YEAR_MAX = 1600
+# DECOUPLED SEF/JA window (135-07 amendment, owner decision 2026-07-24):
+# the interim SEF/JA `--seftja-dates` corpus legitimately includes CLASSICAL
+# base texts (Mishnaic ~150, Talmudic/Amoraic ~300) that the medieval M-source
+# corpus does not, so its floor is decoupled from `_COMPOSITION_YEAR_MIN` and
+# lowered to admit those genuine early-canonical anchors (they act as
+# earlier-side D-17 chronological demoters). The upper bound is unchanged. The
+# anti-corruption rationale of the original R6-HIGH gate is preserved: a floor
+# still rejects near-zero / negative / absurd values; only the medieval-only
+# assumption is corrected. See bake plan §4.3 (dated amendment).
+_SEFTJA_YEAR_MIN = 100
+_SEFTJA_YEAR_MAX = 1600
 # The FIXED, HARDCODED range-separator set (bake plan §4.3 -- data-file-driven
 # designators, but the separator must be identical across every date-table
 # revision). U+002D HYPHEN-MINUS, U+2013 EN DASH, U+2014 EM DASH.
@@ -462,7 +475,10 @@ def parse_seftja_dates(path, *, sha256: Optional[str] = None) -> Dict[str, int]:
     object with EXACTLY `{year:int, basis:str}`. `basis` is validated then
     DISCARDED (only the numeric year is used, never persisted). A missing/
     non-integer year, a missing/non-string basis, a third key, or a year
-    outside [500, 1600] is REJECTED. Returns `{raw_id: year}`."""
+    outside the DECOUPLED SEF/JA window [_SEFTJA_YEAR_MIN, _SEFTJA_YEAR_MAX]
+    (= [100, 1600]; lower than the M-source `--composition-dates` floor of 500
+    so genuine classical base texts are admitted -- 135-07 amendment) is
+    REJECTED. Returns `{raw_id: year}`."""
     _verify_input_sha256(path, sha256, exc=SeftjaDatesError, label="--seftja-dates")
     try:
         doc = _json_loads_strict(Path(path).read_text(encoding="utf-8"))
@@ -483,10 +499,10 @@ def parse_seftja_dates(path, *, sha256: Optional[str] = None) -> Dict[str, int]:
             raise SeftjaDatesError("--seftja-dates 'year' must be a JSON integer")
         if not isinstance(basis, str):
             raise SeftjaDatesError("--seftja-dates 'basis' must be a JSON string")
-        if not (_COMPOSITION_YEAR_MIN <= year <= _COMPOSITION_YEAR_MAX):
+        if not (_SEFTJA_YEAR_MIN <= year <= _SEFTJA_YEAR_MAX):
             raise SeftjaDatesError(
-                f"--seftja-dates 'year' {year} outside the plausible composition window "
-                f"[{_COMPOSITION_YEAR_MIN}, {_COMPOSITION_YEAR_MAX}]"
+                f"--seftja-dates 'year' {year} outside the SEF/JA composition window "
+                f"[{_SEFTJA_YEAR_MIN}, {_SEFTJA_YEAR_MAX}]"
             )
         out[raw_id] = year  # basis discarded
     return out
