@@ -111,3 +111,40 @@ None. No stubbed data surfaces are introduced (this plan delivers build logic + 
 
 - Created/modified files all present: `scripts/build_discovery_sidecar.py`, `scripts/verify_discovery_sidecar.py`, `scripts/discovery_ids.py`, `tests/test_discovery_v2_bake.py`, this SUMMARY.
 - Commits verified: `a466df19` (test), `187448c4` (feat), `f4ca73ea` (test), `8ac0633e` (test), `4d5b5cc7` (feat).
+
+## Amendment (2026-07-24): composition-dates flat-int ingest
+
+Owner-authorized, surgical correctness fix (135-06 stays `[x]`; no new roadmap
+item, no Codex gate re-run). Adapts `parse_composition_dates` to the parallel
+session's real delivered production artifact `discovery_data/composition_dates.json`
+(SHA-256 `d1e21644…`, 7,277 entries, all integer years in `[500, 1587]`), which
+is a **flat pre-normalized** `{raw_id: int-CE-year}` map rather than the frozen
+four-key designator+string form. The chrono pipeline already did the range-aware
+anchoring and emits explicit integer years (masking-cleaner — no descriptive
+strings enter the build input).
+
+- **Parser (`scripts/build_discovery_sidecar.py`).** Added a second accepted
+  schema branch. Detection: `set(doc)==_COMPOSITION_TOP_KEYS` → the unchanged
+  string+designator path; elif non-empty dict with every value an `int` → the
+  flat path; else → `CompositionDatesError` (ambiguous/malformed). Flat path
+  validates each value is an `int` (rejects `bool`) within `[500, 1600]` and
+  HALTs (never a silent skip) on an out-of-range or non-int value. `_verify_input_sha256`,
+  the return `{raw_id: year}` shape, and `normalize_composition_date` (retained
+  for future descriptive inputs) are all unchanged — so `resolve_year_by_canonical`
+  and the crosswalk join are untouched. The parallel session's `_SS`-suffix
+  strip was assessed and is a **no-op** for the delivered artifact (join resolves
+  the same 802 M-works with or without it); deferred.
+- **Tests (`tests/test_discovery_v2_bake.py`, +8).** flat parse → `{raw_id: year}`;
+  out-of-range high (1700) / low (400) HALT; bool HALT; string HALT; mixed
+  (neither form) HALT; empty-object HALT; real-file smoke-parse (7,277 entries,
+  all int in `[500, 1587]`, SHA not a test gate).
+- **Docs.** Dated `## Amendment 2026-07-24` in `docs/specs/discovery-v2-bake-plan.md`
+  §4.3. `docs/specs/discovery-sidecar-schema-v1.md` documents only the
+  `composition_dates_sha256` meta key (not the INPUT schema), so it was left
+  untouched.
+- **Verification.** `pytest tests/test_discovery_v2_bake.py tests/test_discovery_build.py -q`
+  → **162 passed** (154 prior + 8 new). `ruff` clean on both touched code files.
+  `tests/test_no_back_edges_core.py` → 41 passed. Per-file masking scan clean on
+  all three touched files. Real-file sanity: `parse_composition_dates(...)` →
+  `7277 500 1587`.
+- **Commits.** `40e610d0` (test), `0e4dd905` (feat), `01779566` (docs).
