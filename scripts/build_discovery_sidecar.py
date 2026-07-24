@@ -574,51 +574,89 @@ def normalize_composition_date(
 
 
 def parse_composition_dates(path, *, sha256: Optional[str] = None) -> Dict[str, int]:
-    """Parse the hash-pinned `--composition-dates` input against its FROZEN
-    exact schema (bake plan §4.3): a JSON object with EXACTLY the four keys
-    `century_designators` / `range_designators` (non-empty lists of non-empty
-    strings), `era_qualifiers` (a list -- possibly empty -- of non-empty
-    strings), and `dates` (raw_id -> date STRING). Each date value is
-    normalized to ONE integer year via `normalize_composition_date`. The
-    recognized designator vocabulary is READ FROM THIS SAME PINNED FILE (never
-    hardcoded, never in a fixture). Returns `{raw_id: year}`."""
+    """Parse the hash-pinned `--composition-dates` input, accepting EITHER of two
+    schemas (branch selection is robust + unambiguous), and return `{raw_id: year}`:
+
+    (A) **FROZEN designator+string form** (bake plan §4.3): a JSON object with
+        EXACTLY the four keys `century_designators` / `range_designators`
+        (non-empty lists of non-empty strings), `era_qualifiers` (a list --
+        possibly empty -- of non-empty strings), and `dates` (raw_id -> date
+        STRING). Each date value is normalized to ONE integer year via
+        `normalize_composition_date`; the recognized designator vocabulary is
+        READ FROM THIS SAME PINNED FILE (never hardcoded, never in a fixture).
+
+    (B) **FLAT pre-normalized form** (Amendment 2026-07-24 — the delivered
+        production artifact): a NON-EMPTY JSON object mapping raw source-side
+        ids to **integer** CE years. The production chrono pipeline already did
+        the (range-aware) anchoring and hands over explicit anchored years, so
+        no descriptive strings enter the input (masking-cleaner). Each value is
+        validated as an `int` (a `bool` -- an `int` subclass -- is rejected)
+        within `[_COMPOSITION_YEAR_MIN, _COMPOSITION_YEAR_MAX]`; an out-of-range
+        or non-int value HALTs (never a silent skip).
+
+    Anything else (an empty object, mixed/typed values, or extra keys) is
+    ambiguous/malformed and HALTs with `CompositionDatesError`."""
     _verify_input_sha256(path, sha256, exc=CompositionDatesError, label="--composition-dates")
     try:
         doc = _json_loads_strict(Path(path).read_text(encoding="utf-8"))
     except ValueError as e:
         raise CompositionDatesError(f"--composition-dates parse error: {e}") from e
-    if not isinstance(doc, dict) or set(doc) != _COMPOSITION_TOP_KEYS:
-        raise CompositionDatesError(
-            f"--composition-dates must be an object with EXACTLY {sorted(_COMPOSITION_TOP_KEYS)}"
-        )
+    if not isinstance(doc, dict):
+        raise CompositionDatesError("--composition-dates top-level value must be a JSON object")
 
-    def _nonempty_str_list(name, *, allow_empty_list):
-        v = doc[name]
-        if not isinstance(v, list):
-            raise CompositionDatesError(f"--composition-dates '{name}' must be a list")
-        if not allow_empty_list and not v:
-            raise CompositionDatesError(f"--composition-dates '{name}' must be non-empty")
-        for el in v:
-            if not isinstance(el, str) or el == "":
+    # --- Branch (A): FROZEN designator+string form -------------------------
+    if set(doc) == _COMPOSITION_TOP_KEYS:
+        def _nonempty_str_list(name, *, allow_empty_list):
+            v = doc[name]
+            if not isinstance(v, list):
+                raise CompositionDatesError(f"--composition-dates '{name}' must be a list")
+            if not allow_empty_list and not v:
+                raise CompositionDatesError(f"--composition-dates '{name}' must be non-empty")
+            for el in v:
+                if not isinstance(el, str) or el == "":
+                    raise CompositionDatesError(
+                        f"--composition-dates '{name}' elements must be non-empty strings"
+                    )
+            return v
+
+        century = _nonempty_str_list("century_designators", allow_empty_list=False)
+        ranges = _nonempty_str_list("range_designators", allow_empty_list=False)
+        eras = _nonempty_str_list("era_qualifiers", allow_empty_list=True)
+        dates = doc["dates"]
+        if not isinstance(dates, dict):
+            raise CompositionDatesError("--composition-dates 'dates' must be an object")
+
+        out: Dict[str, int] = {}
+        for raw_id, val in dates.items():
+            if not isinstance(val, str):
+                raise CompositionDatesError("--composition-dates 'dates' values must be JSON strings")
+            out[raw_id] = normalize_composition_date(
+                val, century_designators=century, range_designators=ranges, era_qualifiers=eras)
+        return out
+
+    # --- Branch (B): FLAT pre-normalized {raw_id: int CE year} form --------
+    # (bool is an int subclass; detection routes a bool-carrying doc here so the
+    # per-value guard below HALTs on it with a precise message.)
+    if doc and all(isinstance(v, int) for v in doc.values()):
+        flat: Dict[str, int] = {}
+        for raw_id, year in doc.items():
+            if not isinstance(year, int) or isinstance(year, bool):
                 raise CompositionDatesError(
-                    f"--composition-dates '{name}' elements must be non-empty strings"
+                    f"--composition-dates flat value for {raw_id!r} must be a JSON integer"
                 )
-        return v
+            if not (_COMPOSITION_YEAR_MIN <= year <= _COMPOSITION_YEAR_MAX):
+                raise CompositionDatesError(
+                    f"--composition-dates flat year {year} for {raw_id!r} outside "
+                    f"[{_COMPOSITION_YEAR_MIN}, {_COMPOSITION_YEAR_MAX}]"
+                )
+            flat[raw_id] = year
+        return flat
 
-    century = _nonempty_str_list("century_designators", allow_empty_list=False)
-    ranges = _nonempty_str_list("range_designators", allow_empty_list=False)
-    eras = _nonempty_str_list("era_qualifiers", allow_empty_list=True)
-    dates = doc["dates"]
-    if not isinstance(dates, dict):
-        raise CompositionDatesError("--composition-dates 'dates' must be an object")
-
-    out: Dict[str, int] = {}
-    for raw_id, val in dates.items():
-        if not isinstance(val, str):
-            raise CompositionDatesError("--composition-dates 'dates' values must be JSON strings")
-        out[raw_id] = normalize_composition_date(
-            val, century_designators=century, range_designators=ranges, era_qualifiers=eras)
-    return out
+    raise CompositionDatesError(
+        "--composition-dates must be EITHER an object with EXACTLY "
+        f"{sorted(_COMPOSITION_TOP_KEYS)} (designator+string form) OR a non-empty "
+        "object mapping raw ids to integer CE years (flat pre-normalized form)"
+    )
 
 
 # ---------------------------------------------------------------------------
