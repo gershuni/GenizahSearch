@@ -1502,3 +1502,160 @@ def test_v2_top_tier_competing_sibling_wins_display_selection():
                                  ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC)] == 0
     assert ids._BAND_RANK_INDEX[(ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
                                  ids.CONFIDENCE_BAND_EXPERT_VERIFIED)] == 0
+
+
+# ===========================================================================
+# 135-07 FIX 1: resolve_year_by_canonical -- bake plan §4.3 year-resolution
+# contract (representative-first / sibling-min / dropped-excluded /
+# same-member-HALT). Every id below is a FABRICATED opaque `w000xxx` /
+# obviously-synthetic `raw:` key; every date is a numeric year only.
+# ===========================================================================
+
+def test_resolve_year_representative_first_beats_sibling():
+    """Contract (2): the canonical REPRESENTATIVE's own year (comp 1057) wins
+    over a merged sibling's year (seftja 1053) -- NOT the former stub's
+    arbitrary last-write-wins 1053."""
+    out = sidecar_build.resolve_year_by_canonical(
+        [{"raw:comp:452": 1057}, {"raw:seftja:700": 1053}],
+        crosswalk={"raw:comp:452": "w000452", "raw:seftja:700": "w000700"},
+        cross_corpus_map={"w000700": "w000452"},  # w000700 is a sibling of w000452
+    )
+    assert out == {"w000452": 1057}
+
+
+def test_resolve_year_dropped_member_date_never_consulted():
+    """Contract (1) Codex round-8 HIGH-1 (the real w000452/w001239 D-14 case):
+    a DROPPED member's seftja year (1053) is excluded from BOTH lookups, so the
+    representative's own composition year (1057) resolves."""
+    out = sidecar_build.resolve_year_by_canonical(
+        [{"raw:comp:452": 1057}, {"raw:seftja:1239": 1053}],
+        crosswalk={"raw:comp:452": "w000452", "raw:seftja:1239": "w001239"},
+        cross_corpus_map={"w001239": "w000452"},
+        dropped_ids=frozenset({"w001239"}),
+    )
+    assert out == {"w000452": 1057}
+
+
+def test_resolve_year_sibling_minimum_fallback_when_no_representative():
+    """Contract (3): no representative date -> MINIMUM resolved year among the
+    group's non-dropped sibling members (min(1290, 1340) == 1290)."""
+    out = sidecar_build.resolve_year_by_canonical(
+        [{"raw:s1": 1340, "raw:s2": 1290}],
+        crosswalk={"raw:s1": "w000901", "raw:s2": "w000902"},
+        cross_corpus_map={"w000901": "w000900", "w000902": "w000900"},
+    )
+    assert out == {"w000900": 1290}
+
+
+def test_resolve_year_same_member_conflict_halts():
+    """Contract (5) Codex R5-HIGH: two distinct raw ids crosswalk to the SAME
+    opaque within ONE date map with DISTINCT years -> a fail-closed HALT
+    (never resolved by precedence). Distinct-year -> raise; agreeing -> no
+    raise, that year used."""
+    with pytest.raises(sidecar_build.ConflictingSameMemberDateError):
+        sidecar_build.resolve_year_by_canonical(
+            [{"raw:a": 1200, "raw:b": 1300}],
+            crosswalk={"raw:a": "w000010", "raw:b": "w000010"},
+            cross_corpus_map={},
+        )
+    # Agreeing same-member raw ids do NOT halt -- that single year is used.
+    out = sidecar_build.resolve_year_by_canonical(
+        [{"raw:a": 1200, "raw:b": 1200}],
+        crosswalk={"raw:a": "w000010", "raw:b": "w000010"},
+        cross_corpus_map={},
+    )
+    assert out == {"w000010": 1200}
+
+
+def test_resolve_year_unknown_when_only_dropped_member_dated():
+    """Contract (4): a canonical whose ONLY dated non-dropped member is... none
+    (only a dropped member carries a date) is ABSENT from the output -> D-17
+    no-ops that pair via fail_safe_unknown_date."""
+    out = sidecar_build.resolve_year_by_canonical(
+        [{"raw:seftja:1239": 1053}],
+        crosswalk={"raw:seftja:1239": "w001239"},
+        cross_corpus_map={"w001239": "w000452"},
+        dropped_ids=frozenset({"w001239"}),
+    )
+    assert out == {}
+
+
+def test_resolve_year_call_site_threads_dropped_ids_statically():
+    """The finalize_build call site passes `dropped_ids=dropped_work_ids`
+    (that variable is in scope from merges_loaded['dropped']/set())."""
+    src = (_REPO_ROOT / "scripts" / "build_discovery_sidecar.py").read_text(encoding="utf-8")
+    assert "dropped_ids=dropped_work_ids" in src
+
+
+# ===========================================================================
+# 135-07 FIX 2: verifier fail-closed cascade / kept_invalid_reference gate.
+# A 'demoted' audit row whose kept_work_id is itself fully review_only (a
+# three-work cascade) FAILS the verifier. All ids are fabricated w000xxx.
+# ===========================================================================
+
+def test_cascade_demoter_fully_review_only_fails(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    _ins_work(conn, "w000002")
+    _ins_work(conn, "w000003")
+    # w000001 SHIPS a display-evidence row.
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    e1 = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1", routing=_SHIP)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e1, c1))
+    # w000002 is FULLY review_only (no shipped display evidence anywhere).
+    c2 = _ins_claim(conn, page_id="p1", work_id="w000002", display_evidence_id="x")
+    e2 = _ins_evidence(conn, c2, work_id="w000002", page_id="p1", sys_id="s2", routing=_REV,
+                       reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e2, c2))
+    # w000003 is review_only too (the third, demoted work).
+    c3 = _ins_claim(conn, page_id="p1", work_id="w000003", display_evidence_id="x")
+    e3 = _ins_evidence(conn, c3, work_id="w000003", page_id="p1", sys_id="s3", routing=_REV,
+                       reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e3, c3))
+    # Cascade: w000001 demotes w000002 (VALID -- w000001 ships); w000002 then
+    # acts as the 'kept' demoter of w000003 (INVALID -- w000002 is review_only).
+    conn.execute(
+        "INSERT INTO discovery_routing_audit (page_id, kept_work_id, demoted_work_id, "
+        "kept_year, demoted_year, delta_years, decision, routing_reason) VALUES "
+        "('p1','w000001','w000002',900,1100,200,'demoted','later_shared_text')")
+    conn.execute(
+        "INSERT INTO discovery_routing_audit (page_id, kept_work_id, demoted_work_id, "
+        "kept_year, demoted_year, delta_years, decision, routing_reason) VALUES "
+        "('p1','w000002','w000003',1100,1300,200,'demoted','later_shared_text')")
+    conn.commit()
+    violations = verify_mod.check_demotion_kept_reference_shipped(conn)
+    assert violations
+    assert any("w000002" in v for v in violations)  # the invalid demoter is named
+    assert all("w000001" not in v for v in violations)  # the valid demoter is not
+    conn.close()
+
+
+def test_cascade_gate_clean_asset_passes_with_canonical_merge(tmp_path):
+    """A clean asset passes -- AND the group-global/canonical join is real: the
+    kept group w000001 ships via its MERGED sibling w000010 (canonical
+    w000001), even though w000001's own representative claim is review_only."""
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")                       # representative (own canonical)
+    _ins_work(conn, "w000010", canonical="w000001")  # merged sibling of w000001
+    _ins_work(conn, "w000002")
+    # Representative w000001's own claim is review_only on p1...
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    e1 = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1", routing=_REV,
+                       reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e1, c1))
+    # ...but the merged sibling w000010 SHIPS on p2 -> the canonical GROUP ships.
+    c10 = _ins_claim(conn, page_id="p2", work_id="w000010", display_evidence_id="x")
+    e10 = _ins_evidence(conn, c10, work_id="w000010", page_id="p2", sys_id="s10", routing=_SHIP)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e10, c10))
+    # w000002 review_only (the demoted work).
+    c2 = _ins_claim(conn, page_id="p1", work_id="w000002", display_evidence_id="x")
+    e2 = _ins_evidence(conn, c2, work_id="w000002", page_id="p1", sys_id="s2", routing=_REV,
+                       reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e2, c2))
+    conn.execute(
+        "INSERT INTO discovery_routing_audit (page_id, kept_work_id, demoted_work_id, "
+        "kept_year, demoted_year, delta_years, decision, routing_reason) VALUES "
+        "('p1','w000001','w000002',900,1100,200,'demoted','later_shared_text')")
+    conn.commit()
+    assert verify_mod.check_demotion_kept_reference_shipped(conn) == []
+    conn.close()
