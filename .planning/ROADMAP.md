@@ -150,7 +150,7 @@ Plans:
 
 **Wave 2**
 
-- [ ] 135-02-PLAN.md — Bilingual methods/confidence Help section + /help noindex + render-smoke (BAND-05)
+- [x] 135-02-PLAN.md — Bilingual methods/confidence Help section + /help noindex + render-smoke (BAND-05)
 - [x] 135-05-PLAN.md — v2 vocabulary lockstep: routing_reason += later_shared_text + expert_verified→high_confidence_algorithmic rename + spec amendments
 
 **Wave 3**
@@ -239,7 +239,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
-| 135. Precision Certificate & Confidence Bands | 3/9 | In Progress|  |
+| 135. Precision Certificate & Confidence Bands | 5/9 | In Progress|  |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |
