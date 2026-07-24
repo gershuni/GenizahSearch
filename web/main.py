@@ -696,6 +696,11 @@ from web.atlas_assets import (
     atlas_manifest_etag,
 )
 from web.discovery_assets import load_discovery_state, discovery_available  # noqa: F401 -- discovery_available is the Phase 135+ gating predicate; no surface calls it yet in Phase 134 (NO discovery UI ships this phase), imported now so downstream plans wire it without touching this import block
+from web.discovery import (  # Phase 135 (BAND-05): /help methods-section wiring — noindex predicate + band-precision/claim-count readers (patched as web.main.* in the render-smoke test)
+    discovery_methods_noindex,
+    get_all_band_precision,
+    get_band_claim_counts,
+)
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
 
 # App configuration
@@ -2243,22 +2248,33 @@ def settings_page_route():
         create_settings_page()
 
 @ui.page('/help', title='Help | Dicta Genizah Search')
-def help_page_route():
+async def help_page_route():
     safe_user_set('current_page', '/help')
+    # noindex the /help page ONLY while the pre-release discovery methods section
+    # is shown (discovery_available AND NOT DISCOVERY_PUBLIC_RELEASED); flips to
+    # indexed at the Phase-139 REL-01 gate (Codex #18). False (indexed) when
+    # discovery is unavailable — the section is absent, nothing to hide.
     ui.add_head_html(page_meta(
         '/help',
         title='Help | Dicta Genizah Search',
         description='User guide for Dicta Genizah Search: full-text search, Responsa syntax, catalog browsing, manuscript viewer, fragment puzzle, and research tools.',
+        noindex=discovery_methods_noindex(),
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
+    # Read the band-precision rows + the runtime display-deduplicated per-band
+    # claim counts through the supported fail-open wrappers (empty when discovery
+    # is unavailable, so the flag-gated section simply never renders).
+    precision = await get_all_band_precision()
+    band_counts = await get_band_claim_counts()
+
     content = create_layout()
     with content:
         from web.pages.help import create_help_page
-        create_help_page()
+        create_help_page(precision=precision, band_counts=band_counts)
 
 @ui.page('/corrections', title='Corrections | תיקונים — Dicta Genizah Search')
 async def corrections_page_route():

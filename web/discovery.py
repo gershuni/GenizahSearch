@@ -19,8 +19,9 @@ query times out -- T-134-failopen.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+import scripts.discovery_ids as _ids
 from shared.discovery_errors import DiscoveryUnavailable
 from shared.discovery_service import DiscoveryService
 from web.discovery_assets import (
@@ -28,6 +29,7 @@ from web.discovery_assets import (
     discovery_db_path,
     discovery_sidecar_version,
 )
+from web.feature_flags import DISCOVERY_PUBLIC_RELEASED
 
 logger = logging.getLogger(__name__)
 
@@ -123,3 +125,96 @@ async def get_work_witnesses(
     except DiscoveryUnavailable:
         logger.info("discovery.get_work_witnesses: temporarily unavailable for work_id=%s", work_id)
         return []
+
+
+# ---------------------------------------------------------------------------
+# BAND-05 methods-page readers (Phase 135, plan 135-02). The SUPPORTED public
+# wrappers the /help "Confidence Bands & Methods" section reads its per-band
+# numbers through -- all fail OPEN (None / {}) exactly like the pass-throughs
+# above, so a flag-ON / sidecar-absent (or query-timeout) window renders the
+# section's placeholders rather than crashing the Help page (T-135-02-03).
+# ---------------------------------------------------------------------------
+
+
+async def get_band_precision(
+    evidence_source: Optional[str], confidence_band: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """BAND-02 pass-through: the ``scope='band'`` ``band_precision`` row for a
+    (evidence_source, confidence_band) pair, or None when
+    absent/unavailable."""
+    if not discovery_available():
+        return None
+    try:
+        return await _service.get_band_precision_async(evidence_source, confidence_band)
+    except DiscoveryUnavailable:
+        logger.info(
+            "discovery.get_band_precision: temporarily unavailable for (%s, %s)",
+            evidence_source, confidence_band,
+        )
+        return None
+
+
+async def get_band_precision_collection(
+    collection_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """The ``scope='collection'`` ``band_precision`` row -- the propagated-
+    witness COLLECTION-level number (e.g. 0.926) that lives on NO per-band
+    row. None when absent/unavailable/ambiguous."""
+    if not discovery_available():
+        return None
+    try:
+        return await _service.get_band_precision_collection_async(collection_id)
+    except DiscoveryUnavailable:
+        logger.info("discovery.get_band_precision_collection: temporarily unavailable")
+        return None
+
+
+async def get_band_claim_counts() -> Dict[Tuple[str, str], int]:
+    """Codex #9/#B1: the version-aware, SHIPPED, DISPLAY-DEDUPLICATED per-
+    (evidence_source, confidence_band) CLAIM-count population -- the BAND-05
+    "population" source (each claim counted ONCE via its single
+    display_evidence_id, never raw evidence rows, never
+    ``band_precision.denominator``). ``{}`` when unavailable."""
+    if not discovery_available():
+        return {}
+    try:
+        return await _service.get_band_claim_counts_async()
+    except DiscoveryUnavailable:
+        logger.info("discovery.get_band_claim_counts: temporarily unavailable")
+        return {}
+
+
+async def get_all_band_precision() -> Dict[Any, Optional[Dict[str, Any]]]:
+    """Convenience aggregate for the /help methods route: a dict keyed by
+    ``(evidence_source, confidence_band)`` -> its ``band_precision`` row for
+    every stored band pair, PLUS a ``'collection'`` key -> the collection-scope
+    row (the 0.926, kept separate so it is NEVER attached to a per-band row).
+
+    Probes every pair in ``scripts.discovery_ids.CONFIDENCE_BANDS_BY_SOURCE``
+    (which carries BOTH the v1 ``expert_verified`` and the v2
+    ``high_confidence_algorithmic`` keys, so it resolves against either sidecar
+    version -- §5 v1-read-compat). Absent rows are simply omitted. Fails open to
+    ``{}`` when discovery is unavailable."""
+    result: Dict[Any, Optional[Dict[str, Any]]] = {}
+    if not discovery_available():
+        return result
+    for source, bands in _ids.CONFIDENCE_BANDS_BY_SOURCE.items():
+        for band in bands:
+            row = await get_band_precision(source, band)
+            if row is not None:
+                result[(source, band)] = row
+    collection = await get_band_precision_collection()
+    if collection is not None:
+        result["collection"] = collection
+    return result
+
+
+def discovery_methods_noindex() -> bool:
+    """Codex #18: the dedicated pre-release SEO predicate for the /help methods
+    section. Returns True (noindex the page) ONLY while discovery is available
+    AND the Phase-139 REL-01 gate has NOT flipped
+    (``DISCOVERY_PUBLIC_RELEASED`` False) -- so the pre-release methods copy is
+    hidden from crawlers, then FLIPS to indexed at REL-01, never noindexed
+    forever. When discovery is unavailable the section is absent, so there is
+    nothing to noindex and this returns False (no gratuitous de-index)."""
+    return discovery_available() and not DISCOVERY_PUBLIC_RELEASED

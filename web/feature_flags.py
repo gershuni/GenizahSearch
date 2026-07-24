@@ -32,6 +32,16 @@ ATLAS_PREVIEW_ENABLED = _env_enabled("ATLAS_PREVIEW_ENABLED", False)
 # missing (or incompatible/corrupt) window still hides cleanly.
 DISCOVERY_ENABLED = _env_enabled("DISCOVERY_ENABLED", False)
 
+# Phase 135 (BAND-05) — the Phase-139 REL-01 public-release gate. Default OFF
+# through Phase 138: while OFF, the (flag-gated) discovery surfaces that DO ship
+# pre-release — currently only the /help "Confidence Bands & Methods" methods
+# section — are noindexed (via web/discovery.py::discovery_methods_noindex(),
+# which ANDs discovery_available() with NOT this flag) so search engines never
+# index the pre-release methods copy. Flip to 1/true at the REL-01 launch gate
+# (Phase 139) to make those surfaces indexable — a dedicated flag so the
+# noindex is a bounded pre-release window, never a forever de-index.
+DISCOVERY_PUBLIC_RELEASED = _env_enabled("DISCOVERY_PUBLIC_RELEASED", False)
+
 
 def web_fgp_enabled() -> bool:
     """Whether FGP transcriptions surface in the WEB version chooser.
