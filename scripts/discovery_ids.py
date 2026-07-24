@@ -400,6 +400,15 @@ _UNRANKED_ADJUDICATION = len(_ADJUDICATION_RANK)
 
 
 def _display_sort_key(row: Mapping):
+    # v2 (135-06, Pitfall 2 / bake plan §4.3): a `routing_status` tier ABOVE
+    # every band signal -- a SHIPPED evidence row ALWAYS outranks a
+    # `review_only` (D-17- or Lever-1-demoted, or §4.5-rebanded) sibling, so a
+    # demoted row can never become the `display_evidence_id` of a claim that
+    # also owns a shipped row. Backward compatible: a row WITHOUT a
+    # `routing_status` key (or explicitly `shipped`) ranks 0 identically, so
+    # every pre-v2 caller (whose selector rows carried no routing_status) sorts
+    # exactly as before.
+    routing_rank = 1 if row.get("routing_status") == ROUTING_STATUS_REVIEW_ONLY else 0
     is_human_confirmed_direct = (
         row.get("evidence_source") == EVIDENCE_SOURCE_TRACK1_DIRECT
         and row.get("adjudication_status") == ADJUDICATION_STATUS_HUMAN_CONFIRMED
@@ -411,7 +420,7 @@ def _display_sort_key(row: Mapping):
     adjudication_rank = _ADJUDICATION_RANK.get(
         row.get("adjudication_status"), _UNRANKED_ADJUDICATION
     )
-    return (dominance_rank, band_rank, adjudication_rank, str(row.get("evidence_id", "")))
+    return (routing_rank, dominance_rank, band_rank, adjudication_rank, str(row.get("evidence_id", "")))
 
 
 def select_display_evidence(evidence_rows: Iterable[Mapping]) -> str:

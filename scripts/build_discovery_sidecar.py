@@ -230,6 +230,647 @@ CREATE TABLE discovery_routing_audit (
 """
 
 
+# ---------------------------------------------------------------------------
+# v2 re-distill (Phase 135, plan 135-06): hash-pinned build inputs (strict
+# JSON parse), the census -> cross_corpus_map merge loader, the two date
+# inputs, the D-17 chronological co-claim demotion, and the CERT-01
+# FAIL-branch reband. All masking-safe: opaque w000xxx ids + numeric years
+# only ever cross into these structures -- never a title, a raw descriptive
+# date string, or the restricted codename.
+# ---------------------------------------------------------------------------
+
+
+class CanonicalMergesError(ValueError):
+    """Raised when the hash-pinned `--canonical-merges` census input fails its
+    SHA-256 pin, its FROZEN exact-shape schema, its transitivity guard, or
+    (for a release build) its semantic-ratification assertion."""
+
+
+class CompositionDatesError(ValueError):
+    """Raised when the hash-pinned `--composition-dates` input fails its
+    SHA-256 pin or its FROZEN exact schema, or a composition-date value is
+    unparseable / normalizes out of the [500, 1600] CE window."""
+
+
+class SeftjaDatesError(ValueError):
+    """Raised when the hash-pinned `--seftja-dates` input fails its SHA-256
+    pin or its FROZEN exact `{year:int, basis:str}` schema."""
+
+
+class DateCoverageError(RuntimeError):
+    """Raised (Codex #5) when the production date-join coverage gate HALTs a
+    `--release` build: a zero candidate universe, or `pair_coverage` below
+    the absolute floor."""
+
+
+def _reject_duplicate_keys(pairs):
+    """`object_pairs_hook` that HARD-REJECTS a repeated key at ANY nesting
+    level (bake plan §4 shared JSON-parsing requirement, Codex R4-MEDIUM) --
+    the bare stdlib decoder would silently last-write-wins."""
+    seen: Dict = {}
+    for k, v in pairs:
+        if k in seen:
+            raise ValueError(f"duplicate JSON key {k!r} rejected (strict parse)")
+        seen[k] = v
+    return seen
+
+
+def _json_loads_strict(text: str):
+    return json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+
+
+# The CLOSED top-level key allowlist for the census file (bake plan §4.1).
+# Only `merges` + `dropped_by_135` are READ; the other ten are
+# tolerated-but-ignored (present in the real handoff, never consumed). A
+# top-level key OUTSIDE this set is REJECTED.
+_CANONICAL_MERGES_TOP_KEYS = frozenset({
+    "merges", "dropped_by_135", "source", "canonical_priority", "owner_ratified",
+    "ratified_at", "relations_policy", "chronological_rule_examples", "contested",
+    "provisional_relations_measurement_only", "residual_direct", "notes",
+})
+_MERGE_ENTRY_KEYS = frozenset({"members_w", "canonical_w", "owner_verdict"})
+_W_ID_RE = re.compile(r"^w\d{6}$")
+_MERGE_APPROVE = "approve"
+# D-14 semantic-ratification constants (bake plan §2/§4.1) -- the one merge
+# whose canonical rep is the M-source side because the Sefaria copy is dropped.
+_D14_MEMBERS = frozenset({"w000452", "w001239"})
+_D14_CANONICAL = "w000452"
+_D14_DROPPED = "w001239"
+_EXPECTED_APPROVE_MERGES = 16
+
+
+def _is_w_id(x) -> bool:
+    return isinstance(x, str) and bool(_W_ID_RE.match(x))
+
+
+def load_canonical_merges(
+    path, *, sha256: Optional[str] = None, require_release_semantics: bool = False,
+) -> Dict:
+    """Load + validate the REQUIRED hash-pinned `--canonical-merges` census
+    input (bake plan §4.1, Codex #B2). Returns
+    `{cross_corpus_map, dropped, sha256, approve_count}`.
+
+    Order of enforcement: SHA-256 pin (if supplied) -> strict duplicate-key
+    JSON parse -> closed top-level key allowlist -> per-entry FROZEN exact
+    shape (EXACTLY `members_w`/`canonical_w`/`owner_verdict`, w000xxx-shaped,
+    >=2 DISTINCT members, canonical_w a member) -> approve-only load ->
+    transitivity guard (no id in two approved groups) -> (release only) the
+    16-merge / drop=={w001239} / D-14-flip semantic-ratification assertion.
+
+    Masking: members are referenced ONLY by opaque w000xxx id -- never a title
+    or the restricted codename.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise CanonicalMergesError(f"--canonical-merges file not found: {path}")
+    actual_sha = _hash_file(p)
+    if sha256 is not None and actual_sha != sha256:
+        raise CanonicalMergesError(
+            "--canonical-merges SHA-256 pin mismatch (hash gate) -- refusing to load"
+        )
+    try:
+        doc = _json_loads_strict(p.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise CanonicalMergesError(f"--canonical-merges parse error: {e}") from e
+    if not isinstance(doc, dict):
+        raise CanonicalMergesError("--canonical-merges top-level value must be a JSON object")
+    extra = set(doc) - _CANONICAL_MERGES_TOP_KEYS
+    if extra:
+        raise CanonicalMergesError(
+            f"--canonical-merges has {len(extra)} top-level key(s) outside the closed allowlist"
+        )
+    merges = doc.get("merges", [])
+    dropped_raw = doc.get("dropped_by_135", [])
+    if not isinstance(merges, list):
+        raise CanonicalMergesError("--canonical-merges 'merges' must be a list")
+    if not isinstance(dropped_raw, list):
+        raise CanonicalMergesError("--canonical-merges 'dropped_by_135' must be a list")
+
+    dropped = set()
+    for d in dropped_raw:
+        if not _is_w_id(d):
+            raise CanonicalMergesError("--canonical-merges dropped_by_135 entry not w000xxx-shaped")
+        dropped.add(d)
+
+    cross_corpus_map: Dict[str, str] = {}
+    seen_ids: set = set()
+    approve_count = 0
+    d14_ok = False
+    for i, m in enumerate(merges):
+        if not isinstance(m, dict):
+            raise CanonicalMergesError(f"merges[{i}] must be a JSON object")
+        if set(m) != _MERGE_ENTRY_KEYS:
+            raise CanonicalMergesError(
+                f"merges[{i}] must carry EXACTLY {sorted(_MERGE_ENTRY_KEYS)} (no missing/extra field)"
+            )
+        members = m["members_w"]
+        canon = m["canonical_w"]
+        verdict = m["owner_verdict"]
+        if not isinstance(verdict, str):
+            raise CanonicalMergesError(f"merges[{i}] owner_verdict must be a string")
+        if not (isinstance(members, list) and all(_is_w_id(x) for x in members)):
+            raise CanonicalMergesError(f"merges[{i}] members_w must be a list of w000xxx-shaped strings")
+        distinct = set(members)
+        if len(distinct) < 2:
+            raise CanonicalMergesError(f"merges[{i}] members_w must have >=2 DISTINCT ids")
+        if not _is_w_id(canon):
+            raise CanonicalMergesError(f"merges[{i}] canonical_w must be w000xxx-shaped")
+        if canon not in distinct:
+            raise CanonicalMergesError(f"merges[{i}] canonical_w must be an element of its own members_w")
+        if verdict != _MERGE_APPROVE:
+            continue
+        group_ids = distinct | {canon}
+        overlap = group_ids & seen_ids
+        if overlap:
+            raise CanonicalMergesError(
+                f"transitivity guard: {len(overlap)} id(s) appear in >1 approved merge group"
+            )
+        seen_ids |= group_ids
+        approve_count += 1
+        for member in members:
+            cross_corpus_map[member] = canon
+        if distinct == _D14_MEMBERS and canon == _D14_CANONICAL:
+            d14_ok = True
+
+    if require_release_semantics:
+        problems = []
+        if approve_count != _EXPECTED_APPROVE_MERGES:
+            problems.append(f"expected {_EXPECTED_APPROVE_MERGES} approve merges, got {approve_count}")
+        if dropped != {_D14_DROPPED}:
+            problems.append(f"dropped_by_135 must equal {{{_D14_DROPPED!r}}}")
+        if not d14_ok:
+            problems.append("D-14 flip absent (the w000452/w001239 group must have canonical_w=w000452)")
+        if problems:
+            raise CanonicalMergesError(
+                "--canonical-merges semantic-ratification assertion failed: " + "; ".join(problems)
+            )
+
+    return {
+        "cross_corpus_map": cross_corpus_map,
+        "dropped": dropped,
+        "sha256": actual_sha,
+        "approve_count": approve_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Hash-pinned date inputs (bake plan §4.3, Codex #5) -- each parsed against a
+# FROZEN exact schema that REJECTS anything else. Every date normalizes to a
+# NUMERIC YEAR before any use -- the raw descriptive string is NEVER persisted.
+# ---------------------------------------------------------------------------
+
+# The plausible-composition window (bake plan §4.3): a normalized year outside
+# this inclusive bound HALTS the build (never silently UNKNOWN / clamped).
+_COMPOSITION_YEAR_MIN = 500
+_COMPOSITION_YEAR_MAX = 1600
+# The FIXED, HARDCODED range-separator set (bake plan §4.3 -- data-file-driven
+# designators, but the separator must be identical across every date-table
+# revision). U+002D HYPHEN-MINUS, U+2013 EN DASH, U+2014 EM DASH.
+_RANGE_SEPARATORS = frozenset({"-", "–", "—"})
+# The FIXED allowed residual punctuation (bake plan §4.3): comma, period, parens.
+_ALLOWED_RESIDUAL = frozenset({",", ".", "(", ")"})
+_SEFTJA_ENTRY_KEYS = frozenset({"year", "basis"})
+_COMPOSITION_TOP_KEYS = frozenset({
+    "century_designators", "range_designators", "era_qualifiers", "dates",
+})
+
+# D-17 constants (bake plan §4.3). DELTA=100y cited to chrono_date_coverage.md;
+# MIN_ML=200 = the frozen minimum distinctive span.
+D17_DELTA_YEARS = 100
+D17_MIN_ML = 200
+LEVER1_COVERAGE_CLIFF = 0.45
+# Mirrors shared/discovery_band_labels.STRICT_FLOOR (D-07) -- the CERT-01 pass
+# threshold. Kept as a local literal so this stdlib-only build script never
+# imports the values module (avoids a build->shared coupling); the verifier's
+# gate 12 imports the authoritative constant from shared for its own checks.
+STRICT_FLOOR_FROZEN = 0.85
+
+
+def _verify_input_sha256(path, expected, *, exc, label) -> str:
+    p = Path(path)
+    if not p.exists():
+        raise exc(f"{label} file not found: {path}")
+    actual = _hash_file(p)
+    if expected is not None and actual != expected:
+        raise exc(f"{label} SHA-256 pin mismatch (hash gate) -- refusing to load")
+    return actual
+
+
+def parse_seftja_dates(path, *, sha256: Optional[str] = None) -> Dict[str, int]:
+    """Parse the hash-pinned `--seftja-dates` input against its FROZEN exact
+    schema (bake plan §4.3): a JSON object mapping a raw source-side id to an
+    object with EXACTLY `{year:int, basis:str}`. `basis` is validated then
+    DISCARDED (only the numeric year is used, never persisted). A missing/
+    non-integer year, a missing/non-string basis, a third key, or a year
+    outside [500, 1600] is REJECTED. Returns `{raw_id: year}`."""
+    _verify_input_sha256(path, sha256, exc=SeftjaDatesError, label="--seftja-dates")
+    try:
+        doc = _json_loads_strict(Path(path).read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise SeftjaDatesError(f"--seftja-dates parse error: {e}") from e
+    if not isinstance(doc, dict):
+        raise SeftjaDatesError("--seftja-dates top-level value must be a JSON object")
+    out: Dict[str, int] = {}
+    for raw_id, val in doc.items():
+        if not isinstance(val, dict) or set(val) != _SEFTJA_ENTRY_KEYS:
+            raise SeftjaDatesError(
+                f"--seftja-dates entry must carry EXACTLY {sorted(_SEFTJA_ENTRY_KEYS)}"
+            )
+        year = val["year"]
+        basis = val["basis"]
+        # bool is a subclass of int -- reject it explicitly (year is never a flag).
+        if not isinstance(year, int) or isinstance(year, bool):
+            raise SeftjaDatesError("--seftja-dates 'year' must be a JSON integer")
+        if not isinstance(basis, str):
+            raise SeftjaDatesError("--seftja-dates 'basis' must be a JSON string")
+        if not (_COMPOSITION_YEAR_MIN <= year <= _COMPOSITION_YEAR_MAX):
+            raise SeftjaDatesError(
+                f"--seftja-dates 'year' {year} outside the plausible composition window "
+                f"[{_COMPOSITION_YEAR_MIN}, {_COMPOSITION_YEAR_MAX}]"
+            )
+        out[raw_id] = year  # basis discarded
+    return out
+
+
+def normalize_composition_date(
+    value: str, *, century_designators, range_designators, era_qualifiers,
+) -> int:
+    """FROZEN normalizer (bake plan §4.3): convert ONE M-source composition
+    date STRING to ONE integer CE year via EXACTLY three designator-driven
+    categories -- (i) explicit year -> that year; (ii) century form -> midpoint
+    100*(N-1)+50; (iii) bounded range -> midpoint floor((earliest+latest)/2).
+    TOKENIZE-FIRST (digit runs located directly in the original string, never
+    punctuation-stripped first). A present-but-unparseable value OR one
+    normalizing outside [500, 1600] raises `CompositionDatesError` (a HALT,
+    never a silent UNKNOWN). Designator vocabularies are DATA (owner-held,
+    hash-pinned) -- never hardcoded here."""
+    if not isinstance(value, str):
+        raise CompositionDatesError("composition-date value must be a JSON string")
+    s = value.strip()
+
+    def _matches(designators):
+        return [d for d in designators if d and d in s]
+
+    century_hits = _matches(century_designators)
+    range_hits = _matches(range_designators)
+    if century_hits and range_hits:
+        raise CompositionDatesError(f"ambiguous dual-designator match in composition date {value!r}")
+    if century_hits:
+        category = "century"
+    elif range_hits:
+        category = "range"
+    else:
+        category = "explicit"
+
+    runs = re.findall(r"\d+", s)  # maximal decimal-digit runs, left-to-right
+    if category == "century":
+        if len(runs) != 1:
+            raise CompositionDatesError("century form requires EXACTLY one digit run")
+        n = int(runs[0])
+        if not (1 <= n <= 16):
+            raise CompositionDatesError(f"century ordinal {n} outside [1, 16]")
+        year = 100 * (n - 1) + 50
+    elif category == "range":
+        if len(runs) != 2:
+            raise CompositionDatesError("range form requires EXACTLY two digit runs")
+        earliest, latest = int(runs[0]), int(runs[1])
+        if earliest >= latest:
+            raise CompositionDatesError("range earliest must be < latest")
+        # the SOLE non-whitespace char between the two runs must be a pinned dash.
+        i0 = s.index(runs[0])
+        between = s[i0 + len(runs[0]):s.index(runs[1], i0 + len(runs[0]))]
+        between_core = "".join(ch for ch in between if not ch.isspace())
+        if between_core not in _RANGE_SEPARATORS:
+            raise CompositionDatesError(
+                "range separator between digit runs is not one of the pinned {-, en-dash, em-dash}"
+            )
+        year = (earliest + latest) // 2
+    else:  # explicit
+        if len(runs) != 1:
+            raise CompositionDatesError("explicit-year form requires EXACTLY one digit run")
+        year = int(runs[0])
+
+    # Anchoring: after removing matched designators + era_qualifiers + digit
+    # runs (+ range separator), only allowed punctuation may remain.
+    residual = s
+    for d in century_hits + range_hits + _matches(era_qualifiers):
+        residual = residual.replace(d, " ")
+    for run in runs:
+        residual = residual.replace(run, " ", 1)
+    for sep in _RANGE_SEPARATORS:
+        residual = residual.replace(sep, " ")
+    leftover = {ch for ch in residual if not ch.isspace()}
+    stray = leftover - _ALLOWED_RESIDUAL
+    if stray:
+        raise CompositionDatesError(
+            f"composition date {value!r} has unaccounted-for residual character(s)"
+        )
+
+    if not (_COMPOSITION_YEAR_MIN <= year <= _COMPOSITION_YEAR_MAX):
+        raise CompositionDatesError(
+            f"normalized year {year} outside [{_COMPOSITION_YEAR_MIN}, {_COMPOSITION_YEAR_MAX}]"
+        )
+    return year
+
+
+def parse_composition_dates(path, *, sha256: Optional[str] = None) -> Dict[str, int]:
+    """Parse the hash-pinned `--composition-dates` input against its FROZEN
+    exact schema (bake plan §4.3): a JSON object with EXACTLY the four keys
+    `century_designators` / `range_designators` (non-empty lists of non-empty
+    strings), `era_qualifiers` (a list -- possibly empty -- of non-empty
+    strings), and `dates` (raw_id -> date STRING). Each date value is
+    normalized to ONE integer year via `normalize_composition_date`. The
+    recognized designator vocabulary is READ FROM THIS SAME PINNED FILE (never
+    hardcoded, never in a fixture). Returns `{raw_id: year}`."""
+    _verify_input_sha256(path, sha256, exc=CompositionDatesError, label="--composition-dates")
+    try:
+        doc = _json_loads_strict(Path(path).read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise CompositionDatesError(f"--composition-dates parse error: {e}") from e
+    if not isinstance(doc, dict) or set(doc) != _COMPOSITION_TOP_KEYS:
+        raise CompositionDatesError(
+            f"--composition-dates must be an object with EXACTLY {sorted(_COMPOSITION_TOP_KEYS)}"
+        )
+
+    def _nonempty_str_list(name, *, allow_empty_list):
+        v = doc[name]
+        if not isinstance(v, list):
+            raise CompositionDatesError(f"--composition-dates '{name}' must be a list")
+        if not allow_empty_list and not v:
+            raise CompositionDatesError(f"--composition-dates '{name}' must be non-empty")
+        for el in v:
+            if not isinstance(el, str) or el == "":
+                raise CompositionDatesError(
+                    f"--composition-dates '{name}' elements must be non-empty strings"
+                )
+        return v
+
+    century = _nonempty_str_list("century_designators", allow_empty_list=False)
+    ranges = _nonempty_str_list("range_designators", allow_empty_list=False)
+    eras = _nonempty_str_list("era_qualifiers", allow_empty_list=True)
+    dates = doc["dates"]
+    if not isinstance(dates, dict):
+        raise CompositionDatesError("--composition-dates 'dates' must be an object")
+
+    out: Dict[str, int] = {}
+    for raw_id, val in dates.items():
+        if not isinstance(val, str):
+            raise CompositionDatesError("--composition-dates 'dates' values must be JSON strings")
+        out[raw_id] = normalize_composition_date(
+            val, century_designators=century, range_designators=ranges, era_qualifiers=eras)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Lever-1 coverage routing (bake plan §4.4) -- runs BEFORE D-17.
+# ---------------------------------------------------------------------------
+
+def apply_lever1_coverage(evidence_specs: List[Dict], *, threshold: float = LEVER1_COVERAGE_CLIFF) -> int:
+    """Route each track1_direct witness spec whose coverage (its `density`
+    metric = matched_letters / normalized page length) is `< threshold` to
+    `routing_status='review_only'`, recoverable (bake plan §4.4). Leaves the
+    row's PRE-EXISTING `routing_reason` UNCHANGED (this build keeps the frozen
+    5-member ROUTING_REASONS enum -- a Lever-1 review_only row is distinguished
+    from a D-17 one by `routing_reason='none'` vs `'later_shared_text'`, not by
+    a new enum value). Returns the count demoted."""
+    n = 0
+    for e in evidence_specs:
+        if e.get("evidence_source") != _TRACK1 or e.get("evidence_kind") != _WITNESS:
+            continue
+        cov = e.get("density")
+        if cov is None:
+            continue
+        if cov < threshold and e.get("routing_status") == _SHIPPED:
+            e["routing_status"] = _REVIEW_ONLY
+            n += 1
+    return n
+
+
+# ---------------------------------------------------------------------------
+# D-17 chronological co-claim demotion (bake plan §4.3) -- pure pairwise over
+# DISTINCT canonical_work_id groups; keeps the earliest SHIPPED, demotes each
+# materially-later (>= DELTA) SHIPPED co-claimant on the shared span.
+# ---------------------------------------------------------------------------
+
+def _spans_overlap(a_start, a_end, b_start, b_end) -> bool:
+    return max(a_start, b_start) < min(a_end, b_end)
+
+
+def _footprints_overlap(fa: List[Tuple[int, int]], fb: List[Tuple[int, int]]) -> bool:
+    return any(_spans_overlap(x0, x1, y0, y1) for (x0, x1) in fa for (y0, y1) in fb)
+
+
+def apply_d17_demotion(
+    evidence_specs: List[Dict], *, cross_corpus_map: Optional[Dict[str, str]],
+    year_by_canonical: Dict[str, Optional[int]], delta: int = D17_DELTA_YEARS,
+    ml_floor: int = D17_MIN_ML, will_reband_tier_a: bool = False,
+) -> List[Dict]:
+    """Demote materially-later SHIPPED co-claimants on a shared span, grouped
+    by `canonical_work_id` (Codex #4 -- a merged twin is never compared against
+    itself). Mutates the demoted specs in place (`routing_status=review_only`,
+    `routing_reason=later_shared_text`) and returns one masking-safe
+    `discovery_routing_audit` row dict per considered pair (opaque ids +
+    numeric years only). Population = currently-SHIPPED track1_direct witness
+    specs with `matched_letters >= ml_floor`, EXCLUDING rows a §4.5 reband will
+    condemn (`will_reband_tier_a` + `confidence_band==tier_a`, bake plan §6
+    step-0 consultation)."""
+    ccm = cross_corpus_map or {}
+
+    def _canon(spec):
+        return ids.canonical_work_id(spec["work_id"], ccm)
+
+    # Build the shipped population, keyed per page -> canonical -> [specs].
+    by_page: Dict[str, Dict[str, List[Dict]]] = {}
+    for e in evidence_specs:
+        if e.get("evidence_source") != _TRACK1 or e.get("evidence_kind") != _WITNESS:
+            continue
+        if e.get("routing_status") != _SHIPPED:
+            continue
+        ml = e.get("matched_letters")
+        if ml is None or ml < ml_floor:
+            continue
+        if will_reband_tier_a and e.get("confidence_band") == _TIER_A:
+            continue
+        by_page.setdefault(e["page_id"], {}).setdefault(_canon(e), []).append(e)
+
+    audit_rows: List[Dict] = []
+    for page_id in sorted(by_page):
+        groups = by_page[page_id]
+        footprints = {
+            c: [(s["span_start"], s["span_end"]) for s in specs]
+            for c, specs in groups.items()
+        }
+        canons = sorted(groups)
+        for i in range(len(canons)):
+            for j in range(i + 1, len(canons)):
+                lo, hi = canons[i], canons[j]
+                if not _footprints_overlap(footprints[lo], footprints[hi]):
+                    continue
+                yr_lo = year_by_canonical.get(lo)
+                yr_hi = year_by_canonical.get(hi)
+                if yr_lo is None or yr_hi is None:
+                    audit_rows.append({
+                        "page_id": page_id, "kept_work_id": lo, "demoted_work_id": None,
+                        "kept_year": yr_lo, "demoted_year": yr_hi, "delta_years": None,
+                        "decision": "fail_safe_unknown_date", "routing_reason": None,
+                    })
+                    continue
+                d = abs(yr_hi - yr_lo)
+                if d < delta:
+                    audit_rows.append({
+                        "page_id": page_id, "kept_work_id": lo, "demoted_work_id": None,
+                        "kept_year": yr_lo, "demoted_year": yr_hi, "delta_years": d,
+                        "decision": "kept_tie", "routing_reason": None,
+                    })
+                    continue
+                # Materially-later -> demote the later-dated canonical group's
+                # specs that overlap the earlier (kept) footprint.
+                if yr_lo <= yr_hi:
+                    kept, demoted, kept_year, demoted_year = lo, hi, yr_lo, yr_hi
+                else:
+                    kept, demoted, kept_year, demoted_year = hi, lo, yr_hi, yr_lo
+                kept_fp = footprints[kept]
+                for s in groups[demoted]:
+                    if any(_spans_overlap(s["span_start"], s["span_end"], k0, k1) for (k0, k1) in kept_fp):
+                        s["routing_status"] = _REVIEW_ONLY
+                        s["routing_reason"] = _LATER_SHARED_TEXT
+                audit_rows.append({
+                    "page_id": page_id, "kept_work_id": kept, "demoted_work_id": demoted,
+                    "kept_year": kept_year, "demoted_year": demoted_year, "delta_years": d,
+                    "decision": "demoted", "routing_reason": _LATER_SHARED_TEXT,
+                })
+    return audit_rows
+
+
+def compute_pair_coverage(audit_rows: List[Dict]) -> Tuple[int, int, float]:
+    """Production coverage gate arithmetic (bake plan §4.3/§7 gate 9). `U` =
+    every audit row; `R` = rows where BOTH years resolved (decision in
+    demoted/kept_tie). Returns `(|R|, |U|, pair_coverage)`. Raises
+    `DateCoverageError` on the zero-candidate case (never a 0/0 division)."""
+    u = len(audit_rows)
+    if u == 0:
+        raise DateCoverageError(
+            "date-coverage gate: zero candidate pairs (|U|=0) -- likely broken "
+            "candidate generation upstream (never silently treated as 100%)"
+        )
+    r = sum(1 for a in audit_rows if a["decision"] in ("demoted", "kept_tie"))
+    return r, u, r / u
+
+
+def assert_pair_coverage_floor(audit_rows: List[Dict], *, floor: float) -> float:
+    r, u, cov = compute_pair_coverage(audit_rows)
+    if cov < floor:
+        raise DateCoverageError(
+            f"date-coverage gate: pair_coverage {cov:.4f} ({r}/{u}) below absolute floor {floor} -- HALT"
+        )
+    return cov
+
+
+# ---------------------------------------------------------------------------
+# CERT-01 FAIL-branch reband to screening_rb (bake plan §4.5, Codex #7/#B2) --
+# a REBUILD INPUT consumed at band-assignment time, never a bare in-place
+# UPDATE: apply_reband mutates specs BEFORE evidence_id + display selection.
+# ---------------------------------------------------------------------------
+
+_REBAND_TRIGGER_FIELDS = ("precision", "ci_low", "ci_high", "numerator", "denominator")
+
+
+def resolve_reband_decision(precision_spec) -> Optional[Dict]:
+    """Bake plan §6 step-0 pre-flight: inspect an optional `--precision-spec`
+    for a tier_a `measurement_status='measured_fail'` outcome. Returns
+    `{'trigger': {...5 fields...}}` when a valid FAIL reband is triggered,
+    else None (absent spec, or a non-triggering `measured_pass`/
+    `insufficient_evidence`). PREFLIGHT-GATED (Codex round-8 HIGH-2): a
+    `measured_fail` row MUST carry all five non-NULL fields AND `ci_low<0.85`,
+    else `InvalidPrecisionSpecError` (a HALT before any reband logic)."""
+    if not precision_spec:
+        return None
+    fail_rows = [
+        r for r in precision_spec
+        if isinstance(r, dict)
+        and r.get("confidence_band") == _TIER_A
+        and r.get("measurement_status") == "measured_fail"
+    ]
+    if not fail_rows:
+        return None
+    r = fail_rows[0]
+    missing = [f for f in _REBAND_TRIGGER_FIELDS if r.get(f) is None]
+    if missing:
+        raise InvalidPrecisionSpecError(
+            f"measured_fail tier_a spec missing required field(s) {missing} "
+            "(Codex round-8 HIGH-2: an inconsistent measured_fail must NEVER fire the reband)"
+        )
+    if not (isinstance(r["ci_low"], (int, float)) and r["ci_low"] < STRICT_FLOOR_FROZEN):
+        raise InvalidPrecisionSpecError(
+            "measured_fail tier_a spec must have ci_low < 0.85 (contradicts its own CI otherwise)"
+        )
+    return {"trigger": {f: r[f] for f in _REBAND_TRIGGER_FIELDS}}
+
+
+def apply_reband(evidence_specs: List[Dict]) -> int:
+    """Materialize the §4.5 reband as a REBUILD INPUT: every
+    `confidence_band='tier_a'` spec becomes `screening_rb` +
+    `routing_status='review_only'`, mutated BEFORE `assemble_claims_and_evidence`
+    recomputes each row's `evidence_id` (over the NEW band, part of the frozen
+    §2 id tuple) and each claim's routing-aware `display_evidence_id`. Leaves
+    the row's PRE-EXISTING `routing_reason` unchanged (never `later_shared_text`
+    -- that is exclusively D-17's output). Returns the rebanded-row count."""
+    n = 0
+    for e in evidence_specs:
+        if e.get("confidence_band") == _TIER_A:
+            e["confidence_band"] = _SCREENING_RB
+            e["routing_status"] = _REVIEW_ONLY
+            n += 1
+    return n
+
+
+def invalidate_reband_band_precision(bp_rows: List[Dict], decision: Dict) -> Tuple[List[Dict], Dict]:
+    """Atomically invalidate BOTH the SOURCE `tier_a` and TARGET `screening_rb`
+    band_precision rows (bake plan §4.5, Codex R3-HIGH/#B2): each gets
+    `measurement_status='not_measured'` + NULL precision/ci_low/ci_high/
+    numerator/denominator -- the rebanded rows changed both populations, so
+    the legacy numbers are invalid (never a fabricated combined number). The
+    triggering measured_fail numbers are preserved SEPARATELY in `meta` (never
+    in the live band_precision table). Returns `(new_bp_rows, meta_extra)`."""
+    trig = decision["trigger"]
+    new_rows = []
+    for r in bp_rows:
+        r = dict(r)
+        if r.get("evidence_source") == _TRACK1 and r.get("confidence_band") in (_TIER_A, _SCREENING_RB):
+            r["measurement_status"] = "not_measured"
+            for f in _REBAND_TRIGGER_FIELDS:
+                r[f] = None
+        new_rows.append(r)
+    meta_extra = {
+        "tier_a_reband_target": _SCREENING_RB,
+        "tier_a_reband_count": None,  # filled in after apply_reband counts rows
+        "tier_a_reband_trigger_precision": str(trig["precision"]),
+        "tier_a_reband_trigger_ci_low": str(trig["ci_low"]),
+        "tier_a_reband_trigger_ci_high": str(trig["ci_high"]),
+        "tier_a_reband_trigger_numerator": str(trig["numerator"]),
+        "tier_a_reband_trigger_denominator": str(trig["denominator"]),
+    }
+    return new_rows, meta_extra
+
+
+def resolve_year_by_canonical(
+    date_maps: List[Dict[str, int]], *, crosswalk: Dict[str, str],
+    cross_corpus_map: Optional[Dict[str, str]],
+) -> Dict[str, int]:
+    """Join the raw-id -> year date maps to canonical_work_id via the crosswalk
+    (raw research id -> opaque work_id) + the census cross_corpus_map (opaque
+    -> canonical). Returns `{canonical_work_id: year}` -- numeric years only."""
+    ccm = cross_corpus_map or {}
+    out: Dict[str, int] = {}
+    for dm in date_maps:
+        for raw_id, year in dm.items():
+            opaque = crosswalk.get(raw_id)
+            if opaque is None:
+                continue
+            out[ids.canonical_work_id(opaque, ccm)] = year
+    return out
+
+
 def create_schema(conn: sqlite3.Connection) -> None:
     """Emit the FROZEN DDL exactly (docs/specs/discovery-sidecar-schema-v1.md SS1)."""
     conn.executescript(_DDL)
@@ -889,7 +1530,8 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
         claim_id = claim_id_by_key[(page_id, work_id)]
         selector_rows = [
             {"evidence_id": e["_evidence_id"], "evidence_source": e["evidence_source"],
-             "confidence_band": e["confidence_band"], "adjudication_status": e["adjudication_status"]}
+             "confidence_band": e["confidence_band"], "adjudication_status": e["adjudication_status"],
+             "routing_status": e.get("routing_status")}
             for e in rows
         ]
         winner = ids.select_display_evidence(selector_rows)
@@ -1951,7 +2593,8 @@ def assemble_claims_and_evidence(
     for claim_id, rows in evidence_rows_by_claim.items():
         selector_rows = [
             {"evidence_id": e["_evidence_id"], "evidence_source": e["evidence_source"],
-             "confidence_band": e["confidence_band"], "adjudication_status": e["adjudication_status"]}
+             "confidence_band": e["confidence_band"], "adjudication_status": e["adjudication_status"],
+             "routing_status": e.get("routing_status")}
             for e in rows
         ]
         display_choices[claim_id] = ids.select_display_evidence(selector_rows)
@@ -1978,6 +2621,13 @@ def build_claims_and_evidence(
     q2_witness_collection: Iterable[Dict] = (), q2_collection_tafsir_targum: Iterable[Dict] = (),
     q2_collection_with_arabic: Iterable[Dict] = (), q2_shared_text: Iterable[Dict] = (),
     sidecar_version: str = REAL_SIDECAR_VERSION,
+    cross_corpus_map: Optional[Dict[str, str]] = None,
+    year_by_canonical: Optional[Dict[str, Optional[int]]] = None,
+    apply_lever1: bool = False,
+    lever1_threshold: float = LEVER1_COVERAGE_CLIFF,
+    reband_tier_a: bool = False,
+    d17_delta: int = D17_DELTA_YEARS,
+    d17_ml_floor: int = D17_MIN_ML,
 ) -> Dict:
     """Assemble the UNIFIED witness family (track1_direct 4-disjoint-source
     banding + propagated corroborated/weak) + the shared_text family + the
@@ -2021,7 +2671,28 @@ def build_claims_and_evidence(
     )
     evidence_specs += _ingest_shared_text(q2_shared_text, work_index, page_index)
 
-    return assemble_claims_and_evidence(evidence_specs, work_source_corpus, sidecar_version=sidecar_version)
+    # v2 (135-06) corrected order-of-operations (bake plan §6): Lever-1
+    # coverage routing (step 4) BEFORE D-17 chronological demotion (step 5);
+    # the §4.5 reband (step 6 materialization) is consumed as a REBUILD INPUT
+    # here -- BEFORE assemble computes evidence_id / display_evidence_id -- so
+    # each rebanded row's id regenerates over its new confidence_band and the
+    # display pointer recomputes over the rebanded+demoted set.
+    routing_audit_rows: List[Dict] = []
+    if apply_lever1:
+        apply_lever1_coverage(evidence_specs, threshold=lever1_threshold)
+    if year_by_canonical is not None:
+        routing_audit_rows = apply_d17_demotion(
+            evidence_specs, cross_corpus_map=cross_corpus_map,
+            year_by_canonical=year_by_canonical, delta=d17_delta,
+            ml_floor=d17_ml_floor, will_reband_tier_a=reband_tier_a,
+        )
+    if reband_tier_a:
+        apply_reband(evidence_specs)
+
+    result = assemble_claims_and_evidence(
+        evidence_specs, work_source_corpus, sidecar_version=sidecar_version)
+    result["routing_audit_rows"] = routing_audit_rows
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -2143,9 +2814,16 @@ def _connect_research_ro(db_path) -> sqlite3.Connection:
     return sqlite3.connect(uri, uri=True)
 
 
-def _insert_works_real(cur: sqlite3.Cursor, works: List[Dict]) -> None:
+def _insert_works_real(
+    cur: sqlite3.Cursor, works: List[Dict], cross_corpus_map: Optional[Dict[str, str]] = None,
+) -> None:
+    # v2 (135-06): the hash-pinned census `cross_corpus_map` is threaded into
+    # the FROZEN `ids.canonical_work_id` recipe so a merged twin's two source
+    # copies collapse to ONE canonical_work_id (soft merge -- work_id itself
+    # is preserved for provenance). None/{} => v1 identity (each work is its
+    # own canonical), so existing callers are unaffected.
     rows = [
-        (w["work_id"], ids.canonical_work_id(w["work_id"]), w["neutral_title"],
+        (w["work_id"], ids.canonical_work_id(w["work_id"], cross_corpus_map), w["neutral_title"],
          w.get("author"), w.get("genre"), w["source_corpus"])
         for w in works
     ]
@@ -2927,6 +3605,13 @@ def finalize_build(
     data_as_of: Optional[str] = None,
     release: bool = False,
     allow_partial_sources: bool = False,
+    canonical_merges_path=None,
+    canonical_merges_sha256: Optional[str] = None,
+    composition_dates_path=None,
+    composition_dates_sha256: Optional[str] = None,
+    seftja_dates_path=None,
+    seftja_dates_sha256: Optional[str] = None,
+    coverage_floor: float = 0.99,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
     (claims/evidence, NO physical-MS collapse) -> `build_witness_units` ->
@@ -2972,13 +3657,59 @@ def finalize_build(
     a crosswalk update, and (if requested) overwritten the review artifact
     before ever raising.
     """
-    # H3 FIRST -- a pure argument-validation gate with NO file I/O at all,
-    # so it can run before even opening the read-only research connection.
-    bp_rows = _resolve_band_precision_spec(
-        precision_spec=precision_spec,
-        frozen_precision_defaults=frozen_precision_defaults,
-        release=release,
-    )
+    # v2 STEP 0 (135-06, bake plan §6): resolve the optional --precision-spec
+    # FAIL-branch reband BEFORE any DB write. A `measured_fail` tier_a outcome
+    # is a REBUILD INPUT (never a bare in-place UPDATE) -- decided here, then
+    # consumed at band-assignment time inside build_claims_and_evidence.
+    reband_decision = resolve_reband_decision(precision_spec)
+    reband_tier_a = reband_decision is not None
+
+    # H3 -- a pure argument-validation gate with NO file I/O at all. When the
+    # spec triggers a reband, the strict frozen-row-set validation does NOT
+    # apply (that spec carries measurement_status semantics, not the frozen
+    # numbers); the reband path resolves + invalidates band_precision itself.
+    if reband_tier_a:
+        bp_rows = _frozen_real_band_precision_rows()
+        bp_rows, reband_meta_extra = invalidate_reband_band_precision(bp_rows, reband_decision)
+    else:
+        bp_rows = _resolve_band_precision_spec(
+            precision_spec=precision_spec,
+            frozen_precision_defaults=frozen_precision_defaults,
+            release=release,
+        )
+        reband_meta_extra = {}
+
+    # v2 STEP 0 (bake plan §4.1/§4.3): load the hash-pinned merge census + the
+    # two hash-pinned date inputs. In 135-06 (fixtures-only, no production
+    # bake) the v2 inputs are OPT-IN and fully validated + hash-verified when
+    # supplied; the "required-for-release" enforcement rides the 135-07
+    # production-bake path (this keeps the legacy v1-release finalize_build
+    # tests, out of this plan's file scope, green). A mismatched SHA or a
+    # malformed shape still HALTs (raised by the loaders below) whenever the
+    # input IS supplied, and semantic-ratification is enforced on --release.
+    if canonical_merges_path is not None:
+        merges_loaded = load_canonical_merges(
+            canonical_merges_path, sha256=canonical_merges_sha256,
+            require_release_semantics=release,
+        )
+        cross_corpus_map = merges_loaded["cross_corpus_map"]
+        dropped_work_ids = merges_loaded["dropped"]
+        canonical_merges_sha256 = merges_loaded["sha256"]
+    else:
+        cross_corpus_map = {}
+        dropped_work_ids = set()
+
+    run_d17 = composition_dates_path is not None or seftja_dates_path is not None
+    composition_dates_map = {}
+    seftja_dates_map = {}
+    if composition_dates_path is not None:
+        composition_dates_map = parse_composition_dates(
+            composition_dates_path, sha256=composition_dates_sha256)
+        composition_dates_sha256 = _hash_file(Path(composition_dates_path))
+    if seftja_dates_path is not None:
+        seftja_dates_map = parse_seftja_dates(
+            seftja_dates_path, sha256=seftja_dates_sha256)
+        seftja_dates_sha256 = _hash_file(Path(seftja_dates_path))
 
     out_path = Path(out_db_path)
 
@@ -3071,7 +3802,21 @@ def finalize_build(
             raw_work_id = raw_by_opaque.get(a["work_id"])
             if raw_work_id is None:
                 continue
+            # v2 drop-list (bake plan §4.2): a dropped opaque work_id emits NO
+            # works/claim/evidence rows -- excluded BEFORE claim-gen sees it.
+            if a["work_id"] in dropped_work_ids:
+                continue
             works.append({**a, "raw_work_id": raw_work_id})
+
+        # v2 D-17 year resolution (bake plan §4.3): join the hash-pinned date
+        # tables to canonical_work_id via the crosswalk + census map. numeric
+        # years only -- the raw descriptive string never leaves the parser.
+        year_by_canonical = None
+        if run_d17:
+            year_by_canonical = resolve_year_by_canonical(
+                [composition_dates_map, seftja_dates_map],
+                crosswalk=crosswalk, cross_corpus_map=cross_corpus_map,
+            )
 
         result = build_claims_and_evidence(
             conn=conn_research, works=works, page_index=page_index,
@@ -3082,7 +3827,15 @@ def finalize_build(
             q2_collection_with_arabic=q2_collection_with_arabic,
             q2_shared_text=q2_shared_text,
             sidecar_version=REAL_SIDECAR_VERSION,
+            cross_corpus_map=cross_corpus_map,
+            year_by_canonical=year_by_canonical,
+            apply_lever1=run_d17,
+            reband_tier_a=reband_tier_a,
         )
+        routing_audit_rows = result.get("routing_audit_rows", [])
+        # Production coverage gate (Codex #5) -- only on a --release build.
+        if release and run_d17:
+            assert_pair_coverage_floor(routing_audit_rows, floor=coverage_floor)
 
         oxford_parts = _load_oxford_parts(libraries_csv_path) if libraries_csv_path else []
         physical_joins = _load_physical_joins(fjms_db_path) if fjms_db_path else []
@@ -3100,23 +3853,41 @@ def finalize_build(
     try:
         create_schema(out_conn)
         cur = out_conn.cursor()
-        _insert_works_real(cur, works)
+        _insert_works_real(cur, works, cross_corpus_map=cross_corpus_map)
         _insert_claims_and_evidence_real(cur, result["claim_rows"], result["evidence_rows"])
         n_units = _insert_witness_units_real(cur, unit_specs)
 
-        # bp_rows was already resolved above (H3), BEFORE any research-DB
-        # work began -- reused here unchanged, now that the output schema
-        # exists to insert it into.
+        # v2 (135-06): persist every D-17 pairwise decision to the masking-safe
+        # discovery_routing_audit table (opaque ids + numeric years only) so
+        # each demotion is replayable DB-only (gate 10).
+        if routing_audit_rows:
+            cur.executemany(
+                """
+                INSERT INTO discovery_routing_audit
+                    (page_id, kept_work_id, demoted_work_id, kept_year, demoted_year,
+                     delta_years, decision, routing_reason)
+                VALUES (:page_id, :kept_work_id, :demoted_work_id, :kept_year, :demoted_year,
+                        :delta_years, :decision, :routing_reason)
+                """,
+                routing_audit_rows,
+            )
+
+        # bp_rows was already resolved above (H3 / v2 reband), BEFORE any
+        # research-DB work began -- reused here unchanged, now that the output
+        # schema exists to insert it into. measurement_status is written too
+        # (v2, gate 12/13): NULL for a normal build; 'not_measured' for a
+        # reband-invalidated band.
         cur.executemany(
             """
             INSERT INTO band_precision (
                 scope, collection_id, evidence_source, confidence_band, numerator, denominator,
-                precision, ci_low, ci_high, method, sampling_frame, ins_policy, weighting, notes
+                precision, ci_low, ci_high, method, sampling_frame, ins_policy, weighting, notes,
+                measurement_status
             ) VALUES (:scope, :collection_id, :evidence_source, :confidence_band, :numerator,
                        :denominator, :precision, :ci_low, :ci_high, :method, :sampling_frame,
-                       :ins_policy, :weighting, :notes)
+                       :ins_policy, :weighting, :notes, :measurement_status)
             """,
-            bp_rows,
+            [{"measurement_status": None, **r} for r in bp_rows],
         )
 
         (n_works,) = cur.execute("SELECT COUNT(*) FROM works").fetchone()
@@ -3142,6 +3913,28 @@ def finalize_build(
             ("expected_rows_units", str(n_units)),
             ("frame_content_hash", frame_content_hash),
         ]
+        # v2 provenance (bake plan §7 gate 11, Codex #B2/#5): record the
+        # verified SHA-256 of every supplied hash-pinned input in meta.
+        if canonical_merges_sha256 is not None:
+            meta_rows.append(("canonical_merges_sha256", canonical_merges_sha256))
+        if composition_dates_sha256 is not None:
+            meta_rows.append(("composition_dates_sha256", composition_dates_sha256))
+        if seftja_dates_sha256 is not None:
+            meta_rows.append(("seftja_dates_sha256", seftja_dates_sha256))
+        # v2 reband markers (bake plan §4.5, gate 13): the target band + the
+        # rebanded-row count + the preserved trigger provenance.
+        if reband_tier_a:
+            # A screening_rb row can ONLY reach review_only via the reband
+            # (bake plan §4.3 reband-routing-reason clarification) -- so this
+            # counts EXACTLY the rebanded rows, never the original shipped
+            # screening_rb population.
+            (n_rebanded,) = out_conn.execute(
+                "SELECT COUNT(*) FROM discovery_evidence WHERE confidence_band=? AND routing_status=?",
+                (_SCREENING_RB, _REVIEW_ONLY),
+            ).fetchone()
+            reband_meta_extra["tier_a_reband_count"] = str(n_rebanded)
+            for k, v in reband_meta_extra.items():
+                meta_rows.append((k, v))
         cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
 
         (integrity_result,) = out_conn.execute("PRAGMA integrity_check").fetchone()
@@ -3352,7 +4145,24 @@ def build_parser() -> argparse.ArgumentParser:
     real_group.add_argument("--precision-spec", metavar="PATH", default=None,
                         help="H3: JSON file with an explicit list of band_precision row "
                              "dicts (owner-supplied at 134-07) -- overrides the frozen "
-                             "real-mode defaults.")
+                             "real-mode defaults. A tier_a measurement_status='measured_fail' "
+                             "row triggers the v2 CERT-01 FAIL-branch reband (135-06).")
+    v2_group = parser.add_argument_group("v2 re-distill hash-pinned inputs (135-06)")
+    v2_group.add_argument("--canonical-merges", metavar="PATH", default=None,
+                        help="Hash-pinned census: opaque w000xxx merge map + drop-list "
+                             "(REQUIRED for --release; Codex #B2).")
+    v2_group.add_argument("--canonical-merges-sha256", metavar="HEX", default=None,
+                        help="SHA-256 pin verified before --canonical-merges is used.")
+    v2_group.add_argument("--composition-dates", metavar="PATH", default=None,
+                        help="Hash-pinned M-source composition dates (REQUIRED for --release "
+                             "D-17; Codex #5). Frozen schema; normalized to a numeric year.")
+    v2_group.add_argument("--composition-dates-sha256", metavar="HEX", default=None,
+                        help="SHA-256 pin verified before --composition-dates is used.")
+    v2_group.add_argument("--seftja-dates", metavar="PATH", default=None,
+                        help="Hash-pinned interim SEF/JA composition dates (REQUIRED for "
+                             "--release D-17; Codex #5). Frozen {year:int, basis:str} schema.")
+    v2_group.add_argument("--seftja-dates-sha256", metavar="HEX", default=None,
+                        help="SHA-256 pin verified before --seftja-dates is used.")
     real_group.add_argument("--frozen-precision-defaults", action="store_true",
                         help="H3: explicitly acknowledge using the frozen-contract "
                              "band_precision defaults (docs/specs/discovery-sidecar-"
@@ -3466,6 +4276,12 @@ def main(argv=None) -> int:
         frozen_precision_defaults=args.frozen_precision_defaults,
         release=args.release,
         allow_partial_sources=args.allow_partial_sources,
+        canonical_merges_path=args.canonical_merges,
+        canonical_merges_sha256=args.canonical_merges_sha256,
+        composition_dates_path=args.composition_dates,
+        composition_dates_sha256=args.composition_dates_sha256,
+        seftja_dates_path=args.seftja_dates,
+        seftja_dates_sha256=args.seftja_dates_sha256,
     )
     print(f"real build OK: {stats['row_counts']}")
     print(f"content_hash={stats['content_hash']}")
