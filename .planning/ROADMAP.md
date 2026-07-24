@@ -145,7 +145,7 @@ Plans:
 **Wave 1** *(Track A parallel + Track B leadoff, no deps)*
 
 - [x] 135-01-PLAN.md — Band-label values module + band_precision reader + drift-guard test (BAND-01/02/03/04, CERT-02)
-- [ ] 135-03-PLAN.md — Written pre-registered CERT-01 tier-A protocol doc (CERT-01)
+- [x] 135-03-PLAN.md — Written pre-registered CERT-01 tier-A protocol doc (CERT-01)
 - [ ] 135-04-PLAN.md — REWRITE discovery-v2-bake-plan.md + BLOCKING Codex re-review gate (autonomous: false)
 
 **Wave 2**
@@ -239,7 +239,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
-| 135. Precision Certificate & Confidence Bands | 1/9 | In Progress|  |
+| 135. Precision Certificate & Confidence Bands | 2/9 | In Progress|  |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |
