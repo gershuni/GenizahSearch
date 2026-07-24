@@ -124,8 +124,16 @@ _RELEASE_CONTRACT_COUNTS = (
 # full (evidence_kind x evidence_source x confidence_band) combination
 # invariant enforced by scripts/verify_discovery_sidecar.py at build time.
 _CLAIM_TYPES = frozenset({"direct_witness", "quotes_this_work", "shared_text"})
+# v1-read-compat window (Codex #8): the track1_direct top band accepts BOTH the
+# v1 stored key `expert_verified` (the live v1 asset + the v1 fixture) AND its
+# v2 rename `high_confidence_algorithmic`. Do NOT drop `expert_verified` until
+# the v2 manifest is live (135-08) -- a built v2 asset carries only the v2 key
+# (the offline verifier's no-mixed-enum-state check enforces that), while this
+# runtime spot-check accepts whichever key the currently-loaded asset uses.
 _CONFIDENCE_BANDS_BY_SOURCE: Dict[str, frozenset] = {
-    "track1_direct": frozenset({"expert_verified", "tier_a", "screening_rb", "screening_canon"}),
+    "track1_direct": frozenset(
+        {"high_confidence_algorithmic", "expert_verified", "tier_a", "screening_rb", "screening_canon"}
+    ),
     "propagated": frozenset({"corroborated", "weak", "not_evaluated"}),
 }
 

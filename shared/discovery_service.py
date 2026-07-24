@@ -149,7 +149,15 @@ def _parse_json_field(value: Optional[str]) -> Any:
 # web/discovery_assets.py (see its own enum-vocab spot-check comment).
 # ---------------------------------------------------------------------------
 
+# v1-read-compat window (Codex #8): the strongest track1_direct band is listed
+# under BOTH the v2 key `high_confidence_algorithmic` AND the v1 key
+# `expert_verified` at the same (top) rank position, so the band-rank lattice
+# ranks whichever key the currently-loaded asset carries. A built v2 asset
+# uses only the v2 key (the offline verifier's no-mixed-enum-state check
+# enforces that); do NOT drop `expert_verified` until the v2 manifest is live
+# (135-08) -- the v1 asset + the v1 fixture tests still read it.
 _BAND_RANK_ORDER: List[Tuple[str, str]] = [
+    ("track1_direct", "high_confidence_algorithmic"),
     ("track1_direct", "expert_verified"),
     ("track1_direct", "tier_a"),
     ("propagated", "corroborated"),
