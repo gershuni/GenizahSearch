@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -60,10 +61,13 @@ _RAW_WORK_ID_PREFIXES = ("M:", "J:", "REF")
 # Codex #8) with no manual edit. The routing_reason enum (now including
 # `later_shared_text`) is enforced at the discovery_evidence DDL CHECK layer
 # mirroring `ids.ROUTING_REASONS` -- the verifier does not re-validate it.
-# (The release-strict `_EXPECTED_BAND_KEYS` / `_EXPECTED_MEASURED_BAND_PRECISIONS`
-# below still key on `expert_verified`: they gate the REAL v2 asset, whose
-# band_precision rename lands together with the build's band-assignment flip in
-# 135-06 -- NOT in 135-05.)
+# (The release-strict expected band_precision key-set is version-AWARE as of
+# 135-07: `_expected_band_keys` / `_expected_measured_band_precisions` select
+# the top-tier KEY from the DETECTED asset band-vocabulary version -- v1 =>
+# `expert_verified`, v2 => `high_confidence_algorithmic` -- while every value/
+# count check stays exactly as strict. `check_band_vocabulary` then
+# cross-checks the meta marker against the ACTUAL bands present, so the asset
+# can never choose its own contract.)
 VALID_EVIDENCE_COMBOS = frozenset(
     {(ids.EVIDENCE_KIND_WITNESS, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, b)
      for b in ids.CONFIDENCE_BANDS_BY_SOURCE[ids.EVIDENCE_SOURCE_TRACK1_DIRECT]}
@@ -79,16 +83,6 @@ _COLLECTION_PRECISION_VALUE = 0.926
 _PRECISION_TOLERANCE = 1e-6
 _COLLECTION_ID = "propagated_witness_collection_v1"
 
-# M4: the THREE measured track1_direct band precisions (docs/specs SS1.6/
-# SS4.1) -- these are the ONLY (evidence_source, confidence_band) pairs
-# permitted to carry a non-NULL precision in a real/release build; tier_a
-# and every propagated band must stay NULL (H3/G8).
-_EXPECTED_MEASURED_BAND_PRECISIONS = {
-    (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_EXPERT_VERIFIED): 0.889,
-    (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_RB): 0.859,
-    (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_CANON): 0.647,
-}
-
 # Mirrors (never imports/edits) the literal collection_id
 # `scripts/build_discovery_sidecar.py::_frozen_real_band_precision_rows`
 # uses for the E1-certification-registry `scope='band'` rows (Codex R2 MED
@@ -96,19 +90,42 @@ _EXPECTED_MEASURED_BAND_PRECISIONS = {
 # (collection_id, evidence_source, confidence_band) key-set below.
 _E1_REGISTRY_COLLECTION_ID = "e1_certification_registry_v1"
 
-# Codex R2 MED: the COMPLETE frozen release band_precision row-set, keyed
-# on (collection_id, evidence_source, confidence_band) -- used to require
-# EXACTLY ONE row per expected key (never a bare (source, band) dict
-# collapse, which let a duplicate/extra row for an already-satisfied key
-# silently overwrite a valid one and slip through undetected).
-_EXPECTED_BAND_KEYS = {
-    (_COLLECTION_ID, ids.EVIDENCE_SOURCE_PROPAGATED, ids.CONFIDENCE_BAND_CORROBORATED),
-    (_COLLECTION_ID, ids.EVIDENCE_SOURCE_PROPAGATED, ids.CONFIDENCE_BAND_WEAK),
-    (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_EXPERT_VERIFIED),
-    (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A),
-    (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_RB),
-    (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_CANON),
-}
+
+def _top_tier_band_key(v2: bool) -> str:
+    """135-07: the ONE helper that selects the version-specific track1_direct
+    top-tier band KEY -- v1 `expert_verified`, v2 `high_confidence_algorithmic`
+    -- so the release-strict expected sets never drift out of a global."""
+    return _V2_BAND_KEY if v2 else _V1_BAND_LITERAL
+
+
+def _expected_measured_band_precisions(v2: bool) -> Dict[Tuple[str, str], float]:
+    """M4: the THREE measured track1_direct band precisions (docs/specs
+    SS1.6/SS4.1) -- the ONLY (evidence_source, confidence_band) pairs permitted
+    to carry a non-NULL precision in a real/release build; tier_a and every
+    propagated band must stay NULL (H3/G8). Only the top-tier KEY tracks the
+    detected version -- the 0.889/0.859/0.647 VALUES are frozen either way."""
+    return {
+        (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, _top_tier_band_key(v2)): 0.889,
+        (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_RB): 0.859,
+        (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_CANON): 0.647,
+    }
+
+
+def _expected_band_keys(v2: bool) -> set:
+    """Codex R2 MED: the COMPLETE frozen release band_precision row-set, keyed
+    on (collection_id, evidence_source, confidence_band) -- used to require
+    EXACTLY ONE row per expected key (never a bare (source, band) dict
+    collapse, which let a duplicate/extra row for an already-satisfied key
+    silently overwrite a valid one and slip through undetected). The top-tier
+    key tracks the detected band-vocabulary version (135-07)."""
+    return {
+        (_COLLECTION_ID, ids.EVIDENCE_SOURCE_PROPAGATED, ids.CONFIDENCE_BAND_CORROBORATED),
+        (_COLLECTION_ID, ids.EVIDENCE_SOURCE_PROPAGATED, ids.CONFIDENCE_BAND_WEAK),
+        (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, _top_tier_band_key(v2)),
+        (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A),
+        (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_RB),
+        (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_SCREENING_CANON),
+    }
 
 _RELEASE_CONTRACT_COUNTS = [
     ("expected_rows_claims", "discovery_claim"),
@@ -131,6 +148,28 @@ _V1_BAND_LITERAL = ids.CONFIDENCE_BAND_EXPERT_VERIFIED  # "expert_verified"
 _V2_BAND_KEY = ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC  # "high_confidence_algorithmic"
 _D17_DELTA_YEARS = 100
 _REBAND_TARGET_META_KEY = "tier_a_reband_target"
+
+# 135-07: the explicit operator-intent band-vocabulary marker + its allowed
+# values. A REAL v2 build ALSO records the verified `canonical_merges_sha256`;
+# the verifier validates that as a genuine 64-hex SHA (not mere key presence),
+# so a hand-forged `band_vocab_version='v2'` meta row alone cannot fake v2.
+_BAND_VOCAB_META_KEY = "band_vocab_version"
+_BAND_VOCAB_V1 = "v1"
+_BAND_VOCAB_V2 = "v2"
+_CANONICAL_MERGES_SHA_META_KEY = "canonical_merges_sha256"
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _detected_band_vocab(meta: dict) -> str:
+    """The effective band-vocabulary version for an asset: the explicit meta
+    marker when present + valid, else v1 (a marker-less asset -- the synthetic
+    golden fixture or a legacy v1 build -- is v1 by contract). An UNKNOWN
+    marker value is returned verbatim so `check_band_vocabulary` can hard-fail
+    it rather than silently coercing to a valid version."""
+    marker = meta.get(_BAND_VOCAB_META_KEY)
+    if marker is None:
+        return _BAND_VOCAB_V1
+    return marker
 
 
 def _has_table(conn: sqlite3.Connection, name: str) -> bool:
@@ -409,11 +448,12 @@ def check_band_precision(conn: sqlite3.Connection, meta: dict) -> List[str]:
     # sidecar_version meta flag (REAL_SIDECAR_VERSION) rather than the mere
     # presence of collection_id (present in BOTH modes).
     if meta.get("sidecar_version") == sidecar_build.REAL_SIDECAR_VERSION:
-        violations += _check_band_precision_release_strict(rows)
+        v2_asset = _detected_band_vocab(meta) == _BAND_VOCAB_V2
+        violations += _check_band_precision_release_strict(rows, v2_bands=v2_asset)
     return violations
 
 
-def _check_band_precision_release_strict(rows) -> List[str]:
+def _check_band_precision_release_strict(rows, *, v2_bands: bool = False) -> List[str]:
     """M4: strict release-mode-only band_precision validation -- exactly
     one scope='collection' row (id=`_COLLECTION_ID`, precision~=0.926,
     non-null numerator/denominator/ci/method); BOTH propagated bands
@@ -431,6 +471,8 @@ def _check_band_precision_release_strict(rows) -> List[str]:
     keyed OUTSIDE the frozen expected set at all is rejected too, whether
     or not its own precision happens to be non-null."""
     violations: List[str] = []
+    expected_band_keys = _expected_band_keys(v2_bands)
+    expected_measured = _expected_measured_band_precisions(v2_bands)
     collection_rows = []
     band_rows_by_key: Dict[Tuple[Optional[str], Optional[str], Optional[str]], List[Tuple]] = {}
     for scope, collection_id, source, band, numerator, denominator, precision, ci_low, ci_high, method in rows:
@@ -463,7 +505,7 @@ def _check_band_precision_release_strict(rows) -> List[str]:
     # (collection_id, evidence_source, confidence_band) key -- BEFORE any
     # value is checked, so a duplicate/extra row can never silently
     # overwrite a valid one via dict-assignment ordering.
-    for key in sorted(_EXPECTED_BAND_KEYS):
+    for key in sorted(expected_band_keys):
         count = len(band_rows_by_key.get(key, []))
         if count != 1:
             violations.append(
@@ -475,7 +517,7 @@ def _check_band_precision_release_strict(rows) -> List[str]:
     # -- regardless of its own precision value (a fully-NULL bogus/extra
     # band row would previously slip through the old "only reject
     # non-null-and-unexpected" check silently).
-    extra_keys = sorted(set(band_rows_by_key) - _EXPECTED_BAND_KEYS)
+    extra_keys = sorted(set(band_rows_by_key) - expected_band_keys)
     for key in extra_keys:
         violations.append(
             f"release band_precision (M4): unexpected band row for "
@@ -497,7 +539,7 @@ def _check_band_precision_release_strict(rows) -> List[str]:
                 f"release band_precision (M4): propagated/{band} carries non-null precision/CI"
             )
 
-    for (source, band), expected_precision in _EXPECTED_MEASURED_BAND_PRECISIONS.items():
+    for (source, band), expected_precision in expected_measured.items():
         row = _single_row((_E1_REGISTRY_COLLECTION_ID, source, band))
         if row is None:
             continue  # already flagged above (missing/duplicate)
@@ -545,6 +587,126 @@ def check_no_mixed_enum_state(conn: sqlite3.Connection) -> List[str]:
             "atomicity, Codex #8)"
         ]
     return []
+
+
+# ---------------------------------------------------------------------------
+# 9b. v2 band-vocabulary intent gate (135-07): the asset must PROVE it matches
+#     operator intent -- never choose its own contract (Codex #3).
+# ---------------------------------------------------------------------------
+
+def _scan_text_columns_for_literal(conn: sqlite3.Connection, literal: str) -> List[str]:
+    """Defense-in-depth (Codex #3): scan EVERY TEXT/untyped column of every
+    non-sqlite table for an EXACT-token match of `literal` (an external
+    `--precision-spec` can persist free-form fields like `notes`/`method`
+    beyond the two band columns). Uses a word-boundary match so a substring
+    inside an unrelated word is not a false positive, but any standalone
+    occurrence of the retired v1 literal in a v2 asset is a HARD FAIL."""
+    violations: List[str] = []
+    token = re.compile(r"\b" + re.escape(literal) + r"\b")
+    tables = [
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    ]
+    for tbl in tables:
+        cols = conn.execute(f'PRAGMA table_info("{tbl}")').fetchall()
+        # affinity/type is col[2]; TEXT or empty (untyped) columns can hold strings.
+        text_cols = [c[1] for c in cols if (c[2] or "").upper() in ("", "TEXT")]
+        for col in text_cols:
+            for (val,) in conn.execute(
+                f'SELECT DISTINCT "{col}" FROM "{tbl}" WHERE "{col}" IS NOT NULL'  # noqa: S608
+            ):
+                if isinstance(val, str) and token.search(val):
+                    violations.append(
+                        f"band-vocabulary(v2): retired v1 literal {literal!r} persisted in "
+                        f"{tbl}.{col} (defense-in-depth text-column scan)"
+                    )
+                    break  # one hit per column is enough to fail
+    return violations
+
+
+def check_band_vocabulary(
+    conn: sqlite3.Connection, meta: dict, *, expected_band_vocabulary: Optional[str] = None
+) -> List[str]:
+    """135-07 (Codex #3): version-aware band-vocabulary gate that does NOT
+    trust the asset's self-report alone. Detect the version from meta
+    `band_vocab_version`, then CROSS-CHECK it against the ACTUAL band literals
+    present across BOTH band-bearing tables:
+
+      * marker='v2' => REQUIRE the v2 key present, FORBID the v1 literal,
+        require `canonical_merges_sha256` to be a REAL 64-hex SHA (not mere key
+        presence), and scan every TEXT column for the retired v1 literal;
+      * marker='v1' (or absent -> v1 by contract) => inverse: FORBID the v2 key
+        without a marker;
+      * a marker present with NEITHER top-tier key => HARD FAIL;
+      * an unknown marker value => HARD FAIL.
+
+    `expected_band_vocabulary` (the external `--require-v2` / operator-intent
+    gate) is the FALSE-GREEN closer: when set, the DETECTED version must equal
+    it, so an intended-v2 bake that accidentally produced an internally-
+    consistent v1 asset (no marker) FAILS instead of passing."""
+    violations: List[str] = []
+    marker = meta.get(_BAND_VOCAB_META_KEY)
+    detected = _detected_band_vocab(meta)
+
+    bands = set()
+    for tbl in ("discovery_evidence", "band_precision"):
+        for (b,) in conn.execute(f"SELECT DISTINCT confidence_band FROM {tbl}"):  # noqa: S608 (fixed names)
+            if b is not None:
+                bands.add(b)
+    has_v1 = _V1_BAND_LITERAL in bands
+    has_v2 = _V2_BAND_KEY in bands
+
+    # External operator-intent gate (--require-v2 / --expected-band-vocabulary).
+    if expected_band_vocabulary is not None and detected != expected_band_vocabulary:
+        violations.append(
+            f"band-vocabulary: operator declared expected version "
+            f"{expected_band_vocabulary!r} but the asset's detected version is "
+            f"{detected!r} (meta marker={marker!r}) -- the asset must prove it matches "
+            "operator intent, not choose its own contract (--require-v2)"
+        )
+
+    if detected == _BAND_VOCAB_V2:
+        if not has_v2:
+            violations.append(
+                f"band-vocabulary(v2): marker set but the v2 key {_V2_BAND_KEY!r} is absent "
+                "from every band-bearing column"
+            )
+        if has_v1:
+            violations.append(
+                f"band-vocabulary(v2): marker set but the retired v1 literal "
+                f"{_V1_BAND_LITERAL!r} is still present"
+            )
+        sha = meta.get(_CANONICAL_MERGES_SHA_META_KEY)
+        if not (isinstance(sha, str) and _SHA256_HEX_RE.match(sha)):
+            violations.append(
+                f"band-vocabulary(v2): meta.{_CANONICAL_MERGES_SHA_META_KEY} is not a real "
+                "64-hex SHA-256 -- a v2 marker without the verified census SHA cannot prove v2"
+            )
+        violations += _scan_text_columns_for_literal(conn, _V1_BAND_LITERAL)
+    elif detected == _BAND_VOCAB_V1:
+        # v1 contract (marker='v1' or absent): the v2 key must NOT appear
+        # without an explicit v2 marker.
+        if has_v2:
+            violations.append(
+                f"band-vocabulary(v1): the v2 key {_V2_BAND_KEY!r} is present but the asset is "
+                f"not marked band_vocab_version='v2' (meta marker={marker!r})"
+            )
+        # A marker EXPLICITLY set to v1 must carry the v1 top-tier key (reject
+        # neither-top-tier-key-present); a marker-less asset is exempt (a
+        # minimal/legacy asset may legitimately carry neither top-tier band --
+        # the release-strict band_precision keyset gates real assets separately).
+        if marker == _BAND_VOCAB_V1 and not has_v1 and not has_v2:
+            violations.append(
+                f"band-vocabulary(v1): marker set but neither the v1 literal {_V1_BAND_LITERAL!r} "
+                f"nor the v2 key {_V2_BAND_KEY!r} is present (no top-tier band at all)"
+            )
+    else:
+        violations.append(
+            f"band-vocabulary: unknown band_vocab_version marker {marker!r} "
+            f"(expected {_BAND_VOCAB_V1!r} or {_BAND_VOCAB_V2!r})"
+        )
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -854,10 +1016,16 @@ def check_frame_content_hash(conn: sqlite3.Connection, meta: dict, expected_fram
 # verify() -- the single all-invariant entry point
 # ---------------------------------------------------------------------------
 
-def verify(db_path, expected_frame_hash=None) -> int:
+def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optional[str] = None) -> int:
     """Run ALL release-contract invariants over `db_path`. Returns 0 on a
     clean DB, 1 (fail-closed) on ANY violation. Prints every violation found
-    to stderr."""
+    to stderr.
+
+    `expected_band_vocabulary` ('v1'/'v2', from `--require-v2` /
+    `--expected-band-vocabulary`) is the external operator-intent gate: when
+    set, the asset's DETECTED band-vocabulary version must equal it, closing
+    the false-green where an intended-v2 bake accidentally emits a valid v1
+    asset (135-07)."""
     violations: List[str] = []
     conn = _connect_ro(db_path)
     try:
@@ -874,6 +1042,8 @@ def verify(db_path, expected_frame_hash=None) -> int:
         violations += check_frame_content_hash(conn, meta, expected_frame_hash)
         # v2 re-distill invariants (135-06).
         violations += check_no_mixed_enum_state(conn)
+        violations += check_band_vocabulary(
+            conn, meta, expected_band_vocabulary=expected_band_vocabulary)
         violations += check_never_orphan_shipped(conn)
         violations += check_unknown_date_never_demoted(conn)
         violations += check_routing_audit_replayability(conn)
@@ -906,13 +1076,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-frame-hash", metavar="HEX", default=None,
                         help="Expected membership frame_content_hash (hex); required for a full "
                              "release-gate run, optional for ad-hoc local verification")
+    parser.add_argument("--expected-band-vocabulary", choices=["v1", "v2"], default=None,
+                        help="External operator-intent gate (135-07): the asset's DETECTED "
+                             "band-vocabulary version MUST equal this. Closes the false-green "
+                             "where an intended-v2 bake accidentally emits a valid v1 asset.")
+    parser.add_argument("--require-v2", action="store_true",
+                        help="Shorthand for --expected-band-vocabulary v2 -- the production "
+                             "135-07 v2-bake invocation, proving v2 INTENT not mere internal "
+                             "consistency.")
     return parser
 
 
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return verify(args.db_path, args.expected_frame_hash)
+    expected_vocab = args.expected_band_vocabulary
+    if args.require_v2:
+        if expected_vocab not in (None, "v2"):
+            parser.error("--require-v2 conflicts with --expected-band-vocabulary v1")
+        expected_vocab = "v2"
+    return verify(args.db_path, args.expected_frame_hash, expected_band_vocabulary=expected_vocab)
 
 
 if __name__ == "__main__":
