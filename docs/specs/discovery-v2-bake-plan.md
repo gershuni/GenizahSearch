@@ -202,6 +202,18 @@ all-invariant verifier (§7). Document order below is 4.1→4.5; the EXECUTION
 order at bake time is different and is fixed in §6 (4.4 Lever-1 coverage
 routing runs BEFORE 4.3 D-17 chronological demotion).
 
+**Shared JSON-parsing requirement across ALL THREE hash-pinned inputs (Codex
+R4-MEDIUM):** `--canonical-merges`, `--composition-dates`, and
+`--seftja-dates` are each parsed with STRICT duplicate-key rejection at
+EVERY object nesting level — a source document carrying a repeated key
+anywhere (top-level or nested inside a `merges`/`dates` entry) is REJECTED
+(`--release` HALTS), never silently resolved by a default last-write-wins
+JSON decoder. This is implemented via a duplicate-checking `object_pairs_hook`
+(or equivalent) passed to every JSON parse in the build, not the bare
+stdlib `json.loads` default — a real gap the default decoder would
+otherwise silently mask, undermining the "exact/closed shape" guarantees
+specified for all three parsers below.
+
 ### 4.1 Canonical merge (soft merge) — REQUIRED hash-pinned `--canonical-merges` input
 
 - Define the REQUIRED hash-pinned census input `--canonical-merges <path>
@@ -317,29 +329,69 @@ resolution-ORDER rule (representative first, else earliest sibling), never
 an ambiguity — there is exactly one year per canonical group by
 construction.
 
-**Deterministic pairwise decision.** For EVERY qualifying pair `{X, Y}` in
-the candidate universe (below), order the pair lexicographically by
-`canonical_work_id` into `(lo, hi)` — a stable, date-independent addressing
-key, never implying which side is "kept":
+**Deterministic pairwise decision — processed in ONE deterministic pass,
+ORDERED to prevent a demoted reference from itself demoting anything
+further (Codex R4-HIGH fix — closes the span-orphaning gap):** compute
+EVERY qualifying pair `{X, Y}` in the candidate universe (below) up front,
+order EACH pair lexicographically by `canonical_work_id` into `(lo, hi)` —
+a stable, date-independent addressing key, never implying which side is
+"kept" — then process ALL pairs in a SINGLE FIXED ORDER: ascending by the
+NUMERICALLY LATER side's resolved year (ties broken by the lexicographic
+`(page_id, lo, hi)` key). For pair `{lo, hi}`:
 - if EITHER `lo` or `hi` has no resolved year → `decision =
   fail_safe_unknown_date`; NEITHER side is demoted (fail-safe, rule 5 — an
   unknown date on either side means no direction can be established, so the
   KNOWN-dated side is not entitled to demote the unknown one either);
-- else `delta = ABS(year(hi) - year(lo))`;
-  - if `delta >= DELTA` → the LATER-dated of `{lo, hi}` is demoted on the
-    shared span (`routing_status='review_only'`,
-    `routing_reason='later_shared_text'`); `decision = demoted`;
-  - if `delta < DELTA` → `decision = kept_tie`; NEITHER side is demoted.
+- else let `E` = the EARLIER-dated side, `L` = the LATER-dated side (equal
+  years — a true tie — fall through to `kept_tie` directly, below), `delta =
+  ABS(year(L) - year(E))`;
+  - **if `E` has ALREADY been marked `demoted` by an earlier-PROCESSED pair
+    in THIS SAME PASS** (i.e., `E` itself lost to some still-earlier
+    reference) → `decision = kept_tie` REGARDLESS of `delta` — `L` is NEVER
+    demoted relative to an ALREADY-HIDDEN reference; a claim can only ever
+    be demoted relative to a reference that is ITSELF surviving (shipped or
+    tied), never to one that has already lost its own comparison. (Processing
+    in ascending order of the LATER side's year guarantees `E`'s own
+    demotion status against ITS earlier references is ALREADY FINALIZED by
+    the time this pair is evaluated, since `E < L` means `E`'s own pairs were
+    processed earlier in this SAME ascending pass — no fixed-point iteration
+    is needed, one deterministic forward pass suffices.)
+  - **otherwise** (E is a valid, surviving reference): if `delta >= DELTA` →
+    `L` is demoted (`decision = demoted`); if `delta < DELTA` → `decision =
+    kept_tie` (neither demoted).
+
+This closes the exact gap Codex R4 found: WITHOUT the "is `E` already
+demoted" check, a middle-dated claim `B` that itself lost to an earlier
+claim `A` could still be used as the "kept" reference that hides a later
+claim `C` — leaving a shared span where NEITHER the earliest witness (`A`,
+which may not even overlap `C`'s specific span) NOR `B` NOR `C` is visible.
+With the ordered, reference-validity-checked pass above, `C` can only ever
+be demoted relative to a reference that is ITSELF still shipped (or tied),
+so a chain of demotions can never orphan a span.
+
+**Physical mutation — the ENTIRE canonical group's evidence footprint on the
+page, not one arbitrarily-chosen row (Codex R4-BLOCKER fix):** because soft
+merge (§4.1) preserves EVERY raw `discovery_claim`/`discovery_evidence` row
+(a canonical group MAY have 2+ raw member `work_id`s, each with its OWN
+possible witness evidence on the SAME `page_id`), a `decision='demoted'`
+pairwise outcome for canonical group `G` on page `P` demotes EVERY
+`discovery_evidence` row on `P` whose (canonicalized) `work_id` resolves to
+`G`, whose `evidence_source='track1_direct'`, and whose primary span
+satisfies the overlap + 200-letter floor test against the winning side — NOT
+a single representative row. This is a per-CANONICAL-GROUP, per-PAGE
+mutation (potentially touching >1 physical evidence row when a group has
+multiple raw members each separately witnessing that page), never a
+single-row operation. The `discovery_routing_audit` reverse/forward match
+(§below) is therefore MANY-TO-MANY, not 1:1 in either direction: one audit
+row can explain MULTIPLE physical evidence rows (when the demoted canonical
+group has multiple raw-member witnesses on that page), and one evidence row
+can be explained by MULTIPLE audit rows (when it lost to 2+ earlier
+co-claimants in a 3+-way cluster, §above).
 
 A claim's FINAL routing outcome for a given shared span is `review_only` if
-it was the demoted side in ANY qualifying pair touching that span; every
-pairwise decision is computed independently in ONE pass over the
-currently-shipped (pre-D-17) population, so a claim that loses one pairwise
-comparison can still correctly serve as the KEPT (earlier) side of a
-DIFFERENT pairwise comparison against a still-later work — this is
-intentional and correct (a work's relative earliness against one co-claimant
-is independent of its own loss to a different, even-earlier co-claimant).
-The rule NEVER names a relation (embed / abridge / quote) — only demotes.
+its canonical group was the demoted side in ANY qualifying pair touching
+that span, per the ordered pass above; the rule NEVER names a relation
+(embed / abridge / quote) — only demotes.
 
 **Candidate-universe definition — FROZEN (Codex #14), WITH a required
 span-overlap safety refinement (BLOCKER, multi-register invariant).** "Shared
@@ -475,52 +527,59 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
   validated against the owner table" ambiguity from the previous draft is
   eliminated: there is no separate, unpinned owner table; the vocabulary IS
   the pinned file.
-  **FROZEN normalizer contract — designator-driven AND FULLY ANCHORED (Codex
-  R2-BLOCKER fix for the token-count ambiguity + Codex R3-HIGH fix for
-  unanchored residual text):** after stripping leading/trailing whitespace
-  from a `dates` value, the normalizer first tests which designator LIST (if
-  any) the string matches (a substring match against `century_designators`,
-  then `range_designators` — checked in that fixed order; a string matching
-  entries from BOTH lists is UNPARSEABLE, an ambiguous mix). In EVERY
-  category below, the check is FULLY ANCHORED, not merely "contains": after
-  (a) removing exactly one matched designator substring (century or range,
-  if applicable), (b) removing every matched `era_qualifiers` substring
-  (allowed as decoration in ALL three categories), and (c) removing
-  whitespace and characters from a FIXED allowed punctuation set (comma,
-  period, parentheses, and — for the range category only — the separating
-  hyphen/dash between the two year tokens), the ENTIRE REMAINDER of the
-  string MUST consist of EXACTLY the required digit token(s) for that
-  category and NOTHING ELSE. Any leftover character or word NOT accounted
-  for by a designator, an era_qualifier, or the fixed punctuation set makes
-  the WHOLE value UNPARSEABLE — an unrecognized semantic label merely
-  co-occurring with a valid-looking year token is REJECTED, never silently
-  treated as harmless decoration (Codex R3-HIGH: closes the "arbitrary
-  descriptive text containing one year" fabrication risk).
-  1. **Century form** (string matches a `century_designators` entry) — after
-     the anchoring strip above, the remainder MUST be EXACTLY ONE integer
-     token, interpreted as the century ORDINAL `N` (a plausible ordinal in
-     `[1,16]` for the composition window below; an ordinal outside `[1,16]`,
-     zero tokens, more-than-one token, or ANY non-punctuation residual
-     character is UNPARSEABLE) → normalized year = the century MIDPOINT
-     `100*(N-1)+50` (e.g. ordinal 10 → 950).
-  2. **Bounded year range** (string matches a `range_designators` entry, and
-     did NOT already match `century_designators`) — after the anchoring
-     strip, the remainder MUST be EXACTLY TWO integer tokens `earliest`,
-     `latest` (each a plausible 3–4 digit year) separated ONLY by the fixed
-     range-separator punctuation (no other residual text between or around
-     them) in that textual order; zero, one, or more-than-two integer
-     tokens, or ANY unaccounted residual character, is UNPARSEABLE →
-     normalized year = the MIDPOINT `floor((earliest+latest)/2)`, REJECTED
-     if `earliest >= latest`.
-  3. **Explicit single year** (string matches NEITHER `century_designators`
-     NOR `range_designators`) — after removing only whitespace, fixed
-     punctuation, and any matched `era_qualifiers` substrings (no century/
-     range designator applies here by definition), the remainder MUST be
-     EXACTLY ONE integer token (a plausible 3–4 digit year); zero tokens,
-     more-than-one token, or ANY unaccounted residual character/word
-     (including an unrecognized qualifier NOT present in `era_qualifiers`)
-     is UNPARSEABLE → that integer is the normalized year directly (no
-     arithmetic).
+  **FROZEN normalizer contract — TOKENIZE-FIRST (never punctuation-strip-
+  first), designator-driven, fully anchored (Codex R2-BLOCKER fix for the
+  token-count ambiguity + Codex R3-HIGH fix for unanchored residual text +
+  Codex R4-HIGH fix for the punctuation/tokenization order contradiction and
+  the undefined multi-designator-match behavior):** the normalizer NEVER
+  strips or removes punctuation before locating digit tokens — digit tokens
+  are located FIRST, directly against the ORIGINAL (whitespace-trimmed)
+  string, via a fixed maximal-decimal-run scan (every maximal contiguous run
+  of ASCII digit characters, in left-to-right textual order); punctuation is
+  examined ONLY afterward, to validate that nothing UNACCOUNTED-FOR remains.
+  This ordering removes the round-4 contradiction entirely: a range
+  separator or any other punctuation character can NEVER cause two adjacent
+  digit runs to fuse into one token, because digit-run extraction never
+  looks at surrounding punctuation at all.
+  1. **Designator classification (category selection):** test the string for
+     a substring match against EVERY entry in `century_designators`, then
+     EVERY entry in `range_designators` (fixed order). If ONE OR MORE
+     `century_designators` entries match (regardless of how many DISTINCT
+     entries from that SAME list match — multiple synonymous designators for
+     the SAME category is fine and not ambiguous), category = **century**.
+     Else if one or more `range_designators` entries match, category =
+     **range**. Else category = **explicit year**. If the string matches
+     AT LEAST ONE entry from BOTH `century_designators` AND
+     `range_designators` (a genuine cross-list ambiguity, not merely
+     multiple matches within one list), the value is UNPARSEABLE.
+  2. **Digit-token extraction:** scan the ORIGINAL string (not
+     punctuation-stripped) for every maximal decimal-digit run, in
+     left-to-right order. Century category requires EXACTLY ONE run,
+     interpreted as the century ORDINAL `N` (a plausible ordinal in `[1,16]`
+     for the composition window below); range category requires EXACTLY TWO
+     runs, `earliest` then `latest` in textual order (each a plausible 3–4
+     digit year); explicit-year category requires EXACTLY ONE run (a
+     plausible 3–4 digit year). Zero runs, or a run-count other than what
+     the category requires, is UNPARSEABLE (this applies BEFORE any
+     punctuation/residual-text check below).
+  3. **Anchoring — validate the residual (Codex R3-HIGH, restated without the
+     R4 contradiction):** remove FROM THE ORIGINAL STRING every matched
+     designator substring (exactly the ones that determined the category in
+     step 1), every matched `era_qualifiers` substring, every extracted
+     digit-run substring (step 2), and all whitespace. The REMAINDER MUST
+     consist ONLY of characters from a FIXED allowed punctuation set (comma,
+     period, parentheses, and — range category ONLY — exactly one
+     range-separator character, which MUST sit textually BETWEEN the
+     `earliest` and `latest` digit runs, not elsewhere). ANY other leftover
+     character or word (including an unrecognized qualifier not present in
+     `era_qualifiers`) makes the WHOLE value UNPARSEABLE — an unrecognized
+     semantic label merely co-occurring with a valid-looking year token is
+     REJECTED, never silently treated as harmless decoration.
+  4. **Value computation:** century → normalized year = the MIDPOINT
+     `100*(N-1)+50` (e.g. ordinal 10 → 950; an ordinal outside `[1,16]` is
+     UNPARSEABLE); range → normalized year = the MIDPOINT
+     `floor((earliest+latest)/2)`, REJECTED if `earliest >= latest`;
+     explicit year → that integer directly (no arithmetic).
 
   The normalized integer year MUST satisfy the EXACT inclusive bound
   `500 <= year <= 1600` (a normalized value of 499 or 1601 is OUT OF RANGE,
@@ -558,19 +617,26 @@ treated as 100% (trivially "fully covered") or skipped; `|U| = 0` almost
 certainly indicates a broken candidate-generation step upstream (§4.3), not
 a legitimately clean corpus, and must be surfaced as a hard build error
 distinct from the `pair_coverage < 0.990` HALT. Otherwise, `pair_coverage =
-|R| / |U|`. This is the SAME kind of metric the delivered audit computed under its
-looser page-co-occurrence approximation (10,837 pairs at `MIN_ML=200`, 21
-unknown-date pairs = 99.8061% pair coverage — the pair-level number, NOT the
-99.9% corpus-wide all-works number quoted above for DELTA's own citation;
-the v2 build's OWN `|U|` will differ, being span-overlap-gated and therefore
-smaller — see the candidate-universe note above). The `--release` build
-computes `pair_coverage` over the ACTUAL v2-shipped `discovery_routing_audit`
-population and HALTS (hard build error, before any bake proceeds) if
-`pair_coverage < 0.990` — a fixed floor with deliberate headroom below the
-audited 99.8061% approximation (tolerating ordinary corpus growth/drift
-without becoming a false-trip trap on an unrelated small change, while
-still hard-catching a genuine broken date-join or a missing/short input
-source). This gate NEVER silently degrades a missing source to
+|R| / |U|`. **This is an ABSOLUTE production floor, NOT a same-basis
+regression check against the delivered audit's number (Codex R4-MEDIUM —
+the two are computed over DIFFERENT, non-comparable populations and must
+not be conflated as "before vs after"):** the delivered audit's 99.8061%
+figure (10,837 pairs at `MIN_ML=200`, 21 unknown-date pairs) used a LOOSER
+page-co-occurrence approximation with NO span-overlap test; the v2 build's
+`|U|` is computed over the STRICTER, span-overlap-gated candidate universe
+(§ above) — a stricter subset can legitimately show a LOWER or HIGHER
+coverage PROPORTION than the looser approximation even when the underlying
+date-join itself has not regressed at all, simply because the denominator
+population differs. `0.990` is therefore set and enforced as a fixed,
+STANDALONE, absolute quality floor for the v2 build's OWN
+`pair_coverage` (chosen with headroom below the audited number purely as a
+sanity anchor, not as a strict "must not regress from X" comparison) — it
+HALTS (hard build error, before any bake proceeds) whenever the ACTUAL
+v2-shipped `discovery_routing_audit` population's `pair_coverage` is
+`< 0.990`, catching a genuine broken date-join or a missing/short input
+source, without requiring or implying like-for-like comparability to the
+older approximation's number. This gate NEVER silently degrades a missing
+source to
 UNKNOWN-for-all — a HALT is the only outcome on a materially degraded join.
 
 **`discovery_routing_audit` — masking-safe, page-scoped, fully replayable
@@ -624,34 +690,59 @@ fixing the round-1 gate):** for EVERY `discovery_routing_audit` row:
   vanish from that recomputation). Instead, define **pre-D-17-eligible** as:
   a `discovery_evidence` row that is EITHER currently `routing_status=
   'shipped'` OR currently `routing_status='review_only' AND
-  routing_reason='later_shared_text'` (the `low_coverage` / `co_citation`
-  / reband-caused `measured_below_floor` review_only reasons, §4.4/§4.5, are
-  EXCLUDED from this reconstruction — those rows were ALREADY not
-  pre-D-17-shipped, so D-17 never considered them in the first place; only
-  `later_shared_text` is D-17's OWN output and therefore belongs in the
-  pre-D-17 reconstruction). The SET of `(page_id, canonical_work_id_lo,
+  routing_reason='later_shared_text'` (the `low_coverage` review_only
+  reason, §4.4, and the `co_citation` review_only reason, pre-existing v1,
+  are EXCLUDED from this reconstruction — those rows were ALREADY not
+  pre-D-17-shipped, so D-17 never considered them in the first place; the
+  §4.5 reband ALSO never assigns `later_shared_text` — see the dedicated
+  reband-routing-reason clarification below — so it never enters this
+  reconstruction either). The SET of `(page_id, canonical_work_id_lo,
   canonical_work_id_hi)` triples in `discovery_routing_audit` EQUALS the
   frozen candidate-universe `U` recomputed over this PRE-D-17-ELIGIBLE
   population (span-overlap + 200-letter floor, §4.3) — no audit row without
   a corresponding real candidate pair, and no real candidate pair without an
   audit row.
-- **Reverse match — MANY-TO-ONE, not 1:1 (Codex R3-BLOCKER fix):** a single
-  demoted evidence row can lose to MULTIPLE earlier co-claimants when 3+
-  canonical groups co-claim the same page (the pure-pairwise design, §4.3,
-  independently evaluates every qualifying pair) — so the evidence-row side
-  of the reverse match is AT LEAST ONE, not exactly one:
-  - **Forward (audit → evidence, 1:1):** every `discovery_routing_audit` row
-    with `decision='demoted'` has EXACTLY ONE matching `discovery_evidence`
-    row (same `page_id`, `work_id` canonicalizing to
-    `demoted_canonical_work_id`) carrying `routing_reason='later_shared_text'`.
-  - **Reverse (evidence → audit, many-to-one):** every `discovery_evidence`
-    row carrying `routing_reason='later_shared_text'` has AT LEAST ONE
-    corresponding `discovery_routing_audit` row with `decision='demoted'`
-    naming it as `demoted_canonical_work_id` on the same `page_id` — it MAY
-    have more than one (one per earlier co-claimant it lost to).
-  A demotion recorded in one table with ZERO counterparts in the other
-  (in either direction) is a HARD FAIL; MULTIPLE audit rows explaining the
-  SAME demoted evidence row is EXPECTED and VALID, not a failure.
+- **Reverse/forward match — MANY-TO-MANY in BOTH directions (Codex R3-BLOCKER
+  + R4-BLOCKER fixes, corrected from an impossible 1:1 forward claim):**
+  because (a) a single evidence row can lose to MULTIPLE earlier co-claimants
+  when 3+ canonical groups co-claim the same page (the pure-pairwise design,
+  §4.3), AND (b) a single `decision='demoted'` audit row can correspond to
+  MULTIPLE physical `discovery_evidence` rows when the demoted canonical
+  group has 2+ raw members each separately witnessing the SAME page (§4.3's
+  physical-mutation rule — soft merge preserves every raw row), the
+  audit↔evidence match is many-to-many in BOTH directions, joined on
+  `(page_id, canonicalized work_id)`:
+  - every `discovery_evidence` row carrying `routing_reason=
+    'later_shared_text'` has AT LEAST ONE corresponding
+    `discovery_routing_audit` row with `decision='demoted'` naming its
+    (canonicalized) `work_id` as `demoted_canonical_work_id` on the same
+    `page_id`;
+  - every `discovery_routing_audit` row with `decision='demoted'` has AT
+    LEAST ONE corresponding `discovery_evidence` row on the same `page_id`
+    whose canonicalized `work_id` equals `demoted_canonical_work_id` and
+    carries `routing_reason='later_shared_text'`.
+  A demotion recorded in one table with ZERO counterparts in the other (in
+  EITHER direction) is a HARD FAIL; MULTIPLE rows on either side explaining
+  the SAME demotion (whether multiple audit rows for one evidence row, or
+  multiple evidence rows for one audit row) is EXPECTED and VALID, never a
+  failure — the invariant is "zero" that is forbidden, not "more than one".
+- **Reband routing-reason clarification (Codex R4-HIGH fix — closes an
+  undefined-value gap):** the §4.5 FAIL-branch reband flips affected rows'
+  `routing_status` to `review_only` but does NOT assign
+  `routing_reason='later_shared_text'` (that value is EXCLUSIVELY D-17's own
+  output) — the reband LEAVES the row's PRE-EXISTING `routing_reason`
+  UNCHANGED (whatever it already was: `none` for a normal previously-shipped
+  `tier_a` row, or `later_shared_text`/`low_coverage` if D-17/Lever-1 had
+  ALREADY demoted it before the reband ran). The row's REBANDED status is
+  fully identified WITHOUT a new `routing_reason` value by the COMBINATION of
+  `confidence_band='screening_rb'` + `routing_status='review_only'` +
+  `meta.tier_a_reband_target='screening_rb'` being set — a screening_rb row
+  can ONLY reach `review_only` via this reband mechanism (a normal,
+  non-rebanded `screening_rb` row is ALWAYS `routing_status='shipped'`,
+  `routing_reason='none'`, per the pre-existing v1 routing matrix,
+  `discovery-sidecar-schema-v1.md` §7) — so NO third new `routing_reason`
+  enum value is needed; the schema, build behavior, and this replayability
+  description now agree exactly.
 
 **Provenance recorded in `meta` + frame:** the verified `--composition-dates`,
 `--seftja-dates`, and `discovery_data/crosswalk.json` SHA-256 hashes (Codex
@@ -974,10 +1065,13 @@ D-17 could be comparing against a work that was never going to ship anyway.
    EXPLICITLY (a dedicated error, never a 0/0 division) if `|U| = 0` (no
    candidate pairs at all — a likely upstream candidate-generation bug);
    otherwise it HALTS if `pair_coverage` (§4.3's exact `|R|/|U|` predicate
-   over the frozen candidate universe) is `< 0.990` (a fixed floor with
-   headroom below the audited 99.8061% pair-level baseline — NOT the 99.9%
-   corpus-wide all-works figure, a different denominator used only to
-   justify DELTA's citation).
+   over the frozen candidate universe) is `< 0.990` — an ABSOLUTE,
+   standalone production floor for the v2 build's OWN population, NOT a
+   same-basis regression check against the audited 99.8061% pair-level
+   baseline (that number was computed over a LOOSER, non-span-overlap-gated
+   population and is not proportionally comparable to the v2 build's
+   stricter `|U|`); NOT the 99.9% corpus-wide all-works figure either, a
+   third, different denominator used only to justify DELTA's citation.
 10. **Routing-audit replayability check** — the full EXHAUSTIVE predicate
     defined inline in §4.3 (over `canonical_work_id_lo`/`_hi`, `year_lo`/
     `year_hi`, exact `delta` recomputation, population equality against the
@@ -987,11 +1081,13 @@ D-17 could be comparing against a work that was never going to ship anyway.
     `routing_reason='later_shared_text'` evidence row) — summarized here:
     every `discovery_routing_audit` row is individually reconstructable per
     its `decision`, the audit population exactly equals the recomputed
-    pre-D-17-eligible candidate universe (no extra, no missing rows), every
-    `decision='demoted'` audit row matches EXACTLY ONE evidence row
-    (audit→evidence, 1:1), and every `later_shared_text` evidence row matches
-    AT LEAST ONE audit row (evidence→audit, many-to-one — a row demoted by
-    2+ earlier co-claimants in a 3+-way cluster is expected, not a failure).
+    pre-D-17-eligible candidate universe (no extra, no missing rows), and
+    every demotion is matched AT LEAST ONCE in BOTH directions
+    (audit→evidence AND evidence→audit are both many-to-many, not 1:1 — a
+    demoted canonical group with 2+ raw witnessing members on one page, or a
+    row demoted by 2+ earlier co-claimants in a 3+-way cluster, are both
+    expected, not failures; only a ZERO-count match in either direction is a
+    HARD FAIL).
 11. **Frozen-input-hash provenance** — `--canonical-merges`,
     `--composition-dates`, `--seftja-dates`, and
     `discovery_data/crosswalk.json` SHA-256 hashes recorded in `meta` AND the
@@ -1039,28 +1135,43 @@ D-17 could be comparing against a work that was never going to ship anyway.
   present in the v2 shown-set is SKIPPED (logged, not hard-failed) — it is
   harmless because there is no shipped row to affect. A merge entry is only
   APPLIED when at least one member resolves to a shipped `works.work_id`.
-- **(c) `ref_corpus_v2.pkl` stability check + namespaced-id join safety
-  (Codex #9/F9 — EXACT, not merely "stable ids").** Both date inputs (§4.3)
+- **(c) `ref_corpus_v2.pkl` stability check + namespaced-id join safety —
+  the namespace-prefix families are HASH-PINNED DATA, not a described-but-
+  unfrozen mechanism (Codex #9/F9, tightened at R4 — "the same three
+  families the crosswalk is keyed by" is not itself an implementable
+  contract; the exact patterns must be pinned).** Both date inputs (§4.3)
   key off raw source-side ids drawn from `ref_corpus_v2.pkl` at the time the
-  census/date tables were generated. Before attempting ANY crosswalk join,
-  the build validates every raw id referenced by the census,
-  `--composition-dates`, and `--seftja-dates` against a FIXED, small set of
-  recognized STABLE NAMESPACE-PREFIX FAMILIES — the same three families
-  `discovery_data/crosswalk.json` itself is keyed by, one per source corpus
-  (M-source / Sefaria / JA) — never a normalized title string, and never an
-  ad hoc pattern invented at parse time. A raw id matching NONE of the three
-  recognized prefix families is REJECTED before the crosswalk join is even
-  attempted (a HARD FAIL, defense-in-depth ahead of the join itself). For
-  every raw id that DOES match a recognized family, the crosswalk join MUST
-  resolve to EXACTLY ONE `w000xxx`; the join HARD-FAILS (never silently
-  disambiguates, never picks the first match) if it resolves to zero
-  matches (a HARD FAIL, never a silent skip — a crosswalk miss on a
-  previously-registered id indicates `ref_corpus_v2.pkl` drifted between
-  census-generation time and build time) OR to more than one match
-  (unexpected cardinality — a HARD FAIL). This reuses and sharpens the
-  existing crosswalk join-safety discipline (Codex #9 — join only via
-  stable, namespaced ids, never normalized titles, hard-fail unexpected
-  cardinalities in EITHER direction).
+  census/date tables were generated. `discovery_data/crosswalk.json` itself
+  carries a REQUIRED top-level key `namespace_prefixes`: a JSON object with
+  EXACTLY three keys `sefaria`, `ja`, `msource`, each mapping to a
+  non-empty regex-pattern STRING (owner-authored, anchored — e.g. matched
+  via `re.match` against the start of the raw id — and, like the rest of
+  `crosswalk.json`, covered by the SAME SHA-256 pin already required for
+  this file per the existing D-16(c)/Codex #9 discipline, so the recognized
+  prefix patterns are never a separate, unpinned, out-of-band contract).
+  The parser REJECTS a `crosswalk.json` missing `namespace_prefixes`, missing
+  any of the three named keys, or with a non-string/empty-string pattern
+  value. The build validates that the three patterns are MUTUALLY EXCLUSIVE
+  by construction (a self-test over a synthetic id set at build start: no
+  fabricated test id may match more than one pattern) — a HARD FAIL if they
+  are not. Before attempting ANY crosswalk join, the build validates every
+  raw id referenced by the census, `--composition-dates`, and
+  `--seftja-dates` against these three PINNED patterns — never a normalized
+  title string, and never an ad hoc pattern invented at parse time. A raw id
+  matching NONE of the three PINNED patterns is REJECTED before the
+  crosswalk join is even attempted (a HARD FAIL, defense-in-depth ahead of
+  the join itself); a raw id matching MORE than one is likewise a HARD FAIL
+  (should be structurally impossible given the mutual-exclusivity self-test,
+  but asserted defensively per-id too). For every raw id that DOES match
+  exactly one recognized family, the crosswalk join MUST resolve to EXACTLY
+  ONE `w000xxx`; the join HARD-FAILS (never silently disambiguates, never
+  picks the first match) if it resolves to zero matches (a HARD FAIL, never
+  a silent skip — a crosswalk miss on a previously-registered id indicates
+  `ref_corpus_v2.pkl` drifted between census-generation time and build
+  time) OR to more than one match (unexpected cardinality — a HARD FAIL).
+  This reuses and sharpens the existing crosswalk join-safety discipline
+  (Codex #9 — join only via stable, PINNED, namespaced ids, never normalized
+  titles, hard-fail unexpected cardinalities in EITHER direction).
 
 ---
 
