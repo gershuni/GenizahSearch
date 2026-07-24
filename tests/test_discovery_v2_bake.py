@@ -308,3 +308,473 @@ def _build_v2_finalize_fixture(tmp_path, *, neutral_titles=None):
         "approved_csv": approved_csv,
         "out_db_path": tmp_path / "out" / "discovery-v2.db",
     }
+
+
+# ===========================================================================
+# Task 2: hash-pinned date inputs + coverage gate + Lever-1 + D-17 + reband
+# ===========================================================================
+
+# FABRICATED, masking-clean designator vocabularies (never the real owner-held
+# M-source vocabulary) -- neutral ASCII placeholders.
+_CENTURY_DESIGNATORS = ["cent"]
+_RANGE_DESIGNATORS = ["between"]
+_ERA_QUALIFIERS = ["approx"]
+
+
+def _witness_spec(page, work, sys, *, band, ml, span, routing=None, density=None,
+                  adjudication=None, source=None):
+    return sidecar_build._mk_evidence(
+        page_id=page, work_id=work, sys_id=sys,
+        evidence_kind=ids.EVIDENCE_KIND_WITNESS,
+        evidence_source=source or ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+        confidence_band=band,
+        adjudication_status=adjudication or ids.ADJUDICATION_STATUS_UNREVIEWED,
+        audit_status=ids.AUDIT_STATUS_NA,
+        routing_status=routing or ids.ROUTING_STATUS_SHIPPED,
+        routing_reason=ids.ROUTING_REASON_NONE,
+        span_start=span[0], span_end=span[1],
+        matched_letters=ml, density=density,
+    )
+
+
+# --- composition-date normalizer (frozen 3-category contract) --------------
+
+def _norm(value):
+    return sidecar_build.normalize_composition_date(
+        value, century_designators=_CENTURY_DESIGNATORS,
+        range_designators=_RANGE_DESIGNATORS, era_qualifiers=_ERA_QUALIFIERS)
+
+
+def test_composition_date_explicit_year():
+    assert _norm("950") == 950
+
+
+def test_composition_date_century_midpoint():
+    # 10th century -> 100*(10-1)+50 = 950
+    assert _norm("cent 10") == 950
+
+
+def test_composition_date_range_midpoint():
+    # between 900-1000 -> floor((900+1000)/2) = 950
+    assert _norm("between 900-1000") == 950
+
+
+def test_composition_date_near_miss_unparseable_extra_token_rejected():
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        _norm("950 apocrypha")  # unrecognized trailing word -> unparseable
+
+
+def test_composition_date_out_of_range_low_rejected():
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        _norm("499")
+
+
+def test_composition_date_out_of_range_high_rejected():
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        _norm("1601")
+
+
+def test_composition_date_ambiguous_dual_designator_rejected():
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        _norm("cent between 10")
+
+
+def test_composition_date_range_with_comma_separator_rejected():
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        _norm("between 900,1000")  # comma is not a pinned dash separator
+
+
+def test_composition_date_century_ordinal_out_of_bounds_rejected():
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        _norm("cent 20")
+
+
+def test_parse_composition_dates_file_roundtrip(tmp_path):
+    path = _write_json(tmp_path / "comp.json", {
+        "century_designators": _CENTURY_DESIGNATORS,
+        "range_designators": _RANGE_DESIGNATORS,
+        "era_qualifiers": _ERA_QUALIFIERS,
+        "dates": {"raw:w1": "950", "raw:w2": "cent 11", "raw:w3": "between 1000-1100"},
+    })
+    out = sidecar_build.parse_composition_dates(path)
+    assert out == {"raw:w1": 950, "raw:w2": 1050, "raw:w3": 1050}
+
+
+def test_parse_composition_dates_missing_key_rejected(tmp_path):
+    path = _write_json(tmp_path / "comp.json", {
+        "century_designators": _CENTURY_DESIGNATORS,
+        "range_designators": _RANGE_DESIGNATORS,
+        "dates": {},  # missing era_qualifiers
+    })
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.parse_composition_dates(path)
+
+
+def test_parse_composition_dates_sha_mismatch_halts(tmp_path):
+    path = _write_json(tmp_path / "comp.json", {
+        "century_designators": _CENTURY_DESIGNATORS, "range_designators": _RANGE_DESIGNATORS,
+        "era_qualifiers": [], "dates": {"raw:w1": "950"},
+    })
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.parse_composition_dates(path, sha256="beef" * 16)
+
+
+# --- seftja dates (frozen {year:int, basis:str}) ---------------------------
+
+def test_parse_seftja_dates_roundtrip_discards_basis(tmp_path):
+    path = _write_json(tmp_path / "s.json", {
+        "raw:w1": {"year": 1100, "basis": "colophon"},
+        "raw:w2": {"year": 900, "basis": ""},
+    })
+    assert sidecar_build.parse_seftja_dates(path) == {"raw:w1": 1100, "raw:w2": 900}
+
+
+def test_parse_seftja_dates_missing_year_rejected(tmp_path):
+    path = _write_json(tmp_path / "s.json", {"raw:w1": {"basis": "x"}})
+    with pytest.raises(sidecar_build.SeftjaDatesError):
+        sidecar_build.parse_seftja_dates(path)
+
+
+def test_parse_seftja_dates_non_integer_year_rejected(tmp_path):
+    path = _write_json(tmp_path / "s.json", {"raw:w1": {"year": "1100", "basis": "x"}})
+    with pytest.raises(sidecar_build.SeftjaDatesError):
+        sidecar_build.parse_seftja_dates(path)
+
+
+def test_parse_seftja_dates_extra_key_rejected(tmp_path):
+    path = _write_json(tmp_path / "s.json", {"raw:w1": {"year": 1100, "basis": "x", "extra": 1}})
+    with pytest.raises(sidecar_build.SeftjaDatesError):
+        sidecar_build.parse_seftja_dates(path)
+
+
+def test_parse_seftja_dates_sha_mismatch_halts(tmp_path):
+    path = _write_json(tmp_path / "s.json", {"raw:w1": {"year": 1100, "basis": "x"}})
+    with pytest.raises(sidecar_build.SeftjaDatesError):
+        sidecar_build.parse_seftja_dates(path, sha256="beef" * 16)
+
+
+# --- Lever-1 coverage routing ----------------------------------------------
+
+def test_lever1_routes_low_coverage_to_review_only():
+    specs = [
+        _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300,
+                      span=(0, 300), density=0.30),  # below 0.45 -> review_only
+        _witness_spec("p2", "w000002", "s2", band=ids.CONFIDENCE_BAND_TIER_A, ml=300,
+                      span=(0, 300), density=0.90),  # ships
+    ]
+    n = sidecar_build.apply_lever1_coverage(specs)
+    assert n == 1
+    assert specs[0]["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert specs[0]["routing_reason"] != ids.ROUTING_REASON_LATER_SHARED_TEXT  # coverage, not D-17
+    assert specs[1]["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+
+
+# --- D-17 chronological demotion -------------------------------------------
+
+def test_d17_demotes_only_later_shipped_coclaimant():
+    specs = [
+        _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+        _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={}, year_by_canonical={"w000001": 900, "w000002": 1100})
+    # w000001 (earlier) stays shipped; w000002 (later, delta 200) demoted.
+    early = next(s for s in specs if s["work_id"] == "w000001")
+    late = next(s for s in specs if s["work_id"] == "w000002")
+    assert early["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+    assert late["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert late["routing_reason"] == ids.ROUTING_REASON_LATER_SHARED_TEXT
+    demoted = [a for a in audit if a["decision"] == "demoted"]
+    assert len(demoted) == 1
+    assert demoted[0]["kept_work_id"] == "w000001"
+    assert demoted[0]["demoted_work_id"] == "w000002"
+    assert demoted[0]["kept_year"] == 900 and demoted[0]["demoted_year"] == 1100
+    assert demoted[0]["delta_years"] == 200
+
+
+def test_d17_merged_twin_pair_produces_no_demotion():
+    # Two source copies of the SAME work (merged twin) -> ONE canonical -> never
+    # a co-claim pair, never a self-demotion (Codex #4).
+    ccm = {"w000190": "w001382", "w001382": "w001382"}
+    specs = [
+        _witness_spec("p1", "w000190", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+        _witness_spec("p1", "w001382", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map=ccm, year_by_canonical={"w001382": 950})
+    assert audit == []
+    assert all(s["routing_status"] == ids.ROUTING_STATUS_SHIPPED for s in specs)
+
+
+def test_d17_unknown_date_never_demoted_fail_safe():
+    specs = [
+        _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+        _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={}, year_by_canonical={"w000001": 900})  # w000002 undated
+    assert all(s["routing_status"] == ids.ROUTING_STATUS_SHIPPED for s in specs)
+    assert len(audit) == 1
+    assert audit[0]["decision"] == "fail_safe_unknown_date"
+    assert audit[0]["demoted_work_id"] is None
+
+
+def test_d17_within_delta_tie_demotes_neither():
+    specs = [
+        _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+        _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={}, year_by_canonical={"w000001": 950, "w000002": 990})  # delta 40 < 100
+    assert all(s["routing_status"] == ids.ROUTING_STATUS_SHIPPED for s in specs)
+    assert len(audit) == 1 and audit[0]["decision"] == "kept_tie"
+    assert audit[0]["demoted_work_id"] is None
+
+
+def test_d17_distinctive_non_overlapping_span_keeps_shipped():
+    specs = [
+        _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+        _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(500, 800)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={}, year_by_canonical={"w000001": 900, "w000002": 1200})
+    # disjoint spans -> never a candidate pair -> no demotion.
+    assert audit == []
+    assert all(s["routing_status"] == ids.ROUTING_STATUS_SHIPPED for s in specs)
+
+
+def test_d17_earliest_low_coverage_later_shipped_not_orphaned():
+    """Codex #6: earliest is Lever-1 review_only (cov<0.45); the later
+    claimant is shipped -> the later is NOT orphaned/promoted, and the Lever-1
+    review_only row keeps its coverage routing_reason (never later_shared_text)."""
+    specs = [
+        _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300,
+                      span=(0, 300), density=0.20),  # earliest, low coverage
+        _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300,
+                      span=(0, 300), density=0.90),  # later, ships
+    ]
+    sidecar_build.apply_lever1_coverage(specs)
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={}, year_by_canonical={"w000001": 900, "w000002": 1100})
+    early = next(s for s in specs if s["work_id"] == "w000001")
+    late = next(s for s in specs if s["work_id"] == "w000002")
+    assert early["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert early["routing_reason"] != ids.ROUTING_REASON_LATER_SHARED_TEXT  # coverage provenance preserved
+    assert late["routing_status"] == ids.ROUTING_STATUS_SHIPPED  # never orphaned/promoted
+    # earliest excluded from the shipped population -> no pair formed.
+    assert audit == []
+
+
+def test_d17_below_ml_floor_excluded():
+    specs = [
+        _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=50, span=(0, 300)),
+        _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=50, span=(0, 300)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={}, year_by_canonical={"w000001": 900, "w000002": 1200})
+    assert audit == []  # both below MIN_ML=200
+
+
+def test_d17_audit_rows_are_numeric_year_only_masking_safe():
+    specs = [
+        _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+        _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={}, year_by_canonical={"w000001": 900, "w000002": 1100})
+    for a in audit:
+        for k in ("kept_year", "demoted_year", "delta_years"):
+            assert a[k] is None or isinstance(a[k], int)  # numeric years only
+        for k in ("kept_work_id", "demoted_work_id"):
+            assert a[k] is None or (isinstance(a[k], str) and a[k].startswith("w"))
+
+
+# --- coverage gate ---------------------------------------------------------
+
+def test_coverage_gate_zero_candidate_hard_fails():
+    with pytest.raises(sidecar_build.DateCoverageError):
+        sidecar_build.compute_pair_coverage([])
+
+
+def test_coverage_gate_halts_below_floor():
+    audit = (
+        [{"decision": "demoted"}]
+        + [{"decision": "fail_safe_unknown_date"} for _ in range(10)]
+    )  # coverage 1/11 ~ 0.09
+    with pytest.raises(sidecar_build.DateCoverageError):
+        sidecar_build.assert_pair_coverage_floor(audit, floor=0.99)
+
+
+def test_coverage_gate_passes_above_floor():
+    audit = [{"decision": "demoted"} for _ in range(100)] + [{"decision": "kept_tie"}]
+    cov = sidecar_build.assert_pair_coverage_floor(audit, floor=0.99)
+    assert cov == pytest.approx(1.0)
+
+
+# --- CERT-01 FAIL-branch reband --------------------------------------------
+
+def _measured_fail_spec():
+    return [{
+        "scope": "band", "collection_id": "e1_certification_registry_v1",
+        "evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+        "confidence_band": ids.CONFIDENCE_BAND_TIER_A,
+        "measurement_status": "measured_fail",
+        "precision": 0.70, "ci_low": 0.62, "ci_high": 0.78, "numerator": 70, "denominator": 100,
+    }]
+
+
+def test_reband_decision_triggers_on_measured_fail():
+    d = sidecar_build.resolve_reband_decision(_measured_fail_spec())
+    assert d is not None
+    assert d["trigger"]["ci_low"] == 0.62
+
+
+def test_reband_decision_none_for_insufficient_evidence():
+    spec = [{"scope": "band", "collection_id": "e1_certification_registry_v1",
+             "evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+             "confidence_band": ids.CONFIDENCE_BAND_TIER_A,
+             "measurement_status": "insufficient_evidence"}]
+    assert sidecar_build.resolve_reband_decision(spec) is None
+
+
+def test_reband_decision_rejects_inconsistent_measured_fail():
+    bad = _measured_fail_spec()
+    bad[0]["ci_low"] = 0.90  # >= 0.85 contradicts measured_fail
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError):
+        sidecar_build.resolve_reband_decision(bad)
+
+
+def test_reband_band_precision_invalidation_and_meta():
+    frozen = sidecar_build._frozen_real_band_precision_rows()
+    decision = sidecar_build.resolve_reband_decision(_measured_fail_spec())
+    new_rows, meta_extra = sidecar_build.invalidate_reband_band_precision(frozen, decision)
+    by_band = {(r.get("evidence_source"), r.get("confidence_band")): r for r in new_rows}
+    for band in (ids.CONFIDENCE_BAND_TIER_A, ids.CONFIDENCE_BAND_SCREENING_RB):
+        row = by_band[(ids.EVIDENCE_SOURCE_TRACK1_DIRECT, band)]
+        assert row["measurement_status"] == "not_measured"
+        assert row["precision"] is None and row["ci_low"] is None
+    assert meta_extra["tier_a_reband_target"] == ids.CONFIDENCE_BAND_SCREENING_RB
+    assert meta_extra["tier_a_reband_trigger_ci_low"] == "0.62"
+
+
+def test_reband_is_rebuild_input_regenerates_id_and_moves_display_to_shipped_sibling():
+    """Codex-R4 new-HIGH: the reband is consumed BEFORE assemble, so each
+    rebanded row's evidence_id regenerates over screening_rb AND the display
+    pointer moves to the surviving shipped sibling (never the demoted row)."""
+    tier_a = _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300))
+    sibling = _witness_spec(
+        "p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_CORROBORATED, ml=None, span=(0, 300),
+        source=ids.EVIDENCE_SOURCE_PROPAGATED)
+    specs = [tier_a, sibling]
+    n = sidecar_build.apply_reband(specs)
+    assert n == 1
+    assert tier_a["confidence_band"] == ids.CONFIDENCE_BAND_SCREENING_RB
+    assert tier_a["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+
+    result = sidecar_build.assemble_claims_and_evidence(
+        specs, {"w000001": ids.SOURCE_CORPUS_SEFARIA})
+    ev_by_id = {e[0]: e for e in result["evidence_rows"]}
+    # rebanded row's stored evidence_id regenerated over the NEW band.
+    rebanded_id = ids.evidence_id(
+        work_id="w000001", a_page_id="p1", sys_id="s1",
+        evidence_kind=ids.EVIDENCE_KIND_WITNESS,
+        evidence_source=ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+        confidence_band=ids.CONFIDENCE_BAND_SCREENING_RB,
+        span_start=0, span_end=300, other_page_id=None, seed_spans=None)
+    assert rebanded_id in ev_by_id
+    # display moves to the surviving shipped corroborated sibling.
+    display_id = result["claim_rows"][0][4]
+    assert display_id != rebanded_id
+    assert ev_by_id[display_id][4] == ids.CONFIDENCE_BAND_CORROBORATED
+    assert ev_by_id[display_id][7] == ids.ROUTING_STATUS_SHIPPED
+
+
+def test_finalize_build_d17_end_to_end_writes_audit_and_date_shas(tmp_path):
+    """End-to-end: two co-claiming works on one page, dated 200y apart, with
+    the date inputs supplied -> D-17 demotes the later, writes a
+    discovery_routing_audit row, and records the date-input SHAs in meta."""
+    fx = _build_v2_finalize_fixture_shared_page(tmp_path)
+    comp_path = _write_json(tmp_path / "comp.json", {
+        "century_designators": _CENTURY_DESIGNATORS, "range_designators": _RANGE_DESIGNATORS,
+        "era_qualifiers": [], "dates": {"raw:w1": "900"},
+    })
+    seftja_path = _write_json(tmp_path / "s.json", {"raw:w2": {"year": 1100, "basis": "x"}})
+    stats = sidecar_build.finalize_build(
+        source_db_path=str(fx["research_db"]),
+        from_approved_path=str(fx["approved_csv"]),
+        crosswalk_path=str(fx["crosswalk_path"]),
+        out_db_path=str(fx["out_db_path"]),
+        composition_dates_path=comp_path,
+        seftja_dates_path=seftja_path,
+        masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+    )
+    conn = sqlite3.connect(str(stats["db_path"]))
+    try:
+        audit = conn.execute(
+            "SELECT decision, kept_work_id, demoted_work_id, kept_year, demoted_year, delta_years "
+            "FROM discovery_routing_audit").fetchall()
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        late = conn.execute(
+            "SELECT routing_status, routing_reason FROM discovery_evidence de "
+            "JOIN discovery_claim dc ON dc.claim_id=de.claim_id WHERE dc.work_id='w000002'").fetchone()
+    finally:
+        conn.close()
+    demoted = [a for a in audit if a[0] == "demoted"]
+    assert len(demoted) == 1
+    assert demoted[0][1] == "w000001" and demoted[0][2] == "w000002"
+    assert demoted[0][5] == 200  # delta_years
+    assert late == (ids.ROUTING_STATUS_REVIEW_ONLY, ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    assert "composition_dates_sha256" in meta and "seftja_dates_sha256" in meta
+
+
+def _build_v2_finalize_fixture_shared_page(tmp_path):
+    """Two works co-claiming the SAME page pg1 with overlapping spans."""
+    import csv
+    research_db = tmp_path / "research.db"
+    conn = sqlite3.connect(str(research_db))
+    conn.executescript(
+        """
+        CREATE TABLE track1_matches (
+          page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
+          title TEXT, mesirah TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          spans_json TEXT, shadowed_by TEXT
+        );
+        CREATE TABLE pages (
+          page_id TEXT PRIMARY KEY, sys_id TEXT, buckets TEXT, n_chars INTEGER,
+          text TEXT, provenance TEXT, fgp_id INTEGER, fgp_score REAL, htr_n_chars INTEGER
+        );
+        """
+    )
+    conn.executemany(
+        "INSERT INTO track1_matches VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("pg1", "s1", "raw:w1", "Sefaria", None, None, None, None,
+             300, 0.9, 1, "[[0, 300, 0.9]]", None),
+            ("pg1", "s1", "raw:w2", "Sefaria", None, None, None, None,
+             300, 0.9, 1, "[[0, 300, 0.9]]", None),
+        ],
+    )
+    conn.execute("INSERT INTO pages (page_id, sys_id, provenance, text) VALUES ('pg1','s1','htr',?)",
+                 ("x" * 400,))
+    conn.commit()
+    conn.close()
+
+    crosswalk_path = tmp_path / "crosswalk.json"
+    _write_json(crosswalk_path, {"raw:w1": "w000001", "raw:w2": "w000002"})
+
+    approved_csv = tmp_path / "approved.csv"
+    with open(approved_csv, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=sidecar_build.APPROVED_HEADER)
+        writer.writeheader()
+        for wid, title in (("w000001", "Synthetic One"), ("w000002", "Synthetic Two")):
+            row = {h: "" for h in sidecar_build.APPROVED_HEADER}
+            row["work_id"] = wid
+            row["owner_verdict"] = "approve"
+            row["candidate_title"] = title
+            row["source_label"] = ids.SOURCE_CORPUS_SEFARIA
+            writer.writerow(row)
+
+    return {
+        "research_db": research_db, "crosswalk_path": crosswalk_path,
+        "approved_csv": approved_csv, "out_db_path": tmp_path / "out" / "discovery-v2.db",
+    }
