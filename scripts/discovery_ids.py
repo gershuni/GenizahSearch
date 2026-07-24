@@ -378,18 +378,31 @@ def resolve_claim_type(evidence_rows: Iterable[Mapping]) -> str:
 # (evidence_source, confidence_band, adjudication_status) combination.
 # ---------------------------------------------------------------------------
 
-# Global band-rank, strongest first (docs §6 item 2).
-_BAND_RANK: List = [
-    (EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_EXPERT_VERIFIED),
-    (EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_TIER_A),
-    (EVIDENCE_SOURCE_PROPAGATED, CONFIDENCE_BAND_CORROBORATED),
-    (EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_SCREENING_RB),
-    (EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_SCREENING_CANON),
-    (EVIDENCE_SOURCE_PROPAGATED, CONFIDENCE_BAND_WEAK),
-    (EVIDENCE_SOURCE_PROPAGATED, CONFIDENCE_BAND_NOT_EVALUATED),
+# Global band-rank, strongest first (docs §6 item 2). Expressed as rank
+# GROUPS: the track1_direct top tier occupies ONE shared rank across BOTH the
+# v1 key (`expert_verified`) AND its v2 rename
+# (`high_confidence_algorithmic`) -- DUAL-KEY, never version-branched (mirrors
+# how `CONFIDENCE_BANDS_BY_SOURCE` accepts both keys through the transition).
+# Without this, a v2 top-tier row would fall to `_UNRANKED_BAND` in
+# `_display_sort_key` and CORRUPT `display_evidence_id` selection for the
+# highest-confidence evidence (auditor catch #9). Within any single shipped
+# asset only ONE of the two keys is ever present (the verifier's
+# no-mixed-enum-state check enforces that), so their shared rank never needs a
+# tie-break between them; every OTHER pair keeps its exact prior rank order.
+_BAND_RANK_GROUPS: List[List] = [
+    [(EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_EXPERT_VERIFIED),
+     (EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC)],
+    [(EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_TIER_A)],
+    [(EVIDENCE_SOURCE_PROPAGATED, CONFIDENCE_BAND_CORROBORATED)],
+    [(EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_SCREENING_RB)],
+    [(EVIDENCE_SOURCE_TRACK1_DIRECT, CONFIDENCE_BAND_SCREENING_CANON)],
+    [(EVIDENCE_SOURCE_PROPAGATED, CONFIDENCE_BAND_WEAK)],
+    [(EVIDENCE_SOURCE_PROPAGATED, CONFIDENCE_BAND_NOT_EVALUATED)],
 ]
-_BAND_RANK_INDEX = {pair: i for i, pair in enumerate(_BAND_RANK)}
-_UNRANKED_BAND = len(_BAND_RANK)  # any (source, band) combo not in the lattice sorts last
+_BAND_RANK_INDEX = {
+    pair: i for i, group in enumerate(_BAND_RANK_GROUPS) for pair in group
+}
+_UNRANKED_BAND = len(_BAND_RANK_GROUPS)  # any (source, band) combo not in the lattice sorts last
 
 _ADJUDICATION_RANK = {
     ADJUDICATION_STATUS_HUMAN_CONFIRMED: 0,
