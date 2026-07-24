@@ -719,6 +719,112 @@ def test_d17_audit_rows_are_numeric_year_only_masking_safe():
             assert a[k] is None or (isinstance(a[k], str) and a[k].startswith("w"))
 
 
+# --- D-17 ordered-stateful cascade (135-07) --------------------------------
+
+def test_d17_cascade_counterexample_third_work_stays_shipped():
+    """135-07 Codex three-work counterexample. Page P: w1@900 [0,100],
+    w2@1100 [50,150], w3@1300 [120,200]; footprints overlap (w1,w2) and
+    (w2,w3) but NOT (w1,w3). w1 demotes w2; the DEMOTED w2 must NOT go on to
+    demote w3 -- w3's only earlier overlapping neighbour is itself invalid, so
+    w3 STAYS shipped. Exactly one 'demoted' row (kept=w1, demoted=w2); NO
+    demoted row for w3."""
+    specs = [
+        _witness_spec("P", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 100)),
+        _witness_spec("P", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(50, 150)),
+        _witness_spec("P", "w000003", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(120, 200)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={},
+        year_by_canonical={"w000001": 900, "w000002": 1100, "w000003": 1300})
+    by_work = {s["work_id"]: s for s in specs}
+    assert by_work["w000001"]["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+    assert by_work["w000002"]["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert by_work["w000003"]["routing_status"] == ids.ROUTING_STATUS_SHIPPED  # cascade-safe
+    demoted = [a for a in audit if a["decision"] == "demoted"]
+    assert len(demoted) == 1
+    assert demoted[0]["kept_work_id"] == "w000001"
+    assert demoted[0]["demoted_work_id"] == "w000002"
+    assert not any(a["demoted_work_id"] == "w000003" for a in audit)
+
+
+def test_d17_cascade_false_negative_guard_demoter_ships_elsewhere():
+    """135-07 false-negative guard. Identical to the counterexample, but w2
+    ALSO ships a SECOND spec on another page Q (alone there -> stays shipped).
+    The DB-level verifier cascade gate (canonical-group-ships-ANYWHERE) would
+    PASS a wrong 'w2 demotes w3' row because w2's group ships on Q -- so the
+    router itself must be PAGE-SCOPED: on page P, w2's page-P spec is demoted
+    and therefore cannot demote w3 there."""
+    specs = [
+        _witness_spec("P", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 100)),
+        _witness_spec("P", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(50, 150)),
+        _witness_spec("P", "w000003", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(120, 200)),
+        # w2's second spec on page Q -- alone on Q, so it stays shipped there.
+        _witness_spec("Q", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 100)),
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={},
+        year_by_canonical={"w000001": 900, "w000002": 1100, "w000003": 1300})
+    p_specs = {s["work_id"]: s for s in specs if s["page_id"] == "P"}
+    q_spec = next(s for s in specs if s["page_id"] == "Q")
+    assert p_specs["w000001"]["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+    assert p_specs["w000002"]["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert p_specs["w000003"]["routing_status"] == ids.ROUTING_STATUS_SHIPPED  # not orphaned
+    assert q_spec["routing_status"] == ids.ROUTING_STATUS_SHIPPED  # w2 ships on Q
+    assert not any(a["demoted_work_id"] == "w000003" for a in audit)
+
+
+def test_d17_multi_footprint_each_spec_demoted_by_its_own_reference():
+    """135-07 multi-footprint correctness. w1@900 [0,100] and w2@1100
+    [200,300] do NOT overlap each other. w3@1300 carries TWO specs -- s_a
+    [50,100] overlaps w1 only, s_b [200,250] overlaps w2 only. BOTH specs must
+    demote (each against its own still-shipped earlier reference); a naive
+    whole-group skip would wrongly leave one of them shipped. w1 and w2 stay
+    shipped; w3 gets exactly one 'demoted' row attributed to the earliest
+    (w1)."""
+    w1 = _witness_spec("P", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 100))
+    w2 = _witness_spec("P", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(200, 300))
+    s_a = _witness_spec("P", "w000003", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(50, 100))
+    s_b = _witness_spec("P", "w000003", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(200, 250))
+    specs = [w1, w2, s_a, s_b]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={},
+        year_by_canonical={"w000001": 900, "w000002": 1100, "w000003": 1300})
+    assert w1["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+    assert w2["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+    assert s_a["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert s_b["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    demoted = [a for a in audit if a["decision"] == "demoted"]
+    assert len(demoted) == 1  # ONE row per demoted work, even across footprints
+    assert demoted[0]["demoted_work_id"] == "w000003"
+    assert demoted[0]["kept_work_id"] == "w000001"  # earliest valid demoter
+
+
+def test_d17_full_overlap_third_work_gets_single_demoted_row():
+    """135-07 full-overlap dedup. Three mutually-overlapping single-span works
+    (w1@900, w2@1100, w3@1300, all [0,300]). w2 and w3 both demote; w1 (the
+    earliest shipped reference) stays. w3 gets EXACTLY ONE 'demoted' row
+    attributed to the earliest (w1), never a duplicate row per earlier
+    reference."""
+    w1 = _witness_spec("P", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300))
+    w2 = _witness_spec("P", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300))
+    w3 = _witness_spec("P", "w000003", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300))
+    specs = [w1, w2, w3]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={},
+        year_by_canonical={"w000001": 900, "w000002": 1100, "w000003": 1300})
+    assert w1["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+    assert w2["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert w3["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    w3_demoted = [a for a in audit
+                  if a["decision"] == "demoted" and a["demoted_work_id"] == "w000003"]
+    assert len(w3_demoted) == 1  # dedup: never two rows from two earlier refs
+    assert w3_demoted[0]["kept_work_id"] == "w000001"
+    w2_demoted = [a for a in audit
+                  if a["decision"] == "demoted" and a["demoted_work_id"] == "w000002"]
+    assert len(w2_demoted) == 1
+    assert w2_demoted[0]["kept_work_id"] == "w000001"
+
+
 # --- coverage gate ---------------------------------------------------------
 
 def test_coverage_gate_zero_candidate_hard_fails():
