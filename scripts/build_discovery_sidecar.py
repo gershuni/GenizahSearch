@@ -979,9 +979,15 @@ _NONE_REASON = ids.ROUTING_REASON_NONE
 _CO_CITATION = ids.ROUTING_REASON_CO_CITATION
 # v2-vocabulary constants (Phase 135, 135-05). Referenced by the v2 build
 # logic (135-06: the D-17 later_shared_text demotion + the v2 band rename).
-# Established here in lockstep with the frozen enum + DDL; the synthetic
-# fixture (byte-identical) and the current real build keep writing
-# `_EXPERT_VERIFIED` until the v2 bake flips them (NO bake logic in 135-05).
+# Established here in lockstep with the frozen enum + DDL. As of the 135-06
+# amendment (2026-07-24) the real-mode E1 track1_direct top tier IS flipped to
+# `_HIGH_CONFIDENCE_ALGORITHMIC` in a v2 build (`build_claims_and_evidence(
+# v2_bands=True)`, set by finalize_build when a `--canonical-merges` census is
+# supplied); the synthetic byte-identical fixture and every v1 build keep
+# writing `_EXPERT_VERIFIED`. NOTE: the frozen band_precision default
+# (`_frozen_real_band_precision_rows`, below) still keys on `_EXPERT_VERIFIED`
+# -- that rename rides an owner `--precision-spec` at the 135-07 real bake and
+# is deliberately OUT OF SCOPE for this evidence-band amendment.
 _LATER_SHARED_TEXT = ids.ROUTING_REASON_LATER_SHARED_TEXT
 _HIGH_CONFIDENCE_ALGORITHMIC = ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC
 
@@ -2664,6 +2670,7 @@ def build_claims_and_evidence(
     apply_lever1: bool = False,
     lever1_threshold: float = LEVER1_COVERAGE_CLIFF,
     reband_tier_a: bool = False,
+    v2_bands: bool = False,
     d17_delta: int = D17_DELTA_YEARS,
     d17_ml_floor: int = D17_MIN_ML,
 ) -> Dict:
@@ -2681,14 +2688,23 @@ def build_claims_and_evidence(
     work_index = {w["raw_work_id"]: w for w in works}
     work_source_corpus = {w["work_id"]: w["source_corpus"] for w in works}
 
+    # v2 (135-06 amendment 2026-07-24): the E1 track1_direct top tier is an
+    # ALGORITHMIC top-score, NOT human approval, so a v2 build bands it
+    # `high_confidence_algorithmic` (the 135-05 rename); a v1 build keeps the
+    # legacy `expert_verified` literal. Gated by the EXPLICIT `v2_bands` flag
+    # (finalize_build sets it True whenever a v2 census is supplied), matching
+    # the existing v2-signal precedent (cross_corpus_map / apply_lever1 /
+    # reband_tier_a) -- never inferred implicitly from cross_corpus_map.
+    expert_tier_band = _HIGH_CONFIDENCE_ALGORITHMIC if v2_bands else _EXPERT_VERIFIED
+
     evidence_specs: List[Dict] = []
     evidence_specs += _ingest_e1_rows(
         e1_ra_confirmed, work_index=work_index, page_index=page_index,
-        confidence_band=_EXPERT_VERIFIED, adjudication_status=_UNREVIEWED, audit_status=_AUDIT_PENDING,
+        confidence_band=expert_tier_band, adjudication_status=_UNREVIEWED, audit_status=_AUDIT_PENDING,
     )
     evidence_specs += _ingest_e1_rows(
         e1_adjudicated_a, work_index=work_index, page_index=page_index,
-        confidence_band=_EXPERT_VERIFIED, adjudication_status=_HUMAN_CONFIRMED, audit_status=_AUDIT_PENDING,
+        confidence_band=expert_tier_band, adjudication_status=_HUMAN_CONFIRMED, audit_status=_AUDIT_PENDING,
     )
     evidence_specs += _ingest_e1_rows(
         e1_rb_screening, work_index=work_index, page_index=page_index,
@@ -3725,7 +3741,14 @@ def finalize_build(
     # tests, out of this plan's file scope, green). A mismatched SHA or a
     # malformed shape still HALTs (raised by the loaders below) whenever the
     # input IS supplied, and semantic-ratification is enforced on --release.
-    if canonical_merges_path is not None:
+    # v2 build discriminator (135-06 amendment 2026-07-24): a supplied
+    # hash-pinned `--canonical-merges` census is a v2-ONLY concept, so it is
+    # the definitive "this is a v2 build" signal -- used below to flip the E1
+    # track1_direct top tier from the v1 `expert_verified` literal to the v2
+    # `high_confidence_algorithmic` key. Its verified SHA is recorded in meta
+    # (`canonical_merges_sha256`), giving the shipped asset a clean v2 marker.
+    v2_build = canonical_merges_path is not None
+    if v2_build:
         merges_loaded = load_canonical_merges(
             canonical_merges_path, sha256=canonical_merges_sha256,
             require_release_semantics=release,
@@ -3869,6 +3892,7 @@ def finalize_build(
             year_by_canonical=year_by_canonical,
             apply_lever1=run_d17,
             reband_tier_a=reband_tier_a,
+            v2_bands=v2_build,
         )
         routing_audit_rows = result.get("routing_audit_rows", [])
         # Production coverage gate (Codex #5) -- only on a --release build.
