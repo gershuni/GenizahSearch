@@ -39,6 +39,14 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SLIM_CENSUS_PATH = _REPO_ROOT / "discovery_data" / "v2_canonical_merges.build.json"
 _SLIM_CENSUS_SHA256 = "cc054d111b9b4a76dd69912923ba50cd2b63f7820cb632617f645c12c207429a"
 
+# The REAL delivered production composition-dates artifact (gitignored,
+# masking-sensitive; orchestrator-verified present + hash-matched). It is a FLAT
+# pre-normalized {raw_id: int-CE-year} map -- the production chrono pipeline
+# already did the (range-aware) anchoring. Read for a smoke-parse only; its
+# SHA-256 is a RUNTIME --composition-dates-sha256 pin, deliberately NOT hardcoded
+# as a test gate here.
+_COMPOSITION_DATES_PATH = _REPO_ROOT / "discovery_data" / "composition_dates.json"
+
 
 # ---------------------------------------------------------------------------
 # Shared fabricated-fixture helpers
@@ -417,6 +425,74 @@ def test_parse_composition_dates_sha_mismatch_halts(tmp_path):
     })
     with pytest.raises(sidecar_build.CompositionDatesError):
         sidecar_build.parse_composition_dates(path, sha256="beef" * 16)
+
+
+# --- composition-dates FLAT pre-normalized {raw_id: int-CE-year} form -------
+# The production chrono pipeline hands over explicit anchored integer years
+# (no descriptive strings enter the input). parse_composition_dates accepts
+# this as a SECOND schema branch alongside the frozen designator+string form.
+
+def test_parse_composition_dates_flat_int_form(tmp_path):
+    """A non-empty {raw_id: int} map parses to the SAME {raw_id: year} shape the
+    designator+string path returns (so the downstream crosswalk join is
+    unchanged). Boundary years 500 and 1600 are inclusive."""
+    path = _write_json(tmp_path / "comp_flat.json", {
+        "M:w1": 950, "M:w2": 1186, "M:w3": 500, "M:w4": 1600,
+    })
+    out = sidecar_build.parse_composition_dates(path)
+    assert out == {"M:w1": 950, "M:w2": 1186, "M:w3": 500, "M:w4": 1600}
+
+
+def test_parse_composition_dates_flat_out_of_range_high_halts(tmp_path):
+    path = _write_json(tmp_path / "c.json", {"M:w1": 950, "M:w2": 1700})
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.parse_composition_dates(path)
+
+
+def test_parse_composition_dates_flat_out_of_range_low_halts(tmp_path):
+    path = _write_json(tmp_path / "c.json", {"M:w1": 400})
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.parse_composition_dates(path)
+
+
+def test_parse_composition_dates_flat_bool_value_halts(tmp_path):
+    # bool is an int subclass -- a JSON true/false is NEVER a year -> HALT.
+    path = _write_json(tmp_path / "c.json", {"M:w1": True})
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.parse_composition_dates(path)
+
+
+def test_parse_composition_dates_flat_string_value_halts(tmp_path):
+    path = _write_json(tmp_path / "c.json", {"M:w1": "950"})
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.parse_composition_dates(path)
+
+
+def test_parse_composition_dates_neither_form_halts(tmp_path):
+    # A mixed doc (some int, some non-int) is neither the 4-key designator form
+    # nor an all-int flat map -> ambiguous/malformed -> HALT (never a silent skip).
+    path = _write_json(tmp_path / "c.json", {"M:w1": 950, "M:w2": "text"})
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.parse_composition_dates(path)
+
+
+def test_parse_composition_dates_empty_object_halts(tmp_path):
+    path = _write_json(tmp_path / "c.json", {})
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.parse_composition_dates(path)
+
+
+def test_parse_composition_dates_real_flat_file_smoke_parse():
+    """Smoke-parse the REAL delivered production artifact (a flat pre-normalized
+    {raw_id: int-CE-year} map): exactly 7,277 entries, every value an int in
+    [500, 1587]. No SHA arg -> no pin check (the SHA is a runtime
+    --composition-dates-sha256 pin, never a test gate)."""
+    assert _COMPOSITION_DATES_PATH.exists()
+    out = sidecar_build.parse_composition_dates(str(_COMPOSITION_DATES_PATH))
+    assert len(out) == 7277
+    assert all(type(v) is int for v in out.values())
+    assert min(out.values()) == 500
+    assert max(out.values()) == 1587
 
 
 # --- seftja dates (frozen {year:int, basis:str}) ---------------------------
