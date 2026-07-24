@@ -133,6 +133,18 @@ None - no external service configuration required.
 - **Phase-136 forward item** (already recorded in the bake plan's own §10): the `later_shared_text` routing-reason surface needs a distinct display label when Phase 136's read surfaces expose demoted claims behind the "show more possible identifications" toggle.
 - **Known residual risk (bounded, non-blocking):** D-17's coarse chronology rule can, in principle, demote a claim based on interval-midpoint arithmetic when both sides' dates are themselves interval-derived (century/range) rather than explicit years; this is bounded (recoverable via `review_only`, never data loss) and was already accepted by the owner as part of ratifying the coarse rule as launch-grade (commit `84054c45`).
 
+## Self-Check: PASSED
+
+- FOUND: `docs/specs/discovery-v2-bake-plan.md`
+- FOUND: `.planning/phases/135-precision-certificate-confidence-bands/135-BAKEPLAN-CODEX-REVIEW.md`
+- FOUND: `.planning/phases/135-precision-certificate-confidence-bands/135-04-SUMMARY.md`
+- FOUND commit `c35b45db` (Task 1: fold round-9 real defects)
+- FOUND commit `57abcac7` (Task 2: owner-authorized gate-close review doc)
+- FOUND commit `c94d541e` (plan-completion: SUMMARY + tracking)
+- Masking scan (`check_atlas_masking.py --scan-asset`) clean on all three files this plan created/modified: `docs/specs/discovery-v2-bake-plan.md`, `135-BAKEPLAN-CODEX-REVIEW.md`, `135-04-SUMMARY.md`, plus `.planning/STATE.md` and `.planning/ROADMAP.md`
+- SHA-256 of the final `docs/specs/discovery-v2-bake-plan.md` (`a97d682c...aeac708`) confirmed present in `135-BAKEPLAN-CODEX-REVIEW.md`
+- ROADMAP.md 135-04 checkbox confirmed `[x]`; STATE.md Current Position confirmed advanced to Plan 4 of 9
+
 ---
 *Phase: 135-precision-certificate-confidence-bands*
 *Completed: 2026-07-24*
