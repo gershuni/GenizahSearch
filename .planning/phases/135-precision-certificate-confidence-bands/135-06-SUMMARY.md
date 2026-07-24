@@ -148,3 +148,69 @@ strings enter the build input).
   all three touched files. Real-file sanity: `parse_composition_dates(...)` →
   `7277 500 1587`.
 - **Commits.** `40e610d0` (test), `0e4dd905` (feat), `01779566` (docs).
+
+## Amendment (2026-07-24): v2 real-mode band flip wired
+
+Second owner-authorized, surgical amendment (135-06 stays `[x]`; no new roadmap
+item, no Codex gate re-run). Closes the deferred deviation #3 from the original
+plan ("the real-mode band FLIP deferred to 135-07"). 135-07 is a run-only plan
+with NO code changes, so without this the real bake would produce a v1-banded
+asset and fail 135-07's own acceptance (`expert_verified` grep-absent AND
+`high_confidence_algorithmic` present).
+
+- **The flip (`scripts/build_discovery_sidecar.py`).** `build_claims_and_evidence`
+  gained an explicit `v2_bands: bool = False` keyword (placed alongside the
+  existing v2 signals `cross_corpus_map` / `apply_lever1` / `reband_tier_a` —
+  never inferred implicitly). It resolves `expert_tier_band =
+  _HIGH_CONFIDENCE_ALGORITHMIC if v2_bands else _EXPERT_VERIFIED` and uses that
+  at BOTH E1 track1_direct top-tier assignment sites (the RA-confirmed +
+  adjudicated-A `_ingest_e1_rows` calls). `finalize_build` sets
+  `v2_build = canonical_merges_path is not None` and threads `v2_bands=v2_build`
+  into the build call. A `grep` confirmed those two sites are the ONLY real-mode
+  `_EXPERT_VERIFIED` writes; the synthetic fixture builders and
+  `_frozen_real_band_precision_rows` (line ~1430) were left untouched.
+- **Flip trigger — WHY.** `--canonical-merges` (the hash-pinned merge census) is
+  a v2-ONLY concept (bake plan §2 / §4.1), so its presence is the definitive
+  "this is a v2 build" signal, and it is exactly what already gates the v2
+  `cross_corpus_map` + records `canonical_merges_sha256` in `meta`. The bake plan
+  specifies the rename (§5) but no distinct runtime trigger, so per the task's
+  fallback this "canonical-merges supplied ⇒ v2 bands" gate was chosen. It also
+  keeps `finalize_build`'s v2 gating consistent (one discriminator drives the
+  census merge, the drop-list, and now the band flip).
+- **Verifier assessment (`scripts/verify_discovery_sidecar.py`) — NOT
+  strengthened, deliberately.** A clean v2 meta signal DOES exist
+  (`canonical_merges_sha256`), but strengthening `check_no_mixed_enum_state` to
+  assert `expert_verified` ABSENT-when-v2 would be a FRAGILE heuristic here: the
+  frozen band_precision default (`_frozen_real_band_precision_rows`, line ~1430)
+  and the verifier's release-strict `_EXPECTED_BAND_KEYS` /
+  `_EXPECTED_MEASURED_BAND_PRECISIONS` STILL key on `expert_verified` (that
+  band_precision rename was explicitly out of this evidence-band amendment's
+  scope — the task said leave line 1430). Until that separate rename lands (it
+  rides an owner `--precision-spec` at the 135-07 real bake), a v2 build's
+  band_precision legitimately still carries `expert_verified`, so an
+  absent-when-v2 assertion would falsely fail a correctly-built asset. Per the
+  task's guidance ("do NOT force a fragile heuristic"), the check was left as-is.
+  **Enforcement of the flip = the evidence-band flip (this amendment) + 135-07's
+  own grep-acceptance gate.** NOTE for 135-07: because band_precision must also
+  become pure-v2 for the full asset to be grep-clean AND to pass the existing
+  "both-present-fails" `check_no_mixed_enum_state`, the 135-07 bake MUST supply a
+  v2 `--precision-spec` (high_confidence_algorithmic band_precision rows) — the
+  band_precision rename + the corresponding verifier `_EXPECTED_BAND_KEYS` update
+  is the remaining half of the §5 lockstep and is deferred to that bake.
+- **Tests (`tests/test_discovery_v2_bake.py`, +3).** (a) v2-mode
+  (`v2_bands=True`) bands both E1 rows `high_confidence_algorithmic`, never
+  `expert_verified`; (b) v1-mode default keeps both `expert_verified`
+  (regression guard for the v1 golden path); (c) a v2-mode-assembled asset
+  (works + claims + evidence inserted via the real `_insert_*_real` helpers) has
+  the `expert_verified` byte literal grep-ABSENT and `high_confidence_algorithmic`
+  present — mirrors 135-07's acceptance.
+- **Verification.** `pytest tests/test_discovery_v2_bake.py
+  tests/test_discovery_build.py -q` → **165 passed** (162 prior + 3 new). `ruff`
+  clean on both touched files. `tests/test_no_back_edges_core.py` → 41 passed.
+  Per-file `--scan-asset` masking clean on both touched files. The v1
+  golden/byte-identical path is proven unchanged by
+  `test_finalize_build_end_to_end_success` (a v1 `finalize_build` + full
+  `verify_mod.verify` returning rc==0, still green). `verify_discovery_sidecar.py`
+  was NOT touched.
+- **Commits.** See the final metadata commit + the `feat`/`test` commits recorded
+  in STATE.md.
