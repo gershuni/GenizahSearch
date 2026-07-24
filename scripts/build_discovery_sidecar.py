@@ -257,6 +257,17 @@ class SeftjaDatesError(ValueError):
     pin or its FROZEN exact `{year:int, basis:str}` schema."""
 
 
+class ConflictingSameMemberDateError(ValueError):
+    """Raised (bake plan §4.3, Codex R5-HIGH) when, WITHIN a single date map,
+    TWO OR MORE distinct raw ids crosswalk to the SAME opaque `w000xxx` (the
+    representative OR any other group member) carrying TWO OR MORE DISTINCT
+    normalized years. Crosswalk injectivity is FORWARD-ONLY, so this reverse
+    collision is a data-quality defect in the pinned date input requiring
+    upstream correction -- NEVER resolved by first-row/minimum precedence. A
+    `--release` HALT. Masking: the message carries the opaque id + the
+    conflicting numeric years ONLY, never a raw id."""
+
+
 class DateCoverageError(RuntimeError):
     """Raised (Codex #5) when the production date-join coverage gate HALTs a
     `--release` build: a zero candidate universe, or `pair_coverage` below
@@ -910,18 +921,73 @@ def invalidate_reband_band_precision(bp_rows: List[Dict], decision: Dict) -> Tup
 def resolve_year_by_canonical(
     date_maps: List[Dict[str, int]], *, crosswalk: Dict[str, str],
     cross_corpus_map: Optional[Dict[str, str]],
+    dropped_ids: frozenset = frozenset(),
 ) -> Dict[str, int]:
-    """Join the raw-id -> year date maps to canonical_work_id via the crosswalk
-    (raw research id -> opaque work_id) + the census cross_corpus_map (opaque
-    -> canonical). Returns `{canonical_work_id: year}` -- numeric years only."""
+    """Resolve ONE year per canonical group from the raw-id -> year date maps,
+    per the RATIFIED bake plan §4.3 year-resolution contract (NOT the former
+    last-write-wins stub). Join is raw research id -> opaque work_id (crosswalk)
+    -> canonical (census cross_corpus_map). Returns `{canonical_work_id: year}`
+    -- numeric years only.
+
+    Contract (bake plan §4.3):
+      1. Dropped-member exclusion FIRST (Codex round-8 HIGH-1): any opaque in
+         `dropped_ids` (§4.2 `dropped_by_135`) is removed BEFORE the
+         representative AND the sibling lookups -- a dropped id's date can
+         NEVER supply the year that drives a D-17 demotion.
+      2. Representative-first: use the year keyed to the canonical
+         REPRESENTATIVE's own opaque (an opaque is representative iff
+         `canonical_work_id(opaque, ccm) == opaque`).
+      3. Sibling-minimum fallback: if the representative has NO resolved date,
+         use the MINIMUM resolved year among the group's OTHER (non-dropped)
+         member opaques.
+      4. Unknown: if no non-dropped member has a date, the canonical is ABSENT
+         from the output (D-17 then no-ops that pair via fail_safe_unknown_date).
+      5. Same-member-conflict HALT: if, WITHIN a single date map, MULTIPLE
+         distinct raw ids crosswalk to the SAME (non-dropped) opaque with >=2
+         DISTINCT years -> `ConflictingSameMemberDateError` (`--release` HALT).
+         Same year across those raw ids is fine (no HALT).
+
+    `min()` as the multi-year tie-break within `rep_years` is a determinism
+    safeguard (a representative's date lives in exactly one map empirically, so
+    `rep_years` is usually a single value)."""
     ccm = cross_corpus_map or {}
-    out: Dict[str, int] = {}
+    rep_years: Dict[str, set] = {}   # canonical -> {years where opaque == canonical}
+    sib_years: Dict[str, set] = {}   # canonical -> {years where opaque != canonical}
     for dm in date_maps:
+        # (5) Same-member conflict detection WITHIN this single map, AFTER
+        # dropped-exclusion (1): collapse each map to opaque -> year, HALTing on
+        # a second DISTINCT year for the same opaque.
+        year_by_opaque: Dict[str, int] = {}
         for raw_id, year in dm.items():
             opaque = crosswalk.get(raw_id)
-            if opaque is None:
+            if opaque is None or opaque in dropped_ids:
                 continue
-            out[ids.canonical_work_id(opaque, ccm)] = year
+            prev = year_by_opaque.get(opaque)
+            if prev is not None and prev != year:
+                raise ConflictingSameMemberDateError(
+                    f"conflicting same-member dates within one date map for opaque "
+                    f"{opaque}: {sorted({prev, year})} -- crosswalk injectivity is "
+                    "forward-only; a same-member date conflict is an upstream "
+                    "data-quality defect, never resolved by precedence (§4.3)"
+                )
+            year_by_opaque[opaque] = year
+        # (2)/(3) Accumulate representative vs sibling years across maps.
+        for opaque, year in year_by_opaque.items():
+            canonical = ids.canonical_work_id(opaque, ccm)
+            if opaque == canonical:
+                rep_years.setdefault(canonical, set()).add(year)
+            else:
+                sib_years.setdefault(canonical, set()).add(year)
+    out: Dict[str, int] = {}
+    for canonical in set(rep_years) | set(sib_years):
+        rep = rep_years.get(canonical)
+        if rep:
+            out[canonical] = min(rep)          # (2) representative-first
+        else:
+            sib = sib_years.get(canonical)
+            if sib:
+                out[canonical] = min(sib)      # (3) sibling-minimum fallback
+        # (4) neither -> canonical stays ABSENT from `out` (unknown)
     return out
 
 
@@ -4028,6 +4094,7 @@ def finalize_build(
             year_by_canonical = resolve_year_by_canonical(
                 [composition_dates_map, seftja_dates_map],
                 crosswalk=crosswalk, cross_corpus_map=cross_corpus_map,
+                dropped_ids=dropped_work_ids,
             )
 
         result = build_claims_and_evidence(
