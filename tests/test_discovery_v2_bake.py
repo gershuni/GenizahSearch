@@ -778,3 +778,323 @@ def _build_v2_finalize_fixture_shared_page(tmp_path):
         "research_db": research_db, "crosswalk_path": crosswalk_path,
         "approved_csv": approved_csv, "out_db_path": tmp_path / "out" / "discovery-v2.db",
     }
+
+
+# ===========================================================================
+# Task 3: new verifier invariants (hand-built minimal discovery.db assets)
+# ===========================================================================
+
+_W = ids.EVIDENCE_KIND_WITNESS
+_ST = ids.EVIDENCE_KIND_SHARED_TEXT
+_T1 = ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+_PROP = ids.EVIDENCE_SOURCE_PROPAGATED
+_SHIP = ids.ROUTING_STATUS_SHIPPED
+_REV = ids.ROUTING_STATUS_REVIEW_ONLY
+
+
+def _new_db(tmp_path, name="v2.db"):
+    path = tmp_path / name
+    conn = sqlite3.connect(str(path))
+    sidecar_build.create_schema(conn)
+    return conn
+
+
+def _ins_evidence(conn, claim_id, *, work_id, page_id, sys_id, kind=_W, source=_T1,
+                  band=ids.CONFIDENCE_BAND_TIER_A, adjudication=ids.ADJUDICATION_STATUS_UNREVIEWED,
+                  audit=ids.AUDIT_STATUS_NA, routing=_SHIP, reason=ids.ROUTING_REASON_NONE,
+                  span=(0, 300), other_page_id=None, seed_spans=None, evidence_id=None):
+    """Insert ONE evidence row with a GENUINE ids.evidence_id (unless an
+    explicit stale evidence_id is passed, to simulate a bad asset)."""
+    eid = evidence_id or ids.evidence_id(
+        work_id=work_id, a_page_id=page_id, sys_id=sys_id, evidence_kind=kind,
+        evidence_source=source, confidence_band=band, span_start=span[0], span_end=span[1],
+        other_page_id=other_page_id, seed_spans=seed_spans)
+    conn.execute(
+        """INSERT INTO discovery_evidence
+           (evidence_id, claim_id, evidence_kind, evidence_source, confidence_band,
+            adjudication_status, audit_status, routing_status, routing_reason, is_new,
+            a_page_id, sys_id, span_start, span_end, text_layer, snapshot_hash,
+            seed_spans, other_page_id)
+           VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?,'htr','h', ?, ?)""",
+        (eid, claim_id, kind, source, band, adjudication, audit, routing, reason,
+         page_id, sys_id, span[0], span[1],
+         json.dumps(seed_spans) if seed_spans else None, other_page_id),
+    )
+    return eid
+
+
+def _ins_claim(conn, *, page_id, work_id, display_evidence_id, claim_type=None,
+               source_corpus=ids.SOURCE_CORPUS_SEFARIA):
+    claim_id = ids.claim_id(page_id, work_id)
+    conn.execute(
+        "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, "
+        "display_evidence_id, source_corpus, sidecar_version) VALUES (?,?,?,?,?,?,?)",
+        (page_id, work_id, claim_id, claim_type or ids.CLAIM_TYPE_DIRECT_WITNESS,
+         display_evidence_id, source_corpus, sidecar_build.REAL_SIDECAR_VERSION),
+    )
+    return claim_id
+
+
+def _ins_work(conn, work_id, *, canonical=None, corpus=ids.SOURCE_CORPUS_SEFARIA):
+    conn.execute(
+        "INSERT INTO works (work_id, canonical_work_id, neutral_title, source_corpus) VALUES (?,?,?,?)",
+        (work_id, canonical or work_id, "Synthetic Neutral", corpus),
+    )
+
+
+def _display_for(conn, claim_id):
+    rows = [
+        {"evidence_id": r[0], "evidence_source": r[1], "confidence_band": r[2],
+         "adjudication_status": r[3], "routing_status": r[4]}
+        for r in conn.execute(
+            "SELECT evidence_id, evidence_source, confidence_band, adjudication_status, "
+            "routing_status FROM discovery_evidence WHERE claim_id=?", (claim_id,))
+    ]
+    return ids.select_display_evidence(rows)
+
+
+# --- no-mixed-enum-state ---------------------------------------------------
+
+def test_no_mixed_enum_state_flags_both_v1_and_v2_keys(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    _ins_work(conn, "w000002")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    e1 = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                       band=ids.CONFIDENCE_BAND_EXPERT_VERIFIED)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e1, c1))
+    c2 = _ins_claim(conn, page_id="p2", work_id="w000002", display_evidence_id="x")
+    e2 = _ins_evidence(conn, c2, work_id="w000002", page_id="p2", sys_id="s2",
+                       band=ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e2, c2))
+    conn.commit()
+    assert verify_mod.check_no_mixed_enum_state(conn)  # non-empty -> violation
+    conn.close()
+
+
+def test_no_mixed_enum_state_pure_v1_asset_passes(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    e1 = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                       band=ids.CONFIDENCE_BAND_EXPERT_VERIFIED)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e1, c1))
+    conn.commit()
+    assert verify_mod.check_no_mixed_enum_state(conn) == []
+    conn.close()
+
+
+# --- never-orphan-shipped --------------------------------------------------
+
+def test_never_orphan_shipped_flags_review_only_only_witness_page(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    e1 = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                       band=ids.CONFIDENCE_BAND_SCREENING_RB, routing=_REV,
+                       reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e1, c1))
+    conn.commit()
+    assert verify_mod.check_never_orphan_shipped(conn)  # shadow-orphan HARD FAIL
+    conn.close()
+
+
+def test_never_orphan_shipped_display_points_at_review_only_with_shipped_sibling(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    rev = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                        band=ids.CONFIDENCE_BAND_SCREENING_RB, routing=_REV,
+                        reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                  band=ids.CONFIDENCE_BAND_CORROBORATED, source=_PROP, routing=_SHIP)
+    # DELIBERATELY point display at the review_only row despite a shipped sibling.
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (rev, c1))
+    conn.commit()
+    assert verify_mod.check_never_orphan_shipped(conn)
+    conn.close()
+
+
+def test_never_orphan_shipped_clean_asset_passes(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    e1 = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                       band=ids.CONFIDENCE_BAND_TIER_A, routing=_SHIP)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e1, c1))
+    conn.commit()
+    assert verify_mod.check_never_orphan_shipped(conn) == []
+    conn.close()
+
+
+# --- routing-audit replayability + unknown-date-never-demoted --------------
+
+def test_routing_audit_replayability_flags_sub_delta_demotion(tmp_path):
+    conn = _new_db(tmp_path)
+    conn.execute(
+        "INSERT INTO discovery_routing_audit (page_id, kept_work_id, demoted_work_id, "
+        "kept_year, demoted_year, delta_years, decision, routing_reason) VALUES "
+        "('p1','w000001','w000002',900,950,50,'demoted','later_shared_text')")  # delta 50 < 100
+    conn.commit()
+    assert verify_mod.check_routing_audit_replayability(conn)
+    conn.close()
+
+
+def test_routing_audit_replayability_flags_demoted_with_null_year(tmp_path):
+    conn = _new_db(tmp_path)
+    conn.execute(
+        "INSERT INTO discovery_routing_audit (page_id, kept_work_id, demoted_work_id, "
+        "kept_year, demoted_year, delta_years, decision, routing_reason) VALUES "
+        "('p1','w000001','w000002',900,NULL,NULL,'demoted','later_shared_text')")
+    conn.commit()
+    assert verify_mod.check_routing_audit_replayability(conn)
+    conn.close()
+
+
+def test_routing_audit_replayability_clean_passes(tmp_path):
+    conn = _new_db(tmp_path)
+    conn.execute(
+        "INSERT INTO discovery_routing_audit (page_id, kept_work_id, demoted_work_id, "
+        "kept_year, demoted_year, delta_years, decision, routing_reason) VALUES "
+        "('p1','w000001','w000002',900,1100,200,'demoted','later_shared_text')")
+    conn.commit()
+    assert verify_mod.check_routing_audit_replayability(conn) == []
+    conn.close()
+
+
+def test_unknown_date_never_demoted_flags_orphan_later_shared_text(tmp_path):
+    # a later_shared_text evidence row with NO corresponding demoted audit row.
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000002")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000002", display_evidence_id="x")
+    _ins_evidence(conn, c1, work_id="w000002", page_id="p1", sys_id="s1",
+                  band=ids.CONFIDENCE_BAND_TIER_A, routing=_REV,
+                  reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    conn.commit()
+    assert verify_mod.check_unknown_date_never_demoted(conn)
+    conn.close()
+
+
+# --- measurement_status <-> ci_low consistency ----------------------------
+
+def _ins_band_precision(conn, *, band, status, precision=None, ci_low=None, ci_high=None,
+                        numerator=None, denominator=None, source=_T1,
+                        collection_id="e1_certification_registry_v1"):
+    conn.execute(
+        "INSERT INTO band_precision (scope, collection_id, evidence_source, confidence_band, "
+        "numerator, denominator, precision, ci_low, ci_high, measurement_status) "
+        "VALUES ('band',?,?,?,?,?,?,?,?,?)",
+        (collection_id, source, band, numerator, denominator, precision, ci_low, ci_high, status),
+    )
+
+
+def test_measurement_status_ci_consistency_flags_pass_below_floor(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_TIER_A, status="measured_pass",
+                        precision=0.80, ci_low=0.70, ci_high=0.90, numerator=80, denominator=100)
+    conn.commit()
+    assert verify_mod.check_measurement_status_ci_consistency(conn)
+    conn.close()
+
+
+def test_measurement_status_ci_consistency_flags_fail_above_floor(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_TIER_A, status="measured_fail",
+                        precision=0.90, ci_low=0.88, ci_high=0.95, numerator=90, denominator=100)
+    conn.commit()
+    assert verify_mod.check_measurement_status_ci_consistency(conn)
+    conn.close()
+
+
+def test_measurement_status_ci_consistency_clean_passes(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_EXPERT_VERIFIED, status="measured_pass",
+                        precision=0.90, ci_low=0.87, ci_high=0.95, numerator=90, denominator=100)
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_TIER_A, status="not_measured")
+    conn.commit()
+    assert verify_mod.check_measurement_status_ci_consistency(conn) == []
+    conn.close()
+
+
+# --- reband-precision-invalidation (gate-13 iff) ---------------------------
+
+def test_reband_precision_invalidation_flags_retained_precision(tmp_path):
+    conn = _new_db(tmp_path)
+    conn.execute("INSERT INTO meta (key, value) VALUES ('tier_a_reband_target', 'screening_rb')")
+    # screening_rb precision RETAINED (measured) despite the reband -> HARD FAIL.
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_SCREENING_RB, status="measured_pass",
+                        precision=0.859, ci_low=0.86, ci_high=0.90, numerator=86, denominator=100)
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_TIER_A, status="not_measured")
+    conn.commit()
+    assert verify_mod.check_reband_precision_invalidation(conn, {"tier_a_reband_target": "screening_rb"})
+    conn.close()
+
+
+def test_reband_precision_invalidation_clean_when_invalidated(tmp_path):
+    conn = _new_db(tmp_path)
+    conn.execute("INSERT INTO meta (key, value) VALUES ('tier_a_reband_target', 'screening_rb')")
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_SCREENING_RB, status="not_measured")
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_TIER_A, status="not_measured")
+    conn.commit()
+    meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+    assert verify_mod.check_reband_precision_invalidation(conn, meta) == []
+    conn.close()
+
+
+def test_reband_precision_invalidation_iff_marker_absent(tmp_path):
+    # No reband marker -> check is a no-op even if screening_rb carries a number.
+    conn = _new_db(tmp_path)
+    _ins_band_precision(conn, band=ids.CONFIDENCE_BAND_SCREENING_RB, status="measured_pass",
+                        precision=0.859, ci_low=0.86, ci_high=0.90, numerator=86, denominator=100)
+    conn.commit()
+    assert verify_mod.check_reband_precision_invalidation(conn, {}) == []
+    conn.close()
+
+
+# --- evidence_id-content-consistency ---------------------------------------
+
+def test_evidence_id_consistency_flags_stale_id(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    # a STALE evidence_id (simulating a bare in-place confidence_band UPDATE).
+    stale = "deadbeef" * 8
+    _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                  band=ids.CONFIDENCE_BAND_SCREENING_RB, evidence_id=stale)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (stale, c1))
+    conn.commit()
+    assert verify_mod.check_evidence_id_content_consistency(conn)
+    conn.close()
+
+
+def test_evidence_id_consistency_flags_stale_display_pointer(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    rev = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                        band=ids.CONFIDENCE_BAND_SCREENING_RB, routing=_REV,
+                        reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                  band=ids.CONFIDENCE_BAND_CORROBORATED, source=_PROP, routing=_SHIP)
+    # stale display pointer at the review_only row (select would pick the shipped sibling).
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (rev, c1))
+    conn.commit()
+    assert verify_mod.check_evidence_id_content_consistency(conn)
+    conn.close()
+
+
+def test_evidence_id_consistency_clean_rebuilt_asset_passes(tmp_path):
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    rev = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                        band=ids.CONFIDENCE_BAND_SCREENING_RB, routing=_REV,
+                        reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+    _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                  band=ids.CONFIDENCE_BAND_CORROBORATED, source=_PROP, routing=_SHIP)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?",
+                 (_display_for(conn, c1), c1))
+    conn.commit()
+    assert rev  # the review_only row exists but is NOT the display pointer
+    assert verify_mod.check_evidence_id_content_consistency(conn) == []
+    conn.close()
