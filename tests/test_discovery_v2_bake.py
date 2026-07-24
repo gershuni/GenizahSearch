@@ -765,6 +765,74 @@ def test_reband_is_rebuild_input_regenerates_id_and_moves_display_to_shipped_sib
     assert ev_by_id[display_id][7] == ids.ROUTING_STATUS_SHIPPED
 
 
+# --- v2 real-mode band flip (expert_verified -> high_confidence_algorithmic) ---
+# 135-06 amendment (2026-07-24): the E1 track1_direct top tier is an ALGORITHMIC
+# top-score, not human approval, so a v2 build bands it
+# `high_confidence_algorithmic`; a v1 build keeps the legacy `expert_verified`.
+
+def _e1_band_inputs():
+    """One shown work, one RA-confirmed E1 row (pg1) + one adjudicated-A E1 row
+    (pg2). conn=None so `_ingest_tier_a` is skipped -> the ONLY evidence rows
+    are the two E1 top-tier rows under test."""
+    works = [
+        {"raw_work_id": "raw:w1", "work_id": "w000001",
+         "neutral_title": "Synthetic Neutral One", "source_corpus": ids.SOURCE_CORPUS_SEFARIA},
+    ]
+    page_index = {"pg1": ("htr", "h1"), "pg2": ("htr", "h2")}
+    e1_ra = [{"page_id": "pg1", "sys_id": "s1", "work_id": "raw:w1",
+              "o0": 0, "o1": 300, "ml": 300, "dens": 0.9, "n_spans": 1}]
+    e1_adj = [{"page_id": "pg2", "sys_id": "s2", "work_id": "raw:w1",
+               "o0": 0, "o1": 300, "ml": 300, "dens": 0.9, "n_spans": 1}]
+    return works, page_index, e1_ra, e1_adj
+
+
+def test_v2_bands_flip_e1_top_tier_to_high_confidence_algorithmic():
+    works, page_index, e1_ra, e1_adj = _e1_band_inputs()
+    result = sidecar_build.build_claims_and_evidence(
+        conn=None, works=works, page_index=page_index,
+        e1_ra_confirmed=e1_ra, e1_adjudicated_a=e1_adj, v2_bands=True)
+    bands = [e[4] for e in result["evidence_rows"]]  # index 4 == confidence_band
+    assert ids.CONFIDENCE_BAND_EXPERT_VERIFIED not in bands
+    assert bands.count(ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC) == 2  # RA + adjudicated-A
+
+
+def test_v1_bands_default_keeps_expert_verified():
+    """Regression: the DEFAULT (v2_bands=False) v1 build still bands both E1
+    top-tier rows `expert_verified` -- guards the v1 golden/byte-identical path."""
+    works, page_index, e1_ra, e1_adj = _e1_band_inputs()
+    result = sidecar_build.build_claims_and_evidence(
+        conn=None, works=works, page_index=page_index,
+        e1_ra_confirmed=e1_ra, e1_adjudicated_a=e1_adj)  # v2_bands defaults False
+    bands = [e[4] for e in result["evidence_rows"]]
+    assert ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC not in bands
+    assert bands.count(ids.CONFIDENCE_BAND_EXPERT_VERIFIED) == 2
+
+
+def test_v2_assembled_asset_has_no_expert_verified_literal(tmp_path):
+    """Mirrors 135-07's acceptance: a v2-mode-assembled asset has the v1 band
+    literal `expert_verified` grep-ABSENT and the v2 key
+    `high_confidence_algorithmic` present in the shipped DB bytes. (band_precision
+    is not populated on this path -- the frozen expert_verified band_precision
+    default rides an owner --precision-spec at the 135-07 real bake, out of this
+    evidence-band amendment's scope.)"""
+    works, page_index, e1_ra, e1_adj = _e1_band_inputs()
+    result = sidecar_build.build_claims_and_evidence(
+        conn=None, works=works, page_index=page_index,
+        e1_ra_confirmed=e1_ra, e1_adjudicated_a=e1_adj, v2_bands=True)
+    db_path = tmp_path / "v2_asset.db"
+    conn = sqlite3.connect(str(db_path))
+    sidecar_build.create_schema(conn)
+    cur = conn.cursor()
+    sidecar_build._insert_works_real(cur, works)
+    sidecar_build._insert_claims_and_evidence_real(
+        cur, result["claim_rows"], result["evidence_rows"])
+    conn.commit()
+    conn.close()
+    raw = db_path.read_bytes()
+    assert b"expert_verified" not in raw
+    assert b"high_confidence_algorithmic" in raw
+
+
 def test_finalize_build_d17_end_to_end_writes_audit_and_date_shas(tmp_path):
     """End-to-end: two co-claiming works on one page, dated 200y apart, with
     the date inputs supplied -> D-17 demotes the later, writes a
