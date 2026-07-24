@@ -9,11 +9,264 @@ Based on the desktop Help.html but adapted for the web application.
 from nicegui import ui
 from web.translations import get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
+from web.discovery_assets import discovery_available
 from web.components.typography import h1, h2, h3
+from shared.discovery_band_labels import (
+    BAND_LABELS,
+    band_label,
+    format_precision_copy,
+    NUMERATOR_LABEL,
+    DENOMINATOR_LABEL,
+    DRAW_SIZE_LABEL,
+)
 
 
-def create_help_page():
-    """Create the comprehensive Help Center page with bilingual content."""
+# ---------------------------------------------------------------------------
+# BAND-05 "Confidence Bands & Methods" methods section (Phase 135, plan 135-02,
+# D-10). A flag-gated, bilingual SECTION inside this Help page (never a new
+# route), with per-band anchors for tooltip deep-links. Band labels + precision
+# copy are rendered THROUGH shared.discovery_band_labels (never re-worded here);
+# only the section's own field labels + placeholders are local UI copy. The
+# body card + its TOC entry are each independently gated on discovery_available()
+# (Codex #11). noindex until REL-01 is driven separately in web/main.py.
+# ---------------------------------------------------------------------------
+
+# Unique marker class so a render-smoke test can scope its assertions (esp. the
+# no-"certified"/no-מאושר word gate) to THIS section — the word מאושר legitimately
+# appears elsewhere in the Help page (the Joins-Lab "confirmed join" copy).
+_CONFIDENCE_SECTION_CLASS = 'discovery-methods-section'
+
+_CONFIDENCE_TOC_TITLE = {
+    'en': 'Confidence Bands and Methods',
+    'he': 'דרגות ודאות ושיטות',
+}
+
+_CONFIDENCE_INTRO = {
+    'en': (
+        'These are estimated band-population precisions, not per-item probabilities. '
+        'All numbers are provisional pending owner grading; a sampled band estimate is '
+        'never applied to an individual identification. Each identification remains an '
+        'unreviewed algorithmic estimate unless it carries an expert-reviewed marker.'
+    ),
+    'he': (
+        'אלה הערכות דיוק ברמת אוכלוסיית הדרגה, ולא הסתברויות פרטניות. כל המספרים ראשוניים '
+        'עד להכרעת הבעלים; הערכת דרגה מדגמית לעולם אינה מיוחסת לזיהוי בודד. כל זיהוי נותר '
+        'הערכה אלגוריתמית שלא נבדקה, אלא אם כן מצורף לו סימון של בדיקת מומחה.'
+    ),
+}
+
+_CONFIDENCE_FIELD_LABELS = {
+    'population': {
+        'en': 'Population (shipped claims in this band)',
+        'he': 'אוכלוסייה (טענות שפורסמו בדרגה זו)',
+    },
+    'unit': {'en': 'Unit of measurement', 'he': 'יחידת מדידה'},
+    'sample': {'en': 'Sample size', 'he': 'גודל המדגם'},
+    'strata': {'en': 'Strata', 'he': 'שכבות דגימה'},
+    'estimate': {'en': 'Weighted estimate', 'he': 'הערכה משוקללת'},
+    'measurement_date': {'en': 'Measurement date', 'he': 'תאריך מדידה'},
+    'grader': {'en': 'Grader', 'he': 'מדרג'},
+    'audit_status': {'en': 'Audit status', 'he': 'סטטוס ביקורת'},
+    'report_id': {'en': 'Report identifier', 'he': 'מזהה דוח'},
+}
+
+_CONFIDENCE_PLACEHOLDERS = {
+    'not_measured': {'en': 'not yet measured', 'he': 'טרם נמדד'},
+    'audit_pending': {'en': 'independent audit pending', 'he': 'ביקורת בלתי-תלויה בהמתנה'},
+    'count_unavailable': {'en': 'count unavailable', 'he': 'מספר לא זמין'},
+}
+
+# D-05: the estimand unit; CI clustered by physical MS.
+_CONFIDENCE_UNIT_PROSE = {
+    'en': 'per (page, work) claim; confidence interval clustered by physical manuscript',
+    'he': 'לכל טענת (עמוד, חיבור); רווח סמך מקובץ לפי כתב-יד פיזי',
+}
+
+# D-08 strata (generic — the data-driven sampling_frame overrides this when present).
+_CONFIDENCE_STRATA_FALLBACK = {
+    'en': 'source corpus × coverage band (CERT-01 sampling design)',
+    'he': 'קורפוס מקור × דרגת כיסוי (מערך הדגימה של CERT-01)',
+}
+
+_CONFIDENCE_COLLECTION_LABEL = {
+    'en': 'Propagated witness collection (corroborated ∪ weak), collection scope',
+    'he': 'אוסף עדי הפצה (מאושש ∪ חלש), בהיקף האוסף',
+}
+
+# D-10 per-band deep-link anchor registry (help-confidence-<band>): one anchor
+# per band, keyed by the canonical (evidence_source, band) pair. This is the
+# SINGLE greppable source of truth for the tooltip deep-link targets Phase 136
+# will link to — never re-derive a competing anchor string elsewhere.
+_CONFIDENCE_BAND_ANCHORS = {
+    ('track1_direct', 'high_confidence_algorithmic'): 'help-confidence-high_confidence_algorithmic',
+    ('track1_direct', 'tier_a'): 'help-confidence-tier_a',
+    ('track1_direct', 'screening_rb'): 'help-confidence-screening_rb',
+    ('track1_direct', 'screening_canon'): 'help-confidence-screening_canon',
+    ('propagated', 'corroborated'): 'help-confidence-corroborated',
+    ('propagated', 'weak'): 'help-confidence-weak',
+    ('propagated', 'not_evaluated'): 'help-confidence-not_evaluated',
+}
+
+
+def _confidence_lang_key(lang: str) -> str:
+    return 'he' if lang == 'he' else 'en'
+
+
+def _confidence_bands():
+    """The 7 (evidence_source, canonical_band_key) pairs in display order —
+    sourced from the values module's label table so this never re-lists a
+    competing band vocabulary (drift-guarded there)."""
+    return list(BAND_LABELS.keys())
+
+
+def _band_population(band_counts, evidence_source, canonical_band):
+    """The RUNTIME display-deduplicated shipped-claim count for a band, trying
+    the v1 stored key as a fallback (§5 v1-read-compat). None when absent."""
+    if not band_counts:
+        return None
+    n = band_counts.get((evidence_source, canonical_band))
+    if n is None and canonical_band == 'high_confidence_algorithmic':
+        n = band_counts.get((evidence_source, 'expert_verified'))
+    return n
+
+
+def _band_precision_row(precision, evidence_source, canonical_band):
+    """The band_precision row for a band, trying the v1 stored key as a
+    fallback. Returns {} (never None) so downstream .get()/format calls are
+    placeholder-safe."""
+    if not precision:
+        return {}
+    row = precision.get((evidence_source, canonical_band))
+    if row is None and canonical_band == 'high_confidence_algorithmic':
+        row = precision.get((evidence_source, 'expert_verified'))
+    return row or {}
+
+
+def _precision_copy_safe(row, lang):
+    """format_precision_copy, but fail-open on a malformed (partial-CI) stored
+    row: render the not-yet-measured placeholder rather than crash the whole
+    Help page (T-135-02-03 availability). A well-formed row is unaffected."""
+    try:
+        return format_precision_copy(row or {}, lang)
+    except ValueError:
+        return _CONFIDENCE_PLACEHOLDERS['not_measured'][_confidence_lang_key(lang)]
+
+
+def _render_confidence_section(lang, precision, band_counts):
+    """Render the flag-gated BAND-05 methods section body card.
+
+    Codex #11: the CALLER must guard this on discovery_available() — the body
+    is its OWN conditional card, NOT part of the TOC render loop (that loop
+    emits only ui.link TOC entries), so the loop-continue does not gate it.
+    """
+    lk = _confidence_lang_key(lang)
+    rtl = lk == 'he'
+    text_style = 'color: var(--text-secondary);' + (
+        ' direction: rtl; text-align: right;' if rtl else ''
+    )
+    col_style = 'direction: rtl; text-align: right;' if rtl else 'direction: ltr;'
+
+    with ui.card().classes(f'w-full p-6 {_CONFIDENCE_SECTION_CLASS}'):
+        ui.element('a').props('name="help-confidence"')
+        with ui.column().classes('w-full gap-2').style(col_style):
+            with ui.row().classes('items-center gap-3 mb-2'):
+                ui.icon('analytics').classes('text-2xl text-primary')
+                h2(
+                    _CONFIDENCE_TOC_TITLE[lk],
+                    classes='text-xl font-bold',
+                    style='color: var(--text-primary);',
+                )
+
+            ui.label(_CONFIDENCE_INTRO[lk]).style(text_style).classes('mb-2')
+
+            # Collection-scope propagated-witness precision (the 0.926) — rendered
+            # ONLY here, NEVER on the corroborated/weak per-band rows below.
+            collection_row = (precision or {}).get('collection') or {}
+            ui.label(
+                f"{_CONFIDENCE_COLLECTION_LABEL[lk]}: "
+                f"{_precision_copy_safe(collection_row, lang)}"
+            ).style(text_style).classes('mb-2')
+
+            for evidence_source, canonical_band in _confidence_bands():
+                _render_one_band(
+                    evidence_source, canonical_band, lang, precision, band_counts, text_style
+                )
+
+
+def _render_one_band(evidence_source, canonical_band, lang, precision, band_counts, text_style):
+    """One band's documentation block: a deep-link anchor (D-10) + its label +
+    the BAND-05 field set, each field STRICTLY per the plan's field-sourcing
+    table (population from the runtime display-deduplicated shipped count;
+    sample split into draw/determinate/successes; registry fields placeholder-
+    safe, never fabricated)."""
+    lk = _confidence_lang_key(lang)
+    fl = _CONFIDENCE_FIELD_LABELS
+    ph = _CONFIDENCE_PLACEHOLDERS
+    nm = ph['not_measured'][lk]
+    row = _band_precision_row(precision, evidence_source, canonical_band)
+
+    # D-10 per-band anchor (tooltip deep-link target) from the anchor registry;
+    # fall back to the derived name if a future band is added to BAND_LABELS but
+    # not yet to the registry (fail-safe — the anchor still renders).
+    anchor_name = _CONFIDENCE_BAND_ANCHORS.get(
+        (evidence_source, canonical_band), f'help-confidence-{canonical_band}'
+    )
+    ui.element('a').props(f'name="{anchor_name}"')
+    h3(
+        band_label(evidence_source, canonical_band, lang),
+        classes='text-lg font-semibold mt-3 mb-1',
+        style='color: var(--text-primary);',
+    )
+
+    # population — RUNTIME display-deduplicated shipped-claim count (never the
+    # denominator, never raw evidence rows, never the Wave-4 frame doc).
+    n = _band_population(band_counts, evidence_source, canonical_band)
+    pop_val = f"{n:,}" if isinstance(n, int) else ph['count_unavailable'][lk]
+    ui.label(f"{fl['population'][lk]}: {pop_val}").style(text_style)
+
+    # unit of measurement (static estimand prose).
+    ui.label(f"{fl['unit'][lk]}: {_CONFIDENCE_UNIT_PROSE[lk]}").style(text_style)
+
+    # sample size — THREE distinct numbers, never conflated with population.
+    def _num(v):
+        return f"{v:,}" if isinstance(v, int) else nm
+
+    sample_parts = [
+        f"{DRAW_SIZE_LABEL[lk]} {_num(row.get('draw_size'))}",
+        f"{DENOMINATOR_LABEL[lk]} {_num(row.get('denominator'))}",
+        f"{NUMERATOR_LABEL[lk]} {_num(row.get('numerator'))}",
+    ]
+    ui.label(f"{fl['sample'][lk]}: " + "; ".join(sample_parts)).style(text_style)
+
+    # strata — data-driven sampling_frame, else the static D-08 description.
+    strata = row.get('sampling_frame') or _CONFIDENCE_STRATA_FALLBACK[lk]
+    ui.label(f"{fl['strata'][lk]}: {strata}").style(text_style)
+
+    # weighted estimate + CI via the values module (tier_a / corroborated /
+    # weak → "precision not yet measured"; the 0.926 is collection-scope only).
+    estimate = _precision_copy_safe(row, lang)
+    weighting = row.get('weighting')
+    if weighting:
+        estimate = f"{estimate} ({weighting})"
+    ui.label(f"{fl['estimate'][lk]}: {estimate}").style(text_style)
+
+    # the four CERT-01 registry fields — read via .get(), placeholder when
+    # absent/NULL, NEVER fabricated (135-05 columns; filled by 135-09).
+    ui.label(f"{fl['measurement_date'][lk]}: {row.get('measurement_date') or nm}").style(text_style)
+    ui.label(f"{fl['grader'][lk]}: {row.get('grader') or nm}").style(text_style)
+    ui.label(
+        f"{fl['audit_status'][lk]}: {row.get('audit_status') or ph['audit_pending'][lk]}"
+    ).style(text_style)
+    ui.label(f"{fl['report_id'][lk]}: {row.get('report_id') or nm}").style(text_style)
+
+
+def create_help_page(precision=None, band_counts=None):
+    """Create the comprehensive Help Center page with bilingual content.
+
+    ``precision`` / ``band_counts`` (optional) carry the band_precision rows +
+    the runtime display-deduplicated per-band claim counts fetched by the async
+    /help route (web/main.py); when None the flag-gated methods section falls
+    back to placeholders."""
 
     is_hebrew = get_language() == 'he'
 
@@ -27,12 +280,12 @@ def create_help_page():
 
         with ui.column().classes('w-full gap-6'):
             if is_hebrew:
-                _create_hebrew_content()
+                _create_hebrew_content(precision=precision, band_counts=band_counts)
             else:
-                _create_english_content()
+                _create_english_content(precision=precision, band_counts=band_counts)
 
 
-def _create_english_content():
+def _create_english_content(precision=None, band_counts=None):
     """Create the English help content."""
 
     # === Table of Contents ===
@@ -64,8 +317,14 @@ def _create_english_content():
             if WEB_PUZZLE_ENABLED:
                 toc_items.insert(9, ('puzzle', 'Fragment Puzzle'))
                 toc_items.insert(10, ('community-publish', 'Community Publishing'))
+            # BAND-05 methods section TOC entry — gated on discovery_available()
+            # (mirrors the WEB_PUZZLE_ENABLED conditional-insert + loop-continue).
+            if discovery_available():
+                toc_items.append(('confidence', _CONFIDENCE_TOC_TITLE['en']))
             for anchor, title in toc_items:
                 if not WEB_PUZZLE_ENABLED and anchor in {'puzzle', 'community-publish'}:
+                    continue
+                if anchor == 'confidence' and not discovery_available():
                     continue
                 ui.link(f'• {title}', f'#help-{anchor}').classes('text-primary hover:underline')
 
@@ -687,6 +946,13 @@ In the **[downloadable desktop app](/download)** you can run all the search mode
 *My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.*
         ''').style('color: var(--text-secondary);')
 
+    # === Confidence Bands and Methods (Phase 135, BAND-05, D-10) ===
+    # Codex #11: this body card is NOT part of the TOC render loop above (which
+    # emits only ui.link TOC entries), so it carries its OWN discovery_available()
+    # gate — the loop-continue only gates the TOC LINK, not this card.
+    if discovery_available():
+        _render_confidence_section('en', precision, band_counts)
+
     # === Contact ===
     with ui.card().classes('w-full p-6'):
         with ui.row().classes('items-center gap-3 mb-4'):
@@ -697,7 +963,7 @@ In the **[downloadable desktop app](/download)** you can run all the search mode
         ui.label('gershuni@gmail.com').classes('text-lg font-mono mt-2')
 
 
-def _create_hebrew_content():
+def _create_hebrew_content(precision=None, band_counts=None):
     """Create the Hebrew help content."""
 
     # === Table of Contents ===
@@ -728,8 +994,14 @@ def _create_hebrew_content():
             if WEB_PUZZLE_ENABLED:
                 toc_items.insert(8, ('puzzle', 'פאזל קטעים'))
                 toc_items.insert(9, ('community-publish', 'פרסום לקהילה'))
+            # BAND-05 methods section TOC entry — gated on discovery_available()
+            # (mirrors the WEB_PUZZLE_ENABLED conditional-insert + loop-continue).
+            if discovery_available():
+                toc_items.append(('confidence', _CONFIDENCE_TOC_TITLE['he']))
             for anchor, title in toc_items:
                 if not WEB_PUZZLE_ENABLED and anchor in {'puzzle', 'community-publish'}:
+                    continue
+                if anchor == 'confidence' and not discovery_available():
                     continue
                 ui.link(f'• {title}', f'#help-{anchor}').classes('text-primary hover:underline').style('direction: rtl;')
 
@@ -1325,6 +1597,13 @@ def _create_hebrew_content():
 
 *תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.*
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === דרגות ודאות ושיטות (Phase 135, BAND-05, D-10) ===
+    # Codex #11: this body card is NOT part of the TOC render loop above (which
+    # emits only ui.link TOC entries), so it carries its OWN discovery_available()
+    # gate — the loop-continue only gates the TOC LINK, not this card.
+    if discovery_available():
+        _render_confidence_section('he', precision, band_counts)
 
     # === Contact ===
     with ui.card().classes('w-full p-6'):
