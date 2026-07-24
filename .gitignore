@@ -235,3 +235,8 @@ corpus_mapper_output/
 # memory + .planning/phases/134-discovery-data-spine/deferred-items.md.
 tmp/CODEX-*
 tmp/codex_*
+# 2026-07-24: widened to the whole directory — the CODEX-*/codex_* patterns
+# missed same-risk transcripts under other names (135-codex-*-full.log etc.);
+# masking leaks recurred here twice. tmp/ is scratch, never committed.
+# (tmp/web_deploy_v840.log was untracked in the same commit.)
+/tmp/
