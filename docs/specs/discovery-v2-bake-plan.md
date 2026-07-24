@@ -85,6 +85,36 @@ unchanged" refers to the CORE claim-model architecture and pipeline shape —
 not a literal zero-DDL-change claim, which this section makes explicit
 rather than leaving implicit.
 
+**FIRST-BUILD `measurement_status` population — FROZEN default (Codex
+R5-HIGH fix, closing the "initial population unspecified" gap).** On the
+FIRST v2 build (no `--precision-spec` supplied; §6 step 0 resolves "no
+override"), EVERY `band_precision` row's `measurement_status` is populated
+by ONE rule, applied uniformly so gate 12's exact five-field consistency
+predicate holds for EVERY row with NO exception: default
+`measurement_status='not_measured'` with ALL FIVE of
+`precision`/`ci_low`/`ci_high`/`numerator`/`denominator` set NULL, for EVERY
+band — INCLUDING `screening_rb`'s pre-existing legacy figure
+(`discovery-band-labels-v1.md` §3.1's `0.859 (pre-registered; CI pending
+Ph135)`). That legacy value is a precision POINT ESTIMATE WITHOUT a computed
+`ci_low`/`ci_high` (explicitly "CI pending" — not yet a real confidence
+interval), so it CANNOT satisfy gate 12's `measured_pass`/`measured_fail`
+five-field-non-NULL-plus-`ci_low`-comparison requirement; the v2 first build
+therefore NULLS this legacy point estimate alongside its status,
+intentionally resetting `screening_rb`'s displayed precision to "not
+measured" until a REAL CI-bearing measurement (a future `screening_rb`-
+scoped precision protocol, or a later CERT-01-style measurement) completes
+and writes a genuine `measured_pass`/`measured_fail` row with all five
+fields populated. The ONLY row eligible for a non-`not_measured` initial
+status on the FIRST build is one that ALREADY carries a genuine, complete,
+previously-computed CI (non-NULL `precision` AND `ci_low` AND `ci_high` AND
+`numerator` AND `denominator` from a prior, already-completed measurement) —
+none exists at v2 first-build time for ANY band, so in practice EVERY
+`band_precision` row starts the v2 era as `measurement_status='not_measured'`
+with all five fields NULL, no exception. This is a ONE-TIME first-build
+migration rule, distinct from (and never invoked by) the §4.5 reband's own
+atomic invalidation, which applies ONLY on a LATER reband-triggering
+rebuild.
+
 ---
 
 ## 2. The census — RESOLVED: 16 merges, 1 drop, D-14 canonical flip, NO `work_relations` table
@@ -231,6 +261,23 @@ specified for all three parsers below.
   / 8 residual / 1 contested entries out of the shipped v2 build, §2). A
   top-level key OUTSIDE this named twelve-key set is REJECTED (`--release`
   HALTS) — the allowlist is closed, not merely "ignore anything unexpected."
+  **The ten TOLERATED-BUT-IGNORED keys carry NO declared value-shape
+  constraint whatsoever, and this is INTENTIONAL, not an oversight (Codex
+  R5-MEDIUM fix):** `source`, `canonical_priority`, `owner_ratified`,
+  `ratified_at`, `relations_policy`, `chronological_rule_examples`,
+  `contested`, `provisional_relations_measurement_only`, `residual_direct`,
+  and `notes` may EACH hold ANY valid JSON value of ANY shape (string,
+  number, object, list, null, arbitrarily nested) — the parser performs ZERO
+  validation on their CONTENTS; only their KEY NAMES are checked against the
+  closed twelve-key allowlist above (a key name outside the twelve is
+  rejected regardless of its value's shape; a key name inside the twelve, of
+  ANY value shape, is accepted and discarded unread). This is safe precisely
+  BECAUSE these ten keys are never read: a malformed or unexpected VALUE
+  under a tolerated key can never influence the shipped build. The
+  "exact-shape" guarantee this parser provides is therefore scoped to the
+  TWO consumed keys (`merges`, `dropped_by_135`, each frozen exactly below)
+  plus the closed key-NAME allowlist for the file's other ten top-level
+  keys — not to the full recursive shape of every top-level value.
   Each entry in `merges` is a JSON object with EXACTLY the three field names
   `members_w` (a list of one or more `w000xxx`-shaped opaque id strings),
   `canonical_w` (a single `w000xxx`-shaped opaque id string), and
@@ -324,10 +371,44 @@ crosswalk); if the representative's own raw id has no resolved date, fall
 back to the MINIMUM resolved year among the group's OTHER (merged) member
 raw ids. If NO member of the group has a resolved date, the group's year is
 UNKNOWN. This single resolved year is used for every claim under that
-`canonical_work_id`, so conflicting per-member raw dates are a
-resolution-ORDER rule (representative first, else earliest sibling), never
-an ambiguity — there is exactly one year per canonical group by
-construction.
+`canonical_work_id`, so conflicting per-member raw dates ACROSS DIFFERENT
+members are a resolution-ORDER rule (representative first, else earliest
+sibling), never an ambiguity — there is exactly one year per canonical group
+by construction.
+
+**Crosswalk injectivity is ONE-DIRECTIONAL — the SAME-member conflicting-date
+case is a HALT, not an ambiguity resolved by the rule above (Codex R5-HIGH
+fix).** §7 D-16(c)'s crosswalk guarantee is FORWARD-ONLY: every RAW id
+resolves to EXACTLY ONE `w000xxx`. It does NOT guarantee the REVERSE — a
+single `w000xxx` (the representative OR any other group member) MAY be the
+crosswalk target of MULTIPLE DISTINCT raw ids appearing in the SAME date
+table (e.g. two source-side reference-segment ids that both crosswalk to the
+same work). This is DIFFERENT from the "representative vs. sibling"
+resolution-order rule above, which resolves conflicts ACROSS DIFFERENT
+canonical-group MEMBERS — it does NOT cover multiple raw ids landing on the
+SAME member. When multiple raw ids crosswalk to the SAME `w000xxx` within the
+SAME date table: if they ALL normalize to the SAME year, that year is used
+(no ambiguity, no HALT). If they normalize to TWO OR MORE DISTINCT years, the
+build HALTS (`--release` fails) with a dedicated conflicting-same-member-date
+error — NEVER resolved by "first row wins," "minimum year," or any other
+precedence rule; a same-member date conflict is treated as a data-quality
+defect in the pinned date input requiring upstream correction, structurally
+distinct from the (legitimate, resolution-ordered) across-member case above.
+This HALT applies identically whether the SAME-member conflict lands on the
+representative's own id or on a fallback sibling id.
+
+**Namespace-family restriction on the two date inputs (Codex R5-HIGH fix —
+closes the round-5 "not explicitly constrained" gap):** `--seftja-dates` keys
+are restricted to raw ids matching the `sefaria` OR `ja` namespace-prefix
+pattern (§7 D-16(c)) ONLY — a key matching the `msource` pattern present in
+`--seftja-dates` is REJECTED (`--release` HALTS, a hard structural error,
+BEFORE any crosswalk join is attempted for that key). Symmetrically,
+`--composition-dates` keys are restricted to raw ids matching the `msource`
+namespace-prefix pattern ONLY — a key matching `sefaria` or `ja` present in
+`--composition-dates` is REJECTED. This check runs BEFORE the crosswalk join
+(defense-in-depth alongside D-16(c)'s existing zero/multiple-match
+cardinality checks) and prevents either date table from silently supplying
+dates sourced from the WRONG corpus family.
 
 **Deterministic pairwise decision — processed in ONE deterministic pass,
 ORDERED to prevent a demoted reference from itself demoting anything
@@ -347,18 +428,28 @@ NUMERICALLY LATER side's resolved year (ties broken by the lexicographic
   ABS(year(L) - year(E))`;
   - **if `E` has ALREADY been marked `demoted` by an earlier-PROCESSED pair
     in THIS SAME PASS** (i.e., `E` itself lost to some still-earlier
-    reference) → `decision = kept_tie` REGARDLESS of `delta` — `L` is NEVER
-    demoted relative to an ALREADY-HIDDEN reference; a claim can only ever
-    be demoted relative to a reference that is ITSELF surviving (shipped or
-    tied), never to one that has already lost its own comparison. (Processing
-    in ascending order of the LATER side's year guarantees `E`'s own
-    demotion status against ITS earlier references is ALREADY FINALIZED by
-    the time this pair is evaluated, since `E < L` means `E`'s own pairs were
-    processed earlier in this SAME ascending pass — no fixed-point iteration
-    is needed, one deterministic forward pass suffices.)
-  - **otherwise** (E is a valid, surviving reference): if `delta >= DELTA` →
-    `L` is demoted (`decision = demoted`); if `delta < DELTA` → `decision =
-    kept_tie` (neither demoted).
+    reference) → `decision = kept_invalid_reference` REGARDLESS of `delta`
+    (Codex R5-BLOCKER fix — a DISTINCT fourth closed decision value, NEVER
+    `kept_tie`: `kept_tie` is reserved EXCLUSIVELY for a delta-below-floor
+    outcome measured against a VALID, still-surviving reference, so every
+    `kept_tie` row is GUARANTEED `delta < DELTA` by construction — this is
+    what makes gate 10's per-decision predicate, updated below, exhaustive
+    and internally consistent rather than contradicted by this branch) —
+    `L` is NEVER demoted relative to an ALREADY-HIDDEN reference; a claim can
+    only ever be demoted relative to a reference that is ITSELF surviving
+    (shipped or tied), never to one that has already lost its own comparison.
+    (Processing in ascending order of the LATER side's year guarantees `E`'s
+    own demotion status against ITS earlier references is ALREADY FINALIZED
+    by the time this pair is evaluated, since `E < L` means `E`'s own pairs
+    were processed earlier in this SAME ascending pass — no fixed-point
+    iteration is needed, one deterministic forward pass suffices.)
+  - **otherwise** (E is a valid, surviving reference — i.e. E was NOT itself
+    marked `demoted` by an earlier-processed pair in this pass): if
+    `delta >= DELTA` → `L` is demoted (`decision = demoted`); if
+    `delta < DELTA` → `decision = kept_tie` (neither demoted). **`kept_tie` is
+    reachable ONLY from this "valid reference" branch — never from the
+    "`E` already demoted" branch above** — which is exactly what guarantees
+    `delta < DELTA` on every `kept_tie` row (gate 10).
 
 This closes the exact gap Codex R4 found: WITHOUT the "is `E` already
 demoted" check, a middle-dated claim `B` that itself lost to an earlier
@@ -387,6 +478,36 @@ row can explain MULTIPLE physical evidence rows (when the demoted canonical
 group has multiple raw-member witnesses on that page), and one evidence row
 can be explained by MULTIPLE audit rows (when it lost to 2+ earlier
 co-claimants in a 3+-way cluster, §above).
+
+**Demotion target-set — EXACT and independently verifiable (Codex R5-HIGH
+fix, closing the "entire footprint" vs. per-row overlap-qualifier
+ambiguity).** The phrase "ENTIRE canonical group's evidence footprint" above
+means EXACTLY the following CLOSED target set — never an unconditional
+"every row under G" set. For canonical group `G` demoted relative to winning
+side `L` on page `P`, the target set `T(G,P)` = every `discovery_evidence`
+row `R` such that (i) `R`'s canonicalized `work_id` equals `G`, (ii)
+`R.evidence_source='track1_direct'`, (iii) `R`'s primary span NUMERICALLY
+OVERLAPS `L`'s primary span under the EXACT SAME overlap test used to qualify
+the candidate pair itself (`max(start_R, start_L) < min(end_R, end_L)` —
+never a looser "same page" test), and (iv) `R.matched_letters >= 200` (the
+same floor gating candidacy, above). A row on page `P` canonicalizing to `G`
+whose span does NOT overlap `L` (e.g. a disjoint-register witness, per the
+multi-register invariant above) is OUTSIDE `T(G,P)` and is NEVER touched by
+this demotion, even though it shares page `P` and canonical group `G` with
+the demoted rows. `T(G,P)` MAY contain more than one row (when `G` has 2+ raw
+members each separately witnessing an overlapping span on `P`) — this is
+what "the entire qualifying footprint" means; it is NOT "every row
+regardless of overlap."
+
+**"Already demoted" tracking is PAGE-SCOPED (Codex R5-HIGH fix, answering the
+round-5 question directly).** The reference-validity check in the pairwise
+pass (above) tracks a canonical group's demoted status PER
+`(page_id, canonical_work_id)` — exactly the granularity the candidate
+universe itself is keyed at (`(page_id, canonical_work_id_lo,
+canonical_work_id_hi)`, below). A group demoted on page `P1` is NOT thereby
+"already demoted" when its OWN pairs on a DIFFERENT page `P2` are evaluated;
+each page's ordered pass is independent. There is no per-overlapping-span-
+component or cross-page demotion state.
 
 A claim's FINAL routing outcome for a given shared span is `review_only` if
 its canonical group was the demoted side in ANY qualifying pair touching
@@ -563,18 +684,42 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
      the category requires, is UNPARSEABLE (this applies BEFORE any
      punctuation/residual-text check below).
   3. **Anchoring — validate the residual (Codex R3-HIGH, restated without the
-     R4 contradiction):** remove FROM THE ORIGINAL STRING every matched
-     designator substring (exactly the ones that determined the category in
-     step 1), every matched `era_qualifiers` substring, every extracted
-     digit-run substring (step 2), and all whitespace. The REMAINDER MUST
-     consist ONLY of characters from a FIXED allowed punctuation set (comma,
-     period, parentheses, and — range category ONLY — exactly one
-     range-separator character, which MUST sit textually BETWEEN the
-     `earliest` and `latest` digit runs, not elsewhere). ANY other leftover
-     character or word (including an unrecognized qualifier not present in
-     `era_qualifiers`) makes the WHOLE value UNPARSEABLE — an unrecognized
-     semantic label merely co-occurring with a valid-looking year token is
-     REJECTED, never silently treated as harmless decoration.
+     R4 contradiction; Codex R5-HIGH fix pins the EXACT range-separator
+     character set + a deterministic removal order for overlapping matches):**
+     remove FROM THE ORIGINAL STRING, in this FIXED order, (a) the matched
+     designator substring(s) that determined the category in step 1, (b)
+     every matched `era_qualifiers` substring, (c) every extracted digit-run
+     substring (step 2), and (d) — range category ONLY — exactly one
+     range-separator character (below); then remove all whitespace.
+     **Deterministic removal order for overlapping matches:** if two
+     candidate substrings to remove (from the `century_designators`/
+     `range_designators` list at (a), or the `era_qualifiers` list at (b))
+     overlap in character span within the original string (one is a
+     substring of, or partially overlaps, another), the LONGEST matching
+     substring is removed FIRST; a SHORTER match fully contained within an
+     already-removed character span is treated as already consumed — it is
+     NOT removed a second time, and it does NOT count as a SEPARATE match for
+     the "one or more entries match" test in step 1.
+     **The range-separator character set is FIXED and HARDCODED in build
+     code — NOT data-file-driven, unlike the designator lists (Codex R5-HIGH
+     fix), precisely because the separator must be identical across every
+     possible date-table revision:** when category=range, the separator MUST
+     be EXACTLY ONE character from the CLOSED set `{U+002D HYPHEN-MINUS,
+     U+2013 EN DASH, U+2014 EM DASH}`, and — AFTER removals (a)-(c) above —
+     it MUST be the SOLE remaining non-whitespace character positioned
+     TEXTUALLY BETWEEN the `earliest` and `latest` digit-run positions (never
+     before the `earliest` run, never after the `latest` run, never a second
+     occurrence anywhere else in the residual); a range-category string whose
+     between-digit-runs character is NOT one of these three is UNPARSEABLE.
+     The REMAINDER, after (a)-(d) and whitespace removal, MUST consist ONLY
+     of characters from the FIXED allowed punctuation set `{',', '.', '(',
+     ')'}` (comma, period, parentheses) PLUS, for range category ONLY, the
+     single consumed range-separator character above (a distinct set — the
+     separator is never also counted as a comma/period/parenthesis). ANY
+     other leftover character or word (including an unrecognized qualifier
+     not present in `era_qualifiers`) makes the WHOLE value UNPARSEABLE — an
+     unrecognized semantic label merely co-occurring with a valid-looking
+     year token is REJECTED, never silently treated as harmless decoration.
   4. **Value computation:** century → normalized year = the MIDPOINT
      `100*(N-1)+50` (e.g. ordinal 10 → 950; an ordinal outside `[1,16]` is
      UNPARSEABLE); range → normalized year = the MIDPOINT
@@ -600,7 +745,11 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
   explicit year) plus near-miss rejection of an unparseable value (wrong
   integer-token count for its matched category, or a century ordinal outside
   `[1,16]`) AND an out-of-range normalized year (499 and 1601 boundary
-  cases) AND the ambiguous-dual-designator-match rejection.
+  cases) AND the ambiguous-dual-designator-match rejection AND a
+  non-pinned-range-separator rejection (Codex R5-HIGH — a range-shaped value
+  whose between-digit-runs character is NOT one of the three pinned
+  `{U+002D, U+2013, U+2014}` separators, e.g. a comma or a designator word
+  positioned between the two digit runs instead of a dash character).
 
 **Production coverage gate — EXACT predicate (Codex #5).** Let `U` = the
 FROZEN candidate universe above (the currently-shipped, post-Lever-1,
@@ -655,7 +804,8 @@ discovery_routing_audit (
   year_hi                   INTEGER,        -- canonical_work_id_hi's resolved year; NULL if undated
   delta                     INTEGER,        -- ABS(year_hi - year_lo); NULL if either year is NULL
   decision                  TEXT NOT NULL CHECK (decision IN
-                               ('demoted','kept_tie','fail_safe_unknown_date')),
+                               ('demoted','kept_tie','kept_invalid_reference',
+                                'fail_safe_unknown_date')),  -- 4th value: Codex R5-BLOCKER fix
   demoted_canonical_work_id TEXT,           -- the actual demoted member (equals canonical_work_id_lo
                                              -- OR canonical_work_id_hi); NULL for 'kept_tie' and
                                              -- 'fail_safe_unknown_date'
@@ -680,6 +830,22 @@ fixing the round-1 gate):** for EVERY `discovery_routing_audit` row:
 - `decision='kept_tie'` REQUIRES: both years non-NULL, `delta = ABS(year_hi
   - year_lo)` exactly, `delta < DELTA`, and `demoted_canonical_work_id` IS
   NULL;
+- **`decision='kept_invalid_reference'`** (Codex R5-BLOCKER fix — the fourth
+  closed decision value, distinct from `kept_tie`) **REQUIRES:** both years
+  non-NULL (the earlier-dated side `E` must itself have HAD a resolved year
+  to have been marked `demoted` by an earlier-processed pair in the first
+  place), `delta = ABS(year_hi - year_lo)` exactly recomputed — `delta` here
+  carries NO magnitude constraint relative to `DELTA` (it may be `>= DELTA`
+  or `< DELTA`; UNLIKE `kept_tie`, which is bound to `delta < DELTA`), and
+  `demoted_canonical_work_id` IS NULL (this pair's later side `L` is NOT
+  demoted here — it is merely withheld from demoting an already-hidden `E`).
+  **Page-scoped replay check:** `E` (whichever of `canonical_work_id_lo`/`_hi`
+  is the earlier-dated side of THIS pair) MUST itself appear as the
+  `demoted_canonical_work_id` of AT LEAST ONE OTHER `decision='demoted'` row
+  on the SAME `page_id` — a `kept_invalid_reference` row with no such
+  same-page corroborating `demoted` row is a HARD FAIL (it would mean the
+  "already demoted" branch fired without a real, page-scoped prior demotion
+  to justify it);
 - `decision='fail_safe_unknown_date'` REQUIRES: `year_lo IS NULL OR year_hi
   IS NULL`, `delta IS NULL`, and `demoted_canonical_work_id IS NULL`;
 - **Population equality — defined over the RECONSTRUCTED PRE-D-17 population
@@ -726,15 +892,42 @@ fixing the round-1 gate):** for EVERY `discovery_routing_audit` row:
   the SAME demotion (whether multiple audit rows for one evidence row, or
   multiple evidence rows for one audit row) is EXPECTED and VALID, never a
   failure — the invariant is "zero" that is forbidden, not "more than one".
+- **Target-set completeness — a NEW exhaustive check (Codex R5-HIGH fix,
+  IN ADDITION TO, not a replacement for, the "at least one counterpart"
+  reverse/forward match above).** The reverse/forward match above proves NO
+  orphaned audit/evidence row exists at all; it does NOT by itself prove a
+  demotion was COMPLETE. This check closes that gap: for EVERY
+  `discovery_routing_audit` row with `decision='demoted'` naming canonical
+  group `G` on page `P` (with winning side `L` = whichever of `lo`/`hi` is
+  NOT `demoted_canonical_work_id`), the SET of `discovery_evidence` rows with
+  `routing_status='review_only' AND routing_reason='later_shared_text'` whose
+  canonicalized `work_id` equals `G` on page `P` MUST equal EXACTLY the
+  target set `T(G,P)` defined above (§4.3 "Demotion target-set") — every row
+  satisfying (i)-(iv) there is demoted (a qualifying row accidentally left
+  `shipped` is a HARD FAIL: partial mutation), and no row failing any of
+  (i)-(iv) is demoted (a non-overlapping or sub-floor row wrongly caught is a
+  HARD FAIL: over-mutation).
 - **Reband routing-reason clarification (Codex R4-HIGH fix — closes an
-  undefined-value gap):** the §4.5 FAIL-branch reband flips affected rows'
-  `routing_status` to `review_only` but does NOT assign
-  `routing_reason='later_shared_text'` (that value is EXCLUSIVELY D-17's own
-  output) — the reband LEAVES the row's PRE-EXISTING `routing_reason`
-  UNCHANGED (whatever it already was: `none` for a normal previously-shipped
-  `tier_a` row, or `later_shared_text`/`low_coverage` if D-17/Lever-1 had
-  ALREADY demoted it before the reband ran). The row's REBANDED status is
-  fully identified WITHOUT a new `routing_reason` value by the COMBINATION of
+  undefined-value gap; Codex R5-MEDIUM fix removes a now-impossible branch):**
+  the §4.5 FAIL-branch reband flips affected rows' `routing_status` to
+  `review_only` but does NOT assign `routing_reason='later_shared_text'`
+  (that value is EXCLUSIVELY D-17's own output) — the reband LEAVES the
+  row's PRE-EXISTING `routing_reason` UNCHANGED (whatever it already was:
+  `none` for a normal previously-shipped `tier_a` row, or `low_coverage` if
+  Lever-1 had ALREADY demoted it before the reband ran — Lever-1 coverage
+  routing, §4.4, runs on EVERY claim independently of any `--precision-spec`
+  resolution and is NOT excluded by §6 step 0, so a `tier_a` row CAN already
+  carry `low_coverage` at reband time). **`later_shared_text` is NOT a
+  possible pre-existing value here** — unlike `low_coverage`, this is not
+  merely unlikely but STRUCTURALLY IMPOSSIBLE under the corrected §6
+  ordering: step 0's resolution EXCLUDES every row already condemned to this
+  reband from D-17's (step 5) shipped candidate population, so D-17 NEVER
+  processes — and therefore never assigns `later_shared_text` to — a row
+  that THIS SAME build is about to reband; the two mechanisms cannot both
+  touch the same row in one build, so the round-5-flagged "or
+  later_shared_text ... if D-17 had ALREADY demoted it" disjunct is removed
+  as a stale, unreachable branch. The row's REBANDED status is fully
+  identified WITHOUT a new `routing_reason` value by the COMBINATION of
   `confidence_band='screening_rb'` + `routing_status='review_only'` +
   `meta.tier_a_reband_target='screening_rb'` being set — a screening_rb row
   can ONLY reach `review_only` via this reband mechanism (a normal,
@@ -915,7 +1108,10 @@ emit its enum rename in lockstep across the 7 files listed in that doc's §5:
 `scripts/discovery_ids.py`, `scripts/build_discovery_sidecar.py`,
 `scripts/verify_discovery_sidecar.py`, `web/discovery_assets.py`,
 `shared/discovery_service.py`, `docs/specs/discovery-sidecar-schema-v1.md` +
-`discovery-frames.md`, and this file's §2 label map:
+`discovery-frames.md` (Codex R5-MEDIUM fix: the trailing "and this file's §2
+label map" reference is REMOVED here — that was a leftover pointer to a
+label map §2 no longer contains; §2 is now the census, and this document
+carries no separate duplicate band-label mapping of its own to rename):
 
 - `expert_verified → high_confidence_algorithmic` (Track-1 top tier is an
   ALGORITHMIC score, not human approval).
@@ -1101,7 +1297,10 @@ D-17 could be comparing against a work that was never going to ship anyway.
     same five fields ALL non-NULL AND `ci_low < 0.85`; BOTH
     `measurement_status='not_measured'` AND
     `measurement_status='insufficient_evidence'` MUST have ALL FIVE of those
-    fields NULL (no partial intervals under any status — Codex #B3).
+    fields NULL (no partial intervals under any status — Codex #B3). The
+    FIRST-build default population rule (§1, Codex R5-HIGH) guarantees every
+    row satisfies this predicate trivially via `not_measured` + all-NULL
+    until a real measurement lands.
 13. **Reband-precision-invalidation — BOTH bands (Codex R3-HIGH, corrected
     from a target-only check):** when `meta` carries
     `tier_a_reband_target='screening_rb'`, BOTH the target `screening_rb` row
