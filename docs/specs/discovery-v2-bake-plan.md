@@ -544,6 +544,26 @@ members each separately witnessing an overlapping span on `P`) — this is
 what "the entire qualifying footprint" means; it is NOT "every row
 regardless of overlap."
 
+**Condition (v) governs MUTATION eligibility only — it does NOT, by itself,
+stop a Lever-1-hidden row's span from shaping `L`'s reference footprint
+(Codex round-7 HIGH fix, closing the Pitfall-2 multi-evidence-row gap).**
+Condition (v) prevents a Lever-1-hidden row from ever being ADDED TO a
+target set `T(G,P,L)` (i.e. from ever being demoted a second time). It says
+nothing, on its own, about whether that SAME hidden row's span may still
+contribute an interval to a DIFFERENT canonical group's footprint when that
+footprint is used as the winning reference `L` against some OTHER group —
+which would let a claim with one shipped span and one Lever-1-hidden span on
+the SAME page (the Pitfall-2 case) demote a third work off the strength of
+the hidden span alone. This gap is closed at the FOOTPRINT level, not by
+condition (v): the "Canonical-group footprint on a page" definition below is
+ALSO restricted to the identical pre-D-17-shipped snapshot, so a hidden
+row's span can never enter ANY canonical group's footprint in the first
+place — never as `L`'s reference footprint, and never as the footprint used
+to qualify a candidate pair by overlap. The two restrictions apply at
+different levels (mutation-eligibility here at condition (v); footprint
+construction below) but share the IDENTICAL underlying snapshot population,
+so they can never disagree about which rows are "pre-D-17-shipped."
+
 **"Already demoted" tracking is PAGE-SCOPED (Codex R5-HIGH fix, answering the
 round-5 question directly).** The reference-validity check in the pairwise
 pass (above) tracks a canonical group's demoted status PER
@@ -578,20 +598,45 @@ the v2 build's own (smaller) candidate count.
   PRIMARY witness interval on its page — the largest `spans_json` pair for
   `tier_a` rows, the `(o0, o1)` pair for E1 rows (§4 of
   `discovery-sidecar-schema-v1.md`).
-- **Canonical-group footprint on a page — deterministic span resolution
-  (Codex R6-HIGH fix, closing a multi-raw-member dedup ambiguity).** Because
+- **Canonical-group footprint on a page — deterministic span resolution,
+  restricted to the IDENTICAL pre-D-17-shipped snapshot as the demotion
+  target-set's condition (v) (Codex R6-HIGH fix, closing a multi-raw-member
+  dedup ambiguity; Codex round-7 HIGH fix closes a SECOND, separate gap — a
+  Lever-1-hidden row's span could otherwise still establish overlap between
+  two canonical groups, or serve as part of the chronological reference
+  footprint a winning side demotes against, even though condition (v)
+  already stops that same hidden row from ever being MUTATED).** Because
   soft merge (§4.1) preserves EVERY raw member's row, a canonical group `G`
   MAY have 2+ raw rows independently witnessing the SAME page `P` (each with
   its OWN primary span). `G`'s FOOTPRINT on `P` is the UNION of the primary
   spans of every raw row canonicalizing to `G` on `P` with
-  `evidence_source='track1_direct'` AND `matched_letters >= 200` — a set of
-  one or more intervals, never a single arbitrarily-chosen representative
-  row. This is a plain set union: order-independent and deterministic
-  regardless of which raw member happens to be enumerated first. Everywhere
-  below (and in §4.3's demotion target-set above), "G's primary span" / "L's
-  primary span" means this FOOTPRINT, not any one raw row's individual span
-  — this is the deterministic span-resolution rule the dedup rule below
-  relies on.
+  `evidence_source='track1_direct'`, `matched_letters >= 200`, AND
+  `routing_status='shipped'` AS OF THE FIXED PRE-D-17 SNAPSHOT — the
+  IDENTICAL snapshot defined by condition (v) above (the population
+  immediately after Lever-1 coverage routing, §4.4, has completed and BEFORE
+  the pairwise pass begins processing ANY pair; taken ONCE, never
+  re-evaluated mid-pass) — a set of one or more intervals, never a single
+  arbitrarily-chosen representative row, and NEVER an interval contributed by
+  a row that was already `routing_status='review_only'` (Lever-1-hidden)
+  before D-17 began. This closes the Pitfall-2 multi-evidence-row gap
+  directly: a claim with ONE shipped span and ONE Lever-1-hidden
+  low-coverage span on the SAME page can no longer have its hidden span
+  alone establish overlap with, or serve as the reference year for, another
+  work's demotion — the hidden span simply never enters `G`'s footprint, at
+  either the candidate-pair-qualification level (below) or the demotion
+  target-set's condition-(iii) overlap test (§4.3 above, which is defined in
+  terms of THIS footprint). This is a plain set union over that fixed,
+  pre-D-17-shipped population: order-independent and deterministic
+  regardless of which raw member happens to be enumerated first. **The
+  BUILDER and the gate-10 VERIFIER MUST compute this footprint over the
+  IDENTICAL pre-D-17-shipped-evidence population** — gate 10's own
+  "pre-D-17-eligible" reconstruction (below) is defined to agree with this
+  exact same snapshot, so a builder/verifier population mismatch is itself a
+  detectable, hard-failing discrepancy, never two independently-defined
+  populations that could silently drift apart. Everywhere below (and in
+  §4.3's demotion target-set above), "G's primary span" / "L's primary span"
+  means this FOOTPRINT, not any one raw row's individual span — this is the
+  deterministic span-resolution rule the dedup rule below relies on.
 - **Span-overlap requirement (Codex BLOCKER — multi-register safety):** two
   CANONICAL GROUPS on the SAME `page_id` qualify as a candidate pair ONLY IF
   their footprints (above) NUMERICALLY OVERLAP — i.e. AT LEAST ONE interval
@@ -776,15 +821,39 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
      every matched `era_qualifiers` substring, (c) every extracted digit-run
      substring (step 2), and (d) — range category ONLY — exactly one
      range-separator character (below); then remove all whitespace.
-     **Deterministic removal order for overlapping matches:** if two
-     candidate substrings to remove (from the `century_designators`/
-     `range_designators` list at (a), or the `era_qualifiers` list at (b))
-     overlap in character span within the original string (one is a
-     substring of, or partially overlaps, another), the LONGEST matching
-     substring is removed FIRST; a SHORTER match fully contained within an
-     already-removed character span is treated as already consumed — it is
-     NOT removed a second time, and it does NOT count as a SEPARATE match for
-     the "one or more entries match" test in step 1.
+     **Deterministic removal order for overlapping matches — full
+     containment vs. partial/equal-length overlap are NOT the same case
+     (Codex round-7 HIGH fix, closing the previously-undefined partial- and
+     equal-length-overlap cases):** if two candidate substrings to remove
+     (from the `century_designators`/`range_designators` list at (a), or the
+     `era_qualifiers` list at (b)) overlap in character span within the
+     original string, exactly ONE of two outcomes applies, determined solely
+     by the SHAPE of the overlap — never a third, undefined case:
+     - **Full containment** (one matched span is entirely inside the other's
+       character range, including the identical-span case where two
+       different vocabulary entries match the exact same characters): the
+       LONGEST matching substring is removed FIRST; the SHORTER match, being
+       fully contained within the already-removed character span, is treated
+       as already consumed — it is NOT removed a second time, and it does
+       NOT count as a SEPARATE match for the "one or more entries match" test
+       in step 1. (Unchanged from the prior contract — this is the ONLY case
+       it covered.)
+     - **Partial overlap or equal-length overlap** (neither matched span
+       fully contains the other — including two DIFFERENT-length spans that
+       overlap only partway, and two EQUAL-length spans that overlap at
+       different starting offsets without being the identical span): there
+       is no unique longest span, or the overlap is not full containment
+       either way, so this is NOT a "pick the longest" case. The value is
+       UNPARSEABLE outright (the same REJECT/HALT outcome as any other
+       leftover-character violation in step 3 below) — the normalizer NEVER
+       guesses a tie-break, a span union, or a removal precedence for a
+       partial/equal-length overlap; a pinned vocabulary that can produce
+       this shape against a real input is a data-quality defect surfaced as
+       an unparseable value, never silently resolved two different ways by
+       two implementations. This closes the round-7 gap: the prior contract
+       only defined the full-containment case, leaving partial and
+       equal-length overlaps to (necessarily divergent) implementation
+       discretion.
      **The range-separator character set is FIXED and HARDCODED in build
      code — NOT data-file-driven, unlike the designator lists (Codex R5-HIGH
      fix), precisely because the separator must be identical across every
@@ -883,33 +952,51 @@ UNKNOWN-for-all — a HALT is the only outcome on a materially degraded join.
 **Same-basis regression baseline — DISTINCT from, and IN ADDITION TO, the
 absolute floor above (Codex R6-HIGH fix — a standalone absolute floor alone
 cannot detect a material decline that stays above it; a same-basis
-regression check is separately required).** The `0.990` floor intentionally
-does NOT compare against the delivered audit's 99.8061% figure, because that
-figure used a DIFFERENT, looser (non-span-overlap-gated) population — the
-two are not proportionally comparable (Codex R4-MEDIUM, above). A genuine
-same-basis regression check instead requires a baseline computed under the
-SAME methodology as the v2 build's own `pair_coverage` (the strict,
-span-overlap-gated `|R|/|U|` predicate above). On the FIRST v2 build (no
-prior same-basis measurement exists under this methodology), the build
-RECORDS its OWN computed `pair_coverage` as the FROZEN same-basis baseline —
-`meta['v2_pair_coverage_baseline']` — alongside the `|U|`/`|R|` counts, in
-`meta` AND the v2 frame doc; there is nothing to regress from yet, so only
-the absolute `0.990` floor applies on this first build. On any LATER v2
-rebuild (a re-bake following a census/date-table/crosswalk refresh, a
-reband, or any other bake re-run), gate 9 performs BOTH checks: the absolute
-`0.990` floor (unchanged), AND a same-basis regression check — recompute
-`pair_coverage` identically and compare it against the PRIOR build's
-recorded `meta['v2_pair_coverage_baseline']`; the build HALTS if
-`pair_coverage < prior_baseline - PAIR_COVERAGE_REGRESSION_TOLERANCE`, where
+regression check is separately required); PERMANENTLY FROZEN, never a
+rolling previous-build number (Codex round-7 HIGH fix — closing a gap where
+comparing only against the IMMEDIATELY PRECEDING build permits cumulative,
+below-tolerance drift across many successive rebuilds to compound into a
+large, undetected regression over time, since each individual step never
+exceeds the 0.005 tolerance against its own immediate predecessor).** The
+`0.990` floor intentionally does NOT compare against the delivered audit's
+99.8061% figure, because that figure used a DIFFERENT, looser
+(non-span-overlap-gated) population — the two are not proportionally
+comparable (Codex R4-MEDIUM, above). A genuine same-basis regression check
+instead requires a baseline computed under the SAME methodology as the v2
+build's own `pair_coverage` (the strict, span-overlap-gated `|R|/|U|`
+predicate above) — analogous in PURPOSE to how `chrono_date_coverage.md`'s
+own audit fixed ONE coverage figure as its reference point, never a moving
+target. On the FIRST v2 build (no prior same-basis measurement exists under
+this methodology), the build RECORDS its OWN computed `pair_coverage` as the
+PERMANENTLY FROZEN anchor — `meta['v2_pair_coverage_frozen_anchor']` —
+alongside the `|U|`/`|R|` counts, in `meta` AND the v2 frame doc; there is
+nothing to regress from yet, so only the absolute `0.990` floor applies on
+this first build. **This anchor is WRITTEN EXACTLY ONCE, on the build that
+first establishes it, and is NEVER overwritten, replaced, or recomputed by
+any later rebuild** — every subsequent v2 rebuild (a re-bake following a
+census/date-table/crosswalk refresh, a reband, or any other bake re-run)
+carries the anchor FORWARD unchanged into its own `meta`/frame doc, read-only.
+On any LATER v2 rebuild, gate 9 performs BOTH checks: the absolute `0.990`
+floor (unchanged), AND a same-basis regression check — recompute
+`pair_coverage` identically and compare it against THIS SAME FROZEN
+`v2_pair_coverage_frozen_anchor` (never against the immediately-preceding
+build's own number); the build HALTS if `pair_coverage < frozen_anchor -
+PAIR_COVERAGE_REGRESSION_TOLERANCE`, where
 `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` (a fixed, hardcoded half-point
 tolerance — small enough to catch a materially degraded date-join or a
 missing/short input source, large enough to absorb ordinary
-candidate-universe churn from a corpus/date-table refresh). On a PASSING
-later rebuild, the NEW `pair_coverage` REPLACES
-`meta['v2_pair_coverage_baseline']` for the NEXT rebuild's comparison — the
-baseline always tracks the most recently shipped build, never a fixed
-historical constant. This same-basis baseline is what a standalone absolute
-floor cannot provide on its own.
+candidate-universe churn from a corpus/date-table refresh). Comparing every
+rebuild against the SAME fixed anchor — rather than each build's own
+immediate predecessor — is what prevents a sequence of individually-
+within-tolerance rebuilds from cumulatively drifting an arbitrary distance
+below the originally-measured coverage without ever tripping the gate. **The
+immediately-preceding build's own `pair_coverage` is ADDITIONALLY recorded
+each rebuild as `meta['v2_pair_coverage_last_build']` for diagnostic/advisory
+trend visibility ONLY** (build-over-build change, logged and carried in the
+frame doc) — this advisory value NEVER gates the build and NEVER replaces or
+competes with the authoritative frozen anchor above; only a comparison
+against the frozen anchor can HALT gate 9. This same-basis baseline is what
+a standalone absolute floor cannot provide on its own.
 
 **`discovery_routing_audit` — masking-safe, page-scoped, fully replayable
 table (Codex #5).** A new table in the shipped sidecar recording EVERY
@@ -942,8 +1029,13 @@ records WHICH side was undated, never a dropped row. No title, no raw source
 id, no restricted codename ever enters this table — opaque `w000xxx` ids and
 integers only.
 
-**Gate 10 (routing-audit replayability) — EXHAUSTIVE predicate (Codex R2-HIGH,
-fixing the round-1 gate):** for EVERY `discovery_routing_audit` row:
+**Gate 10 (routing-audit replayability) — TWO layers: local per-decision
+field checks (necessary, fast, but NOT SUFFICIENT on their own) PLUS a FULL
+REPLAY of the stateful ordered pass (authoritative — Codex round-7 HIGH fix,
+closing a gap where local field checks alone cannot verify
+`kept_invalid_reference`'s ORDER-DEPENDENT correctness). Local layer first
+(Codex R2-HIGH, fixing the round-1 gate):** for EVERY `discovery_routing_audit`
+row:
 - `demoted_canonical_work_id`, when non-NULL, MUST equal EXACTLY
   `canonical_work_id_lo` OR `canonical_work_id_hi` (no third value);
 - `decision='demoted'` REQUIRES: both `year_lo`/`year_hi` non-NULL,
@@ -962,15 +1054,98 @@ fixing the round-1 gate):** for EVERY `discovery_routing_audit` row:
   or `< DELTA`; UNLIKE `kept_tie`, which is bound to `delta < DELTA`), and
   `demoted_canonical_work_id` IS NULL (this pair's later side `L` is NOT
   demoted here — it is merely withheld from demoting an already-hidden `E`).
-  **Page-scoped replay check:** `E` (whichever of `canonical_work_id_lo`/`_hi`
-  is the earlier-dated side of THIS pair) MUST itself appear as the
-  `demoted_canonical_work_id` of AT LEAST ONE OTHER `decision='demoted'` row
-  on the SAME `page_id` — a `kept_invalid_reference` row with no such
-  same-page corroborating `demoted` row is a HARD FAIL (it would mean the
-  "already demoted" branch fired without a real, page-scoped prior demotion
-  to justify it);
+  A local, WEAKER necessary condition also checked at this layer: `E` MUST
+  appear as the `demoted_canonical_work_id` of AT LEAST ONE OTHER
+  `decision='demoted'` row on the SAME `page_id` (a `kept_invalid_reference`
+  row with NO such same-page `demoted` row anywhere is a HARD FAIL at this
+  layer already). **This local existence check is NECESSARY but explicitly
+  NOT SUFFICIENT** — it cannot confirm the corroborating `demoted` row
+  actually preceded THIS pair in the fixed processing order, which is
+  EXACTLY what the FULL REPLAY below verifies authoritatively (Codex
+  round-7 HIGH fix — closing the gap this local check alone leaves open);
 - `decision='fail_safe_unknown_date'` REQUIRES: `year_lo IS NULL OR year_hi
   IS NULL`, `delta IS NULL`, and `demoted_canonical_work_id IS NULL`;
+- **Full replay of the stateful ordered pass — AUTHORITATIVE, replacing
+  "check independent local predicates on each stored row" as the deciding
+  layer (Codex round-7 HIGH fix).** The local per-decision checks above are
+  NECESSARY but NOT SUFFICIENT: `kept_invalid_reference`'s correctness
+  depends on the ORDERED-PASS STATE at the moment its pair was processed
+  (whether `E` had ALREADY been marked `demoted` by an earlier-PROCESSED
+  pair in THIS SAME PASS, §4.3's pairwise decision rule) — a check that only
+  asks "does SOME `demoted` row exist for `E` on this page, anywhere in the
+  table" cannot distinguish a CORRECT `kept_invalid_reference` from one that
+  fired on a technicality (e.g. `E`'s demotion recorded against an unrelated
+  pair that, in the CORRECT pass order, would not yet have been processed by
+  the time THIS pair was reached). Gate 10 therefore REPLAYS the algorithm
+  rather than merely re-checking its output shape:
+  1. For EVERY `page_id` present in `discovery_routing_audit`, take the
+     stored rows for that page (`canonical_work_id_lo`/`_hi`/`year_lo`/
+     `year_hi`) as the candidate pair set — the "Population equality" check
+     below independently proves this IS the complete, correct set; this
+     replay assumes that population is already validated and REUSES it (the
+     two checks are complementary, not redundant: population equality proves
+     the RIGHT SET of pairs is present, the replay proves the RIGHT DECISION
+     was reached for each).
+  2. Reconstruct the FIXED PROCESSING ORDER for that page's pairs using the
+     EXACT §4.3 rule: primary key ascending by the numerically LATER side's
+     resolved year, WITH the explicit NULL-ordering rule (any pair with an
+     unresolved side sorts AFTER every pair with a resolved later-side year),
+     ties broken by the lexicographic `(page_id, lo, hi)` key — the IDENTICAL
+     ordering rule the BUILDER uses; the builder and the verifier share ONE
+     shared definition of pass order, never two independently re-derived
+     orderings that could silently diverge.
+  3. Walk the page's pairs in this reconstructed order, maintaining
+     page-scoped demotion state (a set of canonical_work_ids marked
+     `demoted` earlier in THIS walk, initially empty — the SAME state
+     management the builder's pairwise pass performs), and for EACH pair
+     RECOMPUTE its decision from scratch using ONLY `year_lo`/`year_hi`,
+     `DELTA`, and the walk's current demotion state (never reading the
+     pair's OWN stored `decision` column while recomputing): if either year
+     is NULL -> `fail_safe_unknown_date`; else, letting `E`/`L` be the
+     earlier/later-dated side (a true year-tie falls through directly to the
+     next case): if `E` is ALREADY in the walk's demoted-state set ->
+     `kept_invalid_reference` (regardless of delta) — reachable ONLY when
+     `E` has a RESOLVED year (an unresolved `E` already routed to
+     `fail_safe_unknown_date` above), so `kept_invalid_reference` is
+     STRUCTURALLY IMPOSSIBLE for an equal-year (tied) pair, which by
+     definition has no earlier side to have been demoted; else if
+     `delta >= DELTA` -> `demoted` (mark `L` demoted in the walk state for
+     subsequent pairs on this SAME page); else -> `kept_tie`.
+  4. **Exhaustive equality requirement:** for EVERY pair on EVERY page, the
+     RECOMPUTED decision (step 3) MUST equal the STORED `decision` column
+     EXACTLY, and — where the stored decision is `demoted` — the RECOMPUTED
+     demoted side MUST equal the stored `demoted_canonical_work_id` EXACTLY.
+     A single mismatch anywhere is a HARD FAIL. This one replay check
+     directly enforces all four of: (a) a stored `demoted` row is correct
+     ONLY if the replay ALSO reaches `demoted`, which (by step 3's
+     construction) requires `E` was NOT already in the demoted-state set —
+     i.e. `E` is a STILL-SURVIVING reference at the moment this pair is
+     processed; (b) a stored `kept_tie` row is correct ONLY if the replay
+     ALSO reaches `kept_tie`, which likewise requires `E` was NOT already
+     demoted (`kept_tie` is reachable only from the "valid reference"
+     branch, never from the "`E` already demoted" branch, per §4.3); (c) a
+     stored `kept_invalid_reference` row is correct ONLY if the replay's OWN
+     walk — processing pairs in the EXACT reconstructed order and
+     accumulating demotion state incrementally — ALSO independently
+     concludes `E` was already demoted BEFORE this pair was reached; a row
+     where `E`'s ONLY same-page demotion happened at a LATER position in the
+     reconstructed order (or against an unrelated pair the walk's state
+     would not yet reflect at this point) fails the replay even though the
+     WEAKER local existence check above would have passed it — this is
+     exactly the gap the full replay closes over the local-predicate-only
+     design; (d) a stored `kept_invalid_reference` row on an EQUAL-YEAR
+     (tied) pair is IMPOSSIBLE to replay-match (per step 3's
+     structural-impossibility note) and is therefore ALWAYS a HARD FAIL —
+     `kept_invalid_reference` requires an `E`/`L` earlier/later distinction
+     a true year-tie never has.
+  **The BUILDER and the gate-10 VERIFIER share this IDENTICAL ordered-pass
+  definition** (candidate population, sort order including the NULL-ordering
+  rule, and the demotion-state transition rule) — there is exactly ONE
+  specification of "how the pairwise pass runs" in this document (§4.3's
+  pairwise decision rule), and gate 10 is that SAME specification
+  independently re-executed by the verifier over the shipped
+  `discovery_routing_audit` rows, never a separately-authored approximation
+  of it.
 - **Population equality — defined over the RECONSTRUCTED PRE-D-17 population
   (Codex R3-BLOCKER fix, not the naively-current `shipped` set):** because
   D-17 itself changes some rows FROM `shipped` TO `review_only`, the
@@ -1167,6 +1342,62 @@ MUST be traceable to that protocol's frozen, pre-registered artifacts (its
 statistical design, it only consumes its OUTCOME (`measurement_status` +
 `ci_low`/`ci_high`/`numerator`/`denominator`) and applies the mechanical
 reband/invalidation described below.
+
+**Measurement-outcome-to-row write contract — EVERY accepted
+`--precision-spec` outcome, not just `measured_fail` (Codex round-7 MEDIUM
+fix, closing a gap where only the reband-triggering outcome had an explicit
+persistence rule).** Step 0 (§6) calls a non-triggering `--precision-spec`
+outcome "no override," but that describes ONLY what happens to
+`confidence_band`/`routing_status` (nothing rebands) — it does NOT mean
+NOTHING is written to `band_precision`. This build writes EXACTLY one of the
+following four outcomes into the relevant `band_precision` row(s); no fifth,
+undefined case exists:
+- **`measured_pass`** — the `--precision-spec` supplies
+  `measurement_status='measured_pass'` plus a computed, non-NULL `precision`/
+  `ci_low`/`ci_high`/`numerator`/`denominator` for the measured band. The
+  build writes ALL FIVE fields onto that band's `band_precision` row exactly
+  as supplied, `measurement_status='measured_pass'`. Per gate 12, this write
+  is REJECTED (a HARD build error, never silently accepted) if the supplied
+  `ci_low < 0.85` — a `measured_pass` outcome is contractually required to
+  clear `STRICT_FLOOR` (0.85); a pass verdict paired with a sub-floor
+  `ci_low` is an inconsistent input, never silently persisted.
+  `confidence_band`/`routing_status` are UNCHANGED by a `measured_pass`
+  write (no reband — a passing measurement keeps its band fully
+  default-eligible per the D-18 predicate below).
+- **`measured_fail`** — triggers the FULL §4.5 reband path (this bullet is a
+  pointer, not a duplicate spec): `confidence_band`/`routing_status` mutate
+  per the bullets below, AND the resulting `band_precision` writes for BOTH
+  affected bands (`tier_a` source, `screening_rb` target) are the
+  ALL-FIVE-fields-NULL, `measurement_status='not_measured'` invalidation
+  writes specified below — never the raw `measured_fail` numbers themselves,
+  which are preserved separately under the `tier_a_reband_trigger_*` `meta`
+  keys (below).
+- **`insufficient_evidence`** — the build writes ONLY
+  `measurement_status='insufficient_evidence'` onto the measured band's
+  `band_precision` row, with ALL FIVE of `precision`/`ci_low`/`ci_high`/
+  `numerator`/`denominator` left NULL (per gate 12 — this status carries NO
+  interval, real or provisional). `confidence_band`/`routing_status` are
+  UNCHANGED (no reband, no relabel) — the band stays exactly where it was
+  (e.g. `tier_a` stays `tier_a`, still shipped); it merely fails the D-18
+  default-eligibility predicate and so is not the surfaced default for its
+  claims until a LATER confirmation draw produces a `measured_pass` (or
+  `measured_fail`) outcome — this is intentionally NOT a terminal state.
+- **`not_measured`** — the FIRST-build default (§1) for every band with no
+  prior genuine measurement: `measurement_status='not_measured'`, all five
+  fields NULL. This is ALSO the exact row shape a `measured_fail`-triggered
+  invalidation writes (both bullets converge on the identical row shape,
+  distinguishable only via `meta`'s `tier_a_reband_target`/
+  `tier_a_reband_trigger_*` provenance keys when the NULLing was
+  reband-caused rather than first-build-default-caused).
+
+**Verifier link for each outcome:** gate 12 (`measurement_status`<->interval
+consistency) enforces the exact five-field shape for ALL FOUR outcomes above
+EXHAUSTIVELY over the closed vocabulary — no stored value outside these four
+is valid. Gate 13 (reband-precision-invalidation) additionally enforces the
+`measured_fail` bullet's BOTH-bands invalidation + `meta` provenance-key
+requirements specifically. There is no separate gate for `measured_pass`/
+`insufficient_evidence` beyond gate 12 — their write contract is fully
+covered by gate 12's exhaustive five-field/status predicate.
 
 - A measured-below-floor `tier_a` outcome (fed post-135 via
   `--precision-spec`, `measurement_status='measured_fail'`) rebands **the
@@ -1413,28 +1644,47 @@ D-17 could be comparing against a work that was never going to ship anyway.
    non-span-overlap-gated population and is not proportionally comparable
    to the v2 build's stricter `|U|`); NOT the 99.9% corpus-wide all-works
    figure either, a third, different denominator used only to justify
-   DELTA's citation. **ADDITIONALLY, a same-basis regression check (Codex
-   R6-HIGH fix, §4.3 "Same-basis regression baseline"), distinct from the
-   absolute floor above:** on any rebuild AFTER the first v2 build, the gate
-   ALSO HALTS if `pair_coverage` has declined by more than
-   `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` from the PRIOR build's
-   recorded `meta['v2_pair_coverage_baseline']`; the FIRST v2 build instead
-   RECORDS its own `pair_coverage` as this baseline (no regression check is
-   possible on the first build); a passing later rebuild's `pair_coverage`
-   becomes the new baseline for the NEXT rebuild.
+   DELTA's citation. **ADDITIONALLY, a same-basis regression check against a
+   PERMANENTLY FROZEN anchor (Codex R6-HIGH fix, §4.3 "Same-basis regression
+   baseline"; Codex round-7 HIGH fix replaces the rolling
+   immediately-preceding-build comparison with a FIXED anchor, closing a
+   cumulative-drift gap), distinct from the absolute floor above:** on any
+   rebuild AFTER the first v2 build, the gate ALSO HALTS if `pair_coverage`
+   has declined by more than `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005`
+   from the PERMANENTLY FROZEN `meta['v2_pair_coverage_frozen_anchor']` —
+   written EXACTLY ONCE, on the build that first establishes it, and NEVER
+   overwritten by any later rebuild; the FIRST v2 build instead RECORDS its
+   own `pair_coverage` as this frozen anchor (no regression check is possible
+   on the first build). Comparing EVERY later rebuild against this SAME
+   fixed anchor — rather than each build's own immediate predecessor —
+   prevents a sequence of individually-within-tolerance rebuilds from
+   cumulatively drifting below the originally-measured coverage without ever
+   tripping the gate. The immediately-preceding build's own `pair_coverage`
+   is separately recorded as `meta['v2_pair_coverage_last_build']` each
+   rebuild for diagnostic/advisory trend visibility ONLY — it is logged and
+   carried in the frame doc but NEVER gates the build.
 10. **Routing-audit replayability check** — the full EXHAUSTIVE predicate
-    defined inline in §4.3 (over `canonical_work_id_lo`/`_hi`, `year_lo`/
-    `year_hi`, exact `delta` recomputation, population equality against the
-    RECONSTRUCTED PRE-D-17-ELIGIBLE candidate universe — `shipped` UNION
+    defined inline in §4.3: local per-decision field checks (necessary, not
+    sufficient) PLUS the AUTHORITATIVE FULL REPLAY (Codex round-7 HIGH fix)
+    — reconstruct each page's fixed processing order (incl. the
+    NULL-ordering rule), walk it maintaining page-scoped demotion state
+    exactly as the builder does, RECOMPUTE every pair's decision from
+    scratch, and require the recomputed decision (and, for `demoted` rows,
+    the recomputed demoted side) to equal the STORED row EXACTLY — this is
+    what proves a `kept_invalid_reference` row's "already demoted" branch
+    fired at the CORRECT position in the pass, not merely that SOME
+    same-page demotion exists somewhere — PLUS population equality against
+    the RECONSTRUCTED PRE-D-17-ELIGIBLE candidate universe — `shipped` UNION
     `review_only`-with-`routing_reason='later_shared_text'`, never the
     naively-current `shipped` set alone — the reverse match against every
     `routing_reason='later_shared_text'` evidence row, AND the target-set
-    completeness check) — summarized here: every `discovery_routing_audit`
-    row is individually reconstructable per its `decision`, the audit
-    population exactly equals the recomputed pre-D-17-eligible candidate
-    universe (no extra, no missing rows), every demotion is matched AT LEAST
-    ONCE in BOTH directions (audit→evidence AND evidence→audit are both
-    many-to-many, not 1:1 — a demoted canonical group with 2+ raw witnessing
+    completeness check — summarized here: every `discovery_routing_audit`
+    row's decision is independently RECOMPUTED via the full replay and must
+    equal its stored value exactly, the audit population exactly equals the
+    recomputed pre-D-17-eligible candidate universe (no extra, no missing
+    rows), every demotion is matched AT LEAST ONCE in BOTH directions
+    (audit→evidence AND evidence→audit are both many-to-many, not 1:1 — a
+    demoted canonical group with 2+ raw witnessing
     members on one page, or a row demoted by 2+ earlier co-claimants in a
     3+-way cluster, are both expected, not failures; only a ZERO-count match
     in either direction is a HARD FAIL), and for every canonical group/page
@@ -1511,10 +1761,27 @@ D-17 could be comparing against a work that was never going to ship anyway.
   value. The build validates that the three patterns are MUTUALLY EXCLUSIVE
   by construction (a self-test over a synthetic id set at build start: no
   fabricated test id may match more than one pattern) — a HARD FAIL if they
-  are not. Before attempting ANY crosswalk join, the build validates every
-  raw id referenced by the census, `--composition-dates`, and
-  `--seftja-dates` against these three PINNED patterns — never a normalized
-  title string, and never an ad hoc pattern invented at parse time. A raw id
+  are not. **Scope of this raw-id validation — the two DATE inputs ONLY,
+  never the census (Codex round-7 MEDIUM fix, closing an internal
+  inconsistency with §4.1):** before attempting ANY crosswalk join, the
+  build validates every raw id referenced by `--composition-dates` and
+  `--seftja-dates` (the two date tables — the ONLY two build inputs whose
+  consumed keys are raw source-side ids requiring a crosswalk join at all)
+  against these three PINNED patterns — never a normalized title string, and
+  never an ad hoc pattern invented at parse time. This validation does NOT
+  apply to, and is never performed on, the census (`--canonical-merges`):
+  per §4.1's frozen exact-shape parser, the census's TWO consumed keys —
+  `merges` (via its `members_w`/`canonical_w` fields) and `dropped_by_135` —
+  are ALREADY opaque `w000xxx`-shaped product ids (validated by the regex
+  `^w\d{6}$` in §4.1's own parser), never raw source-side ids of any
+  namespace family, and therefore require NO namespace-prefix-pattern check
+  and NO crosswalk join at all. The census's other ten top-level keys are
+  TOLERATED-BUT-IGNORED (§4.1) and are, likewise, never read — so no raw id
+  could be "referenced by the census" in the sense this namespace-validation
+  rule addresses even if one of those ignored keys happened to contain one.
+  This namespace-prefix-pattern validation is therefore scoped EXCLUSIVELY to
+  the source-side raw ids appearing as KEYS in `--composition-dates` and
+  `--seftja-dates`. A raw id (from either date table)
   matching NONE of the three PINNED patterns is REJECTED before the
   crosswalk join is even attempted (a HARD FAIL, defense-in-depth ahead of
   the join itself); a raw id matching MORE than one is likewise a HARD FAIL
