@@ -412,13 +412,29 @@ dates sourced from the WRONG corpus family.
 
 **Deterministic pairwise decision — processed in ONE deterministic pass,
 ORDERED to prevent a demoted reference from itself demoting anything
-further (Codex R4-HIGH fix — closes the span-orphaning gap):** compute
-EVERY qualifying pair `{X, Y}` in the candidate universe (below) up front,
-order EACH pair lexicographically by `canonical_work_id` into `(lo, hi)` —
-a stable, date-independent addressing key, never implying which side is
-"kept" — then process ALL pairs in a SINGLE FIXED ORDER: ascending by the
-NUMERICALLY LATER side's resolved year (ties broken by the lexicographic
-`(page_id, lo, hi)` key). For pair `{lo, hi}`:
+further (Codex R4-HIGH fix — closes the span-orphaning gap; Codex R6-MEDIUM
+fix adds an explicit NULL-ordering rule for unknown-date pairs, below):**
+compute EVERY qualifying pair `{X, Y}` in the candidate universe (below) up
+front, order EACH pair lexicographically by `canonical_work_id` into
+`(lo, hi)` — a stable, date-independent addressing key, never implying which
+side is "kept" — then process ALL pairs in a SINGLE FIXED ORDER: primary key
+ascending by the NUMERICALLY LATER side's resolved year, WITH an explicit
+NULL-ordering rule for any pair where EITHER side has no resolved year (i.e.
+every pair that will decide `fail_safe_unknown_date`, below) — such a pair
+has no value on the primary (numeric-year) sort key, so it sorts AFTER every
+pair that DOES have a resolved later-side year, regardless of that other
+pair's year magnitude (real years sort before NULL, always). Ties on the
+primary key — among dated pairs sharing the same later-side year, AND among
+ALL unknown-date pairs (which share the same NULL primary-key value) — are
+broken by the SAME lexicographic `(page_id, lo, hi)` key. This NULL-ordering
+rule fully specifies the pass order (and therefore the
+`discovery_routing_audit` INSERTION order) for EVERY pair, including the
+unknown-date ones, even though an unknown-date pair's OWN decision
+(`fail_safe_unknown_date`) never mutates anything and is unaffected by where
+in the pass it is processed — full determinism of the pass/insertion order
+is a build-reproducibility requirement independent of whether any given
+pair's OUTCOME happens to depend on its position in the pass. For pair
+`{lo, hi}`:
 - if EITHER `lo` or `hi` has no resolved year → `decision =
   fail_safe_unknown_date`; NEITHER side is demoted (fail-safe, rule 5 — an
   unknown date on either side means no direction can be established, so the
@@ -481,20 +497,49 @@ co-claimants in a 3+-way cluster, §above).
 
 **Demotion target-set — EXACT and independently verifiable (Codex R5-HIGH
 fix, closing the "entire footprint" vs. per-row overlap-qualifier
-ambiguity).** The phrase "ENTIRE canonical group's evidence footprint" above
-means EXACTLY the following CLOSED target set — never an unconditional
-"every row under G" set. For canonical group `G` demoted relative to winning
-side `L` on page `P`, the target set `T(G,P)` = every `discovery_evidence`
-row `R` such that (i) `R`'s canonicalized `work_id` equals `G`, (ii)
+ambiguity; Codex R6-BLOCKER fix adds condition (v), closing a contradiction
+with the Lever-1 precedence invariant).** The phrase "ENTIRE canonical
+group's evidence footprint" above means EXACTLY the following CLOSED target
+set — never an unconditional "every row under G" set. For canonical group
+`G` demoted relative to winning side `L` on page `P` via a SPECIFIC demoting
+audit row (see the target-set completeness check below for the case where
+`G` is demoted by MORE THAN ONE audit row against different winning sides on
+the same page), the target set `T(G,P,L)` — written `T(G,P)` where `L` is
+unambiguous from context — = every `discovery_evidence` row `R` such that (i)
+`R`'s canonicalized `work_id` equals `G`, (ii)
 `R.evidence_source='track1_direct'`, (iii) `R`'s primary span NUMERICALLY
-OVERLAPS `L`'s primary span under the EXACT SAME overlap test used to qualify
-the candidate pair itself (`max(start_R, start_L) < min(end_R, end_L)` —
-never a looser "same page" test), and (iv) `R.matched_letters >= 200` (the
-same floor gating candidacy, above). A row on page `P` canonicalizing to `G`
-whose span does NOT overlap `L` (e.g. a disjoint-register witness, per the
-multi-register invariant above) is OUTSIDE `T(G,P)` and is NEVER touched by
-this demotion, even though it shares page `P` and canonical group `G` with
-the demoted rows. `T(G,P)` MAY contain more than one row (when `G` has 2+ raw
+OVERLAPS `L`'s footprint (the union-of-qualifying-raw-spans definition, §
+candidate-universe below) under the EXACT SAME overlap test used to qualify
+the candidate pair itself (`max(start_R, start_L) < min(end_R, end_L)` for
+some interval of `L`'s footprint — never a looser "same page" test), (iv)
+`R.matched_letters >= 200` (the same floor gating candidacy, above), AND (v)
+`R.routing_status='shipped'` AS OF THE FIXED PRE-D-17 SNAPSHOT — the
+population immediately after Lever-1 coverage routing (§4.4) has completed
+and BEFORE this pairwise pass begins processing ANY pair; this snapshot is
+taken ONCE and never re-evaluated mid-pass. **Condition (v) is REQUIRED
+(Codex R6-BLOCKER fix):** WITHOUT it, a row Lever-1 already demoted to
+`routing_status='review_only', routing_reason='low_coverage'` before D-17
+even started could still satisfy (i)-(iv) and be forced into `T(G,P)`, and
+the target-set completeness check (below) would then either require
+silently overwriting its `low_coverage` reason with `later_shared_text`
+(directly contradicting the "D-17 never overwrites a pre-existing Lever-1
+`routing_reason`" invariant, §4.3 Invariants below) or fail the gate outright
+(a row satisfying (i)-(iv) but left `low_coverage` reads as an incomplete
+demotion). Condition (v) closes this by construction: a Lever-1-demoted row
+is, BY DEFINITION, never `routing_status='shipped'` at the pre-D-17
+snapshot, so it can never enter `T(G,P,L)` for any `L`. Being a FIXED,
+one-time snapshot (not re-evaluated mid-pass), condition (v) does NOT remove
+a row from a LATER-processed pair's target set merely because an
+EARLIER-processed pair in this SAME D-17 pass already demoted it — only a
+PRE-D-17 (Lever-1) demotion is excluded by (v); a same-pass D-17 demotion by
+an earlier-processed pair is NOT (this is what makes the documented
+many-to-many audit↔evidence relationship, gate 10, possible at all). A row
+on page `P` canonicalizing to `G` whose span does NOT overlap `L`'s footprint
+(e.g. a disjoint-register witness, per the multi-register invariant above),
+or whose `routing_status` was already `review_only` before D-17 began
+(condition (v)), is OUTSIDE `T(G,P,L)` and is NEVER touched by this
+demotion, even though it shares page `P` and canonical group `G` with the
+demoted rows. `T(G,P,L)` MAY contain more than one row (when `G` has 2+ raw
 members each separately witnessing an overlapping span on `P`) — this is
 what "the entire qualifying footprint" means; it is NOT "every row
 regardless of overlap."
@@ -529,25 +574,44 @@ the v2 build's stricter rule could ever demote, never an exact prediction of
 the v2 build's own (smaller) candidate count.
 - **Population:** the CURRENTLY-SHIPPED (post-Lever-1, §4.4) `discovery_claim`
   rows, restricted to `evidence_source='track1_direct'` witness evidence.
-- **Primary span:** each claim's PRIMARY witness interval on its page — the
-  largest `spans_json` pair for `tier_a` rows, the `(o0, o1)` pair for E1
-  rows (§4 of `discovery-sidecar-schema-v1.md`).
+- **Primary span:** each RAW `discovery_claim`/`discovery_evidence` row's
+  PRIMARY witness interval on its page — the largest `spans_json` pair for
+  `tier_a` rows, the `(o0, o1)` pair for E1 rows (§4 of
+  `discovery-sidecar-schema-v1.md`).
+- **Canonical-group footprint on a page — deterministic span resolution
+  (Codex R6-HIGH fix, closing a multi-raw-member dedup ambiguity).** Because
+  soft merge (§4.1) preserves EVERY raw member's row, a canonical group `G`
+  MAY have 2+ raw rows independently witnessing the SAME page `P` (each with
+  its OWN primary span). `G`'s FOOTPRINT on `P` is the UNION of the primary
+  spans of every raw row canonicalizing to `G` on `P` with
+  `evidence_source='track1_direct'` AND `matched_letters >= 200` — a set of
+  one or more intervals, never a single arbitrarily-chosen representative
+  row. This is a plain set union: order-independent and deterministic
+  regardless of which raw member happens to be enumerated first. Everywhere
+  below (and in §4.3's demotion target-set above), "G's primary span" / "L's
+  primary span" means this FOOTPRINT, not any one raw row's individual span
+  — this is the deterministic span-resolution rule the dedup rule below
+  relies on.
 - **Span-overlap requirement (Codex BLOCKER — multi-register safety):** two
-  claims on the SAME `page_id` qualify as a candidate pair ONLY IF their
-  primary intervals NUMERICALLY OVERLAP: `max(start_x, start_y) <
-  min(end_x, end_y)`. Two claims whose primary spans are DISJOINT (occupy
-  different, non-overlapping positions on the page — e.g. Bible verses vs.
-  an interleaved Targum translation, or Bible vs. Onkelos vs. a
-  Judeo-Arabic Tafsir, each in its own non-overlapping run) are NEVER a
-  candidate pair, regardless of both being present on the same page. This
-  directly preserves the `discovery-band-labels-v1.md` §4 multi-register
-  invariant: legitimate, co-existing, non-competing witnesses in different
-  registers/scripts occupy disjoint spans and are structurally excluded from
-  D-17 comparison — chronology only ever compares works that are ACTUALLY
-  contending for the SAME text.
+  CANONICAL GROUPS on the SAME `page_id` qualify as a candidate pair ONLY IF
+  their footprints (above) NUMERICALLY OVERLAP — i.e. AT LEAST ONE interval
+  `x` in `G`'s footprint and AT LEAST ONE interval `y` in `H`'s footprint
+  satisfy `max(start_x, start_y) < min(end_x, end_y)`. Two canonical groups
+  whose footprints are ENTIRELY DISJOINT (no interval in either footprint
+  overlaps any interval in the other — e.g. Bible verses vs. an interleaved
+  Targum translation, or Bible vs. Onkelos vs. a Judeo-Arabic Tafsir, each in
+  its own non-overlapping run) are NEVER a candidate pair, regardless of both
+  being present on the same page. This directly preserves the
+  `discovery-band-labels-v1.md` §4 multi-register invariant: legitimate,
+  co-existing, non-competing witnesses in different registers/scripts occupy
+  disjoint spans and are structurally excluded from D-17 comparison —
+  chronology only ever compares works that are ACTUALLY contending for the
+  SAME text.
 - **Overlap magnitude floor:** in ADDITION to the overlap requirement above,
-  EACH claim's own `matched_letters >= 200` (the frozen minimum distinctive
-  span, `MIN_ML=200` — the same floor the audit used, applied per side).
+  EACH contributing RAW row's own `matched_letters >= 200` (the frozen
+  minimum distinctive span, `MIN_ML=200` — the same floor the audit used,
+  applied per raw row before it may contribute an interval to its canonical
+  group's footprint above).
 - **Deduplication:** ONE candidate pair row per `(page_id, canonical_work_id_lo,
   canonical_work_id_hi)` — the lexicographic pair key above. Repeated
   overlap of the SAME canonical-group pair on the SAME page collapses to a
@@ -616,10 +680,24 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
   mandatory even though its content is discarded post-validation); a `basis`
   value that is not a JSON string (an EMPTY string `""` IS a valid `basis`
   value — only a missing key or a non-string type is rejected); or any
-  object carrying a THIRD top-level key beyond exactly `{year, basis}`. The
-  `year` value itself carries no additional numeric-range constraint in this
-  input (the SEF/JA interim dates were already range-sanity-checked when
-  generated); only the shape above is enforced by this parser.
+  object carrying a THIRD top-level key beyond exactly `{year, basis}`; OR
+  (Codex R6-HIGH fix — closing a gap where an unbounded integer, e.g. a
+  data-entry typo or a corrupted proxy value, would otherwise pass parsing +
+  the coverage gate unchallenged and fabricate a chronology comparison /
+  demotion downstream) a `year` value falling OUTSIDE the SAME EXACT
+  inclusive plausible-composition-window bound enforced on
+  `--composition-dates` below: `500 <= year <= 1600`. An out-of-range `year`
+  is REJECTED exactly like an out-of-range `--composition-dates` value below
+  — the `--release` build HALTS (a hard build error); it is NEVER silently
+  treated as UNKNOWN (which would no-op D-17 on that pair and evaporate
+  coverage) nor silently clamped into range. This is an independent,
+  per-input check applied by THIS parser (mirroring, not sharing a code path
+  with, the separate `--composition-dates` parser's bound below) BEFORE the
+  crosswalk join. The prior assumption that "the SEF/JA interim dates were
+  already range-sanity-checked when generated" described the SOURCE
+  generation process, not a build-time guarantee — this fix makes the bound
+  an explicit, enforced, tested parser rule rather than an unverified
+  upstream assumption.
 - **`--composition-dates <path> --composition-dates-sha256 <hex>`**
   (owner-held, masking-sensitive — the M-source authored-works composition
   dates). **FROZEN exact schema — the grammar vocabulary is DATA bound by the
@@ -637,11 +715,18 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
   defined once in §7 D-16(c) — to a single composition-date STRING value).
   The parser REJECTS: any file missing one of these four keys;
   `century_designators`/`range_designators` empty or
-  containing a non-string/empty-string element; `era_qualifiers` containing
-  a non-string element (empty list IS valid); `dates` not an object, or any
-  `dates` value that is not a JSON string (a number, null, object, list, or
-  boolean value is REJECTED outright — a structural type violation, not
-  merely "unparseable"). Because the recognized designator vocabulary is
+  containing a non-string/empty-string element; `era_qualifiers` containing a
+  non-string OR EMPTY-STRING element (Codex R6-MEDIUM fix — the declared
+  shape above requires each `era_qualifiers` ELEMENT to be a non-empty
+  string; an empty-string `""` element, left unspecified by the pre-fix
+  reject rule, risks pathological match behavior downstream, since an empty
+  substring trivially "matches" everywhere; an EMPTY LIST for the whole key
+  remains valid — the key itself is required but zero elements is a
+  legitimate, non-pathological case; it is specifically an empty-string
+  ELEMENT WITHIN a non-empty list that is rejected); `dates` not an object,
+  or any `dates` value that is not a JSON string (a number, null, object,
+  list, or boolean value is REJECTED outright — a structural type
+  violation, not merely "unparseable"). Because the recognized designator vocabulary is
   READ FROM THIS SAME FILE (never hardcoded in build code, never quoted in
   this document), the SHA-256 pin on `--composition-dates` covers BOTH the
   raw date strings AND the exact grammar used to parse them — the "vocabulary
@@ -757,8 +842,15 @@ span-overlap-gated co-claim pairs, deduplicated per `(page_id,
 canonical_work_id_lo, canonical_work_id_hi)` — every row of
 `discovery_routing_audit`, §below, IS exactly one element of `U`, by
 construction; `|U|` = `COUNT(*)` of that table). Let `R` = the subset of `U`
-where BOTH sides resolve a composition year (`decision IN ('demoted',
-'kept_tie')`, i.e. NOT `fail_safe_unknown_date`). **Zero-candidate case
+where BOTH sides resolve a composition year — operationally, `decision IN
+('demoted', 'kept_tie', 'kept_invalid_reference')` (Codex R6-HIGH fix: a
+`kept_invalid_reference` row ALSO requires both `year_lo`/`year_hi`
+non-NULL, per its own gate-10 predicate below — omitting it from `R` would
+understate `pair_coverage` against this very "both sides resolve a year"
+definition, since it too is a pair where both sides resolved a year; `R` is
+therefore every row EXCEPT `fail_safe_unknown_date`, i.e. `R` = `U` minus the
+rows where `decision='fail_safe_unknown_date'`, equivalently every row where
+`year_lo IS NOT NULL AND year_hi IS NOT NULL`). **Zero-candidate case
 (Codex R3-MEDIUM):** if `|U| = 0` (no candidate pairs exist at all), the
 build HARD-FAILS EXPLICITLY with a dedicated error — `pair_coverage` is
 NEVER computed as a 0/0 division, and an empty universe is NEVER silently
@@ -787,6 +879,37 @@ source, without requiring or implying like-for-like comparability to the
 older approximation's number. This gate NEVER silently degrades a missing
 source to
 UNKNOWN-for-all — a HALT is the only outcome on a materially degraded join.
+
+**Same-basis regression baseline — DISTINCT from, and IN ADDITION TO, the
+absolute floor above (Codex R6-HIGH fix — a standalone absolute floor alone
+cannot detect a material decline that stays above it; a same-basis
+regression check is separately required).** The `0.990` floor intentionally
+does NOT compare against the delivered audit's 99.8061% figure, because that
+figure used a DIFFERENT, looser (non-span-overlap-gated) population — the
+two are not proportionally comparable (Codex R4-MEDIUM, above). A genuine
+same-basis regression check instead requires a baseline computed under the
+SAME methodology as the v2 build's own `pair_coverage` (the strict,
+span-overlap-gated `|R|/|U|` predicate above). On the FIRST v2 build (no
+prior same-basis measurement exists under this methodology), the build
+RECORDS its OWN computed `pair_coverage` as the FROZEN same-basis baseline —
+`meta['v2_pair_coverage_baseline']` — alongside the `|U|`/`|R|` counts, in
+`meta` AND the v2 frame doc; there is nothing to regress from yet, so only
+the absolute `0.990` floor applies on this first build. On any LATER v2
+rebuild (a re-bake following a census/date-table/crosswalk refresh, a
+reband, or any other bake re-run), gate 9 performs BOTH checks: the absolute
+`0.990` floor (unchanged), AND a same-basis regression check — recompute
+`pair_coverage` identically and compare it against the PRIOR build's
+recorded `meta['v2_pair_coverage_baseline']`; the build HALTS if
+`pair_coverage < prior_baseline - PAIR_COVERAGE_REGRESSION_TOLERANCE`, where
+`PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` (a fixed, hardcoded half-point
+tolerance — small enough to catch a materially degraded date-join or a
+missing/short input source, large enough to absorb ordinary
+candidate-universe churn from a corpus/date-table refresh). On a PASSING
+later rebuild, the NEW `pair_coverage` REPLACES
+`meta['v2_pair_coverage_baseline']` for the NEXT rebuild's comparison — the
+baseline always tracks the most recently shipped build, never a fixed
+historical constant. This same-basis baseline is what a standalone absolute
+floor cannot provide on its own.
 
 **`discovery_routing_audit` — masking-safe, page-scoped, fully replayable
 table (Codex #5).** A new table in the shipped sidecar recording EVERY
@@ -892,21 +1015,38 @@ fixing the round-1 gate):** for EVERY `discovery_routing_audit` row:
   the SAME demotion (whether multiple audit rows for one evidence row, or
   multiple evidence rows for one audit row) is EXPECTED and VALID, never a
   failure — the invariant is "zero" that is forbidden, not "more than one".
-- **Target-set completeness — a NEW exhaustive check (Codex R5-HIGH fix,
-  IN ADDITION TO, not a replacement for, the "at least one counterpart"
-  reverse/forward match above).** The reverse/forward match above proves NO
+- **Target-set completeness — a NEW exhaustive check (Codex R5-HIGH fix, IN
+  ADDITION TO, not a replacement for, the "at least one counterpart"
+  reverse/forward match above; Codex R6-BLOCKER fix corrects the predicate to
+  a UNION across ALL demoting audit rows for `(G,P)`, replacing an impossible
+  per-audit-row equality).** The reverse/forward match above proves NO
   orphaned audit/evidence row exists at all; it does NOT by itself prove a
-  demotion was COMPLETE. This check closes that gap: for EVERY
-  `discovery_routing_audit` row with `decision='demoted'` naming canonical
-  group `G` on page `P` (with winning side `L` = whichever of `lo`/`hi` is
-  NOT `demoted_canonical_work_id`), the SET of `discovery_evidence` rows with
-  `routing_status='review_only' AND routing_reason='later_shared_text'` whose
-  canonicalized `work_id` equals `G` on page `P` MUST equal EXACTLY the
-  target set `T(G,P)` defined above (§4.3 "Demotion target-set") — every row
-  satisfying (i)-(iv) there is demoted (a qualifying row accidentally left
-  `shipped` is a HARD FAIL: partial mutation), and no row failing any of
-  (i)-(iv) is demoted (a non-overlapping or sub-floor row wrongly caught is a
-  HARD FAIL: over-mutation).
+  demotion was COMPLETE. This check closes that gap. For canonical group `G`
+  on page `P`, let `D(G,P)` = the (possibly multi-element) set of ALL
+  `discovery_routing_audit` rows with `decision='demoted'` naming `G` as
+  `demoted_canonical_work_id` on `P` — §4.3's pure-pairwise design explicitly
+  allows `G` to lose to MULTIPLE DISTINCT earlier co-claimants `L_1`, `L_2`,
+  ... on the SAME page (e.g. `G`'s footprint overlaps two different
+  opponents' footprints on non-identical spans, or a single span of `G`'s
+  overlaps two different opponents in a 3+-way cluster), so `|D(G,P)|` MAY be
+  greater than 1. For EVERY audit row `a ∈ D(G,P)` (with its own winning side
+  `L_a`), `T(G,P,L_a)` is the target set defined above (§4.3 "Demotion
+  target-set", including condition (v)), computed against THAT row's
+  specific `L_a`. The completeness predicate compares the SET of
+  `discovery_evidence` rows with `routing_status='review_only' AND
+  routing_reason='later_shared_text'` whose canonicalized `work_id` equals
+  `G` on page `P` against the UNION `T(G,P,L_1) ∪ T(G,P,L_2) ∪ ...` across
+  ALL of `G`'s demoting audit rows on `P` — NEVER against any SINGLE
+  `T(G,P,L_a)` in isolation (Codex R6-BLOCKER fix: a per-audit-row equality
+  check is IMPOSSIBLE to satisfy whenever `G` loses to 2+ co-claimants whose
+  individual target sets differ, since the physically-demoted set is
+  necessarily their union, never any one co-claimant's individual target
+  set). Every row in the union is demoted (a qualifying row accidentally left
+  `shipped` is a HARD FAIL: partial mutation), and no row outside the union
+  is demoted (a non-overlapping, sub-floor, or already-`review_only`-
+  before-D-17 row wrongly caught is a HARD FAIL: over-mutation). (When
+  `|D(G,P)|=1` — the common case — this reduces exactly to the original
+  single-target-set check.)
 - **Reband routing-reason clarification (Codex R4-HIGH fix — closes an
   undefined-value gap; Codex R5-MEDIUM fix removes a now-impossible branch):**
   the §4.5 FAIL-branch reband flips affected rows' `routing_status` to
@@ -962,7 +1102,11 @@ implementation phase).
   overwrites) a pre-existing Lever-1 `routing_reason` — this is a STRUCTURAL
   consequence of the corrected order-of-operations, not a runtime
   conflict-resolution rule (Codex #6: Lever-1-then-D-17 precedence is
-  guaranteed by sequencing, never by a tie-break function).
+  guaranteed by sequencing, never by a tie-break function); this is exactly,
+  and no more than, condition (v) of the demotion target-set `T(G,P,L)`
+  above (Codex R6-BLOCKER fix) — the two are the SAME rule, stated once as
+  an invariant and once as a target-set condition, never two independent or
+  potentially-conflicting rules.
 - Promotion PROHIBITED — D-17 only ever moves a row from `shipped` to
   `review_only`, never the reverse.
 - **`select_display_evidence` routing_status tier (Pitfall 2 — resolved as an
@@ -1261,29 +1405,43 @@ D-17 could be comparing against a work that was never going to ship anyway.
    EXPLICITLY (a dedicated error, never a 0/0 division) if `|U| = 0` (no
    candidate pairs at all — a likely upstream candidate-generation bug);
    otherwise it HALTS if `pair_coverage` (§4.3's exact `|R|/|U|` predicate
-   over the frozen candidate universe) is `< 0.990` — an ABSOLUTE,
-   standalone production floor for the v2 build's OWN population, NOT a
-   same-basis regression check against the audited 99.8061% pair-level
-   baseline (that number was computed over a LOOSER, non-span-overlap-gated
-   population and is not proportionally comparable to the v2 build's
-   stricter `|U|`); NOT the 99.9% corpus-wide all-works figure either, a
-   third, different denominator used only to justify DELTA's citation.
+   over the frozen candidate universe, `R` INCLUDING `kept_invalid_reference`
+   alongside `demoted`/`kept_tie` — Codex R6-HIGH fix, §4.3) is `< 0.990` —
+   an ABSOLUTE, standalone production floor for the v2 build's OWN
+   population, NOT a same-basis regression check against the audited
+   99.8061% pair-level baseline (that number was computed over a LOOSER,
+   non-span-overlap-gated population and is not proportionally comparable
+   to the v2 build's stricter `|U|`); NOT the 99.9% corpus-wide all-works
+   figure either, a third, different denominator used only to justify
+   DELTA's citation. **ADDITIONALLY, a same-basis regression check (Codex
+   R6-HIGH fix, §4.3 "Same-basis regression baseline"), distinct from the
+   absolute floor above:** on any rebuild AFTER the first v2 build, the gate
+   ALSO HALTS if `pair_coverage` has declined by more than
+   `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` from the PRIOR build's
+   recorded `meta['v2_pair_coverage_baseline']`; the FIRST v2 build instead
+   RECORDS its own `pair_coverage` as this baseline (no regression check is
+   possible on the first build); a passing later rebuild's `pair_coverage`
+   becomes the new baseline for the NEXT rebuild.
 10. **Routing-audit replayability check** — the full EXHAUSTIVE predicate
     defined inline in §4.3 (over `canonical_work_id_lo`/`_hi`, `year_lo`/
     `year_hi`, exact `delta` recomputation, population equality against the
     RECONSTRUCTED PRE-D-17-ELIGIBLE candidate universe — `shipped` UNION
     `review_only`-with-`routing_reason='later_shared_text'`, never the
-    naively-current `shipped` set alone — and the reverse match against every
-    `routing_reason='later_shared_text'` evidence row) — summarized here:
-    every `discovery_routing_audit` row is individually reconstructable per
-    its `decision`, the audit population exactly equals the recomputed
-    pre-D-17-eligible candidate universe (no extra, no missing rows), and
-    every demotion is matched AT LEAST ONCE in BOTH directions
-    (audit→evidence AND evidence→audit are both many-to-many, not 1:1 — a
-    demoted canonical group with 2+ raw witnessing members on one page, or a
-    row demoted by 2+ earlier co-claimants in a 3+-way cluster, are both
-    expected, not failures; only a ZERO-count match in either direction is a
-    HARD FAIL).
+    naively-current `shipped` set alone — the reverse match against every
+    `routing_reason='later_shared_text'` evidence row, AND the target-set
+    completeness check) — summarized here: every `discovery_routing_audit`
+    row is individually reconstructable per its `decision`, the audit
+    population exactly equals the recomputed pre-D-17-eligible candidate
+    universe (no extra, no missing rows), every demotion is matched AT LEAST
+    ONCE in BOTH directions (audit→evidence AND evidence→audit are both
+    many-to-many, not 1:1 — a demoted canonical group with 2+ raw witnessing
+    members on one page, or a row demoted by 2+ earlier co-claimants in a
+    3+-way cluster, are both expected, not failures; only a ZERO-count match
+    in either direction is a HARD FAIL), and for every canonical group/page
+    pair the physically-demoted `later_shared_text` set equals EXACTLY the
+    UNION of target sets across ALL of that pair's demoting audit rows —
+    never a single audit row's target set checked in isolation (Codex
+    R6-BLOCKER fix, §4.3 "Target-set completeness").
 11. **Frozen-input-hash provenance** — `--canonical-merges`,
     `--composition-dates`, `--seftja-dates`, and
     `discovery_data/crosswalk.json` SHA-256 hashes recorded in `meta` AND the
