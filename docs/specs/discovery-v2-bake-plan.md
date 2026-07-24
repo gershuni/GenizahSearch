@@ -63,10 +63,27 @@ defects the owner found in the v1 build (2026-07-23):
 - **Production deploy (134-08 Task 3)** — deploy the FINAL v2 sidecar ONCE, as
   a Phase 135 prerequisite. Do not deploy v1 then re-deploy v2.
 
-**The spine is unchanged.** v2 runs through the SAME pipeline, schema, loader,
-service, and masking guard as v1. This is a data refresh, not an architecture
-change — which is why it does not re-open the Phase 134 spine deliverables
-(see §9).
+**The spine is unchanged; the schema gets an ADDITIVE, explicitly-declared
+amendment (Codex R3-HIGH — "spine unchanged" does not mean "zero DDL
+change").** v2 runs through the SAME pipeline, loader, service, and masking
+guard as v1 — the CORE two-table claim model (`works` / `discovery_claim` /
+`discovery_evidence`, §1 of `discovery-sidecar-schema-v1.md`) is untouched.
+This bake plan DOES require two additive, backward-compatible schema
+changes, both landing as a NEW dated amendment section in
+`discovery-sidecar-schema-v1.md` (§11, alongside the `routing_reason` enum
+amendment, §5): (1) the NEW `discovery_routing_audit` table (§4.3); (2) a
+NEW `band_precision.measurement_status` column (closed vocabulary
+`{not_measured, measured_pass, measured_fail, insufficient_evidence}`,
+required by gates 12/13 — flagged as a needed-but-not-yet-frozen column by
+the 135-03 plan's own SUMMARY). Both are ADDITIVE (a new table, a new
+nullable-defaulted column) — an OLD v1 asset remains structurally readable
+by OLD code unchanged; the v2 loader/service degrades gracefully
+(`measurement_status`/`discovery_routing_audit` absent ⇒ treated as a v1
+asset, mirroring the existing `_index_has_field`-style compat-gate
+convention elsewhere in the codebase) rather than crashing. "The spine is
+unchanged" refers to the CORE claim-model architecture and pipeline shape —
+not a literal zero-DDL-change claim, which this section makes explicit
+rather than leaving implicit.
 
 ---
 
@@ -387,22 +404,16 @@ dedup key, or the no-cap/no-formulaic-filter choices is a NEW versioned frame
 (`discovery-v2.1` or later), never a silent in-place edit to an
 already-shipped v2 frame.
 
-**Reband/D-17 interaction (Codex R2-HIGH — read together with §4.5 and §6).**
-The numbered §6 order-of-operations describes the FIRST v2 build (no
-`--precision-spec` reband yet triggered). Whenever a LATER rebuild is
-invoked WITH a `--precision-spec` that triggers the §4.5 FAIL-branch reband,
-that reband's `confidence_band`/`routing_status` reassignment for the
-affected `tier_a` rows is resolved and takes effect BEFORE D-17 (§6 step 5)
-runs in THAT SAME rebuild — i.e. on a reband-triggering rebuild, the
-candidate universe D-17 operates over (the "currently-shipped" population
-above) is computed AFTER the reband has already removed the affected rows
-from `shipped`, never before. This guarantees D-17 can never treat a
-row that this SAME build is about to hide as the surviving (kept) side of a
-pairwise comparison — a page can never end up with BOTH its D-17-kept
-co-claimant AND its only alternative hidden. §6's numbered list names
-"tier-A assignment" as step 6 for the FIRST build (where no reband exists
-yet to interact with); a reband-triggering rebuild is a distinct, later
-invocation where this note governs the effective ordering instead.
+**Reband/D-17 interaction — see §6 for the single unified sequence (Codex
+R2-HIGH, tightened at R3).** §6 defines ONE numbered order-of-operations
+valid for BOTH the first v2 build and any later reband-triggering rebuild:
+a pre-flight step 0 resolves an optional `--precision-spec` BEFORE the
+pipeline runs; D-17 (step 5) CONSULTS that resolution when building its
+currently-shipped candidate population (so a row already condemned to the
+§4.5 reband is excluded from D-17's population even though the reband's
+DB write happens later, at step 6); this guarantees a page can never end up
+with BOTH its D-17-kept co-claimant AND its only alternative hidden by the
+SAME build.
 
 **`DELTA=100y` — hardcoded, cited.** Per
 `same_work_spike/probe/rsource/results/chrono_date_coverage.md` (the
@@ -421,8 +432,10 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
   exact schema:** a JSON object mapping a RAW source-side work id (e.g. a
   Sefaria/JA reference id — masking-sensitive; joined to a `w000xxx` via
   `discovery_data/crosswalk.json` at build time, NOT itself an opaque product
-  id; validated ONLY by successful crosswalk resolution, §7 D-16(c) — no
-  separate raw-id namespace/regex is imposed here) to an object carrying
+  id; validated via the SAME fixed namespace-prefix-family check PLUS
+  crosswalk resolution defined once in §7 D-16(c) — this is the ONE
+  raw-id validation mechanism used by every input in this document, never a
+  separate or contradictory rule) to an object carrying
   EXACTLY the two keys `year` and `basis`, nothing more and nothing less. The
   parser REJECTS: a missing `year` key; a `year` value that is not a JSON
   integer (a numeric string, float, or null is rejected — `basis` and `year`
@@ -447,9 +460,10 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
   decoration that does NOT change how a lone year token is read; MAY be an
   empty list, but the key itself is REQUIRED), and `dates` (a JSON object
   mapping a raw M-source work id — masking-sensitive; joined to `w000xxx`
-  via crosswalk, same crosswalk-only validation as §above — to a single
-  composition-date STRING value). The parser REJECTS: any file missing one
-  of these four keys; `century_designators`/`range_designators` empty or
+  via the SAME namespace-prefix-family check PLUS crosswalk resolution
+  defined once in §7 D-16(c) — to a single composition-date STRING value).
+  The parser REJECTS: any file missing one of these four keys;
+  `century_designators`/`range_designators` empty or
   containing a non-string/empty-string element; `era_qualifiers` containing
   a non-string element (empty list IS valid); `dates` not an object, or any
   `dates` value that is not a JSON string (a number, null, object, list, or
@@ -461,31 +475,52 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
   validated against the owner table" ambiguity from the previous draft is
   eliminated: there is no separate, unpinned owner table; the vocabulary IS
   the pinned file.
-  **FROZEN normalizer contract — designator-driven, not raw integer-counting
-  (Codex R2-BLOCKER fix — removes the prior 3–4-digit vs 1–2-digit token
-  ambiguity):** after stripping leading/trailing whitespace from a `dates`
-  value, the normalizer first tests which designator LIST (if any) the
-  string matches (a substring match against `century_designators`, then
-  `range_designators` — checked in that fixed order; a string matching
-  entries from BOTH lists is UNPARSEABLE, an ambiguous mix):
-  1. **Century form** (string matches a `century_designators` entry) — the
-     normalizer extracts EXACTLY ONE integer token from the string,
-     interpreted as the century ORDINAL `N` (a plausible ordinal in `[1,16]`
-     for the composition window below; an ordinal outside `[1,16]`, or zero
-     / more-than-one integer tokens present, is UNPARSEABLE) → normalized
-     year = the century MIDPOINT `100*(N-1)+50` (e.g. ordinal 10 → 950).
+  **FROZEN normalizer contract — designator-driven AND FULLY ANCHORED (Codex
+  R2-BLOCKER fix for the token-count ambiguity + Codex R3-HIGH fix for
+  unanchored residual text):** after stripping leading/trailing whitespace
+  from a `dates` value, the normalizer first tests which designator LIST (if
+  any) the string matches (a substring match against `century_designators`,
+  then `range_designators` — checked in that fixed order; a string matching
+  entries from BOTH lists is UNPARSEABLE, an ambiguous mix). In EVERY
+  category below, the check is FULLY ANCHORED, not merely "contains": after
+  (a) removing exactly one matched designator substring (century or range,
+  if applicable), (b) removing every matched `era_qualifiers` substring
+  (allowed as decoration in ALL three categories), and (c) removing
+  whitespace and characters from a FIXED allowed punctuation set (comma,
+  period, parentheses, and — for the range category only — the separating
+  hyphen/dash between the two year tokens), the ENTIRE REMAINDER of the
+  string MUST consist of EXACTLY the required digit token(s) for that
+  category and NOTHING ELSE. Any leftover character or word NOT accounted
+  for by a designator, an era_qualifier, or the fixed punctuation set makes
+  the WHOLE value UNPARSEABLE — an unrecognized semantic label merely
+  co-occurring with a valid-looking year token is REJECTED, never silently
+  treated as harmless decoration (Codex R3-HIGH: closes the "arbitrary
+  descriptive text containing one year" fabrication risk).
+  1. **Century form** (string matches a `century_designators` entry) — after
+     the anchoring strip above, the remainder MUST be EXACTLY ONE integer
+     token, interpreted as the century ORDINAL `N` (a plausible ordinal in
+     `[1,16]` for the composition window below; an ordinal outside `[1,16]`,
+     zero tokens, more-than-one token, or ANY non-punctuation residual
+     character is UNPARSEABLE) → normalized year = the century MIDPOINT
+     `100*(N-1)+50` (e.g. ordinal 10 → 950).
   2. **Bounded year range** (string matches a `range_designators` entry, and
-     did NOT already match `century_designators`) — the normalizer extracts
-     EXACTLY TWO integer tokens `earliest`, `latest` in textual order (each
-     a plausible 3–4 digit year; zero, one, or more-than-two integer tokens
-     is UNPARSEABLE) → normalized year = the MIDPOINT
-     `floor((earliest+latest)/2)`, REJECTED if `earliest >= latest`.
+     did NOT already match `century_designators`) — after the anchoring
+     strip, the remainder MUST be EXACTLY TWO integer tokens `earliest`,
+     `latest` (each a plausible 3–4 digit year) separated ONLY by the fixed
+     range-separator punctuation (no other residual text between or around
+     them) in that textual order; zero, one, or more-than-two integer
+     tokens, or ANY unaccounted residual character, is UNPARSEABLE →
+     normalized year = the MIDPOINT `floor((earliest+latest)/2)`, REJECTED
+     if `earliest >= latest`.
   3. **Explicit single year** (string matches NEITHER `century_designators`
-     NOR `range_designators` — `era_qualifiers` entries, if present, are
-     decoration that does not change this classification) — the normalizer
-     extracts EXACTLY ONE integer token (a plausible 3–4 digit year; zero or
-     more-than-one integer tokens is UNPARSEABLE) → that integer is the
-     normalized year directly (no arithmetic).
+     NOR `range_designators`) — after removing only whitespace, fixed
+     punctuation, and any matched `era_qualifiers` substrings (no century/
+     range designator applies here by definition), the remainder MUST be
+     EXACTLY ONE integer token (a plausible 3–4 digit year); zero tokens,
+     more-than-one token, or ANY unaccounted residual character/word
+     (including an unrecognized qualifier NOT present in `era_qualifiers`)
+     is UNPARSEABLE → that integer is the normalized year directly (no
+     arithmetic).
 
   The normalized integer year MUST satisfy the EXACT inclusive bound
   `500 <= year <= 1600` (a normalized value of 499 or 1601 is OUT OF RANGE,
@@ -515,8 +550,15 @@ canonical_work_id_lo, canonical_work_id_hi)` — every row of
 `discovery_routing_audit`, §below, IS exactly one element of `U`, by
 construction; `|U|` = `COUNT(*)` of that table). Let `R` = the subset of `U`
 where BOTH sides resolve a composition year (`decision IN ('demoted',
-'kept_tie')`, i.e. NOT `fail_safe_unknown_date`). `pair_coverage = |R| / |U|`.
-This is the SAME kind of metric the delivered audit computed under its
+'kept_tie')`, i.e. NOT `fail_safe_unknown_date`). **Zero-candidate case
+(Codex R3-MEDIUM):** if `|U| = 0` (no candidate pairs exist at all), the
+build HARD-FAILS EXPLICITLY with a dedicated error — `pair_coverage` is
+NEVER computed as a 0/0 division, and an empty universe is NEVER silently
+treated as 100% (trivially "fully covered") or skipped; `|U| = 0` almost
+certainly indicates a broken candidate-generation step upstream (§4.3), not
+a legitimately clean corpus, and must be surfaced as a hard build error
+distinct from the `pair_coverage < 0.990` HALT. Otherwise, `pair_coverage =
+|R| / |U|`. This is the SAME kind of metric the delivered audit computed under its
 looser page-co-occurrence approximation (10,837 pairs at `MIN_ML=200`, 21
 unknown-date pairs = 99.8061% pair coverage — the pair-level number, NOT the
 99.9% corpus-wide all-works number quoted above for DELTA's own citation;
@@ -574,20 +616,42 @@ fixing the round-1 gate):** for EVERY `discovery_routing_audit` row:
   NULL;
 - `decision='fail_safe_unknown_date'` REQUIRES: `year_lo IS NULL OR year_hi
   IS NULL`, `delta IS NULL`, and `demoted_canonical_work_id IS NULL`;
-- **Population equality:** the SET of `(page_id, canonical_work_id_lo,
+- **Population equality — defined over the RECONSTRUCTED PRE-D-17 population
+  (Codex R3-BLOCKER fix, not the naively-current `shipped` set):** because
+  D-17 itself changes some rows FROM `shipped` TO `review_only`, the
+  candidate universe `U` cannot be recomputed from the CURRENT
+  `routing_status='shipped'` rows alone (every successful demotion would
+  vanish from that recomputation). Instead, define **pre-D-17-eligible** as:
+  a `discovery_evidence` row that is EITHER currently `routing_status=
+  'shipped'` OR currently `routing_status='review_only' AND
+  routing_reason='later_shared_text'` (the `low_coverage` / `co_citation`
+  / reband-caused `measured_below_floor` review_only reasons, §4.4/§4.5, are
+  EXCLUDED from this reconstruction — those rows were ALREADY not
+  pre-D-17-shipped, so D-17 never considered them in the first place; only
+  `later_shared_text` is D-17's OWN output and therefore belongs in the
+  pre-D-17 reconstruction). The SET of `(page_id, canonical_work_id_lo,
   canonical_work_id_hi)` triples in `discovery_routing_audit` EQUALS the
-  frozen candidate-universe `U` recomputed independently from the shipped
-  `discovery_evidence` rows (span-overlap + 200-letter floor, §4.3) — no
-  audit row without a corresponding real candidate pair, and no real
-  candidate pair without an audit row;
-- **Reverse match:** every `discovery_evidence` row carrying
-  `routing_reason='later_shared_text'` corresponds to EXACTLY ONE
-  `discovery_routing_audit` row with `decision='demoted'` whose
-  `demoted_canonical_work_id` equals that evidence row's (canonicalized)
-  `work_id`, on the SAME `page_id` — and conversely, every `decision=
-  'demoted'` audit row has a matching `later_shared_text` evidence row. A
-  demotion recorded in one table without its counterpart in the other is a
-  HARD FAIL.
+  frozen candidate-universe `U` recomputed over this PRE-D-17-ELIGIBLE
+  population (span-overlap + 200-letter floor, §4.3) — no audit row without
+  a corresponding real candidate pair, and no real candidate pair without an
+  audit row.
+- **Reverse match — MANY-TO-ONE, not 1:1 (Codex R3-BLOCKER fix):** a single
+  demoted evidence row can lose to MULTIPLE earlier co-claimants when 3+
+  canonical groups co-claim the same page (the pure-pairwise design, §4.3,
+  independently evaluates every qualifying pair) — so the evidence-row side
+  of the reverse match is AT LEAST ONE, not exactly one:
+  - **Forward (audit → evidence, 1:1):** every `discovery_routing_audit` row
+    with `decision='demoted'` has EXACTLY ONE matching `discovery_evidence`
+    row (same `page_id`, `work_id` canonicalizing to
+    `demoted_canonical_work_id`) carrying `routing_reason='later_shared_text'`.
+  - **Reverse (evidence → audit, many-to-one):** every `discovery_evidence`
+    row carrying `routing_reason='later_shared_text'` has AT LEAST ONE
+    corresponding `discovery_routing_audit` row with `decision='demoted'`
+    naming it as `demoted_canonical_work_id` on the same `page_id` — it MAY
+    have more than one (one per earlier co-claimant it lost to).
+  A demotion recorded in one table with ZERO counterparts in the other
+  (in either direction) is a HARD FAIL; MULTIPLE audit rows explaining the
+  SAME demoted evidence row is EXPECTED and VALID, not a failure.
 
 **Provenance recorded in `meta` + frame:** the verified `--composition-dates`,
 `--seftja-dates`, and `discovery_data/crosswalk.json` SHA-256 hashes (Codex
@@ -636,12 +700,17 @@ implementation phase).
   bake. `matched_letters` is populated on 254,729 evidence rows; the
   denominator is the normalized source page text; verify the computed value
   against the stored `density` column.
-- Routing: `cov ≥ 0.45 → routing_status='shipped'`; `cov < 0.45 →
-  routing_status='review_only'` (recoverable — the claim is retained, just
-  not surfaced). Cliff is at 0.45 (validated: page-level catalogue-blind deck,
-  `track1_pagelevel_manifest.json` — high 94.0% / med 91.7% / low 37.5%; 0.50
-  reference point 94.3%, one-sided 95% LB 90.1%; see
-  `docs/specs/discovery-band-labels-v1.md` §3.1).
+- Routing: `cov ≥ 0.45 → routing_status='shipped', routing_reason='none'`;
+  `cov < 0.45 → routing_status='review_only', routing_reason='low_coverage'`
+  (recoverable — the claim is retained, just not surfaced). `low_coverage`
+  is a NEW `routing_reason` enum value (Codex R3-BLOCKER — see the enum
+  amendment note under §4.3's `discovery_routing_audit` gate: WITHOUT a
+  distinguishing reason, a `review_only` row's cause — Lever-1 vs D-17 vs
+  the §4.5 reband — cannot be reconstructed from the shipped asset alone,
+  which is exactly what breaks gate 10's replayability). Cliff is at 0.45
+  (validated: page-level catalogue-blind deck, `track1_pagelevel_manifest.json`
+  — high 94.0% / med 91.7% / low 37.5%; 0.50 reference point 94.3%, one-sided
+  95% LB 90.1%; see `docs/specs/discovery-band-labels-v1.md` §3.1).
 - **INVARIANT (never route on catalogue):** coverage routing uses ONLY the
   coverage metric. Catalogue mismatch (52%, coverage-confounded) NEVER
   demotes a claim.
@@ -683,27 +752,36 @@ reband/invalidation described below.
   canon-caveat `screening_canon`.
 - AND flips affected rows' `routing_status` to `review_only` (drop from
   default).
-- AND, in the SAME transaction, ATOMICALLY INVALIDATES the target
-  `screening_rb` `band_precision` row: `measurement_status='not_measured'` +
-  NULL `precision`/`ci_low`/`ci_high`/`numerator`/`denominator` — because the
-  rebanded rows CHANGE the `screening_rb` population, so its legacy
-  pre-registered number (0.859, measured on the ORIGINAL screening
-  population) is no longer a valid estimate for the new, larger population.
-  DO NOT fabricate a combined number (Codex #B2).
-- **Source-band (`tier_a`) precision disposition (Codex R2-HIGH — completing
-  the invalidation scope):** because the reband empties `confidence_band=
-  'tier_a'` entirely (zero rows remain — the verifier asserts this: `SELECT
-  COUNT(*) FROM discovery_evidence WHERE confidence_band='tier_a'` MUST be 0
-  whenever `meta.tier_a_reband_target` is set), `tier_a`'s OWN
-  `band_precision` row is PRESERVED, NOT nulled — it is the historical
-  record of the CERT-01 `measured_fail` measurement that TRIGGERED this
-  reband, correctly describing the (now-emptied) population as it existed at
-  measurement time. Only the TARGET band's (`screening_rb`) PRE-EXISTING,
-  unrelated legacy measurement is invalidated (above) — the triggering
-  `tier_a` measurement itself is retained as provenance, never deleted or
-  nulled.
+- AND, in the SAME transaction, ATOMICALLY INVALIDATES the CURRENT
+  `band_precision` row for BOTH bands whose population just changed — TARGET
+  `screening_rb` AND SOURCE `tier_a` (Codex R3-HIGH: invalidating only the
+  target and silently preserving the source's now-stale-population number in
+  the LIVE `band_precision` table was itself a B2 violation — `tier_a`'s row
+  described a population that changed the instant the reband applied, exactly
+  like `screening_rb`'s did). BOTH rows get
+  `measurement_status='not_measured'` + NULL
+  `precision`/`ci_low`/`ci_high`/`numerator`/`denominator` in the SAME
+  transaction — `screening_rb`'s legacy pre-registered number (0.859,
+  measured on the ORIGINAL screening population) is no longer valid for its
+  new, larger population; `tier_a`'s number is no longer valid for a NOW-EMPTY
+  population (zero rows remain — the verifier asserts `SELECT COUNT(*) FROM
+  discovery_evidence WHERE confidence_band='tier_a'` = 0 whenever
+  `meta.tier_a_reband_target` is set). DO NOT fabricate a combined number for
+  either band (Codex #B2).
+- **The triggering measurement is preserved SEPARATELY, in `meta`, never in
+  the LIVE `band_precision` table (Codex R3-HIGH fix):** the actual
+  CERT-01 `measured_fail` numbers that TRIGGERED this reband (the precision/
+  `ci_low`/`ci_high`/numerator/denominator the `--precision-spec` supplied)
+  are recorded as historical provenance under DEDICATED `meta` keys —
+  `tier_a_reband_trigger_precision`, `_ci_low`, `_ci_high`, `_numerator`,
+  `_denominator` — and in the v2 frame doc, NOT as the live `tier_a`
+  `band_precision` row (which, per the bullet above, is nulled like every
+  other invalidated row). This keeps `band_precision` a table of ONLY
+  currently-valid numbers (no exceptions), while the measurement that caused
+  the reband remains fully auditable via `meta` + the frame doc.
 - AND writes a `meta` marker (`tier_a_reband_target='screening_rb'` + a
-  rebanded-row count) the verifier keys on.
+  rebanded-row count) the verifier keys on, ALONGSIDE the trigger-provenance
+  keys above.
 - **This is NOT a `band_precision`-only relabel, NOR a bare in-place `UPDATE
   discovery_evidence SET confidence_band=...`.** Because `confidence_band` is
   part of the FROZEN §2 `evidence_id` tuple (`discovery-sidecar-schema-v1.md`
@@ -762,23 +840,34 @@ emit its enum rename in lockstep across the 7 files listed in that doc's §5:
 - Bilingual EN/HE band labels per that doc's §2; estimated band precision
   `[CI]` presentation per §3, never per-item.
 
-**Eighth lockstep item — the `routing_reason` `later_shared_text` amendment
-(Pitfall 1).** The D-17 rule (§4.3) tags evidence `routing_reason=
-'later_shared_text'`, but the FROZEN `routing_reason` enum in
+**Eighth lockstep item — the `routing_reason` amendment, TWO new values
+(Pitfall 1 + Codex R3-BLOCKER).** The D-17 rule (§4.3) tags evidence
+`routing_reason='later_shared_text'`, and Lever-1 (§4.4) tags its own
+demotions `routing_reason='low_coverage'` — a SECOND new value, discovered
+as necessary during the Codex R3 adversarial round: without it, a
+`review_only` row's cause (Lever-1 vs D-17) cannot be reconstructed from the
+shipped asset alone, which is exactly what gate 10's replayability requires
+(§4.3). The FROZEN `routing_reason` enum in
 `docs/specs/discovery-sidecar-schema-v1.md` / `scripts/discovery_ids.py` /
 the `discovery_evidence` DDL `CHECK` constraint is currently `{impurity,
-runner_up_conflict, co_citation, none}` — no fifth value exists yet. This
-lands as an EIGHTH lockstep change, alongside (not instead of) the 7-file
-rename above, in the SAME bake/commit:
+runner_up_conflict, co_citation, none}` — neither new value exists yet. Both
+land as ONE EIGHTH lockstep change (adding two sibling enum values in the
+SAME amendment), alongside (not instead of) the 7-file rename above, in the
+SAME bake/commit:
 - `scripts/discovery_ids.py` — add `ROUTING_REASON_LATER_SHARED_TEXT =
-  "later_shared_text"` to `ROUTING_REASONS`.
-- `scripts/build_discovery_sidecar.py` — add `'later_shared_text'` to the
-  `discovery_evidence.routing_reason` CHECK constraint DDL.
+  "later_shared_text"` AND `ROUTING_REASON_LOW_COVERAGE = "low_coverage"` to
+  `ROUTING_REASONS`.
+- `scripts/build_discovery_sidecar.py` — add `'later_shared_text'` AND
+  `'low_coverage'` to the `discovery_evidence.routing_reason` CHECK
+  constraint DDL.
 - `scripts/verify_discovery_sidecar.py` — extend the enum-invariant
-  validators.
+  validators for BOTH new values.
 - `docs/specs/discovery-sidecar-schema-v1.md` — a NEW dated amendment section
-  (never a silent edit to the frozen block), adding `later_shared_text` to
-  the Frozen Enum Vocabularies.
+  (never a silent edit to the frozen block), adding BOTH `later_shared_text`
+  and `low_coverage` to the Frozen Enum Vocabularies, AND separately adding
+  the NEW `discovery_routing_audit` table definition and the NEW
+  `band_precision.measurement_status` column (§1's schema-amendment note) in
+  the SAME dated section.
 
 **Asset/bake-level atomicity (Codex #8).** `discovery-band-labels-v1.md` §5
 gains its own dated amendment in plan 135-05 clarifying that the "one
@@ -792,24 +881,59 @@ plans/tasks, as long as no v2 bake ever runs with a partial rename applied.
 
 ---
 
-## 6. Order of operations (corrected — D-17 AFTER Lever-1, not before)
+## 6. Order of operations (corrected — D-17 AFTER Lever-1, not before) — ONE unified sequence for both the initial build and a reband-triggering rebuild (Codex R3-HIGH fix)
+
+**Step 0 — precision-spec resolution (pre-flight, no DB writes; a no-op for
+the FIRST build):** parse and validate an optional `--precision-spec`
+BEFORE step 1. If absent (the first v2 build) or present-but-not-triggering
+(e.g. `measurement_status='insufficient_evidence'`), resolution = "no
+override" and every step below runs exactly as originally banded. If it
+triggers the §4.5 FAIL-branch reband (`measurement_status='measured_fail'`),
+resolution DECIDES (in memory, at this pre-flight point) the FINAL set of
+rows that will end this build as `confidence_band='screening_rb',
+routing_status='review_only'` instead of their original `tier_a`/`shipped`
+state — this decision is CONSULTED (read-only) by step 5 below and
+MATERIALIZED (written to the DB) at step 6; it is decided ONCE, here, never
+re-derived mid-pipeline.
 
 1. Canonical / vgroup resolution (§4.1) + drop-list exclusion (§4.2).
-2. Span-paired claim generation.
+2. Span-paired claim generation (this is where each claim's initial
+   `confidence_band`, including `tier_a`, is populated from its source
+   population — e.g. `track1_matches WHERE shadowed_by IS NULL` for
+   `tier_a` — independently of any later reband).
 3. Distinctive / shared routing.
-4. **Lever-1 coverage routing** (§4.4 — `cov < 0.45 → review_only`).
-5. **D-17 chronological co-claim demotion** (§4.3 — over the now-shipped
-   population from step 4, grouped by `canonical_work_id`).
-6. Tier-A assignment.
+4. **Lever-1 coverage routing** (§4.4 — `cov < 0.45 → routing_status=
+   'review_only', routing_reason='low_coverage'`).
+5. **D-17 chronological co-claim demotion** (§4.3 — over the currently-
+   shipped population from step 4, grouped by `canonical_work_id`, PURE
+   PAIRWISE). CRITICALLY: D-17's "currently-shipped" population CONSULTS
+   step 0's resolution — any row step 0 already decided will end this build
+   rebanded to `screening_rb`/`review_only` is EXCLUDED from D-17's shipped
+   population here, even though step 6 has not yet physically written that
+   change to the row. This is how the reband's effect is guaranteed to
+   precede D-17 causally while `write` of the reband still happens later, at
+   step 6, in the SAME build transaction — D-17 never treats a row step 0
+   has already condemned as a valid "kept" side of a pairwise comparison.
+6. **Tier-A assignment (reband materialization point):** for the FIRST
+   build (step 0 resolved "no override"), this step is a no-op — `tier_a`
+   rows keep the band step 2 gave them. For a reband-triggering rebuild,
+   THIS is where step 0's decision is physically WRITTEN: the affected
+   rows' `confidence_band` becomes `screening_rb`, `routing_status` becomes
+   `review_only`, `evidence_id` regenerates over the new band (§4.5), and
+   `display_evidence_id` recomputes.
 7. Bake + verify + masking + manifest.
 
-This corrects the STALE plan's ordering (which placed relation-table
-population before Lever-1); `chronological_demotion_rule.md`'s own text is
-explicit: "Applied AFTER merges (unify same-work) and Lever-1 coverage
-routing, at bake time." A co-claim cluster's "kept" (earliest) work must
-already have survived coverage routing before chronology compares against
-it — otherwise the chronology step could be comparing against a work that
-was never going to ship anyway.
+This ONE sequence is valid for BOTH build types — there is no separate
+"exception note" for the reband case; step 0's read-only resolution +
+step 5's consultation of it + step 6's materialization is the single
+mechanism that keeps D-17 and the reband mutually consistent regardless of
+which build is running. This also corrects the STALE original plan's
+ordering (which placed relation-table population before Lever-1);
+`chronological_demotion_rule.md`'s own text is explicit: "Applied AFTER
+merges (unify same-work) and Lever-1 coverage routing, at bake time." A
+co-claim pair's earlier-dated side must already have survived coverage
+routing (and any reband) before chronology compares against it — otherwise
+D-17 could be comparing against a work that was never going to ship anyway.
 
 ---
 
@@ -835,9 +959,10 @@ was never going to ship anyway.
    new `frame_content_hash` + DB `content_hash`; update
    `discovery_data/manifest.json`.
 7. **`routing_reason` enum amendment landed in lockstep** (§5 eighth item) —
-   `later_shared_text` present in `scripts/discovery_ids.py`, the DDL CHECK
-   constraint, the verifier, and the dated schema amendment, all in the SAME
-   bake.
+   BOTH `later_shared_text` AND `low_coverage` present in
+   `scripts/discovery_ids.py`, the DDL CHECK constraint, the verifier, and
+   the dated schema amendment (which also adds `discovery_routing_audit` +
+   `band_precision.measurement_status`), all in the SAME bake.
 8. **Never-orphan-shipped verifier invariant — EXACT assertion:** for EVERY
    claim that owns at least one `discovery_evidence` row with
    `routing_status='shipped'`, that claim's `display_evidence_id` MUST
@@ -845,21 +970,28 @@ was never going to ship anyway.
    shipped evidence row can NEVER have `display_evidence_id` pointing at a
    `review_only` row (D-17 or Lever-1 demoted). Directly asserted per claim,
    not inferred from an absence of counterexamples.
-9. **Composition-date coverage gate** — the `--release` build HALTS if
-   `pair_coverage` (§4.3's exact `|R|/|U|` predicate over the frozen
-   candidate universe) is `< 0.990` (a fixed floor with headroom below the
-   audited 99.8061% pair-level baseline — NOT the 99.9% corpus-wide all-works
-   figure, a different denominator used only to justify DELTA's citation).
+9. **Composition-date coverage gate** — the `--release` build HALTS
+   EXPLICITLY (a dedicated error, never a 0/0 division) if `|U| = 0` (no
+   candidate pairs at all — a likely upstream candidate-generation bug);
+   otherwise it HALTS if `pair_coverage` (§4.3's exact `|R|/|U|` predicate
+   over the frozen candidate universe) is `< 0.990` (a fixed floor with
+   headroom below the audited 99.8061% pair-level baseline — NOT the 99.9%
+   corpus-wide all-works figure, a different denominator used only to
+   justify DELTA's citation).
 10. **Routing-audit replayability check** — the full EXHAUSTIVE predicate
     defined inline in §4.3 (over `canonical_work_id_lo`/`_hi`, `year_lo`/
     `year_hi`, exact `delta` recomputation, population equality against the
-    frozen candidate universe, and the two-way reverse match against every
+    RECONSTRUCTED PRE-D-17-ELIGIBLE candidate universe — `shipped` UNION
+    `review_only`-with-`routing_reason='later_shared_text'`, never the
+    naively-current `shipped` set alone — and the reverse match against every
     `routing_reason='later_shared_text'` evidence row) — summarized here:
     every `discovery_routing_audit` row is individually reconstructable per
     its `decision`, the audit population exactly equals the recomputed
-    candidate universe (no extra, no missing rows), and every demotion is
-    matched 1:1 in BOTH directions between the audit table and the evidence
-    rows it explains.
+    pre-D-17-eligible candidate universe (no extra, no missing rows), every
+    `decision='demoted'` audit row matches EXACTLY ONE evidence row
+    (audit→evidence, 1:1), and every `later_shared_text` evidence row matches
+    AT LEAST ONE audit row (evidence→audit, many-to-one — a row demoted by
+    2+ earlier co-claimants in a 3+-way cluster is expected, not a failure).
 11. **Frozen-input-hash provenance** — `--canonical-merges`,
     `--composition-dates`, `--seftja-dates`, and
     `discovery_data/crosswalk.json` SHA-256 hashes recorded in `meta` AND the
@@ -874,13 +1006,18 @@ was never going to ship anyway.
     `measurement_status='not_measured'` AND
     `measurement_status='insufficient_evidence'` MUST have ALL FIVE of those
     fields NULL (no partial intervals under any status — Codex #B3).
-13. **Reband-precision-invalidation** — when `meta` carries
-    `tier_a_reband_target='screening_rb'`, the target band's `band_precision`
-    row MUST have `measurement_status='not_measured'` AND ALL FIVE of
-    `precision`/`ci_low`/`ci_high`/`numerator`/`denominator` NULL (not
-    `precision` alone), AND `meta` MUST ALSO carry the paired rebanded-row
-    count key alongside `tier_a_reband_target` — the verifier asserts BOTH
-    the full five-field nulling AND the count key's presence (Codex #B2).
+13. **Reband-precision-invalidation — BOTH bands (Codex R3-HIGH, corrected
+    from a target-only check):** when `meta` carries
+    `tier_a_reband_target='screening_rb'`, BOTH the target `screening_rb` row
+    AND the source `tier_a` row in `band_precision` MUST have
+    `measurement_status='not_measured'` AND ALL FIVE of `precision`/`ci_low`/
+    `ci_high`/`numerator`/`denominator` NULL (not `precision` alone, and not
+    the target band alone); AND `meta` MUST carry the paired rebanded-row
+    count key alongside `tier_a_reband_target`, AND the
+    `tier_a_reband_trigger_*` provenance keys (precision/ci_low/ci_high/
+    numerator/denominator) recording the triggering measurement — the
+    verifier asserts the full five-field nulling on BOTH bands, the count
+    key's presence, AND the trigger-provenance keys' presence (Codex #B2).
 14. **Asset/bake-level no-mixed-enum atomicity** — the built v2 asset
     contains NO v1 enum literal `expert_verified` AND uses the v2 key
     `high_confidence_algorithmic` — ANY mixed v1/v2 state is a HARD FAIL
