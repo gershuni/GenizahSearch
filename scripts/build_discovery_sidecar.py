@@ -730,15 +730,47 @@ def apply_d17_demotion(
     year_by_canonical: Dict[str, Optional[int]], delta: int = D17_DELTA_YEARS,
     ml_floor: int = D17_MIN_ML, will_reband_tier_a: bool = False,
 ) -> List[Dict]:
-    """Demote materially-later SHIPPED co-claimants on a shared span, grouped
-    by `canonical_work_id` (Codex #4 -- a merged twin is never compared against
-    itself). Mutates the demoted specs in place (`routing_status=review_only`,
-    `routing_reason=later_shared_text`) and returns one masking-safe
-    `discovery_routing_audit` row dict per considered pair (opaque ids +
-    numeric years only). Population = currently-SHIPPED track1_direct witness
-    specs with `matched_letters >= ml_floor`, EXCLUDING rows a §4.5 reband will
-    condemn (`will_reband_tier_a` + `confidence_band==tier_a`, bake plan §6
-    step-0 consultation)."""
+    """Ordered-stateful, per-spec, earliest-first D-17 co-claim demotion (bake
+    plan §4.3; 135-07 cascade fix).
+
+    Groups the currently-SHIPPED track1_direct witness population by page ->
+    `canonical_work_id` (Codex #4 -- a merged twin is never compared against
+    itself) and processes each page's canonical groups EARLIEST-FIRST by
+    resolved year, mutating `routing_status` in place as it goes. A later work
+    W's spec `s` is demoted (`routing_status=review_only`,
+    `routing_reason=later_shared_text`) iff SOME earlier work `k` (with
+    `year[k] <= year[W] - delta`) has a CURRENTLY-SHIPPED spec whose span
+    overlaps `s`. Because processing is earliest-first, every candidate `k` was
+    fully processed before W, so k's shipped footprint is FINAL at the moment W
+    is evaluated:
+      * a FULLY-demoted k has an EMPTY shipped footprint -> it can never demote
+        (fixes the Codex three-work counterexample: w1 demotes w2; the demoted
+        w2 cannot then demote w3; w3 STAYS shipped);
+      * a PARTIALLY-demoted k's still-shipped specs REMAIN valid demoters on
+        their own spans -- a naive whole-group skip would wrongly leave some
+        later specs shipped (the multi-footprint test guards this).
+
+    Returns one masking-safe `discovery_routing_audit` row dict per considered
+    decision (opaque ids + numeric years only):
+      * every considered overlapping pair with an UNDATED member -> one
+        'fail_safe_unknown_date' row (kept_work_id = lower canonical id);
+      * every considered overlapping DATED pair WITHIN delta -> one 'kept_tie'
+        row -- both UNCHANGED from the prior pairwise pass;
+      * each ACTUAL demotion -> EXACTLY ONE 'demoted' row per demoted work,
+        attributed to its EARLIEST valid demoter (earliest year, then id).
+
+    DEFERRED to v2.1 (Option A, owner-ratified): a materially-later DATED pair
+    that does NOT demote because the earlier reference is itself INVALID (no
+    currently-shipped overlapping spec) emits NO audit row. The
+    `kept_invalid_reference` provenance is intentionally NOT modelled here (no
+    new `decision` enum value, no DDL change); its only effect is that those
+    (bounded, negligible) pairs are absent from the coverage U/R. The verifier
+    fail-closed cascade gate (commit 4a52641c) stays as the DB-level backstop.
+
+    Population = currently-SHIPPED track1_direct witness specs with
+    `matched_letters >= ml_floor`, EXCLUDING rows a §4.5 reband will condemn
+    (`will_reband_tier_a` + `confidence_band==tier_a`, bake plan §6 step-0
+    consultation)."""
     ccm = cross_corpus_map or {}
 
     def _canon(spec):
@@ -766,6 +798,11 @@ def apply_d17_demotion(
             for c, specs in groups.items()
         }
         canons = sorted(groups)
+
+        # (A) Pairwise fail_safe / kept_tie classification -- UNCHANGED pairwise
+        # semantics. Materially-later DATED pairs (abs(delta) >= `delta`) emit
+        # NO row here; the demotion decision AND its single 'demoted' row are
+        # produced by the ordered per-spec pass (B) below.
         for i in range(len(canons)):
             for j in range(i + 1, len(canons)):
                 lo, hi = canons[i], canons[j]
@@ -787,21 +824,43 @@ def apply_d17_demotion(
                         "kept_year": yr_lo, "demoted_year": yr_hi, "delta_years": d,
                         "decision": "kept_tie", "routing_reason": None,
                     })
-                    continue
-                # Materially-later -> demote the later-dated canonical group's
-                # specs that overlap the earlier (kept) footprint.
-                if yr_lo <= yr_hi:
-                    kept, demoted, kept_year, demoted_year = lo, hi, yr_lo, yr_hi
-                else:
-                    kept, demoted, kept_year, demoted_year = hi, lo, yr_hi, yr_lo
-                kept_fp = footprints[kept]
-                for s in groups[demoted]:
-                    if any(_spans_overlap(s["span_start"], s["span_end"], k0, k1) for (k0, k1) in kept_fp):
+                # else: materially-later DATED pair -> deferred to pass (B); if
+                # its earlier reference turns out to be invalid there, NO row is
+                # emitted (the v2.1-deferred kept_invalid_reference provenance).
+
+        # (B) Ordered-stateful, per-spec demotion. Process dated canonicals
+        # EARLIEST-FIRST (year, then id) so a spec demoted here can no longer
+        # act as a demoter for any later work evaluated afterwards.
+        dated = sorted(
+            (c for c in canons if year_by_canonical.get(c) is not None),
+            key=lambda c: (year_by_canonical[c], c),
+        )
+        for w_idx, W in enumerate(dated):
+            yW = year_by_canonical[W]
+            attributed: Optional[Tuple[int, str]] = None  # earliest (year, id)
+            for s in groups[W]:
+                for k in dated[:w_idx]:  # strictly-earlier works, earliest-first
+                    yk = year_by_canonical[k]
+                    if yk > yW - delta:  # not materially earlier -> not a demoter
+                        continue
+                    if any(
+                        ks["routing_status"] == _SHIPPED
+                        and _spans_overlap(s["span_start"], s["span_end"],
+                                           ks["span_start"], ks["span_end"])
+                        for ks in groups[k]
+                    ):
                         s["routing_status"] = _REVIEW_ONLY
                         s["routing_reason"] = _LATER_SHARED_TEXT
+                        cand = (yk, k)
+                        if attributed is None or cand < attributed:
+                            attributed = cand
+                        break  # spec demoted; attribute it to its earliest `k`
+            if attributed is not None:
+                kept_year, kept_id = attributed
                 audit_rows.append({
-                    "page_id": page_id, "kept_work_id": kept, "demoted_work_id": demoted,
-                    "kept_year": kept_year, "demoted_year": demoted_year, "delta_years": d,
+                    "page_id": page_id, "kept_work_id": kept_id, "demoted_work_id": W,
+                    "kept_year": kept_year, "demoted_year": yW,
+                    "delta_years": abs(yW - kept_year),
                     "decision": "demoted", "routing_reason": _LATER_SHARED_TEXT,
                 })
     return audit_rows
