@@ -191,16 +191,44 @@ routing runs BEFORE 4.3 D-17 chronological demotion).
   --canonical-merges-sha256 <hex>` (owner-held handoff, the machine-readable
   `v2_canonical_merges.json`; masking-sensitive — never committed).
 - **FROZEN exact-shape validating parser** (masking-safe, EXACT — not
-  "merely functional"): the file is a JSON object whose `merges` list
-  contains entries of the shape `{members: [w000xxx, ...], canonical:
-  w000xxx, owner_verdict: str}` (field names as implemented in the real
-  handoff: `members_w`/`canonical_w`/`owner_verdict`); ONLY entries with
-  `owner_verdict=='approve'` load. A top-level `dropped_by_135` list gives
-  the drop set (§4.2/§3). The parser REJECTS any merge entry missing the
-  members/canonical/verdict fields, any entry whose member/canonical values
-  are not `w000xxx`-shaped opaque ids, or any unexpected top-level shape.
-  NEVER a title, NEVER the restricted codename — the parser and this
-  document reference members only by their opaque `w000xxx` id.
+  "merely functional"): the file is a JSON object with EXACTLY these
+  top-level keys read by the build: `merges` (a list) and `dropped_by_135`
+  (a list); any OTHER top-level key present in the real handoff (`source`,
+  `canonical_priority`, `owner_ratified`, `ratified_at`, `relations_policy`,
+  `chronological_rule_examples`, `contested`,
+  `provisional_relations_measurement_only`, `residual_direct`, `notes`) is
+  present in the real file but IGNORED by the parser — reading `merges` and
+  `dropped_by_135` only, never any other key, is itself part of the frozen
+  contract (this is what keeps the 174 provisional / 8 residual / 1
+  contested entries out of the shipped v2 build, §2). Each entry in `merges`
+  is a JSON object with EXACTLY the field names `members_w` (a list of one
+  or more `w000xxx`-shaped opaque id strings), `canonical_w` (a single
+  `w000xxx`-shaped opaque id string), and `owner_verdict` (a string) — these
+  are the REAL field names as implemented in the delivered handoff, used
+  verbatim here (no renaming/abstraction layer). ONLY entries with
+  `owner_verdict=='approve'` load; any other `owner_verdict` value (e.g. the
+  single `contested_drop_w001239` entry) is SKIPPED by this parser (that
+  entry is handled entirely by the separate `dropped_by_135` exclusion,
+  §4.2/§3, never by the merge loader). `dropped_by_135` is a list of
+  `w000xxx`-shaped opaque id strings. The parser REJECTS: any `merges` entry
+  missing `members_w`, `canonical_w`, or `owner_verdict`; any entry whose
+  `members_w`/`canonical_w` values are not `w000xxx`-shaped strings
+  (regex `^w\d{6}$`); a `dropped_by_135` entry that is not `w000xxx`-shaped;
+  or a top-level JSON value that is not an object. NEVER a title, NEVER the
+  restricted codename — the parser and this document reference members only
+  by their opaque `w000xxx` id.
+- **Semantic-ratification assertion (defense-in-depth, MEDIUM):** structural
+  validity + a matching SHA-256 pin is not sufficient on its own to prove
+  the PINNED file is the intended census — an operator could hash-pin a
+  structurally-valid but wrong census revision. The build additionally
+  asserts, after parsing: exactly 16 entries carry `owner_verdict=='approve'`;
+  `dropped_by_135` equals exactly `{w001239}`; and the entry whose
+  `members_w` contains `w000452` and `w001239` has `canonical_w=='w000452'`
+  (the D-14 flip — the one merge whose canonical rep is NOT its Sefaria
+  member). A file that passes SHA-256 + structural validation but fails any
+  of these three semantic counts is REJECTED (`--release` HALTS) — this is
+  the build's own defense against a correctly-hashed but substantively wrong
+  census file.
 - **Transitivity guard:** reject a census where a work appears as a member of
   more than one merge group (a chained collapse is a hard build error, not a
   best-effort union).
@@ -247,13 +275,86 @@ sequencing fix for RESEARCH.md Pitfall 3).
 **The rule** (per `same_work_spike/probe/rsource/results/chronological_demotion_rule.md`,
 gitignored bake spec): for a page P, consider all works with a Track-1 claim
 whose matched span on P overlaps another work's span (a co-claim cluster on
-shared text), GROUPED BY `canonical_work_id` (Codex #4). Order the cluster by
-composition year (earliest first). The earliest work with a RELIABLE date
-keeps its rank; every other work in the cluster whose year is `>= DELTA`
-years later is demoted on that shared span (`routing_status='review_only'`,
-`routing_reason='later_shared_text'`). It NEVER names a relation (embed /
-abridge / quote) — only demotes. Works within `DELTA` of each other are a
-tie: NONE demoted. A work with no reliable date is NEVER demoted (fail-safe).
+shared text — the candidate-universe definition below), GROUPED BY
+`canonical_work_id` (Codex #4) — i.e. the cluster is built over DISTINCT
+`canonical_work_id` values present on P, so two claims that collapse to the
+SAME canonical group never compete against each other at all (they are one
+entity for D-17 purposes).
+
+**Deterministic year resolution per canonical group.** A canonical group's
+year is resolved ONCE, not per raw member: primarily from the date table
+entry keyed to the canonical representative's OWN raw work id (via
+crosswalk); if the representative's own raw id has no resolved date, fall
+back to the MINIMUM resolved year among the group's OTHER (merged) member
+raw ids. If NO member of the group has a resolved date, the group's year is
+UNKNOWN. This single resolved year is used for every claim under that
+`canonical_work_id`, so conflicting per-member raw dates are a
+resolution-ORDER rule (representative first, else earliest sibling), never
+an ambiguity — there is exactly one year per canonical group by
+construction.
+
+**Deterministic single-anchor comparison (not pairwise-among-all-members).**
+Within a cluster (2 or more distinct canonical groups on the same overlapping
+span): let B = the cluster member with the MINIMUM resolved year (a
+deterministic tie-break — if 2+ members share the minimum year, B is the
+lexicographically smallest `canonical_work_id` among them; since all
+minimum-year members are then within `DELTA` of each other by construction,
+the tie-break never changes who gets demoted). For EVERY OTHER member A in
+the cluster:
+- if A has no resolved year → A is NEVER demoted (fail-safe, rule 5);
+- else `diff = year(A) - year(B)` (always `>= 0` since B is the minimum);
+  if `diff >= DELTA` → demote A on the shared span
+  (`routing_status='review_only'`, `routing_reason='later_shared_text'`);
+  if `diff < DELTA` → A is a TIE with B, NOT demoted.
+
+Every comparison is against the single anchor B — members are NEVER compared
+pairwise against each other. This resolves the apparent tension between
+"later than the earliest" and "within-threshold ties": a tie is ALWAYS a
+tie against the anchor B, never a separate pairwise check among the later
+members (two non-anchor members that are both `>= DELTA` past B are both
+demoted independently of each other, regardless of how close they are to
+each other). The rule NEVER names a relation (embed / abridge / quote) — only
+demotes. A work with no reliable date is NEVER demoted (fail-safe).
+
+**Candidate-universe definition — FROZEN (Codex #14).** "Shared text" /
+"co-claim cluster" is defined exactly as follows, reusing the SAME frame the
+delivered date-coverage audit already measured its 69.1%/30.7%/0.2% firing
+rates against (`chrono_date_coverage.md`, `MIN_ML=200`) — this is not a new
+threshold invented for this rewrite, it is the audited one:
+- **Population:** the CURRENTLY-SHIPPED (post-Lever-1, §4.4) `discovery_claim`
+  rows, restricted to `evidence_source='track1_direct'` witness evidence
+  (the same population the audit computed over).
+- **Overlap metric:** two claims on the SAME `page_id` co-claim when each
+  carries a witness evidence row with `matched_letters >= 200` on that page
+  (the frozen minimum distinctive span — `MIN_ML=200`, identical to the
+  audited frame; a match shorter than 200 letters is NOT a candidate pair
+  member, on EITHER side).
+- **Boundary rule:** no additional span-overlap geometry test beyond the
+  `>=200`-letter threshold above is applied in v2 (both works' evidence
+  spans are on the SAME page — the co-occurrence itself, gated by the
+  200-letter floor, is the candidate signal; sub-span positional overlap
+  refinement is a Lever-2/v2.1 concern, not v2).
+- **Deduplication:** ONE candidate pair per unordered `{canonical_work_id_a,
+  canonical_work_id_b}` PER `page_id` — repeated occurrences of the same
+  canonical-group pair on the SAME page collapse to a single considered
+  pair (already implied by the canonical-group clustering above); the SAME
+  pair recurring on a DIFFERENT page is a SEPARATE considered pair (and gets
+  its own `discovery_routing_audit` row, §below).
+- **Formulaic-text exclusion:** NOT applied in v2 — no boilerplate/liturgical-
+  formula filter narrows the candidate universe beyond the 200-letter floor.
+  This is an explicit, documented v2 limitation (a common short liturgical
+  formula shared verbatim across many works could inflate low-value
+  candidate pairs); if corpus-scale fan-out proves this materially noisy, a
+  formulaic-text exclusion is a v2.1/Lever-2 follow-up, not silently added
+  here.
+- **Fan-out cap:** NONE at v2 launch — the real corpus's co-claim universe is
+  bounded (10,837 pairs at the audited frame size), well within any
+  practical build budget; no artificial per-work or per-page cap is applied.
+
+This candidate-universe definition is frozen BEFORE the v2 frame freezes
+(§7 gate 6) — a later change to the 200-letter floor, the dedup rule, or the
+no-cap/no-formulaic-filter choices is a NEW versioned frame (`discovery-v2.1`
+or later), never a silent in-place edit to an already-shipped v2 frame.
 
 **`DELTA=100y` — hardcoded, cited.** Per
 `same_work_spike/probe/rsource/results/chrono_date_coverage.md` (the
@@ -272,58 +373,119 @@ silently optional; SHA-256 verified before use; recorded in `meta` + frame):
   exact schema:** a JSON object mapping a RAW source-side work id (e.g. a
   Sefaria/JA reference id — masking-sensitive; joined to a `w000xxx` via
   `discovery_data/crosswalk.json` at build time, NOT itself an opaque product
-  id) to an object carrying EXACTLY the keys `year` (integer) and `basis`
-  (string, provenance/validation only — DISCARDED after validation, never
-  persisted to any shipped row; only the numeric year reaches the sidecar).
-  The parser REJECTS any entry missing `year`, a non-integer `year`, or an
-  object carrying unexpected top-level keys.
+  id; validated ONLY by successful crosswalk resolution, §7 D-16(c) — no
+  separate raw-id namespace/regex is imposed here) to an object carrying
+  EXACTLY the two keys `year` and `basis`, nothing more and nothing less. The
+  parser REJECTS: a missing `year` key; a `year` value that is not a JSON
+  integer (a numeric string, float, or null is rejected — `basis` and `year`
+  are never interchangeable); a missing `basis` key (its presence is
+  mandatory even though its content is discarded post-validation); a `basis`
+  value that is not a JSON string (an EMPTY string `""` IS a valid `basis`
+  value — only a missing key or a non-string type is rejected); or any
+  object carrying a THIRD top-level key beyond exactly `{year, basis}`. The
+  `year` value itself carries no additional numeric-range constraint in this
+  input (the SEF/JA interim dates were already range-sanity-checked when
+  generated); only the shape above is enforced by this parser.
 - **`--composition-dates <path> --composition-dates-sha256 <hex>`**
   (owner-held, masking-sensitive — the M-source authored-works composition
   dates). **FROZEN exact schema:** a JSON object mapping a raw M-source work
-  id (masking-sensitive; joined to `w000xxx` via crosswalk) to a single
-  descriptive composition-date value. **FROZEN normalizer contract**
-  (masking-safe — the CATEGORIES and rules are described functionally here;
-  the literal production date-string forms are owner-held M-source values
-  resolved at execution against the owner table, and are NEVER
-  enumerated/quoted in this committed document): the normalizer accepts
-  EXACTLY three categories:
-  1. an explicit single year → that integer year;
-  2. a century form → the century MIDPOINT (`Nth century CE → 100*(N-1)+50`,
-     e.g. a 10th-century value → 950);
-  3. an explicit bounded year range (earliest–latest) → the MIDPOINT
-     `floor((earliest+latest)/2)`, e.g. a 1000–1100 value → 1050.
+  id (masking-sensitive; joined to `w000xxx` via crosswalk, same
+  crosswalk-only validation as above) to a single composition-date value.
+  The mapped value MUST be a JSON string (a number, null, object, list, or
+  boolean is REJECTED outright — not merely "unparseable," a structural type
+  violation). **FROZEN normalizer contract** (masking-safe — the STRUCTURAL
+  grammar is exact and frozen here; the literal era/range/century designator
+  vocabulary is the owner-held M-source string content itself and is NEVER
+  enumerated/quoted in this committed document, since quoting it would
+  reproduce owner-held source material): after stripping leading/trailing
+  whitespace, the normalizer classifies the string into EXACTLY one of three
+  structural categories by counting the decimal integer tokens (each 3–4
+  digits) it contains and whether a recognized-but-unquoted era/range/century
+  designator decorates them:
+  1. **Explicit single year** — the string carries decoration recognized as
+     an era/qualifier marker (or none) around EXACTLY ONE integer token →
+     that integer is the normalized year directly (no arithmetic).
+  2. **Century form** — the string carries decoration recognized as a
+     century marker around EXACTLY ONE integer token `N` (the century
+     ordinal, itself a small 1–2 digit number, NOT a 3–4 digit year) → the
+     normalized year is the century MIDPOINT `100*(N-1)+50` (e.g. ordinal 10
+     → 950).
+  3. **Bounded year range** — the string carries decoration recognized as a
+     range marker around EXACTLY TWO integer tokens `earliest`, `latest` (in
+     that textual order) → the normalized year is the MIDPOINT
+     `floor((earliest+latest)/2)`, REJECTED if `earliest >= latest` (a
+     non-increasing or degenerate pair is not a valid range, regardless of
+     designator match).
 
-  The normalized integer year MUST fall within the plausible-composition
-  window **~500–1600 CE**; a value normalizing outside that bound is
-  REJECTED. **REJECT/HALT:** a present-but-unparseable value (matching NONE
-  of the three categories) OR one normalizing to an implausible/out-of-range
-  year HALTS the `--release` build (a hard build error) — it NEVER silently
-  becomes UNKNOWN (an UNKNOWN would no-op D-17 on that pair and evaporate the
-  audited coverage). This is DISTINCT from a MISSING row (absent from the
-  file entirely), which the production coverage gate (below) handles
-  separately. The exact literal production forms are validated at execution
-  against the owner table; this category/normalization/range/reject contract
-  is FROZEN here and tested in the build (135-06): one test per accepted
-  category (explicit year / century→midpoint / range→midpoint) plus near-miss
-  rejection of an unparseable value AND an out-of-range year.
+  A string containing zero integer tokens, more than two integer tokens, or
+  decoration matching more than one designator category (an ambiguous mix)
+  is UNPARSEABLE. The normalized integer year MUST satisfy the EXACT
+  inclusive bound `500 <= year <= 1600` (a normalized value of 499 or 1601 is
+  OUT OF RANGE, not merely "implausible" — the predicate is a plain integer
+  comparison, no fuzz). **REJECT/HALT:** a present-but-unparseable value
+  (matching NONE of the three categories, or matching more than one) OR one
+  normalizing to a year failing the `500 <= year <= 1600` predicate HALTS the
+  `--release` build (a hard build error) — it NEVER silently becomes UNKNOWN
+  (an UNKNOWN would no-op D-17 on that pair and evaporate the audited
+  coverage). This is DISTINCT from a MISSING row (absent from the file
+  entirely), which the production coverage gate (below) handles separately.
+  The exact literal era/range/century designator vocabulary is validated at
+  execution against the owner table; the three-category/integer-count/
+  midpoint-arithmetic/inclusive-range-bound/reject contract above is FROZEN
+  and tested in the build (135-06): one test per accepted category (explicit
+  year / century→midpoint / range→midpoint) plus near-miss rejection of an
+  unparseable value (zero or >2 integer tokens) AND an out-of-range year
+  (499 and 1601 boundary cases).
 
-**Production coverage gate (Codex #5):** compute the date-join coverage over
-the co-claim work-pair universe at build time; the `--release` build FAILS/
-HALTS if that coverage departs materially from the audited ~99.9% (a
-missing/short input source HALTs — it never silently degrades every work to
-UNKNOWN, which would no-op D-17 corpus-wide and evaporate the audited
-coverage).
+**Production coverage gate — EXACT predicate (Codex #5).** Let `U` = the
+FROZEN candidate universe above (the currently-shipped, post-Lever-1
+co-claim pairs at the `>=200`-letter floor, deduplicated per `(page_id,
+canonical_work_id_a, canonical_work_id_b)`). Let `R` = the subset of `U`
+where BOTH sides resolve a composition year (§4.3's deterministic
+per-canonical-group year resolution). `pair_coverage = |R| / |U|`. This is
+the SAME metric the delivered audit computed (10,837 pairs at `MIN_ML=200`,
+21 unknown-date pairs = 99.8061% pair coverage — the pair-level number, NOT
+the 99.9% corpus-wide all-works number quoted above for DELTA's own
+citation; the two are DIFFERENT denominators and this gate uses the PAIR one
+exclusively). The `--release` build computes `pair_coverage` over the ACTUAL
+v2-shipped pair universe and HALTS (hard build error, before any bake
+proceeds) if `pair_coverage < 0.990` — a fixed floor with deliberate headroom
+below the audited 99.8061% (tolerating ordinary corpus growth/drift without
+becoming a false-trip trap on an unrelated small change, while still hard-
+catching a genuine broken date-join or a missing/short input source). This
+gate NEVER silently degrades a missing source to UNKNOWN-for-all — a
+HALT is the only outcome on a materially degraded join.
 
-**`discovery_routing_audit` — masking-safe replayability table (Codex #5).**
-A new table in the shipped sidecar recording every D-17 decision so
-`verify_discovery_sidecar.py` can prove every demotion DB-only, without
-re-deriving it from the (gitignored, dev-box-only) research inputs: one row
-per considered co-claim pair, carrying the opaque `w000xxx` kept id, the
-opaque `w000xxx` demoted id (nullable — absent for a tie/fail-safe row), the
-numeric kept year, the numeric demoted year (nullable), the numeric `delta`
-(`|year_a - year_b|`), and a `decision` enum in
-`{demoted, kept_tie, fail_safe_unknown_date}`. No title, no raw source id, no
-restricted codename ever enters this table — opaque ids and integers only.
+**`discovery_routing_audit` — masking-safe, page-scoped replayability table
+(Codex #5).** A new table in the shipped sidecar recording every D-17
+decision — one row per considered `(page_id, canonical_work_id_a,
+canonical_work_id_b)` occurrence (matching the dedup key above, so repeated
+occurrences of the SAME work pair on DIFFERENT pages each get their own row,
+and `verify_discovery_sidecar.py` can reconstruct every individual routing
+decision, not merely prove that SOME compatible pair-level record exists):
+
+```
+discovery_routing_audit (
+  page_id                  TEXT NOT NULL,
+  canonical_work_id_a      TEXT NOT NULL,  -- the anchor B (min-year / tie-break winner)
+  canonical_work_id_b      TEXT NOT NULL,  -- the other member A of this considered pair
+  year_a                   INTEGER,        -- B's resolved year; NULL only if B itself
+                                            -- has no date (fail_safe_unknown_date case)
+  year_b                   INTEGER,        -- A's resolved year; NULL if A is undated
+  delta                    INTEGER,        -- year_b - year_a; NULL if either year is NULL
+  decision                 TEXT NOT NULL CHECK (decision IN
+                              ('demoted','kept_tie','fail_safe_unknown_date')),
+  demoted_canonical_work_id TEXT,          -- set to canonical_work_id_b when decision='demoted';
+                                            -- NULL for 'kept_tie' and 'fail_safe_unknown_date'
+  UNIQUE(page_id, canonical_work_id_a, canonical_work_id_b)
+);
+```
+
+Both canonical work ids are ALWAYS recorded, regardless of decision type
+(including the fail-safe/unknown-date case) — a `NULL` `year_a`/`year_b`
+records WHICH side was undated, never a dropped row. No title, no raw source
+id, no restricted codename ever enters this table — opaque `w000xxx` ids and
+integers only.
 
 **Provenance recorded in `meta` + frame:** the verified `--composition-dates`,
 `--seftja-dates`, and `discovery_data/crosswalk.json` SHA-256 hashes (Codex
@@ -392,6 +554,21 @@ implementation phase).
 
 ### 4.5 The TESTED CERT-01 FAIL-branch reband to `screening_rb` (Codex #7 + #B2)
 
+**Scope boundary — explicit deferral to the measurement protocol (Codex F6/
+F12).** This section consumes a `--precision-spec` measurement OUTCOME as an
+opaque, already-decided build input. This bake plan does NOT define, govern,
+or duplicate ANY part of how that outcome is produced — blinding, sample
+isolation from the D-17/Lever-1 diagnostic families, the survey-design
+estimator (physMS-cluster bootstrap, effective sample size, per-stratum
+minimums), or the pass/fail decision rule itself. ALL of that is governed
+EXCLUSIVELY by `docs/specs/discovery-cert01-protocol.md` (135-03, already
+Codex-reviewed and tracked). The `--precision-spec` value this build accepts
+MUST be traceable to that protocol's frozen, pre-registered artifacts (its
+`report_id`/frame hashes) — this build never re-validates the measurement's
+statistical design, it only consumes its OUTCOME (`measurement_status` +
+`ci_low`/`ci_high`/`numerator`/`denominator`) and applies the mechanical
+reband/invalidation described below.
+
 - A measured-below-floor `tier_a` outcome (fed post-135 via
   `--precision-spec`, `measurement_status='measured_fail'`) rebands `tier_a
   → screening_rb` — a REAL frozen band key (the rule-based algorithmic
@@ -431,8 +608,14 @@ implementation phase).
   tier).
 - Distinct from the **insufficient-evidence branch**
   (`measurement_status='insufficient_evidence'`), which keeps `tier_a`
-  non-default via the D-18 predicate — no permanent relabel, no
-  invalidation.
+  non-default via the **D-18 default-eligibility predicate**
+  (`is_default_eligible()`, defined in `shared/discovery_band_labels.py`,
+  135-01: a band is default-eligible ONLY when
+  `measurement_status=='measured_pass'` AND `ci_low` is present AND
+  `ci_low >= STRICT_FLOOR` (0.85); an `insufficient_evidence` status
+  therefore fails this predicate and the band stays non-default WITHOUT any
+  permanent relabel or precision invalidation — it can still pass on a later
+  confirmation draw).
 - This is a build capability 135-06 implements + tests; no production bake
   runs from this plan.
 
@@ -449,8 +632,15 @@ emit its enum rename in lockstep across the 7 files listed in that doc's §5:
 
 - `expert_verified → high_confidence_algorithmic` (Track-1 top tier is an
   ALGORITHMIC score, not human approval).
-- "verified/confirmed/certified" reserved for `adjudication_status=
-  'human_confirmed'` ONLY (121 rows corpus-wide).
+- "Verified" / "confirmed" / "reviewed" are reserved for
+  `adjudication_status='human_confirmed'` ONLY (121 rows corpus-wide) — they
+  MUST NOT appear as a name or label for any `confidence_band` value.
+- **"Certified" is PROHIBITED OUTRIGHT** — unlike the three words above, it
+  is NEVER used anywhere in this document, the v2 build, or any v2 surface,
+  including for `human_confirmed` rows (pre-existing frame rule,
+  independent-audit gate not yet passed). This document itself uses
+  "certified" ONLY inside this sentence, to state the prohibition — it never
+  appears as a label, a variable name, or a description of any band.
 - Bilingual EN/HE band labels per that doc's §2; estimated band precision
   `[CI]` presentation per §3, never per-item.
 
@@ -530,29 +720,48 @@ was never going to ship anyway.
    `later_shared_text` present in `scripts/discovery_ids.py`, the DDL CHECK
    constraint, the verifier, and the dated schema amendment, all in the SAME
    bake.
-8. **Never-orphan-shipped verifier invariant** — a `review_only`-tagged
-   co-claimant (D-17 or Lever-1) must never be the sole reachable evidence
-   for a claim that also has a shipped sibling row.
+8. **Never-orphan-shipped verifier invariant — EXACT assertion:** for EVERY
+   claim that owns at least one `discovery_evidence` row with
+   `routing_status='shipped'`, that claim's `display_evidence_id` MUST
+   reference one of ITS OWN `shipped` evidence rows — a claim with any
+   shipped evidence row can NEVER have `display_evidence_id` pointing at a
+   `review_only` row (D-17 or Lever-1 demoted). Directly asserted per claim,
+   not inferred from an absence of counterexamples.
 9. **Composition-date coverage gate** — the `--release` build HALTS if
-   date-join coverage over the co-claim work-pair universe departs
-   materially from the audited ~99.9% (§4.3).
-10. **Routing-audit replayability check** — every `later_shared_text` row
-    cross-checks against a `discovery_routing_audit` row with both years
-    resolved and `delta >= DELTA`; fail-safe (unknown-date) rows are never
-    demoted.
+   `pair_coverage` (§4.3's exact `|R|/|U|` predicate over the frozen
+   candidate universe) is `< 0.990` (a fixed floor with headroom below the
+   audited 99.8061% pair-level baseline — NOT the 99.9% corpus-wide all-works
+   figure, a different denominator used only to justify DELTA's citation).
+10. **Routing-audit replayability check** — every `discovery_routing_audit`
+    row is individually reconstructable: for `decision='demoted'`,
+    `demoted_canonical_work_id` is non-NULL, both years are non-NULL, and
+    `delta >= DELTA`; for `decision='kept_tie'`, both years are non-NULL and
+    `delta < DELTA`; for `decision='fail_safe_unknown_date'`, at least one of
+    `year_a`/`year_b` is NULL and `demoted_canonical_work_id` is NULL. Every
+    `routing_reason='later_shared_text'` evidence row cross-checks against
+    an audit row with `decision='demoted'` on the same `(page_id,
+    canonical_work_id_a, canonical_work_id_b)` key.
 11. **Frozen-input-hash provenance** — `--canonical-merges`,
     `--composition-dates`, `--seftja-dates`, and
     `discovery_data/crosswalk.json` SHA-256 hashes recorded in `meta` AND the
     v2 frame doc (Codex #B2/#5 — NOT the minimal deploy manifest).
-12. **`measurement_status` ↔ `ci_low` consistency** — a `band_precision` row
-    with `measurement_status='measured_pass'` MUST carry `ci_low >= 0.85`;
-    `measurement_status='measured_fail'` MUST carry `ci_low < 0.85` (Codex
-    #B3) — a contradictory precision spec can never surface as a pass.
+12. **`measurement_status` ↔ interval consistency — EXHAUSTIVE over the
+    closed vocabulary** `{not_measured, measured_pass, measured_fail,
+    insufficient_evidence}` (any OTHER stored value is a HARD FAIL): a row
+    with `measurement_status='measured_pass'` MUST have
+    `precision`/`ci_low`/`ci_high`/`numerator`/`denominator` ALL non-NULL AND
+    `ci_low >= 0.85`; `measurement_status='measured_fail'` MUST have those
+    same five fields ALL non-NULL AND `ci_low < 0.85`; BOTH
+    `measurement_status='not_measured'` AND
+    `measurement_status='insufficient_evidence'` MUST have ALL FIVE of those
+    fields NULL (no partial intervals under any status — Codex #B3).
 13. **Reband-precision-invalidation** — when `meta` carries
-    `tier_a_reband_target`, the target band's `band_precision` row MUST be
-    `measurement_status='not_measured'` + NULL `precision` — a
-    population-changing reband can never retain the prior measurement (Codex
-    #B2).
+    `tier_a_reband_target='screening_rb'`, the target band's `band_precision`
+    row MUST have `measurement_status='not_measured'` AND ALL FIVE of
+    `precision`/`ci_low`/`ci_high`/`numerator`/`denominator` NULL (not
+    `precision` alone), AND `meta` MUST ALSO carry the paired rebanded-row
+    count key alongside `tier_a_reband_target` — the verifier asserts BOTH
+    the full five-field nulling AND the count key's presence (Codex #B2).
 14. **Asset/bake-level no-mixed-enum atomicity** — the built v2 asset
     contains NO v1 enum literal `expert_verified` AND uses the v2 key
     `high_confidence_algorithmic` — ANY mixed v1/v2 state is a HARD FAIL
