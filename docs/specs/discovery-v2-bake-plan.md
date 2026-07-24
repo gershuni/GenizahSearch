@@ -279,8 +279,13 @@ specified for all three parsers below.
   plus the closed key-NAME allowlist for the file's other ten top-level
   keys — not to the full recursive shape of every top-level value.
   Each entry in `merges` is a JSON object with EXACTLY the three field names
-  `members_w` (a list of one or more `w000xxx`-shaped opaque id strings),
-  `canonical_w` (a single `w000xxx`-shaped opaque id string), and
+  `members_w` (a list of TWO OR MORE DISTINCT `w000xxx`-shaped opaque id
+  strings — Codex round-8 MED-2 fix: a one-member or duplicate-collapsed
+  `members_w` describes nothing to merge and is REJECTED, never silently
+  accepted as a degenerate no-op merge), `canonical_w` (a single `w000xxx`-
+  shaped opaque id string, REQUIRED to be an ELEMENT of that SAME entry's
+  `members_w` list — Codex round-8 MED-2 fix: a canonical id that is not
+  itself a member of its own group is a structurally-invalid entry), and
   `owner_verdict` (a string) — these are the REAL field names as implemented
   in the delivered handoff, used verbatim here (no renaming/abstraction
   layer); a `merges` entry carrying ANY field beyond exactly these three is
@@ -293,11 +298,16 @@ specified for all three parsers below.
   `w000xxx`-shaped opaque id strings. The parser REJECTS: any `merges` entry
   missing `members_w`, `canonical_w`, or `owner_verdict`, or carrying an
   extra field; any entry whose `members_w`/`canonical_w` values are not
-  `w000xxx`-shaped strings (regex `^w\d{6}$`); a `dropped_by_135` entry that
-  is not `w000xxx`-shaped; a top-level JSON value that is not an object; or
-  any top-level key outside the closed twelve-key set above. NEVER a title,
-  NEVER the restricted codename — the parser and this document reference
-  members only by their opaque `w000xxx` id.
+  `w000xxx`-shaped strings (regex `^w\d{6}$`); an entry whose `members_w`
+  contains FEWER than 2 DISTINCT ids — either a single-element list, or a
+  list of 2+ elements that reduce to fewer than 2 once duplicates are
+  collapsed (Codex round-8 MED-2 fix); an entry whose `canonical_w` is NOT
+  present in that SAME entry's `members_w` (Codex round-8 MED-2 fix); a
+  `dropped_by_135` entry that is not `w000xxx`-shaped; a top-level JSON
+  value that is not an object; or any top-level key outside the closed
+  twelve-key set above. NEVER a title, NEVER the restricted codename — the
+  parser and this document reference members only by their opaque `w000xxx`
+  id.
 - **Semantic-ratification assertion (defense-in-depth, MEDIUM):** structural
   validity + a matching SHA-256 pin is not sufficient on its own to prove
   the PINNED file is the intended census — an operator could hash-pin a
@@ -310,9 +320,16 @@ specified for all three parsers below.
   of these three semantic counts is REJECTED (`--release` HALTS) — this is
   the build's own defense against a correctly-hashed but substantively wrong
   census file.
-- **Transitivity guard:** reject a census where a work appears as a member of
-  more than one merge group (a chained collapse is a hard build error, not a
-  best-effort union).
+- **Transitivity guard — collision-free canonical groups (Codex round-8
+  MED-2 strengthens this check's stated scope to explicitly cover
+  `canonical_w`; no change to the underlying build behavior, which already
+  compared across each entry's full id set):** reject a census where ANY
+  `w000xxx` id — whether it appears in an entry's `members_w` OR as that
+  entry's `canonical_w` — appears in MORE THAN ONE approved
+  (`owner_verdict=='approve'`) merge group. Equivalently: every approved
+  group's full id set (its `members_w` ids UNION its own `canonical_w`) is
+  PAIRWISE DISJOINT from every other approved group's full id set (a
+  chained collapse is a hard build error, not a best-effort union).
 - The build MUST verify the file's SHA-256 against the pin BEFORE use (fail
   on missing/mismatch), validate the schema, build a `cross_corpus_map` from
   the `approve` rows PLUS the D-14 flip (§2), and thread it THREE ways:
@@ -375,6 +392,27 @@ UNKNOWN. This single resolved year is used for every claim under that
 members are a resolution-ORDER rule (representative first, else earliest
 sibling), never an ambiguity — there is exactly one year per canonical group
 by construction.
+
+**`dropped_by_135` members are EXCLUDED from BOTH lookups above, not just
+from claim/evidence output (Codex round-8 HIGH-1 fix — closing a gap where a
+dropped id disappears from the shipped sidecar's claims yet could still
+SUPPLY the year that drives a D-17 demotion, re-entering the build through
+the chronology path even though it never emits a `works`/`discovery_claim`/
+`discovery_evidence` row of its own).** Before EITHER the representative-date
+lookup or the sibling-fallback lookup runs, the year resolver removes every
+id present in `dropped_by_135` (§4.2) from that canonical group's
+`members_w` — a dropped id's own raw date can NEVER be consulted as the
+representative's date (structurally moot in practice, since a dropped id is
+never itself `canonical_w` per the semantic-ratification assertion, §4.1)
+AND can NEVER be consulted as a fallback sibling's date. Concretely: merge #7
+(`w000452` ↔ `w001239`, the D-14 flip) has `w001239` in `dropped_by_135` —
+`w001239`'s composition date, if any, is EXCLUDED from the sibling-fallback
+lookup for `w000452`'s canonical group, even though `w001239` remains listed
+in that census merge's `members_w`. This exclusion is applied by the
+BUILDER'S year resolver AND independently re-derived by gate 10's
+source-grounded year reconstruction (§7 gate 10, below) — the two must
+agree by construction, never two independently-defined exclusion rules that
+could silently diverge.
 
 **Crosswalk injectivity is ONE-DIRECTIONAL — the SAME-member conflicting-date
 case is a HALT, not an ambiguity resolved by the rule above (Codex R5-HIGH
@@ -579,6 +617,16 @@ its canonical group was the demoted side in ANY qualifying pair touching
 that span, per the ordered pass above; the rule NEVER names a relation
 (embed / abridge / quote) — only demotes.
 
+**Demotion is a confidence/curation tier, NEVER suppression (owner display
+clarification).** A claim demoted by this rule (`routing_status=
+'review_only'`, `routing_reason='later_shared_text'`) is NOT deleted and NOT
+permanently hidden: its claim row, its evidence row(s), and its id all
+persist in the shipped sidecar and remain fully queryable. It stays
+user-reachable behind the Phase-136 "show more possible identifications"
+toggle, alongside the recall-honesty disclaimer that surface already
+carries. D-17 demotion changes DEFAULT VISIBILITY / confidence tier only —
+it is never a data-loss or suppression mechanism.
+
 **Candidate-universe definition — FROZEN (Codex #14), WITH a required
 span-overlap safety refinement (BLOCKER, multi-register invariant).** "Shared
 text" / co-claim pair is defined exactly as follows. The delivered
@@ -588,10 +636,26 @@ NO span-position-overlap test) purely to validate DELTA's firing rate; the v2
 BUILD CONTRACT below is STRICTER — it additionally REQUIRES the two claims'
 primary witness spans to numerically overlap, which the audit script did not
 test. This is a deliberate, honest divergence: a stricter candidate universe
-can only be a SUBSET of the audited 10,837 (never a superset), so the
-audited 69.1%/30.7%/0.2% firing-rate split is a valid UPPER BOUND on how much
-the v2 build's stricter rule could ever demote, never an exact prediction of
-the v2 build's own (smaller) candidate count.
+can only be a SUBSET of the audited 10,837 (never a superset) — this bounds
+the v2 build's candidate COUNT (`|U| <= 10,837`), never its demotion RATE
+(Codex round-8 MED-1 fix — correcting a mathematical error in a prior draft
+that treated the audited 69.1%/30.7%/0.2% firing-rate SPLIT itself as an
+upper bound on the v2 build's own demotion PROPORTION). A subset bounds an
+absolute COUNT relative to its superset's count, but it does NOT bound a
+PROPORTION: a stricter subset can legitimately exhibit a HIGHER demotion
+rate than the looser superset it is drawn from — for example, if the
+span-overlap requirement disproportionately RETAINS pairs that are
+genuinely later/shared while disproportionately DROPPING pairs that would
+have resolved to unknown-dated or within-DELTA-tied outcomes, the surviving
+subset's demotion rate could exceed 69.1% even though its absolute count is
+smaller. The audited 69.1%/30.7%/0.2% split therefore remains useful ONLY as
+a corpus-wide sanity reference for `DELTA`'s citation (per
+`chrono_date_coverage.md`) and as informal context for how the rule behaves
+at scale — it is NEVER presented, here or in the v2 frame doc, as a
+predicted or bounded RATE for the v2 build's own (smaller, stricter)
+candidate population; the v2 build's actual demotion rate must be measured
+directly from the shipped `discovery_routing_audit` table once built, not
+inferred from the audit's looser-population percentages.
 - **Population:** the CURRENTLY-SHIPPED (post-Lever-1, §4.4) `discovery_claim`
   rows, restricted to `evidence_source='track1_direct'` witness evidence.
 - **Primary span:** each RAW `discovery_claim`/`discovery_evidence` row's
@@ -952,51 +1016,89 @@ UNKNOWN-for-all — a HALT is the only outcome on a materially degraded join.
 **Same-basis regression baseline — DISTINCT from, and IN ADDITION TO, the
 absolute floor above (Codex R6-HIGH fix — a standalone absolute floor alone
 cannot detect a material decline that stays above it; a same-basis
-regression check is separately required); PERMANENTLY FROZEN, never a
-rolling previous-build number (Codex round-7 HIGH fix — closing a gap where
-comparing only against the IMMEDIATELY PRECEDING build permits cumulative,
-below-tolerance drift across many successive rebuilds to compound into a
-large, undetected regression over time, since each individual step never
-exceeds the 0.005 tolerance against its own immediate predecessor).** The
-`0.990` floor intentionally does NOT compare against the delivered audit's
-99.8061% figure, because that figure used a DIFFERENT, looser
-(non-span-overlap-gated) population — the two are not proportionally
-comparable (Codex R4-MEDIUM, above). A genuine same-basis regression check
-instead requires a baseline computed under the SAME methodology as the v2
-build's own `pair_coverage` (the strict, span-overlap-gated `|R|/|U|`
-predicate above) — analogous in PURPOSE to how `chrono_date_coverage.md`'s
-own audit fixed ONE coverage figure as its reference point, never a moving
-target. On the FIRST v2 build (no prior same-basis measurement exists under
-this methodology), the build RECORDS its OWN computed `pair_coverage` as the
-PERMANENTLY FROZEN anchor — `meta['v2_pair_coverage_frozen_anchor']` —
-alongside the `|U|`/`|R|` counts, in `meta` AND the v2 frame doc; there is
-nothing to regress from yet, so only the absolute `0.990` floor applies on
-this first build. **This anchor is WRITTEN EXACTLY ONCE, on the build that
-first establishes it, and is NEVER overwritten, replaced, or recomputed by
-any later rebuild** — every subsequent v2 rebuild (a re-bake following a
-census/date-table/crosswalk refresh, a reband, or any other bake re-run)
-carries the anchor FORWARD unchanged into its own `meta`/frame doc, read-only.
-On any LATER v2 rebuild, gate 9 performs BOTH checks: the absolute `0.990`
-floor (unchanged), AND a same-basis regression check — recompute
-`pair_coverage` identically and compare it against THIS SAME FROZEN
-`v2_pair_coverage_frozen_anchor` (never against the immediately-preceding
-build's own number); the build HALTS if `pair_coverage < frozen_anchor -
-PAIR_COVERAGE_REGRESSION_TOLERANCE`, where
-`PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` (a fixed, hardcoded half-point
-tolerance — small enough to catch a materially degraded date-join or a
-missing/short input source, large enough to absorb ordinary
-candidate-universe churn from a corpus/date-table refresh). Comparing every
-rebuild against the SAME fixed anchor — rather than each build's own
-immediate predecessor — is what prevents a sequence of individually-
-within-tolerance rebuilds from cumulatively drifting an arbitrary distance
-below the originally-measured coverage without ever tripping the gate. **The
-immediately-preceding build's own `pair_coverage` is ADDITIONALLY recorded
-each rebuild as `meta['v2_pair_coverage_last_build']` for diagnostic/advisory
-trend visibility ONLY** (build-over-build change, logged and carried in the
-frame doc) — this advisory value NEVER gates the build and NEVER replaces or
-competes with the authoritative frozen anchor above; only a comparison
-against the frozen anchor can HALT gate 9. This same-basis baseline is what
-a standalone absolute floor cannot provide on its own.
+regression check is separately required); grounded in a NAMED, INDEPENDENT
+pre-build audit artifact — OWNER DECISION (Option A), REPLACING the prior
+"anchor derived from the first v2 build's own self-measurement" mechanism
+(Codex round-8 HIGH-4 fix — closing the gap where a bug shared between the
+anchor-recording build and every later regression check could corrupt BOTH
+identically and never be caught, since both would run through the SAME
+possibly-buggy main-bake date-resolution code).** The `0.990` floor
+intentionally does NOT compare against the delivered audit's 99.8061%
+figure, because that figure used a DIFFERENT, looser (non-span-overlap-gated)
+population — the two are not proportionally comparable (Codex R4-MEDIUM,
+above). A genuine same-basis regression check instead requires a baseline
+computed under the SAME methodology as the v2 build's own `pair_coverage`
+(the strict, span-overlap-gated `|R|/|U|` predicate above) — analogous in
+PURPOSE to how `chrono_date_coverage.md`'s own audit fixed ONE coverage
+figure as its reference point, never a moving target.
+
+**The regression baseline is the `chrono_coverage_prebuild` artifact — a
+NAMED, INDEPENDENT pre-build audit, NOT a number any v2 build measures of
+itself (owner-ratified Option A).** A prior draft of this section had the
+FIRST v2 build record its OWN computed `pair_coverage` as the permanently-
+frozen anchor, comparing every LATER rebuild against that self-measured
+number. The owner rejected this mechanism: because the anchor-recording
+build and the value it is later compared against would both flow through
+the SAME main-bake date-resolution/candidate-universe code, a bug present
+from the very first measurement could corrupt both identically and could
+never be caught by comparing a build against itself. Option A replaces the
+self-referential anchor with an INDEPENDENT measurement:
+
+- **REQUIRED 135-07 pre-build gate input.** BEFORE the FIRST v2 build runs
+  (and unchanged thereafter), a SEPARATE step measures date-join coverage
+  over the FROZEN production co-claim work-pair universe using a SEPARATE
+  enumeration/measurement path that does NOT reuse ANY of the main bake's
+  own date-resolution or candidate-universe code (a distinct
+  script/module — never a call into `build_discovery_sidecar.py`'s own
+  year-resolution or `discovery_routing_audit`-population functions).
+  Independence is the entire point: a bug shared between the measurement
+  path and the main bake cannot corrupt both identically, because there is
+  no shared code path left to carry it.
+- The result is frozen as a pinned artifact — `chrono_coverage_prebuild` —
+  with a recorded SHA-256, consumed via a REQUIRED `--chrono-coverage-anchor
+  <path> --chrono-coverage-anchor-sha256 <hex>` pair (verified before use,
+  exactly like the other hash-pinned inputs in §4.1/§4.3 above), and its
+  coverage figure PLUS its SHA-256 are recorded in `meta` AND the v2 frame
+  doc (joining the provenance list below and §7 gate 11).
+- **Gate 9's FIRST-build check** regression-tests the FIRST v2 build's OWN
+  measured `pair_coverage` against THIS independent `chrono_coverage_prebuild`
+  figure (same `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` tolerance as
+  every later rebuild, below), IN ADDITION TO the absolute `0.990` floor —
+  so even the FIRST build now has a genuine, independently-sourced
+  same-basis regression check, closing the round-6/round-7 gap where "there
+  is nothing to regress from yet" left the first build with only the
+  absolute floor.
+- **Later rebuilds** continue to check against this SAME
+  `chrono_coverage_prebuild` anchor (never a rolling previous-build
+  baseline, and never re-derived from any v2 build's own output) — the
+  anchor is written ONCE, at pre-build audit time (BEFORE the first v2
+  build), and is NEVER overwritten, replaced, or recomputed by ANY v2 build,
+  first or later; every rebuild's gate 9 reads the SAME pinned figure.
+- On EVERY build — first or later, no asymmetry between them — the build
+  HALTS if `pair_coverage < chrono_coverage_prebuild -
+  PAIR_COVERAGE_REGRESSION_TOLERANCE`, where
+  `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` (a fixed, hardcoded
+  half-point tolerance — small enough to catch a materially degraded
+  date-join or a missing/short input source, large enough to absorb
+  ordinary candidate-universe churn from a corpus/date-table refresh).
+  Comparing every build against this SAME independently-sourced, permanently
+  frozen anchor — rather than a self-measured first build or each build's
+  own immediate predecessor — is what prevents both a shared-bug blind spot
+  AND a sequence of individually-within-tolerance rebuilds from cumulatively
+  drifting an arbitrary distance below the independently-audited coverage
+  without ever tripping the gate.
+- **The immediately-preceding build's own `pair_coverage` is ADDITIONALLY
+  recorded each rebuild as `meta['v2_pair_coverage_last_build']` for
+  diagnostic/advisory trend visibility ONLY** (build-over-build change,
+  logged and carried in the frame doc) — this advisory value NEVER gates
+  the build and NEVER replaces or competes with the authoritative
+  `chrono_coverage_prebuild` anchor; only a comparison against
+  `chrono_coverage_prebuild` can HALT gate 9.
+
+This same-basis baseline is what a standalone absolute floor cannot provide
+on its own, and grounding it in an INDEPENDENTLY-measured pre-build artifact
+— rather than the first v2 build's own self-reported number — is what closes
+the shared-bug blind spot a self-referential anchor could never catch.
 
 **`discovery_routing_audit` — masking-safe, page-scoped, fully replayable
 table (Codex #5).** A new table in the shipped sidecar recording EVERY
@@ -1065,6 +1167,39 @@ row:
   round-7 HIGH fix — closing the gap this local check alone leaves open);
 - `decision='fail_safe_unknown_date'` REQUIRES: `year_lo IS NULL OR year_hi
   IS NULL`, `delta IS NULL`, and `demoted_canonical_work_id IS NULL`;
+- **Year reconstruction — source-grounded, BEFORE the replay below (Codex
+  round-8 HIGH-3 fix, closing a gap where the replay recomputed decisions
+  from STORED `year_lo`/`year_hi` alone, so a builder bug that stores
+  wrong-but-self-consistent years/deltas/decisions could pass every local
+  AND replay check below without detection).** Gate 10 does NOT treat the
+  stored `year_lo`/`year_hi` columns as ground truth. For EVERY
+  `canonical_work_id` appearing in `discovery_routing_audit`, the verifier
+  INDEPENDENTLY reconstructs that group's resolved year from the SAME pinned
+  inputs the builder consumes — `--composition-dates`, `--seftja-dates`,
+  `discovery_data/crosswalk.json`, the canonical map (§4.1's
+  `cross_corpus_map`), and the drop set (`dropped_by_135`) — applying the
+  IDENTICAL year-resolution rule specified above ("Deterministic year
+  resolution per canonical group": the representative's own raw date first,
+  else the MINIMUM resolved year among the group's OTHER member raw ids,
+  with EVERY `dropped_by_135` id EXCLUDED from BOTH lookups, per the HIGH-1
+  fix above). The verifier requires the STORED `year_lo` and `year_hi` in
+  EVERY `discovery_routing_audit` row to equal EXACTLY this
+  independently-reconstructed year for the corresponding canonical group — a
+  mismatch anywhere (either side, any row) is a HARD FAIL, regardless of
+  whether the stored `decision`/`delta` happen to be internally consistent
+  with the (wrong) stored years. Only AFTER this reconstruction-equality
+  check passes does the full replay below proceed, and it proceeds against
+  the RECONSTRUCTED years (known, by the equality check just performed, to
+  be identical to the stored ones) — never trusting the stored columns as an
+  unverified input. This closes the exact gap the round-8 review found: a
+  builder that stores an internally-consistent but SOURCE-WRONG year for a
+  canonical group (e.g. by applying a different resolution order, or by
+  failing to exclude a dropped id) previously produced audit rows the local
+  checks AND the replay would both accept, because neither independently
+  re-derived years from the pinned date tables; this reconstruction step is
+  the missing independent derivation, and it is the BUILDER and VERIFIER's
+  ONE shared year-resolution specification (§4.3 above), never two
+  independently-authored implementations of it.
 - **Full replay of the stateful ordered pass — AUTHORITATIVE, replacing
   "check independent local predicates on each stored row" as the deciding
   layer (Codex round-7 HIGH fix).** The local per-decision checks above are
@@ -1098,10 +1233,13 @@ row:
      page-scoped demotion state (a set of canonical_work_ids marked
      `demoted` earlier in THIS walk, initially empty — the SAME state
      management the builder's pairwise pass performs), and for EACH pair
-     RECOMPUTE its decision from scratch using ONLY `year_lo`/`year_hi`,
-     `DELTA`, and the walk's current demotion state (never reading the
-     pair's OWN stored `decision` column while recomputing): if either year
-     is NULL -> `fail_safe_unknown_date`; else, letting `E`/`L` be the
+     RECOMPUTE its decision from scratch using ONLY the source-grounded
+     RECONSTRUCTED `year_lo`/`year_hi` established above (identical to the
+     stored values, per the year-reconstruction equality check — Codex
+     round-8 HIGH-3 fix), `DELTA`, and the walk's current demotion state
+     (never reading the pair's OWN stored `decision` column while
+     recomputing): if either year is NULL -> `fail_safe_unknown_date`; else,
+     letting `E`/`L` be the
      earlier/later-dated side (a true year-tie falls through directly to the
      next case): if `E` is ALREADY in the walk's demoted-state set ->
      `kept_invalid_reference` (regardless of delta) — reachable ONLY when
@@ -1253,10 +1391,12 @@ row:
   description now agree exactly.
 
 **Provenance recorded in `meta` + frame:** the verified `--composition-dates`,
-`--seftja-dates`, and `discovery_data/crosswalk.json` SHA-256 hashes (Codex
-#5/#B2 — alongside the `--canonical-merges` hash from §4.1; all four join the
-existing `docs/specs/discovery-deploy.md` §4 pinned-input list at the
-implementation phase).
+`--seftja-dates`, `discovery_data/crosswalk.json`, AND `--chrono-coverage-
+anchor` (the independent `chrono_coverage_prebuild` pre-build audit, HIGH-4/
+Option A above) SHA-256 hashes (Codex #5/#B2 — alongside the
+`--canonical-merges` hash from §4.1; all five join the existing
+`docs/specs/discovery-deploy.md` §4 pinned-input list at the implementation
+phase).
 
 **Invariants:**
 - Merges FIRST (§4.1/§4.2 before this step) — never chrono-compare a work
@@ -1371,7 +1511,26 @@ undefined case exists:
   ALL-FIVE-fields-NULL, `measurement_status='not_measured'` invalidation
   writes specified below — never the raw `measured_fail` numbers themselves,
   which are preserved separately under the `tier_a_reband_trigger_*` `meta`
-  keys (below).
+  keys (below). **The reband is a PREFLIGHT-GATED capability, not a bare
+  trigger on the status label alone (Codex round-8 HIGH-2 fix — closing a
+  gap where an internally-inconsistent `--precision-spec` could still reach
+  and fire the reband, then become UNCHECKABLE at gate 12 because the reband
+  immediately NULLS the very `band_precision` row gate 12 would otherwise
+  have inspected):** the §6 step-0 preflight resolver REJECTS (a HARD build
+  error, HALTS before ANY reband logic runs) a `--precision-spec` claiming
+  `measurement_status='measured_fail'` UNLESS ALL FIVE of `precision`/
+  `ci_low`/`ci_high`/`numerator`/`denominator` are present (non-NULL) AND
+  the supplied `ci_low < 0.85` — the exact symmetric counterpart of the
+  `measured_pass` rejection rule above. A `measured_fail` verdict paired
+  with a missing field, or with `ci_low >= 0.85`, is an inconsistent input
+  and MUST NEVER be permitted to trigger the reband — permitting it would
+  let an inconsistent spec fire a real, population-changing mutation whose
+  own atomic invalidation (below) then erases the only place
+  (`band_precision`) gate 12's exhaustive predicate could otherwise have
+  caught the inconsistency. This preflight check is the FIRST line of
+  defense; gate 13 (below) is the SECOND, re-checking the SAME sub-floor
+  predicate against the recorded `meta` trigger provenance post-hoc, since
+  by gate-13 time the live `band_precision` row has already been nulled.
 - **`insufficient_evidence`** — the build writes ONLY
   `measurement_status='insufficient_evidence'` onto the measured band's
   `band_precision` row, with ALL FIVE of `precision`/`ci_low`/`ci_high`/
@@ -1644,25 +1803,35 @@ D-17 could be comparing against a work that was never going to ship anyway.
    non-span-overlap-gated population and is not proportionally comparable
    to the v2 build's stricter `|U|`); NOT the 99.9% corpus-wide all-works
    figure either, a third, different denominator used only to justify
-   DELTA's citation. **ADDITIONALLY, a same-basis regression check against a
-   PERMANENTLY FROZEN anchor (Codex R6-HIGH fix, §4.3 "Same-basis regression
-   baseline"; Codex round-7 HIGH fix replaces the rolling
-   immediately-preceding-build comparison with a FIXED anchor, closing a
-   cumulative-drift gap), distinct from the absolute floor above:** on any
-   rebuild AFTER the first v2 build, the gate ALSO HALTS if `pair_coverage`
-   has declined by more than `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005`
-   from the PERMANENTLY FROZEN `meta['v2_pair_coverage_frozen_anchor']` —
-   written EXACTLY ONCE, on the build that first establishes it, and NEVER
-   overwritten by any later rebuild; the FIRST v2 build instead RECORDS its
-   own `pair_coverage` as this frozen anchor (no regression check is possible
-   on the first build). Comparing EVERY later rebuild against this SAME
-   fixed anchor — rather than each build's own immediate predecessor —
-   prevents a sequence of individually-within-tolerance rebuilds from
-   cumulatively drifting below the originally-measured coverage without ever
-   tripping the gate. The immediately-preceding build's own `pair_coverage`
-   is separately recorded as `meta['v2_pair_coverage_last_build']` each
-   rebuild for diagnostic/advisory trend visibility ONLY — it is logged and
-   carried in the frame doc but NEVER gates the build.
+   DELTA's citation. **ADDITIONALLY, a same-basis regression check against
+   an INDEPENDENT pre-build audit anchor — `chrono_coverage_prebuild` (Codex
+   round-8 HIGH-4 fix, owner-ratified Option A, REPLACING the prior
+   "first-build-measures-its-own-anchor" mechanism; §4.3 "Same-basis
+   regression baseline"), distinct from the absolute floor above:** BEFORE
+   the FIRST v2 build runs, a SEPARATE step (135-07 pre-build gate input)
+   measures date-join coverage over the frozen candidate universe via an
+   INDEPENDENT enumeration/measurement path that shares NO code with the
+   main bake's own date-resolution/candidate-universe logic, and freezes
+   the result as the `chrono_coverage_prebuild` pinned artifact
+   (`--chrono-coverage-anchor <path> --chrono-coverage-anchor-sha256
+   <hex>`). On EVERY build — the FIRST v2 build AND every later rebuild
+   alike, no asymmetry between them — the gate ALSO HALTS if
+   `pair_coverage` has declined by more than
+   `PAIR_COVERAGE_REGRESSION_TOLERANCE = 0.005` from this SAME
+   `chrono_coverage_prebuild` figure, which is written ONCE (at pre-build
+   audit time, before the first v2 build) and NEVER overwritten, replaced,
+   or recomputed by any v2 build. Grounding the anchor in an INDEPENDENTLY-
+   measured artifact (rather than the first build's own self-reported
+   number) closes the shared-bug blind spot a self-referential anchor could
+   never catch, and comparing EVERY build against this SAME fixed,
+   independent anchor — rather than each build's own immediate predecessor
+   — additionally prevents a sequence of individually-within-tolerance
+   rebuilds from cumulatively drifting below the independently-audited
+   coverage without ever tripping the gate. The immediately-preceding
+   build's own `pair_coverage` is separately recorded as
+   `meta['v2_pair_coverage_last_build']` each rebuild for
+   diagnostic/advisory trend visibility ONLY — it is logged and carried in
+   the frame doc but NEVER gates the build.
 10. **Routing-audit replayability check** — the full EXHAUSTIVE predicate
     defined inline in §4.3: local per-decision field checks (necessary, not
     sufficient) PLUS the AUTHORITATIVE FULL REPLAY (Codex round-7 HIGH fix)
@@ -1693,9 +1862,11 @@ D-17 could be comparing against a work that was never going to ship anyway.
     never a single audit row's target set checked in isolation (Codex
     R6-BLOCKER fix, §4.3 "Target-set completeness").
 11. **Frozen-input-hash provenance** — `--canonical-merges`,
-    `--composition-dates`, `--seftja-dates`, and
-    `discovery_data/crosswalk.json` SHA-256 hashes recorded in `meta` AND the
-    v2 frame doc (Codex #B2/#5 — NOT the minimal deploy manifest).
+    `--composition-dates`, `--seftja-dates`, `discovery_data/crosswalk.json`,
+    AND `--chrono-coverage-anchor` (the independent `chrono_coverage_prebuild`
+    pre-build audit artifact, Codex round-8 HIGH-4/Option A, §4.3) SHA-256
+    hashes recorded in `meta` AND the v2 frame doc (Codex #B2/#5 — NOT the
+    minimal deploy manifest).
 12. **`measurement_status` ↔ interval consistency — EXHAUSTIVE over the
     closed vocabulary** `{not_measured, measured_pass, measured_fail,
     insufficient_evidence}` (any OTHER stored value is a HARD FAIL): a row
@@ -1718,9 +1889,19 @@ D-17 could be comparing against a work that was never going to ship anyway.
     the target band alone); AND `meta` MUST carry the paired rebanded-row
     count key alongside `tier_a_reband_target`, AND the
     `tier_a_reband_trigger_*` provenance keys (precision/ci_low/ci_high/
-    numerator/denominator) recording the triggering measurement — the
+    numerator/denominator) recording the triggering measurement, ALL FIVE
+    non-NULL, AND `tier_a_reband_trigger_ci_low < 0.85` (Codex round-8
+    HIGH-2 fix — presence of the five trigger fields is NECESSARY but NOT
+    SUFFICIENT: the verifier additionally re-checks the SAME sub-floor
+    predicate the §4.5 preflight resolver required before permitting the
+    reband, this time against the STORED `meta` values, because by the time
+    this gate runs the live `band_precision` row has ALREADY been nulled by
+    the invalidation and can no longer be inspected directly — this is what
+    catches a reband that fired on an inconsistent, non-sub-floor
+    `measured_fail` spec that somehow bypassed the preflight check) — the
     verifier asserts the full five-field nulling on BOTH bands, the count
-    key's presence, AND the trigger-provenance keys' presence (Codex #B2).
+    key's presence, the trigger-provenance keys' presence, AND this
+    trigger-`ci_low` sub-floor predicate (Codex #B2 + round-8 HIGH-2).
 14. **Asset/bake-level no-mixed-enum atomicity** — the built v2 asset
     contains NO v1 enum literal `expert_verified` AND uses the v2 key
     `high_confidence_algorithmic` — ANY mixed v1/v2 state is a HARD FAIL
@@ -1849,3 +2030,20 @@ complete before Phase 135 grading and Phase 136 read surfaces — it is a Phase
 135 prerequisite, tracked here. The 134-08 Task 3 production deploy remains
 DEFERRED until the v2 build is ready to ship (deploy the FINAL v2 sidecar
 ONCE, never v1 then v2).
+
+---
+
+## 10. Downstream (Phase 136) follow-ups (non-blocking notes)
+
+These are surface-design notes for Phase 136, recorded here only because the
+underlying data distinction is CREATED by this bake plan. NONE of them are
+135 bake changes, and NONE block this plan's completion or Phase 135 grading.
+
+- **Distinct labeling for `later_shared_text` demotions.** Phase 136 SHOULD
+  surface a claim demoted with `routing_reason='later_shared_text'` under a
+  DISTINCT label (e.g. "later textual parallel / likely quotation") rather
+  than lumping it in with generic low-confidence screening — the demotion
+  tag already preserves this distinction in the shipped data
+  (`routing_reason` per claim, §4.3/§4.5), so no further data work is
+  needed; this is purely a Phase-136 surface-design decision, not a 135
+  bake change.
