@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Phase 135 context COMPLETE — census in; SEED-029 chronological demotion rule adopted (D-17); Codex REWORK integrated; tier_a held behind toggle until CERT-01 (D-18); date-coverage audit requested (D-19). Gating Track-B task = rewrite discovery-v2-bake-plan.md + re-Codex.
-last_updated: "2026-07-23T23:45:04.821Z"
-last_activity: 2026-07-23 -- Phase 135 planning complete
+stopped_at: "Completed 135-01-PLAN.md (band values module + SC#1 serializer + D-18 predicate + DiscoveryService band_precision reader)"
+last_updated: "2026-07-24T00:18:04.372Z"
+last_activity: 2026-07-24
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 23
-  completed_plans: 13
+  completed_plans: 14
   percent: 14
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-20)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 134 — discovery-data-spine
+**Current focus:** Phase 135 — precision-certificate-confidence-bands
 
 ## Current Position
 
-Phase: 134 (discovery-data-spine) — REMEDIATION (owner review re-opened the frame)
-Plan: 8 of 8 (Tasks 1-2 done; Task 3 held); frame superseded-pending -> discovery-v2
+Phase: 135 (precision-certificate-confidence-bands) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-07-23 -- Phase 135 planning complete
+Last activity: 2026-07-24
 
 Progress: [████████░] 94% plumbing (7/8 plans); GATED by data-quality remediation — v1 build NOT shippable (dup works / band overclaim / anthology FPs); 133-06 human-deploy checkpoint still pending separately
 
@@ -86,9 +86,9 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-07-23T18:56:14.703Z
-Stopped at: Phase 135 context COMPLETE — census in; SEED-029 chronological demotion rule adopted (D-17); Codex REWORK integrated; tier_a held behind toggle until CERT-01 (D-18); date-coverage audit requested (D-19). Gating Track-B task = rewrite discovery-v2-bake-plan.md + re-Codex.
-Resume file: .planning/phases/135-precision-certificate-confidence-bands/135-CONTEXT.md
+Last session: 2026-07-24T00:18:04.364Z
+Stopped at: Completed 135-01-PLAN.md (band values module + SC#1 serializer + D-18 predicate + DiscoveryService band_precision reader)
+Resume file: None
 Next step: PHASE 134 CLOSED 2026-07-23 on spine SC1–SC3 (owner-ratified close-on-spine); the discovery-v2 data re-distill is RE-BRACKETED as Phase 135's LEADOFF task (plan docs/specs/discovery-v2-bake-plan.md, Codex review REQUIRED; blocked on the SEED-029 census); 134-08 Task 3 prod-deploy DEFERRED → Phase 135 prereq. (B) band-label honesty contract LANDED (docs/specs/discovery-band-labels-v1.md) + inspection view relabeled. Blocked on the SEED-029/R-source track for (A) relation-aware canonical cross-corpus merge (gen2_workid_registry.json → w000xxx via crosswalk; ≥2-author groups held for owner; whole-vs-part granularity = Codex #1) + (C) direction-aware shadow router. Key correction: the current shadow is DENSITY-ONLY (no direction; mis-routes ~26% of anthology co-claims), so "direction-first for free" does NOT hold — direction must be built INTO the shadow (producer-side). (C) is itself blocked on Track-1 re-instrumentation to persist per-match ref-subspans+provenance (page-side [start,end,density] only today). (C) integration is no-schema-change: shadow → routing_status='review_only' + claim_type reclass; NEW INVARIANT — a review_only row must NEVER dominate a shipped row (else the base is orphaned). v2 order-of-ops (Codex-blessed, demotion BEFORE shadow finalizes): canonical/vgroup → span-paired claim gen → distinctive/shared routing → relation-aware shadow → tier-A → bake (full shadow recompute every bake; shadowing non-monotone under row addition). 134-08 Task 3 (prod deploy) + Phase 135 grading HELD until v2. Masking: R-source tokens in .masking_patterns (owner action, still pending) HARD-BLOCK any R-source build/scan. DECISION-UNIT RESOLVED 2026-07-23: SEED-029 page-level catalogue-blind deck PASSED (200 grades, independent (page,work) set, launch3 frame). Band precision at the routed unit: high 94.0% / med 91.7% / low 37.5%. Lever-1 coverage page-routing RE-ENABLED: ship cov>=0.45, route cov<0.45 -> review_only (recoverable); cliff at 0.45 (med 0.45-0.60 ~92%; 0.50 point 94.3%, one-sided 95% LB 90.1%). Cite as "estimated band precision [CI]" from frozen track1_pagelevel_manifest.json. Invariant holds (mismatch 52%, coverage-confounded; never route on catalogue). Residual ~6% at high coverage = quoted-works class -> Lever 2 (direction-aware ref-subspan router), lands after S1. Recorded in docs/specs/discovery-band-labels-v1.md §3.1.
 V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonical merge + coverage routing ship>=0.45 / <0.45->review_only, high-band quoted-works residual documented); Lever 2 = v2.1 follow-up (reclassifies ~6% direct_witness->quotes_this_work; needs full re-instrumented Track-1 re-run + direction router; S1 re-instrumentation BUILT+smoke-validated). (A) seed CORRECTED: use rsource/results/mask2_v2_cross_census.md (v2-internal Sefaria/M/JA twins, masking-clean) — NOT gen2_workid_registry.json (R-only, for discovery-v2+ when R lands). Census file NOT on my tree — NEED the peer to hand the COMPLETE list (incomplete merge => self-erasure, pitfall #7). Feasibility CONFIRMED: seed resolves via REF2: prefix on the Sefaria side + RCh numerics = M:Ytext405xxx. Resolved vgroup twin pairs (M<->Sef w-ids, merge to ONE canonical=Sefaria rep): Tur OC w000190<->w001382; Ramban Gen w000192<->w001269; Ramban Deut w000193<->w001267; Chinukh w000191<->w001337; RCh Sanhedrin w000465<->w001238; RCh Taanit w000459<->w001242; RCh Bava Metzia w000464<->w001226. RCh SHABBAT = DROP, NOT MERGE (owner 2026-07-23: "drop it and we'll be ok"): DROP w001239 (RCh Shabbat Sefaria copy) from the v2 build entirely — do NOT merge it into w000452, do NOT fold Hai in. In-DB evidence (2026-07-23 study, tmp/discovery-contested-study*.txt): Hai Gaon w000451's ONLY co-occurrence was with the Sefaria RCh Shabbat w001239 (11 shared direct-witness folios, byte-identical matched_letters e.g. 629/468/602/657); ZERO shared folios with M-source RCh Shabbat w000452 (control: two genuinely-different works share 0 direct-witness folios). Dropping w001239 => Hai Gaon standalone w/ zero RCh overlap, contested-author question VANISHES, and all 11 shared folios KEEP a tier_a Hai Gaon ID (verified 0 loss on contested folios). SUPERSEDES the earlier "fold Hai as contested-author" plan AND the peer's "map both / no collapse" default. COST accepted by owner: RCh Shabbat coverage 65->31 direct-witness folios; 34 Sefaria-only folios drop, 12 rescued by another work, ~22 lose their (unreviewed, Sefaria-reference-only) RCh ID (~10 lose any claim). Integrity CLEAN: w001239 canonical for no other work; witness_unit_members has no work_id FK; pure bake-time exclusion (129 claims / 144 evidence rows). => RCh Shabbat drops OUT of the twin-merge list; keep M-source w000452 standalone; Hai Gaon w000451 standalone. v2 disputed-author schema NO LONGER REQUIRED for this case — reinstate only if the full census surfaces OTHER >=2-author groups (defer to census). DO NOT GENERALIZE the drop to the other twins (Ramban/Tur/Chinukh/RCh Sanhedrin/Taanit/Bava Metzia) — those MERGE (no contested-author reason to delete; dropping forfeits the dropped copy's unique folios). RELATIONS (never twin-merge, need a v2 work_relations concept): MT Sefer Zmanim w000177 -> Haggadah w001159 (directional embed); Rif<->Bavli per tractate (subset/abridgment, jac 0.42-0.62); Mishnah Avot <-> David haNagid w001135 (base-text embed). Coverage self-computable at BAKE (matched_letters populated on 254,729 evidence rows; denom = len(norm_stream(page_text)) from the source corpus; verify vs stored `density`). v2 bake needs 4 build changes: (1) populate canonical_work_id from the twin seed; (2) DROP list — exclude w001239 (RCh Shabbat Sefaria) entirely at bake; (3) NEW work_relations table for directional+subset relations (contested-author representation DROPPED — no case left after the w001239 drop); (4) Lever-1 coverage routing (cov<0.45->review_only) in claim-gen; then re-distill+verify+masking+frame-doc discovery-v2. build_discovery_sidecar.py is Codex-reviewed (6 rounds) -> a v2 bake PLAN + Codex review SHOULD precede the code change (phase-134 discipline). BLOCKER: complete census list from the peer. 134-07 COMPLETE 2026-07-22 (1,270-work real discovery.db; frame_content_hash 17bf5601…; DB content_hash 8e434513…; 368.5MB owner-accepted; discovery-frames.md FROZEN). Separately-pending: 133-06 human production deploy Tasks 3-4 (asset-first upload of atlas_data/ → deploy.sh master-main → set ATLAS_PREVIEW_ENABLED=1 → restart, then live smoke + rollback drill); the baked asset atlas-v1-61519a85a2d0 is ready locally in gitignored atlas_data/.
 
@@ -108,6 +108,7 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 | Phase 134 P04 | 120 | 3 tasks | 2 files |
 | Phase 134 P05 | 35min | 3 tasks | 6 files |
 | Phase 134 P06 | 70min | 3 tasks | 6 files |
+| Phase 135 P01 | 55min | 3 tasks | 3 files |
 
 ## Decisions
 
@@ -145,3 +146,7 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 - [Phase ?]: 134-06: DATA-10 unit x work projection factored into a pure, DB-free helper (_project_work_witnesses) so the highest-band-wins rule across differing member bands is directly unit-testable
 - [Phase 134]: Codex R1 rework applied (2026-07-22) — fixed all 9 CODE-review R1 findings (H1-H3, M1-M4, L1-L2) across shared/discovery_service.py + scripts/build_discovery_sidecar.py + scripts/verify_discovery_sidecar.py, each with a regression test and atomic commit; H1/H2/H3 additionally validated against the real gitignored research corpus (see 134-CODE-REVIEW-R1.md)
 - [Phase 134]: Codex R2 rework applied (2026-07-22) — fixed all 5 residual CODE-review R2 findings (1 HIGH: unvalidated --precision-spec; 4 MED: get_work_witnesses tie-break, finalize_build gate ordering, band_precision dict-collapse, _validate_crosswalk masking leak + ASCII-digit regex) across scripts/build_discovery_sidecar.py + shared/discovery_service.py + scripts/verify_discovery_sidecar.py, each with a regression test and atomic commit; gate-ordering + tie-break fixes additionally validated against the real gitignored research corpus (see 134-CODE-REVIEW-R2.md)
+- [Phase 135 P01]: STRICT_FLOOR=0.85 (D-07) lives in shared/discovery_band_labels.py, not duplicated in discovery_service.py — the service layer never needs to know the CERT-01 pass threshold, only the values/predicate module does
+- [Phase 135 P01]: get_band_claim_counts joins discovery_claim to its display_evidence_id and filters routing_status='shipped' on that DISPLAY row only (Codex #B1/#9) — verified by inserting a second non-display evidence row on an existing claim (count unchanged) then flipping the DISPLAY row to review_only (claim drops out entirely)
+- [Phase 135 P01]: serialize_banded_claim defaults a missing routing_status to review_only — conservative -- an unknown routing status must never be treated as default-shown
+- [Phase 135 P01]: Skipped requirements mark-complete for BAND-01/02/03/04/CERT-02 (shared frontmatter IDs on plan 135-01) — this plan establishes and invariant-tests the values module/serializer/predicate, but BAND-03/04 describe live UI toggle/disclaimer surfaces, BAND-05's methods page and CERT-01's measurement are separate plans/tracks -- mirrors the 134-01/02/03 precedent of deferring mark-complete until the consuming surface lands
