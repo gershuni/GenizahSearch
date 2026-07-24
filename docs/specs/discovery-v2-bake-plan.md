@@ -2195,3 +2195,41 @@ rather than ask the parallel session to re-emit).
   the designator+string path regression) plus a smoke-parse of the real pinned
   file (7,277 entries, all int in `[500, 1587]`). The artifact SHA is a runtime
   pin, not a test gate.
+
+## Amendment 2026-07-24 (Phase 135, decoupled SEF/JA composition-year window)
+
+Amends the `--seftja-dates` year-window in §4.3. Owner-authorized (2026-07-24
+decision) after the 135-07 pre-bake discovered a spec-vs-data conflict: the
+frozen SEF/JA artifact the parallel session deliberately pinned
+(`seftja_dates.json`, 407 entries) legitimately carries **61 pre-500 classical
+composition dates** (13 at year 150 = Mishnaic era, 48 at year 300 =
+Talmudic/Amoraic era; full range 150–1470, none above 1600), but the original
+R6-HIGH gate rejected any SEF/JA year below 500 and HALTed the `--release` bake.
+
+- **Root cause.** The R6-HIGH gate set the SEF/JA window IDENTICAL to the
+  M-source `--composition-dates` window `[500, 1600]`, on the assumption that
+  all SEF/JA composition dates are medieval. That assumption is false: the SEF/JA
+  reference corpus includes CLASSICAL base texts (Mishnah, Talmud) that the
+  medieval-only M-source literary corpus does not. The 61 early entries cluster
+  on round era-numbers (150/300), not scattered typos — they are genuine
+  early-canonical dates the artifact deliberately carries.
+- **The change.** The SEF/JA window is DECOUPLED from `_COMPOSITION_YEAR_MIN`
+  and given its own constants `_SEFTJA_YEAR_MIN = 100` / `_SEFTJA_YEAR_MAX =
+  1600`. `parse_seftja_dates` now rejects a year outside `[100, 1600]`. The
+  M-source `--composition-dates` window is UNCHANGED at `[500, 1600]` (that
+  corpus is entirely in `[500, 1587]`).
+- **Why 100 (not 500, not 0).** A floor is retained so the R6-HIGH
+  anti-corruption rationale still holds — a near-zero / negative / absurd year
+  is still rejected and still HALTs `--release` (never silently UNKNOWN /
+  clamped). Only the medieval-only assumption is corrected; the floor is lowered
+  just far enough to admit the genuine classical anchors present in the pinned
+  artifact (min 150).
+- **Effect on the shipped asset.** The 61 classical works are now admitted and
+  act as earlier-side D-17 chronological demoters (a work composed ~150/300
+  cannot be the LATER co-claimant), materially populating the demotion set with
+  correct early-canonical anchors that the medieval-only floor had silently
+  excluded. This changes shipped D-17 output — owner-ratified.
+- **Tests.** `tests/test_discovery_v2_bake.py` adds: classical years 150/300
+  accepted; the `[100,1600]` floor/ceiling boundaries (100 & 1600 inclusive, 99
+  & 1601 HALT); a smoke-parse of the real frozen artifact (407 entries, min 150,
+  max 1470, 61 below 500). The M-source floor-of-500 test is retained unchanged.
