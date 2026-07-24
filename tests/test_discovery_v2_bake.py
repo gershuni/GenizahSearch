@@ -13,7 +13,9 @@ research tree.
 This plan delivers LOGIC + its unit tests only -- there is NO production
 bake here (that is 135-07).
 """
+import csv
 import json
+import shutil
 import sqlite3
 import sys
 from pathlib import Path
@@ -1242,3 +1244,209 @@ def test_evidence_id_consistency_clean_rebuilt_asset_passes(tmp_path):
     assert rev  # the review_only row exists but is NOT the display pointer
     assert verify_mod.check_evidence_id_content_consistency(conn) == []
     conn.close()
+
+
+# ===========================================================================
+# 135-07: hermetic release-contract MUTATION suite (the systemic false-NEGATIVE
+# guard). A valid v2 fixture build verifies rc==0 through the FULL verifier
+# (incl no-mixed-enum + release-strict band_precision + --require-v2); then each
+# INDEPENDENT mutation must return NONZERO. A deliberately-v1 asset stays green
+# on the SAME code (byte-identity guard) but FAILS under --require-v2.
+#
+# Every input below is FABRICATED, masking-clean (opaque w000xxx ids, `raw:`
+# source ids, neutral ASCII titles, no real research content). No production
+# bake is run here.
+# ===========================================================================
+
+def _finalize_asset(tmp_path, *, v2: bool):
+    """Build a complete, release-strict-valid discovery.db via `finalize_build`
+    over fabricated inputs. `v2=True` supplies a (fabricated, empty) hash-pinned
+    `--canonical-merges` census -> the E1 top tier + band_precision top tier key
+    on `high_confidence_algorithmic` and meta records band_vocab_version='v2';
+    `v2=False` is the byte-identical v1 path (top tier `expert_verified`, marker
+    'v1'). One shown work (w000001) with a tier_a track1 row on pg1 + one
+    RA-confirmed E1 top-tier row on pg2, so the asset carries BOTH the top-tier
+    band (E1) and a tier_a band."""
+    research_db = tmp_path / "research.db"
+    conn = sqlite3.connect(str(research_db))
+    conn.executescript(
+        """
+        CREATE TABLE track1_matches (
+          page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
+          title TEXT, mesirah TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          spans_json TEXT, shadowed_by TEXT
+        );
+        CREATE TABLE pages (
+          page_id TEXT PRIMARY KEY, sys_id TEXT, buckets TEXT, n_chars INTEGER,
+          text TEXT, provenance TEXT, fgp_id INTEGER, fgp_score REAL, htr_n_chars INTEGER
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO track1_matches VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("pg1", "s1", "raw:w1", "Sefaria", None, None, None, None,
+         300, 0.9, 1, "[[0, 300, 0.9]]", None),
+    )
+    conn.executemany(
+        "INSERT INTO pages (page_id, sys_id, provenance, text) VALUES (?,?,?,?)",
+        [("pg1", "s1", "htr", "x" * 400), ("pg2", "s1", "htr", "y" * 400)],
+    )
+    conn.commit()
+    conn.close()
+
+    crosswalk_path = tmp_path / "crosswalk.json"
+    _write_json(crosswalk_path, {"raw:w1": "w000001"})
+
+    approved_csv = tmp_path / "approved.csv"
+    with open(approved_csv, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=sidecar_build.APPROVED_HEADER)
+        writer.writeheader()
+        row = {h: "" for h in sidecar_build.APPROVED_HEADER}
+        row["work_id"] = "w000001"
+        row["owner_verdict"] = "approve"
+        row["candidate_title"] = "Synthetic Neutral One"
+        row["source_label"] = ids.SOURCE_CORPUS_SEFARIA
+        writer.writerow(row)
+
+    e1_ra_path = tmp_path / "e1_ra.jsonl"
+    e1_ra_path.write_text(
+        json.dumps({"page_id": "pg2", "sys_id": "s1", "work_id": "raw:w1",
+                    "o0": 0, "o1": 300, "ml": 300, "dens": 0.9, "n_spans": 1}) + "\n",
+        encoding="utf-8",
+    )
+
+    kwargs = dict(
+        source_db_path=str(research_db),
+        from_approved_path=str(approved_csv),
+        crosswalk_path=str(crosswalk_path),
+        out_db_path=str(tmp_path / "out" / "discovery.db"),
+        e1_ra_confirmed_path=str(e1_ra_path),
+        masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+    )
+    if v2:
+        merges_path = _write_json(tmp_path / "merges.json", _merges_doc(merges=[], dropped=[]))
+        kwargs["canonical_merges_path"] = merges_path
+        kwargs["canonical_merges_sha256"] = sidecar_build._hash_file(Path(merges_path))
+    return sidecar_build.finalize_build(**kwargs)
+
+
+def _rw(db_path):
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = OFF")
+    return conn
+
+
+def test_v2_release_valid_asset_full_verify_passes_require_v2(tmp_path):
+    """A valid v2 fixture build verifies rc==0 through the FULL verifier,
+    including --require-v2 (band_vocab_version='v2', no-mixed-enum,
+    release-strict band_precision keyed on high_confidence_algorithmic)."""
+    stats = _finalize_asset(tmp_path, v2=True)
+    conn = sqlite3.connect(str(stats["db_path"]))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        ev_bands = {r[0] for r in conn.execute("SELECT confidence_band FROM discovery_evidence")}
+        bp_bands = {r[0] for r in conn.execute(
+            "SELECT confidence_band FROM band_precision WHERE scope='band'")}
+    finally:
+        conn.close()
+    assert meta["band_vocab_version"] == "v2"
+    assert ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC in ev_bands
+    assert ids.CONFIDENCE_BAND_EXPERT_VERIFIED not in ev_bands
+    assert ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC in bp_bands
+    assert ids.CONFIDENCE_BAND_EXPERT_VERIFIED not in bp_bands
+    assert verify_mod.verify(
+        str(stats["db_path"]), stats["frame_content_hash"],
+        expected_band_vocabulary="v2") == 0
+
+
+def test_mutation_a_remove_v2_marker_fails_require_v2(tmp_path):
+    """(a) Remove the v2 marker from meta -> under --require-v2 the asset no
+    longer proves v2 intent -> NONZERO."""
+    stats = _finalize_asset(tmp_path, v2=True)
+    corrupt = tmp_path / "mut_a.db"
+    shutil.copyfile(stats["db_path"], corrupt)
+    conn = _rw(corrupt)
+    conn.execute("DELETE FROM meta WHERE key='band_vocab_version'")
+    conn.commit()
+    conn.close()
+    assert verify_mod.verify(
+        str(corrupt), stats["frame_content_hash"], expected_band_vocabulary="v2") != 0
+
+
+def test_mutation_b_evidence_band_reverted_to_v1_fails(tmp_path):
+    """(b) Change ONLY the evidence-side band key back to the v1 literal ->
+    mixed-enum + stale evidence_id -> NONZERO (even under --require-v2)."""
+    stats = _finalize_asset(tmp_path, v2=True)
+    corrupt = tmp_path / "mut_b.db"
+    shutil.copyfile(stats["db_path"], corrupt)
+    conn = _rw(corrupt)
+    conn.execute(
+        "UPDATE discovery_evidence SET confidence_band=? WHERE confidence_band=?",
+        (ids.CONFIDENCE_BAND_EXPERT_VERIFIED, ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC),
+    )
+    conn.commit()
+    conn.close()
+    assert verify_mod.verify(
+        str(corrupt), stats["frame_content_hash"], expected_band_vocabulary="v2") != 0
+
+
+def test_mutation_c_band_precision_band_reverted_to_v1_fails(tmp_path):
+    """(c) Change ONLY the band_precision key back to the v1 literal ->
+    mixed-enum + release-strict keyset mismatch -> NONZERO."""
+    stats = _finalize_asset(tmp_path, v2=True)
+    corrupt = tmp_path / "mut_c.db"
+    shutil.copyfile(stats["db_path"], corrupt)
+    conn = _rw(corrupt)
+    conn.execute(
+        "UPDATE band_precision SET confidence_band=? WHERE confidence_band=?",
+        (ids.CONFIDENCE_BAND_EXPERT_VERIFIED, ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC),
+    )
+    conn.commit()
+    conn.close()
+    assert verify_mod.verify(
+        str(corrupt), stats["frame_content_hash"], expected_band_vocabulary="v2") != 0
+
+
+def test_mutation_d_pure_v1_asset_green_but_fails_require_v2(tmp_path):
+    """(d) A deliberately-v1 asset uses the v1 key end to end and stays GREEN on
+    the SAME verifier code (byte-identity guard) -- but FAILS under --require-v2
+    (the false-green closer: a valid v1 asset is not an intended-v2 bake)."""
+    stats = _finalize_asset(tmp_path, v2=False)
+    conn = sqlite3.connect(str(stats["db_path"]))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        ev_bands = {r[0] for r in conn.execute("SELECT confidence_band FROM discovery_evidence")}
+    finally:
+        conn.close()
+    assert meta["band_vocab_version"] == "v1"
+    assert ids.CONFIDENCE_BAND_EXPERT_VERIFIED in ev_bands
+    assert ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC not in ev_bands
+    # v1 asset is internally valid (green) with NO operator-intent flag ...
+    assert verify_mod.verify(str(stats["db_path"]), stats["frame_content_hash"]) == 0
+    # ... but must FAIL when the operator declared a v2 bake.
+    assert verify_mod.verify(
+        str(stats["db_path"]), stats["frame_content_hash"],
+        expected_band_vocabulary="v2") != 0
+
+
+def test_v2_top_tier_competing_sibling_wins_display_selection():
+    """Guards D (auditor catch #9): a v2 top-tier (high_confidence_algorithmic)
+    evidence row wins `select_display_evidence` over a COMPETING lower-band
+    sibling. Without the _BAND_RANK dual-key fix the v2 key falls to
+    _UNRANKED_BAND and the corroborated sibling would wrongly win."""
+    hca = {"evidence_id": "e_hca", "evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+           "confidence_band": ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
+           "adjudication_status": ids.ADJUDICATION_STATUS_UNREVIEWED,
+           "routing_status": ids.ROUTING_STATUS_SHIPPED}
+    corroborated_sibling = {
+        "evidence_id": "e_corr", "evidence_source": ids.EVIDENCE_SOURCE_PROPAGATED,
+        "confidence_band": ids.CONFIDENCE_BAND_CORROBORATED,
+        "adjudication_status": ids.ADJUDICATION_STATUS_UNREVIEWED,
+        "routing_status": ids.ROUTING_STATUS_SHIPPED}
+    # Order the sibling FIRST so a naive min() over an unranked v2 key would pick it.
+    assert ids.select_display_evidence([corroborated_sibling, hca]) == "e_hca"
+    # Both top-tier keys share rank 0 (dual-key), and neither is _UNRANKED_BAND.
+    assert ids._BAND_RANK_INDEX[(ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+                                 ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC)] == 0
+    assert ids._BAND_RANK_INDEX[(ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+                                 ids.CONFIDENCE_BAND_EXPERT_VERIFIED)] == 0
