@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sqlite3
 import sys
@@ -115,6 +116,33 @@ _RELEASE_CONTRACT_COUNTS = [
     ("expected_rows_works", "works"),
     ("expected_rows_units", "witness_units"),
 ]
+
+# ---------------------------------------------------------------------------
+# v2 re-distill verifier invariants (Phase 135, plan 135-06). Mirrors
+# shared/discovery_band_labels.STRICT_FLOOR / MEASUREMENT_STATUSES (D-07 /
+# 135-05 closed vocab) as local literals so the verifier stays lean and
+# stdlib-only -- the SAME 0.85 floor + closed status vocab the build enforces.
+# ---------------------------------------------------------------------------
+_STRICT_FLOOR = 0.85
+_MEASUREMENT_STATUSES = frozenset({
+    "not_measured", "measured_pass", "measured_fail", "insufficient_evidence",
+})
+_V1_BAND_LITERAL = ids.CONFIDENCE_BAND_EXPERT_VERIFIED  # "expert_verified"
+_V2_BAND_KEY = ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC  # "high_confidence_algorithmic"
+_D17_DELTA_YEARS = 100
+_REBAND_TARGET_META_KEY = "tier_a_reband_target"
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    if not _has_table(conn, table):
+        return False
+    return any(r[1] == column for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall())
 
 
 def _connect_ro(db_path) -> sqlite3.Connection:
@@ -493,6 +521,316 @@ def _check_band_precision_release_strict(rows) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# 9. v2 no-mixed-enum-state (asset/bake-level atomicity, band-labels §5 / bake
+#    plan §7 gate 14, Codex #8)
+# ---------------------------------------------------------------------------
+
+def check_no_mixed_enum_state(conn: sqlite3.Connection) -> List[str]:
+    """A v2 asset must not carry BOTH the retired v1 band literal
+    `expert_verified` AND the v2 key `high_confidence_algorithmic` -- ANY
+    mixed v1/v2 state in the shipped DB's band-bearing columns is a HARD FAIL.
+    Scans `discovery_evidence.confidence_band` + `band_precision.confidence_band`
+    (the ASSET bytes; the runtime dual-key read-compat from 135-05 is
+    unaffected). A pure-v1 asset (only `expert_verified`) or a pure-v2 asset
+    (only `high_confidence_algorithmic`) both PASS."""
+    bands = set()
+    for tbl in ("discovery_evidence", "band_precision"):
+        for (b,) in conn.execute(f"SELECT DISTINCT confidence_band FROM {tbl}"):  # noqa: S608 (fixed names)
+            if b is not None:
+                bands.add(b)
+    if _V1_BAND_LITERAL in bands and _V2_BAND_KEY in bands:
+        return [
+            "no-mixed-enum-state: the v2 asset carries BOTH the v1 literal "
+            f"{_V1_BAND_LITERAL!r} AND the v2 key {_V2_BAND_KEY!r} (asset/bake-level "
+            "atomicity, Codex #8)"
+        ]
+    return []
+
+
+# ---------------------------------------------------------------------------
+# 10. v2 never-orphan-shipped (bake plan §7 gate 8 + §4a shadow-orphan)
+# ---------------------------------------------------------------------------
+
+def check_never_orphan_shipped(conn: sqlite3.Connection) -> List[str]:
+    """(A) A claim owning >=1 shipped evidence row must have its
+    `display_evidence_id` point at one of ITS OWN shipped rows -- never a
+    review_only sibling (gate 8, EXACT). (B) Shadow-orphan (§4a): a page that
+    carries any WITNESS evidence must have >=1 shipped claim (a claim whose
+    display evidence is shipped) -- a witness page left with 0 shipped claims
+    is a HARD FAIL. Pages with only shared_text/co-citation review_only rows
+    (never a shipped witness) are legitimately non-shipping and exempt."""
+    violations: List[str] = []
+    cur = conn.cursor()
+    claims = cur.execute(
+        "SELECT claim_id, page_id, display_evidence_id FROM discovery_claim").fetchall()
+    ev_by_claim: Dict[str, List[Tuple]] = {}
+    routing_by_evid: Dict[str, str] = {}
+    for evid, claim_id, routing, kind in cur.execute(
+        "SELECT evidence_id, claim_id, routing_status, evidence_kind FROM discovery_evidence"
+    ).fetchall():
+        ev_by_claim.setdefault(claim_id, []).append((evid, routing, kind))
+        routing_by_evid[evid] = routing
+
+    # (A) display-ownership under routing.
+    for claim_id, _page_id, display_id in claims:
+        rows = ev_by_claim.get(claim_id, [])
+        if any(r == ids.ROUTING_STATUS_SHIPPED for (_e, r, _k) in rows):
+            if routing_by_evid.get(display_id) != ids.ROUTING_STATUS_SHIPPED:
+                violations.append(
+                    f"claim {claim_id}: owns a shipped evidence row but its display_evidence_id "
+                    "points at a review_only row (never-orphan-shipped, gate 8)"
+                )
+
+    # (B) shadow-orphan, scoped to witness-bearing pages.
+    page_claims: Dict[str, List[Tuple[str, str]]] = {}
+    for claim_id, page_id, display_id in claims:
+        page_claims.setdefault(page_id, []).append((claim_id, display_id))
+    for page_id, clist in page_claims.items():
+        page_has_witness = any(
+            kind == ids.EVIDENCE_KIND_WITNESS
+            for (claim_id, _d) in clist
+            for (_e, _r, kind) in ev_by_claim.get(claim_id, [])
+        )
+        if not page_has_witness:
+            continue
+        page_has_shipped_claim = any(
+            routing_by_evid.get(display_id) == ids.ROUTING_STATUS_SHIPPED
+            for (_c, display_id) in clist
+        )
+        if not page_has_shipped_claim:
+            violations.append(
+                f"page {page_id}: has witness claim(s) but 0 shipped claims (shadow-orphan HARD FAIL, §4a)"
+            )
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# 11. v2 unknown-date-never-demoted (bake plan §4.3)
+# ---------------------------------------------------------------------------
+
+def check_unknown_date_never_demoted(conn: sqlite3.Connection) -> List[str]:
+    """Every `routing_reason='later_shared_text'` evidence row MUST correspond
+    to a `discovery_routing_audit` row on the same page with
+    `decision='demoted'` and BOTH years non-NULL -- an unknown-date pair is
+    fail-safe and can NEVER produce a demotion. A pre-v2 asset (no
+    `discovery_routing_audit` table) degrades gracefully to [] (compat-gate)."""
+    if not _has_table(conn, "discovery_routing_audit"):
+        return []
+    violations: List[str] = []
+    cur = conn.cursor()
+    demoted_pages = set()
+    for page_id, ky, dy in cur.execute(
+        "SELECT page_id, kept_year, demoted_year FROM discovery_routing_audit WHERE decision='demoted'"
+    ).fetchall():
+        if ky is not None and dy is not None:
+            demoted_pages.add(page_id)
+    rows = cur.execute(
+        "SELECT de.evidence_id, de.a_page_id FROM discovery_evidence de "
+        "WHERE de.routing_reason=?", (ids.ROUTING_REASON_LATER_SHARED_TEXT,)
+    ).fetchall()
+    for evid, page_id in rows:
+        if page_id not in demoted_pages:
+            violations.append(
+                f"evidence {evid}: routing_reason='later_shared_text' on page {page_id} has NO "
+                "discovery_routing_audit decision='demoted' row with both years non-NULL "
+                "(unknown-date-never-demoted)"
+            )
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# 12. v2 routing-audit replayability (bake plan §4.3/§7 gate 10, Codex #5)
+# ---------------------------------------------------------------------------
+
+def check_routing_audit_replayability(conn: sqlite3.Connection) -> List[str]:
+    """Cross-check `discovery_routing_audit` internal consistency: every
+    `decision='demoted'` row has BOTH years non-NULL, `demoted_year -
+    kept_year >= DELTA` (100), `delta_years` recomputes exactly, and a
+    non-NULL `demoted_work_id`; every `fail_safe_unknown_date`/`kept_tie` row
+    has `demoted_work_id IS NULL`. So every demotion is replayable DB-only. A
+    pre-v2 asset (no audit table) degrades gracefully to [] (compat-gate)."""
+    if not _has_table(conn, "discovery_routing_audit"):
+        return []
+    violations: List[str] = []
+    for (page_id, kept, demoted, ky, dy, delta, decision) in conn.execute(
+        "SELECT page_id, kept_work_id, demoted_work_id, kept_year, demoted_year, "
+        "delta_years, decision FROM discovery_routing_audit"
+    ).fetchall():
+        if decision == "demoted":
+            if ky is None or dy is None:
+                violations.append(
+                    f"routing_audit page {page_id}: demoted row has a NULL year (not replayable)")
+                continue
+            if demoted is None:
+                violations.append(
+                    f"routing_audit page {page_id}: demoted row missing demoted_work_id")
+            computed = abs(dy - ky)
+            if delta != computed:
+                violations.append(
+                    f"routing_audit page {page_id}: delta_years {delta} != |{dy}-{ky}|={computed}")
+            if computed < _D17_DELTA_YEARS:
+                violations.append(
+                    f"routing_audit page {page_id}: demoted delta {computed} < DELTA "
+                    f"{_D17_DELTA_YEARS} (a within-DELTA pair must never be 'demoted')")
+        elif decision in ("kept_tie", "fail_safe_unknown_date"):
+            if demoted is not None:
+                violations.append(
+                    f"routing_audit page {page_id}: {decision} row must have NULL demoted_work_id")
+        else:
+            violations.append(
+                f"routing_audit page {page_id}: unknown decision {decision!r}")
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# 13. v2 measurement_status <-> ci_low consistency (bake plan §7 gate 12, Codex #B3)
+# ---------------------------------------------------------------------------
+
+def check_measurement_status_ci_consistency(conn: sqlite3.Connection) -> List[str]:
+    """EXHAUSTIVE over the closed measurement_status vocab: `measured_pass`
+    requires all five precision/CI/num/denom fields non-NULL AND `ci_low >=
+    STRICT_FLOOR`; `measured_fail` requires all five non-NULL AND `ci_low <
+    STRICT_FLOOR`; `not_measured`/`insufficient_evidence` require ALL FIVE
+    NULL; any other stored status is a HARD FAIL. A NULL measurement_status
+    (legacy/v1-compat, the current real-build default) is exempt. A pre-v2
+    asset (no `measurement_status` column) degrades gracefully to []."""
+    if not _has_column(conn, "band_precision", "measurement_status"):
+        return []
+    violations: List[str] = []
+    for (cb, status, precision, ci_low, ci_high, num, den) in conn.execute(
+        "SELECT confidence_band, measurement_status, precision, ci_low, ci_high, "
+        "numerator, denominator FROM band_precision"
+    ).fetchall():
+        if status is None:
+            continue
+        if status not in _MEASUREMENT_STATUSES:
+            violations.append(f"band_precision ({cb}): unknown measurement_status {status!r}")
+            continue
+        five = (precision, ci_low, ci_high, num, den)
+        all_present = all(v is not None for v in five)
+        all_null = all(v is None for v in five)
+        if status == "measured_pass":
+            if not all_present or ci_low is None or ci_low < _STRICT_FLOOR:
+                violations.append(
+                    f"band_precision ({cb}): measured_pass requires all five fields non-NULL AND "
+                    f"ci_low>={_STRICT_FLOOR} (Codex #B3)")
+        elif status == "measured_fail":
+            if not all_present or ci_low is None or ci_low >= _STRICT_FLOOR:
+                violations.append(
+                    f"band_precision ({cb}): measured_fail requires all five fields non-NULL AND "
+                    f"ci_low<{_STRICT_FLOOR} (Codex #B3)")
+        else:  # not_measured / insufficient_evidence
+            if not all_null:
+                violations.append(
+                    f"band_precision ({cb}): {status} must have ALL five precision/CI/num/denom NULL")
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# 14. v2 reband-precision-invalidation (bake plan §7 gate 13, gate-13 iff, Codex #B2)
+# ---------------------------------------------------------------------------
+
+def check_reband_precision_invalidation(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """IFF `meta.tier_a_reband_target='screening_rb'` is set (a
+    population-changing reband occurred), BOTH the target `screening_rb` AND
+    the source `tier_a` band_precision rows MUST be
+    `measurement_status='not_measured'` with `precision IS NULL` -- a retained
+    pre-reband number is a HARD FAIL. The check is a NO-OP when the marker is
+    absent (gate-13 iff)."""
+    target = meta.get(_REBAND_TARGET_META_KEY)
+    if not target:
+        return []
+    if not _has_column(conn, "band_precision", "measurement_status"):
+        return []
+    violations: List[str] = []
+    for band in (target, ids.CONFIDENCE_BAND_TIER_A):
+        rows = conn.execute(
+            "SELECT measurement_status, precision FROM band_precision "
+            "WHERE confidence_band=? AND evidence_source=?",
+            (band, ids.EVIDENCE_SOURCE_TRACK1_DIRECT),
+        ).fetchall()
+        for status, precision in rows:
+            if status != "not_measured" or precision is not None:
+                violations.append(
+                    f"reband-precision-invalidation: meta.{_REBAND_TARGET_META_KEY}={target!r} is set "
+                    f"but band_precision ({band}) retains measurement_status={status!r}/precision="
+                    f"{precision!r} (a population-changing reband can never keep the prior number, "
+                    "Codex #B2)")
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# 15. v2 evidence_id-content-consistency (bake plan §7 gate 15, Codex-R4 new-HIGH)
+# ---------------------------------------------------------------------------
+
+def check_evidence_id_content_consistency(conn: sqlite3.Connection) -> List[str]:
+    """For EVERY discovery_evidence row, RECOMPUTE the frozen §2 evidence_id
+    recipe over the row's stored fields and require it to EQUAL the stored id
+    -- a mismatch catches a stale id left by a bare in-place `UPDATE
+    confidence_band` (reband not fed as a rebuild input). AND for every claim,
+    `select_display_evidence` over its CURRENT evidence rows must reproduce the
+    stored `display_evidence_id` -- a stale display pointer (e.g. still at a
+    now-review_only row after a reband) is a HARD FAIL."""
+    violations: List[str] = []
+    cur = conn.cursor()
+    for (evid, work_id, a_page_id, sys_id, kind, source, band, span_start, span_end,
+         other_page_id, seed_spans_json) in cur.execute(
+        "SELECT de.evidence_id, dc.work_id, de.a_page_id, de.sys_id, de.evidence_kind, "
+        "de.evidence_source, de.confidence_band, de.span_start, de.span_end, "
+        "de.other_page_id, de.seed_spans "
+        "FROM discovery_evidence de JOIN discovery_claim dc ON dc.claim_id = de.claim_id"
+    ).fetchall():
+        seed_spans = json.loads(seed_spans_json) if seed_spans_json else None
+        recomputed = ids.evidence_id(
+            work_id=work_id, a_page_id=a_page_id, sys_id=sys_id, evidence_kind=kind,
+            evidence_source=source, confidence_band=band, span_start=span_start,
+            span_end=span_end, other_page_id=other_page_id, seed_spans=seed_spans)
+        if recomputed != evid:
+            violations.append(
+                f"evidence {evid}: stored evidence_id != recomputed frozen §2 recipe "
+                "(stale id -- a reband applied as a bare in-place UPDATE, not a rebuild input)")
+
+    ev_by_claim: Dict[str, List[Dict]] = {}
+    for (claim_id, evid, source, band, adjudication, routing) in cur.execute(
+        "SELECT claim_id, evidence_id, evidence_source, confidence_band, adjudication_status, "
+        "routing_status FROM discovery_evidence"
+    ).fetchall():
+        ev_by_claim.setdefault(claim_id, []).append({
+            "evidence_id": evid, "evidence_source": source, "confidence_band": band,
+            "adjudication_status": adjudication, "routing_status": routing,
+        })
+    for (claim_id, display_id) in cur.execute(
+        "SELECT claim_id, display_evidence_id FROM discovery_claim"
+    ).fetchall():
+        rows = ev_by_claim.get(claim_id)
+        if not rows:
+            continue  # zero-evidence claims already caught by check_evidence_combinations
+        recomputed_display = ids.select_display_evidence(rows)
+        if recomputed_display != display_id:
+            violations.append(
+                f"claim {claim_id}: stored display_evidence_id != select_display_evidence recompute "
+                "(stale display pointer -- reband/demotion not fed as a rebuild input)")
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# 16. v2 coverage-gap report (bake plan §4a -- LOG+REPORT, non-fatal)
+# ---------------------------------------------------------------------------
+
+def check_coverage_gap_report(conn: sqlite3.Connection) -> List[str]:
+    """Non-fatal (§4a): report the D-17 routing-audit demotion/tie/fail-safe
+    split for operator visibility. NEVER a violation (returns [])."""
+    if not _has_table(conn, "discovery_routing_audit"):
+        return []
+    counts = dict(conn.execute(
+        "SELECT decision, COUNT(*) FROM discovery_routing_audit GROUP BY decision").fetchall())
+    if counts:
+        print(f"coverage-gap report (non-fatal): routing_audit decision counts = {counts}",
+              file=sys.stderr)
+    return []
+
+
+# ---------------------------------------------------------------------------
 # 8. Membership frame_content_hash
 # ---------------------------------------------------------------------------
 
@@ -534,6 +872,15 @@ def verify(db_path, expected_frame_hash=None) -> int:
         violations += count_violations
         violations += check_band_precision(conn, meta)
         violations += check_frame_content_hash(conn, meta, expected_frame_hash)
+        # v2 re-distill invariants (135-06).
+        violations += check_no_mixed_enum_state(conn)
+        violations += check_never_orphan_shipped(conn)
+        violations += check_unknown_date_never_demoted(conn)
+        violations += check_routing_audit_replayability(conn)
+        violations += check_measurement_status_ci_consistency(conn)
+        violations += check_reband_precision_invalidation(conn, meta)
+        violations += check_evidence_id_content_consistency(conn)
+        violations += check_coverage_gap_report(conn)  # non-fatal report
     finally:
         conn.close()
 
