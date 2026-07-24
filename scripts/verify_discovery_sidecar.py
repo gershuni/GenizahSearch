@@ -845,6 +845,58 @@ def check_routing_audit_replayability(conn: sqlite3.Connection) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# 12b. v2 fail-closed cascade / kept_invalid_reference gate (bake plan §4.3,
+# Codex R4/R5 span-orphaning fix)
+# ---------------------------------------------------------------------------
+
+def check_demotion_kept_reference_shipped(conn: sqlite3.Connection) -> List[str]:
+    """Every `discovery_routing_audit` row with `decision='demoted'` MUST name a
+    `kept_work_id` whose canonical group STILL ships >=1 display-evidence row --
+    i.e. the demoter reference is NOT itself fully demoted/review_only.
+
+    Closes the three-work cascade Codex R4/R5 flagged: the D-17 pairwise pass
+    can let an already-demoted canonical group act as the 'kept' (demoter) of a
+    third group, producing a 'demoted' audit row whose `kept_work_id` is itself
+    review_only -- a non-replayable/misleading provenance row (the shared span
+    would be left with NO shipped witness). This gate is FAIL-CLOSED: if a REAL
+    bake trips it, the bake HALTs and the owner adjudicates the concrete cascade
+    cases, rather than silently shipping misleading audit provenance. The
+    demotion ROUTING is left AS-IS (routing-invariant) -- this is a verifier-only
+    guard.
+
+    Canonical grouping is derived DB-only from `works.canonical_work_id` (a raw
+    member work_id -> its canonical); a group 'ships' iff >=1 of its claims has a
+    `display_evidence_id` pointing at a `routing_status='shipped'` evidence row.
+    Masking-safe: opaque ids + page ids only. A pre-v2 asset (no
+    `discovery_routing_audit` table) degrades gracefully to [] (compat-gate)."""
+    if not _has_table(conn, "discovery_routing_audit"):
+        return []
+    violations: List[str] = []
+    cur = conn.cursor()
+    shipped_canonicals = {
+        row[0]
+        for row in cur.execute(
+            "SELECT DISTINCT w.canonical_work_id "
+            "FROM discovery_claim dc "
+            "JOIN works w ON w.work_id = dc.work_id "
+            "JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id "
+            "WHERE de.routing_status = ?", (ids.ROUTING_STATUS_SHIPPED,)
+        ).fetchall()
+    }
+    for (page_id, kept) in cur.execute(
+        "SELECT page_id, kept_work_id FROM discovery_routing_audit WHERE decision='demoted'"
+    ).fetchall():
+        if kept is not None and kept not in shipped_canonicals:
+            violations.append(
+                f"routing_audit page {page_id}: demoted row's kept_work_id {kept} is "
+                "itself fully review_only (its canonical group has no shipped display "
+                "evidence) -- a three-work cascade demoting against an already-demoted "
+                "reference (kept_invalid_reference, bake plan §4.3)"
+            )
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # 13. v2 measurement_status <-> ci_low consistency (bake plan §7 gate 12, Codex #B3)
 # ---------------------------------------------------------------------------
 
@@ -1047,6 +1099,7 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         violations += check_never_orphan_shipped(conn)
         violations += check_unknown_date_never_demoted(conn)
         violations += check_routing_audit_replayability(conn)
+        violations += check_demotion_kept_reference_shipped(conn)
         violations += check_measurement_status_ci_consistency(conn)
         violations += check_reband_precision_invalidation(conn, meta)
         violations += check_evidence_id_content_consistency(conn)
