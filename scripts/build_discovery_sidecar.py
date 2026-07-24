@@ -984,10 +984,13 @@ _CO_CITATION = ids.ROUTING_REASON_CO_CITATION
 # `_HIGH_CONFIDENCE_ALGORITHMIC` in a v2 build (`build_claims_and_evidence(
 # v2_bands=True)`, set by finalize_build when a `--canonical-merges` census is
 # supplied); the synthetic byte-identical fixture and every v1 build keep
-# writing `_EXPERT_VERIFIED`. NOTE: the frozen band_precision default
-# (`_frozen_real_band_precision_rows`, below) still keys on `_EXPERT_VERIFIED`
-# -- that rename rides an owner `--precision-spec` at the 135-07 real bake and
-# is deliberately OUT OF SCOPE for this evidence-band amendment.
+# writing `_EXPERT_VERIFIED`. The 135-07 pre-bake hardening COMPLETED the
+# rename cascade: the frozen band_precision default
+# (`_frozen_real_band_precision_rows(v2_bands=True)`, below) now ALSO keys the
+# E1 top-tier row on `_HIGH_CONFIDENCE_ALGORITHMIC` in a v2 build, threaded
+# from finalize_build's single `band_vocab_version` signal, so a pure-v2 asset
+# passes the FULL (version-aware) verifier and the pure-v1 build stays
+# byte-identical.
 _LATER_SHARED_TEXT = ids.ROUTING_REASON_LATER_SHARED_TEXT
 _HIGH_CONFIDENCE_ALGORITHMIC = ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC
 
@@ -1389,7 +1392,7 @@ def _band_precision_rows() -> List[Dict]:
     return rows
 
 
-def _frozen_real_band_precision_rows() -> List[Dict]:
+def _frozen_real_band_precision_rows(v2_bands: bool = False) -> List[Dict]:
     """The FROZEN real/release-mode band_precision default spec (H3, C-7/G8,
     docs/specs/discovery-sidecar-schema-v1.md SS1.6). Used by
     `finalize_build`'s real-mode path whenever the caller does not supply a
@@ -1400,7 +1403,14 @@ def _frozen_real_band_precision_rows() -> List[Dict]:
     MEASURED track1_direct bands (expert_verified/screening_rb/
     screening_canon) and the collection-level 0.926 are the frozen contract
     values documented in the schema doc; the owner may override this whole
-    spec at 134-07 via an explicit `--precision-spec <json>` file."""
+    spec at 134-07 via an explicit `--precision-spec <json>` file.
+
+    v2 rename (135-07): when `v2_bands=True`, the E1 top-tier row's
+    `confidence_band` KEY is `_HIGH_CONFIDENCE_ALGORITHMIC` instead of the v1
+    `_EXPERT_VERIFIED` -- SAME 0.889 measured value, ONLY the key renames (the
+    tier is algorithmic, not human-verified). Every other row is byte-identical
+    across v1/v2, so a v1 build stays exactly as before."""
+    top_tier_band = _HIGH_CONFIDENCE_ALGORITHMIC if v2_bands else _EXPERT_VERIFIED
     rows = [
         {
             "scope": "collection", "collection_id": "propagated_witness_collection_v1",
@@ -1433,7 +1443,7 @@ def _frozen_real_band_precision_rows() -> List[Dict]:
         },
         {
             "scope": "band", "collection_id": "e1_certification_registry_v1",
-            "evidence_source": _TRACK1, "confidence_band": _EXPERT_VERIFIED,
+            "evidence_source": _TRACK1, "confidence_band": top_tier_band,
             "numerator": None, "denominator": None, "precision": 0.889,
             "ci_low": None, "ci_high": None, "method": "E1 registry pre-registered measurement",
             "sampling_frame": None, "ins_policy": None, "weighting": None,
@@ -3327,6 +3337,17 @@ class InvalidPrecisionSpecError(ValueError):
     exits) ever gets a chance to catch it."""
 
 
+class BandVocabPreflightError(RuntimeError):
+    """Raised (135-07 hardening) when a build's band-vocabulary input set is
+    inconsistent with the operator's declared intent: a SHA-256 pin supplied
+    WITHOUT its input path (any mode -- a dangling pin means the operator
+    believes an input is wired that is not); a v2 `--release` missing any of
+    the THREE hash-pinned inputs or their SHA pins; or a v1 `--release`
+    carrying any v2-only input. Fail-closed: v1-vs-v2 operator intent must be
+    unambiguous and fully pinned before any output is produced (the deferred
+    rename cascade's root cause was that v2 was inferred, never asserted)."""
+
+
 def _count_tier_a_rows(conn: sqlite3.Connection) -> int:
     (n,) = conn.execute(
         "SELECT COUNT(*) FROM track1_matches WHERE shadowed_by IS NULL"
@@ -3430,17 +3451,98 @@ def _assert_release_inputs_complete(
         )
 
 
+def _assert_band_vocab_release_preflight(
+    *,
+    release: bool,
+    v2_build: bool,
+    canonical_merges_path,
+    canonical_merges_sha256,
+    composition_dates_path,
+    composition_dates_sha256,
+    seftja_dates_path,
+    seftja_dates_sha256,
+) -> None:
+    """135-07 band-vocabulary release preflight -- a pure argument-validation
+    gate with NO file I/O, run at the very TOP of `finalize_build` (before any
+    input load or output mutation). Enforces:
+
+      * (ALL modes) a SHA-256 pin supplied WITHOUT its input path is a hard
+        error -- a dangling pin means the operator believes an input is wired
+        that is not (fail-closed, never silently ignored);
+      * (release + v2) all THREE hash-pinned inputs (`--canonical-merges`,
+        `--composition-dates`, `--seftja-dates`) present WITH their SHA pins;
+      * (release + v1) NO v2-only input present at all -- a v1 release that
+        carries a v2 input has ambiguous intent and is refused.
+
+    The `--release` gates are inert for the fixture/unit path (135-06's
+    "v2 inputs opt-in when not --release" behavior is preserved); only the
+    universal dangling-pin check applies there, which the fixtures satisfy."""
+    dangling = [
+        name
+        for name, path, sha in (
+            ("--canonical-merges", canonical_merges_path, canonical_merges_sha256),
+            ("--composition-dates", composition_dates_path, composition_dates_sha256),
+            ("--seftja-dates", seftja_dates_path, seftja_dates_sha256),
+        )
+        if sha is not None and path is None
+    ]
+    if dangling:
+        raise BandVocabPreflightError(
+            "SHA-256 pin(s) supplied without the corresponding input path: "
+            + ", ".join(sorted(dangling))
+        )
+    if not release:
+        return
+    if v2_build:
+        problems = []
+        for name, path, sha in (
+            ("--canonical-merges", canonical_merges_path, canonical_merges_sha256),
+            ("--composition-dates", composition_dates_path, composition_dates_sha256),
+            ("--seftja-dates", seftja_dates_path, seftja_dates_sha256),
+        ):
+            if path is None:
+                problems.append(f"{name} path missing")
+            if sha is None:
+                problems.append(f"{name} SHA-256 pin missing")
+        if problems:
+            raise BandVocabPreflightError(
+                "v2 --release requires all three hash-pinned inputs present WITH "
+                "their SHA-256 pins: " + "; ".join(problems)
+            )
+    else:
+        v2_only = [
+            name
+            for name, path in (
+                ("--canonical-merges", canonical_merges_path),
+                ("--composition-dates", composition_dates_path),
+                ("--seftja-dates", seftja_dates_path),
+            )
+            if path is not None
+        ]
+        if v2_only:
+            raise BandVocabPreflightError(
+                "v1 --release must not carry v2-only input(s): "
+                + ", ".join(sorted(v2_only))
+            )
+
+
 _PRECISION_SPEC_TOLERANCE = 1e-6
 
 
-def _validate_precision_spec(rows: List[Dict]) -> None:
+def _validate_precision_spec(rows: List[Dict], *, v2_bands: bool = False) -> None:
     """Codex R2 HIGH: validate an explicit `--precision-spec` against the
     EXACT frozen release band_precision row-set (docs/specs/discovery-
     sidecar-schema-v1.md SS1.6) BEFORE it is used for any output/artifact
-    write. Cross-checked against `_frozen_real_band_precision_rows()` --
-    the ONE source of truth for the frozen row-set already defined in this
+    write. Cross-checked against `_frozen_real_band_precision_rows(v2_bands)`
+    -- the ONE source of truth for the frozen row-set already defined in this
     module -- rather than a second hardcoded copy of the same contract
     (which would risk drifting out of sync).
+
+    v2 rename (135-07): `v2_bands` selects the frozen key-set the supplied spec
+    must match. A v2 build REQUIRES the v2 top-tier key
+    (`high_confidence_algorithmic`) and REJECTS the v1 key (`expert_verified`),
+    and vice-versa for a v1 build -- the frozen row-set is the sole gate, so
+    this falls out automatically from the version-threaded cross-check below.
 
     Requires EXACTLY: the collection row (`propagated_witness_collection_v1`,
     precision ~= 0.926, non-null numerator/denominator/ci_low/ci_high/method);
@@ -3452,7 +3554,7 @@ def _validate_precision_spec(rows: List[Dict]) -> None:
     fabricated `tier_a` precision or a missing frozen row must never reach
     a real/release build's output before the separate verifier ever runs.
     """
-    frozen = _frozen_real_band_precision_rows()
+    frozen = _frozen_real_band_precision_rows(v2_bands=v2_bands)
     frozen_collection = next(r for r in frozen if r["scope"] == "collection")
     frozen_band_by_key = {
         (r["evidence_source"], r["confidence_band"]): r
@@ -3604,6 +3706,7 @@ def _validate_precision_spec(rows: List[Dict]) -> None:
 
 def _resolve_band_precision_spec(
     *, precision_spec: Optional[List[Dict]], frozen_precision_defaults: bool, release: bool,
+    v2_bands: bool = False,
 ) -> List[Dict]:
     """H3: resolve the band_precision rows to write, BEFORE any further
     build work begins. An explicit `precision_spec` (owner-supplied at
@@ -3620,19 +3723,24 @@ def _resolve_band_precision_spec(
     `--allow-partial-sources` smoke builds) defaults to the SAME
     frozen-contract rows when neither is supplied. Extracted as its own
     function so H3's raise path is directly unit-testable without needing
-    to satisfy the (unrelated) H2 input-completeness gate."""
+    to satisfy the (unrelated) H2 input-completeness gate.
+
+    v2 rename (135-07): `v2_bands` is threaded to BOTH the explicit-spec
+    validation and the frozen-default resolution so a v2 build's band_precision
+    top tier is keyed `high_confidence_algorithmic` (and a supplied v2 spec is
+    required to match that key), while a v1 build stays byte-identical."""
     if precision_spec is not None:
-        _validate_precision_spec(precision_spec)
+        _validate_precision_spec(precision_spec, v2_bands=v2_bands)
         return precision_spec
     if frozen_precision_defaults:
-        return _frozen_real_band_precision_rows()
+        return _frozen_real_band_precision_rows(v2_bands=v2_bands)
     if release:
         raise ValueError(
             "--release requires --precision-spec <json> or an explicit "
             "--frozen-precision-defaults acknowledgement (H3) -- a real/release "
             "build must never silently fabricate band_precision numbers"
         )
-    return _frozen_real_band_precision_rows()
+    return _frozen_real_band_precision_rows(v2_bands=v2_bands)
 
 
 def finalize_build(
@@ -3711,6 +3819,31 @@ def finalize_build(
     a crosswalk update, and (if requested) overwritten the review artifact
     before ever raising.
     """
+    # v2 STEP -1 (135-07 ordering fix, Codex #1): derive the band-vocabulary
+    # version ONCE, at the very TOP of the body -- BEFORE band_precision is
+    # resolved. A supplied hash-pinned `--canonical-merges` census is a v2-ONLY
+    # concept, so it is the definitive "this is a v2 build" signal;
+    # `band_vocab_version` is the explicit, durable operator-intent marker
+    # recorded in meta (below) and cross-checked by the verifier. Previously
+    # `v2_build` was computed AFTER `bp_rows` was resolved, so the frozen
+    # band_precision default kept the v1 `expert_verified` top-tier key even in
+    # a v2 build (the deferred-rename cascade's ordering bug).
+    v2_build = canonical_merges_path is not None
+    band_vocab_version = "v2" if v2_build else "v1"
+
+    # 135-07 band-vocabulary release preflight (pure arg validation, NO I/O):
+    # dangling SHA pins (any mode) + v2/v1 --release input-set completeness.
+    _assert_band_vocab_release_preflight(
+        release=release,
+        v2_build=v2_build,
+        canonical_merges_path=canonical_merges_path,
+        canonical_merges_sha256=canonical_merges_sha256,
+        composition_dates_path=composition_dates_path,
+        composition_dates_sha256=composition_dates_sha256,
+        seftja_dates_path=seftja_dates_path,
+        seftja_dates_sha256=seftja_dates_sha256,
+    )
+
     # v2 STEP 0 (135-06, bake plan §6): resolve the optional --precision-spec
     # FAIL-branch reband BEFORE any DB write. A `measured_fail` tier_a outcome
     # is a REBUILD INPUT (never a bare in-place UPDATE) -- decided here, then
@@ -3722,14 +3855,19 @@ def finalize_build(
     # spec triggers a reband, the strict frozen-row-set validation does NOT
     # apply (that spec carries measurement_status semantics, not the frozen
     # numbers); the reband path resolves + invalidates band_precision itself.
+    # v2_bands is threaded into BOTH branches (135-07) so the E1 top-tier
+    # band_precision row is keyed `high_confidence_algorithmic` in a v2 build
+    # (the reband branch grabs the frozen rows BEFORE invalidating tier_a/
+    # screening_rb, so without the version thread it would keep the OLD key).
     if reband_tier_a:
-        bp_rows = _frozen_real_band_precision_rows()
+        bp_rows = _frozen_real_band_precision_rows(v2_bands=v2_build)
         bp_rows, reband_meta_extra = invalidate_reband_band_precision(bp_rows, reband_decision)
     else:
         bp_rows = _resolve_band_precision_spec(
             precision_spec=precision_spec,
             frozen_precision_defaults=frozen_precision_defaults,
             release=release,
+            v2_bands=v2_build,
         )
         reband_meta_extra = {}
 
@@ -3741,13 +3879,10 @@ def finalize_build(
     # tests, out of this plan's file scope, green). A mismatched SHA or a
     # malformed shape still HALTs (raised by the loaders below) whenever the
     # input IS supplied, and semantic-ratification is enforced on --release.
-    # v2 build discriminator (135-06 amendment 2026-07-24): a supplied
-    # hash-pinned `--canonical-merges` census is a v2-ONLY concept, so it is
-    # the definitive "this is a v2 build" signal -- used below to flip the E1
-    # track1_direct top tier from the v1 `expert_verified` literal to the v2
-    # `high_confidence_algorithmic` key. Its verified SHA is recorded in meta
-    # (`canonical_merges_sha256`), giving the shipped asset a clean v2 marker.
-    v2_build = canonical_merges_path is not None
+    # `v2_build` (the "this is a v2 build" signal) was derived at the TOP of
+    # the body (v2 STEP -1) so it could thread the band_precision rename; its
+    # verified SHA is recorded in meta (`canonical_merges_sha256`) below,
+    # giving the shipped asset a clean v2 marker alongside band_vocab_version.
     if v2_build:
         merges_loaded = load_canonical_merges(
             canonical_merges_path, sha256=canonical_merges_sha256,
@@ -3974,6 +4109,13 @@ def finalize_build(
             ("expected_rows_works", str(n_works)),
             ("expected_rows_units", str(n_units)),
             ("frame_content_hash", frame_content_hash),
+            # 135-07: the explicit, durable band-vocabulary version marker
+            # ("v1"/"v2"). The verifier keys its version-aware expected top-tier
+            # band KEY on this (cross-checked against the ACTUAL bands present +
+            # the real canonical_merges_sha256), and `--require-v2` proves the
+            # bake matched OPERATOR INTENT rather than letting the asset choose
+            # its own contract.
+            ("band_vocab_version", band_vocab_version),
         ]
         # v2 provenance (bake plan §7 gate 11, Codex #B2/#5): record the
         # verified SHA-256 of every supplied hash-pinned input in meta.
