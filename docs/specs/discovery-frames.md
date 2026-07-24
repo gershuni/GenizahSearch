@@ -201,6 +201,17 @@ BAND-02 reads it with no code change. **Labels are registry-gated: the word
   `adjudication_status=human_confirmed` (a display/adjudication axis, NOT a separate
   precision); the 0.889 is the band-population precision.
 
+**Rename note 2026-07-24 (Phase 135, plan 135-05 — v2 enum lockstep, Codex #8).**
+`discovery-frames.md` is a §5-lockstep member of
+`docs/specs/discovery-band-labels-v1.md`. At the `discovery-v2` bake the C-7
+track1_direct band `expert_verified` in the tables above renames to
+`high_confidence_algorithmic` (only this key renames; all other bands unchanged).
+The v1 counts/precision in §7 are **NOT** rewritten here — this document remains
+the frozen reference record of what `discovery-v1` IS; the renamed v2 band table
++ v2 counts are frozen in the forthcoming `discovery-frames-v2.md` at the v2 bake
+(135-07). The v1 key is retained for read-compat until the v2 manifest is live
+(135-08).
+
 ## 8. Frame lineage
 
 - Corrected two-family, evidence-source-axis model (134 CONTEXT C-1..C-9):

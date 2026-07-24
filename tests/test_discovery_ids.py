@@ -522,3 +522,30 @@ def test_discovery_routing_audit_rejects_bogus_decision():
             conn.commit()
     finally:
         conn.close()
+
+
+# -- Task 3 golden pin: the committed amended vocabulary. If a change here is
+#    intentional, regenerate + re-review docs/specs/discovery-sidecar-schema-v1.md
+#    (the 2026-07-24 amendment) + discovery-band-labels-v1.md §5 alongside it.
+
+GOLDEN_ROUTING_REASONS = [
+    "co_citation", "impurity", "later_shared_text", "none", "runner_up_conflict",
+]
+GOLDEN_TRACK1_CONFIDENCE_BANDS = [
+    "expert_verified", "high_confidence_algorithmic", "screening_canon",
+    "screening_rb", "tier_a",
+]
+
+
+def test_routing_reasons_golden_membership():
+    assert sorted(d.ROUTING_REASONS) == GOLDEN_ROUTING_REASONS
+
+
+def test_track1_confidence_bands_golden_membership():
+    # The v2 key is present AND the v1 key is retained (v1-read-compat, Codex #8).
+    assert sorted(d.CONFIDENCE_BANDS_BY_SOURCE[d.EVIDENCE_SOURCE_TRACK1_DIRECT]) == (
+        GOLDEN_TRACK1_CONFIDENCE_BANDS
+    )
+    assert d.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC in (
+        d.CONFIDENCE_BANDS_BY_SOURCE[d.EVIDENCE_SOURCE_TRACK1_DIRECT]
+    )

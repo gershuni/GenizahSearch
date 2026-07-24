@@ -609,7 +609,80 @@ ATLAS-layer graph concern (Phase 133+), never a `discovery_claim`.
 
 ---
 
+## Amendment 2026-07-24 (Phase 135, plan 135-05 — v2 vocabulary + registry lockstep, D-17)
+
+This dated amendment ADDS to the frozen contract above; the "Frozen Enum
+Vocabularies" block, §1.5, and §1.6 are left UNTOUCHED in place (dated-amendment
+discipline, never a silent edit). It establishes the v2 vocabulary + schema the
+`discovery-v2` bake logic (135-06) and CERT-01 grading (135-09+) write against.
+NO row is populated by 135-05 — this is DDL + vocabulary only.
+
+1. **`routing_reason` gains `later_shared_text`.** The frozen `routing_reason`
+   vocab becomes `{impurity, runner_up_conflict, co_citation, none,
+   later_shared_text}` (5 members). `later_shared_text` records the D-17 coarse
+   chronological demotion: the later of two co-claiming works whose text is
+   shared is routed to `routing_status='review_only'` with this reason. The
+   `discovery_evidence.routing_reason` DDL CHECK mirrors the frozen
+   `scripts.discovery_ids.ROUTING_REASONS` frozenset exactly.
+
+2. **`band_precision` gains five NULLABLE CERT-01 registry columns** (filled by
+   the CERT-01 grading write later, never by 135-05):
+
+   ```sql
+   measurement_status TEXT CHECK (measurement_status IN
+                         ('not_measured','measured_pass','measured_fail','insufficient_evidence')
+                         OR measurement_status IS NULL),
+   measurement_date   TEXT,
+   grader             TEXT,
+   audit_status       TEXT,
+   report_id          TEXT
+   ```
+
+   The **CLOSED-vocab `measurement_status` CHECK (Codex #B3)** mirrors
+   `shared/discovery_band_labels.MEASUREMENT_STATUSES` exactly, so a free-text
+   status can never reach the D-18 default-eligibility predicate — a
+   `measured_pass` that contradicts its own `ci_low` is still fail-closed at the
+   predicate layer, and a status outside the closed vocab is rejected at the DB
+   layer.
+
+3. **New `discovery_routing_audit` table** (masking-safe by construction —
+   opaque work ids + numeric years only; NO title, reference text, or raw id):
+
+   ```sql
+   CREATE TABLE discovery_routing_audit (
+     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+     page_id         TEXT,
+     kept_work_id    TEXT,
+     demoted_work_id TEXT,
+     kept_year       INTEGER,
+     demoted_year    INTEGER,
+     delta_years     INTEGER,
+     decision        TEXT CHECK (decision IN ('demoted','kept_tie','fail_safe_unknown_date')),
+     routing_reason  TEXT
+   );
+   ```
+
+   The v2 bake (135-06) WRITES one row per D-17 routing decision; `routing_reason`
+   is a plain annotation column here (the constrained routing_reason enum lives
+   on `discovery_evidence`).
+
+4. **New `meta` provenance keys written at the v2 bake** (Codex #B2/#5), added to
+   the §1.5 release-contract key set for the v2 asset: `canonical_merges_sha256`
+   (content hash of the twin/canonical-merge seed), `composition_dates_sha256`
+   (Sefaria composition-date input), and `seftja_dates_sha256` (the SEF/JA date
+   swap-in input). These pin the D-17 chronology + canonical-merge inputs so a
+   rebuild is reproducible and its provenance is auditable.
+
+5. **v2 band rename — v1-read-compat.** The stored track1_direct top band adds
+   the v2 key `high_confidence_algorithmic`; the v1 key `expert_verified` is
+   RETAINED through the transition (the live v1 asset + the v1 fixture tests read
+   it) and is dropped only once the v2 manifest is live (135-08). See
+   `docs/specs/discovery-band-labels-v1.md` §5 (asset/bake-level atomicity) and §2.
+
+---
+
 *This document is FROZEN as of 2026-07-22 (plan 134-01, Task 1). Later
 Phase 134 plans (fixture/distillation/loader/service/frame) implement
 against this contract; any correction requires a new dated amendment
-section here, never a silent edit.*
+section here, never a silent edit. Dated amendments: 2026-07-24 (Phase 135,
+plan 135-05 — v2 vocabulary + registry lockstep).*

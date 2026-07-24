@@ -11,6 +11,11 @@ now citeable at the routed unit from the frozen `track1_pagelevel_manifest.json`
 and **Lever-1 coverage page-routing is re-enabled** (ship cov ≥ 0.45, route
 cov < 0.45 → `review_only`; cliff at 0.45). See §3.1. The ~6% high-coverage
 quoted-works residual remains for Lever 2 (after S1).
+Amended 2026-07-24 (Phase 135, plan 135-05): §4 gains the **D-18 default-shown
+sequencing** dated amendment (tier_a held behind the toggle until its CERT-01
+gate passes); §5 gains the **asset/bake-level atomicity** dated amendment (the
+frozen-enum "one commit / one bake" contract is redefined at asset/bake level,
+not per-git-commit — Codex #8).
 
 **Tunable ONLY by versioning this artifact** (same discipline as
 `docs/specs/discovery-budgets.md`). This file is the SINGLE source of truth for
@@ -171,6 +176,19 @@ This is the yardstick-not-evidence / provisional-not-certified discipline the
 whole discovery program runs under; it does not delete any row (everything stays
 queryable) — it governs what the DEFAULT view asserts.
 
+**Amendment 2026-07-24 (Phase 135, plan 135-05 — D-18 default-shown sequencing).**
+Refining the default-shown policy above for the `tier_a` band specifically:
+**tier_a is NOT default-shown until its CERT-01 gate passes; until then only
+human_confirmed rows + the 0.889 measured (independent audit pending) band show
+by default.** The gate is the D-18 `is_default_eligible` predicate
+(`shared/discovery_band_labels.py`) reading the `band_precision.measurement_status`
+closed vocab + `ci_low` (fail-closed on a missing/sub-`STRICT_FLOOR` bound, Codex
+#B3), backed at the DB layer by the `measurement_status` CHECK added in the
+schema-doc's 2026-07-24 amendment. This is a display-time gate: tier_a rows stay
+queryable behind the `screening_rb`/`screening_canon` "show more" toggle until
+the certificate passes. (`CERT-01`/`cert-*` are technical identifiers only — the
+word "certified" is never a band or review label, Rule 1 / Codex #19.)
+
 ## 4a. Bake-time integrity checks (v2 verifier — from the SEED-029 handoff)
 
 Two page-coverage checks the v2 bake/verifier owns (counts supplied by the
@@ -201,6 +219,26 @@ or the frozen-enum invariant breaks:
 Only `expert_verified` renames; the other stored keys are unchanged. The DISPLAY
 labels in §2 are usable immediately (no re-distill needed) since surfaces never
 show the raw key.
+
+**Amendment 2026-07-24 (Phase 135, plan 135-05 — the atomicity contract is
+asset/bake-level, NOT per-git-commit; Codex #8).** The "one commit / one bake"
+phrase above is REDEFINED: the frozen-enum atomicity requirement is
+**asset/bake-level** — the BUILT `discovery-v2` ASSET must be entirely v2 (NO
+mixed v1/v2 enum state), produced in a SINGLE bake. It is **NOT** a statement
+about GSD's per-plan git commits: the separately-planned 135-05 (this
+vocabulary/DDL/spec lockstep), 135-06 (the v2 build logic that flips band
+assignment + `band_precision` + the verifier's release-strict expected keys), and
+135-07 (the actual bake + freeze) tasks legitimately land across MULTIPLE git
+commits and do NOT violate the contract, so long as they together produce ONE
+atomic v2 asset with no mixed enum state. During the transition the CODE is
+version-aware: the runtime spot-check (`web/discovery_assets.py
+::_CONFIDENCE_BANDS_BY_SOURCE`), the band-rank (`shared/discovery_service.py
+::_BAND_RANK_ORDER`), the frozen enum (`scripts/discovery_ids.py
+::CONFIDENCE_BANDS_BY_SOURCE`), and the verifier's `VALID_EVIDENCE_COMBOS` all
+accept BOTH keys (v1-read-compat — the v1 asset stays live until 135-08), while
+the v2 verifier's **no-mixed-enum-state assertion over the built asset**
+(135-06/135-07) guarantees the shipped v2 asset carries only the v2 key. The v1
+key `expert_verified` is dropped only once the v2 manifest is live (135-08).
 
 ## 6. Cross-references
 
