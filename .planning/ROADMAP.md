@@ -151,7 +151,7 @@ Plans:
 **Wave 2**
 
 - [ ] 135-02-PLAN.md — Bilingual methods/confidence Help section + /help noindex + render-smoke (BAND-05)
-- [ ] 135-05-PLAN.md — v2 vocabulary lockstep: routing_reason += later_shared_text + expert_verified→high_confidence_algorithmic rename + spec amendments
+- [x] 135-05-PLAN.md — v2 vocabulary lockstep: routing_reason += later_shared_text + expert_verified→high_confidence_algorithmic rename + spec amendments
 
 **Wave 3**
 
