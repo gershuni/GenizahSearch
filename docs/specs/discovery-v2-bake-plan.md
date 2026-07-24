@@ -2151,3 +2151,47 @@ underlying data distinction is CREATED by this bake plan. NONE of them are
   (`routing_reason` per claim, §4.3/§4.5), so no further data work is
   needed; this is purely a Phase-136 surface-design decision, not a 135
   bake change.
+
+## Amendment 2026-07-24 (Phase 135, composition-dates flat-int ingest)
+
+Amends the `--composition-dates` INPUT contract in §4.3 (the composition-dates
+parser). Owner-authorized adaptation to the parallel session's real delivered
+production artifact; no Codex gate re-run (the owner chose to adapt the parser
+rather than ask the parallel session to re-emit).
+
+- **A second accepted INPUT schema.** `parse_composition_dates` now accepts, in
+  addition to the FROZEN four-key designator+string form specified in §4.3, a
+  **flat pre-normalized** form: a NON-EMPTY JSON object mapping raw source-side
+  ids to **integer** CE years (`{ "<raw_id>": <int CE year>, … }`). The
+  delivered artifact `discovery_data/composition_dates.json` (7,277 entries,
+  every value an integer year in `[500, 1587]`) is exactly this shape.
+- **Why.** The production chrono pipeline already performs the (range-aware)
+  anchoring and hands over explicit anchored integer years. Rationale for
+  adapting the parser to this form: it is the source-of-truth production output
+  AND is **masking-cleaner** — no descriptive date strings enter the build
+  input at all (every value is a bare integer year before any use).
+- **Branch selection (robust, unambiguous).** If `set(doc)` is EXACTLY the four
+  designator+dates keys → the existing designator+string path (unchanged). Else
+  if `doc` is a non-empty object whose every value is a JSON integer → the flat
+  path. Otherwise (empty object, mixed/typed values, or extra keys) → HALT with
+  `CompositionDatesError`.
+- **Flat-path validation (HALT, never silent skip).** Each value is validated as
+  an `int` — a JSON `bool` (an `int` subclass) is rejected — within the SAME
+  `[500, 1600]` plausible-composition window enforced elsewhere in §4.3. An
+  out-of-range or non-int value HALTs the build.
+- **Retained.** The frozen designator-driven string normalizer
+  (`normalize_composition_date`) and the four-key string path are kept fully
+  intact for any future descriptive input. The SHA-256 pin
+  (`--composition-dates-sha256`) and the returned `{raw_id: year}` shape are
+  unchanged, so the downstream `resolve_year_by_canonical` crosswalk join is
+  untouched.
+- **`_SS`-suffix stripping — assessed, no-op, deferred.** The parallel session
+  noted a possible `_SS`-suffix strip on raw ids before the crosswalk join. It
+  was assessed and is a **no-op for the delivered artifact** (the join resolves
+  the same 802 corpus M-works with or without stripping); `resolve_year_by_canonical`
+  and the crosswalk join are deliberately left unchanged. Deferred.
+- **Tests.** `tests/test_discovery_v2_bake.py` covers the flat path (parse to
+  `{raw_id: year}`; out-of-range / bool / string / mixed / empty-object HALTs;
+  the designator+string path regression) plus a smoke-parse of the real pinned
+  file (7,277 entries, all int in `[500, 1587]`). The artifact SHA is a runtime
+  pin, not a test gate.
