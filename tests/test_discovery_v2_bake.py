@@ -1246,6 +1246,156 @@ def test_never_orphan_shipped_clean_asset_passes(tmp_path):
     conn.close()
 
 
+# ===========================================================================
+# 135-07 FIX: Lever-1 coverage metric (matched_letters / norm-page-letters),
+# NOT the edit-distance `density`. Every fixture below is FABRICATED and
+# masking-clean: synthetic page text is built from ASCII Hebrew CODE POINTS
+# (chr(0x05D0)==alef), never a literal Hebrew glyph or restricted content.
+# ===========================================================================
+
+# Fabricated Hebrew base letters, by code point (masking-safe: no literal glyph
+# appears in this source file). ALEF..DALET + a final-kaf / final-mem, a nikud
+# mark (hiriq U+05B4), a cantillation mark (etnahta U+0591), the Judeo-Arabic
+# upper dot (U+0307), a geresh (U+05F3) and an ASCII space/bracket.
+_ALEF, _BET, _GIMEL, _DALET = chr(0x05D0), chr(0x05D1), chr(0x05D2), chr(0x05D3)
+_FINAL_KAF, _KAF = chr(0x05DA), chr(0x05DB)
+_FINAL_MEM, _MEM = chr(0x05DD), chr(0x05DE)
+_HIRIQ, _ETNAHTA, _UPPER_DOT, _GERESH = chr(0x05B4), chr(0x0591), chr(0x0307), chr(0x05F3)
+
+
+def test_norm_stream_letter_count_strips_marks_and_finals_and_separators():
+    """The ported SEED-029 normalizer counts ONLY Hebrew base letters
+    (U+05D0..U+05EA); nikud, cantillation, the Judeo-Arabic upper dot, geresh,
+    spaces and brackets are separators (dropped); final forms fold to base but
+    still count."""
+    # 4 base letters + hiriq + etnahta + upper dot on the first letter.
+    assert sidecar_build.norm_stream_letter_count(
+        _ALEF + _HIRIQ + _ETNAHTA + _UPPER_DOT + _BET + _GIMEL + _DALET) == 4
+    # finals fold to base and count; separators dropped.
+    assert sidecar_build.norm_stream_letter_count(
+        _FINAL_KAF + " " + _FINAL_MEM + _GERESH + "[" + _ALEF + "]") == 3
+    # non-Hebrew page -> 0 letters (division guard -> coverage 0.0 downstream).
+    assert sidecar_build.norm_stream_letter_count("x" * 400) == 0
+    assert sidecar_build.norm_stream_letter_count("") == 0
+    assert sidecar_build.norm_stream_letter_count(None) == 0
+
+
+def test_compute_page_coverage_clamp_and_zero_denominator_guard():
+    assert sidecar_build.compute_page_coverage(300, 400) == 0.75
+    assert sidecar_build.compute_page_coverage(500, 400) == 1.0  # clamp
+    assert sidecar_build.compute_page_coverage(100, 0) == 0.0    # zero denom guard
+    assert sidecar_build.compute_page_coverage(100, None) == 0.0
+    assert sidecar_build.compute_page_coverage(None, 400) is None  # no basis
+
+
+def test_apply_lever1_reads_coverage_not_density_regression():
+    """The bug: Lever-1 was fed `density` (edit-distance, capped at 0.35) so a
+    genuinely high-coverage row was demoted. FIX: it reads `coverage`. A spec
+    whose density=0.30 (< cliff) but coverage=0.75 (>= cliff) must SHIP; a spec
+    whose coverage=0.25 must demote to review_only + low_coverage regardless of
+    a high density."""
+    ships = {"evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+             "evidence_kind": ids.EVIDENCE_KIND_WITNESS,
+             "routing_status": ids.ROUTING_STATUS_SHIPPED,
+             "routing_reason": ids.ROUTING_REASON_NONE,
+             "density": 0.30, "coverage": 0.75, "page_id": "p_hi", "work_id": "w000001"}
+    demote = {"evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+              "evidence_kind": ids.EVIDENCE_KIND_WITNESS,
+              "routing_status": ids.ROUTING_STATUS_SHIPPED,
+              "routing_reason": ids.ROUTING_REASON_NONE,
+              "density": 0.35, "coverage": 0.25, "page_id": "p_lo", "work_id": "w000002"}
+    n = sidecar_build.apply_lever1_coverage([ships, demote])
+    assert n == 1
+    assert ships["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+    assert ships["routing_reason"] == ids.ROUTING_REASON_NONE
+    assert demote["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert demote["routing_reason"] == ids.ROUTING_REASON_LOW_COVERAGE  # PART 4
+
+
+def test_apply_lever1_skips_propagated_and_missing_coverage():
+    """Only track1_direct witnesses route on coverage. A propagated row and a
+    spec with no `coverage` key (a page_index test double without norm_letters)
+    are left untouched."""
+    prop = {"evidence_source": ids.EVIDENCE_SOURCE_PROPAGATED,
+            "evidence_kind": ids.EVIDENCE_KIND_WITNESS,
+            "routing_status": ids.ROUTING_STATUS_SHIPPED,
+            "routing_reason": ids.ROUTING_REASON_NONE, "coverage": 0.01}
+    no_cov = {"evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+              "evidence_kind": ids.EVIDENCE_KIND_WITNESS,
+              "routing_status": ids.ROUTING_STATUS_SHIPPED,
+              "routing_reason": ids.ROUTING_REASON_NONE}
+    assert sidecar_build.apply_lever1_coverage([prop, no_cov]) == 0
+    assert prop["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+    assert no_cov["routing_status"] == ids.ROUTING_STATUS_SHIPPED
+
+
+def _research_conn_with_pages(pages):
+    """In-memory research DB with a `pages` table (page_id, sys_id, provenance,
+    text). `pages` = list of (page_id, hebrew_text). PageTextIndex over this
+    conn supplies both `.get()` and `.norm_letters()`."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE pages (page_id TEXT PRIMARY KEY, sys_id TEXT, "
+        "buckets TEXT, n_chars INTEGER, text TEXT, provenance TEXT)")
+    conn.executemany(
+        "INSERT INTO pages (page_id, sys_id, provenance, text) VALUES (?,?,?,?)",
+        [(pid, "s1", "htr", text) for pid, text in pages])
+    conn.commit()
+    return conn
+
+
+def test_ingestion_computes_coverage_and_lever1_routes_end_to_end():
+    """End-to-end over the real ingestion path: two E1 witnesses on synthetic
+    Hebrew pages (built from code points). page_norm_letters is computed by the
+    ported normalizer via PageTextIndex; coverage = ml / page_norm_letters
+    routes each row under the 0.45 cliff. The high-coverage row SHIPS even
+    though its density (0.30) is below the cliff (the exact bug regression);
+    the low-coverage row demotes to review_only + low_coverage."""
+    page_hi = _ALEF * 400      # 400 base letters
+    page_lo = _BET * 400
+    research = _research_conn_with_pages([("pg_hi", page_hi), ("pg_lo", page_lo)])
+    page_index = sidecar_build.PageTextIndex(research)
+    works = [{"raw_work_id": "raw:w1", "work_id": "w000001",
+              "neutral_title": "Synthetic Neutral One",
+              "source_corpus": ids.SOURCE_CORPUS_SEFARIA}]
+    e1_ra = [
+        {"page_id": "pg_hi", "sys_id": "s1", "work_id": "raw:w1",
+         "o0": 0, "o1": 300, "ml": 300, "dens": 0.30, "n_spans": 1},  # cov 0.75
+        {"page_id": "pg_lo", "sys_id": "s1", "work_id": "raw:w1",
+         "o0": 0, "o1": 100, "ml": 100, "dens": 0.35, "n_spans": 1},  # cov 0.25
+    ]
+    result = sidecar_build.build_claims_and_evidence(
+        conn=None, works=works, page_index=page_index,
+        e1_ra_confirmed=e1_ra, apply_lever1=True)
+    # evidence_rows tuple layout: [7]=routing_status, [8]=routing_reason,
+    # [10]=a_page_id (see assemble_claims_and_evidence insert order).
+    by_page = {r[10]: r for r in result["evidence_rows"]}
+    assert by_page["pg_hi"][7] == ids.ROUTING_STATUS_SHIPPED
+    assert by_page["pg_hi"][8] == ids.ROUTING_REASON_NONE
+    assert by_page["pg_lo"][7] == ids.ROUTING_STATUS_REVIEW_ONLY
+    assert by_page["pg_lo"][8] == ids.ROUTING_REASON_LOW_COVERAGE
+    research.close()
+
+
+def test_low_coverage_routing_reason_accepted_by_ddl(tmp_path):
+    """PART 4: `low_coverage` is a valid discovery_evidence.routing_reason under
+    the DDL CHECK (a review_only Lever-1 row inserts cleanly) and is a member of
+    the frozen ids.ROUTING_REASONS vocab."""
+    assert ids.ROUTING_REASON_LOW_COVERAGE in ids.ROUTING_REASONS
+    conn = _new_db(tmp_path)
+    _ins_work(conn, "w000001")
+    c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
+    e1 = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
+                       band=ids.CONFIDENCE_BAND_TIER_A, routing=_REV,
+                       reason=ids.ROUTING_REASON_LOW_COVERAGE)
+    conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e1, c1))
+    conn.commit()
+    got = conn.execute(
+        "SELECT routing_reason FROM discovery_evidence WHERE evidence_id=?", (e1,)).fetchone()[0]
+    assert got == "low_coverage"
+    conn.close()
+
+
 # --- routing-audit replayability + unknown-date-never-demoted --------------
 
 def test_routing_audit_replayability_flags_sub_delta_demotion(tmp_path):
