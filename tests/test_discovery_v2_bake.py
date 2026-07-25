@@ -572,20 +572,21 @@ def test_parse_seftja_dates_high_boundary_unchanged(tmp_path):
 
 def test_parse_seftja_dates_real_frozen_artifact_smoke_parse():
     """Smoke-parse the REAL frozen SEF/JA artifact (the orchestrator-pinned
-    seftja_dates.json, 407 entries incl. 61 pre-500 classical dates): under the
-    DECOUPLED [100,1600] window it parses cleanly; every value is an int; min
-    is the Mishnaic-era 150. No SHA arg (the pin is a runtime gate, not a test
-    gate). Skips gracefully if the gitignored artifact is not on this box."""
+    seftja_dates.json, 410 entries incl. 64 pre-500 classical dates -- the
+    135-07 owner-ratified append of 3 Tannaitic works at year 150, 407 -> 410):
+    under the DECOUPLED [100,1600] window it parses cleanly; every value is an
+    int; min is the Mishnaic-era 150. No SHA arg (the pin is a runtime gate, not
+    a test gate). Skips gracefully if the gitignored artifact is not on this box."""
     import pathlib
     p = pathlib.Path("same_work_spike/probe/rsource/data/seftja_dates.json")
     if not p.exists():
         pytest.skip("frozen seftja artifact not present on this box")
     out = sidecar_build.parse_seftja_dates(str(p))
-    assert len(out) == 407
+    assert len(out) == 410
     assert all(type(v) is int for v in out.values())
     assert min(out.values()) == 150
     assert max(out.values()) == 1470
-    assert sum(1 for v in out.values() if v < 500) == 61
+    assert sum(1 for v in out.values() if v < 500) == 64
 
 
 # --- Lever-1 coverage routing ----------------------------------------------
