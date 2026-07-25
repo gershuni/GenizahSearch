@@ -332,8 +332,8 @@ _ERA_QUALIFIERS = ["approx"]
 
 
 def _witness_spec(page, work, sys, *, band, ml, span, routing=None, density=None,
-                  adjudication=None, source=None):
-    return sidecar_build._mk_evidence(
+                  adjudication=None, source=None, coverage=None):
+    spec = sidecar_build._mk_evidence(
         page_id=page, work_id=work, sys_id=sys,
         evidence_kind=ids.EVIDENCE_KIND_WITNESS,
         evidence_source=source or ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
@@ -345,6 +345,11 @@ def _witness_spec(page, work, sys, *, band, ml, span, routing=None, density=None
         span_start=span[0], span_end=span[1],
         matched_letters=ml, density=density,
     )
+    # 135-07: the Lever-1 routing input is the per-spec `coverage`
+    # (matched_letters / norm-page-letters), NOT the edit-distance `density`.
+    if coverage is not None:
+        spec["coverage"] = coverage
+    return spec
 
 
 # --- composition-date normalizer (frozen 3-category contract) --------------
@@ -588,14 +593,14 @@ def test_parse_seftja_dates_real_frozen_artifact_smoke_parse():
 def test_lever1_routes_low_coverage_to_review_only():
     specs = [
         _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300,
-                      span=(0, 300), density=0.30),  # below 0.45 -> review_only
+                      span=(0, 300), coverage=0.30),  # below 0.45 -> review_only
         _witness_spec("p2", "w000002", "s2", band=ids.CONFIDENCE_BAND_TIER_A, ml=300,
-                      span=(0, 300), density=0.90),  # ships
+                      span=(0, 300), coverage=0.90),  # ships
     ]
     n = sidecar_build.apply_lever1_coverage(specs)
     assert n == 1
     assert specs[0]["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
-    assert specs[0]["routing_reason"] != ids.ROUTING_REASON_LATER_SHARED_TEXT  # coverage, not D-17
+    assert specs[0]["routing_reason"] == ids.ROUTING_REASON_LOW_COVERAGE  # coverage, not D-17
     assert specs[1]["routing_status"] == ids.ROUTING_STATUS_SHIPPED
 
 
@@ -679,9 +684,9 @@ def test_d17_earliest_low_coverage_later_shipped_not_orphaned():
     review_only row keeps its coverage routing_reason (never later_shared_text)."""
     specs = [
         _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300,
-                      span=(0, 300), density=0.20),  # earliest, low coverage
+                      span=(0, 300), coverage=0.20),  # earliest, low coverage
         _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300,
-                      span=(0, 300), density=0.90),  # later, ships
+                      span=(0, 300), coverage=0.90),  # later, ships
     ]
     sidecar_build.apply_lever1_coverage(specs)
     audit = sidecar_build.apply_d17_demotion(
@@ -689,7 +694,7 @@ def test_d17_earliest_low_coverage_later_shipped_not_orphaned():
     early = next(s for s in specs if s["work_id"] == "w000001")
     late = next(s for s in specs if s["work_id"] == "w000002")
     assert early["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
-    assert early["routing_reason"] != ids.ROUTING_REASON_LATER_SHARED_TEXT  # coverage provenance preserved
+    assert early["routing_reason"] == ids.ROUTING_REASON_LOW_COVERAGE  # coverage provenance preserved
     assert late["routing_status"] == ids.ROUTING_STATUS_SHIPPED  # never orphaned/promoted
     # earliest excluded from the shipped population -> no pair formed.
     assert audit == []
@@ -1058,8 +1063,13 @@ def _build_v2_finalize_fixture_shared_page(tmp_path):
              300, 0.9, 1, "[[0, 300, 0.9]]", None),
         ],
     )
+    # 135-07: page text must carry Hebrew base letters so the Lever-1 coverage
+    # denominator (norm_stream length) is non-zero -- 400 alef code points ->
+    # coverage = matched_letters(300) / 400 = 0.75 (>= 0.45 cliff) so BOTH
+    # witnesses SHIP and remain in the D-17 candidate universe. (Masking-safe:
+    # a code point, chr(0x05D0)==alef, never a literal Hebrew glyph.)
     conn.execute("INSERT INTO pages (page_id, sys_id, provenance, text) VALUES ('pg1','s1','htr',?)",
-                 ("x" * 400,))
+                 (chr(0x05D0) * 400,))
     conn.commit()
     conn.close()
 

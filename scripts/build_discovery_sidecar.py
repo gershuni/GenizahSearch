@@ -53,6 +53,7 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -470,6 +471,80 @@ LEVER1_COVERAGE_CLIFF = 0.45
 STRICT_FLOOR_FROZEN = 0.85
 
 
+# ---------------------------------------------------------------------------
+# SEED-029 page-coverage normalizer (bake plan §4.4 -- 135-07 fix).
+#
+# The Lever-1 routing basis is `coverage = matched_letters / page_norm_letters`
+# (frozen manifest `coverage_def`, discovery-band-labels-v1.md §3.1). This is a
+# FAITHFUL, letter-count-only port of
+# `same_work_spike/probe/scripts/normalize.py::norm_stream` -- the SEED-029
+# union-view normalizer that DEFINED the denominator when the page-level bands
+# (94.0% / 91.7% / 37.5%) were validated. The port is proven byte-exact by the
+# 135-07 PART-2 replication gate (tests/test_discovery_coverage_replication.py):
+# it reproduces every graded unit's stored `cov` and the three precision bands.
+#
+# Masking-safe: this is a GENERIC Hebrew base-letter normalizer expressed
+# ENTIRELY in ASCII code points -- no restricted content, no literal Hebrew
+# glyph in this source file. Only the derived INTEGER stream length ever leaves
+# the function (same masking posture as `matched_letters`); the normalized text
+# itself is never returned or persisted.
+# ---------------------------------------------------------------------------
+
+# Hebrew base-letter range: U+05D0 (alef) .. U+05EA (tav).
+_HEB_MIN, _HEB_MAX = 0x05D0, 0x05EA
+# Final-form -> base-form fold, keyed BY CODE POINT so no literal Hebrew glyph
+# appears here (final kaf/mem/nun/pe/tsadi -> their base forms). Verbatim to
+# normalize.py's FINAL_FOLD. Every final form (U+05DA/DD/DF/E3/E5) already lies
+# inside [_HEB_MIN, _HEB_MAX], so the fold does not change the stream LENGTH --
+# it is ported for exact fidelity to the source normalizer, not for the count.
+_FINAL_FOLD = {
+    0x05DA: chr(0x05DB),  # final kaf   -> kaf
+    0x05DD: chr(0x05DE),  # final mem   -> mem
+    0x05DF: chr(0x05E0),  # final nun   -> nun
+    0x05E3: chr(0x05E4),  # final pe    -> pe
+    0x05E5: chr(0x05E6),  # final tsadi -> tsadi
+}
+
+
+def norm_stream_letter_count(text: Optional[str]) -> int:
+    """`len(norm_stream(text))` -- the SEED-029 space-free normalized Hebrew
+    base-letter stream length (= `page_norm_letters`, the Lever-1 coverage
+    denominator).
+
+    Faithful port of `same_work_spike/probe/scripts/normalize.py::norm_stream`'s
+    letter selection: NFC-normalize -> fold final letters to base -> KEEP ONLY
+    the Hebrew base letters U+05D0..U+05EA. EVERYTHING else is a separator and
+    is dropped -- nikud / cantillation / ALL Unicode combining marks (incl. the
+    Judeo-Arabic upper dot U+0307), geresh / gershayim / quotes / apostrophes,
+    brackets, spaces, digits, and Latin. Returns the integer stream length only.
+    """
+    if not text:
+        return 0
+    n = 0
+    for ch in unicodedata.normalize("NFC", text):
+        folded = _FINAL_FOLD.get(ord(ch))
+        code = ord(ch) if folded is None else ord(folded)
+        if _HEB_MIN <= code <= _HEB_MAX:
+            n += 1
+    return n
+
+
+def compute_page_coverage(matched_letters: Optional[int], page_norm_letters: Optional[int]) -> Optional[float]:
+    """The Lever-1 coverage metric: `min(1.0, matched_letters /
+    page_norm_letters)`, clamped to [0, 1] (bake plan §4.4 `coverage_def`).
+
+    Returns None when `matched_letters` is unknown (no routing basis). Guards
+    the zero / missing denominator (an all-non-Hebrew page, or a page whose text
+    is absent from the research DB) -> coverage 0.0 (the row routes to
+    review_only under the 0.45 cliff -- fail-closed, never a ZeroDivisionError).
+    """
+    if matched_letters is None:
+        return None
+    if not page_norm_letters:  # None or 0
+        return 0.0
+    return min(1.0, matched_letters / page_norm_letters)
+
+
 def _verify_input_sha256(path, expected, *, exc, label) -> str:
     p = Path(path)
     if not p.exists():
@@ -691,24 +766,55 @@ def parse_composition_dates(path, *, sha256: Optional[str] = None) -> Dict[str, 
 # ---------------------------------------------------------------------------
 
 def apply_lever1_coverage(evidence_specs: List[Dict], *, threshold: float = LEVER1_COVERAGE_CLIFF) -> int:
-    """Route each track1_direct witness spec whose coverage (its `density`
-    metric = matched_letters / normalized page length) is `< threshold` to
-    `routing_status='review_only'`, recoverable (bake plan §4.4). Leaves the
-    row's PRE-EXISTING `routing_reason` UNCHANGED (this build keeps the frozen
-    5-member ROUTING_REASONS enum -- a Lever-1 review_only row is distinguished
-    from a D-17 one by `routing_reason='none'` vs `'later_shared_text'`, not by
-    a new enum value). Returns the count demoted."""
+    """Route each track1_direct witness spec whose page COVERAGE is `< threshold`
+    to `routing_status='review_only'` with `routing_reason='low_coverage'`,
+    recoverable (bake plan §4.4).
+
+    135-07 field-name-collision FIX: the routing input is the per-spec
+    `coverage` = `matched_letters / len(norm_stream(page_text))` (computed at
+    ingestion, see `_ingest_tier_a` / `_ingest_e1_rows`), NOT the `density`
+    column. The `density` column is a SEPARATE signal -- the normalized
+    Levenshtein edit-DISTANCE match quality (`track1_match.accept_density`
+    HARD-REJECTS > 0.35, so it is capped at 0.35 and can NEVER reach the 0.45
+    cliff). Feeding `density` in as "coverage" demoted ~100% of witnesses and
+    orphaned every shipped page (the bug this fixes). The cliff (0.45) is
+    unchanged -- only the metric was wrong.
+
+    `routing_reason='low_coverage'` (Codex R3-BLOCKER, bake plan §4.4) makes a
+    Lever-1 demotion reconstructable from the shipped asset alone, distinct from
+    a D-17 `'later_shared_text'` demotion. Returns the count demoted."""
     n = 0
     for e in evidence_specs:
         if e.get("evidence_source") != _TRACK1 or e.get("evidence_kind") != _WITNESS:
             continue
-        cov = e.get("density")
+        cov = e.get("coverage")
         if cov is None:
             continue
+        # Bake plan §4.4 cross-check (NON-fatal): the recomputed coverage and
+        # the stored `density` edit-distance are DIFFERENT signals, but a
+        # coverage that is impossibly high relative to a near-zero density can
+        # indicate a matched_letters / denominator mismatch. Log, never route.
+        _lever1_density_crosscheck(e, cov)
         if cov < threshold and e.get("routing_status") == _SHIPPED:
             e["routing_status"] = _REVIEW_ONLY
+            e["routing_reason"] = _LOW_COVERAGE
             n += 1
     return n
+
+
+def _lever1_density_crosscheck(e: Dict, coverage: float) -> None:
+    """Bake plan §4.4 sanity cross-check (NON-fatal, never a routing input):
+    a shipped-tier coverage (>= cliff) computed against a page whose stored
+    `density` edit-distance signal is entirely absent is worth a one-line
+    diagnostic on stderr. Deliberately conservative -- it NEVER raises and NEVER
+    changes routing (that is the field-collision bug this plan removes)."""
+    density = e.get("density")
+    if density is None and coverage >= LEVER1_COVERAGE_CLIFF:
+        print(
+            f"[lever1-crosscheck] page={e.get('page_id')!r} work={e.get('work_id')!r} "
+            f"coverage={coverage:.3f} ships but has no density edit-distance signal",
+            file=sys.stderr,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2361,6 +2467,7 @@ class PageTextIndex:
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
         self._cache: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        self._norm_letters_cache: Dict[str, int] = {}
 
     def get(self, page_id: str) -> Tuple[Optional[str], Optional[str]]:
         if page_id in self._cache:
@@ -2376,6 +2483,23 @@ class PageTextIndex:
             result = (provenance, snapshot_hash)
         self._cache[page_id] = result
         return result
+
+    def norm_letters(self, page_id: str) -> int:
+        """`page_norm_letters` for a page (bake plan §4.4 Lever-1 coverage
+        denominator) = `len(norm_stream(pages.text))`. Cached per page_id. The
+        raw `text` is read transiently and IMMEDIATELY reduced to the derived
+        integer letter count -- it is NEVER exposed, copied, or persisted into
+        the sidecar (same masking posture as `get`'s snapshot digest). A page
+        absent from `pages` -> 0 (coverage 0.0, routes to review_only)."""
+        cached = self._norm_letters_cache.get(page_id)
+        if cached is not None:
+            return cached
+        row = self._conn.execute(
+            "SELECT text FROM pages WHERE page_id = ?", (page_id,)
+        ).fetchone()
+        count = norm_stream_letter_count(row[0]) if row is not None else 0
+        self._norm_letters_cache[page_id] = count
+        return count
 
 
 # ---------------------------------------------------------------------------
@@ -2468,6 +2592,25 @@ def _selected_other_page_for_occurrence(seeds: List[Dict], occ0: int, occ1: int)
 # 6.6 Per-source ingestion (C-4 band map; §4 of the frozen schema doc)
 # ---------------------------------------------------------------------------
 
+def _attach_coverage(spec: Dict, page_index, page_id: str, matched_letters: Optional[int]) -> Dict:
+    """Set the Lever-1 routing input `spec['coverage']` = `matched_letters /
+    page_norm_letters` (bake plan §4.4), computed at INGESTION for every
+    track1_direct witness (135-07 coverage-metric fix).
+
+    `page_norm_letters` comes from `page_index.norm_letters(page_id)` (cached,
+    integer-only). A `page_index` WITHOUT a `norm_letters` method (a lightweight
+    in-memory test double that supplies only `.get()`) yields NO coverage --
+    the spec's `coverage` stays absent, so `apply_lever1_coverage` skips it and
+    the row keeps its ingested routing (backward-compatible with the E1/tier_a
+    unit tests that never exercise Lever-1). Mutates and returns `spec`."""
+    norm_fn = getattr(page_index, "norm_letters", None)
+    if norm_fn is None:
+        return spec
+    page_norm_letters = norm_fn(page_id)
+    spec["coverage"] = compute_page_coverage(matched_letters, page_norm_letters)
+    return spec
+
+
 def _ingest_e1_rows(
     rows: Iterable[Dict], *, work_index: Dict[str, Dict], page_index,
     confidence_band: str, adjudication_status: str, audit_status: str,
@@ -2483,15 +2626,17 @@ def _ingest_e1_rows(
         if work is None:
             continue
         text_layer, snapshot_hash = page_index.get(row["page_id"])
-        out.append(_mk_evidence(
+        matched_letters = row.get("ml")
+        spec = _mk_evidence(
             page_id=row["page_id"], work_id=work["work_id"], sys_id=row["sys_id"],
             evidence_kind=_WITNESS, evidence_source=_TRACK1, confidence_band=confidence_band,
             adjudication_status=adjudication_status, audit_status=audit_status,
             routing_status=_SHIPPED, routing_reason=_NONE_REASON,
             span_start=row["o0"], span_end=row["o1"],
-            matched_letters=row.get("ml"), density=row.get("dens"), n_spans=row.get("n_spans"),
+            matched_letters=matched_letters, density=row.get("dens"), n_spans=row.get("n_spans"),
             text_layer=text_layer, snapshot_hash=snapshot_hash,
-        ))
+        )
+        out.append(_attach_coverage(spec, page_index, row["page_id"], matched_letters))
     return out
 
 
@@ -2510,7 +2655,7 @@ def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_i
             continue
         start, end = _largest_track1_span(spans_json)
         text_layer, snapshot_hash = page_index.get(page_id)
-        out.append(_mk_evidence(
+        spec = _mk_evidence(
             page_id=page_id, work_id=work["work_id"], sys_id=sys_id,
             evidence_kind=_WITNESS, evidence_source=_TRACK1, confidence_band=_TIER_A,
             adjudication_status=_UNREVIEWED, audit_status=_NA,
@@ -2518,7 +2663,8 @@ def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_i
             span_start=start, span_end=end,
             matched_letters=matched_letters, density=best_density, n_spans=n_spans,
             text_layer=text_layer, snapshot_hash=snapshot_hash,
-        ))
+        )
+        out.append(_attach_coverage(spec, page_index, page_id, matched_letters))
     return out
 
 
