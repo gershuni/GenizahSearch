@@ -122,7 +122,7 @@ CREATE TABLE discovery_evidence (
   adjudication_status TEXT NOT NULL CHECK (adjudication_status IN ('human_confirmed','provisional','unreviewed')),
   audit_status      TEXT NOT NULL CHECK (audit_status IN ('audit_pending','audit_passed','n/a')),
   routing_status    TEXT NOT NULL CHECK (routing_status IN ('shipped','review_only')),
-  routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none','later_shared_text')),
+  routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none','later_shared_text','low_coverage')),
   is_new            INTEGER NOT NULL DEFAULT 0,
 
   a_page_id         TEXT NOT NULL,
@@ -1133,6 +1133,8 @@ _CO_CITATION = ids.ROUTING_REASON_CO_CITATION
 # passes the FULL (version-aware) verifier and the pure-v1 build stays
 # byte-identical.
 _LATER_SHARED_TEXT = ids.ROUTING_REASON_LATER_SHARED_TEXT
+# Lever-1 coverage-demotion reason (bake plan §4.4, 135-07 coverage-metric fix).
+_LOW_COVERAGE = ids.ROUTING_REASON_LOW_COVERAGE
 _HIGH_CONFIDENCE_ALGORITHMIC = ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC
 
 _OXFORD_PART = ids.MERGE_BASIS_OXFORD_PART

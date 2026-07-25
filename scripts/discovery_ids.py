@@ -124,12 +124,21 @@ ROUTING_REASON_NONE = "none"
 # (and the discovery_routing_audit row recording each decision) lands in the
 # v2 build logic (135-06).
 ROUTING_REASON_LATER_SHARED_TEXT = "later_shared_text"
+# Lever-1 coverage demotion (Phase 135, v2 bake, bake plan §4.4): a
+# track1_direct witness whose page coverage (matched_letters / normalized page
+# length) falls below the 0.45 cliff is routed to review_only with this reason.
+# Added to the frozen vocab in 135-07 (the coverage-metric fix); WITHOUT a
+# distinguishing reason a review_only row's cause (Lever-1 vs D-17
+# 'later_shared_text' vs a §4.5 reband) could not be reconstructed from the
+# shipped asset alone (Codex R3-BLOCKER -- breaks gate 10 replayability).
+ROUTING_REASON_LOW_COVERAGE = "low_coverage"
 ROUTING_REASONS = frozenset({
     ROUTING_REASON_IMPURITY,
     ROUTING_REASON_RUNNER_UP_CONFLICT,
     ROUTING_REASON_CO_CITATION,
     ROUTING_REASON_NONE,
     ROUTING_REASON_LATER_SHARED_TEXT,
+    ROUTING_REASON_LOW_COVERAGE,
 })
 
 MERGE_BASIS_OXFORD_PART = "oxford_part"

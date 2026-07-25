@@ -410,7 +410,14 @@ def _insert_evidence(conn, *, routing_reason):
 def test_routing_reason_later_shared_text_constant_and_membership():
     assert d.ROUTING_REASON_LATER_SHARED_TEXT == "later_shared_text"
     assert "later_shared_text" in d.ROUTING_REASONS
-    assert len(d.ROUTING_REASONS) == 5
+    # 135-07 added the Lever-1 coverage-demotion reason `low_coverage`.
+    assert len(d.ROUTING_REASONS) == 6
+
+
+def test_routing_reason_low_coverage_constant_and_membership():
+    """135-07 (bake plan §4.4): the Lever-1 coverage-demotion reason."""
+    assert d.ROUTING_REASON_LOW_COVERAGE == "low_coverage"
+    assert "low_coverage" in d.ROUTING_REASONS
 
 
 def test_discovery_evidence_routing_reason_check_accepts_later_shared_text():
@@ -419,6 +426,18 @@ def test_discovery_evidence_routing_reason_check_accepts_later_shared_text():
         _insert_evidence(conn, routing_reason="later_shared_text")  # must insert cleanly
         (n,) = conn.execute(
             "SELECT COUNT(*) FROM discovery_evidence WHERE routing_reason = 'later_shared_text'"
+        ).fetchone()
+        assert n == 1
+    finally:
+        conn.close()
+
+
+def test_discovery_evidence_routing_reason_check_accepts_low_coverage():
+    conn = _fresh_schema_conn()
+    try:
+        _insert_evidence(conn, routing_reason="low_coverage")  # must insert cleanly
+        (n,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_evidence WHERE routing_reason = 'low_coverage'"
         ).fetchone()
         assert n == 1
     finally:
@@ -527,9 +546,12 @@ def test_discovery_routing_audit_rejects_bogus_decision():
 # -- Task 3 golden pin: the committed amended vocabulary. If a change here is
 #    intentional, regenerate + re-review docs/specs/discovery-sidecar-schema-v1.md
 #    (the 2026-07-24 amendment) + discovery-band-labels-v1.md §5 alongside it.
+#    135-07 added `low_coverage` (the Lever-1 coverage-demotion reason, bake
+#    plan §4.4) to ROUTING_REASONS.
 
 GOLDEN_ROUTING_REASONS = [
-    "co_citation", "impurity", "later_shared_text", "none", "runner_up_conflict",
+    "co_citation", "impurity", "later_shared_text", "low_coverage", "none",
+    "runner_up_conflict",
 ]
 GOLDEN_TRACK1_CONFIDENCE_BANDS = [
     "expert_verified", "high_confidence_algorithmic", "screening_canon",
