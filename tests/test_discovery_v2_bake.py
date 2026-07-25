@@ -1200,16 +1200,21 @@ def test_no_mixed_enum_state_pure_v1_asset_passes(tmp_path):
 
 # --- never-orphan-shipped --------------------------------------------------
 
-def test_never_orphan_shipped_flags_review_only_only_witness_page(tmp_path):
+def test_never_orphan_shipped_all_low_page_passes(tmp_path):
+    """135-07 narrowed invariant (bake plan §4.4): a witness page whose EVERY
+    claim is legitimately low-coverage (all review_only, Lever-1 demoted) is a
+    valid recoverable routing outcome, NOT a shadow-orphan -- it PASSES. (Before
+    135-07 the overbroad §4a branch HARD-FAILED any witness page with 0 shipped
+    claims, which would reject every all-low page.)"""
     conn = _new_db(tmp_path)
     _ins_work(conn, "w000001")
     c1 = _ins_claim(conn, page_id="p1", work_id="w000001", display_evidence_id="x")
     e1 = _ins_evidence(conn, c1, work_id="w000001", page_id="p1", sys_id="s1",
-                       band=ids.CONFIDENCE_BAND_SCREENING_RB, routing=_REV,
-                       reason=ids.ROUTING_REASON_LATER_SHARED_TEXT)
+                       band=ids.CONFIDENCE_BAND_TIER_A, routing=_REV,
+                       reason=ids.ROUTING_REASON_LOW_COVERAGE)
     conn.execute("UPDATE discovery_claim SET display_evidence_id=? WHERE claim_id=?", (e1, c1))
     conn.commit()
-    assert verify_mod.check_never_orphan_shipped(conn)  # shadow-orphan HARD FAIL
+    assert verify_mod.check_never_orphan_shipped(conn) == []  # all-low page is recoverable
     conn.close()
 
 

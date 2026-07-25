@@ -714,13 +714,23 @@ def check_band_vocabulary(
 # ---------------------------------------------------------------------------
 
 def check_never_orphan_shipped(conn: sqlite3.Connection) -> List[str]:
-    """(A) A claim owning >=1 shipped evidence row must have its
-    `display_evidence_id` point at one of ITS OWN shipped rows -- never a
-    review_only sibling (gate 8, EXACT). (B) Shadow-orphan (§4a): a page that
-    carries any WITNESS evidence must have >=1 shipped claim (a claim whose
-    display evidence is shipped) -- a witness page left with 0 shipped claims
-    is a HARD FAIL. Pages with only shared_text/co-citation review_only rows
-    (never a shipped witness) are legitimately non-shipping and exempt."""
+    """NON-DISPLACEMENT invariant (gate 8; narrowed in 135-07 per bake plan
+    §4.4 + discovery-band-labels-v1.md §3.1): a claim owning >=1 SHIPPED
+    evidence row must have its `display_evidence_id` point at one of ITS OWN
+    shipped rows -- never a `review_only` sibling. A `review_only` row must
+    never DISPLACE a shipped claim.
+
+    Deliberately NARROW: it does NOT require a witness-bearing page to carry any
+    shipped claim. Under the now-correct Lever-1 coverage routing (bake plan
+    §4.4), a page whose EVERY claim is legitimately low-coverage may be entirely
+    `review_only` (recoverable, queryable behind the toggle) -- that is a valid
+    routing outcome, not a shadow-orphan. The earlier `check` had a second
+    branch (§4a) that HARD-FAILED any witness page with 0 shipped claims; it was
+    overbroad (it would reject every legitimately all-low page) and is REMOVED.
+    The multi-register invariant (band-labels §4) holds because
+    `display_evidence_id` is per-claim `(page_id, work_id)`, never per-page: this
+    check catches the real bug -- a claim that OWNS a shipped row yet points its
+    display at a review_only sibling -- without penalising all-low pages."""
     violations: List[str] = []
     cur = conn.cursor()
     claims = cur.execute(
@@ -733,36 +743,16 @@ def check_never_orphan_shipped(conn: sqlite3.Connection) -> List[str]:
         ev_by_claim.setdefault(claim_id, []).append((evid, routing, kind))
         routing_by_evid[evid] = routing
 
-    # (A) display-ownership under routing.
+    # Per-claim display-ownership under routing: a claim owning any shipped row
+    # must display a shipped row (never a review_only sibling).
     for claim_id, _page_id, display_id in claims:
         rows = ev_by_claim.get(claim_id, [])
         if any(r == ids.ROUTING_STATUS_SHIPPED for (_e, r, _k) in rows):
             if routing_by_evid.get(display_id) != ids.ROUTING_STATUS_SHIPPED:
                 violations.append(
                     f"claim {claim_id}: owns a shipped evidence row but its display_evidence_id "
-                    "points at a review_only row (never-orphan-shipped, gate 8)"
+                    "points at a review_only row (never-orphan-shipped displacement, gate 8)"
                 )
-
-    # (B) shadow-orphan, scoped to witness-bearing pages.
-    page_claims: Dict[str, List[Tuple[str, str]]] = {}
-    for claim_id, page_id, display_id in claims:
-        page_claims.setdefault(page_id, []).append((claim_id, display_id))
-    for page_id, clist in page_claims.items():
-        page_has_witness = any(
-            kind == ids.EVIDENCE_KIND_WITNESS
-            for (claim_id, _d) in clist
-            for (_e, _r, kind) in ev_by_claim.get(claim_id, [])
-        )
-        if not page_has_witness:
-            continue
-        page_has_shipped_claim = any(
-            routing_by_evid.get(display_id) == ids.ROUTING_STATUS_SHIPPED
-            for (_c, display_id) in clist
-        )
-        if not page_has_shipped_claim:
-            violations.append(
-                f"page {page_id}: has witness claim(s) but 0 shipped claims (shadow-orphan HARD FAIL, §4a)"
-            )
     return violations
 
 
