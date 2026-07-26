@@ -2233,3 +2233,53 @@ R6-HIGH gate rejected any SEF/JA year below 500 and HALTed the `--release` bake.
   accepted; the `[100,1600]` floor/ceiling boundaries (100 & 1600 inclusive, 99
   & 1601 HALT); a smoke-parse of the real frozen artifact (407 entries, min 150,
   max 1470, 61 below 500). The M-source floor-of-500 test is retained unchanged.
+
+## Amendment 2026-07-26 (Phase 135, widened M-source composition-year window + classical-strata recovery + antiquity clamp)
+
+Amends the `--composition-dates` year-window in §4.3 (and supersedes the
+previous amendment's "M-source window UNCHANGED at [500,1600]" clause).
+Owner-directed (2026-07-26): after the corrected Lever-1 coverage routing
+(135-07) grew the shipped co-claim universe to its true size, the D-17
+date-coverage gate HALTed at `pair_coverage 0.5929 (3753/6330)` — 173 shipped
+canonical works had NO date entry anywhere (167 M-source, 5 SEF/JA, 1 REF2).
+
+- **Root cause (diagnosed, not assumed).** The upstream M-source date emitter
+  applies its own `[500, 1600]` window when building the delivered flat table,
+  silently dropping every work whose owner-source date parses below 500. A
+  replay of the emitter's OWN extraction logic (same reader + same free-text
+  date parser, window removed) over the owner-held date source recovered a
+  parse for 167/167 missing M-source works with ZERO in-window omissions —
+  i.e. the ONLY reason any of them was missing is the window itself (127
+  classical works in [200,499]; 39 biblical/Second-Temple works below 100; 1
+  work above 1600). Not a crosswalk/merge/linkage bug: all pre-merge member
+  raw ids were checked and none carried an in-window date.
+- **The change (symmetric with the SEF/JA decouple).**
+  `_COMPOSITION_YEAR_MIN` is lowered `500 -> 100`; `_COMPOSITION_YEAR_MAX`
+  stays 1600. Both windows are now `[100, 1600]`. The floor retains the
+  R6-HIGH anti-corruption rationale (near-zero / negative / absurd years still
+  HALT `--release`).
+- **Antiquity clamp (new convention).** A work whose composition predates 100
+  CE is recorded AT the floor (year = 100). Order-preserving for every D-17
+  comparison against a co-claimant dated >= 200 (delta >= 100 still demotes
+  the later side); a pair wholly inside [100,199] resolves `kept_tie`
+  (conservative fail-safe — never a wrong demotion). This extends the
+  owner-ratified "Tannaitic works at 150" convention down to the floor.
+- **Data effect.** `composition_dates.json` grows 7,277 -> 7,443 entries
+  (+166 raw-id entries: 127 true recovered classical years + 39 antiquity
+  clamps at 100), keyed by the EXACT crosswalk raw ids of the recovered works
+  (all ids of one work share one year, preserving the §4.3 same-member-conflict
+  invariant). The 1 post-1600 work and the 6 non-M undated works are left
+  undated (all have ZERO overlapping co-claim pairs — fail-safe, no gate
+  effect). New `--composition-dates-sha256` pin:
+  `2b46b4708ddccb9f26961dcb9ba6d62b23d64cc1da225d133af1be21bf2e9476`.
+  Simulated effect on the real corpus BEFORE adoption: `pair_coverage` rises
+  0.5929 -> 1.0000 (6,270 pairs: 2,062 demoted + 4,208 kept_tie, zero
+  fail_safe) — the 0.99 floor is met with the full corrected universe.
+- **Upstream sync note.** The gitignored M-source date emitter still carries
+  its own [500,1600] window; the parallel session should widen it (and adopt
+  the antiquity-clamp policy) so its next re-emit reproduces this table
+  instead of regressing it.
+- **Tests.** `tests/test_discovery_v2_bake.py`: the string-form floor test now
+  rejects 99 and accepts 100/499; the flat-form boundary test uses 100/1600;
+  the flat out-of-range-low test uses 99; the real-file smoke asserts 7,443
+  entries, values in [100,1587], exactly 166 below 500.
