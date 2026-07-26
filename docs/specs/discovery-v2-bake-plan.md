@@ -2283,3 +2283,54 @@ canonical works had NO date entry anywhere (167 M-source, 5 SEF/JA, 1 REF2).
   rejects 99 and accepts 100/499; the flat-form boundary test uses 100/1600;
   the flat out-of-range-low test uses 99; the real-file smoke asserts 7,443
   entries, values in [100,1587], exactly 166 below 500.
+
+### Addendum (same amendment, post-Codex gate — PROCEED-WITH-CHANGES resolved)
+
+The window-widen + recovery was gate-reviewed (Codex, 2026-07-26; verdict
+PROCEED-WITH-CHANGES: "the clamp itself is sound"). Disposition of its items,
+with the counted impact audit it allowed as the deferral basis:
+
+- **Counted basis-exposure audit (accepted in lieu of interval-aware routing
+  now).** Of 2,062 demotions in the corrected build, 40 (1.9%) have a
+  recovered inexact-basis work on the DEMOTED side. Refined: all 23
+  range-midpoint rows SURVIVE the strict interval-aware rule (`demoter_year +
+  100 <= true range START` from the owner source) — zero suppressed, i.e.
+  routing-inert; of the 17 "before-N" (upper-bound) rows, 14 are demoted by
+  antiquity-clamped works (true dates centuries before their stored 100 —
+  factually safe regardless of the bound), leaving **3 residual rows** whose
+  wrongness would require the "before-N" bound to overstate the true date by
+  50–100+ years, and whose failure mode is a recoverable `review_only`
+  routing, not data loss. Death-year basis: zero among the recovered entries.
+  **Interval-aware D-17 routing + per-side `year_basis` audit columns
+  (closed vocab incl. `antiquity_floor`) are DEFERRED to v2.1** alongside the
+  already-deferred `kept_invalid_reference` provenance; until then the value
+  100 in audit rows is documented as a ROUTING FLOOR, never a true
+  composition year (this section + the frame doc are that documentation).
+- **U-reconciliation (the "6,270 vs 6,330" question).** Audit-row `U` counts
+  ROWS, not pairs (materially-later pairs collapse into ONE `demoted` row per
+  demoted work per page). The date-INDEPENDENT pairwise universe is **6,508**
+  overlapping co-claim pairs and is IDENTICAL before/after the date append.
+  Corrected-build reconciliation, exact: 6,508 = 4,208 tie + 2,300 material +
+  0 undated; of the material pairs, 2,298 are covered by a demoted row and
+  **2** are the ratified Option-A invalid-reference no-row deferral (bounded,
+  documented — not 60; the apparent 60-row shrink was row-collapse
+  arithmetic). The frame doc must cite BOTH numbers (6,508 pairs / 6,270
+  audit rows) with this semantics, and never certify 6,270 as "the universe".
+- **Release-semantic regression gate (implemented now).**
+  `assert_composition_release_contract` HALTs any `--release` build whose
+  composition table falls below the recovered-strata minima (>= 7,443
+  entries, >= 166 pre-500, >= 39 at the floor) — closing the "operator
+  re-pins a regressed upstream re-emit" hole the SHA pin cannot catch.
+  Constants `_COMPOSITION_RELEASE_MIN_*`; release-only (fixtures unaffected).
+- **Clamp boundary tests (implemented now).** 100/100 -> kept_tie; 100/199 ->
+  kept_tie (conservative); 100/200 -> demote. Plus a regressed-table /
+  known-good / padded-without-strata contract test triple.
+- **Degree-0 reassertion.** The 7 intentionally-undated works (1 post-1600 +
+  6 non-M) were re-verified degree-0 in the corrected build's pairwise
+  universe (zero overlapping co-claim pairs; nonzero set empty).
+- **The pinned independent coverage anchor (`chrono_coverage_prebuild`) is
+  EXPLICITLY SUPERSEDED for the 135-07 bake** (it was never implemented in
+  the build CLI; the 135-07 plan-of-record gates on the absolute 0.99 floor +
+  the mutation-tested verifier instead). It moves to the v2.1 / CERT-01
+  systemic re-validation track together with the coverage-framework
+  re-validation the Lever-1 review already assigned there.
