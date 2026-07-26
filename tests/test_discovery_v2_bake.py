@@ -638,6 +638,60 @@ def test_d17_demotes_only_later_shipped_coclaimant():
     assert demoted[0]["delta_years"] == 200
 
 
+def test_d17_antiquity_clamp_boundaries():
+    """135-07 antiquity-clamp semantics (Codex window-widen review): two
+    clamped works (100/100) -> kept_tie; clamp vs 199 (delta 99 < 100) ->
+    kept_tie (conservative); clamp vs 200 (delta exactly 100) -> the later
+    side is demoted."""
+    def _pair(years):
+        specs = [
+            _witness_spec("p1", "w000001", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+            _witness_spec("p1", "w000002", "s1", band=ids.CONFIDENCE_BAND_TIER_A, ml=300, span=(0, 300)),
+        ]
+        audit = sidecar_build.apply_d17_demotion(
+            specs, cross_corpus_map={},
+            year_by_canonical={"w000001": years[0], "w000002": years[1]})
+        return specs, audit
+
+    # 100 vs 100 -> kept_tie, both ship
+    specs, audit = _pair((100, 100))
+    assert all(s["routing_status"] == ids.ROUTING_STATUS_SHIPPED for s in specs)
+    assert [a["decision"] for a in audit] == ["kept_tie"]
+
+    # 100 vs 199 -> delta 99 < 100 -> kept_tie, both ship (conservative)
+    specs, audit = _pair((100, 199))
+    assert all(s["routing_status"] == ids.ROUTING_STATUS_SHIPPED for s in specs)
+    assert [a["decision"] for a in audit] == ["kept_tie"]
+
+    # 100 vs 200 -> delta exactly 100 -> the later (200) side is demoted
+    specs, audit = _pair((100, 200))
+    late = next(s for s in specs if s["work_id"] == "w000002")
+    assert late["routing_status"] == ids.ROUTING_STATUS_REVIEW_ONLY
+    demoted = [a for a in audit if a["decision"] == "demoted"]
+    assert len(demoted) == 1
+    assert demoted[0]["kept_year"] == 100 and demoted[0]["demoted_year"] == 200
+
+
+def test_composition_release_contract_regressed_table_halts():
+    """135-07 recovered-strata release gate: a table regressed to the
+    pre-recovery shape (old emitter window) HALTs; the known-good recovered
+    distribution passes."""
+    regressed = {f"M:w{i}": 500 + (i % 1000) for i in range(7277)}  # 0 pre-500
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.assert_composition_release_contract(regressed)
+
+    good = {f"M:w{i}": 500 + (i % 1000) for i in range(7277)}
+    good.update({f"M:c{i}": 200 + (i % 300) for i in range(127)})   # 127 classical
+    good.update({f"M:b{i}": 100 for i in range(39)})                # 39 at the floor
+    assert len(good) == 7443
+    sidecar_build.assert_composition_release_contract(good)  # no raise
+
+    # entries >= min but pre-500 strata missing -> still HALT
+    padded = {f"M:w{i}": 500 + (i % 1000) for i in range(7443)}
+    with pytest.raises(sidecar_build.CompositionDatesError):
+        sidecar_build.assert_composition_release_contract(padded)
+
+
 def test_d17_merged_twin_pair_produces_no_demotion():
     # Two source copies of the SAME work (merged twin) -> ONE canonical -> never
     # a co-claim pair, never a self-demotion (Codex #4).

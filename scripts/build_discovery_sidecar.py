@@ -449,6 +449,17 @@ def load_canonical_merges(
 # preserved: the floor still rejects near-zero / negative / absurd values.
 _COMPOSITION_YEAR_MIN = 100
 _COMPOSITION_YEAR_MAX = 1600
+# 135-07 recovered-strata RELEASE contract (Codex window-widen review, item 3):
+# a regenerated upstream table that silently regressed the classical-strata
+# recovery (the upstream emitter's own [500,1600] window dropping them again)
+# must never pass `--release`, even if an operator re-pins its SHA. These
+# minima pin the known-good distribution of the recovered strata (7,277
+# delivered + 166 recovered = 7,443; 166 pre-500 incl. 39 antiquity-floor
+# clamps); a legitimate future refresh can only GROW them. Applied ONLY to a
+# `--release` build with a `--composition-dates` input (fixtures unaffected).
+_COMPOSITION_RELEASE_MIN_ENTRIES = 7443
+_COMPOSITION_RELEASE_MIN_PRE500 = 166
+_COMPOSITION_RELEASE_MIN_AT_FLOOR = 39
 # DECOUPLED SEF/JA window (135-07 amendment, owner decision 2026-07-24):
 # the interim SEF/JA `--seftja-dates` corpus legitimately includes CLASSICAL
 # base texts (Mishnaic ~150, Talmudic/Amoraic ~300) that the medieval M-source
@@ -771,6 +782,29 @@ def parse_composition_dates(path, *, sha256: Optional[str] = None) -> Dict[str, 
         f"{sorted(_COMPOSITION_TOP_KEYS)} (designator+string form) OR a non-empty "
         "object mapping raw ids to integer CE years (flat pre-normalized form)"
     )
+
+
+def assert_composition_release_contract(dates_map: Dict[str, int]) -> None:
+    """135-07 recovered-strata release contract (Codex window-widen review,
+    item 3): HALT a `--release` build whose composition-date table regressed
+    below the known-good recovered distribution -- the failure mode is an
+    upstream re-emit with the old [500,1600] window silently dropping the
+    classical strata again, then an operator re-pinning the regressed file.
+    The SHA pin cannot catch a deliberate re-pin; this semantic gate can."""
+    n = len(dates_map)
+    n_pre500 = sum(1 for v in dates_map.values() if v < 500)
+    n_floor = sum(1 for v in dates_map.values() if v == _COMPOSITION_YEAR_MIN)
+    if (n < _COMPOSITION_RELEASE_MIN_ENTRIES
+            or n_pre500 < _COMPOSITION_RELEASE_MIN_PRE500
+            or n_floor < _COMPOSITION_RELEASE_MIN_AT_FLOOR):
+        raise CompositionDatesError(
+            "--composition-dates release contract violated: table regressed below "
+            f"the 135-07 recovered-strata minima (entries {n} < "
+            f"{_COMPOSITION_RELEASE_MIN_ENTRIES}, pre-500 {n_pre500} < "
+            f"{_COMPOSITION_RELEASE_MIN_PRE500}, or at-floor {n_floor} < "
+            f"{_COMPOSITION_RELEASE_MIN_AT_FLOOR}) -- likely an upstream re-emit "
+            "with the old [500,1600] window; HALT"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -4203,6 +4237,10 @@ def finalize_build(
         composition_dates_map = parse_composition_dates(
             composition_dates_path, sha256=composition_dates_sha256)
         composition_dates_sha256 = _hash_file(Path(composition_dates_path))
+        if release:
+            # 135-07 recovered-strata semantic gate (release builds only --
+            # fixtures/smoke paths pass no composition table or no --release).
+            assert_composition_release_contract(composition_dates_map)
     if seftja_dates_path is not None:
         seftja_dates_map = parse_seftja_dates(
             seftja_dates_path, sha256=seftja_dates_sha256)
