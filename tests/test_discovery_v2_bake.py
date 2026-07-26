@@ -380,8 +380,13 @@ def test_composition_date_near_miss_unparseable_extra_token_rejected():
 
 
 def test_composition_date_out_of_range_low_rejected():
+    # Floor widened 500 -> 100 (135-07 classical-strata recovery): 99 is below
+    # the widened floor; 100 (the antiquity clamp value) and 499 (recovered
+    # classical years) are now in-window.
     with pytest.raises(sidecar_build.CompositionDatesError):
-        _norm("499")
+        _norm("99")
+    assert _norm("100") == 100
+    assert _norm("499") == 499
 
 
 def test_composition_date_out_of_range_high_rejected():
@@ -442,12 +447,13 @@ def test_parse_composition_dates_sha_mismatch_halts(tmp_path):
 def test_parse_composition_dates_flat_int_form(tmp_path):
     """A non-empty {raw_id: int} map parses to the SAME {raw_id: year} shape the
     designator+string path returns (so the downstream crosswalk join is
-    unchanged). Boundary years 500 and 1600 are inclusive."""
+    unchanged). Boundary years 100 and 1600 are inclusive (floor widened
+    500 -> 100 by the 135-07 classical-strata amendment)."""
     path = _write_json(tmp_path / "comp_flat.json", {
-        "M:w1": 950, "M:w2": 1186, "M:w3": 500, "M:w4": 1600,
+        "M:w1": 950, "M:w2": 1186, "M:w3": 100, "M:w4": 1600,
     })
     out = sidecar_build.parse_composition_dates(path)
-    assert out == {"M:w1": 950, "M:w2": 1186, "M:w3": 500, "M:w4": 1600}
+    assert out == {"M:w1": 950, "M:w2": 1186, "M:w3": 100, "M:w4": 1600}
 
 
 def test_parse_composition_dates_flat_out_of_range_high_halts(tmp_path):
@@ -457,7 +463,8 @@ def test_parse_composition_dates_flat_out_of_range_high_halts(tmp_path):
 
 
 def test_parse_composition_dates_flat_out_of_range_low_halts(tmp_path):
-    path = _write_json(tmp_path / "c.json", {"M:w1": 400})
+    # 99 is below the widened [100,1600] floor (135-07 amendment).
+    path = _write_json(tmp_path / "c.json", {"M:w1": 99})
     with pytest.raises(sidecar_build.CompositionDatesError):
         sidecar_build.parse_composition_dates(path)
 
@@ -491,15 +498,18 @@ def test_parse_composition_dates_empty_object_halts(tmp_path):
 
 def test_parse_composition_dates_real_flat_file_smoke_parse():
     """Smoke-parse the REAL delivered production artifact (a flat pre-normalized
-    {raw_id: int-CE-year} map): exactly 7,277 entries, every value an int in
-    [500, 1587]. No SHA arg -> no pin check (the SHA is a runtime
+    {raw_id: int-CE-year} map): 7,443 entries after the 135-07 classical-strata
+    recovery append (7,277 delivered + 166 recovered: 127 true classical years
+    in [200,499] + 39 antiquity-clamped at the widened floor 100), every value
+    an int in [100, 1587]. No SHA arg -> no pin check (the SHA is a runtime
     --composition-dates-sha256 pin, never a test gate)."""
     assert _COMPOSITION_DATES_PATH.exists()
     out = sidecar_build.parse_composition_dates(str(_COMPOSITION_DATES_PATH))
-    assert len(out) == 7277
+    assert len(out) == 7443
     assert all(type(v) is int for v in out.values())
-    assert min(out.values()) == 500
+    assert min(out.values()) == 100
     assert max(out.values()) == 1587
+    assert sum(1 for v in out.values() if v < 500) == 166
 
 
 # --- seftja dates (frozen {year:int, basis:str}) ---------------------------

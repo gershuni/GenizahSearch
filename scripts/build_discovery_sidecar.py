@@ -433,9 +433,21 @@ def load_canonical_merges(
 
 # The plausible-composition window (bake plan §4.3): a normalized year outside
 # this inclusive bound HALTS the build (never silently UNKNOWN / clamped).
-# This bound governs the M-source `--composition-dates` corpus, which is
-# entirely medieval Genizah-era literary composition (all in [500, 1587]).
-_COMPOSITION_YEAR_MIN = 500
+# This bound governs the M-source `--composition-dates` corpus.
+# WIDENED 500 -> 100 (135-07 amendment, owner-directed 2026-07-26): the
+# original floor assumed the corpus is entirely medieval, but that was an
+# artifact of the upstream date-emitter's own [500,1600] filter silently
+# dropping the CLASSICAL strata (Mishnaic/Talmudic-era base texts) whose
+# dates DO exist in the owner date source. Those recovered years now enter
+# this table directly, so the floor matches the decoupled SEF/JA floor below.
+# ANTIQUITY-CLAMP convention (same amendment): a work whose composition
+# predates 100 CE (biblical / Second-Temple era) is recorded AT the floor
+# (100) -- order-preserving for every D-17 comparison against a co-claimant
+# dated >= 200 (delta >= 100 still demotes), while pairs wholly inside
+# [100,199] resolve kept_tie (conservative fail-safe, never a wrong
+# demotion). The anti-corruption rationale of the original R6-HIGH gate is
+# preserved: the floor still rejects near-zero / negative / absurd values.
+_COMPOSITION_YEAR_MIN = 100
 _COMPOSITION_YEAR_MAX = 1600
 # DECOUPLED SEF/JA window (135-07 amendment, owner decision 2026-07-24):
 # the interim SEF/JA `--seftja-dates` corpus legitimately includes CLASSICAL
