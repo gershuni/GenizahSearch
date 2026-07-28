@@ -1,8 +1,27 @@
-# v9.0.0 Requirements Addendum — DRAFT, awaiting owner approval
+# v9.0.0 Requirements Addendum — ✅ APPROVED AND APPLIED 2026-07-28
 
-**Status: DRAFT. Nothing here has been applied to `.planning/REQUIREMENTS.md`.**
-Approve, edit, or reject; on approval these get folded into the requirement blocks and the
-traceability table, and the coverage count moves from 40 to 44.
+**Status: APPLIED to `.planning/REQUIREMENTS.md`. Coverage moved 40 → 44.**
+This file is now the rationale record; `REQUIREMENTS.md` is authoritative.
+
+**Owner decisions, 2026-07-28:**
+
+| Item | Decision |
+|---|---|
+| A. NOVEL-01 / NOVEL-02 | **Registered**, but homed **AFTER Phase 136** — 136 stays read-surfaces-only. The novelty axis needs the LLM title-gate rewired to the validated `gemini-3.6-flash` + `reasoning:{effort:"low"}` config, the heuristic funnel run, and the 254,612-row `track1_direct` coverage gap closed; that is a phase of work in its own right. Traceability rows read `Post-136 (owner: not in 136)` pending a phase assignment. |
+| B. VIS-01 | **Registered, homed Phase 136** (not a 135 reopen — 135 is closed and its asset deployed). VIS-02 stays Phase 139 as drafted. |
+| C. REL-01 CURATED-SURFACE EXCEPTION | **GRANTED as drafted, all eight conditions (a)–(h)**, appended verbatim to REL-01. Phase 136's read surfaces may deploy early behind a dedicated flag. |
+| C. open sub-question — per-claim human confirmation | **NOT required.** The honesty load is carried by (c), (d), (f) and the BAND-03/04 framing; a banded, disclaimered "possible identification" is a different speech act from a certified claim. The owner accepts that a future gen-2 reclassification (~32K–45K publishable rows moving same-work → quotation) is handled as a correction under (f)'s retraction policy rather than pre-empted by per-claim review. |
+| D. bookkeeping | Four traceability rows added; coverage 40 → 44. All three pre-existing inconsistencies fixed: DATA-01/02 contract correction **ratified**; DATA-08 reworded to a working target with a recorded size re-acceptance (368.5 MB v1 / ~370 MiB v2 accepted; the only hard budget is PERF-01's RSS ≤ 250 MB, measured at 11.2 MB); the `/leads` phase reference in `discovery-budgets.md` corrected to 138. |
+
+**One premise changed after drafting:** section C was written 2026-07-27 while CERT-01 was ungraded.
+CERT-01 was graded and PASSED on 2026-07-28 (weighted 0.9382, CI [0.9084, 0.9644] vs the 0.85
+Strict floor). Condition (c) — no population-level `tier_a` precision number — nevertheless still
+binds, because the certificate is not yet PUBLISHED: `band_precision` has not been re-baked and the
+CERT-02 outcome copy is unapplied. Revisit (c) when those land.
+
+---
+
+## Original draft text (retained as the rationale record)
 
 **Why this exists:** two features are now central to what v9.0.0 ships and **neither has a
 requirement ID**. In a milestone whose release gate (REL-01) is requirement-driven and

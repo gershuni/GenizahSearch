@@ -71,7 +71,16 @@ Condensed 7-phase roadmap: an early atlas quick win, then the REL-01 gate sequen
 
 ### Pending Todos
 
-- Run the UX discuss-phase (atlas graph object / atlas scope / relation wording / disclaimer wording / band-selection / title curation), then `/gsd-plan-phase 133`.
+**Requirements addendum APPROVED + APPLIED 2026-07-28** — `REQUIREMENTS.md` now carries VIS-01 (Phase 136), VIS-02 (139), NOVEL-01/02 (registered, homed AFTER 136 — 136 stays read-surfaces-only), and the REL-01 **CURATED-SURFACE EXCEPTION** granted as drafted with all eight conditions. Per-claim human confirmation is **NOT** required (owner). Coverage 40 → 44. See `.planning/v9-REQUIREMENTS-ADDENDUM-DRAFT.md` for the decision table.
+
+**NEXT: `/gsd-discuss-phase 136`.** Carry these four items into it — they are the still-live remainder of the never-run UX discuss (the two atlas items from the old todo belong to Phase 139, and the old todo's trailing `/gsd-plan-phase 133` is stale — 133 shipped 2026-07-21):
+
+1. **Relation wording** (DATA-01 bilingual vocabulary) — PANEL-02 shows two relation types; only display wording was deferred, the semantic mapping is frozen.
+2. **Disclaimer wording** (BAND-04 per-surface recall-honesty variants) — canonical base sentence is fixed in D-12; per-surface tuning happens where each surface is built.
+3. **Band-selection / row counts** — what the panel lists by default, and the BAND-03 screening-toggle default.
+4. **Title display rule** (DATA-04) — coverage is 100% (1,269/1,269 works carry a `neutral_title`; 1,088 works have ≥1 shipped claim and so would get a `/work` page), but the DISPLAY rule is unsettled and collides with VIS-01: 656 of the 1,269 works are `source_corpus='msource'` and their titles must not reach a public surface.
+
+Also feed 136's discuss the CERT-01 findings: the per-stratum precision spread (1.000 ja → 0.471 msource:medium) must surface on BAND-05, and the liturgical-containment FP class is a v2.1 target.
 
 ### Blockers/Concerns
 
