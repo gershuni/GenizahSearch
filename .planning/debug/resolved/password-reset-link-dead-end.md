@@ -1,6 +1,6 @@
 ---
 slug: password-reset-link-dead-end
-status: investigating
+status: resolved
 trigger: |
   DATA_START
   Got a message from user: "thank you very much for developing such an useful tool.
@@ -9,7 +9,7 @@ trigger: |
   I've tried several times, but it seems that the link isn't working as expected."
   DATA_END
 created: 2026-07-28
-updated: 2026-07-28T(REOPENED — prior "resolved" was based on a misread confirmation)
+updated: 2026-07-28T(RESOLVED — root cause fixed, confirmed by the original reporter)
 surface: web + desktop (shared Supabase auth)
 ---
 
@@ -692,3 +692,89 @@ briefly showed a `#` that vanished, or never had one.
 
 Do NOT write more code until Diagnostic 1 comes back — the two branches lead to
 completely different fixes.
+
+---
+
+## RESOLVED 2026-07-28 (final) — root cause was the slot stack, confirmed by the reporter
+
+**Confirmation quality:** the ORIGINAL end user — the person who was locked out — completed
+the flow and reported it fixed. That is strong evidence: satisfying them required actually
+setting a new password and logging in. (Contrast the earlier false close, which rested on
+the owner having only *received* the email. See the retraction above.)
+
+### Actual root cause — NOT the one the first fix targeted
+
+Found from production `[pwreset]` logs after the instrumented deploy (`f626bc68`). Every
+homepage load was emitting:
+
+```
+RuntimeError('The current slot cannot be determined because the slot stack for this task
+is empty. This may happen if you try to create UI from a background task.
+To fix this, enter the target slot explicitly using `with container_element:`.')
+```
+
+**NiceGUI keys its slot stack PER asyncio TASK.** `asyncio.ensure_future` starts a NEW task
+whose stack is empty, so any `ui.context.*` lookup from inside it raises — and
+`ui.run_javascript` is `ui.context.client.run_javascript(...)` underneath. The fragment
+probe therefore raised on EVERY homepage load, and the original
+`except Exception -> logger.debug(...)` swallowed it entirely.
+
+Consequences worth stating plainly:
+
+- The recovery flow **could never fire** — not for a valid link, not for an expired one.
+  The dialog code, the session exchange and the error branch were all unreachable.
+- It failed **identically for a real link and a fake fragment**, which is precisely why the
+  symptom was misread as a Supabase wire-format problem for a full cycle.
+
+**Fix (`76d49305`):** bind `page_client = ui.context.client` at RENDER time, where the slot
+stack is populated, then use `page_client.connected()` / `page_client.run_javascript()`
+inside the task — never the `ui.` module-level shims. This capture idiom was ALREADY in the
+codebase (`web/pages/home.py::create_page`, `browse.py` `refs.page_client`,
+`search.py:110`); the recovery handler simply didn't follow it.
+
+**Guard:** `tests/test_password_reset_recovery.py::
+test_deferred_probe_uses_captured_client_not_ui_context` — asserts the capture happens
+outside every nested `def`, and that no `ui.context` lookup or `ui.run_javascript` call
+appears inside `_deferred_check`. Verified to fail against the exact regression. A static
+guard is mandatory here: the failure raises inside a background task, shows the user
+nothing, and no mock-based test touches a real slot stack.
+
+### Hypotheses that were WRONG (recorded so they are not re-chased)
+
+1. **"Supabase sends PKCE `?code=` not a fragment."** Dead. The wire format was never the
+   problem; the interceptor never got the chance to matter.
+2. **"`_build_dialogs`' teardown guard is returning `{}` and `_open_error()` no-ops."**
+   Plausible from the symptom, but not the cause.
+3. **"Missing `await client.connected()`."** `Client.run_javascript` awaits it internally
+   since NiceGUI 3.0.0 — but the `ui.context` lookup raises BEFORE that ever runs.
+
+Also separately verified NOT causal: deploy staleness (interceptor was in the served HTML),
+HTML escaping (byte-intact), script ordering (precedes gtag and PostHog), the IIFE return
+(NiceGUI `eval`s the code), CSP (no such header), outbox pre-connect buffering (buffers,
+does not drop), and `set_session_from_url` raising (fully exception-guarded).
+
+### What actually cracked it
+
+Instrumentation, not reasoning. Two hypotheses had already been argued from source and both
+were wrong. Raising the swallowed `logger.debug` to WARNING, logging each stage, and reading
+one production log line gave the answer immediately. **The lesson generalizes: when a
+deferred/background path fails silently, instrument and measure before theorizing again.**
+
+### Deferred follow-ups (tracked in docs/OPEN_ISSUES.md)
+
+1. No app-side rate limit / CAPTCHA on the anonymous reset request (Codex MEDIUM-3);
+   Turnstile is the recommended mitigation. `web/api_hardening.py` does NOT apply to a
+   NiceGUI event handler.
+2. Path B (`token_hash` + server-side `verify_otp`) remains the more robust architecture
+   and would remove the client-side JS dependency entirely.
+3. `set_session_from_url` is a blocking network call made directly on the event loop inside
+   `_complete_password_recovery_session`. Should move off-loop — but doing so safely
+   interacts with the `run.io_bound`/`safe_storage` contextvar trap that produced the
+   earlier BLOCKER, so it needs its own change.
+
+### Lessons captured to memory
+
+- `reference_io_bound_safe_storage_trap` — now covers BOTH background-context traps: the
+  silent `run.io_bound`/`safe_storage` degradation AND this task-keyed slot-stack failure.
+- `feedback_verify_what_was_actually_exercised` — a brief "looks like it works" is not a
+  smoke-test result; ask which steps were performed before recording "verified".
