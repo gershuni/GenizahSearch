@@ -600,8 +600,57 @@ def sign_out(access_token: Optional[str] = None) -> Dict:
         return {'error': f'Logout error: {str(e)}'}
 
 
-def change_password(new_password: str) -> Dict:
+def request_password_reset(email: str) -> Dict:
+    """Send a Supabase password-recovery email via a throwaway client (D-10).
+
+    Debug session password-reset-link-dead-end (2026-07-28): deliberately
+    does NOT pass ``options={'redirect_to': ...}``. Supabase silently
+    downgrades any ``redirect_to`` target that is not in the project's
+    Redirect URLs allowlist to the Site URL (confirmed via the 2026-07-28
+    dashboard read-back -- only ``/auth/callback`` variants are allowlisted,
+    NOT ``/reset-password``). Omitting ``redirect_to`` altogether makes the
+    recovery link land on the bare Site URL root, which is exactly what
+    ``web/main.py``'s ``/`` route (``dashboard_page``) is now built to
+    intercept via its ``#access_token=...&type=recovery`` fragment handler.
+
+    This mirrors the desktop app's ``request_password_reset`` in
+    ``supabase_corrections_client.py`` (also no ``redirect_to``) so the
+    web- and desktop-originated recovery emails land on the exact same
+    tested consumer path -- ONE recovery code path, not two.
+
+    Args:
+        email: The account email to send the recovery link to.
+
+    Returns:
+        Dict with 'success': True on success, or 'error': message on failure.
+    """
+    try:
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        throwaway.auth.reset_password_for_email(email)
+        return {'success': True}
+    except AuthApiError as e:
+        return {'error': str(e)}
+    except Exception as e:
+        return {'error': f'Failed to send reset email: {str(e)}'}
+
+
+def change_password(new_password: str, access_token: Optional[str] = None) -> Dict:
     """Change current user's password without GoTrue's local-session requirement.
+
+    ``access_token``: pass the caller's user-scope JWT explicitly when this
+    function is invoked OFF the NiceGUI event-loop thread (e.g. via
+    ``run.io_bound``). Codex code review 2026-07-28 found a BLOCKER here:
+    ``nicegui.storage.Storage.user`` reads ``request_contextvar``, and
+    ``run.io_bound`` -> ``loop.run_in_executor`` does NOT propagate
+    contextvars into the worker thread, so the ``safe_user_get`` fallback
+    below silently degrades to ``{}`` (a documented, expected degradation --
+    see web/safe_storage.py's own "inside a run.io_bound worker thread"
+    note) and this function returned ``{'error': 'Not logged in'}`` on EVERY
+    attempt. The caller must therefore read ``auth_session`` on the event
+    loop and hand the token in. Left defaulting to None so the pre-existing
+    synchronous caller (web/pages/profile.py, which calls this directly on
+    the event-loop thread where the UI context IS available) keeps working
+    byte-for-byte unchanged.
 
     Direct PUT to /auth/v1/user with explicit headers -- Codex round-2 P2:
     the GoTrue base client (gotrue_base_api.py:54-58) merges instance
@@ -619,9 +668,13 @@ def change_password(new_password: str) -> Dict:
     update_user's contract; bypass GoTrue entirely.
     """
     import httpx
-    from web.safe_storage import safe_user_get
-    auth_session = safe_user_get('auth_session') or {}
-    access_token = auth_session.get('access_token')
+    if not access_token:
+        # No token handed in -> we must be on the event-loop thread (the
+        # profile.py path). Reading storage from a worker thread yields {}
+        # here, which is exactly the BLOCKER described in the docstring.
+        from web.safe_storage import safe_user_get
+        auth_session = safe_user_get('auth_session') or {}
+        access_token = auth_session.get('access_token')
     if not access_token:
         return {'error': 'Not logged in'}
     url = f"{SUPABASE_URL}/auth/v1/user"

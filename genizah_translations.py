@@ -1187,6 +1187,14 @@ TRANSLATIONS = {
     "For desktop app login, set a password in your profile after signing up.": "לכניסה מתוכנת המחשב, הגדר סיסמה בפרופיל לאחר ההרשמה.",
     "or": "או",
 
+    # ==================== Password Reset (web recovery-link landing) ====================
+    "Set a new password": "הגדר סיסמה חדשה",
+    "Set Password": "הגדר סיסמה",
+    "This password reset link has expired or was already used.": "קישור איפוס הסיסמה הזה פג תוקף או שכבר נעשה בו שימוש.",
+    "Send reset link": "שלח קישור איפוס",
+    "Please enter your email address": "אנא הזן את כתובת האימייל שלך",
+    "If an account exists for that email, a password reset link has been sent.": "אם קיים חשבון עבור כתובת אימייל זו, נשלח אליו קישור לאיפוס סיסמה.",
+
     # ==================== Submit Correction ====================
     "Submit Correction": "שלח תיקון",
     "Submit a Transcription Correction": "שלח תיקון תמלול",

@@ -1015,6 +1015,373 @@ from web.analytics import posthog_capture  # noqa: F401 — re-export
 
 
 # ============================================================================
+# Password Recovery Fragment Interceptor (debug session
+# password-reset-link-dead-end, 2026-07-28)
+# ============================================================================
+# Root cause: Supabase's `reset_password_for_email` (used by BOTH the
+# desktop app and the new web "Forgot password?" link -- see
+# supabase_client.request_password_reset) never registers a PKCE
+# code_challenge, so Supabase always redirects the recovery link to the
+# Site URL (confirmed bare `https://genizahsearch.com` via the 2026-07-28
+# dashboard read-back) with session tokens in the URL FRAGMENT
+# (`#access_token=...&refresh_token=...&type=recovery`), or -- for an
+# expired/consumed/invalid token -- an error fragment
+# (`#error=access_denied&error_code=otp_expired&...`). NiceGUI is
+# server-rendered and never sees URL fragments on its own; only
+# client-side JS can read `window.location.hash`.
+#
+# This script is added as the FIRST inline <script> in `dashboard_page()`'s
+# <head> (before ANALYTICS_SCRIPT / POSTHOG_SCRIPT, both defined above and
+# emitted later in the same <head>) specifically so the fragment is read
+# and the address bar scrubbed via `history.replaceState` SYNCHRONOUSLY,
+# before Google Analytics' gtag or PostHog's session-recording/pageview
+# capture (both deferred/async) can ever observe `location.href` with the
+# tokens or error details still attached. The extracted payload is stashed
+# in a transient `window.__genizahRecovery` global -- never the URL, never
+# a query string, never logged -- and is read exactly once via
+# `ui.run_javascript` (the existing NiceGUI websocket channel, not a new
+# HTTP request) by `_render_password_recovery_handler` below, which
+# deletes it immediately after reading.
+_RECOVERY_FRAGMENT_INTERCEPT_SCRIPT = '''
+<script>
+(function() {
+    try {
+        var hash = window.location.hash;
+        if (!hash || hash.length < 2) { return; }
+        var params = new URLSearchParams(hash.substring(1));
+        var isRecovery = params.get('type') === 'recovery' && !!params.get('access_token');
+        var hasError = !!params.get('error');
+        if (!isRecovery && !hasError) { return; }
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        if (isRecovery) {
+            window.__genizahRecovery = {
+                kind: 'recovery',
+                access_token: params.get('access_token'),
+                refresh_token: params.get('refresh_token') || ''
+            };
+        } else {
+            window.__genizahRecovery = {
+                kind: 'error',
+                error_code: params.get('error_code') || ''
+            };
+        }
+    } catch (e) { /* malformed fragment -- treat as an ordinary homepage load */ }
+})();
+</script>
+'''
+
+# One-shot read-and-clear: returns the payload stashed above (or null for an
+# ordinary homepage load with no recovery-shaped fragment), then deletes it
+# so a page reload / reconnect cannot replay a stale payload.
+_RECOVERY_PAYLOAD_READ_JS = (
+    "(function(){ var r = window.__genizahRecovery || null; "
+    "try { delete window.__genizahRecovery; } catch (e) { window.__genizahRecovery = undefined; } "
+    "return r; })()"
+)
+
+
+async def _complete_password_recovery_session(access_token: str, refresh_token: str) -> dict:
+    """Establish the recovery session and persist it via safe_storage.
+
+    Factored out of the `/` page's recovery-fragment handler (mirrors the
+    Phase 91 AUTHW-02 `_oauth_complete_login` extraction) so the
+    session-establishment + multi-write atomicity logic is unit-testable
+    without a NiceGUI render harness. Reuses `set_session_from_url()`
+    (`web/supabase_client.py`) -- the ONLY call site the Phase 90 D-15
+    static AST guard (`tests/test_no_set_session_outside_oauth.py`)
+    allowlists for `set_session`, already anticipated for exactly this
+    scenario but with zero callers before this fix.
+
+    Returns:
+        {'success': True, 'user': ..., 'profile': ...} on success, or
+        {'error': 'reason_code'} on failure -- reason_code is one of
+        session_exchange_failed / no_user_returned / no_session_returned /
+        session_storage_unavailable / auth_state_storage_unavailable.
+    """
+    from web.supabase_client import get_profile, set_session_from_url
+
+    result = set_session_from_url(access_token, refresh_token)
+    if 'error' in result:
+        posthog_capture('password_recovery_failed', {'error_code': 'session_exchange_failed'})
+        return {'error': 'session_exchange_failed'}
+
+    user = result.get('user')
+    if not user:
+        posthog_capture('password_recovery_failed', {'error_code': 'no_user_returned'})
+        return {'error': 'no_user_returned'}
+
+    session = result.get('session')
+    if not session:
+        posthog_capture('password_recovery_failed', {'error_code': 'no_session_returned'})
+        return {'error': 'no_session_returned'}
+
+    if not safe_user_set('auth_session', {
+        'access_token': session.get('access_token'),
+        'refresh_token': session.get('refresh_token'),
+    }):
+        posthog_capture('password_recovery_failed', {'error_code': 'session_storage_unavailable'})
+        return {'error': 'session_storage_unavailable'}
+
+    profile = get_profile(user['id'])
+    if not GlobalAuthState.set_auth(user, profile):
+        # DEFENSIVE 3-key cleanup -- same pattern as _oauth_complete_login.
+        safe_user_pop('auth_session', None)
+        safe_user_pop('auth_user', None)
+        safe_user_pop('auth_profile', None)
+        posthog_capture('password_recovery_failed', {'error_code': 'auth_state_storage_unavailable'})
+        return {'error': 'auth_state_storage_unavailable'}
+
+    # Codex review 2026-07-28 HIGH-2: the browser-side payload was already
+    # read-and-DELETED (and the fragment scrubbed) before we got here, so
+    # until this flag exists there is NO durable record that a recovery is
+    # in progress. If the tab reloads or the websocket drops between the JS
+    # read and the dialog opening, the user lands on a plain homepage with
+    # the fragment gone AND their single-use email link already spent --
+    # i.e. exactly the silent dead end this whole fix exists to remove.
+    # This flag is a plain non-secret boolean (never a token); it lets any
+    # subsequent `/` render re-offer the set-password dialog, because at
+    # this point the recovery SESSION is already established server-side
+    # and no further token exchange is needed. Cleared on success or on an
+    # explicit user cancel (see _render_password_recovery_handler) so it
+    # cannot nag forever.
+    safe_user_set('password_recovery_pending', True)
+
+    posthog_capture('password_recovery_started', {})
+    return {'success': True, 'user': user, 'profile': profile}
+
+
+async def _handle_recovery_payload(payload, open_set_password_dialog, open_error_dialog) -> None:
+    """Classify the JS-extracted recovery payload and dispatch the right UI.
+
+    `open_set_password_dialog` / `open_error_dialog` are plain zero-arg
+    callables (in production the lazy `_open_set_password` / `_open_error`
+    wrappers, which build the dialogs on first demand; in tests, simple
+    counters) so this dispatch logic is unit-testable without building
+    real NiceGUI dialogs.
+
+    NOTE: this function is what makes the lazy build pay off -- it returns
+    WITHOUT invoking either callable for an ordinary homepage load, so no
+    dialog is ever constructed on the overwhelming majority of `/` renders.
+
+    Handles THREE cases:
+      - payload is None / not a dict -> ordinary homepage load, no-op.
+      - payload['kind'] == 'error' -> the recovery link was expired,
+        already consumed, or otherwise invalid (Supabase's own
+        `#error=access_denied&error_code=otp_expired&...` fragment). This
+        is a REQUIRED case (recovery tokens are single-use), not an edge
+        case -- shows the expired-link dialog with a path back to
+        request a fresh link.
+      - payload['kind'] == 'recovery' -> valid single-use token; establish
+        the session via `_complete_password_recovery_session` and show the
+        set-new-password dialog on success, or the same expired-link
+        dialog if session establishment itself fails.
+    """
+    if not payload or not isinstance(payload, dict):
+        return
+    kind = payload.get('kind')
+    if kind == 'error':
+        posthog_capture('password_recovery_failed', {
+            'error_code': str(payload.get('error_code', ''))[:100],
+        })
+        open_error_dialog()
+        return
+    if kind != 'recovery':
+        return
+    access_token = payload.get('access_token')
+    refresh_token = payload.get('refresh_token', '') or ''
+    if not access_token:
+        return
+    result = await _complete_password_recovery_session(access_token, refresh_token)
+    if 'error' in result:
+        open_error_dialog()
+        return
+    open_set_password_dialog()
+
+
+def _render_password_recovery_handler():
+    """Schedule the one-shot recovery-fragment check on `/` and build the
+    recovery dialogs LAZILY, only once a recovery fragment is confirmed
+    present. See `_RECOVERY_FRAGMENT_INTERCEPT_SCRIPT` above for the full
+    root-cause writeup. Must be called from within the page's
+    `with content:` slot (mirrors every other dialog built in this module)
+    so the anchor container has a valid parent slot.
+
+    Why lazy: `/` is the highest-traffic route on the site and is hit
+    relentlessly by crawlers, while a recovery fragment is present on a
+    vanishingly small fraction of loads. Building three dialogs (with
+    inputs, buttons and their event handlers) eagerly on every homepage
+    render is pure waste, and this site has a documented history of RSS
+    pressure driven by bot traffic on `/` (see the 2026-07-08 allocator-
+    ratchet remediation). Eagerly we create exactly ONE hidden anchor
+    `<div>`; everything else is deferred behind the JS check, so an
+    ordinary homepage load costs a single `ui.run_javascript` round-trip
+    over the already-open websocket and nothing more.
+    """
+    # Anchor container: captured so the deferred build has a valid parent
+    # slot inside an async task (the codebase's established pattern for
+    # async element creation -- cf. `content_container` in web/pages/browse.py).
+    # display:none keeps it from consuming a flex gap in the page column;
+    # Quasar portals dialog content to <body> on open, so a hidden parent
+    # does not affect the dialogs themselves.
+    anchor = ui.element('div').style('display: none;')
+
+    # Memo so a build is done at most once per page even if both branches
+    # somehow fire; holds the two dialogs the payload handler can open.
+    _built: dict = {}
+
+    def _build_dialogs() -> dict:
+        """Construct the recovery dialogs on first demand. Returns {} if the
+        client/container is already torn down (visitor navigated away while
+        the fragment check was in flight)."""
+        if _built:
+            return _built
+
+        # Same teardown guard as browse.py's update_content(): accessing
+        # .client on a dead session returns the deleted object rather than
+        # raising, so the deletion flags must be checked explicitly.
+        try:
+            _client = anchor.client
+        except (RuntimeError, AttributeError):
+            return {}
+        if anchor.is_deleted or getattr(_client, '_deleted', False):
+            return {}
+
+        from web.auth_state import create_forgot_password_dialog
+
+        with anchor:
+            forgot_dialog = create_forgot_password_dialog()
+
+            set_password_dialog = ui.dialog().props('persistent')
+            with set_password_dialog, ui.card().classes('w-96 p-6').style('background: var(--bg-card); color: var(--text-primary);'):
+                ui.label(tr('Set a new password')).classes('text-lg font-bold')
+                new_pw = ui.input(tr('New Password'), password=True, password_toggle_button=True).classes('w-full').props('outlined').style('direction: ltr;')
+                confirm_pw = ui.input(tr('Confirm New Password'), password=True, password_toggle_button=True).classes('w-full').props('outlined').style('direction: ltr;')
+                set_pw_error = ui.label('').classes('text-red-500 text-sm hidden')
+
+                async def handle_set_password():
+                    set_pw_error.classes('hidden', remove='visible')
+                    if not new_pw.value:
+                        set_pw_error.text = tr('Please enter new password')
+                        set_pw_error.classes('visible', remove='hidden')
+                        return
+                    if new_pw.value != confirm_pw.value:
+                        set_pw_error.text = tr('Passwords do not match')
+                        set_pw_error.classes('visible', remove='hidden')
+                        return
+                    if len(new_pw.value) < 8:
+                        set_pw_error.text = tr('Password must be at least 8 characters')
+                        set_pw_error.classes('visible', remove='hidden')
+                        return
+                    from web.supabase_client import change_password as supabase_change_password
+                    # Codex review 2026-07-28 BLOCKER-1: read the token HERE,
+                    # on the NiceGUI event-loop thread where the UI context
+                    # (and therefore app.storage.user) actually exists, and
+                    # hand it to the worker. Letting change_password() do its
+                    # own safe_user_get() inside run.io_bound silently yielded
+                    # {} -> 'Not logged in' on EVERY attempt, because
+                    # loop.run_in_executor does not propagate contextvars.
+                    auth_session = safe_user_get('auth_session') or {}
+                    access_token = auth_session.get('access_token')
+                    if not access_token:
+                        # Recovery session lost (storage pruned / server
+                        # restart). The email link is single-use, so send them
+                        # for a fresh one rather than failing opaquely.
+                        safe_user_pop('password_recovery_pending', None)
+                        set_password_dialog.close()
+                        _open_error()
+                        return
+                    result = await run.io_bound(
+                        supabase_change_password, new_pw.value, access_token,
+                    )
+                    if result.get('success'):
+                        # Recovery is complete -- retire the pending flag so
+                        # later `/` visits stop re-offering the dialog.
+                        safe_user_pop('password_recovery_pending', None)
+                        posthog_capture('password_recovery_completed', {})
+                        set_password_dialog.close()
+                        ui.notify(tr('Password changed successfully'), type='positive')
+                        await asyncio.sleep(0.3)
+                        ui.navigate.reload()
+                    else:
+                        # Codex review 2026-07-28 MEDIUM-4: NEVER surface the
+                        # raw Supabase/httpx error text -- it is English-only
+                        # (leaks into the Hebrew UI, violating the i18n
+                        # invariant) and exposes backend operational detail.
+                        # Show a translated message; keep the detail in logs.
+                        logger.warning(
+                            "password recovery: change_password failed: %s",
+                            result.get('error'),
+                        )
+                        set_pw_error.text = tr('Failed to change password')
+                        set_pw_error.classes('visible', remove='hidden')
+
+                def _cancel_set_password():
+                    # An explicit user cancel is the one non-success case that
+                    # clears the pending flag -- otherwise the dialog would
+                    # reappear on every homepage visit indefinitely.
+                    safe_user_pop('password_recovery_pending', None)
+                    set_password_dialog.close()
+
+                with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                    ui.button(tr('Cancel'), on_click=_cancel_set_password).props('flat')
+                    ui.button(tr('Set Password'), on_click=handle_set_password).props('color=primary')
+                confirm_pw.on('keydown.enter', handle_set_password)
+
+            error_dialog = ui.dialog()
+            with error_dialog, ui.card().classes('w-96 p-6').style('background: var(--bg-card); color: var(--text-primary);'):
+                ui.icon('error_outline').classes('text-3xl').style('color: #ef4444;')
+                ui.label(tr('This password reset link has expired or was already used.')).classes('text-base')
+
+                def _open_forgot():
+                    error_dialog.close()
+                    forgot_dialog.open()
+
+                with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                    ui.button(tr('Cancel'), on_click=error_dialog.close).props('flat')
+                    ui.button(tr('Forgot password?'), on_click=_open_forgot).props('color=primary')
+
+        _built['set_password'] = set_password_dialog
+        _built['error'] = error_dialog
+        return _built
+
+    # Lazy open-callables. `_handle_recovery_payload` only invokes one of
+    # these AFTER it has classified a non-empty recovery payload, so an
+    # ordinary homepage load never triggers a build. Keeping the
+    # zero-arg-callable contract also keeps that function unit-testable
+    # without a NiceGUI render harness (tests pass plain counters).
+    def _open_set_password() -> None:
+        dialogs = _build_dialogs()
+        if dialogs:
+            dialogs['set_password'].open()
+
+    def _open_error() -> None:
+        dialogs = _build_dialogs()
+        if dialogs:
+            dialogs['error'].open()
+
+    # Codex review 2026-07-28 HIGH-2 (resume path): a recovery that already
+    # established its session but never finished the password change is
+    # re-offered here, WITHOUT needing the fragment or the (single-use, now
+    # spent) email link again. Covers the reload / websocket-drop / >5s
+    # run_javascript-timeout window in which the browser-side payload has
+    # already been read-and-deleted but the dialog never appeared. Runs on
+    # the event-loop thread during page render, so the storage read is valid.
+    if safe_user_get('password_recovery_pending'):
+        _open_set_password()
+        return  # the fragment is long gone on a resume; skip the JS probe
+
+    async def _deferred_check():
+        try:
+            payload = await ui.run_javascript(_RECOVERY_PAYLOAD_READ_JS, timeout=5.0)
+        except Exception:
+            logger.debug("password-recovery fragment read failed (non-fatal)", exc_info=True)
+            return
+        await _handle_recovery_payload(payload, _open_set_password, _open_error)
+
+    asyncio.ensure_future(_deferred_check())
+
+
+# ============================================================================
 # Modern Theme System - Professional Research UI
 # ============================================================================
 
@@ -1654,6 +2021,11 @@ def apply_theme_immediately():
 def dashboard_page():
     safe_user_set('current_page', '/')
     current_theme = safe_user_get('theme', 'light')
+    # MUST be the first add_head_html call on this route (see the constant's
+    # docstring above) -- scrubs a Supabase password-recovery fragment from
+    # the address bar before ANALYTICS_SCRIPT / POSTHOG_SCRIPT (added later
+    # in this same <head>) can ever observe it.
+    ui.add_head_html(_RECOVERY_FRAGMENT_INTERCEPT_SCRIPT)
     ui.add_head_html(page_meta('/'))
     # Structured data: WebSite schema for homepage
     ui.add_head_html('''
@@ -1827,6 +2199,9 @@ def dashboard_page():
         from web.pages import home
         if hasattr(home, 'create_page'):
             home.create_page()
+        # Password-reset-link-dead-end fix: check for + consume a Supabase
+        # recovery fragment on every homepage load (cheap no-op when absent).
+        _render_password_recovery_handler()
 
 @ui.page('/search', title='Full-Text Search | חיפוש טקסט מלא — Dicta Genizah Search')
 def search_page_route(

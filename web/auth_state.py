@@ -11,7 +11,10 @@ Uses Supabase for authentication instead of the FastAPI backend.
 from typing import Optional, Dict
 from nicegui import app, ui
 import asyncio
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -355,6 +358,67 @@ def do_logout():
     GlobalAuthState.clear_auth()
 
 
+def create_forgot_password_dialog():
+    """Build the "Forgot password?" dialog: enter email -> send Supabase recovery email.
+
+    Debug session password-reset-link-dead-end (2026-07-28): this is the
+    web app's first-ever entry point into the password-recovery flow (the
+    web previously had none at all -- only the desktop login dialog's
+    "Forgot password?" link could trigger a reset). Deliberately reuses
+    ``supabase_client.request_password_reset(email)`` -- called WITHOUT a
+    ``redirect_to`` (see that function's docstring) so the web-originated
+    recovery email lands on the exact same homepage handler
+    (``web/main.py``'s ``/`` route) as the desktop-originated one. ONE
+    tested recovery code path, not two.
+
+    Called from two places: the login dialog's own "Forgot password?"
+    link (below) AND the homepage's expired/consumed-link error dialog
+    (``web/main.py``), so a user who burns a link can request a fresh one
+    without leaving the page.
+    """
+    from web.translations import tr
+    from web.supabase_client import request_password_reset
+
+    dialog = ui.dialog()
+    with dialog, ui.card().classes('w-96 p-6').style('background: var(--bg-card); color: var(--text-primary);'):
+        ui.label(tr('Forgot Password')).classes('text-lg font-bold')
+        ui.label(tr('Enter your email address:')).classes('text-sm').style('color: var(--text-muted);')
+        email_input = ui.input(tr('Email')).classes('w-full').props('outlined')
+        status_label = ui.label('').classes('text-sm')
+
+        async def handle_send():
+            status_label.classes(remove='text-red-500 text-green-600')
+            email = (email_input.value or '').strip()
+            if not email:
+                status_label.text = tr('Please enter your email address')
+                status_label.classes(add='text-red-500')
+                return
+            from nicegui import run
+            result = await run.io_bound(request_password_reset, email)
+            if 'error' in result:
+                # Codex review 2026-07-28 MEDIUM-4: never render the raw
+                # Supabase/httpx error string. It is English-only (leaks into
+                # the Hebrew UI, breaking the i18n invariant) and exposes
+                # backend operational detail -- throttle windows, SMTP
+                # failures -- on an ANONYMOUS form. Translated message to the
+                # user; detail to the log only. Deliberately does NOT reveal
+                # whether the address exists (no account enumeration).
+                logger.warning("request_password_reset failed: %s", result['error'])
+                status_label.text = tr('Failed to send reset email')
+                status_label.classes(add='text-red-500')
+            else:
+                status_label.text = tr('If an account exists for that email, a password reset link has been sent.')
+                status_label.classes(add='text-green-600')
+
+        with ui.row().classes('w-full justify-end gap-2 mt-2'):
+            ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+            ui.button(tr('Send reset link'), on_click=handle_send).props('color=primary')
+
+        email_input.on('keydown.enter', handle_send)
+
+    return dialog
+
+
 def create_login_dialog():
     """
     Create and return a login/register dialog.
@@ -382,6 +446,15 @@ def create_login_dialog():
 
                     # Remember me checkbox
                     remember_me = ui.checkbox(tr('Remember me')).classes('w-full')
+
+                    # Forgot password link (debug session
+                    # password-reset-link-dead-end, 2026-07-28): the web app's
+                    # only entry point into the recovery flow -- lazily builds
+                    # its own dialog on first click.
+                    forgot_password_dialog = create_forgot_password_dialog()
+                    ui.label(tr('Forgot password?')).classes(
+                        'text-xs text-right w-full cursor-pointer hover:underline'
+                    ).style('color: var(--text-muted);').on('click', forgot_password_dialog.open)
 
                     login_error = ui.label('').classes('text-red-500 text-sm hidden')
 
