@@ -1,0 +1,63 @@
+{
+  "allowed_verdicts": [
+    "A",
+    "B",
+    "C",
+    "INS"
+  ],
+  "canonical_merges_sha256": "cc054d111b9b4a76dd69912923ba50cd2b63f7820cb632617f645c12c207429a",
+  "card_count": 220,
+  "cluster_map_hash": "00fa8bf47ae9a48d8b3c21e4c3ce1a39ee66857ef227c113debfe7c2185bdaa3",
+  "composition_dates_sha256": "2b46b4708ddccb9f26961dcb9ba6d62b23d64cc1da225d133af1be21bf2e9476",
+  "confirmation_allocation": {
+    "basis": "max finite size_confirmation n_drawn across the pre-outcome OC grid (protocol §6/§7) -- sequestered at freeze time, never invented ad hoc after discovery results land",
+    "n_drawn": 340
+  },
+  "crosswalk_sha256": "bcde04bd460bbf6c91e354121109b793c4c1e7e9b203433ca640aed848345f0e",
+  "cutoffs": {
+    "coverage_high_floor": 0.6,
+    "d17_delta_years": 100,
+    "lever1_coverage_cliff": 0.45,
+    "strict_floor": 0.85
+  },
+  "db_content_hash": "33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff",
+  "frame_content_hash": "53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7",
+  "gold_allocation": {
+    "n": 20,
+    "pool_available": 174,
+    "source": "e1_adjudicated_a.jsonl (individually-adjudicated cards; re-presented blind for intra-rater repeatability, drawn cluster-disjoint from the discovery deck at Task 2 draw time)"
+  },
+  "population_hash": "d3d1cc44e96fc3b7971a8239949478ffb2a14b61f26daf3f7a234574b8845ca3",
+  "protocol_sha256": "16823cadb5001c9be91fe33da9ae28e4e3816531824061f67c7fd6346933475d",
+  "report_id": "282e9359f9a24c3ebe451d1689ee891165aa3e0ad4b78150035bc34038fcdf02",
+  "seed": {
+    "bootstrap": 7,
+    "deck_draw": 20260728,
+    "gold_shuffle": 20260729
+  },
+  "seftja_dates_sha256": "0076028917c60044ac72ee36504c173b9e6decd0a5aef9890ec0f0fe934b22d7",
+  "strata_weights": {
+    "ja:high": 0.093392,
+    "ja:medium": 0.01474,
+    "msource:high": 0.08393,
+    "msource:medium": 0.015881,
+    "sefaria:high": 0.667104,
+    "sefaria:medium": 0.124952
+  },
+  "stratum_allocation": {
+    "ja:high": 27,
+    "ja:medium": 17,
+    "msource:high": 26,
+    "msource:medium": 17,
+    "sefaria:high": 102,
+    "sefaria:medium": 31
+  },
+  "stratum_counts": {
+    "ja:high": 12526,
+    "ja:medium": 1977,
+    "msource:high": 11257,
+    "msource:medium": 2130,
+    "sefaria:high": 89474,
+    "sefaria:medium": 16759
+  }
+}
