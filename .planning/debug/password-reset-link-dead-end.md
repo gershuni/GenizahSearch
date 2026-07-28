@@ -1,6 +1,6 @@
 ---
 slug: password-reset-link-dead-end
-status: resolved
+status: investigating
 trigger: |
   DATA_START
   Got a message from user: "thank you very much for developing such an useful tool.
@@ -9,7 +9,7 @@ trigger: |
   I've tried several times, but it seems that the link isn't working as expected."
   DATA_END
 created: 2026-07-28
-updated: 2026-07-28T(resolved — live smoke confirmed by owner post-deploy)
+updated: 2026-07-28T(REOPENED — prior "resolved" was based on a misread confirmation)
 surface: web + desktop (shared Supabase auth)
 ---
 
@@ -611,3 +611,84 @@ console signature to look for is anything referencing `__genizahRecovery`.
 silently breaks any helper that reads `safe_user_*` internally, because contextvars do
 not cross into the executor thread and `safe_storage` degrades to the default rather
 than raising. Found only by external review; 26 passing tests and full CI missed it.
+
+---
+
+## REOPENED 2026-07-28 — the prior "resolved" was based on a misread confirmation
+
+**Retraction.** The section above claiming live-smoke confirmation is WRONG. The owner's
+"Looks like it works" referred ONLY to *receiving the reset email* after clicking
+"Forgot password?" — they never clicked the link in the email. I recorded an ambiguous
+one-line confirmation as a verified smoke test, wrote it into a commit message
+(`7f3866c1`) and this file, and archived the session. That was a process failure on my
+part: the checklist explicitly said the load-bearing step was "confirm the password
+ACTUALLY CHANGES and logs in", and I did not ask which steps had been performed.
+
+**Current status: the deployed fix does NOT resolve the reported bug.**
+
+### What has been RULED OUT (verified, not assumed)
+
+1. **Not a deploy gap.** `curl https://genizahsearch.com/` returns the
+   `__genizahRecovery` interceptor in the served `<head>`. The new `dashboard_page()`
+   code is running in the live process.
+2. **Not a templating/escaping corruption.** The served `<script>` block is byte-intact:
+   no `&quot;` / `&#34;` / `&amp;` / `&lt;` / `&gt;` / `&#39;` anywhere in it.
+3. **Not a script-ordering problem.** Served offsets: interceptor @3606, `gtag` @11659,
+   `posthog.init` @13639 — the interceptor is first, as designed.
+4. **Not an IIFE return-value problem.** NiceGUI's client-side `runJavascript` is
+   `new Promise((resolve) => resolve(eval(code)))`, so `(function(){...})()` returns its
+   value correctly. (Worth noting: every OTHER `ui.run_javascript` in this repo that
+   consumes a return value passes a single bare expression, so there was no in-repo
+   precedent — this had to be checked against the library source.)
+5. **Not a missing `await client.connected()`.** `Client.run_javascript` awaits
+   `self.connected()` internally since NiceGUI 3.0.0 (confirmed in the installed
+   source), so scheduling the probe from page-build is not inherently broken.
+
+### LEADING HYPOTHESIS (untested) — there may be no fragment at all
+
+Supabase may be issuing a **PKCE-style `?code=...` query-param** redirect rather than an
+**implicit-flow `#access_token=...&type=recovery` fragment**. Codex verified that the
+*client library*'s `reset_password_for_email` sends no `code_challenge`, but the
+project/server side can still hand back a code-style link. If so:
+
+- there is no fragment, so the interceptor correctly no-ops and stays silent;
+- `?code=` lands on `/`, whose `dashboard_page` ignores it (only `/auth/callback` reads
+  `code`, and the email does not point there);
+- the observable symptom is IDENTICAL before and after the fix — which matches the
+  report exactly.
+
+This would mean the entire Path A design is aimed at the wrong wire format. Path B (the
+deferred `token_hash` + server-side `verify_otp` route) sidesteps the question entirely
+and is now a materially stronger candidate rather than a nice-to-have.
+
+### Secondary hypothesis
+
+If a fragment IS present, the break is between the interceptor and the Python dispatch.
+Note a real observability defect I introduced: `_deferred_check`'s
+`except Exception: logger.debug(...)` swallows any `run_javascript` failure at DEBUG
+level, so a production failure leaves no trace at the default INFO level. This must be
+raised to WARNING regardless of root cause — it is why the logs cannot answer this
+question today.
+
+### NEXT ACTION — two owner diagnostics, before any further code change
+
+**Diagnostic 1 (decisive, isolates our code from Supabase's wire format).** Visit this
+URL on the live site — a deliberately fake token, safe, no email needed:
+
+    https://genizahsearch.com/#access_token=faketoken&refresh_token=fakerefresh&type=recovery
+
+- "expired or already used" dialog appears  => the WHOLE Path A chain works
+  (interceptor -> payload read -> session exchange fails on the fake token -> error
+  dialog). The bug is then in Supabase's real link format, confirming the hypothesis
+  above.
+- NOTHING appears  => the break is inside our chain (payload read or dispatch), and the
+  fragment format is a red herring.
+
+**Diagnostic 2 (identifies the real wire format).** From a REAL reset email, right-click
+the button, copy the link, and report its shape with secrets redacted — specifically
+whether the landing URL carries `#access_token=...` or `?code=...`, and what
+`redirect_to=` is set to. Equivalently: click it and note whether the address bar
+briefly showed a `#` that vanished, or never had one.
+
+Do NOT write more code until Diagnostic 1 comes back — the two branches lead to
+completely different fixes.
