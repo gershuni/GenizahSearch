@@ -170,8 +170,16 @@ def test_canonical_merges_duplicate_json_key_rejected(tmp_path):
 def test_canonical_merges_real_slim_file_smoke_parse():
     """Smoke-parse the REAL hash-pinned SLIM build.json: 16 approve merges,
     dropped_by_135 == {w001239}, D-14 flip resolves to w000452, and the
-    verified SHA-256 matches the orchestrator-provided pin."""
-    assert _SLIM_CENSUS_PATH.exists()
+    verified SHA-256 matches the orchestrator-provided pin.
+
+    Skips gracefully if the gitignored artifact is not on this box (same
+    presence-gate as test_parse_seftja_dates_real_frozen_artifact_smoke_parse):
+    discovery_data/ is gitignored by design and scp'd out of band, so this
+    artifact can never exist in CI. The load-bearing production gate is the
+    runtime --canonical-merges-sha256 pin, not this smoke-parse; when the file
+    IS present the _SLIM_CENSUS_SHA256 assertion below still pins it."""
+    if not _SLIM_CENSUS_PATH.exists():
+        pytest.skip("gitignored SLIM census artifact not present on this box")
     out = sidecar_build.load_canonical_merges(
         str(_SLIM_CENSUS_PATH),
         sha256=_SLIM_CENSUS_SHA256,
@@ -502,8 +510,14 @@ def test_parse_composition_dates_real_flat_file_smoke_parse():
     recovery append (7,277 delivered + 166 recovered: 127 true classical years
     in [200,499] + 39 antiquity-clamped at the widened floor 100), every value
     an int in [100, 1587]. No SHA arg -> no pin check (the SHA is a runtime
-    --composition-dates-sha256 pin, never a test gate)."""
-    assert _COMPOSITION_DATES_PATH.exists()
+    --composition-dates-sha256 pin, never a test gate).
+
+    Skips gracefully if the gitignored artifact is not on this box (same
+    presence-gate as test_parse_seftja_dates_real_frozen_artifact_smoke_parse):
+    discovery_data/ is gitignored by design and scp'd out of band, so this
+    artifact can never exist in CI."""
+    if not _COMPOSITION_DATES_PATH.exists():
+        pytest.skip("gitignored composition-dates artifact not present on this box")
     out = sidecar_build.parse_composition_dates(str(_COMPOSITION_DATES_PATH))
     assert len(out) == 7443
     assert all(type(v) is int for v in out.values())
