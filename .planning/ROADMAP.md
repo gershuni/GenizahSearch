@@ -159,11 +159,11 @@ Plans:
 
 **Wave 4**
 
-- [ ] 135-07-PLAN.md — Run v2 bake + verifier + strict masking gate + freeze discovery-frames-v2.md
+- [x] 135-07-PLAN.md — Run v2 bake + verifier + strict masking gate + freeze discovery-frames-v2.md
 
 **Wave 5**
 
-- [ ] 135-08-PLAN.md — v2 production deploy (asset-first, human-approved checkpoint, ONCE) (autonomous: false)
+- [x] 135-08-PLAN.md — v2 production deploy (asset-first, human-approved checkpoint, ONCE) (autonomous: false)
 
 **Wave 6**
 
@@ -239,7 +239,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
-| 135. Precision Certificate & Confidence Bands | 6/9 | In Progress|  |
+| 135. Precision Certificate & Confidence Bands | 8/9 | In Progress|  |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |

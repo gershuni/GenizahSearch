@@ -27,14 +27,17 @@ key-files:
     - scripts/cert01_frame.py
     - scripts/cert01_freeze.py
     - scripts/cert01_draw_deck.py
+    - scripts/cert01_render_deck.py
     - scripts/verify_cert01_grading.py
     - tests/test_cert01_frame.py
     - tests/test_cert01_harness_adapter.py
     - tests/test_cert01_grading_validator.py
+    - tests/test_cert01_render_deck.py
     - .planning/phases/135-precision-certificate-confidence-bands/cert01_prereg.json
     - .planning/phases/135-precision-certificate-confidence-bands/cert01_oc_table.md
     - .planning/phases/135-precision-certificate-confidence-bands/cert01_deck_manifest.json
-  modified: []
+  modified:
+    - scripts/cert01_frame.py (additive: span_start/span_end/a_page_id on estimand rows, rendering-only, never part of any hash)
 
 key-decisions:
   - "same_work_spike/probe/scripts/cert01_frame_adapter.py (as named in the plan) was NOT created -- that whole tree was deliberately untracked by commit 5370c20f as part of the M-source masking-history remediation; new tracked estimand/hash/deck-draw/validator logic lives in scripts/ instead (scripts/cert01_frame.py, cert01_freeze.py, cert01_draw_deck.py), importing e1_deck.py/e1_confirm_sizing.py at RUNTIME via a sys.path bridge to the gitignored dev-box tree"
@@ -42,6 +45,7 @@ key-decisions:
   - "OC table ICC realized via a Beta-Bernoulli simulation over the REAL 31,022-cluster physMS size distribution at three illustrative correlation levels (0.0/0.05/0.10, the e1_confirm_sizing.py self-test's own documented range) -- the true within-cluster verdict correlation cannot be measured pre-outcome; disclosed as an assumption in cert01_oc_table.md"
   - "gold_allocation.n = 20 (capped by the 174-card e1_adjudicated_a.jsonl pool); confirmation_allocation.n_drawn = 340 (the maximum finite size_confirmation n_drawn across the full pre-outcome OC grid) -- both frozen as COUNTS at freeze time per protocol §5.1, with the specific cluster-disjoint gold cards selected at draw time (Task 2)"
   - "Diagnostic-sample 'retained' candidates identified at PAGE granularity via discovery_routing_audit.decision='kept_tie' pages (the shipped v2 asset's kept_tie rows carry demoted_work_id=NULL, so the exact co-claim pair is not recoverable from the audit table alone) -- documented data-shape limitation, not a fabrication"
+  - "ORCHESTRATOR CORRECTION: the drawn deck was bound (Task 2) but never RENDERED -- an expert cannot grade an opaque uid. scripts/cert01_render_deck.py now renders the frozen 280-card deck by reusing e1_deck.render_deck/adapt_template verbatim (no redraw/resample), resolving each card's raw research work_id via the REVERSE of discovery_data/crosswalk.json and its matched span from discovery_evidence (span_start/span_end, added additively to cert01_frame.py's estimand rows -- verified NOT to change population_hash/report_id/deck_manifest_hash). Patches ONLY the toolbar + exportV() to add a required Grader field and emit the ledger LIST shape the validator reads; vote()/reveal()/revealOpen() (the reveal-lock discipline) are untouched."
 
 requirements-completed: []  # CERT-01 grading has NOT started yet (Task 3 checkpoint pending) -- premature to mark Complete
 ---
@@ -52,22 +56,24 @@ requirements-completed: []  # CERT-01 grading has NOT started yet (Task 3 checkp
 
 ## Performance
 
-- **Duration:** ~170 min (single continuous session; exact start not separately timestamped)
+- **Duration:** ~200 min (single continuous session, including an orchestrator-requested rendering correction; exact start not separately timestamped)
 - **Completed:** 2026-07-28
-- **Tasks:** 2 of 3 fully executed (Task 1, Task 2); Task 3's buildable half (validator + tests) executed and committed, its human-grading half is the open checkpoint
-- **Files created:** 10 tracked (+ 3 gitignored research artifacts)
+- **Tasks:** 2 of 3 fully executed (Task 1, Task 2 incl. the rendering correction); Task 3's buildable half (validator + tests) executed and committed, its human-grading half is the open checkpoint
+- **Files created:** 12 tracked (+ 1 modified) (+ 3 gitignored research artifacts, one added: the rendered HTML deck)
 
 ## Accomplishments
 
 - **Task 1 (frame freeze):** Computed the frozen protocol §1.2 dedup/ranking SQL directly against the deployed v2 sidecar (`discovery-v1-33499c5b…db`), yielding **134,123** shipped, display-deduplicated `tier_a` `(page_id, canonical_work_id)` rows (326 raw collisions correctly resolved by the precedence-lattice re-ranking across canonical merges). Computed `population_hash`, a dedicated `cluster_map_hash` (over the page->physMS `unit_key` mapping, 31,022 distinct clusters), read + recomputed-and-compared all four frozen input hashes (`canonical_merges_sha256`, `composition_dates_sha256`, `seftja_dates_sha256`) plus `db_content_hash` and `crosswalk_sha256` against the deployed sidecar `meta` table and `discovery_data/manifest.json` -- every one matched exactly. Wrote the immutable `cert01_prereg.json` (`report_id` = SHA-256 over the payload with its own field omitted) and the mandatory pre-outcome `cert01_oc_table.md` (36-row grid: true precision × ICC scenario × INS rate), computed via the REUSED `e1_confirm_sizing.py` primitives (`anova_icc`, `size_confirmation`, `expected_nonempty_components`, `wilson_lower_one_sided`, `binom_sf`) -- never re-derived.
 - **Task 2 (deck draw):** Re-verified `population_hash`/`cluster_map_hash` against the frozen pre-registration before drawing (fail-loud on drift), then drew a 220-card SRSWOR-per-stratum discovery deck (`ja:high` 27, `ja:medium` 17, `msource:high` 26, `msource:medium` 17, `sefaria:high` 102, `sefaria:medium` 31), 20 cluster-disjoint gold repeat cards from the existing 174-card `e1_adjudicated_a.jsonl` pool, and a blinded 20-demoted + 20-retained `later_shared_text` diagnostic sample (protocol §8) with the hidden classifier tag stored in a SEPARATE gitignored side file, never in the grader-visible deck. Delegated to `e1_deck.components_of` for the drawn deck's physMS bipartite component structure (85 components over 220 cards). Wrote the separate, tracked `cert01_deck_manifest.json` (`prereg_report_id` + `deck_manifest_hash` + per-stratum/gold/confirmation counts); confirmed `cert01_prereg.json` stayed byte-identical (never mutated).
 - **Task 3 (validator, buildable half):** Built `scripts/verify_cert01_grading.py` implementing all twelve forge-resistant checks named in the plan, each independently proven load-bearing by 30 tests in `tests/test_cert01_grading_validator.py` (a self-consistent golden fixture passes all twelve; each check's specific failure mode is reverted and shown to raise). Ran the validator against the REAL current artifacts: **11/12 checks PASS**; check 6 (grader attribution / >=1 verdict) correctly FAILS because the ledger is genuinely empty -- grading has not started.
+- **Rendering correction (orchestrator-caught gap):** the drawn/bound deck from Task 2 carried only opaque uids -- not gradable. `scripts/cert01_render_deck.py` renders the exact FROZEN 280-card deck (same order, same uids, no redraw) to `same_work_spike/probe/review/cert01_deck.html` by calling `e1_deck.render_deck`/`adapt_template` verbatim. Resolved every card's raw research work_id via the reverse of `discovery_data/crosswalk.json` (confirmed ALL 280 cards resolve to a real entry in `ref_corpus_v2.pkl`), its matched span from `discovery_evidence.span_start`/`span_end` (added additively to `cert01_frame.py`'s estimand rows -- confirmed byte-identical `population_hash`/`report_id`/`deck_manifest_hash` before and after), and its neutral title from `works.neutral_title`. Patched ONLY the toolbar (added a required "Grader" field) and `exportV()` (now emits the ledger LIST shape `[{uid, verdict, grader, notes, revealed, post_verdict}]` instead of e1_deck's native dict-of-dicts, downloading directly as `cert01_deck_verdicts.json`) -- `vote()`/`reveal()`/`revealOpen()` (the reveal-lock + blind-pane discipline) are byte-for-byte unmodified. A defense-in-depth check confirms the rendered HTML embeds no `later_shared_text`/`routing_status` field. Masking scan (`--scan-asset`) on the rendered gitignored HTML: **clean**.
 
 ## Task Commits
 
 1. **Task 1: Freeze the CERT-01 frame** - `3e5772cc` (feat)
 2. **Task 2: Draw the deck + diagnostic sample** - `d2bfd9ae` (feat)
 3. **Task 3: Grading-STARTED validator + tests (buildable half)** - `ad793440` (feat)
+4. **Rendering correction: render the frozen deck to a gradable page** - `09b4d552` (fix)
 
 _Task 3's human-grading half is the open checkpoint below -- no further commit until an owner/expert records a verdict._
 
@@ -76,10 +82,12 @@ _Task 3's human-grading half is the open checkpoint below -- no further commit u
 - `scripts/cert01_frame.py` - Frozen estimand/hash primitives shared by all three call sites (the dedup/ranking SQL across canonical-merge collisions, page->physMS cluster mapping, cross-corpus stratum tie-break, `population_hash`/`cluster_map_hash`, self-referential `report_id`, input-hash recompute-and-compare, stratified card allocation)
 - `scripts/cert01_freeze.py` - Task 1 CLI: computes the estimand + OC table, writes `cert01_prereg.json` + `cert01_oc_table.md`
 - `scripts/cert01_draw_deck.py` - Task 2 CLI: draws the stratified deck + gold + diagnostic sample, writes `cert01_deck_manifest.json` + the gitignored deck/ledger artifacts
+- `scripts/cert01_render_deck.py` - Rendering correction: renders the FROZEN deck to a gradable HTML page, reusing `e1_deck.render_deck`/`adapt_template` verbatim + patching only the export format
 - `scripts/verify_cert01_grading.py` - Task 3 CLI: the twelve-check mechanical/estimand validator
-- `tests/test_cert01_frame.py` - 19 tests (hash invariance, `report_id` self-reference, ranked-SQL collision dedup + w001239 drop-list, stratum tie-break, input-hash mismatch fail-loud)
+- `tests/test_cert01_frame.py` - 19 tests (hash invariance, `report_id` self-reference, ranked-SQL collision dedup + w001239 drop-list, stratum tie-break, input-hash mismatch fail-loud; fixture schema updated for the additive span_start/span_end columns)
 - `tests/test_cert01_harness_adapter.py` - 8 tests (stratified-draw allocation/reproducibility, gold cluster-disjoint filtering, diagnostic-sample page identification, `e1_deck.components_of` delegation proof)
 - `tests/test_cert01_grading_validator.py` - 30 tests (every one of the twelve checks proven load-bearing + wiring tests + a real-artifact end-to-end check)
+- `tests/test_cert01_render_deck.py` - 8 tests (reverse-crosswalk inversion, gold/demoted/neutral-title lookups, the export-format patch proven against a REAL `render_deck()` output, frozen-order/span resolution, missing-crosswalk-entry fail-loud)
 - `.planning/phases/135-precision-certificate-confidence-bands/cert01_prereg.json` - The TRACKED, immutable pre-registration
 - `.planning/phases/135-precision-certificate-confidence-bands/cert01_oc_table.md` - The TRACKED pre-outcome OC table
 - `.planning/phases/135-precision-certificate-confidence-bands/cert01_deck_manifest.json` - The TRACKED, separate deck manifest
@@ -87,6 +95,7 @@ _Task 3's human-grading half is the open checkpoint below -- no further commit u
 **Gitignored research artifacts (created on disk, never committed, per the protocol's own interface convention):**
 - `same_work_spike/probe/data/cert01_deck_key.json` - the drawn deck (280 cards: 220 candidate + 20 gold + 20 demoted + 20 retained)
 - `same_work_spike/probe/data/cert01_diagnostic_tag.json` - the hidden `later_shared_text` classifier tag, keyed by uid
+- `same_work_spike/probe/review/cert01_deck.html` - **the gradable, rendered deck the owner opens to grade** (603 KB; masking scan clean)
 - `same_work_spike/probe/review/cert01_deck_verdicts.json` - the verdict ledger, currently `[]` (empty -- awaiting the human checkpoint)
 
 ## Decisions Made
@@ -111,9 +120,22 @@ See frontmatter `key-decisions`. In short: (1) new tracked CERT-01 logic lives i
 - **Fix:** Ran `--scan-repo` alone (clean, full repo scan) plus `--scan-asset <file>` individually on every new tracked file (all clean).
 - **Committed in:** N/A (verification-only, no code change)
 
+**3. [Incomplete deliverable, caught by the orchestrator and corrected] Task 2's deck was drawn and bound but never RENDERED**
+- **Found during:** orchestrator verification of the returned checkpoint (not self-caught)
+- **Issue:** Task 2's action says "Render the ~200-250-card catalogue-blind deck." The deck was drawn and bound, but `e1_deck.render_deck` was never called -- only `components_of`. What existed was `cert01_deck_key.json`: 280 rows of opaque ids (`uid`, `page_id`, `canonical_work_id`, `sys_id`, `role`, `stratum`). No expert can produce a genuine verdict from that -- grading a card means judging whether a page really witnesses work W, which requires the page text, the matched span, and the work's reference text side by side. Handing the owner a JSON of ids would also have forced ad-hoc manual lookup, breaking the protocol's catalogue-blind + logged-reveals discipline. The checkpoint was therefore not actionable as first returned.
+- **Fix:** `scripts/cert01_render_deck.py` renders the EXACT frozen 280-card deck (same uids, same order, no redraw) to the gitignored `same_work_spike/probe/review/cert01_deck.html`, reusing `e1_deck.render_deck`/`adapt_template` verbatim. Spans come from the deployed sidecar's `discovery_evidence.span_start`/`span_end`; only the toolbar (grader field) and `exportV()` (ledger LIST shape) were patched -- the reveal-lock/blind-pane logic is byte-for-byte unmodified.
+- **Files affected:** `scripts/cert01_render_deck.py`, `tests/test_cert01_render_deck.py` (new); `scripts/cert01_frame.py`, `tests/test_cert01_frame.py` (additive span columns)
+- **Verification (orchestrator-confirmed independently):** `cert01_prereg.json` and `cert01_deck_manifest.json` untouched since their original commits (git-log confirmed); validator still 11/12 with only check 6 failing; 65/65 cert01 tests pass; ruff clean; full `--scan-repo` clean; the rendered HTML contains zero occurrences of `routing_status` / `later_shared_text` / `diagnostic_demoted` / `diagnostic_retained` / `role`; all 280 frozen uids present in the HTML.
+- **Committed in:** `09b4d552`
+
+**4. [Cosmetic, NOT corrected -- deliberate] `report_id` stored as bare hex, without the plan's `cert-tier_a-` prefix**
+- **Found during:** orchestrator verification
+- **Issue:** Task 1's action prescribes `report_id = "cert-tier_a-" + <hex>`. The stored value is the bare hex digest with no prefix.
+- **Disposition:** LEFT AS IS, by orchestrator judgment, surfaced to the owner. The load-bearing property is fully satisfied and independently re-verified: `report_id` IS the SHA-256 over the canonical payload with its own `report_id` field omitted, and it recomputes stably (validator check 2). The prefix is a human-readable label with no cryptographic role. Correcting it would require MUTATING the artifact this plan's entire freeze discipline declares immutable -- after the deck was already drawn and bound against it -- and re-deriving `cert01_deck_manifest.json`'s `prereg_report_id`. Trading the immutability guarantee for a cosmetic string is the wrong exchange. Recorded here so the deviation is on the record rather than silent; the owner may still direct a re-freeze.
+
 ---
 
-**Total deviations:** 2 (1 file-location correction following a more recent hard constraint, 1 pre-existing malformed-verify-command workaround). No scope creep -- both preserve or strengthen the plan's own masking/verification intent.
+**Total deviations:** 4 (1 file-location correction following a more recent hard constraint, 1 pre-existing malformed-verify-command workaround, 1 orchestrator-caught incomplete deliverable since corrected, 1 cosmetic spec mismatch deliberately left uncorrected to preserve the immutability guarantee). No scope creep.
 
 ## Issues Encountered
 
@@ -151,7 +173,7 @@ FOUND commit: ad793440
 **BLOCKED on the Task 3 human checkpoint.** `scripts/verify_cert01_grading.py` runs clean against the real artifacts today: 11 of 12 checks PASS; the sole failure is check 6 ("grader attribution present (>=1 verdict)"), because the ledger (`same_work_spike/probe/review/cert01_deck_verdicts.json`) is genuinely empty. This is the correct, honest state -- no verdict was fabricated.
 
 **What the owner must do to close Phase 135:**
-1. Grade at least one card from the drawn deck (`same_work_spike/probe/data/cert01_deck_key.json`, 280 cards: 220 candidate + 20 gold + 20 demoted + 20 retained diagnostic) using one of the allowed verdicts (`A`/`B`/`C`/`INS`), recording `{uid, verdict, grader, ...}` in `same_work_spike/probe/review/cert01_deck_verdicts.json`.
+1. Open **`same_work_spike/probe/review/cert01_deck.html`** in a browser — the rendered, gradable deck (280 cards: 220 candidate + 20 gold + 20 demoted + 20 retained diagnostic; the roles are blinded, so they look identical while grading). Fill in the Grader field, grade at least one card with `A` / `B` / `C` / `INS`, then use its export button, which downloads a ready-made `cert01_deck_verdicts.json` in the exact ledger shape the validator reads. Drop that file at `same_work_spike/probe/review/cert01_deck_verdicts.json`.
 2. Re-run `python scripts/verify_cert01_grading.py` -- it should then exit 0 (all twelve checks pass).
 3. Resume this plan (or hand off to a fresh execute-plan agent) with the resume signal `"grading-started"` once step 2 passes, so Phase 135 can close (D-02: grading STARTED, not completed).
 
