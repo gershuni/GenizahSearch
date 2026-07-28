@@ -277,10 +277,19 @@ cannot estimate corpus precision."
   dev box (browse p95 0.57 ms vs a 150 ms cap; added RSS 11.1 MB vs a 250 MB cap — large headroom, but
   the wrong artifact). Prod-box RSS is unmeasured; `/work` + `/leads` request-time caps are pending
   until those surfaces exist. The frozen v2 asset (~370 MiB) has had no size re-acceptance.
-- **Commit `97cad7df`** still contains the restricted M-source name under `.planning/`, a pushable
-  path, in unpushed history. Resolve (targeted rewrite, or rely on `.planning` filtering as
-  `gsd-pr-branch` does) BEFORE any `master-main` push — and a web deploy goes through `master-main`.
-  Memory: `project_discovery_history_expunge_97cad7df`.
+- **~~Commit `97cad7df` blocks pushing~~ — NO LONGER A BLOCKER (owner decision, 2026-07-28).**
+  Measured that day: the repo is **PUBLIC**, and the restricted name — plus excerpt-level reference
+  TEXT (`ref_txt`, `ref_snippet`) — has been in its pushed **history** since **2026-01-30** (91
+  commits, through the 2026-07-20 cleanup; paths under `same_work_spike/**` and `corpus_mapper/**`,
+  NOT `.planning/`). `97cad7df` would add a 92nd to 91 already public. **Owner accepted the historical
+  exposure and declined a rewrite** — the window is closed, distribution is low (13 stars, 0 watchers,
+  3 forks all created 2026-01-09/12 *before* the window opened), and a rewrite would change every SHA
+  and risk the desktop updater, which distributes the installer via tag-bound GitHub Releases.
+  **Do not gate 135-08 or any deploy on this.** Forward discipline is the whole control: never commit
+  M-source/R-source names, titles or text; research trees stay untracked + gitignored.
+  **Known blind spot to remember:** DATA-05 scopes the guard to *"git index/HEAD"* — a green
+  `--scan-repo` says nothing about history, which is exactly how this ran undetected for six months.
+  Full measurement: memory `project_git_history_msource_exposure_accepted`.
 - **R-source tokens absent from `.masking_patterns`** — owner-only action, hard-blocks R-source work.
 - **Pending UX discuss-phase** (already a Pending Todo in `STATE.md`) gates 136 planning: relation
   vocabulary display wording, the `/catalog` Browse-by-Identification extension shape, the BAND-03
