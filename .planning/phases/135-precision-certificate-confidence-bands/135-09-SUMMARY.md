@@ -47,7 +47,8 @@ key-decisions:
   - "Diagnostic-sample 'retained' candidates identified at PAGE granularity via discovery_routing_audit.decision='kept_tie' pages (the shipped v2 asset's kept_tie rows carry demoted_work_id=NULL, so the exact co-claim pair is not recoverable from the audit table alone) -- documented data-shape limitation, not a fabrication"
   - "ORCHESTRATOR CORRECTION: the drawn deck was bound (Task 2) but never RENDERED -- an expert cannot grade an opaque uid. scripts/cert01_render_deck.py now renders the frozen 280-card deck by reusing e1_deck.render_deck/adapt_template verbatim (no redraw/resample), resolving each card's raw research work_id via the REVERSE of discovery_data/crosswalk.json and its matched span from discovery_evidence (span_start/span_end, added additively to cert01_frame.py's estimand rows -- verified NOT to change population_hash/report_id/deck_manifest_hash). Patches ONLY the toolbar + exportV() to add a required Grader field and emit the ledger LIST shape the validator reads; vote()/reveal()/revealOpen() (the reveal-lock discipline) are untouched."
 
-requirements-completed: []  # CERT-01 grading has NOT started yet (Task 3 checkpoint pending) -- premature to mark Complete
+requirements-completed: []  # CERT-01 remains Pending: the owner closed Task 3 on OWNER AUTHORITY via 135-09-OWNER-ATTESTATION.md (2026-07-28) WITHOUT per-card grading, so the measurement does not exist and the mechanical D-02 signal is unmet (validator stays 11/12). Never mark CERT-01 Complete on the strength of the attestation's ~95% -- that is a usefulness impression, an upper bound on precision, not an A-only measurement with a clustered CI.
+status: complete-on-owner-authority
 ---
 
 # Phase 135 Plan 09: CERT-01 Precision Certificate -- Frame Freeze + Deck Draw + Validator Summary
@@ -169,6 +170,32 @@ FOUND commit: ad793440
 ## Self-Check: PASSED
 
 ## Next Phase Readiness
+
+### RESOLVED 2026-07-28 — closed on OWNER AUTHORITY, not on the mechanical signal
+
+The owner reviewed the full rendered 280-card deck, judged the identifications broadly
+sound ("about 95% were what I would expect to find when I ask for textual witness
+suggestions"), and declined to record per-card verdicts. Phase 135 closes on owner
+authority. Recorded in **`135-09-OWNER-ATTESTATION.md`** — read that before citing the
+95% anywhere.
+
+Three things remain deliberately true:
+
+1. **The verdict ledger was NOT populated.** `verify_cert01_grading.py` still reports
+   11/12 with check 6 failing. Fabricating verdicts would be exactly threat T-135-09-05
+   the validator exists to prevent.
+2. **CERT-01 is NOT satisfied** and stays `Pending` in `REQUIREMENTS.md`. The 95% is a
+   usefulness impression, not an A-only precision measurement with a clustered CI — it is
+   an upper bound on precision, not a substitute for it.
+3. **Nothing is overclaimed.** `tier_a` still carries no measured precision
+   (`band_precision` id=5); the 95% is not written to the sidecar or any surface.
+
+The consequence lands at Phase 139 REL-01, which as written requires CERT-01 "graded to
+completion" with tier-A public "WITH its measured number." Four options are laid out in
+the attestation §5. The deck, pre-registration, OC table and validator are all frozen and
+ready if grading is resumed later — nothing expires.
+
+### Original checkpoint state (retained for the record)
 
 **BLOCKED on the Task 3 human checkpoint.** `scripts/verify_cert01_grading.py` runs clean against the real artifacts today: 11 of 12 checks PASS; the sole failure is check 6 ("grader attribution present (>=1 verdict)"), because the ledger (`same_work_spike/probe/review/cert01_deck_verdicts.json`) is genuinely empty. This is the correct, honest state -- no verdict was fabricated.
 

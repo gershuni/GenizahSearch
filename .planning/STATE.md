@@ -25,12 +25,14 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 
 ## Current Position
 
-Phase: 135 (precision-certificate-confidence-bands) — EXECUTING
-Plan: 8 of 9
-Status: Blocked on a human gate (135-08 production deploy)
-Last activity: 2026-07-27
+Phase: 135 (precision-certificate-confidence-bands) — COMPLETE (9/9; 135-09 closed on OWNER AUTHORITY)
+Plan: 9 of 9
+Status: Phase 135 closed 2026-07-28. CERT-01 remains UNMEASURED and Pending.
+Last activity: 2026-07-28
 
-Progress: [███████░░] 7/9 plans; the v2 asset is BUILT + VERIFIED + FROZEN (`discovery-v1-33499c5b…`, frame hash `53725098…`; verifier `--require-v2` exit 0, strict masking exit 0, D-17 pair_coverage 1.0000). Both 135-07 HALTs were root-caused and fixed, never bypassed. Remaining: 135-08 (production deploy — human, mechanical) and 135-09 (CERT-01 pre-registration + deck draw — human; per the roadmap's own decision the GRADING then runs in PARALLEL with the 136–138 UI build and gates only the Phase-139 REL-01 flip, so it does NOT block Phase 136).
+**PHASE 135 CLOSED 2026-07-28.** 135-08 deployed the v2 sidecar to production (atomic manifest swap, `discovery-v1-33499c5b…`, flag OFF, rollback drilled, prod-box PERF-01 actuals recorded: browse p95 0.49 ms / added RSS 11.2 MB). 135-09 froze the CERT-01 pre-registration + OC table + 280-card deck + twelve-check validator, then closed on **OWNER AUTHORITY** — the owner reviewed the full rendered deck, judged it broadly sound ("about 95% were what I would expect to find when I ask for textual witness suggestions") and declined per-card grading. **CERT-01 is therefore UNMEASURED and stays `Pending`.** The verdict ledger was deliberately left `[]` and the validator honestly reports 11/12 (fabricating verdicts would be the exact forgery the validator exists to catch). `tier_a` still carries NO precision number, so nothing is overclaimed. **The ~95% is a usefulness impression — an upper bound on precision, NOT a measurement; never publish it as precision.** Full record + the four Phase-139 options: `.planning/phases/135-precision-certificate-confidence-bands/135-09-OWNER-ATTESTATION.md`. Consequence lands at REL-01 (Phase 139), which as written requires CERT-01 graded to completion with tier-A public WITH its measured number. Deck/prereg/OC/validator are all frozen and ready if grading resumes; nothing expires.
+
+Historical (superseded): Progress: [███████░░] 7/9 plans; the v2 asset is BUILT + VERIFIED + FROZEN (`discovery-v1-33499c5b…`, frame hash `53725098…`; verifier `--require-v2` exit 0, strict masking exit 0, D-17 pair_coverage 1.0000). Both 135-07 HALTs were root-caused and fixed, never bypassed. Remaining: 135-08 (production deploy — human, mechanical) and 135-09 (CERT-01 pre-registration + deck draw — human; per the roadmap's own decision the GRADING then runs in PARALLEL with the 136–138 UI build and gates only the Phase-139 REL-01 flip, so it does NOT block Phase 136).
 
 **Read before planning 136+:** `.planning/v9-PUBLICATION-STRATEGY.md` (owner strategy decisions, 2026-07-27) and `.planning/v9-REQUIREMENTS-ADDENDUM-DRAFT.md` (two unregistered features awaiting requirement IDs).
 
