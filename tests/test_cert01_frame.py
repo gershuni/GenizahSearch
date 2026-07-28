@@ -34,7 +34,8 @@ def _make_sidecar_db(rows, works=None, unit_members=None):
                                           evidence_kind TEXT,
                                           evidence_source TEXT, confidence_band TEXT,
                                           adjudication_status TEXT, routing_status TEXT,
-                                          a_page_id TEXT, sys_id TEXT, matched_letters INTEGER);
+                                          a_page_id TEXT, sys_id TEXT, matched_letters INTEGER,
+                                          span_start INTEGER, span_end INTEGER);
         CREATE TABLE witness_unit_members (unit_id TEXT, sys_id TEXT, merge_basis TEXT);
         """
     )
@@ -55,10 +56,11 @@ def _make_sidecar_db(rows, works=None, unit_members=None):
         conn.execute("INSERT INTO discovery_claim VALUES (?,?,?,?,?)",
                     (r["page_id"], r["work_id"], claim_id, "direct_witness", evidence_id))
         conn.execute(
-            "INSERT INTO discovery_evidence VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO discovery_evidence VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (evidence_id, claim_id, "witness", r["evidence_source"], r["confidence_band"],
              r.get("adjudication_status", "unreviewed"), r["routing_status"],
-             r.get("a_page_id", r["page_id"]), r["sys_id"], r.get("matched_letters")),
+             r.get("a_page_id", r["page_id"]), r["sys_id"], r.get("matched_letters"),
+             r.get("span_start", 0), r.get("span_end", 0)),
         )
     for unit_id, sys_id in (unit_members or []):
         conn.execute("INSERT INTO witness_unit_members VALUES (?,?,?)",

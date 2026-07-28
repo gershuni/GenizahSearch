@@ -110,6 +110,8 @@ WITH claim_display AS (
     de.a_page_id,
     de.sys_id,
     de.matched_letters,
+    de.span_start,
+    de.span_end,
     w.source_corpus
   FROM discovery_claim dc
   JOIN works w               ON w.work_id = dc.work_id
@@ -152,7 +154,7 @@ ranked AS (
   FROM claim_display
 )
 SELECT page_id, canonical_work_id, work_id, claim_id, display_evidence_id,
-       a_page_id, sys_id, matched_letters, source_corpus
+       a_page_id, sys_id, matched_letters, span_start, span_end, source_corpus
 FROM ranked
 WHERE rn = 1 AND confidence_band = 'tier_a'
 ORDER BY page_id, canonical_work_id
@@ -273,6 +275,13 @@ def compute_estimand_rows(sidecar_db_path, research_db_path,
             "stratum_corpus": stratum_corpus,
             "coverage_band": coverage_band,
             "stratum": stratum,
+            # Rendering-only fields (NEVER part of population_hash/cluster_map_hash,
+            # which key ONLY on page_id/canonical_work_id/stratum/unit_key -- see
+            # population_hash()/cluster_map_hash() below). Carried here so a deck
+            # renderer can look up the matched span without a second query.
+            "a_page_id": r["a_page_id"],
+            "span_start": r["span_start"],
+            "span_end": r["span_end"],
         })
     return out
 
