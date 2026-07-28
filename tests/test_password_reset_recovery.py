@@ -738,6 +738,79 @@ def test_pending_flag_not_set_when_session_exchange_fails(monkeypatch):
     assert 'password_recovery_pending' not in storage, storage
 
 
+def test_deferred_probe_uses_captured_client_not_ui_context():
+    """ROOT-CAUSE regression guard for the 2026-07-28 live failure.
+
+    NiceGUI keys its slot stack PER asyncio task. `asyncio.ensure_future` starts
+    a new task whose slot stack is empty, so any `ui.context.*` lookup from
+    inside it raises:
+
+        RuntimeError('The current slot cannot be determined because the slot
+                      stack for this task is empty.')
+
+    `ui.run_javascript` is `ui.context.client.run_javascript(...)` under the
+    hood, so the probe raised this on EVERY homepage load and the original
+    `except Exception -> logger.debug` swallowed it. The recovery flow could
+    never fire -- identically for a real link and a fake one, which is exactly
+    why the symptom was misread as a Supabase wire-format problem.
+
+    The fix is to bind the Client at RENDER time (where the slot stack is
+    populated) and use that object in the task. This guard pins it, because the
+    failure mode is invisible: it raises inside a background task, produces no
+    user-visible error, and no mock-based unit test touches a real slot stack.
+    """
+    import ast
+    import inspect
+    import textwrap
+    import web.main as mod
+
+    src = textwrap.dedent(inspect.getsource(mod._render_password_recovery_handler))
+    handler = ast.parse(src).body[0]
+
+    # The client must be captured in the handler body, outside any nested def.
+    nested_spans = set()
+    for node in ast.walk(handler):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node is not handler:
+            nested_spans.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+
+    captures = [
+        n for n in ast.walk(handler)
+        if isinstance(n, ast.Attribute) and n.attr == 'client'
+        and isinstance(n.value, ast.Attribute) and n.value.attr == 'context'
+        and n.lineno not in nested_spans
+    ]
+    assert captures, (
+        "_render_password_recovery_handler must capture `ui.context.client` at "
+        "RENDER time (outside every nested function) so the deferred task does "
+        "not perform a ui.context lookup with an empty slot stack."
+    )
+
+    # And nothing inside the deferred task may touch ui.context / ui.run_javascript.
+    deferred = next(
+        (n for n in ast.walk(handler)
+         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+         and n.name == '_deferred_check'),
+        None,
+    )
+    assert deferred is not None, "_deferred_check closure is gone — test is stale"
+
+    for node in ast.walk(deferred):
+        if isinstance(node, ast.Attribute) and node.attr == 'context':
+            raise AssertionError(
+                f"ui.context lookup at relative line {node.lineno} inside "
+                "_deferred_check — this raises 'slot stack for this task is "
+                "empty' in a background task. Use the captured client instead."
+            )
+        if isinstance(node, ast.Attribute) and node.attr == 'run_javascript':
+            # Must be <captured_client>.run_javascript, never ui.run_javascript.
+            base = getattr(node.value, 'id', None)
+            assert base != 'ui', (
+                f"ui.run_javascript at relative line {node.lineno} inside "
+                "_deferred_check resolves via ui.context.client and raises in a "
+                "background task. Call it on the captured client instead."
+            )
+
+
 def test_backend_error_text_is_never_rendered_to_the_user():
     """MEDIUM-4 regression: raw Supabase/httpx error strings must not reach a
     UI label. They are English-only (leaking into the Hebrew UI, breaking the

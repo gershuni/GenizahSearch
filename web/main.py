@@ -1225,6 +1225,25 @@ def _render_password_recovery_handler():
     # does not affect the dialogs themselves.
     anchor = ui.element('div').style('display: none;')
 
+    # ROOT CAUSE of the 2026-07-28 live failure (found via prod [pwreset] logs):
+    # NiceGUI keys its slot stack PER asyncio TASK. `asyncio.ensure_future`
+    # below starts a NEW task whose slot stack is empty, so ANY `ui.context.*`
+    # lookup from inside it raises
+    #   RuntimeError('The current slot cannot be determined because the slot
+    #                 stack for this task is empty.')
+    # `ui.run_javascript` is `ui.context.client.run_javascript(...)` under the
+    # hood, so the probe raised this on EVERY homepage load and the original
+    # `except Exception -> logger.debug` swallowed it. The recovery flow could
+    # therefore never fire -- for a real link exactly as for a fake one, which
+    # is why this looked like a Supabase wire-format problem and was not.
+    #
+    # Fix: bind the Client HERE, at render time, where the slot stack is
+    # populated, and use that object directly in the task -- never
+    # `ui.context.*` / the `ui.run_javascript` module-level shim. This is the
+    # same capture idiom already used by web/pages/home.py::create_page,
+    # web/pages/browse.py (refs.page_client) and web/pages/search.py.
+    page_client = ui.context.client
+
     # Memo so a build is done at most once per page even if both branches
     # somehow fire; holds the two dialogs the payload handler can open.
     _built: dict = {}
@@ -1390,13 +1409,16 @@ def _render_password_recovery_handler():
         # INFO level, which is exactly why the first live failure could not be
         # diagnosed from the logs. Never swallow this path silently again.
         # Tokens are NEVER logged -- only the payload's shape.
+        # `page_client`, NOT ui.context.* -- see the root-cause note above.
         try:
-            await ui.context.client.connected(timeout=10.0)
+            await page_client.connected(timeout=10.0)
         except Exception as exc:
             logger.warning("[pwreset] client never connected, probe skipped: %r", exc)
             return
         try:
-            payload = await ui.run_javascript(_RECOVERY_PAYLOAD_READ_JS, timeout=10.0)
+            payload = await page_client.run_javascript(
+                _RECOVERY_PAYLOAD_READ_JS, timeout=10.0,
+            )
         except Exception as exc:
             logger.warning("[pwreset] fragment probe FAILED: %r", exc, exc_info=True)
             return
