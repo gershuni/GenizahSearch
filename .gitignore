@@ -49,7 +49,14 @@ fist_data/*
 # re-include files inside an excluded *glob* pattern.
 !fist_data/synthetic_manifest.json
 nli_data/
-pgp_data/pgp.db
+# PGP sidecar DB + its backup siblings. Was the single literal `pgp_data/pgp.db`,
+# which left copies like `pgp_data/pgp_backup_<date>.db` untracked-but-NOT-ignored
+# — so the DATA-05 masking gate's `--scan-repo` enumerated them and failed closed
+# on strings that the live pgp.db carries too and that this line already excludes
+# by design (PGP scholarly metadata legitimately cites source corpora).
+# Glob-scoped to *.db only: pgp_data/full_import_report.txt and
+# pgp_data/import_report.csv REMAIN TRACKED.
+pgp_data/*.db
 FIST_DB_BACKUP/
 # FGP transcription archive (local sidecar, copied from D:\fgp_transcriptions).
 # Large (~1.5 GB, 48K files); never committed. Manifest lives inside.
@@ -274,8 +281,8 @@ ACL2026_papers/GLOBAL_INDEX - Copy.md
 # (Frozen desktop is unaffected: it uses %LOCALAPPDATA%\GenizahSearchPro\.)
 /joins_data/
 
-# PGP raw text dump (~317 MB), sibling of the already-ignored pgp_data/pgp.db
-# at line 52. Scoped to the subdirectory: pgp_data/full_import_report.txt and
+# PGP raw text dump (~317 MB), sibling of the already-ignored `pgp_data/*.db`
+# above. Scoped to the subdirectory: pgp_data/full_import_report.txt and
 # pgp_data/import_report.csv REMAIN TRACKED.
 pgp_data/pgp-text/
 
