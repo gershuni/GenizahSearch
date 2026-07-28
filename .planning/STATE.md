@@ -71,7 +71,11 @@ Condensed 7-phase roadmap: an early atlas quick win, then the REL-01 gate sequen
 
 ### Pending Todos
 
-**Requirements addendum APPROVED + APPLIED 2026-07-28** — `REQUIREMENTS.md` now carries VIS-01 (Phase 136), VIS-02 (139), NOVEL-01/02 (registered, homed AFTER 136 — 136 stays read-surfaces-only), and the REL-01 **CURATED-SURFACE EXCEPTION** granted as drafted with all eight conditions. Per-claim human confirmation is **NOT** required (owner). Coverage 40 → 44. See `.planning/v9-REQUIREMENTS-ADDENDUM-DRAFT.md` for the decision table.
+**Requirements addendum APPROVED + APPLIED 2026-07-28** — `REQUIREMENTS.md` now carries VIS-01 (Phase 136), VIS-02 (139), and NOVEL-01/02 (registered, homed AFTER 136 — 136 stays read-surfaces-only). Coverage 40 → 44. Decision table: `.planning/v9-REQUIREMENTS-ADDENDUM-DRAFT.md`.
+
+**NOTHING SHIPS BEFORE THE DISCOVERY GATE (owner, 2026-07-28).** The REL-01 CURATED-SURFACE EXCEPTION was granted earlier the same day and then REVERSED — its text has been REMOVED from REL-01, which reverts to its plain reading: it gates ALL public claim surfaces, not merely the flag/sitemap/homepage switches. **Phase 136 BUILDS the read surfaces behind the flag; Phase 139 flips them on.** This is the original REL-01 ordering, so no exception is needed. Do NOT plan any early/preview surface for 136, and do not re-derive one from the addendum's section C (retained only as declined-draft text). The atlas-preview exception is unaffected — the atlas is live and stays live.
+
+Two consequences to carry into planning: (1) **per-claim human confirmation is NOT required** (owner) — a standing posture for when surfaces go live at 139, with the honesty load on BAND-01/03/04 + CERT-02 + the BAND-05 methods page; a future gen-2 reclassification (~32K–45K rows, same-work → quotation) is handled as a correction, not pre-empted. (2) That correction/retraction policy was condition (f) of the now-declined exception, so it currently has **no requirement carrying it** — decide at 139 whether it needs one. **VIS-01 stays in 136** despite the exception lapsing: building 136 against the public projection from line one keeps that path exercised instead of first touching it at the release gate.
 
 **NEXT: `/gsd-discuss-phase 136`.** Carry these four items into it — they are the still-live remainder of the never-run UX discuss (the two atlas items from the old todo belong to Phase 139, and the old todo's trailing `/gsd-plan-phase 133` is stale — 133 shipped 2026-07-21):
 
