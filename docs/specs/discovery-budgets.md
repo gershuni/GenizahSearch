@@ -21,7 +21,7 @@ not alter existing non-Discovery budgets (e.g. the pre-existing
 **Measurement posture:** every cap below is MEASURED BEFORE RELEASE (PERF-01)
 against a production-scale `discovery.db` and real traffic patterns. Until
 that measurement lands (134-08, later in this phase), this document ships
-with INITIAL caps only — see the "MEASURED ACTUALS" section at the bottom.
+with INITIAL caps only — see the "Measured Actuals" section at the bottom.
 
 ## 1. Initial Numeric Caps (PERF-01, copied verbatim from REQUIREMENTS.md)
 
@@ -103,7 +103,7 @@ None of these env vars exist in code yet -- this section only fixes the
 NAMES and DEFAULTS 134-06 must implement against, so this artifact and the
 DiscoveryService code stay in lockstep from the first line of that plan.
 
-## 4. Measured Actuals — dev-box measured (prod-box PENDING)
+## 4. Measured Actuals — dev-box + prod-box measured
 
 Measured 2026-07-23 by `scripts/bench_discovery.py` over the real sidecar
 `discovery-v1-8e43451300429ed4ace5e29e5513359a29674ac49731d5c969eb1d607e0ca065.db` (368.5 MB on disk), through the
@@ -130,12 +130,36 @@ cache-miss DB query (worst case; the production cache only lowers this).
 `get_pages_related_to_page` = 200 queries / 425 rows;
 `get_work_witnesses` = 200 queries / 9930 unit rows.
 
-### 4.2 Prod-box + later-surface caps — PENDING
+### 4.2 MEASURED ACTUALS (prod-box) — recorded 2026-07-28
 
-- **Additional RSS on the prod box (vs the ≤ 250 MB cap)** — PENDING: the
-  authoritative measurement is the 134-08 Task 3 human/live-server step (owner
-  runs `bench_discovery.py` / samples the web process RSS around restart on the
-  web box); recorded here as **MEASURED ACTUALS (prod-box)** after that run.
+Measured on the EC2 web box by `scripts/bench_discovery.py --sample 50
+--warm-passes 1` (exit 0) immediately after the 135-08 production deploy of the
+v2 sidecar `discovery-v1-33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff.db`
+(370.0 MB on disk), through the same `DiscoveryService` async chokepoint and the
+same F14 benchmark-only readiness predicate — `DISCOVERY_ENABLED` was OFF
+throughout and never set. Browse-path latency again measured with the browse LRU
+disabled (worst case). This closes the prod-box item deferred from 134-08 Task 3.
+Full context: `.planning/phases/135-precision-certificate-confidence-bands/135-08-DEPLOY-LOG.md`.
+
+| Metric | Cap | **Prod-box actual** | Dev-box (§4.1, v1 asset) |
+|---|---|---|---|
+| Browse-enrichment added latency (p95) | ≤ 150 ms | **0.49 ms** ✓ | 0.57 ms |
+| &nbsp;&nbsp;• `get_claims_for_page` (p95 / max) | — | 0.49 / 3.12 ms | 0.57 / 6.99 ms |
+| &nbsp;&nbsp;• `get_pages_related_to_page` (p95 / max) | — | 0.47 / 0.90 ms | 0.54 / 0.95 ms |
+| `get_work_witnesses` query (p95 / max) | (request cap ≤ 1.5 s) | 200.77 / 357.17 ms | 117.21 / 478.95 ms |
+| **Additional RSS (prod-box, sidecar+service+LRU warm)** | ≤ 250 MB | **11.2 MB** ✓ | 11.1 MB |
+
+Executed-query counts (nonzero-result assertion passed for all): 50 queries each;
+51 / 76 / 2500 rows respectively; warm-burst 2627 rows.
+
+Both PERF-01 caps that are measurable before the UI surfaces exist are met with
+wide margin — added RSS is ~4.5% of the 250 MB cap, and browse-enrichment p95 is
+~0.3% of the 150 ms cap. The `get_work_witnesses` p95 is higher than dev-box on a
+smaller sample (50 vs 200 works, so the draw hit a heavier mix); it remains
+DB-side cost only and well inside the ≤ 1.5 s request budget.
+
+### 4.3 Later-surface caps — PENDING
+
 - **Work/Leads request-time p95 / response size (§1.2)** — PENDING until Phase
   136 ships the `/work/{id}` + `/leads` surfaces (the query-latency figures
   above are the DB-side cost only; the full request-time budget is measured
