@@ -1,0 +1,23 @@
+{
+  "candidate_count": 220,
+  "candidate_phys_ms_components": 85,
+  "confirmation_allocation": {
+    "basis": "max finite size_confirmation n_drawn across the pre-outcome OC grid (protocol §6/§7) -- sequestered at freeze time, never invented ad hoc after discovery results land",
+    "n_drawn": 340
+  },
+  "deck_manifest_hash": "0bc6abe40e2ce711fcde34a43f9ce14e9d53c7bcd7e994ddf46e81bbdd5ae92a",
+  "deck_size": 280,
+  "diagnostic_demoted_count": 20,
+  "diagnostic_retained_count": 20,
+  "gold_allocation_drawn": 20,
+  "gold_count": 20,
+  "prereg_report_id": "282e9359f9a24c3ebe451d1689ee891165aa3e0ad4b78150035bc34038fcdf02",
+  "stratum_drawn_counts": {
+    "ja:high": 27,
+    "ja:medium": 17,
+    "msource:high": 26,
+    "msource:medium": 17,
+    "sefaria:high": 102,
+    "sefaria:medium": 31
+  }
+}
