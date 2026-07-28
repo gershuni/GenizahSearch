@@ -1,6 +1,6 @@
 ---
 slug: password-reset-link-dead-end
-status: awaiting_human_verify
+status: resolved
 trigger: |
   DATA_START
   Got a message from user: "thank you very much for developing such an useful tool.
@@ -9,7 +9,7 @@ trigger: |
   I've tried several times, but it seems that the link isn't working as expected."
   DATA_END
 created: 2026-07-28
-updated: 2026-07-28T(fix-applied+specialist-reviewed+patch-reverified)
+updated: 2026-07-28T(resolved — live smoke confirmed by owner post-deploy)
 surface: web + desktop (shared Supabase auth)
 ---
 
@@ -572,3 +572,42 @@ reach); 61 passing across the recovery + 4 auth guard suites; `ruff` clean;
 - Inspect GA/PostHog `$current_url` and a session replay for any fragment leakage.
 - Check the hidden-anchor Quasar dialog portal, the password visibility toggles, RTL
   rendering in Hebrew, and mobile sizing — all UNVERIFIED until a real browser.
+
+---
+
+## RESOLVED — live smoke confirmed (2026-07-28)
+
+Deployed to production via `deploy.sh master-main` (commit `c5d35749`, CI green across
+all 9 jobs incl. render-smoke on both platforms). Owner ran the live smoke test and
+reported: **"Looks like it works."**
+
+That confirms the load-bearing step — the one the Codex BLOCKER would have failed:
+the recovery link now lands on a working "Set a new password" dialog and the password
+change goes through. The original reporter's symptom (link redirects to the plain
+homepage, nothing happens) is gone.
+
+**Scope of the owner's confirmation — recorded honestly.** The report was a brief
+overall "works", not a per-path walkthrough. Explicitly confirmed: the success path.
+NOT individually confirmed, and therefore still only code-verified:
+
+- the expired/consumed-link dialog + its fresh-link button (bilingual EN/HE),
+- the `password_recovery_pending` resume path (reload / >5s websocket drop mid-exchange),
+- GA/PostHog `$current_url` + session-replay inspection for fragment leakage,
+- Hebrew RTL rendering, password visibility toggles, and mobile sizing of the new dialogs.
+
+None of these block the fix — the reported bug is closed and the primary path is live.
+They are secondary paths worth spot-checking opportunistically; if any misbehaves, the
+console signature to look for is anything referencing `__genizahRecovery`.
+
+**Still open, tracked in `docs/OPEN_ISSUES.md`:**
+- No app-side rate limit / CAPTCHA on the anonymous reset request (Codex MEDIUM-3).
+  Turnstile is the recommended mitigation; `web/api_hardening.py` does NOT apply to a
+  NiceGUI event handler.
+- Path B (Supabase `token_hash`/`verify_otp` SSR pattern) remains the better long-term
+  architecture and would structurally eliminate the HIGH-2 class of problem rather than
+  mitigating it with a resume flag. Needs a production email-template edit.
+
+**Lesson extracted to memory:** `reference_io_bound_safe_storage_trap` — `run.io_bound`
+silently breaks any helper that reads `safe_user_*` internally, because contextvars do
+not cross into the executor thread and `safe_storage` degrades to the default rather
+than raising. Found only by external review; 26 passing tests and full CI missed it.
