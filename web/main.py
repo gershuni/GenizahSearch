@@ -1241,9 +1241,15 @@ def _render_password_recovery_handler():
         # raising, so the deletion flags must be checked explicitly.
         try:
             _client = anchor.client
-        except (RuntimeError, AttributeError):
+        except (RuntimeError, AttributeError) as exc:
+            logger.warning("[pwreset] _build_dialogs bailed — no client: %r", exc)
             return {}
         if anchor.is_deleted or getattr(_client, '_deleted', False):
+            logger.warning(
+                "[pwreset] _build_dialogs bailed — torn down (anchor.is_deleted=%s "
+                "client._deleted=%s)",
+                anchor.is_deleted, getattr(_client, '_deleted', None),
+            )
             return {}
 
         from web.auth_state import create_forgot_password_dialog
@@ -1352,12 +1358,20 @@ def _render_password_recovery_handler():
     def _open_set_password() -> None:
         dialogs = _build_dialogs()
         if dialogs:
+            logger.info("[pwreset] opening set-password dialog")
             dialogs['set_password'].open()
+        else:
+            # Silent no-op here was undiagnosable in production. See the
+            # WARNING inside _build_dialogs for the reason it bailed.
+            logger.warning("[pwreset] set-password dialog NOT opened — build returned {}")
 
     def _open_error() -> None:
         dialogs = _build_dialogs()
         if dialogs:
+            logger.info("[pwreset] opening expired-link dialog")
             dialogs['error'].open()
+        else:
+            logger.warning("[pwreset] expired-link dialog NOT opened — build returned {}")
 
     # Codex review 2026-07-28 HIGH-2 (resume path): a recovery that already
     # established its session but never finished the password change is
@@ -1371,12 +1385,42 @@ def _render_password_recovery_handler():
         return  # the fragment is long gone on a resume; skip the JS probe
 
     async def _deferred_check():
+        # Observability (2026-07-28 reopen): the original `except Exception ->
+        # logger.debug` made a production failure leave NO trace at the default
+        # INFO level, which is exactly why the first live failure could not be
+        # diagnosed from the logs. Never swallow this path silently again.
+        # Tokens are NEVER logged -- only the payload's shape.
         try:
-            payload = await ui.run_javascript(_RECOVERY_PAYLOAD_READ_JS, timeout=5.0)
-        except Exception:
-            logger.debug("password-recovery fragment read failed (non-fatal)", exc_info=True)
+            await ui.context.client.connected(timeout=10.0)
+        except Exception as exc:
+            logger.warning("[pwreset] client never connected, probe skipped: %r", exc)
             return
-        await _handle_recovery_payload(payload, _open_set_password, _open_error)
+        try:
+            payload = await ui.run_javascript(_RECOVERY_PAYLOAD_READ_JS, timeout=10.0)
+        except Exception as exc:
+            logger.warning("[pwreset] fragment probe FAILED: %r", exc, exc_info=True)
+            return
+        if payload is None:
+            logger.info("[pwreset] probe returned None (ordinary load, no fragment)")
+        elif isinstance(payload, dict):
+            logger.info(
+                "[pwreset] probe returned kind=%r has_access_token=%s error_code=%r",
+                payload.get('kind'),
+                bool(payload.get('access_token')),
+                payload.get('error_code'),
+            )
+        else:
+            logger.warning("[pwreset] probe returned unexpected type %s: %r",
+                           type(payload).__name__, payload)
+        # The dispatch itself was previously OUTSIDE any try/except, so an
+        # exception in the session exchange or dialog construction became an
+        # unhandled asyncio task exception -- invisible, and indistinguishable
+        # from "nothing happened". This is a prime suspect for the 2026-07-28
+        # live failure, so it gets its own guard and a loud log.
+        try:
+            await _handle_recovery_payload(payload, _open_set_password, _open_error)
+        except Exception as exc:
+            logger.warning("[pwreset] dispatch FAILED: %r", exc, exc_info=True)
 
     asyncio.ensure_future(_deferred_check())
 
