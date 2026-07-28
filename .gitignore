@@ -240,3 +240,64 @@ tmp/codex_*
 # masking leaks recurred here twice. tmp/ is scratch, never committed.
 # (tmp/web_deploy_v840.log was untracked in the same commit.)
 /tmp/
+
+# ── 2026-07-28: local research corpora, runtime sidecars, and root scratch ──
+# Swept during a /gsd-progress pass that found ~24 GB of untracked debris at the
+# repo root. None of it is GenizahSearch source; the bulk of it also made
+# `git status` slow enough to be a nuisance. Ignoring only — nothing already
+# tracked is untracked by this block.
+
+# ACL 2026 reading corpus: ~6,000 downloaded conference PDFs (~24 GB, Tracks/
+# alone is 20 GB) plus the 2.2 MB auto-generated paper index and its stray
+# "- Copy" duplicate.
+# The MARKDOWN NOTE LAYER STAYS TRACKED on purpose — ACL2026-LIBRARY.md,
+# RAMBERT-CROSSLINGUAL-EXPERIMENT-PLAN.md, TRACK3-*.md, README.md, and the
+# _scan/ + _scan2/ relevance-card sets are the reusable output of the reading
+# pass. Do NOT widen this to a bare `ACL2026_papers/`: that would need a
+# `git rm --cached` on 21 already-committed notes to have any effect.
+ACL2026_papers/Tracks/
+ACL2026_papers/Workshops/
+ACL2026_papers/Session_*/
+ACL2026_papers/Topic_*/
+ACL2026_papers/GLOBAL_INDEX.md
+ACL2026_papers/GLOBAL_INDEX - Copy.md
+
+# Saved puzzle/join documents sidecar (joins.db + its WAL/SHM).
+# NEVER TRACK THIS — it is not merely hygiene, it is a data-loss guard.
+# PuzzleService creates the dir and schema at runtime (shared/puzzle_service.py
+# mkdir at ~L97), so the repo never needs to supply it; locally it is an empty
+# scratch DB. But on the WEB SERVER this same repo-root path holds the LIVE,
+# shared, user-created join documents (web/pages/puzzle.py ~L2247), and
+# deploy.sh runs `git reset --hard origin/$BRANCH`. reset --hard spares
+# untracked/ignored files but clobbers tracked ones — so a committed joins.db
+# would wipe every join users saved since that commit, on every deploy.
+# (Frozen desktop is unaffected: it uses %LOCALAPPDATA%\GenizahSearchPro\.)
+/joins_data/
+
+# PGP raw text dump (~317 MB), sibling of the already-ignored pgp_data/pgp.db
+# at line 52. Scoped to the subdirectory: pgp_data/full_import_report.txt and
+# pgp_data/import_report.csv REMAIN TRACKED.
+pgp_data/pgp-text/
+
+# Desktop session backup of the Tantivy index directory — carries LocalIndex/,
+# app logs, and a config.pkl holding per-user desktop state. `Genizah_Index/`
+# is ignored at line 75; this is the differently-named backup twin.
+/Genizah_Index.session-bak/
+
+# One-off PDF conversion/remapping scratch scripts. Not imported by either app.
+/ephraim_meiri_pdf_converter/
+
+# Contributed local-extension prototype from Yehuda Seewald (יהודה זייבלד) —
+# includes seewald_emails.txt, i.e. PRIVATE CORRESPONDENCE. Never commit; same
+# posture as docs/outreach/ at line 10.
+/seewald_addition/
+
+# Ad-hoc analysis output directory (per-run subfolders).
+/outputs/
+
+# Joins Lab candidate exports — regenerated on demand by the lab's XLSX export.
+/joins_lab_candidates*.xlsx
+
+# cairo-genizah-research skill runtime state (self-throttle bookkeeping).
+# Narrow by design: the state/ directory's tracked .gitkeep must survive.
+skills/*/state/throttle.json
