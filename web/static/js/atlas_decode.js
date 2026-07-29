@@ -1390,9 +1390,28 @@
 
     // --- pointer: pan (1 finger/mouse) + pinch-zoom (2 fingers) + hover ---
     // Multi-touch is tracked in a pointer map so phones/tablets can pinch to
-    // zoom (there is no wheel on touch). touch-action:none stops the browser
-    // swallowing the gesture as page scroll/zoom before our handlers see it.
-    if (canvas.style) canvas.style.touchAction = 'none';
+    // zoom (there is no wheel on touch). `touch-action` decides how much of the
+    // gesture the browser hands us before our handlers see it — see
+    // applyTouchAction() immediately below for why that is conditional.
+    // Touch-gesture ownership (2026-07-29). Desktop and fullscreen want
+    // 'none' — the canvas owns every gesture, so a one-finger drag pans the
+    // map. Inline on a PHONE that is a scroll trap: the canvas is a large part
+    // of the viewport, so a user swiping to read the rest of the page only ever
+    // pans the map and can never scroll away from it.
+    //
+    // On narrow screens (outside fullscreen) we therefore hand VERTICAL panning
+    // back to the browser with 'pan-y': a one-finger swipe scrolls the page as
+    // the user expects, while horizontal drags still pan the map and two-finger
+    // pinch still zooms it (pan-y does not permit browser pinch-zoom, so those
+    // pointer events are still delivered here). Fullscreen — reached via the
+    // toolbar button — restores 'none' for uninterrupted pan/pinch, which is
+    // the right model once there is no page to scroll.
+    function applyTouchAction() {
+      if (!canvas.style) return;
+      var immersive = !state.narrow || _isFs();
+      canvas.style.touchAction = immersive ? 'none' : 'pan-y';
+    }
+    applyTouchAction();
     var pointers = {};           // active pointerId -> {x, y} in canvas px
     var dragMoved = false;       // gate: a drag/pinch is never treated as a tap
     var lastX = 0, lastY = 0;    // single-pointer pan anchor
@@ -1462,7 +1481,13 @@
         tip.style.top = Math.min(p[1] + 14, state.viewH - 90) + 'px';
       }
     });
-    function endPointer(ev) {
+    // `canceled` is true for pointercancel. Under the narrow-screen 'pan-y'
+    // touch-action the browser CLAIMS a one-finger vertical swipe and cancels
+    // our pointer — often before the finger has travelled the 2px that would
+    // have set dragMoved. Treating that as a tap would focus a cluster (or open
+    // a manuscript) under the user's finger every time they scrolled the page,
+    // so a canceled pointer must never take the tap path.
+    function endPointer(ev, canceled) {
       if (!(ev.pointerId in pointers)) return;
       var releasePos = relPos(ev);
       delete pointers[ev.pointerId];
@@ -1471,7 +1496,7 @@
         canvas.style.cursor = 'grab';
         // A tap (single pointer, no drag/pinch) enters a focus constellation or
         // opens the manuscript pane.
-        if (!dragMoved) {
+        if (!dragMoved && !canceled) {
           var idx = pick(state, releasePos[0], releasePos[1]);
           if (idx >= 0) {
             if (state.focusCluster >= 0) {
@@ -1505,8 +1530,8 @@
         pinchDist = 0;
       }
     }
-    canvas.addEventListener('pointerup', endPointer);
-    canvas.addEventListener('pointercancel', endPointer);
+    canvas.addEventListener('pointerup', function (ev) { endPointer(ev, false); });
+    canvas.addEventListener('pointercancel', function (ev) { endPointer(ev, true); });
 
     // --- wheel zoom (toward cursor) ---
     canvas.addEventListener('wheel', function (ev) {
@@ -1599,8 +1624,13 @@
         : (state.labels.fullScreen || 'Full screen');
       _track('atlas_fullscreen', { on: on });
       // The box (hence the canvas) just changed size — re-fit after the layout
-      // settles, then repaint.
-      setTimeout(function () { resizeCanvas(state); redraw(); }, 60);
+      // settles, then repaint. Entering fullscreen on a phone also switches the
+      // canvas back to owning every gesture, and exiting restores page-scroll.
+      setTimeout(function () {
+        resizeCanvas(state);
+        applyTouchAction();
+        redraw();
+      }, 60);
     }
     if (document.addEventListener) {
       document.addEventListener('fullscreenchange', _onFsChange);
@@ -1613,6 +1643,10 @@
     // orientation change. init's resize listener (registered earlier) refreshes
     // state.narrow via resizeCanvas before this fires.
     window.addEventListener('resize', function () {
+      // A rotate / window resize can cross the narrow threshold in either
+      // direction, so re-derive gesture ownership from the refreshed
+      // state.narrow (init's resize listener runs resizeCanvas before this).
+      applyTouchAction();
       if (state.focusCluster >= 0) rebuildFocusPanel();
     });
 

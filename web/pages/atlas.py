@@ -30,10 +30,33 @@ from nicegui import ui
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
 
-# Fixed canvas dimensions — reserved up front so the (later-injected) renderer
-# never shifts layout when it attaches (CLS-safe, D-10). Height is a fixed px
-# value, not a max-height, so the box occupies its full space before any draw.
+# Canvas dimensions — reserved up front so the (later-injected) renderer never
+# shifts layout when it attaches (CLS-safe, D-10). The height is an explicit
+# resolvable value, NOT a max-height, so the box occupies its full space before
+# any draw.
+#
+# Desktop keeps the original 720px. Phones cap the box at a fraction of the
+# viewport (2026-07-29): the height used to be a FLAT 720px on every viewport,
+# which on a phone is taller than the visible area — and because the renderer
+# sets `touch-action: none` on the canvas to own pan/pinch, the canvas then
+# swallowed every vertical swipe. Mobile users (two thirds of atlas traffic)
+# could not scroll past the map at all. Capping the height guarantees there is
+# always page above and below the canvas to grab.
+#
+# Deliberately plain `vh`, NOT `dvh`: NiceGUI parses .style() into a DICT keyed
+# by property name, so emitting `height:...vh; height:...dvh` as a progressive-
+# enhancement pair does NOT survive — the dict keeps only the last value. That
+# would ship `dvh` alone, which older WebKit (iOS < 15.4) cannot parse, dropping
+# the declaration entirely and collapsing the reserved box. `vh` is universally
+# supported. On iOS it measures the LARGE viewport (browser chrome hidden), so
+# the box can occupy a somewhat larger share of the visible area than the
+# fraction suggests — still comfortably short of the full screen, which is all
+# the scroll fix requires. Both units resolve at first paint; CLS holds either way.
 _ATLAS_CANVAS_HEIGHT_PX = 720
+_ATLAS_CANVAS_VIEWPORT_FRACTION = 60
+_ATLAS_CANVAS_HEIGHT_CSS = (
+    f'height: min({_ATLAS_CANVAS_HEIGHT_PX}px, {_ATLAS_CANVAS_VIEWPORT_FRACTION}vh);'
+)
 
 # ---------------------------------------------------------------------------
 # 133-04 RENDERER (contract fulfilled):
@@ -156,7 +179,7 @@ def create_atlas_page() -> None:
         # --- Intro / how-to (elaborated 2026-07-21) — describes the map, its
         #     interactions, and how to read it to spot connections. Two paragraphs.
         ui.label(
-            tr("A graphical view of textual connections between manuscripts across the Genizah. Manuscripts containing similar text are grouped together into clusters, and connections between manuscripts are marked with a thin line. Alongside the clusters and manuscripts, catalogue information from the National Library and the Friedberg Genizah Project is shown. You can zoom in and out, focus on a particular cluster, and open a preview of a specific manuscript to read it. For the best experience, we recommend viewing the atlas on a computer in full-screen mode.")
+            tr("A graphical view of textual connections between manuscripts across the Genizah. Manuscripts containing similar text are grouped together into clusters, and connections between manuscripts are marked with a thin line. Alongside the clusters and manuscripts, catalogue information from the National Library and the Friedberg Genizah Project is shown. You can zoom in and out, focus on a particular cluster, and open a preview of a specific manuscript to read it. For the best experience on a phone, tap Full screen — there you can pan and zoom the map freely; a larger screen simply shows more of it at once.")
         ).classes('text-sm').style('color: var(--text-secondary); line-height: 1.7;')
         ui.label(
             tr("Use the atlas to get an overall sense of the structure of the Genizah corpus and the connections within it, and to discover new, previously unknown connections. For example, if within a cluster of linguistics manuscripts you find a manuscript identified as 'Biblical fragments,' this manuscript too may be a work of linguistics.")
@@ -177,10 +200,12 @@ def create_atlas_page() -> None:
             ).classes('text-sm').style('color: var(--text-secondary); line-height: 1.5;')
 
         # --- CLS-reserved canvas container ---------------------------------
-        # Explicit width AND fixed height (not max-height) so the box occupies
-        # its full area before the 133-04 renderer attaches — no layout shift.
+        # Explicit width AND an explicit resolvable height (not max-height) so
+        # the box occupies its full area before the 133-04 renderer attaches —
+        # no layout shift. The height caps against the viewport on phones; see
+        # _ATLAS_CANVAS_HEIGHT_CSS.
         with ui.element('div').classes('w-full rounded-lg overflow-hidden').style(
-            f'position: relative; width: 100%; height: {_ATLAS_CANVAS_HEIGHT_PX}px; '
+            f'position: relative; width: 100%; {_ATLAS_CANVAS_HEIGHT_CSS} '
             f'background: var(--bg-secondary); border: 1px solid var(--border-light);'
         ).props('id="atlas-canvas-box"'):
             # The canvas the renderer draws into. Sized to fill the reserved box.
@@ -193,7 +218,7 @@ def create_atlas_page() -> None:
             ui.element('canvas').props('id=atlas-canvas').props(
                 f'aria-label="{tr("The Visual Genizah Atlas")}"'
             ).style(
-                f'display:block; width:100%; height:{_ATLAS_CANVAS_HEIGHT_PX}px;'
+                f'display:block; width:100%; {_ATLAS_CANVAS_HEIGHT_CSS}'
             )
             # Loading placeholder (centered), shown until 133-04's renderer draws.
             # The JS renderer removes this element (by id) on a successful first

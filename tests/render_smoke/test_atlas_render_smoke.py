@@ -165,11 +165,17 @@ def test_atlas_renders_chrome_canvas_and_decoder_injection():
             "Atlas render FAIL: honesty banner text not found in any label."
         )
 
-        # CLS-reserved canvas: a native <canvas id="atlas-canvas"> element with a
-        # FIXED 720px height (not just max-height). It must be ui.element('canvas'),
-        # NOT ui.html — whose client-side sanitize strips the id, breaking the
-        # renderer's getElementById mount ("could not be loaded"). Asserting the
-        # element + id + native tag guards that regression at the render layer.
+        # CLS-reserved canvas: a native <canvas id="atlas-canvas"> element with an
+        # explicit, first-paint-resolvable height (not just max-height). It must be
+        # ui.element('canvas'), NOT ui.html — whose client-side sanitize strips the
+        # id, breaking the renderer's getElementById mount ("could not be loaded").
+        # Asserting the element + id + native tag guards that at the render layer.
+        #
+        # Since 2026-07-29 the height is responsive — min(<cap>px, <fraction>vh) —
+        # so phones cap below the viewport instead of reserving a flat 720px that
+        # filled the screen and swallowed every vertical swipe (mobile scroll
+        # trap). Assert the INVARIANT, not the literal. See
+        # tests/test_atlas_mobile_gestures.py for the full gesture guards.
         from web.pages.atlas import _ATLAS_CANVAS_HEIGHT_PX
         canvas = _canvas_element(user)
         assert canvas is not None, (
@@ -180,9 +186,15 @@ def test_atlas_renders_chrome_canvas_and_decoder_injection():
             "(must be ui.element('canvas'), not ui.html which strips the id)."
         )
         cstyle = getattr(canvas, '_style', None) or {}
-        assert cstyle.get('height') == f'{_ATLAS_CANVAS_HEIGHT_PX}px', (
-            "Atlas render FAIL: canvas is not CLS-reserved with a fixed "
-            f"{_ATLAS_CANVAS_HEIGHT_PX}px height. style={cstyle!r}"
+        _h = cstyle.get('height')
+        assert _h and _h.startswith('min(') and f'{_ATLAS_CANVAS_HEIGHT_PX}px' in _h, (
+            "Atlas render FAIL: canvas is not CLS-reserved with the responsive "
+            f"min({_ATLAS_CANVAS_HEIGHT_PX}px, <fraction>vh) height. style={cstyle!r}"
+        )
+        assert 'vh)' in _h and 'dvh' not in _h, (
+            "Atlas render FAIL: canvas height must cap against the viewport using "
+            f"plain vh (dvh has no surviving fallback through NiceGUI's style "
+            f"dict). style={cstyle!r}"
         )
 
         # Decoder module + bootstrap injected into the page body.

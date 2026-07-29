@@ -31,10 +31,39 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   **Readable labels** on a dark backing plate (legible over the bright cluster cores).
 - **In-atlas browse pane** — clicking a manuscript opens it in a drawer via an `?embed=1`
   bare-viewer iframe (Close / Open-full-browse), instead of leaving the atlas.
-- **Mobile** — one-finger pan + two-finger pinch-zoom; the browse drawer goes full-width on
-  narrow screens.
+- **Mobile** — one-finger pan + two-finger pinch-zoom (revised 2026-07-29, see below); the
+  browse drawer goes full-width on narrow screens.
 - **Elaborated bilingual intro** describing the map and how to read it; a prominent, claim-free
   homepage launch announcement (alongside the existing subtle teaser).
+
+### Fixed — mobile scroll trap (2026-07-29)
+- **The atlas no longer traps the page scroll on phones.** Following complaints from mobile
+  users: the reserved canvas was a flat `720px` on every viewport, which on a phone is taller
+  than the visible area — and because the renderer sets `touch-action: none` on the canvas to
+  own pan/pinch, every vertical swipe panned the map instead of scrolling the page, so readers
+  could not scroll past the atlas at all. This mattered far more than the desktop-first design
+  assumed: **mobile is 68% of `/atlas` pageviews (1,587 of 2,364) and 972 of 1,447 people**,
+  driven by the homepage/Facebook announcement, and only 6% of mobile loads ever entered
+  full-screen where that gesture model would have been appropriate.
+  - The reservation is now `min(720px, 60vh)` — desktop keeps the full 720px, phones cap below
+    the viewport so there is always page above and below the map to grab. (Deliberately plain
+    `vh`: NiceGUI parses `.style()` into a dict keyed by property name, so a `vh`→`dvh`
+    fallback pair cannot survive, and `dvh` alone is unparseable on iOS < 15.4 — which would
+    drop the declaration and collapse the reserved box.) The CLS reservation still holds.
+  - On narrow screens **outside** full-screen, vertical panning is handed back to the browser
+    with `touch-action: pan-y`: a one-finger swipe scrolls the page as expected, while
+    horizontal drags still pan the map and two-finger pinch still zooms it. Full-screen —
+    reached from the toolbar — restores full gesture ownership, which is the right model once
+    there is no page to scroll. Re-derived on full-screen change and on rotate/resize.
+  - A **canceled pointer is no longer treated as a tap.** Under `pan-y` the browser claims a
+    one-finger swipe and fires `pointercancel`, usually before the finger has travelled the
+    2px that marks a drag — which would otherwise have focused a cluster under the reader's
+    finger on every page scroll.
+  - **Intro copy revised:** it previously recommended viewing the atlas on a computer, which
+    addressed the majority of its readers as second-class; it now points them at the
+    Full screen control (EN + HE).
+  - Tests: `tests/test_atlas_mobile_gestures.py` (10 guards). The two existing CLS guards now
+    assert the responsive `min()`/`vh` invariant rather than the flat pixel literal.
 
 ---
 
