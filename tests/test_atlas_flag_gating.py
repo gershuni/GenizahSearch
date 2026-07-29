@@ -294,6 +294,16 @@ def test_real_atlas_chrome_renders_banner_and_cls_reserved_canvas():
         "atlas-canvas must be a native <canvas> element, not ui.html "
         "(sanitize would strip the id)"
     )
+    # CLS invariant (D-10): the canvas must reserve an explicit, first-paint-
+    # resolvable height — never absent, never `auto`, and never a bare
+    # `max-height` (which collapses the box to zero before the first draw).
+    #
+    # This stays the FLAT pixel reservation. The 2026-07-29 mobile scroll-trap
+    # fix caps the height on touch-primary devices via a `(hover: none) and
+    # (pointer: coarse)` stylesheet rule, NOT by making this inline value
+    # viewport-relative: a bare inline `min(720px, 60vh)` also shrank every
+    # desktop under 1200px tall (1920x1080 -> 648px, 1366x768 -> 461px).
+    # See tests/test_atlas_mobile_gestures.py for the cap's own guards.
     assert canvas_info["style"].get("height") == f"{_ATLAS_CANVAS_HEIGHT_PX}px", (
         f"canvas must reserve a fixed height (CLS-safe); style={canvas_info['style']!r}"
     )

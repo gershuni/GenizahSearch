@@ -165,11 +165,17 @@ def test_atlas_renders_chrome_canvas_and_decoder_injection():
             "Atlas render FAIL: honesty banner text not found in any label."
         )
 
-        # CLS-reserved canvas: a native <canvas id="atlas-canvas"> element with a
-        # FIXED 720px height (not just max-height). It must be ui.element('canvas'),
-        # NOT ui.html — whose client-side sanitize strips the id, breaking the
-        # renderer's getElementById mount ("could not be loaded"). Asserting the
-        # element + id + native tag guards that regression at the render layer.
+        # CLS-reserved canvas: a native <canvas id="atlas-canvas"> element with an
+        # explicit, first-paint-resolvable height (not just max-height). It must be
+        # ui.element('canvas'), NOT ui.html — whose client-side sanitize strips the
+        # id, breaking the renderer's getElementById mount ("could not be loaded").
+        # Asserting the element + id + native tag guards that at the render layer.
+        #
+        # This stays the FLAT pixel reservation: the 2026-07-29 mobile scroll-trap
+        # fix caps the height on touch-primary devices through a stylesheet media
+        # query, NOT by making this inline value viewport-relative (which also
+        # shrank every desktop under 1200px tall). See
+        # tests/test_atlas_mobile_gestures.py for the cap + gesture guards.
         from web.pages.atlas import _ATLAS_CANVAS_HEIGHT_PX
         canvas = _canvas_element(user)
         assert canvas is not None, (
