@@ -2955,9 +2955,19 @@ async def auth_callback_route(code: str = None, error: str = None, error_descrip
 
         # PKCE flow - code in query parameter
         if code:
-            logger.info(f"OAuth callback: exchanging code {code[:20]}...")
+            # SECURITY (Codex review 2026-07-29, HIGH latent): never log the
+            # exchange result or the code itself. `result['session']` carries a
+            # LIVE access_token + refresh_token (see supabase_client.
+            # _session_to_dict), so the previous `logger.info(f"Code exchange
+            # result: {result}")` would have written usable OAuth credentials
+            # into journald the moment anyone raised web.main to INFO -- which
+            # the pending logging cleanup was about to do. Log shape only.
+            logger.info("OAuth callback: exchanging authorization code")
             result = exchange_code_for_session(code)
-            logger.info(f"Code exchange result: {result}")
+            logger.info(
+                "OAuth code exchange finished: ok=%s has_user=%s",
+                'error' not in result, bool(result.get('user')),
+            )
 
             if 'error' in result:
                 show_error(result['error'])

@@ -392,3 +392,58 @@ def test_set_auth_profile_is_none_clears_stale_profile(monkeypatch):
     assert role != 'admin', (
         f"stale admin role leaked through get_role() after profile=None login: {role}"
     )
+
+
+def test_oauth_callback_never_logs_credentials():
+    """SECURITY guard (Codex review 2026-07-29, HIGH latent).
+
+    `exchange_code_for_session` returns a dict whose 'session' carries a LIVE
+    access_token + refresh_token (see supabase_client._session_to_dict). The
+    OAuth callback previously did `logger.info(f"Code exchange result: {result}")`,
+    which would have written usable OAuth credentials into journald the instant
+    anyone raised the `web.main` logger to INFO. It was dormant ONLY because the
+    app ships no logging configuration, so the effective level is WARNING --
+    a latent leak one config change away from firing.
+
+    Pins the invariant at the source level: no logging call inside the OAuth
+    callback may interpolate the exchange result, a session, or a raw token.
+    """
+    import ast
+    import inspect
+    import textwrap
+    import web.main as mod
+
+    src = textwrap.dedent(inspect.getsource(mod.auth_callback_route))
+    tree = ast.parse(src)
+
+    FORBIDDEN = ('result', 'session', 'access_token', 'refresh_token', 'code')
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # logger.info(...) / logger.debug(...) / logger.warning(...)
+        if not (isinstance(func, ast.Attribute)
+                and func.attr in ('info', 'debug', 'warning', 'error', 'exception')
+                and getattr(func.value, 'id', None) == 'logger'):
+            continue
+        for arg in node.args:
+            # f-strings: inspect every interpolated expression's root name.
+            if isinstance(arg, ast.JoinedStr):
+                for part in arg.values:
+                    if not isinstance(part, ast.FormattedValue):
+                        continue
+                    for sub in ast.walk(part.value):
+                        if isinstance(sub, ast.Name) and sub.id in FORBIDDEN:
+                            raise AssertionError(
+                                f"OAuth callback f-string logging interpolates "
+                                f"{sub.id!r} at relative line {arg.lineno} — this can "
+                                f"emit live credentials. Log shape only "
+                                f"(e.g. ok=..., has_user=...)."
+                            )
+            # %-style args: logger.info("...", result) is equally unsafe.
+            elif isinstance(arg, ast.Name) and arg.id in FORBIDDEN:
+                raise AssertionError(
+                    f"OAuth callback logging passes {arg.id!r} as a format arg at "
+                    f"relative line {arg.lineno} — this can emit live credentials."
+                )
