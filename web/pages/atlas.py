@@ -43,16 +43,28 @@ from web.components.typography import h1
 # thirds of atlas traffic) could not scroll past the map at all. Capping the
 # height guarantees there is always page above and below the canvas to grab.
 #
-# The cap is gated on `(hover: none) and (pointer: coarse)` — the standard
-# touch-primary query — NOT on viewport width or height. Both alternatives are
-# wrong here, and a first cut of this fix got it wrong twice (caught in review):
+# The cap is gated on `(hover: none) and (pointer: coarse)` — the touch-PRIMARY
+# query — NOT on viewport width or height. Both alternatives are wrong here, and
+# a first cut of this fix got it wrong twice (caught in review):
 #   * Height-gated (a bare `min(720px, 60vh)` inline) silently shrank DESKTOP:
 #     60vh < 720px for any viewport under 1200px tall, so 1920x1080 dropped to
 #     648px and a 1366x768 laptop to 461px — i.e. almost every desktop.
 #   * Width-gated (<= 640px) misses LANDSCAPE phones and tablets, which are
 #     exactly where a 720px box over a ~390px-tall viewport is worst.
-# Touch-primary is the population with the swipe-trap problem, so it is the
-# population that gets the cap. Mouse/trackpad layouts are untouched at any size.
+#
+# DO NOT "unify" this with the `(any-pointer: coarse)` gate that atlas_decode.js
+# uses for touch-action. The difference is deliberate and load-bearing:
+#   * `height` is GLOBAL to the layout. Capping it on any machine that merely HAS
+#     a touchscreen would shrink the canvas for that machine's mouse users too —
+#     which is exactly the desktop regression of the first review finding, since
+#     a great many laptops ship a touchscreen. So the cap stays on touch-PRIMARY
+#     (phones and tablets), where the short viewport is the actual problem.
+#   * `touch-action` is INPUT-SCOPED — it constrains touch/pen only and leaves
+#     mouse-driven pointer events alone — so the renderer can afford the wider
+#     `any-pointer` gate, and needs it to cover hybrids (a third review finding).
+# The two conditions are NESTED, not equal: touch-primary implies any-coarse-
+# pointer, so every device that gets the shorter canvas also gets page-scroll.
+# Preserve that nesting; do not collapse it into equality in either direction.
 #
 # This lives in a real stylesheet rule rather than the inline style because a
 # media query cannot be expressed inline, and because NiceGUI parses .style()

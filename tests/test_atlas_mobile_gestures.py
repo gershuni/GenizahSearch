@@ -14,10 +14,8 @@ and mobile users complained about the page. Two defects caused it:
    before the finger travelled the 2px that sets ``dragMoved``. Treating that as
    a tap would focus a cluster under the user's finger on every page scroll.
 
-Both the geometry cap and the gesture gate hang off ONE signal — the
-touch-primary media query ``(hover: none) and (pointer: coarse)``. That is the
-load-bearing decision here, because the first cut of the fix got the signal wrong
-twice and code review caught both:
+Picking the right SIGNAL for each of those two mechanisms is the load-bearing
+decision, because three successive code-review findings were all signal bugs:
 
 * **Height-gated** (a bare inline ``min(720px, 60vh)``) silently shrank DESKTOP:
   ``60vh`` < 720px for any viewport under 1200px tall, so 1920x1080 rendered a
@@ -26,9 +24,25 @@ twice and code review caught both:
 * **Width-gated** (``state.narrow``, canvas width <= 640px) missed LANDSCAPE
   phones and tablets — the worst geometry of all, a 720px box over a ~390px-tall
   viewport — leaving them in the exact trap being fixed.
+* **Primary-pointer-gated** (``(hover: none) and (pointer: coarse)``) for the
+  GESTURE missed HYBRIDS: a touchscreen laptop / Surface / iPad-with-trackpad
+  reports ``hover: hover`` and ``pointer: fine``, so it kept ``touch-action:
+  none`` even with a finger on the canvas — the same trap again.
 
-The tests below therefore pin the SIGNAL, not just the behaviour, so neither
-wrong gate can creep back in.
+The resolution is that the two mechanisms take DIFFERENT, NESTED signals, and the
+asymmetry is deliberate:
+
+* **Height cap** -> ``(hover: none) and (pointer: coarse)`` (touch-PRIMARY).
+  ``height`` is global to the layout, so capping on any machine that merely has a
+  touchscreen would shrink the canvas for that machine's mouse users too.
+* **touch-action** -> ``(any-pointer: coarse)`` (has a touchscreen at all).
+  ``touch-action`` is input-scoped — touch/pen only, never mouse — so the wider
+  gate is free, and it is required to cover hybrids.
+
+Touch-primary implies any-coarse-pointer, so every device that gets the shorter
+canvas also gets page-scroll. The tests below pin each SIGNAL and that NESTING,
+so none of the three wrong gates can creep back in and so nobody "unifies" the
+two queries in either direction.
 
 These are static/structural guards over the renderer + page source: the renderer
 is browser-only (Canvas 2D, PointerEvents, Fullscreen API) with no JS test
@@ -46,7 +60,10 @@ _JS = (
 _JS_SRC = _JS.read_text(encoding="utf-8")
 _PAGE_SRC = pathlib.Path(atlas_page.__file__).read_text(encoding="utf-8")
 
-_TOUCH_QUERY = "(hover: none) and (pointer: coarse)"
+# Touch-PRIMARY: phones/tablets. Gates the height cap (global to the layout).
+_TOUCH_PRIMARY_QUERY = "(hover: none) and (pointer: coarse)"
+# HAS a touchscreen at all, incl. hybrids. Gates touch-action (input-scoped).
+_ANY_COARSE_QUERY = "(any-pointer: coarse)"
 
 
 # ---------------------------------------------------------------------------
@@ -69,17 +86,18 @@ def test_touch_action_is_never_set_unconditionally_to_none():
     )
 
 
-def test_gesture_gate_uses_the_touch_primary_media_query():
-    assert "function _isTouchPrimary()" in _JS_SRC, (
-        "the gesture gate must derive from a touch-primary probe"
+def test_gesture_gate_uses_the_any_pointer_coarse_query():
+    assert "function _hasCoarsePointer()" in _JS_SRC, (
+        "the gesture gate must derive from a has-a-touchscreen probe"
     )
-    assert _TOUCH_QUERY in _JS_SRC, (
-        f"the gesture gate must use the standard touch-primary query {_TOUCH_QUERY!r}"
+    assert _ANY_COARSE_QUERY in _JS_SRC, (
+        f"the gesture gate must use {_ANY_COARSE_QUERY!r} so hybrids (touchscreen "
+        f"laptops, Surface, iPad + trackpad) are covered"
     )
 
 
 def test_gesture_gate_does_not_regress_to_the_narrow_width_proxy():
-    # REGRESSION GUARD (review finding): state.narrow is the focus-panel
+    # REGRESSION GUARD (review finding 2): state.narrow is the focus-panel
     # breakpoint (canvas width <= 640px). Using it as the touch proxy left
     # landscape phones and tablets trapped.
     body = _JS_SRC.split("function applyTouchAction()", 1)[1][:400]
@@ -87,10 +105,24 @@ def test_gesture_gate_does_not_regress_to_the_narrow_width_proxy():
         "applyTouchAction must NOT gate on state.narrow — that is a width "
         "breakpoint, so landscape phones and tablets keep the scroll trap"
     )
-    assert "_isTouchPrimary()" in body, "the gate must consult the touch-primary probe"
+    assert "_hasCoarsePointer()" in body, "the gate must consult the touchscreen probe"
     assert "_isFs()" in body, "fullscreen must re-take full gesture ownership"
     assert "'pan-y'" in body, "touch + non-fullscreen must yield pan-y"
-    assert "'none'" in body, "pointer devices / fullscreen must yield none"
+    assert "'none'" in body, "pointer-only devices / fullscreen must yield none"
+
+
+def test_gesture_gate_does_not_regress_to_the_primary_pointer_query():
+    # REGRESSION GUARD (review finding 3): the touch-PRIMARY query describes only
+    # the primary pointer, so a hybrid reports hover:hover / pointer:fine and kept
+    # touch-action:none with a finger on the canvas. The gesture gate must use the
+    # any-pointer family. (The HEIGHT CAP still uses the primary query, by design
+    # — see test_the_two_gates_are_deliberately_nested_not_equal.)
+    probe = _JS_SRC.split("function _hasCoarsePointer()", 1)[1][:400]
+    assert "any-pointer" in probe, "the probe must use the any-pointer family"
+    assert "hover: none" not in probe, (
+        "the gesture probe must NOT gate on the primary pointer — hybrids "
+        "(touchscreen laptops) report hover:hover and stay trapped"
+    )
 
 
 def test_touch_action_resyncs_on_fullscreen_and_resize():
@@ -147,9 +179,9 @@ def test_inline_reservation_stays_a_flat_pixel_height():
 
 def test_height_cap_is_gated_on_touch_primary_not_on_width_or_height():
     style = atlas_page._ATLAS_HEIGHT_CAP_STYLE
-    assert _TOUCH_QUERY in style, (
-        f"the height cap must be gated on {_TOUCH_QUERY!r} — the population with "
-        f"the swipe-trap problem"
+    assert _TOUCH_PRIMARY_QUERY in style, (
+        f"the height cap must be gated on {_TOUCH_PRIMARY_QUERY!r} — phones and "
+        f"tablets, where the short viewport is the actual problem"
     )
     assert "max-width" not in style and "max-height" not in style, (
         "the cap must NOT be gated on a width/height breakpoint: width misses "
@@ -193,6 +225,37 @@ def test_cap_style_is_injected_into_head():
     assert "ui.add_head_html(_ATLAS_HEIGHT_CAP_STYLE)" in _PAGE_SRC, (
         "the cap must be in <head> so it applies at first paint and the CLS "
         "reservation still holds"
+    )
+
+
+def test_the_two_gates_are_deliberately_nested_not_equal():
+    """The height cap and the gesture gate must use DIFFERENT, nested signals.
+
+    This is the invariant a future 'let's unify these' refactor would break, in
+    whichever direction it went — and both directions re-introduce a shipped bug:
+
+      * Widening the HEIGHT CAP to `any-pointer: coarse` would shrink the canvas
+        on every touchscreen laptop, for its mouse users too — review finding 1's
+        desktop regression, since a great many laptops ship a touchscreen.
+      * Narrowing the GESTURE GATE to the touch-primary query would strand
+        hybrids with `touch-action: none` — review finding 3.
+
+    Nesting (touch-primary => any-coarse-pointer) is what makes the pair safe:
+    every device that gets the shorter canvas also gets page-scroll.
+    """
+    cap_style = atlas_page._ATLAS_HEIGHT_CAP_STYLE
+    # The cap is the NARROW (primary-pointer) condition...
+    assert _TOUCH_PRIMARY_QUERY in cap_style
+    assert "any-pointer" not in cap_style, (
+        "the height cap must NOT widen to any-pointer — it would shrink the "
+        "canvas for mouse users of any touchscreen laptop"
+    )
+    # ...and the gesture gate is the WIDE (any-pointer) condition.
+    assert _ANY_COARSE_QUERY in _JS_SRC
+    probe = _JS_SRC.split("function _hasCoarsePointer()", 1)[1][:400]
+    assert _TOUCH_PRIMARY_QUERY not in probe, (
+        "the gesture gate must NOT narrow to the touch-primary query — it would "
+        "strand hybrids in the scroll trap"
     )
 
 
