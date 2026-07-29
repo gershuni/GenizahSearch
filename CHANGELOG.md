@@ -54,14 +54,19 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
     1366×768 laptop. Gating on *width* would have missed landscape phones and tablets, the
     worst geometry of all. Plain `vh`, not `dvh`: `dvh` is unparseable on iOS < 15.4, which
     drops the declaration and collapses the box.)
-  - On touch devices **outside** full-screen, vertical panning is handed back to the browser
-    with `touch-action: pan-y`: a one-finger swipe scrolls the page as expected, while
-    horizontal drags still pan the map and two-finger pinch still zooms it. Full-screen —
+  - On any device **with a touchscreen**, outside full-screen, vertical panning is handed back
+    to the browser with `touch-action: pan-y`: a one-finger swipe scrolls the page as expected,
+    while horizontal drags still pan the map and two-finger pinch still zooms it. Full-screen —
     reached from the toolbar — restores full gesture ownership, which is the right model once
-    there is no page to scroll. Driven by the same touch-primary signal as the height cap, so
-    geometry and gesture ownership cannot disagree, and re-derived on full-screen change and
-    on resize. `touch-action` constrains touch/pen only, so a touchscreen laptop still pans by
-    mouse drag exactly as before.
+    there is no page to scroll. Re-derived on full-screen change and on resize.
+  - The gesture gate uses `(any-pointer: coarse)` — **wider** than the height cap's
+    touch-primary query, deliberately. `touch-action` constrains touch/pen input only and never
+    affects mouse-driven pointer events, so the wide gate costs a touchscreen laptop's mouse
+    users nothing while covering **hybrids** (touchscreen laptops, Surface, iPad with a
+    trackpad) whose *primary* pointer is fine and which the narrower query would strand in the
+    trap. Height cannot use the wide gate — it is global to the layout, so it would shrink the
+    canvas for those same mouse users. The two conditions are nested (touch-primary implies
+    any-coarse-pointer), so every device that gets the shorter canvas also gets page-scroll.
   - A **canceled pointer is no longer treated as a tap.** Under `pan-y` the browser claims a
     one-finger swipe and fires `pointercancel`, usually before the finger has travelled the
     2px that marks a drag — which would otherwise have focused a cluster under the reader's
@@ -69,10 +74,12 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   - **Intro copy revised:** it previously recommended viewing the atlas on a computer, which
     addressed the majority of its readers as second-class; it now points them at the
     Full screen control (EN + HE).
-  - Tests: `tests/test_atlas_mobile_gestures.py` (13 guards, including regression guards
-    against both wrong gates — a viewport-relative inline height, and the `state.narrow` width
-    proxy). The two existing CLS guards keep asserting the flat pixel reservation, which the
-    final design leaves in place.
+  - Tests: `tests/test_atlas_mobile_gestures.py` (15 guards, including a regression guard
+    against each of the three wrong gates code review rejected — a viewport-relative inline
+    height, the `state.narrow` width proxy, and the primary-pointer-only query for the gesture
+    — plus one pinning the nesting of the two remaining queries so a future "unify these"
+    refactor cannot collapse them in either direction). The two existing CLS guards keep
+    asserting the flat pixel reservation, which the final design leaves in place.
 
 ---
 

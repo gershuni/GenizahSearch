@@ -1407,27 +1407,44 @@
     // via the toolbar button — restores 'none' for uninterrupted pan/pinch,
     // which is the right model once there is no page to scroll.
     //
-    // The gate is `(hover: none) and (pointer: coarse)`, NOT state.narrow. That
-    // was a review finding: state.narrow is the focus-panel breakpoint (canvas
-    // width <= 640px), so LANDSCAPE phones and tablets fell through to the
-    // immersive branch and kept the exact scroll trap this fix targets — the
-    // worst case, since a 720px box over a ~390px-tall viewport is the most
-    // trapping geometry there is. It also matches the CSS media query that caps
-    // the reserved height (web/pages/atlas.py), so geometry and gesture
-    // ownership are driven by ONE signal and cannot disagree.
+    // The gate is `(any-pointer: coarse)` — "this device has a touchscreen at
+    // all" — NOT state.narrow, and NOT the touch-PRIMARY query. Two review
+    // findings shaped that, in order:
     //
-    // Being liberal here is cheap: `touch-action` constrains touch/pen input
-    // only and does NOT affect mouse-driven pointer events, so a touchscreen
-    // laptop still pans by mouse drag exactly as before.
-    function _isTouchPrimary() {
+    //   1. state.narrow is the focus-panel breakpoint (canvas width <= 640px),
+    //      so LANDSCAPE phones and tablets fell through to the immersive branch
+    //      and kept the exact scroll trap this fix targets — the worst case,
+    //      since a 720px box over a ~390px-tall viewport is the most trapping
+    //      geometry there is.
+    //   2. `(hover: none) and (pointer: coarse)` describes only the PRIMARY
+    //      pointer, so a hybrid — a touchscreen laptop, a Surface, an iPad with
+    //      a trackpad attached — reports `hover: hover` / `pointer: fine` and
+    //      got 'none' even while the user's finger was on the canvas. Same trap,
+    //      and a regression against the state.narrow gate for narrow hybrids.
+    //
+    // `any-pointer` is the right family precisely BECAUSE being liberal here is
+    // free: `touch-action` constrains touch/pen input only and does NOT affect
+    // mouse-driven pointer events, so a touchscreen laptop still pans by mouse
+    // drag exactly as before while its touch input gains page-scroll.
+    //
+    // NOTE the deliberate asymmetry with the height cap in web/pages/atlas.py,
+    // which stays on the narrower touch-PRIMARY query. That is not an oversight:
+    // `height` is global to the layout, so capping it on any touchscreen would
+    // shrink the canvas for mouse users of that same machine (the desktop
+    // regression of review finding #1). `touch-action` is input-scoped, so it
+    // costs those users nothing. The two conditions are therefore nested, not
+    // equal — touch-primary implies any-coarse-pointer — which means every
+    // device that gets the shorter canvas also gets page-scroll. That nesting is
+    // the invariant to preserve; equality is not.
+    function _hasCoarsePointer() {
       try {
         return !!(window.matchMedia &&
-                  window.matchMedia('(hover: none) and (pointer: coarse)').matches);
-      } catch (e) { return false; }   // no matchMedia -> assume pointer device
+                  window.matchMedia('(any-pointer: coarse)').matches);
+      } catch (e) { return false; }   // no matchMedia -> assume pointer-only
     }
     function applyTouchAction() {
       if (!canvas.style) return;
-      var immersive = _isFs() || !_isTouchPrimary();
+      var immersive = _isFs() || !_hasCoarsePointer();
       canvas.style.touchAction = immersive ? 'none' : 'pan-y';
     }
     applyTouchAction();
