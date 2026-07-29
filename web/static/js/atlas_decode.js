@@ -1399,16 +1399,35 @@
     // of the viewport, so a user swiping to read the rest of the page only ever
     // pans the map and can never scroll away from it.
     //
-    // On narrow screens (outside fullscreen) we therefore hand VERTICAL panning
-    // back to the browser with 'pan-y': a one-finger swipe scrolls the page as
-    // the user expects, while horizontal drags still pan the map and two-finger
-    // pinch still zooms it (pan-y does not permit browser pinch-zoom, so those
-    // pointer events are still delivered here). Fullscreen — reached via the
-    // toolbar button — restores 'none' for uninterrupted pan/pinch, which is
-    // the right model once there is no page to scroll.
+    // On TOUCH-primary devices (outside fullscreen) we therefore hand VERTICAL
+    // panning back to the browser with 'pan-y': a one-finger swipe scrolls the
+    // page as the user expects, while horizontal drags still pan the map and
+    // two-finger pinch still zooms it (pan-y does not permit browser pinch-zoom,
+    // so those pointer events are still delivered here). Fullscreen — reached
+    // via the toolbar button — restores 'none' for uninterrupted pan/pinch,
+    // which is the right model once there is no page to scroll.
+    //
+    // The gate is `(hover: none) and (pointer: coarse)`, NOT state.narrow. That
+    // was a review finding: state.narrow is the focus-panel breakpoint (canvas
+    // width <= 640px), so LANDSCAPE phones and tablets fell through to the
+    // immersive branch and kept the exact scroll trap this fix targets — the
+    // worst case, since a 720px box over a ~390px-tall viewport is the most
+    // trapping geometry there is. It also matches the CSS media query that caps
+    // the reserved height (web/pages/atlas.py), so geometry and gesture
+    // ownership are driven by ONE signal and cannot disagree.
+    //
+    // Being liberal here is cheap: `touch-action` constrains touch/pen input
+    // only and does NOT affect mouse-driven pointer events, so a touchscreen
+    // laptop still pans by mouse drag exactly as before.
+    function _isTouchPrimary() {
+      try {
+        return !!(window.matchMedia &&
+                  window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+      } catch (e) { return false; }   // no matchMedia -> assume pointer device
+    }
     function applyTouchAction() {
       if (!canvas.style) return;
-      var immersive = !state.narrow || _isFs();
+      var immersive = _isFs() || !_isTouchPrimary();
       canvas.style.touchAction = immersive ? 'none' : 'pan-y';
     }
     applyTouchAction();
@@ -1643,9 +1662,9 @@
     // orientation change. init's resize listener (registered earlier) refreshes
     // state.narrow via resizeCanvas before this fires.
     window.addEventListener('resize', function () {
-      // A rotate / window resize can cross the narrow threshold in either
-      // direction, so re-derive gesture ownership from the refreshed
-      // state.narrow (init's resize listener runs resizeCanvas before this).
+      // Re-derive gesture ownership. Touch-primary rarely changes mid-session,
+      // but it CAN — attaching a trackpad to an iPad or a keyboard to a hybrid
+      // flips `(pointer: coarse)`, and such changes usually come with a resize.
       applyTouchAction();
       if (state.focusCluster >= 0) rebuildFocusPanel();
     });

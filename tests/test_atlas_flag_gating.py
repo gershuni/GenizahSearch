@@ -298,27 +298,14 @@ def test_real_atlas_chrome_renders_banner_and_cls_reserved_canvas():
     # resolvable height — never absent, never `auto`, and never a bare
     # `max-height` (which collapses the box to zero before the first draw).
     #
-    # Since 2026-07-29 that height is responsive rather than a flat px value:
-    # min(<desktop cap>px, <fraction>vh). Desktop still reserves the full cap;
-    # phones cap at a fraction of the viewport so the canvas cannot fill the
-    # screen and swallow every vertical swipe (the mobile scroll trap — the
-    # renderer sets touch-action on the canvas to own pan/pinch).
-    _height = canvas_info["style"].get("height")
-    assert _height, f"canvas must reserve a height (CLS-safe); style={canvas_info['style']!r}"
-    assert _height.startswith("min("), (
-        f"canvas height must be the responsive min() reservation, not a flat "
-        f"value or a max-height; got {_height!r}"
-    )
-    assert f"{_ATLAS_CANVAS_HEIGHT_PX}px" in _height, (
-        f"canvas height must keep the {_ATLAS_CANVAS_HEIGHT_PX}px desktop cap; got {_height!r}"
-    )
-    # The viewport leg is what breaks the mobile scroll trap — pin it, and pin it
-    # to `vh` specifically: NiceGUI collapses .style() into a dict, so a
-    # `vh`-then-`dvh` fallback pair cannot survive, and shipping `dvh` alone
-    # would be unparseable on iOS < 15.4 (declaration dropped -> box collapses).
-    assert "vh)" in _height and "dvh" not in _height, (
-        f"canvas height must cap against the viewport using plain vh (not dvh, "
-        f"which has no surviving fallback through NiceGUI's style dict); got {_height!r}"
+    # This stays the FLAT pixel reservation. The 2026-07-29 mobile scroll-trap
+    # fix caps the height on touch-primary devices via a `(hover: none) and
+    # (pointer: coarse)` stylesheet rule, NOT by making this inline value
+    # viewport-relative: a bare inline `min(720px, 60vh)` also shrank every
+    # desktop under 1200px tall (1920x1080 -> 648px, 1366x768 -> 461px).
+    # See tests/test_atlas_mobile_gestures.py for the cap's own guards.
+    assert canvas_info["style"].get("height") == f"{_ATLAS_CANVAS_HEIGHT_PX}px", (
+        f"canvas must reserve a fixed height (CLS-safe); style={canvas_info['style']!r}"
     )
 
 

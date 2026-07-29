@@ -35,27 +35,46 @@ from web.components.typography import h1
 # resolvable value, NOT a max-height, so the box occupies its full space before
 # any draw.
 #
-# Desktop keeps the original 720px. Phones cap the box at a fraction of the
-# viewport (2026-07-29): the height used to be a FLAT 720px on every viewport,
-# which on a phone is taller than the visible area — and because the renderer
-# sets `touch-action: none` on the canvas to own pan/pinch, the canvas then
-# swallowed every vertical swipe. Mobile users (two thirds of atlas traffic)
-# could not scroll past the map at all. Capping the height guarantees there is
-# always page above and below the canvas to grab.
+# EVERY pointer-driven layout keeps the original flat 720px. TOUCH-primary
+# devices cap the box at a fraction of the viewport (2026-07-29): the height was
+# a FLAT 720px on every viewport, which on a phone is taller than the visible
+# area — and because the renderer sets `touch-action: none` on the canvas to own
+# pan/pinch, the canvas then swallowed every vertical swipe. Mobile users (two
+# thirds of atlas traffic) could not scroll past the map at all. Capping the
+# height guarantees there is always page above and below the canvas to grab.
 #
-# Deliberately plain `vh`, NOT `dvh`: NiceGUI parses .style() into a DICT keyed
-# by property name, so emitting `height:...vh; height:...dvh` as a progressive-
-# enhancement pair does NOT survive — the dict keeps only the last value. That
-# would ship `dvh` alone, which older WebKit (iOS < 15.4) cannot parse, dropping
-# the declaration entirely and collapsing the reserved box. `vh` is universally
-# supported. On iOS it measures the LARGE viewport (browser chrome hidden), so
-# the box can occupy a somewhat larger share of the visible area than the
-# fraction suggests — still comfortably short of the full screen, which is all
-# the scroll fix requires. Both units resolve at first paint; CLS holds either way.
+# The cap is gated on `(hover: none) and (pointer: coarse)` — the standard
+# touch-primary query — NOT on viewport width or height. Both alternatives are
+# wrong here, and a first cut of this fix got it wrong twice (caught in review):
+#   * Height-gated (a bare `min(720px, 60vh)` inline) silently shrank DESKTOP:
+#     60vh < 720px for any viewport under 1200px tall, so 1920x1080 dropped to
+#     648px and a 1366x768 laptop to 461px — i.e. almost every desktop.
+#   * Width-gated (<= 640px) misses LANDSCAPE phones and tablets, which are
+#     exactly where a 720px box over a ~390px-tall viewport is worst.
+# Touch-primary is the population with the swipe-trap problem, so it is the
+# population that gets the cap. Mouse/trackpad layouts are untouched at any size.
+#
+# This lives in a real stylesheet rule rather than the inline style because a
+# media query cannot be expressed inline, and because NiceGUI parses .style()
+# into a DICT keyed by property name — so an inline progressive-enhancement pair
+# (`height:...vh; height:...dvh`) does not survive, keeping only the last value.
+# `!important` is required to beat the inline reservation. The rule deliberately
+# uses a CLASS selector (0-1-0): atlas_decode.js's `.atlas-fs-box:fullscreen`
+# rules (0-2-0 / 0-2-1, also !important) out-specify it, so entering full screen
+# still fills the screen on a phone. Plain `vh`, not `dvh` — `dvh` is unparseable
+# on iOS < 15.4, which would drop the declaration and collapse the box.
 _ATLAS_CANVAS_HEIGHT_PX = 720
 _ATLAS_CANVAS_VIEWPORT_FRACTION = 60
-_ATLAS_CANVAS_HEIGHT_CSS = (
-    f'height: min({_ATLAS_CANVAS_HEIGHT_PX}px, {_ATLAS_CANVAS_VIEWPORT_FRACTION}vh);'
+# Class carried by BOTH the reserved box and the canvas, targeted by the rule below.
+_ATLAS_HEIGHT_CAP_CLASS = 'atlas-h-cap'
+_ATLAS_CANVAS_HEIGHT_CSS = f'height: {_ATLAS_CANVAS_HEIGHT_PX}px;'
+_ATLAS_HEIGHT_CAP_STYLE = (
+    '<style id="atlas-height-cap">'
+    '@media (hover: none) and (pointer: coarse){'
+    f'.{_ATLAS_HEIGHT_CAP_CLASS}{{'
+    f'height: min({_ATLAS_CANVAS_HEIGHT_PX}px, {_ATLAS_CANVAS_VIEWPORT_FRACTION}vh) !important;'
+    '}}'
+    '</style>'
 )
 
 # ---------------------------------------------------------------------------
@@ -166,6 +185,10 @@ def create_atlas_page() -> None:
     direction = 'rtl' if rtl else 'ltr'
     align = 'right' if rtl else 'left'
 
+    # Touch-primary height cap (see _ATLAS_HEIGHT_CAP_STYLE). In <head>, so it
+    # applies at first paint and the CLS reservation still holds.
+    ui.add_head_html(_ATLAS_HEIGHT_CAP_STYLE)
+
     with ui.column().classes('w-full max-w-7xl mx-auto gap-3 fade-in').style(
         f'direction: {direction}; text-align: {align};'
     ):
@@ -204,7 +227,9 @@ def create_atlas_page() -> None:
         # the box occupies its full area before the 133-04 renderer attaches —
         # no layout shift. The height caps against the viewport on phones; see
         # _ATLAS_CANVAS_HEIGHT_CSS.
-        with ui.element('div').classes('w-full rounded-lg overflow-hidden').style(
+        with ui.element('div').classes(
+            f'w-full rounded-lg overflow-hidden {_ATLAS_HEIGHT_CAP_CLASS}'
+        ).style(
             f'position: relative; width: 100%; {_ATLAS_CANVAS_HEIGHT_CSS} '
             f'background: var(--bg-secondary); border: 1px solid var(--border-light);'
         ).props('id="atlas-canvas-box"'):
@@ -217,7 +242,7 @@ def create_atlas_page() -> None:
             # loaded"). Setting id via .props() keeps it queryable in the DOM.
             ui.element('canvas').props('id=atlas-canvas').props(
                 f'aria-label="{tr("The Visual Genizah Atlas")}"'
-            ).style(
+            ).classes(_ATLAS_HEIGHT_CAP_CLASS).style(
                 f'display:block; width:100%; {_ATLAS_CANVAS_HEIGHT_CSS}'
             )
             # Loading placeholder (centered), shown until 133-04's renderer draws.

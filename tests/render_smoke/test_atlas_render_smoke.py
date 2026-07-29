@@ -171,11 +171,11 @@ def test_atlas_renders_chrome_canvas_and_decoder_injection():
         # id, breaking the renderer's getElementById mount ("could not be loaded").
         # Asserting the element + id + native tag guards that at the render layer.
         #
-        # Since 2026-07-29 the height is responsive — min(<cap>px, <fraction>vh) —
-        # so phones cap below the viewport instead of reserving a flat 720px that
-        # filled the screen and swallowed every vertical swipe (mobile scroll
-        # trap). Assert the INVARIANT, not the literal. See
-        # tests/test_atlas_mobile_gestures.py for the full gesture guards.
+        # This stays the FLAT pixel reservation: the 2026-07-29 mobile scroll-trap
+        # fix caps the height on touch-primary devices through a stylesheet media
+        # query, NOT by making this inline value viewport-relative (which also
+        # shrank every desktop under 1200px tall). See
+        # tests/test_atlas_mobile_gestures.py for the cap + gesture guards.
         from web.pages.atlas import _ATLAS_CANVAS_HEIGHT_PX
         canvas = _canvas_element(user)
         assert canvas is not None, (
@@ -186,15 +186,9 @@ def test_atlas_renders_chrome_canvas_and_decoder_injection():
             "(must be ui.element('canvas'), not ui.html which strips the id)."
         )
         cstyle = getattr(canvas, '_style', None) or {}
-        _h = cstyle.get('height')
-        assert _h and _h.startswith('min(') and f'{_ATLAS_CANVAS_HEIGHT_PX}px' in _h, (
-            "Atlas render FAIL: canvas is not CLS-reserved with the responsive "
-            f"min({_ATLAS_CANVAS_HEIGHT_PX}px, <fraction>vh) height. style={cstyle!r}"
-        )
-        assert 'vh)' in _h and 'dvh' not in _h, (
-            "Atlas render FAIL: canvas height must cap against the viewport using "
-            f"plain vh (dvh has no surviving fallback through NiceGUI's style "
-            f"dict). style={cstyle!r}"
+        assert cstyle.get('height') == f'{_ATLAS_CANVAS_HEIGHT_PX}px', (
+            "Atlas render FAIL: canvas is not CLS-reserved with a fixed "
+            f"{_ATLAS_CANVAS_HEIGHT_PX}px height. style={cstyle!r}"
         )
 
         # Decoder module + bootstrap injected into the page body.
