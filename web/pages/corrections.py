@@ -84,7 +84,17 @@ async def fetch_leaderboard_users(limit: int = 20) -> List[Dict]:
     shared across requests deliberately -- a per-call one would bound each visitor
     to 4 but leave the process ceiling at 4 x visitors.
     """
-    users = await run.io_bound(_fetch_top_profiles, limit)
+    # The profiles query is offloaded too, so it must sit under the SAME
+    # process-wide bound -- otherwise the real ceiling is "one unbounded profile
+    # read per visitor, plus 4 counts", and enough simultaneous visitors can
+    # still occupy the shared pool.
+    #
+    # Acquired in its OWN block and released before the counts below. Do NOT nest
+    # the count fan-out inside this `async with`: holding a slot while waiting for
+    # another slot from the same semaphore deadlocks once `limit` visitors are in
+    # flight.
+    async with _LEADERBOARD_COUNT_SEMAPHORE:
+        users = await run.io_bound(_fetch_top_profiles, limit)
     if not users:
         return []
     ids = [u.get('id') for u in users]

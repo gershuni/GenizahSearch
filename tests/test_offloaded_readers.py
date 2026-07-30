@@ -197,13 +197,13 @@ def _instrument_leaderboard(monkeypatch, corrections, n_profiles=20):
     stats = {'in_flight': 0, 'peak': 0}
 
     async def fake_io_bound(fn, *args, **kwargs):
-        if fn is corrections._fetch_top_profiles:
-            return fn(*args, **kwargs)
+        # Counts EVERY offloaded call, profile reads included -- they share the
+        # same thread pool, so a bound that ignores them is not a real bound.
         stats['in_flight'] += 1
         stats['peak'] = max(stats['peak'], stats['in_flight'])
         await asyncio.sleep(0.01)
         stats['in_flight'] -= 1
-        return 1
+        return fn(*args, **kwargs) if fn is corrections._fetch_top_profiles else 1
 
     monkeypatch.setattr(corrections.run, 'io_bound', fake_io_bound)
     return stats
@@ -251,6 +251,78 @@ def test_leaderboard_bound_holds_across_concurrent_visitors(monkeypatch):
         f"combined peak {stats['peak']} exceeded the process-wide bound {limit} -- "
         'the semaphore is per-invocation again'
     )
+
+
+def test_leaderboard_profile_reads_are_also_bounded(monkeypatch):
+    """The initial profiles query must sit under the bound too.
+
+    Regression for the follow-up PR-review P2: `_fetch_top_profiles` was offloaded
+    BEFORE acquiring the semaphore, so the true ceiling was "one unbounded profile
+    read per visitor, plus 4 counts".
+
+    Uses 8 simultaneous visitors deliberately: their profile reads all start at
+    once, so an unbounded version peaks at 8 while the bounded one cannot exceed
+    4. Three visitors would NOT discriminate -- 3 unbounded profile reads stay
+    under the bound by luck.
+    """
+    corrections = pytest.importorskip('web.pages.corrections')
+    limit = corrections._LEADERBOARD_COUNT_CONCURRENCY
+    stats = _instrument_leaderboard(monkeypatch, corrections, n_profiles=2)
+
+    async def many_visitors():
+        return await asyncio.gather(*[
+            corrections.fetch_leaderboard_users(limit=2) for _ in range(8)
+        ])
+
+    results = asyncio.run(many_visitors())
+
+    assert len(results) == 8
+    assert stats['peak'] <= limit, (
+        f"combined peak {stats['peak']} exceeded {limit} -- the profiles read is "
+        'outside the shared bound'
+    )
+
+
+def test_leaderboard_does_not_nest_semaphore_acquisitions():
+    """The profiles acquire must be released before the count fan-out.
+
+    Holding a slot while awaiting another slot from the SAME semaphore deadlocks
+    once `_LEADERBOARD_COUNT_CONCURRENCY` visitors are in flight, so the two
+    acquisitions must be sequential blocks, not nested.
+    """
+    import ast
+    import textwrap
+
+    corrections = pytest.importorskip('web.pages.corrections')
+    tree = ast.parse(textwrap.dedent(inspect.getsource(corrections.fetch_leaderboard_users)))
+
+    def acquires_the_semaphore(node):
+        return isinstance(node, ast.AsyncWith) and any(
+            isinstance(n, ast.Name) and n.id == '_LEADERBOARD_COUNT_SEMAPHORE'
+            for item in node.items for n in ast.walk(item.context_expr)
+        )
+
+    blocks = [n for n in ast.walk(tree) if acquires_the_semaphore(n)]
+    assert blocks, 'the semaphore is never acquired'
+
+    # Positive: the profiles read is inside one of those blocks.
+    def mentions(node, name):
+        return any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(node))
+
+    assert any(mentions(b, '_fetch_top_profiles') for b in blocks), \
+        'the profiles read is not under the shared bound'
+
+    # Negative: no acquire block may CONTAIN another acquire, and the `_count`
+    # helper (which acquires it too) must not be defined inside one -- holding a
+    # slot while awaiting another from the same semaphore deadlocks.
+    for block in blocks:
+        inner = [n for n in ast.walk(block) if n is not block and acquires_the_semaphore(n)]
+        assert not inner, 'nested acquire of the same semaphore -- deadlock risk'
+        nested_count = [
+            n for n in ast.walk(block)
+            if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == '_count'
+        ]
+        assert not nested_count, '_count defined inside a semaphore block -- deadlock risk'
 
 
 def test_leaderboard_semaphore_is_module_level():
