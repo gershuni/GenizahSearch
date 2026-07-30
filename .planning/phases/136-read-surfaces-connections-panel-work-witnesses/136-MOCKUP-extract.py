@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Extract REAL data from the frozen discovery asset + Transcriptions.txt for the
 Phase 136 mockup. Read-only. Writes mockup_data.json to the scratchpad."""
-import json, os, re, sqlite3, sys, csv
+import json, os, re, sqlite3, csv
 
 DB = r'C:\Genizahsearch\discovery_data\discovery-v1-33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff.db'
 TRANS = r'C:\Genizahsearch\Transcriptions.txt'
