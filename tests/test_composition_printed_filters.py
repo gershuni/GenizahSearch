@@ -16,6 +16,9 @@ _APP = QApplication.instance() or QApplication([])
 
 
 class _CompositionFilterHarness:
+    comp_col_library = 1
+    comp_col_shelfmark = 2
+    comp_col_title = 3
     comp_col_context = 5
     comp_col_ms_context = 6
     comp_col_printed = 7
@@ -50,9 +53,15 @@ class _CompositionFilterHarness:
     def _show_local_filter_chip(self, surface, inactive):
         return None
 
-    def add_result(self, sys_id):
-        node = QTreeWidgetItem(self.comp_tree)
-        node.setData(0, Qt.ItemDataRole.UserRole, {"sys_id": sys_id})
+    def add_result(
+        self, sys_id=None, *, parent=None, library="", shelfmark="", title=""
+    ):
+        node = QTreeWidgetItem(parent if parent is not None else self.comp_tree)
+        node.setText(self.comp_col_library, library)
+        node.setText(self.comp_col_shelfmark, shelfmark)
+        node.setText(self.comp_col_title, title)
+        record = {"sys_id": sys_id} if sys_id else {}
+        node.setData(0, Qt.ItemDataRole.UserRole, record)
         node.setData(
             0,
             Qt.ItemDataRole.UserRole + 1,
@@ -75,6 +84,43 @@ def test_composition_printed_filter_uses_record_data_not_preview_data():
     harness._apply_comp_tree_filters()
     assert not printed.isHidden()
     assert manuscript.isHidden()
+
+
+def test_composition_printed_filter_applies_to_entire_manuscript_subtree():
+    harness = _CompositionFilterHarness()
+    printed = harness.add_result("printed")
+    page = harness.add_result(parent=printed, shelfmark="Image 1")
+
+    harness._comp_printed_filter_state = "hide_printed"
+    harness._apply_comp_tree_filters()
+    assert printed.isHidden()
+    assert page.isHidden()
+
+    harness._comp_printed_filter_state = "only_printed"
+    harness._apply_comp_tree_filters()
+    assert not printed.isHidden()
+    assert not page.isHidden()
+
+
+def test_composition_library_filter_uses_displayed_library_column():
+    harness = _CompositionFilterHarness()
+    local = harness.add_result(
+        "local-id",
+        library="Local Folder",
+        shelfmark="local-file.txt",
+    )
+    harness.comp_filters = {
+        harness.comp_col_library: {"text": "Local Folder", "exclude": False}
+    }
+
+    harness._apply_comp_tree_filters()
+    assert not local.isHidden()
+
+    harness.comp_filters = {
+        harness.comp_col_library: {"text": "local-file.txt", "exclude": False}
+    }
+    harness._apply_comp_tree_filters()
+    assert local.isHidden()
 
 
 class _Signal:
