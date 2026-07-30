@@ -585,7 +585,9 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
 ## Deferred Ideas
 
 **Open, resolved during execution (gate noted):**
-- **Gate 1:** the D-13c short-evidence threshold; the D-13b lead-attribution tie-break.
+- **Gate 1:** the D-13c short-evidence threshold; the D-13b lead-attribution tie-break; **the D-13d
+  granularity separation rule** (same work at two granularities → collapse; different works on one
+  passage → generic) — the ⚠ KNOWN FLAW above, which must be closed before the panel is built on it.
 - **Gate 5:** the findings page's row unit (recommended default: one identification per line); how
   computed rows are presented alongside catalogued ones on `/catalog-browse`.
 - **Gate 6:** PANEL-03's final form, given the b-side has no offsets.
@@ -605,11 +607,20 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
 - Whether restricted-source rows ever move private → public (`v9-PUBLICATION-STRATEGY.md` §8.5),
   which decides if D-22's projection is permanent or a revisable policy label.
 
-**Bookkeeping owed before/at planning:**
-- `REQUIREMENTS.md`: NOVEL-01/02 traceability → Phase 136; the BAND-03, BAND-05 and NOVEL-01 wording
-  amendments; note that 136 amends contracts.
-- `ROADMAP.md`: rewritten Phase-136 goal + success criteria (four surfaces + the rebuild), and the
-  findings-page ↔ leads-queue relationship at 138.
+**Bookkeeping — DONE 2026-07-30, before planning:**
+- `REQUIREMENTS.md`: NOVEL-01/02 re-homed to Phase 136 in the traceability table + a dated note on the
+  Novelty-axis section reversing the 2026-07-28 homing; dated `⟨AMENDED⟩` sub-bullets on **BAND-03**
+  (the screening-precision-via-tooltip clause STRUCK), **BAND-05** (weighted estimate, CI and strata
+  table STRUCK; qualitative methods page; the `help.py` rewrite is due in THIS phase), and **NOVEL-01**
+  (tri-state fail-closed; "Not found in the finding aids checked"; the owner confidence estimate
+  dropped; reviewed alias-aware identity key); a `⟨CONFLICT FLAGGED⟩` sub-bullet on **CERT-02** naming
+  the R-A 0.889 / screening-values clash with D-06 and leaving resolution to Phase 139.
+- `ROADMAP.md`: Phase-136 entry rewritten — scope-expansion banner (novelty moved IN, VIS-01 homed,
+  two new surfaces, one authorized rebuild), requirements line extended with VIS-01/NOVEL-01/NOVEL-02
+  plus the contracts this phase amends, **eight** success criteria (rebuild first, then panel, evidence
+  view, work page, findability, novelty, no-numbers honesty, flag-off/perf/masking), the six execution
+  gates in the Plans line, and the one-line phase summary. Phase 138 now records the findings-page ↔
+  leads-queue relationship: `/leads` is a MODE of the 136 findings page, not a second implementation.
 
 </deferred>
 
