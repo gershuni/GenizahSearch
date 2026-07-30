@@ -1,0 +1,660 @@
+<title>Phase 136 mockup — connections panel, work page, findings browse</title>
+<style>
+  :root {
+    --bg:#fbfaf8; --fg:#1c1a17; --mut:#6b645c; --line:#e2ddd5; --card:#fff;
+    --accent:#7a4f2c; --hi:#fde68a; --warnbg:#fff4e5; --warnfg:#8a4b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16151a; --fg:#ebe7e0; --mut:#a19a90; --line:#2f2c34; --card:#1e1d23;
+      --accent:#d8a878; --hi:#5a4a12; --warnbg:#3a2a12; --warnfg:#f0c48a; }
+  }
+  :root[data-theme="dark"] { --bg:#16151a; --fg:#ebe7e0; --mut:#a19a90; --line:#2f2c34; --card:#1e1d23;
+      --accent:#d8a878; --hi:#5a4a12; --warnbg:#3a2a12; --warnfg:#f0c48a; }
+  :root[data-theme="light"] { --bg:#fbfaf8; --fg:#1c1a17; --mut:#6b645c; --line:#e2ddd5; --card:#fff;
+      --accent:#7a4f2c; --hi:#fde68a; --warnbg:#fff4e5; --warnfg:#8a4b00; }
+  body { background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;
+    margin:0; padding:0 0 5rem; }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 1.1rem; }
+  h1 { font-size:1.5rem; margin:2rem 0 .3rem; letter-spacing:-.01em; }
+  h2 { font-size:1.15rem; margin:2.6rem 0 .2rem; padding-top:1.4rem; border-top:1px solid var(--line); }
+  h3 { font-size:.95rem; margin:1.5rem 0 .5rem; color:var(--mut); text-transform:uppercase;
+    letter-spacing:.06em; font-weight:600; }
+  p, li { color:var(--fg); }
+  .lede { color:var(--mut); margin:.2rem 0 1.4rem; }
+  .prov { font-size:.82rem; color:var(--mut); background:var(--card); border:1px solid var(--line);
+    border-radius:8px; padding:.7rem .9rem; margin:1rem 0 0; }
+  .prov code { font-size:.9em; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:1rem 1.1rem;
+    margin:.9rem 0; }
+  .browsebar { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; font-size:.9rem;
+    color:var(--mut); }
+  .cta { background:var(--accent); color:#fff; border:0; border-radius:7px; padding:.5rem .85rem;
+    font-size:.9rem; cursor:pointer; }
+  :root[data-theme="dark"] .cta, @media (prefers-color-scheme: dark) { }
+  .grp { margin:.9rem 0 .2rem; font-weight:650; font-size:.95rem; }
+  .grp .cnt { color:var(--mut); font-weight:400; }
+  .claim { border-top:1px solid var(--line); padding:.7rem 0 .6rem; }
+  .claim.dup { background:var(--warnbg); border-radius:6px; padding-inline:.6rem; }
+  .c-main { display:flex; align-items:baseline; gap:.5rem; flex-wrap:wrap; }
+  .c-title { font-size:1.05rem; font-weight:600; }
+  .c-en { color:var(--mut); font-size:.82rem; }
+  .pct { font-size:.82rem; color:var(--mut); border:1px solid var(--line); border-radius:20px;
+    padding:.05rem .5rem; }
+  .c-meta { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; font-size:.8rem;
+    color:var(--mut); margin-top:.25rem; }
+  .band { border-radius:5px; padding:.1rem .45rem; font-size:.78rem; border:1px solid var(--line); }
+  .band .he { opacity:.7; margin-inline-start:.3rem; }
+  .b-a { border-color:var(--accent); color:var(--accent); }
+  .b-hi { border-color:#2f7d4f; color:#2f7d4f; }
+  .b-ne { opacity:.75; }
+  .unrev { font-style:italic; }
+  .wid { font-family:ui-monospace,monospace; font-size:.72rem; opacity:.6; }
+  .c-act { display:flex; gap:.45rem; flex-wrap:wrap; margin-top:.45rem; align-items:center; }
+  .btn { background:transparent; color:var(--accent); border:1px solid var(--line); border-radius:6px;
+    padding:.25rem .55rem; font-size:.8rem; cursor:pointer; }
+  .vote { margin-inline-start:auto; font-size:.85rem; color:var(--mut); }
+  .ph { font-size:.72rem; opacity:.65; }
+  .warn { background:var(--warnfg); color:var(--card); border-radius:4px; padding:.05rem .4rem;
+    font-size:.72rem; }
+  .toggle { border-top:1px solid var(--line); margin-top:.7rem; padding-top:.7rem; font-size:.88rem;
+    color:var(--accent); }
+  .disc { font-size:.82rem; color:var(--mut); margin-top:.7rem; font-style:italic; }
+  .heb { direction:rtl; text-align:right; font-size:1.05rem; line-height:1.9; }
+  mark { background:var(--hi); color:inherit; padding:.05rem .1rem; border-radius:3px; }
+  table { border-collapse:collapse; width:100%; font-size:.88rem; }
+  th, td { text-align:start; padding:.4rem .5rem; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-size:.76rem; text-transform:uppercase; letter-spacing:.05em; }
+  td.num { text-align:end; font-variant-numeric:tabular-nums; color:var(--mut); }
+  .shelf { font-weight:600; }
+  .joined { font-size:.72rem; color:var(--mut); margin-inline-start:.4rem; border:1px solid var(--line);
+    border-radius:20px; padding:0 .4rem; }
+  .novel { font-size:.74rem; border:1px dashed var(--accent); color:var(--accent); border-radius:20px;
+    padding:.05rem .45rem; }
+  .tbl-wrap { overflow-x:auto; }
+  .ctrls { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; margin:.6rem 0; font-size:.85rem; }
+  .chip { border:1px solid var(--line); border-radius:20px; padding:.2rem .6rem; cursor:pointer; }
+  .chip.on { border-color:var(--accent); color:var(--accent); }
+  .q { background:var(--warnbg); border:1px solid var(--warnfg); border-radius:10px;
+    padding:.9rem 1.05rem; margin:1rem 0; }
+  .q h4 { margin:0 0 .4rem; font-size:.95rem; color:var(--warnfg); }
+  .side { display:grid; grid-template-columns:1fr 1fr 1fr; gap:.8rem; }
+  @media (max-width:860px) { .side { grid-template-columns:1fr; } }
+  .opt { border:1px solid var(--line); border-radius:9px; padding:.8rem; background:var(--card); }
+  .opt h5 { margin:0 0 .5rem; font-size:.85rem; }
+  .opt .tag { font-size:.7rem; color:var(--mut); }
+  .fail { color:#a33; font-size:.85rem; }
+  ul.tight { margin:.4rem 0 0; padding-inline-start:1.2rem; }
+  ul.tight li { margin:.25rem 0; }
+</style>
+
+<div class="wrap">
+
+<h1>Phase 136 — read surfaces, mocked on real data</h1>
+<p class="lede">Everything below except where marked <em>mock</em> is pulled live from the deployed
+discovery file and the real transcription corpus. Nothing here is styled to final polish — the point is
+the <strong>information architecture and the wording</strong>, so the open decisions can be settled.</p>
+
+<div class="prov">
+  <strong>Provenance.</strong> Asset <code>discovery-v1-33499c5b…</code> (frozen, deployed, flag OFF) ·
+  manuscript <strong>Ms. EVR II A 684</strong> (RNL,
+  <span dir="rtl">סדור מנהג אשכנז.</span>) ·
+  page <code>…253_P000006_FL49002304</code> · page text 1573 chars /
+  1225 Hebrew letters, read from <code>Transcriptions.txt</code>.<br>
+  <strong>Mocked, not real:</strong> the novelty marks (the flag is not computed yet for this family)
+  and the vote controls (phase 137). Precision percentages appear nowhere, by your decision.
+</div>
+
+<h2>1 · The connections panel</h2>
+
+<h3>Entry point on the browse page</h3>
+<div class="card">
+  <div class="browsebar">
+    <span>Enrichment: PGP ✓ · Catalogue ✓ · Images ✓ ·</span>
+    <button class="cta">Computed identifications · זיהויים מחושבים <strong>(16)</strong></button>
+    <span>— hidden entirely on the ~83% of manuscripts with none</span>
+  </div>
+</div>
+
+<h3>Panel open — as the data actually is</h3>
+<div class="card">
+  <div class="grp">On this page <span class="cnt">· 8 matches</span></div>
+  
+    <div class="claim dup" data-pub="private">
+      <div class="c-main">
+        <span class="c-title" dir="rtl">ארבעה טורים, אורח חיים</span>
+        <span class="c-en">Matches · התאמה</span>
+        <span class="pct">45% of page</span>
+        <span class="warn">same canonical work as טור אורח חיים</span>
+      </div>
+      <div class="c-meta">
+        <span class="band b-a">Algorithmic match — tier A <span class="he" dir="rtl">התאמה אלגוריתמית — דרגה א׳</span></span>
+        <span class="unrev">unreviewed · algorithmic estimate</span>
+        <span class="wid">w000190</span>
+        יעקב בן אשר
+      </div>
+      <div class="c-act">
+        <button class="btn">Evidence · ראיות</button>
+        <button class="btn">Other manuscripts matching this work ▸</button>
+        <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder → phase 137)</span></span>
+      </div>
+    </div>
+    <div class="claim " data-pub="public">
+      <div class="c-main">
+        <span class="c-title" dir="rtl">ילקוט שמעוני על נ&quot;ך</span>
+        <span class="c-en">Matches · התאמה</span>
+        <span class="pct">45% of page</span>
+        
+      </div>
+      <div class="c-meta">
+        <span class="band b-a">Algorithmic match — tier A <span class="he" dir="rtl">התאמה אלגוריתמית — דרגה א׳</span></span>
+        <span class="unrev">unreviewed · algorithmic estimate</span>
+        <span class="wid">w001383</span>
+        שמעון הדרשן
+      </div>
+      <div class="c-act">
+        <button class="btn">Evidence · ראיות</button>
+        <button class="btn">Other manuscripts matching this work ▸</button>
+        <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder → phase 137)</span></span>
+      </div>
+    </div>
+    <div class="claim dup" data-pub="public">
+      <div class="c-main">
+        <span class="c-title" dir="rtl">טור אורח חיים</span>
+        <span class="c-en">Matches · התאמה</span>
+        <span class="pct">45% of page</span>
+        <span class="warn">same canonical work as ארבעה טורים, אורח חיים</span>
+      </div>
+      <div class="c-meta">
+        <span class="band b-a">Algorithmic match — tier A <span class="he" dir="rtl">התאמה אלגוריתמית — דרגה א׳</span></span>
+        <span class="unrev">unreviewed · algorithmic estimate</span>
+        <span class="wid">w001382</span>
+        יעקב בן אשר
+      </div>
+      <div class="c-act">
+        <button class="btn">Evidence · ראיות</button>
+        <button class="btn">Other manuscripts matching this work ▸</button>
+        <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder → phase 137)</span></span>
+      </div>
+    </div>
+    <div class="claim " data-pub="public">
+      <div class="c-main">
+        <span class="c-title" dir="rtl">עמידה לחול (שחרית)</span>
+        <span class="c-en">Matches · התאמה</span>
+        <span class="pct">5% of page</span>
+        
+      </div>
+      <div class="c-meta">
+        <span class="band b-ne">Shared text — not evaluated <span class="he" dir="rtl">טקסט משותף — לא הוערך</span></span>
+        <span class="unrev">unreviewed · algorithmic estimate</span>
+        <span class="wid">w001157</span>
+        
+      </div>
+      <div class="c-act">
+        <button class="btn">Evidence · ראיות</button>
+        <button class="btn">Other manuscripts matching this work ▸</button>
+        <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder → phase 137)</span></span>
+      </div>
+    </div>
+    <div class="claim " data-pub="public">
+      <div class="c-main">
+        <span class="c-title" dir="rtl">עמידה לחול (ערבית)</span>
+        <span class="c-en">Matches · התאמה</span>
+        <span class="pct">5% of page</span>
+        
+      </div>
+      <div class="c-meta">
+        <span class="band b-ne">Shared text — not evaluated <span class="he" dir="rtl">טקסט משותף — לא הוערך</span></span>
+        <span class="unrev">unreviewed · algorithmic estimate</span>
+        <span class="wid">w001156</span>
+        
+      </div>
+      <div class="c-act">
+        <button class="btn">Evidence · ראיות</button>
+        <button class="btn">Other manuscripts matching this work ▸</button>
+        <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder → phase 137)</span></span>
+      </div>
+    </div>
+    <div class="claim " data-pub="public">
+      <div class="c-main">
+        <span class="c-title" dir="rtl">עמידה לשבת (ערבית)</span>
+        <span class="c-en">Matches · התאמה</span>
+        <span class="pct">5% of page</span>
+        
+      </div>
+      <div class="c-meta">
+        <span class="band b-ne">Shared text — not evaluated <span class="he" dir="rtl">טקסט משותף — לא הוערך</span></span>
+        <span class="unrev">unreviewed · algorithmic estimate</span>
+        <span class="wid">w001153</span>
+        
+      </div>
+      <div class="c-act">
+        <button class="btn">Evidence · ראיות</button>
+        <button class="btn">Other manuscripts matching this work ▸</button>
+        <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder → phase 137)</span></span>
+      </div>
+    </div>
+    <div class="claim " data-pub="public">
+      <div class="c-main">
+        <span class="c-title" dir="rtl">הגדה של פסח</span>
+        <span class="c-en">Matches · התאמה</span>
+        <span class="pct">5% of page</span>
+        
+      </div>
+      <div class="c-meta">
+        <span class="band b-ne">Shared text — not evaluated <span class="he" dir="rtl">טקסט משותף — לא הוערך</span></span>
+        <span class="unrev">unreviewed · algorithmic estimate</span>
+        <span class="wid">w001159</span>
+        
+      </div>
+      <div class="c-act">
+        <button class="btn">Evidence · ראיות</button>
+        <button class="btn">Other manuscripts matching this work ▸</button>
+        <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder → phase 137)</span></span>
+      </div>
+    </div>
+    <div class="claim " data-pub="public">
+      <div class="c-main">
+        <span class="c-title" dir="rtl">ילקוט שמעוני על התורה</span>
+        <span class="c-en">Matches · התאמה</span>
+        <span class="pct">19% of page</span>
+        
+      </div>
+      <div class="c-meta">
+        <span class="band b-ne">Shared text — not evaluated <span class="he" dir="rtl">טקסט משותף — לא הוערך</span></span>
+        <span class="unrev">unreviewed · algorithmic estimate</span>
+        <span class="wid">w001384</span>
+        שמעון הדרשן
+      </div>
+      <div class="c-act">
+        <button class="btn">Evidence · ראיות</button>
+        <button class="btn">Other manuscripts matching this work ▸</button>
+        <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder → phase 137)</span></span>
+      </div>
+    </div>
+
+  <div class="grp" style="margin-top:1.2rem">Elsewhere in this manuscript
+    <span class="cnt">· 8 matches on 2 other pages ▸ (collapsed)</span></div>
+
+  <div class="toggle">Pages matching this page in other manuscripts ·
+    דפים התואמים לדף זה בכתבי־יד אחרים — <strong>4</strong>
+    pages. <span style="text-decoration:underline">Show more possible matches ▾</span>
+    <span class="ph">(rows behind the toggle: they carry the “shared text — not evaluated” band)</span></div>
+
+  <div class="toggle">Show more possible matches ▾ <span class="ph">— also reveals
+    4 screening / review-only rows on this manuscript</span></div>
+
+  <div class="disc">Not exhaustive — more identifications may exist. ·
+    <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+</div>
+
+<div class="q">
+  <h4>⚠ What this real page exposes — two things we had not written down</h4>
+  <ul class="tight">
+    <li><strong>The same work appears twice under two titles.</strong>
+      <span dir="rtl">ארבעה טורים, אורח חיים</span> (<code>w000190</code>) and
+      <span dir="rtl">טור אורח חיים</span> (<code>w001382</code>) are the same work — the merge IS
+      recorded (<code>canonical_work_id = w001382</code>) — but both ship as separate rows because
+      claims key on <em>(page, work)</em> and dedup runs per claim key. Corpus-wide:
+      <strong>921 row-pairs</strong> like this. The panel has to collapse by canonical work at
+      display time and pick one title.</li>
+    <li><strong>Three of these matches sit on byte-identical offsets</strong> (0–555) — one passage
+      matched to three works, shown as three independent findings. Corpus-wide:
+      <strong>1,558 span-groups</strong> with 2–8 claims on identical spans (1,245 pairs, 208 triples,
+      one 8-way). Presenting them flat overstates the evidence.</li>
+  </ul>
+</div>
+
+<h3>Same panel, with both fixes applied — is this what you want?</h3>
+<div class="card">
+  <div class="grp">On this page <span class="cnt">· 3 passages matched</span></div>
+  <div class="claim">
+    <div class="c-main">
+      <span class="c-title" dir="rtl">טור אורח חיים</span>
+      <span class="c-en">Matches · התאמה</span>
+      <span class="pct">45% of page</span>
+    </div>
+    <div class="c-meta">
+      <span class="band b-a">Algorithmic match — tier A <span class="he" dir="rtl">התאמה אלגוריתמית — דרגה א׳</span></span>
+      <span class="unrev">unreviewed · algorithmic estimate</span>
+      <span class="wid">w001382</span> <span dir="rtl">יעקב בן אשר</span>
+    </div>
+    <div class="c-act">
+      <button class="btn">Evidence · ראיות</button>
+      <button class="btn">Other manuscripts matching this work ▸</button>
+      <span class="vote">✓ <span class="sep">·</span> ? <span class="sep">·</span> ✗ <span class="ph">(placeholder)</span></span>
+    </div>
+    <div class="c-meta" style="margin-top:.5rem">
+      ↳ the same passage also matches <span dir="rtl">ילקוט שמעוני על נ"ך</span>
+      <span class="band b-a">tier A</span> <span class="ph">— one passage, competing attributions</span>
+    </div>
+  </div>
+  <div class="claim">
+    <div class="c-main">
+      <span class="c-title" dir="rtl">עמידה לחול (שחרית)</span>
+      <span class="c-en">Matches · התאמה</span>
+      <span class="pct">5% of page</span>
+    </div>
+    <div class="c-meta">
+      <span class="band b-ne">Shared text — not evaluated <span class="he" dir="rtl">טקסט משותף — לא הוערך</span></span>
+      <span class="unrev">unreviewed · algorithmic estimate</span>
+    </div>
+    <div class="c-meta" style="margin-top:.5rem">
+      ↳ the same passage also matches
+      <span dir="rtl">עמידה לחול (ערבית)</span>, <span dir="rtl">עמידה לשבת (ערבית)</span>,
+      <span dir="rtl">הגדה של פסח</span> <span class="ph">— 4 liturgical works on one 66-letter span</span>
+    </div>
+  </div>
+  <div class="disc">Not exhaustive — more identifications may exist.</div>
+</div>
+
+<h3>Expanded: other manuscripts matching this work</h3>
+<div class="card">
+  <div class="grp" dir="rtl">ילקוט שמעוני על נ"ך <span class="cnt" dir="ltr">— 224 other manuscripts, 214 witnesses after grouping joined fragments</span></div>
+  <div class="tbl-wrap"><table>
+    <tr><th>#</th><th>Shelfmark</th><th>Library</th><th>Tier</th><th>Pages</th><th>Matched</th><th></th></tr>
+    
+      <tr>
+        <td class="num">1</td>
+        <td class="shelf">Cambridge University Library Ms. Or. 1080 13.2</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">1147 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">2</td>
+        <td class="shelf">Cambridge University Library Ms. T-S E 4.07</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">1011 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">3</td>
+        <td class="shelf">Catalogue Halper, Philadelphia 84</td>
+        <td>Katz</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">1365 letters</td>
+        <td class="nov"><span class="novel">not in the finding aids?</span></td>
+      </tr>
+      <tr>
+        <td class="num">4</td>
+        <td class="shelf">Library of the Alliance Israélite Universelle Ms. III C 59</td>
+        <td>AIU</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">651 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">5</td>
+        <td class="shelf">Cambridge University Library Ms. T-S F 1(2).85</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">2</td>
+        <td class="num">891 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">6</td>
+        <td class="shelf">Cambridge University Library Ms. T-S Ar. 18(1).182</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">764 letters</td>
+        <td class="nov"></td>
+      </tr>
+  </table></div>
+  <div class="disc">Showing 6 of 214 · full list on the work page ▸</div>
+</div>
+
+<h2>2 · The evidence view — three candidates (this is the open decision)</h2>
+<p class="lede">Real text, real offsets: matched 555 letters · offsets 0–555 of 1573 ·
+ layer <code>htr</code> ·
+ page hash <code>000cb570b0c9…</code>. Reference text is never rendered in any variant.</p>
+
+<div class="side">
+  <div class="opt">
+    <h5>A · Highlight in the transcription already on screen</h5>
+    <span class="tag">recommended — reuses browse's existing highlighter, no second text fetch</span>
+    <div class="heb" style="margin-top:.6rem">
+      <mark>מספדי למחול לי פתיחת שקי ותאזריני שמ טמחה . או תשמח בתולה במחול בהו בהורים וזקננם יחדיו . והפכתי אבלם לשטיו וניחמתים ושמחתם מיגונם ולא ]מרוע לבלעם ויה …</mark> מור ייי ורפאתיו ורוח לבשה עמשא ראש השלישים לך רוד ועמד בן ישי שלום לך שלום לעזרך ויקבלם דו …
+    </div>
+    <div class="c-meta" style="margin-top:.5rem">matched 555 letters · offsets 0–555</div>
+  </div>
+  <div class="opt">
+    <h5>B · Dedicated evidence pane</h5>
+    <span class="tag">closest to the written requirement; own fetch + own fail-closed join</span>
+    <div class="heb" style="margin-top:.6rem; border:1px solid var(--line); border-radius:7px; padding:.5rem">
+      <mark>מספדי למחול לי פתיחת שקי ותאזריני שמ טמחה . או תשמח בתולה במחול בהו בהורים וזקננם יחדיו . והפכתי אבלם לשטיו ונ …</mark>
+    </div>
+    <div class="c-meta" style="margin-top:.5rem">matched 555 letters ·
+      offsets 0–555 of 1573 · 1 span</div>
+  </div>
+  <div class="opt">
+    <h5>C · Match statistics only</h5>
+    <span class="tag">cheapest, zero drift risk — but a reader cannot see what matched</span>
+    <div class="c-meta" style="margin-top:.6rem">matched <strong>555</strong> letters ·
+      45% of the page ·
+      1 contiguous span · layer <code>htr</code></div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:1rem">
+  <strong>Fail-closed behaviour</strong> (identical in all three): when the live page text no longer
+  matches the stored snapshot hash —
+  <div class="fail" style="margin-top:.4rem">⚠ Evidence unavailable for this version of the
+    transcription. · <span dir="rtl">הראיות אינן זמינות לגרסה זו של התעתיק.</span></div>
+  <span class="ph">The identification itself still shows, with its tier — only the span is withheld.</span>
+</div>
+
+<h2>3 · The work page</h2>
+<div class="card">
+  <div class="grp" dir="rtl">ילקוט שמעוני על נ"ך <span class="cnt" dir="ltr">· <span dir="rtl">שמעון הדרשן</span></span></div>
+  <div class="c-meta"><span class="wid">w001383</span> · 284 matches across
+    224 manuscripts · <strong>214 witnesses</strong> after grouping joined fragments</div>
+  <div class="ctrls">
+    <span>Sort:</span>
+    <span class="chip on">Strongest tier</span><span class="chip">Library</span><span class="chip">% of page</span>
+    <span style="margin-inline-start:1rem">Show:</span>
+    <span class="chip on">Everything</span><span class="chip">Only new findings <span class="ph">(mock)</span></span>
+    <span style="margin-inline-start:1rem">Tier:</span>
+    <span class="chip on">all enabled</span>
+    <span>≥</span><span class="chip">20% of page</span>
+  </div>
+  <div class="tbl-wrap"><table>
+    <tr><th>#</th><th>Shelfmark</th><th>Library</th><th>Tier</th><th>Pages</th><th>Matched</th>
+      <th>Novelty <span class="ph">(mock)</span></th></tr>
+    
+      <tr>
+        <td class="num">1</td>
+        <td class="shelf">Cambridge University Library Ms. Or. 1080 13.2</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">1147 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">2</td>
+        <td class="shelf">Cambridge University Library Ms. T-S E 4.07</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">1011 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">3</td>
+        <td class="shelf">Catalogue Halper, Philadelphia 84</td>
+        <td>Katz</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">1365 letters</td>
+        <td class="nov"><span class="novel">not in the finding aids?</span></td>
+      </tr>
+      <tr>
+        <td class="num">4</td>
+        <td class="shelf">Library of the Alliance Israélite Universelle Ms. III C 59</td>
+        <td>AIU</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">651 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">5</td>
+        <td class="shelf">Cambridge University Library Ms. T-S F 1(2).85</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">2</td>
+        <td class="num">891 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">6</td>
+        <td class="shelf">Cambridge University Library Ms. T-S Ar. 18(1).182</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">764 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">7</td>
+        <td class="shelf">Cambridge University Library Ms. T-S Misc. 19.106</td>
+        <td>CUL</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">964 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">8</td>
+        <td class="shelf">MS heb. c.18/9</td>
+        <td>Oxford</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">713 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">9</td>
+        <td class="shelf">Library of the Alliance Israélite Universelle Ms. II B 89</td>
+        <td>AIU</td>
+        <td><span class="band b-hi">High-confidence match (algorithmic)</span></td>
+        <td class="num">1</td>
+        <td class="num">979 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">10</td>
+        <td class="shelf">Ms. EVR II A 7</td>
+        <td>RNL</td>
+        <td><span class="band b-a">Algorithmic match — tier A</span></td>
+        <td class="num">1</td>
+        <td class="num">543 letters</td>
+        <td class="nov"><span class="novel">not in the finding aids?</span></td>
+      </tr>
+      <tr>
+        <td class="num">11</td>
+        <td class="shelf">Ms. EVR II A 427</td>
+        <td>RNL</td>
+        <td><span class="band b-a">Algorithmic match — tier A</span></td>
+        <td class="num">1</td>
+        <td class="num">935 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">12</td>
+        <td class="shelf">Library of the Hungarian Academy of Sciences Ms. 229.2</td>
+        <td>HAS</td>
+        <td><span class="band b-a">Algorithmic match — tier A</span></td>
+        <td class="num">1</td>
+        <td class="num">510 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">13</td>
+        <td class="shelf">Catalogue Lutzki L 594</td>
+        <td>Lutzki</td>
+        <td><span class="band b-a">Algorithmic match — tier A</span></td>
+        <td class="num">1</td>
+        <td class="num">121 letters</td>
+        <td class="nov"></td>
+      </tr>
+      <tr>
+        <td class="num">14</td>
+        <td class="shelf">Catalogue Lutzki L 599</td>
+        <td>Lutzki</td>
+        <td><span class="band b-a">Algorithmic match — tier A</span></td>
+        <td class="num">1</td>
+        <td class="num">130 letters</td>
+        <td class="nov"></td>
+      </tr>
+  </table></div>
+  <div class="c-meta" style="margin-top:.6rem">214 witnesses — page 1 of
+    2 · 200 per page</div>
+  <div class="disc">Not exhaustive — more identifications may exist. ·
+    <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+</div>
+<p class="lede">The giant case is <span dir="rtl">תנ"ך, תהלים</span> — <strong>13,038</strong> matches
+across 4,796 manuscripts → “page 1 of 66”. That is where the tier / novelty / % filters stop being a
+convenience and become the only way through.</p>
+
+<h2>4 · The findings browse <span class="ph">(shape not yet decided)</span></h2>
+<p class="lede">Corpus-wide, novelty-first. Novelty here is <em>mocked</em>. The undecided question is
+what one row is: an identification (manuscript × work), a work, or a manuscript.</p>
+<div class="card">
+  <div class="ctrls">
+    <span class="chip on">Only new findings <span class="ph">(mock)</span></span>
+    <span class="chip">Everything</span>
+    <span style="margin-inline-start:1rem">Tier:</span><span class="chip on">tier A +</span>
+    <span style="margin-inline-start:1rem">≥</span><span class="chip on">40% of page</span>
+  </div>
+  <div class="tbl-wrap"><table>
+    <tr><th>Manuscript</th><th>Library</th><th>Matches</th><th>Tier</th><th>% of page</th><th>Novelty</th></tr>
+    <tr><td class="shelf">Catalogue Halper, Philadelphia 84</td><td>Katz</td>
+      <td dir="rtl">ילקוט שמעוני על נ&quot;ך</td><td><span class="band b-a">tier A</span></td>
+      <td class="num">114%</td>
+      <td><span class="novel">not in the finding aids?</span></td></tr><tr><td class="shelf">Library of the Alliance Israélite Universelle Ms. III C 59</td><td>AIU</td>
+      <td dir="rtl">ילקוט שמעוני על נ&quot;ך</td><td><span class="band b-a">tier A</span></td>
+      <td class="num">54%</td>
+      <td><span class="novel">not in the finding aids?</span></td></tr><tr><td class="shelf">Cambridge University Library Ms. T-S F 1(2).85</td><td>CUL</td>
+      <td dir="rtl">ילקוט שמעוני על נ&quot;ך</td><td><span class="band b-a">tier A</span></td>
+      <td class="num">74%</td>
+      <td><span class="novel">not in the finding aids?</span></td></tr><tr><td class="shelf">Cambridge University Library Ms. T-S Ar. 18(1).182</td><td>CUL</td>
+      <td dir="rtl">ילקוט שמעוני על נ&quot;ך</td><td><span class="band b-a">tier A</span></td>
+      <td class="num">64%</td>
+      <td><span class="novel">not in the finding aids?</span></td></tr><tr><td class="shelf">Cambridge University Library Ms. T-S Misc. 19.106</td><td>CUL</td>
+      <td dir="rtl">ילקוט שמעוני על נ&quot;ך</td><td><span class="band b-a">tier A</span></td>
+      <td class="num">80%</td>
+      <td><span class="novel">not in the finding aids?</span></td></tr><tr><td class="shelf">MS heb. c.18/9</td><td>Oxford</td>
+      <td dir="rtl">ילקוט שמעוני על נ&quot;ך</td><td><span class="band b-a">tier A</span></td>
+      <td class="num">59%</td>
+      <td><span class="novel">not in the finding aids?</span></td></tr>
+  </table></div>
+  <div class="disc">Rows shown are real manuscript–work matches; the novelty column is mock.</div>
+</div>
+
+<h2>5 · Decisions this mockup puts in front of you</h2>
+<div class="card">
+  <ul class="tight">
+    <li><strong>Evidence view</strong> — A, B or C above.</li>
+    <li><strong>Collapse duplicate canonical works?</strong> 921 row-pairs affected. If yes: which
+      title wins — the canonical (Sefaria) one, always?</li>
+    <li><strong>Group identical-span competing attributions?</strong> 1,558 groups. The “↳ the same
+      passage also matches …” treatment above, or flat rows?</li>
+    <li><strong>Does the liturgy case read acceptably?</strong> An Ashkenazi prayer book matching
+      four liturgical works on one 66-letter span is arguably all correct — and it is also exactly
+      the pattern that produced the concentrated error in the grading.</li>
+    <li><strong>Novelty chip wording</strong> — “not in the finding aids?” is a placeholder; the
+      requirement forbids “new”/“new discovery”.</li>
+    <li><strong>Findings browse row unit</strong> — identification, work, or manuscript.</li>
+  </ul>
+</div>
+
+</div>

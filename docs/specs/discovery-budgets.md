@@ -161,7 +161,8 @@ DB-side cost only and well inside the ≤ 1.5 s request budget.
 ### 4.3 Later-surface caps — PENDING
 
 - **Work/Leads request-time p95 / response size (§1.2)** — PENDING until Phase
-  136 ships the `/work/{id}` + `/leads` surfaces (the query-latency figures
+  136 ships `/work/{id}` (LEADS-01/02 and `/leads` are Phase 138 per ROADMAP.md +
+  the REQUIREMENTS.md traceability table) (the query-latency figures
   above are the DB-side cost only; the full request-time budget is measured
   when the surface exists).
 - **Atlas drill-down p95 / node-edge counts / response size (§1.3)** — PENDING

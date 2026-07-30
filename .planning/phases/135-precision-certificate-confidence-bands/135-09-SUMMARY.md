@@ -47,19 +47,19 @@ key-decisions:
   - "Diagnostic-sample 'retained' candidates identified at PAGE granularity via discovery_routing_audit.decision='kept_tie' pages (the shipped v2 asset's kept_tie rows carry demoted_work_id=NULL, so the exact co-claim pair is not recoverable from the audit table alone) -- documented data-shape limitation, not a fabrication"
   - "ORCHESTRATOR CORRECTION: the drawn deck was bound (Task 2) but never RENDERED -- an expert cannot grade an opaque uid. scripts/cert01_render_deck.py now renders the frozen 280-card deck by reusing e1_deck.render_deck/adapt_template verbatim (no redraw/resample), resolving each card's raw research work_id via the REVERSE of discovery_data/crosswalk.json and its matched span from discovery_evidence (span_start/span_end, added additively to cert01_frame.py's estimand rows -- verified NOT to change population_hash/report_id/deck_manifest_hash). Patches ONLY the toolbar + exportV() to add a required Grader field and emit the ledger LIST shape the validator reads; vote()/reveal()/revealOpen() (the reveal-lock discipline) are untouched."
 
-requirements-completed: []  # CERT-01 remains Pending: the owner closed Task 3 on OWNER AUTHORITY via 135-09-OWNER-ATTESTATION.md (2026-07-28) WITHOUT per-card grading, so the measurement does not exist and the mechanical D-02 signal is unmet (validator stays 11/12). Never mark CERT-01 Complete on the strength of the attestation's ~95% -- that is a usefulness impression, an upper bound on precision, not an A-only measurement with a clustered CI.
-status: complete-on-owner-authority
+requirements-completed: []  # CERT-01's MEASUREMENT clause is now satisfied -- graded 2026-07-28, validator 12/12, weighted 0.9382 CI [0.9084,0.9644] PASS vs the 0.85 Strict floor (see 135-09-CERT01-MEASUREMENT.md). Still NOT flipped Complete: REL-01 additionally requires the CERT-02 outcome copy applied and the number published, and band_precision has not been re-baked (tier_a still carries no number). Flip at Phase 139 once those land.
+status: complete
 ---
 
 # Phase 135 Plan 09: CERT-01 Precision Certificate -- Frame Freeze + Deck Draw + Validator Summary
 
-**Froze the shipped tier_a estimand (134,123 `(page, canonical_work_id)` rows) in an immutable, hash-pinned pre-registration against the deployed discovery-v2 sidecar, drew a 220-card stratified discovery deck + 20 gold + 20/20 blinded diagnostic sample bound by a separate deck manifest, and built a twelve-check mechanical validator that currently reports 11/12 PASS -- the sole failure is the honest, expected one: no verdict has been graded yet.**
+**Froze the shipped tier_a estimand (134,123 `(page, canonical_work_id)` rows) in an immutable, hash-pinned pre-registration against the deployed discovery-v2 sidecar, drew a 220-card stratified discovery deck + 20 gold + 20/20 blinded diagnostic sample bound by a separate deck manifest, rendered it to a gradable page, and built a twelve-check mechanical validator. The owner then graded ALL 280 cards catalogue-blind: validator 12/12 exit 0, pre-registered weighted precision 0.9382 CI [0.9084, 0.9644] -- PASS against the 0.85 Strict floor.**
 
 ## Performance
 
 - **Duration:** ~200 min (single continuous session, including an orchestrator-requested rendering correction; exact start not separately timestamped)
 - **Completed:** 2026-07-28
-- **Tasks:** 2 of 3 fully executed (Task 1, Task 2 incl. the rendering correction); Task 3's buildable half (validator + tests) executed and committed, its human-grading half is the open checkpoint
+- **Tasks:** 3 of 3 executed — Task 1 (freeze + OC table), Task 2 (draw + bind, incl. the orchestrator-requested rendering correction), Task 3 (validator + tests, then the human grading checkpoint SATISFIED: owner graded all 280 cards, validator 12/12 exit 0)
 - **Files created:** 12 tracked (+ 1 modified) (+ 3 gitignored research artifacts, one added: the rendered HTML deck)
 
 ## Accomplishments
@@ -171,29 +171,50 @@ FOUND commit: ad793440
 
 ## Next Phase Readiness
 
-### RESOLVED 2026-07-28 — closed on OWNER AUTHORITY, not on the mechanical signal
+### CLOSED 2026-07-28 — CERT-01 GRADED AND PASSED (12/12, real mechanical signal)
 
-The owner reviewed the full rendered 280-card deck, judged the identifications broadly
-sound ("about 95% were what I would expect to find when I ask for textual witness
-suggestions"), and declined to record per-card verdicts. Phase 135 closes on owner
-authority. Recorded in **`135-09-OWNER-ATTESTATION.md`** — read that before citing the
-95% anywhere.
+The owner graded **all 280 cards** (grader `Hillel`, zero reveals — fully catalogue-blind).
+`scripts/verify_cert01_grading.py` reports **12/12, exit 0**. Phase 135 closes on the real
+D-02 signal.
 
-Three things remain deliberately true:
+**Pre-registered estimand — weighted to the shipped tier_a population (D-08), clustered by
+the frozen physMS map via the reused `e1_deck.comp_bootstrap` (B=10,000, seed 7):**
 
-1. **The verdict ledger was NOT populated.** `verify_cert01_grading.py` still reports
-   11/12 with check 6 failing. Fabricating verdicts would be exactly threat T-135-09-05
-   the validator exists to prevent.
-2. **CERT-01 is NOT satisfied** and stays `Pending` in `REQUIREMENTS.md`. The 95% is a
-   usefulness impression, not an A-only precision measurement with a clustered CI — it is
-   an upper bound on precision, not a substitute for it.
-3. **Nothing is overclaimed.** `tier_a` still carries no measured precision
-   (`band_precision` id=5); the 95% is not written to the sidecar or any surface.
+| | Point | 95% CI | vs 0.85 Strict floor |
+|---|---|---|---|
+| **Weighted (the gate)** | **0.9382** | **[0.9084, 0.9644]** | **PASS** |
+| Unweighted | 0.8995 | [0.8558, 0.9401] | PASS (narrowly) |
 
-The consequence lands at Phase 139 REL-01, which as written requires CERT-01 "graded to
-completion" with tier-A public "WITH its measured number." Four options are laid out in
-the attestation §5. The deck, pre-registration, OC table and validator are all frozen and
-ready if grading is resumed later — nothing expires.
+Gold consistency 19/20. Full result, per-stratum spread, error concentration and the
+public-scope subgroup: **`135-09-CERT01-MEASUREMENT.md`**.
+
+**Key findings:**
+
+1. **Error is concentrated, not diffuse** — 22 non-A of 220, with ONE work causing 10 of
+   them (45%) and the top three causing 68%. Owner-identified mechanism: a later halakhic
+   code embeds the full liturgy, so a page carrying a common prayer matches the code
+   instead of the prayer-book. D-17's chronological demotion cannot catch it (the code
+   postdates what it quotes), which matches the diagnostic sample's weak 50%/60%
+   separation. Containment-aware rule → v2.1 candidate.
+2. **Per-stratum spread is wide** — 1.000 (ja) down to 0.471 (`msource:medium`).
+   Publishing the weighted headline without the spread would mislead the weak tail; it
+   belongs on the BAND-05 methods page.
+3. **Public scope is stronger** — Sefaria-only (the first public scope; msource/JA held
+   private) measures 0.9580 CI [0.9240, 0.9847], and the failing population
+   (`msource` 0.714, n=42) is exactly the one being withheld. **These subgroup rows are
+   post-hoc and descriptive — NOT pre-registered.** The visibility boundary was fixed
+   2026-07-27, before the 2026-07-28 draw, so it was pre-specified rather than chosen to
+   flatter; even so, the public estimand should be pre-registered before the public bake.
+
+**Not done, deliberately:** `band_precision` is unchanged — `tier_a` still carries no
+measured number (row id=5). Writing 0.938 in needs a `--precision-spec` re-bake plus a
+production deploy, an owner-gated decision. No surface renders any of these numbers; the
+flag stays OFF; "certified" is still never used.
+
+`135-09-OWNER-ATTESTATION.md` (the earlier close-on-owner-authority record) is
+**SUPERSEDED** and retained only as a decision trail.
+
+### Original checkpoint state (retained for the record)
 
 ### Original checkpoint state (retained for the record)
 
