@@ -18147,6 +18147,10 @@ class GenizahGUI(QMainWindow):
                 text = node.text(self.comp_col_shelfmark)
             elif column == self.comp_col_title:
                 text = node.text(self.comp_col_title)
+                parent = node.parent()
+                while not text and parent is not None:
+                    text = parent.text(self.comp_col_title)
+                    parent = parent.parent()
             elif column == self.comp_col_context:
                 text = preview_data.get("source_ctx", data.get("source_ctx", ""))
             elif column == self.comp_col_ms_context:

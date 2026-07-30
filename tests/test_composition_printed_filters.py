@@ -54,7 +54,15 @@ class _CompositionFilterHarness:
         return None
 
     def add_result(
-        self, sys_id=None, *, parent=None, library="", shelfmark="", title=""
+        self,
+        sys_id=None,
+        *,
+        parent=None,
+        library="",
+        shelfmark="",
+        title="",
+        source_ctx="source",
+        ms_ctx="manuscript",
     ):
         node = QTreeWidgetItem(parent if parent is not None else self.comp_tree)
         node.setText(self.comp_col_library, library)
@@ -65,7 +73,7 @@ class _CompositionFilterHarness:
         node.setData(
             0,
             Qt.ItemDataRole.UserRole + 1,
-            {"source_ctx": "source", "ms_ctx": "manuscript", "anchor": None},
+            {"source_ctx": source_ctx, "ms_ctx": ms_ctx, "anchor": None},
         )
         return node
 
@@ -121,6 +129,25 @@ def test_composition_library_filter_uses_displayed_library_column():
     }
     harness._apply_comp_tree_filters()
     assert local.isHidden()
+
+
+def test_composition_title_filter_is_inherited_by_matching_page_context():
+    harness = _CompositionFilterHarness()
+    manuscript = harness.add_result(
+        "manuscript", title="Matching composition", source_ctx="first page"
+    )
+    first_page = harness.add_result(parent=manuscript, source_ctx="first page")
+    matching_page = harness.add_result(parent=manuscript, source_ctx="target context")
+    harness.comp_filters = {
+        harness.comp_col_title: {"text": "Matching composition", "exclude": False},
+        harness.comp_col_context: {"text": "target context", "exclude": False},
+    }
+
+    harness._apply_comp_tree_filters()
+
+    assert not manuscript.isHidden()
+    assert first_page.isHidden()
+    assert not matching_page.isHidden()
 
 
 class _Signal:
