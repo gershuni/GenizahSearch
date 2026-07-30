@@ -18,7 +18,7 @@ from web.translations import tr, is_rtl
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.supabase_client import (
-    get_client, get_feed_items, create_discovery, update_discovery, delete_discovery,
+    get_client, get_user_client, get_feed_items, create_discovery, update_discovery, delete_discovery,
     delete_comment, delete_correction, delete_fragment_join,
     get_discovery_responses, create_discovery_response,
     vote_discovery, toggle_discovery_answered,
@@ -1212,12 +1212,13 @@ def create_feed_item(item: dict, on_refresh=None):
                             ui.separator().classes('my-2')
                             responses_container = ui.column().classes('w-full gap-2')
 
-                            def do_load_responses(container=responses_container, nid=numeric_id):
+                            # `nid` stays a parameter: the nested `do_submit_reply`
+                            # closure below captures it as a default argument.
+                            def render_responses(responses, container=responses_container, nid=numeric_id):
                                 try:
                                     if container.client.has_been_deleted: return
                                     container.clear()
                                     with container:
-                                        responses = get_discovery_responses(int(nid))
                                         if container.client.has_been_deleted: return
                                         if responses:
                                             ui.label(f"{tr('Responses')} ({len(responses)})").classes('font-medium text-sm')
@@ -1261,19 +1262,45 @@ def create_feed_item(item: dict, on_refresh=None):
                                             else:
                                                 ui.notify(tr('Reply posted'), type='positive')
                                                 inp.value = ''
-                                                do_load_responses()
+                                                # Refresh the list. This handler is already
+                                                # doing a blocking write on the loop, so the
+                                                # extra read is not a new regression; it is
+                                                # a click path, not a page-render path.
+                                                render_responses(
+                                                    get_discovery_responses(int(nid)), responses_container
+                                                )
 
                                         ui.button(tr('Reply'), on_click=do_submit_reply).props('dense color=primary').classes('self-end')
                                     else:
                                         ui.label(tr('Login to reply')).classes('text-xs').style('color: var(--text-tertiary);')
 
                             # Load responses when expansion opens
-                            async def _deferred_responses():
+                            async def _deferred_responses(container=responses_container, nid=numeric_id):
+                                # Client built on the loop, blocking fetch in a
+                                # worker, render back on the loop. The explicit
+                                # client matters most HERE: this reader's own
+                                # docstring leaves the policy target open ("if RLS
+                                # is TO authenticated..."), so an anonymous
+                                # degradation in the worker could return zero
+                                # responses for signed-in users. Passing a
+                                # loop-built client makes that question moot.
                                 await asyncio.sleep(0.1)
                                 try:
-                                    await do_load_responses()
-                                except Exception:
-                                    pass  # Deferred UI refresh failed; page still usable
+                                    if container.client.has_been_deleted:
+                                        return
+                                    reader_client = get_user_client()
+                                    responses = await run.io_bound(
+                                        get_discovery_responses, int(nid), client=reader_client
+                                    )
+                                    if responses is None:
+                                        return  # app shutting down mid-flight
+                                    if container.client.has_been_deleted:
+                                        return
+                                    render_responses(responses, container)
+                                except RuntimeError as e:
+                                    logger.debug("responses render skipped (client gone): %s", e)
+                                except Exception as e:
+                                    logger.warning("deferred discovery responses load failed: %s", e, exc_info=False)
                             asyncio.ensure_future(_deferred_responses())
 
                 # Footer - collapsed view info
