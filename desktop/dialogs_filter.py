@@ -830,6 +830,7 @@ class PreSearchFilterDialog(QDialog):
         self.setMinimumSize(780, 720)
         self._current_filters = current_filters.copy() if current_filters else {}
         self._count_worker = None
+        self._count_generation = 0
         self._result_set = None  # computed restrict_sys_ids
         # Store all domain/author/work data for display name lookup
         self._domain_data = {}  # data_key -> display_text
@@ -1101,12 +1102,12 @@ class PreSearchFilterDialog(QDialog):
         btn_layout.addWidget(clear_btn)
         btn_layout.addStretch()
 
-        ok_btn = QPushButton(tr("OK"))
-        ok_btn.setDefault(True)
-        ok_btn.clicked.connect(self.accept)
+        self.ok_btn = QPushButton(tr("OK"))
+        self.ok_btn.setDefault(True)
+        self.ok_btn.clicked.connect(self.accept)
         cancel_btn = QPushButton(tr("Cancel"))
         cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(self.ok_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
 
@@ -1582,20 +1583,30 @@ class PreSearchFilterDialog(QDialog):
 
     def _update_count(self):
         """Recompute manuscript count in background thread."""
+        self._count_generation += 1
+        generation = self._count_generation
         filters = self._get_current_filter_dict()
         # Check if any actual filter is set (not just include_mode)
         has_filter = any(k != 'include_mode' for k in filters)
         if not has_filter:
             self.count_label.setText(tr("All manuscripts (no filters)"))
             self._result_set = None
+            if hasattr(self, 'ok_btn'):
+                self.ok_btn.setEnabled(True)
             return
         self.count_label.setText(tr("Counting..."))
+        if hasattr(self, 'ok_btn'):
+            self.ok_btn.setEnabled(False)
         self._count_worker = FilterCountWorker(filters, self)
-        self._count_worker.finished.connect(self._on_count_finished)
+        self._count_worker.finished.connect(
+            lambda result_set, gen=generation: self._on_count_finished(result_set, gen)
+        )
         self._count_worker.start()
 
-    def _on_count_finished(self, result_set):
+    def _on_count_finished(self, result_set, generation=None):
         """Handle count worker result."""
+        if generation is not None and generation != self._count_generation:
+            return
         self._result_set = result_set
         if result_set is None:
             self.count_label.setText(tr("All manuscripts (no filters)"))
@@ -1606,6 +1617,8 @@ class PreSearchFilterDialog(QDialog):
             count_str = f"{len(result_set):,}"
             self.count_label.setText(f"{count_str} {tr('manuscripts')}")
             self.count_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #2980b9; padding: 4px;")
+        if hasattr(self, 'ok_btn'):
+            self.ok_btn.setEnabled(True)
 
     def _clear_all(self):
         """Reset all filter controls to default."""
