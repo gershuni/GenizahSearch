@@ -604,16 +604,25 @@ class UserListsManager:
             return self.local_mgr.get_items_in_list(list_id)
         return []
 
-    def get_items_in_list_sync(self, list_id: str) -> List[Dict]:
-        """Synchronous version of get_items_in_list."""
+    def get_items_in_list_sync(self, list_id: str, *, client=None) -> List[Dict]:
+        """Synchronous version of get_items_in_list.
+
+        `client` (2026-07-30, keyword-only, default None = unchanged behaviour):
+        an already-built Supabase client, so this blocking read can be dispatched
+        through `run.io_bound` without losing the caller's auth context. Both
+        underlying tables (`recent_items`, `list_items`) are `TO authenticated`
+        and user-scoped, so a worker thread that fell back to the anonymous
+        client would return ZERO rows -- an empty list for a logged-in user
+        rather than an error. See `web/supabase_client.get_corrections`.
+        """
         if self.is_authenticated:
             if self._is_recent_list(list_id):
-                return self._format_recent_items(get_recent_items(self.user_id))
+                return self._format_recent_items(get_recent_items(self.user_id, client=client))
             try:
                 list_id_int = int(list_id)
             except ValueError:
                 return []
-            return get_list_items(list_id_int)
+            return get_list_items(list_id_int, client=client)
         elif self.local_mgr:
             return self.local_mgr.get_items_in_list(list_id)
         return []
