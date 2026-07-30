@@ -70,7 +70,7 @@ Move to "Completed Issues" section at bottom with date
 
 ---
 
-## v9.0.0 Discovery Milestone — status & coordination (2026-07-24)
+## v9.0.0 Discovery Milestone — status & coordination (2026-07-24; updated 2026-07-30)
 
 > **The live milestone tracker is `.planning/STATE.md` + the phase docs, NOT this file.** This block is a pointer so a session entering via OPEN_ISSUES is not blind to the most active work in the repo. Detailed state lives in memory `project_v9_discovery_milestone`.
 
@@ -78,6 +78,9 @@ Move to "Completed Issues" section at bottom with date
 - **Forward ledger: [`docs/specs/discovery-forward-ledger.md`](specs/discovery-forward-ledger.md)** — 10 probe-validated ideas with no current owner (page-chain evidence, residue mining, fragmentary-tail auto-validation, conformal+FDR, motif/units product layer, interleaved refs, reversed-direction finds, confusion-matrix engine assets, per-work quotation profiles, MAPV2-8/9 debts). Review at each 136–139 phase boundary.
 - ❌ **Open — census-parser mismatch (fix on resume).** The approved v2-bake-plan's frozen `--canonical-merges` parser requires exactly 3 fields per merge entry and HALTs on extras; the real `rsource/data/v2_canonical_merges.json` has 9 fields/entry (incl. cleartext `title_msource`). Fix = gen-2 session emits a slim `v2_canonical_merges.build.json` (3 fields + `dropped_by_135`); 135 pins that hash; add a real-file smoke-parse as the first parser test in 135-06. Survived all 9 Codex rounds (prose-only review never opened the gitignored data).
 - ⏳ **Pending owner authorization** — retitle the two paused sessions + queue their resume briefs (written verbatim in `discovery-coordination.md` §4).
+- ❌ **Open (2026-07-30) — latent: `get_claims_for_page` hides human-confirmed rows the display contract says always show.** `shared/discovery_service.py::get_claims_for_page` filters `routing_status='shipped'` in SQL by default, but `shared/discovery_band_labels.py::is_default_eligible` returns True for `adjudication_status='human_confirmed'` **unconditionally, before** it checks routing, and `docs/specs/discovery-band-labels-v1.md` §4 says the same. **19 of the 121** human-confirmed rows are therefore dropped by the query before the predicate meant to protect them ever runs. Latent today (that function has no callers); Phase 136 builds its first caller and fixes it there (`136-CONTEXT.md` D-13g — owner chose: show them, flagged as low-coverage). Symptom seen in the real-data mockup: on Moss. V,374, P22's human-confirmed `רש"י על איכה` is hidden while P23's human-confirmed `רש"י על אסתר` shows.
+- ❌ **Open (2026-07-30) — provenance of the 121 `human_confirmed` rows is unestablished.** Phase 134's closeout left it open (*"internal deck vs owner"*). Source is `e1_adjudicated_a.jsonl` (174 individually-adjudicated cards). Until it is resolved, **no surface displays a human-review badge** (`136-CONTEXT.md` D-13f — owner decision 2026-07-30); if the owner turns out to have graded them, the badge can return with sourced wording. Requires a dated amendment to `discovery-band-labels-v1.md` §2.
+- 📋 **Recorded (2026-07-30) — coverage routing demotes correct identifications.** `low_coverage` accounts for **100,159** of the review-only display rows. On Moss. V,374 it demoted SIX correct Rashi-on-Megillot identifications (one at 1,329 matched letters) because a commentary occupies only part of a densely-written page. Not fixable in Phase 136 — direct evidence for the deferred witness-vs-quoter / coverage work in the discovery-v2.1 refresh.
 
 ---
 

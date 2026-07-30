@@ -101,11 +101,21 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
   (2) offline build + verification of BOTH projections (compatibility, masking positive-control,
   reconciliation, performance); (3) owner approval + the paired asset-first deploy; (4) the panel +
   a tier-first work page; (5) the catalogue integration + the findings page; (6) PANEL-03 last.
-- **D-05 — Both process gates RAN in this discuss session, before planning.** Artifacts:
-  `136-MOCKUP.html` (+ its `136-MOCKUP-extract.py` / `136-MOCKUP-render.py`, real data from the frozen
-  asset + `Transcriptions.txt`) and `136-CODEX-REVIEW.md` (**VERDICT: REWORK**, 3 BLOCKER / 9 HIGH /
-  3 MEDIUM; every finding dispositioned below). Further UI-detail decisions still route to a
-  second mockup pass during execution gate 4.
+- **D-05 — Both process gates RAN in this discuss session, before planning, and a SECOND mockup pass
+  ran after them.** Artifacts: `136-MOCKUP.html` (single manuscript) and `136-MOCKUP-MULTI.html`
+  (seven manuscripts, every agreed rule applied), with their generators; plus `136-CODEX-REVIEW.md`
+  (**VERDICT: REWORK**, 3 BLOCKER / 9 HIGH / 3 MEDIUM; every finding dispositioned below). All data is
+  real — the deployed asset + real HTR text from `Transcriptions.txt`.
+  - **The second pass earned its keep:** it exposed the D-13d granularity flaw, the D-13g
+    human-confirmed/routing bug, and the D-13i catalogue-juxtaposition trap — none of which were
+    visible in the single-manuscript pass or in any document. **Lesson to carry: mock a SPREAD of real
+    manuscripts, not one.** The seven cases (clean / commentary / Judeo-Arabic multi-register /
+    expert-reviewed / the problem siddur / page-relation-heavy / 427-identification) are the standing
+    regression set for any future panel change.
+  - **Coverage routing evidence recorded for the v2.1 lever:** `low_coverage` accounts for **100,159**
+    of the review-only display rows, and on Moss. V,374 it demoted SIX correct Rashi identifications —
+    one at 1,329 matched letters — because a commentary occupies only part of a densely-written page.
+    Not fixable in 136; it is direct evidence for the deferred witness-vs-quoter/coverage work.
 
 ### Bands, numbers and honesty
 
@@ -185,6 +195,70 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
   32 quints, 15 six-way, one 8-way). Owner decision: the strongest attribution is the row; the others
   appear as "↳ the same passage also matches …". This stops one passage inflating a manuscript's match
   count. The lead-attribution rule must be deterministic (tier rank, then the existing total order).
+- **D-13d — Identical-span groups are pulled OUT of the identifications entirely (owner, second mockup
+  pass).** Not merely nested (which D-13b proposed) — the whole group leaves the identifications
+  bucket. Behind the toggle it reads "one passage (offsets a–b, N letters) appears in **N works**: …".
+  Rationale: several works claiming byte-identical text with identical matched length is the signature
+  of generic shared text (a verse-chain, a liturgical formula), not of a witness. Owner's case: a
+  prayer book whose page-6 verse-chain pulled in Tur Orach Chaim (twice, under two titles) and Yalkut
+  Shimoni on Nevi'im on offsets 0–555. Scope: 1,558 groups / 3,600 claims = **2.5%** of the shipped
+  direct set; matched length is identical within the group in 1,495 of the 1,558.
+  - **⚠ KNOWN FLAW, must be fixed at gate 1 (found by the second mockup pass).** The rule as stated
+    conflates two different cases. On T-S Misc. 12.31.14, `רש"י על התורה` (w000171) and
+    `רש"י על בראשית` (w001281) sit on the IDENTICAL span 0–962 — the same work at two granularities,
+    carrying DIFFERENT `canonical_work_id`s, so D-13a's merge collapse does not catch them and D-13d
+    files them as "generic shared text". Net effect: that manuscript renders **1** identification where
+    it should render **2** (Rashi + Genesis, on genuinely different passages). The rule must separate
+    *same work at different granularity* → collapse like a duplicate, from *different works on one
+    passage* → generic. This is the reference-granularity gap the GEN2 handoff defers to v2.1,
+    surfacing a phase early; a display-time alias/containment test is needed, not a data fix.
+- **D-13e — A third bucket: "Also shares text with" (owner, second mockup pass).** The panel has THREE
+  disclosure levels, not two: (1) **Identifications** (default); (2) **"Also shares text with /
+  חולק טקסט גם עם"** — collapsed by default, holding the D-13d generic-passage groups and the
+  related-pages count, explicitly NOT presented as identifications; (3) the existing **"Show more
+  possible matches"** toggle for screening bands, review-only and short-passage rows. Owner's words for
+  the middle bucket: *"perhaps interesting but should be hidden by default"* — it is neither an
+  identification nor low-quality screening, so it gets its own honest home.
+- **D-13f — The review badge is DROPPED until provenance is established (owner, second mockup pass).**
+  No row on any surface claims human review. The 121 `adjudication_status='human_confirmed'` rows (121
+  claims across 116 manuscripts) keep their tier and lose only the badge, because **Phase 134's own
+  closeout left their provenance open — "internal deck vs owner", never resolved.** Until we can name
+  who reviewed a row and when, "Expert-reviewed ✓ / נבדק בידי מומחה" asserts more than we can source —
+  the same discipline that governs the band names. Consequence: every row on the surface reads
+  "unreviewed · algorithmic estimate", which is at least uniform and true. Requires a dated amendment
+  to `discovery-band-labels-v1.md` §2 (the review overlay). `review_overlay()` and
+  `serialize_banded_claim` keep computing the value — the surfaces simply do not render it.
+  - **New task:** establish the provenance of those 121 rows (their source is
+    `e1_adjudicated_a.jsonl`, 174 individually-adjudicated cards). If it turns out the owner graded
+    them, the badge can return with a sourced wording. Until then it stays off.
+- **D-13g — A human-confirmed row is shown by default even when routing demoted it, flagged as
+  low-coverage (owner, second mockup pass).** **This is a real bug, not a preference.**
+  `shared/discovery_service.py::get_claims_for_page` filters `routing_status='shipped'` in SQL by
+  default, but `is_default_eligible()` returns True for `human_confirmed` **unconditionally, before it
+  checks routing**, and `discovery-band-labels-v1.md` §4 says the same. So **19 of the 121**
+  human-confirmed rows are dropped by the query before the predicate meant to protect them ever runs.
+  Live symptom in the mockup: on Moss. V,374, P22's human-confirmed `רש"י על איכה` is hidden while
+  P23's human-confirmed `רש"י על אסתר` shows — two rows a human confirmed, treated differently. Fix:
+  the query must not filter them out; the row renders with an explicit low-coverage note.
+  - **Interaction with D-13f (accepted by the owner):** with the badge dropped, the reader sees an
+    ordinary row carrying a low-coverage note and no stated reason for its presence. The inclusion rule
+    keys on `human_confirmed` internally; the note is about coverage, not review.
+- **D-13h — "Elsewhere in this manuscript" NAMES the works, not just a count (owner, second mockup
+  pass).** It reads "Rashi on Song of Songs (5 pages), Rashi on Lamentations, Halakhot Gedolot" rather
+  than "8 more on 7 pages". Rationale from the mockup: **manuscript-level coherence is the context that
+  makes a single claim judgeable by a reader.** Moss. V,374's page-23 Esther identification looks
+  arbitrary alone and obviously right once you see that P2–P8 carry Rashi on Song of Songs and P22
+  Rashi on Lamentations — a Rashi-on-Megillot codex in the standard order. (This is a READER aid only;
+  it must never feed band assignment or routing, which would be circular.)
+- **D-13i — A shelfmark's catalogue description must never sit unlabelled beside a page-level claim.**
+  The second mockup pass produced a false alarm this way: Moss. V,374's catalogue line reads
+  *"a) Legal document regarding a bill of divorce. b) Court record in the hand of Hillel b. Eli"* —
+  which describes OTHER leaves of a composite volume, not page 23. Presented next to the Rashi-on-Esther
+  claim it read as an absurd mismatch, when the claim is verifiably correct (the span ends with the
+  colophon `תם כל הפירוש`). On composite shelfmarks a catalogue description is simply not about the
+  folio. Either omit it beside claims or label it explicitly as describing the shelfmark. Same trap as
+  `feedback_catalogue_never_evidence`, in the other direction: the mismatch looked like a false
+  positive when it was the catalogue being coarse.
 - **D-13c — Short-evidence rows go behind the "show more" toggle (mockup M-3).** Under 150 matched
   letters: **6,558** direct rows (4.5% of 144,294) and **5,630** propagated rows (25% of 22,243). The
   mockup's real case is a siddur whose four liturgical matches share one **66-letter** span; the
