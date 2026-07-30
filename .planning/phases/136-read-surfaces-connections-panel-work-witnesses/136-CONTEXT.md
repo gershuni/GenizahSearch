@@ -1,6 +1,7 @@
 # Phase 136: Read Surfaces — Connections Panel & Work→Witnesses - Context
 
 **Gathered:** 2026-07-30
+**Revised:** 2026-07-30 — post mockup + Codex gate (both gates RUN in the discuss session, before planning)
 **Status:** Ready for planning
 
 <domain>
@@ -8,24 +9,23 @@
 
 The **first UI that renders discovery claims**: a browse-page "Computed identifications" panel
 (PANEL-01/02/03), a `/work/{id}` witness-map page (WORK-01/02), computed identifications folded into
-the existing `/catalog` Browse-by-Identification page, and a corpus-wide **findings browse** ordered
-novelty-first. Everything is built **behind the discovery flag** — Phase 139 flips it on (REL-01's
-plain reading; the curated-surface exception was declined by the owner on 2026-07-28).
+the existing `/catalog-browse` Browse-by-Identification page, and a **standalone corpus-wide findings
+page with its own nav entry**. Everything is built **behind the discovery flag** — Phase 139 flips it
+on (REL-01's plain reading; the curated-surface exception was declined by the owner 2026-07-28).
 
-**Owner-authorized scope expansion (2026-07-30, this discussion).** The phase now opens with ONE data
-rebuild + ONE production redeploy carrying three payloads, and absorbs two requirements previously
-homed after 136:
+**Owner-authorized scope expansion (2026-07-30).** The phase opens with ONE data rebuild + ONE
+production redeploy and absorbs two requirements previously homed after 136:
 
 - **VIS-01** (public/private projection — already homed here)
 - **NOVEL-01 + NOVEL-02** (the novelty axis + its provenance masking) — **moved INTO 136**, reversing
   the 2026-07-28 "Post-136" homing. Owner rationale: novelty is the axis that makes these surfaces
-  worth using ("new — or those not obvious from the title/identification — are the most important"),
-  the surfaces cannot honestly ship a novelty toggle over data where the flag is uncomputed, and the
-  phase is already rebuilding + redeploying the asset once, so a second rebuild/deploy cycle is pure
-  waste. `.planning/REQUIREMENTS.md` traceability + the ROADMAP Phase-136 goal/success-criteria need
-  updating to match (see Deferred → bookkeeping).
+  worth using, the surfaces cannot honestly ship a novelty toggle over data where the flag is
+  uncomputed, and the phase is already rebuilding + redeploying the asset once.
 
 **Requirements delivered:** PANEL-01, PANEL-02, PANEL-03, WORK-01, WORK-02, VIS-01, NOVEL-01, NOVEL-02.
+**Requirements AMENDED by this phase** (amendment is in scope here, not deferred): BAND-03, BAND-05,
+NOVEL-01 wording, plus a narrow amendment to the frozen precision contract in
+`docs/specs/discovery-sidecar-schema-v1.md` §1.6 and `docs/specs/discovery-band-labels-v1.md`.
 
 **NOT in this phase:** community judgments (137 — 136 ships placeholder voting controls only), the
 leads queue (138), atlas drill-down + homepage band + the REL-01 public flip (139), and the **gen-2 /
@@ -41,195 +41,318 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
 - **D-01 — Build on the LIVE v2 asset; the gen-2 v2.1 refresh gets its OWN later phase.** The
   surfaces render `discovery_data/discovery-v1-33499c5b…db` (deployed at 135-08). The GEN2 handoff
   (`same_work_spike/probe/rsource/HANDOFF-TO-135.md`) asks the milestone to re-bake v2.1 from
-  `g_launch3.db` — **not in 136.** Measured reasons, all verified against both files during this
-  discussion:
-  - Only **34.7%** of v2.1's 236,497 shipped claims (82,156) name a work that carries an
-    owner-reviewed neutral title. DATA-04 is fail-closed (never ship a research title), so v2.1 at
-    full breadth needs a NEW owner curation round over ~2,670 works — and at constant curation it
-    would *shrink* the renderable surface from ~152K to ~82K claims.
-  - v2.1 **strands CERT-01**: its shipped population differs, and REL-01 wants the measurement to
-    describe what ships → re-registration + a fresh blind draw + owner grading time (the scarcest
-    resource on this program).
-  - v2.1 has **no MS-to-MS / shared_text family at all** (every claim is `direct_witness`) and
-    `band` is NULL — so it cannot serve PANEL-02's second view or the propagated witness family, and
-    bands would have to be re-derived. A v2.1 bake must MERGE v2's propagated/shared_text inputs
-    alongside v2.1's direct evidence; that is a data phase, not a file swap.
-  - Carried into that later phase with it: the **reference-granularity stage** (Bible → chapter,
+  `g_launch3.db` — **not in 136.** Measured, and Codex-confirmed sound (F-15):
+  - Only **34.25%** of v2.1's 236,497 shipped claims (**80,993**) name a work carrying an
+    owner-reviewed neutral title (the approved-list ∪ crosswalk join; the exact recipe must be
+    documented when that phase is planned — an earlier figure of 34.7%/82,156 used a crosswalk-keys-only
+    join and is superseded). DATA-04 is fail-closed, so v2.1 at full breadth needs a NEW owner
+    curation round over ~2,670 works; at constant curation the renderable surface would SHRINK from
+    ~152K to ~81K claims.
+  - v2.1 **strands CERT-01** (different shipped population → re-registration + a fresh blind draw +
+    owner grading time).
+  - v2.1 has **no MS-to-MS / shared_text family at all** (every claim is `direct_witness`) and `band`
+    is NULL. A v2.1 bake must MERGE v2's propagated/shared_text inputs alongside v2.1's direct
+    evidence; that is a data phase, not a file swap.
+  - Carried into that later phase: the **reference-granularity stage** (Bible → chapter,
     Mishnah/Tosefta → tractate+chapter, Talmud → folio+amud — actionability, measured NOT to raise
     precision) and the **witness-vs-quoter lever**.
-- **D-02 — ONE rebuild + ONE production redeploy, as wave 1, before any surface is built.** Payloads:
-  1. **Precision fields** onto the `band_precision` `tier_a` row (`measurement_status='measured_pass'`,
-     precision 0.9382, `ci_low` 0.9084, `ci_high` 0.9644, method/strata/report id). Nothing else about
-     the claim rows changes, so CERT-01 keeps describing the shipped population.
-  2. **Page length / coverage**, so span-coverage can be displayed, sorted and filtered. The builder
-     already computes it (it was the Lever-1 routing input); the sidecar currently stores
-     `matched_letters` (37–5,847, avg 666) and `density` but **no page length**, and `router_bucket`
-     is NULL throughout.
-  3. **The novelty flag for ALL evidence families** + NOVEL-02 masking (D-25).
+- **D-02 — ONE rebuild + ONE production redeploy, as the first execution gate, before any surface.**
+  Payloads:
+  1. **The tier-A default-visibility authorization** — see D-02a. NOT the precision figure.
+  2. **Coverage**: an indexed fixed-point `coverage_ppm` + a validity status, plus the page-length
+     input, for the DIRECT family only (D-08a).
+  3. **The novelty assessment for ALL evidence families**, tri-state (D-23a), + NOVEL-02 masking.
+  4. **Materialized sort keys and indexes** the new surfaces need (D-10a).
   Asset-first, human-approved, ONCE, per `docs/specs/discovery-deploy.md`.
-- **D-03 — Why the rebuild must precede the UI:** in the deployed file the `tier_a` `band_precision`
-  row is empty, so `is_default_eligible()` fails closed and the default panel would render **~2,660 of
-  ~152K** shipped claims; novelty is flagged for **14,003** propagated rows while **all 144,294**
-  shipped `track1_direct` rows sit at `is_new = 0` — a computation gap, not a finding. Building the
-  default view against that data would be building against unrepresentative data (the same reason
-  VIS-01 was homed here).
-- **D-04 — Phase shape: ONE phase, data first, then surfaces.** Not split into two numbered phases;
-  the wave ordering does the de-risking and keeps the production deploy count at one.
-- **D-05 — Two hard process gates.** (a) **Real-data mockups** (frozen local asset + real HTR text
-  from `Transcriptions.txt`) BEFORE the UI implementation decisions are locked; PANEL-03 is explicitly
-  held open for one (D-11). (b) A **Codex adversarial pass** — owner: "many possible pitfalls."
-  Owner instruction: *"do the corrections and other decisions upon the mockup+codex gate"* — the
-  open items in Deferred are resolved there, not by re-running this discussion.
+- **D-02a — Store the AUTHORIZATION, not the number (owner, post-Codex F-01).** Codex proved the
+  rebuild as originally written **cannot be built**: `_validate_precision_spec`
+  (`scripts/build_discovery_sidecar.py:3865-3890`, enforced at 4019-4027) *requires* `tier_a`
+  precision to be NULL; the release verifier independently rejects a non-null `tier_a`
+  (`scripts/verify_discovery_sidecar.py:553-560`); and the `band_precision` insert
+  (`scripts/build_discovery_sidecar.py:4419-4427`) writes only `measurement_status` of the five
+  registry columns. **Owner decision:** write ONLY `measurement_status='measured_pass'` and
+  `ci_low = 0.9084` for `tier_a`; `precision` stays NULL. That is exactly what
+  `is_default_eligible()` reads, so the band goes default-visible while the asset stores the
+  authorization rather than an estimate — consistent with D-06's no-numbers posture, and it preserves
+  the contract's real intent (no unearned `tier_a` figure in the asset). Requires a NARROW dated
+  amendment permitting those two fields for this band, applied in lockstep across the frozen §1.6
+  row-set, `_frozen_real_band_precision_rows`, `_validate_precision_spec`, the release verifier, the
+  insert column list and the schema tests — with fixtures proving BOTH the pass and the fail branch.
+- **D-02b — Rebuild-preservation gate (Codex F-04; strengthens the gate identified in-session).**
+  Population-hash equality is necessary but NOT sufficient: `population_hash` /`cluster_map_hash`
+  (`scripts/cert01_frame.py:293-306`) key only on `(page_id, canonical_work_id, stratum)` /
+  `(…, unit_key)`, and the frame hash omits novelty, routing, precision, snapshot hash and
+  `matched_letters` — so `matched_letters` could drift within a stratum undetected. The gate is an
+  **exact old/new allowlisted diff**: `works`, claims, witness units, routing audit and every
+  pre-existing evidence column byte-identical, with ONLY the new coverage columns, the authorized
+  novelty changes and the `tier_a` registry row permitted to differ; PLUS recompute
+  population/stratum/cluster hashes; PLUS bind every graded card to the same work, claim,
+  display-evidence, span and snapshot; PLUS an externally pinned expected frame hash (the deploy
+  runbook currently reads the expected frame from the *candidate's own* manifest —
+  `docs/specs/discovery-deploy.md:79-91,123-138` — which cannot detect a wrong rebuild). The runbook's
+  rebuild command (lines 211-231) also omits the live v2 pinned inputs and must be corrected.
+- **D-02c — The pre-registration stays IMMUTABLE.** `scripts/verify_cert01_grading.py:206-212`
+  pins the CURRENT asset's `db_content_hash`, so every rebuilt byte-stream fails its check 10 by
+  design. Do NOT weaken that check. Publish a **separate compatibility attestation** for the rebuilt
+  asset (original hash + new hash + the allowlisted-diff result + the recomputed population hashes),
+  and keep the original hash and report id in the immutable pre-registration.
+- **D-04 — Phase shape: ONE phase, six execution gates** (Codex F-12, accepted): (1) requirement +
+  contract amendments and the frozen semantics for visibility, novelty, coverage and evidence;
+  (2) offline build + verification of BOTH projections (compatibility, masking positive-control,
+  reconciliation, performance); (3) owner approval + the paired asset-first deploy; (4) the panel +
+  a tier-first work page; (5) the catalogue integration + the findings page; (6) PANEL-03 last.
+- **D-05 — Both process gates RAN in this discuss session, before planning.** Artifacts:
+  `136-MOCKUP.html` (+ its `136-MOCKUP-extract.py` / `136-MOCKUP-render.py`, real data from the frozen
+  asset + `Transcriptions.txt`) and `136-CODEX-REVIEW.md` (**VERDICT: REWORK**, 3 BLOCKER / 9 HIGH /
+  3 MEDIUM; every finding dispositioned below). Further UI-detail decisions still route to a
+  second mockup pass during execution gate 4.
 
 ### Bands, numbers and honesty
 
-- **D-06 — NO precision percentages on ANY surface, and no by-source breakdown table.** Owner
+- **D-06 — NO precision percentages on ANY surface, and no by-source breakdown.** Owner
   (2026-07-30): *"the exact percentage may be misleading and may include sources the user will never
-  see. What's important is the tiers, and the user can judge for themselves."* Surfaces show the tier
-  label + review overlay + a link to the methods page. This supersedes the 135 carry-forward that the
-  per-stratum spread (1.000 `ja` → 0.471 `msource:medium`) must surface on BAND-05, and it means the
-  BAND-05 methods section shipped in 135-02 needs re-thinking into a **qualitative** per-tier
-  explanation (what the tier is, how it was produced, what it does not claim).
-  - **Flagged for Phase 139, not re-litigated here:** REL-01/CERT-02 currently require that tier-A
-    "goes public WITH its measured number." D-06 conflicts with that clause. 139 must either amend
-    REL-01/CERT-02 or publish the number then. 136 publishes nothing, so nothing is violated now.
-- **D-07 — The measured numbers still go INTO the file, they are just never displayed.**
-  `is_default_eligible()` reads `measurement_status` + `ci_low` from the sidecar; that is an internal
-  gate, not a display path. Internal ≠ published.
-- **D-08 — The span-coverage percentage IS displayed** ("Matches ⟨work⟩ · 68% of page"), sortable and
-  filterable. **Do not confuse it with a precision number.** Wording must keep it a statement of how
-  much of the page is accounted for, never a confidence score.
+  see. What's important is the tiers, and the user can judge for themselves."*
+- **D-06a — The conflicting requirements are AMENDED IN THIS PHASE (owner, post-Codex F-03).** Codex
+  showed the conflict is live NOW, not only at 139: BAND-03 requires screening precision reachable via
+  the band tooltip, BAND-05 requires the methods page to publish population, sample size, weighted
+  estimate and CI, and `web/pages/help.py:245-260` **already renders estimates and intervals**.
+  Owner chose to amend both and rewrite the methods page **qualitatively**: each tier explained in
+  words plus the non-percentage facts — that grading happened, the unit, the sample size, the grader,
+  the date, the method, the audit state, and the immutable report identifier. No percentage, no CI, no
+  strata table. `docs/specs/discovery-band-labels-v1.md` §3 needs a dated amendment to match.
+  - **Still owed at 139:** REL-01/CERT-02 also require tier-A to go public *with* its measured number.
+    That clause must be amended or satisfied at the release gate; 136 publishes nothing, so nothing is
+    violated now.
+- **D-06b — The public projection is NOT certificate-covered (Codex F-02).** The measurement is on the
+  all-source population; the public projection is a structurally different one, and `135-09-CERT01-MEASUREMENT.md`
+  itself records the Sefaria-only figure as descriptive, not pre-registered. Never copy the all-source
+  measurement into the public asset as if frame-matched. **OPEN, must be settled before the 139 flip:**
+  either pre-register and measure a public estimand before the public bake, or formally amend REL-01 to
+  justify the transfer. For 136 the full/private asset carries the D-02a authorization; whether the
+  public projection may inherit it is part of that same open decision.
+- **D-08 — A coverage percentage IS displayed** ("Matches ⟨work⟩ · 68% of page"), sortable and
+  filterable. It is NOT a precision number and must never read as one.
+- **D-08a — Coverage is DIRECT-FAMILY ONLY and explicitly labelled (owner, post-Codex F-08).** The
+  metric is matched Hebrew **base letters** ÷ the normalized page stream
+  (`scripts/build_discovery_sidecar.py:532-568`) — not character coverage and not the displayed span:
+  **9,549** shipped direct rows have multiple spans while only the largest is stored, and **all**
+  42,776 shipped propagated evidence rows have NULL `matched_letters`. So: show, sort and filter the
+  percentage for the direct family only; label it as matched-letter coverage, never bare "68% of page";
+  store `coverage_ppm` (indexed, fixed-point) plus a validity status; propagated rows show no
+  percentage at all.
 
 ### Panel (PANEL-01/02/03)
 
 - **D-09 — Scope: both page and manuscript.** One panel, two groups: **"On this page"** first, then
   **"Elsewhere in this manuscript"** (collapsed). Served via `page_id IN (…)` over the browse page's
-  own page list — `discovery_evidence` has indexes on `claim_id`, `a_page_id`, `other_page_id` and
-  **none on `sys_id`**. Per manuscript: median **2** shipped claims / **1** distinct work; max 427
-  claims / 47 works; **429** manuscripts carry >50 claims → the manuscript group needs pagination.
-  (Adding a `sys_id` index to the wave-1 rebuild is Claude's discretion — see below.)
-- **D-10 — Nested structure, not three flat lists.** Top level = identification rows (work + tier +
-  review overlay + span %). "Other manuscripts matching ⟨work⟩" is derived per work, so it nests
-  under its own identification row as an on-demand expansion via
-  `get_work_witnesses(work_id, anchor_sys_id=…)` (which already excludes the anchor's own unit and
-  suppresses same-unit members). "Pages matching this page in other manuscripts" is a separate
-  section below.
-- **D-11 — Related-pages section: header + count by default, rows behind the toggle.** The 20,435
-  shipped `shared_text` rows carry band `not_evaluated`, which `is_default_eligible()` rejects. The
-  section therefore always shows "N pages in other manuscripts match this page" with the disclaimer,
-  while the row list expands only via "Show more possible matches". **No amendment to
-  `discovery-band-labels-v1.md`** — nothing unevaluated is asserted as an identification.
-- **D-12 — PANEL-03 (evidence view): OPEN, decided at the mockup gate.** Owner: *"Probably 1, but
-  I'll need to see a mockup (preferably with our real data) to decide."* Leading candidate: **highlight
-  the matched span inside the transcription browse already renders** (reusing `web/pages/browse.py`'s
-  `highlight_text` machinery) with match stats beside it, failing closed — explicit "evidence
-  unavailable for this text version", no highlight — when the live page text disagrees with the stored
-  `snapshot_hash`. Alternatives kept alive for the mockup: a dedicated evidence pane; match-stats-only.
-  Reference text is NEVER rendered in any variant.
-- **D-13 — The entry control is hidden when a manuscript has no claims.** Only **44,375** of ~255K
-  sys_ids carry shipped claims (~17%), so the control would otherwise be a dead end on ~83% of browse
-  pages. Accepted trade-off: the BAND-04 recall disclaimer then does not appear on empty manuscripts.
+  own page list — `discovery_evidence` has no `sys_id` index, and Codex confirmed the page-list plan
+  does use `ix_discovery_claim_page_id`, so it is the right approach. Per manuscript: median **2**
+  shipped claims / **1** distinct work; max 427 claims / 47 works; **429** manuscripts over 50 claims
+  → the manuscript group needs pagination.
+- **D-10 — Nested structure.** Top level = identification rows. "Other manuscripts matching ⟨work⟩"
+  nests per work as an on-demand expansion via `get_work_witnesses(work_id, anchor_sys_id=…)`.
+  "Pages matching this page in other manuscripts" is a separate section below.
+- **D-11 — Related-pages section: header + count by default, rows behind the toggle.** No amendment to
+  the band-label contract — nothing unevaluated is asserted as an identification.
+- **D-11a — Count semantics (Codex F-13).** The earlier "20,435" was display-claims whose *selected*
+  evidence is shared text, not the relation population. Real figures: **40,968** shipped shared-text
+  evidence rows, **37,397** directed page pairs, **30,539** unordered pairs. The header counts
+  **distinct opposite pages for this anchor**, deduplicated, and is labelled as *unevaluated candidate
+  alignments* so an aggregate cannot evade the screening disclosure.
+- **D-12 — PANEL-03 (evidence view): highlight where offsets exist, and only there (owner,
+  post-Codex F-09).** Mechanism: slice the RAW page text at the stored offsets, escape each part, wrap
+  the middle — **not** a reuse of `web/pages/browse.py::highlight_text`, which escapes first and then
+  substitutes search *terms* (`browse.py:1577-1601`), so it cannot consume offsets and would corrupt
+  them. Fail closed per side on snapshot-hash drift: the identification and its tier still show, only
+  the span is withheld. **The b-side of a page relation has no stored offsets by design**
+  (`discovery-sidecar-schema-v1.md:165-175`), so when the viewed page is the b-side the section shows
+  the relation and its stats with an explicit "the passage location was not recorded" note. PANEL-03
+  ships in execution gate 6, last.
+- **D-13 — The entry control is hidden only on a SUCCESSFUL zero (Codex F-14).** Only 44,375 of ~255K
+  manuscripts carry shipped claims (~17%), so hiding on zero is right — but today's wrappers collapse
+  timeout, overload, unavailable sidecar and genuine zero all to `[]`, which would hide the panel
+  during an outage as though the manuscript had nothing. The service must return an envelope
+  (`{status, items, total}`); an outage shows a visible temporary-unavailable state with retry.
+- **D-13a — Collapse duplicate canonical works at display time (mockup M-1).** The mockup's real page
+  showed the SAME work twice under two titles — `w000190` (M-source-sourced title) and `w001382`
+  (Sefaria) — even though `canonical_work_id = w001382` records the merge, because claims key on
+  `(page_id, work_id)` and dedup runs per claim key. Corpus-wide: **921 row-pairs**. Owner decision:
+  **collapse by `canonical_work_id`, and the canonical work's own title wins** (the other title is
+  dropped from view). Applies to the panel, the work page and the findings page alike, and to every
+  count derived from them.
+- **D-13b — One row per passage; competing attributions nest beneath (mockup M-2).** **1,558**
+  span-groups carry 2–8 shipped claims on byte-identical offsets (1,245 pairs, 208 triples, 57 quads,
+  32 quints, 15 six-way, one 8-way). Owner decision: the strongest attribution is the row; the others
+  appear as "↳ the same passage also matches …". This stops one passage inflating a manuscript's match
+  count. The lead-attribution rule must be deterministic (tier rank, then the existing total order).
+- **D-13c — Short-evidence rows go behind the "show more" toggle (mockup M-3).** Under 150 matched
+  letters: **6,558** direct rows (4.5% of 144,294) and **5,630** propagated rows (25% of 22,243). The
+  mockup's real case is a siddur whose four liturgical matches share one **66-letter** span; the
+  thinnest shipped direct match in the whole asset is **37** letters. Owner chose the toggle over
+  marking. **The threshold itself is set at execution gate 1 with counts on the table** — note the
+  honest counter-argument the owner accepted: for a prayer book a short liturgical passage may be
+  exactly the correct identification, so the threshold must be defensible and the rows stay reachable,
+  never deleted.
 
 ### Work page (`/work/{id}`, WORK-01)
 
-- **D-14 — Sort is a toggle with three options, tier-first by default:** (1) strongest tier, then
-  shelfmark (default, deterministic); (2) library then shelfmark; (3) span coverage. All three ship.
-- **D-15 — A novelty toggle is first-class:** "show only new findings / show everything", with the
-  novelty state clearly marked on rows in the second state. **Wording caveat:** NOVEL-01 PROHIBITS
-  "new discovery" / "new" / "unknown to scholarship" on public surfaces; the marker must express
-  "not identified in any available finding aid" / "לא מזוהה באמצעי העזר הקיימים" in a chip-sized form.
-  The exact chip text is an open wording item for the mockup gate.
-- **D-16 — Filters: tier + novelty + span coverage are the important ones.** Owner: the library filter
-  "is not the one that's important, though it is not entirely useless" → include it ONLY if the
-  existing web library-filter component (v8.4 dual-mode show-only/hide) drops in cheaply; otherwise
-  defer it. Filters compose as AND; empty = all currently enabled tiers (screening rows appear only
-  while the "show more" toggle is on).
-- **D-17 — Plain paging with the real total visible.** "13,038 manuscripts — page 1 of 66"; no hidden
-  truncation, no size-dependent behaviour change. **120** works exceed the 200-row PERF-01 cap; the
-  median work has **9** carriers; 1,088 works have ≥1 shipped claim.
-- Witness-unit grouping itself is already fixed by DATA-10 (joined/part-grouped fragments = ONE
-  witness at the highest member tier, members visible on expansion) — not re-decided here.
+- **D-14 — Sort is a three-way toggle, tier-first by default:** (1) strongest tier, then shelfmark;
+  (2) library then shelfmark; (3) coverage. Novelty is NOT a sort — see D-15a.
+- **D-15 — A novelty filter is first-class**, worded per D-23b.
+- **D-15a — Novelty filters and (optionally) groups; it never orders by default (Codex F-07).** D-19's
+  novelty-first ordering contradicted NOVEL-01/D-24's prohibition on novelty feeding ranking. Owner
+  resolution: default order stays tier-first; novelty is a filter plus an explicit user-selected
+  grouping that never changes confidence rank or styling. NOVEL-01's prohibition text is amended to
+  say exactly that.
+- **D-16 — Filters: tier + novelty + coverage are the important ones.** The library filter is included
+  only if the existing web library-filter component drops in cheaply; otherwise deferred. Filters
+  compose as AND; empty = all currently enabled tiers.
+- **D-17 — Plain paging with the real total visible.** **Corrected figures (Codex F-11):** the heaviest
+  work has **13,038 claim rows** but **4,796 distinct manuscripts** and **4,637 witness units**;
+  medians across the 1,088 works are **9 claims / 5 manuscripts / 4 units**; only **64** works exceed
+  200 witness units (not 120). WORK-01 totals count the post-DATA-10 **unit** projection.
+- **D-17a — The work query needs display fields the service does not return (Codex F-11).**
+  `shared/discovery_service.py:209-226` exposes only unit/page/work/claim/manuscript ids, family, band
+  and band rank; the paged result (797-842) has no total, shelfmark, library, coverage or novelty — so
+  server-side sorting by library and a visible total are impossible today. The rebuild adds a sidecar
+  **manuscript-display lookup** with normalized library and shelfmark sort keys, and the service gains
+  a count query using the identical grouped predicates.
 
-### Findability (WORK-02) and the findings browse
+### Findability, the catalogue page and the findings page
 
-- **D-18 — The `/catalog` Browse-by-Identification page gains computed identifications**, with BOTH
-  the same-work-ish and the parallel/citation rows present, **visibly separated and separately
-  worded** — but NOT under wording that asserts "is a copy of" versus "quotes". Owner: *"we are not
-  sure that tier_a is same work and the next are parallels, just heuristics."* Note the integration
-  problem to solve: that page's work vocabulary is the FJMS catalogue's, ours is the 1,088-work
-  reviewed neutral-title set, so the mapping is real work and will not be complete.
-- **D-19 — A corpus-wide findings browse ships in this phase**, ordered and filtered novelty-first
-  (plus tier and span filters). This is where the owner's "maximum ability to see new findings" lives,
-  and it gives **SEED-032** (surface new/uncataloged discoveries above known works) its home — closing
-  the disposition that `v9-PUBLICATION-STRATEGY.md` §8.6 left open. Its detailed shape (is a row an
-  identification, a work, or a manuscript? one surface or two?) is an open item for the mockup gate.
-- **D-20 — Work pages are reachable from** the manuscript panel, the catalogue page, and the findings
-  browse.
+- **D-18 — `/catalog-browse` (Browse by Identification) gains computed identifications**, with both the
+  strong and the weaker relation kinds present, visibly separated and separately worded — never under
+  wording that asserts "is a copy of" versus "quotes". Note the integration problem: that page's work
+  vocabulary is the FJMS catalogue's and resolves shelfmarks only after fetching a page
+  (`web/pages/catalog_browse.py:262-309,376-438`), so the mapping is real work and will not be
+  complete. **How computed rows are presented alongside catalogued ones is OPEN** → execution gate 5.
+- **D-19 — The corpus-wide findings surface is its OWN page with its OWN nav entry** (owner,
+  2026-07-30), flag-gated exactly as `/atlas` is (availability predicate, not the flag alone). It
+  cannot be called "Discoveries" — `/discoveries` is the pre-existing **Community** page. The nav today
+  is Home · About · Search · Find Parallels · Browse by Shelfmark · Browse by Identification ·
+  Community · My Lists · Joins Lab · [Fragment Puzzle] · [The Genizah Atlas — Beta]. This surface
+  gives **SEED-032** its home, closing the disposition `v9-PUBLICATION-STRATEGY.md` §8.6 left open.
+  **The row unit is OPEN** → execution gate 5, with a mockup. Recommended default to test:
+  **one line = one identification (manuscript × work)**, because tier, novelty, coverage and the
+  future vote all attach to exactly that pairing; the alternatives are one line per manuscript
+  (44,375 rows; 9,806 carry >1 work, so a novelty filter is ambiguous) or one line per work (1,088
+  rows, but the individual find is hidden and giant works dominate by size).
+- **D-20 — Work pages are reachable from** the manuscript panel, `/catalog-browse`, and the findings
+  page.
 
-### Relation wording (the deferred DATA-01 display vocabulary)
+### Relation wording
 
-- **D-21 — "Match framing", heuristic-honest.** Chosen family (owner-selected preview), with the
-  Hebrew maqaf written as U+05BE `־`:
-  - Row: **"Matches ⟨work⟩ · 68% of page"** / **"התאמה ל⟨חיבור⟩ · 68% מהדף"**
+- **D-21 — "Match framing", heuristic-honest.** Owner-selected, with the Hebrew maqaf as U+05BE `־`:
+  - Row: **"Matches ⟨work⟩ · 68% of page"** / **"התאמה ל⟨חיבור⟩ · 68% מהדף"** — the percentage only on
+    direct-family rows (D-08a), labelled as matched-letter coverage.
   - Weaker relation: **"Partial match with ⟨work⟩"** / **"התאמה חלקית ל⟨חיבור⟩"**
   - Section: **"Other manuscripts matching ⟨work⟩"** / **"כתבי־יד נוספים התואמים ל⟨חיבור⟩"**
   - Section: **"Pages matching this page in other manuscripts"** /
     **"דפים התואמים לדף זה בכתבי־יד אחרים"**
-  - PROHIBITED in display: "copy of", "quotes", "witness of", and anything else that names the
-    relationship the routing only guesses at. The stored vocabulary
-    (`direct_witness` / `quotes_this_work` / `shared_text`) stays as-is — this is display only.
-  - "Possible identification" stays RESERVED for screening-tier rows (BAND-03); it is not a general
-    row label.
-  - The panel's own title stays the requirement's **"Computed identifications" / "זיהויים מחושבים"**.
+  - PROHIBITED in display: "copy of", "quotes", "witness of". Owner: *"we are not sure that tier_a is
+    same work and the next are parallels, just heuristics."* The stored vocabulary
+    (`direct_witness` / `quotes_this_work` / `shared_text`) is unchanged — this is display only.
+  - "Possible identification" stays RESERVED for screening-tier rows (BAND-03).
+  - The panel title stays **"Computed identifications" / "זיהויים מחושבים"**.
 
-### Public/private projection (VIS-01) and novelty provenance (NOVEL-02)
+### Public/private projection (VIS-01)
 
-- **D-22 — The public/private decision is made PER ROW, on the origin of the displayed claim** — not
-  per work and not on `works.source_corpus` alone. Measured during this discussion: the crosswalk's
-  restricted-corpus id prefix maps to **656 restricted-identity works AND 235 open (Sefaria) ones**,
-  so a corpus-keyed rule mislabels in both directions. A row is public only when the evidence that
-  produced it came from an open source AND the work it names has an open identity. Exclusion is
-  **structural** — private rows are ABSENT from the public artifact, never filtered in the UI. Needs a
-  build-time per-row provenance decision plus a test proving the public file contains no restricted row
-  (the VIS-02 positive control at 139 then has something real to check).
-  - Reference numbers for the projection: shipped display claims by corpus × family — sefaria/direct
-    113,337; ja/direct 15,821; msource/direct 15,136; sefaria/propagated 11,604; msource/propagated
-    6,564; ja/propagated 4,075. Works: 1,269 total (sefaria 507, msource 656, ja 106); 1,088 with ≥1
-    shipped claim.
-- **D-23 — Novelty computation: the FULL check.** The enumerable finding-aid set (FJMS + NLI catalogue
-  and bibliography, titles, PGP, FGP, M-source shelfmark attributions), per `(sys_id, specific work)`,
-  with the paid title judgement settling the cases a string comparison misses. The owner's own
-  observation — "what's computed and not in the catalogue is new" — IS the funnel's catalogue arm; the
-  title check exists because a catalogue title can name the work in different words, and because the
-  handoff measured that bibliography `published_full` and bare PGP descriptions **over-demote**
-  (presence ≠ naming *this* work). Handoff-supplied specifics to honour: compute at the **raw
-  `ref_work`** grain, not the over-collapsed `canonical_work_id`; read the catalogue's own
+- **D-22 — Two visibility axes, derived at BUILD time, before raw ids are discarded (Codex F-05).**
+  "Origin of the displayed assertion" is not representable in the shipped schema as written: the
+  schema *requires* `discovery_claim.source_corpus` to equal the work's identity source
+  (`discovery-sidecar-schema-v1.md:89-100`, enforced at `verify_discovery_sidecar.py:319-332`), and
+  `discovery_evidence` carries only a family code — no assertion-origin and no licence provenance. So
+  `works.source_corpus` IS exactly the proxy D-22 says is insufficient. The build must therefore derive
+  **`assertion_visibility`** (from the raw evidence origin) and **`identity_visibility`** (for the
+  displayed work) as separate fields; **public eligibility requires BOTH**. The public artifact carries
+  only masked/public enums, never the raw origin.
+  - Projection is a **closed graph**: FK closure, no unreachable works, routing-audit rows, counts,
+    aggregates, sort behaviour and auxiliary tables all projected and verified — not claim rows alone.
+  - Measured motivation: the restricted-corpus id prefix maps to **656 restricted-identity works AND
+    235 open (Sefaria) ones**, so a corpus-keyed rule mislabels in both directions.
+  - Reference numbers: shipped display claims by corpus × family — sefaria/direct 113,337; ja/direct
+    15,821; msource/direct 15,136; sefaria/propagated 11,604; msource/propagated 6,564; ja/propagated
+    4,075. Works: 1,269 total (sefaria 507, msource 656, ja 106); 1,088 with ≥1 shipped claim.
+
+### Novelty (NOVEL-01/02)
+
+- **D-23 — The full check.** The enumerable finding-aid set (FJMS + NLI catalogue and bibliography,
+  titles, PGP, FGP, M-source shelfmark attributions), per (manuscript, specific work), with the LLM
+  title judgement for cases a string comparison misses. The owner's own framing — "what's computed and
+  not in the catalogue is new" — IS the funnel's catalogue arm. Handoff specifics to honour: compute at
+  the **raw `ref_work`** grain, not the over-collapsed `canonical_work_id`; read the catalogue's own
   identification (`catalog.TitleHeb` / `GenizahTitleOrgTitle`), NOT `catalog_refs` (matched zero);
-  keyed by `sys_id == AlmaId`. Cost ≈ **$27 one-time**, ~15 min parallelized, with
-  `google/gemini-3.6-flash` + `reasoning:{effort:"low"}` — **do not downgrade the model** (a weaker
-  flash model scored 62.5% agreement vs 100%); always read real `usage.cost`. Verdict cache is a
-  build-time artifact and never ships in the sidecar.
-- **D-24 — Novelty is structurally orthogonal to the tier.** It must never feed band assignment,
-  precision copy, ranking weight, or "certified"-style styling. Absence from a finding aid is not
-  evidence a claim is correct.
-- **D-25 — When a row is already recorded but only in a source we may not name:** the row is simply
-  not flagged novel, and the explanation degrades — name the source where nameable ("recorded in the
-  catalogue"), otherwise **"recorded in another reference source"** with no corpus name anywhere,
+  keyed by `sys_id == AlmaId`; bibliography `published_full` and bare PGP descriptions **over-demote**
+  (presence ≠ naming *this* work).
+- **D-23a — TRI-STATE, fail-closed (owner, post-Codex F-06).** Values are
+  **`known` / `not_found` / `indeterminate`**, defaulting to `indeterminate` whenever anything fails —
+  a source is unavailable, an identifier does not normalize, a snapshot is incomplete, a cache is
+  stale, or the model abstains. A boolean cannot distinguish "checked and found nothing" from "the
+  check failed", and the live asset already contains **665 claims whose evidence rows disagree with
+  each other** on `is_new` (of 29,054 multi-evidence claims). The assessment is centralized at a
+  versioned manuscript–work key, and a verifier asserts every evidence row of a claim inherits ONE
+  result.
+- **D-23b — Wording: "Not found in the finding aids checked"** / the Hebrew equivalent, shown with the
+  checked-source list and their dates. This replaces "not identified in any available finding aid",
+  which over-claims relative to the finite set actually checked. "New", "new discovery" and "unknown to
+  scholarship" stay PROHIBITED. NOVEL-01's wording is amended accordingly.
+- **D-23c — The LLM gate needs a reproducible contract:** pinned prompt hash, exact model and version
+  (`gemini-3.6-flash` + `reasoning:{effort:"low"}`), normalized input hash, **structured abstention**
+  (→ `indeterminate`), an explicit cache-key specification, and a **substantially larger owner-labelled
+  hard-case evaluation than the 40 cards** used so far — agreement on 40 is too weak for an axis this
+  reputationally loaded. Cost ≈ $27 one-time; **do not downgrade the model**; always read real
+  `usage.cost`. The verdict cache is a build-time artifact and never ships.
+- **D-23d — Novelty needs its OWN reviewed identity key.** Raw source-work ids split aliases; the
+  existing canonical key is documented as over-collapsing (one collapsed id covers 39 Bible books).
+  Define a reviewed `novelty_work_key` with aliases and a deterministic "known via ANY alias ⇒ not
+  novel" rule (Codex F-07).
+- **D-24 — Novelty is structurally orthogonal to the tier** — never feeding band assignment, precision
+  copy, ranking weight or certified styling. Enforced in the UI by D-15a (filter/grouping, not order).
+- **D-25 — Prior-record provenance is masked.** Name the source where nameable ("recorded in the
+  catalogue"); otherwise **"recorded in another reference source"**, with no corpus name anywhere —
   including copy/clipboard output, JSON payloads and error paths.
+
+### Performance (PERF-01)
+
+- **D-10a — The findings page cannot meet the current budget without new indexes (Codex F-10,
+  measured).** A representative novelty/tier/coverage ordering scanned all display claims, used a
+  temporary B-tree, and took **3.41–3.55 s** across four runs against a **1.5 s** cap
+  (`discovery-budgets.md:35-42`); the count alone took 0.50–0.55 s. The rebuild must materialize
+  sortable **`band_rank`** and **`coverage_ppm`**, add an index supporting findings ordering/filtering
+  and a **unique index on `discovery_claim(display_evidence_id)`**, and index the novelty *status*
+  rather than the legacy boolean. Every filter/sort/count combination is benchmarked before deploy, and
+  the new query shapes plus their worst-case filtered totals are added to the **versioned**
+  `discovery-budgets.md` (which today has no findings-page cap at all).
+
+### Codex disposition (`136-CODEX-REVIEW.md`, VERDICT: REWORK)
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| F-01 tier-A precision forbidden by builder + verifier | BLOCKER | **Resolved** by D-02a (store authorization only) + the narrow lockstep amendment |
+| F-02 certificate cannot authorize the public projection | BLOCKER | **Open by design** — D-06b; must be settled before the 139 flip, not in 136 |
+| F-03 no-numbers conflicts with BAND-03/05 now | BLOCKER | **Resolved** by D-06a (amend both, methods page goes qualitative) |
+| F-04 population-hash equality insufficient | HIGH | **Accepted** → D-02b exact allowlisted diff + card binding + external pinned frame hash |
+| F-05 assertion origin not representable | HIGH | **Accepted** → D-22 two-axis build-time derivation + closed-graph projection |
+| F-06 boolean novelty cannot express failure | HIGH | **Accepted** → D-23a tri-state, fail-closed |
+| F-07 novelty-first ordering contradicts no-ranking | HIGH | **Accepted** → D-15a filter/grouping only + D-23d own identity key |
+| F-08 coverage metric mis-described, absent for propagated | HIGH | **Accepted** → D-08a direct-family only, explicit label, `coverage_ppm` |
+| F-09 PANEL-03 impossible for b-side; highlight_text unusable | HIGH | **Accepted** → D-12 offset renderer + b-side note; PANEL-03 last |
+| F-10 findings query 3.4 s vs 1.5 s cap | HIGH | **Accepted** → D-10a materialized keys + indexes + versioned caps |
+| F-11 work query lacks display fields; terminology wrong | HIGH | **Accepted** → D-17/D-17a; figures corrected |
+| F-12 not one deliverable phase | HIGH | **Accepted** → D-04 six execution gates |
+| F-13 related-page count semantics | MEDIUM | **Accepted** → D-11a |
+| F-14 wrappers collapse outage into zero | MEDIUM | **Accepted** → D-13 envelope |
+| F-15 title-coverage figure stale | MEDIUM | **Accepted** → D-01 corrected to 34.25% / 80,993 |
 
 ### Claude's Discretion
 
-- **Per-surface BAND-04 disclaimer variants.** The canonical base sentence is fixed (135 D-12):
-  "Not exhaustive — more identifications may exist." / "אינו ממצה — ייתכנו זיהויים נוספים." Per-surface
-  tuning (panel / work page / catalogue rows / findings browse) is Claude's, subject to the mockup gate.
-- **Whether the wave-1 rebuild also adds an index on `discovery_evidence.sys_id`** — it would let the
-  panel query a manuscript directly instead of via `page_id IN (…)`. Cheap while the file is being
-  rebuilt anyway; the planner decides against the PERF-01 budget and the D-09 query shape.
-- Page sizes, per-query timeouts, LRU sizing and query shapes, within the PERF-01 caps; the
-  overload / sidecar-absent copy; whether `discovery-budgets.md` needs a version bump for the new
-  findings-browse and novelty-filter query shapes.
-- The band-values/label module already exists (`shared/discovery_band_labels.py`); every surface MUST
-  render claims through `serialize_banded_claim()` so the tier is structurally inseparable (SC#1).
+- Per-surface BAND-04 disclaimer variants (base sentence fixed in 135 D-12).
+- The D-13c short-evidence threshold's exact value (set at gate 1 with counts).
+- The D-13b lead-attribution tie-break beyond tier rank.
+- Page sizes, timeouts, LRU sizing and query shapes within the PERF-01 caps; the
+  overload/sidecar-absent copy.
+- Whether to add a `discovery_evidence.sys_id` index — Codex confirmed the `page_id IN (…)` plan is
+  already indexed, so add one only if it replaces that plan.
 
 </decisions>
 
@@ -238,85 +361,86 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
 
 **Downstream agents MUST read these before planning or implementing.**
 
-### Owner strategy & milestone state (read first)
-- `.planning/v9-PUBLICATION-STRATEGY.md` — open-first / visibility-gated output (§2), the ONE gate at
-  the packaging boundary (§3), the novelty axis and its precise public label (§4), gen-2 posture (§5),
-  the precision posture (§6), and §8's open list — items 2, 3 and 6 are answered by this CONTEXT.
-- `.planning/v9-REQUIREMENTS-ADDENDUM-DRAFT.md` — the rationale record for VIS-01/02 + NOVEL-01/02 and
-  for the DECLINED curated-surface exception (section C is declined-draft text — do NOT re-derive an
-  early surface from it).
-- `.planning/STATE.md` — the CERT-01 measurement outcome + the three findings that shape 136+.
-- `.planning/REQUIREMENTS.md` — PANEL-01/02/03, WORK-01/02, VIS-01, NOVEL-01/02, BAND-01..05,
-  CERT-02, DATA-03/04/06/07/10, PERF-01, REL-01.
-- `.planning/ROADMAP.md` §Phase 136 — goal + success criteria (needs updating per D-03/D-19).
+### This phase's own gate artifacts (read first)
+- `.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-CODEX-REVIEW.md` — the
+  adversarial review (REWORK) with file:line evidence for every blocker and high.
+- `.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-MOCKUP.html` — the
+  real-data mockup; `136-MOCKUP-extract.py` + `136-MOCKUP-render.py` regenerate it.
+- `.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-DISCUSSION-LOG.md` — the
+  alternatives considered (audit trail only).
 
-### GEN2 handoff (the v2.1 decision — D-01)
-- `same_work_spike/probe/rsource/HANDOFF-TO-135.md` — the v2.1 evidence package, the two-surface
-  coverage router, the post-G validation, and §6's four stages moved onto the milestone. **§6.1 is
-  load-bearing for NOVEL-01** (grain, catalogue source, strictness, pre-built tooling).
-- `same_work_spike/probe/rsource/GEN2-HANDOFF.md` — the fuller engine-track fold-up. (gitignored,
-  local-only)
-- `same_work_spike/probe/rsource/data/g_launch3.db` — the v2.1 evidence. **NOT consumed in 136.**
+### Owner strategy & milestone state
+- `.planning/v9-PUBLICATION-STRATEGY.md` — open-first / visibility-gated output (§2), the gate at the
+  packaging boundary (§3), the novelty axis (§4), gen-2 posture (§5), precision posture (§6), §8 open
+  list (items 2, 3 and 6 answered here).
+- `.planning/v9-REQUIREMENTS-ADDENDUM-DRAFT.md` — rationale for VIS-01/02 + NOVEL-01/02 and the
+  DECLINED curated-surface exception (section C is declined-draft text — do NOT revive it).
+- `.planning/STATE.md` · `.planning/REQUIREMENTS.md` · `.planning/ROADMAP.md` §Phase 136.
 
-### Discovery contract specs (single sources of truth)
-- `docs/specs/discovery-sidecar-schema-v1.md` — the frozen two-table model, `claim_id`/`evidence_id`
-  hashing, the frozen enum vocab, the 2026-07-24 amendments (`measurement_status` CHECK,
-  `discovery_routing_audit`, the v2 provenance `meta` keys).
-- `docs/specs/discovery-band-labels-v1.md` — §2 EN/HE labels + review overlay, §3 precision-presentation
-  rules (a band estimate is NEVER a per-row probability), §3.1 coverage bands + the 0.45 cliff, §4
-  default-shown policy + the multi-register invariant + the D-18 amendment, §5 the enum-rename lockstep.
-  **D-06 changes what is displayed, not this contract's rules** — any wording change here is a dated
-  amendment, never a silent edit.
-- `docs/specs/discovery-budgets.md` — the PERF-01 caps and the tunable-only-by-versioning discipline.
-- `docs/specs/discovery-deploy.md` — asset-first deploy / rollback / reproducible rebuild (the wave-1
-  redeploy follows it).
-- `docs/specs/discovery-coordination.md` — session roles, the naming discipline ("v2" is reserved for
-  the milestone sidecar; gen-2 outputs are never called "v2"), and the pinned-artifact handoff rule.
-- `docs/specs/discovery-frames.md` — the frozen frame artifact; a rebuild needs a new dated frame doc
-  with the public/private row-count reconciliation (VIS-02 input).
+### GEN2 handoff (the D-01 deferral)
+- `same_work_spike/probe/rsource/HANDOFF-TO-135.md` — the v2.1 package; **§6.1 is load-bearing for
+  NOVEL-01**. `GEN2-HANDOFF.md` is the fuller engine-track record. `rsource/data/g_launch3.db` is the
+  v2.1 evidence — **not consumed in 136**. (gitignored, local-only)
+
+### Discovery contract specs
+- `docs/specs/discovery-sidecar-schema-v1.md` — the frozen two-table model, id recipes, enums, §1.6
+  precision row-set (D-02a amends it), the nullable shared-text b-side (F-09), the claim/work
+  source-corpus equality constraint (F-05).
+- `docs/specs/discovery-band-labels-v1.md` — §2 labels, §3 precision-presentation rules (D-06a amends),
+  §3.1 coverage bands, §4 default-shown + D-18 amendment, §5 enum lockstep.
+- `docs/specs/discovery-budgets.md` — PERF-01 caps; needs a versioned findings-page entry (D-10a).
+- `docs/specs/discovery-deploy.md` — asset-first deploy/rollback; §211-231 rebuild command needs the
+  live v2 pinned inputs (D-02b).
+- `docs/specs/discovery-coordination.md` — session roles, the "v2 vs gen-2" naming rule, the
+  pinned-artifact handoff rule.
+- `docs/specs/discovery-frames.md` / `discovery-frames-v2.md` — the frozen frame; a rebuild needs a new
+  dated frame doc with the public/private row-count reconciliation (VIS-02 input).
+
+### Certificate
+- `.planning/phases/135-precision-certificate-confidence-bands/135-09-CERT01-MEASUREMENT.md` — the
+  measured 0.9382 [0.9084, 0.9644]; its own text records the public-scope figure as descriptive (F-02).
+- `.planning/phases/135-precision-certificate-confidence-bands/cert01_prereg.json` — pins
+  `db_content_hash` + `frame_content_hash` (D-02c).
+- `scripts/verify_cert01_grading.py` · `scripts/cert01_frame.py` — the 12 checks and the hash recipes.
 
 ### Phase context
 - `.planning/phases/134-discovery-data-spine/134-CONTEXT.md` — the two-table contract (C-1..C-9), band
-  sources, the DATA-10 unit×work projection, the `band_precision` mechanism, the masked-title workflow.
+  sources, the DATA-10 unit×work projection, the masked-title workflow.
 - `.planning/phases/135-precision-certificate-confidence-bands/135-CONTEXT.md` — D-11 toggle wording,
-  D-12 disclaimer base sentence, D-17 chronological demotion, D-18 default-shown sequencing.
-- `.planning/phases/135-precision-certificate-confidence-bands/135-09-CERT01-MEASUREMENT.md` — the
-  measured 0.9382 [0.9084, 0.9644], the strata table, and the error-concentration finding.
+  D-12 disclaimer base sentence, D-17 demotion, D-18 default-shown sequencing.
 
 ### Code the phase builds on
-- `shared/discovery_service.py` — the async chokepoint. All four read paths exist and are UNUSED:
-  `get_claims_for_page`, `get_pages_related_to_page`, `get_evidence`, `get_work_witnesses`
-  (+ `get_band_precision*`, `get_band_claim_counts`). Shipped-only by default with an
-  `include_review` opt-in; `_BAND_RANK_*` ordering; LIMIT/OFFSET paginates over units post-grouping.
-- `web/discovery.py` — fail-open async wrappers, **zero callers today**; this phase is their first
-  consumer. Also `discovery_methods_noindex()`.
+- `shared/discovery_service.py` — the async chokepoint; all four read paths exist and are UNUSED.
+  Needs the D-13 envelope, the D-17a display fields + count query, and the D-13a/D-13b grouping.
+- `web/discovery.py` — fail-open async wrappers, **zero callers**; this phase is their first consumer.
 - `shared/discovery_band_labels.py` — `band_label`, `review_overlay`, `band_measurement_status`,
-  `is_default_eligible` (the D-18 gate), `serialize_banded_claim` (SC#1 — mandatory).
+  `is_default_eligible` (reads `measurement_status` + `ci_low` — the D-02a target),
+  `serialize_banded_claim` (SC#1, mandatory).
 - `web/discovery_assets.py` — the fail-closed versioned loader + availability predicate.
-- `web/pages/browse.py` + `web/pages/browse_enrichment.py` — the staleness-guarded enrichment path
-  (`_load_generation` generation token, `enrichment_refs`, `update_enrichment_sections`) the panel
-  hangs off; `highlight_text` is the PANEL-03 candidate mechanism.
-- `web/pages/catalog_browse.py` — the Browse-by-Identification page to extend (domain/author/work
-  facets, `_CatalogFacetWorker`, the reusable library filter).
-- `web/pages/help.py` — the BAND-05 methods section + its per-band anchor registry (needs the D-06
-  qualitative rework).
-- `scripts/build_discovery_sidecar.py` / `scripts/verify_discovery_sidecar.py` /
-  `scripts/discovery_ids.py` — the bake, the all-invariant verifier + strict masking gate, the frozen
-  id/enum module (wave 1 touches all three).
-- `scripts/check_atlas_masking.py` + `MASKING_SCAN_PATTERNS_FILE` — the DATA-05 gate that must pass on
-  the rebuilt asset AND every new surface. **Known blind spot:** it scans git index/HEAD, never history.
+- `web/pages/browse.py` + `web/pages/browse_enrichment.py` — the staleness-guarded enrichment path;
+  `highlight_text` at 1577-1601 is NOT reusable for offsets (D-12).
+- `web/pages/catalog_browse.py` — the Browse-by-Identification page to extend (D-18).
+- `web/main.py:1753-1772` — the nav list the new findings page joins (D-19); `@ui.page` routes at
+  2086-2907. The route is `/catalog-browse`, NOT `/catalog`.
+- `web/pages/help.py:245-260` — currently renders estimates and intervals; D-06a rewrites this.
+- `scripts/build_discovery_sidecar.py` — `_validate_precision_spec` 3865-3890 / 4019-4027, the
+  `band_precision` insert 4419-4427, coverage 532-568, largest-span selection 2555-2570/2689-2713.
+- `scripts/verify_discovery_sidecar.py` — release check M4 553-560 (tier-A precision NULL), the
+  claim/work corpus equality 319-332.
+- `scripts/check_atlas_masking.py` + `MASKING_SCAN_PATTERNS_FILE` — the DATA-05 gate; must pass on the
+  rebuilt asset, the public projection and every new surface. **Blind spot: it scans git index/HEAD,
+  never history.**
 - `scripts/discovery_identified_gate.py` + `scripts/title_gate_llm.py` — the pre-built NOVEL-01 funnel
-  and title gate (rewire the LLM gate to `gemini-3.6-flash` + `reasoning:{effort:"low"}`).
+  and title gate (rewire per D-23c).
 
 ### Discipline (memory)
-- `feedback_catalogue_never_evidence` — the catalogue is a recall yardstick, NEVER acceptance
-  evidence. Applies in reverse to novelty: absence from a finding aid is not evidence of correctness.
-- `project_msource_codename_rule` — restricted corpora appear ONLY as M-source / R-source in any
-  tracked file or product surface.
-- `reference_discovery_llm_gate_cost` — the validated cheap novelty-gate configuration and its cost
-  measurement discipline.
+- `feedback_catalogue_never_evidence` — the catalogue is a recall yardstick, never acceptance evidence;
+  in reverse for novelty: absence from a finding aid is not evidence of correctness.
+- `project_msource_codename_rule` — restricted corpora appear ONLY as M-source / R-source.
+- `reference_discovery_llm_gate_cost` — the validated cheap gate configuration and cost discipline.
 - `reference_io_bound_safe_storage_trap` — background execution loses NiceGUI context; bind
-  `page_client` at render time (relevant to every async panel/browse fetch).
+  `page_client` at render time.
+- `feedback_plain_english_decision_questions` — put owner decisions in plain English with real numbers.
 
 </canonical_refs>
 
@@ -324,44 +448,45 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
 ## Existing Code Insights
 
 ### Reusable Assets
-- **The entire read spine is already built, tested, and has zero callers** —
-  `shared/discovery_service.py` + `web/discovery.py`. This phase is UI plus one data rebuild, not
-  data-layer design.
-- **`serialize_banded_claim()`** enforces the band-inseparability invariant; it raises rather than
-  emitting a bandless presentation. Every surface goes through it.
+- **The read spine is built, tested and has zero callers** — `shared/discovery_service.py` +
+  `web/discovery.py`. This phase is UI plus one rebuild, not data-layer design.
+- **`serialize_banded_claim()`** raises rather than emitting a bandless presentation (SC#1).
 - **`get_work_witnesses(work_id, enabled_bands, anchor_sys_id=…)`** already implements the DATA-10
-  unit×work projection: one row per witness unit at its highest member band, anchor unit excluded,
-  same-unit members suppressed, pagination over units (not over a truncated row set).
-- **Browse's enrichment path** (generation-token staleness guard + `enrichment_refs` +
-  `update_enrichment_sections`) is the established place to hang a lazily-loaded section.
-- **The v8.4 dual-mode library filter** (show-only / hide) is the component to reuse if D-16's library
-  filter ships.
-- **The `/catalog` facet worker pattern** (`_CatalogFacetWorker`, off-UI-thread facet counts) is the
-  model for the findings browse's counts.
-- **`highlight_text` in `web/pages/browse.py`** — the PANEL-03 in-transcription highlight candidate.
+  unit×work projection with pagination over units.
+- **Browse's enrichment path** (generation-token staleness guard + `enrichment_refs`) is the
+  established place for a lazily-loaded section.
+- **The `/catalog-browse` facet worker** (`_CatalogFacetWorker`, off-UI-thread counts) is the model for
+  the findings page's counts.
+- **The atlas availability pattern** (`atlas_preview_available()` gating page + data routes + nav) is
+  exactly the model for gating the new findings page and its nav entry.
 
 ### Established Patterns
-- Content-hashed, versioned frozen artifacts; tunable-only-by-versioning contract docs; display labels
-  rendered over stored keys (a surface never shows a raw key); fail-closed versioned loader; the
-  masking gate over asset + repo + every surface; asset-first deploy (DBs before code).
-- Fail-open everywhere: flag AND sidecar-readiness, and every service wrapper degrades to empty
-  rather than raising.
+- Content-hashed versioned artifacts; tunable-only-by-versioning contract docs; display labels rendered
+  over stored keys; fail-closed loader; masking gate over asset + repo + every surface; asset-first
+  deploy (DBs before code); fail-open service wrappers.
 
 ### Integration Points
-- New page module(s) for `/work/{id}` and the findings browse — **note the naming hazard:**
-  `web/pages/discoveries.py` is the PRE-EXISTING community "Discoveries Center" and is unrelated.
-- The panel attaches to `web/pages/browse_enrichment.py`; the catalogue integration modifies
-  `web/pages/catalog_browse.py`; the methods rework touches `web/pages/help.py`.
-- Wave 1 touches the bake/verifier/id modules and produces a new schema-versioned asset + a new dated
-  frame doc; the redeploy is the one human-approved checkpoint in the phase.
+- New page modules for `/work/{id}` and the findings page — **naming hazard:**
+  `web/pages/discoveries.py` is the pre-existing community "Discoveries Center" and is unrelated; the
+  nav label "Discoveries" is taken.
+- Panel → `web/pages/browse_enrichment.py`; catalogue integration → `web/pages/catalog_browse.py`;
+  methods rewrite → `web/pages/help.py`; nav + routes → `web/main.py`.
+- Gate 1–3 touch the bake/verifier/id modules, the frozen specs, and produce a new schema-versioned
+  asset + public projection + a new dated frame doc + the D-02c compatibility attestation.
 
-### Measured facts worth planning against (from the deployed asset, 2026-07-30)
+### Measured facts (deployed asset, verified twice — in-session and by Codex)
 - `page_id` = `{sys_id}_{IE…}_{P00000N}_{FL…}` → maps 1:1 onto a browse page.
-- 268,361 claims / 297,415 evidence rows. Shipped display claims: tier_a 134,449; `not_evaluated`
-  20,435; screening_canon 6,594; screening_rb 2,399; weak 1,078; high_confidence_algorithmic 852
-  (750 unreviewed + 102 human_confirmed); corroborated 730.
-- 44,375 sys_ids and 1,088 works carry shipped claims. Claims per page: 141,553 pages have exactly 1,
-  8,449 have 2, tail to 10.
+- 1,269 works / 268,361 claims / 297,415 evidence rows / 166,537 shipped display claims.
+- Shipped display claims: tier_a 134,449; `not_evaluated` 20,435; screening_canon 6,594;
+  screening_rb 2,399; weak 1,078; high_confidence_algorithmic 852 (750 unreviewed + 102
+  human_confirmed); corroborated 730.
+- 44,375 manuscripts and 1,088 works carry shipped claims; 9,806 manuscripts carry >1 work.
+- Relation population: 40,968 shipped shared-text evidence rows / 37,397 directed / 30,539 unordered.
+- All 144,294 shipped direct rows have novelty false (uncomputed); 14,003 propagated rows are flagged;
+  665 claims disagree internally.
+- 9,549 shipped direct rows have multiple spans (only the largest is stored); all propagated rows have
+  NULL `matched_letters`.
+- Evidence thinness: 10 direct rows under 50 matched letters, 1,710 at 50–99, 4,838 at 100–149.
 - No index on `discovery_evidence.sys_id`; `router_bucket` is NULL throughout; no page-length column.
 
 </code_context>
@@ -369,48 +494,52 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
 <specifics>
 ## Specific Ideas
 
-- Row wording, verbatim: **"Matches ⟨work⟩ · 68% of page"** / **"התאמה ל⟨חיבור⟩ · 68% מהדף"**.
-- Panel groups: **"On this page"** then **"Elsewhere in this manuscript"** (collapsed).
-- Novelty toggle, owner's words: *"show only novel findings / show everything"*, the latter with a
-  clear novelty mark — expressed as "not identified in any available finding aid", never "new".
-- Big-work page reads: **"13,038 manuscripts — page 1 of 66"**.
-- Owner's framing of the whole phase: *"It's a big new amazing feature and it should be very
-  accessible, allowing for maximum ability to see new findings — new, or those that are not obvious
-  from the title/identification, are the most important."*
-- Owner's honesty constraint on the tiers: *"we are not sure that tier_a is same work and the next are
-  parallels, just heuristics."*
+- Row wording: **"Matches ⟨work⟩ · 68% of page"** / **"התאמה ל⟨חיבור⟩ · 68% מהדף"** (direct family only).
+- Panel groups: **"On this page"** then **"Elsewhere in this manuscript"**.
+- Competing attributions: **"↳ the same passage also matches …"**.
+- Novelty: **"Not found in the finding aids checked"** + the source list and dates; never "new".
+- Big-work page: **"4,637 witnesses · page 1 of 24"** — count units, not claim rows.
+- The mockup's teaching case: RNL Ms. EVR II A 684 (`סדור מנהג אשכנז`) page 6 carries *Tur Orach Chaim*
+  twice under two titles plus *Yalkut Shimoni on Nevi'im* on byte-identical offsets 0–555, and four
+  liturgical works sharing one 66-letter span — every row real, shipped and tier-A.
+- Owner's framing: *"a big new amazing feature… maximum ability to see new findings"*, and the honesty
+  constraint *"we are not sure that tier_a is same work and the next are parallels, just heuristics."*
 
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
-**Resolved at the mockup + Codex gate (owner instruction), NOT by re-running this discussion:**
-- **PANEL-03's final form** (D-12) — highlight-in-transcription vs dedicated pane vs stats-only.
-- **The findings browse's detailed shape** — row unit (identification / work / manuscript), behaviour
-  with novelty filtering off, one surface or two.
-- **The BAND-05 methods-page rework** under D-06 (numbers off the table → qualitative per-tier copy).
-- **The novelty chip's exact bilingual wording** under NOVEL-01's prohibited-words constraint.
-- **Roadmap / requirements bookkeeping** — NOVEL-01/02 re-homing to Phase 136, the rewritten Phase-136
-  goal + success criteria, and the findings-browse ↔ leads-queue relationship (Phase 138).
+**Open, resolved during execution (gate noted):**
+- **Gate 1:** the D-13c short-evidence threshold; the D-13b lead-attribution tie-break.
+- **Gate 5:** the findings page's row unit (recommended default: one identification per line); how
+  computed rows are presented alongside catalogued ones on `/catalog-browse`.
+- **Gate 6:** PANEL-03's final form, given the b-side has no offsets.
+
+**Owed at Phase 139:**
+- **D-06b** — whether the public projection gets its own pre-registered estimand or REL-01 is amended.
+- REL-01/CERT-02's "tier-A goes public WITH its measured number" clause versus D-06.
+- The correction/retraction policy that lost its home when the curated-surface exception was declined.
+- VIS-02's positive control and the public/private row-count reconciliation.
 
 **Later phases:**
-- **The gen-2 / discovery-v2.1 evidence refresh** as its own phase (D-01), carrying with it the
-  reference-granularity stage (Bible → chapter, Mishnah/Tosefta → tractate+chapter, Talmud →
-  folio+amud) and the witness-vs-quoter precision lever. Also the ~2,670-work neutral-title curation
-  round and the CERT-01 re-registration that a v2.1 population change forces.
-- **Phase 139:** whether REL-01/CERT-02's "tier-A goes public WITH its measured number" clause is
-  amended or satisfied (the D-06 conflict); the correction/retraction policy that lost its home when
-  the curated-surface exception was declined; VIS-02's positive-control release gate.
-- **Community judgments (137)** — 136 ships placeholder voting controls only.
-- **The leads queue (138)**.
-- **The library filter on the work page** if reusing the existing component is not cheap (D-16).
-- **Promotion path** (`v9-PUBLICATION-STRATEGY.md` §8.5): whether restricted-source rows ever move
-  private → public later, which decides if D-22's projection is permanent or a revisable policy label.
+- **The gen-2 / discovery-v2.1 evidence refresh** as its own phase (D-01), carrying the
+  reference-granularity stage and the witness-vs-quoter lever, plus the ~2,670-work title curation
+  round and the CERT-01 re-registration a population change forces.
+- Community judgments (137); the leads queue (138).
+- The work-page library filter if reuse is not cheap (D-16).
+- Whether restricted-source rows ever move private → public (`v9-PUBLICATION-STRATEGY.md` §8.5),
+  which decides if D-22's projection is permanent or a revisable policy label.
+
+**Bookkeeping owed before/at planning:**
+- `REQUIREMENTS.md`: NOVEL-01/02 traceability → Phase 136; the BAND-03, BAND-05 and NOVEL-01 wording
+  amendments; note that 136 amends contracts.
+- `ROADMAP.md`: rewritten Phase-136 goal + success criteria (four surfaces + the rebuild), and the
+  findings-page ↔ leads-queue relationship at 138.
 
 </deferred>
 
 ---
 
 *Phase: 136-read-surfaces-connections-panel-work-witnesses*
-*Context gathered: 2026-07-30*
+*Context gathered: 2026-07-30 · revised the same day after the mockup + Codex gates*
