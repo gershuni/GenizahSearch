@@ -1,0 +1,511 @@
+<title>Phase 136 — panel across seven real manuscripts</title>
+<style>
+  :root { --bg:#fbfaf8; --fg:#1c1a17; --mut:#6b645c; --line:#e2ddd5; --card:#fff; --accent:#7a4f2c;
+    --warnbg:#fff6ea; --warnfg:#8a4b00; --okfg:#2f7d4f; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16151a; --fg:#ebe7e0; --mut:#a19a90;
+    --line:#2f2c34; --card:#1e1d23; --accent:#d8a878; --warnbg:#3a2a12; --warnfg:#f0c48a; --okfg:#79c79b; } }
+  :root[data-theme="dark"] { --bg:#16151a; --fg:#ebe7e0; --mut:#a19a90; --line:#2f2c34; --card:#1e1d23;
+    --accent:#d8a878; --warnbg:#3a2a12; --warnfg:#f0c48a; --okfg:#79c79b; }
+  :root[data-theme="light"] { --bg:#fbfaf8; --fg:#1c1a17; --mut:#6b645c; --line:#e2ddd5; --card:#fff;
+    --accent:#7a4f2c; --warnbg:#fff6ea; --warnfg:#8a4b00; --okfg:#2f7d4f; }
+  body { background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;
+    margin:0; padding:0 0 4rem; }
+  .wrap { max-width:1020px; margin:0 auto; padding:0 1.1rem; }
+  h1 { font-size:1.45rem; margin:2rem 0 .3rem; }
+  h2 { font-size:1.1rem; margin:2.4rem 0 .4rem; padding-top:1.2rem; border-top:1px solid var(--line); }
+  .lede { color:var(--mut); margin:.2rem 0 1.2rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:11px; padding:1rem 1.1rem;
+    margin:1.1rem 0; }
+  .card.problem { border-color:var(--warnfg); }
+  .ms-head { display:flex; gap:.6rem; align-items:baseline; flex-wrap:wrap; }
+  .ms-shelf { font-weight:700; font-size:1.02rem; }
+  .ms-lib { font-size:.75rem; border:1px solid var(--line); border-radius:20px; padding:0 .45rem;
+    color:var(--mut); }
+  .ms-cat { color:var(--mut); font-size:.9rem; }
+  .ms-note { font-size:.85rem; color:var(--mut); font-style:italic; margin:.35rem 0 .8rem; }
+  .card.problem .ms-note { color:var(--warnfg); font-style:normal; }
+  .b-head { font-weight:650; font-size:.93rem; margin:.9rem 0 .1rem; }
+  .b-head .cnt { font-weight:400; color:var(--mut); margin-inline-start:.4rem; }
+  .claim { border-top:1px solid var(--line); padding:.6rem 0 .55rem; }
+  .c-main { display:flex; align-items:baseline; gap:.5rem; flex-wrap:wrap; }
+  .c-title { font-size:1.02rem; font-weight:600; }
+  .c-en { color:var(--mut); font-size:.78rem; }
+  .pct { font-size:.78rem; color:var(--mut); border:1px solid var(--line); border-radius:20px;
+    padding:.05rem .5rem; }
+  .nopct { font-size:.75rem; color:var(--mut); font-style:italic; }
+  .alias { font-size:.72rem; color:var(--accent); border:1px dashed var(--accent); border-radius:20px;
+    padding:0 .45rem; }
+  .c-meta { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; font-size:.78rem;
+    color:var(--mut); margin-top:.22rem; }
+  .band { border:1px solid var(--line); border-radius:5px; padding:.05rem .45rem; }
+  .b-hi { border-color:var(--okfg); color:var(--okfg); }
+  .b-a { border-color:var(--accent); color:var(--accent); }
+  .b-ne, .b-weak { opacity:.8; }
+  .rev { color:var(--okfg); font-weight:600; }
+  .rev .he { opacity:.8; font-weight:400; }
+  .unrev { font-style:italic; }
+  .wid { font-family:ui-monospace,monospace; font-size:.7rem; opacity:.55; }
+  .off { font-family:ui-monospace,monospace; font-size:.7rem; opacity:.5; }
+  .c-act { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; margin-top:.4rem; }
+  .btn { background:transparent; color:var(--accent); border:1px solid var(--line); border-radius:6px;
+    padding:.2rem .5rem; font-size:.78rem; cursor:pointer; }
+  .vote { margin-inline-start:auto; font-size:.82rem; color:var(--mut); }
+  .ph { font-size:.72rem; opacity:.65; }
+  .bucket2 { background:var(--warnbg); border-radius:8px; padding:.6rem .75rem; margin:.9rem 0 .3rem; }
+  .gen-row { font-size:.86rem; margin:.3rem 0; }
+  .toggle { border-top:1px solid var(--line); margin-top:.6rem; padding-top:.55rem; font-size:.86rem;
+    color:var(--accent); }
+  .empty { font-size:.85rem; color:var(--mut); font-style:italic; border-top:1px solid var(--line);
+    padding-top:.55rem; }
+  .disc { font-size:.8rem; color:var(--mut); margin-top:.65rem; font-style:italic; }
+  table { border-collapse:collapse; width:100%; font-size:.86rem; }
+  th, td { text-align:start; padding:.4rem .5rem; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  td.num { text-align:end; font-variant-numeric:tabular-nums; }
+  td.strong { font-weight:700; }
+  tr.hl td { background:var(--warnbg); }
+  .tbl-wrap { overflow-x:auto; }
+  ul.tight { margin:.4rem 0 0; padding-inline-start:1.2rem; }
+  ul.tight li { margin:.25rem 0; }
+  .prov { font-size:.8rem; color:var(--mut); background:var(--card); border:1px solid var(--line);
+    border-radius:8px; padding:.7rem .9rem; }
+</style>
+
+<div class="wrap">
+<h1>Phase 136 panel — seven real manuscripts, all rules applied</h1>
+<p class="lede">Every row is real, from the deployed asset. The rules now applied: canonical duplicates
+collapsed, identical-span groups pulled out of the identifications, short passages behind the toggle,
+coverage shown only where it is defined, review badge only where a human actually reviewed.</p>
+
+<div class="prov"><strong>Rules in force.</strong> Canonical collapse · identical-span groups →
+“Also shares text with” (not identifications) · under 150 matched letters → behind the
+toggle · coverage figure on the direct family only · <em>mock:</em> vote controls (phase 137);
+novelty is absent entirely because it is not computed yet.</div>
+
+<h2>What the rules do, per manuscript</h2>
+<div class="tbl-wrap"><table>
+  <tr><th>Shelfmark</th><th>Lib</th><th>Shipped on MS</th><th>Shown as IDs</th>
+    <th>Shares-text</th><th>Behind toggle</th><th>Related pages</th><th>Dupes collapsed</th></tr>
+  <tr class=""><td>Cambridge University Library Ms. T-S AS 32.8</td><td>CUL</td><td class="num">1</td><td class="num strong">1</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr><tr class=""><td>Cambridge University Library Ms. T-S Misc. 12.31.14</td><td>CUL</td><td class="num">4</td><td class="num strong">1</td><td class="num">2</td><td class="num">0</td><td class="num">1</td><td class="num">0</td></tr><tr class=""><td>Cambridge University Library Ms. T-S Ar. 21.164</td><td>CUL</td><td class="num">6</td><td class="num strong">3</td><td class="num">0</td><td class="num">0</td><td class="num">4</td><td class="num">0</td></tr><tr class=""><td>Moss. V,374</td><td>Mosseri</td><td class="num">1</td><td class="num strong">1</td><td class="num">0</td><td class="num">7</td><td class="num">0</td><td class="num">0</td></tr><tr class="hl"><td>Ms. EVR II A 684</td><td>RNL</td><td class="num">16</td><td class="num strong">1</td><td class="num">2</td><td class="num">8</td><td class="num">3</td><td class="num">1</td></tr><tr class=""><td>Ms. Heb. 577.4.99=4</td><td>NLI</td><td class="num">12</td><td class="num strong">3</td><td class="num">2</td><td class="num">0</td><td class="num">26</td><td class="num">1</td></tr><tr class=""><td>Ms. EVR II B 25</td><td>RNL</td><td class="num">427</td><td class="num strong">1</td><td class="num">0</td><td class="num">49</td><td class="num">0</td><td class="num">0</td></tr>
+</table></div>
+
+<h2>The panels</h2>
+
+    <div class="card ">
+      <div class="ms-head">
+        <span class="ms-shelf">Cambridge University Library Ms. T-S AS 32.8</span>
+        <span class="ms-lib">CUL</span>
+        <span class="ms-cat" dir="rtl">מקרא;מקרא [טקסט]. ; Deuteronomy 23:24-28:11</span>
+      </div>
+      <div class="ms-note">The common case — one strong identification, nothing else. 141,553 pages look like this.</div>
+
+      <div class="b-head">Identifications · <span dir="rtl">זיהויים</span>
+        <span class="cnt">On this page — 1 shown</span></div>
+      
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">תנ&quot;ך, דברים</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="pct">100% of page matched · 5259 letters</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-a">tier A</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w000090</span>
+          <span dir="rtl"></span>
+          <span class="off">offsets 0–5259</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 2390</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+
+      
+
+      <div class="toggle">Elsewhere in this manuscript ▸
+        <span class="cnt">0 more on 0 pages</span>
+      </div>
+      <div class="toggle">Pages matching this page in other manuscripts ▸
+        <span class="cnt">0 pages</span>
+        <span class="ph">— unevaluated candidate alignments</span></div>
+      <div class="toggle">Show more possible matches ▾
+        <span class="cnt">0</span>
+        <span class="ph">— 0 short-passage, 0 screening / review-only</span></div>
+      <div class="disc">Not exhaustive — more identifications may exist. ·
+        <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+    </div>
+    <div class="card ">
+      <div class="ms-head">
+        <span class="ms-shelf">Cambridge University Library Ms. T-S Misc. 12.31.14</span>
+        <span class="ms-lib">CUL</span>
+        <span class="ms-cat" dir="rtl">פרשנות מקרא רבנית. ; Solomon b. Isaac, Rashi, Biblical Exegesis - Rabbanite: Genesis 44 ; שלמה בן יצחק, פרשנות מקרא רבנית: בראשית מד</span>
+      </div>
+      <div class="ms-note">A commentary manuscript: the base text and its commentary both match, on different passages — legitimately multi-register. Also carries a canonical duplicate.</div>
+
+      <div class="b-head">Identifications · <span dir="rtl">זיהויים</span>
+        <span class="cnt">On this page — 1 shown</span></div>
+      
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">תנ&quot;ך, בראשית</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="pct">47% of page matched · 961 letters</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-a">tier A</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w000086</span>
+          <span dir="rtl"></span>
+          <span class="off">offsets 981–1942</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 3261</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+
+      
+      <div class="bucket2">
+        <div class="b-head">Also shares text with · <span dir="rtl">חולק טקסט גם עם</span>
+          <span class="cnt">2 works over 1 passage(s)</span>
+          <span class="ph">— collapsed by default; not presented as identifications</span></div>
+        <div class="gen-row">One passage (offsets 0–962, 962 letters) appears in <strong>2 works</strong>: <span dir="rtl">רש&quot;י על התורה</span> · <span dir="rtl">רש&quot;י על בראשית</span></div>
+      </div>
+
+      <div class="toggle">Elsewhere in this manuscript ▸
+        <span class="cnt">1 more on 1 pages</span>
+      </div>
+      <div class="toggle">Pages matching this page in other manuscripts ▸
+        <span class="cnt">1 pages</span>
+        <span class="ph">— unevaluated candidate alignments</span></div>
+      <div class="toggle">Show more possible matches ▾
+        <span class="cnt">0</span>
+        <span class="ph">— 0 short-passage, 0 screening / review-only</span></div>
+      <div class="disc">Not exhaustive — more identifications may exist. ·
+        <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+    </div>
+    <div class="card ">
+      <div class="ms-head">
+        <span class="ms-shelf">Cambridge University Library Ms. T-S Ar. 21.164</span>
+        <span class="ms-lib">CUL</span>
+        <span class="ms-cat" dir="rtl">תפסיר רס&quot;ג. ; Saadiah b. Joseph al-Fayyumi (Saadiah Gaon), Tafsir Saadya Gaon: Genesis 49:28 – 50:11; Exodus 1:7 – 2:12 ; סעדיה בן יוסף גאון, תפסיר רס&quot;ג: בראשית מט:כח – נ:יא; שמות א:ז – ב:יב</span>
+      </div>
+      <div class="ms-note">Judeo-Arabic multi-register: two Tafsir portions plus a commentary, all correct, all on different passages.</div>
+
+      <div class="b-head">Identifications · <span dir="rtl">זיהויים</span>
+        <span class="cnt">On this page — 3 shown</span></div>
+      
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">רס&quot;ג, בראשית תרגום (תפסיר תורה)</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="pct">53% of page matched · 520 letters</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-a">tier A</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w000032</span>
+          <span dir="rtl">סעדיה גאון (רס&quot;ג)</span>
+          <span class="off">offsets 453–973</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 505</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">רס&quot;ג, שמות תרגום (תפסיר תורה)</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="pct">52% of page matched · 504 letters</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-a">tier A</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w000033</span>
+          <span dir="rtl">סעדיה גאון (רס&quot;ג)</span>
+          <span class="off">offsets 0–504</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 301</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">פירוש התורה לרשב&quot;ח</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="pct">47% of page matched · 457 letters</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-a">tier A</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w000063</span>
+          <span dir="rtl">שמואל בן חופני</span>
+          <span class="off">offsets 516–973</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 123</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+
+      
+
+      <div class="toggle">Elsewhere in this manuscript ▸
+        <span class="cnt">3 more on 1 pages</span>
+      </div>
+      <div class="toggle">Pages matching this page in other manuscripts ▸
+        <span class="cnt">4 pages</span>
+        <span class="ph">— unevaluated candidate alignments</span></div>
+      <div class="toggle">Show more possible matches ▾
+        <span class="cnt">0</span>
+        <span class="ph">— 0 short-passage, 0 screening / review-only</span></div>
+      <div class="disc">Not exhaustive — more identifications may exist. ·
+        <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+    </div>
+    <div class="card ">
+      <div class="ms-head">
+        <span class="ms-shelf">Moss. V,374</span>
+        <span class="ms-lib">Mosseri</span>
+        <span class="ms-cat" dir="rtl">a) Legal document regarding a bill of divorce. b) Court record in the hand of Hillel b. Eli</span>
+      </div>
+      <div class="ms-note">An expert-reviewed row — the only case that earns a review badge.</div>
+
+      <div class="b-head">Identifications · <span dir="rtl">זיהויים</span>
+        <span class="cnt">On this page — 1 shown</span></div>
+      
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">רש&quot;י על אסתר</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="pct">90% of page matched · 2809 letters</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-hi">High-confidence match</span><span class="rev">Expert-reviewed ✓ <span class="he">נבדק בידי מומחה</span></span>
+          <span class="wid">w001277</span>
+          <span dir="rtl">שלמה בן יצחק (רש״י)</span>
+          <span class="off">offsets 638–2374</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 1</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+
+      
+
+      <div class="toggle">Elsewhere in this manuscript ▸
+        <span class="cnt">0 more on 0 pages</span>
+      </div>
+      <div class="toggle">Pages matching this page in other manuscripts ▸
+        <span class="cnt">0 pages</span>
+        <span class="ph">— unevaluated candidate alignments</span></div>
+      <div class="toggle">Show more possible matches ▾
+        <span class="cnt">7</span>
+        <span class="ph">— 0 short-passage, 7 screening / review-only</span></div>
+      <div class="disc">Not exhaustive — more identifications may exist. ·
+        <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+    </div>
+    <div class="card problem">
+      <div class="ms-head">
+        <span class="ms-shelf">Ms. EVR II A 684</span>
+        <span class="ms-lib">RNL</span>
+        <span class="ms-cat" dir="rtl">סדור מנהג אשכנז.</span>
+      </div>
+      <div class="ms-note">THE PROBLEM CASE you flagged: a prayer book whose verse-chain page pulls in later works that merely quote the same verses.</div>
+
+      <div class="b-head">Identifications · <span dir="rtl">זיהויים</span>
+        <span class="cnt">On this page — 1 shown</span></div>
+      
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">ילקוט שמעוני על התורה</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="nopct">no coverage figure for this family</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-ne">shared text — not evaluated</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w001384</span>
+          <span dir="rtl">שמעון הדרשן</span>
+          <span class="off">offsets 307–538</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 396</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+
+      
+      <div class="bucket2">
+        <div class="b-head">Also shares text with · <span dir="rtl">חולק טקסט גם עם</span>
+          <span class="cnt">2 works over 1 passage(s)</span>
+          <span class="ph">— collapsed by default; not presented as identifications</span></div>
+        <div class="gen-row">One passage (offsets 0–555, 555 letters) appears in <strong>2 works</strong>: <span dir="rtl">טור אורח חיים</span> · <span dir="rtl">ילקוט שמעוני על נ&quot;ך</span></div>
+      </div>
+
+      <div class="toggle">Elsewhere in this manuscript ▸
+        <span class="cnt">8 more on 2 pages</span>
+      </div>
+      <div class="toggle">Pages matching this page in other manuscripts ▸
+        <span class="cnt">3 pages</span>
+        <span class="ph">— unevaluated candidate alignments</span></div>
+      <div class="toggle">Show more possible matches ▾
+        <span class="cnt">8</span>
+        <span class="ph">— 4 short-passage, 4 screening / review-only</span></div>
+      <div class="disc">Not exhaustive — more identifications may exist. ·
+        <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+    </div>
+    <div class="card ">
+      <div class="ms-head">
+        <span class="ms-shelf">Ms. Heb. 577.4.99=4</span>
+        <span class="ms-lib">NLI</span>
+        <span class="ms-cat" dir="rtl">גט. פסטאט. 1213.</span>
+      </div>
+      <div class="ms-note">Page-relation heavy: 54 shared-text rows touch this page — the bucket that used to be invisible.</div>
+
+      <div class="b-head">Identifications · <span dir="rtl">זיהויים</span>
+        <span class="cnt">On this page — 3 shown</span></div>
+      
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">ספר השטרות</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="nopct">no coverage figure for this family</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-ne">shared text — not evaluated</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w001050</span>
+          <span dir="rtl">האיי גאון</span>
+          <span class="off">offsets 281–624</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 229</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">הלכות ראו</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="nopct">no coverage figure for this family</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-ne">shared text — not evaluated</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w000797</span>
+          <span dir="rtl"></span>
+          <span class="off">offsets 470–624</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 160</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">רי&quot;ף גיטין</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="nopct">no coverage figure for this family</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-ne">shared text — not evaluated</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w001320</span>
+          <span dir="rtl">יצחק אלפסי (רי&quot;ף)</span>
+          <span class="off">offsets 386–536</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 110</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+
+      
+      <div class="bucket2">
+        <div class="b-head">Also shares text with · <span dir="rtl">חולק טקסט גם עם</span>
+          <span class="cnt">2 works over 1 passage(s)</span>
+          <span class="ph">— collapsed by default; not presented as identifications</span></div>
+        <div class="gen-row">One passage (offsets 185–638, 453 letters) appears in <strong>2 works</strong>: <span dir="rtl">ספר החינוך</span> · <span dir="rtl">משנה תורה, ספר נשים</span></div>
+      </div>
+
+      <div class="toggle">Elsewhere in this manuscript ▸
+        <span class="cnt">6 more on 1 pages</span>
+      </div>
+      <div class="toggle">Pages matching this page in other manuscripts ▸
+        <span class="cnt">26 pages</span>
+        <span class="ph">— unevaluated candidate alignments</span></div>
+      <div class="toggle">Show more possible matches ▾
+        <span class="cnt">0</span>
+        <span class="ph">— 0 short-passage, 0 screening / review-only</span></div>
+      <div class="disc">Not exhaustive — more identifications may exist. ·
+        <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+    </div>
+    <div class="card ">
+      <div class="ms-head">
+        <span class="ms-shelf">Ms. EVR II B 25</span>
+        <span class="ms-lib">RNL</span>
+        <span class="ms-cat" dir="rtl">נביאים (קטעים).</span>
+      </div>
+      <div class="ms-note">427 identifications across 427 pages from 8 works — what &quot;elsewhere in this manuscript&quot; has to survive.</div>
+
+      <div class="b-head">Identifications · <span dir="rtl">זיהויים</span>
+        <span class="cnt">On this page — 1 shown</span></div>
+      
+      <div class="claim">
+        <div class="c-main">
+          <span class="c-title" dir="rtl">תנ&quot;ך, יהושע</span>
+          <span class="c-en">Matches · התאמה</span>
+          <span class="pct">100% of page matched · 633 letters</span>
+          
+        </div>
+        <div class="c-meta">
+          <span class="band b-a">tier A</span><span class="unrev">unreviewed · algorithmic estimate</span>
+          <span class="wid">w000091</span>
+          <span dir="rtl"></span>
+          <span class="off">offsets 0–633</span>
+        </div>
+        <div class="c-act">
+          <button class="btn">Evidence · ראיות</button><button class="btn">Other manuscripts matching this work ▸ 548</button>
+          <span class="vote">✓ · ? · ✗ <span class="ph">(placeholder)</span></span>
+        </div>
+      </div>
+
+      
+
+      <div class="toggle">Elsewhere in this manuscript ▸
+        <span class="cnt">426 more on 426 pages</span>
+      </div>
+      <div class="toggle">Pages matching this page in other manuscripts ▸
+        <span class="cnt">0 pages</span>
+        <span class="ph">— unevaluated candidate alignments</span></div>
+      <div class="toggle">Show more possible matches ▾
+        <span class="cnt">49</span>
+        <span class="ph">— 0 short-passage, 49 screening / review-only</span></div>
+      <div class="disc">Not exhaustive — more identifications may exist. ·
+        <span dir="rtl">אינו ממצה — ייתכנו זיהויים נוספים.</span></div>
+    </div>
+
+<h2>What to look for</h2>
+<div class="card">
+  <ul class="tight">
+    <li><strong>The prayer book</strong> — does moving the identical-span group out of the
+      identifications give you the reading you wanted? Note what is left behind: a lone Mishneh Torah
+      match on its own passage, which no rule in this phase catches. That is the case we agreed to
+      leave to the later evidence refresh.</li>
+    <li><strong>The commentary and Judeo-Arabic manuscripts</strong> — the multi-register cases must
+      survive intact. Several works on one page, different passages, all correct: if these look thinned
+      out, the rules are too aggressive.</li>
+    <li><strong>The clean case and the reviewed case</strong> — the reference for what a good row looks
+      like, and the only place a review badge appears.</li>
+    <li><strong>The shares-text bucket wording</strong> — “One passage appears in N works” is the
+      honest phrasing, but is it useful to you, or just noise to collapse and forget?</li>
+    <li><strong>The 427-identification manuscript</strong> — one match per page across 427 pages. Is
+      “Elsewhere in this manuscript” a usable place to put that, or does it need its own view?</li>
+  </ul>
+</div>
+</div>
