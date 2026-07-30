@@ -21,6 +21,7 @@ from web.supabase_client import (
     get_user_corrections_count,
 )
 from web.state import state
+from web.bounded_io import bounded_io_bound
 from web.components.typography import h1, h2, h3
 
 logger = logging.getLogger(__name__)
@@ -84,25 +85,23 @@ async def fetch_leaderboard_users(limit: int = 20) -> List[Dict]:
     shared across requests deliberately -- a per-call one would bound each visitor
     to 4 but leave the process ceiling at 4 x visitors.
     """
-    # The profiles query is offloaded too, so it must sit under the SAME
-    # process-wide bound -- otherwise the real ceiling is "one unbounded profile
-    # read per visitor, plus 4 counts", and enough simultaneous visitors can
-    # still occupy the shared pool.
+    # The profiles query is offloaded too, so it sits under the SAME process-wide
+    # bound -- otherwise the real ceiling is "one unbounded profile read per
+    # visitor, plus 4 counts", and enough simultaneous visitors can still occupy
+    # the shared pool.
     #
-    # Acquired in its OWN block and released before the counts below. Do NOT nest
-    # the count fan-out inside this `async with`: holding a slot while waiting for
-    # another slot from the same semaphore deadlocks once `limit` visitors are in
-    # flight.
-    async with _LEADERBOARD_COUNT_SEMAPHORE:
-        users = await run.io_bound(_fetch_top_profiles, limit)
+    # `bounded_io_bound` rather than `async with ...: run.io_bound(...)`: the
+    # latter releases the permit when THIS coroutine unwinds, but `run.io_bound`
+    # swallows CancelledError and returns while its thread keeps working, so a
+    # teardown mid-fetch would free the slot with the request still in flight.
+    users = await bounded_io_bound(_LEADERBOARD_COUNT_SEMAPHORE, _fetch_top_profiles, limit)
     if not users:
         return []
     ids = [u.get('id') for u in users]
     countable = [uid for uid in ids if uid]
 
     async def _count(uid):
-        async with _LEADERBOARD_COUNT_SEMAPHORE:
-            return await run.io_bound(get_user_corrections_count, uid)
+        return await bounded_io_bound(_LEADERBOARD_COUNT_SEMAPHORE, get_user_corrections_count, uid)
 
     results = await asyncio.gather(
         *[_count(uid) for uid in countable],

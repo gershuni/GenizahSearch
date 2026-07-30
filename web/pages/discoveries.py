@@ -25,6 +25,7 @@ from web.supabase_client import (
     toggle_discovery_pin, toggle_discovery_hidden
 )
 from web.state import state
+from web.bounded_io import bounded_io_bound
 from typing import Optional
 from datetime import datetime
 from web.components.typography import h1, h2, h3
@@ -1304,10 +1305,10 @@ def create_feed_item(item: dict, on_refresh=None):
                                     # resolution too, so even with activation
                                     # gating a user flicking through cards must
                                     # not be able to flood it.
-                                    async with _RESPONSES_FETCH_SEMAPHORE:
-                                        responses = await run.io_bound(
-                                            get_discovery_responses, int(nid), client=reader_client
-                                        )
+                                    responses = await bounded_io_bound(
+                                        _RESPONSES_FETCH_SEMAPHORE,
+                                        get_discovery_responses, int(nid), client=reader_client,
+                                    )
                                     if responses is None:
                                         return  # app shutting down mid-flight
                                     if container.client.has_been_deleted:

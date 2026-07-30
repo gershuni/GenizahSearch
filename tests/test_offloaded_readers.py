@@ -183,29 +183,54 @@ def test_offloaded_read_does_not_stall_an_event_loop_ticker():
 def _instrument_leaderboard(monkeypatch, corrections, n_profiles=20):
     """Wire fakes and return a live peak-concurrency counter.
 
+    Counts concurrency INSIDE the blocking functions, on the worker threads, so
+    the real `bounded_io_bound` + real semaphore + real thread pool are all
+    exercised. (An earlier version faked `run.io_bound` and skipped the profiles
+    call -- which is precisely why it could not see the unbounded profile read.)
+
     Injects a FRESH module-level semaphore: `_LoopBoundMixin._get_loop` caches the
     loop on first contended use and raises if reused from another loop, and each
     test drives its own `asyncio.run`.
     """
+    import threading
+    import time as real_time
+
     profiles = [{'id': f'u{i}', 'reputation': i} for i in range(n_profiles)]
-    monkeypatch.setattr(corrections, '_fetch_top_profiles', lambda lim: list(profiles))
     monkeypatch.setattr(
         corrections, '_LEADERBOARD_COUNT_SEMAPHORE',
         asyncio.Semaphore(corrections._LEADERBOARD_COUNT_CONCURRENCY),
     )
 
     stats = {'in_flight': 0, 'peak': 0}
+    lock = threading.Lock()
 
-    async def fake_io_bound(fn, *args, **kwargs):
-        # Counts EVERY offloaded call, profile reads included -- they share the
-        # same thread pool, so a bound that ignores them is not a real bound.
-        stats['in_flight'] += 1
-        stats['peak'] = max(stats['peak'], stats['in_flight'])
-        await asyncio.sleep(0.01)
-        stats['in_flight'] -= 1
-        return fn(*args, **kwargs) if fn is corrections._fetch_top_profiles else 1
+    def _enter():
+        with lock:
+            stats['in_flight'] += 1
+            stats['peak'] = max(stats['peak'], stats['in_flight'])
 
-    monkeypatch.setattr(corrections.run, 'io_bound', fake_io_bound)
+    def _exit():
+        with lock:
+            stats['in_flight'] -= 1
+
+    def fake_profiles(limit):
+        _enter()
+        try:
+            real_time.sleep(0.02)
+            return list(profiles)
+        finally:
+            _exit()
+
+    def fake_count(uid):
+        _enter()
+        try:
+            real_time.sleep(0.02)
+            return 1
+        finally:
+            _exit()
+
+    monkeypatch.setattr(corrections, '_fetch_top_profiles', fake_profiles)
+    monkeypatch.setattr(corrections, 'get_user_corrections_count', fake_count)
     return stats
 
 
@@ -283,46 +308,34 @@ def test_leaderboard_profile_reads_are_also_bounded(monkeypatch):
     )
 
 
-def test_leaderboard_does_not_nest_semaphore_acquisitions():
-    """The profiles acquire must be released before the count fan-out.
+def test_every_leaderboard_offload_goes_through_the_bounded_helper():
+    """Both offloaded calls must use `bounded_io_bound` with the shared semaphore.
 
-    Holding a slot while awaiting another slot from the SAME semaphore deadlocks
-    once `_LEADERBOARD_COUNT_CONCURRENCY` visitors are in flight, so the two
-    acquisitions must be sequential blocks, not nested.
+    A bare `async with semaphore: await run.io_bound(...)` releases the permit
+    when the CALLER unwinds, and `run.io_bound` swallows CancelledError and
+    returns while its thread keeps working -- so a teardown mid-fetch frees the
+    slot with the request still in flight.
     """
-    import ast
-    import textwrap
-
     corrections = pytest.importorskip('web.pages.corrections')
-    tree = ast.parse(textwrap.dedent(inspect.getsource(corrections.fetch_leaderboard_users)))
+    src = inspect.getsource(corrections.fetch_leaderboard_users)
 
-    def acquires_the_semaphore(node):
-        return isinstance(node, ast.AsyncWith) and any(
-            isinstance(n, ast.Name) and n.id == '_LEADERBOARD_COUNT_SEMAPHORE'
-            for item in node.items for n in ast.walk(item.context_expr)
-        )
+    assert 'async with _LEADERBOARD_COUNT_SEMAPHORE' not in src, \
+        'raw `async with` on the semaphore releases the permit too early'
+    assert src.count('bounded_io_bound(_LEADERBOARD_COUNT_SEMAPHORE') == 2, \
+        'expected exactly two bounded offloads (profiles + counts)'
+    # Look at CODE only -- the docstring legitimately discusses `run.io_bound`.
+    code = '\n'.join(
+        line for line in src.splitlines() if not line.lstrip().startswith('#')
+    )
+    assert 'await run.io_bound(' not in code, 'an unbounded run.io_bound call remains'
 
-    blocks = [n for n in ast.walk(tree) if acquires_the_semaphore(n)]
-    assert blocks, 'the semaphore is never acquired'
 
-    # Positive: the profiles read is inside one of those blocks.
-    def mentions(node, name):
-        return any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(node))
-
-    assert any(mentions(b, '_fetch_top_profiles') for b in blocks), \
-        'the profiles read is not under the shared bound'
-
-    # Negative: no acquire block may CONTAIN another acquire, and the `_count`
-    # helper (which acquires it too) must not be defined inside one -- holding a
-    # slot while awaiting another from the same semaphore deadlocks.
-    for block in blocks:
-        inner = [n for n in ast.walk(block) if n is not block and acquires_the_semaphore(n)]
-        assert not inner, 'nested acquire of the same semaphore -- deadlock risk'
-        nested_count = [
-            n for n in ast.walk(block)
-            if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == '_count'
-        ]
-        assert not nested_count, '_count defined inside a semaphore block -- deadlock risk'
+def test_discovery_responses_use_the_bounded_helper():
+    import pathlib
+    src = pathlib.Path('web/pages/discoveries.py').read_text(encoding='utf-8')
+    assert 'bounded_io_bound(\n' in src or 'bounded_io_bound(' in src
+    assert 'async with _RESPONSES_FETCH_SEMAPHORE' not in src, \
+        'raw `async with` releases the permit before the worker finishes'
 
 
 def test_leaderboard_semaphore_is_module_level():
@@ -520,7 +533,8 @@ def test_discovery_responses_fetch_is_bounded():
 
     import pathlib
     src = pathlib.Path('web/pages/discoveries.py').read_text(encoding='utf-8')
-    assert 'async with _RESPONSES_FETCH_SEMAPHORE' in src, 'semaphore is never acquired'
+    assert 'bounded_io_bound(' in src and '_RESPONSES_FETCH_SEMAPHORE,' in src, \
+        'the responses read does not go through the bounded helper'
 
 
 def test_expansion_gate_only_fires_on_open_and_only_once():
