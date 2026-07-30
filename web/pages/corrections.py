@@ -30,6 +30,20 @@ logger = logging.getLogger(__name__)
 # unbounded fan-out of ~20 would crowd it out for concurrent visitors.
 _LEADERBOARD_COUNT_CONCURRENCY = 4
 
+# MODULE-LEVEL on purpose: the bound has to be process-wide. Constructing the
+# semaphore inside `fetch_leaderboard_users` gave every concurrent visitor their
+# own 4 slots, so the real ceiling was 4 x visitors -- which can still fill the
+# shared pool and delay search and image work. Do NOT move it back into the
+# function.
+#
+# Safe to build at import time (Python 3.10+ dropped the `loop` argument, and
+# `Semaphore.acquire` only touches the loop when it actually has to wait). Note
+# the flip side: `_LoopBoundMixin._get_loop` caches the loop on first CONTENDED
+# use and then raises if reused from a different loop. Production has one
+# long-lived loop so that is fine, but a test driving this through several
+# `asyncio.run()` calls must inject a fresh semaphore per loop.
+_LEADERBOARD_COUNT_SEMAPHORE = asyncio.Semaphore(_LEADERBOARD_COUNT_CONCURRENCY)
+
 
 def _fetch_top_profiles(limit: int) -> List[Dict]:
     """Fetch the top-reputation profiles. Blocking -- call inside ``run.io_bound``.
@@ -62,11 +76,13 @@ async def fetch_leaderboard_users(limit: int = 20) -> List[Dict]:
     A server-side aggregate RPC (as `get_list_item_counts` does for lists) would
     be the better long-term fix, but that needs a Supabase migration.
 
-    Concurrency is BOUNDED at `_LEADERBOARD_COUNT_CONCURRENCY`. `run.io_bound`
-    submits to NiceGUI's single process-wide `ThreadPoolExecutor`, so firing all
-    ~20 counts at once would occupy most of that shared pool; several concurrent
-    visitors could then starve unrelated offloaded work (image resolution, search
-    execution) and pile load onto Supabase.
+    Concurrency is BOUNDED by the module-level `_LEADERBOARD_COUNT_SEMAPHORE`.
+    `run.io_bound` submits to NiceGUI's single process-wide `ThreadPoolExecutor`,
+    so firing all ~20 counts at once would occupy most of that shared pool;
+    several concurrent visitors could then starve unrelated offloaded work (image
+    resolution, search execution) and pile load onto Supabase. The semaphore is
+    shared across requests deliberately -- a per-call one would bound each visitor
+    to 4 but leave the process ceiling at 4 x visitors.
     """
     users = await run.io_bound(_fetch_top_profiles, limit)
     if not users:
@@ -74,10 +90,8 @@ async def fetch_leaderboard_users(limit: int = 20) -> List[Dict]:
     ids = [u.get('id') for u in users]
     countable = [uid for uid in ids if uid]
 
-    semaphore = asyncio.Semaphore(_LEADERBOARD_COUNT_CONCURRENCY)
-
     async def _count(uid):
-        async with semaphore:
+        async with _LEADERBOARD_COUNT_SEMAPHORE:
             return await run.io_bound(get_user_corrections_count, uid)
 
     results = await asyncio.gather(

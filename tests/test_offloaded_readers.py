@@ -180,6 +180,35 @@ def test_offloaded_read_does_not_stall_an_event_loop_ticker():
 # P2 -- leaderboard: bounded concurrency + lazy start + guarded render
 # ---------------------------------------------------------------------------
 
+def _instrument_leaderboard(monkeypatch, corrections, n_profiles=20):
+    """Wire fakes and return a live peak-concurrency counter.
+
+    Injects a FRESH module-level semaphore: `_LoopBoundMixin._get_loop` caches the
+    loop on first contended use and raises if reused from another loop, and each
+    test drives its own `asyncio.run`.
+    """
+    profiles = [{'id': f'u{i}', 'reputation': i} for i in range(n_profiles)]
+    monkeypatch.setattr(corrections, '_fetch_top_profiles', lambda lim: list(profiles))
+    monkeypatch.setattr(
+        corrections, '_LEADERBOARD_COUNT_SEMAPHORE',
+        asyncio.Semaphore(corrections._LEADERBOARD_COUNT_CONCURRENCY),
+    )
+
+    stats = {'in_flight': 0, 'peak': 0}
+
+    async def fake_io_bound(fn, *args, **kwargs):
+        if fn is corrections._fetch_top_profiles:
+            return fn(*args, **kwargs)
+        stats['in_flight'] += 1
+        stats['peak'] = max(stats['peak'], stats['in_flight'])
+        await asyncio.sleep(0.01)
+        stats['in_flight'] -= 1
+        return 1
+
+    monkeypatch.setattr(corrections.run, 'io_bound', fake_io_bound)
+    return stats
+
+
 def test_leaderboard_concurrency_is_bounded(monkeypatch):
     """No more than _LEADERBOARD_COUNT_CONCURRENCY counts may run at once.
 
@@ -190,30 +219,48 @@ def test_leaderboard_concurrency_is_bounded(monkeypatch):
     limit = corrections._LEADERBOARD_COUNT_CONCURRENCY
     assert limit <= 8, 'bound should stay small relative to the shared pool'
 
-    profiles = [{'id': f'u{i}', 'reputation': i} for i in range(20)]
-    monkeypatch.setattr(corrections, '_fetch_top_profiles', lambda lim: list(profiles))
-
-    in_flight = 0
-    peak = 0
-    lock = asyncio.Lock()
-
-    async def fake_io_bound(fn, *args, **kwargs):
-        nonlocal in_flight, peak
-        if fn is corrections._fetch_top_profiles:
-            return fn(*args, **kwargs)
-        async with lock:
-            in_flight += 1
-            peak = max(peak, in_flight)
-        await asyncio.sleep(0.01)
-        async with lock:
-            in_flight -= 1
-        return 1
-
-    monkeypatch.setattr(corrections.run, 'io_bound', fake_io_bound)
-
+    stats = _instrument_leaderboard(monkeypatch, corrections)
     users = asyncio.run(corrections.fetch_leaderboard_users(limit=20))
+
     assert len(users) == 20
-    assert peak <= limit, f'peak concurrency {peak} exceeded the bound {limit}'
+    assert stats['peak'] <= limit, f"peak {stats['peak']} exceeded the bound {limit}"
+
+
+def test_leaderboard_bound_holds_across_concurrent_visitors(monkeypatch):
+    """The bound must be PROCESS-wide, not per-invocation.
+
+    Regression for the PR-review P2: the semaphore was built inside
+    `fetch_leaderboard_users`, so every concurrent visitor got their own 4 slots
+    and the real ceiling was 4 x visitors -- enough to fill NiceGUI's shared
+    thread pool and delay search and image work. Three simultaneous visitors on
+    ONE event loop (which is all production has) must still total <= 4.
+    """
+    corrections = pytest.importorskip('web.pages.corrections')
+    limit = corrections._LEADERBOARD_COUNT_CONCURRENCY
+    stats = _instrument_leaderboard(monkeypatch, corrections)
+
+    async def three_visitors():
+        return await asyncio.gather(*[
+            corrections.fetch_leaderboard_users(limit=20) for _ in range(3)
+        ])
+
+    results = asyncio.run(three_visitors())
+
+    assert [len(r) for r in results] == [20, 20, 20]
+    assert stats['peak'] <= limit, (
+        f"combined peak {stats['peak']} exceeded the process-wide bound {limit} -- "
+        'the semaphore is per-invocation again'
+    )
+
+
+def test_leaderboard_semaphore_is_module_level():
+    """Pins the fix structurally as well as behaviourally."""
+    corrections = pytest.importorskip('web.pages.corrections')
+    assert isinstance(corrections._LEADERBOARD_COUNT_SEMAPHORE, asyncio.Semaphore)
+    src = inspect.getsource(corrections.fetch_leaderboard_users)
+    assert 'asyncio.Semaphore(' not in src, \
+        'fetch_leaderboard_users constructs its own semaphore -- the bound must be shared'
+    assert '_LEADERBOARD_COUNT_SEMAPHORE' in src, 'the shared semaphore is not acquired'
 
 
 def test_leaderboard_view_returns_loader_and_does_not_fetch_eagerly():
