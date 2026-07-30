@@ -55,6 +55,16 @@ input, direction verdicts, gen-2 evidence snapshots). 135-SHIP never reads
 live `rsource/` working files — it reads pinned snapshots whose SHA-256 it
 records in `meta` + the frame doc.
 
+**Delivered by GEN2 (2026-07-24):** the slim canonical-merges build input
+`v2_canonical_merges.build.json` — **SHA-256
+`cc054d111b9b4a76dd69912923ba50cd2b63f7820cb632617f645c12c207429a`**
+(2382 bytes; 16 merges; top level EXACTLY `{dropped_by_135, merges}`; each merge
+entry EXACTLY `{members_w, canonical_w, owner_verdict}`; `dropped_by_135=["w001239"]`;
+pure-ASCII opaque `w#####` ids — no titles). A copy is staged at
+`discovery_data/v2_canonical_merges.build.json`; regenerate deterministically from the
+full census with `rsource/scripts/emit_canonical_merges_build.py`. 135-SHIP: point
+`--canonical-merges` at this pinned file and record the SHA in `meta` + the frame doc.
+
 ## 4. Immediate tasks on resume
 
 **GEN2, in order:**
