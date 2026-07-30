@@ -628,9 +628,23 @@ def create_page():
                 try:
                     if not state.lists_mgr:
                         return
-                    reader_client = get_user_client() if state.lists_mgr.is_authenticated else None
+                    # Resolve the auth decision HERE, on the loop, and pass it in.
+                    # Passing only `client` is not enough: the method otherwise
+                    # re-derives auth itself via GlobalAuthState -> safe_user_get,
+                    # which has no UI context in the worker, reads as logged-OUT,
+                    # and falls through to the local_mgr branch -- so a signed-in
+                    # user would silently get local-or-empty recent activity while
+                    # the authenticated client went unused.
+                    lists_mgr = state.lists_mgr
+                    is_authed = lists_mgr.is_authenticated
+                    reader_user_id = lists_mgr.user_id if is_authed else None
+                    reader_client = get_user_client() if is_authed else None
                     recent_items = await run.io_bound(
-                        state.lists_mgr.get_items_in_list_sync, 'recent', client=reader_client
+                        lists_mgr.get_items_in_list_sync,
+                        'recent',  # literal sentinel: resolves without any storage read
+                        client=reader_client,
+                        is_authenticated=is_authed,
+                        user_id=reader_user_id,
                     )
                     if recent_items is None:
                         return  # app shutting down mid-flight

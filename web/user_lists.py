@@ -564,7 +564,7 @@ class UserListsManager:
             return self.local_mgr.update_item(item_id, tags=tags)
         return False
 
-    def _is_recent_list(self, list_id: str) -> bool:
+    def _is_recent_list(self, list_id: str, *, is_authenticated: Optional[bool] = None) -> bool:
         """True when list_id refers to the "Recently Viewed" system list.
 
         The recent list can be addressed two ways:
@@ -581,9 +581,14 @@ class UserListsManager:
         localized name may differ).
         """
         if list_id == 'recent':
+            # Short-circuits BEFORE any storage read, which is why the literal
+            # sentinel is the only form safe to resolve off the event loop.
             return True
-        if not self.is_authenticated:
+        if not (self.is_authenticated if is_authenticated is None else is_authenticated):
             return False
+        # NOTE: `_get_cached_data()` may read per-user state, so the numeric-id
+        # form is NOT safe to resolve in a worker thread. Callers offloading this
+        # should pass the literal 'recent' sentinel.
         data = self._get_cached_data()
         lst = data.get('lists', {}).get(str(list_id))
         if not lst or not lst.get('is_system'):
@@ -604,20 +609,34 @@ class UserListsManager:
             return self.local_mgr.get_items_in_list(list_id)
         return []
 
-    def get_items_in_list_sync(self, list_id: str, *, client=None) -> List[Dict]:
+    def get_items_in_list_sync(self, list_id: str, *, client=None,
+                               is_authenticated: Optional[bool] = None,
+                               user_id: Optional[str] = None) -> List[Dict]:
         """Synchronous version of get_items_in_list.
 
-        `client` (2026-07-30, keyword-only, default None = unchanged behaviour):
-        an already-built Supabase client, so this blocking read can be dispatched
-        through `run.io_bound` without losing the caller's auth context. Both
-        underlying tables (`recent_items`, `list_items`) are `TO authenticated`
-        and user-scoped, so a worker thread that fell back to the anonymous
-        client would return ZERO rows -- an empty list for a logged-in user
-        rather than an error. See `web/supabase_client.get_corrections`.
+        All three keyword-only parameters were added 2026-07-30 and default to
+        None = unchanged behaviour. Together they make this method safe to run in
+        a `run.io_bound` worker thread; passing only `client` is NOT enough.
+
+        `client`: an already-built Supabase client. Both underlying tables
+        (`recent_items`, `list_items`) are `TO authenticated` and user-scoped, so
+        a worker that fell back to the anonymous client returns ZERO rows -- an
+        empty list for a logged-in user rather than an error.
+
+        `is_authenticated` / `user_id`: the caller's auth decision, resolved on
+        the event loop. WITHOUT these the method still re-derives auth itself via
+        `self.is_authenticated` -> `GlobalAuthState.is_logged_in()` ->
+        `safe_user_get(USER_KEY)`, which in a worker thread has no NiceGUI UI
+        context and degrades to None (web/safe_storage.py). `is_authenticated`
+        then reads False, execution falls through to the `local_mgr` branch, and
+        a signed-in user silently gets local-or-empty results while the
+        carefully-supplied authenticated `client` is never touched at all.
         """
-        if self.is_authenticated:
-            if self._is_recent_list(list_id):
-                return self._format_recent_items(get_recent_items(self.user_id, client=client))
+        authed = self.is_authenticated if is_authenticated is None else is_authenticated
+        uid = self.user_id if user_id is None else user_id
+        if authed:
+            if self._is_recent_list(list_id, is_authenticated=authed):
+                return self._format_recent_items(get_recent_items(uid, client=client))
             try:
                 list_id_int = int(list_id)
             except ValueError:

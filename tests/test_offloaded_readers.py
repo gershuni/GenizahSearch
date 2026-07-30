@@ -62,8 +62,13 @@ def test_lists_manager_threads_client_through():
     assert sig.parameters['client'].default is None
 
     src = inspect.getsource(user_lists.UserListsManager.get_items_in_list_sync)
-    assert 'get_recent_items(self.user_id, client=client)' in src, 'recent path drops the client'
+    assert 'get_recent_items(uid, client=client)' in src, 'recent path drops the client'
     assert 'get_list_items(list_id_int, client=client)' in src, 'list-items path drops the client'
+    # The auth decision must also be overridable, or the worker re-derives it
+    # from storage it cannot read -- see the P1 test further down.
+    for name in ('is_authenticated', 'user_id'):
+        assert sig.parameters[name].kind == inspect.Parameter.KEYWORD_ONLY
+        assert sig.parameters[name].default is None
 
 
 def test_explicit_client_is_used_instead_of_get_user_client(monkeypatch):
@@ -284,6 +289,145 @@ def test_deferred_loader_offloads_and_guards(module_name, loader):
         f'{loader} does not pass an explicitly-built client into the worker'
     assert 'get_user_client()' in body, f'{loader} does not build the client on the loop'
     assert 'has_been_deleted' in body, f'{loader} renders without a teardown guard'
+
+
+# ---------------------------------------------------------------------------
+# PR #319 review, P1 -- the worker must not re-derive auth for itself
+# ---------------------------------------------------------------------------
+
+def test_get_items_in_list_sync_honours_explicit_auth_when_context_is_lost(monkeypatch):
+    """THE regression test for the PR-review P1.
+
+    Passing `client` alone was not enough. `get_items_in_list_sync` also consulted
+    `self.is_authenticated` -> `GlobalAuthState.is_logged_in()` -> `safe_user_get`,
+    which in a worker thread has no NiceGUI UI context and reads as logged-OUT.
+    Execution then fell through to the `local_mgr` branch and a signed-in user got
+    local-or-empty recent activity, while the authenticated client sat unused.
+
+    Here `is_logged_in` returns False (exactly what the worker sees) but the
+    caller passes the auth decision it resolved on the loop, so the Supabase path
+    must still be taken.
+    """
+    user_lists = pytest.importorskip('web.user_lists')
+
+    monkeypatch.setattr(user_lists.GlobalAuthState, 'is_logged_in', classmethod(lambda cls: False))
+    monkeypatch.setattr(user_lists.GlobalAuthState, 'get_user_id', classmethod(lambda cls: None))
+
+    recent_calls = []
+    monkeypatch.setattr(
+        user_lists, 'get_recent_items',
+        lambda uid, client=None: recent_calls.append((uid, client)) or [{'sys_id': '42'}],
+    )
+
+    class _LocalMgr:
+        def __init__(self):
+            self.used = False
+
+        def get_items_in_list(self, list_id):
+            self.used = True
+            return [{'sys_id': 'LOCAL'}]
+
+    local = _LocalMgr()
+    mgr = user_lists.UserListsManager(local_mgr=local)
+    sentinel_client = object()
+
+    items = mgr.get_items_in_list_sync(
+        'recent', client=sentinel_client, is_authenticated=True, user_id='u1'
+    )
+
+    assert not local.used, 'fell through to local_mgr despite explicit is_authenticated=True'
+    assert recent_calls == [('u1', sentinel_client)], \
+        f'Supabase reader not called with the captured user id + client: {recent_calls}'
+    assert [it['sys_id'] for it in items] == ['42']
+
+
+def test_get_items_in_list_sync_still_defers_to_ambient_auth_by_default(monkeypatch):
+    """Omitting the overrides must keep the original behaviour exactly."""
+    user_lists = pytest.importorskip('web.user_lists')
+    monkeypatch.setattr(user_lists.GlobalAuthState, 'is_logged_in', classmethod(lambda cls: False))
+
+    class _LocalMgr:
+        def get_items_in_list(self, list_id):
+            return [{'sys_id': 'LOCAL'}]
+
+    mgr = user_lists.UserListsManager(local_mgr=_LocalMgr())
+    assert mgr.get_items_in_list_sync('recent') == [{'sys_id': 'LOCAL'}]
+
+
+def test_home_passes_the_auth_decision_into_the_worker():
+    """home.py must hand over is_authenticated AND user_id, not just the client."""
+    import pathlib
+    src = pathlib.Path('web/pages/home.py').read_text(encoding='utf-8')
+    block = src.split('async def _deferred_load_recent', 1)[1][:3400]
+    # Strip comment lines: these docs mention `run.io_bound` in prose, and an
+    # ordering assertion must look at CODE, not at explanatory text.
+    code = '\n'.join(
+        line for line in block.splitlines() if not line.lstrip().startswith('#')
+    )
+
+    assert 'is_authenticated=is_authed' in code, 'auth decision not passed to the worker'
+    assert 'user_id=reader_user_id' in code, 'user id not passed to the worker'
+    # The decision itself must be taken before the offload, not inside it.
+    assert code.index('is_authed = lists_mgr.is_authenticated') < code.index('await run.io_bound('), \
+        'auth must be resolved on the event loop, before the offload'
+
+
+# ---------------------------------------------------------------------------
+# PR #319 review, P2 -- discovery responses: gated + bounded
+# ---------------------------------------------------------------------------
+
+def test_discovery_responses_are_gated_on_expansion_open():
+    """A 50-card feed must not fire 50 Supabase reads on load.
+
+    NiceGUI builds expansion content eagerly, so an unconditional
+    `ensure_future` per card ran one read per card regardless of whether the
+    visitor ever opened it.
+    """
+    import pathlib
+    src = pathlib.Path('web/pages/discoveries.py').read_text(encoding='utf-8')
+    assert 'as content_expansion' in src, 'expansion is not captured'
+    assert 'content_expansion.on_value_change(_on_expansion_change)' in src, \
+        'responses loader is not wired to expansion activation'
+    assert 'asyncio.ensure_future(_deferred_responses())' not in src, \
+        'responses are still loaded eagerly for every card'
+
+
+def test_discovery_responses_fetch_is_bounded():
+    discoveries = pytest.importorskip('web.pages.discoveries')
+    sem = discoveries._RESPONSES_FETCH_SEMAPHORE
+    assert isinstance(sem, asyncio.Semaphore)
+    # Small relative to NiceGUI's shared pool.
+    assert sem._value <= 8, f'bound {sem._value} is too loose for the shared executor'
+
+    import pathlib
+    src = pathlib.Path('web/pages/discoveries.py').read_text(encoding='utf-8')
+    assert 'async with _RESPONSES_FETCH_SEMAPHORE' in src, 'semaphore is never acquired'
+
+
+def test_expansion_gate_only_fires_on_open_and_only_once():
+    """Mirrors the gate's logic: ignore close events, run at most once."""
+    started = []
+    responses_started = False
+
+    async def fake_load():
+        started.append(1)
+
+    async def on_change(value):
+        nonlocal responses_started
+        if responses_started or not value:
+            return
+        responses_started = True
+        await fake_load()
+
+    async def main():
+        await on_change(False)  # collapse event before any open
+        assert started == []
+        await on_change(True)   # first open -> loads
+        await on_change(True)   # re-open -> must not reload
+        await on_change(False)
+        return started
+
+    assert asyncio.run(main()) == [1]
 
 
 # ---------------------------------------------------------------------------
