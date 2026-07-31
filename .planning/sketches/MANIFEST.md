@@ -40,6 +40,17 @@ comparable `/atlas` surface runs ~68% mobile.
 
 | 002 | panel-embedded-in-browse | How does the panel sit inside the real `/browse` page, and how does offset highlighting actually work on its text pane? | **accepted** | discovery, browse, integration, highlighting, d-12, panel-01, panel-03 |
 
+| 003 | discovery-findings-page | What is the row unit of the corpus-wide findings page, and what can it honestly show before the rebuild? | _pending_ | discovery, findings-page, phase-136, d-19, novelty, perf-01, nav, gate-5 |
+
+**Sketch 003 (the page D-19 explicitly asked for a mockup of) found that the novelty axis cannot
+honestly ship on the current asset.** Only propagated rows carry a verdict (14,003 flagged / 8,240
+not); all **144,294 direct rows sit at `is_new = 0` meaning UNCHECKED**, so a two-state filter would
+assert those findings are already recorded — false. Also: `coverage_ppm` and `band_rank` do not exist
+as columns, so the coverage filter is inert, and the deduped identification count took **16 s**,
+independently confirming D-10a's PERF-01 problem. Row-unit totals measured for the first time:
+**65,200** identifications (the recommended unit) vs 166,537 claims / 44,375 manuscripts / 1,088 works.
+The page is therefore *blocked on* gates 1–3, not merely improved by them.
+
 ### Owner decisions (2026-07-31)
 
 - **Variant D — even panes — wins.** Two equal panes at ≥900px; page identifications and the
