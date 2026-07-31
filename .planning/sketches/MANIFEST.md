@@ -36,7 +36,21 @@ comparable `/atlas` surface runs ~68% mobile.
 
 | # | Name | Design Question | Winner | Tags |
 |---|------|----------------|--------|------|
-| 001 | discovery-panel-architecture | Where does manuscript-level coherence live relative to this page's identifications, and how do the three disclosure buckets read? | _pending_ | discovery, panel, phase-136, disclosure, rtl, mobile, d-09 |
+| 001 | discovery-panel-architecture | Where does manuscript-level coherence live relative to this page's identifications, and how do the three disclosure buckets read? | _pending (round 2)_ | discovery, panel, phase-136, disclosure, filters, rtl, mobile, d-09, d-21 |
+
+**Round 2 (owner steer):** a fourth variant **D — even panes** (the B+C synthesis), a per-view
+**relation-kind + tier filter**, and 13 manuscripts instead of 7 so tiers and relation kinds are
+actually exercised. All data real from the deployed asset; nothing illustrative.
+
+**Two open decisions this sketch forces:**
+1. **D-09** locks "On this page first, then Elsewhere (collapsed)". B and D both drop the collapse; if
+   either wins, D-09 needs a dated amendment (narrower for D — strike "collapsed", keep the ordering).
+2. **D-21** prohibits "quotes" in display, so the relation filter is labelled with match-framing
+   ("Direct match / Partial match / Shared text"), not "Citations". Calling it "Citations" is a
+   defensible product choice that needs a dated D-21 amendment.
+
+Also noted: **panel filters are new scope** — D-16 specifies filters for `/work/{id}`, not the panel,
+whose locked model is D-13e's fixed three-bucket disclosure.
 
 ### Queued (scoped, not yet built)
 

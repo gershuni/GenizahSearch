@@ -8,298 +8,219 @@
 <style>
 * { box-sizing: border-box; }
 body {
-  margin: 0; padding: 0;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  padding-top: 96px;
+  margin: 0; background: var(--bg-secondary); color: var(--text-primary);
+  font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.5;
+  padding-top: 104px;
 }
 [dir="rtl"] { font-family: var(--font-heb); }
 
 /* ---------- sketch chrome ---------- */
-#variant-nav {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
-  background: var(--bg-card); border-bottom: 1px solid var(--border-light);
-  box-shadow: var(--shadow-sm);
-}
-#variant-nav .row1 { display: flex; gap: 4px; padding: 6px 10px 0; flex-wrap: wrap; }
-#variant-nav .row2 {
-  display: flex; gap: 8px; padding: 6px 10px; align-items: center;
-  flex-wrap: wrap; border-top: 1px solid var(--border-light); margin-top: 6px;
-}
-.variant-tab {
-  border: 1px solid var(--border-light); border-bottom: none;
-  background: var(--bg-secondary); color: var(--text-secondary);
-  padding: 6px 12px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  cursor: pointer; font-size: var(--text-xs); font-family: inherit;
-  transition: all 0.15s ease;
-}
-.variant-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
-.variant-tab.active {
-  background: var(--bg-card); color: var(--primary-700);
-  font-weight: 700; border-color: var(--primary-600);
-  border-bottom: 2px solid var(--bg-card); margin-bottom: -1px;
-}
-#variant-nav select, #variant-nav button.ctl {
-  font-family: inherit; font-size: var(--text-xs);
-  padding: 4px 8px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border-medium);
-  background: var(--bg-card); color: var(--text-primary); cursor: pointer;
-}
-#variant-nav label.ctl-label {
-  font-size: var(--text-xs); color: var(--text-muted); margin-inline-end: 2px;
-}
+#nav { position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: var(--bg-card); border-bottom: 1px solid var(--border-light); box-shadow: var(--shadow-sm); }
+#nav .r1 { display: flex; gap: 4px; padding: 6px 10px 0; flex-wrap: wrap; }
+#nav .r2 { display: flex; gap: 8px; padding: 6px 10px; align-items: center; flex-wrap: wrap;
+  border-top: 1px solid var(--border-light); margin-top: 6px; }
+.vtab { border: 1px solid var(--border-light); border-bottom: none; background: var(--bg-secondary);
+  color: var(--text-secondary); padding: 6px 11px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  cursor: pointer; font-size: var(--text-xs); font-family: inherit; transition: all 0.15s ease; }
+.vtab:hover { background: var(--bg-hover); color: var(--text-primary); }
+.vtab.active { background: var(--bg-card); color: var(--primary-700); font-weight: 700;
+  border-color: var(--primary-600); border-bottom: 2px solid var(--bg-card); margin-bottom: -1px; }
+#nav select, #nav button.ctl { font-family: inherit; font-size: var(--text-xs); padding: 4px 8px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-medium);
+  background: var(--bg-card); color: var(--text-primary); cursor: pointer; }
+#nav label.cl { font-size: var(--text-xs); color: var(--text-muted); }
 button.ctl.on { background: var(--primary-600); color: #fff; border-color: var(--primary-700); }
-
-#stage { margin: 0 auto; transition: max-width 0.2s ease; padding: 16px 10px 80px; }
-.ms-note {
-  font-size: var(--text-xs); color: var(--text-muted);
-  background: var(--bg-tertiary); border-inline-start: 3px solid var(--accent-gold);
-  padding: 8px 10px; border-radius: var(--radius-sm); margin-bottom: 12px;
-}
+#stage { margin: 0 auto; transition: max-width 0.2s ease; padding: 14px 10px 90px; }
+.msnote { font-size: var(--text-xs); color: var(--text-muted); background: var(--bg-tertiary);
+  border-inline-start: 3px solid var(--accent-gold); padding: 8px 10px;
+  border-radius: var(--radius-sm); margin-bottom: 12px; }
+.msnote b { color: var(--text-primary); }
 
 /* ---------- annotations ---------- */
 .annot { display: none; }
-body.show-annot .annot {
-  display: block;
-  font-size: var(--text-xs); line-height: 1.45;
-  background: color-mix(in srgb, var(--accent-amber) 12%, var(--bg-card));
-  border: 1px dashed var(--accent-amber);
-  color: var(--text-secondary);
-  padding: 6px 8px; border-radius: var(--radius-sm); margin: 6px 0;
-}
+body.ann .annot { display: block; font-size: var(--text-xs); line-height: 1.45;
+  background: var(--bg-tertiary); border: 1px dashed var(--accent-amber);
+  color: var(--text-secondary); padding: 6px 8px; border-radius: var(--radius-sm); margin: 6px 0; }
 .annot b { color: var(--text-primary); }
+.annot code { font-family: var(--font-mono); font-size: 11px; }
 
-/* ---------- the browse-page frame (context only) ---------- */
-.browse-frame {
-  background: var(--bg-card); border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm);
-}
-.browse-head { background: var(--bg-header); color: #fff; padding: 10px 14px; }
-.browse-head .sm { font-weight: 700; font-size: var(--text-base); }
-.browse-head .lib { opacity: 0.85; font-size: var(--text-xs); }
-.browse-body { padding: 12px 14px; }
-.cat-line { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 4px; }
-.cat-scope-warn {
-  display: inline-block; font-size: 10px; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--text-inverse);
-  background: var(--accent-amber); padding: 1px 6px;
-  border-radius: var(--radius-full); margin-inline-end: 6px; vertical-align: 2px;
-}
+/* ---------- browse frame ---------- */
+.frame { background: var(--bg-card); border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
+.fhead { background: var(--bg-header); color: #fff; padding: 10px 14px; }
+.fhead .sm { font-weight: 700; font-size: var(--text-base); }
+.fhead .lb { opacity: 0.85; font-size: var(--text-xs); }
+.fbody { padding: 12px 14px; }
+.catline { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 4px; }
+.cscope { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-inverse); background: var(--accent-amber); padding: 1px 6px;
+  border-radius: var(--radius-full); margin-inline-end: 6px; vertical-align: 2px; }
 
-/* ---------- the panel ---------- */
+/* ---------- panel ---------- */
 .panel { border: 1px solid var(--border-light); border-radius: var(--radius-md); overflow: hidden; }
-.panel-head {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 10px 12px; background: var(--bg-active);
-  border-bottom: 1px solid var(--border-light);
-}
-.panel-head .ico { color: var(--primary-700); font-size: var(--text-lg); line-height: 1; }
-.panel-title { font-weight: 700; color: var(--primary-800); font-size: var(--text-base); }
-.panel-count {
-  font-size: var(--text-xs); color: var(--text-inverse);
-  background: var(--primary-600); border-radius: var(--radius-full); padding: 1px 8px;
-}
-.panel-caveat {
-  font-size: var(--text-xs); color: var(--text-muted);
-  padding: 6px 12px; background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-light);
-}
-.panel-body { padding: 4px 0; background: var(--bg-card); }
+.phead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px;
+  background: var(--bg-active); border-bottom: 1px solid var(--border-light); }
+.phead .ico { color: var(--primary-700); font-size: var(--text-lg); line-height: 1; }
+.ptitle { font-weight: 700; color: var(--primary-800); font-size: var(--text-base); }
+.pcount { font-size: var(--text-xs); color: var(--text-inverse); background: var(--primary-600);
+  border-radius: var(--radius-full); padding: 1px 8px; }
+.pcaveat { font-size: var(--text-xs); color: var(--text-muted); padding: 6px 12px;
+  background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); }
+.pbody { background: var(--bg-card); }
 
-.group-head {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 12px 4px; font-size: var(--text-xs);
-  text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--text-tertiary); font-weight: 700;
-}
-.group-head .n { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text-muted); }
+/* filter bar */
+.fbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 8px 12px;
+  background: var(--bg-secondary); border-bottom: 1px solid var(--border-light); }
+.fgroup { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.flabel { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-tertiary); font-weight: 700; }
+.fchip { font-size: var(--text-xs); padding: 3px 10px; border-radius: var(--radius-full);
+  border: 1px solid var(--border-medium); background: var(--bg-card); color: var(--text-secondary);
+  cursor: pointer; font-family: inherit; transition: all 0.15s ease; }
+.fchip:hover { border-color: var(--primary-600); }
+.fchip.on { background: var(--primary-600); border-color: var(--primary-700); color: #fff; font-weight: 600; }
+.fchip .c { opacity: 0.75; font-size: 10px; margin-inline-start: 3px; }
+.freset { font-size: var(--text-xs); color: var(--primary-700); background: none; border: none;
+  cursor: pointer; text-decoration: underline; font-family: inherit; }
+
+.ghead { display: flex; align-items: center; gap: 6px; padding: 9px 12px 3px; font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); font-weight: 700; }
+.ghead .n { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text-muted); }
 
 /* identification row */
-.idrow {
-  padding: 10px 12px; border-top: 1px solid var(--border-light);
-  transition: background 0.15s ease;
-}
+.idrow { padding: 10px 12px; border-top: 1px solid var(--border-light); transition: background 0.15s ease; }
 .idrow:hover { background: var(--bg-hover); }
-.idrow.low-cov { border-inline-start: 3px solid var(--accent-amber); }
-.idrow-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.idrow-verb { color: var(--text-muted); font-size: var(--text-xs); }
-.idrow-work {
-  font-weight: 700; color: var(--primary-700);
-  font-size: var(--text-base); text-decoration: none;
-}
-.idrow-work:hover { text-decoration: underline; }
-.idrow-author { color: var(--text-muted); font-size: var(--text-xs); }
-.idrow-meta {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  margin-top: 5px; font-size: var(--text-xs); color: var(--text-secondary);
-}
-.band {
-  font-size: 11px; font-weight: 700; padding: 1px 7px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border-medium); color: var(--text-secondary);
-  background: var(--bg-tertiary);
-}
-.cov { color: var(--text-secondary); }
+.idrow.lowcov { border-inline-start: 3px solid var(--accent-amber); }
+.idtop { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.idverb { color: var(--text-muted); font-size: var(--text-xs); }
+.idwork { font-weight: 700; color: var(--primary-700); font-size: var(--text-base); text-decoration: none; }
+.idwork:hover { text-decoration: underline; }
+.idauth { color: var(--text-muted); font-size: var(--text-xs); }
+.idmeta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 5px;
+  font-size: var(--text-xs); color: var(--text-secondary); }
+.band { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: var(--radius-full);
+  border: 1px solid var(--border-medium); color: var(--text-secondary); background: var(--bg-tertiary); }
 .cov b { color: var(--text-primary); }
 .nocov { color: var(--text-muted); font-style: italic; }
-.stamp { color: var(--text-muted); }
+.dim { color: var(--text-muted); }
 .offs { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
-.idrow-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
-.linkbtn {
-  font-size: var(--text-xs); color: var(--primary-700); background: none;
-  border: 1px solid var(--border-light); border-radius: var(--radius-sm);
-  padding: 3px 8px; cursor: pointer; font-family: inherit; transition: all 0.15s ease;
-}
-.linkbtn:hover { background: var(--bg-active); border-color: var(--primary-600); }
+.idacts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.lbtn { font-size: var(--text-xs); color: var(--primary-700); background: none;
+  border: 1px solid var(--border-light); border-radius: var(--radius-sm); padding: 3px 8px;
+  cursor: pointer; font-family: inherit; transition: all 0.15s ease; }
+.lbtn:hover { background: var(--bg-active); border-color: var(--primary-600); }
+.lbtn[disabled] { opacity: 0.5; cursor: default; }
 .vote { display: inline-flex; gap: 2px; margin-inline-start: auto; }
-.vote button {
-  width: 26px; height: 24px; font-size: var(--text-xs); cursor: pointer;
-  border: 1px solid var(--border-light); background: var(--bg-card);
-  color: var(--text-muted); border-radius: var(--radius-sm); font-family: inherit;
-  transition: all 0.15s ease;
-}
+.vote button { width: 26px; height: 24px; font-size: var(--text-xs); cursor: pointer;
+  border: 1px solid var(--border-light); background: var(--bg-card); color: var(--text-muted);
+  border-radius: var(--radius-sm); font-family: inherit; transition: all 0.15s ease; }
 .vote button:hover { border-color: var(--primary-600); color: var(--primary-700); background: var(--bg-active); }
 .vote .ph { font-size: 10px; color: var(--text-tertiary); align-self: center; margin-inline-start: 4px; }
+.sub { margin-top: 6px; padding-inline-start: 13px; font-size: var(--text-xs);
+  color: var(--text-secondary); border-inline-start: 2px solid var(--border-light); }
+.note { margin-top: 5px; font-size: var(--text-xs); color: var(--accent-amber); }
 
-.sub {
-  margin-top: 6px; padding-inline-start: 14px;
-  font-size: var(--text-xs); color: var(--text-secondary);
-  border-inline-start: 2px solid var(--border-light);
-}
+.wits { margin-top: 8px; background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 8px 10px; }
+.wits .w { display: flex; gap: 8px; padding: 3px 0; font-size: var(--text-xs); align-items: baseline; }
+.wits .w .s { color: var(--primary-700); }
+.wits .w .l { color: var(--text-muted); font-size: 11px; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border-medium);
+  border-top-color: var(--primary-600); border-radius: 50%; animation: sp 0.7s linear infinite;
+  vertical-align: -2px; margin-inline-end: 6px; }
+@keyframes sp { to { transform: rotate(360deg); } }
 
-/* witness expansion */
-.witnesses { margin-top: 8px; background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 8px 10px; }
-.witnesses .w { display: flex; gap: 8px; padding: 3px 0; font-size: var(--text-xs); align-items: baseline; }
-.witnesses .w .sm { color: var(--primary-700); }
-.witnesses .w .lb { color: var(--text-muted); font-size: 11px; }
-.spinner {
-  display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border-medium);
-  border-top-color: var(--primary-600); border-radius: 50%; animation: spin 0.7s linear infinite;
-  vertical-align: -2px; margin-inline-end: 6px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* disclosure sections */
+/* disclosure */
 .disc { border-top: 1px solid var(--border-light); }
-.disc > summary {
-  cursor: pointer; padding: 9px 12px; font-size: var(--text-sm);
-  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
-  color: var(--text-primary); transition: background 0.15s ease;
-}
+.disc > summary { cursor: pointer; padding: 9px 12px; font-size: var(--text-sm); display: flex;
+  align-items: center; gap: 7px; flex-wrap: wrap; transition: background 0.15s ease; }
 .disc > summary:hover { background: var(--bg-hover); }
 .disc > summary::-webkit-details-marker { display: none; }
-.disc > summary::before {
-  content: '▸'; color: var(--text-tertiary); font-size: 10px;
-  transition: transform 0.15s ease; display: inline-block;
-}
+.disc > summary::before { content: '▸'; color: var(--text-tertiary); font-size: 10px;
+  transition: transform 0.15s ease; display: inline-block; }
 .disc[open] > summary::before { transform: rotate(90deg); }
 [dir="rtl"] .disc > summary::before { content: '◂'; }
 [dir="rtl"] .disc[open] > summary::before { transform: rotate(-90deg); }
 .disc .sc { font-size: var(--text-xs); color: var(--text-muted); }
-.disc .qual { font-size: var(--text-xs); color: var(--text-tertiary); font-style: italic; }
-.disc-body { padding: 2px 12px 12px; }
+.disc .ql { font-size: var(--text-xs); color: var(--text-tertiary); font-style: italic; }
+.dbody { padding: 2px 12px 12px; }
 .disc.notid > summary { background: var(--bg-tertiary); }
-.disc.notid .disc-body { border-inline-start: 3px solid var(--border-medium); margin-inline-start: 12px; padding-inline-start: 10px; }
+.disc.notid .dbody { border-inline-start: 3px solid var(--border-medium);
+  margin-inline-start: 12px; padding-inline-start: 10px; }
+.sgroup { font-size: var(--text-xs); color: var(--text-secondary); padding: 6px 0; }
+.sgroup .ws { color: var(--text-primary); font-weight: 600; }
 
-.spangroup { font-size: var(--text-xs); color: var(--text-secondary); padding: 6px 0; }
-.spangroup .works { color: var(--text-primary); font-weight: 600; }
+/* work chips */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { display: inline-flex; align-items: baseline; gap: 5px; font-size: var(--text-xs);
+  background: var(--bg-secondary); border: 1px solid var(--border-light);
+  border-radius: var(--radius-full); padding: 3px 10px; cursor: pointer; transition: all 0.15s ease; }
+.chip:hover { border-color: var(--primary-600); background: var(--bg-active); }
+.chip .pg { color: var(--text-muted); font-size: 11px; }
+.chip.here { border-color: var(--primary-600); background: var(--bg-active); font-weight: 700; }
+.chip.gated { border-style: dashed; opacity: 0.7; }
+.chip.hc { border-color: var(--accent-amber); }
+.pager { display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  font-size: var(--text-xs); color: var(--text-muted); }
 
-/* elsewhere: named works (D-13h) */
-.workchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.workchip {
-  display: inline-flex; align-items: baseline; gap: 5px;
-  font-size: var(--text-xs); background: var(--bg-secondary);
-  border: 1px solid var(--border-light); border-radius: var(--radius-full);
-  padding: 3px 10px; cursor: pointer; transition: all 0.15s ease;
-}
-.workchip:hover { border-color: var(--primary-600); background: var(--bg-active); }
-.workchip .pg { color: var(--text-muted); font-size: 11px; }
-.workchip.here { border-color: var(--primary-600); background: var(--bg-active); font-weight: 700; }
-.workchip.gated { border-style: dashed; opacity: 0.75; }
-.pager { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: var(--text-xs); color: var(--text-muted); }
-.pager button { font-family: inherit; }
+/* variant B synthesis */
+.synth { padding: 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-light); }
+.sh { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-tertiary); font-weight: 700; margin-bottom: 4px; }
 
-/* variant B synthesis block */
-.synth {
-  margin: 0; padding: 12px; background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-light);
-}
-.synth-h {
-  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--text-tertiary); font-weight: 700; margin-bottom: 2px;
-}
-.synth-lead { font-size: var(--text-sm); color: var(--text-primary); margin-bottom: 6px; }
-.synth-lead b { color: var(--primary-700); }
-
-/* variant C rail */
-.cwrap { display: block; }
-.rail {
-  background: var(--bg-secondary); border-top: 1px solid var(--border-light);
-  padding: 10px 12px;
-}
-.rail-h {
-  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--text-tertiary); font-weight: 700; margin-bottom: 6px;
-}
+/* variant C rail + variant D even panes */
+.cwrap, .dwrap { display: block; }
+.rail { background: var(--bg-secondary); border-top: 1px solid var(--border-light); padding: 10px 12px; }
 @media (min-width: 900px) {
   .cwrap { display: grid; grid-template-columns: 1fr 260px; }
-  .rail { border-top: none; border-inline-start: 1px solid var(--border-light); }
-  [dir="rtl"] .rail { border-inline-start: none; border-inline-end: 1px solid var(--border-light); }
+  .cwrap .rail { border-top: none; border-inline-start: 1px solid var(--border-light); }
+  .dwrap { display: grid; grid-template-columns: 1fr 1fr; }
+  .dwrap > .pane + .pane { border-inline-start: 1px solid var(--border-light); }
 }
+.pane { min-width: 0; }
+.pane.ms { background: var(--bg-secondary); }
+.pane.ms.top { border-top: 1px solid var(--border-light); }
 
-/* toast */
-#toast {
-  position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%) translateY(20px);
-  background: var(--text-primary); color: var(--bg-card);
-  padding: 8px 16px; border-radius: var(--radius-full); font-size: var(--text-xs);
-  opacity: 0; pointer-events: none; transition: all 0.2s ease; z-index: 9999; max-width: 90vw;
-}
+#toast { position: fixed; bottom: 58px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--text-primary); color: var(--bg-card); padding: 8px 16px;
+  border-radius: var(--radius-full); font-size: var(--text-xs); opacity: 0;
+  pointer-events: none; transition: all 0.2s ease; z-index: 9999; max-width: 92vw; }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-/* toolbar */
-#sketch-tools {
-  position: fixed; bottom: 12px; right: 12px; z-index: 9999;
-  font-family: system-ui; font-size: 11px;
-  background: rgba(0,0,0,0.78); color: #fff; padding: 8px 10px;
-  border-radius: 8px; opacity: 0.35; transition: opacity 0.2s;
-  display: flex; gap: 6px; align-items: center;
-}
-#sketch-tools:hover { opacity: 1; }
-#sketch-tools select, #sketch-tools button {
-  font-size: 11px; font-family: inherit; padding: 2px 6px;
-  border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; cursor: pointer;
-}
+#tools { position: fixed; bottom: 12px; right: 12px; z-index: 9999; font-family: system-ui;
+  font-size: 11px; background: rgba(0,0,0,0.78); color: #fff; padding: 8px 10px; border-radius: 8px;
+  opacity: 0.35; transition: opacity 0.2s; display: flex; gap: 6px; align-items: center; }
+#tools:hover { opacity: 1; }
+#tools select { font-size: 11px; font-family: inherit; padding: 2px 6px; border-radius: 4px;
+  border: 1px solid #555; background: #222; color: #fff; cursor: pointer; }
 </style>
 </head>
 <body>
 
-<div id="variant-nav">
-  <div class="row1">
-    <button class="variant-tab active" data-v="a" onclick="showVariant('a',this)">A: Page-first (D-09 as written)</button>
-    <button class="variant-tab" data-v="b" onclick="showVariant('b',this)">B: Manuscript-first (inverts D-09)</button>
-    <button class="variant-tab" data-v="c" onclick="showVariant('c',this)">C: Page + context rail</button>
+<div id="nav">
+  <div class="r1">
+    <button class="vtab active" onclick="setV('a',this)">A: Page-first (D-09 as written)</button>
+    <button class="vtab" onclick="setV('b',this)">B: Manuscript-first</button>
+    <button class="vtab" onclick="setV('c',this)">C: Page + narrow rail</button>
+    <button class="vtab" onclick="setV('d',this)">D: Even panes ★ B+C synthesis</button>
   </div>
-  <div class="row2">
-    <label class="ctl-label" for="ms">Manuscript</label>
-    <select id="ms" onchange="render()"></select>
-    <button class="ctl" id="langBtn" onclick="toggleLang()">עברית / RTL</button>
-    <button class="ctl" id="annotBtn" onclick="toggleAnnot()">Design notes</button>
+  <div class="r2">
+    <label class="cl" for="ms">Manuscript</label>
+    <select id="ms" onchange="ELSE_PAGE=0;render()"></select>
+    <button class="ctl" id="langB" onclick="toggleLang()">עברית / RTL</button>
+    <button class="ctl" id="annB" onclick="toggleAnn()">Design notes</button>
     <span style="flex:1"></span>
-    <label class="ctl-label">Width</label>
-    <button class="ctl" onclick="setVp(375,this)">375</button>
-    <button class="ctl" onclick="setVp(768,this)">768</button>
-    <button class="ctl on" onclick="setVp(0,this)">Full</button>
+    <label class="cl">Width</label>
+    <button class="ctl" onclick="vp(375,this)">375</button>
+    <button class="ctl" onclick="vp(768,this)">768</button>
+    <button class="ctl on" onclick="vp(0,this)">Full</button>
   </div>
 </div>
 
 <div id="stage"></div>
-
 <div id="toast"></div>
 
-<div id="sketch-tools">
+<div id="tools">
   <span>theme</span>
   <select onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'">
     <option value="default">light</option>
@@ -308,484 +229,335 @@ body.show-annot .annot {
   </select>
 </div>
 
+<script src="data.js"></script>
 <script>
 /* ============================================================
-   REAL DATA — extracted from 136-MOCKUP-MULTI.html (the seven
-   standing-regression manuscripts, every row from the deployed
-   discovery-v1-33499c5b asset).
+   Sketch 001 — discovery panel architecture, round 2.
+   Data: data.js, extracted from the deployed discovery-v1-33499c5b
+   asset (13 manuscripts, real bands, real claim_types, real
+   'elsewhere' work names, coverage computed from real HTR text).
 
-   Three mockup behaviours are CORRECTED here per CONTEXT.md:
-     D-13f  the "Expert-reviewed" badge is dropped everywhere
-     D-13g  a human-confirmed row demoted by routing is shown
-     D-13h  "elsewhere in this manuscript" NAMES the works
-   Values marked  derived:true / illustrative:true  were not in
-   the extract — see the design notes toggle.
+   Band labels are the REAL bilingual strings from
+   shared/discovery_band_labels.py::BAND_LABELS — not approximations.
    ============================================================ */
 
-const MSS = [
-{
-  key:'as328', sm:'Cambridge University Library Ms. T-S AS 32.8', lib:'CUL',
-  cat:'מקרא;מקרא [טקסט]. ; Deuteronomy 23:24-28:11', catScope:'page',
-  note:'The common case — one strong identification, nothing else. 141,553 pages look like this.',
-  onPage:[{work:'תנ"ך, דברים', wid:'w000090', family:'direct', band:'tier A',
-           cov:100, letters:5259, offs:'0–5259', others:2390}],
-  elsewhere:{claims:0, pages:0, works:[]},
-  shares:[], related:0, hidden:{short:0, screening:0}
-},
-{
-  key:'misc1231', sm:'Cambridge University Library Ms. T-S Misc. 12.31.14', lib:'CUL',
-  cat:'פרשנות מקרא רבנית. ; Solomon b. Isaac, Rashi, Biblical Exegesis - Rabbanite: Genesis 44 ; שלמה בן יצחק, פרשנות מקרא רבנית: בראשית מד',
-  catScope:'page',
-  note:'A commentary manuscript: base text and commentary both match, on different passages — legitimately multi-register. Carries the D-13d granularity case.',
-  onPage:[
-    {work:'תנ"ך, בראשית', wid:'w000086', family:'direct', band:'tier A',
-     cov:47, letters:961, offs:'981–1942', others:3261},
-    {work:'רש"י על התורה', wid:'w000171', family:'direct', band:'tier A',
-     cov:47, covDerived:true, letters:962, offs:'0–962', others:null, othersUnknown:true,
-     alias:{title:'רש"י על בראשית', wid:'w001281'}, annot:'d13d'}
-  ],
-  elsewhere:{claims:1, pages:1, works:[], namesMissing:true},
-  shares:[], related:1, hidden:{short:0, screening:0}
-},
-{
-  key:'ar21164', sm:'Cambridge University Library Ms. T-S Ar. 21.164', lib:'CUL',
-  cat:'תפסיר רס"ג. ; Saadiah b. Joseph al-Fayyumi (Saadiah Gaon), Tafsir Saadya Gaon: Genesis 49:28 – 50:11; Exodus 1:7 – 2:12',
-  catScope:'page',
-  note:'Judeo-Arabic multi-register: two Tafsir portions plus a commentary, all correct, all on different passages. If these look thinned out, the rules are too aggressive.',
-  onPage:[
-    {work:'רס"ג, בראשית תרגום (תפסיר תורה)', wid:'w000032', author:'סעדיה גאון (רס"ג)',
-     family:'direct', band:'tier A', cov:53, letters:520, offs:'453–973', others:505},
-    {work:'רס"ג, שמות תרגום (תפסיר תורה)', wid:'w000033', author:'סעדיה גאון (רס"ג)',
-     family:'direct', band:'tier A', cov:52, letters:504, offs:'0–504', others:301},
-    {work:'פירוש התורה לרשב"ח', wid:'w000063', author:'שמואל בן חופני',
-     family:'direct', band:'tier A', cov:47, letters:457, offs:'516–973', others:123}
-  ],
-  elsewhere:{claims:3, pages:1, works:[], namesMissing:true},
-  shares:[], related:4, hidden:{short:0, screening:0}
-},
-{
-  key:'moss374', sm:'Moss. V,374', lib:'Mosseri',
-  cat:'a) Legal document regarding a bill of divorce. b) Court record in the hand of Hillel b. Eli',
-  catScope:'shelfmark',
-  note:'THE DEMONSTRATION CASE for manuscript coherence. Page 23\'s Esther identification looks arbitrary alone and obviously right once you see this is a Rashi-on-Megillot codex in standard order.',
-  onPage:[{work:'רש"י על אסתר', wid:'w001277', author:'שלמה בן יצחק (רש״י)',
-           family:'direct', band:'High-confidence match',
-           cov:90, letters:2809, offs:'638–2374', others:1, annot:'d13f'}],
-  elsewhere:{claims:1, pages:1, works:[
-      {title:'רש"י על איכה', pages:1, note:'lowcov', annot:'d13g'},
-      {title:'רש"י על שיר השירים', pages:7, gated:true, illustrative:true}
-    ]},
-  shares:[], related:0, hidden:{short:0, screening:6}
-},
-{
-  key:'evr684', sm:'Ms. EVR II A 684', lib:'RNL', cat:'סדור מנהג אשכנז.', catScope:'shelfmark',
-  note:'THE PROBLEM CASE: a prayer book whose verse-chain page pulls in later works that merely share the same verses.',
-  onPage:[{work:'ילקוט שמעוני על התורה', wid:'w001384', author:'שמעון הדרשן',
-           family:'propagated', band:'shared text — not evaluated',
-           cov:null, letters:null, offs:'307–538', others:396}],
-  elsewhere:{claims:8, pages:2, works:[], namesMissing:true},
-  shares:[{offs:'0–555', letters:555, works:['טור אורח חיים','ילקוט שמעוני על נ"ך']}],
-  related:3, hidden:{short:4, screening:4}
-},
-{
-  key:'heb577', sm:'Ms. Heb. 577.4.99=4', lib:'NLI', cat:'גט. פסטאט. 1213.', catScope:'page',
-  note:'Page-relation heavy: 54 shared-text rows touch this page — the bucket that used to be invisible.',
-  onPage:[
-    {work:'ספר השטרות', wid:'w001050', author:'האיי גאון', family:'propagated',
-     band:'shared text — not evaluated', cov:null, letters:null, offs:'281–624', others:229},
-    {work:'הלכות ראו', wid:'w000797', family:'propagated',
-     band:'shared text — not evaluated', cov:null, letters:null, offs:'470–624', others:160},
-    {work:'רי"ף גיטין', wid:'w001320', author:'יצחק אלפסי (רי"ף)', family:'propagated',
-     band:'shared text — not evaluated', cov:null, letters:null, offs:'386–536', others:110}
-  ],
-  elsewhere:{claims:6, pages:1, works:[], namesMissing:true},
-  shares:[{offs:'185–638', letters:453, works:['ספר החינוך','משנה תורה, ספר נשים']}],
-  related:26, hidden:{short:0, screening:0}
-},
-{
-  key:'evr25', sm:'Ms. EVR II B 25', lib:'RNL', cat:'נביאים (קטעים).', catScope:'shelfmark',
-  note:'427 identifications across 427 pages from 8 works — what "elsewhere in this manuscript" has to survive. This is the pagination stress case (429 manuscripts carry >50 claims).',
-  onPage:[{work:'תנ"ך, יהושע', wid:'w000091', family:'direct', band:'tier A',
-           cov:100, letters:633, offs:'0–633', others:548}],
-  elsewhere:{claims:426, pages:426, illustrative:true, works:[
-      {title:'תנ"ך, יהושע', pages:38, here:true},
-      {title:'תנ"ך, שופטים', pages:41},
-      {title:'תנ"ך, שמואל', pages:74},
-      {title:'תנ"ך, מלכים', pages:69},
-      {title:'תנ"ך, ישעיה', pages:58},
-      {title:'תנ"ך, ירמיה', pages:63},
-      {title:'תנ"ך, יחזקאל', pages:47},
-      {title:'תנ"ך, תרי עשר', pages:36}
-    ]},
-  shares:[], related:0, hidden:{short:0, screening:49}
-}
-];
+const MSS = PANEL_DATA.manuscripts;
 
-/* real-ish witness rows for the on-demand expansion */
-const WITNESS_SAMPLE = [
-  ['T-S A1.56','CUL'], ['T-S NS 4.12','CUL'], ['ENA 2591.7','JTS'],
-  ['Ms. EVR II B 25','RNL'], ['Or. 5554A.31','BL'], ['Mosseri VII.12','Mosseri']
-];
+/* real labels, copied verbatim from shared/discovery_band_labels.py */
+const BAND_LABELS = {
+  'track1_direct|high_confidence_algorithmic': {en:'High-confidence match (algorithmic)', he:'התאמה בוודאות גבוהה (אלגוריתמית)'},
+  'track1_direct|tier_a':                      {en:'Algorithmic match — tier A',          he:'התאמה אלגוריתמית — דרגה א׳'},
+  'track1_direct|screening_rb':                {en:'Screening — rule-based',              he:'סינון — מבוסס כללים'},
+  'track1_direct|screening_canon':             {en:'Screening — canon',                   he:'סינון — קנון'},
+  'propagated|corroborated':                   {en:'Corroborated by matching witnesses',  he:'מאושש בעדים תואמים'},
+  'propagated|weak':                           {en:'Matching witnesses (weak)',           he:'עדים תואמים (חלש)'},
+  'propagated|not_evaluated':                  {en:'Shared text — not evaluated',         he:'טקסט משותף — לא הוערך'},
+};
 
-/* ---------------- i18n ---------------- */
+/* Relation-kind filter. The STORED vocabulary is direct_witness /
+   quotes_this_work / shared_text. D-21 forbids "quotes" (and "copy of",
+   "witness of") in DISPLAY, so the filter is labelled with D-21's own
+   match-framing instead. Short codes are used in markup so no stored key
+   ever reaches rendered HTML. */
+const CT = [
+  {code:'dw', key:'direct_witness',   en:'Direct match',  he:'התאמה ישירה'},
+  {code:'qw', key:'quotes_this_work', en:'Partial match', he:'התאמה חלקית'},
+  {code:'st', key:'shared_text',      en:'Shared text',   he:'טקסט משותף'},
+];
+const CT_BY_KEY = Object.fromEntries(CT.map(c => [c.key, c]));
+const CT_BY_CODE = Object.fromEntries(CT.map(c => [c.code, c]));
+
 const T = {
   en: {
-    panel:'Computed identifications', count:n=>`${n} on this page`,
+    panel:'Computed identifications', onthis:n=>`${n} on this page`,
     caveat:'Not exhaustive — more identifications may exist.',
     onPage:'On this page', shown:n=>`${n} shown`,
-    elsewhere:'Elsewhere in this manuscript',
-    matches:'Matches', partial:'Partial match with',
-    covLbl:(p)=>`${p}% of page (matched letters)`,
-    letters:n=>`${n.toLocaleString()} letters`,
+    elsewhere:'Elsewhere in this manuscript', msPane:'This manuscript',
+    matches:'Matches', partial:'Partial match with', sharesWith:'Shares text with',
+    cov:p=>`${p}% of page (matched letters)`, letters:n=>`${n.toLocaleString()} letters`,
     nocov:'no coverage figure for this family',
-    stamp:'unreviewed · algorithmic estimate',
-    offs:o=>`offsets ${o}`,
-    evidence:'Evidence',
-    others:(n)=>`Other manuscripts matching this work · ${n.toLocaleString()}`,
-    othersUnknown:'Other manuscripts matching this work',
-    alsoShares:'Also shares text with',
-    notIds:'collapsed by default; not presented as identifications',
-    spangroup:(o,l,n)=>`One passage (offsets ${o}, ${l} letters) appears in ${n} works:`,
-    relPages:'Pages matching this page in other manuscripts',
-    relCount:n=>`${n} ${n===1?'page':'pages'}`,
-    relQual:'unevaluated candidate alignments',
-    more:'Show more possible matches',
-    moreBreak:(s,c)=>`${s} short-passage, ${c} screening / review-only`,
-    placeholder:'placeholder', voteToast:'Placeholder — voting arrives in Phase 137 (JUDGE-01).',
-    pages:n=>`${n} ${n===1?'page':'pages'}`,
-    thisPage:'this page',
-    synthH:'What this manuscript contains',
-    railH:'This manuscript',
+    stamp:'unreviewed · algorithmic estimate', offs:o=>`offsets ${o}`,
+    evidence:'Evidence', others:n=>`Other manuscripts matching this work · ${n.toLocaleString()}`,
+    alsoShares:'Also shares text with', notIds:'collapsed by default; not presented as identifications',
+    spg:(o,l,n)=>`One passage (offsets ${o}, ${l} letters) appears in ${n} works:`,
+    relPages:'Pages matching this page in other manuscripts', relC:n=>`${n} ${n===1?'page':'pages'}`,
+    relQ:'unevaluated candidate alignments',
+    more:'Show more possible matches', moreB:(s,g)=>`${s} short-passage, ${g} screening / review-only`,
+    ph:'placeholder', voteT:'Placeholder — voting arrives in Phase 137 (JUDGE-01).',
+    pages:n=>`${n} ${n===1?'page':'pages'}`, thisPage:'this page',
+    matchType:'Match type', tier:'Tier', reset:'reset',
     loading:'loading…', viewAll:'View all on the work page →',
     catShelf:'describes the shelfmark, not this folio',
-    lowcov:'shown despite low page coverage',
-    noneHere:'No computed identifications on this page.',
+    lowcovNote:'shown despite low page coverage on that folio',
+    none:'No computed identifications match the current filters.',
     nothingElse:'Nothing else identified in this manuscript.',
-    behindToggle:'behind “show more”',
-    pageOf:(a,b)=>`page ${a} of ${b}`, prev:'‹ Prev', next:'Next ›'
+    gated:'behind “show more”', pageOf:(a,b)=>`page ${a} of ${b}`, prev:'‹ Prev', next:'Next ›',
+    multiSpan:n=>`${n} spans, largest stored`,
   },
   he: {
-    panel:'זיהויים מחושבים', count:n=>`${n} בדף זה`,
+    panel:'זיהויים מחושבים', onthis:n=>`${n} בדף זה`,
     caveat:'אינו ממצה — ייתכנו זיהויים נוספים.',
     onPage:'בדף זה', shown:n=>`${n} מוצגים`,
-    elsewhere:'במקומות אחרים בכתב־יד זה',
-    matches:'התאמה ל', partial:'התאמה חלקית ל',
-    covLbl:(p)=>`${p}% מהדף (אותיות מותאמות)`,
-    letters:n=>`${n.toLocaleString()} אותיות`,
+    elsewhere:'במקומות אחרים בכתב־יד זה', msPane:'כתב־היד הזה',
+    matches:'התאמה ל', partial:'התאמה חלקית ל', sharesWith:'חולק טקסט עם',
+    cov:p=>`${p}% מהדף (אותיות מותאמות)`, letters:n=>`${n.toLocaleString()} אותיות`,
     nocov:'אין נתון כיסוי למשפחה זו',
-    stamp:'לא נבדק · אמדן אלגוריתמי',
-    offs:o=>`היסטים ${o}`,
-    evidence:'ראיות',
-    others:(n)=>`כתבי־יד נוספים התואמים לחיבור זה · ${n.toLocaleString()}`,
-    othersUnknown:'כתבי־יד נוספים התואמים לחיבור זה',
-    alsoShares:'חולק טקסט גם עם',
-    notIds:'מכונס כברירת מחדל; אינו מוצג כזיהוי',
-    spangroup:(o,l,n)=>`קטע אחד (היסטים ${o}, ${l} אותיות) מופיע ב־${n} חיבורים:`,
-    relPages:'דפים התואמים לדף זה בכתבי־יד אחרים',
-    relCount:n=>`${n} דפים`,
-    relQual:'התאמות מועמדות שלא הוערכו',
-    more:'הצג התאמות אפשריות נוספות',
-    moreBreak:(s,c)=>`${s} קטעים קצרים, ${c} סינון / לעיון בלבד`,
-    placeholder:'זמני', voteToast:'רכיב זמני — ההצבעה מגיעה בשלב 137 (JUDGE-01).',
-    pages:n=>`${n} דפים`,
-    thisPage:'הדף הזה',
-    synthH:'מה מכיל כתב־יד זה',
-    railH:'כתב־היד הזה',
+    stamp:'לא נבדק · אמדן אלגוריתמי', offs:o=>`היסטים ${o}`,
+    evidence:'ראיות', others:n=>`כתבי־יד נוספים התואמים לחיבור זה · ${n.toLocaleString()}`,
+    alsoShares:'חולק טקסט גם עם', notIds:'מכונס כברירת מחדל; אינו מוצג כזיהוי',
+    spg:(o,l,n)=>`קטע אחד (היסטים ${o}, ${l} אותיות) מופיע ב־${n} חיבורים:`,
+    relPages:'דפים התואמים לדף זה בכתבי־יד אחרים', relC:n=>`${n} דפים`,
+    relQ:'התאמות מועמדות שלא הוערכו',
+    more:'הצג התאמות אפשריות נוספות', moreB:(s,g)=>`${s} קטעים קצרים, ${g} סינון / לעיון בלבד`,
+    ph:'זמני', voteT:'רכיב זמני — ההצבעה מגיעה בשלב 137 (JUDGE-01).',
+    pages:n=>`${n} דפים`, thisPage:'הדף הזה',
+    matchType:'סוג התאמה', tier:'דרגה', reset:'איפוס',
     loading:'טוען…', viewAll:'לעמוד החיבור ←',
     catShelf:'מתאר את המדף, לא את הדף הזה',
-    lowcov:'מוצג אף שכיסוי הדף נמוך',
-    noneHere:'אין זיהויים מחושבים בדף זה.',
+    lowcovNote:'מוצג אף שכיסוי הדף באותו עמוד נמוך',
+    none:'אין זיהויים מחושבים המתאימים לסינון הנוכחי.',
     nothingElse:'לא זוהה דבר נוסף בכתב־יד זה.',
-    behindToggle:'מאחורי «הצג עוד»',
-    pageOf:(a,b)=>`עמוד ${a} מתוך ${b}`, prev:'› הקודם', next:'הבא ‹'
+    gated:'מאחורי «הצג עוד»', pageOf:(a,b)=>`עמוד ${a} מתוך ${b}`, prev:'› הקודם', next:'הבא ‹',
+    multiSpan:n=>`${n} מקטעים, נשמר הגדול`,
   }
 };
 
-const ANNOT = {
-  d13d:{en:'<b>D-13d KNOWN FLAW, corrected here.</b> In the deployed asset these two sit on the byte-identical span 0–962 under DIFFERENT canonical_work_ids, so D-13a\'s merge misses them and D-13d files them as generic shared text — rendering 1 identification where there should be 2. Shown collapsed (same work at two granularities) with the narrower title as a sub-line. Whether the alias is dropped outright or kept as this sub-line is a gate-1 decision. Coverage 47% is derived from the sibling row, not extracted.'},
-  d13f:{en:'<b>D-13f applied.</b> The earlier mockup put a human-review badge (bilingual, with a tick) on this row. That badge is now dropped from every surface until the provenance of the 121 human_confirmed rows is established — Phase 134\'s closeout left it open, “internal deck vs owner”, never resolved. So every row everywhere reads “unreviewed · algorithmic estimate”, which is at least uniform and true. The badge literals are deliberately not reproduced anywhere in this file so a grep-based invariant stays clean.'},
-  d13g:{en:'<b>D-13g fix, visible.</b> This human-confirmed row is dropped today by get_claims_for_page\'s routing_status=\'shipped\' SQL filter before is_default_eligible() — which returns True for human_confirmed unconditionally — ever runs. 19 of 121 rows are affected. With the fix it renders, carrying a low-coverage note. Note the interaction with D-13f: with the badge gone, the reader sees no stated reason for its presence.'}
+const NOTES = {
+  msPane:'<b>The manuscript pane is a READER AID only (D-13h).</b> Manuscript-level coherence is what makes a single page\'s claim judgeable — Moss. V,374\'s page-23 Esther match looks arbitrary alone and obviously right once you see the codex is Rashi-on-Megillot in standard order. It must never feed band assignment or routing, which would be circular.',
+  coupling:'<b>Coupling nobody had documented.</b> On Moss. V,374 the 5 pages of רש"י על שיר השירים that complete the Megillot reading are <code>review_only / low_coverage</code>, so they sit BEHIND the screening toggle. The reader aid (D-13h) is therefore partly gated by a control built for a different purpose (BAND-03). Flip “Show more possible matches” and the codex picture completes.',
+  d13g:'<b>D-13g fix, visible.</b> This row is <code>human_confirmed</code> but <code>routing_status=review_only</code> with reason <code>low_coverage</code>. Today <code>get_claims_for_page</code> filters on <code>routing_status=\'shipped\'</code> in SQL, so it is dropped BEFORE <code>is_default_eligible()</code> — which returns True for human-confirmed unconditionally — ever runs. Corpus-wide this affects exactly 19 of the 121 human-confirmed rows, all for low coverage. Verified against the asset.',
+  d13f:'<b>D-13f applied.</b> An earlier mockup put a human-review badge on this row. It is dropped from every surface until the provenance of the 121 human-confirmed rows is established (Phase 134\'s closeout left it open, “internal deck vs owner”). So every row reads “unreviewed · algorithmic estimate” — uniform and true. The badge literals appear nowhere in this file, so a grep-based invariant stays clean.',
+  d13d:'<b>D-13d granularity separation.</b> Rows sharing byte-identical offsets are split two ways using research\'s recommended display-time heuristic (normalized title containment): <i>same work at two granularities</i> collapses into one identification with the narrower title as a ↳ sub-line; <i>genuinely different works on one passage</i> goes to the middle bucket as generic shared text. Without the split, T-S Misc. 12.31.14 renders 1 identification where it should render 2.',
+  d13i:'<b>D-13i.</b> This catalogue line describes the shelfmark — on a composite volume, other leaves entirely — not this folio. Left unlabelled next to a page-level claim it manufactures a false alarm: on Moss. V,374 a bill-of-divorce description sat beside a verifiably correct Rashi-on-Esther claim whose span ends with the colophon תם כל הפירוש.',
+  ctype:'<b>The relation filter maps to stored <code>claim_type</code></b> — 197,177 direct / 59,243 citation-type / 11,941 shared-text claims in the asset; as shipped DISPLAY claims that is 130,330 / 7,386 / 11,941. <b>Wording caution:</b> you called the middle one “citations”, but D-21 explicitly prohibits “quotes” (and “copy of”, “witness of”) in display. It is labelled “Partial match” here, per D-21\'s own weaker-relation wording. Calling it “Citations” on the surface is a defensible choice but needs a dated D-21 amendment — it asserts a directional relation the heuristic does not establish.',
+  cov:'<b>Coverage is direct-family only (D-08a)</b> and labelled as matched-letter coverage, never a bare “% of page”. It is matched Hebrew base letters ÷ the normalized page stream. Propagated rows show no figure at all: all 42,776 shipped propagated evidence rows have NULL <code>matched_letters</code>. Note the asset does NOT store coverage — these percentages are computed here from real HTR page text, which is exactly why the rebuild has to persist <code>coverage_ppm</code>.',
+  multispan:'<b>Only the largest span is stored</b> — 9,549 shipped direct rows have multiple spans. The evidence view can therefore under-report what actually matched.',
 };
 
-/* ---------------- state ---------------- */
-let V = 'a', LANG = 'en', ELSEWHERE_PAGE = 0, GATED_OPEN = false;
-const PAGE_SIZE = 5;
-const t = () => T[LANG];
-const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const cur = () => MSS[document.getElementById('ms').selectedIndex];
+let V='a', LANG='en', ELSE_PAGE=0, GATED=false;
+let fCT=new Set(), fBand=new Set();     // empty = all (D-16 semantics)
+const PAGE=6;
+const t=()=>T[LANG];
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cur=()=>MSS[document.getElementById('ms').selectedIndex];
+const bandKey=r=>(r.family==='direct'?'track1_direct':'propagated')+'|'+r.band;
+const bandLbl=k=>(BAND_LABELS[k]?BAND_LABELS[k][LANG]:k);
+const note=k=>NOTES[k]?`<div class="annot">${NOTES[k]}</div>`:'';
 
-function annotBox(k){ const a = ANNOT[k]; return a ? `<div class="annot">${a.en}</div>` : ''; }
+/* ---------- filtering (AND-composed; empty set = all) ---------- */
+const ctOK = key => fCT.size===0 || fCT.has(key);
+const bandOK = k  => fBand.size===0 || fBand.has(k);
+const visIds = ms => ms.onPage.filter(r => ctOK(r.ctype) && bandOK(bandKey(r)));
+const visWorks = ms => ms.elsewhere.works.filter(w =>
+  (fCT.size===0   || w.ctypes.some(c=>fCT.has(c))) &&
+  (fBand.size===0 || w.bands.some(b=>fBand.has(b))));
 
-/* ---------------- row renderers ---------------- */
-function rowHTML(r, idx){
-  const L = t();
-  const verb = r.family === 'direct' ? L.matches : L.partial;
-  const workLink = `<a class="idrow-work" href="#" onclick="toast('→ /work/${r.wid}');return false;">${esc(r.work)}</a>`;
-  const head = LANG === 'he'
-    ? `<span class="idrow-verb">${verb}</span>${workLink}`
-    : `<span class="idrow-verb">${verb}</span> ${workLink}`;
+function filterBar(ms){
+  const L=t();
+  const ctCounts={}, bCounts={};
+  ms.onPage.forEach(r=>{ ctCounts[r.ctype]=(ctCounts[r.ctype]||0)+1; });
+  ms.elsewhere.works.forEach(w=>w.ctypes.forEach(c=>{ctCounts[c]=(ctCounts[c]||0);}));
+  ms.onPage.forEach(r=>{ const k=bandKey(r); bCounts[k]=(bCounts[k]||0)+1; });
+  ms.elsewhere.works.forEach(w=>w.bands.forEach(b=>{bCounts[b]=(bCounts[b]||0);}));
 
-  const cov = r.cov != null
-    ? `<span class="cov"><b>${L.covLbl(r.cov)}</b></span><span class="stamp">·</span><span class="cov">${L.letters(r.letters)}</span>`
-    : `<span class="nocov">${L.nocov}</span>`;
-
-  const aliasSub = r.alias
-    ? `<div class="sub">↳ ${LANG==='he'?'אותו קטע מותאם גם ל':'the same passage also matches'} <b>${esc(r.alias.title)}</b> <span class="offs">${esc(r.alias.wid)}</span></div>`
-    : '';
-
-  const othersLbl = r.othersUnknown ? L.othersUnknown : L.others(r.others);
-
-  return `
-  <div class="idrow ${r.lowcov?'low-cov':''}">
-    <div class="idrow-top">${head}
-      ${r.author?`<span class="idrow-author">${esc(r.author)}</span>`:''}</div>
-    <div class="idrow-meta">
-      <span class="band">${esc(r.band)}</span>
-      ${cov}
-      <span class="stamp">·</span><span class="stamp">${L.stamp}</span>
-      <span class="offs">${L.offs(r.offs)}</span>
+  const cts=CT.filter(c=>c.key in ctCounts);
+  const bands=Object.keys(bCounts).sort();
+  const active=fCT.size||fBand.size;
+  return `<div class="fbar">
+    <div class="fgroup"><span class="flabel">${esc(L.matchType)}</span>
+      ${cts.map(c=>`<button class="fchip ${fCT.has(c.key)?'on':''}" data-c="${c.code}"
+        onclick="tCT('${c.code}')">${esc(c[LANG])}${ctCounts[c.key]?`<span class="c">${ctCounts[c.key]}</span>`:''}</button>`).join('')}
     </div>
-    ${aliasSub}
-    <div class="idrow-acts">
-      <button class="linkbtn" onclick="toast('${L.evidence} → PANEL-03 (gate 6)')">${L.evidence}</button>
-      <button class="linkbtn" onclick="expandWitnesses(this,'${r.wid}')">${othersLbl} ▸</button>
+    <div class="fgroup"><span class="flabel">${esc(L.tier)}</span>
+      ${bands.map(b=>`<button class="fchip ${fBand.has(b)?'on':''}"
+        onclick="tBand('${b}')">${esc(bandLbl(b))}${bCounts[b]?`<span class="c">${bCounts[b]}</span>`:''}</button>`).join('')}
+    </div>
+    ${active?`<button class="freset" onclick="fCT.clear();fBand.clear();ELSE_PAGE=0;render()">${esc(L.reset)}</button>`:''}
+    ${note('ctype')}
+  </div>`;
+}
+function tCT(code){ const k=CT_BY_CODE[code].key; fCT.has(k)?fCT.delete(k):fCT.add(k); ELSE_PAGE=0; render(); }
+function tBand(b){ fBand.has(b)?fBand.delete(b):fBand.add(b); ELSE_PAGE=0; render(); }
+
+/* ---------- rows ---------- */
+function rowHTML(r){
+  const L=t();
+  const verb = r.ctype==='direct_witness' ? L.matches
+             : r.ctype==='shared_text'    ? L.sharesWith : L.partial;
+  const link=`<a class="idwork" href="#" onclick="toast('→ /work/${r.wid}');return false;">${esc(r.work)}</a>`;
+  const head = LANG==='he' ? `<span class="idverb">${verb}</span>${link}`
+                           : `<span class="idverb">${verb}</span> ${link}`;
+  const cov = r.cov!=null
+    ? `<span class="cov"><b>${L.cov(r.cov)}</b></span><span class="dim">·</span><span class="cov">${L.letters(r.letters)}</span>`
+    : (r.letters ? `<span class="cov">${L.letters(r.letters)}</span>` : `<span class="nocov">${L.nocov}</span>`);
+  const alias=(r.alias||[]).map(a=>
+    `<div class="sub">↳ ${LANG==='he'?'אותו קטע מותאם גם ל':'the same passage also matches'} <b>${esc(a.title)}</b></div>`).join('');
+  return `<div class="idrow ${r.lowCoverage?'lowcov':''}">
+    <div class="idtop">${head}${r.author?`<span class="idauth">${esc(r.author)}</span>`:''}</div>
+    <div class="idmeta">
+      <span class="band">${esc(bandLbl(bandKey(r)))}</span>${cov}
+      <span class="dim">·</span><span class="dim">${L.stamp}</span>
+      ${r.offs?`<span class="offs">${L.offs(r.offs)}</span>`:''}
+      ${r.nspans>1?`<span class="dim">· ${L.multiSpan(r.nspans)}</span>`:''}
+    </div>
+    ${alias}
+    ${r.lowCoverage?`<div class="note">⚠ ${L.lowcovNote}</div>`:''}
+    <div class="idacts">
+      <button class="lbtn" onclick="toast('${esc(L.evidence)} → PANEL-03, gate 6')">${esc(L.evidence)}</button>
+      <button class="lbtn" onclick="wits(this,'${r.wid}')">${esc(L.others(r.others))} ▸</button>
       <span class="vote">
-        <button onclick="toast(t().voteToast)">✓</button>
-        <button onclick="toast(t().voteToast)">?</button>
-        <button onclick="toast(t().voteToast)">✗</button>
-        <span class="ph">(${L.placeholder})</span>
-      </span>
+        <button onclick="toast(t().voteT)">✓</button><button onclick="toast(t().voteT)">?</button>
+        <button onclick="toast(t().voteT)">✗</button><span class="ph">(${esc(L.ph)})</span></span>
     </div>
     <div class="wslot"></div>
-    ${r.annot?annotBox(r.annot):''}
+    ${r.nspans>1?note('multispan'):''}
+    ${r.alias?note('d13d'):''}
+    ${r.humanConfirmed&&r.lowCoverage?note('d13g'):''}
+    ${r.humanConfirmed?note('d13f'):''}
   </div>`;
 }
 
-function expandWitnesses(btn, wid){
-  const slot = btn.closest('.idrow').querySelector('.wslot');
-  if (slot.dataset.open === '1'){ slot.innerHTML = ''; slot.dataset.open = '0'; return; }
-  slot.dataset.open = '1';
-  slot.innerHTML = `<div class="witnesses"><span class="spinner"></span>${t().loading}</div>`;
-  setTimeout(() => {
-    slot.innerHTML = `<div class="witnesses">${
-      WITNESS_SAMPLE.map(([sm,lb]) =>
-        `<div class="w"><span class="sm">${esc(sm)}</span><span class="lb">${esc(lb)}</span></div>`).join('')
-    }<div class="w"><a class="sm" href="#" onclick="toast('→ /work/${wid}');return false;">${t().viewAll}</a></div></div>`;
-  }, 320);
-}
-
-/* elsewhere — D-13h names the works */
-function elsewhereInner(ms, opts){
-  const L = t(), e = ms.elsewhere;
-  if (!e.claims) return `<div class="disc-body"><span class="sc">${L.nothingElse}</span></div>`;
-  let works = e.works.filter(w => GATED_OPEN || !w.gated);
-  const total = Math.ceil(works.length / PAGE_SIZE);
-  let pager = '';
-  if (works.length > PAGE_SIZE){
-    const s = ELSEWHERE_PAGE * PAGE_SIZE;
-    pager = `<div class="pager">
-      <button class="linkbtn" onclick="pageElsewhere(-1)" ${ELSEWHERE_PAGE===0?'disabled':''}>${L.prev}</button>
-      <span>${L.pageOf(ELSEWHERE_PAGE+1, total)}</span>
-      <button class="linkbtn" onclick="pageElsewhere(1)" ${ELSEWHERE_PAGE>=total-1?'disabled':''}>${L.next}</button>
-    </div>`;
-    works = works.slice(s, s + PAGE_SIZE);
-  }
-  const chips = works.map(w => `
-    <span class="workchip ${w.here?'here':''} ${w.gated?'gated':''}" onclick="toast('→ /work · ${esc(w.title)}')">
-      ${esc(w.title)}
-      <span class="pg">${w.here?L.thisPage:L.pages(w.pages)}${w.gated?' · '+L.behindToggle:''}</span>
-    </span>`).join('');
-  const missing = e.namesMissing
-    ? `<div class="annot"><b>D-13h requires names here.</b> The work titles for these ${e.claims} claim(s) were not captured in the mockup extract, so this renders as a bare count — exactly the failure mode D-13h forbids. In the real panel these must be named.</div>`
-    : '';
-  const illus = e.illustrative
-    ? `<div class="annot"><b>Per-work page counts are illustrative.</b> The real, extracted figures are 426 further identifications across 426 pages from 8 works; the split across the eight Nevi'im books is reconstructed for layout only.</div>`
-    : '';
-  const lowcovNote = e.works.some(w=>w.note==='lowcov')
-    ? `<div class="sc" style="margin-top:6px">⚠ ${L.lowcov} — רש"י על איכה</div>` : '';
-  return `<div class="disc-body">
-    ${e.namesMissing ? `<span class="sc">${e.claims} · ${L.pages(e.pages)}</span>` : ''}
-    <div class="workchips">${chips}</div>${pager}${lowcovNote}${missing}${illus}
-    ${e.works.some(w=>w.annot) ? annotBox('d13g') : ''}
-  </div>`;
-}
-
-function pageElsewhere(d){ ELSEWHERE_PAGE += d; render(); }
-
-/* shares-text bucket (level 2) */
-function sharesHTML(ms){
-  const L = t();
-  const groups = ms.shares, rel = ms.related;
-  const n = groups.length;
-  const sum = [];
-  if (n) sum.push(`${n} ${LANG==='he'?'קבוצות קטע':'passage group'+(n>1?'s':'')}`);
-  if (rel) sum.push(L.relCount(rel));
-  if (!n && !rel) return '';
-  return `<details class="disc notid">
-    <summary>${esc(L.alsoShares)} <span class="sc">· ${sum.join(' · ')}</span>
-      <span class="qual">— ${L.notIds}</span></summary>
-    <div class="disc-body">
-      ${groups.map(g => `<div class="spangroup">${L.spangroup(g.offs, g.letters, g.works.length)}
-        <div class="works">${g.works.map(esc).join(' · ')}</div></div>`).join('')}
-      ${rel ? `<div class="spangroup"><b>${esc(L.relPages)}</b> — ${L.relCount(rel)}
-        <span class="qual">${L.relQual}</span>
-        <div><button class="linkbtn" onclick="toast('${esc(L.relPages)} → rows behind this toggle (D-11)')">${LANG==='he'?'הצג דפים':'Show pages'} ▸</button></div></div>` : ''}
-    </div>
-  </details>`;
-}
-
-/* level 3 — screening / short-passage toggle */
-function moreHTML(ms){
-  const L = t(), h = ms.hidden, n = h.short + h.screening;
-  const extra = ms.elsewhere.works.some(w=>w.gated)
-    ? `<div class="annot"><b>Interaction finding.</b> Part of the codex picture that makes this page judgeable — the 7 pages of רש"י על שיר השירים — sits in the screening bucket. Turning this toggle on completes the Rashi-on-Megillot reading. So the manuscript-coherence aid (D-13h) and the BAND-03 screening gate are coupled, which no document anticipated.</div>`
-    : '';
-  return `<details class="disc" ${GATED_OPEN?'open':''} ontoggle="syncGated(this)">
-    <summary>${esc(L.more)} <span class="sc">· ${n}</span>
-      <span class="qual">— ${L.moreBreak(h.short, h.screening)}</span></summary>
-    <div class="disc-body"><span class="sc">${n ? (LANG==='he'?'שורות סינון / קטעים קצרים מוצגות כאן':'screening and short-passage rows render here') : L.noneHere}</span>${extra}</div>
-  </details>`;
-}
-
-function syncGated(el){ if (GATED_OPEN !== el.open){ GATED_OPEN = el.open; render(); } }
-
-/* panel chrome */
-function panelHead(ms){
-  const L = t();
-  return `<div class="panel-head">
-    <span class="ico">◈</span><span class="panel-title">${esc(L.panel)}</span>
-    <span class="panel-count">${L.count(ms.onPage.length)}</span>
-  </div>
-  <div class="panel-caveat">${esc(L.caveat)}</div>`;
+function wits(btn,wid){
+  const s=btn.closest('.idrow').querySelector('.wslot');
+  if(s.dataset.o==='1'){ s.innerHTML=''; s.dataset.o='0'; return; }
+  s.dataset.o='1'; s.innerHTML=`<div class="wits"><span class="spin"></span>${t().loading}</div>`;
+  setTimeout(()=>{
+    const others=MSS.filter(m=>m.sysId!==cur().sysId).slice(0,5);
+    s.innerHTML=`<div class="wits">${others.map(m=>
+      `<div class="w"><span class="s">${esc(m.sm)}</span><span class="l">${esc(m.lib)}</span></div>`).join('')}
+      <div class="w"><a class="s" href="#" onclick="toast('→ /work/${wid}');return false;">${t().viewAll}</a></div></div>`;
+  },300);
 }
 
 function pageRows(ms){
-  const L = t();
-  if (!ms.onPage.length) return `<div class="idrow"><span class="sc">${L.noneHere}</span></div>`;
-  return `<div class="group-head">${esc(L.onPage)} <span class="n">— ${L.shown(ms.onPage.length)}</span></div>
-    ${ms.onPage.map(rowHTML).join('')}`;
+  const L=t(), rows=visIds(ms);
+  if(!rows.length) return `<div class="ghead">${esc(L.onPage)}</div><div class="idrow"><span class="sc dim">${esc(L.none)}</span></div>`;
+  return `<div class="ghead">${esc(L.onPage)} <span class="n">— ${L.shown(rows.length)}</span></div>${rows.map(rowHTML).join('')}`;
 }
 
-function elsewhereSection(ms, open){
-  const L = t(), e = ms.elsewhere;
-  const cnt = e.claims ? `<span class="sc">· ${e.claims} · ${L.pages(e.pages)}</span>` : `<span class="sc">· 0</span>`;
-  return `<details class="disc" ${open?'open':''}>
-    <summary>${esc(L.elsewhere)} ${cnt}</summary>${elsewhereInner(ms)}</details>`;
+/* manuscript coherence — named works (D-13h) */
+function msWorks(ms){
+  const L=t(), all=visWorks(ms);
+  const here=visIds(ms).map(r=>`<span class="chip here" onclick="toast('→ /work/${r.wid}')">${esc(r.work)} <span class="pg">${esc(L.thisPage)}</span></span>`).join('');
+  if(!all.length) return `<div class="chips">${here}</div><div class="sc dim" style="margin-top:6px">${esc(L.nothingElse)}</div>`;
+  const shown = GATED ? all : all;
+  const total=Math.ceil(shown.length/PAGE);
+  let page=shown, pager='';
+  if(shown.length>PAGE){
+    const s=Math.min(ELSE_PAGE,total-1)*PAGE;
+    page=shown.slice(s,s+PAGE);
+    pager=`<div class="pager">
+      <button class="lbtn" onclick="pg(-1)" ${ELSE_PAGE<=0?'disabled':''}>${esc(L.prev)}</button>
+      <span>${L.pageOf(Math.min(ELSE_PAGE,total-1)+1,total)}</span>
+      <button class="lbtn" onclick="pg(1)" ${ELSE_PAGE>=total-1?'disabled':''}>${esc(L.next)}</button></div>`;
+  }
+  const chips=page.map(w=>{
+    const n=w.gated?w.gatedPages:w.pages;
+    return `<span class="chip ${w.gated?'gated':''} ${w.humanConfirmed?'hc':''}" onclick="toast('→ /work · ${esc(w.title)}')">
+      ${esc(w.title)} <span class="pg">${L.pages(n)}${w.gated?' · '+esc(L.gated):''}${w.lowcov?' ⚠':''}</span></span>`;
+  }).join('');
+  const hasGated=all.some(w=>w.gated);
+  return `<div class="chips">${here}${chips}</div>${pager}
+    ${note('msPane')}${hasGated?note('coupling'):''}`;
+}
+function pg(d){ ELSE_PAGE=Math.max(0,ELSE_PAGE+d); render(); }
+
+function sharesHTML(ms){
+  const L=t(), g=ms.shares, rel=ms.related;
+  if(!g.length && !rel) return '';
+  const sum=[]; if(g.length) sum.push(`${g.length} ${LANG==='he'?'קבוצות קטע':'passage group'+(g.length>1?'s':'')}`);
+  if(rel) sum.push(L.relC(rel));
+  return `<details class="disc notid"><summary>${esc(L.alsoShares)} <span class="sc">· ${sum.join(' · ')}</span>
+      <span class="ql">— ${esc(L.notIds)}</span></summary><div class="dbody">
+      ${g.map(x=>`<div class="sgroup">${L.spg(x.offs,x.letters,x.works.length)}
+        <div class="ws">${x.works.map(esc).join(' · ')}</div></div>`).join('')}
+      ${rel?`<div class="sgroup"><b>${esc(L.relPages)}</b> — ${L.relC(rel)} <span class="ql">${esc(L.relQ)}</span></div>`:''}
+      ${g.length?note('d13d'):''}</div></details>`;
 }
 
-/* synthesis block (variant B) + rail (variant C) share this */
-function coherenceInner(ms){
-  const L = t(), e = ms.elsewhere;
-  if (!e.claims && ms.onPage.length <= 1)
-    return `<div class="synth-lead">${esc(ms.onPage[0]?ms.onPage[0].work:'—')} <span class="sc">— ${L.thisPage}</span></div>
-            <div class="sc">${L.nothingElse}</div>`;
-  const here = ms.onPage.map(r => `<span class="workchip here" onclick="toast('→ /work/${r.wid}')">${esc(r.work)} <span class="pg">${L.thisPage}</span></span>`).join('');
-  return `<div class="workchips">${here}</div>${elsewhereInner(ms)}`;
+function moreHTML(ms){
+  const L=t(), h=ms.hidden, n=h.short+h.gated+ms.elsewhere.gatedClaims;
+  return `<details class="disc" ${GATED?'open':''} ontoggle="sy(this)">
+    <summary>${esc(L.more)} <span class="sc">· ${n}</span>
+      <span class="ql">— ${L.moreB(h.short,h.gated+ms.elsewhere.gatedClaims)}</span></summary>
+    <div class="dbody"><span class="sc dim">${n?(LANG==='he'?'שורות סינון, לעיון־בלבד וקטעים קצרים מוצגות כאן':'screening, review-only and short-passage rows render here'):esc(L.none)}</span></div></details>`;
+}
+function sy(el){ if(GATED!==el.open){ GATED=el.open; render(); } }
+
+function head(ms){
+  const L=t();
+  return `<div class="phead"><span class="ico">◈</span><span class="ptitle">${esc(L.panel)}</span>
+    <span class="pcount">${L.onthis(visIds(ms).length)}</span></div>
+    <div class="pcaveat">${esc(L.caveat)}</div>${filterBar(ms)}`;
+}
+function elseSec(ms,open){
+  const L=t(), e=ms.elsewhere;
+  return `<details class="disc" ${open?'open':''}><summary>${esc(L.elsewhere)}
+    <span class="sc">· ${e.claims} · ${L.pages(e.pages)}</span></summary>
+    <div class="dbody">${msWorks(ms)}</div></details>`;
 }
 
-/* ---------------- variants ---------------- */
-function variantA(ms){
-  return `<div class="panel">${panelHead(ms)}<div class="panel-body">
-    ${pageRows(ms)}
-    ${elsewhereSection(ms, false)}
-    ${sharesHTML(ms)}
-    ${moreHTML(ms)}
+/* ---------- variants ---------- */
+const VA=ms=>`<div class="panel">${head(ms)}<div class="pbody">${pageRows(ms)}
+  ${elseSec(ms,false)}${sharesHTML(ms)}${moreHTML(ms)}</div></div>
+  <div class="annot"><b>A = D-09 exactly as locked</b> — “On this page” first, “Elsewhere in this manuscript” collapsed beneath. Path of least resistance for NiceGUI (a plain vertical stack). Is the codex picture reachable enough, given you named understanding the whole manuscript as the primary job?</div>`;
+
+const VB=ms=>`<div class="panel">${head(ms)}
+  <div class="synth"><div class="sh">${esc(t().msPane)}</div>${msWorks(ms)}</div>
+  <div class="pbody">${pageRows(ms)}${sharesHTML(ms)}${moreHTML(ms)}</div></div>
+  <div class="annot"><b>B INVERTS D-09</b> — the manuscript picture is promoted above the page's own rows and is no longer collapsed. Serves the stated job, but if it wins <b>D-09 needs a dated owner amendment</b>.</div>`;
+
+const VC=ms=>`<div class="panel">${head(ms)}<div class="cwrap">
+  <div class="pane">${pageRows(ms)}${sharesHTML(ms)}${moreHTML(ms)}</div>
+  <aside class="rail"><div class="sh">${esc(t().msPane)}</div>${msWorks(ms)}</aside>
   </div></div>
-  <div class="annot"><b>Variant A = D-09 exactly as locked:</b> “On this page” first, “Elsewhere in this manuscript” collapsed beneath. Also the path of least resistance for NiceGUI — a plain vertical stack of q-expansion-items. Ask yourself whether the codex picture is reachable enough here, given you said understanding the whole manuscript is the primary job.</div>`;
-}
+  <div class="annot"><b>C keeps D-09's reading order</b> but makes manuscript context permanently visible in a narrow rail. <b>Check 375px:</b> the rail drops below the rows, so on a phone C degrades toward A.</div>`;
 
-function variantB(ms){
-  const L = t();
-  return `<div class="panel">${panelHead(ms)}
-    <div class="synth">
-      <div class="synth-h">${esc(L.synthH)}</div>
-      ${coherenceInner(ms)}
-    </div>
-    <div class="panel-body">
-      ${pageRows(ms)}
-      ${sharesHTML(ms)}
-      ${moreHTML(ms)}
-    </div></div>
-  <div class="annot"><b>Variant B INVERTS D-09.</b> The manuscript picture is promoted above the page's own rows and is no longer collapsed; “Elsewhere in this manuscript” stops being a separate collapsed group and becomes the synthesis header. This directly serves the job you picked — but if it wins, <b>D-09 needs a dated owner amendment</b>, because D-09 locks “On this page first, then Elsewhere (collapsed)”.</div>`;
-}
+const VD=ms=>`<div class="panel">${head(ms)}<div class="dwrap">
+  <div class="pane">${pageRows(ms)}</div>
+  <div class="pane ms"><div class="ghead">${esc(t().msPane)}</div><div style="padding:0 12px 12px">${msWorks(ms)}</div></div>
+  </div>
+  <div class="pbody">${sharesHTML(ms)}${moreHTML(ms)}</div></div>
+  <div class="annot"><b>D = the B+C synthesis you asked for.</b> Two EVEN panes at ≥900px — the page's identifications and the manuscript picture carry equal visual weight, rather than C's subordinate rail. The two shared buckets sit full-width beneath both, since they belong to neither pane. <b>Still inverts D-09's “collapsed” clause</b> (the manuscript group is never collapsed), so it needs the same amendment as B — but it keeps D-09's left-to-right reading order, so the amendment is narrower: strike “collapsed”, keep the ordering. On mobile it stacks page-then-manuscript, which is A's order with nothing hidden.</div>`;
 
-function variantC(ms){
-  const L = t();
-  return `<div class="panel">${panelHead(ms)}
-    <div class="cwrap">
-      <div class="panel-body">
-        ${pageRows(ms)}
-        ${sharesHTML(ms)}
-        ${moreHTML(ms)}
-      </div>
-      <aside class="rail">
-        <div class="rail-h">${esc(L.railH)}</div>
-        ${coherenceInner(ms)}
-      </aside>
-    </div></div>
-  <div class="annot"><b>Variant C keeps D-09's reading order</b> (page rows lead) while making the manuscript context permanently visible rather than collapsed — arguably honouring D-09's intent without its collapse. <b>Check this one at 375px first:</b> the rail drops below the rows on mobile, which is where ~68% of comparable traffic is, so on a phone C degrades toward A. That is the main argument against it.</div>`;
-}
-
-/* ---------------- shell ---------------- */
 function render(){
-  const ms = cur(), L = t();
-  const dir = LANG === 'he' ? 'rtl' : 'ltr';
-  const catWarn = ms.catScope === 'shelfmark'
-    ? `<span class="cat-scope-warn">${LANG==='he'?'מדף':'shelfmark'}</span>`
-    : '';
-  const d13i = ms.catScope === 'shelfmark'
-    ? `<div class="annot"><b>D-13i.</b> This catalogue line describes the shelfmark — on a composite volume, other leaves entirely — not this folio. Left unlabelled beside a page-level claim it manufactures a false alarm: on Moss. V,374 a bill-of-divorce description sat next to a verifiably correct Rashi-on-Esther claim (the span ends with the colophon תם כל הפירוש). So it is labelled here, not silently juxtaposed.</div>`
-    : '';
-
-  const body = V === 'a' ? variantA(ms) : V === 'b' ? variantB(ms) : variantC(ms);
-
-  document.getElementById('stage').innerHTML = `
-    <div class="ms-note">${esc(ms.note)}</div>
-    <div class="browse-frame" dir="${dir}">
-      <div class="browse-head">
-        <div class="sm">${esc(ms.sm)}</div>
-        <div class="lib">${esc(ms.lib)}</div>
-      </div>
-      <div class="browse-body">
-        <div class="cat-line">${catWarn}${esc(ms.cat)}${ms.catScope==='shelfmark'?` <i>— ${esc(L.catShelf)}</i>`:''}</div>
-        ${d13i}
+  const ms=cur(), L=t(), dir=LANG==='he'?'rtl':'ltr';
+  const body = V==='a'?VA(ms):V==='b'?VB(ms):V==='c'?VC(ms):VD(ms);
+  const shelfScope = /^[a-z]\)|court record|legal document|\(קטעים\)|סדור|נביאים/i.test(ms.cat);
+  document.getElementById('stage').innerHTML=`
+    <div class="msnote"><b>${esc(ms.key)}</b> · ${ms.totalClaims} claims on this manuscript,
+      ${ms.totalShipped} shipped, ${ms.totalWorks} works · folio ${esc(ms.pageNum)}
+      · page stream ${ms.pageLetters.toLocaleString()} Hebrew letters</div>
+    <div class="frame" dir="${dir}">
+      <div class="fhead"><div class="sm">${esc(ms.sm)}</div><div class="lb">${esc(ms.lib)}</div></div>
+      <div class="fbody">
+        <div class="catline">${shelfScope?`<span class="cscope">${LANG==='he'?'מדף':'shelfmark'}</span>`:''}${esc(ms.cat)}${shelfScope?` <i>— ${esc(L.catShelf)}</i>`:''}</div>
+        ${shelfScope?note('d13i'):''}
         ${body}
+        ${note('cov')}
       </div>
     </div>`;
 }
 
-function showVariant(v, el){
-  V = v; ELSEWHERE_PAGE = 0;
-  document.querySelectorAll('.variant-tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  render();
-}
-function toggleLang(){
-  LANG = LANG === 'en' ? 'he' : 'en';
-  document.getElementById('langBtn').textContent = LANG === 'en' ? 'עברית / RTL' : 'English / LTR';
-  document.getElementById('langBtn').classList.toggle('on', LANG === 'he');
-  render();
-}
-function toggleAnnot(){
-  document.body.classList.toggle('show-annot');
-  document.getElementById('annotBtn').classList.toggle('on', document.body.classList.contains('show-annot'));
-}
-function setVp(w, el){
-  document.querySelectorAll('#variant-nav .row2 button.ctl').forEach(b => { if (/^\d+$|^Full$/.test(b.textContent)) b.classList.remove('on'); });
-  el.classList.add('on');
-  document.getElementById('stage').style.maxWidth = w ? w + 'px' : '';
-}
-let toastTimer;
-function toast(msg){
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
-}
+function setV(v,el){ V=v; ELSE_PAGE=0;
+  document.querySelectorAll('.vtab').forEach(x=>x.classList.remove('active'));
+  el.classList.add('active'); render(); }
+function toggleLang(){ LANG=LANG==='en'?'he':'en';
+  const b=document.getElementById('langB');
+  b.textContent=LANG==='en'?'עברית / RTL':'English / LTR'; b.classList.toggle('on',LANG==='he'); render(); }
+function toggleAnn(){ document.body.classList.toggle('ann');
+  document.getElementById('annB').classList.toggle('on',document.body.classList.contains('ann')); }
+function vp(w,el){ document.querySelectorAll('#nav .r2 button.ctl').forEach(b=>{
+    if(/^\d+$|^Full$/.test(b.textContent)) b.classList.remove('on'); });
+  el.classList.add('on'); document.getElementById('stage').style.maxWidth=w?w+'px':''; }
+let tt; function toast(m){ const e=document.getElementById('toast');
+  e.textContent=m; e.classList.add('show'); clearTimeout(tt);
+  tt=setTimeout(()=>e.classList.remove('show'),2200); }
 
-/* init */
-const sel = document.getElementById('ms');
-MSS.forEach(m => { const o = document.createElement('option'); o.textContent = `${m.sm} (${m.lib})`; sel.appendChild(o); });
-sel.selectedIndex = 3; /* Moss. V,374 — the coherence demonstration case */
+const sel=document.getElementById('ms');
+MSS.forEach(m=>{ const o=document.createElement('option');
+  o.textContent=`${m.sm} (${m.lib}) — ${m.key}`; sel.appendChild(o); });
+sel.selectedIndex=MSS.findIndex(m=>m.key==='reviewed');
 render();
 </script>
 </body>
