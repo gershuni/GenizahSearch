@@ -21,7 +21,12 @@ body { margin:0; background:var(--bg-secondary); color:var(--text-primary);
 #nav label.cl { font-size:10px; text-transform:uppercase; letter-spacing:.05em;
   color:var(--text-tertiary); font-weight:700; }
 button.ctl.on { background:var(--primary-600); color:#fff; border-color:var(--primary-700); }
-button.ctl.bad.on { background:var(--error); border-color:var(--error); }
+/* the two broken-highlight modes read as dangerous AT REST, not only once selected */
+button.ctl.bad { color:var(--error); border-color:var(--error);
+  background:color-mix(in srgb, var(--error) 8%, var(--bg-card)); font-weight:600; }
+button.ctl.bad:hover { background:color-mix(in srgb, var(--error) 16%, var(--bg-card)); }
+button.ctl.bad.on { background:var(--error); border-color:var(--error); color:#fff; }
+button.ctl.good { color:var(--primary-700); border-color:var(--primary-600); font-weight:600; }
 #stage { margin:0 auto; transition:max-width .2s ease; padding:12px 10px 90px; }
 
 .annot { display:none; }
@@ -228,9 +233,9 @@ body.ann .annot { display:block; font-size:var(--text-xs); line-height:1.45;
   </div>
   <div class="r">
     <label class="cl">Highlight in the text pane</label>
-    <button class="ctl on"      id="hmC" onclick="setHM('correct',this)">correct (norm→raw + per-line)</button>
-    <button class="ctl bad"     id="hmR" onclick="setHM('raw',this)">D-12 literal: slice RAW text</button>
-    <button class="ctl bad"     id="hmL" onclick="setHM('noline',this)">mapped but NOT per-line</button>
+    <button class="ctl good on" id="hmC" onclick="setHM('correct',this)">✓ correct — norm→raw + per-line</button>
+    <button class="ctl bad"     id="hmR" onclick="setHM('raw',this)">⚠ broken: D-12 literal, slice RAW text</button>
+    <button class="ctl bad"     id="hmL" onclick="setHM('noline',this)">⚠ broken: mapped but NOT per-line</button>
     <button class="ctl"         id="hmO" onclick="setHM('off',this)">off</button>
     <label class="cl" style="margin-inline-start:8px">Also</label>
     <button class="ctl" id="termB" onclick="TERMS=!TERMS;render()">search terms active</button>
