@@ -6,13 +6,118 @@ User corrections and comments system: view, edit, and manage your contributions.
 """
 
 import asyncio
+import logging
+from typing import Dict, List
 
-from nicegui import ui
+from nicegui import run, ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, create_login_dialog, do_logout
-from web.supabase_client import get_corrections, update_correction, get_comments, get_client
+from web.supabase_client import (
+    get_corrections,
+    update_correction,
+    get_comments,
+    get_client,
+    get_user_client,
+    get_user_corrections_count,
+)
 from web.state import state
+from web.bounded_io import bounded_io_bound
 from web.components.typography import h1, h2, h3
+
+logger = logging.getLogger(__name__)
+
+# Max simultaneous leaderboard count queries. `run.io_bound` shares ONE
+# process-wide thread pool with every other offloaded call in the app, so an
+# unbounded fan-out of ~20 would crowd it out for concurrent visitors.
+_LEADERBOARD_COUNT_CONCURRENCY = 4
+
+# MODULE-LEVEL on purpose: the bound has to be process-wide. Constructing the
+# semaphore inside `fetch_leaderboard_users` gave every concurrent visitor their
+# own 4 slots, so the real ceiling was 4 x visitors -- which can still fill the
+# shared pool and delay search and image work. Do NOT move it back into the
+# function.
+#
+# Safe to build at import time (Python 3.10+ dropped the `loop` argument, and
+# `Semaphore.acquire` only touches the loop when it actually has to wait). Note
+# the flip side: `_LoopBoundMixin._get_loop` caches the loop on first CONTENDED
+# use and then raises if reused from a different loop. Production has one
+# long-lived loop so that is fine, but a test driving this through several
+# `asyncio.run()` calls must inject a fresh semaphore per loop.
+_LEADERBOARD_COUNT_SEMAPHORE = asyncio.Semaphore(_LEADERBOARD_COUNT_CONCURRENCY)
+
+
+def _fetch_top_profiles(limit: int) -> List[Dict]:
+    """Fetch the top-reputation profiles. Blocking -- call inside ``run.io_bound``.
+
+    Uses the anonymous module singleton client (`get_client`), which reads no
+    per-user storage, so it is safe off the event loop. Do NOT switch this to
+    `get_user_client()`: that reads `safe_user_get('auth_session')`, which
+    degrades to anonymous in a worker thread (see web/safe_storage.py).
+    """
+    client = get_client()
+    response = client.table('profiles').select('*').order('reputation', desc=True).limit(limit).execute()
+    return response.data or []
+
+
+async def fetch_leaderboard_users(limit: int = 20) -> List[Dict]:
+    """Top contributors with their approved-correction counts, fetched OFF the event loop.
+
+    PERF (2026-07-30): this replaces a sequential in-render fanout -- one
+    profiles query followed by up to `limit` `get_user_corrections_count`
+    queries, all executed synchronously ON the event loop while the page was
+    being constructed. uvicorn runs a SINGLE worker, so that stalled every
+    other concurrent request (static assets, `/api/*`) for the duration, which
+    is why `/corrections` was the slowest route. The counts now fan out
+    concurrently in the thread pool, so wall time is ~2 round trips instead of
+    ~21, and none of it occupies the loop.
+
+    Counts are exact (per-user `count='exact'`), deliberately not collapsed into
+    one `in_()` query: a single fetch of author_id rows would be subject to
+    PostgREST's default row cap and could silently undercount a prolific author.
+    A server-side aggregate RPC (as `get_list_item_counts` does for lists) would
+    be the better long-term fix, but that needs a Supabase migration.
+
+    Concurrency is BOUNDED by the module-level `_LEADERBOARD_COUNT_SEMAPHORE`.
+    `run.io_bound` submits to NiceGUI's single process-wide `ThreadPoolExecutor`,
+    so firing all ~20 counts at once would occupy most of that shared pool;
+    several concurrent visitors could then starve unrelated offloaded work (image
+    resolution, search execution) and pile load onto Supabase. The semaphore is
+    shared across requests deliberately -- a per-call one would bound each visitor
+    to 4 but leave the process ceiling at 4 x visitors.
+    """
+    # The profiles query is offloaded too, so it sits under the SAME process-wide
+    # bound -- otherwise the real ceiling is "one unbounded profile read per
+    # visitor, plus 4 counts", and enough simultaneous visitors can still occupy
+    # the shared pool.
+    #
+    # `bounded_io_bound` rather than `async with ...: run.io_bound(...)`: the
+    # latter releases the permit when THIS coroutine unwinds, but `run.io_bound`
+    # swallows CancelledError and returns while its thread keeps working, so a
+    # teardown mid-fetch would free the slot with the request still in flight.
+    users = await bounded_io_bound(_LEADERBOARD_COUNT_SEMAPHORE, _fetch_top_profiles, limit)
+    if not users:
+        return []
+    ids = [u.get('id') for u in users]
+    countable = [uid for uid in ids if uid]
+
+    async def _count(uid):
+        return await bounded_io_bound(_LEADERBOARD_COUNT_SEMAPHORE, get_user_corrections_count, uid)
+
+    results = await asyncio.gather(
+        *[_count(uid) for uid in countable],
+        return_exceptions=True,
+    )
+    counts: Dict[str, int] = {}
+    for uid, result in zip(countable, results):
+        if isinstance(result, BaseException) or result is None:
+            # get_user_corrections_count already degrades to 0; None means the
+            # app is shutting down mid-flight. Either way show 0, never crash.
+            counts[uid] = 0
+        else:
+            counts[uid] = int(result)
+    for u in users:
+        u['_corrections_count'] = counts.get(u.get('id'), 0)
+    return users
 
 
 def get_shelfmark_for_id(sys_id: str) -> tuple:
@@ -87,12 +192,13 @@ async def create_corrections_page():
                     ui.button(tr('Logout'), on_click=handle_logout).props('flat color=negative')
 
             # Tabs for different views
+            leaderboard_tab_name = tr('Leaderboard')
             with ui.tabs().classes('w-full') as tabs:
                 my_edits_tab = ui.tab(tr('My Edits'))
                 my_comments_tab = ui.tab(tr('My Comments'))
                 if user.get('role') in ('reviewer', 'editor', 'admin'):
                     review_tab = ui.tab(tr('Review'))
-                leaderboard_tab = ui.tab(tr('Leaderboard'))
+                leaderboard_tab = ui.tab(leaderboard_tab_name)  # noqa: F841 -- panel key below
 
             with ui.tab_panels(tabs, value=my_edits_tab).classes('w-full'):
                 # My Edits panel
@@ -108,9 +214,27 @@ async def create_corrections_page():
                     with ui.tab_panel(review_tab):
                         create_review_view()
 
-                # Leaderboard panel
+                # Leaderboard panel — builds the spinner and returns its loader;
+                # the fetch starts on first activation of the tab (below).
                 with ui.tab_panel(leaderboard_tab):
-                    create_leaderboard_view()
+                    load_leaderboard = create_leaderboard_view()
+
+            leaderboard_started = False
+
+            async def _on_tab_change(event):
+                """Start the leaderboard fetch once, the first time its tab is shown.
+
+                `ui.tabs`'s value is the tab NAME (a str), not the Tab element --
+                `ui.tab(name)` stores it in `_props['name']` -- so compare against
+                the name we passed in.
+                """
+                nonlocal leaderboard_started
+                if leaderboard_started or event.value != leaderboard_tab_name:
+                    return
+                leaderboard_started = True
+                await load_leaderboard()
+
+            tabs.on_value_change(_on_tab_change)
 
         def create_my_edits_view():
             """View user's own corrections/edits."""
@@ -128,12 +252,10 @@ async def create_corrections_page():
                     ui.spinner('dots', size='lg', color='primary')
                     ui.label(tr('Loading your edits...')).classes('mt-2').style('color: var(--text-secondary);')
 
-            def load_edits():
+            def render_edits(corrections_raw):
                 content_container.clear()
                 with content_container:
-                    # Get user's corrections from Supabase
                     try:
-                        corrections_raw = get_corrections(author_id=user_id)
                         # Format corrections for display
                         corrections = []
                         for c in corrections_raw:
@@ -177,11 +299,28 @@ async def create_corrections_page():
 
             # Load data after brief delay to show spinner
             async def _deferred_load_edits():
+                # Fetch OFF the loop, render ON it. The explicit client is
+                # mandatory: `run.io_bound` dispatches via
+                # `loop.run_in_executor`, which does not propagate contextvars,
+                # so `get_user_client()` inside the worker would find no UI
+                # context and degrade to anonymous -- and corrections RLS is dual
+                # (`TO public` approved + `TO authenticated` own-any-status), so
+                # the user's own PENDING corrections would silently disappear.
                 await asyncio.sleep(0.1)
                 try:
-                    await load_edits()
-                except Exception:
-                    pass  # Deferred UI refresh failed; page still usable
+                    reader_client = get_user_client()
+                    corrections_raw = await run.io_bound(
+                        get_corrections, author_id=user_id, client=reader_client
+                    )
+                    if corrections_raw is None:
+                        return  # app shutting down mid-flight
+                    if content_container.client.has_been_deleted:
+                        return  # SEED-008: navigated away while fetching
+                    render_edits(corrections_raw)
+                except RuntimeError as e:
+                    logger.debug("edits render skipped (client gone): %s", e)
+                except Exception as e:
+                    logger.warning("deferred edits load failed: %s", e, exc_info=False)
             asyncio.ensure_future(_deferred_load_edits())
 
         def create_edit_card(corr: dict, delete_callback):
@@ -385,12 +524,10 @@ async def create_corrections_page():
                     ui.spinner('dots', size='lg', color='primary')
                     ui.label(tr('Loading your comments...')).classes('mt-2').style('color: var(--text-secondary);')
 
-            def load_comments():
+            def render_comments(comments_raw):
                 content_container.clear()
                 with content_container:
-                    # Get user's comments from Supabase
                     try:
-                        comments_raw = get_comments(author_id=user_id)
                         comments = []
                         for c in comments_raw:
                             profile = c.get('profiles', {}) or {}
@@ -420,11 +557,26 @@ async def create_corrections_page():
 
             # Load data after brief delay to show spinner
             async def _deferred_load_comments():
+                # Same shape as `_deferred_load_edits`: client built on the loop,
+                # blocking read in a worker, render back on the loop. The explicit
+                # client keeps the `TO authenticated` half of the dual comments RLS
+                # reachable -- without it the worker degrades to anonymous and the
+                # user's own PRIVATE comments silently disappear.
                 await asyncio.sleep(0.1)
                 try:
-                    await load_comments()
-                except Exception:
-                    pass  # Deferred UI refresh failed; page still usable
+                    reader_client = get_user_client()
+                    comments_raw = await run.io_bound(
+                        get_comments, author_id=user_id, client=reader_client
+                    )
+                    if comments_raw is None:
+                        return  # app shutting down mid-flight
+                    if content_container.client.has_been_deleted:
+                        return  # SEED-008: navigated away while fetching
+                    render_comments(comments_raw)
+                except RuntimeError as e:
+                    logger.debug("comments render skipped (client gone): %s", e)
+                except Exception as e:
+                    logger.warning("deferred comments load failed: %s", e, exc_info=False)
             asyncio.ensure_future(_deferred_load_comments())
 
         def create_comment_card(comment: dict):
@@ -654,47 +806,75 @@ async def create_corrections_page():
                                 ui.button(tr('Reject'), on_click=reject).props('color=negative flat')
 
         def create_leaderboard_view():
-            """Show top contributors."""
-            # Get users with their correction counts from Supabase
-            try:
-                client = get_client()
-                response = client.table('profiles').select('*').order('reputation', desc=True).limit(20).execute()
-                users = response.data or []
-                # Batch-fetch correction counts for leaderboard users
-                if users:
-                    from web.supabase_client import get_user_corrections_count
-                    for u in users:
-                        if u.get('id'):
-                            u['_corrections_count'] = get_user_corrections_count(u['id'])
-            except Exception as e:
-                ui.label(f"{tr('Error loading leaderboard')}: {str(e)}").style('color: var(--danger);')
-                return
+            """Show top contributors.
 
-            with ui.column().classes('w-full'):
-                # Changed to H3
-                h3(tr('Top Contributors'), classes='text-xl font-bold mb-4')
+            The fetch is deferred and runs off the event loop (see
+            `fetch_leaderboard_users`); only rendering happens on the loop.
+            """
+            leaderboard_container = ui.column().classes('w-full')
 
-                if not users:
-                    ui.label(tr('No contributors yet')).style('color: var(--text-secondary);')
-                else:
-                    for i, user in enumerate(users, 1):
-                        with ui.card().classes('w-full p-3 mb-2'):
-                            with ui.row().classes('w-full items-center justify-between'):
-                                with ui.row().classes('items-center gap-3'):
-                                    if i == 1:
-                                        ui.icon('emoji_events').style('color: gold;')
-                                    elif i == 2:
-                                        ui.icon('emoji_events').style('color: silver;')
-                                    elif i == 3:
-                                        ui.icon('emoji_events').style('color: #cd7f32;')
-                                    else:
-                                        ui.label(f"#{i}").classes('w-6 text-center')
+            with leaderboard_container:
+                with ui.column().classes('w-full items-center py-8'):
+                    ui.spinner('dots', size='lg', color='primary')
+                    ui.label(tr('Loading leaderboard...')).classes('mt-2').style('color: var(--text-secondary);')
 
-                                    ui.label(user.get('full_name') or user.get('username', 'Unknown')).classes('font-medium')
+            def render_leaderboard(users: List[Dict]) -> None:
+                leaderboard_container.clear()
+                with leaderboard_container:
+                    # Changed to H3
+                    h3(tr('Top Contributors'), classes='text-xl font-bold mb-4')
 
-                                with ui.row().classes('items-center gap-4'):
-                                    ui.label(f"{user.get('_corrections_count', 0)} {tr('corrections')}").style('color: var(--text-secondary);')
-                                    ui.badge(f"{user.get('reputation', 0)} pts").props('color=primary')
+                    if not users:
+                        ui.label(tr('No contributors yet')).style('color: var(--text-secondary);')
+                    else:
+                        for i, contributor in enumerate(users, 1):
+                            with ui.card().classes('w-full p-3 mb-2'):
+                                with ui.row().classes('w-full items-center justify-between'):
+                                    with ui.row().classes('items-center gap-3'):
+                                        if i == 1:
+                                            ui.icon('emoji_events').style('color: gold;')
+                                        elif i == 2:
+                                            ui.icon('emoji_events').style('color: silver;')
+                                        elif i == 3:
+                                            ui.icon('emoji_events').style('color: #cd7f32;')
+                                        else:
+                                            ui.label(f"#{i}").classes('w-6 text-center')
+
+                                        ui.label(contributor.get('full_name') or contributor.get('username', 'Unknown')).classes('font-medium')
+
+                                    with ui.row().classes('items-center gap-4'):
+                                        ui.label(f"{contributor.get('_corrections_count', 0)} {tr('corrections')}").style('color: var(--text-secondary);')
+                                        ui.badge(f"{contributor.get('reputation', 0)} pts").props('color=primary')
+
+            async def load_leaderboard():
+                """Fetch + render. Started on first activation of the tab, not on page build."""
+                try:
+                    users = await fetch_leaderboard_users()
+                    if users is None:
+                        return  # app shutting down mid-flight
+                    if leaderboard_container.client.has_been_deleted:
+                        return  # SEED-008: navigated away while fetching
+                    render_leaderboard(users)
+                except RuntimeError as e:
+                    logger.debug("leaderboard render skipped (client gone): %s", e)
+                except Exception as e:
+                    logger.warning("leaderboard load failed: %s", e, exc_info=False)
+                    # The error path mutates the UI too, so it needs the same guard.
+                    if leaderboard_container.client.has_been_deleted:
+                        return
+                    try:
+                        leaderboard_container.clear()
+                        with leaderboard_container:
+                            ui.label(f"{tr('Error loading leaderboard')}: {str(e)}").style('color: var(--danger);')
+                    except RuntimeError:
+                        pass
+
+            # Hand the loader back to the caller, which wires it to tab activation.
+            # Deliberately NOT started here: this panel is built while the page is
+            # constructed but the Leaderboard tab is NOT the default, so eagerly
+            # firing the fan-out would spend up to `limit` Supabase queries and
+            # occupy the shared thread pool for a tab most visitors never open.
+            return load_leaderboard
 
         # Initial render
         refresh_page()

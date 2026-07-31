@@ -32,6 +32,7 @@ from web.crawler_visibility import (
 )
 from web.safe_storage import ensure_session_uuid, safe_user_get, safe_user_set, safe_user_pop
 from web.auth_state import GlobalAuthState
+from web.perf_watch import SlowRequestTimingMiddleware, start_event_loop_lag_monitor
 apply_all_patches()
 
 
@@ -230,6 +231,21 @@ async def _mark_non_document_paths_noindex(request, call_next):
     if should_mark_noindex(path):
         response.headers.setdefault('X-Robots-Tag', 'noindex, noarchive')
     return response
+
+
+# Always-on (unless GENIZAH_PERF_WATCH=0) per-request timing for EVERY http path,
+# including static files and mounted sub-apps. See web/perf_watch.py for why this
+# exists: before it, a 9-second response left no server-side trace at all.
+#
+# REGISTERED LAST ON PURPOSE — do not move it up next to the other
+# `add_middleware` calls. Starlette prepends each registration to
+# `user_middleware` and wraps in reverse, so the LAST one registered ends up
+# OUTERMOST. Registered earlier, it sat *inside* the two `@app.middleware('http')`
+# decorators above, and `_mark_non_document_paths_noindex` can short-circuit a
+# request with a 403/404 before calling through — so blocked crawler and archive
+# requests were never timed, contradicting the all-paths claim. Anything added
+# after this line will again wrap outside it.
+app.add_middleware(SlowRequestTimingMiddleware)
 
 
 # NOTE: Tried to defer quasar.unimportant.prod.css via a media-print preload
@@ -3038,6 +3054,18 @@ async def start_malloc_trim_on_startup():
         print(f"[init] malloc_trim startup failed (non-fatal): {e}", flush=True)
 
 
+async def start_perf_watch_on_startup():
+    """Start the event-loop lag monitor (see web/perf_watch.py).
+
+    Must run as a startup hook rather than at import time: it needs the running
+    event loop that it measures.
+    """
+    try:
+        start_event_loop_lag_monitor()
+    except Exception as e:
+        print(f"[init] perf watch startup failed (non-fatal): {e}", flush=True)
+
+
 async def initialize_engine():
     """Heavy initialization running in a separate thread via run.io_bound."""
     print("[init] Starting background initialization...")
@@ -3096,6 +3124,7 @@ async def initialize_engine():
 
 app.on_startup(compact_export_storage_on_startup)
 app.on_startup(start_malloc_trim_on_startup)
+app.on_startup(start_perf_watch_on_startup)
 app.on_startup(initialize_engine)
 
 def _find_free_port(start_port: int, max_attempts: int = 10) -> int:

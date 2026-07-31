@@ -10,12 +10,16 @@ A professional research dashboard providing:
 """
 
 import asyncio
+import logging
 
-from nicegui import ui
+from nicegui import run, ui
 from web.state import state
+from web.supabase_client import get_user_client
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
 from web.atlas_assets import atlas_preview_available
+
+logger = logging.getLogger(__name__)
 
 
 def create_page():
@@ -553,12 +557,10 @@ def create_page():
             # 0.3s load doesn't shift the System Status section below it — CLS).
             recent_container = ui.row().classes('w-full gap-4 flex-wrap').style('min-height: 120px;')
 
-            def load_recent():
+            def render_recent(recent_items):
                 recent_container.clear()
                 with recent_container:
                     if state.lists_mgr:
-                        # Use sync version to avoid async/await issues
-                        recent_items = state.lists_mgr.get_items_in_list_sync('recent')[:6]
                         if recent_items:
                             for item in recent_items:
                                 item_id = item.get('item_id', '')
@@ -607,11 +609,53 @@ def create_page():
                             ui.spinner(size='lg')
 
             async def _deferred_load_recent():
+                # Previously `await load_recent()` on a plain `def`: the body ran
+                # to completion ON the event loop (blocking every other request --
+                # uvicorn runs a single worker) and then raised
+                # `TypeError: object NoneType can't be used in 'await' expression`,
+                # swallowed by a bare `except Exception: pass`, so genuine load
+                # failures were invisible too.
+                #
+                # Now split: build the authenticated client HERE, on the loop
+                # (where the NiceGUI request context exists), do the blocking read
+                # in a worker, then render back on the loop. The explicit client is
+                # mandatory -- `run.io_bound` goes through `loop.run_in_executor`,
+                # which does not propagate contextvars, so a worker calling
+                # `get_user_client()` itself would degrade to anonymous and
+                # `recent_items` (`TO authenticated`, user-scoped) would return
+                # ZERO rows: an empty "Recently viewed" for a logged-in user.
                 await asyncio.sleep(0.3)
                 try:
-                    await load_recent()
-                except Exception:
-                    pass  # Deferred UI refresh failed; page still usable
+                    if not state.lists_mgr:
+                        return
+                    # Resolve the auth decision HERE, on the loop, and pass it in.
+                    # Passing only `client` is not enough: the method otherwise
+                    # re-derives auth itself via GlobalAuthState -> safe_user_get,
+                    # which has no UI context in the worker, reads as logged-OUT,
+                    # and falls through to the local_mgr branch -- so a signed-in
+                    # user would silently get local-or-empty recent activity while
+                    # the authenticated client went unused.
+                    lists_mgr = state.lists_mgr
+                    is_authed = lists_mgr.is_authenticated
+                    reader_user_id = lists_mgr.user_id if is_authed else None
+                    reader_client = get_user_client() if is_authed else None
+                    recent_items = await run.io_bound(
+                        lists_mgr.get_items_in_list_sync,
+                        'recent',  # literal sentinel: resolves without any storage read
+                        client=reader_client,
+                        is_authenticated=is_authed,
+                        user_id=reader_user_id,
+                    )
+                    if recent_items is None:
+                        return  # app shutting down mid-flight
+                    if recent_container.client.has_been_deleted:
+                        return  # SEED-008: user navigated away while we were fetching
+                    render_recent(recent_items[:6])
+                except RuntimeError as e:
+                    # NiceGUI raises RuntimeError when mutating a torn-down client.
+                    logger.debug("recent-items render skipped (client gone): %s", e)
+                except Exception as e:
+                    logger.warning("deferred recent-items load failed: %s", e, exc_info=False)
             asyncio.ensure_future(_deferred_load_recent())
 
         # === System Status Section ===

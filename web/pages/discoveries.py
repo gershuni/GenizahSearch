@@ -18,19 +18,27 @@ from web.translations import tr, is_rtl
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.supabase_client import (
-    get_client, get_feed_items, create_discovery, update_discovery, delete_discovery,
+    get_client, get_user_client, get_feed_items, create_discovery, update_discovery, delete_discovery,
     delete_comment, delete_correction, delete_fragment_join,
     get_discovery_responses, create_discovery_response,
     vote_discovery, toggle_discovery_answered,
     toggle_discovery_pin, toggle_discovery_hidden
 )
 from web.state import state
+from web.bounded_io import bounded_io_bound
 from typing import Optional
 from datetime import datetime
 from web.components.typography import h1, h2, h3
 from web.components.translate_button import detect_language, translate_text
 
 logger = logging.getLogger(__name__)
+
+# Bounds concurrent discovery-response reads. `run.io_bound` submits to ONE
+# process-wide ThreadPoolExecutor shared with search execution, image resolution
+# and every other offloaded call, so an unbounded per-card fan-out (a feed builds
+# up to 50 cards) could crowd it out and burst Supabase. Paired with
+# open-the-expansion gating, which is the primary defence.
+_RESPONSES_FETCH_SEMAPHORE = asyncio.Semaphore(4)
 
 
 def _filter_puzzle_feed_result(result: dict) -> dict:
@@ -908,7 +916,11 @@ def create_feed_item(item: dict, on_refresh=None):
                 content = item.get('content_preview', '')
                 related_manuscripts = item.get('related_manuscripts', []) or []
 
-                with ui.expansion(icon='expand_more').classes('w-full').props('dense'):
+                # Captured so the responses loader further down can start only when
+                # the card is actually opened -- NiceGUI builds expansion content
+                # eagerly, so without this every card in a 50-item feed fires a
+                # Supabase read on feed load.
+                with ui.expansion(icon='expand_more').classes('w-full').props('dense') as content_expansion:
                     with ui.column().classes('w-full gap-4'):
 
                         # For corrections: show original and corrected text side by side
@@ -1212,12 +1224,13 @@ def create_feed_item(item: dict, on_refresh=None):
                             ui.separator().classes('my-2')
                             responses_container = ui.column().classes('w-full gap-2')
 
-                            def do_load_responses(container=responses_container, nid=numeric_id):
+                            # `nid` stays a parameter: the nested `do_submit_reply`
+                            # closure below captures it as a default argument.
+                            def render_responses(responses, container=responses_container, nid=numeric_id):
                                 try:
                                     if container.client.has_been_deleted: return
                                     container.clear()
                                     with container:
-                                        responses = get_discovery_responses(int(nid))
                                         if container.client.has_been_deleted: return
                                         if responses:
                                             ui.label(f"{tr('Responses')} ({len(responses)})").classes('font-medium text-sm')
@@ -1261,20 +1274,67 @@ def create_feed_item(item: dict, on_refresh=None):
                                             else:
                                                 ui.notify(tr('Reply posted'), type='positive')
                                                 inp.value = ''
-                                                do_load_responses()
+                                                # Refresh the list. This handler is already
+                                                # doing a blocking write on the loop, so the
+                                                # extra read is not a new regression; it is
+                                                # a click path, not a page-render path.
+                                                render_responses(
+                                                    get_discovery_responses(int(nid)), responses_container
+                                                )
 
                                         ui.button(tr('Reply'), on_click=do_submit_reply).props('dense color=primary').classes('self-end')
                                     else:
                                         ui.label(tr('Login to reply')).classes('text-xs').style('color: var(--text-tertiary);')
 
                             # Load responses when expansion opens
-                            async def _deferred_responses():
-                                await asyncio.sleep(0.1)
+                            async def _deferred_responses(container=responses_container, nid=numeric_id):
+                                # Client built on the loop, blocking fetch in a
+                                # worker, render back on the loop. The explicit
+                                # client matters most HERE: this reader's own
+                                # docstring leaves the policy target open ("if RLS
+                                # is TO authenticated..."), so an anonymous
+                                # degradation in the worker could return zero
+                                # responses for signed-in users. Passing a
+                                # loop-built client makes that question moot.
                                 try:
-                                    await do_load_responses()
-                                except Exception:
-                                    pass  # Deferred UI refresh failed; page still usable
-                            asyncio.ensure_future(_deferred_responses())
+                                    if container.client.has_been_deleted:
+                                        return
+                                    reader_client = get_user_client()
+                                    # Shared bound: `run.io_bound` submits to ONE
+                                    # process-wide pool used by search and image
+                                    # resolution too, so even with activation
+                                    # gating a user flicking through cards must
+                                    # not be able to flood it.
+                                    responses = await bounded_io_bound(
+                                        _RESPONSES_FETCH_SEMAPHORE,
+                                        get_discovery_responses, int(nid), client=reader_client,
+                                    )
+                                    if responses is None:
+                                        return  # app shutting down mid-flight
+                                    if container.client.has_been_deleted:
+                                        return
+                                    render_responses(responses, container)
+                                except RuntimeError as e:
+                                    logger.debug("responses render skipped (client gone): %s", e)
+                                except Exception as e:
+                                    logger.warning("deferred discovery responses load failed: %s", e, exc_info=False)
+
+                            # Start on FIRST expansion open, not at feed build.
+                            # NiceGUI builds expansion content eagerly, so the old
+                            # unconditional `ensure_future` fired one Supabase read
+                            # per card -- up to 50 on a single feed load, all landing
+                            # in the shared executor at once, for cards the visitor
+                            # may never open.
+                            responses_started = False
+
+                            async def _on_expansion_change(event, exp=content_expansion):
+                                nonlocal responses_started
+                                if responses_started or not event.value:
+                                    return
+                                responses_started = True
+                                await _deferred_responses()
+
+                            content_expansion.on_value_change(_on_expansion_change)
 
                 # Footer - collapsed view info
                 with ui.row().classes('w-full items-center justify-between mt-2'):

@@ -45,7 +45,9 @@ def test_w2_recent_system_list_read_by_numeric_id_routes_to_recent_items():
          patch('web.user_lists.get_list_items', return_value=[]) as m_list_items:
         items = mgr.get_items_in_list_sync('42')  # numeric id of the recent system list
 
-    m_recent.assert_called_once_with('u1')
+    # `client=None` is the 2026-07-30 off-loop-reader parameter; None means
+    # "build it yourself", i.e. behaviour identical to the original call.
+    m_recent.assert_called_once_with('u1', client=None)
     m_list_items.assert_not_called()
     assert [it['sys_id'] for it in items] == ['111', '222']
 
@@ -58,7 +60,7 @@ def test_w2_literal_recent_still_works():
          patch.object(type(mgr), 'user_id', property(lambda self: 'u1')), \
          patch('web.user_lists.get_recent_items', return_value=[{'sys_id': '9'}]) as m_recent:
         items = mgr.get_items_in_list_sync('recent')
-    m_recent.assert_called_once_with('u1')
+    m_recent.assert_called_once_with('u1', client=None)
     assert items[0]['sys_id'] == '9'
 
 
@@ -72,7 +74,7 @@ def test_w2_regular_user_list_unaffected():
          patch('web.user_lists.get_list_items', return_value=[{'sys_id': '5'}]) as m_list_items:
         items = mgr.get_items_in_list_sync('7')
     m_recent.assert_not_called()
-    m_list_items.assert_called_once_with(7)
+    m_list_items.assert_called_once_with(7, client=None)
     assert items[0]['sys_id'] == '5'
 
 

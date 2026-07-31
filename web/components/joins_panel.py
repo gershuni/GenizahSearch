@@ -1298,8 +1298,7 @@ def create_joins_indicator(
     """
     container = ui.row().classes('items-center gap-1')
 
-    def load_and_display():
-        data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id, pgpid=pgpid)
+    def render_indicator(data: dict) -> None:
         total = data.get('total_fragments', 1)
 
         container.clear()
@@ -1319,10 +1318,26 @@ def create_joins_indicator(
                 ui.tooltip(tr('No joins'))
 
     async def _deferred_load_display():
+        # PERF (2026-07-30): `fetch_connected_fragments` is a BLOCKING Supabase
+        # call. It used to be invoked as `await load_and_display()` on a plain
+        # `def`, which (a) ran the whole blocking fetch ON the event loop --
+        # stalling every other request, since uvicorn runs a single worker --
+        # and (b) then raised `TypeError: object NoneType can't be used in
+        # 'await' expression`, silently eaten by `except Exception: pass`.
+        # Safe to run in a worker thread: the joins RLS is `USING(true)` (all
+        # rows publicly readable) and `fetch_connected_fragments` guards its
+        # module cache with a lock, so losing the per-user auth context in the
+        # worker cannot change the result. Do NOT copy this to readers whose
+        # RLS is per-user scoped -- there the anon fallback silently drops rows.
         await asyncio.sleep(0.1)
         try:
-            await load_and_display()
-        except Exception:
-            pass  # Tooltip metadata optional; item still valid
+            data = await run.io_bound(
+                fetch_connected_fragments, shelfmark=shelfmark, document_id=document_id, pgpid=pgpid
+            )
+            if data is None:
+                return  # app shutting down mid-flight
+            render_indicator(data)
+        except Exception as e:
+            logger.debug("joins indicator load failed: %s", e, exc_info=False)
     asyncio.ensure_future(_deferred_load_display())
     return container

@@ -170,6 +170,20 @@ GENIZAH_STORAGE_RETENTION_DAYS=90     # delete .nicegui storage-user files untou
 NLI_CACHE_MAX_ENTRIES=20000           # metadata nli_cache LRU bound (code default 75000; prod set 20000 on 2026-07-08)
 IIIF_MANIFEST_CACHE_MAX_ENTRIES=1500  # IIIF manifest cache bound (code default 5000; prod set 1500 on 2026-07-08)
 
+# Perf watch (2026-07-30 slowness diagnosis; web-only, web/perf_watch.py). Default ON and
+# deliberately quiet — nothing is logged while the app behaves. Added because a 9-second
+# response previously left NO server-side trace: nginx uses the default `combined` log format
+# (no $request_time/$upstream_response_time) and the only in-app timing was /lists-scoped and
+# flag-gated, so origin latency was invisible and had to be inferred from outside.
+GENIZAH_PERF_WATCH=1                  # 0/false disables BOTH signals below
+GENIZAH_SLOW_REQUEST_MS=1500          # log any http request slower than this (all paths, incl. static)
+GENIZAH_LOOP_LAG_MS=300               # log event-loop stalls above this — THE decisive signal: uvicorn
+                                       # runs ONE worker, so sync Supabase/NLI I/O on the loop stalls every
+                                       # concurrent request incl. static files, while burning no CPU (so it
+                                       # is invisible in load average — prod read 0.03 during multi-second TTFBs)
+GENIZAH_LOOP_LAG_INTERVAL=1.0         # lag monitor tick, seconds (floor 0.1)
+GENIZAH_PERF_SUMMARY_SECONDS=300      # periodic counter summary; 0 disables
+
 # Phase 98 NLI Resilience env knobs (added 2026-05-25)
 NLI_CIRCUIT_THRESHOLD=3               # Consecutive failures to trip the shared circuit breaker
 NLI_CIRCUIT_WINDOW=60                 # Seconds the breaker stays open before auto-recovery probes

@@ -1183,11 +1183,17 @@ def empty_trash(user_id: str) -> Dict:
 # LIST ITEMS OPERATIONS
 # ============================================================================
 
-def get_list_items(list_id: int) -> List[Dict]:
-    """Get all items in a list."""
+def get_list_items(list_id: int, *, client=None) -> List[Dict]:
+    """Get all items in a list.
+
+    `client` (2026-07-30, keyword-only, default None = unchanged behaviour): see
+    `get_corrections`. `list_items` is `TO authenticated`; anon returns 0 rows,
+    so an off-loop call without an explicit client silently shows an empty list.
+    """
     try:
         # READER-01 (Phase 92.1): list_items SELECT RLS is `TO authenticated`; anon returns 0 rows.
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         _t = time.perf_counter()
         response = client.table('list_items').select('*').eq('list_id', list_id).order('added_at', desc=True).execute()
         _inst_record_query((time.perf_counter() - _t) * 1000.0)  # Phase 92.2 D-VER-01
@@ -1245,11 +1251,18 @@ def delete_list_item(item_id: int) -> Dict:
 # RECENT ITEMS OPERATIONS
 # ============================================================================
 
-def get_recent_items(user_id: str, limit: int = 50) -> List[Dict]:
-    """Get recent items for a user."""
+def get_recent_items(user_id: str, limit: int = 50, *, client=None) -> List[Dict]:
+    """Get recent items for a user.
+
+    `client` (2026-07-30, keyword-only, default None = unchanged behaviour): see
+    `get_corrections`. `recent_items` is `TO authenticated` and user-scoped, so
+    the anonymous degradation in a worker thread returns ZERO rows -- an empty
+    "Recently viewed" for a logged-in user. Pass a client built on the loop.
+    """
     try:
         # READER-01 (Phase 92.1): recent_items is user-scoped `TO authenticated`.
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         _t = time.perf_counter()
         response = client.table('recent_items').select('*').eq('user_id', user_id).order('viewed_at', desc=True).limit(limit).execute()
         _inst_record_query((time.perf_counter() - _t) * 1000.0)  # Phase 92.2 D-VER-01
@@ -1363,13 +1376,27 @@ def delete_project(project_id: int) -> Dict:
 # CORRECTIONS OPERATIONS
 # ============================================================================
 
-def get_corrections(sys_id: str = None, author_id: str = None, status: str = None, ie_id: str = None) -> List[Dict]:
-    """Get corrections with optional filters, including author profile data."""
+def get_corrections(sys_id: str = None, author_id: str = None, status: str = None, ie_id: str = None,
+                    *, client=None) -> List[Dict]:
+    """Get corrections with optional filters, including author profile data.
+
+    `client` (2026-07-30, keyword-only, default None = unchanged behaviour): an
+    already-built Supabase client for the caller to supply. Required to run this
+    reader OFF the NiceGUI event loop: `run.io_bound` dispatches through
+    `loop.run_in_executor`, which does NOT propagate contextvars, so
+    `get_user_client()` called inside a worker thread finds no UI context, and
+    `safe_user_get('auth_session')` deliberately degrades to anonymous (see
+    web/safe_storage.py). Since corrections RLS is dual (`TO public` approved +
+    `TO authenticated` own-any-status), that degradation would silently drop the
+    user's own PENDING corrections. Build the client on the event loop and pass
+    it in instead.
+    """
     try:
         # READER-01 (Phase 92.1): corrections has dual RLS (`TO public` for approved AND
         # `TO authenticated` for own-any-status). Anon path missed user's own pending. When not
         # logged in, get_user_client falls back to anon singleton (`TO public` still works).
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         # Fetch corrections (profile data is fetched separately below)
         query = client.table('corrections').select('*')
 
@@ -1470,12 +1497,28 @@ def _enrich_with_profiles(client, rows: List[Dict], id_field: str = 'author_id')
     return rows
 
 
-def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = True, ie_id: str = None) -> List[Dict]:
-    """Get comments with optional filters."""
+def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = True, ie_id: str = None,
+                 *, client=None) -> List[Dict]:
+    """Get comments with optional filters.
+
+    `client` (2026-07-30, keyword-only, default None = unchanged behaviour): see
+    `get_corrections`. Needed to call this off the event loop without the
+    anonymous degradation, which here would silently drop the user's own PRIVATE
+    comments (`TO authenticated` branch of the dual RLS).
+
+    NOTE on the JWT-expiry retry below: when an explicit `client` is supplied we
+    do NOT refresh and retry. `_refresh_user_session()` persists the new tokens
+    through `safe_user_set`, which needs the UI context the worker thread does
+    not have -- so a refresh attempted off-loop cannot be saved and would just
+    burn a round trip. An expired token therefore returns [] here and is
+    refreshed by the next on-loop call.
+    """
     try:
         # READER-01 (Phase 92.1): comments has dual RLS (`TO public` for is_public=true,
         # `TO authenticated` for own private). Anonymous path missed user's own private comments.
-        client = get_user_client()
+        explicit_client = client is not None
+        if client is None:
+            client = get_user_client()
         query = client.table('comments').select('*')
 
         if sys_id:
@@ -1491,6 +1534,12 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
         comments = response.data or []
         return _enrich_with_profiles(client, comments)
     except Exception as e:
+        if _is_jwt_expired(e) and explicit_client:
+            # Off-loop caller: a refresh cannot be persisted from a worker thread
+            # (safe_user_set needs the UI context), so do not attempt it.
+            logger.warning("JWT expired in get_comments with an explicit client; "
+                           "skipping off-loop refresh, next on-loop call will refresh")
+            return []
         if _is_jwt_expired(e):
             logger.warning("JWT expired in get_comments, refreshing session and retrying")
             _refresh_user_session()
@@ -1768,14 +1817,22 @@ def update_discovery(discovery_id: int, data: Dict) -> Dict:
 # DISCOVERY RESPONSES
 # ============================================================================
 
-def get_discovery_responses(discovery_id: int) -> List[Dict]:
-    """Get responses for a discovery."""
+def get_discovery_responses(discovery_id: int, *, client=None) -> List[Dict]:
+    """Get responses for a discovery.
+
+    `client` (2026-07-30, keyword-only, default None = unchanged behaviour): see
+    `get_corrections`. Load-bearing here precisely BECAUSE the policy target is
+    ambiguous in the note below -- if the SELECT policy is `TO authenticated`,
+    an off-loop call that degraded to anonymous would return zero responses for
+    signed-in users. Passing a loop-built client makes the question moot.
+    """
     try:
         # READER-01 (Phase 92.1): consistency with companion writer create_discovery_response
         # (which already uses get_user_client). Reader filters only discovery_id (no per-user
         # scoping), so anon fallback is preserved if RLS is TO public; if RLS is TO authenticated
         # the migration ensures auth.uid() is bound. Per Reviews M2 -- rationale tightened.
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         response = client.table('discovery_responses').select('*').eq(
             'discovery_id', discovery_id
         ).order('created_at', desc=False).execute()
