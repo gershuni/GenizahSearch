@@ -1,0 +1,97 @@
+/* ============================================================
+   GenizahSearch sketch theme — LIGHT (default)
+   Mirrored from web/static/common.css :root so sketches cannot
+   drift from the production design system.
+   Source of truth: web/static/common.css lines 5-69.
+   ============================================================ */
+
+:root {
+  /* Primary — "Deep Academic Green" */
+  --primary-50:  #ecfdf5;
+  --primary-100: #d1fae5;
+  --primary-200: #a7f3d0;
+  --primary-300: #6ee7b7;
+  --primary-400: #34d399;
+  --primary-500: #10b981;
+  --primary-600: #059669;
+  --primary-700: #047857;
+  --primary-800: #065f46;
+  --primary-900: #064e3b;
+
+  /* Neutrals */
+  --neutral-50:  #fafafa;
+  --neutral-100: #f5f5f5;
+  --neutral-200: #e5e5e5;
+  --neutral-300: #d4d4d4;
+  --neutral-400: #a3a3a3;
+  --neutral-500: #737373;
+  --neutral-600: #525252;
+  --neutral-700: #404040;
+  --neutral-800: #262626;
+  --neutral-900: #171717;
+
+  /* Accents */
+  --accent-gold:   #d4a574;
+  --accent-amber:  #f59e0b;
+  --accent-blue:   #3b82f6;
+  --accent-purple: #8b5cf6;
+  --accent-rose:   #f43f5e;
+
+  /* Semantic */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error:   #ef4444;
+  --info:    #3b82f6;
+
+  /* Surfaces */
+  --bg-primary:   #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary:  #f1f5f9;
+  --bg-header:    linear-gradient(135deg, #065f46 0%, #047857 50%, #059669 100%);
+  --bg-sidebar:   #ffffff;
+  --bg-card:      #ffffff;
+  --bg-hover:     #f1f5f9;
+  --bg-active:    #ecfdf5;
+
+  /* Text — WCAG AA deliberate (see common.css comment: --text-muted
+     #475569 passes 4.5:1 on white 7.5:1 and on bg-tertiary 6.98:1) */
+  --text-primary:   #1e293b;
+  --text-secondary: #475569;
+  --text-tertiary:  #64748b;
+  --text-muted:     #475569;
+  --text-inverse:   #ffffff;
+
+  --border-light:  #e2e8f0;
+  --border-medium: #cbd5e1;
+  --border-focus:  #059669;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+
+  /* Typography — the app relies on system/Quasar defaults; Hebrew
+     needs a serif-capable stack for manuscript titles. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-heb:  'Segoe UI', 'Arial Hebrew', 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', Consolas, monospace;
+
+  --text-xs:   0.75rem;
+  --text-sm:   0.875rem;
+  --text-base: 1rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.25rem;
+  --text-2xl:  1.5rem;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-full: 9999px;
+}
