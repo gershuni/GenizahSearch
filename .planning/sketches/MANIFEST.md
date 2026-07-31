@@ -40,7 +40,7 @@ comparable `/atlas` surface runs ~68% mobile.
 
 | 002 | panel-embedded-in-browse | How does the panel sit inside the real `/browse` page, and how does offset highlighting actually work on its text pane? | **accepted** | discovery, browse, integration, highlighting, d-12, panel-01, panel-03 |
 
-| 003 | discovery-findings-page | What is the row unit of the corpus-wide findings page, and what can it honestly show before the rebuild? | _pending_ | discovery, findings-page, phase-136, d-19, novelty, perf-01, nav, gate-5 |
+| 003 | discovery-findings-page | What is the row unit of the corpus-wide findings page, and what can it honestly show before the rebuild? | **accepted** — all three units ship | discovery, findings-page, phase-136, d-19, novelty, perf-01, nav, gate-5 |
 
 **Sketch 003 (the page D-19 explicitly asked for a mockup of) found that the novelty axis cannot
 honestly ship on the current asset.** Only propagated rows carry a verdict (14,003 flagged / 8,240
@@ -63,6 +63,19 @@ The page is therefore *blocked on* gates 1–3, not merely improved by them.
   beneath the two 60vh panes; wired as a fifth `enrichment_refs` placeholder.
 - **Panel filters remain new scope** — D-16 specifies filters for `/work/{id}`, not the panel. Carry
   as a PANEL-01/02 amendment or a deliberate reuse decision at gate 1.
+
+### Owner decisions on sketch 003 (2026-07-31, at wrap-up)
+
+- **Nav label: "Computed Identifications" / זיהויים מחושבים.** Consistent with the panel title, and
+  "computed" carries the caveat in the label itself. Runners-up were "Findings / ממצאים" and
+  "Text Matches / התאמות טקסט".
+- **All three row units ship, user-selectable** ("Show as" control), default = one row per
+  identification. D-19's open question is answered as "all three" — the row unit is a reader choice.
+- **Sketch 003 accepted into the findings skill** as its third design area.
+
+Still open for the owner: whether the mode strip matches the intent for Phases 137/138; the three
+low-confidence domain assignments; and which surface wins the band-label vs confidence-scale
+disagreement between the panel and the findings page.
 
 **Sketch 002 found two defects in D-12** (both verified against the asset and the live code, both
 cheap to fix, neither currently written down): the stored offsets index the normalized Hebrew-letter
@@ -89,7 +102,13 @@ whose locked model is D-13e's fixed three-bucket disclosure.
 
 ### Queued (scoped, not yet built)
 
+Renumbered at wrap-up — 002 and 003 are now taken by built sketches.
+
 | # | Name | Design Question |
 |---|------|----------------|
-| 002 | discovery-row-anatomy | How does one row read as "amazing but caveated"? Placement of band label, matched-letter coverage, offsets, vote placeholders and the `unreviewed · algorithmic estimate` stamp — and how they stack on a phone. |
-| 003 | discovery-service-states | Are the four service states unmistakably distinct — especially **outage ≠ genuine zero** (the D-13 envelope, and the one genuinely new test class in the phase)? |
+| 004 | discovery-row-anatomy | How does one row read as "amazing but caveated"? Placement of band label, matched-letter coverage, offsets, vote placeholders and the `unreviewed · algorithmic estimate` stamp — and how they stack on a phone. |
+| 005 | discovery-service-states | Are the four service states unmistakably distinct — especially **outage ≠ genuine zero** (the D-13 envelope, and the one genuinely new test class in the phase)? |
+
+Both are now partly covered: 002 exercises 5 service states and 003 exercises 4, and 003's row anatomy
+is settled for the findings page. What remains genuinely unbuilt is the **panel** row anatomy on a phone
+and a dedicated outage-vs-zero comparison.

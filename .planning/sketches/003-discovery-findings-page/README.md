@@ -2,7 +2,8 @@
 sketch: 003
 name: discovery-findings-page
 question: "What is the row unit of the corpus-wide findings page, and what can it honestly show before the rebuild?"
-winner: null
+winner: "accepted"
+winner_note: "All three row units ship, user-selectable, default per identification (D-19 answered as 'all three'). Nav label: Computed Identifications / זיהויים מחושבים (owner, 2026-07-31)."
 tags: [discovery, findings-page, phase-136, d-19, novelty, perf-01, nav, gate-5]
 ---
 

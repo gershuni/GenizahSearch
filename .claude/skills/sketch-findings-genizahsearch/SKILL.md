@@ -1,6 +1,6 @@
 ---
 name: sketch-findings-genizahsearch
-description: Validated design decisions, CSS patterns, and visual direction from GenizahSearch sketch experiments — the Phase 136 discovery panel, its browse-page embedding, and the evidence-highlighting algorithm. Auto-load when building discovery read surfaces or any NiceGUI browse-page UI.
+description: Validated design decisions, CSS patterns, and visual direction from GenizahSearch sketch experiments — the Phase 136 discovery panel, its browse-page embedding, the evidence-highlighting algorithm, and the corpus-wide findings page. Auto-load when building discovery read surfaces or any NiceGUI browse-page UI.
 ---
 
 <context>
@@ -19,7 +19,7 @@ vertical stack is the path of least resistance.
 
 Comparable surfaces run **~68% mobile** (measured on `/atlas`), so design phone-first.
 
-Sketch session wrapped: 2026-07-31.
+Sketch sessions wrapped: 2026-07-31 (sketches 001–002), 2026-07-31 (sketch 003).
 </context>
 
 <design_direction>
@@ -38,7 +38,15 @@ page's identifications and the manuscript picture get **equal** weight.
 Honesty constraints are absolute and greppable: no precision percentage, no confidence interval, no
 human-review badge, and none of "copy of" / "quotes" / "witness of" in display. Relation kinds are
 labelled with match-framing ("Direct match / Partial match / Shared text"). Coverage is shown only for
-the direct family and always labelled as matched-letter coverage.
+the direct family and always labelled as matched-letter coverage. **A negated use still violates the
+rule** — "not proof that a folio is a *copy of* the work" is a violation, because a grep-based CI guard
+cannot see the negation.
+
+On the corpus-wide findings page these constraints resolve into a **three-level confidence scale
+(Strong / Medium / Weak) derived from the relation kind, not from the frozen band** — and novelty
+voiced as **"Candidates for new finds"**, asserting candidacy only. "New discovery" was offered and
+declined: it stacks two unearned claims (that the match is correct, and that it is new) on a row with
+no human review until Phase 137.
 </design_direction>
 
 <findings_index>
@@ -48,6 +56,12 @@ the direct family and always labelled as matched-letter coverage.
 |------|-----------|--------------|
 | Discovery panel layout & disclosure | `references/discovery-panel-layout.md` | Even two-pane layout (1fr/1fr ≥900px, stacks on mobile); three disclosure levels; manuscript pane NAMES the works; relation + tier filters with match-framing labels |
 | Browse integration & evidence highlighting | `references/browse-integration-and-highlighting.md` | Entry control in browse toolbar row 2; panel full-width beneath the panes via a fifth `enrichment_refs` placeholder; highlighting needs **normalized→raw offset mapping plus per-line span clipping** |
+| Corpus-wide findings page | `references/findings-page.md` | Nav label **"Computed Identifications"**; all three row units user-selectable (default = per identification, 65,200); **relation-derived** Strong/Medium/Weak scale; novelty as a prominent switch voiced "Candidates for new finds"; domain/author/work cascade on the **identified work's** domain; modes not pages. **Blocked on the rebuild** — see below |
+
+The two surfaces disagree on one thing deliberately: the panel shows the **frozen band labels**
+(`shared/discovery_band_labels.py::BAND_LABELS`), the findings page shows the **three-level confidence
+scale** with the band label on hover. That is a display-contract change and it owes a dated amendment to
+`discovery-band-labels-v1.md` §2. Resolve which surface wins before building either.
 
 ## Theme
 
@@ -64,7 +78,12 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
   with 5 service states and 4 highlight modes (including the two broken ones, so the defects are
   reproducible).
 - `sources/001-discovery-panel-architecture/data.js` — real data extracted from the deployed
-  `discovery-v1-33499c5b` asset. Shared by both sketches.
+  `discovery-v1-33499c5b` asset. Shared by sketches 001 and 002.
+- `sources/003-discovery-findings-page/index.html` — the corpus-wide page: 3 row units × 4 service
+  states × 2 languages × 3 nav labels, plus a "pretend rebuild has landed" switch that flips novelty
+  from what the asset can honestly show today to the intended tri-state. Its own `data.js` (real
+  totals + bounded row samples) and `work-domains.js` / `work-domains.sample.json` (the 93-work domain
+  feasibility sample).
 
 ## Hard-won findings that are NOT in any requirement doc
 
@@ -80,14 +99,47 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
 6. **The manuscript-coherence reader aid is coupled to the BAND-03 screening gate** — part of the codex
    picture sits behind a toggle built for a different purpose.
 7. **Outage must not look like a genuine zero** — today's wrappers cannot tell them apart.
+8. **144,294 direct rows carry `is_new = 0` meaning UNCHECKED, not "known".** A two-state novelty
+   filter over that data makes a false claim on the flagship surface. This is why D-23a's fail-closed
+   tri-state is load-bearing rather than bookkeeping.
+9. **`coverage_ppm` and `band_rank` do not exist as columns** (`PRAGMA table_info`), so the coverage
+   filter is inert until the rebuild.
+10. **A band-derived confidence scale orphans 20,435 never-assessed rows** (12.3%) and forces a fourth
+    "not assessed" level. Deriving it from the relation kind avoids this — three levels, honestly.
+11. **`works.genre` is entirely empty**, so the domain facet needs a one-time curation pass (~1,088
+    works, ~96% high-confidence in one pass). The **work** facet needs nothing; bridging discovery
+    titles to FJMS `genizah_titles` matches only 5% and is not required.
+12. **A manuscript's catalogue domain is the wrong filter axis** — Moss. V,374 is catalogued *Court
+    Records* while carrying a correct Rashi finding, and 338 tier-A findings sit on manuscripts
+    catalogued documentary/legal. Filtering on it hides exactly the findings that disagree with the
+    catalogue.
+13. **PERF-01 confirmed twice** — the deduped identification *count* alone took 16 s. A visible real
+    total is not free.
+
+## Requirement amendments these sketches owe
+
+| Item | Change | Status |
+|---|---|---|
+| **D-09** | Strike "collapsed" (variant D never collapses the manuscript group); keep the left-to-right ordering | narrow amendment owed |
+| **D-12** | Offsets index the normalized letter stream; result must be clipped per line; highlight dropped on version change; search-term precedence rule | rewrite owed |
+| **`discovery-band-labels-v1.md` §2** | Seven frozen `(family, band)` display labels → three user-facing confidence levels. BAND-03 unaffected | amendment owed |
+| **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; shipped wording uses "new finds" under a candidacy hedge | amendment owed, with the *candidate ≠ discovery* reasoning on the record |
+| **D-21** | — | no change (owner declined "Citations") |
+| **PANEL-01/02** | Panel-level relation/tier filters are new scope (D-16 covers `/work/{id}` only) | carry to gate 1 |
+| `LONG_CITATION = 200` | The Medium-confidence threshold, consistent with D-13c's 150-letter cutoff | gate-1 tunable |
 
 ## Verification technique worth reusing
 
-Both sketches ship a `node` render-smoke harness asserting the prohibited-wording invariants across
-every manuscript × variant × language × state combination (114 and 540 assertions), each proven live by
-a **positive control** — seeding a precision figure, a confidence interval and a stored vocabulary key
-makes the suite fail. A green check that cannot fail is worthless. This is the same technique
+All three sketches ship a `node` render-smoke harness asserting the prohibited-wording invariants across
+every manuscript × variant × language × state combination (114, 540 and 160 assertions), each proven
+live by a **positive control** — seeding a precision figure, a confidence interval or a stored vocabulary
+key makes the suite fail. A green check that cannot fail is worthless. This is the same technique
 `136-VALIDATION.md` specifies for Success Criterion 7.
+
+Sketch 003 adds a second lesson: **scope every assertion to the element it is about.** Its facet-header
+assertion tested the whole rendered page and *passed while the header was wrong*, because unrelated
+design-note prose happened to contain the phrase it grepped for. An assertion that can pass for the
+wrong reason is worse than none.
 </findings_index>
 
 <metadata>
@@ -95,4 +147,5 @@ makes the suite fail. A green check that cannot fail is worthless. This is the s
 
 - 001-discovery-panel-architecture (winner: D)
 - 002-panel-embedded-in-browse (accepted)
+- 003-discovery-findings-page (accepted; nav label "Computed Identifications", all three row units ship)
 </metadata>

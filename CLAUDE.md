@@ -124,8 +124,8 @@ See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
 ### Skill routing
 
 - **Sketch findings for GenizahSearch** (validated design decisions, CSS patterns, visual direction —
-  the Phase 136 discovery panel, its `/browse` embedding, and the evidence-highlighting algorithm) →
-  `Skill("sketch-findings-genizahsearch")`
+  the Phase 136 discovery panel, its `/browse` embedding, the evidence-highlighting algorithm, and the
+  corpus-wide findings page) → `Skill("sketch-findings-genizahsearch")`
 
 ## Code Style
 
