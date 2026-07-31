@@ -386,16 +386,23 @@ def test_leaderboard_render_is_inside_the_teardown_guard():
     src = inspect.getsource(corrections.create_corrections_page)
     loader = src.split('async def load_leaderboard()', 1)[1].split('return load_leaderboard', 1)[0]
 
-    assert 'has_been_deleted' in loader, 'no teardown guard around leaderboard render'
+    assert 'client_gone(' in loader, 'no teardown guard around leaderboard render'
     assert 'except RuntimeError' in loader, 'teardown RuntimeError is not handled'
     # The error branch mutates the UI too and must be guarded as well.
     error_branch = loader.split('except Exception', 1)[1]
-    assert 'has_been_deleted' in error_branch, 'error-render path lacks the teardown guard'
+    assert 'client_gone(' in error_branch, 'error-render path lacks the teardown guard'
 
 
 # ---------------------------------------------------------------------------
 # P1/P2 -- every deferred loader guards its render and threads a client
 # ---------------------------------------------------------------------------
+
+# NOTE (v8.5.2): these are source-TEXT assertions -- they prove a guard is
+# *present*, not that it *works*. An earlier version of this file asserted
+# `'has_been_deleted' in body` and passed for weeks while that guard raised
+# AttributeError on every call in production. Behavioural coverage of the guard
+# itself lives in tests/test_client_guard.py, which drives it with real
+# nicegui.Client objects; keep both.
 
 DEFERRED_LOADERS = [
     ('web.pages.corrections', '_deferred_load_edits'),
@@ -420,7 +427,7 @@ def test_deferred_loader_offloads_and_guards(module_name, loader):
     assert 'client=reader_client' in body or 'client=reader_client' in body, \
         f'{loader} does not pass an explicitly-built client into the worker'
     assert 'get_user_client()' in body, f'{loader} does not build the client on the loop'
-    assert 'has_been_deleted' in body, f'{loader} renders without a teardown guard'
+    assert 'client_gone(' in body, f'{loader} renders without a teardown guard'
 
 
 # ---------------------------------------------------------------------------

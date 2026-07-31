@@ -4769,6 +4769,12 @@ TRANSLATIONS.update({
         "אין שינוי בחיפוש או בתמלולים — מהדורה זו היא תיקון ממוקד.",
 })
 
+# === Web deferred-render failure notice (v8.5.2 hotfix) ===
+TRANSLATIONS.update({
+    "Could not load this section. Please refresh the page.":
+        "לא ניתן היה לטעון את החלק הזה. נסו לרענן את הדף.",
+})
+
 # === Desktop What's New — v8.5.2 (2026-07-31 bug-fix patch) ===
 TRANSLATIONS.update({
     "Fixed: the Printed filter in Composition Search had no effect — it now filters correctly.":

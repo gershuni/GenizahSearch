@@ -22,6 +22,7 @@ from web.supabase_client import (
 )
 from web.state import state
 from web.bounded_io import bounded_io_bound
+from web.client_guard import client_gone, show_load_error
 from web.components.typography import h1, h2, h3
 
 logger = logging.getLogger(__name__)
@@ -314,13 +315,14 @@ async def create_corrections_page():
                     )
                     if corrections_raw is None:
                         return  # app shutting down mid-flight
-                    if content_container.client.has_been_deleted:
+                    if client_gone(content_container):
                         return  # SEED-008: navigated away while fetching
                     render_edits(corrections_raw)
                 except RuntimeError as e:
                     logger.debug("edits render skipped (client gone): %s", e)
                 except Exception as e:
                     logger.warning("deferred edits load failed: %s", e, exc_info=False)
+                    show_load_error(content_container)
             asyncio.ensure_future(_deferred_load_edits())
 
         def create_edit_card(corr: dict, delete_callback):
@@ -570,13 +572,14 @@ async def create_corrections_page():
                     )
                     if comments_raw is None:
                         return  # app shutting down mid-flight
-                    if content_container.client.has_been_deleted:
+                    if client_gone(content_container):
                         return  # SEED-008: navigated away while fetching
                     render_comments(comments_raw)
                 except RuntimeError as e:
                     logger.debug("comments render skipped (client gone): %s", e)
                 except Exception as e:
                     logger.warning("deferred comments load failed: %s", e, exc_info=False)
+                    show_load_error(content_container)
             asyncio.ensure_future(_deferred_load_comments())
 
         def create_comment_card(comment: dict):
@@ -852,7 +855,7 @@ async def create_corrections_page():
                     users = await fetch_leaderboard_users()
                     if users is None:
                         return  # app shutting down mid-flight
-                    if leaderboard_container.client.has_been_deleted:
+                    if client_gone(leaderboard_container):
                         return  # SEED-008: navigated away while fetching
                     render_leaderboard(users)
                 except RuntimeError as e:
@@ -860,7 +863,7 @@ async def create_corrections_page():
                 except Exception as e:
                     logger.warning("leaderboard load failed: %s", e, exc_info=False)
                     # The error path mutates the UI too, so it needs the same guard.
-                    if leaderboard_container.client.has_been_deleted:
+                    if client_gone(leaderboard_container):
                         return
                     try:
                         leaderboard_container.clear()

@@ -15,6 +15,7 @@ import logging
 from nicegui import run, ui
 from web.state import state
 from web.supabase_client import get_user_client
+from web.client_guard import client_gone, show_load_error
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
 from web.atlas_assets import atlas_preview_available
@@ -648,7 +649,7 @@ def create_page():
                     )
                     if recent_items is None:
                         return  # app shutting down mid-flight
-                    if recent_container.client.has_been_deleted:
+                    if client_gone(recent_container):
                         return  # SEED-008: user navigated away while we were fetching
                     render_recent(recent_items[:6])
                 except RuntimeError as e:
@@ -656,6 +657,7 @@ def create_page():
                     logger.debug("recent-items render skipped (client gone): %s", e)
                 except Exception as e:
                     logger.warning("deferred recent-items load failed: %s", e, exc_info=False)
+                    show_load_error(recent_container)
             asyncio.ensure_future(_deferred_load_recent())
 
         # === System Status Section ===

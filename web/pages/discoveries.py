@@ -26,6 +26,7 @@ from web.supabase_client import (
 )
 from web.state import state
 from web.bounded_io import bounded_io_bound
+from web.client_guard import client_gone, show_load_error
 from typing import Optional
 from datetime import datetime
 from web.components.typography import h1, h2, h3
@@ -1228,10 +1229,10 @@ def create_feed_item(item: dict, on_refresh=None):
                             # closure below captures it as a default argument.
                             def render_responses(responses, container=responses_container, nid=numeric_id):
                                 try:
-                                    if container.client.has_been_deleted: return
+                                    if client_gone(container): return
                                     container.clear()
                                     with container:
-                                        if container.client.has_been_deleted: return
+                                        if client_gone(container): return
                                         if responses:
                                             ui.label(f"{tr('Responses')} ({len(responses)})").classes('font-medium text-sm')
                                             for resp in responses:
@@ -1297,7 +1298,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                 # responses for signed-in users. Passing a
                                 # loop-built client makes that question moot.
                                 try:
-                                    if container.client.has_been_deleted:
+                                    if client_gone(container):
                                         return
                                     reader_client = get_user_client()
                                     # Shared bound: `run.io_bound` submits to ONE
@@ -1311,13 +1312,14 @@ def create_feed_item(item: dict, on_refresh=None):
                                     )
                                     if responses is None:
                                         return  # app shutting down mid-flight
-                                    if container.client.has_been_deleted:
+                                    if client_gone(container):
                                         return
                                     render_responses(responses, container)
                                 except RuntimeError as e:
                                     logger.debug("responses render skipped (client gone): %s", e)
                                 except Exception as e:
                                     logger.warning("deferred discovery responses load failed: %s", e, exc_info=False)
+                                    show_load_error(container)
 
                             # Start on FIRST expansion open, not at feed build.
                             # NiceGUI builds expansion content eagerly, so the old
