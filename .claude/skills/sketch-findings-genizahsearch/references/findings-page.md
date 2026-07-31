@@ -27,7 +27,12 @@ one row per identification.
 
 **A plain three-level confidence scale, first and prominent — defined by relation kind, not by
 internal band.** The frozen band labels were not understandable to readers, so the surface describes
-*what kind of claim this is*:
+*what kind of claim this is*.
+
+> **This scale is system-wide, not page-local.** The owner ruled on 2026-07-31 that it wins and applies
+> to the **discovery panel** too, so the frozen band labels become tooltip-only everywhere. `confOf()`
+> below is the single implementation for both surfaces — see `discovery-panel-layout.md` for what it
+> changes on a panel row, including the one follow-on decision it leaves open (the panel's tier filter).
 
 | Level | Meaning | Rule | Rows | Share |
 |---|---|---|---|---|
@@ -147,7 +152,7 @@ indexes, or a cached/approximate count with honest wording.
 
 | Doc | Change |
 |---|---|
-| `discovery-band-labels-v1.md` §2 | Collapsing seven frozen `(family, band)` display labels into three user-facing confidence levels is a display-contract change and needs a dated amendment. **BAND-03 is unaffected** — screening rows remain the "show more" population |
+| `discovery-band-labels-v1.md` §2 | Collapsing seven frozen `(family, band)` display labels into three user-facing confidence levels is a display-contract change and needs a dated amendment. **Write it system-wide** — the owner ruled 2026-07-31 that the scale applies to the panel too, so the frozen labels become tooltip-only on every surface. **§4 (default visibility) and BAND-03 (screening routing) are unaffected** — bands still decide gating and bucket placement; only the visible label changes |
 | **NOVEL-01 / D-23b** | D-23b currently mandates "Not found in the finding aids checked" and prohibits "new" outright; the shipped wording uses "new finds" under a candidacy hedge. The amendment must record the *candidate ≠ discovery* reasoning on the record, not in a commit message |
 
 ## CSS Patterns

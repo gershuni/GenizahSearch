@@ -87,6 +87,7 @@ picture carry equal weight.
 | Novelty voice | "Candidates for new finds" — significance restored, candidacy preserved |
 | Facet domain axis | The **identified work's** domain, with a one-time curation pass |
 | Nav label | **Computed Identifications / זיהויים מחושבים** |
+| Band labels vs confidence scale | **The confidence scale wins, on both surfaces.** The frozen band labels become tooltip-only everywhere, panel included |
 
 ## Requirement / decision changes these sketches imply
 
@@ -94,7 +95,8 @@ picture carry equal weight.
 |---|---|---|
 | **D-09** | Strike "collapsed" (variant D never collapses the manuscript group); keep the left-to-right ordering | **Narrow amendment owed** |
 | **D-12** | Offsets index the normalized letter stream, not raw text; result must be clipped per line; highlight dropped on version change; search-term precedence rule | **Rewrite owed** |
-| **`discovery-band-labels-v1.md` §2** | Seven frozen `(family, band)` display labels → three user-facing confidence levels. BAND-03 unaffected | **Amendment owed** |
+| **`discovery-band-labels-v1.md` §2** | Seven frozen `(family, band)` display labels → three user-facing confidence levels, **system-wide** (panel + findings page). Labels become tooltip-only. §4 and BAND-03 unaffected | **Amendment owed** (scope widened by the 2026-07-31 ruling) |
+| Panel **tier** filter | Labels options in a vocabulary the rows no longer use once the scale lands. Confidence filter recommended, but it collapses `tier_a` + `high_confidence_algorithmic` into `Strong` | **Open** — the one follow-on the ruling creates |
 | **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; the shipped wording uses "new finds" under a candidacy hedge | **Amendment owed**, with the *candidate ≠ discovery* reasoning on the record |
 | **D-21** | — | **No change** (owner declined "Citations") |
 | **PANEL-01/02** | Panel-level relation/tier filters are new scope (D-16 specifies filters for `/work/{id}` only) | Carry to gate 1 |
@@ -117,8 +119,12 @@ picture carry equal weight.
 - Does the mode strip (leads + saved as future tabs) match the intent for Phases 137/138?
 - The three low-confidence domain assignments (literary letter collection · Arabic Josippon · kalam vs
   theology) — and whether "Unspecified Domain" is the right home for works the vocabulary can't place.
-- Which surface wins the band-label vs confidence-scale disagreement between the panel and the findings
-  page (see the note in the skill's findings index).
+- **Whether the panel's tier filter becomes a confidence filter.** Created by the 2026-07-31 ruling: the
+  rows now say Strong/Medium/Weak while the filter still says tier A/B. Recommended fix is a confidence
+  filter, at the cost of no longer being able to isolate tier A.
+
+**Resolved 2026-07-31:** the band-label vs confidence-scale disagreement between the two surfaces — the
+confidence scale wins on both.
 
 ## Verification carried forward
 

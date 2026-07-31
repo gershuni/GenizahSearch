@@ -35,6 +35,29 @@ between header and body rather than being buried as fine print or shouted as a w
 match-framing only — **"Direct match / Partial match / Shared text"**. The owner explicitly declined
 "Citations", so D-21 is unamended and the prohibited display words never appear.
 
+**The panel displays the three-level confidence scale, not the frozen band labels** (owner, 2026-07-31
+— see `findings-page.md` for the rule, the counts and the reasoning). The scale was designed on the
+findings page and the owner ruled it wins *and* applies here, so both surfaces speak one vocabulary.
+
+Concretely, on a panel row: `Strong` / `Medium` / `Weak` replaces
+"Algorithmic match — tier A" as the visible chip, with the frozen band label moved to the chip's
+`title`. Three consequences worth knowing before you build:
+
+- **It fixes a layout problem rather than creating one.** The frozen labels are long enough to change a
+  row's visual balance (see the note under HTML Structures); one-word labels don't.
+- **The confidence chip and the relation label are correlated but not redundant.** `Strong` means
+  `direct_witness` **in a strong band**, so "Direct match + Weak" is a real combination — the chip
+  carries band information the relation label does not.
+- **Routing is untouched.** Bands still decide which of the three disclosure buckets a row lands in, and
+  `discovery-band-labels-v1.md` **§4** still governs default visibility (tier_a gated pending D-02a,
+  not_evaluated always gated). Only **§2**, the display labels, changes. BAND-03 is unaffected.
+
+⚠ **One follow-on decision this forces, deliberately left open:** the panel's **tier** filter now
+labels its options in a vocabulary the rows no longer use. Making it a *confidence* filter restores one
+vocabulary but loses granularity — `tier_a` and `high_confidence_algorithmic` both collapse into
+`Strong`, so a reader could no longer isolate tier A. Recommendation: switch it to confidence for
+consistency and re-add a tier-A affordance only if someone asks for it. Not decided; do not assume.
+
 ## CSS Patterns
 
 ```css
@@ -72,9 +95,20 @@ stamp · letter offsets) → optional `↳` granularity sub-line → optional lo
 (evidence, other-manuscripts expansion, vote placeholders pushed right with
 `margin-inline-start:auto`).
 
-Band labels come from `shared/discovery_band_labels.py::BAND_LABELS` — the real bilingual strings, not
-approximations. Tier A renders as "Algorithmic match — tier A" / "התאמה אלגוריתמית — דרגה א׳", which is
-long enough to change the row's visual balance.
+The meta line's first element is the **confidence chip** (`Strong` / `Medium` / `Weak`), carrying the
+frozen band label as its tooltip — same markup as the findings page:
+
+```html
+<span class="band conf-strong" title="Algorithmic match — tier A">Strong</span>
+```
+
+Lift `confOf()` verbatim from `findings-page.md` rather than reimplementing it; one rule, two surfaces.
+
+Band labels still come from `shared/discovery_band_labels.py::BAND_LABELS` — the real bilingual strings,
+not approximations — but they are now **tooltip-only**. Worth knowing why that matters for layout: Tier A
+renders as "Algorithmic match — tier A" / "התאמה אלגוריתמית — דרגה א׳", long enough to change a row's
+visual balance. The sketches were built with those strings inline, so the panel's real rows will read
+tighter than sketch 001 shows.
 
 ## What to Avoid
 
@@ -102,3 +136,7 @@ long enough to change the row's visual balance.
 
 Sketch 001 (round 2), winner variant D. Source in `sources/001-discovery-panel-architecture/`
 (`data.js` is the real extracted asset data).
+
+**Amended 2026-07-31** by the owner's ruling that the findings page's confidence scale wins and applies
+to the panel too. Sketch 001's HTML still shows the frozen band labels inline — it predates the ruling,
+so read it for *layout* and take the *label vocabulary* from `findings-page.md`.

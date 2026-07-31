@@ -42,11 +42,11 @@ the direct family and always labelled as matched-letter coverage. **A negated us
 rule** — "not proof that a folio is a *copy of* the work" is a violation, because a grep-based CI guard
 cannot see the negation.
 
-On the corpus-wide findings page these constraints resolve into a **three-level confidence scale
-(Strong / Medium / Weak) derived from the relation kind, not from the frozen band** — and novelty
-voiced as **"Candidates for new finds"**, asserting candidacy only. "New discovery" was offered and
-declined: it stacks two unearned claims (that the match is correct, and that it is new) on a row with
-no human review until Phase 137.
+Confidence is displayed as a **three-level scale (Strong / Medium / Weak) derived from the relation
+kind, not from the frozen band** — on **every** discovery surface, panel included (owner, 2026-07-31).
+The frozen band labels survive as tooltips. Novelty is voiced **"Candidates for new finds"**, asserting
+candidacy only; "New discovery" was offered and declined, because it stacks two unearned claims (that
+the match is correct, and that it is new) on a row with no human review until Phase 137.
 </design_direction>
 
 <findings_index>
@@ -58,10 +58,20 @@ no human review until Phase 137.
 | Browse integration & evidence highlighting | `references/browse-integration-and-highlighting.md` | Entry control in browse toolbar row 2; panel full-width beneath the panes via a fifth `enrichment_refs` placeholder; highlighting needs **normalized→raw offset mapping plus per-line span clipping** |
 | Corpus-wide findings page | `references/findings-page.md` | Nav label **"Computed Identifications"**; all three row units user-selectable (default = per identification, 65,200); **relation-derived** Strong/Medium/Weak scale; novelty as a prominent switch voiced "Candidates for new finds"; domain/author/work cascade on the **identified work's** domain; modes not pages. **Blocked on the rebuild** — see below |
 
-The two surfaces disagree on one thing deliberately: the panel shows the **frozen band labels**
-(`shared/discovery_band_labels.py::BAND_LABELS`), the findings page shows the **three-level confidence
-scale** with the band label on hover. That is a display-contract change and it owes a dated amendment to
-`discovery-band-labels-v1.md` §2. Resolve which surface wins before building either.
+**RESOLVED (owner, 2026-07-31): the confidence scale wins, on both surfaces.** The frozen band labels
+(`shared/discovery_band_labels.py::BAND_LABELS`) become **tooltip-only** everywhere — the visible chip is
+`Strong` / `Medium` / `Weak` on the panel and on the findings page alike. Implement `confOf()` once (it is
+in `findings-page.md`) and share it.
+
+This makes the `discovery-band-labels-v1.md` **§2** amendment a system-wide display-contract change
+rather than a page-local one — write it that way. **§4 (default visibility) and BAND-03 (screening
+routing) are untouched**: bands still decide which disclosure bucket a row lands in and what is gated by
+default. Only the *label a reader sees* changes.
+
+⚠ It also leaves one follow-on open: the panel's **tier** filter now labels options in a vocabulary its
+rows no longer use. Switching it to a confidence filter restores one vocabulary but collapses `tier_a`
+and `high_confidence_algorithmic` into `Strong`, so tier A can no longer be isolated. Recommended but
+**not decided** — see `discovery-panel-layout.md`.
 
 ## Theme
 
@@ -122,7 +132,8 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
 |---|---|---|
 | **D-09** | Strike "collapsed" (variant D never collapses the manuscript group); keep the left-to-right ordering | narrow amendment owed |
 | **D-12** | Offsets index the normalized letter stream; result must be clipped per line; highlight dropped on version change; search-term precedence rule | rewrite owed |
-| **`discovery-band-labels-v1.md` §2** | Seven frozen `(family, band)` display labels → three user-facing confidence levels. BAND-03 unaffected | amendment owed |
+| **`discovery-band-labels-v1.md` §2** | Seven frozen `(family, band)` display labels → three user-facing confidence levels, **system-wide** (panel + findings page; owner ruled 2026-07-31). Labels become tooltip-only. **§4 and BAND-03 unaffected** | amendment owed |
+| Panel **tier** filter | Now labels options in a vocabulary its rows no longer use. Confidence filter recommended; collapses tier_a + high_confidence_algorithmic into Strong | **open**, not decided |
 | **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; shipped wording uses "new finds" under a candidacy hedge | amendment owed, with the *candidate ≠ discovery* reasoning on the record |
 | **D-21** | — | no change (owner declined "Citations") |
 | **PANEL-01/02** | Panel-level relation/tier filters are new scope (D-16 covers `/work/{id}` only) | carry to gate 1 |

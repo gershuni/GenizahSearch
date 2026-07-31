@@ -73,9 +73,17 @@ The page is therefore *blocked on* gates 1–3, not merely improved by them.
   identification. D-19's open question is answered as "all three" — the row unit is a reader choice.
 - **Sketch 003 accepted into the findings skill** as its third design area.
 
+- **The confidence scale wins, and applies to the panel too.** `Strong` / `Medium` / `Weak` becomes the
+  visible label on **every** discovery surface; the frozen `BAND_LABELS` strings survive as tooltips.
+  This widens the `discovery-band-labels-v1.md` §2 amendment from page-local to system-wide. §4 (default
+  visibility) and BAND-03 (screening routing) are untouched — bands still drive gating and bucket
+  placement, only the reader-facing label changes.
+
 Still open for the owner: whether the mode strip matches the intent for Phases 137/138; the three
-low-confidence domain assignments; and which surface wins the band-label vs confidence-scale
-disagreement between the panel and the findings page.
+low-confidence domain assignments; and — newly created by the ruling above — whether the panel's **tier**
+filter becomes a **confidence** filter, since its rows no longer speak the tier vocabulary. Switching it
+collapses `tier_a` and `high_confidence_algorithmic` into `Strong`, so tier A could no longer be
+isolated.
 
 **Sketch 002 found two defects in D-12** (both verified against the asset and the live code, both
 cheap to fix, neither currently written down): the stored offsets index the normalized Hebrew-letter
