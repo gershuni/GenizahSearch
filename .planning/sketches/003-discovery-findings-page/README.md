@@ -104,11 +104,29 @@ describes a weak *relation*, which those rows genuinely have. Three levels, hone
 `(family, band)` display labels into three user-facing levels is a display-contract change. BAND-03 is
 unaffected: screening rows remain the "show more" population.
 
-**Novelty is now a prominent switch**, first in the filter bar, worded **"Not in the catalogues we
-checked"** with a **(?)** that discloses the checked source list and dates. Note this is close to but
-not identical to D-23b's settled wording ("Not found in the finding aids checked"); the checked set
-includes bibliography, titles, PGP and FGP as well as catalogues, so the **(?)** carries the
-boundedness that D-23b was protecting. **A NOVEL-01 wording amendment is owed** if this phrasing ships.
+**Novelty is now a prominent switch**, first in the filter bar, and the voice changed at the owner's
+direction (2026-07-31): the earlier "Not found in the finding aids checked" was accurate but so hedged
+that readers did not register this as the significant material.
+
+| Element | Wording |
+|---|---|
+| Toggle | **Candidates for new finds** / מועמדים לממצאים חדשים |
+| Row badge | **Candidate new find** / מועמד לממצא חדש |
+| Sub-line | *Findings you would not reach by searching the catalogues.* |
+| **(?)** | the full disclosure: no finding aid we checked records this work on this fragment; the checked list is fixed and dated (FJMS + NLI catalogues and bibliography, titles, PGP, FGP, shelfmark attributions); **the identification itself is an unreviewed algorithmic match, so this is a candidate, not a confirmed find** |
+
+Plus visual prominence — candidate rows carry an accent rule so significance lands before the words do.
+
+"Candidate" is what makes this defensible. The line deliberately **not** crossed is "new discovery" or
+"likely new find", which was offered and declined: that phrasing stacks two unearned claims — that the
+match is *correct* and that it is *new* — on a row with no human review at all until Phase 137. A wrong
+match that no catalogue records is not a discovery. "Candidates for new finds" asserts only
+candidacy, which is exactly what the data supports.
+
+**⚠ A dated NOVEL-01 / D-23b amendment is owed.** D-23b currently mandates "Not found in the finding
+aids checked" and prohibits "new" outright; the new wording uses "new finds" under a candidacy hedge.
+The amendment should record the reasoning above, so the distinction between *candidate* and *discovery*
+is on the record rather than in a commit message.
 
 **All three row units are user-selectable** via a "Show as" control in the result bar, per the owner —
 the row unit is a reader choice, not a design pick. D-19's open question is therefore answered as

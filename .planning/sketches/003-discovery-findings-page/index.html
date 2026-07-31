@@ -275,13 +275,15 @@ const T = {
     cWhyMedium:'A long passage in common — more likely a citation than a copy.',
     cWhyWeak:'Everything else: short or generic overlap, screening candidates, and relations never assessed.',
     cHelp:'How sure the system is that this folio carries this work. Strong and Medium are shown by default; Weak and Not assessed are screening candidates. Nothing here has been reviewed by a person.',
-    novToggle:'Not in the catalogues we checked', novHelp:'We checked a fixed, dated list of finding aids: the FJMS and NLI catalogues and bibliography, titles, PGP, FGP and shelfmark attributions. “Not in the catalogues we checked” means it was absent from THAT list — not that it is unknown to scholarship, and not that it is correct.',
+    novToggle:'Candidates for new finds', novBadge:'Candidate new find',
+    novWhy:'Findings you would not reach by searching the catalogues.',
+    novHelp:'No finding aid we checked records this work on this fragment — so it is a strong candidate for something not previously documented, and you would not reach it by searching the catalogues. The checked list is fixed and dated: the FJMS and NLI catalogues and bibliography, titles, PGP, FGP and shelfmark attributions. The identification itself is an unreviewed algorithmic match, so this is a candidate, not a confirmed find.',
     showAs:'Show as', asIdent:'One row per identification', asMs:'One row per manuscript', asWork:'One row per work',
     asIdentShort:'Identifications', asMsShort:'Manuscripts', asWorkShort:'Works',
     reset:'reset all', sortBy:'Sort', showing:(a,b,n)=>`${a}–${b} of ${n.toLocaleString()}`,
     sortTier:'Strongest tier first', sortPages:'Most pages', sortLetters:'Most matched text',
     prev:'‹ Previous', next:'Next ›',
-    novNot:'Not found in the finding aids checked', novKnown:'Recorded in a reference source',
+    novNot:'Candidate new find', novKnown:'Already in a catalogue',
     novUnknown:'not checked',
     pages:n=>`${n} ${n===1?'page':'pages'}`, letters:n=>`${n.toLocaleString()} letters`,
     mss:n=>`${n.toLocaleString()} manuscripts`, works:n=>`${n} works`,
@@ -303,13 +305,15 @@ const T = {
     cWhyMedium:'קטע ארוך משותף — סביר יותר ציטוט מהעתקה.',
     cWhyWeak:'כל השאר: חפיפה קצרה או כללית, מועמדים לסינון, ויחסים שלא הוערכו.',
     cHelp:'עד כמה המערכת בטוחה שהדף נושא את החיבור. «חזקה» ו«בינונית» מוצגות כברירת מחדל; «חלשה» ו«לא הוערכה» הן מועמדות לסינון. שום דבר כאן לא נבדק בידי אדם.',
-    novToggle:'לא באמצעי העזר שנבדקו', novHelp:'בדקנו רשימה קבועה ומתוארכת של אמצעי עזר: קטלוגי FJMS ו‑NLI והביבליוגרפיה, כותרים, PGP, FGP וייחוסי מדף. «לא באמצעי העזר שנבדקו» פירושו שהחיבור נעדר מאותה רשימה — לא שהוא בלתי מוכר למחקר, ולא שהזיהוי נכון.',
+    novToggle:'מועמדים לממצאים חדשים', novBadge:'מועמד לממצא חדש',
+    novWhy:'ממצאים שלא הייתם מגיעים אליהם בחיפוש בקטלוגים.',
+    novHelp:'אף אמצעי עזר שבדקנו אינו מתעד חיבור זה בקטע זה — ולכן זהו מועמד חזק לממצא שלא תועד קודם, ולא הייתם מגיעים אליו בחיפוש בקטלוגים. הרשימה שנבדקה קבועה ומתוארכת: קטלוגי FJMS ו‑NLI והביבליוגרפיה, כותרים, PGP, FGP וייחוסי מדף. הזיהוי עצמו הוא התאמה אלגוריתמית שלא נבדקה, ולכן זהו מועמד ולא ממצא מאושר.',
     showAs:'הצג לפי', asIdent:'שורה לכל זיהוי', asMs:'שורה לכל כתב־יד', asWork:'שורה לכל חיבור',
     asIdentShort:'זיהויים', asMsShort:'כתבי־יד', asWorkShort:'חיבורים',
     reset:'איפוס הכל', sortBy:'מיון', showing:(a,b,n)=>`${a}–${b} מתוך ${n.toLocaleString()}`,
     sortTier:'הדרגה החזקה תחילה', sortPages:'הכי הרבה דפים', sortLetters:'הכי הרבה טקסט מותאם',
     prev:'› הקודם', next:'הבא ‹',
-    novNot:'לא נמצא באמצעי העזר שנבדקו', novKnown:'מתועד במקור עזר אחר',
+    novNot:'מועמד לממצא חדש', novKnown:'כבר בקטלוג',
     novUnknown:'לא נבדק',
     pages:n=>`${n} דפים`, letters:n=>`${n.toLocaleString()} אותיות`,
     mss:n=>`${n.toLocaleString()} כתבי־יד`, works:n=>`${n} חיבורים`,
@@ -511,13 +515,19 @@ function filterBar(){
       <div class="fg-row">${CONF_ORDER.map(c=>`<button class="fchip conf ${c} ${fConf.has(c)?'on':''}"
         onclick="tB('${c}')" title="${esc(confWhyText(c))}">${esc(confLbl(c))}<span class="c">${(confCounts[c]||0).toLocaleString()}</span></button>`).join('')}</div>
     </div>
-    <div class="fg ${REBUILT?'':'blocked'}">
+    <div class="fg novgrp ${REBUILT?'':'blocked'}">
       <div class="fg-h">${esc(L.novelty)} ${REBUILT?'':`<span class="needs">${esc(L.needsRebuild)}</span>`}</div>
-      <div class="fg-row">
-        <button class="fchip ${fNov.has('not_found')?'on':''}" ${REBUILT?`onclick="tN('not_found')"`:''}>${esc(L.novNot)}</button>
-        <button class="fchip ${fNov.has('known')?'on':''}" ${REBUILT?`onclick="tN('known')"`:''}>${esc(L.novKnown)}</button>
-        <button class="fchip ${fNov.has('indeterminate')?'on':''}" ${REBUILT?`onclick="tN('indeterminate')"`:''}>${esc(L.novUnknown)}</button>
+      <div class="novrow">
+        <span class="novsw ${fNov.has('not_found')?'on':''}" role="switch"
+          aria-checked="${fNov.has('not_found')}" ${REBUILT?`onclick="tN('not_found')"`:''}></span>
+        <span class="novlbl">${esc(L.novToggle)}</span>
+        <span class="qmark" title="${esc(L.novHelp)}">?</span>
       </div>
+      <div class="novwhy">${esc(L.novWhy)}</div>
+      ${REBUILT?`<div class="fg-row" style="margin-top:4px">
+        <button class="fchip ${fNov.has('known')?'on':''}" onclick="tN('known')">${esc(L.novKnown)}</button>
+        <button class="fchip ${fNov.has('indeterminate')?'on':''}" onclick="tN('indeterminate')">${esc(L.novUnknown)}</button>
+      </div>`:''}
     </div>
     <div class="fg blocked">
       <div class="fg-h">${esc(L.coverage)} <span class="needs">${esc(L.needsRebuild)}</span></div>
@@ -542,7 +552,7 @@ function rowA(r){
     <div class="r-sub">${esc(lib(r.sysId))}, <a class="r-title" style="font-size:var(--text-sm)" href="#"
       onclick="toast('→ /browse ${esc(sm(r.sysId))}');return false;">${esc(sm(r.sysId))}</a>
       ${wauthor(r.wid)?`<span class="dim"> · ${esc(wauthor(r.wid))}</span>`:''}</div>
-    <div class="r-meta"><span class="band">${esc(bandLbl(r.band))}</span>${novChip(r)}
+    <div class="r-meta"><span class="band conf-${confOf(r)}" title="${esc(bandLbl(r.band))}">${esc(confLbl(confOf(r)))}</span>${novChip(r)}
       <span class="dim">${L.pages(r.pages)}</span>
       ${r.letters?`<span class="dim">· ${L.letters(r.letters)}</span>`:''}</div>
   </div><div class="side">
@@ -556,7 +566,7 @@ function rowB(r){
     <a class="r-title" href="#" onclick="toast('→ /browse ${esc(sm(r.sysId))}');return false;">${esc(lib(r.sysId))}, ${esc(sm(r.sysId))}</a>
     <div class="r-meta" style="margin-top:4px">${ws.slice(0,5).map(w=>`<span class="wchip">${esc(w)}</span>`).join('')}
       ${r.works>5?`<span class="dim">+${r.works-5}</span>`:''}</div>
-    <div class="r-meta"><span class="band">${esc(bandLbl(r.band))}</span>${novChip(r)}
+    <div class="r-meta"><span class="band conf-${confOf(r)}" title="${esc(bandLbl(r.band))}">${esc(confLbl(confOf(r)))}</span>${novChip(r)}
       <span class="dim">${L.works(r.works)} · ${L.pages(r.pages)}</span></div>
   </div><div class="side"><button class="lbtn" onclick="toast('→ /browse')">${esc(L.openMs)}</button></div></div>
   ${r.works>1?`<div class="annot">Multi-work manuscript (${r.works} works). Which work is the novelty verdict about? This is unit B's ambiguity — 9,806 manuscripts are like this.</div>`:''}`;
@@ -566,7 +576,7 @@ function rowC(r){
   return `<div class="row"><div class="main">
     <a class="r-title" href="#" onclick="toast('→ /work/'+'${r.wid}');return false;">${esc(wtitle(r.wid))}</a>
     ${wauthor(r.wid)?`<div class="r-sub">${esc(wauthor(r.wid))}</div>`:''}
-    <div class="r-meta"><span class="band">${esc(bandLbl(r.band))}</span>
+    <div class="r-meta"><span class="band conf-${confOf(r)}" title="${esc(bandLbl(r.band))}">${esc(confLbl(confOf(r)))}</span>
       <span class="dim">${L.mss(r.mss)} · ${L.pages(r.pages)}</span></div>
   </div><div class="side"><button class="lbtn" onclick="toast('→ /work/'+'${r.wid}')">${esc(L.openWork)}</button></div></div>`;
 }
@@ -583,6 +593,13 @@ function body(){
   const from=total?p*PER+1:0, to=Math.min(total,p*PER+slice.length);
   return `<div class="rbar">
       <b>${L.showing(from,to,total)}</b>
+      <span class="dim">·</span>
+      <label class="dim">${esc(L.showAs)}</label>
+      <select onchange="U=this.value;PAGE=0;render()">
+        <option value="a" ${U==='a'?'selected':''}>${esc(L.asIdent)}</option>
+        <option value="b" ${U==='b'?'selected':''}>${esc(L.asMs)}</option>
+        <option value="c" ${U==='c'?'selected':''}>${esc(L.asWork)}</option>
+      </select>
       <span class="spacer"></span>
       <label class="dim">${esc(L.sortBy)}</label>
       <select onchange="toast('sort → '+this.value)">
