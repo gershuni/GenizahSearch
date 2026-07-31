@@ -129,6 +129,28 @@ read from stalling every other request on the site.
 - **Teardown guards** around all post-I/O rendering, including the error branch, so closing a
   tab mid-fetch cannot raise.
 
+### Fixed — same-day hotfix: deferred renders never ran (web, `b3faedd8`)
+- **`/corrections` sat on "Loading your edits..." forever**, and My Comments, the homepage
+  Recently Viewed panel and discovery replies never populated. The teardown guard added above
+  read `container.client.has_been_deleted` — **not a NiceGUI attribute** (checked against 3.8.0)
+  and never one. It raised `AttributeError` on *every* call, not just on teardown; each caller's
+  `except Exception` swallowed it, so the render never ran and the spinner stayed up. The
+  leaderboard was worse: its error branch re-read the same dead attribute, so that one escaped
+  as an unhandled traceback.
+- Two of the nine sites **predate this release** (`c39838c3`); the perf work copied the name
+  onto four main-path loaders, turning a latent bug into total failure of those surfaces.
+- **Fix:** all nine now call `web/client_guard.py::client_gone()`, which tests membership in
+  `Client.instances` — the public signal `Client.delete()` actually manipulates. Deliberately
+  *not* `has_socket_connection`, which is `False` during initial page construction and would
+  skip the first render of every page (the same bug mirrored).
+- **`show_load_error()`** added: a swallowed failure now replaces the spinner with a visible
+  bilingual notice, so a broken loader can no longer present as a merely slow one.
+- **Why CI missed it:** the regression tests asserted the *string* `'has_been_deleted'` appeared
+  in the loader source — they pinned the misspelling and passed. Nothing ever executed a guard
+  against a real `Client`, and a `Mock()` answers to any attribute name.
+  `tests/test_client_guard.py` now drives it with genuine `Client` objects (13 tests), plus an
+  AST guard forbidding the dead attribute across `web/`.
+
 ### Added — latency instrumentation (web)
 - **New `web/perf_watch.py`**, on by default and deliberately quiet. nginx logs the default
   `combined` format (no `$request_time`) and the only in-app timing was `/lists`-scoped and
