@@ -135,7 +135,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("Fixed: some manuscripts showed each folio twice in Browse. This is now corrected."))
+        self.lbl_msg.setText(tr("Fixed: the Printed filter in Composition Search had no effect — it now filters correctly."))
         self.show()
 
     def on_learn_more(self):
@@ -269,8 +269,8 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Browse no longer shows doubled folios: manuscripts with a single image set could display each page twice. This is now fixed."),
-            tr("No changes to search or transcriptions \u2014 this release is a targeted fix."),
+            tr("Composition Search: the Printed filter had no effect \u2014 \u201cOnly printed\u201d hid everything and \u201cExclude printed\u201d hid nothing. Filtering by Library, Shelfmark and Title now works too, including on the fragment rows under a manuscript."),
+            tr("Focus Search: you can no longer confirm before the manuscript count finishes \u2014 that could quietly run a search over the whole corpus instead of the scope you chose."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

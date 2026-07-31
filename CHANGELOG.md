@@ -83,6 +83,74 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [8.5.2] - 2026-07-31 — Composition Filter Fix & Web Responsiveness
+
+Patch release (both apps). Two unrelated fixes that landed together: a desktop Composition
+Search filter that never actually filtered, and a web change that stops one slow database
+read from stalling every other request on the site.
+
+### Fixed — Composition Search printed filter (desktop, #318)
+- **"Only printed" hid everything and "Exclude printed" hid nothing.** The Composition Search
+  results tree keeps the manuscript record and the preview text in two *different* Qt data
+  roles, but the filter code read the preview role as though it held the record. Every row
+  therefore looked unidentified — so the three-state Printed column filter, and "Exclude
+  printed" on a standard Composition Search, silently did nothing. Filtering now reads the
+  record role, falls back to the rendered column text for Library / Shelfmark / Title, and
+  keeps the preview role for the two context columns.
+- **Filters now reach fragment rows.** A child row inherits its parent manuscript's title for
+  the Title filter and its `sys_id` for the printed lookup, so matching fragments are no
+  longer hidden merely because the child row carries no title of its own.
+- **Focus Search could run unrestricted.** The dialog let you press OK before its background
+  manuscript-count finished, passing `None` as the restriction — a search over the whole
+  corpus when you had asked for a narrow scope. OK is now disabled while the count runs, and a
+  generation token discards results from a superseded calculation when filters change quickly.
+- Tests: `tests/test_composition_printed_filters.py` (11).
+
+### Fixed — one slow read no longer stalls the whole site (web, #319)
+- **Context: uvicorn runs a single worker** and NiceGUI calls page builders directly on the
+  event loop, so one blocking network call stalls *every* concurrent request, including
+  unrelated static assets. Waiting on I/O burns no CPU, so this never appeared in load average
+  (the box read `0.03` during multi-second responses) — which is why an earlier "the app is
+  fast, only the network is slow" reading was wrong.
+- **Five `await <sync function>()` sites.** Python evaluates the call first, so the whole
+  blocking body ran on the loop and only *then* did `await None` raise a `TypeError` that a
+  bare `except Exception: pass` swallowed. The data still appeared — the body had run — so the
+  bug was invisible while the "deferred" loader blocked everyone. Each now builds the Supabase
+  client on the loop, reads via `run.io_bound`, and renders back on the loop.
+- **`/corrections` was the slowest route in real-user monitoring** (p75 LCP 5981 ms / FCP
+  6998 ms). Its "batch-fetch" was one profiles query plus up to 20 *sequential* count queries,
+  run during page construction before any HTML was returned. Now off-loop, bounded to 4
+  concurrent reads, and deferred until the Leaderboard tab is actually opened.
+- **Reads keep their auth context.** `run.io_bound` goes through `loop.run_in_executor`, which
+  does not propagate contextvars — a naive off-loop wrap would have found no request context
+  and silently degraded to *anonymous* reads: your own pending corrections, your private
+  comments and your recent items would have come back empty, with no error. The five
+  user-scoped readers therefore take an explicit `client=` built on the loop.
+- **Teardown guards** around all post-I/O rendering, including the error branch, so closing a
+  tab mid-fetch cannot raise.
+
+### Added — latency instrumentation (web)
+- **New `web/perf_watch.py`**, on by default and deliberately quiet. nginx logs the default
+  `combined` format (no `$request_time`) and the only in-app timing was `/lists`-scoped and
+  flag-gated, so a nine-second response previously left **no server-side trace at all**. Adds
+  per-request slow-request logging plus an **event-loop lag monitor** — the one signal load
+  average cannot show. Knobs: `GENIZAH_PERF_WATCH`, `GENIZAH_SLOW_REQUEST_MS`,
+  `GENIZAH_LOOP_LAG_MS`, `GENIZAH_LOOP_LAG_INTERVAL`, `GENIZAH_PERF_SUMMARY_SECONDS`.
+
+### Also carried by this version (web, already deployed since v8.5.1)
+- Password-reset recovery links work again (the Supabase `Client` is bound at render time).
+- The OAuth callback no longer logs live credentials.
+- The Visual Genizah Atlas no longer traps page scroll on phones.
+
+### Still open
+- **The CDN half of the slowness is not fixed.** Every response carries a `Set-Cookie` header,
+  so Cloudflare caches nothing — 100% `BYPASS`/`DYNAMIC`, including assets already sending
+  `max-age=31536000, immutable`. Tracked in `docs/OPEN_ISSUES.md` with the traps found while
+  diagnosing it (an ordinary `@app.middleware("http")` cannot strip that cookie; a Cloudflare
+  "Eligible for cache" rule alone would risk session fixation).
+
+---
+
 ## [8.5.1] - 2026-07-21 — Browse doubled-folios fix (desktop)
 
 ### Fixed

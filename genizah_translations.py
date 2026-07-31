@@ -4768,3 +4768,13 @@ TRANSLATIONS.update({
     "No changes to search or transcriptions — this release is a targeted fix.":
         "אין שינוי בחיפוש או בתמלולים — מהדורה זו היא תיקון ממוקד.",
 })
+
+# === Desktop What's New — v8.5.2 (2026-07-31 bug-fix patch) ===
+TRANSLATIONS.update({
+    "Fixed: the Printed filter in Composition Search had no effect — it now filters correctly.":
+        "תוקן: סינון הדפוסים בחיפוש חיבורים לא פעל — כעת הסינון עובד כראוי.",
+    "Composition Search: the Printed filter had no effect — “Only printed” hid everything and “Exclude printed” hid nothing. Filtering by Library, Shelfmark and Title now works too, including on the fragment rows under a manuscript.":
+        "חיפוש חיבורים: מסנן הדפוסים לא פעל — ״דפוסים בלבד״ הסתיר הכול ו״ללא דפוסים״ לא הסתיר דבר. גם הסינון לפי ספרייה, מספר מדף וכותרת פועל כעת, לרבות בשורות הקטעים שתחת כתב היד.",
+    "Focus Search: you can no longer confirm before the manuscript count finishes — that could quietly run a search over the whole corpus instead of the scope you chose.":
+        "מקד חיפוש: לא ניתן עוד לאשר לפני שחישוב מספר כתבי היד הסתיים — הדבר עלול היה להריץ חיפוש על כל הקורפוס במקום על התחום שבחרתם.",
+})

@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.5.1
+# Dicta Genizah Search Pro 8.5.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -513,7 +513,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.5.1_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.5.2_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
