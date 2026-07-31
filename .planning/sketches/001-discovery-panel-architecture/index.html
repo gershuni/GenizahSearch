@@ -208,6 +208,7 @@ body.ann .annot { display: block; font-size: var(--text-xs); line-height: 1.45;
     <label class="cl" for="ms">Manuscript</label>
     <select id="ms" onchange="ELSE_PAGE=0;render()"></select>
     <button class="ctl" id="langB" onclick="toggleLang()">עברית / RTL</button>
+    <button class="ctl on" id="rbB" onclick="REBUILT=!REBUILT;render()">post-rebuild view</button>
     <button class="ctl" id="annB" onclick="toggleAnn()">Design notes</button>
     <span style="flex:1"></span>
     <label class="cl">Width</label>
@@ -331,10 +332,11 @@ const NOTES = {
   d13i:'<b>D-13i.</b> This catalogue line describes the shelfmark — on a composite volume, other leaves entirely — not this folio. Left unlabelled next to a page-level claim it manufactures a false alarm: on Moss. V,374 a bill-of-divorce description sat beside a verifiably correct Rashi-on-Esther claim whose span ends with the colophon תם כל הפירוש.',
   ctype:'<b>The relation filter maps to stored <code>claim_type</code></b> — 197,177 direct / 59,243 citation-type / 11,941 shared-text claims in the asset; as shipped DISPLAY claims that is 130,330 / 7,386 / 11,941. <b>Wording caution:</b> you called the middle one “citations”, but D-21 explicitly prohibits “quotes” (and “copy of”, “witness of”) in display. It is labelled “Partial match” here, per D-21\'s own weaker-relation wording. Calling it “Citations” on the surface is a defensible choice but needs a dated D-21 amendment — it asserts a directional relation the heuristic does not establish.',
   cov:'<b>Coverage is direct-family only (D-08a)</b> and labelled as matched-letter coverage, never a bare “% of page”. It is matched Hebrew base letters ÷ the normalized page stream. Propagated rows show no figure at all: all 42,776 shipped propagated evidence rows have NULL <code>matched_letters</code>. Note the asset does NOT store coverage — these percentages are computed here from real HTR page text, which is exactly why the rebuild has to persist <code>coverage_ppm</code>.',
+  gate18:'<b>This is the panel as it renders TODAY, and it is nearly empty on purpose.</b> <code>discovery-band-labels-v1.md</code> §4 holds <code>tier_a</code> behind the “show more” toggle until <code>band_precision</code> carries <code>measurement_status = &quot;measured_pass&quot;</code> AND <code>ci_low &gt;= 0.85</code> (D-18, fail-closed). The deployed asset has BOTH NULL, so 80.7% of shipped display claims are gated and only <b>2,660 of 166,537 (1.6%)</b> are default-visible corpus-wide. 9 of these 13 manuscripts show ZERO default identifications today. The rebuild’s D-02a payload is precisely what flips this — which is why gate 1 <i>enables</i> these surfaces rather than improving them. Note <code>not_evaluated</code> stays gated in both states, so the siddur and Ms. Heb. 577.4.99=4 have no default identifications even after the rebuild; their content lives in the middle bucket, which is exactly why D-13e exists.',
   multispan:'<b>Only the largest span is stored</b> — 9,549 shipped direct rows have multiple spans. The evidence view can therefore under-report what actually matched.',
 };
 
-let V='a', LANG='en', ELSE_PAGE=0, GATED=false;
+let V='a', LANG='en', ELSE_PAGE=0, GATED=false, REBUILT=true;
 let fCT=new Set(), fBand=new Set();     // empty = all (D-16 semantics)
 const PAGE=6;
 const t=()=>T[LANG];
@@ -347,7 +349,15 @@ const note=k=>NOTES[k]?`<div class="annot">${NOTES[k]}</div>`:'';
 /* ---------- filtering (AND-composed; empty set = all) ---------- */
 const ctOK = key => fCT.size===0 || fCT.has(key);
 const bandOK = k  => fBand.size===0 || fBand.has(k);
-const visIds = ms => ms.onPage.filter(r => ctOK(r.ctype) && bandOK(bandKey(r)));
+/* REBUILT=false shows what the panel renders TODAY. discovery-band-labels-v1.md §4
+   holds tier_a behind the "show more" toggle until band_precision carries
+   measurement_status='measured_pass' + ci_low >= 0.85 (D-18, fail-closed), and the
+   deployed asset has both NULL — so 80.7% of shipped display claims are gated and
+   only 2,660 of 166,537 (1.6%) are default-visible corpus-wide. The rebuild's D-02a
+   payload is what flips it. `not_evaluated` is gated in BOTH states. */
+const srcIds  = ms => (REBUILT ? ms.onPage : (ms.onPageNow || ms.onPage));
+const srcHid  = ms => (REBUILT ? ms.hidden : (ms.hiddenNow || ms.hidden));
+const visIds = ms => srcIds(ms).filter(r => ctOK(r.ctype) && bandOK(bandKey(r)));
 const visWorks = ms => ms.elsewhere.works.filter(w =>
   (fCT.size===0   || w.ctypes.some(c=>fCT.has(c))) &&
   (fBand.size===0 || w.bands.some(b=>fBand.has(b))));
@@ -476,7 +486,7 @@ function sharesHTML(ms){
 }
 
 function moreHTML(ms){
-  const L=t(), h=ms.hidden, n=h.short+h.gated+ms.elsewhere.gatedClaims;
+  const L=t(), h=srcHid(ms), n=h.short+h.gated+ms.elsewhere.gatedClaims;
   return `<details class="disc" ${GATED?'open':''} ontoggle="sy(this)">
     <summary>${esc(L.more)} <span class="sc">· ${n}</span>
       <span class="ql">— ${L.moreB(h.short,h.gated+ms.elsewhere.gatedClaims)}</span></summary>
@@ -521,6 +531,9 @@ const VD=ms=>`<div class="panel">${head(ms)}<div class="dwrap">
   <div class="annot"><b>D = the B+C synthesis you asked for.</b> Two EVEN panes at ≥900px — the page's identifications and the manuscript picture carry equal visual weight, rather than C's subordinate rail. The two shared buckets sit full-width beneath both, since they belong to neither pane. <b>Still inverts D-09's “collapsed” clause</b> (the manuscript group is never collapsed), so it needs the same amendment as B — but it keeps D-09's left-to-right reading order, so the amendment is narrower: strike “collapsed”, keep the ordering. On mobile it stacks page-then-manuscript, which is A's order with nothing hidden.</div>`;
 
 function render(){
+  const rb=document.getElementById('rbB');
+  if(rb){ rb.classList.toggle('on',REBUILT);
+    rb.textContent = REBUILT ? 'post-rebuild view' : 'TODAY (pre-rebuild)'; }
   const ms=cur(), L=t(), dir=LANG==='he'?'rtl':'ltr';
   const body = V==='a'?VA(ms):V==='b'?VB(ms):V==='c'?VC(ms):VD(ms);
   const shelfScope = /^[a-z]\)|court record|legal document|\(קטעים\)|סדור|נביאים/i.test(ms.cat);
@@ -534,7 +547,7 @@ function render(){
         <div class="catline">${shelfScope?`<span class="cscope">${LANG==='he'?'מדף':'shelfmark'}</span>`:''}${esc(ms.cat)}${shelfScope?` <i>— ${esc(L.catShelf)}</i>`:''}</div>
         ${shelfScope?note('d13i'):''}
         ${body}
-        ${note('cov')}
+        ${note('cov')}${REBUILT?'':note('gate18')}
       </div>
     </div>`;
 }

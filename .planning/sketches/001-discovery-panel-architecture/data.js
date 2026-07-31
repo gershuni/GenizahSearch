@@ -37,6 +37,12 @@ const PANEL_DATA = {
     "short": 0,
     "gated": 0
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 1
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
     "claims": 0,
     "pages": 0,
@@ -94,6 +100,12 @@ const PANEL_DATA = {
     "short": 0,
     "gated": 0
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 3
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
     "claims": 1,
     "pages": 1,
@@ -190,6 +202,12 @@ const PANEL_DATA = {
     "short": 0,
     "gated": 0
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 3
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
     "claims": 3,
     "pages": 1,
@@ -282,6 +300,29 @@ const PANEL_DATA = {
     "short": 0,
     "gated": 0
    },
+   "onPageNow": [
+    {
+     "work": "רש\"י על אסתר",
+     "wid": "w001277",
+     "author": "שלמה בן יצחק (רש״י)",
+     "family": "direct",
+     "ctype": "direct_witness",
+     "band": "high_confidence_algorithmic",
+     "humanConfirmed": true,
+     "lowCoverage": false,
+     "cov": 90,
+     "letters": 2809,
+     "nspans": 3,
+     "offs": "638–2374",
+     "others": 1,
+     "alias": null
+    }
+   ],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 0
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
     "claims": 1,
     "pages": 1,
@@ -356,24 +397,7 @@ const PANEL_DATA = {
    "pageNum": "6",
    "pageLetters": 1225,
    "pageText": "מספדי למחול לי פתיחת שקי ותאזריני שמ\nטמחה . או תשמח בתולה במחול בהו\nבהורים וזקננם יחדיו . והפכתי אבלם\nלשטיו וניחמתים ושמחתם מיגונם ולא\n]מרוע לבלעם ויהפוד ייי אלהיך לד\nאת הקללה לברכה כי אהבד ייי אלהיד .\n]נה . תרה בשלום נפשי ברקרוב\n. ברכיים היו עמדי . ופז\nופדויי יי יטובון ובאו לציון ברינה שמחת\nעולם על ראשם שטון ושמוחה ישיגר ובסר ⟦י/⟧\nיגון ואנחה . ויאמרו העם אל שאול הית\nהיונתן יבוות אשר עשה את התשועה הגדול\nבישר חלילה לך חי ייי אם יפול משערת\nראשו ארצה כי עם אלהים עשה היום הזה\nויפרו העם את יהונתן ולא ברת .\nטלוחות . בורא ניב שפתים שלום שלום לרחרק\nולקרוב אמור ייי ורפאתיו ורוח לבשה עמשא\nראש השלישים לך רוד ועמד בן ישי שלום\nלך שלום לעזרך ויקבלם דוד ויתנם בראשי ⟦/⟧\nהגדור ואמרתם כה לאחי אתה שלום ולבית\nשלום ייי עון לעמו יתן ייי יברך את עבדו ישר'\nבשלים .\nתפילה של יום טוב .\nבחרתנו מכל העבדים\nאהבת אותנו ורצית במי\nורוממתנו מכל הלשרנו\nוקדשתנו במצותיך וקרבתנו מלפינו לעבודתיך\nושמד הגדול והקדוש עלינו קראת . אותתילו\nייי אלהינו באהבה . את יום המנזה הזה ואף ידם חגן\nהמצות הזה . זמן חירותינו לשבוטות אתם\nיום חג השבועות הזה זמן בותך תורתינו . לסוטא\nאת יום הסוכות הזה זכון שמחתינו לשמיני\nאת יום שמיני חג עצרת הזה זמן שמחתיכך .\nו' . באהבה מוקרא קודש זכר ליציאת מצרים\nאהינו ואהי אבתינו יעלה\nריברא וביע וראה\nוירצה וישמע ויפקד ויזכר זכהובינו ופקורונינ'\nזכרון אבותינו זכרון משיח בן דוד עבדר\nזכרון ירושלים עיר הדשך וזכרון כל עמד בית\nישר' לפניך לפליטה לטובה להן לחסר להחמים\nלחיים ולעילום את יום המנוח הזי ואת יום חג ⟦ה⟧\nהמצות הזה . ווכרינו לי אלהינו בו לטומל\nופוקדינו בו לברכה . והנשיענו בו לחיים . בדבר\nישרעה ורחמים חוס וחונינו ורחם עלינו ⟦והוש⟧\nוהושיענו כי אליר עיניני בי א' מלך הנון והקוב\n\n",
-   "onPage": [
-    {
-     "work": "ילקוט שמעוני על התורה",
-     "wid": "w001384",
-     "author": "שמעון הדרשן",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "307–538",
-     "others": 396,
-     "alias": null
-    }
-   ],
+   "onPage": [],
    "shares": [
     {
      "offs": "0–555",
@@ -382,27 +406,23 @@ const PANEL_DATA = {
       "טור אורח חיים",
       "ילקוט שמעוני על נ\"ך"
      ]
-    },
-    {
-     "offs": "979–1045",
-     "letters": 0,
-     "works": [
-      "עמידה לחול (שחרית)",
-      "עמידה לחול (ערבית)",
-      "עמידה לשבת (ערבית)",
-      "הגדה של פסח"
-     ]
     }
    ],
    "related": 3,
    "hidden": {
     "short": 1,
-    "gated": 0
+    "gated": 5
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 1,
+    "gated": 7
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
-    "claims": 8,
-    "pages": 2,
-    "gatedClaims": 3,
+    "claims": 3,
+    "pages": 1,
+    "gatedClaims": 8,
     "works": [
      {
       "title": "טור אורח חיים",
@@ -419,62 +439,6 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "עמידה לחול (שחרית)",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "עמידה לחול (ערבית)",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "עמידה לשבת (ערבית)",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "הגדה של פסח",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
       "title": "ילקוט שמעוני על נ\"ך",
       "pages": 1,
       "gatedPages": 0,
@@ -486,20 +450,6 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "עמידה לשבת (שחרית)",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
       ]
      },
      {
@@ -531,6 +481,62 @@ const PANEL_DATA = {
       ]
      },
      {
+      "title": "עמידה לחול (שחרית)",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
+      "title": "עמידה לחול (ערבית)",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
+      "title": "עמידה לשבת (ערבית)",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
+      "title": "הגדה של פסח",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
       "title": "תנ\"ך, שמואל א",
       "pages": 0,
       "gatedPages": 1,
@@ -542,6 +548,20 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "עמידה לשבת (שחרית)",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
       ]
      }
     ]
@@ -566,56 +586,7 @@ const PANEL_DATA = {
    "pageNum": "1",
    "pageLetters": 668,
    "pageText": "ד.\nבמעלי שבתא דהוא שיתה יומין לירח ניסן שנת ארבעת אלפא ותשע מאה\nושבעין ותלת שנין ליצירה דהיא שנת אלפא וחמש מאה ועשרין וארבע שנין\nלשטרות דרגילין אנן למימני ביה בפסטאט מצרים דעל נילוס נהרא מותבה\nאיך אנא מפצל דמיתקרי שלה בר משולם בר מר נתנאל הזקן נע דמארץ מצרים\nוכל שום אחרן וחניכא ראית לי ולאבהתי ולאתרי ולאתריהון דאבהתי צביתי בראות\nנפשי כדלא אני סנא ופטרית ושבקית ותרוכית יתיכי ליכי אנתי סת אלנסב ברת\nאלעזר דידיע בן שלום דמארע מצרים וכל שום אחרן וחניכא דאית ליכי ולאבהתיכי\nולאתרי כי ולא תריהון דאבהתיכי די הוית אנתתי מקדמת דנא וכדו פטרית ושבקית\nותרוכית יתיכי ליכי די תהוייין רשאה ושלטאה בנפשיכי למתך להתנסבא לכל\nגבר די תצבייין ואנש לא ימחא בידי כי מן שמי מן יומא דנן ולעלם והדי את\nמותרת לכל אדם ודן דיהוי ליכי מינאי ספר תרוכין וגט פטורין ואגרת שבוקין\nבתורה וכהלכה בדת משה וישראל ישועה בר דני אל זצל\nמשה הכהן בר שארית הכהן ילהה\n\n",
-   "onPage": [
-    {
-     "work": "ספר השטרות",
-     "wid": "w001050",
-     "author": "האיי גאון",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "281–624",
-     "others": 229,
-     "alias": null
-    },
-    {
-     "work": "רי\"ף גיטין",
-     "wid": "w001320",
-     "author": "יצחק אלפסי (רי\"ף)",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "386–536",
-     "others": 110,
-     "alias": null
-    },
-    {
-     "work": "הלכות ראו",
-     "wid": "w000797",
-     "author": "",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "470–624",
-     "others": 160,
-     "alias": null
-    }
-   ],
+   "onPage": [],
    "shares": [
     {
      "offs": "185–638",
@@ -629,12 +600,18 @@ const PANEL_DATA = {
    "related": 26,
    "hidden": {
     "short": 0,
-    "gated": 0
+    "gated": 3
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 5
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
-    "claims": 6,
+    "claims": 3,
     "pages": 1,
-    "gatedClaims": 0,
+    "gatedClaims": 3,
     "works": [
      {
       "title": "ספר החינוך",
@@ -666,9 +643,9 @@ const PANEL_DATA = {
      },
      {
       "title": "ספר השטרות",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
@@ -680,9 +657,9 @@ const PANEL_DATA = {
      },
      {
       "title": "רי\"ף גיטין",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
@@ -694,9 +671,9 @@ const PANEL_DATA = {
      },
      {
       "title": "הלכות ראו",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
@@ -751,6 +728,12 @@ const PANEL_DATA = {
     "short": 2,
     "gated": 1
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 2,
+    "gated": 2
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
     "claims": 426,
     "pages": 426,
@@ -1199,75 +1182,65 @@ const PANEL_DATA = {
    "sm": "Cambridge University Library Ms. T-S NS 26.378",
    "lib": "CUL",
    "cat": "",
-   "anchor": "990051762180205171_IE164993752_P000114_FL164993867",
-   "pageNum": "114",
-   "pageLetters": 732,
-   "pageText": "שהרית צים גדליה\nויברכו את שמך הגדול באמת לעולם\nטוב האל ישועתנו ועזרתנו סלה האל הטוב . בר\nאתה יהוה הטוב שמך ולך נאה לחודות :\nובחזרת העמידם אומר השליח צבור .\nאלהינו ואלהי אבותינו ברכנו בברכה חמשלשת כתו\nהכתובה על ידי משה עבדך הי מורד מפי גר\nבדד\nובניו הכהנים עם קדשיך כאמור : יברכך יהוח וישמו\nיאר יהוה פניו אליך ויהנך : ישא יהוה פייו אליך וי[\nלך שלום : ושמו את שמי על בני ישראל ואני אברכ\nשים שלום טובה וברכה חיים חן וחסד . צדק\nורחמים עלינו ועל כל ישראל עמך : ובר\nאבינו כלנו יחד באור פניך . כי באור פניך נה[\nלנו יהוה אלחינו תורה וחיים : אהבה וחסר . צדי\nורחמים ברכה ושלום . וטוב בעיניך לברי\nי\nולברך את כל עמך ישראל ברוב עוז ושלו\nובספר חיים ברכה ושלום . ופרנסה טובה . וישוע\nונחמה וגזרות טובות נזכר ונכתב לפניך אנו\nוכל עמך ישראל לחיים טובים ולשלום . ברוך א[\nיוהו ווהו ויהוה במוכין המברך את עמו ישראל\nבשלום אמן : י'י חזרת ספינ\nיהיו לרצון אמרי פי והניון לכי לפניך יהוה צורי ונא\nאלהי נצור לשוני מרע . ושפתותי מדבר מרכ\nולמקלרי נפשי תדום . ונפשי כעפר לי\nתהיו[\nון\n]\nב\nיבר\n\n",
+   "anchor": "990051762180205171_IE164993752_P000253_FL164994006",
+   "pageNum": "253",
+   "pageLetters": 778,
+   "pageText": "שחרית של כפור רכב\nוכתוב לחיים טובים כל בני בריתך : ויהללו\nויברכו את שמך הגדול באמת לעולם כי טוב\nהאל ישועתנו ועזרתנו כלה האל הטוב . ברוך\nאתה יהוה ויהוה בם הטוב שמך ולך נאה להודות :\nשים שלום טובה וברכה . חיים חן וחסד . צדקה\nורחמים עלינו ועל כל ישראל עמך וכרכנו\nאבינו כלנו יחד כאור פניך כי באור פניך נתתלנו\nיהוה אלהינו תורה וחיים אהבה וחמד צדקה ורחמים\nברכה ושלום וטוב יהיה בעיניך לברכנו ולברך את\nכל טמך ישראל ברוב עוז ושלום :\nובספר חיים ברכה ושלום . ופרנסה טובה וישועה\nונחמה . וגזרות טובות נזכר ונכתב לפניך\nאנחנו וכל עמך ישראל לחיים טובים ולשלום .\nברוך אתה יוהו ווהו ויהוה במוכין המברך את\nעטו ישראל בשלום אמן : יהיו לרצון אמרי פי\nוהניון לבי לפניך יהוה צורי וגאלי :\nלהינו ואלהי אבותינו תבא לפניך תפלתנו ואל\nתתעלם מתחנתנו שאין אנו עזי פנים\nוקשי עורף לומר לפניך יהוה אלחינו ואלהי אבותינו\nצדיקים אנחנו ולא חטאנו אבל חטאנו אנחנו\nנאבותינו . אשמנו . בנדנו . גזלנו . דברנו דופי ולשון\nהרע . העוינו . והרשענו . זרנו . תמסנו . טפלנו שקר\n.\nעצות רעות . כזבנו לצנוי מרדנו באצנו נאפנו\nבשבעני\nבנו\nרך\nהרא\nאל\n]בר\n]זה\nבה\nה\nה[\n]יך\nב\n",
    "onPage": [
     {
-     "work": "עמידה לחול (שחרית)",
-     "wid": "w001157",
+     "work": "עמידה למוסף שבת",
+     "wid": "w001154",
      "author": "",
      "family": "direct",
      "ctype": "direct_witness",
      "band": "tier_a",
      "humanConfirmed": false,
      "lowCoverage": false,
-     "cov": 55,
-     "letters": 399,
+     "cov": 54,
+     "letters": 419,
      "nspans": 1,
-     "offs": "333–732",
-     "others": 515,
-     "alias": null
-    },
-    {
-     "work": "עמידה למוסף שבת",
-     "wid": "w001154",
-     "author": "",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "381–732",
+     "offs": "112–531",
      "others": 530,
      "alias": null
     },
     {
-     "work": "עמידה לשבת (שחרית)",
-     "wid": "w001155",
+     "work": "עמידה לחול (שחרית)",
+     "wid": "w001157",
      "author": "",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
+     "family": "direct",
+     "ctype": "quotes_this_work",
+     "band": "tier_a",
      "humanConfirmed": false,
      "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "381–447",
-     "others": 447,
+     "cov": 47,
+     "letters": 365,
+     "nspans": 1,
+     "offs": "166–531",
+     "others": 515,
      "alias": null
     }
    ],
    "shares": [],
-   "related": 2,
+   "related": 1,
    "hidden": {
-    "short": 2,
-    "gated": 0
+    "short": 0,
+    "gated": 1
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 3
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
-    "claims": 197,
-    "pages": 141,
-    "gatedClaims": 126,
+    "claims": 133,
+    "pages": 114,
+    "gatedClaims": 192,
     "works": [
      {
       "title": "משנה תורה, ספר אהבה",
-      "pages": 35,
-      "gatedPages": 22,
+      "pages": 18,
+      "gatedPages": 39,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1300,8 +1273,8 @@ const PANEL_DATA = {
      },
      {
       "title": "עמידה לחול (שחרית)",
-      "pages": 12,
-      "gatedPages": 9,
+      "pages": 7,
+      "gatedPages": 14,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1331,8 +1304,8 @@ const PANEL_DATA = {
      },
      {
       "title": "עמידה לחול (ערבית)",
-      "pages": 11,
-      "gatedPages": 7,
+      "pages": 6,
+      "gatedPages": 12,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1348,8 +1321,8 @@ const PANEL_DATA = {
      },
      {
       "title": "עמידה לשבת (ערבית)",
-      "pages": 9,
-      "gatedPages": 7,
+      "pages": 4,
+      "gatedPages": 12,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1365,8 +1338,8 @@ const PANEL_DATA = {
      },
      {
       "title": "ברכות שמע לשחרית חול",
-      "pages": 13,
-      "gatedPages": 1,
+      "pages": 11,
+      "gatedPages": 3,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1382,8 +1355,8 @@ const PANEL_DATA = {
      },
      {
       "title": "עמידה למוסף שבת",
-      "pages": 7,
-      "gatedPages": 7,
+      "pages": 1,
+      "gatedPages": 13,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1414,8 +1387,8 @@ const PANEL_DATA = {
      },
      {
       "title": "עמידה לשבת (שחרית)",
-      "pages": 6,
-      "gatedPages": 5,
+      "pages": 2,
+      "gatedPages": 10,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1431,8 +1404,8 @@ const PANEL_DATA = {
      },
      {
       "title": "ברכות שמע לערבית חול",
-      "pages": 6,
-      "gatedPages": 3,
+      "pages": 4,
+      "gatedPages": 5,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1462,26 +1435,9 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "טור אורח חיים",
-      "pages": 2,
-      "gatedPages": 6,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
       "title": "ברכות שמע לערבית שבת",
-      "pages": 6,
-      "gatedPages": 1,
+      "pages": 4,
+      "gatedPages": 3,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1489,22 +1445,6 @@ const PANEL_DATA = {
        "direct_witness",
        "quotes_this_work",
        "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "תנ\"ך, במדבר",
-      "pages": 1,
-      "gatedPages": 6,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work"
       ],
       "bands": [
        "propagated|not_evaluated",
@@ -1542,29 +1482,13 @@ const PANEL_DATA = {
      },
      {
       "title": "הגדה של פסח",
-      "pages": 4,
-      "gatedPages": 1,
+      "pages": 1,
+      "gatedPages": 4,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
        "direct_witness",
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "הלכות פסוקות",
-      "pages": 3,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
        "quotes_this_work",
        "shared_text"
       ],
@@ -1633,8 +1557,8 @@ const PANEL_DATA = {
      },
      {
       "title": "תרגום יונתן על ישעיהו",
-      "pages": 2,
-      "gatedPages": 0,
+      "pages": 1,
+      "gatedPages": 1,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -1644,20 +1568,6 @@ const PANEL_DATA = {
       ],
       "bands": [
        "propagated|corroborated",
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "הלכות ראו",
-      "pages": 2,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "shared_text"
-      ],
-      "bands": [
        "propagated|not_evaluated"
       ]
      },
@@ -1690,31 +1600,52 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "תלמוד בבלי, פסחים",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
+      "title": "תנ\"ך, במדבר",
+      "pages": 0,
+      "gatedPages": 8,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
-       "shared_text"
+       "direct_witness",
+       "quotes_this_work"
       ],
       "bands": [
-       "propagated|not_evaluated"
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
       ]
      },
      {
-      "title": "מסכת סופרים",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
+      "title": "טור אורח חיים",
+      "pages": 0,
+      "gatedPages": 8,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
+       "direct_witness",
+       "quotes_this_work",
        "shared_text"
       ],
       "bands": [
-       "propagated|not_evaluated"
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "הלכות פסוקות",
+      "pages": 0,
+      "gatedPages": 4,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
       ]
      },
      {
@@ -1758,6 +1689,20 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "הלכות ראו",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
       ]
      },
      {
@@ -1927,6 +1872,34 @@ const PANEL_DATA = {
       "bands": [
        "track1_direct|tier_a"
       ]
+     },
+     {
+      "title": "תלמוד בבלי, פסחים",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
+      "title": "מסכת סופרים",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
      }
     ]
    },
@@ -1946,14 +1919,30 @@ const PANEL_DATA = {
    "sm": "Ms. EVR II C 1",
    "lib": "RNL",
    "cat": "תורה : ; עם ניקוד וטעמים, מסורה קטנה וגדולה.",
-   "anchor": "990000989500205171_IE50056583_P000251_FL50057052",
-   "pageNum": "251",
-   "pageLetters": 908,
-   "pageText": "בת\nי וסימ[\nכי פנה אר אלהים אחרים אוי לנו כי פנה היום כי ינטו ולא פר[\nזהבים ושמיכ זב פנה אל תפלת העדעה אנח פנה הו\nמהה כבה יעש\nולקנהא בני א[\nתסתמליהא מן אפואההם לכי\nתכון לי שאהדא עליהם :\nכי אביאנו אל האדמה אשר ⟦/⟧\nנשבעתי לאבתיו זבת חלב ודבש\nואכל ושרע ודשן ופנה אל ⟦א⟧\nאלהים אחרים ועבדום ונאצונו\nוהפר את בריתי .\nאד אדכלהם אלא אלבלד אלדי\nקסמת לאבאיהם והו יפיץ\nלבנא ועסלא פיאכל\nקומהם וישבע ויסמן תם\nיולא אלא מעבודאת אכר\nפי עבדהא וירפצ̇ני ויפסך\nעהדי :\nוהיה כי תמצאן אתו רעות ⟦/\nרבות וצרות ↑ וענתה השירה\nהזאת לפניו לעד כי לא תשכח\nמפי זרעו כי ידעתי את יצרו ⟦/⟧\nאשר הוא עשה היום בטרם .\nאביאנו אל הארץ אשר .. ⟦ש⟧\nנשבעתי :\n \nהה\nומצאהו רעות רבות וצרות ואמר\nביום ההוא הלא על כי אין אלהי\nבקרבי מצאוני הרעות האלה .\nוישתר גצ̇בי עליהם פי דלך\nאלזמאן פאתרכהם ואחגב\nרחמתי ענהם פיצירון מאכלא\nותציבהם שרור כתירה ושדאיד\nפיקולון פי דלך אלחין אלא אן\nממא ליס נור רבי מעו אצא בתני\nאלבלאיא.\nואנכי הסתר אסתיר פני ביום ההוא\nעל כל הרעה אשר עשה כיפנה\nאל אלהים אחרים :\nומע דלך אנא מקום עלי חגב\nרחמתי פי דלך אלזמאן ענה בסבב\nאלשר אלדי צנעה אדולא אלא מעבודאת\n  אבת :\nועתה כתבו לכם את השידה :\nהזאת ולמדה את בני ישראק\nשומה בפיהם למען תהיה לי\nהשירה הזאת לעד בבני ישראל\nואלאן פאכתבו לכם הדה אלתסבחת\nבעמה אבי\nודם מית רשת\nואש'\n[\nשר\nבית\n\n",
+   "anchor": "990000989500205171_IE50056583_P000158_FL50056901",
+   "pageNum": "158",
+   "pageLetters": 981,
+   "pageText": "אלם אשמורו\nם תשמע\nולא תחלף באסם אללה רבך זורא\nאן אללה לא יברי מן יחלף באסמה זורא\nשמור את יום השבת לקדשו כאשר\nצוך יהוה אלדוך ששת ימים תעבד\nועשות כל מלאכתך ויום השביעין\nשבת ליהוה אלהיך לא תעשה כל\nמלאכה אתה ובנך ובתך ועבדך ⟦/⟧\nואמתך ושורך וחמרך וכל בחמתך\nוגרך אשר בשעריך למען ונוח ⟦/\nעבדך ואמתך כמוך וזכרת כי עבד\nהיית בארץ מצרים ויצאך יהוה\nאלהיך משם ביד חזקה ובזרע\nנטויה על כן צוך יהוה אלהיך . ⟦/⟧\nלעשות את יום השבת :\nאחפט יום אלסבת וקדסה כמא\nאמר אללה רבך סתה איאם תעמל\nותצנע גמיע צנאיעך ואליום אלסאבע\nסבת ללה רכך לא תעמל שיא מן\nאלצנאיע אנת ואבנך ואבנתך ועבדך\nואמתך ותורך וחמא רך נסאיר בהאינך\nולשי\n: ואלה שמות וכל תמונה\nמונה\nסים\nפני לא תעשה לך פסל כל תמונה\nאשר בשמים ממעל ואשר . ⟦/⟧\nכארץ מתחת ואשר במים מתחת\nלארץ לא תשתחוה להם ולא\nתעברם כי אנכי יהוה אלהיך אל\nקנא פקד עון אבות על בנים ועל\nשלשים ועל רבעים לשנ' אי ועשה\nחסד לאלפים לאהבי ולשמרי ⟦//⟧\nמצותו :\nלאיכוז לך אלתאכה מן דוני ולא\nתצנע לך פסלא ולא מן כל שבה\nממא פי אלסמא אלתי פיקך וממא\nפי אלארץ̇ אלתי תחתך וממא פי אלמא\nאלדי תחת אלארץ̇ לא תסגד להא ולא\nתעבדהא לאני אללה דבך אלטאיק\nאלמעאקב מטאלב בדגוב אלאבא מע\nאלבנין ואלתואלת ואלרואבע מן שאניי\nומגאזי באלאחסאן לאלוף מן מחביי\nוהאפטי וצאיאי :\nלא תשא את שם יהוה אלהיך\nלשוא כי לא ינקה יהוה את אשר\nישא את שמו לשוא\nד' עשה ב[\n   מן החור לאל מים את ב מל עירה אש\nי\n]ים\nדעל\nהמשנה תורה מצול\nשמו\n\n",
    "onPage": [
     {
      "work": "תנ\"ך, דברים",
      "wid": "w000090",
+     "author": "",
+     "family": "direct",
+     "ctype": "direct_witness",
+     "band": "tier_a",
+     "humanConfirmed": false,
+     "lowCoverage": false,
+     "cov": 50,
+     "letters": 490,
+     "nspans": 2,
+     "offs": "48–327",
+     "others": 2390,
+     "alias": null
+    },
+    {
+     "work": "תנ\"ך, שמות",
+     "wid": "w000087",
      "author": "",
      "family": "direct",
      "ctype": "quotes_this_work",
@@ -1961,44 +1950,34 @@ const PANEL_DATA = {
      "humanConfirmed": false,
      "lowCoverage": false,
      "cov": 45,
-     "letters": 409,
+     "letters": 443,
      "nspans": 3,
-     "offs": "314–467",
-     "others": 2390,
-     "alias": null
-    },
-    {
-     "work": "רס\"ג, דברים תרגום (תפסיר תורה)",
-     "wid": "w000035",
-     "author": "סעדיה גאון (רס\"ג)",
-     "family": "propagated",
-     "ctype": "direct_witness",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "519–677",
-     "others": 247,
+     "offs": "463–674",
+     "others": 2500,
      "alias": null
     }
    ],
    "shares": [],
    "related": 1,
    "hidden": {
-    "short": 3,
-    "gated": 0
+    "short": 0,
+    "gated": 2
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 4
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
-    "claims": 295,
-    "pages": 263,
-    "gatedClaims": 760,
+    "claims": 34,
+    "pages": 34,
+    "gatedClaims": 1022,
     "works": [
      {
       "title": "תנ\"ך, דברים",
-      "pages": 23,
-      "gatedPages": 155,
+      "pages": 9,
+      "gatedPages": 169,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -2014,8 +1993,8 @@ const PANEL_DATA = {
      },
      {
       "title": "תנ\"ך, במדבר",
-      "pages": 32,
-      "gatedPages": 115,
+      "pages": 12,
+      "gatedPages": 135,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -2031,8 +2010,8 @@ const PANEL_DATA = {
      },
      {
       "title": "תנ\"ך, בראשית",
-      "pages": 17,
-      "gatedPages": 114,
+      "pages": 3,
+      "gatedPages": 128,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -2048,25 +2027,8 @@ const PANEL_DATA = {
      },
      {
       "title": "תנ\"ך, שמות",
-      "pages": 12,
-      "gatedPages": 105,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "רס\"ג, דברים תרגום (תפסיר תורה)",
-      "pages": 42,
-      "gatedPages": 46,
+      "pages": 2,
+      "gatedPages": 114,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -2082,8 +2044,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס\"ג, במדבר תרגום (תפסיר תורה)",
-      "pages": 46,
-      "gatedPages": 38,
+      "pages": 1,
+      "gatedPages": 83,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -2100,8 +2062,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס\"ג, בראשית תרגום (תפסיר תורה)",
-      "pages": 46,
-      "gatedPages": 26,
+      "pages": 2,
+      "gatedPages": 70,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -2117,26 +2079,9 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "רס\"ג, שמות תרגום (תפסיר תורה)",
-      "pages": 36,
-      "gatedPages": 19,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
       "title": "תנ\"ך, ויקרא",
-      "pages": 3,
-      "gatedPages": 18,
+      "pages": 2,
+      "gatedPages": 19,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -2151,8 +2096,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס״ג, ויקרא תרגום (תפסיר תורה)",
-      "pages": 10,
-      "gatedPages": 6,
+      "pages": 2,
+      "gatedPages": 14,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -2168,10 +2113,26 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "רס\"ג, שמות פירוש",
+      "title": "רס\"ג, בראשית פירוש",
       "pages": 1,
-      "gatedPages": 11,
+      "gatedPages": 8,
       "gated": false,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "רס\"ג, דברים תרגום (תפסיר תורה)",
+      "pages": 0,
+      "gatedPages": 88,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
@@ -2185,14 +2146,32 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "רס\"ג, בראשית פירוש",
-      "pages": 3,
-      "gatedPages": 6,
-      "gated": false,
+      "title": "רס\"ג, שמות תרגום (תפסיר תורה)",
+      "pages": 0,
+      "gatedPages": 54,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
        "direct_witness",
+       "quotes_this_work",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "רס\"ג, שמות פירוש",
+      "pages": 0,
+      "gatedPages": 12,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work",
        "shared_text"
       ],
       "bands": [
@@ -2202,117 +2181,13 @@ const PANEL_DATA = {
      },
      {
       "title": "תרגום אונקלוס על בראשית",
-      "pages": 9,
-      "gatedPages": 0,
-      "gated": false,
+      "pages": 0,
+      "gatedPages": 9,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
        "direct_witness",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "תנחומא",
-      "pages": 2,
-      "gatedPages": 2,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "תרגום אונקלוס על במדבר",
-      "pages": 3,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "הגדה של פסח",
-      "pages": 2,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "תרגום אונקלוס על דברים",
-      "pages": 3,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "במדבר רבה א-יד",
-      "pages": 2,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "ספרא",
-      "pages": 2,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "תרגום (פסאודו-)יונתן על במדבר",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
        "shared_text"
       ],
       "bands": [
@@ -2335,7 +2210,37 @@ const PANEL_DATA = {
       ]
      },
      {
+      "title": "מדרש לקח טוב על דברים",
+      "pages": 0,
+      "gatedPages": 5,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work"
+      ],
+      "bands": [
+       "track1_direct|tier_a"
+      ]
+     },
+     {
       "title": "פירוש התורה לרשב\"ח",
+      "pages": 0,
+      "gatedPages": 5,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work"
+      ],
+      "bands": [
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "ילקוט שמעוני על התורה",
       "pages": 0,
       "gatedPages": 5,
       "gated": true,
@@ -2395,21 +2300,6 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "מדרש לקח טוב על דברים",
-      "pages": 0,
-      "gatedPages": 4,
-      "gated": true,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work"
-      ],
-      "bands": [
-       "track1_direct|tier_a"
-      ]
-     },
-     {
       "title": "דברי הימים של משה רבנו",
       "pages": 0,
       "gatedPages": 4,
@@ -2425,7 +2315,24 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "ילקוט שמעוני על התורה",
+      "title": "תנחומא",
+      "pages": 0,
+      "gatedPages": 4,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "רמב\"ן על דברים",
       "pages": 0,
       "gatedPages": 4,
       "gated": true,
@@ -2440,14 +2347,13 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "רמב\"ן על דברים",
+      "title": "שערי תשובה",
       "pages": 0,
       "gatedPages": 4,
       "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
-       "direct_witness",
        "quotes_this_work"
       ],
       "bands": [
@@ -2512,17 +2418,48 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "שערי תשובה",
+      "title": "תרגום אונקלוס על במדבר",
       "pages": 0,
       "gatedPages": 3,
       "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
-       "quotes_this_work"
+       "quotes_this_work",
+       "shared_text"
       ],
       "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
+      "title": "הגדה של פסח",
+      "pages": 0,
+      "gatedPages": 3,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
        "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "תרגום אונקלוס על דברים",
+      "pages": 0,
+      "gatedPages": 3,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
       ]
      },
      {
@@ -2723,6 +2660,34 @@ const PANEL_DATA = {
       ]
      },
      {
+      "title": "במדבר רבה א-יד",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
+      "title": "ספרא",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
       "title": "מאור האפלה",
       "pages": 0,
       "gatedPages": 1,
@@ -2903,6 +2868,20 @@ const PANEL_DATA = {
       "bands": [
        "track1_direct|tier_a"
       ]
+     },
+     {
+      "title": "תרגום (פסאודו-)יונתן על במדבר",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
      }
     ]
    },
@@ -2922,10 +2901,10 @@ const PANEL_DATA = {
    "sm": "Ms. EVR II A 118/01",
    "lib": "RNL",
    "cat": "פרוש התורה לרש\"י.",
-   "anchor": "990000852430205171_IE49043068_P000106_FL49044593",
-   "pageNum": "106",
-   "pageLetters": 2071,
-   "pageText": "מסע וכן וילך אלמסעיווכן אלה מסעין לפי שכמקום החנייה ח\nחזח ונסעו ולכך נקראו כוען מסעות\nחסלת אלה פקודי\nלפי שפירשתי מעשה האפוד והחשן פרקים פרקים\nעל פירוש המקראות ויש לשגות כצידופן אני כותב\nמעשיהן יחר : האפור עשוי כמין סינר של עשים רוככות על ⟦ס⟧\nסוסים וחוגרו מאחריו כנגד לכו למטה מאציליו : רחכו כמרת\nרחכ גבו של אדם ויותר ומגיע עד עקיביו והחושן מחוכר כראשו\nעל פני דחכו מעשה אורג ומאריך לכאן ולכאן כדי עלהקיף ולא ⟦ול\nולחגור כו : והכתיפות מחוכרות כחשב אחת לימין ואחת לשמאל\nמאחורי הכהן לשני קצות רחכו על סינר וכשזוקפין עומדות לו על\nשתי כתיפות והן כמין שתי רצועות עשויות מימין האפור ארוכות\nכדי שיעור לזוקפן אצל צוארו מפאן ומכאן ונקפלות לפניו למטה\nמכתפיו מענ . ואכני השוהן קבועות כהן אחת על כתף ⟦אימן וא'\nואחת על כתף שמאאל והמבכצות נתונות כראשיהן לפני כתפיוו\nושתי עכותות הזהב תחוכות כשתי נוכעות שכחשן כשתי קצות\nכחכו העליון אחת לימין ואחת לשמאל ושני ראשיה השרשרות ⟦ת⟧\nתקועין כמשכצות לימז וכן ראשי שרשרות השמאלית תקועין ⟦/⟧\nכמשכצת שככתף שמאל ⟦נמצא⟧ החטן תלוי במשכצת האפור על\nלכו מלפניו : ועוד שתי נוכעות כשני קצות החטן כתחתיתו וכל זמן\nשתי נבעות כשתי נובעות החשן מול טבעות האפור שוככין זה על\nזה ומרכסן כפתיל תכלת תחוב כנובעות האפור והחשן שיהא ⟦/⟧\nתחתית החשן דבוק לחשב האפור ולא יהא נד מאצל לכו של ⟦כ⟧\nכהן ונברל ממנו והולך וחוזר\nאתחיל לכתוב ויקרא\nויקרא אל משה לכל דיברות ולכל אמירות ולכע ציווים\nקדמה קריאה עמדה תורה דרך ארץ שלא ⟦יא⟧\nיאמר אדם לחבירו שום דכר אלא אם כן קורהו תחילה תו' לשון\nחיכה ו לשון שמלאני השרת משמשין כו : ויקרא זה אל זה אכל\nלנכיאי אומות העולם נגלה עליהם כלשון עראי וכלשון כגומאה\nכמו ויקר אלהים כלשון שרומה לו כאילו מדכר עם הטמאו ויקרא\nאל משהו הקול הואלך ומגיע לאוזניו וכל ישר' לא שומעין יכול\nאף להפסקות הייתה קריאה ת'ל' וידכר לדכר הייתה הקראה\nואלא להפסקות ומה היו ההפסקות משמשות ליתן ריוח עמשה ⟦/ל⟧\nלהתכונן כין פרשה לפרשה וכין עניין לעניין קל וחומר להדיונ ⟦ה⟧\nהעמד מהריוט : אליוו למענ את אהרן ו ר' יהודה אומ' שעש עשרה\nדכרות נאמרו כתורה למשה ולאהק וכנגדן נאמרו שלש עטרה\nמיעוטין ללמרך שלא לאהרן נאמרו אלא למשה שיאמר ללאהרן\nואיאלו הן י'ג' מיעוטין ו אלדכר אתו מדם אליו : וידכר אליו : ⟦ונ\nונוערת . לך כו' כתורת כהניםו יכול ישמעו את קול הקריאה תע'\nקול לו קול אליוומשה שמע וכל ישר' לא שמעו . מאהל מועד ⟦מ'⟧\nמלמד שהיה הקול נפסק ולא היה יוצא חוץ לאהלו יכל מפני\nשהיה הקול מ נמוך ת'ל' את הקול הוא הקול המפורש ככתובים\nקאל קול יי ככא קול יי כהרר קול יי שוכר ארזים א'כ' עמיד נאמר\nמאהל מוער מלמד שהיה הקול נפסק ⟦כיוצא⟧ כו וקול כנפי הכרוכים\nנשמע עד החצר החיצונה יכול מפני שהיה הקול נמוך ת'ל' כקול\nאלטרי כדכרו א'כ' למה נאמ' ער החצר החיצונה כיון שמגיע שם\nהיה נפסק : מאהל מוערו לאמח יטל מכל הכת ת'ל' מעל ⟦ה\nהכפורת יכול מעל הכפורת כולה ת'ל' מכין שני הכרוכים : לאמר\nצא ואמור להם דברי כיכושין כשבילכם הוא מדכר עמו ו שכן ⟦מ'⟧\nמצינו שכל שלשים ושמונה שנה שהיו ישר' כמטדין לשמים מן\n\n",
+   "anchor": "990000852430205171_IE49043068_P000037_FL49043555",
+   "pageNum": "37",
+   "pageLetters": 2434,
+   "pageText": "דבר שללה והןכה מידי רצה רעצה אלא שמקצר לשונו . כרהטים\nכמחצת המים בבריכות העשויות כארץ להשקות שם היצאן : אשר\nתכאנה הצאן עשתות שם הציג המקלות לנכח ⟦הצאן⟧ . ויחמנה ככוחן\nעשתותו הכהמה רואה את המקלות והיא נרתעת לאחוריהו והזכר\nרובעה והיא זלרת כיוצא כו : ואני ידיריה הצעיר כל ימי הייתית\nתמיה על התיכה הזאת ו ויחמנה כלשון נקבה ר' אושעי' אומ' המים\nנעשו זרע כמעיהן ולא היו צריכות לזכר וזהו ויחמנה ככואן לשתות\n: אל המקלותו אל מראית המקלות : עקודים ומשונים כמקום עק\nעקירהן הן קרצולי ידיהן ורגעליהן : והכשכים הפריר יעקב הנעדים\nעקודים נקודים הכרען ללעצמן ועושה או תן עדר לכדו ומוליך אותו\nעדר לפני ⟦הצאן⟧ ופני הצאן מהלכות אחריהם צופות אליהן וזהו ⟦ש'⟧\nשאמ' נתן פני הצאן אל עקור שהיו פני ⟦הצאן אל העקורים ואל כל\nחום שמצא כצאן לכן : וישת לו עדרים לכדו כמו שפירשתי : ויצע\nלשון הכרשה וכן כל הצלה שכמקרא לשון הפרשה שמפרשו מן ⟦ה'⟧\nכרעה : הכהושרותו נתרגו' הככירות ו ואין לי עד כמקרא לחוכיח עליו\nומנחם חיכרו אחיהו כל כקושרי' ויהי הקשר ⟦אמץ⟧ ואותן המתקש⟦\nחת יחר למהר עושרו : וכהענוף הצאן ולשון איחור . כתרגו' מנחם ח'⟧\nחיברו עם המחלצות והמעטפות לשון עטיפת נסות כלומ' מתעטפות\nכעורן וצמרן ואינן מתאות להתייחי על ידי זכרים יצאן רכותו פרות\nורבות משאר הצאן : ושפחות ועבדים מוכר צונו כדמים יקרים ולוקח\nכל אלה ו עשה וכינסו כמו ויעשאיל ויך את עמעק : טוב אל ⟦הארץ⟧\nאבותיך ושם אהיה עמך ואכלו בדך מחוכר לטמא אי איפשר להשרות\nשכינת . עליך ו ויקרא לרחל תחילה ואחר כך ללחה שהיא היתה עיקר\nהבית שכשכילה נזרווג יעקב על [ן : ואף כניה של לאה מודים ⟦כ⟧\nכדבר שהר כועז ובית דינו משכנן וה[ ]ה והיו אמרו כרחל וכלאה ⟦א'⟧\nאשר כנו הקרימו רחל ללאה : עשרת מולט נם מסום מעשרה\nמונים ולשון סיכום ו כלים חשכון והן עשירית ולמרנו שהחליו תלחו\nמאה פעמים ו והנה העתורים א'ע'פ' שהכדילן לכן כולב ע שלח\nיתעברו ⟦הצאן⟧ רוגמתן היו מלאכי השרת מביאין אותן מערר המסור\nכיר בני לכן לעדר שכיר יעקב : וכרורים כתרגו ופציחין חונו של ⟦ל⟧\nלכן מקיף את גופו סכיב חכרכורות שלו פתוחה ומכולש מזו אל\nזו ואין עלי להביא ער מין המקרא : האל כיתאל כמו אל כיתאל ⟦ה'⟧\nיתירה ודרך המקראות לדכר כן כמו כי אתם באים אל הארץ כנען :\nאשר משחת שם מצכה לשון שכח וגדולה כנמשח למלכות כך ויצוק\nשמן על ראשה להיות משוח למזכח . אשר נדרת לי וצריך אתה ⟦/⟧\nלשמרו שאמרת יהיה בית אלהים וכיתאל שתקריב שם קרכנות:\nהעוד לנו חלק ונחלה למה נעקב על יריך כלום אין אנו מייחלות ⟦ע⟧\nלירש כניכסי אבינו כלום בין הזכרים : הלא נוכריות נחשכנו חפי' ⟦ב⟧\nבשעה שדרך כני ארם לתת נרוניא לכנותיו בשעת נשואים נריג עימנו\nכנוכריות : כי מכרנו שעברת אותנו ארבע עשרה שנה ולא נתננו לך\nאלח כשכר פעולה : את כספיט ו שעינב את כספינ כשנה פעולתך\nוכי כל הענשרו כי משמש כלשון אלח כלומ משל אבינו אין לנו כלום\nאלא שהציל הק' מאכינו שלנו הוא : הצולה לשוך הפרשה וכן כל הצלה\nשכמקרא לשון הפרשה שמפרישו מן הרעה ומן בחוב ואת כעו ⟦ו⟧\nואת נשיו הקרים זכרים לנקבות ועשו הקדים נקיבות לזכרים ⟦שנ'\nויקח עשו את נשיו ואת כניו ואת כנותיו ומקנה קניינו ומה שקנה\nמצאטו עבדים וטפחות גמלים ואמורים ו לגזוז את צאנו ושנתן כיר\nכנין ו דרך שלשת ימים בינו ובין יעקבנו ותגנוב רחל את התרפים ⟦/ל⟧\nלהפריש את אביה מעז' נתכוונה [ת התרפים שלא יגירו עלכן\nבריחותו אם ישאל כהן : כדכת' אי אפור ותרפים : מתרגמי' לית כמחזי\nתוספ'ו ומה הן התרפים שוחט אדם ככור וחותכין ראשו ומולחין\nאותו כמלח וכשמים ועת בין על צי הזהב שם רוח טומאה ומ⟧\nומניחין חוצו תחת עשונו ונותנין אותו כקיר ומדליקין לבניו ⟦ומ'⟧\nומשתחוום לו והוא מדכר עמהם ומניין שהתרפים מדברים שנ פי\n\n",
    "onPage": [
     {
      "work": "רש\"י על התורה",
@@ -2937,76 +2916,67 @@ const PANEL_DATA = {
      "humanConfirmed": false,
      "lowCoverage": false,
      "cov": 91,
-     "letters": 1887,
-     "nspans": 2,
-     "offs": "1114–2071",
+     "letters": 2217,
+     "nspans": 1,
+     "offs": "0–2217",
      "others": 579,
      "alias": null
     },
     {
-     "work": "ראב\"ש, שמואל א פירוש",
-     "wid": "w000046",
-     "author": "ראב\"ש",
+     "work": "רש\"י על בראשית",
+     "wid": "w001281",
+     "author": "שלמה בן יצחק (רש״י)",
      "family": "propagated",
      "ctype": "quotes_this_work",
-     "band": "not_evaluated",
+     "band": "corroborated",
      "humanConfirmed": false,
      "lowCoverage": false,
      "cov": null,
      "letters": null,
      "nspans": null,
-     "offs": "64–720",
-     "others": 55,
-     "alias": null
-    },
-    {
-     "work": "רש\"י על שמות",
-     "wid": "w001278",
-     "author": "שלמה בן יצחק (רש״י)",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "72–720",
-     "others": 139,
-     "alias": null
-    },
-    {
-     "work": "רש\"י על ויקרא",
-     "wid": "w001299",
-     "author": "שלמה בן יצחק (רש״י)",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "1205–1565",
-     "others": 80,
+     "offs": "1217–1755",
+     "others": 188,
      "alias": null
     }
    ],
    "shares": [],
-   "related": 5,
+   "related": 2,
    "hidden": {
     "short": 1,
     "gated": 0
    },
+   "onPageNow": [
+    {
+     "work": "רש\"י על בראשית",
+     "wid": "w001281",
+     "author": "שלמה בן יצחק (רש״י)",
+     "family": "propagated",
+     "ctype": "quotes_this_work",
+     "band": "corroborated",
+     "humanConfirmed": false,
+     "lowCoverage": false,
+     "cov": null,
+     "letters": null,
+     "nspans": null,
+     "offs": "1217–1755",
+     "others": 188,
+     "alias": null
+    }
+   ],
+   "hiddenNow": {
+    "short": 1,
+    "gated": 1
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
-    "claims": 244,
-    "pages": 128,
-    "gatedClaims": 25,
+    "claims": 157,
+    "pages": 117,
+    "gatedClaims": 114,
     "works": [
      {
       "title": "רש\"י על התורה",
-      "pages": 125,
-      "gatedPages": 3,
+      "pages": 108,
+      "gatedPages": 20,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -3023,8 +2993,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רש\"י על שמות",
-      "pages": 48,
-      "gatedPages": 1,
+      "pages": 17,
+      "gatedPages": 33,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -3041,8 +3011,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רש\"י על בראשית",
-      "pages": 40,
-      "gatedPages": 3,
+      "pages": 17,
+      "gatedPages": 25,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -3060,8 +3030,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רש\"י על ויקרא",
-      "pages": 21,
-      "gatedPages": 0,
+      "pages": 14,
+      "gatedPages": 8,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -3072,39 +3042,6 @@ const PANEL_DATA = {
       ],
       "bands": [
        "propagated|corroborated",
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "רמב\"ן על בראשית",
-      "pages": 1,
-      "gatedPages": 7,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "רמב\"ן על שמות",
-      "pages": 4,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
        "propagated|not_evaluated",
        "track1_direct|tier_a"
       ]
@@ -3125,27 +3062,61 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "פירוש המשנה, קדשים",
-      "pages": 2,
-      "gatedPages": 0,
-      "gated": false,
+      "title": "רמב\"ן על בראשית",
+      "pages": 0,
+      "gatedPages": 8,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
+       "direct_witness",
+       "quotes_this_work",
        "shared_text"
       ],
       "bands": [
-       "propagated|not_evaluated"
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "רמב\"ן על שמות",
+      "pages": 0,
+      "gatedPages": 5,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "ילקוט שמעוני על התורה",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work"
+      ],
+      "bands": [
+       "track1_direct|tier_a"
       ]
      },
      {
       "title": "ראב\"ש, שמואל א פירוש",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
+       "quotes_this_work",
        "shared_text"
       ],
       "bands": [
@@ -3164,6 +3135,20 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "פירוש המשנה, קדשים",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
       ]
      },
      {
@@ -3209,34 +3194,6 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "תנחומא",
-      "pages": 0,
-      "gatedPages": 1,
-      "gated": true,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work"
-      ],
-      "bands": [
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "ילקוט שמעוני על התורה",
-      "pages": 0,
-      "gatedPages": 1,
-      "gated": true,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work"
-      ],
-      "bands": [
-       "track1_direct|tier_a"
-      ]
-     },
-     {
       "title": "ספרא",
       "pages": 0,
       "gatedPages": 1,
@@ -3268,70 +3225,60 @@ const PANEL_DATA = {
    "sm": "The National Library of Russia Box N.14",
    "lib": "RNL",
    "cat": "מאמר בסימני עוף : ; בערבית יהודית.",
-   "anchor": "997012160770405171_IE50232361_P000144_FL50232506",
-   "pageNum": "144",
-   "pageLetters": 671,
-   "pageText": "מכפנים אבינו אות אחת הר אול\nמנהג כשוט שכותבין על יומהוה מבחוץ עגו\nהדיום שבין פרשה לפרשה שדי ואין בזה הכסר לי\nמבחוץ אבל אילו שכותבין בה בפנים שנען המלאני\nאו שמות קדושים או פסוק או ה תמנה הריזן מכלל\nמי שאין לו חזלה לעולם הבין שאילו הטפשים לא [\nלהם שבטלו המצוה אלא שעושין מצוה גדולה שהיא\nייחוד שמו שלהקכה ואהבתו וערודת כאילו היא קמע\nלהנה עצמן כיו טעלה בלל בן הסכל שוה דבר המהנ\nבהבלי העולם ומצוה לכתוב על הארץ בשעה\nאחרונה בין בראש האה בין באמצע הט[ ]טה ונהגו\nכל הסופרים לבתובאותה בעשרים ושתים שוטות\nועל הארץ בראש שיטה אחרונה ואילוהן האודטה\nשבראש כל שטה ושטה על הסדרי שמע ייי אלידברי\nלבניך ובשכבך בין והיה מצוה בכלי יורה עשבי\nפו והשתחויהם השמים ואכרתסי ושמתם אהם אהם\nבדרך ובשעריך אשרי על הארץ כשכופלין אותה\nגוללין אותה מסוף השיטה לתחלתה עז שהמצא\nכש יפתח הקורא לקרות יקרא מראש השטה לסופה\nואחר שגול לה מכניסה בשפופרת שלקנה או טל עץ\nאו ש↑ לכל דבר\n\n",
+   "anchor": "997012160770405171_IE50232361_P000128_FL50232490",
+   "pageNum": "128",
+   "pageLetters": 892,
+   "pageText": "דמות אדם להנה: ורגליהם רגל ישרה וכף\nבכף רגל עגל ונוצצים כעין נחשת קלל : וארא\nכעין חשמל פמראה אש בית לה סביב ממראה\nמתניו ולמעלה וממראה מתניו ולמאה ראותו\nכמראה אש ונוגה לו סביב : פמראה הקשת\nאשר יהיה בענן ביום הנשם כן מראה הנוגה\nסביב הוא מראה כבוד ינו' ואראה ואפול על פני\nואשמע קול מדבר : ויאמר לי בן אדם עמוד\nעל ראלך ואדבר אותך : ותבוא בי רוח כאשר\nדבר אלי ותעמידני על רגלי ואשמע את קול\nמדבר אלי: ותשאני רוח ואשמע אחרי קול רעש\nגדול ברוך כבוד יצי ממקומו : וקול כנפי\nהחיות משיקות אשה אלאחותה וקול האופנים\nלעומתם וקול חעש גדול: וקול כנפי הכרובים\nנממיב עד החצר החיצונה כקול אלשרי בדברו\nהים\nהדברים\nאלהם בקודש דרכך מי אלגדול כלהים : את\nהלה דבר צ̇י אלכל קהלכם בהר מתוך האש הענן\nוהערפל קול גדול ולא יתף ויכתבם על שני\nלוחות אבנים ויתנם אלי : ויהי כשמעכם את\nהקול מתוך החשך וההר בוער באש ותקרבון\nאלי כל ראשי שבטיכם וזקניכם : ותאמרו הן\nהראנו יצי אלהינו את כבודו ואת גדל ואת קול\nשמענו מתוך האש היום הזה ראינו פי ידבר\nאלהים את האדם וחיו כי שלנא לימים ראשונים\nאשר היו לפניך למן היום אשר ברא אלהים\nאדם על הארץ ולמקצה השמים ועד קלה\nהשמים הנהיה כדבר הגדול הזה או הנשמע\nכמוהו : השמע עם קול אלהים מדבר\nמתוך האש כאשר שמעת אתה ויחי : כי\nמי כל בשר אשר שמע קול להים חיים\n\n",
    "onPage": [
     {
-     "work": "משנה תורה, ספר אהבה",
-     "wid": "w000176",
-     "author": "משה בן מימון (רמב״ם)",
+     "work": "תנ\"ך, דברים",
+     "wid": "w000090",
+     "author": "",
      "family": "direct",
      "ctype": "direct_witness",
      "band": "tier_a",
      "humanConfirmed": false,
      "lowCoverage": false,
-     "cov": 100,
-     "letters": 671,
+     "cov": 46,
+     "letters": 413,
      "nspans": 1,
-     "offs": "0–671",
-     "others": 2653,
+     "offs": "471–884",
+     "others": 2390,
      "alias": null
     },
     {
-     "work": "הלכות קטנות לרי\"ף (מנחות)",
-     "wid": "w001321",
-     "author": "יצחק אלפסי",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "253–587",
-     "others": 50,
-     "alias": null
-    },
-    {
-     "work": "הלכות קצובות",
-     "wid": "w001014",
+     "work": "תנ\"ך, יחזקאל",
+     "wid": "w000099",
      "author": "",
-     "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
+     "family": "direct",
+     "ctype": "quotes_this_work",
+     "band": "tier_a",
      "humanConfirmed": false,
      "lowCoverage": false,
-     "cov": null,
-     "letters": null,
-     "nspans": null,
-     "offs": "402–671",
-     "others": 31,
+     "cov": 45,
+     "letters": 402,
+     "nspans": 1,
+     "offs": "26–428",
+     "others": 992,
      "alias": null
     }
    ],
    "shares": [],
-   "related": 4,
+   "related": 0,
    "hidden": {
     "short": 0,
-    "gated": 0
+    "gated": 1
    },
+   "onPageNow": [],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 3
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
-    "claims": 66,
-    "pages": 61,
-    "gatedClaims": 136,
+    "claims": 49,
+    "pages": 48,
+    "gatedClaims": 153,
     "works": [
      {
       "title": "תנ\"ך, תהלים",
@@ -3350,8 +3297,8 @@ const PANEL_DATA = {
      },
      {
       "title": "תנ\"ך, ישעיהו",
-      "pages": 4,
-      "gatedPages": 10,
+      "pages": 3,
+      "gatedPages": 11,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -3367,8 +3314,8 @@ const PANEL_DATA = {
      },
      {
       "title": "תנ\"ך, יחזקאל",
-      "pages": 4,
-      "gatedPages": 8,
+      "pages": 1,
+      "gatedPages": 10,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -3383,7 +3330,7 @@ const PANEL_DATA = {
      },
      {
       "title": "תנ\"ך, דברים",
-      "pages": 4,
+      "pages": 3,
       "gatedPages": 7,
       "gated": false,
       "lowcov": false,
@@ -3397,24 +3344,8 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "תנ\"ך, בראשית",
-      "pages": 4,
-      "gatedPages": 3,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
       "title": "משנה תורה, ספר אהבה",
-      "pages": 4,
+      "pages": 5,
       "gatedPages": 2,
       "gated": false,
       "lowcov": false,
@@ -3428,16 +3359,15 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "תנחומא",
-      "pages": 4,
-      "gatedPages": 2,
+      "title": "תנ\"ך, בראשית",
+      "pages": 3,
+      "gatedPages": 4,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
        "direct_witness",
-       "quotes_this_work",
-       "shared_text"
+       "quotes_this_work"
       ],
       "bands": [
        "propagated|not_evaluated",
@@ -3476,8 +3406,8 @@ const PANEL_DATA = {
      },
      {
       "title": "תנ\"ך, דברי הימים ב",
-      "pages": 2,
-      "gatedPages": 3,
+      "pages": 1,
+      "gatedPages": 4,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -3492,30 +3422,13 @@ const PANEL_DATA = {
      },
      {
       "title": "משנה תורה, ספר זמנים",
-      "pages": 4,
-      "gatedPages": 1,
+      "pages": 3,
+      "gatedPages": 2,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
        "direct_witness",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "טור אורח חיים",
-      "pages": 1,
-      "gatedPages": 3,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work",
        "shared_text"
       ],
       "bands": [
@@ -3567,37 +3480,6 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "תנ\"ך, מיכה",
-      "pages": 1,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "הגדה של פסח",
-      "pages": 1,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
       "title": "תנ\"ך, הושע",
       "pages": 1,
       "gatedPages": 1,
@@ -3627,20 +3509,6 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "פסיקתא דרב כהנא",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
       "title": "הלכות הרי\"ף (שבת)",
       "pages": 1,
       "gatedPages": 0,
@@ -3666,20 +3534,6 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "תנ\"ך, איוב",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
       ]
      },
      {
@@ -3726,6 +3580,23 @@ const PANEL_DATA = {
       ]
      },
      {
+      "title": "תנחומא",
+      "pages": 0,
+      "gatedPages": 6,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
       "title": "תלמוד בבלי, שבת",
       "pages": 0,
       "gatedPages": 4,
@@ -3737,6 +3608,23 @@ const PANEL_DATA = {
        "quotes_this_work"
       ],
       "bands": [
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "טור אורח חיים",
+      "pages": 0,
+      "gatedPages": 4,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
        "track1_direct|tier_a"
       ]
      },
@@ -3860,16 +3748,33 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "רמב\"ן על שמות",
+      "title": "תנ\"ך, מיכה",
       "pages": 0,
       "gatedPages": 2,
       "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
-       "quotes_this_work"
+       "direct_witness"
       ],
       "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "הגדה של פסח",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
        "track1_direct|tier_a"
       ]
      },
@@ -3899,6 +3804,20 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "פסיקתא דרב כהנא",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
       ]
      },
      {
@@ -4098,6 +4017,20 @@ const PANEL_DATA = {
       ]
      },
      {
+      "title": "רמב\"ן על שמות",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work"
+      ],
+      "bands": [
+       "track1_direct|tier_a"
+      ]
+     },
+     {
       "title": "ילקוט שמעוני על נ\"ך",
       "pages": 0,
       "gatedPages": 1,
@@ -4109,6 +4042,20 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "תנ\"ך, איוב",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
       ]
      },
      {
@@ -4194,6 +4141,34 @@ const PANEL_DATA = {
       "bands": [
        "track1_direct|tier_a"
       ]
+     },
+     {
+      "title": "הלכות קטנות לרי\"ף (מנחות)",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
+      "title": "הלכות קצובות",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
      }
     ]
    },
@@ -4257,15 +4232,38 @@ const PANEL_DATA = {
     "short": 0,
     "gated": 0
    },
+   "onPageNow": [
+    {
+     "work": "רס\"ג, ישעיה תרגום",
+     "wid": "w000073",
+     "author": "סעדיה גאון (רס\"ג)",
+     "family": "propagated",
+     "ctype": "direct_witness",
+     "band": "corroborated",
+     "humanConfirmed": false,
+     "lowCoverage": false,
+     "cov": null,
+     "letters": null,
+     "nspans": null,
+     "offs": "543–1099",
+     "others": 150,
+     "alias": null
+    }
+   ],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 1
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
-    "claims": 62,
-    "pages": 53,
-    "gatedClaims": 6,
+    "claims": 38,
+    "pages": 36,
+    "gatedClaims": 30,
     "works": [
      {
       "title": "רס\"ג, בראשית תרגום (תפסיר תורה)",
-      "pages": 10,
-      "gatedPages": 0,
+      "pages": 3,
+      "gatedPages": 7,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4280,8 +4278,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס\"ג, משלי: תרגום (ספר דרישת החכמה)",
-      "pages": 9,
-      "gatedPages": 0,
+      "pages": 8,
+      "gatedPages": 1,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4297,8 +4295,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס\"ג, איכה תרגום",
-      "pages": 7,
-      "gatedPages": 0,
+      "pages": 6,
+      "gatedPages": 1,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4328,8 +4326,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס״ג, ויקרא תרגום (תפסיר תורה)",
-      "pages": 5,
-      "gatedPages": 0,
+      "pages": 2,
+      "gatedPages": 3,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4344,8 +4342,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס\"ג, במדבר תרגום (תפסיר תורה)",
-      "pages": 4,
-      "gatedPages": 0,
+      "pages": 3,
+      "gatedPages": 1,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4359,8 +4357,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס\"ג, ישעיה תרגום",
-      "pages": 3,
-      "gatedPages": 0,
+      "pages": 2,
+      "gatedPages": 1,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4376,8 +4374,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס״ג, ישעיהו פירוש",
-      "pages": 2,
-      "gatedPages": 1,
+      "pages": 1,
+      "gatedPages": 2,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4393,8 +4391,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס\"ג, תהלים תרגום",
-      "pages": 3,
-      "gatedPages": 0,
+      "pages": 2,
+      "gatedPages": 1,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4409,8 +4407,8 @@ const PANEL_DATA = {
      },
      {
       "title": "רס\"ג, משלי: פירוש (ספר דרישת החכמה)",
-      "pages": 3,
-      "gatedPages": 0,
+      "pages": 2,
+      "gatedPages": 1,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4420,37 +4418,6 @@ const PANEL_DATA = {
       "bands": [
        "propagated|not_evaluated",
        "propagated|weak",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "רס\"ג, שמות תרגום (תפסיר תורה)",
-      "pages": 3,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "רס\"ג, בראשית פירוש",
-      "pages": 1,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
        "track1_direct|tier_a"
       ]
      },
@@ -4469,13 +4436,14 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "רס\"ג, דברים תרגום (תפסיר תורה)",
-      "pages": 2,
-      "gatedPages": 0,
-      "gated": false,
+      "title": "רס\"ג, שמות תרגום (תפסיר תורה)",
+      "pages": 0,
+      "gatedPages": 3,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
+       "direct_witness",
        "shared_text"
       ],
       "bands": [
@@ -4483,17 +4451,19 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "רס\"ג, תהלים פירוש",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
+      "title": "רס\"ג, בראשית פירוש",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
       "lowcov": false,
       "humanConfirmed": false,
       "ctypes": [
-       "direct_witness"
+       "direct_witness",
+       "quotes_this_work"
       ],
       "bands": [
-       "propagated|not_evaluated"
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
       ]
      },
      {
@@ -4508,6 +4478,20 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "רס\"ג, דברים תרגום (תפסיר תורה)",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
       ]
      },
      {
@@ -4537,6 +4521,20 @@ const PANEL_DATA = {
       "bands": [
        "track1_direct|tier_a"
       ]
+     },
+     {
+      "title": "רס\"ג, תהלים פירוש",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
      }
     ]
    },
@@ -4556,87 +4554,77 @@ const PANEL_DATA = {
    "sm": "Cambridge University Library Ms. T-S Misc. 34.2",
    "lib": "CUL",
    "cat": "פיוט;שירת חול;תפילה וברכות. ; Liturgy and Brakhot ; תפילה וברכות",
-   "anchor": "990051381880205171_IE159263815_P000142_FL159264087",
-   "pageNum": "142",
-   "pageLetters": 846,
-   "pageText": "ד' מנחה לשבת\nבאמת והנחילנו יי אלהינו באהבה וברצון וטובות\nשבת קדשך וינוחו בה ישראל מקדשי שמך\nברוך אתה יי מקדש השבת :\nועל כלב\nרצה יי אלהינו בעמך ישראל ובתפלתם .\nוהשב את העבודה לדביר ביתך ואשי\nישראל ותפלתם באהבה תקבל ברצון ותהי\nלרצון תמיד עבודת ישראל עמך :\nשים ש[\nמט ראש חדש מונר חח' מ' והגט אמן יעלה ויבא :\nורחמים\nאלהינו ואלהי אבותינו יעלה ויבא ויגיע ויראה וירצה\nברכנו א\nוישמע ויפקד ויזכר זכרגנו ופקדגנו וזכרון אבותינו .\nכי באו\nוזכרון משיח בן דוד עבדך . וזכרון ירושלים עיר קדשך :\nתורת\nוברכה\nוזכרון כל עמך בית ישראל לפניך . לפלטה לטובה נעיניך\nלהן ולחסר ולרחמים לחיים ולשלום ביום עת ובל\nנרח ראש החדש ו לכסו חג המצות לסכוי חג המכות\nהזה זכרנו יי אלהינו כן לטובה ופקדנו בו לברכה והושיענו.\nבו לחיים ובדבר ישועה ורחמים חוס וחגנו ורחם עלינו\nיהושיענו כי אליך עינינו . כי אל מלך חגון ורחום אתה :\nותחזינה עינינו בשובך לציון ברחמים . ברוך\nאתה יי המחזיר שכינתו לציון :\nמודים אנחנו לך שאתה הוא יי אלהינו ואלהי אבותינו\nלעולם ועד צור חיינו מנן ישענו אתה הוא לדור ודור נודה\nלך ונספר תהלתך על חיינו המסורים בידך ועל נשמתינו\nהפקודות לך . ועל נסיך שבכל יום עמנו ועל נפלאותיך\nוטובותיך\nהום\nרחמיך\nלהר\n\n",
+   "anchor": "990051381880205171_IE159263815_P000173_FL159264179",
+   "pageNum": "173",
+   "pageLetters": 1003,
+   "pageText": "פרק ששי צב\nתוכהו\nואומר והפרה הלבנה ובושה החמה כי מלך יי צבאות\nדו ואינ\nבהר ציון ובירושלים ונגד זקניו כבוד : רבי שמעון בן\nכף זכור\nמנסיא אומר אלו שבע מדות שמנו חכמים לצדיקים\nישב לב\nכלם נתקימו ברבי ובבניו : . אמר רבי יוסי בן קסמא\nומוסי\nפעם אחת הייתי מהלך בדרך ופגע כי אדם אחר ונתך\nלעשור\nלי שלום והחזרתי לו שלום אמר לי רבי מאיזה מקום\nומר דבר\nאתה אמרתי לו מעיר גדולה של חכמים ושל סופרים\nם אומר\nאני אמר לי רבי רצונך שתדור עמנו במקומנו ואני אתן\nלך בשב\nלך אלף אלפים דינרי זהב ואבנים טובות ומרגליות\nעושיר\nאמרתי לו אם אתה נותן לי כל כסף וזהב ואבנים טובות\nמצאיהם\nומרגליות שבעולם איני דר אלא במקום תורה וכן כתוב\nרך ושקו\nבספר תהלים על ידי דוד מלך ישראל טוב לי תורת פיך\nה ותמכין\nמאלפי זהב וכסף : ולא עוד שבשעת פטירתו של אדם\nנרגרתין\nאין מלוין לו לאדם לא כסף ולא זהב ולא אבנים טובות\nתתמגג\nומרגליות אלא תורה ומעשים טובים בלבד שנאמר\nבך\nם : ואומ\nבהתהלכך תנחה אתך בשכבך תשמור עליך והקיצות\nואומר [\nהיא תשיחך : בהתהלכך תנחה אתך כעולם הזה\nרבי שמע\nבשכבך תשמור עליך בקבר והקיצות היא תשיחך\nהנוי והכ\nלעולם הבא . ואומר לי הכסף ולי הזהב נאם יי צבאות :\nבנים נא\nארבעה יחמשה קנינים קנהילו הקדוש ברוך הוא בעולמו\nרת שיב\nואלו הן . תורה קנין אחד שמים וארץ קנין אחד\nירים כהר\nואברהם קנין אחר ישראל קנין אחד בית המקדש קנין\nםעשרם : אחד : תורה מנין דכתיב יי קנני ראשית דרכו קדם\nם אבותם\nמפעליו מאז : שמים וארץ מנין דכתיב וכה אמר ::\n\n",
    "onPage": [
     {
-     "work": "עמידה לשבת (ערבית)",
-     "wid": "w001153",
-     "author": "",
+     "work": "פירוש אבות לדוד הנגיד",
+     "wid": "w001135",
+     "author": "דוד בן יהושע הנגיד",
      "family": "direct",
      "ctype": "direct_witness",
      "band": "tier_a",
      "humanConfirmed": false,
      "lowCoverage": false,
-     "cov": 100,
-     "letters": 846,
+     "cov": 86,
+     "letters": 866,
      "nspans": 1,
-     "offs": "0–846",
-     "others": 441,
+     "offs": "137–1003",
+     "others": 179,
      "alias": null
     },
     {
-     "work": "הגדה של פסח",
-     "wid": "w001159",
-     "author": "",
-     "family": "direct",
-     "ctype": "quotes_this_work",
-     "band": "tier_a",
-     "humanConfirmed": false,
-     "lowCoverage": false,
-     "cov": 47,
-     "letters": 398,
-     "nspans": 1,
-     "offs": "234–632",
-     "others": 1077,
-     "alias": null
-    },
-    {
-     "work": "ברכת המזון",
-     "wid": "w001158",
+     "work": "קניין תורה",
+     "wid": "w000775",
      "author": "",
      "family": "propagated",
-     "ctype": "shared_text",
-     "band": "not_evaluated",
+     "ctype": "quotes_this_work",
+     "band": "weak",
      "humanConfirmed": false,
      "lowCoverage": false,
      "cov": null,
      "letters": null,
      "nspans": null,
-     "offs": "377–596",
-     "others": 297,
+     "offs": "137–352",
+     "others": 62,
      "alias": null
     }
    ],
-   "shares": [
-    {
-     "offs": "78–846",
-     "letters": 768,
-     "works": [
-      "עמידה לחול (שחרית)",
-      "עמידה לחול (ערבית)"
-     ]
-    },
-    {
-     "offs": "598–846",
-     "letters": 472,
-     "works": [
-      "עמידה לשבת (שחרית)",
-      "עמידה למוסף שבת"
-     ]
-    }
-   ],
-   "related": 7,
+   "shares": [],
+   "related": 1,
    "hidden": {
     "short": 0,
     "gated": 0
    },
+   "onPageNow": [
+    {
+     "work": "קניין תורה",
+     "wid": "w000775",
+     "author": "",
+     "family": "propagated",
+     "ctype": "quotes_this_work",
+     "band": "weak",
+     "humanConfirmed": false,
+     "lowCoverage": false,
+     "cov": null,
+     "letters": null,
+     "nspans": null,
+     "offs": "137–352",
+     "others": 62,
+     "alias": null
+    }
+   ],
+   "hiddenNow": {
+    "short": 0,
+    "gated": 1
+   },
+   "tierAAuthorizedToday": false,
    "elsewhere": {
-    "claims": 280,
-    "pages": 156,
-    "gatedClaims": 169,
+    "claims": 182,
+    "pages": 126,
+    "gatedClaims": 272,
     "works": [
      {
       "title": "תנ\"ך, תהלים",
@@ -4655,8 +4643,8 @@ const PANEL_DATA = {
      },
      {
       "title": "עמידה למוסף שבת",
-      "pages": 24,
-      "gatedPages": 13,
+      "pages": 12,
+      "gatedPages": 26,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4672,8 +4660,8 @@ const PANEL_DATA = {
      },
      {
       "title": "עמידה לחול (ערבית)",
-      "pages": 26,
-      "gatedPages": 9,
+      "pages": 16,
+      "gatedPages": 20,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4683,32 +4671,14 @@ const PANEL_DATA = {
        "shared_text"
       ],
       "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "משנה תורה, ספר אהבה",
-      "pages": 20,
-      "gatedPages": 14,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|corroborated",
        "propagated|not_evaluated",
        "track1_direct|tier_a"
       ]
      },
      {
       "title": "עמידה לחול (שחרית)",
-      "pages": 25,
-      "gatedPages": 9,
+      "pages": 19,
+      "gatedPages": 16,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4724,8 +4694,8 @@ const PANEL_DATA = {
      },
      {
       "title": "עמידה לשבת (ערבית)",
-      "pages": 23,
-      "gatedPages": 11,
+      "pages": 12,
+      "gatedPages": 23,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4740,9 +4710,27 @@ const PANEL_DATA = {
       ]
      },
      {
+      "title": "משנה תורה, ספר אהבה",
+      "pages": 10,
+      "gatedPages": 24,
+      "gated": false,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|corroborated",
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
       "title": "עמידה לשבת (שחרית)",
-      "pages": 22,
-      "gatedPages": 11,
+      "pages": 12,
+      "gatedPages": 22,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4758,8 +4746,8 @@ const PANEL_DATA = {
      },
      {
       "title": "פירוש אבות לדוד הנגיד",
-      "pages": 15,
-      "gatedPages": 8,
+      "pages": 11,
+      "gatedPages": 11,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4775,8 +4763,8 @@ const PANEL_DATA = {
      },
      {
       "title": "הגדה של פסח",
-      "pages": 14,
-      "gatedPages": 5,
+      "pages": 4,
+      "gatedPages": 16,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4792,8 +4780,8 @@ const PANEL_DATA = {
      },
      {
       "title": "ברכות שמע לערבית חול",
-      "pages": 14,
-      "gatedPages": 3,
+      "pages": 11,
+      "gatedPages": 6,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4824,8 +4812,8 @@ const PANEL_DATA = {
      },
      {
       "title": "ברכות שמע לערבית שבת",
-      "pages": 11,
-      "gatedPages": 3,
+      "pages": 8,
+      "gatedPages": 6,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4841,8 +4829,8 @@ const PANEL_DATA = {
      },
      {
       "title": "ברכות שמע לשחרית חול",
-      "pages": 8,
-      "gatedPages": 5,
+      "pages": 7,
+      "gatedPages": 6,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4872,8 +4860,8 @@ const PANEL_DATA = {
      },
      {
       "title": "תנ\"ך, שמות",
-      "pages": 5,
-      "gatedPages": 3,
+      "pages": 4,
+      "gatedPages": 4,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4889,8 +4877,8 @@ const PANEL_DATA = {
      },
      {
       "title": "טור אורח חיים",
-      "pages": 3,
-      "gatedPages": 5,
+      "pages": 1,
+      "gatedPages": 7,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4934,57 +4922,9 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "ברכת המזון",
-      "pages": 3,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "תנ\"ך, ישעיהו",
-      "pages": 1,
-      "gatedPages": 3,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "קניין תורה",
-      "pages": 4,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work",
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "propagated|weak"
-      ]
-     },
-     {
       "title": "תרגום יונתן על ישעיהו",
-      "pages": 3,
-      "gatedPages": 0,
+      "pages": 1,
+      "gatedPages": 2,
       "gated": false,
       "lowcov": false,
       "humanConfirmed": false,
@@ -4995,37 +4935,6 @@ const PANEL_DATA = {
       "bands": [
        "propagated|corroborated",
        "propagated|not_evaluated"
-      ]
-     },
-     {
-      "title": "תלמוד ירושלמי, ברכות",
-      "pages": 1,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
-      ]
-     },
-     {
-      "title": "מסכת סופרים",
-      "pages": 1,
-      "gatedPages": 1,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "direct_witness",
-       "quotes_this_work"
-      ],
-      "bands": [
-       "propagated|not_evaluated",
-       "track1_direct|tier_a"
       ]
      },
      {
@@ -5071,20 +4980,6 @@ const PANEL_DATA = {
       ]
      },
      {
-      "title": "תוספות למשנה",
-      "pages": 1,
-      "gatedPages": 0,
-      "gated": false,
-      "lowcov": false,
-      "humanConfirmed": false,
-      "ctypes": [
-       "shared_text"
-      ],
-      "bands": [
-       "propagated|not_evaluated"
-      ]
-     },
-     {
       "title": "תנ\"ך, במדבר",
       "pages": 0,
       "gatedPages": 6,
@@ -5095,6 +4990,38 @@ const PANEL_DATA = {
        "quotes_this_work"
       ],
       "bands": [
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "ברכת המזון",
+      "pages": 0,
+      "gatedPages": 5,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "תנ\"ך, ישעיהו",
+      "pages": 0,
+      "gatedPages": 4,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
        "track1_direct|tier_a"
       ]
      },
@@ -5110,6 +5037,51 @@ const PANEL_DATA = {
        "quotes_this_work"
       ],
       "bands": [
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "קניין תורה",
+      "pages": 0,
+      "gatedPages": 3,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
+      ]
+     },
+     {
+      "title": "תלמוד ירושלמי, ברכות",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "quotes_this_work"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
+       "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "מסכת סופרים",
+      "pages": 0,
+      "gatedPages": 2,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "direct_witness",
+       "quotes_this_work"
+      ],
+      "bands": [
+       "propagated|not_evaluated",
        "track1_direct|tier_a"
       ]
      },
@@ -5433,6 +5405,20 @@ const PANEL_DATA = {
       ],
       "bands": [
        "track1_direct|tier_a"
+      ]
+     },
+     {
+      "title": "תוספות למשנה",
+      "pages": 0,
+      "gatedPages": 1,
+      "gated": true,
+      "lowcov": false,
+      "humanConfirmed": false,
+      "ctypes": [
+       "shared_text"
+      ],
+      "bands": [
+       "propagated|not_evaluated"
       ]
      }
     ]

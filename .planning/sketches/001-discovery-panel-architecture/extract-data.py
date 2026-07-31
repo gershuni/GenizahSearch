@@ -71,16 +71,42 @@ def same_work_different_granularity(a, b):
 def title_of(r):
     return r['canon_title'] or r['neutral_title']
 
-def visible_by_default(r):
+# --- discovery-band-labels-v1.md §4, implemented exactly as
+# shared/discovery_band_labels.py::is_default_eligible does. Two corrections to
+# the first cut of this script:
+#   (1) `not_evaluated` is ALWAYS toggle-gated (it was missing from the set)
+#   (2) `tier_a` is default-visible ONLY once band_precision carries
+#       measurement_status='measured_pass' AND ci_low >= STRICT_FLOOR — D-18's
+#       fail-closed gate. The deployed asset has BOTH NULL, so today tier_a
+#       (80.7% of shipped display claims) sits behind the toggle. The rebuild's
+#       D-02a payload is what flips it.
+TOGGLE_GATED_BANDS = {'screening_rb', 'screening_canon', 'not_evaluated'}
+STRICT_FLOOR = 0.85
+
+_bp = conn.execute("""SELECT measurement_status, ci_low FROM band_precision
+                      WHERE scope='band' AND evidence_source='track1_direct'
+                        AND confidence_band='tier_a'""").fetchone()
+TIER_A_AUTHORIZED_TODAY = bool(
+    _bp and _bp['measurement_status'] == 'measured_pass'
+    and _bp['ci_low'] is not None and _bp['ci_low'] >= STRICT_FLOOR)
+print(f'tier_a authorized in the deployed asset? {TIER_A_AUTHORIZED_TODAY} '
+      f'(measurement_status={_bp["measurement_status"] if _bp else "?"}, '
+      f'ci_low={_bp["ci_low"] if _bp else "?"})')
+
+
+def visible_by_default(r, tier_ok):
+    """§4 order matters: human_confirmed wins before routing is even checked."""
     if r['adjudication_status'] == 'human_confirmed':
         return True                                   # D-13g
     if r['routing_status'] != 'shipped':
         return False
-    if r['confidence_band'] in SCREENING_BANDS:
+    if r['confidence_band'] in TOGGLE_GATED_BANDS:
         return False
+    if r['confidence_band'] == 'tier_a' and not tier_ok:
+        return False                                  # D-18 fail-closed
     ml = r['matched_letters']
     if ml is not None and ml < SHORT_LETTERS:
-        return False                                  # D-13c
+        return False                                  # D-13c (ours, not the contract's)
     return True
 
 wcount = {}
@@ -93,7 +119,7 @@ def witnesses(wid):
     return wcount[wid]
 
 
-def build_page(rows_on_page, page_letters):
+def build_page(rows_on_page, page_letters, tier_ok=True):
     """Return (identifications, generic_span_groups, hidden_short, hidden_gated)."""
     # D-13a: collapse duplicates by canonical_work_id, canonical title wins
     seen, collapsed = {}, []
@@ -104,8 +130,8 @@ def build_page(rows_on_page, page_letters):
         seen[ck] = r
         collapsed.append(r)
 
-    vis = [r for r in collapsed if visible_by_default(r)]
-    hidden = [r for r in collapsed if not visible_by_default(r)]
+    vis = [r for r in collapsed if visible_by_default(r, tier_ok)]
+    hidden = [r for r in collapsed if not visible_by_default(r, tier_ok)]
     h_short = sum(1 for r in hidden
                   if r['matched_letters'] is not None and r['matched_letters'] < SHORT_LETTERS)
     h_gated = len(hidden) - h_short
@@ -216,7 +242,9 @@ out = {'manuscripts': []}
 for sys_id, (kind, anchor, rows, by_page) in raw.items():
     L = libs.get(sys_id, {})
     page_letters = heb_letters(texts.get(anchor, ''))
-    ids, generic, h_short, h_gated = build_page(by_page.get(anchor, []), page_letters)
+    # the INTENDED state (post-rebuild, tier_a authorized) and TODAY's state
+    ids, generic, h_short, h_gated = build_page(by_page.get(anchor, []), page_letters, tier_ok=True)
+    ids_now, _, hs_now, hg_now = build_page(by_page.get(anchor, []), page_letters, tier_ok=False)
 
     # D-13h: elsewhere, REAL names, split default-visible vs toggle-gated
     ew = {}
@@ -229,7 +257,7 @@ for sys_id, (kind, anchor, rows, by_page) in raw.items():
                                'ctypes': set(), 'bands': set()})
         d['ctypes'].add(r['claim_type'])
         d['bands'].add(f"{r['evidence_source']}|{r['confidence_band']}")
-        if visible_by_default(r):
+        if visible_by_default(r, True):
             d['pages'].add(r['page_id'])
             if r['adjudication_status'] == 'human_confirmed':
                 d['humanConfirmed'] = True
@@ -263,23 +291,32 @@ for sys_id, (kind, anchor, rows, by_page) in raw.items():
         'sm': L.get('sm') or sys_id, 'lib': L.get('lib') or '', 'cat': L.get('cat') or '',
         'anchor': anchor, 'pageNum': anchor.split('_')[2].lstrip('P').lstrip('0') or '1',
         'pageLetters': page_letters,
+        # real HTR page text — the offsets in onPage[].offs index into THIS string,
+        # so the mockup can render genuine offset highlighting
+        'pageText': texts.get(anchor, ''),
         'onPage': ids, 'shares': generic, 'related': rel,
         'hidden': {'short': h_short, 'gated': h_gated},
+        # what the panel shows TODAY, before the rebuild writes the D-02a
+        # authorization: tier_a is still held behind the toggle by D-18.
+        'onPageNow': ids_now,
+        'hiddenNow': {'short': hs_now, 'gated': hg_now},
+        'tierAAuthorizedToday': TIER_A_AUTHORIZED_TODAY,
         'elsewhere': {'claims': sum(1 for r in rows if r['page_id'] != anchor
-                                    and visible_by_default(r)),
+                                    and visible_by_default(r, True)),
                       'pages': len({r['page_id'] for r in rows if r['page_id'] != anchor
-                                    and visible_by_default(r)}),
+                                    and visible_by_default(r, True)}),
                       'gatedClaims': sum(1 for r in rows if r['page_id'] != anchor
-                                         and not visible_by_default(r)),
+                                         and not visible_by_default(r, True)),
                       'works': elsewhere},
         'd13g': d13g, 'ctypes': ctypes,
         'totalClaims': len(rows),
         'totalShipped': sum(1 for r in rows if r['routing_status'] == 'shipped'),
         'totalWorks': len({r['work_id'] for r in rows}),
     })
-    print(f"{kind:13} {L.get('lib',''):9} ids={len(ids)} ctypes={len({i['ctype'] for i in ids})} "
-          f"bands={len({i['band'] for i in ids})} hid={h_short}+{h_gated} gen={len(generic)} "
-          f"rel={rel:3} elseW={len(elsewhere)} d13g={len(d13g)} p{page_letters}")
+    print(f"{kind:13} {L.get('lib',''):9} ids={len(ids)} (today={len(ids_now)}) "
+          f"ctypes={len({i['ctype'] for i in ids})} bands={len({i['band'] for i in ids})} "
+          f"hid={h_short}+{h_gated} gen={len(generic)} rel={rel:3} "
+          f"elseW={len(elsewhere)} d13g={len(d13g)} p{page_letters}")
 
 with open(OUT, 'w', encoding='utf-8') as f:
     f.write('/* REAL data from discovery-v1-33499c5b (the deployed asset).\n'

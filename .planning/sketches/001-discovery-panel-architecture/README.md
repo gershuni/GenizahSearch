@@ -4,7 +4,7 @@ name: discovery-panel-architecture
 question: "Where does manuscript-level coherence live relative to this page's identifications, and how do the three disclosure buckets read?"
 winner: "D"
 winner_note: "Even panes (B+C synthesis). Relation filter keeps match-framing wording — D-21 NOT amended (owner, 2026-07-31)."
-round: 2
+round: 3
 tags: [discovery, panel, phase-136, disclosure, filters, rtl, mobile, d-09, d-21]
 ---
 
@@ -93,6 +93,42 @@ filter model on the panel. It is a good idea; it just is not currently in any re
 Novelty is deliberately absent from the filter: it is uncomputed in the deployed asset (all direct
 rows sit at `is_new = 0`), and NOVEL-01/02 are what the phase's rebuild adds.
 
+## ⚠ CORRECTION (round 3) — the first two rounds overstated what the panel shows
+
+The extractor's `visible_by_default` did not match `discovery-band-labels-v1.md` §4. Two errors:
+
+1. **`not_evaluated` was missing from the toggle-gated set.** §4 gates
+   `{screening_rb, screening_canon, not_evaluated}` — the first cut only gated the two screening bands.
+2. **The `tier_a` gate was ignored entirely.** §4 makes `tier_a` default-visible **only** when
+   `band_precision` carries `measurement_status = "measured_pass"` AND `ci_low >= 0.85` (D-18,
+   fail-closed). **The deployed asset has both NULL**, so tier-A — 80.7% of shipped display claims —
+   is behind the "show more" toggle today.
+
+Corpus-wide, only **2,660 of 166,537 shipped display claims (1.6%)** are default-visible right now;
+the rebuild's D-02a payload takes that to **137,109 (82.3%)**. Across the 13 regression manuscripts,
+**9 show ZERO default identifications today**:
+
+| | today | post-rebuild |
+|---|---|---|
+| clean · commentary · high-count · reviewed | 0 · 0 · 0 · **1** | 1 each |
+| judeo-arabic | 0 | 3 |
+| variety-a/b/d | 0 | 2 each |
+| variety-c/e/f | 1 each | 2 each |
+| **siddur · shared-text** | **0** | **0 — even after the rebuild** |
+
+Two consequences worth carrying into the plan:
+
+- **Gate 1 *enables* these surfaces rather than improving them.** Before the rebuild the panel is
+  near-empty by design. That is a much stronger sequencing argument than "the surfaces need stored
+  fields".
+- **The siddur and Ms. Heb. 577.4.99=4 have no default identifications even post-rebuild**, because
+  every row they carry is propagated `not_evaluated`, which §4 gates permanently. Their entire content
+  lives in the middle bucket and behind the toggle — which is the strongest possible validation of
+  D-13e's three-level disclosure. Those manuscripts are *why* the middle bucket exists.
+
+The sketch now carries a **post-rebuild view / TODAY (pre-rebuild)** toggle so both states are
+inspectable, and the suite asserts the gate in both directions.
+
 ## Findings surfaced while building
 
 - **The manuscript-coherence aid and the BAND-03 screening gate are coupled** — undocumented anywhere.
@@ -136,7 +172,7 @@ research recommends as its backstop is a gate-1 task.
 
 ## Automated checks
 
-`node` render-smoke over 13 manuscripts × 4 variants × 2 languages — **114 assertions, all pass**:
+`node` render-smoke over 13 manuscripts × 4 variants × 2 languages — **218 assertions, all pass** (13 manuscripts x 4 variants x 2 languages x 2 visibility states):
 
 - no `precision`, no raw precision figure, no confidence interval
 - no review badge (EN or HE), no "copy of" / "quotes" / "witness of"
@@ -147,5 +183,5 @@ research recommends as its backstop is a gate-1 task.
 - the D-13g row is promoted into default-visible; the 5 gated Song-of-Songs pages are present
 
 Verified live by **positive control**: seeding a precision figure, a CI and a stored-key leak produces
-236 failures. The green result is meaningful, not vacuous. This is the technique
+241 failures. The green result is meaningful, not vacuous. This is the technique
 `136-VALIDATION.md` specifies for Success Criterion 7, prototyped here.
