@@ -78,6 +78,42 @@ data-quality fixes for free: the asset attributes *Hovot ha-Levavot* to the wron
 - **Unassigned must be a visible bucket**, not a silent disappearance. FJMS itself has "Unspecified
   Domain" (19,709 rows), so there is precedent.
 
+
+## Confidence scale + prominence (owner, 2026-07-31)
+
+The band labels were not understandable, so the surface now shows a **plain confidence scale, first
+and prominent** — and per the owner it describes **what kind of claim this is**, not which internal
+band it landed in:
+
+| Level | Meaning | Rule | Rows | Share |
+|---|---|---|---|---|
+| **Strong** | may be the same work | `direct_witness` in a strong band | 131,164 | 78.8% |
+| **Medium** | a long citation-type match | `quotes_this_work`, >= 200 matched letters | 3,501 | 2.1% |
+| **Weak** | the rest | everything else | 31,872 | 19.1% |
+
+200 letters sits just above D-13c's 150-letter short-passage cutoff, so the two are consistent; carry
+it as a gate-1 tunable exactly like D-13c. The precise frozen band label stays on hover and on the
+methods page.
+
+**This resolves an honesty problem the band-based draft had.** A band-derived scale left 20,435 rows
+(12.3%) that were never assessed, and calling those "weak" would have asserted an assessment nobody
+made — forcing an awkward fourth "not assessed" value. Under the relation-based definition "weak"
+describes a weak *relation*, which those rows genuinely have. Three levels, honestly.
+
+**⚠ Needs a dated amendment to `discovery-band-labels-v1.md` §2.** Collapsing seven frozen
+`(family, band)` display labels into three user-facing levels is a display-contract change. BAND-03 is
+unaffected: screening rows remain the "show more" population.
+
+**Novelty is now a prominent switch**, first in the filter bar, worded **"Not in the catalogues we
+checked"** with a **(?)** that discloses the checked source list and dates. Note this is close to but
+not identical to D-23b's settled wording ("Not found in the finding aids checked"); the checked set
+includes bibliography, titles, PGP and FGP as well as catalogues, so the **(?)** carries the
+boundedness that D-23b was protecting. **A NOVEL-01 wording amendment is owed** if this phrasing ships.
+
+**All three row units are user-selectable** via a "Show as" control in the result bar, per the owner —
+the row unit is a reader choice, not a design pick. D-19's open question is therefore answered as
+"all three", with one row per identification as the default.
+
 ## The three candidate row units — measured
 
 | Unit | Rows | Verdict |
@@ -152,7 +188,7 @@ serves all three.
 ## Automated checks
 
 `node` smoke over 3 units × 4 states × 2 languages × 3 nav labels × 2 rebuild states —
-**160 assertions, all pass**, including the facet cascade:
+**160 assertions, all pass**, including the facet cascade and the confidence scale:
 
 - the domain filter narrows, and a leaf narrows further than its parent
 - the author list is cross-filtered by domain; the work list by domain + author

@@ -83,6 +83,35 @@ body.ann .annot{display:block;font-size:var(--text-xs);line-height:1.45;backgrou
 .freset{font-size:var(--text-xs);color:var(--primary-700);background:none;border:none;
   cursor:pointer;text-decoration:underline;font-family:inherit;align-self:flex-end}
 
+/* confidence — first and prominent (owner: "and more in the front") */
+.fg.confgrp .fg-h{font-size:var(--text-xs);color:var(--text-primary);text-transform:none;letter-spacing:0}
+.fchip.conf{font-size:var(--text-sm);padding:5px 14px;font-weight:600}
+.fchip.conf.strong{border-color:var(--primary-600);color:var(--primary-700)}
+.fchip.conf.strong.on{background:var(--primary-600);color:#fff}
+.fchip.conf.medium{border-color:var(--accent-amber);color:var(--accent-amber)}
+.fchip.conf.medium.on{background:var(--accent-amber);color:var(--text-inverse);border-color:var(--accent-amber)}
+.fchip.conf.weak{border-color:var(--border-medium);color:var(--text-muted)}
+.fchip.conf.weak.on{background:var(--text-muted);color:var(--bg-card);border-color:var(--text-muted)}
+.qmark{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;
+  border-radius:50%;border:1px solid var(--border-medium);color:var(--text-muted);
+  font-size:9px;cursor:help;font-weight:700}
+.qmark:hover{border-color:var(--primary-600);color:var(--primary-700)}
+
+/* novelty — promoted to a prominent switch (owner: "more prominent") */
+.fg.novgrp{order:-1}
+.novrow{display:flex;align-items:center;gap:8px;background:var(--bg-card);
+  border:1px solid var(--primary-600);border-radius:var(--radius-full);padding:4px 12px}
+.fg.novgrp.blocked .novrow{border-color:var(--border-medium);border-style:dashed}
+.novsw{position:relative;width:34px;height:18px;flex:0 0 34px;border-radius:9px;
+  background:var(--border-medium);cursor:pointer;transition:background .15s ease}
+.novsw::after{content:'';position:absolute;top:2px;inset-inline-start:2px;width:14px;height:14px;
+  border-radius:50%;background:#fff;transition:transform .15s ease}
+.novsw.on{background:var(--primary-600)}
+.novsw.on::after{transform:translateX(16px)}
+[dir="rtl"] .novsw.on::after{transform:translateX(-16px)}
+.novlbl{font-size:var(--text-sm);font-weight:600;color:var(--text-primary)}
+.fg.novgrp.blocked .novlbl{color:var(--text-muted);font-weight:400}
+
 /* domain tree — the /catalog-browse shape */
 .dtree{display:flex;flex-direction:column;gap:1px;max-height:210px;overflow:auto;
   border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-card);padding:3px}
@@ -125,6 +154,9 @@ body.ann .annot{display:block;font-size:var(--text-xs);line-height:1.45;backgrou
 .band{font-size:10px;font-weight:700;padding:1px 7px;border-radius:var(--radius-full);
   border:1px solid var(--border-medium);background:var(--bg-tertiary);color:var(--text-secondary)}
 .dim{color:var(--text-muted)}
+.band.conf-strong{border-color:var(--primary-600);color:var(--primary-700);background:var(--bg-active)}
+.band.conf-medium{border-color:var(--accent-amber);color:var(--accent-amber)}
+.band.conf-weak{border-color:var(--border-medium);color:var(--text-muted)}
 .wchip{font-size:10px;background:var(--bg-secondary);border:1px solid var(--border-light);
   border-radius:var(--radius-full);padding:1px 7px;color:var(--text-secondary)}
 .nov{font-size:10px;font-weight:700;padding:1px 7px;border-radius:var(--radius-full);
@@ -238,6 +270,14 @@ const T = {
     tier:'Confidence tier', novelty:'Finding aids', coverage:'Page coverage', library:'Library',
     domain:'Domain', domainOfWork:'— of the identified work', allDomains:'All domains',
     author:'Author', work:'Work', anyAuthor:'Any author', anyWork:'Any work',
+    confidence:'Confidence', cStrong:'Strong', cMedium:'Medium', cWeak:'Weak',
+    cWhyStrong:'We think this folio may carry the same work.',
+    cWhyMedium:'A long passage in common — more likely a citation than a copy.',
+    cWhyWeak:'Everything else: short or generic overlap, screening candidates, and relations never assessed.',
+    cHelp:'How sure the system is that this folio carries this work. Strong and Medium are shown by default; Weak and Not assessed are screening candidates. Nothing here has been reviewed by a person.',
+    novToggle:'Not in the catalogues we checked', novHelp:'We checked a fixed, dated list of finding aids: the FJMS and NLI catalogues and bibliography, titles, PGP, FGP and shelfmark attributions. “Not in the catalogues we checked” means it was absent from THAT list — not that it is unknown to scholarship, and not that it is correct.',
+    showAs:'Show as', asIdent:'One row per identification', asMs:'One row per manuscript', asWork:'One row per work',
+    asIdentShort:'Identifications', asMsShort:'Manuscripts', asWorkShort:'Works',
     reset:'reset all', sortBy:'Sort', showing:(a,b,n)=>`${a}–${b} of ${n.toLocaleString()}`,
     sortTier:'Strongest tier first', sortPages:'Most pages', sortLetters:'Most matched text',
     prev:'‹ Previous', next:'Next ›',
@@ -258,6 +298,14 @@ const T = {
     tier:'דרגת ודאות', novelty:'אמצעי עזר', coverage:'כיסוי הדף', library:'ספרייה',
     domain:'תחום', domainOfWork:'— של החיבור המזוהה', allDomains:'כל התחומים',
     author:'מחבר', work:'חיבור', anyAuthor:'כל המחברים', anyWork:'כל החיבורים',
+    confidence:'ודאות', cStrong:'חזקה', cMedium:'בינונית', cWeak:'חלשה',
+    cWhyStrong:'אנו סבורים שהדף עשוי לשאת את אותו חיבור.',
+    cWhyMedium:'קטע ארוך משותף — סביר יותר ציטוט מהעתקה.',
+    cWhyWeak:'כל השאר: חפיפה קצרה או כללית, מועמדים לסינון, ויחסים שלא הוערכו.',
+    cHelp:'עד כמה המערכת בטוחה שהדף נושא את החיבור. «חזקה» ו«בינונית» מוצגות כברירת מחדל; «חלשה» ו«לא הוערכה» הן מועמדות לסינון. שום דבר כאן לא נבדק בידי אדם.',
+    novToggle:'לא באמצעי העזר שנבדקו', novHelp:'בדקנו רשימה קבועה ומתוארכת של אמצעי עזר: קטלוגי FJMS ו‑NLI והביבליוגרפיה, כותרים, PGP, FGP וייחוסי מדף. «לא באמצעי העזר שנבדקו» פירושו שהחיבור נעדר מאותה רשימה — לא שהוא בלתי מוכר למחקר, ולא שהזיהוי נכון.',
+    showAs:'הצג לפי', asIdent:'שורה לכל זיהוי', asMs:'שורה לכל כתב־יד', asWork:'שורה לכל חיבור',
+    asIdentShort:'זיהויים', asMsShort:'כתבי־יד', asWorkShort:'חיבורים',
     reset:'איפוס הכל', sortBy:'מיון', showing:(a,b,n)=>`${a}–${b} מתוך ${n.toLocaleString()}`,
     sortTier:'הדרגה החזקה תחילה', sortPages:'הכי הרבה דפים', sortLetters:'הכי הרבה טקסט מותאם',
     prev:'› הקודם', next:'הבא ‹',
@@ -288,7 +336,7 @@ const NOTES = {
 };
 
 let U='a', LANG='en', PAGE=0, REBUILT=false, MODE='all';
-let fBand=new Set(), fNov=new Set();
+let fConf=new Set(), fNov=new Set();
 let fParent=null, fDomain=null, fAuthor=null, fWork=null;   // /catalog-browse cascade
 let openParents=new Set();
 const PER=12;
@@ -307,6 +355,28 @@ const widOf = r => r.wid || null;
 const t=()=>T[LANG];
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const bandLbl=b=>BAND_LABELS[b]?BAND_LABELS[b][LANG]:b;
+
+/* ---- Confidence scale (owner, 2026-07-31): it describes WHAT KIND OF CLAIM
+   this is, not which internal band it landed in.
+     strong = we think it may be the SAME WORK -> direct_witness in a strong band
+     medium = a long citation-type match       -> quotes_this_work, >= LONG letters
+     weak   = the rest
+   Measured on the deployed asset: strong 131,164 (78.8%) / medium 3,501 (2.1%)
+   / weak 31,872 (19.1%). LONG = 200 sits just above D-13c's 150-letter
+   short-passage cutoff, so the two thresholds are consistent; carry it as a
+   gate-1 tunable exactly like D-13c.
+   NOTE: needs a dated amendment to discovery-band-labels-v1.md §2 — the precise
+   band label stays available on hover and on the methods page. ---- */
+const LONG_CITATION = 200;
+const STRONG_BANDS = new Set(['tier_a','high_confidence_algorithmic']);
+function confOf(r){
+  if (r.ctype==='direct_witness' && STRONG_BANDS.has(r.band)) return 'strong';
+  if (r.ctype==='quotes_this_work' && (r.maxLetters||0) >= LONG_CITATION) return 'medium';
+  return 'weak';
+}
+const CONF_ORDER=['strong','medium','weak'];
+const confLbl=c=>({strong:t().cStrong,medium:t().cMedium,weak:t().cWeak}[c]);
+const confWhyText=c=>({strong:t().cWhyStrong,medium:t().cWhyMedium,weak:t().cWhyWeak}[c]);
 const note=k=>NOTES[k]?`<div class="annot">${NOTES[k]}</div>`:'';
 const sm=id=>(D.libs[id]||{}).sm||id;
 const lib=id=>(D.libs[id]||{}).lib||'';
@@ -328,7 +398,7 @@ function novChip(r){
 }
 
 /* ---------- filtering ---------- */
-const bandOK=b=>fBand.size===0||fBand.has(b);
+const confOK=r=>fConf.size===0||fConf.has(confOf(r));
 const novOK=r=>fNov.size===0||fNov.has(novOf(r));
 
 /* reverse title -> work id, so unit B (manuscript rows) can be filtered by the
@@ -352,7 +422,7 @@ const workOK  =r=>!fWork   || widsOfRow(r).includes(fWork);
 
 function rowsFor(u){
   const src = u==='a'?D.unitA : u==='b'?D.unitB : D.unitC;
-  return src.filter(r=>bandOK(r.band) && domainOK(r) && authorOK(r) && workOK(r)
+  return src.filter(r=>confOK(r) && domainOK(r) && authorOK(r) && workOK(r)
                        && (u==='c'?true:novOK(r)));
 }
 
@@ -380,7 +450,7 @@ function worksFor(u){
 }
 function totalFor(u){
   const base = u==='a'?TOT.identifications : u==='b'?TOT.manuscripts : TOT.works;
-  if (fBand.size===0 && fNov.size===0) return base;
+  if (fConf.size===0 && fNov.size===0) return base;
   // proportional estimate from the sample, clearly a sketch affordance
   const src = u==='a'?D.unitA : u==='b'?D.unitB : D.unitC;
   return Math.max(rowsFor(u).length, Math.round(base * rowsFor(u).length / Math.max(1,src.length)));
@@ -414,10 +484,9 @@ function domainTree(u){
 
 function filterBar(){
   const L=t();
-  const bandCounts={};
-  D.tierFacets.forEach(f=>{ bandCounts[f.band]=(bandCounts[f.band]||0)+f.n; });
-  const bands=Object.keys(bandCounts).sort((a,b)=>bandCounts[b]-bandCounts[a]);
-  const active=fBand.size||fNov.size||fParent||fDomain||fAuthor||fWork;
+  /* real corpus counts, mapped through the same rule as the rows */
+  const confCounts={strong:131164, medium:3501, weak:31872};
+  const active=fConf.size||fNov.size||fParent||fDomain||fAuthor||fWork;
   const auth=authorsFor(U), wks=worksFor(U);
   return `<div class="fbar">
     <div class="fg" style="flex:1 1 240px;max-width:340px">
@@ -437,10 +506,10 @@ function filterBar(){
       </select>
       ${note('cascade')}
     </div>
-    <div class="fg">
-      <div class="fg-h">${esc(L.tier)}</div>
-      <div class="fg-row">${bands.map(b=>`<button class="fchip ${fBand.has(b)?'on':''}"
-        onclick="tB('${b}')">${esc(bandLbl(b))}<span class="c">${bandCounts[b].toLocaleString()}</span></button>`).join('')}</div>
+    <div class="fg confgrp">
+      <div class="fg-h">${esc(L.confidence)} <span class="qmark" title="${esc(L.cHelp)}">?</span></div>
+      <div class="fg-row">${CONF_ORDER.map(c=>`<button class="fchip conf ${c} ${fConf.has(c)?'on':''}"
+        onclick="tB('${c}')" title="${esc(confWhyText(c))}">${esc(confLbl(c))}<span class="c">${(confCounts[c]||0).toLocaleString()}</span></button>`).join('')}</div>
     </div>
     <div class="fg ${REBUILT?'':'blocked'}">
       <div class="fg-h">${esc(L.novelty)} ${REBUILT?'':`<span class="needs">${esc(L.needsRebuild)}</span>`}</div>
@@ -458,12 +527,12 @@ function filterBar(){
   </div>
   ${note('domainmap')}${note('novelty')}${note('coverage')}`;
 }
-function tB(b){ fBand.has(b)?fBand.delete(b):fBand.add(b); PAGE=0; render(); }
+function tB(c){ fConf.has(c)?fConf.delete(c):fConf.add(c); PAGE=0; render(); }
 function tN(v){ fNov.has(v)?fNov.delete(v):fNov.add(v); PAGE=0; render(); }
 function pickDomain(p,d){ fParent=p; fDomain=d; fAuthor=null; fWork=null; PAGE=0;
   if(p) openParents.add(p); render(); }
 function togP(p){ openParents.has(p)?openParents.delete(p):openParents.add(p); render(); }
-function clearAll(){ fBand.clear(); fNov.clear(); fParent=fDomain=fAuthor=fWork=null; PAGE=0; render(); }
+function clearAll(){ fConf.clear(); fNov.clear(); fParent=fDomain=fAuthor=fWork=null; PAGE=0; render(); }
 
 /* ---------- rows per unit ---------- */
 function rowA(r){

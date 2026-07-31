@@ -46,10 +46,20 @@ rows_a = [dict(r) for r in conn.execute(f"""
                   WHEN 'screening_canon' THEN 4 WHEN 'screening_rb' THEN 5 ELSE 6 END) AS rank,
          COUNT(DISTINCT dc.page_id) AS pages,
          SUM(COALESCE(e.matched_letters,0)) AS letters,
+         MAX(COALESCE(e.matched_letters,0)) AS maxLetters,
+         MIN(CASE dc.claim_type WHEN 'direct_witness' THEN 0
+                  WHEN 'quotes_this_work' THEN 1 ELSE 2 END) AS ctrank,
          MAX(e.evidence_source) AS src,
          MAX(e.is_new) AS isNew
   {BASE} GROUP BY 1,2
   ORDER BY rank ASC, letters DESC LIMIT 60""")]
+CTYPE = {0:'direct_witness',1:'quotes_this_work',2:'shared_text'}
+def stamp(rows):
+    for r in rows:
+        r['ctype'] = CTYPE.get(r.get('ctrank'), 'shared_text')
+        r.pop('ctrank', None)
+    return rows
+
 RANKBAND = {0:'tier_a',1:'high_confidence_algorithmic',2:'corroborated',3:'weak',
             4:'screening_canon',5:'screening_rb',6:'not_evaluated'}
 for r in rows_a:
@@ -59,6 +69,9 @@ for r in rows_a:
 rows_a += [dict(r, band=RANKBAND[r['rank']]) for r in conn.execute(f"""
   SELECT e.sys_id AS sysId, dc.work_id AS wid, 4 AS rank,
          COUNT(DISTINCT dc.page_id) AS pages, SUM(COALESCE(e.matched_letters,0)) AS letters,
+         MAX(COALESCE(e.matched_letters,0)) AS maxLetters,
+         MIN(CASE dc.claim_type WHEN 'direct_witness' THEN 0
+                  WHEN 'quotes_this_work' THEN 1 ELSE 2 END) AS ctrank,
          MAX(e.evidence_source) AS src, MAX(e.is_new) AS isNew
   {BASE} AND e.confidence_band IN ('screening_canon','screening_rb')
   GROUP BY 1,2 ORDER BY letters DESC LIMIT 12""")]
@@ -66,6 +79,9 @@ rows_a += [dict(r, band=RANKBAND[r['rank']]) for r in conn.execute(f"""
 rows_a += [dict(r, band='not_evaluated') for r in conn.execute(f"""
   SELECT e.sys_id AS sysId, dc.work_id AS wid, 6 AS rank,
          COUNT(DISTINCT dc.page_id) AS pages, SUM(COALESCE(e.matched_letters,0)) AS letters,
+         MAX(COALESCE(e.matched_letters,0)) AS maxLetters,
+         MIN(CASE dc.claim_type WHEN 'direct_witness' THEN 0
+                  WHEN 'quotes_this_work' THEN 1 ELSE 2 END) AS ctrank,
          MAX(e.evidence_source) AS src, MAX(e.is_new) AS isNew
   {BASE} AND e.evidence_source='propagated' AND e.is_new=1
   GROUP BY 1,2 ORDER BY pages DESC LIMIT 14""")]
@@ -79,6 +95,9 @@ rows_b = [dict(r) for r in conn.execute(f"""
                   WHEN 'high_confidence_algorithmic' THEN 1 WHEN 'corroborated' THEN 2
                   WHEN 'weak' THEN 3 WHEN 'screening_canon' THEN 4
                   WHEN 'screening_rb' THEN 5 ELSE 6 END) AS rank,
+         MIN(CASE dc.claim_type WHEN 'direct_witness' THEN 0
+                  WHEN 'quotes_this_work' THEN 1 ELSE 2 END) AS ctrank,
+         MAX(COALESCE(e.matched_letters,0)) AS maxLetters,
          MAX(e.is_new) AS isNew
   {BASE} GROUP BY 1 ORDER BY works DESC, claims DESC LIMIT 45""")]
 for r in rows_b:
@@ -92,7 +111,9 @@ rows_c = [dict(r) for r in conn.execute(f"""
          MIN(CASE e.confidence_band WHEN 'tier_a' THEN 0
                   WHEN 'high_confidence_algorithmic' THEN 1 WHEN 'corroborated' THEN 2
                   WHEN 'weak' THEN 3 WHEN 'screening_canon' THEN 4
-                  WHEN 'screening_rb' THEN 5 ELSE 6 END) AS rank
+                  WHEN 'screening_rb' THEN 5 ELSE 6 END) AS rank,
+         MIN(CASE dc.claim_type WHEN 'direct_witness' THEN 0
+                  WHEN 'quotes_this_work' THEN 1 ELSE 2 END) AS ctrank
   {BASE} GROUP BY 1 ORDER BY mss DESC LIMIT 45""")]
 for r in rows_c:
     r['band'] = RANKBAND[r['rank']]
@@ -134,7 +155,7 @@ for sid in {r['sysId'] for r in rows_b}:
     msWorks[sid] = ts
 out['msWorks'] = msWorks
 
-out['unitA'], out['unitB'], out['unitC'] = rows_a, rows_b, rows_c
+out['unitA'], out['unitB'], out['unitC'] = stamp(rows_a), stamp(rows_b), stamp(rows_c)
 out['schema'] = {
     'coveragePpmExists': 'coverage_ppm' in [r[1] for r in conn.execute('PRAGMA table_info(discovery_evidence)')],
     'bandRankExists':    'band_rank'    in [r[1] for r in conn.execute('PRAGMA table_info(discovery_evidence)')],
