@@ -2,7 +2,8 @@
 sketch: 002
 name: panel-embedded-in-browse
 question: "How does the discovery panel sit inside the real /browse page, and how does offset highlighting actually work on its text pane?"
-winner: null
+winner: "accepted"
+winner_note: "Embedding approved (owner, 2026-07-31): entry control in toolbar row 2 beside Joins, panel full-width beneath the two panes, via a fifth enrichment_refs placeholder. Highlighting must use norm→raw mapping + per-line clipping."
 tags: [discovery, panel, phase-136, browse, integration, highlighting, d-12, panel-01, panel-03]
 ---
 

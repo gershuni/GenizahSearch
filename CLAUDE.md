@@ -121,6 +121,12 @@ See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
 - `docs/archive/` - Historical documents
 - `CHANGELOG.md` - Full release history
 
+### Skill routing
+
+- **Sketch findings for GenizahSearch** (validated design decisions, CSS patterns, visual direction —
+  the Phase 136 discovery panel, its `/browse` embedding, and the evidence-highlighting algorithm) →
+  `Skill("sketch-findings-genizahsearch")`
+
 ## Code Style
 
 - Python 3.10+

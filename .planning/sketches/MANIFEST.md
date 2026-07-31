@@ -36,9 +36,22 @@ comparable `/atlas` surface runs ~68% mobile.
 
 | # | Name | Design Question | Winner | Tags |
 |---|------|----------------|--------|------|
-| 001 | discovery-panel-architecture | Where does manuscript-level coherence live relative to this page's identifications, and how do the three disclosure buckets read? | _pending (round 2)_ | discovery, panel, phase-136, disclosure, filters, rtl, mobile, d-09, d-21 |
+| 001 | discovery-panel-architecture | Where does manuscript-level coherence live relative to this page's identifications, and how do the three disclosure buckets read? | **D — even panes** | discovery, panel, phase-136, disclosure, filters, rtl, mobile, d-09, d-21 |
 
-| 002 | panel-embedded-in-browse | How does the panel sit inside the real `/browse` page, and how does offset highlighting actually work on its text pane? | _pending_ | discovery, browse, integration, highlighting, d-12, panel-01, panel-03 |
+| 002 | panel-embedded-in-browse | How does the panel sit inside the real `/browse` page, and how does offset highlighting actually work on its text pane? | **accepted** | discovery, browse, integration, highlighting, d-12, panel-01, panel-03 |
+
+### Owner decisions (2026-07-31)
+
+- **Variant D — even panes — wins.** Two equal panes at ≥900px; page identifications and the
+  manuscript picture carry the same weight. Stacks page-then-manuscript on mobile.
+- **The relation filter keeps match-framing wording** ("Direct match / Partial match / Shared text").
+  The owner explicitly declined "Citations", so **D-21 is NOT amended** — no escalation needed.
+- **D-09 still needs a narrow amendment:** variant D never collapses the manuscript group, so strike
+  "collapsed" from D-09 while keeping its left-to-right ordering.
+- **Embedding approved:** entry control in browse toolbar row 2 beside Joins; panel body full-width
+  beneath the two 60vh panes; wired as a fifth `enrichment_refs` placeholder.
+- **Panel filters remain new scope** — D-16 specifies filters for `/work/{id}`, not the panel. Carry
+  as a PANEL-01/02 amendment or a deliberate reuse decision at gate 1.
 
 **Sketch 002 found two defects in D-12** (both verified against the asset and the live code, both
 cheap to fix, neither currently written down): the stored offsets index the normalized Hebrew-letter

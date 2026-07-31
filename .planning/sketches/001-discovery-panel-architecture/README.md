@@ -2,7 +2,8 @@
 sketch: 001
 name: discovery-panel-architecture
 question: "Where does manuscript-level coherence live relative to this page's identifications, and how do the three disclosure buckets read?"
-winner: null
+winner: "D"
+winner_note: "Even panes (B+C synthesis). Relation filter keeps match-framing wording — D-21 NOT amended (owner, 2026-07-31)."
 round: 2
 tags: [discovery, panel, phase-136, disclosure, filters, rtl, mobile, d-09, d-21]
 ---
