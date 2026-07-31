@@ -29,6 +29,55 @@ start .planning\sketches\003-discovery-findings-page\index.html
 | **pretend rebuild has landed** | switches novelty from what the asset can honestly show today to the intended tri-state |
 | **עברית / RTL** · **Design notes** · width · theme | as in sketches 001–002 |
 
+## Domain / author / work facets — the `/catalog-browse` cascade (owner, 2026-07-31)
+
+The page carries the same three-facet cascade `/catalog-browse` uses: a collapsible **domain tree**,
+then **author** narrowed by domain, then **work** narrowed by domain + author — mirroring
+`fjms.get_browse_authors(domain)` and `fjms.get_browse_works(domain, author)`.
+
+**Domain is the domain of the IDENTIFIED WORK, never the manuscript's catalogue domain.** This is the
+owner's ruling and it is the right one. The manuscript route was tempting — FJMS `domains` joins on
+`sys_id == AlmaId` at **83% coverage** (37,027 of 44,375 findings-bearing manuscripts) with zero new
+work — but it is the wrong axis and actively harmful: **Moss. V,374 is catalogued *Court Documents /
+Court Records* while carrying a verifiably correct Rashi-on-Esther finding.** Filtering on manuscript
+domain would hide exactly the findings that disagree with the catalogue, which are the most valuable
+ones. **338 tier-A findings** sit on manuscripts catalogued documentary/legal.
+
+### What the "complete map" actually costs — only one facet needs it
+
+| Facet | Source | Coverage today | Work needed |
+|---|---|---|---|
+| **Domain** | assign each work a domain from the FJMS vocabulary (**39 parents / 202 leaves**, bilingual) | 0% — `works.genre` exists but is **entirely empty** | **The one-time curation pass**, ~1,088 works carrying shipped claims |
+| **Author** | `works.author`, already in the asset | 520 of 1,088 works (48%); only **96 distinct** strings, of which **81%** match FJMS `genizah_persons` (38 exact + 40 containment) | Small — fill the gaps + a 96-row alias map, same pass |
+| **Work** | the discovery works themselves (935 distinct titles) | 100% | **None** |
+
+The work facet needing nothing is the key simplification. Bridging discovery titles to FJMS
+`genizah_titles` matches only **5%** (55 of 935, +12 containment, 868 unmatched) and would have been
+the expensive part — but that bridge is only needed if this page must speak FJMS's work vocabulary.
+It doesn't: the works being identified *are* the discovery works. `/catalog-browse` uses FJMS titles
+because that is its corpus; here the corpus is the computed identifications.
+
+### Feasibility sample: 93 works assigned, 96% at high confidence
+
+`work-domains.sample.json` assigns all 93 works appearing in this sketch's sample, drawn only from the
+FJMS vocabulary. Result of one pass with **no external lookups: 90 of 93 high confidence (96%)**. The
+three low-confidence cases are a literary letter collection (Documentary/Letters vs a literary
+parent), an Arabic Josippon (the vocabulary has no history leaf), and a kalam-vs-theology judgement.
+
+Extrapolated, the full pass over ~1,088 works is a bounded agent task with roughly **3–4% needing a
+web lookup or an owner ruling** — which matches the owner's expectation. It also surfaces
+data-quality fixes for free: the asset attributes *Hovot ha-Levavot* to the wrong Bahya.
+
+**Design requirements the pass must honour:**
+- Assign at the **canonical work** level, so duplicates don't get assigned twice.
+- **Closed vocabulary** — a leaf outside the FJMS tree is a build error, not a new domain. Asserted in
+  the sketch's test suite.
+- Persist as a **curated, hash-pinned artifact** (the shape `v2_canonical_merges` and the approved-title
+  list already use), not hand-edited into the DB — consistent with DATA-04's fail-closed posture.
+- **Record per-row confidence and provenance**, so the owner reviews only the uncertain rows.
+- **Unassigned must be a visible bucket**, not a silent disappearance. FJMS itself has "Unspecified
+  Domain" (19,709 rows), so there is precedent.
+
 ## The three candidate row units — measured
 
 | Unit | Rows | Verdict |
@@ -103,7 +152,15 @@ serves all three.
 ## Automated checks
 
 `node` smoke over 3 units × 4 states × 2 languages × 3 nav labels × 2 rebuild states —
-**153 assertions, all pass**:
+**160 assertions, all pass**, including the facet cascade:
+
+- the domain filter narrows, and a leaf narrows further than its parent
+- the author list is cross-filtered by domain; the work list by domain + author
+- **every domain assignment falls inside the FJMS vocabulary tree** (closed vocab)
+- unit C (work rows) is domain-filterable too
+- the domain facet header states it is the **identified work's** domain
+
+and the original invariants:
 
 - the real totals (65,200 / 44,375 / 1,088) are the ones surfaced
 - **before the rebuild, no direct row claims any novelty verdict** — they must all read "not checked"
@@ -115,7 +172,13 @@ serves all three.
   no stored vocabulary key, no prohibited novelty wording
 
 Positive control: seeding "New discovery — precision 0.9382" into the novelty label produces 162
-failures.
+failures. A second control — an out-of-vocabulary domain plus a facet header mislabelled as the
+*manuscript's* domain — is caught by both new assertions.
+
+That second control earned its keep immediately: the header assertion originally tested the whole
+rendered page, and **passed while the header was wrong**, because the design-note prose also contains
+the phrase "identified work". It now scopes to the facet header. An assertion that can pass for the
+wrong reason is worse than none.
 
 ### The guard earned its keep on this sketch
 
@@ -131,6 +194,8 @@ data, which is exactly where these rules get broken.
    unit where every axis attaches to the row.
 2. **Which nav label?**
 3. Does the mode strip (leads + saved as future tabs) match the intent for 137/138?
+4. The three low-confidence domain assignments (letter collection · Arabic Josippon · kalam vs
+   theology) — and whether "Unspecified Domain" is the right home for works the vocabulary can't place.
 
 ## Data provenance
 

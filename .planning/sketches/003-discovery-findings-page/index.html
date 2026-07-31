@@ -83,6 +83,23 @@ body.ann .annot{display:block;font-size:var(--text-xs);line-height:1.45;backgrou
 .freset{font-size:var(--text-xs);color:var(--primary-700);background:none;border:none;
   cursor:pointer;text-decoration:underline;font-family:inherit;align-self:flex-end}
 
+/* domain tree — the /catalog-browse shape */
+.dtree{display:flex;flex-direction:column;gap:1px;max-height:210px;overflow:auto;
+  border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-card);padding:3px}
+.dgrp{display:flex;flex-direction:column;gap:1px}
+.dnode{display:flex;align-items:center;gap:5px;width:100%;text-align:start;font-family:inherit;
+  font-size:var(--text-xs);padding:3px 6px;border:none;background:none;color:var(--text-secondary);
+  cursor:pointer;border-radius:var(--radius-sm)}
+.dnode:hover{background:var(--bg-hover);color:var(--text-primary)}
+.dnode.on{background:var(--primary-600);color:#fff;font-weight:700}
+.dnode.leaf{padding-inline-start:22px;font-size:11px}
+.dnode .c{margin-inline-start:auto;opacity:.7;font-size:10px}
+.dnode .tw{width:11px;flex:0 0 11px;text-align:center;color:var(--text-tertiary);font-size:9px}
+.dnode.on .tw,.dnode.on .c{color:#fff}
+.fsel{font-family:inherit;font-size:var(--text-xs);padding:3px 6px;border:1px solid var(--border-medium);
+  border-radius:var(--radius-sm);background:var(--bg-card);color:var(--text-primary);
+  max-width:100%;width:100%}
+
 /* result bar */
 .rbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 16px;
   border-bottom:1px solid var(--border-light);font-size:var(--text-xs);color:var(--text-secondary)}
@@ -184,6 +201,7 @@ body.ann .annot{display:block;font-size:var(--text-xs);line-height:1.45;backgrou
 </div>
 
 <script src="data.js"></script>
+<script src="work-domains.js"></script>
 <script>
 /* ==========================================================================
    Sketch 003 — the corpus-wide discovery findings page (D-19).
@@ -218,6 +236,8 @@ const T = {
     caveat:'These are algorithmic text matches, not catalogued identifications. Nothing here has been reviewed. Not exhaustive — more matches may exist, and a text match is not by itself proof of identity.',
     modeAll:'All findings', modeLeads:'Screening leads', modeSaved:'My saved',
     tier:'Confidence tier', novelty:'Finding aids', coverage:'Page coverage', library:'Library',
+    domain:'Domain', domainOfWork:'— of the identified work', allDomains:'All domains',
+    author:'Author', work:'Work', anyAuthor:'Any author', anyWork:'Any work',
     reset:'reset all', sortBy:'Sort', showing:(a,b,n)=>`${a}–${b} of ${n.toLocaleString()}`,
     sortTier:'Strongest tier first', sortPages:'Most pages', sortLetters:'Most matched text',
     prev:'‹ Previous', next:'Next ›',
@@ -236,6 +256,8 @@ const T = {
     caveat:'אלו התאמות טקסט אלגוריתמיות, לא זיהויים קטלוגיים. שום דבר כאן לא נבדק. אינו ממצה — ייתכנו התאמות נוספות, והתאמת טקסט אינה כשלעצמה הוכחת זהות.',
     modeAll:'כל הממצאים', modeLeads:'מועמדים לסינון', modeSaved:'השמורים שלי',
     tier:'דרגת ודאות', novelty:'אמצעי עזר', coverage:'כיסוי הדף', library:'ספרייה',
+    domain:'תחום', domainOfWork:'— של החיבור המזוהה', allDomains:'כל התחומים',
+    author:'מחבר', work:'חיבור', anyAuthor:'כל המחברים', anyWork:'כל החיבורים',
     reset:'איפוס הכל', sortBy:'מיון', showing:(a,b,n)=>`${a}–${b} מתוך ${n.toLocaleString()}`,
     sortTier:'הדרגה החזקה תחילה', sortPages:'הכי הרבה דפים', sortLetters:'הכי הרבה טקסט מותאם',
     prev:'› הקודם', next:'הבא ‹',
@@ -258,13 +280,30 @@ const NOTES = {
   perf:'<b>PERF-01 is a real blocker here, measured twice.</b> D-10a recorded 3.41-3.55 s for a representative novelty/tier/coverage ordering against a 1.5 s cap. Independently, the deduped identification COUNT for unit A took <b>16 s</b> in this extraction. A visible real total (which WORK-01 requires and this page wants) is therefore not free — it needs the materialized sort keys and indexes, or a cached/approximate count with honest wording.',
   nav:'<b>The nav label is constrained from three directions.</b> "Discoveries" is taken by the pre-existing Community page (<code>web/pages/discoveries.py</code>). "Browse by Identification" already exists in the nav for <code>/catalog-browse</code>, so a bare "Identifications" invites confusion between a catalogue browse and a computed-match list. And D-23b prohibits "new" / "new discovery" / "unknown to scholarship", so anything like "New Findings" is out. Switch the dropdown to compare the three survivors.',
   modes:'<b>Modes, not pages.</b> The roadmap records that Phase 138\'s <code>/leads</code> is a MODE of this page rather than a second implementation, and Phase 137 adds saved judgments. Designing the mode strip now means 138 and 137 add a tab instead of a page — and it keeps one filter/sort/paging implementation. The greyed tabs are deliberately non-functional here.',
+  domainmap:'<b>Domain is the domain of the IDENTIFIED WORK, not of the manuscript (owner, 2026-07-31).</b> This matters. The FJMS catalogue classifies the <i>shelfmark</i>, and it joins cleanly on <code>sys_id == AlmaId</code> at 83% coverage (37,027 of 44,375 findings-bearing manuscripts) — so the manuscript route was tempting and free. But it is the wrong axis and actively harmful here: Moss. V,374 is catalogued <i>Court Documents / Court Records</i> while carrying a verifiably correct <b>Rashi on Esther</b> finding. Filtering by manuscript domain would hide precisely the findings that disagree with the catalogue, which are the most interesting ones — 338 tier-A findings sit on manuscripts catalogued documentary/legal. So each WORK is assigned its own domain, once, from the same FJMS vocabulary the catalogue browse already uses (39 parents / 202 leaves, bilingual).',
+  cascade:'<b>The cascade is /catalog-browse\'s, deliberately.</b> Collapsible domain tree, then author narrowed by domain, then work narrowed by domain + author — mirroring <code>fjms.get_browse_authors(domain)</code> and <code>fjms.get_browse_works(domain, author)</code>. Two of the three facets need NO new mapping: author is already in the asset for 520 of 1,088 works (only 96 distinct strings, 81% matching FJMS persons), and the <b>work facet IS the discovery work vocabulary</b> — it does not need bridging to FJMS <code>genizah_titles</code>, which matched only 5% (55 of 935) and would have been the expensive part. Only DOMAIN needs the one-time pass.',
+  sample:'<b>The domain data here is a 93-work feasibility sample, not the full map.</b> Assigning it took one pass with no external lookups: <b>90 of 93 at high confidence (96%)</b>. The 3 low-confidence cases are a literary letter collection, an Arabic Josippon (the vocabulary has no history leaf), and a kalam-vs-theology judgement. Extrapolated, the full pass over ~1,088 works is a bounded agent task with roughly 3-4% needing a web lookup or an owner ruling — and it surfaces data-quality fixes for free (Hovot ha-Levavot is attributed to the wrong Bahya in the asset).',
   gate:'<b>Gated like /atlas, not by the flag alone.</b> The page, its data routes and its nav entry all check an availability predicate ANDed with <code>DISCOVERY_ENABLED</code>, so a flag-on/sidecar-missing window still hides cleanly. Switch State to "sidecar absent / flag off": the correct behaviour is that the nav entry disappears entirely, not that the page renders empty.',
   sort:'<b>Novelty must never order the list (D-15a / D-24).</b> Default sort is tier-first. Novelty is a filter — and optionally a user-selected grouping — but it never changes confidence rank or styling, because absence from a finding aid is not evidence a match is correct. Note the sort dropdown offers no novelty option, deliberately.',
 };
 
 let U='a', LANG='en', PAGE=0, REBUILT=false, MODE='all';
 let fBand=new Set(), fNov=new Set();
+let fParent=null, fDomain=null, fAuthor=null, fWork=null;   // /catalog-browse cascade
+let openParents=new Set();
 const PER=12;
+
+/* ---- the work -> FJMS domain map (owner's decision: domain of the IDENTIFIED
+   WORK, never the manuscript's catalogue domain — the catalogue classifies the
+   shelfmark, so on Moss. V,374 it says "Court Records" while the finding is
+   Rashi on Esther, and filtering on it would hide exactly the findings that
+   disagree with the catalogue). ---- */
+const domOf   = wid => WORK_DOMAINS[wid] || null;
+const parentOf= wid => (domOf(wid)||{}).parent || null;
+const leafOf  = wid => (domOf(wid)||{}).domain || null;
+const authorOf= wid => ((D.works[wid]||{}).author || '').trim();
+/* a row's work id — unit B rows are manuscript-level and have no single work */
+const widOf = r => r.wid || null;
 const t=()=>T[LANG];
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const bandLbl=b=>BAND_LABELS[b]?BAND_LABELS[b][LANG]:b;
@@ -291,9 +330,53 @@ function novChip(r){
 /* ---------- filtering ---------- */
 const bandOK=b=>fBand.size===0||fBand.has(b);
 const novOK=r=>fNov.size===0||fNov.has(novOf(r));
+
+/* reverse title -> work id, so unit B (manuscript rows) can be filtered by the
+   domains of the works found on it */
+const TITLE2WID={}; Object.entries(D.works).forEach(([w,v])=>{ TITLE2WID[v.title]=w; });
+const widsOfRow=r=>{
+  if (r.wid) return [r.wid];
+  const ts=(D.msWorks[r.sysId]||[]);
+  return ts.map(t=>TITLE2WID[t]).filter(Boolean);
+};
+const domainOK=r=>{
+  if(!fParent && !fDomain) return true;
+  return widsOfRow(r).some(w=>{
+    const d=domOf(w); if(!d) return false;
+    if(fDomain) return d.domain===fDomain;
+    return d.parent===fParent;
+  });
+};
+const authorOK=r=>!fAuthor || widsOfRow(r).some(w=>authorOf(w)===fAuthor);
+const workOK  =r=>!fWork   || widsOfRow(r).includes(fWork);
+
 function rowsFor(u){
   const src = u==='a'?D.unitA : u==='b'?D.unitB : D.unitC;
-  return src.filter(r=>bandOK(r.band) && (u==='c'?true:novOK(r)));
+  return src.filter(r=>bandOK(r.band) && domainOK(r) && authorOK(r) && workOK(r)
+                       && (u==='c'?true:novOK(r)));
+}
+
+/* cross-filtered facet lists, exactly the /catalog-browse cascade:
+   authors narrow to the chosen domain; works narrow to domain + author */
+function authorsFor(u){
+  const seen={};
+  rowsFor(u).forEach(r=>widsOfRow(r).forEach(w=>{
+    const a=authorOf(w); if(!a) return;
+    if(fDomain && leafOf(w)!==fDomain) return;
+    if(fParent && !fDomain && parentOf(w)!==fParent) return;
+    seen[a]=(seen[a]||0)+1;
+  }));
+  return Object.entries(seen).sort((x,y)=>y[1]-x[1]);
+}
+function worksFor(u){
+  const seen={};
+  rowsFor(u).forEach(r=>widsOfRow(r).forEach(w=>{
+    if(fDomain && leafOf(w)!==fDomain) return;
+    if(fParent && !fDomain && parentOf(w)!==fParent) return;
+    if(fAuthor && authorOf(w)!==fAuthor) return;
+    seen[w]=(seen[w]||0)+1;
+  }));
+  return Object.entries(seen).sort((x,y)=>y[1]-x[1]);
 }
 function totalFor(u){
   const base = u==='a'?TOT.identifications : u==='b'?TOT.manuscripts : TOT.works;
@@ -303,13 +386,57 @@ function totalFor(u){
   return Math.max(rowsFor(u).length, Math.round(base * rowsFor(u).length / Math.max(1,src.length)));
 }
 
+/* domain tree — the same collapsible parent/leaf shape /catalog-browse uses */
+function domainTree(u){
+  const L=t();
+  const cnt={}, pcnt={};
+  const src = u==='a'?D.unitA : u==='b'?D.unitB : D.unitC;
+  src.forEach(r=>widsOfRow(r).forEach(w=>{
+    const d=domOf(w); if(!d) return;
+    pcnt[d.parent]=(pcnt[d.parent]||0)+1; cnt[d.domain]=(cnt[d.domain]||0)+1;
+  }));
+  const parents=Object.keys(DOMAIN_TREE).filter(p=>pcnt[p]).sort((a,b)=>pcnt[b]-pcnt[a]);
+  return `<div class="dtree">
+    <button class="dnode ${!fParent&&!fDomain?'on':''}" onclick="pickDomain(null,null)">${esc(L.allDomains)}</button>
+    ${parents.map(p=>{
+      const open=openParents.has(p), node=DOMAIN_TREE[p];
+      const kids=node.children.filter(c=>cnt[c.en]);
+      return `<div class="dgrp">
+        <button class="dnode ${fParent===p&&!fDomain?'on':''}" onclick="pickDomain('${esc(p)}',null)">
+          <span class="tw" onclick="event.stopPropagation();togP('${esc(p)}')">${kids.length?(open?'▾':'▸'):'·'}</span>
+          ${esc(LANG==='he'&&node.he?node.he:p)}<span class="c">${pcnt[p]}</span></button>
+        ${open?kids.map(c=>`<button class="dnode leaf ${fDomain===c.en?'on':''}"
+            onclick="pickDomain('${esc(p)}','${esc(c.en)}')">${esc(LANG==='he'&&c.he?c.he:c.en)}<span class="c">${cnt[c.en]}</span></button>`).join(''):''}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 function filterBar(){
   const L=t();
   const bandCounts={};
   D.tierFacets.forEach(f=>{ bandCounts[f.band]=(bandCounts[f.band]||0)+f.n; });
   const bands=Object.keys(bandCounts).sort((a,b)=>bandCounts[b]-bandCounts[a]);
-  const active=fBand.size||fNov.size;
+  const active=fBand.size||fNov.size||fParent||fDomain||fAuthor||fWork;
+  const auth=authorsFor(U), wks=worksFor(U);
   return `<div class="fbar">
+    <div class="fg" style="flex:1 1 240px;max-width:340px">
+      <div class="fg-h">${esc(L.domain)} <span class="dim" style="font-weight:400;text-transform:none;letter-spacing:0">${esc(L.domainOfWork)}</span></div>
+      ${domainTree(U)}
+    </div>
+    <div class="fg" style="min-width:190px">
+      <div class="fg-h">${esc(L.author)}</div>
+      <select class="fsel" onchange="fAuthor=this.value||null;fWork=null;PAGE=0;render()">
+        <option value="">${esc(L.anyAuthor)} (${auth.length})</option>
+        ${auth.map(([a,n])=>`<option value="${esc(a)}" ${fAuthor===a?'selected':''}>${esc(a)} (${n})</option>`).join('')}
+      </select>
+      <div class="fg-h" style="margin-top:6px">${esc(L.work)}</div>
+      <select class="fsel" onchange="fWork=this.value||null;PAGE=0;render()">
+        <option value="">${esc(L.anyWork)} (${wks.length})</option>
+        ${wks.map(([w,n])=>`<option value="${esc(w)}" ${fWork===w?'selected':''}>${esc((D.works[w]||{}).title||w)} (${n})</option>`).join('')}
+      </select>
+      ${note('cascade')}
+    </div>
     <div class="fg">
       <div class="fg-h">${esc(L.tier)}</div>
       <div class="fg-row">${bands.map(b=>`<button class="fchip ${fBand.has(b)?'on':''}"
@@ -327,12 +454,16 @@ function filterBar(){
       <div class="fg-h">${esc(L.coverage)} <span class="needs">${esc(L.needsRebuild)}</span></div>
       <div class="fg-row"><button class="fchip">≥ 25%</button><button class="fchip">≥ 50%</button><button class="fchip">≥ 75%</button></div>
     </div>
-    ${active?`<button class="freset" onclick="fBand.clear();fNov.clear();PAGE=0;render()">${esc(L.reset)}</button>`:''}
+    ${active?`<button class="freset" onclick="clearAll()">${esc(L.reset)}</button>`:''}
   </div>
-  ${note('novelty')}${note('coverage')}`;
+  ${note('domainmap')}${note('novelty')}${note('coverage')}`;
 }
 function tB(b){ fBand.has(b)?fBand.delete(b):fBand.add(b); PAGE=0; render(); }
 function tN(v){ fNov.has(v)?fNov.delete(v):fNov.add(v); PAGE=0; render(); }
+function pickDomain(p,d){ fParent=p; fDomain=d; fAuthor=null; fWork=null; PAGE=0;
+  if(p) openParents.add(p); render(); }
+function togP(p){ openParents.has(p)?openParents.delete(p):openParents.add(p); render(); }
+function clearAll(){ fBand.clear(); fNov.clear(); fParent=fDomain=fAuthor=fWork=null; PAGE=0; render(); }
 
 /* ---------- rows per unit ---------- */
 function rowA(r){
@@ -425,7 +556,7 @@ function render(){
       </div>
       ${filterBar()}${body()}`}
   </div>
-  ${note('unit')}${note('nav')}${note('modes')}${note('gate')}`;
+  ${note('unit')}${note('sample')}${note('nav')}${note('modes')}${note('gate')}`;
 }
 
 function setU(u,el){ U=u; PAGE=0;
