@@ -18095,15 +18095,37 @@ class GenizahGUI(QMainWindow):
                 unhide(root.child(i))
             return
 
+        def with_inherited_sys_id(node, data):
+            if data.get('sys_id'):
+                return data
+            parent = node.parent()
+            while parent is not None:
+                parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(parent_data, dict) and parent_data.get('sys_id'):
+                    inherited = dict(data)
+                    inherited['sys_id'] = parent_data['sys_id']
+                    return inherited
+                parent = parent.parent()
+            return data
+
         def visit(node):
             visible_any = False
             for i in range(node.childCount()):
                 if visit(node.child(i)):
                     visible_any = True
 
-            data = node.data(0, Qt.ItemDataRole.UserRole + 1)
-            if data:
-                matches = self._comp_data_matches_filters(node, data, _local_visible_sys_ids_comp)
+            record_data = node.data(0, Qt.ItemDataRole.UserRole)
+            preview_data = node.data(0, Qt.ItemDataRole.UserRole + 1)
+            if record_data or preview_data:
+                filter_data = with_inherited_sys_id(
+                    node, record_data if isinstance(record_data, dict) else {}
+                )
+                matches = self._comp_data_matches_filters(
+                    node,
+                    filter_data,
+                    _local_visible_sys_ids_comp,
+                    preview_data if isinstance(preview_data, dict) else {},
+                )
                 node_visible = matches or visible_any
             else:
                 node_visible = visible_any
@@ -18114,20 +18136,27 @@ class GenizahGUI(QMainWindow):
         for i in range(root.childCount()):
             visit(root.child(i))
 
-    def _comp_data_matches_filters(self, node, data, local_visible_sys_ids=None):
+    def _comp_data_matches_filters(
+        self, node, data, local_visible_sys_ids=None, preview_data=None
+    ):
+        preview_data = preview_data or {}
         for column, rule in self.comp_filters.items():
-            if column == 1:
-                text = data.get("shelfmark", "")
-                if not text:
-                    text = node.text(1)
-            elif column == 2:
-                text = data.get("title", "")
-                if not text:
-                    text = node.text(2)
+            if column == self.comp_col_library:
+                text = node.text(self.comp_col_library)
+            elif column == self.comp_col_shelfmark:
+                text = node.text(self.comp_col_shelfmark)
+            elif column == self.comp_col_title:
+                text = node.text(self.comp_col_title)
+                parent = node.parent()
+                while not text and parent is not None:
+                    text = parent.text(self.comp_col_title)
+                    parent = parent.parent()
             elif column == self.comp_col_context:
-                text = data.get("source_ctx", "")
+                text = preview_data.get("source_ctx", data.get("source_ctx", ""))
             elif column == self.comp_col_ms_context:
-                text = data.get("ms_ctx", "")
+                text = preview_data.get(
+                    "ms_ctx", data.get("ms_ctx", data.get("text", ""))
+                )
             elif column == self.comp_col_printed:
                 text = node.text(self.comp_col_printed)
             else:
