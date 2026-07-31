@@ -38,7 +38,18 @@ comparable `/atlas` surface runs ~68% mobile.
 |---|------|----------------|--------|------|
 | 001 | discovery-panel-architecture | Where does manuscript-level coherence live relative to this page's identifications, and how do the three disclosure buckets read? | _pending (round 2)_ | discovery, panel, phase-136, disclosure, filters, rtl, mobile, d-09, d-21 |
 
-**Round 2 (owner steer):** a fourth variant **D — even panes** (the B+C synthesis), a per-view
+| 002 | panel-embedded-in-browse | How does the panel sit inside the real `/browse` page, and how does offset highlighting actually work on its text pane? | _pending_ | discovery, browse, integration, highlighting, d-12, panel-01, panel-03 |
+
+**Sketch 002 found two defects in D-12** (both verified against the asset and the live code, both
+cheap to fix, neither currently written down): the stored offsets index the normalized Hebrew-letter
+stream rather than the raw text — so D-12's "slice the RAW page text at the stored offsets" ends
+Moss. V,374's highlight 652 characters early — and the result must additionally be clipped per line,
+because the line-number gutter splits highlight HTML on `\n`. Done correctly 72 of 148 grid rows
+highlight; done as written, 1. Plus two collisions (search-term highlighting shares the same render
+slot; the version selector invalidates the offsets) and one honesty problem (only the largest span is
+stored, so the stated matched-letter count exceeds what can be highlighted).
+
+**Round 2 (owner steer) on sketch 001:** a fourth variant **D — even panes** (the B+C synthesis), a per-view
 **relation-kind + tier filter**, and 13 manuscripts instead of 7 so tiers and relation kinds are
 actually exercised. All data real from the deployed asset; nothing illustrative.
 

@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 002 — panel embedded in the real /browse page</title>
+<link rel="stylesheet" href="../themes/default.css">
+<style>
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg-secondary); color:var(--text-primary);
+  font-family:var(--font-sans); font-size:var(--text-sm); line-height:1.5; padding-top:112px; }
+
+/* ---------- sketch chrome ---------- */
+#nav { position:fixed; top:0; left:0; right:0; z-index:9998; background:var(--bg-card);
+  border-bottom:1px solid var(--border-light); box-shadow:var(--shadow-sm); }
+#nav .r { display:flex; gap:8px; padding:7px 10px; align-items:center; flex-wrap:wrap; }
+#nav .r + .r { border-top:1px solid var(--border-light); }
+#nav select, #nav button.ctl { font-family:inherit; font-size:var(--text-xs); padding:4px 8px;
+  border-radius:var(--radius-sm); border:1px solid var(--border-medium);
+  background:var(--bg-card); color:var(--text-primary); cursor:pointer; }
+#nav label.cl { font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--text-tertiary); font-weight:700; }
+button.ctl.on { background:var(--primary-600); color:#fff; border-color:var(--primary-700); }
+button.ctl.bad.on { background:var(--error); border-color:var(--error); }
+#stage { margin:0 auto; transition:max-width .2s ease; padding:12px 10px 90px; }
+
+.annot { display:none; }
+body.ann .annot { display:block; font-size:var(--text-xs); line-height:1.45;
+  background:var(--bg-tertiary); border:1px dashed var(--accent-amber); color:var(--text-secondary);
+  padding:6px 8px; border-radius:var(--radius-sm); margin:6px 0; }
+.annot b { color:var(--text-primary); } .annot code { font-family:var(--font-mono); font-size:11px; }
+.warn { background:color-mix(in srgb, var(--error) 10%, var(--bg-card));
+  border:1px solid var(--error); color:var(--text-primary); font-size:var(--text-xs);
+  padding:7px 9px; border-radius:var(--radius-sm); margin:8px 0; }
+.warn b { color:var(--error); }
+
+/* ============ /browse page chrome, reproduced ============ */
+/* app header — web/main.py ui.header, 64px, --bg-header gradient */
+.appbar { background:var(--bg-header); color:#fff; height:64px; display:flex; align-items:center;
+  gap:16px; padding:0 14px; border-radius:var(--radius-lg) var(--radius-lg) 0 0; }
+.appbar .brand { font-weight:700; font-size:var(--text-base); }
+.appbar .navlinks { display:flex; gap:12px; font-size:var(--text-xs); opacity:.9; flex-wrap:wrap; }
+.appbar .navlinks span.cur { font-weight:700; border-bottom:2px solid #fff; }
+
+/* browse.py:1682 — compact metadata header card */
+.metahead { background:linear-gradient(135deg,#15803d 0%,#166534 100%); color:#fff;
+  padding:12px; margin:12px 12px 12px; border-radius:var(--radius-md);
+  display:flex; align-items:center; gap:10px; }
+.metahead .navbtn { background:rgba(255,255,255,.15); border:none; color:#fff; width:28px; height:28px;
+  border-radius:50%; cursor:pointer; font-size:14px; }
+.metahead .mid { flex:1; text-align:center; }
+.metahead h2 { margin:0; font-size:var(--text-xl); font-weight:700;
+  text-shadow:0 2px 4px rgba(0,0,0,.3); }
+.metahead .desc { font-size:var(--text-xs); opacity:.95; margin-top:2px; }
+.chiplink { display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,.2);
+  padding:2px 8px; border-radius:var(--radius-sm); font-size:var(--text-xs); font-weight:600; }
+
+/* browse.py:2568 — main content card, min-height 60vh */
+.maincard { background:var(--bg-card); border:1px solid var(--border-light);
+  border-radius:var(--radius-md); margin:0 12px 12px; }
+
+/* toolbars */
+.tbar { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:7px 10px;
+  border-bottom:1px solid var(--border-light); }
+.tbtn { font-size:var(--text-xs); background:none; border:none; color:var(--primary-700);
+  padding:3px 7px; border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;
+  display:inline-flex; align-items:center; gap:4px; transition:all .15s ease; }
+.tbtn:hover { background:var(--bg-hover); }
+.tbtn.chip { border:1px solid var(--border-light); }
+.tbtn.disc-entry { border:1px solid var(--primary-600); background:var(--bg-active); font-weight:700; }
+.tbtn.disc-entry.busy { border-style:dashed; color:var(--text-muted); }
+.tbtn.disc-entry.err { border-color:var(--error); color:var(--error); background:transparent; }
+.tbtn .n { background:var(--primary-600); color:#fff; border-radius:var(--radius-full);
+  font-size:10px; padding:0 5px; }
+.spacer { flex:1; }
+.pgnav { display:flex; align-items:center; gap:4px; font-size:var(--text-xs); }
+.pgnav input { width:52px; font-family:inherit; font-size:var(--text-xs); padding:2px 4px;
+  border:1px solid var(--border-medium); border-radius:var(--radius-sm);
+  background:var(--bg-card); color:var(--text-primary); }
+.newtag { font-size:9px; text-transform:uppercase; letter-spacing:.04em; background:var(--accent-amber);
+  color:var(--text-inverse); padding:0 4px; border-radius:2px; margin-inline-start:4px; }
+
+/* browse.py:3978 — side-by-side flex, gap 16, min-height 60vh; left pane flex 0 0 50% */
+.panes { display:flex; flex-direction:row; gap:16px; padding:10px; }
+.pane-img { flex:0 0 50%; min-width:0; display:flex; flex-direction:column; }
+.pane-txt { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
+@media (max-width:820px) { .panes { flex-direction:column; } .pane-img { flex:0 0 auto; } }
+.imgbar { display:flex; align-items:center; gap:6px; padding:4px 6px; background:var(--bg-tertiary);
+  border:1px solid var(--border-light); border-bottom:none;
+  border-radius:var(--radius-sm) var(--radius-sm) 0 0; font-size:var(--text-xs);
+  color:var(--text-secondary); }
+/* browse.py:4046 — image container, #1a1a1a, height calc(60vh - 100px) */
+.imgbox { background:#1a1a1a; height:calc(60vh - 100px); min-height:240px; display:flex;
+  align-items:center; justify-content:center; color:#666; font-size:var(--text-xs);
+  border:1px solid var(--border-light); position:relative; overflow:hidden; }
+.imgbox .ph { text-align:center; line-height:1.8; }
+.imgcredit { font-size:10px; color:var(--text-muted); padding:3px 6px; border:1px solid var(--border-light);
+  border-top:none; border-radius:0 0 var(--radius-sm) var(--radius-sm); }
+
+/* text pane: version row (browse.py:4232 'items-center p-2 border-b') + scroll area 4184 */
+.verrow { display:flex; align-items:center; gap:6px; padding:8px; border:1px solid var(--border-light);
+  border-bottom:none; border-radius:var(--radius-sm) var(--radius-sm) 0 0;
+  background:var(--bg-card); flex-wrap:wrap; font-size:var(--text-xs); }
+.verrow select { font-family:inherit; font-size:var(--text-xs); padding:2px 6px;
+  border:1px solid var(--border-medium); border-radius:var(--radius-sm);
+  background:var(--bg-card); color:var(--text-primary); }
+.srcbadge { font-size:10px; font-weight:700; padding:1px 6px; border-radius:var(--radius-full);
+  background:var(--primary-100); color:var(--primary-800); }
+.txtscroll { height:calc(60vh - 80px); min-height:240px; overflow:auto; padding:20px;
+  border:1px solid var(--border-light); border-radius:0 0 var(--radius-sm) var(--radius-sm);
+  background:var(--bg-card); }
+
+/* the REAL renderer's output shape — web/components/typography.py:170 */
+.line-numbered-text { direction:rtl; text-align:right; line-height:2.2; font-size:1.4rem;
+  font-family:'David','Frank Ruehl','Noto Sans Hebrew',serif;
+  display:grid; grid-template-columns:max-content 1fr; column-gap:.6em; row-gap:0; }
+.line-number-gutter { color:var(--text-muted); font-size:.75em; text-align:left;
+  font-family:'Inter',system-ui,sans-serif; user-select:none; direction:ltr;
+  padding-left:.4em; border-left:1px solid var(--border-light); align-self:start;
+  line-height:calc(2.2 * 1.4rem); }
+.line-numbered-body-row { white-space:pre-wrap; overflow-wrap:break-word; word-break:break-word;
+  min-height:calc(2.2 * 1.4rem); }
+.discovery-match { background:color-mix(in srgb, var(--primary-500) 26%, transparent);
+  border-radius:2px; box-shadow:0 0 0 1px color-mix(in srgb, var(--primary-600) 40%, transparent); }
+.highlight-term { background:var(--accent-amber); color:#000; border-radius:2px; }
+
+/* ============ the discovery panel ============ */
+.panel { margin:0 10px 10px; border:1px solid var(--primary-600); border-radius:var(--radius-md);
+  overflow:hidden; }
+.phead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:9px 11px;
+  background:var(--bg-active); border-bottom:1px solid var(--border-light); }
+.ptitle { font-weight:700; color:var(--primary-800); }
+.pcount { font-size:var(--text-xs); color:#fff; background:var(--primary-600);
+  border-radius:var(--radius-full); padding:1px 8px; }
+.pcaveat { font-size:var(--text-xs); color:var(--text-muted); padding:5px 11px;
+  background:var(--bg-tertiary); border-bottom:1px solid var(--border-light); }
+.dpanes { display:block; }
+@media (min-width:900px) { .dpanes { display:grid; grid-template-columns:1fr 1fr; }
+  .dpanes > div + div { border-inline-start:1px solid var(--border-light); } }
+.dp { min-width:0; }
+.dp.ms { background:var(--bg-secondary); }
+.ghead { padding:8px 11px 3px; font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--text-tertiary); font-weight:700; }
+.idrow { padding:9px 11px; border-top:1px solid var(--border-light); }
+.idrow:hover { background:var(--bg-hover); }
+.idrow.sel { background:var(--bg-active); box-shadow:inset 3px 0 0 var(--primary-600); }
+[dir="rtl"] .idrow.sel { box-shadow:inset -3px 0 0 var(--primary-600); }
+.idwork { font-weight:700; color:var(--primary-700); text-decoration:none; }
+.idverb { color:var(--text-muted); font-size:var(--text-xs); }
+.idmeta { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; font-size:var(--text-xs);
+  color:var(--text-secondary); align-items:center; }
+.band { font-size:10px; font-weight:700; padding:1px 6px; border-radius:var(--radius-full);
+  border:1px solid var(--border-medium); background:var(--bg-tertiary); color:var(--text-secondary); }
+.offs { font-family:var(--font-mono); font-size:10px; color:var(--text-muted); }
+.dim { color:var(--text-muted); }
+.nocov { color:var(--text-muted); font-style:italic; }
+.idacts { display:flex; gap:5px; flex-wrap:wrap; margin-top:6px; align-items:center; }
+.lbtn { font-size:var(--text-xs); color:var(--primary-700); background:none;
+  border:1px solid var(--border-light); border-radius:var(--radius-sm); padding:2px 7px;
+  cursor:pointer; font-family:inherit; }
+.lbtn:hover { background:var(--bg-active); border-color:var(--primary-600); }
+.lbtn.on { background:var(--primary-600); color:#fff; border-color:var(--primary-700); }
+.vote { display:inline-flex; gap:2px; margin-inline-start:auto; }
+.vote button { width:24px; height:22px; font-size:11px; cursor:pointer; border:1px solid var(--border-light);
+  background:var(--bg-card); color:var(--text-muted); border-radius:var(--radius-sm); font-family:inherit; }
+.chips { display:flex; flex-wrap:wrap; gap:5px; padding:0 11px 10px; }
+.chip { font-size:var(--text-xs); background:var(--bg-card); border:1px solid var(--border-light);
+  border-radius:var(--radius-full); padding:2px 9px; cursor:pointer; }
+.chip:hover { border-color:var(--primary-600); }
+.chip.here { border-color:var(--primary-600); background:var(--bg-active); font-weight:700; }
+.chip.gated { border-style:dashed; opacity:.7; }
+.chip .pg { color:var(--text-muted); font-size:10px; margin-inline-start:4px; }
+.disc { border-top:1px solid var(--border-light); }
+.disc > summary { cursor:pointer; padding:8px 11px; display:flex; gap:6px; align-items:center;
+  flex-wrap:wrap; font-size:var(--text-xs); }
+.disc > summary::-webkit-details-marker { display:none; }
+.disc > summary::before { content:'▸'; color:var(--text-tertiary); font-size:9px; }
+.disc[open] > summary::before { content:'▾'; }
+.disc.notid > summary { background:var(--bg-tertiary); }
+.dbody { padding:0 11px 10px; font-size:var(--text-xs); color:var(--text-secondary); }
+.ql { color:var(--text-tertiary); font-style:italic; }
+
+/* service states */
+.statebox { padding:14px 12px; text-align:center; font-size:var(--text-xs); color:var(--text-muted); }
+.statebox.err { color:var(--error); }
+.spin { display:inline-block; width:13px; height:13px; border:2px solid var(--border-medium);
+  border-top-color:var(--primary-600); border-radius:50%; animation:sp .7s linear infinite;
+  vertical-align:-2px; margin-inline-end:6px; }
+@keyframes sp { to { transform:rotate(360deg); } }
+.skel { height:11px; background:var(--bg-tertiary); border-radius:3px; margin:7px 11px;
+  animation:pulse 1.3s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+#toast { position:fixed; bottom:58px; left:50%; transform:translateX(-50%) translateY(20px);
+  background:var(--text-primary); color:var(--bg-card); padding:8px 15px;
+  border-radius:var(--radius-full); font-size:var(--text-xs); opacity:0; pointer-events:none;
+  transition:all .2s ease; z-index:9999; max-width:92vw; }
+#toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+#tools { position:fixed; bottom:12px; right:12px; z-index:9999; font-family:system-ui; font-size:11px;
+  background:rgba(0,0,0,.78); color:#fff; padding:8px 10px; border-radius:8px; opacity:.35;
+  transition:opacity .2s; display:flex; gap:6px; align-items:center; }
+#tools:hover { opacity:1; }
+#tools select { font-size:11px; font-family:inherit; padding:2px 6px; border-radius:4px;
+  border:1px solid #555; background:#222; color:#fff; }
+</style>
+</head>
+<body>
+
+<div id="nav">
+  <div class="r">
+    <label class="cl">Manuscript</label>
+    <select id="ms" onchange="SEL=0;render()"></select>
+    <label class="cl">Service state</label>
+    <select id="st" onchange="render()">
+      <option value="ready">ready</option>
+      <option value="loading">loading (Phase B)</option>
+      <option value="outage">outage / timeout</option>
+      <option value="absent">sidecar absent</option>
+      <option value="zero">genuine zero</option>
+    </select>
+    <button class="ctl" id="langB" onclick="toggleLang()">עברית / RTL</button>
+    <button class="ctl" id="annB" onclick="toggleAnn()">Design notes</button>
+    <span class="spacer"></span>
+    <label class="cl">Width</label>
+    <button class="ctl" onclick="vp(375,this)">375</button>
+    <button class="ctl" onclick="vp(820,this)">820</button>
+    <button class="ctl on" onclick="vp(0,this)">Full</button>
+  </div>
+  <div class="r">
+    <label class="cl">Highlight in the text pane</label>
+    <button class="ctl on"      id="hmC" onclick="setHM('correct',this)">correct (norm→raw + per-line)</button>
+    <button class="ctl bad"     id="hmR" onclick="setHM('raw',this)">D-12 literal: slice RAW text</button>
+    <button class="ctl bad"     id="hmL" onclick="setHM('noline',this)">mapped but NOT per-line</button>
+    <button class="ctl"         id="hmO" onclick="setHM('off',this)">off</button>
+    <label class="cl" style="margin-inline-start:8px">Also</label>
+    <button class="ctl" id="termB" onclick="TERMS=!TERMS;render()">search terms active</button>
+  </div>
+</div>
+
+<div id="stage"></div>
+<div id="toast"></div>
+<div id="tools">
+  <span>theme</span>
+  <select onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'">
+    <option value="default">light</option><option value="parchment">parchment</option><option value="dark">dark</option>
+  </select>
+</div>
+
+<script src="../001-discovery-panel-architecture/data.js"></script>
+<script>
+/* ==========================================================================
+   Sketch 002 — the discovery panel embedded in a faithful reproduction of
+   the real /browse page.
+
+   Chrome reproduced from:
+     web/main.py             app header (64px, --bg-header gradient)
+     browse.py:1682          compact metadata header (gradient #15803d→#166534)
+     browse.py:2568          main content card, min-height 60vh
+     browse.py:3760-3960     the two toolbar rows (bib/catalog, page nav,
+                             edit/comment/notes/joins/reading-desk)
+     browse.py:3978          side-by-side flex, gap 16px
+     browse.py:3984          left image pane, flex: 0 0 50%
+     browse.py:4046          image box #1a1a1a, height calc(60vh - 100px)
+     browse.py:4232          version selector row ('items-center p-2 border-b')
+     browse.py:4184          text scroll area, height calc(60vh - 80px), padding 20px
+     typography.py:66-215    render_line_numbered_html — the per-line grid the
+                             highlight HTML must survive
+
+   The panel attaches exactly where the four existing enrichment sections do:
+   a placeholder container registered in `enrichment_refs` at render time and
+   filled by `update_enrichment_sections()` (browse_enrichment.py:488) after
+   Phase B. Entry control goes in toolbar row 2 beside Joins.
+   ========================================================================== */
+
+const MSS = PANEL_DATA.manuscripts;
+
+const BAND_LABELS = {
+  'track1_direct|high_confidence_algorithmic':{en:'High-confidence match (algorithmic)',he:'התאמה בוודאות גבוהה (אלגוריתמית)'},
+  'track1_direct|tier_a':{en:'Algorithmic match — tier A',he:'התאמה אלגוריתמית — דרגה א׳'},
+  'track1_direct|screening_rb':{en:'Screening — rule-based',he:'סינון — מבוסס כללים'},
+  'track1_direct|screening_canon':{en:'Screening — canon',he:'סינון — קנון'},
+  'propagated|corroborated':{en:'Corroborated by matching witnesses',he:'מאושש בעדים תואמים'},
+  'propagated|weak':{en:'Matching witnesses (weak)',he:'עדים תואמים (חלש)'},
+  'propagated|not_evaluated':{en:'Shared text — not evaluated',he:'טקסט משותף — לא הוערך'},
+};
+const T = {
+  en:{ panel:'Computed identifications', entry:'Computed identifications',
+    caveat:'Not exhaustive — more identifications may exist.',
+    onPage:'On this page', msPane:'This manuscript',
+    matches:'Matches', partial:'Partial match with', sharesWith:'Shares text with',
+    cov:p=>`${p}% of page (matched letters)`, letters:n=>`${n.toLocaleString()} letters`,
+    nocov:'no coverage figure for this family', stamp:'unreviewed · algorithmic estimate',
+    evidence:'Show in text', hide:'Hide in text', others:n=>`Other manuscripts · ${n.toLocaleString()}`,
+    alsoShares:'Also shares text with', notIds:'not presented as identifications',
+    relPages:'Pages matching this page in other manuscripts',
+    more:'Show more possible matches', pages:n=>`${n} ${n===1?'page':'pages'}`,
+    thisPage:'this page', gated:'behind “show more”',
+    loading:'Looking for computed identifications…',
+    outage:'Computed identifications are temporarily unavailable.',
+    retry:'Retry', absent:'Computed identifications are not available on this server.',
+    ph:'placeholder', voteT:'Placeholder — voting arrives in Phase 137 (JUDGE-01).',
+    ver:'Manuscript Text', lines:'Line numbers', spanOf:(a,b)=>`letters ${a}–${b}`,
+  },
+  he:{ panel:'זיהויים מחושבים', entry:'זיהויים מחושבים',
+    caveat:'אינו ממצה — ייתכנו זיהויים נוספים.',
+    onPage:'בדף זה', msPane:'כתב־היד הזה',
+    matches:'התאמה ל', partial:'התאמה חלקית ל', sharesWith:'חולק טקסט עם',
+    cov:p=>`${p}% מהדף (אותיות מותאמות)`, letters:n=>`${n.toLocaleString()} אותיות`,
+    nocov:'אין נתון כיסוי למשפחה זו', stamp:'לא נבדק · אמדן אלגוריתמי',
+    evidence:'הצג בטקסט', hide:'הסתר בטקסט', others:n=>`כתבי־יד נוספים · ${n.toLocaleString()}`,
+    alsoShares:'חולק טקסט גם עם', notIds:'אינו מוצג כזיהוי',
+    relPages:'דפים התואמים לדף זה בכתבי־יד אחרים',
+    more:'הצג התאמות אפשריות נוספות', pages:n=>`${n} דפים`,
+    thisPage:'הדף הזה', gated:'מאחורי «הצג עוד»',
+    loading:'מחפש זיהויים מחושבים…',
+    outage:'הזיהויים המחושבים אינם זמינים כרגע.',
+    retry:'נסה שוב', absent:'הזיהויים המחושבים אינם זמינים בשרת זה.',
+    ph:'זמני', voteT:'רכיב זמני — ההצבעה מגיעה בשלב 137 (JUDGE-01).',
+    ver:'טקסט כתב־היד', lines:'מספור שורות', spanOf:(a,b)=>`אותיות ${a}–${b}`,
+  }
+};
+
+const NOTES = {
+  seam:'<b>Where this attaches.</b> The entry control sits in browse.py\'s second toolbar row, beside Joins — the same row as Edit Transcription / comments / notes / Add to Reading Desk. Mechanically it is a fifth <code>enrichment_refs</code> placeholder: an empty container created during the synchronous render, then filled by <code>update_enrichment_sections()</code> (browse_enrichment.py:488) once Phase B completes. Four sections already work exactly this way. The panel body then renders full-width beneath the two 60vh panes, because neither pane has room for it.',
+  guards:'<b>Three things the seam demands.</b> (1) Re-check the generation token after every await (browse_enrichment.py:319, 452, 458) or rapid page navigation renders a stale panel over the wrong folio. (2) Bind <code>page_client</code> at render time — <code>run.io_bound</code> silently degrades <code>safe_user_*</code> to <code>{}</code> and <code>ensure_future</code> makes <code>ui.context.*</code> raise. (3) The D-13 envelope: today\'s wrappers collapse timeout, overload, absent-sidecar and genuine-zero all to <code>[]</code>, so an outage would hide the panel as though the manuscript had nothing. Only ~17% of manuscripts carry claims, so hiding on a TRUE zero is right — switch the state selector to feel the difference.',
+  offsets:'<b>The offsets are NOT raw-text indices.</b> Verified against the asset: <code>span_end − span_start == matched_letters</code> in 11 of 14 sampled rows, and the 3 exceptions are exactly the multi-span rows. For the “clean” manuscript the span is <code>0–5259</code> while the raw HTR text is 6,670 characters and the normalized letter count is 5,259 — i.e. the span covers the ENTIRE normalized stream. So offsets index <code>norm_stream</code> (NFC → fold final letters → keep only U+05D0–U+05EA; spaces, newlines, nikud, punctuation and Latin are all dropped). Rendering requires building a normalized-index → raw-index map at render time and translating the span. <b>D-12 says “slice the RAW page text at the stored offsets”, which highlights the wrong characters</b> — press the red “D-12 literal” button to see it drift.',
+  perline:'<b>And the result must be clipped per line.</b> <code>render_line_numbered_html</code> splits the highlight HTML on <code>\\n</code> and drops each line into its own grid <code>&lt;div&gt;</code> (typography.py:139, 170). A span that crosses a newline therefore leaves an unclosed <code>&lt;span&gt;</code> in one row, NO highlight in the middle rows, and an orphan <code>&lt;/span&gt;</code> at the end — the browser silently auto-closes and discards. Every span in the sample crosses newlines (152, 27, 17, 55, 6), so this is the normal case, not an edge case. Press “mapped but NOT per-line” to see it.',
+  terms:'<b>Search terms and discovery spans compete for one slot.</b> <code>render_text_content</code> computes <code>highlight_html = highlight_text(text) if state.highlight_terms else None</code> (browse.py:4186). Arrive at /browse from a search and both want that parameter. Toggle “search terms active” — the two marks must coexist (amber terms inside the green span here), which means one renderer has to emit both, not two renderers fighting.',
+  version:'<b>The version selector invalidates the offsets.</b> <code>handle_version_change</code> (browse.py:4207) swaps the text and re-renders. Offsets were computed against ONE HTR snapshot; switch to an FGP transcription or a translation and they address different characters. D-12 covers snapshot-hash drift over time but says nothing about the user actively switching source in the UI. Change the dropdown here — the highlight must be dropped, not re-validated.',
+  multispan:'<b>Only the largest span is stored.</b> This row\'s label says its matched-letter total, but only one span can be highlighted, so the highlighted length is SMALLER than the number shown — 1,736 highlighted vs 2,809 stated on the reviewed manuscript. 9,549 shipped direct rows have multiple spans. Either the label needs qualifying or the evidence view has to say it is showing one span of several.',
+  coupling:'<b>The codex picture is partly gated.</b> On Moss. V,374 the 5 pages of רש"י על שיר השירים that make this folio judgeable are <code>review_only / low_coverage</code>, so they sit behind the screening toggle. The D-13h reader aid is coupled to a BAND-03 control built for something else.',
+};
+
+let LANG='en', HM='correct', TERMS=false, SEL=0, ST='ready';
+const t=()=>T[LANG];
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cur=()=>MSS[document.getElementById('ms').selectedIndex];
+const bandKey=r=>(r.family==='direct'?'track1_direct':'propagated')+'|'+r.band;
+const bandLbl=k=>BAND_LABELS[k]?BAND_LABELS[k][LANG]:k;
+const note=k=>NOTES[k]?`<div class="annot">${NOTES[k]}</div>`:'';
+
+/* ---------- norm_stream mapping (faithful port of the builder) ---------- */
+const HEB_MIN=0x05D0, HEB_MAX=0x05EA;
+const FINAL_FOLD={0x05DA:0x05DB,0x05DD:0x05DE,0x05DF:0x05E0,0x05E3:0x05E4,0x05E5:0x05E6};
+/** map[i] = raw index of the i-th normalized Hebrew base letter */
+function normMap(raw){
+  const nf = raw.normalize('NFC'), map=[];
+  for (let i=0;i<nf.length;i++){
+    let code = nf.codePointAt(i);
+    if (FINAL_FOLD[code] !== undefined) code = FINAL_FOLD[code];
+    if (code>=HEB_MIN && code<=HEB_MAX) map.push(i);
+  }
+  return {nf, map};
+}
+/** normalized [a,b) -> raw [rs,re) */
+function spanToRaw(raw,a,b){
+  const {nf,map}=normMap(raw);
+  if (!map.length || a>=map.length) return null;
+  const rs = map[a];
+  const re = (b-1 < map.length) ? map[b-1]+1 : map[map.length-1]+1;
+  return {nf, rs, re};
+}
+
+/* ---------- the four highlight builders ---------- */
+function hlOff(raw){ return esc(raw); }
+
+/* CORRECT: normalized→raw mapping, then clipped to each line */
+function hlCorrect(raw,a,b){
+  const m=spanToRaw(raw,a,b); if(!m) return esc(raw);
+  const {nf,rs,re}=m;
+  const out=[]; let pos=0;
+  for (const line of nf.split('\n')){
+    const ls=pos, le=pos+line.length;
+    const s=Math.max(rs,ls), e=Math.min(re,le);
+    if (s<e){
+      out.push(mark(line.slice(0,s-ls)) + '<span class="discovery-match">' +
+               mark(line.slice(s-ls,e-ls)) + '</span>' + mark(line.slice(e-ls)));
+    } else out.push(mark(line));
+    pos=le+1;
+  }
+  return out.join('\n');
+}
+/* mapped but NOT clipped per line — one span across newlines */
+function hlNoLine(raw,a,b){
+  const m=spanToRaw(raw,a,b); if(!m) return esc(raw);
+  const {nf,rs,re}=m;
+  return mark(nf.slice(0,rs)) + '<span class="discovery-match">' +
+         mark(nf.slice(rs,re)) + '</span>' + mark(nf.slice(re));
+}
+/* D-12 LITERAL: slice the RAW text at the stored offsets (wrong units) */
+function hlRaw(raw,a,b){
+  return mark(raw.slice(0,a)) + '<span class="discovery-match">' +
+         mark(raw.slice(a,b)) + '</span>' + mark(raw.slice(b));
+}
+/* search-term marking, mimicking browse.py::highlight_text but applied to a part */
+const SEARCH_TERMS=['אשר','ואת'];
+function mark(part){
+  let h=esc(part);
+  if (TERMS) for (const term of SEARCH_TERMS)
+    h = h.split(esc(term)).join(`<span class="highlight-term">${esc(term)}</span>`);
+  return h;
+}
+
+/* ---------- the real renderer's line-numbered grid ---------- */
+function lineNumbered(text, highlightHtml){
+  const lines = (highlightHtml!==null && highlightHtml!==undefined)
+    ? highlightHtml.replace(/<br\s*\/?>/g,'\n').split('\n')
+    : esc(text).split('\n');
+  return '<div class="line-numbered-text">' + lines.map((l,i)=>
+    `<span class="line-number-gutter">${i+1}</span><div class="line-numbered-body-row">${l}</div>`
+  ).join('') + '</div>';
+}
+
+/* ---------- diagnostics for the current highlight mode ---------- */
+function hlDiag(ms,row){
+  if (HM==='off' || !row || !row.offs) return '';
+  const [a,b]=row.offs.split('–').map(Number);
+  const raw=ms.pageText;
+  const html = HM==='correct'?hlCorrect(raw,a,b) : HM==='noline'?hlNoLine(raw,a,b) : hlRaw(raw,a,b);
+  const rows=html.split('\n');
+  let open=0,broken=0,bare=0,marked=0;
+  for(const r of rows){
+    const o=(r.match(/<span class="discovery-match">/g)||[]).length;
+    const c=(r.match(/<\/span>/g)||[]).length - (r.match(/<\/span>/g)||[]).length + (r.match(/<span class="discovery-match">[^]*?<\/span>/g)||[]).length;
+    const closes=(r.match(/<\/span>/g)||[]).length;
+    if(o>closes) broken++; else if(closes>o) broken++;
+    if(o) marked++;
+  }
+  const m=spanToRaw(raw,a,b);
+  const items=[];
+  if (HM==='raw'){
+    const trueEnd = m? m.re : b;
+    items.push(`<b>Wrong units.</b> Stored span <code>${a}–${b}</code> is in normalized-letter units. Sliced against raw text it ends at character ${b}, but the span really ends at raw character ${trueEnd} — off by ${Math.abs(trueEnd-b)} characters.`);
+  }
+  if (HM==='noline' || HM==='raw'){
+    items.push(`<b>Broken rows:</b> ${broken} of ${rows.length} grid rows have an unbalanced <code>&lt;span&gt;</code>; only ${marked} row(s) carry a highlight at all.`);
+  }
+  if (HM==='correct'){
+    items.push(`<b>Balanced:</b> ${marked} of ${rows.length} grid rows highlighted, 0 unbalanced.`);
+    if (row.letters && (b-a)!==row.letters)
+      items.push(`<b>But:</b> the row states ${row.letters.toLocaleString()} matched letters while this single stored span covers only ${(b-a).toLocaleString()} — the rest is in spans the asset discarded.`);
+  }
+  return `<div class="${HM==='correct'?'annot':'warn'}" style="display:block">${items.join('<br>')}</div>`;
+}
+
+/* ---------- panel body ---------- */
+function rowHTML(ms,r,i){
+  const L=t();
+  const verb = r.ctype==='direct_witness'?L.matches : r.ctype==='shared_text'?L.sharesWith : L.partial;
+  const cov = r.cov!=null
+    ? `<span class="cov"><b>${L.cov(r.cov)}</b></span><span class="dim">·</span><span>${L.letters(r.letters)}</span>`
+    : (r.letters?`<span>${L.letters(r.letters)}</span>`:`<span class="nocov">${L.nocov}</span>`);
+  const isSel = i===SEL && !!r.offs;
+  const [a,b] = r.offs?r.offs.split('–').map(Number):[null,null];
+  return `<div class="idrow ${isSel?'sel':''}">
+    <div>${LANG==='he'?`<span class="idverb">${verb}</span>`:`<span class="idverb">${verb}</span> `}<a class="idwork" href="#" onclick="toast('→ /work/'+'${r.wid}');return false;">${esc(r.work)}</a>
+      ${r.author?`<span class="dim" style="font-size:var(--text-xs)"> ${esc(r.author)}</span>`:''}</div>
+    <div class="idmeta"><span class="band">${esc(bandLbl(bandKey(r)))}</span>${cov}
+      <span class="dim">·</span><span class="dim">${L.stamp}</span>
+      ${r.offs?`<span class="offs">${L.spanOf(a,b)}</span>`:''}</div>
+    <div class="idacts">
+      ${r.offs?`<button class="lbtn ${isSel?'on':''}" onclick="SEL=${isSel?-1:i};render()">${isSel?L.hide:L.evidence}</button>`
+              :`<button class="lbtn" disabled title="no stored offsets on this side">${L.evidence}</button>`}
+      <button class="lbtn" onclick="toast(t().others(${r.others}))">${L.others(r.others)} ▸</button>
+      <span class="vote"><button onclick="toast(t().voteT)">✓</button><button onclick="toast(t().voteT)">?</button><button onclick="toast(t().voteT)">✗</button></span>
+    </div>
+    ${r.nspans>1?note('multispan'):''}
+  </div>`;
+}
+
+function panelBody(ms){
+  const L=t();
+  const ids=ms.onPage;
+  const works=ms.elsewhere.works.slice(0,8);
+  return `<div class="dpanes">
+    <div class="dp">
+      <div class="ghead">${esc(L.onPage)} — ${ids.length}</div>
+      ${ids.length?ids.map((r,i)=>rowHTML(ms,r,i)).join(''):`<div class="statebox">—</div>`}
+    </div>
+    <div class="dp ms">
+      <div class="ghead">${esc(L.msPane)}</div>
+      <div class="chips">
+        ${ids.map(r=>`<span class="chip here">${esc(r.work)}<span class="pg">${esc(L.thisPage)}</span></span>`).join('')}
+        ${works.map(w=>`<span class="chip ${w.gated?'gated':''}">${esc(w.title)}<span class="pg">${L.pages(w.gated?w.gatedPages:w.pages)}${w.gated?' · '+esc(L.gated):''}</span></span>`).join('')}
+      </div>
+      ${ms.elsewhere.works.some(w=>w.gated)?note('coupling'):''}
+    </div>
+  </div>
+  ${(ms.shares.length||ms.related)?`<details class="disc notid"><summary>${esc(L.alsoShares)}
+     <span class="dim">· ${ms.shares.length?ms.shares.length+' passage group(s)':''}${ms.related?' · '+ms.related+' pages':''}</span>
+     <span class="ql">— ${esc(L.notIds)}</span></summary>
+     <div class="dbody">${ms.shares.map(g=>`One passage (letters ${esc(g.offs)}, ${g.letters}) appears in ${g.works.length} works: <b>${g.works.map(esc).join(' · ')}</b>`).join('<br>')}
+     ${ms.related?`<div style="margin-top:5px"><b>${esc(L.relPages)}</b> — ${ms.related}</div>`:''}</div></details>`:''}
+  <details class="disc"><summary>${esc(L.more)}
+    <span class="dim">· ${ms.hidden.short+ms.hidden.gated+ms.elsewhere.gatedClaims}</span></summary>
+    <div class="dbody">screening, review-only and short-passage rows render here</div></details>`;
+}
+
+function panel(ms){
+  const L=t();
+  if (ST==='loading') return `<div class="panel"><div class="phead"><span class="ptitle">${esc(L.panel)}</span></div>
+    <div class="statebox"><span class="spin"></span>${esc(L.loading)}</div>
+    <div class="skel" style="width:60%"></div><div class="skel" style="width:45%"></div></div>`;
+  if (ST==='outage') return `<div class="panel" style="border-color:var(--error)">
+    <div class="phead" style="background:transparent"><span class="ptitle" style="color:var(--error)">${esc(L.panel)}</span></div>
+    <div class="statebox err">⚠ ${esc(L.outage)}
+      <div style="margin-top:7px"><button class="lbtn" onclick="ST='ready';document.getElementById('st').value='ready';render()">${esc(L.retry)}</button></div></div></div>`;
+  if (ST==='absent') return `<div class="panel" style="border-color:var(--border-medium)">
+    <div class="phead" style="background:var(--bg-tertiary)"><span class="ptitle" style="color:var(--text-muted)">${esc(L.panel)}</span></div>
+    <div class="statebox">${esc(L.absent)}</div></div>`;
+  if (ST==='zero') return '';
+  return `<div class="panel">
+    <div class="phead"><span style="color:var(--primary-700)">◈</span><span class="ptitle">${esc(L.panel)}</span>
+      <span class="pcount">${ms.onPage.length}</span></div>
+    <div class="pcaveat">${esc(L.caveat)}</div>${panelBody(ms)}</div>`;
+}
+
+/* ---------- the browse page ---------- */
+function render(){
+  const ms=cur(), L=t(), dir=LANG==='he'?'rtl':'ltr';
+  const row = (SEL>=0 && ms.onPage[SEL]) ? ms.onPage[SEL] : null;
+  let hh=null;
+  if (HM!=='off' && row && row.offs){
+    const [a,b]=row.offs.split('–').map(Number);
+    hh = HM==='correct'?hlCorrect(ms.pageText,a,b)
+       : HM==='noline' ?hlNoLine(ms.pageText,a,b)
+       :                hlRaw(ms.pageText,a,b);
+  } else if (TERMS) hh = mark(ms.pageText);
+
+  const entryHidden = (ST==='zero');
+  const entryCls = ST==='loading'?'busy' : (ST==='outage'?'err':'');
+  const entryTxt = ST==='loading'?'…' : ST==='outage'?'⚠' : ms.onPage.length;
+
+  document.getElementById('stage').innerHTML=`
+  <div class="frame" dir="${dir}" style="background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-md)">
+    <div class="appbar">
+      <span class="brand">Dicta Genizah Search</span>
+      <span class="navlinks"><span>Home</span><span>Search</span><span>Find Parallels</span>
+        <span class="cur">Browse by Shelfmark</span><span>Browse by Identification</span>
+        <span>Community</span><span>Joins Lab</span></span>
+    </div>
+
+    <div class="metahead">
+      <button class="navbtn">${dir==='rtl'?'›':'‹'}</button>
+      <div class="mid">
+        <h2>${esc(ms.lib)}, ${esc(ms.sm)}</h2>
+        <div class="desc">${esc((ms.cat||'').slice(0,110))}${(ms.cat||'').length>110?'…':''}</div>
+      </div>
+      <span class="chiplink">↗ Ktiv</span><span class="chiplink">↗ PGP</span>
+      <button class="navbtn">${dir==='rtl'?'‹':'›'}</button>
+    </div>
+
+    <div class="maincard">
+      <div class="tbar">
+        <button class="tbtn chip">NLI</button>
+        <button class="tbtn chip">Bibliography</button>
+        <button class="tbtn chip">Catalog</button>
+        <span class="spacer"></span>
+        <span class="pgnav"><button class="tbtn">${dir==='rtl'?'›':'‹'}</button>
+          <input value="${esc(ms.pageNum)}"><button class="tbtn">Go</button>
+          <span class="dim">/ ${ms.elsewhere.pages+ms.elsewhere.gatedClaims+1}</span>
+          <button class="tbtn">${dir==='rtl'?'‹':'›'}</button></span>
+        <button class="tbtn chip">▤ Show Full Manuscript</button><button class="tbtn">☆</button>
+      </div>
+      <div class="tbar">
+        <button class="tbtn chip">✎ Edit Transcription</button>
+        <button class="tbtn chip">💬 Comments</button>
+        <button class="tbtn chip">🗒 Notes</button>
+        <button class="tbtn chip">⛓ Joins</button>
+        ${entryHidden?'':`<button class="tbtn disc-entry ${entryCls}" onclick="toast('the panel is already open below')">
+          ◈ ${esc(L.entry)} <span class="n">${entryTxt}</span><span class="newtag">new</span></button>`}
+        <button class="tbtn">＋ Reading Desk</button>
+        ${entryHidden?`<span class="dim" style="font-size:var(--text-xs)">— entry control hidden: a TRUE zero (D-13)</span>`:''}
+      </div>
+
+      <div class="panes">
+        <div class="pane-img">
+          <div class="imgbar">🔍 − ＋ ⟲ &nbsp;<span class="dim">${esc(ms.lib)}</span></div>
+          <div class="imgbox"><div class="ph">manuscript image<br><span style="opacity:.6">flex: 0 0 50% · calc(60vh − 100px)</span></div></div>
+          <div class="imgcredit">Image: ${esc(ms.lib)} — reproduced by permission</div>
+        </div>
+        <div class="pane-txt">
+          <div class="verrow">
+            <span class="dim">${esc(L.ver)}</span>
+            <select onchange="onVersion(this.value)">
+              <option value="htr">MiDRASH V0.8 (HTR)</option>
+              <option value="fgp">FGP transcription</option>
+              <option value="tr">English translation</option>
+            </select>
+            <span class="srcbadge">V0.8</span>
+            <button class="tbtn" title="${esc(L.lines)}">№</button>
+            ${row&&HM!=='off'?`<span class="dim" style="margin-inline-start:auto">◈ ${esc(row.work)}</span>`:''}
+          </div>
+          <div class="txtscroll">${lineNumbered(ms.pageText, hh)}</div>
+        </div>
+      </div>
+
+      ${panel(ms)}
+      ${hlDiag(ms,row)}
+    </div>
+  </div>
+  ${note('seam')}${note('guards')}${note('offsets')}${note('perline')}${TERMS?note('terms'):''}${note('version')}`;
+}
+
+function onVersion(v){
+  if (v==='htr'){ toast('V0.8 — stored offsets apply'); return; }
+  SEL=-1;
+  toast(LANG==='he' ? 'מקור אחר — ההיסטים אינם תקפים, ההדגשה בוטלה'
+                    : 'different source — stored offsets do not apply, highlight dropped');
+  render();
+}
+function setHM(m,el){ HM=m;
+  ['hmC','hmR','hmL','hmO'].forEach(id=>document.getElementById(id).classList.remove('on'));
+  el.classList.add('on'); if(SEL<0) SEL=0; render(); }
+function toggleLang(){ LANG=LANG==='en'?'he':'en';
+  const b=document.getElementById('langB');
+  b.textContent=LANG==='en'?'עברית / RTL':'English / LTR'; b.classList.toggle('on',LANG==='he'); render(); }
+function toggleAnn(){ document.body.classList.toggle('ann');
+  document.getElementById('annB').classList.toggle('on',document.body.classList.contains('ann')); }
+function vp(w,el){ document.querySelectorAll('#nav .r:first-child button.ctl').forEach(b=>{
+    if(/^\d+$|^Full$/.test(b.textContent)) b.classList.remove('on'); });
+  el.classList.add('on'); document.getElementById('stage').style.maxWidth=w?w+'px':''; }
+let tt; function toast(m){ const e=document.getElementById('toast'); e.textContent=m;
+  e.classList.add('show'); clearTimeout(tt); tt=setTimeout(()=>e.classList.remove('show'),2400); }
+
+const sel=document.getElementById('ms');
+MSS.forEach(m=>{ const o=document.createElement('option');
+  o.textContent=`${m.sm} (${m.lib}) — ${m.key}`; sel.appendChild(o); });
+sel.selectedIndex=MSS.findIndex(m=>m.key==='reviewed');
+document.getElementById('st').value='ready';
+render();
+</script>
+</body>
+</html>
