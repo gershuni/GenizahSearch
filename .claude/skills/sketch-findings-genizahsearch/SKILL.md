@@ -181,6 +181,14 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
     3,800-char windows with tracked offsets, positions deliberately preserved. Persisting it is the
     single highest-leverage change available: it makes citations locatable, which is what makes them
     worth anything to a scholar.
+24. **Sefaria verse maps already exist** — 322 `*.versemap.json` sidecars in `refs_staging/`, verse-level
+    with character offsets, because the fetcher deliberately kept labels out of the body. But they index
+    the **body** while the matcher indexes **`norm_stream`** — two coordinate systems, the same trap
+    sketch 002 found on the manuscript side. **Name the coordinate space of every offset at the point of
+    definition**; treat that as a schema rule, not two coincidences.
+25. **Only 42% of works can ever show a reference** (451 Sefaria of 1,088) even though 75% of *claims*
+    can. JA has no internal division at all; M-source is masked and must never display a locus. Any
+    locus UI needs three tiers: full reference · position-only · omitted.
 
 ## Requirement amendments these sketches owe
 
@@ -192,7 +200,7 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
 | Panel **tier** filter | **Deleted**, not converted — quality is the bucket, kind is the relation filter | resolved 2026-08-01 |
 | `band_precision.tier_a` | Carry the CERT-01 result (`measured_pass` + real `ci_low`) into the v2 bake | **data fix**, blocks the surface |
 | `page_norm_letters` | A `page_id → letter count` table (~139K ints, no text, masking-safe) so the coverage gate can ship | **data fix**, blocks the surface |
-| Work-side offsets `w_start`/`w_end` | **Highest-value rebuild item.** Already computed by the matcher and discarded at ingest. Fixes containment, but far more importantly makes citations *locatable* — turning the second bucket into a browsable corpus of addressed quotations, enabling side-by-side evidence, join sequencing and leaf ordering. See `main-pool-rule.md` | rebuild |
+| Work-side offsets `w_start`/`w_end` | **Highest-value rebuild item.** Already computed by the matcher and discarded at ingest. Fixes containment, but far more importantly makes citations *locatable* — enabling side-by-side evidence, join sequencing and leaf ordering. **Written into `docs/specs/discovery-v2-bake-plan.md`, Amendment 2026-08-01.** Sefaria first (75% of claims, and 322 verse-level maps already exist); JA needs an investigation; M-source stores but never displays | rebuild, planned |
 | `span_competitors` pre-shadowing + 8-gram IDF | Honest distinctiveness; a tuned prototype already exists in the gitignored spike | rebuild |
 | `works.genre` + composition year | Genre is entirely NULL; missing liturgy dates neutralised date-based demotion | rebuild |
 | `discovery_routing_audit.kept_tie` | NULL `demoted_work_id` makes tie pairs unreconstructable | rebuild |

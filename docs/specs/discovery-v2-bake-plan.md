@@ -2334,3 +2334,116 @@ with the counted impact audit it allowed as the deferral basis:
   the mutation-tested verifier instead). It moves to the v2.1 / CERT-01
   systemic re-validation track together with the coverage-framework
   re-validation the Lever-1 review already assigned there.
+
+## Amendment 2026-08-01 (Phase 136, work-side match offsets — `w_start`/`w_end`)
+
+**Owner decision, 2026-08-01.** Persist **where inside the reference work** each match lands. This
+arrived on the rebuild list as the structural fix for containment misattribution, but the owner
+identified the larger value: *a citation you cannot locate is close to worthless to a scholar*.
+Prioritise the **public** corpora (Sefaria, JA); the M-source cannot carry a displayable locus in any
+case.
+
+### Why it is cheap: the position is already computed and thrown away
+
+`track1_match.py` slices each reference work into overlapping `SEG_LEN = 3800` character windows and
+records every window's offset (`seg_off`), with an explicit in-code comment that *"gram POSITIONS stay
+original, so span coordinates are unaffected"*. Each hit is `(work, p0, p1, dens, seg)`. **The work-side
+coordinate exists at match time and is discarded at ingest** — the same failure as page coverage
+(§4.4), which is computed for the Lever-1 cliff and then not persisted.
+
+- **Segment-level location** (≈ a chapter or two) is nearly free: persist the segment index + `seg_off`.
+- **Exact offsets** need only retaining the per-gram alignment positions the matcher already carries.
+
+Store `w_start`, `w_end` on `discovery_evidence` alongside the existing page-side `span_start`/
+`span_end`. (Note the existing `b_start`/`b_end` are the *propagated* manuscript-to-manuscript B side,
+not the work side — do not overload them.)
+
+### Prioritisation — measured on the deployed `discovery-v1-33499c5b` asset
+
+| source corpus | works w/ shipped claims | claims | identifications | citation-type claims |
+|---|---|---|---|---|
+| **sefaria** | 451 | **124,941 (75%)** | 47,027 (72%) | **5,474 (74%)** |
+| msource | 533 | 21,700 (13%) | 11,595 | 1,373 |
+| **ja** | 104 | 19,896 (12%) | 6,578 | 539 |
+
+Sefaria alone carries three quarters of the value, and it is also the corpus where the mapping already
+exists.
+
+### The Sefaria mapping already exists — `*.versemap.json`
+
+`ref1_fetch_sefaria.py` deliberately keeps verse/chapter labels **out** of the body and writes them to a
+per-work sidecar. `refs_staging/` currently holds **322 versemaps**, structures `verse` (295),
+`hierarchical` (25), `flat` (2), in exactly the required shape:
+
+```json
+{"ref": "Keter Malkhut 1:4", "chapter": 1, "verse": 4, "start": 0, "end": 28}
+```
+
+Coverage of the staged bodies: `sef_*` 249/249, `targum_*` 42/42, `b2_*` 3/3, `liturgy_*` 28/30,
+**`ja2_*` 0/21**.
+
+**Two gaps to close for Sefaria:** the 2 liturgy bodies without a versemap, and the difference between
+the 322 staged versemaps and the 451 Sefaria works carrying shipped claims. The fetcher is proven and
+re-runnable, so this is acquisition work, not new engineering.
+
+### ⚠ The coordinate-system trap — do not assume the offsets align
+
+The versemap `start`/`end` index the **body** text (Hebrew base letters + single spaces, maqaf mapped to
+space, readability-oriented). The matcher indexes **`normalize.norm_stream`**, which is a *different,
+matching-oriented* normalisation. **These are two coordinate systems and they do not agree.**
+
+A `body ↔ norm_stream` offset map must be built per work. Both are deterministic functions of the same
+source text, so this is mechanical — and it is the identical problem Phase 136's sketch 002 already
+found and solved on the *manuscript* side (stored offsets index the normalised letter stream, not the
+raw text, so slicing raw text at them lands in the wrong place). Reuse that technique; budget it on the
+work side too.
+
+Treat the D-12 sketch finding as a precedent, not a coincidence: **every offset in this system needs its
+coordinate space named.** Record which stream `w_start`/`w_end` index, in the schema doc, at the point
+of definition.
+
+### JA needs investigation — it has no divisions today
+
+JA works enter via `track1_build_ref.py` from per-document text files whose only structure is a
+`'***\n<title>\n---\n'` header. There is **no internal division at all** — no chapters, no sections. So
+for JA the questions are open and must be answered before design work assumes an answer:
+
+1. Does the upstream Friedberg JA material carry any division (folio, chapter, section) that the
+   per-document flattening discarded?
+2. If not, is there a defensible synthetic unit (paragraph, folio of the printed edition, Nth-character
+   block) that a scholar would accept as an address?
+3. If neither, JA rows can still carry a **position** (percentage through the work) but never a
+   human-readable reference.
+
+**Do not block Sefaria on this.** Ship the Sefaria locus first; JA follows its own investigation.
+
+### M-source: store, do not display
+
+M-source raw files carry `##...##` headers and `>>` line markers, so a division exists upstream — but
+the corpus is masked and **no M-source locus may reach a display surface**. Store `w_start`/`w_end` for
+containment detection and shadowing (both internal), and render at most a position-through-work.
+
+### The display asymmetry this creates — a design constraint, not a detail
+
+By **works**, only 451 of 1,088 (42%) will ever show a human-readable reference; 104 JA works get a
+position at best, and 533 M-source works get nothing displayable. By **claims** the picture is much
+better — 75% Sefaria — but a surface must degrade gracefully across three tiers:
+
+| tier | example |
+|---|---|
+| full reference | "Mishneh Torah, Laws of Prayer 4:2" |
+| position only | "about 40% through the work" |
+| nothing | (omit the element entirely; never a placeholder that implies a missing lookup) |
+
+### Gates for this amendment
+
+1. `w_start`/`w_end` present on every `track1_direct` evidence row, with the indexed stream named in
+   `discovery-sidecar-schema-v1.md`.
+2. A round-trip test per structure type (`verse`, `hierarchical`, `flat`): a known passage's offsets
+   resolve back to its known reference.
+3. A `body ↔ norm_stream` mapping test on a work containing maqaf and nikud — the two cases the two
+   normalisations treat differently.
+4. Containment check: matches landing in Mishneh Torah's Seder-Tefilot appendix are distinguishable from
+   body matches. This is the acceptance test for the original motivation (see the Sefer Ahava case:
+   2,070 identifications, 7th corpus-wide, above Isaiah).
+5. Masking gate: no M-source locus string in any rendered output.

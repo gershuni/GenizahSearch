@@ -182,9 +182,59 @@ What persisting it unlocks:
 ⚠ **The known cost:** offsets index a *normalized letter stream*, so turning one into "chapter 4"
 requires mapping back to the real text. That is the same normalized→raw problem sketch 002 already found
 and solved on the manuscript side (see `browse-integration-and-highlighting.md`) — known problem, known
-machinery, but it must be budgeted on the work side too. Also, only works with a canonical locus
-structure (Bible, Mishnah, Talmud, codes) can render a human-readable address; the rest can offer only a
-position or a percentage through the work.
+machinery, but it must be budgeted on the work side too.
+
+**Written into the build plan** as `docs/specs/discovery-v2-bake-plan.md` §"Amendment 2026-08-01
+(work-side match offsets)", with prioritisation, the existing Sefaria mapping, the coordinate trap, the
+JA investigation and five gates.
+
+### The display asymmetry — plan the UI around it from the start
+
+Public corpora are prioritised because they are where a locus is both most valuable and actually
+available. Measured on the deployed asset:
+
+| corpus | works with claims | claims | citation-type claims | locus available? |
+|---|---|---|---|---|
+| **Sefaria** | 451 | **124,941 (75%)** | **5,474 (74%)** | **yes** — 322 `*.versemap.json` sidecars already exist, verse-level, with character offsets |
+| JA | 104 | 19,896 (12%) | 539 | **no** — the per-document ingest has no internal division at all. Open investigation |
+| M-source | 533 | 21,700 (13%) | 1,373 | **must not be displayed** — masked corpus. Store for containment/shadowing only |
+
+So by claims, 75% can carry a real reference — but by **works**, only 42% ever will. Every surface that
+shows a locus needs three graceful tiers: **full reference** ("Laws of Prayer 4:2") · **position only**
+("about 40% through the work") · **nothing** (omit the element; never a placeholder implying a failed
+lookup). Design that in rather than discovering it when half the rows come back empty.
+
+### Ramifications on current and future work
+
+**Phase 136 (these surfaces).**
+- The evidence view can become **side-by-side** — manuscript text beside the matched passage of the
+  work. Today the reader sees a highlight and must trust it. This is the largest available upgrade to
+  the evidence design in `browse-integration-and-highlighting.md`, and it is **scope beyond D-12**,
+  which covers manuscript-side highlighting only.
+- Rows can carry a locus chip. Check it against D-21 first — naming *where* a match falls is a fact
+  about position, not a claim about the relationship, so it should pass, but confirm rather than assume.
+- The "more matches" bucket gains a reason to exist as a destination rather than an overflow.
+
+**Phase 137 (saved judgments).** Side-by-side text makes adjudication far faster and better-grounded,
+which feeds directly into the measurement that gates everything else. A reviewer also gains a verdict
+the model currently cannot express: *right work, wrong section*.
+
+**Phase 138 (`/leads`).** A lead you can look up is actionable; one you can't mostly isn't.
+
+**Joins Lab (existing product, not in this milestone).** Two fragments landing on **adjacent stretches
+of the same work** is join evidence — and it quantifies the gap between them. This is a join-finding
+signal that does not exist today, on an already-shipped surface. Worth a seed of its own.
+
+**Browse / reading view.** Leaf ordering within a multi-page fragment falls out for free (sort by work
+offset), which is a standing cataloguing problem.
+
+**Corpus-level.** "These 40 fragments together preserve 60% of this work, with gaps here and here" — a
+view of what survives that does not exist today.
+
+**A general lesson worth carrying:** sketch 002 found that manuscript-side offsets index a normalized
+stream rather than raw text, and now the work side has the identical trap waiting. **Every offset in
+this system needs its coordinate space named at the point of definition.** Treat that as a standing
+schema rule, not two coincidences.
 
 ## How this relates to `is_default_eligible()`
 
