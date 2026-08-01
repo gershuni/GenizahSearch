@@ -96,7 +96,9 @@ picture carry equal weight.
 | **D-09** | Strike "collapsed" (variant D never collapses the manuscript group); keep the left-to-right ordering | **Narrow amendment owed** |
 | **D-12** | Offsets index the normalized letter stream, not raw text; result must be clipped per line; highlight dropped on version change; search-term precedence rule | **Rewrite owed** |
 | **`discovery-band-labels-v1.md` §2** | Seven frozen `(family, band)` display labels → three user-facing confidence levels, **system-wide** (panel + findings page). Labels become tooltip-only. §4 and BAND-03 unaffected | **Amendment owed** (scope widened by the 2026-07-31 ruling) |
-| Panel **tier** filter | Labels options in a vocabulary the rows no longer use once the scale lands. Confidence filter recommended, but it collapses `tier_a` + `high_confidence_algorithmic` into `Strong` | **Open** — the one follow-on the ruling creates |
+| Panel **tier** filter | Becomes a **confidence** filter. Tier A stays reachable because §4 already keeps `tier_a` behind the "show more" toggle — that toggle *is* the tier-A control | **Resolved 2026-08-01** |
+| **`discovery-band-labels-v1.md` §3** | tier_a "must be shown as *precision not yet measured*"; once band labels become tooltips that requirement has no home | **Open** — gate 1 |
+| **Default-shown (§4) × the scale** | The panel gates `tier_a` out of the default view pending CERT-01; sketch 003 never modelled the policy, so the findings page's Strong facet (131,164) ignores it | **Open** — gate 1, answer once for both surfaces |
 | **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; the shipped wording uses "new finds" under a candidacy hedge | **Amendment owed**, with the *candidate ≠ discovery* reasoning on the record |
 | **D-21** | — | **No change** (owner declined "Citations") |
 | **PANEL-01/02** | Panel-level relation/tier filters are new scope (D-16 specifies filters for `/work/{id}` only) | Carry to gate 1 |
@@ -119,12 +121,23 @@ picture carry equal weight.
 - Does the mode strip (leads + saved as future tabs) match the intent for Phases 137/138?
 - The three low-confidence domain assignments (literary letter collection · Arabic Josippon · kalam vs
   theology) — and whether "Unspecified Domain" is the right home for works the vocabulary can't place.
-- **Whether the panel's tier filter becomes a confidence filter.** Created by the 2026-07-31 ruling: the
-  rows now say Strong/Medium/Weak while the filter still says tier A/B. Recommended fix is a confidence
-  filter, at the cost of no longer being able to isolate tier A.
+- **Three collisions between the confidence scale and `discovery-band-labels-v1.md`**, found 2026-08-01
+  while propagating the system-wide ruling. None reverses the ruling; all three need answers at gate 1:
+  1. **"Strong" is 99.37% `tier_a`** (134,449 rows vs 852 `high_confidence_algorithmic`) — a band whose
+     precision §3 says is *not yet measured* and **must be displayed as such**. Demoting the band name to
+     a tooltip leaves that requirement homeless.
+  2. **`corroborated` — 0.926 [0.875, 0.968], the highest measured precision in the system — displays as
+     `Weak`**, beside `screening_canon` (0.647) and never-assessed rows. Defensible under a
+     relation-based scale, but it must be chosen rather than stumbled into.
+  3. **§4 gates `tier_a` out of the default view pending CERT-01**, so the panel's top level is nearly
+     empty by default (852 rows + `human_confirmed`). **Sketch 003 never modelled the default-shown
+     policy** — a gap in the sketch, not a decision it made — so its Strong facet advertises 131,164 with
+     no reference to the gate, and the two surfaces could diverge by accident.
 
 **Resolved 2026-07-31:** the band-label vs confidence-scale disagreement between the two surfaces — the
 confidence scale wins on both.
+**Resolved 2026-08-01:** the panel's tier filter becomes a confidence filter; §4's "show more" toggle
+already serves as the tier-A affordance, so the granularity cost is minimal.
 
 ## Verification carried forward
 

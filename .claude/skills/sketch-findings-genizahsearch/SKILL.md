@@ -68,10 +68,22 @@ rather than a page-local one — write it that way. **§4 (default visibility) a
 routing) are untouched**: bands still decide which disclosure bucket a row lands in and what is gated by
 default. Only the *label a reader sees* changes.
 
-⚠ It also leaves one follow-on open: the panel's **tier** filter now labels options in a vocabulary its
-rows no longer use. Switching it to a confidence filter restores one vocabulary but collapses `tier_a`
-and `high_confidence_algorithmic` into `Strong`, so tier A can no longer be isolated. Recommended but
-**not decided** — see `discovery-panel-layout.md`.
+The panel's **tier** filter becomes a **confidence** filter to match (resolved 2026-08-01). Tier A stays
+reachable because §4 already keeps `tier_a` behind the "show more" toggle — that toggle *is* the tier-A
+control, so almost no granularity is lost.
+
+⚠ **Before building the scale, read the three collisions in `findings-page.md`** (found 2026-08-01,
+written down nowhere else). None reverses the ruling; all three need an answer at gate 1:
+
+1. **"Strong" is 99.37% `tier_a`** (134,449 rows vs 852 `high_confidence_algorithmic`) — a band whose
+   precision §3 says is *not yet measured* and **must be shown as such**. The tooltip demotion leaves
+   that requirement homeless.
+2. **`corroborated` — 0.926, the best-measured population in the system — displays as `Weak`**, beside
+   `screening_canon` (0.647) and never-assessed rows. Defensible under a relation-based scale; must be
+   chosen, not stumbled into.
+3. **§4 gates `tier_a` out of the default view pending CERT-01**, so the panel's top level is nearly
+   empty by default. **Sketch 003 never modelled the default-shown policy** — a gap in the sketch, not a
+   decision — so the two surfaces could answer it differently by accident.
 
 ## Theme
 
@@ -125,6 +137,12 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
     catalogue.
 13. **PERF-01 confirmed twice** — the deduped identification *count* alone took 16 s. A visible real
     total is not free.
+14. **The strong bands are 99.37% `tier_a`** (134,449 vs 852), and `tier_a` has no measured precision at
+    all while being gated out of the default view pending CERT-01. Any UI that treats "the top band" as
+    the normal case is describing 852 rows.
+15. **`corroborated` at 0.926 is the highest measured precision in the system** — higher than
+    `high_confidence_algorithmic`'s 0.889 — yet it is a *propagated* band, so relation-based rules sort
+    it below direct matches. Measured quality and relation strength genuinely disagree here.
 
 ## Requirement amendments these sketches owe
 
@@ -133,7 +151,9 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
 | **D-09** | Strike "collapsed" (variant D never collapses the manuscript group); keep the left-to-right ordering | narrow amendment owed |
 | **D-12** | Offsets index the normalized letter stream; result must be clipped per line; highlight dropped on version change; search-term precedence rule | rewrite owed |
 | **`discovery-band-labels-v1.md` §2** | Seven frozen `(family, band)` display labels → three user-facing confidence levels, **system-wide** (panel + findings page; owner ruled 2026-07-31). Labels become tooltip-only. **§4 and BAND-03 unaffected** | amendment owed |
-| Panel **tier** filter | Now labels options in a vocabulary its rows no longer use. Confidence filter recommended; collapses tier_a + high_confidence_algorithmic into Strong | **open**, not decided |
+| Panel **tier** filter | Becomes a **confidence** filter; the "show more" toggle remains the tier-A affordance per §4 | resolved 2026-08-01 |
+| **`discovery-band-labels-v1.md` §3** | tier_a's "must be shown as *precision not yet measured*" needs a home once band labels are tooltips — amend §3 or carry the qualifier into the scale | **open**, gate 1 |
+| **Default-shown (§4) × the scale** | Whether the findings page honours §4's tier_a gate (the panel does). Sketch 003 never modelled it | **open**, gate 1 — must be answered once, for both surfaces |
 | **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; shipped wording uses "new finds" under a candidacy hedge | amendment owed, with the *candidate ≠ discovery* reasoning on the record |
 | **D-21** | — | no change (owner declined "Citations") |
 | **PANEL-01/02** | Panel-level relation/tier filters are new scope (D-16 covers `/work/{id}` only) | carry to gate 1 |

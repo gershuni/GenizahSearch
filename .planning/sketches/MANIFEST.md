@@ -79,11 +79,21 @@ The page is therefore *blocked on* gates 1–3, not merely improved by them.
   visibility) and BAND-03 (screening routing) are untouched — bands still drive gating and bucket
   placement, only the reader-facing label changes.
 
-Still open for the owner: whether the mode strip matches the intent for Phases 137/138; the three
-low-confidence domain assignments; and — newly created by the ruling above — whether the panel's **tier**
-filter becomes a **confidence** filter, since its rows no longer speak the tier vocabulary. Switching it
-collapses `tier_a` and `high_confidence_algorithmic` into `Strong`, so tier A could no longer be
-isolated.
+### Follow-ups from the ruling (2026-08-01)
+
+- **Resolved — the panel's tier filter becomes a confidence filter.** Tier A stays reachable: §4's
+  2026-07-24 amendment already keeps `tier_a` behind the "show more" toggle pending CERT-01, so that
+  toggle *is* the tier-A control and the granularity cost is minimal.
+- **Open — three collisions between the scale and `discovery-band-labels-v1.md`**, verified against the
+  real facet counts: (1) "Strong" is **99.37% `tier_a`** (134,449 vs 852), a band §3 says must be shown
+  as *precision not yet measured* — a requirement with no home once band labels are tooltips;
+  (2) **`corroborated` at 0.926, the best-measured population in the system, displays as `Weak`**;
+  (3) §4 gates `tier_a` out of the default view, so the panel's top level is nearly empty by default —
+  and **sketch 003 never modelled the default-shown policy at all**, so its Strong facet (131,164)
+  ignores the gate. All three need answers at gate 1, and (3) must be answered once for both surfaces.
+
+Still open for the owner: whether the mode strip matches the intent for Phases 137/138, and the three
+low-confidence domain assignments.
 
 **Sketch 002 found two defects in D-12** (both verified against the asset and the live code, both
 cheap to fix, neither currently written down): the stored offsets index the normalized Hebrew-letter

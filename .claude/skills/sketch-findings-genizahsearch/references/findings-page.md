@@ -49,6 +49,42 @@ forcing an awkward fourth "not assessed" level. Under the relation definition, "
 are consistent — carry it as a gate-1 tunable exactly like D-13c. The precise frozen band label stays
 on the chip's `title` and on the methods page.
 
+### ⚠ Three collisions between the scale and `discovery-band-labels-v1.md` — settle at gate 1
+
+Found 2026-08-01 while propagating the owner's system-wide ruling, by reading §3/§4 of the spec against
+the real facet counts in `data.js`. **None of these reverses the ruling** — the scale is still the right
+display — but all three have to be answered before it is built, and none is written down anywhere else.
+
+**1. "Strong" is 99.37% an unmeasured band.** Of the two bands `confOf()` calls strong, `tier_a` has
+**134,449** rows and `high_confidence_algorithmic` has **852**. Spec §3 says tier_a's precision is *not
+yet measured* — "89% of the spine; no estimate exists — **must be shown as 'precision not yet
+measured'**". Collapsing the label into "Strong" and demoting the band name to a tooltip leaves that
+required statement with nowhere to live. Either the scale carries the not-yet-measured qualifier
+somewhere visible, or §3's display requirement is amended too. It cannot simply be dropped.
+
+**2. The best-measured population in the system displays as "Weak".** `corroborated` (propagated) is
+**0.926 [0.875, 0.968]** — the only measured propagated number, and higher than
+`high_confidence_algorithmic`'s 0.889 — but it is not in `STRONG_BANDS`, so its 730 rows land in Weak
+beside `screening_canon` (0.647, 6,594 rows) and `not_evaluated` (never assessed, 20,435 rows).
+
+This is *defensible* under the scale's own logic — it is relation-based, and a propagated witness is a
+weaker **kind** of evidence than a direct text match, which is exactly what "Weak" is defined to mean
+here. But it collides with a measured fact, and Phase 134 unified the witness family
+(`evidence_source direct|propagated`) precisely so propagated rows would be first-class. Decide
+deliberately; do not let it happen by omission.
+
+**3. In a default panel view the top level is nearly empty.** §4's 2026-07-24 amendment gates `tier_a`
+out of the default view until CERT-01 passes — it stays queryable behind the "show more" toggle. So
+before that gate, "Strong" in the panel means the **852** `high_confidence_algorithmic` rows plus any
+`human_confirmed` row, and 134,449 rows of Strong sit behind a toggle. A reader meeting a three-level
+scale whose top level is almost always empty will misread the corpus.
+
+Note this cuts the other way on the findings page, whose confidence facet advertises **Strong 131,164**
+with no reference to the §4 gate at all. **Sketch 003 did not model the default-shown policy** — that is
+a real gap in the sketch, not a decision it made. Whether the findings page honours §4's default or
+deliberately shows everything is undecided, and the two surfaces must not answer it differently by
+accident.
+
 **Novelty is a prominent switch, first in the filter bar**, voiced under an explicit candidacy hedge:
 
 | Element | Wording |

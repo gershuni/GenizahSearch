@@ -31,9 +31,11 @@ between header and body rather than being buried as fine print or shouted as a w
 70% opacity for works only reachable behind the screening toggle. Paging appears above 6 works
 (needed: one sampled manuscript has 61 works elsewhere).
 
-**Relation + tier filters** in the panel header, AND-composed, empty set = all. Labels use
-match-framing only — **"Direct match / Partial match / Shared text"**. The owner explicitly declined
-"Citations", so D-21 is unamended and the prohibited display words never appear.
+**Relation + confidence filters** in the panel header, AND-composed, empty set = all. Relation labels
+use match-framing only — **"Direct match / Partial match / Shared text"**. The owner explicitly declined
+"Citations", so D-21 is unamended and the prohibited display words never appear. (Sketch 001 built this
+as a relation + **tier** filter; the tier half was replaced when the confidence scale went system-wide —
+see below.)
 
 **The panel displays the three-level confidence scale, not the frozen band labels** (owner, 2026-07-31
 — see `findings-page.md` for the rule, the counts and the reasoning). The scale was designed on the
@@ -52,11 +54,22 @@ Concretely, on a panel row: `Strong` / `Medium` / `Weak` replaces
   `discovery-band-labels-v1.md` **§4** still governs default visibility (tier_a gated pending D-02a,
   not_evaluated always gated). Only **§2**, the display labels, changes. BAND-03 is unaffected.
 
-⚠ **One follow-on decision this forces, deliberately left open:** the panel's **tier** filter now
-labels its options in a vocabulary the rows no longer use. Making it a *confidence* filter restores one
-vocabulary but loses granularity — `tier_a` and `high_confidence_algorithmic` both collapse into
-`Strong`, so a reader could no longer isolate tier A. Recommendation: switch it to confidence for
-consistency and re-add a tier-A affordance only if someone asks for it. Not decided; do not assume.
+**The panel's tier filter becomes a confidence filter** (resolved 2026-08-01). Once the rows say
+Strong/Medium/Weak, a filter offering "tier A / tier B" is a second vocabulary for the same axis, which
+is indefensible.
+
+I originally flagged this as costing granularity — `tier_a` and `high_confidence_algorithmic` both
+collapse into `Strong`, so tier A can no longer be isolated by the filter. Reading §4 of
+`discovery-band-labels-v1.md` shows that cost is much smaller than it looked: **the "show more" toggle
+already is the tier-A control.** §4's 2026-07-24 amendment gates `tier_a` out of the default view until
+CERT-01 passes and keeps it "queryable behind the `screening_rb`/`screening_canon` 'show more' toggle" —
+so the population a tier filter would have isolated is exactly the population that toggle governs. One
+vocabulary on the rows, one filter, and tier A still reachable.
+
+⚠ But see **collision 3** in `findings-page.md`: because tier_a is 99.37% of the strong bands and is
+gated by default, the panel's **`Strong` filter chip matches only ~852 corpus-wide rows plus
+`human_confirmed` ones until the toggle is on**. Show the chip's facet count against the *currently
+visible* set, not the corpus, or the number will look broken.
 
 ## CSS Patterns
 
