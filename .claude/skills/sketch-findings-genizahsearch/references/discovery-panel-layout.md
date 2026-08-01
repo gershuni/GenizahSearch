@@ -31,45 +31,43 @@ between header and body rather than being buried as fine print or shouted as a w
 70% opacity for works only reachable behind the screening toggle. Paging appears above 6 works
 (needed: one sampled manuscript has 61 works elsewhere).
 
-**Relation + confidence filters** in the panel header, AND-composed, empty set = all. Relation labels
-use match-framing only — **"Direct match / Partial match / Shared text"**. The owner explicitly declined
-"Citations", so D-21 is unamended and the prohibited display words never appear. (Sketch 001 built this
-as a relation + **tier** filter; the tier half was replaced when the confidence scale went system-wide —
-see below.)
+**One relation filter** in the panel header, AND-composed with the other controls, empty set = all.
+Labels use match-framing only — **"Direct match / Partial match / Shared text"**. The owner explicitly
+declined "Citations", so D-21 is unamended and the prohibited display words never appear. (Sketch 001
+built a relation **+ tier** filter; the tier half is deleted — see *Two buckets* below.)
 
-**The panel displays the three-level confidence scale, not the frozen band labels** (owner, 2026-07-31
-— see `findings-page.md` for the rule, the counts and the reasoning). The scale was designed on the
-findings page and the owner ruled it wins *and* applies here, so both surfaces speak one vocabulary.
+### Two buckets, and no confidence scale (owner, 2026-08-01 — supersedes 2026-07-31)
 
-Concretely, on a panel row: `Strong` / `Medium` / `Weak` replaces
-"Algorithmic match — tier A" as the visible chip, with the frozen band label moved to the chip's
-`title`. Three consequences worth knowing before you build:
+The 2026-07-31 ruling put the findings page's three-level confidence scale on the panel too. A check
+against the live asset the next day retired the scale entirely on both surfaces. What the panel gets
+instead is **two buckets — main pool / more matches** — split by the rule already in the codebase:
 
-- **It fixes a layout problem rather than creating one.** The frozen labels are long enough to change a
-  row's visual balance (see the note under HTML Structures); one-word labels don't.
-- **The confidence chip and the relation label are correlated but not redundant.** `Strong` means
-  `direct_witness` **in a strong band**, so "Direct match + Weak" is a real combination — the chip
-  carries band information the relation label does not.
-- **Routing is untouched.** Bands still decide which of the three disclosure buckets a row lands in, and
-  `discovery-band-labels-v1.md` **§4** still governs default visibility (tier_a gated pending D-02a,
-  not_evaluated always gated). Only **§2**, the display labels, changes. BAND-03 is unaffected.
+```python
+from shared.discovery_band_labels import is_default_eligible
+```
 
-**The panel's tier filter becomes a confidence filter** (resolved 2026-08-01). Once the rows say
-Strong/Medium/Weak, a filter offering "tier A / tier B" is a second vocabulary for the same axis, which
-is indefensible.
+Full reasoning, measured composition and bucket sizes are in `findings-page.md`. The parts that bear on
+the panel:
 
-I originally flagged this as costing granularity — `tier_a` and `high_confidence_algorithmic` both
-collapse into `Strong`, so tier A can no longer be isolated by the filter. Reading §4 of
-`discovery-band-labels-v1.md` shows that cost is much smaller than it looked: **the "show more" toggle
-already is the tier-A control.** §4's 2026-07-24 amendment gates `tier_a` out of the default view until
-CERT-01 passes and keeps it "queryable behind the `screening_rb`/`screening_canon` 'show more' toggle" —
-so the population a tier filter would have isolated is exactly the population that toggle governs. One
-vocabulary on the rows, one filter, and tier A still reachable.
+- **The panel's tier filter is deleted, not converted.** Yesterday's note said it should become a
+  confidence filter; that is now wrong, because there is no confidence axis to filter on. Quality is the
+  bucket (a default plus a toggle), kind is the relation filter. The panel ends up with **one filter and
+  one toggle** — simpler than either previous plan.
+- **The row chip shows the relation, not a confidence level** — "Direct match" / "Partial match" /
+  "Shared text", with the frozen band label on hover.
+- **`confOf()` and `STRONG_BANDS` must not be copied from sketch 003.** They disagree with
+  `is_default_eligible()` and sent the best-measured population (0.926) to the bottom level.
+- **Routing is untouched.** Bands still decide bucket membership, and §4 still governs default
+  visibility. §2's amendment shrinks to "band labels are tooltip-only" — no new display vocabulary.
 
-⚠ But see **collision 3** in `findings-page.md`: because tier_a is 99.37% of the strong bands and is
-gated by default, the panel's **`Strong` filter chip matches only ~852 corpus-wide rows plus
-`human_confirmed` ones until the toggle is on**. Show the chip's facet count against the *currently
-visible* set, not the corpus, or the number will look broken.
+⚠ **Does the panel's three-level disclosure survive?** Its middle bucket — *"also shares text with"* —
+holds `not_evaluated` / shared-text rows, which are **also** in "more matches" by quality. So levels 2
+and 3 are both behind-the-default and differ only by relation kind, which the relation chip now
+carries. That argues for collapsing to two, matching the owner's model. **D-13e locks the three-bucket
+disclosure**, so this needs a decision at gate 1 — flagged, not decided.
+
+Note also that `not_evaluated` is labelled "Shared text" but **5,604 of its claims carry
+`claim_type='direct_witness'`**, so a section built on that band name will contain same-work claims.
 
 ## CSS Patterns
 
@@ -108,20 +106,21 @@ stamp · letter offsets) → optional `↳` granularity sub-line → optional lo
 (evidence, other-manuscripts expansion, vote placeholders pushed right with
 `margin-inline-start:auto`).
 
-The meta line's first element is the **confidence chip** (`Strong` / `Medium` / `Weak`), carrying the
-frozen band label as its tooltip — same markup as the findings page:
+The meta line's first element is the **relation chip**, carrying the frozen band label as its tooltip —
+same markup as the findings page:
 
 ```html
-<span class="band conf-strong" title="Algorithmic match — tier A">Strong</span>
+<span class="rel" title="Algorithmic match — tier A">Direct match</span>
 ```
 
-Lift `confOf()` verbatim from `findings-page.md` rather than reimplementing it; one rule, two surfaces.
+Keep it visually neutral. Colour-coding the chip by relation kind reintroduces per-tier styling through
+the back door, which is what D-24 prohibits.
 
 Band labels still come from `shared/discovery_band_labels.py::BAND_LABELS` — the real bilingual strings,
 not approximations — but they are now **tooltip-only**. Worth knowing why that matters for layout: Tier A
 renders as "Algorithmic match — tier A" / "התאמה אלגוריתמית — דרגה א׳", long enough to change a row's
-visual balance. The sketches were built with those strings inline, so the panel's real rows will read
-tighter than sketch 001 shows.
+visual balance. Sketch 001 was built with those strings inline, so the panel's real rows will read
+tighter than it shows.
 
 ## What to Avoid
 
@@ -150,6 +149,7 @@ tighter than sketch 001 shows.
 Sketch 001 (round 2), winner variant D. Source in `sources/001-discovery-panel-architecture/`
 (`data.js` is the real extracted asset data).
 
-**Amended 2026-07-31** by the owner's ruling that the findings page's confidence scale wins and applies
-to the panel too. Sketch 001's HTML still shows the frozen band labels inline — it predates the ruling,
-so read it for *layout* and take the *label vocabulary* from `findings-page.md`.
+**Amended twice since.** 2026-07-31: the findings page's confidence scale wins and applies to the panel
+too. 2026-08-01: that scale is retired entirely in favour of **two buckets** from the existing
+`is_default_eligible()` predicate, and the panel's tier filter is deleted rather than converted. Sketch
+001's HTML predates both — read it for *layout*, and take the confidence model from `findings-page.md`.

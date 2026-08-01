@@ -5,6 +5,12 @@ Validated in sketch 003 against real totals and real sample rows from the deploy
 4 service states and 2 rebuild states. This is the page D-19 asked for a mockup of, and the surface
 carrying the owner's rationale — *"a big new amazing feature… maximum ability to see new findings."*
 
+> **Superseded in one place.** Sketch 003 shipped a three-level confidence scale (Strong / Medium /
+> Weak). The owner replaced it on 2026-08-01 with **two buckets — "main pool" / "more matches"** — after
+> a check against the live asset showed the three-level rule was an invented duplicate of a rule the
+> codebase already has. See *Two buckets* below. The sketch HTML still shows the old scale; read it for
+> layout, not for the confidence model.
+
 ## Design Decisions
 
 **Nav label: "Computed Identifications / זיהויים מחושבים" — SELECTED.** Consistent with the panel
@@ -21,69 +27,97 @@ one row per identification.
 | Unit | Rows | Note |
 |---|---|---|
 | per **claim** (page × work) | 166,537 | **not offered** — the same identification repeats once per folio |
-| per **identification** (manuscript × work) | **65,200** | **default.** The only unit where tier, coverage, novelty and the future vote all attach to exactly the thing on the line. CONTEXT.md recommended it without a count; this is that count |
+| per **identification** (manuscript × work) | **65,200** | **default.** The only unit where tier, coverage, novelty and the future vote all attach to exactly the thing on the line |
 | per **manuscript** | 44,375 | **9,806 carry more than one work**, so a novelty verdict on the row is ambiguous — novel *how*? Rows carry an inline annotation wherever this bites |
 | per **work** | 1,088 | browsable, but the individual find is hidden and giant works dominate by size. Novelty is not offered on this unit at all |
 
-**A plain three-level confidence scale, first and prominent — defined by relation kind, not by
-internal band.** The frozen band labels were not understandable to readers, so the surface describes
-*what kind of claim this is*.
+The default is not arbitrary. Counting per **page** inflates same-work matches ~2.3× relative to
+citations, because a fragment that copies a work matches on every folio while a citation matches once:
 
-> **This scale is system-wide, not page-local.** The owner ruled on 2026-07-31 that it wins and applies
-> to the **discovery panel** too, so the frozen band labels become tooltip-only everywhere. `confOf()`
-> below is the single implementation for both surfaces — see `discovery-panel-layout.md` for what it
-> changes on a panel row, including the one follow-on decision it leaves open (the panel's tier filter).
+| kind | avg pages per identification | share per page | share per identification |
+|---|---|---|---|
+| same work | **2.71** | 88.4% | **77.8%** |
+| quotes | 1.2 | 4.4% | 8.8% |
+| shared wording | 1.27 | 7.2% | 13.4% |
 
-| Level | Meaning | Rule | Rows | Share |
-|---|---|---|---|---|
-| **Strong** | may be the same work | `direct_witness` in a strong band | 131,164 | 78.8% |
-| **Medium** | a long citation-type match | `quotes_this_work`, ≥ 200 matched letters | 3,501 | 2.1% |
-| **Weak** | the rest | everything else | 31,872 | 19.1% |
+The effect is real but bounded, because a Genizah "manuscript" here is a **fragment**: median 2 pages,
+86.5% at one or two, only 0.9% above fifty (largest 427). Per-identification is the honest unit and now
+has a number behind it.
 
-The relation-based definition is what makes this honest. A **band**-derived scale left 20,435 rows
-(12.3%) that were never assessed, and calling those "weak" would assert an assessment nobody made —
-forcing an awkward fourth "not assessed" level. Under the relation definition, "weak" describes a weak
-*relation*, which those rows genuinely have. Three levels, honestly.
+## Two buckets — main pool / more matches
 
-`LONG_CITATION = 200` sits just above D-13c's 150-letter short-passage cutoff, so the two thresholds
-are consistent — carry it as a gate-1 tunable exactly like D-13c. The precise frozen band label stays
-on the chip's `title` and on the methods page.
+**Replaces the three-level confidence scale.** Two buckets, split by the rule that already exists in
+`shared/discovery_band_labels.py::is_default_eligible()`:
 
-### ⚠ Three collisions between the scale and `discovery-band-labels-v1.md` — settle at gate 1
+| bucket | tooltip | what's in it |
+|---|---|---|
+| **Main pool** | *best pool for same-work identification* | default-shown claims — **92.4% same-work** |
+| **More matches** | *lower-confidence and ungraded matches* | screening bands + never-evaluated — 48.2% same-work, 40.3% shared wording, 11.5% quotes |
 
-Found 2026-08-01 while propagating the owner's system-wide ruling, by reading §3/§4 of the spec against
-the real facet counts in `data.js`. **None of these reverses the ruling** — the scale is still the right
-display — but all three have to be answered before it is built, and none is written down anywhere else.
+**Do not invent a rule.** `is_default_eligible(evidence_source, confidence_band, adjudication_status,
+routing_status, measurement_status, ci_low)` is the authority. It already implements §4 of
+`discovery-band-labels-v1.md` plus the D-18 fail-closed gate, and it already returns the right answer
+for every band. Sketch 003's `confOf()` with its hand-picked
+`STRONG_BANDS = {tier_a, high_confidence_algorithmic}` was a second, disagreeing implementation of the
+same idea — **delete it**, along with `LONG_CITATION`, the three level labels and the confidence chips.
 
-**1. "Strong" is 99.37% an unmeasured band.** Of the two bands `confOf()` calls strong, `tier_a` has
-**134,449** rows and `high_confidence_algorithmic` has **852**. Spec §3 says tier_a's precision is *not
-yet measured* — "89% of the spine; no estimate exists — **must be shown as 'precision not yet
-measured'**". Collapsing the label into "Strong" and demoting the band name to a tooltip leaves that
-required statement with nowhere to live. Either the scale carries the not-yet-measured qualifier
-somewhere visible, or §3's display requirement is amended too. It cannot simply be dropped.
+Why the invented rule was wrong, concretely: `is_default_eligible` returns **True** for `corroborated`
+and `weak` (propagated witnesses), because those are already-shipped measured bands. `STRONG_BANDS`
+excluded them, so the population with the **highest measured precision in the system** (0.926 [0.875,
+0.968]) rendered as "Weak" beside 0.647 screening rows. Using the existing rule, that cannot happen.
+The bug is not fixed — it stops existing.
 
-**2. The best-measured population in the system displays as "Weak".** `corroborated` (propagated) is
-**0.926 [0.875, 0.968]** — the only measured propagated number, and higher than
-`high_confidence_algorithmic`'s 0.889 — but it is not in `STRONG_BANDS`, so its 730 rows land in Weak
-beside `screening_canon` (0.647, 6,594 rows) and `not_evaluated` (never assessed, 20,435 rows).
+A related trap: that 0.926 is measured over `corroborated ∪ weak` **jointly**, and the asset's own note
+forbids splitting it — *"NEVER a corroborated-only (81/86) or weak-only (95/104) split."* The two bands
+move together or not at all. There is no narrow fix available.
 
-This is *defensible* under the scale's own logic — it is relation-based, and a propagated witness is a
-weaker **kind** of evidence than a direct text match, which is exactly what "Weak" is defined to mean
-here. But it collides with a measured fact, and Phase 134 unified the witness family
-(`evidence_source direct|propagated`) precisely so propagated rows would be first-class. Decide
-deliberately; do not let it happen by omission.
+**The second tooltip must not say "mostly citations and shared texts."** Measured, the overflow's
+largest single group is same-work claims (48.2%) — it is not a different *kind* of match, it is the
+same kinds at lower grading quality. Pre-rebuild it is 88.3% same-work, which would make that wording
+flatly false.
 
-**3. In a default panel view the top level is nearly empty.** §4's 2026-07-24 amendment gates `tier_a`
-out of the default view until CERT-01 passes — it stays queryable behind the "show more" toggle. So
-before that gate, "Strong" in the panel means the **852** `high_confidence_algorithmic` rows plus any
-`human_confirmed` row, and 134,449 rows of Strong sit behind a toggle. A reader meeting a three-level
-scale whose top level is almost always empty will misread the corpus.
+### Bucket sizes — the tier_a grade is a hard dependency
 
-Note this cuts the other way on the findings page, whose confidence facet advertises **Strong 131,164**
-with no reference to the §4 gate at all. **Sketch 003 did not model the default-shown policy** — that is
-a real gap in the sketch, not a decision it made. Whether the findings page honours §4's default or
-deliberately shows everything is undecided, and the two surfaces must not answer it differently by
-accident.
+| | main pool | more matches |
+|---|---|---|
+| **today**, per identification | **2,241** | 62,959 |
+| **after the rebuild** | **46,644** | 18,556 |
+
+(out of 65,200 identifications; page-level equivalents are 2,660 / 163,877 → 137,109 / 29,428.)
+
+The gap is one row of data. `tier_a` — **134,449 claims, 81% of the corpus** — carries
+`precision=NULL, ci_low=NULL, measurement_status=NULL` in the deployed asset's `band_precision` table,
+so `band_measurement_status()` reads `not_measured` and the D-18 gate fails closed. Its note is
+deliberate: *"tier_a carries NO measured precision in the frozen contract — NEVER a fabricated number
+in a real/release build."*
+
+**The grading exists.** CERT-01 passed 2026-07-28 at a weighted 0.9382 against a 0.85 floor — but into
+the **v2** asset, which is deployed flag-OFF. The live v1 asset was never updated. So this is a data
+carry-over at the v2 bake (`measurement_status='measured_pass'` + a real `ci_low ≥ 0.85`), not a
+measurement, not a design decision. **Until it lands, the surface shows 2,241 of 65,200 and is not
+worth shipping.** Add it to the rebuild's list beside novelty, `coverage_ppm` and `band_rank`.
+
+### What the two buckets change on this page
+
+1. **The confidence filter group is deleted** — three chips and their counts go. The bucket is not a
+   filter; it is a default plus a "show more matches" toggle, the same shape the panel already uses.
+2. **The default result count changes** from 65,200 to the main pool (46,644 post-rebuild). Say so in
+   the result bar rather than silently narrowing.
+3. **This page now needs the relation filter the panel has** — "Direct match / Partial match / Shared
+   text". Removing the confidence chips otherwise leaves *no* way to filter by kind of match, and at
+   78 / 9 / 13 that is a filter readers will want. It is also genuinely orthogonal to the bucket
+   (kind vs grading quality), which the deleted chips were not.
+4. **The row chip becomes a relation chip, not a confidence chip.** Which bucket a row is in is
+   positional; what a reader needs on the line is what kind of match it is. Band label stays on hover.
+5. **`LONG_CITATION = 200` disappears** as a tunable — it existed only to define the Medium level.
+
+**A plain three-level confidence scale** is therefore no longer part of this design. The reasoning that
+produced it still holds and is worth keeping: a band-derived scale would have orphaned 20,435
+never-assessed rows and forced an awkward fourth "not assessed" level. Two buckets avoid that by not
+grading rows at all — they say *which pool this came from*, which is the only claim the data supports.
+Per `discovery-band-labels-v1.md` §3, band precisions are "estimated band-**population** precisions, not
+per-item probabilities", and applying one to a row as its confidence is explicitly forbidden. "Best pool
+for same-work identification" is a population claim, which is why it is honest.
 
 **Novelty is a prominent switch, first in the filter bar**, voiced under an explicit candidacy hedge:
 
@@ -152,6 +186,10 @@ so the mode strip ships now with **All findings** live and **Screening leads** /
 tagged with their phase. 137 and 138 then add a tab rather than a page, and one filter/sort/paging
 implementation serves all three.
 
+Note that "Screening leads" is now nameable precisely: it is the **more matches** bucket. Phase 138's
+mode and the "show more" toggle are the same population viewed two ways — decide at gate 1 whether
+both exist.
+
 **Gated like `/atlas`** — availability predicate ANDed with the flag, not the flag alone. In the
 `absent` state the **nav entry disappears entirely**; the page does not render empty.
 
@@ -159,8 +197,7 @@ Filters compose as AND; empty set = all; default sort is tier-first; rows stack 
 
 ## ⚠ What the page is blocked on
 
-This is the load-bearing finding: the findings page is **blocked on** gates 1–3, not merely improved by
-them.
+The findings page is **blocked on** the rebuild, not merely improved by it. Four items, all data:
 
 **1. The novelty axis cannot honestly ship on the current asset.**
 
@@ -179,17 +216,29 @@ rebuild*. This is the concrete argument for D-23a's tri-state
 **2. `coverage_ppm` and `band_rank` do not exist as columns** (verified by `PRAGMA table_info`). The
 coverage filter is therefore inert — rendered, disabled, tagged.
 
-**3. PERF-01, independently confirmed.** D-10a measured 3.41–3.55 s for a representative
+**3. The `tier_a` grade is not in `band_precision`** (see *Bucket sizes* above) — without it the main
+pool is 2,241 identifications instead of 46,644.
+
+**4. PERF-01, independently confirmed.** D-10a measured 3.41–3.55 s for a representative
 novelty/tier/coverage ordering against a 1.5 s cap. Separately, the deduped identification **count**
-for the default unit took **16 s**. A visible real total is not free — it needs materialized keys and
-indexes, or a cached/approximate count with honest wording.
+took **16 s**. A visible real total is not free — it needs materialized keys and indexes, or a
+cached/approximate count with honest wording.
+
+## Two data quirks worth knowing
+
+- **The 11,941 "shared wording" claims have no `matched_letters` value at all** — zero of them. Any row
+  layout that promises "N matched letters" has nothing to show on those rows.
+- **`not_evaluated` is labelled "Shared text" but 5,604 of its claims carry
+  `claim_type='direct_witness'`.** The band name and the relation disagree, so a UI section built on the
+  band name will contain same-work claims.
 
 ## Amendments owed
 
 | Doc | Change |
 |---|---|
-| `discovery-band-labels-v1.md` §2 | Collapsing seven frozen `(family, band)` display labels into three user-facing confidence levels is a display-contract change and needs a dated amendment. **Write it system-wide** — the owner ruled 2026-07-31 that the scale applies to the panel too, so the frozen labels become tooltip-only on every surface. **§4 (default visibility) and BAND-03 (screening routing) are unaffected** — bands still decide gating and bucket placement; only the visible label changes |
-| **NOVEL-01 / D-23b** | D-23b currently mandates "Not found in the finding aids checked" and prohibits "new" outright; the shipped wording uses "new finds" under a candidacy hedge. The amendment must record the *candidate ≠ discovery* reasoning on the record, not in a commit message |
+| `discovery-band-labels-v1.md` §2 | **Much smaller than it was.** Band labels become tooltip-only; the visible split is the §4 default-shown boundary, which §4 already defines. No new display vocabulary is introduced, so this is a note rather than a contract rewrite. §4 and BAND-03 unaffected |
+| **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; the shipped wording uses "new finds" under a candidacy hedge. The amendment must record the *candidate ≠ discovery* reasoning on the record, not in a commit message |
+| **D-16 / PANEL-01** | This page needs the relation filter currently specified only for the panel |
 
 ## CSS Patterns
 
@@ -208,17 +257,15 @@ indexes, or a cached/approximate count with honest wording.
   border-radius: var(--radius-full); padding: 1px 6px;
 }
 
-/* confidence chips — the ONLY place tier-ish colour is allowed, because it is a
-   FILTER control, not row styling (D-24 prohibits per-tier ROW styling) */
-.fchip.conf.strong { border-color: var(--primary-600); color: var(--primary-700); }
-.fchip.conf.strong.on { background: var(--primary-600); color: #fff; }
-.fchip.conf.medium { border-color: var(--accent-amber); color: var(--accent-amber); }
-.fchip.conf.medium.on { background: var(--accent-amber); color: var(--text-inverse); }
-.fchip.conf.weak { border-color: var(--border-medium); color: var(--text-muted); }
-.fchip.conf.weak.on { background: var(--text-muted); color: var(--bg-card); }
+/* relation chip on a row — neutral by design. Do NOT colour-code it by kind:
+   that reintroduces per-tier styling through the back door (D-24). */
+.rel {
+  font-size: 10px; padding: 1px 7px; border-radius: var(--radius-full);
+  border: 1px solid var(--border-light); background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
 
-/* novelty badge: solid presence for a candidate, italic-muted for the other two
-   verdicts. This IS the prominence — see "What to Avoid" below. */
+/* novelty badge: solid presence for a candidate, italic-muted otherwise */
 .nov {
   font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: var(--radius-full);
   border: 1px solid var(--primary-600); color: var(--primary-700); background: var(--bg-active);
@@ -247,6 +294,8 @@ indexes, or a cached/approximate count with honest wording.
 }
 ```
 
+The deleted `.fchip.conf.strong/.medium/.weak` rules are the one part of sketch 003's CSS not to copy.
+
 Every directional property is logical (`-inline-start`, `text-align: start/end`) — the page renders in
 both directions.
 
@@ -254,42 +303,43 @@ both directions.
 
 Page shell, top to bottom: **appbar** (nav; the findings entry is `.cur .beta`) → **`.phead`** (h1 +
 `.sub` + the permanent `.caveat` slot) → **`.modes`** strip → **`.fbar`** filter bar → **`.rbar`**
-result bar (count · "Show as" · sort) → **`.rows`** → **`.pager`** (labelled *(sample)*).
+result bar (count · "Show as" · sort) → **`.rows`** → **"show more matches"** → **`.pager`** (labelled
+*(sample)*).
 
 Row anatomy for the default unit: work title link → `.r-sub` with library + shelfmark link + author →
-`.r-meta` with **confidence chip (band label on `title`) → novelty chip → pages → matched letters** →
+`.r-meta` with **relation chip (band label on `title`) → novelty chip → pages → matched letters** →
 `.side` actions (open manuscript / open work), which move below the row under 700px.
 
-The confidence chip carries the frozen band label as its tooltip:
-`<span class="band conf-${confOf(r)}" title="${bandLbl(r.band)}">`. That is how the display-contract
-change stays reversible — the precise label is one hover away, never lost.
+The chip carries the frozen band label as its tooltip, which is how the display-contract change stays
+reversible — the precise label is one hover away, never lost:
 
-Classification is a pure function worth lifting verbatim:
+```html
+<span class="rel" title="Algorithmic match — tier A">Direct match</span>
+```
 
-```js
-const LONG_CITATION = 200;                                   // gate-1 tunable, cf. D-13c's 150
-const STRONG_BANDS = new Set(['tier_a', 'high_confidence_algorithmic']);
-function confOf(r) {
-  if (r.ctype === 'direct_witness' && STRONG_BANDS.has(r.band)) return 'strong';
-  if (r.ctype === 'quotes_this_work' && (r.maxLetters || 0) >= LONG_CITATION) return 'medium';
-  return 'weak';
-}
+Bucket membership comes from the shared predicate, never a local reimplementation:
 
-function novOf(r) {                    // fail-closed: unchecked is NOT "known"
-  if (REBUILT) return r.isNew === 1 ? 'not_found'
-             : (r.isNew === 0 && r.src === 'propagated' ? 'known' : 'not_found');
-  if (r.src === 'propagated') return r.isNew === 1 ? 'not_found' : 'known';
-  return 'indeterminate';              // the 144,294 direct rows
-}
+```python
+from shared.discovery_band_labels import is_default_eligible
+
+in_main_pool = is_default_eligible(
+    row.evidence_source, row.confidence_band, row.adjudication_status,
+    row.routing_status, measurement_status, ci_low=ci_low,
+)
 ```
 
 ## What to Avoid
 
+- **Writing a second "is this good enough" rule.** `is_default_eligible()` exists and is the contract.
+  Sketch 003's `confOf()` is the cautionary example: a hand-picked band set that disagreed with it and
+  labelled the best-measured population "Weak".
+- **Splitting `corroborated` from `weak`.** The 0.926 is measured over their union and the asset's own
+  note forbids the split.
+- **"Mostly citations and shared texts" for the second bucket.** Measured, it is 48.2% same-work.
 - **A two-state novelty filter before the rebuild.** It asserts 144,294 unchecked findings are already
-  recorded. This is not a nice-to-have data gap; it is the difference between an honest filter and a
-  false claim on the flagship surface.
-- **Deriving the confidence scale from bands.** It orphans 20,435 never-assessed rows and forces a
-  fourth level. Derive it from the relation kind.
+  recorded — the difference between an honest filter and a false claim on the flagship surface.
+- **Per-row precision language of any kind.** §3 forbids applying a band's population estimate to a row.
+  Bucket names are population claims, which is exactly why they are allowed.
 - **"New discovery" / "likely new find" / novelty as a sort key or a row style.** D-23b, D-15a, D-24.
 - **Offering novelty on the per-work unit.** A work spanning many manuscripts has no single verdict.
 - **Filtering by the manuscript's catalogue domain.** It hides the findings that disagree with the
@@ -297,7 +347,7 @@ function novOf(r) {                    // fail-closed: unchecked is NOT "known"
 - **Rendering the page empty in the `absent` state.** The nav entry must be gone.
 - **A silent "unassigned" domain bucket.** Works the vocabulary can't place must remain visible.
 - **Negated use of prohibited wording.** The first draft of the page caveat read *"a match is not proof
-  that a folio is a copy of the work"* — the suite failed it, because D-21 prohibits "copy of" on
+  that a folio is a *copy of* the work"* — the suite failed it, because D-21 prohibits "copy of" on
   display surfaces flatly and a grep-based CI guard cannot see the negation. Reworded to *"a text match
   is not by itself proof of identity."* The violation was in hand-written prose, not in data, which is
   exactly where these rules get broken.
@@ -321,6 +371,10 @@ is not a sort option; the domain filter narrows and a leaf narrows further than 
 list is cross-filtered by domain and the work list by domain + author; **every domain assignment falls
 inside the FJMS vocabulary tree**.
 
+Add one assertion when the buckets are built: **bucket membership must equal
+`is_default_eligible()`** for every row, so a future local reimplementation fails the suite rather than
+silently diverging. That is the class of bug `confOf()` was.
+
 Two positive controls. The first seeds "New discovery — precision 0.9382" → 162 failures. The second
 seeds an out-of-vocabulary domain plus a facet header mislabelled as the *manuscript's* domain — and it
 earned its keep immediately: the header assertion originally tested the whole rendered page and
@@ -330,6 +384,7 @@ is worse than none.*
 
 ## Origin
 
-Sketch 003. Source in `sources/003-discovery-findings-page/` — `data.js` (real totals, tier facet
-counts, novelty state and bounded row samples from `discovery-v1-33499c5b`), `work-domains.js` +
+Sketch 003, plus a 2026-08-01 verification pass against the deployed asset that replaced its confidence
+model. Source in `sources/003-discovery-findings-page/` — `data.js` (real totals, tier facet counts,
+novelty state and bounded row samples from `discovery-v1-33499c5b`), `work-domains.js` +
 `work-domains.sample.json` (the 93-work domain feasibility sample).

@@ -84,16 +84,29 @@ The page is therefore *blocked on* gates 1–3, not merely improved by them.
 - **Resolved — the panel's tier filter becomes a confidence filter.** Tier A stays reachable: §4's
   2026-07-24 amendment already keeps `tier_a` behind the "show more" toggle pending CERT-01, so that
   toggle *is* the tier-A control and the granularity cost is minimal.
-- **Open — three collisions between the scale and `discovery-band-labels-v1.md`**, verified against the
-  real facet counts: (1) "Strong" is **99.37% `tier_a`** (134,449 vs 852), a band §3 says must be shown
-  as *precision not yet measured* — a requirement with no home once band labels are tooltips;
-  (2) **`corroborated` at 0.926, the best-measured population in the system, displays as `Weak`**;
-  (3) §4 gates `tier_a` out of the default view, so the panel's top level is nearly empty by default —
-  and **sketch 003 never modelled the default-shown policy at all**, so its Strong facet (131,164)
-  ignores the gate. All three need answers at gate 1, and (3) must be answered once for both surfaces.
+### The confidence model, settled 2026-08-01
 
-Still open for the owner: whether the mode strip matches the intent for Phases 137/138, and the three
-low-confidence domain assignments.
+Checking those collisions against the live asset retired the scale entirely. **Two buckets — "main
+pool" / "more matches"** — split by `shared/discovery_band_labels.py::is_default_eligible()`, which
+already exists and already implements §4 + the D-18 gate. Sketch 003's `confOf()` / `STRONG_BANDS` was a
+second, disagreeing implementation of the same idea; it is deleted, along with the three level labels
+and `LONG_CITATION`.
+
+- **Measured composition:** main pool **92.4% same-work**; more matches 48.2% same-work / 40.3% shared
+  wording / 11.5% quotes. So the tooltip *"best pool for same-work identification"* is earned, but
+  *"mostly citations and shared texts"* is **not** — reword to *"lower-confidence and ungraded matches"*.
+- **The corroborated bug stops existing.** `is_default_eligible()` already returns True for
+  `corroborated`/`weak`; and the narrow fix was never available — the asset's note forbids a
+  corroborated-only or weak-only split of the 0.926 measurement.
+- **Blocking data fix:** `tier_a` (81% of the corpus) has `measurement_status=NULL, ci_low=NULL`, so the
+  main pool is **2,241 of 65,200 identifications instead of 46,644**. CERT-01 passed 2026-07-28 into the
+  unshipped **v2** asset; carry it into the v2 bake.
+- **Page-unit inflation quantified:** counting per page overstates same-work ~2.3× (88.4% → 77.8%
+  deduped), which is why per-identification is the default row unit.
+
+Still open for the owner: whether the mode strip matches the intent for Phases 137/138; the three
+low-confidence domain assignments; whether the panel's three-level disclosure collapses to two (D-13e);
+and whether the findings page gains the panel's relation filter (D-16).
 
 **Sketch 002 found two defects in D-12** (both verified against the asset and the live code, both
 cheap to fix, neither currently written down): the stored offsets index the normalized Hebrew-letter

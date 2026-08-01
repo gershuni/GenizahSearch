@@ -64,9 +64,10 @@ picture carry equal weight.
 - **All three row units ship, user-selectable** via a "Show as" control; default = one row per
   identification (**65,200**, measured here for the first time). D-19's open question is answered as
   "all three" — the row unit is a reader choice, not a design pick.
-- **Three-level confidence scale (Strong / Medium / Weak) derived from the relation kind**, not from the
-  frozen band. The band-derived alternative orphaned 20,435 never-assessed rows and would have forced a
-  fourth level.
+- **Two buckets — "main pool" / "more matches"** (owner, 2026-08-01), split by the existing
+  `is_default_eligible()` predicate. This **replaces** the three-level Strong/Medium/Weak scale sketch
+  003 shipped: a check against the live asset showed that scale was a second, disagreeing implementation
+  of a rule the codebase already has.
 - **Novelty as a prominent switch** voiced "Candidates for new finds", under an explicit candidacy hedge.
   "New discovery" was offered and declined.
 - **Domain / author / work cascade** mirroring `/catalog-browse`, on the **identified work's** domain —
@@ -95,10 +96,11 @@ picture carry equal weight.
 |---|---|---|
 | **D-09** | Strike "collapsed" (variant D never collapses the manuscript group); keep the left-to-right ordering | **Narrow amendment owed** |
 | **D-12** | Offsets index the normalized letter stream, not raw text; result must be clipped per line; highlight dropped on version change; search-term precedence rule | **Rewrite owed** |
-| **`discovery-band-labels-v1.md` §2** | Seven frozen `(family, band)` display labels → three user-facing confidence levels, **system-wide** (panel + findings page). Labels become tooltip-only. §4 and BAND-03 unaffected | **Amendment owed** (scope widened by the 2026-07-31 ruling) |
-| Panel **tier** filter | Becomes a **confidence** filter. Tier A stays reachable because §4 already keeps `tier_a` behind the "show more" toggle — that toggle *is* the tier-A control | **Resolved 2026-08-01** |
-| **`discovery-band-labels-v1.md` §3** | tier_a "must be shown as *precision not yet measured*"; once band labels become tooltips that requirement has no home | **Open** — gate 1 |
-| **Default-shown (§4) × the scale** | The panel gates `tier_a` out of the default view pending CERT-01; sketch 003 never modelled the policy, so the findings page's Strong facet (131,164) ignores it | **Open** — gate 1, answer once for both surfaces |
+| **`discovery-band-labels-v1.md` §2** | Band labels become **tooltip-only**; the visible split is §4's own default-shown boundary. No new display vocabulary, so a note rather than a contract rewrite. §3, §4, BAND-03 all unaffected | **Small amendment owed** (much smaller than the 2026-07-31 version) |
+| Panel **tier** filter | **Deleted** — quality is the bucket, kind is the relation filter | **Resolved 2026-08-01** |
+| `band_precision.tier_a` | Carry the CERT-01 result (`measured_pass` + real `ci_low`) into the v2 bake | **Data fix** — blocks the surface, see below |
+| **D-16 / PANEL-01** | The findings page needs the relation filter currently specified for the panel only | **Open** — gate 1 |
+| **D-13e** | Panel's middle disclosure bucket may collapse into "more matches" | **Open** — gate 1 |
 | **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; the shipped wording uses "new finds" under a candidacy hedge | **Amendment owed**, with the *candidate ≠ discovery* reasoning on the record |
 | **D-21** | — | **No change** (owner declined "Citations") |
 | **PANEL-01/02** | Panel-level relation/tier filters are new scope (D-16 specifies filters for `/work/{id}` only) | Carry to gate 1 |
@@ -115,29 +117,32 @@ picture carry equal weight.
 4. **`works.genre` is entirely empty** — the domain facet needs a one-time curation pass over ~1,088
    works (measured at ~96% high-confidence in one pass on a 93-work sample; ~3–4% need a lookup or an
    owner ruling).
+5. **The `tier_a` grade is missing from `band_precision`** (added 2026-08-01). `tier_a` is 134,449
+   claims — 81% of the corpus — with `measurement_status=NULL, ci_low=NULL`, so the D-18 gate fails
+   closed and the main pool is **2,241 of 65,200 identifications instead of 46,644**. CERT-01 passed
+   2026-07-28 at 0.9382 but into the **v2** asset, which is deployed flag-OFF; the live v1 asset was
+   never updated. A data carry-over at the v2 bake, not a measurement — but until it lands the surface
+   is not worth shipping.
 
 ## Still open for the owner
 
 - Does the mode strip (leads + saved as future tabs) match the intent for Phases 137/138?
 - The three low-confidence domain assignments (literary letter collection · Arabic Josippon · kalam vs
   theology) — and whether "Unspecified Domain" is the right home for works the vocabulary can't place.
-- **Three collisions between the confidence scale and `discovery-band-labels-v1.md`**, found 2026-08-01
-  while propagating the system-wide ruling. None reverses the ruling; all three need answers at gate 1:
-  1. **"Strong" is 99.37% `tier_a`** (134,449 rows vs 852 `high_confidence_algorithmic`) — a band whose
-     precision §3 says is *not yet measured* and **must be displayed as such**. Demoting the band name to
-     a tooltip leaves that requirement homeless.
-  2. **`corroborated` — 0.926 [0.875, 0.968], the highest measured precision in the system — displays as
-     `Weak`**, beside `screening_canon` (0.647) and never-assessed rows. Defensible under a
-     relation-based scale, but it must be chosen rather than stumbled into.
-  3. **§4 gates `tier_a` out of the default view pending CERT-01**, so the panel's top level is nearly
-     empty by default (852 rows + `human_confirmed`). **Sketch 003 never modelled the default-shown
-     policy** — a gap in the sketch, not a decision it made — so its Strong facet advertises 131,164 with
-     no reference to the gate, and the two surfaces could diverge by accident.
+- **Does the panel's three-level disclosure survive the two-bucket model?** Its middle bucket
+  ("also shares text with") is behind-the-default on quality *and* distinguished only by relation, which
+  the row's relation chip now carries — so it arguably collapses into "more matches". **D-13e locks
+  three buckets.** Gate 1.
+- **Does the findings page get the relation filter?** Deleting the confidence chips leaves it with no
+  way to filter by kind of match. D-16 specifies that filter for the panel only. Gate 1.
 
 **Resolved 2026-07-31:** the band-label vs confidence-scale disagreement between the two surfaces — the
 confidence scale wins on both.
-**Resolved 2026-08-01:** the panel's tier filter becomes a confidence filter; §4's "show more" toggle
-already serves as the tier-A affordance, so the granularity cost is minimal.
+**Resolved 2026-08-01 (supersedes the above):** there is **no confidence scale**. Two buckets, split by
+the existing `is_default_eligible()`. The panel's tier filter is **deleted**, not converted. The
+corroborated bug stops existing rather than being fixed, because the existing predicate already places
+`corroborated`/`weak` in the default pool — and the frozen contract forbade the narrow fix anyway
+("NEVER a corroborated-only or weak-only split").
 
 ## Verification carried forward
 
