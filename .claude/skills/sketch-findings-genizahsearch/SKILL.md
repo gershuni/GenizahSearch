@@ -177,6 +177,10 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
     96%, ≥3 → 91% (n=211 human grades).
 22. **Competition/exclusivity is nearly useless as a distinctiveness proxy** — only 6.7% of same-work
     rows have any overlapping competitor, because the reference corpus lacks the competing works.
+23. **The matcher already knows where in the *work* a match falls** and throws it away at ingest —
+    3,800-char windows with tracked offsets, positions deliberately preserved. Persisting it is the
+    single highest-leverage change available: it makes citations locatable, which is what makes them
+    worth anything to a scholar.
 
 ## Requirement amendments these sketches owe
 
@@ -188,7 +192,7 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
 | Panel **tier** filter | **Deleted**, not converted — quality is the bucket, kind is the relation filter | resolved 2026-08-01 |
 | `band_precision.tier_a` | Carry the CERT-01 result (`measured_pass` + real `ci_low`) into the v2 bake | **data fix**, blocks the surface |
 | `page_norm_letters` | A `page_id → letter count` table (~139K ints, no text, masking-safe) so the coverage gate can ship | **data fix**, blocks the surface |
-| Work-side offsets `w_start`/`w_end` | The structural fix for containment (liturgy inside Rambam) | rebuild |
+| Work-side offsets `w_start`/`w_end` | **Highest-value rebuild item.** Already computed by the matcher and discarded at ingest. Fixes containment, but far more importantly makes citations *locatable* — turning the second bucket into a browsable corpus of addressed quotations, enabling side-by-side evidence, join sequencing and leaf ordering. See `main-pool-rule.md` | rebuild |
 | `span_competitors` pre-shadowing + 8-gram IDF | Honest distinctiveness; a tuned prototype already exists in the gitignored spike | rebuild |
 | `works.genre` + composition year | Genre is entirely NULL; missing liturgy dates neutralised date-based demotion | rebuild |
 | `discovery_routing_audit.kept_tie` | NULL `demoted_work_id` makes tie pairs unreconstructable | rebuild |

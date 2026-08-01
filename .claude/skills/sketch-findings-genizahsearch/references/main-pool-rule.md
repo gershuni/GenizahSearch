@@ -126,9 +126,10 @@ table above.
 **Rebuild must add** — beyond the already-planned novelty verdict, `coverage_ppm`, `band_rank` and the
 `tier_a` grade:
 
-1. **Work-side match offsets** (`w_start`, `w_end` in the work's normalized stream). The only structural
-   fix for containment — flags matches landing in Sefer Ahava's Seder-Tefilot appendix, or Haggadah's
-   Hallel = Psalms.
+1. **Work-side match offsets** (`w_start`, `w_end` in the work's normalized stream). **Highest-value
+   item on this list — see below.** It is the only structural fix for containment (it flags matches
+   landing in Sefer Ahava's Seder-Tefilot appendix, or Haggadah's Hallel = Psalms), but the containment
+   fix is the smallest of its uses.
 2. **`span_competitors`, computed pipeline-side and PRE-shadowing** — the count of other reference works
    matching ≥50% of the same span. The sidecar only ever sees post-router survivors, so honest
    distinctiveness can only be baked, never derived downstream.
@@ -147,6 +148,43 @@ but it is the general boilerplate detector.
 **Materialise the bucket and its reason code at bake time and index them.** Recomputing coverage,
 competition or manuscript aggregation inside a query that already takes 3.5 s against a 1.5 s budget is
 not credible (PERF-01).
+
+### Why "where inside the work" is the highest-value rebuild item (owner, 2026-08-01)
+
+It arrived on the list as a containment fix. It is worth far more than that, and it is **already
+computed**: `same_work_spike/probe/scripts/track1_match.py` slices each work into overlapping
+`SEG_LEN = 3800` character windows and tracks every window's offset (`seg_off`), with an explicit
+comment that *"gram POSITIONS stay original, so span coordinates are unaffected"*. Each hit is
+`(work, p0, p1, dens, seg)`. **The work-side position is discarded at ingest** — exactly like page
+coverage. Segment-level location (≈ a chapter or two) is nearly free; exact offsets need only retaining
+the alignment positions that already exist.
+
+What persisting it unlocks:
+
+- **A citation becomes a reference you can look up.** "Quotes Mishneh Torah" is a note; "quotes Mishneh
+  Torah, Laws of Prayer, ch. 4" is a citation. This is the owner's point and it is the main one — for a
+  scholar, an unlocatable citation is close to worthless.
+- **It turns the second bucket from an apology into a feature.** 28,357 identifications currently read
+  as "things we could not confirm". Located, they become a browsable corpus of *quotations with
+  addresses* — arguably a product in its own right, and it reframes "more matches" as useful rather
+  than residual.
+- **Side-by-side evidence.** Today the panel highlights the manuscript text and the reader must trust
+  that it matches something. With the work-side position you can show both texts together, which is what
+  actually lets a scholar judge a claim. This is the largest single upgrade available to the evidence
+  view in `browse-integration-and-highlighting.md`.
+- **Join evidence.** Two fragments landing on adjacent stretches of the same work is evidence they come
+  from one codex — and tells you how much is missing between them. Feeds the Joins Lab directly.
+- **Leaf ordering.** The leaves of a multi-page fragment sort by where they fall in the work, which is a
+  standing cataloguing problem.
+- **Corpus-level coverage.** "These 40 fragments together preserve 60% of this work, with these gaps" —
+  a view of the Genizah that does not exist today.
+
+⚠ **The known cost:** offsets index a *normalized letter stream*, so turning one into "chapter 4"
+requires mapping back to the real text. That is the same normalized→raw problem sketch 002 already found
+and solved on the manuscript side (see `browse-integration-and-highlighting.md`) — known problem, known
+machinery, but it must be budgeted on the work side too. Also, only works with a canonical locus
+structure (Bible, Mishnah, Talmud, codes) can render a human-readable address; the rest can offer only a
+position or a percentage through the work.
 
 ## How this relates to `is_default_eligible()`
 

@@ -125,6 +125,11 @@ surface). Multi-folio agreement measured 96% good at two pages; coverage separat
   is absent from the reference corpus, and only 22 liturgy works ship. The rule cuts it 37%; **1–3% of
   the main pool stays misattributed** and no sidecar-computable signal fixes it.
 - **Blocking data:** the `tier_a` grade carry-over, plus a `page_id → letter count` table.
+- **Work-side offsets are the highest-value rebuild item** (owner, 2026-08-01) — and the matcher already
+  computes them, discarding them at ingest. Beyond fixing containment they make citations *locatable*
+  ("Mishneh Torah, Laws of Prayer ch. 4" rather than "Mishneh Torah"), which turns the 28,357-row
+  "more matches" bucket from an apology into a browsable corpus of addressed quotations, and enables
+  side-by-side evidence, join sequencing and leaf ordering.
 - **Do not freeze the 0.8 threshold** without a ~300-case scholar review — both reviewers said so.
 
 Still open for the owner: whether the mode strip matches the intent for Phases 137/138; the three
