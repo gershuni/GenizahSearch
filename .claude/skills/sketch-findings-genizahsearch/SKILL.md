@@ -187,9 +187,14 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
     sketch 002 found on the manuscript side. **Name the coordinate space of every offset at the point of
     definition**; treat that as a schema rule, not two coincidences.
 25. **Only 42% of works can ever show a reference** (451 Sefaria of 1,088) even though 75% of *claims*
-    can. JA has no internal division at all and is **deferred to a stage 2 that may never happen**;
-    M-source is masked and must never display a locus. Any locus UI needs three tiers — full reference ·
-    position-only · omitted — and **two of the three are load-bearing on day one.**
+    can — Sefaria works carry far more claims each, so **design for the row, not the corpus.** Three
+    display tiers, two load-bearing on day one: full reference (Sefaria) · approximate position (JA) ·
+    omitted (M-source).
+26. **JA and M-source lack a locus for opposite reasons, and it changes what each may do.** JA has *no
+    data* (no divisions exist) but is a public corpus — it is displayed, gets an approximate position,
+    and **its text may appear in a side-by-side evidence view.** M-source is a *disclosure* limit —
+    assume its text may never render, pending an explicit masking ruling. Side-by-side evidence is
+    therefore available for 87% of claims, not 75%. Never collapse the two into one "degraded" case.
 
 ## Requirement amendments these sketches owe
 

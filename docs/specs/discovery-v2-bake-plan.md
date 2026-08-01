@@ -2353,8 +2353,9 @@ would make this look like a 42%-of-works feature; separated, stage 1 delivers th
 
 - **Stage 1 (this rebuild):** persist offsets corpus-wide; resolve to references for Sefaria; close the
   Sefaria acquisition gaps (2 liturgy bodies, and 322 staged versemaps vs 451 works with claims).
-- **Stage 2 (deferred, may never happen):** JA divisions, pending the investigation below.
-- **No stage:** M-source. Masked — offsets stored for internal use, locus never displayed.
+- **Stage 2 (deferred, may never happen):** JA *divisions*, pending the investigation below. JA itself
+  **is displayed in stage 1** — it simply carries an approximate position rather than a citation.
+- **No stage:** M-source. Masked — offsets stored for internal use, locus not displayed.
 
 Consequence worth stating plainly: **the containment fix — the original motivation — lands in full at
 stage 1**, for every corpus, because it needs the offset and not the reference.
@@ -2425,9 +2426,20 @@ JA works enter via `track1_build_ref.py` from per-document text files whose only
 unlike Sefaria there is nothing to map, only something to invent or recover. That is why it is deferred
 rather than merely sequenced later.
 
-**In stage 1, JA behaves exactly like M-source on the display side**: offsets stored, position-only
-rendering, no reference string. Nothing about stage 1 needs to change if stage 2 never happens, and
-nothing in stage 1 forecloses it.
+**JA IS shown in stage 1 — just without an exact position** (owner, 2026-08-01). An earlier draft of
+this amendment said JA "behaves exactly like M-source on the display side". **That was wrong, and the
+difference is load-bearing:**
+
+| | JA | M-source |
+|---|---|---|
+| why there is no locus | **we don't have the data** — no divisions exist to map | **disclosure** — masked corpus |
+| work title | shown (ships today) | shown (ships today, neutral title) |
+| approximate position ("~40% through") | **yes** — derived from the stored offset, public corpus | withhold pending a masking check |
+| the work's matched text, e.g. side-by-side evidence | **allowed** — public corpus, text available | **needs masking review** before any surface shows it |
+| can improve later | yes, via stage 2 | no — the constraint is not about data |
+
+So JA is a **first-class displayed corpus with a coarser locus**, not a withheld one. Nothing about
+stage 1 needs to change if stage 2 never happens, and nothing in stage 1 forecloses it.
 
 If stage 2 is ever picked up, these are the questions — in order, and question 1 may make the rest moot:
 
@@ -2440,23 +2452,35 @@ If stage 2 is ever picked up, these are the questions — in order, and question
 
 **Do not block stage 1 on any of this.**
 
-### M-source: store, do not display
+### M-source: store, do not display the locus
 
 M-source raw files carry `##...##` headers and `>>` line markers, so a division exists upstream — but
 the corpus is masked and **no M-source locus may reach a display surface**. Store `w_start`/`w_end` for
-containment detection and shadowing (both internal), and render at most a position-through-work.
+containment detection and shadowing (both internal).
+
+Note what is *not* affected: M-source **work titles already ship and already render** (656 titled works
+in the asset, `works.neutral_title`); the masked thing is the corpus codename and excerpt-level
+reference text, not the works' existence. Two questions are therefore open rather than settled, and both
+are cheap to ask:
+
+1. **Is a bare position-through-work (a percentage) masking-safe for M-source?** It carries no corpus
+   name and no text. If yes, M-source joins JA at the position tier and the "nothing" tier nearly
+   disappears.
+2. **Can M-source *work text* ever appear on a surface** (the side-by-side evidence view)? Assume **no**
+   pending an explicit masking ruling — do not design as though it were available.
 
 ### The display asymmetry this creates — a design constraint, not a detail
 
-By **works**, only 451 of 1,088 (42%) will ever show a human-readable reference; 104 JA works get a
-position at best, and 533 M-source works get nothing displayable. By **claims** the picture is much
-better — 75% Sefaria — but a surface must degrade gracefully across three tiers:
+Three tiers, and — with JA displayed — **two of them are load-bearing on day one**, not future states:
 
-| tier | example |
-|---|---|
-| full reference | "Mishneh Torah, Laws of Prayer 4:2" |
-| position only | "about 40% through the work" |
-| nothing | (omit the element entirely; never a placeholder that implies a missing lookup) |
+| tier | example | who, at stage 1 | share of claims |
+|---|---|---|---|
+| **full reference** | "Mishneh Torah, Laws of Prayer 4:2" | Sefaria — 451 works | **75%** |
+| **approximate position** | "about 40% through the work" | JA — 104 works (+ M-source if question 1 above resolves yes) | 12% (up to 25%) |
+| **nothing** | omit the element entirely; never a placeholder implying a failed lookup | M-source — 533 works, unless question 1 resolves yes | 13% (down to 0%) |
+
+By **works** only 42% ever show a human-readable reference, even though 75% of claims do — the
+difference is that Sefaria works carry far more claims each. Design for the row, not the corpus.
 
 ### Gates for this amendment (stage 1)
 

@@ -195,10 +195,11 @@ jobs, and separating them is what makes the staging work:
   *internal* use (containment detection, shadowing, join sequencing, leaf ordering, work-coverage stats)
   needs the offset and never a reference string — so **the containment fix lands in full at stage 1,
   corpus-wide.**
-- **Stage 2 — JA divisions: deferred, may never happen.** JA has no internal division to map, only one
-  to recover or invent, so it is deferred rather than sequenced. In stage 1 it renders like M-source:
-  position-only, no reference.
-- **M-source — no stage.** Masked; offsets stored for internal use, locus never displayed.
+- **Stage 2 — JA *divisions*: deferred, may never happen.** JA has no internal division to map, only one
+  to recover or invent. **JA itself ships in stage 1** with an approximate position instead of a
+  citation — displayed, not withheld.
+- **M-source — no stage.** Masked; offsets stored for internal use, locus not displayed. Work titles
+  already ship and are unaffected.
 
 ### The display asymmetry — plan the UI around it from the start
 
@@ -207,15 +208,29 @@ available. Measured on the deployed asset:
 
 | corpus | works with claims | claims | citation-type claims | locus available? |
 |---|---|---|---|---|
-| **Sefaria** | 451 | **124,941 (75%)** | **5,474 (74%)** | **yes, stage 1** — 322 `*.versemap.json` sidecars already exist, verse-level, with character offsets |
-| JA | 104 | 19,896 (12%) | 539 | **not in stage 1** — the per-document ingest has no internal division at all. Deferred; position-only for now |
-| M-source | 533 | 21,700 (13%) | 1,373 | **never** — masked corpus. Offsets stored for containment/shadowing only |
+| **Sefaria** | 451 | **124,941 (75%)** | **5,474 (74%)** | **full reference, stage 1** — 322 `*.versemap.json` sidecars already exist, verse-level, with character offsets |
+| **JA** | 104 | 19,896 (12%) | 539 | **shown, approximate position** — "about 40% through the work". No divisions exist to map; deferred to a stage 2 that may never happen |
+| M-source | 533 | 21,700 (13%) | 1,373 | **no locus** — masked. Offsets stored for containment/shadowing only |
 
-So at stage 1, 75% of claims carry a real reference — but only 42% of **works** ever will, and JA's 12%
-stays position-only indefinitely. Every surface showing a locus needs three graceful tiers: **full
-reference** ("Laws of Prayer 4:2") · **position only** ("about 40% through the work") · **nothing**
-(omit the element; never a placeholder implying a failed lookup). Design all three in from the start —
-two of the three are load-bearing on day one, not hypothetical future states.
+**JA is displayed, not withheld** (owner, 2026-08-01) — and the reason it lacks a locus is completely
+different from M-source's, which changes what else each may do:
+
+| | JA | M-source |
+|---|---|---|
+| why no locus | **no data** — divisions don't exist | **disclosure** — masked corpus |
+| work title | shown today | shown today (neutral title) |
+| approximate position | **yes** | withhold pending a masking check |
+| its text in a side-by-side evidence view | **allowed** — public corpus | **assume no** pending an explicit masking ruling |
+| can improve later | yes | no — not a data problem |
+
+Do not collapse those two into one "degraded" case. Side-by-side evidence, the biggest upgrade on the
+table, is available for **two of three** corpora — 87% of claims — not one.
+
+Three tiers, and with JA displayed, **two are load-bearing on day one**: **full reference** ("Laws of
+Prayer 4:2", 75% of claims) · **approximate position** (12%, up to 25% if a bare percentage turns out to
+be masking-safe for M-source) · **nothing** (13%, omit the element; never a placeholder implying a
+failed lookup). By works only 42% ever show a reference, because Sefaria works carry far more claims
+each — **design for the row, not the corpus.**
 
 ### Ramifications on current and future work
 
