@@ -2482,6 +2482,41 @@ Three tiers, and — with JA displayed — **two of them are load-bearing on day
 By **works** only 42% ever show a human-readable reference, even though 75% of claims do — the
 difference is that Sefaria works carry far more claims each. Design for the row, not the corpus.
 
+### Rendering reference text — allowed, but licence-gated PER WORK (owner, 2026-08-02)
+
+Phase 136 SC-3 originally read *"reference text is NEVER rendered."* The owner has ruled that rendering
+**public-corpus** reference text is on the table, which unlocks the side-by-side evidence view. But
+checking the acquisition manifest before writing the rule changed its shape:
+
+**"Public corpus" is NOT the operative test — the per-work `reuse_ok` flag is**, and it already exists in
+`refs_staging/manifest.json` alongside a generated `attribution_text` per work.
+
+| `reuse_ok` | works | licences | may render? |
+|---|---|---|---|
+| `yes` | **277** | Public Domain 264 · CC-BY 11 · CC0 1 · CC-BY-SA 1 | **yes**, with attribution where the licence requires it |
+| `unclear` | 46 | `unknown` 42 · CC-BY-NC 4 | **no** — fail closed |
+| `noncommercial_only` | 1 | CC-BY-NC | **no** — fail closed pending a ruling |
+| *absent* | 21 | **every JA work — no licence metadata at all** | **no** |
+
+Two consequences that contradict the intuitive reading:
+
+1. **~17% of Sefaria works are not clearly reusable** (37 `unknown` + 4 CC-BY-NC of 249 `sef_*`). Being
+   on Sefaria is not permission. The 42 `unknown` are unknown because the API reported no licence for
+   that *version* — often resolvable by re-querying or selecting a different version, so this is
+   partly recoverable acquisition work.
+2. **JA text cannot render at all today.** JA is public, is displayed elsewhere in the UI, and the owner
+   ruled its rows are shown — but it has **zero licence evidence**, so its *text* is gated. This is a
+   **separate question from its missing divisions**: JA needs a licensing answer for the evidence view
+   and a structure answer for the locus, and either can be resolved without the other.
+
+M-source never renders, unchanged.
+
+**Also decide the render source.** The staged bodies are lossy by design — HTML stripped, `<small>`
+rubrics and kavanah instructions dropped, nikud/te'amim/punctuation removed at acquisition. That is
+arguably fine for comparison against unvocalised HTR, but it is not the edition as published. Either
+accept stripped text as the comparison view (and say so on the surface), or re-fetch display text at
+render time.
+
 ### Gates for this amendment (stage 1)
 
 1. `w_start`/`w_end` present on every `track1_direct` evidence row **regardless of source corpus**, with
@@ -2494,3 +2529,7 @@ difference is that Sefaria works carry far more claims each. Design for the row,
    body matches. This is the acceptance test for the original motivation (see the Sefer Ahava case:
    2,070 identifications, 7th corpus-wide, above Isaiah).
 5. Masking gate: no M-source locus string in any rendered output.
+6. **Licence gate on rendered reference text:** no work with `reuse_ok != 'yes'` reaches a render path,
+   and every CC-BY / CC-BY-SA work that does carries its `attribution_text`. Assert on the *absence* of
+   the flag too — a work missing from the manifest must fail closed, not default open (all 21 JA works
+   are in exactly that state today).

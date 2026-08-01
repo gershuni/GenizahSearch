@@ -220,11 +220,42 @@ different from M-source's, which changes what else each may do:
 | why no locus | **no data** — divisions don't exist | **disclosure** — masked corpus |
 | work title | shown today | shown today (neutral title) |
 | approximate position | **yes** | withhold pending a masking check |
-| its text in a side-by-side evidence view | **allowed** — public corpus | **assume no** pending an explicit masking ruling |
+| its text in a side-by-side evidence view | **blocked today — licence, not masking.** See below | **no** — masked |
 | can improve later | yes | no — not a data problem |
 
-Do not collapse those two into one "degraded" case. Side-by-side evidence, the biggest upgrade on the
-table, is available for **two of three** corpora — 87% of claims — not one.
+Do not collapse those two into one "degraded" case — the *locus* rules differ even where the text rules
+agree.
+
+### Rendering reference text is licence-gated per work, not per corpus
+
+The owner ruled on 2026-08-02 that rendering **public-corpus** reference text is on the table, amending
+Phase 136 SC-3 (which read *"reference text is NEVER rendered"*). Checking the acquisition manifest
+before building on that changed the shape of the rule — `refs_staging/manifest.json` already carries a
+per-work `reuse_ok` flag and a generated `attribution_text`:
+
+| `reuse_ok` | works | may render? |
+|---|---|---|
+| `yes` | **277** (Public Domain 264 · CC-BY 11 · CC0 1 · CC-BY-SA 1) | **yes**, with attribution where required |
+| `unclear` | 46 (`unknown` 42 · CC-BY-NC 4) | no — fail closed |
+| `noncommercial_only` | 1 | no — pending a ruling |
+| *absent* | 21 — **every JA work** | no |
+
+Two things that contradict the intuitive reading:
+
+- **~17% of Sefaria works are not clearly reusable.** Being on Sefaria is not permission. (The 42
+  `unknown` are unknown because the API reported no licence for that *version* — often fixable by
+  re-querying, so partly recoverable.)
+- **JA text cannot render today at all.** JA is public, its rows display, and the owner ruled it shown —
+  but it has **zero licence evidence**. That is a *separate* question from its missing divisions: the
+  evidence view needs a licensing answer, the locus needs a structure answer, and either can be
+  resolved without the other.
+
+So side-by-side evidence lands for **most Sefaria works** at stage 1, not for "two of three corpora".
+The claims-weighted share has not been measured — do not quote one until it is.
+
+**Also undecided: what text to render.** The staged bodies are lossy by design (HTML, rubrics, nikud and
+punctuation stripped at acquisition). Acceptable against unvocalised HTR, arguably — but it is not the
+edition as published. Either say so on the surface, or re-fetch display text at render time.
 
 Three tiers, and with JA displayed, **two are load-bearing on day one**: **full reference** ("Laws of
 Prayer 4:2", 75% of claims) · **approximate position** (12%, up to 25% if a bare percentage turns out to

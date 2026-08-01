@@ -190,11 +190,17 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
     can — Sefaria works carry far more claims each, so **design for the row, not the corpus.** Three
     display tiers, two load-bearing on day one: full reference (Sefaria) · approximate position (JA) ·
     omitted (M-source).
-26. **JA and M-source lack a locus for opposite reasons, and it changes what each may do.** JA has *no
-    data* (no divisions exist) but is a public corpus — it is displayed, gets an approximate position,
-    and **its text may appear in a side-by-side evidence view.** M-source is a *disclosure* limit —
-    assume its text may never render, pending an explicit masking ruling. Side-by-side evidence is
-    therefore available for 87% of claims, not 75%. Never collapse the two into one "degraded" case.
+26. **JA and M-source lack a locus for opposite reasons.** JA has *no data* (no divisions exist) but is
+    public — displayed, with an approximate position, and improvable later. M-source is a *disclosure*
+    limit — not a data problem, so it never improves. Don't collapse them into one "degraded" case.
+27. **Rendering reference text is licence-gated PER WORK, not per corpus.** SC-3's absolute ban was
+    lifted 2026-08-02, but the gate is the acquisition manifest's existing `reuse_ok`: **yes 277**
+    (PD 264 · CC-BY 11 · CC0 1 · CC-BY-SA 1) · unclear 46 · noncommercial_only 1 · **absent 21 = every
+    JA work.** So **~17% of Sefaria works are not clearly reusable**, and **JA text cannot render at all
+    today** despite being public — a licensing question entirely separate from its missing divisions.
+    Fail closed on a missing flag; carry `attribution_text` for CC-BY/CC-BY-SA. And the staged bodies
+    are lossy (nikud, punctuation and rubrics stripped at acquisition) — decide whether that is the
+    comparison view or whether display text is re-fetched.
 
 ## Requirement amendments these sketches owe
 
