@@ -46,56 +46,28 @@ has a number behind it.
 
 ## Two buckets — main pool / more matches
 
-**Replaces the three-level confidence scale.** Two buckets, split by the rule that already exists in
-`shared/discovery_band_labels.py::is_default_eligible()`:
+**Replaces the three-level confidence scale.** The rule that draws the line has its own reference —
+**`main-pool-rule.md`** — because it is shared with the panel and it is the most load-bearing decision
+on either surface. In brief:
 
-| bucket | tooltip | what's in it |
+| bucket | meaning | size |
 |---|---|---|
-| **Main pool** | *best pool for same-work identification* | default-shown claims — **92.4% same-work** |
-| **More matches** | *lower-confidence and ungraded matches* | screening bands + never-evaluated — 48.2% same-work, 40.3% shared wording, 11.5% quotes |
+| **Main pool** | matches the work across more than one leaf, **or** covers almost a whole page alone | **36,152** (56%) |
+| **More matches** | everything else — *"not enough evidence"*, never *"probably wrong"* | **28,357** (44%) |
 
-**Do not invent a rule.** `is_default_eligible(evidence_source, confidence_band, adjudication_status,
-routing_status, measurement_status, ci_low)` is the authority. It already implements §4 of
-`discovery-band-labels-v1.md` plus the D-18 fail-closed gate, and it already returns the right answer
-for every band. Sketch 003's `confOf()` with its hand-picked
-`STRONG_BANDS = {tier_a, high_confidence_algorithmic}` was a second, disagreeing implementation of the
-same idea — **delete it**, along with `LONG_CITATION`, the three level labels and the confidence chips.
+Four gates (no same-work claim · screening-only band · unresolved competition on every page ·
+single-page under 0.8 coverage), evaluated as non-compensating floors, `human_confirmed` always Main.
 
-Why the invented rule was wrong, concretely: `is_default_eligible` returns **True** for `corroborated`
-and `weak` (propagated witnesses), because those are already-shipped measured bands. `STRONG_BANDS`
-excluded them, so the population with the **highest measured precision in the system** (0.926 [0.875,
-0.968]) rendered as "Weak" beside 0.647 screening rows. Using the existing rule, that cannot happen.
-The bug is not fixed — it stops existing.
+**Delete sketch 003's `confOf()`**, its `STRONG_BANDS`, `LONG_CITATION`, the three level labels and the
+confidence chips. It was a hand-picked band set that disagreed with the codebase and rendered the
+best-measured population in the system (0.926) as "Weak".
 
-A related trap: that 0.926 is measured over `corroborated ∪ weak` **jointly**, and the asset's own note
-forbids splitting it — *"NEVER a corroborated-only (81/86) or weak-only (95/104) split."* The two bands
-move together or not at all. There is no narrow fix available.
+**Do not build on `density`** — it is Levenshtein edit-distance, not coverage, and the repo already
+carries a warning that feeding it in as coverage *"demoted ~100% of witnesses"*. Real page coverage is
+computed at bake and discarded; shipping gate 4 needs a small `page_id → letter count` table.
 
-**The second tooltip must not say "mostly citations and shared texts."** Measured, the overflow's
-largest single group is same-work claims (48.2%) — it is not a different *kind* of match, it is the
-same kinds at lower grading quality. Pre-rebuild it is 88.3% same-work, which would make that wording
-flatly false.
-
-### Bucket sizes — the tier_a grade is a hard dependency
-
-| | main pool | more matches |
-|---|---|---|
-| **today**, per identification | **2,241** | 62,959 |
-| **after the rebuild** | **46,644** | 18,556 |
-
-(out of 65,200 identifications; page-level equivalents are 2,660 / 163,877 → 137,109 / 29,428.)
-
-The gap is one row of data. `tier_a` — **134,449 claims, 81% of the corpus** — carries
-`precision=NULL, ci_low=NULL, measurement_status=NULL` in the deployed asset's `band_precision` table,
-so `band_measurement_status()` reads `not_measured` and the D-18 gate fails closed. Its note is
-deliberate: *"tier_a carries NO measured precision in the frozen contract — NEVER a fabricated number
-in a real/release build."*
-
-**The grading exists.** CERT-01 passed 2026-07-28 at a weighted 0.9382 against a 0.85 floor — but into
-the **v2** asset, which is deployed flag-OFF. The live v1 asset was never updated. So this is a data
-carry-over at the v2 bake (`measurement_status='measured_pass'` + a real `ci_low ≥ 0.85`), not a
-measurement, not a design decision. **Until it lands, the surface shows 2,241 of 65,200 and is not
-worth shipping.** Add it to the rebuild's list beside novelty, `coverage_ppm` and `band_rank`.
+**Never say "mostly citations and shared texts"** of the second bucket. Measured, its largest single
+group is same-work claims — it is the same kinds of match at lower evidence, not a different kind.
 
 ### What the two buckets change on this page
 
@@ -216,8 +188,11 @@ rebuild*. This is the concrete argument for D-23a's tri-state
 **2. `coverage_ppm` and `band_rank` do not exist as columns** (verified by `PRAGMA table_info`). The
 coverage filter is therefore inert — rendered, disabled, tagged.
 
-**3. The `tier_a` grade is not in `band_precision`** (see *Bucket sizes* above) — without it the main
-pool is 2,241 identifications instead of 46,644.
+**3. The `tier_a` grade is not in `band_precision`.** 134,449 claims — 81% of the corpus — carry
+`precision=NULL, ci_low=NULL, measurement_status=NULL`, so the D-18 gate fails closed and the main pool
+collapses to ~2,241. CERT-01 passed 2026-07-28 at 0.9382 against a 0.85 floor, but into the **v2** asset
+(deployed flag-OFF); the live v1 asset was never updated. A data carry-over at the bake, not a
+measurement. Plus **`page_norm_letters`** for gate 4 — see `main-pool-rule.md`.
 
 **4. PERF-01, independently confirmed.** D-10a measured 3.41–3.55 s for a representative
 novelty/tier/coverage ordering against a 1.5 s cap. Separately, the deduped identification **count**

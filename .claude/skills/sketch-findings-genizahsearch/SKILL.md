@@ -61,35 +61,40 @@ not copy `confOf()` / `STRONG_BANDS` / `LONG_CITATION` out of the sketch HTML.
 
 | Area | Reference | Key Decision |
 |------|-----------|--------------|
+| **The main-pool rule** (read first) | `references/main-pool-rule.md` | How "probably the identification" is decided: multi-folio agreement **or** near-full page coverage, as non-compensating floors. 56% / 44%. Includes the `density` trap, the containment residue, and the rebuild shopping list |
 | Discovery panel layout & disclosure | `references/discovery-panel-layout.md` | Even two-pane layout (1fr/1fr ≥900px, stacks on mobile); three disclosure levels; manuscript pane NAMES the works; relation + tier filters with match-framing labels |
 | Browse integration & evidence highlighting | `references/browse-integration-and-highlighting.md` | Entry control in browse toolbar row 2; panel full-width beneath the panes via a fifth `enrichment_refs` placeholder; highlighting needs **normalized→raw offset mapping plus per-line span clipping** |
 | Corpus-wide findings page | `references/findings-page.md` | Nav label **"Computed Identifications"**; all three row units user-selectable (default = per identification, 65,200); **two buckets** from `is_default_eligible()`; novelty as a prominent switch voiced "Candidates for new finds"; domain/author/work cascade on the **identified work's** domain; modes not pages. **Blocked on the rebuild** — see below |
 
-**The confidence model, settled 2026-08-01 after a check against the live asset.** Two buckets on both
-surfaces, split by `is_default_eligible()` — the predicate already implementing §4 + the D-18 gate:
+**The confidence model, settled 2026-08-01.** Two buckets on both surfaces — **main pool** /
+**more matches** — drawn by the rule in **`references/main-pool-rule.md`**. Read that file before
+building either surface; it is the most load-bearing decision in this skill.
 
-| bucket | tooltip | measured composition |
-|---|---|---|
-| **Main pool** | *best pool for same-work identification* | **92.4% same-work** |
-| **More matches** | *lower-confidence and ungraded matches* | 48.2% same-work, 40.3% shared wording, 11.5% quotes |
+> A fragment is a probable identification when it matches the work **across more than one leaf**, or
+> **covers almost a whole page** on its own. Everything else is "more matches".
 
-Three things this settles, each of which had been open:
+Four non-compensating gates, `human_confirmed` always Main → **36,152 (56%) / 28,357 (44%)**. Measured
+against 211 human grades at 0.92 main precision vs 0.88 for a naive claim-type split — **design numbers
+only; D-06 forbids them on any surface.**
 
-- **The corroborated bug stops existing.** `is_default_eligible()` already returns True for
-  `corroborated`/`weak`; only sketch 003's invented `STRONG_BANDS` excluded them, which is what sent the
-  best-measured population in the system (0.926) to the bottom level. And the split was never available
-  anyway — the asset's note forbids a corroborated-only or weak-only split of that measurement.
+Settled along with it:
+
 - **The panel's tier filter is deleted, not converted.** Quality is the bucket; kind is the relation
   filter. One filter, one toggle.
-- **The §2 amendment shrinks to a note.** Band labels become tooltip-only and no new display vocabulary
-  is introduced, so it is no longer a display-contract rewrite. §4 and BAND-03 untouched.
+- **The §2 amendment shrinks to a note** — band labels become tooltip-only, no new display vocabulary.
+  §4's screening exclusion survives as gate 2; BAND-03 untouched.
+- **The corroborated bug stops existing** — the invented `STRONG_BANDS` was what sent the
+  best-measured population (0.926) to the bottom level. And the split was never available: the asset's
+  note forbids a corroborated-only or weak-only split of that measurement.
 
-⚠ **The `tier_a` grade is a hard data dependency.** 134,449 claims — 81% of the corpus — carry
-`measurement_status=NULL, ci_low=NULL` in the deployed asset, so the D-18 gate fails closed and the main
-pool is **2,241 of 65,200 identifications instead of 46,644**. CERT-01 passed 2026-07-28 (0.9382 vs a
-0.85 floor) but into the **v2** asset, which is deployed flag-OFF; the live v1 asset was never updated.
-This is a data carry-over at the v2 bake, not a measurement and not a design call — but until it lands
-the surface is not worth shipping.
+⚠ **Two hard data dependencies** before the surface is worth shipping: the `tier_a` grade
+(CERT-01 passed 2026-07-28 at 0.9382, but into the unshipped **v2** asset — until carried over, the pool
+collapses to ~2,241), and a `page_id → letter count` table for the coverage gate.
+
+⚠ **Known residue:** containment. `משנה תורה, ספר אהבה` ranks 7th corpus-wide — above Isaiah — because it
+contains the whole liturgy, and `claim_type` defaults to *same work* whenever the true host work is
+missing from the reference corpus (only 22 liturgy works ship). The rule cuts it 37%; **1–3% of the main
+pool remains misattributed**, and no sidecar-computable signal fixes it.
 
 ⚠ **Open at gate 1:** does the panel's three-level disclosure survive? Its middle bucket
 (*"also shares text with"*) is behind-the-default on quality *and* distinguished only by relation, which
@@ -162,6 +167,16 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
     "N matched letters" has nothing to show on them.
 18. **`not_evaluated` is labelled "Shared text" but 5,604 of its claims are `direct_witness`.** A UI
     section built on that band name will contain same-work claims.
+19. **`density` is Levenshtein edit-distance, not coverage** — and the repo carries a scar from that
+    exact confusion (*"demoted ~100% of witnesses"*). Real coverage is computed at bake and discarded.
+20. **`claim_type` is assigned by within-page span dominance** (`scripts/discovery_ids.py:336-382`), so
+    it defaults to `direct_witness` whenever the true host work is **absent from the reference corpus**.
+    That is why liturgy is attributed to Rambam — a corpus-coverage problem wearing a classification
+    problem's clothes.
+21. **Multi-folio agreement is the strongest free signal in the asset**: 1 page → 72% good, 2 pages →
+    96%, ≥3 → 91% (n=211 human grades).
+22. **Competition/exclusivity is nearly useless as a distinctiveness proxy** — only 6.7% of same-work
+    rows have any overlapping competitor, because the reference corpus lacks the competing works.
 
 ## Requirement amendments these sketches owe
 
@@ -172,6 +187,11 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
 | **`discovery-band-labels-v1.md` §2** | Band labels become **tooltip-only**; the visible split is §4's default-shown boundary, which §4 already defines. No new display vocabulary, so a note rather than a contract rewrite. §3, §4 and BAND-03 all unaffected | small amendment owed |
 | Panel **tier** filter | **Deleted**, not converted — quality is the bucket, kind is the relation filter | resolved 2026-08-01 |
 | `band_precision.tier_a` | Carry the CERT-01 result (`measured_pass` + real `ci_low`) into the v2 bake | **data fix**, blocks the surface |
+| `page_norm_letters` | A `page_id → letter count` table (~139K ints, no text, masking-safe) so the coverage gate can ship | **data fix**, blocks the surface |
+| Work-side offsets `w_start`/`w_end` | The structural fix for containment (liturgy inside Rambam) | rebuild |
+| `span_competitors` pre-shadowing + 8-gram IDF | Honest distinctiveness; a tuned prototype already exists in the gitignored spike | rebuild |
+| `works.genre` + composition year | Genre is entirely NULL; missing liturgy dates neutralised date-based demotion | rebuild |
+| `discovery_routing_audit.kept_tie` | NULL `demoted_work_id` makes tie pairs unreconstructable | rebuild |
 | **D-16 / PANEL-01** | The findings page needs the relation filter currently specified only for the panel | **open**, gate 1 |
 | **D-13e** | Panel's middle disclosure bucket may collapse into "more matches" under the two-bucket model | **open**, gate 1 |
 | **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; shipped wording uses "new finds" under a candidacy hedge | amendment owed, with the *candidate ≠ discovery* reasoning on the record |

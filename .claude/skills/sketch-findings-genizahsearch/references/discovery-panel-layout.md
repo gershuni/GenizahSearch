@@ -40,14 +40,9 @@ built a relation **+ tier** filter; the tier half is deleted — see *Two bucket
 
 The 2026-07-31 ruling put the findings page's three-level confidence scale on the panel too. A check
 against the live asset the next day retired the scale entirely on both surfaces. What the panel gets
-instead is **two buckets — main pool / more matches** — split by the rule already in the codebase:
-
-```python
-from shared.discovery_band_labels import is_default_eligible
-```
-
-Full reasoning, measured composition and bucket sizes are in `findings-page.md`. The parts that bear on
-the panel:
+instead is **two buckets — main pool / more matches**, drawn by the rule in **`main-pool-rule.md`**
+(coverage + multi-folio agreement + competition, as non-compensating floors). Read that file before
+building either surface. The parts that bear on the panel:
 
 - **The panel's tier filter is deleted, not converted.** Yesterday's note said it should become a
   confidence filter; that is now wrong, because there is no confidence axis to filter on. Quality is the
@@ -55,10 +50,11 @@ the panel:
   one toggle** — simpler than either previous plan.
 - **The row chip shows the relation, not a confidence level** — "Direct match" / "Partial match" /
   "Shared text", with the frozen band label on hover.
-- **`confOf()` and `STRONG_BANDS` must not be copied from sketch 003.** They disagree with
-  `is_default_eligible()` and sent the best-measured population (0.926) to the bottom level.
-- **Routing is untouched.** Bands still decide bucket membership, and §4 still governs default
-  visibility. §2's amendment shrinks to "band labels are tooltip-only" — no new display vocabulary.
+- **`confOf()` and `STRONG_BANDS` must not be copied from sketch 003**, and **nothing may be built on
+  `density`** — it is edit-distance, not coverage, and the repo warns that treating it as coverage
+  *"demoted ~100% of witnesses"*.
+- **Routing is untouched.** §4's screening exclusion survives as gate 2 of the rule, and §2's amendment
+  shrinks to "band labels are tooltip-only" — no new display vocabulary.
 
 ⚠ **Does the panel's three-level disclosure survive?** Its middle bucket — *"also shares text with"* —
 holds `not_evaluated` / shared-text rows, which are **also** in "more matches" by quality. So levels 2

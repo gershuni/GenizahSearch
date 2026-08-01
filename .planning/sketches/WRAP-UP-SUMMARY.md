@@ -64,10 +64,11 @@ picture carry equal weight.
 - **All three row units ship, user-selectable** via a "Show as" control; default = one row per
   identification (**65,200**, measured here for the first time). D-19's open question is answered as
   "all three" — the row unit is a reader choice, not a design pick.
-- **Two buckets — "main pool" / "more matches"** (owner, 2026-08-01), split by the existing
-  `is_default_eligible()` predicate. This **replaces** the three-level Strong/Medium/Weak scale sketch
-  003 shipped: a check against the live asset showed that scale was a second, disagreeing implementation
-  of a rule the codebase already has.
+- **Two buckets — "main pool" / "more matches"** (owner, 2026-08-01), replacing the three-level
+  Strong/Medium/Weak scale sketch 003 shipped. The rule: *a fragment is a probable identification when it
+  matches the work across more than one leaf, or covers almost a whole page on its own.* Four
+  non-compensating gates → 36,152 / 28,357. Full detail in the skill's `references/main-pool-rule.md`;
+  designed by a measured pass over the live asset, independently reviewed by Codex.
 - **Novelty as a prominent switch** voiced "Candidates for new finds", under an explicit candidacy hedge.
   "New discovery" was offered and declined.
 - **Domain / author / work cascade** mirroring `/catalog-browse`, on the **identified work's** domain —

@@ -104,6 +104,29 @@ and `LONG_CITATION`.
 - **Page-unit inflation quantified:** counting per page overstates same-work ~2.3× (88.4% → 77.8%
   deduped), which is why per-identification is the default row unit.
 
+### The main-pool rule, adopted 2026-08-01
+
+`is_default_eligible()` was a placeholder — it splits on *was this band graded*, not *is this the work*.
+The adopted rule (full detail in the skill's `references/main-pool-rule.md`), designed by a measured
+pass over the live asset and independently reviewed by Codex:
+
+> A fragment is a probable identification when it matches the work **across more than one leaf**, or
+> **covers almost a whole page** on its own.
+
+Four non-compensating gates → **main 36,152 (56%) / more 28,357 (44%)**; 0.92 main precision against 211
+human grades vs 0.88 for a naive claim-type split (design numbers only — D-06 bars them from any
+surface). Multi-folio agreement measured 96% good at two pages; coverage separates same-work (median
+0.987) from quotes (0.519).
+
+- **`density` is NOT coverage** — it is Levenshtein edit-distance, and the repo warns that treating it
+  as coverage *"demoted ~100% of witnesses"*. Real coverage is computed at bake and thrown away.
+- **Containment residue, accepted:** `משנה תורה, ספר אהבה` ranks 7th corpus-wide (above Isaiah) because
+  it contains the whole liturgy. Root cause: `claim_type` defaults to *same work* when the true host work
+  is absent from the reference corpus, and only 22 liturgy works ship. The rule cuts it 37%; **1–3% of
+  the main pool stays misattributed** and no sidecar-computable signal fixes it.
+- **Blocking data:** the `tier_a` grade carry-over, plus a `page_id → letter count` table.
+- **Do not freeze the 0.8 threshold** without a ~300-case scholar review — both reviewers said so.
+
 Still open for the owner: whether the mode strip matches the intent for Phases 137/138; the three
 low-confidence domain assignments; whether the panel's three-level disclosure collapses to two (D-13e);
 and whether the findings page gains the panel's relation filter (D-16).
