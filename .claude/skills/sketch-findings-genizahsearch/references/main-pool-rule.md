@@ -185,8 +185,20 @@ and solved on the manuscript side (see `browse-integration-and-highlighting.md`)
 machinery, but it must be budgeted on the work side too.
 
 **Written into the build plan** as `docs/specs/discovery-v2-bake-plan.md` §"Amendment 2026-08-01
-(work-side match offsets)", with prioritisation, the existing Sefaria mapping, the coordinate trap, the
-JA investigation and five gates.
+(work-side match offsets)", with prioritisation, the existing Sefaria mapping, the coordinate trap and
+five gates.
+
+**Staged (owner, 2026-08-01).** Storing an offset and resolving it to a human reference are separate
+jobs, and separating them is what makes the staging work:
+
+- **Stage 1 — `w_start`/`w_end` for ALL corpora**, plus reference resolution for **Sefaria only**. Every
+  *internal* use (containment detection, shadowing, join sequencing, leaf ordering, work-coverage stats)
+  needs the offset and never a reference string — so **the containment fix lands in full at stage 1,
+  corpus-wide.**
+- **Stage 2 — JA divisions: deferred, may never happen.** JA has no internal division to map, only one
+  to recover or invent, so it is deferred rather than sequenced. In stage 1 it renders like M-source:
+  position-only, no reference.
+- **M-source — no stage.** Masked; offsets stored for internal use, locus never displayed.
 
 ### The display asymmetry — plan the UI around it from the start
 
@@ -195,14 +207,15 @@ available. Measured on the deployed asset:
 
 | corpus | works with claims | claims | citation-type claims | locus available? |
 |---|---|---|---|---|
-| **Sefaria** | 451 | **124,941 (75%)** | **5,474 (74%)** | **yes** — 322 `*.versemap.json` sidecars already exist, verse-level, with character offsets |
-| JA | 104 | 19,896 (12%) | 539 | **no** — the per-document ingest has no internal division at all. Open investigation |
-| M-source | 533 | 21,700 (13%) | 1,373 | **must not be displayed** — masked corpus. Store for containment/shadowing only |
+| **Sefaria** | 451 | **124,941 (75%)** | **5,474 (74%)** | **yes, stage 1** — 322 `*.versemap.json` sidecars already exist, verse-level, with character offsets |
+| JA | 104 | 19,896 (12%) | 539 | **not in stage 1** — the per-document ingest has no internal division at all. Deferred; position-only for now |
+| M-source | 533 | 21,700 (13%) | 1,373 | **never** — masked corpus. Offsets stored for containment/shadowing only |
 
-So by claims, 75% can carry a real reference — but by **works**, only 42% ever will. Every surface that
-shows a locus needs three graceful tiers: **full reference** ("Laws of Prayer 4:2") · **position only**
-("about 40% through the work") · **nothing** (omit the element; never a placeholder implying a failed
-lookup). Design that in rather than discovering it when half the rows come back empty.
+So at stage 1, 75% of claims carry a real reference — but only 42% of **works** ever will, and JA's 12%
+stays position-only indefinitely. Every surface showing a locus needs three graceful tiers: **full
+reference** ("Laws of Prayer 4:2") · **position only** ("about 40% through the work") · **nothing**
+(omit the element; never a placeholder implying a failed lookup). Design all three in from the start —
+two of the three are load-bearing on day one, not hypothetical future states.
 
 ### Ramifications on current and future work
 

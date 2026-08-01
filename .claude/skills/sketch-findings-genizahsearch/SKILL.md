@@ -187,8 +187,9 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
     sketch 002 found on the manuscript side. **Name the coordinate space of every offset at the point of
     definition**; treat that as a schema rule, not two coincidences.
 25. **Only 42% of works can ever show a reference** (451 Sefaria of 1,088) even though 75% of *claims*
-    can. JA has no internal division at all; M-source is masked and must never display a locus. Any
-    locus UI needs three tiers: full reference · position-only · omitted.
+    can. JA has no internal division at all and is **deferred to a stage 2 that may never happen**;
+    M-source is masked and must never display a locus. Any locus UI needs three tiers — full reference ·
+    position-only · omitted — and **two of the three are load-bearing on day one.**
 
 ## Requirement amendments these sketches owe
 

@@ -2340,8 +2340,24 @@ with the counted impact audit it allowed as the deferral basis:
 **Owner decision, 2026-08-01.** Persist **where inside the reference work** each match lands. This
 arrived on the rebuild list as the structural fix for containment misattribution, but the owner
 identified the larger value: *a citation you cannot locate is close to worthless to a scholar*.
-Prioritise the **public** corpora (Sefaria, JA); the M-source cannot carry a displayable locus in any
-case.
+
+### Staging (owner, 2026-08-01) — and the distinction that makes it work
+
+**Storing the offset and resolving it to a human reference are two separate jobs.** Conflating them
+would make this look like a 42%-of-works feature; separated, stage 1 delivers the full-corpus benefit.
+
+| | scope in stage 1 |
+|---|---|
+| **`w_start` / `w_end` persisted** | **ALL corpora.** Same code path regardless of source, and every *internal* use — containment detection, shadowing, join sequencing, leaf ordering, work-coverage statistics — needs only the offset, never a reference string |
+| **Offset → human reference** | **Sefaria only.** 451 works, 75% of claims, and the mapping already exists |
+
+- **Stage 1 (this rebuild):** persist offsets corpus-wide; resolve to references for Sefaria; close the
+  Sefaria acquisition gaps (2 liturgy bodies, and 322 staged versemaps vs 451 works with claims).
+- **Stage 2 (deferred, may never happen):** JA divisions, pending the investigation below.
+- **No stage:** M-source. Masked — offsets stored for internal use, locus never displayed.
+
+Consequence worth stating plainly: **the containment fix — the original motivation — lands in full at
+stage 1**, for every corpus, because it needs the offset and not the reference.
 
 ### Why it is cheap: the position is already computed and thrown away
 
@@ -2402,20 +2418,27 @@ Treat the D-12 sketch finding as a precedent, not a coincidence: **every offset 
 coordinate space named.** Record which stream `w_start`/`w_end` index, in the schema doc, at the point
 of definition.
 
-### JA needs investigation — it has no divisions today
+### JA — DEFERRED to stage 2 (owner, 2026-08-01)
 
 JA works enter via `track1_build_ref.py` from per-document text files whose only structure is a
-`'***\n<title>\n---\n'` header. There is **no internal division at all** — no chapters, no sections. So
-for JA the questions are open and must be answered before design work assumes an answer:
+`'***\n<title>\n---\n'` header. There is **no internal division at all** — no chapters, no sections — so
+unlike Sefaria there is nothing to map, only something to invent or recover. That is why it is deferred
+rather than merely sequenced later.
 
-1. Does the upstream Friedberg JA material carry any division (folio, chapter, section) that the
-   per-document flattening discarded?
-2. If not, is there a defensible synthetic unit (paragraph, folio of the printed edition, Nth-character
-   block) that a scholar would accept as an address?
-3. If neither, JA rows can still carry a **position** (percentage through the work) but never a
-   human-readable reference.
+**In stage 1, JA behaves exactly like M-source on the display side**: offsets stored, position-only
+rendering, no reference string. Nothing about stage 1 needs to change if stage 2 never happens, and
+nothing in stage 1 forecloses it.
 
-**Do not block Sefaria on this.** Ship the Sefaria locus first; JA follows its own investigation.
+If stage 2 is ever picked up, these are the questions — in order, and question 1 may make the rest moot:
+
+1. Does the upstream Friedberg JA material carry a division (folio, chapter, section) that the
+   per-document flattening discarded? Check the source before designing anything.
+2. If not, is there a synthetic unit — paragraph, printed-edition folio, Nth-character block — that a
+   scholar would accept as an address? A synthetic address that looks canonical but isn't would be worse
+   than none.
+3. If neither, JA stays position-only permanently, which is an acceptable end state.
+
+**Do not block stage 1 on any of this.**
 
 ### M-source: store, do not display
 
@@ -2435,10 +2458,10 @@ better — 75% Sefaria — but a surface must degrade gracefully across three ti
 | position only | "about 40% through the work" |
 | nothing | (omit the element entirely; never a placeholder that implies a missing lookup) |
 
-### Gates for this amendment
+### Gates for this amendment (stage 1)
 
-1. `w_start`/`w_end` present on every `track1_direct` evidence row, with the indexed stream named in
-   `discovery-sidecar-schema-v1.md`.
+1. `w_start`/`w_end` present on every `track1_direct` evidence row **regardless of source corpus**, with
+   the indexed stream named in `discovery-sidecar-schema-v1.md`.
 2. A round-trip test per structure type (`verse`, `hierarchical`, `flat`): a known passage's offsets
    resolve back to its known reference.
 3. A `body ↔ norm_stream` mapping test on a work containing maqaf and nikud — the two cases the two
