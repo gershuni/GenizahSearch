@@ -11,7 +11,12 @@ novelty hard-case candidate set that feeds plan 136-03 Task 3 — originally
 three D-23c classes (near-miss titles, alias pairs, granularity), extended
 per an OWNER-AUTHORIZED gate-1 ruling (recorded in ``136-GATE1-DECISIONS.md``
 item C) with two additional classes: terse/missing catalogue identification
-text, and generic collection works.
+text, and generic collection works. A SIXTH class -- catalogue divergence --
+was added per owner decision E (``136-GATE1-DECISIONS.md`` item E, which also
+amends the tri-state novelty flag into a seven-value shade enum): real
+shipped claims where an available finding aid ties the SAME fragment to a
+DIFFERENT work that is not a D-13d granularity variant -- the shade decision
+E calls ``diverges``, with zero representation in Classes 1-5.
 
 Mirrors the shape of ``scripts/bench_discovery.py``: open the live asset
 read-only, drive real queries against it, print a table per measurement, and
@@ -1040,6 +1045,135 @@ def select_generic_collection_candidates(
     return out[:cap]
 
 
+def select_catalogue_divergence_candidates(
+    claims: List[Dict[str, Any]],
+    works: Dict[str, Dict[str, Any]],
+    libraries: Dict[str, Dict[str, str]],
+    cap: int = 15,
+    min_divergent_title_len: int = 6,
+) -> List[Dict[str, Any]]:
+    """Class 6 (catalogue divergence, owner decision E -- 136-GATE1-DECISIONS.md
+    item E): shipped ``direct_witness`` claims on a manuscript whose OWN
+    ``libraries.csv`` catalogue-identification text, once normalized, contains
+    the normalized title of a DIFFERENT work than the one this claim
+    identifies, where that other work is NOT a D-13d granularity variant of
+    the claimed work (``works_related_by_title`` returns False for the pair)
+    -- decision E's ``diverges`` shade: "an aid ties F to a different work
+    that is NOT a granularity variant". This class has ZERO representation
+    across Classes 1-5 and is exactly the shade decision E's rationale names
+    as currently inflating the novelty (``not_in_finding_aids``) count.
+
+    Selection is pure deterministic string containment over data already
+    loaded for Classes 1-5 -- ZERO model calls, same discipline as every
+    other class. A manuscript/work pair is skipped as a candidate when the
+    claimed work's OWN normalized title is already found in the catalogue
+    text (that is agreement, however partial, not divergence). Only work
+    titles at least ``min_divergent_title_len`` normalized characters long
+    are searched for containment -- a short title would match too much
+    catalogue prose to be a trustworthy divergence signal (the same
+    reasoning as D-13d's >=4-char PREFIX bar, raised here because this is
+    FULL-title containment against free-text catalogue prose, not a
+    title-to-title prefix comparison).
+
+    One candidate per manuscript (sys_id): across all of that manuscript's
+    shipped claimed works, the one whose best divergent match has the
+    LONGEST normalized divergent title wins (a longer matched title is less
+    likely to be a spurious substring hit). Candidates are then GROUPED by
+    the divergent work they name and round-robined across groups (largest
+    group first, ties broken by work_id -- the identical discipline
+    ``select_generic_collection_candidates`` above uses for its clusters):
+    a single widely-quoted title (e.g. a popular ethical/halakhic work named
+    in passing across many unrelated catalogue entries) would otherwise
+    crowd out every other divergence pattern, exactly the diversity problem
+    that function's own docstring names. Deterministic, no randomness, no
+    sampling; re-running against the same asset reproduces the identical
+    candidate list byte-for-byte.
+    """
+    best_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for c in claims:
+        if c.get("claim_type") != "direct_witness" or c.get("routing_status") != "shipped":
+            continue
+        key = (c["sys_id"], c["work_id"])
+        cand_key = (-(c["matched_letters"] or 0), c["page_id"])
+        prev = best_by_key.get(key)
+        if prev is None or cand_key < prev["_key"]:
+            d = dict(c)
+            d["_key"] = cand_key
+            best_by_key[key] = d
+
+    title_index: List[Tuple[Dict[str, Any], str]] = []
+    for w in sorted(works.values(), key=lambda w: w["work_id"]):
+        nt = normalize_title(w.get("neutral_title"))
+        if len(nt) >= min_divergent_title_len:
+            title_index.append((w, nt))
+
+    sys_ids = sorted({sid for sid, _wid in best_by_key.keys()})
+    per_sys_best: List[Dict[str, Any]] = []
+    for sid in sys_ids:
+        cat_text = libraries.get(sid, {}).get("catalogue_text", "")
+        if not cat_text:
+            continue
+        cat_norm = normalize_title(cat_text)
+        if not cat_norm:
+            continue
+        work_ids_for_sys = sorted({wid for s, wid in best_by_key.keys() if s == sid})
+        best_case: Optional[Tuple[int, str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]] = None
+        for wid in work_ids_for_sys:
+            claim = best_by_key[(sid, wid)]
+            w_claimed = works.get(wid)
+            if w_claimed is None:
+                continue
+            claimed_norm = normalize_title(w_claimed.get("neutral_title"))
+            if claimed_norm and claimed_norm in cat_norm:
+                continue  # catalogue text already seems to name this exact claim -- not a divergence
+            for o, nt in title_index:
+                if o["canonical_work_id"] == w_claimed["canonical_work_id"]:
+                    continue
+                if nt not in cat_norm:
+                    continue
+                if works_related_by_title(w_claimed, o):
+                    continue  # D-13d granularity variant, not a genuine divergence
+                cand = (len(nt), wid, w_claimed, o, claim)
+                if best_case is None or cand[0] > best_case[0]:
+                    best_case = cand
+        if best_case is not None:
+            _mlen, _wid, w_claimed, o, claim = best_case
+            per_sys_best.append({
+                "sys_id": sid,
+                "claim": claim,
+                "claimed_work": w_claimed,
+                "divergent_work": o,
+            })
+
+    # Round-robin across DISTINCT divergent-work groups (largest group first,
+    # ties by work_id) -- same discipline as select_generic_collection_candidates
+    # above, so one frequently-quoted title cannot crowd out every other
+    # divergence pattern in the capped list.
+    by_divergent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for entry in per_sys_best:
+        by_divergent[entry["divergent_work"]["work_id"]].append(entry)
+    groups: List[Tuple[int, str, List[Dict[str, Any]]]] = []
+    for wid, entries in by_divergent.items():
+        entries.sort(key=lambda e: (e["sys_id"], e["claim"]["work_id"]))
+        groups.append((len(entries), wid, entries))
+    groups.sort(key=lambda t: (-t[0], t[1]))
+
+    out: List[Dict[str, Any]] = []
+    round_idx = 0
+    while len(out) < cap:
+        added_this_round = False
+        for _size, _wid, entries in groups:
+            if round_idx < len(entries):
+                out.append(entries[round_idx])
+                added_this_round = True
+                if len(out) >= cap:
+                    break
+        if not added_this_round:
+            break
+        round_idx += 1
+    return out[:cap]
+
+
 def build_hardcases(
     claims: List[Dict[str, Any]],
     works: Dict[str, Dict[str, Any]],
@@ -1048,6 +1182,7 @@ def build_hardcases(
     cap_per_class: int = 20,
     class4_cap: int = 15,
     class5_cap: int = 15,
+    class6_cap: int = 15,
 ) -> List[Dict[str, Any]]:
     cases: List[Dict[str, Any]] = []
 
@@ -1218,6 +1353,40 @@ def build_hardcases(
             "proposal": (
                 "PROPOSAL (draft, not a label): a generic collection member -- confirm whether this "
                 "specific witness/passage is already recorded, or correct."
+            ),
+        })
+
+    # --- Class 6: catalogue divergence (owner decision E, 136-GATE1-DECISIONS.md
+    # item E -- the seven-shade novelty enum's "diverges" shade, with ZERO
+    # representation in Classes 1-5 above) ---
+    divergence = select_catalogue_divergence_candidates(claims, works, libraries, cap=class6_cap)
+    for entry in divergence:
+        sid = entry["sys_id"]
+        cat = libraries.get(sid, {})
+        w_claimed = entry["claimed_work"]
+        w_divergent = entry["divergent_work"]
+        c = entry["claim"]
+        claimed_title = f"{w_claimed['neutral_title']} ({c['work_id']})"
+        divergent_title = f"{w_divergent['neutral_title']} ({w_divergent['work_id']})"
+        cases.append({
+            "class": "catalogue_divergence",
+            "sys_id": sid,
+            "shelfmark": cat.get("shelfmark", ""),
+            "catalogue_text": cat.get("catalogue_text", ""),
+            "work_titles": [
+                f"CLAIMED (this identification): {claimed_title}",
+                f"CATALOGUE NAMES (found in the identification text): {divergent_title}",
+            ],
+            "reason": (
+                "This manuscript's own catalogue identification text names a DIFFERENT work "
+                f"({w_divergent['neutral_title']!r}) than the one this claim identifies "
+                f"({w_claimed['neutral_title']!r}); the two are NOT a granularity variant under the "
+                "D-13d author-gated rule (different author, or an unrelated title) -- a genuine "
+                "catalogue/claim divergence, the shade decision E calls `diverges`."
+            ),
+            "proposal": (
+                "PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim "
+                "name different works -- confirm or correct."
             ),
         })
 
@@ -1446,6 +1615,21 @@ def render_evidence_brief(
     return "\n".join(lines) + "\n"
 
 
+# Per-class guidance for which of decision E's seven shades are actually
+# plausible answers for that class's kind of hard case (136-03 Task 4 --
+# "say plainly, per class, which shades are plausible answers for that
+# class"). Every case can still receive ANY shade, `unsure`, or `skip`; this
+# is a reading aid for the owner, never a constraint enforced by this script.
+_PLAUSIBLE_SHADES_BY_CLASS: Dict[str, Tuple[str, ...]] = {
+    "granularity": ("refines_granularity", "confirms", "diverges"),
+    "alias": ("alias_merge", "confirms", "fills_gap"),
+    "near_miss": ("confirms", "diverges", "fills_gap"),
+    "terse_catalogue": ("fills_gap", "confirms"),
+    "generic_collection": ("fills_gap", "confirms", "extends"),
+    "catalogue_divergence": ("diverges", "refines_granularity", "confirms"),
+}
+
+
 def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
     lines: List[str] = []
     a = lines.append
@@ -1454,17 +1638,52 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
     a("Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn "
       "from. The original three classes D-23c names -- **near-miss titles**, **alias pairs**, and a "
       "**catalogue entry naming a different GRANULARITY of the same work** -- were selected "
-      "adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 below are an "
-      "OWNER-AUTHORIZED scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured "
-      "novelty-funnel error rate is not flattered by cases an LLM finds easy: **terse or missing "
-      "catalogue identification text** and **generic collection works** (responsa/piyyut/collection "
-      "titles recurring across many distinct catalogued items, where \"already recorded\" is genuinely "
-      "ill-defined rather than merely hard to string-match). All five classes are selected entirely by "
-      "string/title/metadata comparison over the works and manuscripts already in the deployed asset "
-      "-- **zero model calls, measured cost $0.00**. Every existing case from the original 52 is kept "
-      "unchanged; classes 4 and 5 are purely additive. Any attached draft verdict below is explicitly "
-      "marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script "
-      "as an owner answer.")
+      "adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 are an OWNER-AUTHORIZED "
+      "scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured novelty-funnel error "
+      "rate is not flattered by cases an LLM finds easy: **terse or missing catalogue identification "
+      "text** and **generic collection works** (responsa/piyyut/collection titles recurring across "
+      "many distinct catalogued items, where \"already recorded\" is genuinely ill-defined rather than "
+      "merely hard to string-match). **Class 6 -- catalogue divergence -- is a further "
+      "owner-authorized extension (`136-GATE1-DECISIONS.md` item E)**: real shipped claims where an "
+      "available finding aid ties the SAME fragment to a DIFFERENT work that is NOT a D-13d "
+      "granularity variant -- the shade item E's ruling calls `diverges`, with ZERO representation in "
+      "Classes 1-5. All six classes are selected entirely by string/title/metadata comparison over the "
+      "works and manuscripts already in the deployed asset -- **zero model calls, measured cost "
+      "$0.00**. Every existing case from the original 82 is kept unchanged; Class 6 is purely "
+      "additive. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid "
+      "only, never a label -- it is NOT filled in by this script as an owner answer.")
+    a("")
+    a("## Verdict vocabulary (amended 2026-08-02, owner decision E -- see `136-GATE1-DECISIONS.md` "
+      "item E)")
+    a("")
+    a("Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`). The "
+      "owner ruled it into a SEVEN-shade enum because the tri-state collapsed materially different "
+      "findings into one bucket -- a catalogue CONTRADICTION and a genuine \"previously unknown\" both "
+      "used to score the same way. For EACH case below, answer with the shade that best describes what "
+      "an enumerable finding aid (the catalogue's own identification field, bibliography, titles, PGP, "
+      "FGP, M-source shelfmark attributions) actually says about THIS fragment and THIS work -- or "
+      "`unsure` / `skip`.")
+    a("")
+    a("| Shade | Choose this when... |")
+    a("|---|---|")
+    a("| `confirms` | an aid already ties this fragment to this work |")
+    a("| `refines_granularity` | an aid ties this fragment to a coarser/finer variant of this work "
+      "(the D-13d same-author/related-title rule) |")
+    a("| `diverges` | an aid ties this fragment to a DIFFERENT work that is NOT a granularity "
+      "variant -- the aid and the claim contradict each other |")
+    a("| `fills_gap` | the aids identify this fragment as nothing at all -- the genuine \"previously "
+      "unknown\" case |")
+    a("| `extends` | aids tie OTHER folios of the SAME manuscript to this work, but not this "
+      "specific folio |")
+    a("| `alias_merge` | the two work_ids shown ARE the same underlying work, not yet canonically "
+      "merged (Class 2's situation) |")
+    a("| `unsure` | you cannot judge this case from the information shown -- maps to `not_checked`, "
+      "costs nothing, is a real and useful answer |")
+    a("| `skip` | you choose not to judge this case at all -- recorded as skipped, NEVER filled from "
+      "a draft `PROPOSAL` |")
+    a("")
+    a("`not_checked` (the fail-closed system default for an unrun/failed/abstained check) is not a "
+      "verdict the owner picks directly -- `unsure` is its owner-facing equivalent.")
     a("")
     by_class: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for c in cases:
@@ -1476,11 +1695,22 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
         "near_miss": "Class 1 -- near-miss titles",
         "terse_catalogue": "Class 4 -- terse or missing catalogue identification text (owner-authorized extension)",
         "generic_collection": "Class 5 -- generic collection works (owner-authorized extension)",
+        "catalogue_divergence": "Class 6 -- catalogue divergence (owner decision E)",
     }
+    class_order = (
+        "granularity", "alias", "near_miss", "terse_catalogue", "generic_collection",
+        "catalogue_divergence",
+    )
     n = 0
-    for cls in ("granularity", "alias", "near_miss", "terse_catalogue", "generic_collection"):
+    for cls in class_order:
         items = by_class.get(cls, [])
         a(f"## {class_titles[cls]} ({len(items)} candidates)")
+        a("")
+        plausible = _PLAUSIBLE_SHADES_BY_CLASS[cls]
+        plausible_str = ", ".join(f"`{s}`" for s in plausible)
+        a(f"**Plausible shades for this class:** {plausible_str} (any other shade from the "
+          "vocabulary table above is still a valid answer if the case warrants it; `unsure` / "
+          "`skip` are always available).")
         a("")
         for item in items:
             n += 1
@@ -1498,8 +1728,8 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
             a(f"- **Why it is hard:** {item['reason']}")
             if item.get("proposal"):
                 a(f"- **{item['proposal']}**")
-            a("- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / "
-              "`unsure`, or `skip`)_")
+            a(f"- **Owner verdict:** _(pending Task 3 -- {plausible_str}, any other shade from the "
+              "vocabulary table above, or `unsure` / `skip`)_")
             a("")
 
     return "\n".join(lines) + "\n"
@@ -1604,6 +1834,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ledger.check("hardcases", len(hardcases))
         ledger.check("hardcases_class4_terse_catalogue", sum(1 for c in hardcases if c["class"] == "terse_catalogue"))
         ledger.check("hardcases_class5_generic_collection", sum(1 for c in hardcases if c["class"] == "generic_collection"))
+        ledger.check("hardcases_class6_catalogue_divergence", sum(1 for c in hardcases if c["class"] == "catalogue_divergence"))
         # Acceptance criteria: any attached draft verdict MUST be explicitly
         # marked PROPOSAL and separable from an owner's answer -- assert it
         # on every case that carries one (a case may also carry none at all,

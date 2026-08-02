@@ -1,8 +1,27 @@
 # Phase 136 Plan 03 -- Novelty Hard-Case Candidates
 
-Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn from. The original three classes D-23c names -- **near-miss titles**, **alias pairs**, and a **catalogue entry naming a different GRANULARITY of the same work** -- were selected adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 below are an OWNER-AUTHORIZED scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured novelty-funnel error rate is not flattered by cases an LLM finds easy: **terse or missing catalogue identification text** and **generic collection works** (responsa/piyyut/collection titles recurring across many distinct catalogued items, where "already recorded" is genuinely ill-defined rather than merely hard to string-match). All five classes are selected entirely by string/title/metadata comparison over the works and manuscripts already in the deployed asset -- **zero model calls, measured cost $0.00**. Every existing case from the original 52 is kept unchanged; classes 4 and 5 are purely additive. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer.
+Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn from. The original three classes D-23c names -- **near-miss titles**, **alias pairs**, and a **catalogue entry naming a different GRANULARITY of the same work** -- were selected adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 are an OWNER-AUTHORIZED scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured novelty-funnel error rate is not flattered by cases an LLM finds easy: **terse or missing catalogue identification text** and **generic collection works** (responsa/piyyut/collection titles recurring across many distinct catalogued items, where "already recorded" is genuinely ill-defined rather than merely hard to string-match). **Class 6 -- catalogue divergence -- is a further owner-authorized extension (`136-GATE1-DECISIONS.md` item E)**: real shipped claims where an available finding aid ties the SAME fragment to a DIFFERENT work that is NOT a D-13d granularity variant -- the shade item E's ruling calls `diverges`, with ZERO representation in Classes 1-5. All six classes are selected entirely by string/title/metadata comparison over the works and manuscripts already in the deployed asset -- **zero model calls, measured cost $0.00**. Every existing case from the original 82 is kept unchanged; Class 6 is purely additive. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer.
+
+## Verdict vocabulary (amended 2026-08-02, owner decision E -- see `136-GATE1-DECISIONS.md` item E)
+
+Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`). The owner ruled it into a SEVEN-shade enum because the tri-state collapsed materially different findings into one bucket -- a catalogue CONTRADICTION and a genuine "previously unknown" both used to score the same way. For EACH case below, answer with the shade that best describes what an enumerable finding aid (the catalogue's own identification field, bibliography, titles, PGP, FGP, M-source shelfmark attributions) actually says about THIS fragment and THIS work -- or `unsure` / `skip`.
+
+| Shade | Choose this when... |
+|---|---|
+| `confirms` | an aid already ties this fragment to this work |
+| `refines_granularity` | an aid ties this fragment to a coarser/finer variant of this work (the D-13d same-author/related-title rule) |
+| `diverges` | an aid ties this fragment to a DIFFERENT work that is NOT a granularity variant -- the aid and the claim contradict each other |
+| `fills_gap` | the aids identify this fragment as nothing at all -- the genuine "previously unknown" case |
+| `extends` | aids tie OTHER folios of the SAME manuscript to this work, but not this specific folio |
+| `alias_merge` | the two work_ids shown ARE the same underlying work, not yet canonically merged (Class 2's situation) |
+| `unsure` | you cannot judge this case from the information shown -- maps to `not_checked`, costs nothing, is a real and useful answer |
+| `skip` | you choose not to judge this case at all -- recorded as skipped, NEVER filled from a draft `PROPOSAL` |
+
+`not_checked` (the fail-closed system default for an unrun/failed/abstained check) is not a verdict the owner picks directly -- `unsure` is its owner-facing equivalent.
 
 ## Class 3 -- catalogue entry naming a different granularity of the same work (20 candidates)
+
+**Plausible shades for this class:** `refines_granularity`, `confirms`, `diverges` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
 ### Case 1
 
@@ -11,7 +30,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרשנות מקרא רבנית. ; Solomon b. Isaac, Rashi, Biblical Exegesis - Rabbanite: Genesis 44 ; שלמה בן יצחק, פרשנות מקרא רבנית: בראשית מד
 - **Why it is hard:** Byte-identical span 0-962 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 2
 
@@ -20,7 +39,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** משנה תורה (ספר שופטים).
 - **Why it is hard:** Byte-identical span 0-617 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 3
 
@@ -29,7 +48,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י.
 - **Why it is hard:** Byte-identical span 0-2500 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 4
 
@@ -38,7 +57,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י (שמות כא:כו-כו:כד).
 - **Why it is hard:** Byte-identical span 0-3022 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 5
 
@@ -47,7 +66,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י (במדבר).
 - **Why it is hard:** Byte-identical span 0-1846 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 6
 
@@ -56,7 +75,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י (בראשית כ-כד, שמות כ-לד, קטעים).
 - **Why it is hard:** Byte-identical span 0-1087 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 7
 
@@ -65,7 +84,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י (דברים כט:י-לב:יג, קטעים).
 - **Why it is hard:** Byte-identical span 0-1198 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 8
 
@@ -74,7 +93,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י (שמות, במדבר-דברים).
 - **Why it is hard:** Byte-identical span 0-1591 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 9
 
@@ -83,7 +102,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י (שמות כח:לה-ל:יג).
 - **Why it is hard:** Byte-identical span 0-993 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 10
 
@@ -92,7 +111,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י (שמות יט:יז-כ:ב; ויקרא יט:א-במדבר יא:כו).
 - **Why it is hard:** Byte-identical span 0-1510 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 11
 
@@ -101,7 +120,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה לרש"י (בראשית, קטעים).
 - **Why it is hard:** Byte-identical span 0-780 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 12
 
@@ -110,7 +129,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** משנה תורה (הקדמה, מניין המצוות לפי סדר הספרים, קטע).
 - **Why it is hard:** Byte-identical span 0-436 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 13
 
@@ -119,7 +138,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** קטעי גניזה.
 - **Why it is hard:** Byte-identical span 0-662 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 14
 
@@ -128,7 +147,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה (במדבר, קטע).
 - **Why it is hard:** Byte-identical span 0-685 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 15
 
@@ -137,7 +156,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש נביאים (ישעיה, קטע).
 - **Why it is hard:** Byte-identical span 0-1091 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 16
 
@@ -146,7 +165,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש נביאים (ישעיה, קטע).
 - **Why it is hard:** Byte-identical span 13-463 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 17
 
@@ -155,7 +174,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש נביאים לרס"ג.
 - **Why it is hard:** Byte-identical span 0-1326 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 18
 
@@ -164,7 +183,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פרוש התורה (בראשית, קטע).
 - **Why it is hard:** Byte-identical span 0-633 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 19
 
@@ -173,7 +192,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** תרגום ופרוש ערבי לתורה (קטע).
 - **Why it is hard:** Byte-identical span 625-1572 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 20
 
@@ -182,9 +201,11 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** תורה (במדבר ד).
 - **Why it is hard:** Byte-identical span 0-246 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ## Class 2 -- alias pairs (12 candidates)
+
+**Plausible shades for this class:** `alias_merge`, `confirms`, `fills_gap` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
 ### Case 21
 
@@ -193,7 +214,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** ספרות חז"ל; פירוש רב שרירא גאון לתלמוד; פירושי תלמוד בבלי. ; Rabbinic Literature ; פירוש לתלמוד: שבת יא ע"ב – יב ע"ב; טז ע"ב – יז ע"א
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 22
 
@@ -201,7 +222,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** תשובות הילאי גאון (w000575, msource) / תשובות הילאי גאון (w000576, msource)
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 23
 
@@ -209,7 +230,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** תשובות חנוך בן משה (w000475, msource) / תשובות חנוך בן משה (w000477, msource)
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 24
 
@@ -218,7 +239,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** ספר העתים (קטע).
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 25
 
@@ -227,7 +248,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** הלכות הרי"ף;ספרות הלכתית ופרשנות תלמודית;ספרות חז"ל. ; Isaac Al-Fasi, Hilkhot ha-Rif: Mo'ed Qatan 1 ; יצחק אלפסי, הלכות הרי"ף: מועד קטן א
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 26
 
@@ -236,7 +257,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** פירושי תלמוד בבלי. ; Talmudic Commentaries: Sanhedrin 90; Makkot ; פירושי תלמוד: סנהדרין צ; מכות
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 27
 
@@ -244,7 +265,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** תשובות משה בן חנוך (w000473, msource) / תשובות משה בן חנוך (w000474, msource)
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 28
 
@@ -252,7 +273,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** איגרת קראית אל אחד מנכבדי הקראים בפוסטאט (w000518, msource) / איגרת קראית אל אחד מנכבדי הקראים בפוסטאט (w000519, msource)
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 29
 
@@ -261,7 +282,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Lists, Responsa lists ; רשימות, רשימות שו"ת
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 30
 
@@ -270,7 +291,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** חידושי הר"ן לתלמוד;פירושי תלמוד בבלי. ; נסים בן ראובן גירונדי, חידושי הר"ן לתלמוד: עירובין ב ע"ב
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 31
 
@@ -278,7 +299,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** תשובות סעדיה גאון (w001060, msource) / תשובות סעדיה גאון (w001061, msource)
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 32
 
@@ -287,9 +308,11 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות. ; דף 144 א-ב כולל שלש תשובות בערבית האחת בעניין גביית חוב מיתומים קטנים. התשובה השנייה עוסקת בעניין חוב מיתומים כשכתובת האלמנה אבדה. התשובה השלישית עוסקת בעניין ספר קודש שנקנה מגויים, לאחר שהגיע לידם כשלל מקהיר, והיה כתוב עליו 'קדש', האם מותר לקונה למוכרו או למשכנו מחמת שמצבו הכספי דחוק.
 - **Why it is hard:** Two DIFFERENT work_ids share both the same author and an identical normalized title (a two-member cluster, not a large generic-collection cluster) -- a likely un-merged cross-corpus alias/duplicate.
 - **PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically merged) -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `alias_merge`, `confirms`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ## Class 1 -- near-miss titles (20 candidates)
+
+**Plausible shades for this class:** `confirms`, `diverges`, `fills_gap` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
 ### Case 33
 
@@ -297,7 +320,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** המספיק לעובדי השם (כרך ב חלק ב) (w000007) / המספיק לעובדי השם (כרך ט חלק ב) (w000036)
 - **Catalogue's own identification text:** דרשות;כפאיה אלעאבידין;פרשנות מקרא. ; Abraham Maimonidess Kitab kifayat al-'abidi n. On prostration (סג'וד )
 - **Why it is hard:** Same author; normalized titles are 96.8% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 34
 
@@ -305,7 +328,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** המספיק לעובדי השם (כרך ט חלק ב) (w000036) / המספיק לעובדי השם (כרך ט חלק א) (w000038)
 - **Catalogue's own identification text:** כפאיה אלעאבדין.
 - **Why it is hard:** Same author; normalized titles are 96.8% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 35
 
@@ -313,7 +336,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** רד"ק על הושע (w001248) / רד"ק על יהושע (w001258)
 - **Catalogue's own identification text:** פרוש נביאים לרד"ק (הושע, עמוס, מיכה, קטעים).
 - **Why it is hard:** Same author; normalized titles are 95.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 36
 
@@ -321,7 +344,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** רש"י על הושע (w001284) / רש"י על יהושע (w001296)
 - **Catalogue's own identification text:** פרוש נביאים לרש"י (יחזקאל, תרי עשר, קטעים).
 - **Why it is hard:** Same author; normalized titles are 95.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 37
 
@@ -329,7 +352,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** משנה תורה, ספר משפטים (w000187) / משנה תורה, ספר שופטים (w000188)
 - **Catalogue's own identification text:** משנה תורה;משנה תורה ופירושיו. ; Moses b. Maimon, Rambam, Mishneh Torah: Mishpatim ; משה בן מימון, משנה תורה: משפטים
 - **Why it is hard:** Same author; normalized titles are 95.2% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 38
 
@@ -337,7 +360,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ראב"ש, שמואל א פירוש (w000046) / ראב"ש, שמואל ב פירוש (w000047)
 - **Catalogue's own identification text:** כתאב אלביאן תאליף (יהושע ושופטים).
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 39
 
@@ -345,7 +368,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ספר הערוך, אות העי"ן (w001165) / ספר הערוך, אות השי"ן (w001179)
 - **Catalogue's own identification text:** ערוך (קטעים).
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 40
 
@@ -353,7 +376,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ספר הערוך, אות העי"ן (w001165) / ספר הערוך, אות הזי"ן (w001184)
 - **Catalogue's own identification text:** ערוך (קטעים).
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 41
 
@@ -361,7 +384,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ספר הערוך, אות הבי"ת (w001166) / ספר הערוך, אות החי"ת (w001167)
 - **Catalogue's own identification text:** ספר הערוך;ספרות הלכתית ופרשנות תלמודית. ; ערוך, בלע-במות;בעמדם בצית; ר' נתן בן יחיאל מרומא
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 42
 
@@ -369,7 +392,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ספר הערוך, אות הבי"ת (w001166) / ספר הערוך, אות הטי"ת (w001181)
 - **Catalogue's own identification text:** ספר הערוך;ספרות הלכתית ופרשנות תלמודית. ; ערוך, בלע-במות;בעמדם בצית; ר' נתן בן יחיאל מרומא
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 43
 
@@ -377,7 +400,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ספר הערוך, אות החי"ת (w001167) / ספר הערוך, אות הטי"ת (w001181)
 - **Catalogue's own identification text:** מעשיות.
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 44
 
@@ -385,7 +408,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ספר הערוך, אות השי"ן (w001179) / ספר הערוך, אות הזי"ן (w001184)
 - **Catalogue's own identification text:** מילונים. ; ספר 'הערוך' לר' נתן בן יחיאל. דפוס.
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 45
 
@@ -393,7 +416,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ספר הערוך, אות התי"ו (w001180) / ספר הערוך, אות היו"ד (w001183)
 - **Catalogue's own identification text:** ערוך (אותיות תאל-תבליא).
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 46
 
@@ -401,14 +424,14 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** רד"ק על דברי הימים א׳ (w001249) / רד"ק על דברי הימים ב' (w001252)
 - **Catalogue's own identification text:** קובץ.
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 47
 
 - **Manuscript:** Cambridge University Library Ms. T-S AS 194.373 (sys_id `990052328210205171`)
 - **Work(s):** רש"י על דברי הימים א (w001285) / רש"י על דברי הימים ב (w001288)
 - **Why it is hard:** Same author; normalized titles are 94.7% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 48
 
@@ -416,7 +439,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** ספר הערוך, אות הה"א (w001170) / ספר הערוך, אות הפ"א (w001176)
 - **Catalogue's own identification text:** ערוך (אותיות פטפוט-תאטר).
 - **Why it is hard:** Same author; normalized titles are 94.4% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 49
 
@@ -424,7 +447,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** מורה נבוכים, חלק א (w001193) / מורה נבוכים, חלק ב (w001194)
 - **Catalogue's own identification text:** מורה נבוכים.
 - **Why it is hard:** Same author; normalized titles are 94.4% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 50
 
@@ -432,7 +455,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** מורה נבוכים, חלק א (w001193) / מורה נבוכים, חלק ג (w001195)
 - **Catalogue's own identification text:** מורה נבוכים.
 - **Why it is hard:** Same author; normalized titles are 94.4% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 51
 
@@ -440,7 +463,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** מורה נבוכים, חלק ב (w001194) / מורה נבוכים, חלק ג (w001195)
 - **Catalogue's own identification text:** מורה נבוכים.
 - **Why it is hard:** Same author; normalized titles are 94.4% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 52
 
@@ -448,9 +471,11 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** רבנו חננאל על מסכת שבת (w000452) / רבנו חננאל על מסכת שבועות (w000467)
 - **Catalogue's own identification text:** פירוש רבנו חננאל לתלמוד;שאלות ותשובות- גאונים. ; Responsa- Gaonim ; חננאל בן חושיאל, פירוש רבנו חננאל לתלמוד: שבת קמא ע"ב – קמו ע"ב
 - **Why it is hard:** Same author; normalized titles are 93.6% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `confirms`, `diverges`, `fills_gap`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ## Class 4 -- terse or missing catalogue identification text (owner-authorized extension) (15 candidates)
+
+**Plausible shades for this class:** `fills_gap`, `confirms` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
 ### Case 53
 
@@ -458,7 +483,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** כתר מלכות (רשב"ג/אבן גבירול) (w001129)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 54
 
@@ -466,7 +491,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** פירוש אבות לדוד הנגיד (w001135)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 55
 
@@ -474,7 +499,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** רס"ג, שמות תרגום (תפסיר תורה) (w000033)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 56
 
@@ -482,7 +507,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** משנה תורה, ספר אהבה (w000176)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 57
 
@@ -490,7 +515,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** תנ"ך, בראשית (w000086)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 58
 
@@ -498,7 +523,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** נתנאל בן פיומי, גן השכלים (w000039)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 59
 
@@ -506,7 +531,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** הלכות גדולות (w001196)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 60
 
@@ -514,7 +539,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** מדרש אגור (w000836)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 61
 
@@ -522,7 +547,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** תשובות האיי גאון (w000654)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 62
 
@@ -530,7 +555,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** מונחי המסורה וכלליה (w000906)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 63
 
@@ -538,7 +563,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** סדר אליהו זוטא א-טו (w000162)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 64
 
@@ -546,7 +571,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** תנ"ך, ויקרא (w000088)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 65
 
@@ -554,7 +579,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** דברי הימים של משה רבנו (w000944)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 66
 
@@ -562,7 +587,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** פירוש ליחזקאל ותרי עשר (w000918)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 67
 
@@ -570,9 +595,11 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** מדרש חסרות ויתרות (w000859)
 - **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
 - **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ## Class 5 -- generic collection works (owner-authorized extension) (15 candidates)
+
+**Plausible shades for this class:** `fills_gap`, `confirms`, `extends` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
 ### Case 68
 
@@ -581,7 +608,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
 - **Why it is hard:** This work belongs to a 43-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 69
 
@@ -590,7 +617,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
 - **Why it is hard:** This work belongs to a 33-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 70
 
@@ -599,7 +626,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** תשובות הגאונים.
 - **Why it is hard:** This work belongs to a 12-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 71
 
@@ -608,7 +635,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** ספרות הלכתית ופרשנות תלמודית;ספרות חז"ל;שאלות ותשובות- גאונים. ; Halakhic Literature and Talmudic Commentaries ; Responsa; geonic, concerning oaths (whether a married woman should be made to swear in court, and whether some members of a partnership can waive an oath due them without the remaining partners consent).
 - **Why it is hard:** This work belongs to a 9-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 72
 
@@ -617,7 +644,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; תשובות בעניין המגרש בגט בטל, אונאה וחזרה במכירת קרקע
 - **Why it is hard:** This work belongs to a 6-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 73
 
@@ -626,7 +653,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות הגאונים.
 - **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 74
 
@@ -635,7 +662,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות. ; Responsa and Halakhic Decisions
 - **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 75
 
@@ -643,7 +670,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** תשובות עמרם גאון (w000553) -- one of 5 works sharing author 'עמרם גאון' and title stem 'תשובות עמרם גאון' (siblings incl. w000547, w000548, w000551, w000552)
 - **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 76
 
@@ -652,7 +679,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
 - **Why it is hard:** This work belongs to a 4-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 77
 
@@ -661,7 +688,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות הגאונים.
 - **Why it is hard:** This work belongs to a 4-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 78
 
@@ -670,7 +697,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות- גאונים.
 - **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 79
 
@@ -679,7 +706,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; Responsa and Halakhic Decisions ; ד' תשובות בענייני כתובה: א. כנראה בעניין אשה שהוציאה שטר כתובה ונמצא מזוייף. ב. תשובת רב צמח גאון בעניין אשה שאבדה כתובתה. ג. תשובת רב צמח גאון בעניין פירוש דברי רב רב יוסף "בביתי ולא בביקתי" (כתובות נד ע"א). ד. תשובת מר רבנא משה גאון (בן יעקב, ראש ישיבת מתא מחסיא) בעניין בחור שנשא אשה והתברר שהיא נכפית.
 - **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 80
 
@@ -688,7 +715,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** תשובות.
 - **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 81
 
@@ -697,7 +724,7 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; Responsa- Gaonim ; שאלות ותשובות- גאונים
 - **Why it is hard:** This work belongs to a 43-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 82
 
@@ -706,5 +733,144 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Catalogue's own identification text:** שאלות ותשובות הגאונים.
 - **Why it is hard:** This work belongs to a 33-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
 - **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+## Class 6 -- catalogue divergence (owner decision E) (15 candidates)
+
+**Plausible shades for this class:** `diverges`, `refines_granularity`, `confirms` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
+
+### Case 83
+
+- **Manuscript:** Ms. Evr. Antonin B 1104 (sys_id `990000555880205171`)
+- **Work(s):** CLAIMED (this identification): תשובות האיי גאון (w000650) / CATALOGUE NAMES (found in the identification text): תשובות (w000543)
+- **Catalogue's own identification text:** שאלות ותשובות מאת האי בן שרירא גאון (קטע).
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('תשובות') than the one this claim identifies ('תשובות האיי גאון'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 84
+
+- **Manuscript:** Allony, Nehemia Ms. 304 (sys_id `990000413480205171`)
+- **Work(s):** CLAIMED (this identification): משנה תורה, ספר זמנים (w000177) / CATALOGUE NAMES (found in the identification text): הגדה של פסח (w001159)
+- **Catalogue's own identification text:** הגדה של פסח.
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('הגדה של פסח') than the one this claim identifies ('משנה תורה, ספר זמנים'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 85
+
+- **Manuscript:** Ms. Evr. Antonin B 915 (sys_id `990000555810205171`)
+- **Work(s):** CLAIMED (this identification): הלכות פסוקות (w001084) / CATALOGUE NAMES (found in the identification text): הלכות גדולות (w001196)
+- **Catalogue's own identification text:** הלכות גדולות (בבא קמא).
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('הלכות גדולות') than the one this claim identifies ('הלכות פסוקות'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 86
+
+- **Manuscript:** Cambridge University Library Ms. Add. 3162 (sys_id `990001398690205171`)
+- **Work(s):** CLAIMED (this identification): משנה תורה, ספר אהבה (w000176) / CATALOGUE NAMES (found in the identification text): ברכת המזון (w001158)
+- **Catalogue's own identification text:** ברכת המזון.
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('ברכת המזון') than the one this claim identifies ('משנה תורה, ספר אהבה'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 87
+
+- **Manuscript:** Cambridge University Library Ms. Add. 1246 (sys_id `990001394270205171`)
+- **Work(s):** CLAIMED (this identification): ספר יוסיפון (ערבי) (w001152) / CATALOGUE NAMES (found in the identification text): יוסיפון (w000853)
+- **Catalogue's own identification text:** יוסיפון בערבית.
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('יוסיפון') than the one this claim identifies ('ספר יוסיפון (ערבי)'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 88
+
+- **Manuscript:** Ms. Evr. Antonin B 961 (sys_id `990000555730205171`)
+- **Work(s):** CLAIMED (this identification): תשובה בעניין סוכה (w000434) / CATALOGUE NAMES (found in the identification text): תשובות הגאונים (w000349)
+- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('תשובות הגאונים') than the one this claim identifies ('תשובה בעניין סוכה'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 89
+
+- **Manuscript:** Ms. EVR ARAB I 3085 (sys_id `990000801470205171`)
+- **Work(s):** CLAIMED (this identification): רס"ג, ספר יצירה פירוש (w000021) / CATALOGUE NAMES (found in the identification text): ספר יצירה (w000522)
+- **Catalogue's own identification text:** פרוש ספר יצירה בערבית.
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('ספר יצירה') than the one this claim identifies ('רס"ג, ספר יצירה פירוש'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 90
+
+- **Manuscript:** Catalogue Halper, Philadelphia 120 (sys_id `990001935160205171`)
+- **Work(s):** CLAIMED (this identification): הלכות פסוקות, תרגומים ועיבודים עבריים, הלכות קידושין (w001037) / CATALOGUE NAMES (found in the identification text): הלכות פסוקות (w001084)
+- **Catalogue's own identification text:** הלכות פסוקות (קדושין).
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('הלכות פסוקות') than the one this claim identifies ('הלכות פסוקות, תרגומים ועיבודים עבריים, הלכות קידושין'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 91
+
+- **Manuscript:** Ms. Evr. Antonin B 236 (sys_id `990000905560205171`)
+- **Work(s):** CLAIMED (this identification): מכילתא דרבי שמעון בן יוחאי (w000321) / CATALOGUE NAMES (found in the identification text): מכילתא דרבי ישמעאל (w000766)
+- **Catalogue's own identification text:** מכילתא דרבי ישמעאל (בא-יתרו).
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('מכילתא דרבי ישמעאל') than the one this claim identifies ('מכילתא דרבי שמעון בן יוחאי'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 92
+
+- **Manuscript:** Library of the Hungarian Academy of Sciences Ms. 57 (sys_id `990001004230205171`)
+- **Work(s):** CLAIMED (this identification): ילקוט שמעוני על התורה (w001384) / CATALOGUE NAMES (found in the identification text): תנחומא (w000926)
+- **Catalogue's own identification text:** מדרש תנחומא (קטעים).
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('תנחומא') than the one this claim identifies ('ילקוט שמעוני על התורה'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 93
+
+- **Manuscript:** Cambridge University Library Ms. T-S NS 169.52 (sys_id `990051091870205171`)
+- **Work(s):** CLAIMED (this identification): נסים גאון, חמשה ספרים (w000071) / CATALOGUE NAMES (found in the identification text): מגילת סתרים (w000509)
+- **Catalogue's own identification text:** הלכה; מגילת סתרים [נסים בן יעקב]; ספרות הלכתית ופרשנות תלמודית; ספרות חז"ל. ; Halakhic Literature and Talmudic Commentaries ; Rabbinica; exposition of PT hagigah 78a and Tosefta Sheqalim 3:23-24 (the latter section numbered 140).
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('מגילת סתרים') than the one this claim identifies ('נסים גאון, חמשה ספרים'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 94
+
+- **Manuscript:** Cambridge University Library Ms. T-S F 7.45 (sys_id `990051173260205171`)
+- **Work(s):** CLAIMED (this identification): משנה תורה, הקדמה ומניין המצוות (w000174) / CATALOGUE NAMES (found in the identification text): הלכות ציצית (w001052)
+- **Catalogue's own identification text:** משנה תורה;משנה תורה ופירושיו. ; Mishneh Torah and its Commentaries ; מנין מצות על סדר הרמב"ם, מסוף ספר אהבה (הלכות ציצית) עד סוף ספר זמנים
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('הלכות ציצית') than the one this claim identifies ('משנה תורה, הקדמה ומניין המצוות'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 95
+
+- **Manuscript:** Ms. EVR II A 33 (sys_id `990000621960205171`)
+- **Work(s):** CLAIMED (this identification): תנ"ך, בראשית (w000086) / CATALOGUE NAMES (found in the identification text): שאילתות (w000732)
+- **Catalogue's own identification text:** שאילתות.
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('שאילתות') than the one this claim identifies ('תנ"ך, בראשית'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 96
+
+- **Manuscript:** Cambridge University Library Ms. T-S C 1.23 (sys_id `990051150540205171`)
+- **Work(s):** CLAIMED (this identification): בראשית רבה צה-צו, תוספת (w000900) / CATALOGUE NAMES (found in the identification text): בראשית רבה (w000156)
+- **Catalogue's own identification text:** בראשית רבה;מדרש. ; Midrash ; בראשית רבה
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('בראשית רבה') than the one this claim identifies ('בראשית רבה צה-צו, תוספת'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+### Case 97
+
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 15.67 (sys_id `990051080280205171`)
+- **Work(s):** CLAIMED (this identification): ויקרא רבה (w000169) / CATALOGUE NAMES (found in the identification text): חובות הלבבות (תרגום אבן תיבון) (w000195)
+- **Catalogue's own identification text:** חובות הלבבות (תרגום אבן תיבון). ; ספר חובות הלבבות. מעלת התשובה ומעלת הצדקה. דפוס.
+- **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('חובות הלבבות (תרגום אבן תיבון)') than the one this claim identifies ('ויקרא רבה'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
+- **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
