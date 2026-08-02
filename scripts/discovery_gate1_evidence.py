@@ -18,6 +18,22 @@ shipped claims where an available finding aid ties the SAME fragment to a
 DIFFERENT work that is not a D-13d granularity variant -- the shade decision
 E calls ``diverges``, with zero representation in Classes 1-5.
 
+**Correction E′** (``136-GATE1-DECISIONS.md`` § E′, a same-day correction to
+decision E, not a new ruling): decision E's ``refines_granularity`` shade
+conflated two opposite directions of a granularity relationship into one
+value. The shade enum now widens from SEVEN to EIGHT values by splitting it:
+``refines_granularity`` (OUR claim is the finer one -- informative) versus
+``aid_more_specific`` (the AID's identification is the finer one -- we add
+nothing). ``aid_more_specific`` is the least-novel shade and is excluded from
+the candidate toggle alongside ``confirms`` / ``refines_granularity`` /
+``diverges`` / ``extends``; ``fills_gap`` remains the sole candidate
+selector. This module's vocabulary table, per-class plausible-shade hints
+(Class 3 and Class 6, per the owner's own scoping) and case footers are
+updated for E′; the 97 candidate cases themselves are UNCHANGED in content.
+This module also emits an XLSX labelling workbook (``write_hardcases_xlsx``)
+alongside the Markdown, per the owner's request for something easier to work
+with than Hebrew RTL in Markdown.
+
 Mirrors the shape of ``scripts/bench_discovery.py``: open the live asset
 read-only, drive real queries against it, print a table per measurement, and
 NEVER present a silent zero as a finding — every count this script reports
@@ -28,7 +44,7 @@ Usage:
     python scripts/discovery_gate1_evidence.py <asset.db>
     python scripts/discovery_gate1_evidence.py <asset.db> --research-db <fullcorpus.db> \\
         --libraries-csv libraries.csv --evidence-out 136-GATE1-EVIDENCE.md \\
-        --hardcases-out 136-NOVELTY-HARDCASES.md
+        --hardcases-out 136-NOVELTY-HARDCASES.md --hardcases-xlsx-out 136-NOVELTY-HARDCASES.xlsx
 
 Determinism: every SQL query below is either naturally total (aggregate
 COUNT) or carries an explicit ORDER BY over a stable key, and every Python
@@ -73,6 +89,69 @@ DEFAULT_RESEARCH_DB = os.path.join(REPO_ROOT, "same_work_spike", "probe", "data"
 DEFAULT_LIBRARIES_CSV = os.path.join(REPO_ROOT, "libraries.csv")
 DEFAULT_EVIDENCE_OUT = os.path.join(PHASE_DIR, "136-GATE1-EVIDENCE.md")
 DEFAULT_HARDCASES_OUT = os.path.join(PHASE_DIR, "136-NOVELTY-HARDCASES.md")
+DEFAULT_HARDCASES_XLSX_OUT = os.path.join(PHASE_DIR, "136-NOVELTY-HARDCASES.xlsx")
+
+# ---------------------------------------------------------------------------
+# Verdict vocabulary -- the SINGLE source of truth for every owner-facing
+# shade token, shared verbatim by the Markdown worksheet, the XLSX dropdown
+# validation and the XLSX vocabulary sheet, so the three surfaces can never
+# drift out of sync. Order matches the owner's own E/E′ shade table (decision
+# E's six original shades, E′'s aid_more_specific inserted right after its
+# sibling refines_granularity, then not_checked's owner-facing alias `unsure`
+# and the `skip` non-answer). ``not_checked`` itself is NOT owner-facing --
+# only its owner-facing alias `unsure` is offered as an answer token.
+# ---------------------------------------------------------------------------
+SHADE_VOCABULARY: Tuple[Tuple[str, str], ...] = (
+    ("confirms", "an aid already ties this fragment to this work"),
+    (
+        "refines_granularity",
+        "OUR claim is MORE SPECIFIC (finer) than what an aid says -- e.g. the catalogue names the "
+        "whole work, our claim names a specific book/chapter of it (the D-13d same-author/related-"
+        "title rule); the OPPOSITE direction from `aid_more_specific` -- we ADD precision here",
+    ),
+    (
+        "aid_more_specific",
+        "an AID names a MORE SPECIFIC (finer) variant of this fragment's work than our claim does "
+        "-- e.g. the catalogue names a chapter/book, our claim names the whole work (the D-13d "
+        "same-author/related-title rule); the OPPOSITE direction from `refines_granularity` -- we "
+        "add NOTHING here, the aid already knew more (owner correction E′; the LEAST novel shade)",
+    ),
+    (
+        "diverges",
+        "an aid ties this fragment to a DIFFERENT work that is NOT a granularity variant -- the aid "
+        "and the claim contradict each other",
+    ),
+    (
+        "fills_gap",
+        "the aids identify this fragment as nothing at all -- the genuine \"previously unknown\" case",
+    ),
+    (
+        "extends",
+        "aids tie OTHER folios of the SAME manuscript to this work, but not this specific folio",
+    ),
+    (
+        "alias_merge",
+        "the two work_ids shown ARE the same underlying work, not yet canonically merged (Class 2's "
+        "situation)",
+    ),
+    (
+        "unsure",
+        "you cannot judge this case from the information shown -- maps to `not_checked`, costs "
+        "nothing, is a real and useful answer",
+    ),
+    (
+        "skip",
+        "you choose not to judge this case at all -- recorded as skipped, NEVER filled from a draft "
+        "`PROPOSAL`",
+    ),
+)
+# The real SHADE tokens only (excludes the two non-shade answer tokens
+# `unsure` / `skip`) -- this is the XLSX DataValidation list together with
+# `unsure` / `skip` appended (nine tokens total): seven real shades that are
+# owner-facing (the eighth stored value, `not_checked`, is a fail-closed
+# system default never picked directly -- `unsure` is its owner-facing
+# alias) plus the two non-shade answers.
+SHADE_TOKENS: Tuple[str, ...] = tuple(tok for tok, _ in SHADE_VOCABULARY)
 
 # ---------------------------------------------------------------------------
 # D-13c / gate-4 page-coverage normalizer -- a faithful, standalone port of
@@ -1621,16 +1700,61 @@ def render_evidence_brief(
 # class"). Every case can still receive ANY shade, `unsure`, or `skip`; this
 # is a reading aid for the owner, never a constraint enforced by this script.
 _PLAUSIBLE_SHADES_BY_CLASS: Dict[str, Tuple[str, ...]] = {
-    "granularity": ("refines_granularity", "confirms", "diverges"),
+    # E′ adds `aid_more_specific` to Class 3 and Class 6 ONLY -- the two
+    # classes the owner scoped this to. Both are genuinely grounded: Class
+    # 3's own selection algorithm already computes the D-13d title
+    # relationship `aid_more_specific` is defined over, and Class 6 is
+    # exactly the boundary where the algorithm's own `diverges` call could,
+    # on owner review, turn out to be a missed granularity direction instead
+    # of a genuine divergence. Deliberately NOT extended to Class 5 (generic
+    # collection) -- that class's own selection algorithm never tests title-
+    # relatedness/directionality at all, so a plausible-shade hint there
+    # would not be grounded in what the class actually measures.
+    "granularity": ("refines_granularity", "aid_more_specific", "confirms", "diverges"),
     "alias": ("alias_merge", "confirms", "fills_gap"),
     "near_miss": ("confirms", "diverges", "fills_gap"),
     "terse_catalogue": ("fills_gap", "confirms"),
     "generic_collection": ("fills_gap", "confirms", "extends"),
-    "catalogue_divergence": ("diverges", "refines_granularity", "confirms"),
+    "catalogue_divergence": ("diverges", "aid_more_specific", "refines_granularity", "confirms"),
 }
 
 
+_CLASS_TITLES: Dict[str, str] = {
+    "granularity": "Class 3 -- catalogue entry naming a different granularity of the same work",
+    "alias": "Class 2 -- alias pairs",
+    "near_miss": "Class 1 -- near-miss titles",
+    "terse_catalogue": "Class 4 -- terse or missing catalogue identification text (owner-authorized extension)",
+    "generic_collection": "Class 5 -- generic collection works (owner-authorized extension)",
+    "catalogue_divergence": "Class 6 -- catalogue divergence (owner decision E)",
+}
+_CLASS_ORDER: Tuple[str, ...] = (
+    "granularity", "alias", "near_miss", "terse_catalogue", "generic_collection",
+    "catalogue_divergence",
+)
+
+
+def assign_case_numbers(cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Assigns a stable, sequential ``case_num`` to each case in the SAME
+    ``_CLASS_ORDER`` / within-class order the Markdown worksheet renders in,
+    so 136-NOVELTY-HARDCASES.md and 136-NOVELTY-HARDCASES.xlsx agree
+    case-for-case -- both render from this ONE pre-numbered list, never two
+    independent iterations that could silently drift apart."""
+    by_class: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for c in cases:
+        by_class[c["class"]].append(c)
+    numbered: List[Dict[str, Any]] = []
+    n = 0
+    for cls in _CLASS_ORDER:
+        for item in by_class.get(cls, []):
+            n += 1
+            item = dict(item)
+            item["case_num"] = n
+            numbered.append(item)
+    return numbered
+
+
 def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
+    """``cases`` must already carry ``case_num`` (see ``assign_case_numbers``)."""
     lines: List[str] = []
     a = lines.append
     a("# Phase 136 Plan 03 -- Novelty Hard-Case Candidates")
@@ -1651,36 +1775,31 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
       "works and manuscripts already in the deployed asset -- **zero model calls, measured cost "
       "$0.00**. Every existing case from the original 82 is kept unchanged; Class 6 is purely "
       "additive. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid "
-      "only, never a label -- it is NOT filled in by this script as an owner answer.")
+      "only, never a label -- it is NOT filled in by this script as an owner answer. **Correction E′ "
+      "(`136-GATE1-DECISIONS.md` § E′, same day as decision E, a correction to it and not a new "
+      "ruling)** splits decision E's `refines_granularity` shade by direction, adding "
+      "`aid_more_specific` -- see the updated vocabulary table below. This worksheet is also emitted "
+      "as `136-NOVELTY-HARDCASES.xlsx` (same phase directory) for owners who find Hebrew RTL easier "
+      "to work with in a spreadsheet; both files render the SAME 97 cases in the SAME order, from "
+      "the same pre-numbered case list, so the two agree case-for-case.")
     a("")
-    a("## Verdict vocabulary (amended 2026-08-02, owner decision E -- see `136-GATE1-DECISIONS.md` "
-      "item E)")
+    a("## Verdict vocabulary (amended 2026-08-02, owner decisions E / E′ -- see "
+      "`136-GATE1-DECISIONS.md` items E and E′)")
     a("")
     a("Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`). The "
-      "owner ruled it into a SEVEN-shade enum because the tri-state collapsed materially different "
-      "findings into one bucket -- a catalogue CONTRADICTION and a genuine \"previously unknown\" both "
-      "used to score the same way. For EACH case below, answer with the shade that best describes what "
-      "an enumerable finding aid (the catalogue's own identification field, bibliography, titles, PGP, "
-      "FGP, M-source shelfmark attributions) actually says about THIS fragment and THIS work -- or "
-      "`unsure` / `skip`.")
+      "owner ruled it into an EIGHT-shade enum (decision E's original seven, direction-split by "
+      "correction E′ into eight) because the tri-state collapsed materially different findings into "
+      "one bucket -- a catalogue CONTRADICTION and a genuine \"previously unknown\" both used to "
+      "score the same way, and (per E′) a granularity refinement that helps and one that adds "
+      "nothing also used to score the same way. For EACH case below, answer with the shade that best "
+      "describes what an enumerable finding aid (the catalogue's own identification field, "
+      "bibliography, titles, PGP, FGP, M-source shelfmark attributions) actually says about THIS "
+      "fragment and THIS work -- or `unsure` / `skip`.")
     a("")
     a("| Shade | Choose this when... |")
     a("|---|---|")
-    a("| `confirms` | an aid already ties this fragment to this work |")
-    a("| `refines_granularity` | an aid ties this fragment to a coarser/finer variant of this work "
-      "(the D-13d same-author/related-title rule) |")
-    a("| `diverges` | an aid ties this fragment to a DIFFERENT work that is NOT a granularity "
-      "variant -- the aid and the claim contradict each other |")
-    a("| `fills_gap` | the aids identify this fragment as nothing at all -- the genuine \"previously "
-      "unknown\" case |")
-    a("| `extends` | aids tie OTHER folios of the SAME manuscript to this work, but not this "
-      "specific folio |")
-    a("| `alias_merge` | the two work_ids shown ARE the same underlying work, not yet canonically "
-      "merged (Class 2's situation) |")
-    a("| `unsure` | you cannot judge this case from the information shown -- maps to `not_checked`, "
-      "costs nothing, is a real and useful answer |")
-    a("| `skip` | you choose not to judge this case at all -- recorded as skipped, NEVER filled from "
-      "a draft `PROPOSAL` |")
+    for token, description in SHADE_VOCABULARY:
+        a(f"| `{token}` | {description} |")
     a("")
     a("`not_checked` (the fail-closed system default for an unrun/failed/abstained check) is not a "
       "verdict the owner picks directly -- `unsure` is its owner-facing equivalent.")
@@ -1689,22 +1808,9 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
     for c in cases:
         by_class[c["class"]].append(c)
 
-    class_titles = {
-        "granularity": "Class 3 -- catalogue entry naming a different granularity of the same work",
-        "alias": "Class 2 -- alias pairs",
-        "near_miss": "Class 1 -- near-miss titles",
-        "terse_catalogue": "Class 4 -- terse or missing catalogue identification text (owner-authorized extension)",
-        "generic_collection": "Class 5 -- generic collection works (owner-authorized extension)",
-        "catalogue_divergence": "Class 6 -- catalogue divergence (owner decision E)",
-    }
-    class_order = (
-        "granularity", "alias", "near_miss", "terse_catalogue", "generic_collection",
-        "catalogue_divergence",
-    )
-    n = 0
-    for cls in class_order:
+    for cls in _CLASS_ORDER:
         items = by_class.get(cls, [])
-        a(f"## {class_titles[cls]} ({len(items)} candidates)")
+        a(f"## {_CLASS_TITLES[cls]} ({len(items)} candidates)")
         a("")
         plausible = _PLAUSIBLE_SHADES_BY_CLASS[cls]
         plausible_str = ", ".join(f"`{s}`" for s in plausible)
@@ -1713,8 +1819,7 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
           "`skip` are always available).")
         a("")
         for item in items:
-            n += 1
-            a(f"### Case {n}")
+            a(f"### Case {item['case_num']}")
             a("")
             if item.get("shelfmark"):
                 a(f"- **Manuscript:** {item['shelfmark']} (sys_id `{item['sys_id']}`)")
@@ -1733,6 +1838,208 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
             a("")
 
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# XLSX labelling workbook (owner-requested, 2026-08-02: Hebrew RTL is hard to
+# work with in Markdown). Same ``cases`` data as the Markdown worksheet above
+# (pre-numbered via ``assign_case_numbers`` so the two files agree
+# case-for-case), reissued via THIS script -- never hand-edited -- per the
+# same discipline as the Markdown. openpyxl is an existing project
+# dependency (see ``shared/export_dossier.py`` / ``web/export_service.py``
+# for the house style this mirrors: ``sheet_view.rightToLeft``, bold-white-
+# on-blue header row, ``sanitize_text_for_excel`` on every cell).
+#
+# MASKING NOTE (measured during this plan): ``.xlsx`` is a ZIP archive whose
+# inner XML parts are DEFLATE-compressed by default -- a raw byte-level scan
+# of the OUTER file (e.g. a naive ``check_atlas_masking.py --scan-asset`` on
+# the ``.xlsx`` path) cannot see a literal string that is only present in the
+# compressed inner XML. The masking scan for this artifact must be run
+# against the DECOMPRESSED inner content (e.g. via ``zipfile`` extraction
+# into a scratch file passed as a single explicit ``--scan-asset`` path) --
+# see ``136-GATE1-DECISIONS.md``'s "Outstanding (pending Task 3)" section for
+# the full methodology note. This module does not perform that extraction
+# itself (it stays a lightweight read/write path, mirroring this file's own
+# stated reason for not importing the masking-gate module directly); the
+# caller is expected to do it before presenting the workbook to the owner.
+# ---------------------------------------------------------------------------
+
+def write_hardcases_xlsx(cases: List[Dict[str, Any]], path: str) -> None:
+    """``cases`` must already carry ``case_num`` (see ``assign_case_numbers``).
+
+    Writes a two-sheet workbook: "Hard Cases" (one row per case, Case #/
+    Verdict frozen at the reading-order edge alongside the header row, RTL,
+    wrapped text, autofilter, a ``DataValidation`` dropdown on the Verdict
+    column restricted to the full vocabulary) and "Vocabulary" (the same
+    shade table + per-class plausible-shade hints + an explicit "blank is
+    NOT a label" note). Deterministic at the cell-value / validation-list /
+    sheet-structure level -- NOT claimed byte-for-byte on the saved ``.xlsx``
+    file itself, since openpyxl embeds a save timestamp in the workbook's
+    ``docProps/core.xml`` on every save.
+    """
+    # Deferred heavy import (mirrors scripts/bench_discovery.py's own
+    # documented pattern): keeps this module importable/usable via --help
+    # and --no-write without an openpyxl dependency on those paths.
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from shared.export_utils import sanitize_text_for_excel as _san
+
+    def _s(value: Optional[str]) -> str:
+        return _san(value or "")
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    wrap_top = Alignment(horizontal="right", vertical="top", wrap_text=True, readingOrder=2)
+    wrap_top_center = Alignment(horizontal="center", vertical="top", wrap_text=True)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Hard Cases"
+    ws.sheet_view.rightToLeft = True
+
+    # Column order: Case # and Verdict adjacent so BOTH sit in the frozen
+    # "alongside the case number" region the plan asks for; in an RTL sheet
+    # column A renders at the visual right edge, i.e. the natural reading
+    # start for this predominantly-Hebrew content.
+    headers = [
+        "Case #", "Verdict", "Class", "Plausible shades",
+        "Manuscript", "sys_id", "Claimed work(s)",
+        "Catalogue's own identification text", "Why it is hard",
+        "PROPOSAL (draft -- NOT a label)",
+    ]
+    ws.append(headers)
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+
+    widths = {
+        "A": 9, "B": 20, "C": 46, "D": 30, "E": 32, "F": 22, "G": 48, "H": 46, "I": 55, "J": 46,
+    }
+    for col_letter, width in widths.items():
+        ws.column_dimensions[col_letter].width = width
+
+    for item in cases:
+        manuscript = (
+            item["shelfmark"] if item.get("shelfmark")
+            else (f"sys_id {item['sys_id']} (no shelfmark on file)" if item.get("sys_id")
+                  else "(no shipped claim instance found for either work)")
+        )
+        row = [
+            item["case_num"],
+            "",  # Verdict -- left blank; owner fills in, never pre-filled from a draft
+            _s(_CLASS_TITLES[item["class"]]),
+            _s(", ".join(_PLAUSIBLE_SHADES_BY_CLASS[item["class"]])),
+            _s(manuscript),
+            _s(item.get("sys_id")),
+            _s(" / ".join(item["work_titles"])),
+            _s(item.get("catalogue_text")),
+            _s(item["reason"]),
+            _s(item.get("proposal")),
+        ]
+        ws.append(row)
+
+    last_row = ws.max_row
+    for row_idx in range(2, last_row + 1):
+        ws.cell(row=row_idx, column=1).alignment = wrap_top_center
+        for col_idx in range(2, len(headers) + 1):
+            ws.cell(row=row_idx, column=col_idx).alignment = wrap_top
+
+    ws.freeze_panes = "C2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{last_row}"
+
+    # Verdict dropdown -- the FULL vocabulary (seven real shades + `unsure` +
+    # `skip`, i.e. every token in SHADE_VOCABULARY -- nine total). Blank is
+    # allowed by the validation itself ("not yet answered" is a legitimate
+    # transient state); the Vocabulary sheet explains in words that a blank
+    # is NOT a label and `unsure` is the real answer for "cannot tell".
+    dv_formula = '"' + ",".join(SHADE_TOKENS) + '"'
+    dv = DataValidation(
+        type="list", formula1=dv_formula, allow_blank=True, showErrorMessage=True,
+        errorTitle="Invalid verdict",
+        error="Choose one of the listed shades, or 'unsure' / 'skip'. Free text is rejected.",
+        promptTitle="Verdict",
+        prompt="Pick the shade that best fits, or 'unsure' / 'skip'. Blank = not yet answered.",
+    )
+    ws.add_data_validation(dv)
+    dv.add(f"B2:B{last_row}")
+
+    # --- Sheet 2: Vocabulary & Instructions ---
+    ws2 = wb.create_sheet(title="Vocabulary")
+    ws2.sheet_view.rightToLeft = True
+    ws2.column_dimensions["A"].width = 24
+    ws2.column_dimensions["B"].width = 90
+
+    def _note(text: str) -> None:
+        ws2.append([_s(text)])
+        ws2.cell(row=ws2.max_row, column=1).alignment = Alignment(
+            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
+        )
+        ws2.merge_cells(start_row=ws2.max_row, start_column=1, end_row=ws2.max_row, end_column=2)
+
+    _note(
+        "This workbook is a labelling instrument for the novelty hard-case evaluation set "
+        "(plan 136-03 Task 3). The Markdown file 136-NOVELTY-HARDCASES.md in the same phase "
+        "directory remains the authoritative human-readable record of the 97 candidate cases and "
+        "the reasoning for why each is hard; this workbook renders the SAME 97 cases, in the SAME "
+        "order, from one shared pre-numbered case list."
+    )
+    ws2.append([])
+    _note(
+        "IMPORTANT: a BLANK Verdict cell is NOT a label -- it means \"not yet answered\". If you "
+        "cannot judge a case, enter `unsure` explicitly (it maps to the fail-closed system default "
+        "and costs nothing) rather than leaving the cell blank. If you choose not to judge a case at "
+        "all, enter `skip` explicitly -- it is recorded as skipped, never silently filled from the "
+        "case's own draft PROPOSAL."
+    )
+    ws2.append([])
+
+    ws2.append(["Shade", "Choose this when..."])
+    ws2.cell(row=ws2.max_row, column=1).font = header_font
+    ws2.cell(row=ws2.max_row, column=2).font = header_font
+    ws2.cell(row=ws2.max_row, column=1).fill = header_fill
+    ws2.cell(row=ws2.max_row, column=2).fill = header_fill
+    for token, description in SHADE_VOCABULARY:
+        ws2.append([token, _s(description)])
+        ws2.cell(row=ws2.max_row, column=1).alignment = Alignment(
+            horizontal="right", vertical="top", readingOrder=2
+        )
+        ws2.cell(row=ws2.max_row, column=2).alignment = Alignment(
+            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
+        )
+    ws2.append([])
+
+    _note(
+        "`not_checked` (the fail-closed system default for an unrun/failed/abstained check) is not "
+        "a verdict you pick directly -- `unsure` is its owner-facing equivalent."
+    )
+    ws2.append([])
+
+    ws2.append(["Class", "Plausible shades (a reading aid -- any shade above is still a valid answer)"])
+    ws2.cell(row=ws2.max_row, column=1).font = header_font
+    ws2.cell(row=ws2.max_row, column=2).font = header_font
+    ws2.cell(row=ws2.max_row, column=1).fill = header_fill
+    ws2.cell(row=ws2.max_row, column=2).fill = header_fill
+    for cls in _CLASS_ORDER:
+        plausible_str = ", ".join(_PLAUSIBLE_SHADES_BY_CLASS[cls])
+        ws2.append([_s(_CLASS_TITLES[cls]), _s(plausible_str)])
+        ws2.cell(row=ws2.max_row, column=1).alignment = Alignment(
+            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
+        )
+        ws2.cell(row=ws2.max_row, column=2).alignment = Alignment(
+            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
+        )
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    wb.save(path)
 
 
 # ---------------------------------------------------------------------------
@@ -1756,9 +2063,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--evidence-out", default=DEFAULT_EVIDENCE_OUT)
     parser.add_argument("--hardcases-out", default=DEFAULT_HARDCASES_OUT)
+    parser.add_argument("--hardcases-xlsx-out", default=DEFAULT_HARDCASES_XLSX_OUT)
     parser.add_argument(
         "--no-write", action="store_true",
-        help="print console tables only; do not write the two Markdown artifacts",
+        help="print console tables only; do not write the Markdown/XLSX artifacts",
     )
     args = parser.parse_args(argv)
 
@@ -1847,6 +2155,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                     f"hard-case draft verdict is not marked PROPOSAL: {proposal!r}"
                 )
 
+        # Assign stable case numbers ONCE, in the same class order both
+        # rendered artifacts (Markdown + XLSX) share -- see assign_case_numbers.
+        hardcases = assign_case_numbers(hardcases)
+        ledger.check("hardcases_numbered", len(hardcases))
+
     finally:
         conn.close()
 
@@ -1896,6 +2209,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         with open(args.hardcases_out, "w", encoding="utf-8") as fh:
             fh.write(hardcases_md)
         print(f"wrote {args.hardcases_out}")
+
+        write_hardcases_xlsx(hardcases, args.hardcases_xlsx_out)
+        print(f"wrote {args.hardcases_xlsx_out}")
 
     return 0
 

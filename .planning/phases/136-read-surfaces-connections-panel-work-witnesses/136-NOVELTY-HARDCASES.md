@@ -1,15 +1,16 @@
 # Phase 136 Plan 03 -- Novelty Hard-Case Candidates
 
-Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn from. The original three classes D-23c names -- **near-miss titles**, **alias pairs**, and a **catalogue entry naming a different GRANULARITY of the same work** -- were selected adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 are an OWNER-AUTHORIZED scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured novelty-funnel error rate is not flattered by cases an LLM finds easy: **terse or missing catalogue identification text** and **generic collection works** (responsa/piyyut/collection titles recurring across many distinct catalogued items, where "already recorded" is genuinely ill-defined rather than merely hard to string-match). **Class 6 -- catalogue divergence -- is a further owner-authorized extension (`136-GATE1-DECISIONS.md` item E)**: real shipped claims where an available finding aid ties the SAME fragment to a DIFFERENT work that is NOT a D-13d granularity variant -- the shade item E's ruling calls `diverges`, with ZERO representation in Classes 1-5. All six classes are selected entirely by string/title/metadata comparison over the works and manuscripts already in the deployed asset -- **zero model calls, measured cost $0.00**. Every existing case from the original 82 is kept unchanged; Class 6 is purely additive. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer.
+Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn from. The original three classes D-23c names -- **near-miss titles**, **alias pairs**, and a **catalogue entry naming a different GRANULARITY of the same work** -- were selected adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 are an OWNER-AUTHORIZED scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured novelty-funnel error rate is not flattered by cases an LLM finds easy: **terse or missing catalogue identification text** and **generic collection works** (responsa/piyyut/collection titles recurring across many distinct catalogued items, where "already recorded" is genuinely ill-defined rather than merely hard to string-match). **Class 6 -- catalogue divergence -- is a further owner-authorized extension (`136-GATE1-DECISIONS.md` item E)**: real shipped claims where an available finding aid ties the SAME fragment to a DIFFERENT work that is NOT a D-13d granularity variant -- the shade item E's ruling calls `diverges`, with ZERO representation in Classes 1-5. All six classes are selected entirely by string/title/metadata comparison over the works and manuscripts already in the deployed asset -- **zero model calls, measured cost $0.00**. Every existing case from the original 82 is kept unchanged; Class 6 is purely additive. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer. **Correction E′ (`136-GATE1-DECISIONS.md` § E′, same day as decision E, a correction to it and not a new ruling)** splits decision E's `refines_granularity` shade by direction, adding `aid_more_specific` -- see the updated vocabulary table below. This worksheet is also emitted as `136-NOVELTY-HARDCASES.xlsx` (same phase directory) for owners who find Hebrew RTL easier to work with in a spreadsheet; both files render the SAME 97 cases in the SAME order, from the same pre-numbered case list, so the two agree case-for-case.
 
-## Verdict vocabulary (amended 2026-08-02, owner decision E -- see `136-GATE1-DECISIONS.md` item E)
+## Verdict vocabulary (amended 2026-08-02, owner decisions E / E′ -- see `136-GATE1-DECISIONS.md` items E and E′)
 
-Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`). The owner ruled it into a SEVEN-shade enum because the tri-state collapsed materially different findings into one bucket -- a catalogue CONTRADICTION and a genuine "previously unknown" both used to score the same way. For EACH case below, answer with the shade that best describes what an enumerable finding aid (the catalogue's own identification field, bibliography, titles, PGP, FGP, M-source shelfmark attributions) actually says about THIS fragment and THIS work -- or `unsure` / `skip`.
+Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`). The owner ruled it into an EIGHT-shade enum (decision E's original seven, direction-split by correction E′ into eight) because the tri-state collapsed materially different findings into one bucket -- a catalogue CONTRADICTION and a genuine "previously unknown" both used to score the same way, and (per E′) a granularity refinement that helps and one that adds nothing also used to score the same way. For EACH case below, answer with the shade that best describes what an enumerable finding aid (the catalogue's own identification field, bibliography, titles, PGP, FGP, M-source shelfmark attributions) actually says about THIS fragment and THIS work -- or `unsure` / `skip`.
 
 | Shade | Choose this when... |
 |---|---|
 | `confirms` | an aid already ties this fragment to this work |
-| `refines_granularity` | an aid ties this fragment to a coarser/finer variant of this work (the D-13d same-author/related-title rule) |
+| `refines_granularity` | OUR claim is MORE SPECIFIC (finer) than what an aid says -- e.g. the catalogue names the whole work, our claim names a specific book/chapter of it (the D-13d same-author/related-title rule); the OPPOSITE direction from `aid_more_specific` -- we ADD precision here |
+| `aid_more_specific` | an AID names a MORE SPECIFIC (finer) variant of this fragment's work than our claim does -- e.g. the catalogue names a chapter/book, our claim names the whole work (the D-13d same-author/related-title rule); the OPPOSITE direction from `refines_granularity` -- we add NOTHING here, the aid already knew more (owner correction E′; the LEAST novel shade) |
 | `diverges` | an aid ties this fragment to a DIFFERENT work that is NOT a granularity variant -- the aid and the claim contradict each other |
 | `fills_gap` | the aids identify this fragment as nothing at all -- the genuine "previously unknown" case |
 | `extends` | aids tie OTHER folios of the SAME manuscript to this work, but not this specific folio |
@@ -21,7 +22,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 
 ## Class 3 -- catalogue entry naming a different granularity of the same work (20 candidates)
 
-**Plausible shades for this class:** `refines_granularity`, `confirms`, `diverges` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
+**Plausible shades for this class:** `refines_granularity`, `aid_more_specific`, `confirms`, `diverges` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
 ### Case 1
 
@@ -30,7 +31,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרשנות מקרא רבנית. ; Solomon b. Isaac, Rashi, Biblical Exegesis - Rabbanite: Genesis 44 ; שלמה בן יצחק, פרשנות מקרא רבנית: בראשית מד
 - **Why it is hard:** Byte-identical span 0-962 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 2
 
@@ -39,7 +40,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** משנה תורה (ספר שופטים).
 - **Why it is hard:** Byte-identical span 0-617 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 3
 
@@ -48,7 +49,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י.
 - **Why it is hard:** Byte-identical span 0-2500 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 4
 
@@ -57,7 +58,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י (שמות כא:כו-כו:כד).
 - **Why it is hard:** Byte-identical span 0-3022 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 5
 
@@ -66,7 +67,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י (במדבר).
 - **Why it is hard:** Byte-identical span 0-1846 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 6
 
@@ -75,7 +76,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י (בראשית כ-כד, שמות כ-לד, קטעים).
 - **Why it is hard:** Byte-identical span 0-1087 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 7
 
@@ -84,7 +85,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י (דברים כט:י-לב:יג, קטעים).
 - **Why it is hard:** Byte-identical span 0-1198 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 8
 
@@ -93,7 +94,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י (שמות, במדבר-דברים).
 - **Why it is hard:** Byte-identical span 0-1591 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 9
 
@@ -102,7 +103,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י (שמות כח:לה-ל:יג).
 - **Why it is hard:** Byte-identical span 0-993 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 10
 
@@ -111,7 +112,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י (שמות יט:יז-כ:ב; ויקרא יט:א-במדבר יא:כו).
 - **Why it is hard:** Byte-identical span 0-1510 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 11
 
@@ -120,7 +121,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה לרש"י (בראשית, קטעים).
 - **Why it is hard:** Byte-identical span 0-780 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 12
 
@@ -129,7 +130,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** משנה תורה (הקדמה, מניין המצוות לפי סדר הספרים, קטע).
 - **Why it is hard:** Byte-identical span 0-436 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 13
 
@@ -138,7 +139,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** קטעי גניזה.
 - **Why it is hard:** Byte-identical span 0-662 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 14
 
@@ -147,7 +148,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה (במדבר, קטע).
 - **Why it is hard:** Byte-identical span 0-685 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 15
 
@@ -156,7 +157,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש נביאים (ישעיה, קטע).
 - **Why it is hard:** Byte-identical span 0-1091 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 16
 
@@ -165,7 +166,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש נביאים (ישעיה, קטע).
 - **Why it is hard:** Byte-identical span 13-463 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 17
 
@@ -174,7 +175,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש נביאים לרס"ג.
 - **Why it is hard:** Byte-identical span 0-1326 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 18
 
@@ -183,7 +184,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש התורה (בראשית, קטע).
 - **Why it is hard:** Byte-identical span 0-633 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 19
 
@@ -192,7 +193,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** תרגום ופרוש ערבי לתורה (קטע).
 - **Why it is hard:** Byte-identical span 625-1572 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 20
 
@@ -201,7 +202,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** תורה (במדבר ד).
 - **Why it is hard:** Byte-identical span 0-246 on this page is claimed by 2 works sharing the same author and a common title stem -- a title-containment/alias relationship a plain string comparison cannot resolve on its own (same underlying commentary at two catalogued granularities, or two genuinely distinct works?).
 - **PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `refines_granularity`, `aid_more_specific`, `confirms`, `diverges`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ## Class 2 -- alias pairs (12 candidates)
 
@@ -737,7 +738,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 
 ## Class 6 -- catalogue divergence (owner decision E) (15 candidates)
 
-**Plausible shades for this class:** `diverges`, `refines_granularity`, `confirms` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
+**Plausible shades for this class:** `diverges`, `aid_more_specific`, `refines_granularity`, `confirms` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
 ### Case 83
 
@@ -746,7 +747,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** שאלות ותשובות מאת האי בן שרירא גאון (קטע).
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('תשובות') than the one this claim identifies ('תשובות האיי גאון'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 84
 
@@ -755,7 +756,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** הגדה של פסח.
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('הגדה של פסח') than the one this claim identifies ('משנה תורה, ספר זמנים'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 85
 
@@ -764,7 +765,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** הלכות גדולות (בבא קמא).
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('הלכות גדולות') than the one this claim identifies ('הלכות פסוקות'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 86
 
@@ -773,7 +774,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** ברכת המזון.
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('ברכת המזון') than the one this claim identifies ('משנה תורה, ספר אהבה'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 87
 
@@ -782,7 +783,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** יוסיפון בערבית.
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('יוסיפון') than the one this claim identifies ('ספר יוסיפון (ערבי)'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 88
 
@@ -791,7 +792,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** שאלות ותשובות הגאונים.
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('תשובות הגאונים') than the one this claim identifies ('תשובה בעניין סוכה'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 89
 
@@ -800,7 +801,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** פרוש ספר יצירה בערבית.
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('ספר יצירה') than the one this claim identifies ('רס"ג, ספר יצירה פירוש'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 90
 
@@ -809,7 +810,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** הלכות פסוקות (קדושין).
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('הלכות פסוקות') than the one this claim identifies ('הלכות פסוקות, תרגומים ועיבודים עבריים, הלכות קידושין'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 91
 
@@ -818,7 +819,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** מכילתא דרבי ישמעאל (בא-יתרו).
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('מכילתא דרבי ישמעאל') than the one this claim identifies ('מכילתא דרבי שמעון בן יוחאי'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 92
 
@@ -827,7 +828,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** מדרש תנחומא (קטעים).
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('תנחומא') than the one this claim identifies ('ילקוט שמעוני על התורה'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 93
 
@@ -836,7 +837,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** הלכה; מגילת סתרים [נסים בן יעקב]; ספרות הלכתית ופרשנות תלמודית; ספרות חז"ל. ; Halakhic Literature and Talmudic Commentaries ; Rabbinica; exposition of PT hagigah 78a and Tosefta Sheqalim 3:23-24 (the latter section numbered 140).
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('מגילת סתרים') than the one this claim identifies ('נסים גאון, חמשה ספרים'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 94
 
@@ -845,7 +846,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** משנה תורה;משנה תורה ופירושיו. ; Mishneh Torah and its Commentaries ; מנין מצות על סדר הרמב"ם, מסוף ספר אהבה (הלכות ציצית) עד סוף ספר זמנים
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('הלכות ציצית') than the one this claim identifies ('משנה תורה, הקדמה ומניין המצוות'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 95
 
@@ -854,7 +855,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** שאילתות.
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('שאילתות') than the one this claim identifies ('תנ"ך, בראשית'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 96
 
@@ -863,7 +864,7 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** בראשית רבה;מדרש. ; Midrash ; בראשית רבה
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('בראשית רבה') than the one this claim identifies ('בראשית רבה צה-צו, תוספת'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
 ### Case 97
 
@@ -872,5 +873,5 @@ Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `
 - **Catalogue's own identification text:** חובות הלבבות (תרגום אבן תיבון). ; ספר חובות הלבבות. מעלת התשובה ומעלת הצדקה. דפוס.
 - **Why it is hard:** This manuscript's own catalogue identification text names a DIFFERENT work ('חובות הלבבות (תרגום אבן תיבון)') than the one this claim identifies ('ויקרא רבה'); the two are NOT a granularity variant under the D-13d author-gated rule (different author, or an unrelated title) -- a genuine catalogue/claim divergence, the shade decision E calls `diverges`.
 - **PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim name different works -- confirm or correct.**
-- **Owner verdict:** _(pending Task 3 -- `diverges`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Owner verdict:** _(pending Task 3 -- `diverges`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
