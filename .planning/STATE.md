@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 136-03-PLAN.md (Gate-1 decisions ratified A-J + owner-labelled novelty evaluation set + Task 4 label file/analysis; plan CLOSED)
-last_updated: "2026-08-02T20:51:45.157Z"
+stopped_at: Completed 136-07-PLAN.md (main-pool bucket rule + display-grouping predicates + one wording for the rule; continuation agent finished Task 3 after a prior executor died on an API error after Tasks 1-2)
+last_updated: "2026-08-02T21:43:13.961Z"
 last_activity: 2026-08-02
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 45
-  completed_plans: 25
+  completed_plans: 30
   percent: 13
 ---
 
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 4 of 21
-Status: Ready to execute (136-03 CLOSED — see the "136-03 CLOSED" paragraph below for the final Task 3/4 outcome; the paragraphs after it are the pre-closure decision trail, retained per this file's own append-only discipline)
+Plan: 5 of 21
+Status: Ready to execute
 
 **136-03 CLOSED 2026-08-02 (this continuation) — Task 3 returned (owner labelled 84 of 101 verdict cells in `136-NOVELTY-HARDCASES.xlsx`) and Task 4 wrote the label file, closing the plan.** `discovery_data/novelty_hardcase_labels-v1.json` (gitignored, matching every sibling `discovery_data/` asset) carries all 101 cases with per-entry `label_provenance`; content hash
 `sha256:ce0dc2fb176d01de5f04975eac82017feaeb390db71e9ec13f3872a77d28d4b6` recorded in `136-GATE1-DECISIONS.md`. Read back via a new `--read-labels-from`/`--labels-out` mode added to `scripts/discovery_gate1_evidence.py` (fails closed on a missing/renamed sheet, header mismatch, out-of-vocab value, or a Case # outside 1..101/duplicated). Verified cell-for-cell against the actual XLSX — zero data discrepancies across all 101 cases; one FRAMING correction found (cases 6-8 are Class 1 near-miss, not "Class 3" — Class 3 is genuinely cases 1-3, all `same_work`). Per-arm analysis recorded in `136-GATE1-DECISIONS.md` (new section after § J): Arm 1 residual (30) has ZERO `fills_gap` — 19 `diverges_work` (18 `catalogue_correct`), `container_predicts` saved 4/30 rows from false candidacy (validates ruling H); Class 6 (30) selector over-fires ~57% (15 `confirms` + 2 `refines_granularity`), and its 13 confirmed `diverges_work` calls are 13/13 `catalogue_correct`; Identity constant-answer hypothesis CONFIRMED on the 5 decided cases (cases 6-8 skipped); Arm 2 (heuristic-demoted, 25) recorded as **INCONCLUSIVE** — only 7/25 decisive, the two Codex-flagged-hardest strata (`published_full_sole`, `pgp_sole`) each produced exactly 1 decisive verdict of 10, diagnosed as an instrument-design gap (the sheet shows only the stratum rationale, never the actual bib/PGP source text a labeller needs) — the owner's ungraded prose read is recorded verbatim but explicitly NOT treated as a measurement; a redesigned Arm 2 is recommended, not built. **A genuine, currently-dormant D-13d gap was found and flagged (not fixed):** investigating the owner's skip note for cases 6-8 ("same work, different location, perhaps not the same page") led to confirming via direct query that Class 1's near-miss pairs are never actually co-located on any span (unlike Class 3, verified genuinely span-grounded) — and that D-13d's `works_related_by_title` predicate (author + >=4-char title-prefix) WOULD collapse a real example (three catalogued volumes of `המספיק לעובדי השם` by אברהם בן הרמב"ם, `w000007`/`w000036`/`w000038`) if they ever co-occurred, though a corpus-wide check found zero span-groups where 2+ of them currently do. Flagged for a future re-examination of `works_related_by_title`; the collapse rule itself is UNCHANGED. **Wave 2+ impact assessed, not acted on:** 136-04 (which grades the funnel against this label file and its hash) and 136-13 (the one authorized rebuild) are NOT blocked by any of the above — the label file exists with its hash, and every finding here is either already actionable within 136-04's existing scope (ruling I's re-measurement gate; the funnel-first residual-only wiring already reconciled) or explicitly deferred (Arm 2 redesign, D-13d re-examination) without touching any code 136-04/136-13 depend on. Full analysis: `136-GATE1-DECISIONS.md`'s new post-§-J section. Next: `136-04-PLAN.md`.
@@ -122,8 +122,8 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-08-02T20:51:45.148Z
-Stopped at: Completed 136-03-PLAN.md (Gate-1 decisions ratified A-J + owner-labelled novelty evaluation set + Task 4 label file/analysis; plan CLOSED)
+Last session: 2026-08-02T21:43:13.950Z
+Stopped at: Completed 136-07-PLAN.md (main-pool bucket rule + display-grouping predicates + one wording for the rule; continuation agent finished Task 3 after a prior executor died on an API error after Tasks 1-2)
 Historical: Completed 135-02-PLAN.md (BAND-05 methods section). The flag-gated bilingual "Confidence Bands & Methods" section now renders inside the existing /help page (never a new route): its TOC entry AND its body card are each INDEPENDENTLY gated on discovery_available() (Codex #11 — the render loop emits only TOC links, so the body card carries its own gate). Each of the 7 bands has a help-confidence-<band> deep-link anchor (D-10) from an explicit registry. Fields render STRICTLY per the plan's field-sourcing: population from the RUNTIME display-deduplicated SHIPPED-CLAIM count (web.discovery.get_band_claim_counts — never band_precision.denominator, never raw evidence rows, never the Wave-4 frame doc); unit = (page, work); sample split into draw/determinate/successes; strata from sampling_frame else the D-08 fallback; weighted estimate + CI via format_precision_copy; the propagated 0.926 ONLY in a collection-scope paragraph (get_band_precision_collection), never on the corroborated/weak rows; the 4 CERT-01 registry fields (measurement_date/grader/audit_status/report_id) via .get() → placeholder ("not yet measured" / "independent audit pending"), NEVER fabricated. /help is now an async route reading rows+counts through the new web/discovery.py wrappers (get_band_precision / get_band_precision_collection / get_band_claim_counts / get_all_band_precision, all fail-open) and noindexed by the dedicated pre-release SEO predicate discovery_methods_noindex() = discovery_available() AND NOT DISCOVERY_PUBLIC_RELEASED (new web/feature_flags.py flag, default OFF) — noindex ONLY in the pre-release window, FLIPS to indexed at the Phase-139 REL-01 gate (Codex #18). Render-smoke (tests/render_smoke/test_help_methods_render_smoke.py, 6 tests): EN+HE section render, all 7 anchors, runtime population, placeholder-safe registry fields, three-state noindex transition + the predicate truth-table, the no-"certified" gate (EN + HE מאומת/מאושר/מוסמך, scoped to the section since מאושר legitimately appears in Joins-Lab help), and HE RTL. Gates: ruff clean (5 files); per-file --scan-asset masking clean; real-name grep 0; render_smoke package 59 pass + discovery suites 48 pass + back-edge guard 7 pass (no regression). Wave 2 COMPLETE; Wave 3 = 135-06 next.
 Historical (superseded, retained for the v2 decision trail): Completed 135-05-PLAN.md (v2 vocabulary + schema lockstep landed as vocabulary/DDL/spec only — NO bake logic: routing_reason gains later_shared_text [5-member frozenset + discovery_evidence DDL CHECK]; track1_direct band adds high_confidence_algorithmic alongside the RETAINED v1 expert_verified [v1-read-compat, Codex #8]; band_precision gains 5 CERT-01 registry columns incl the closed-vocab measurement_status CHECK [Codex #B3]; new masking-safe discovery_routing_audit table [decision CHECK]; dual-key band-rank in web spot-check + service _BAND_RANK_ORDER; dated amendments to discovery-sidecar-schema-v1.md [+meta provenance keys], band-labels §4 D-18 + §5 asset/bake-level atomicity, discovery-frames.md rename note). The real-build band-assignment flip + verifier release-strict expected-key rename are deferred to 135-06 (the v2 bake). Wave 2 remaining: 135-02.
 Resume file: None
@@ -155,6 +155,7 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 | Phase 136 P01 | 18min | 3 tasks | 5 files |
 | Phase 136 P02 | 40min | 3 tasks | 3 files |
 | Phase 136 P03 | 45min | 1 tasks | 4 files |
+| Phase 136 P07 | 35min | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -226,3 +227,5 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 - [Phase 136]: 136-02: Tasks 1+2 (help.py qualitative rewrite) committed together because Task 1's own verify step runs the same render-smoke suite Task 2 also extends -- an intermediate git state was built and independently verified green before committing, rather than leaving the suite red between task commits
 - [Phase 136]: 136-02: Skipped requirements mark-complete for PANEL-01/PANEL-02/NOVEL-01 (this plan's shared frontmatter IDs) -- this plan lands only the methods-page rewrite + the honesty gate; the bulk of each requirement lands in later Phase-136 plans
 - [Phase 136]: 136-03 Task 4 complete: owner-labelled novelty_hardcase_labels-v1.json written (content_hash sha256:ce0dc2fb...), per-arm analysis recorded (Arm1 0 fills_gap/19 diverges_work; Class6 selector over-fires ~57%; Arm2 inconclusive - instrument gap), D-13d flagged for a dormant volume/part collapse gap (not fixed)
+- [Phase 136]: main_pool_sentence/bucket_label are the sole wording for the two-bucket rule, pinned against web/pages/help.py by an AST-literal-eval parity test, plus a standing AST guard scanning shared/ and web/ for a second locally-defined bucket-membership predicate (the confOf()/STRONG_BANDS shape)
+- [Phase 136]: scripts/project_discovery_public.py's 136-08 main-pool stand-in heuristic is explicitly reassigned to plans 136-11/136-12 (not fixed by 136-07) -- it needs a discovery_routing_audit kept_tie join and band_precision-sourced measurement_status/ci_low that the projection script does not currently read
