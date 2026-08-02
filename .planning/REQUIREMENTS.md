@@ -58,6 +58,33 @@
     ROADMAP's: `not_in_finding_aids` / `already_recorded` / `not_checked`, defaulting to `not_checked`.**
     D-23a's `not_found` / `known` / `indeterminate` are recorded here as descriptive ALIASES of those same
     three states respectively, so no later plan invents a fourth value or a second storage vocabulary.
+  - **⟨AMENDED 2026-08-02 (later the same day) — Phase-136 plan 03, owner decision E
+    (`136-GATE1-DECISIONS.md` item E)⟩** The tri-state `novelty_status` (`not_in_finding_aids` /
+    `already_recorded` / `not_checked`) becomes a **SEVEN-VALUE SHADE ENUM** in the SAME column:
+    `confirms` / `refines_granularity` / `diverges` / `fills_gap` / `extends` / `alias_merge` /
+    `not_checked` (fail-closed default, unchanged in meaning and unchanged as the default). Owner
+    rationale: the tri-state collapsed two materially different findings into one bucket — a
+    catalogue CONTRADICTION ("an aid ties this fragment to a DIFFERENT work") scored
+    `not_in_finding_aids`, the SAME score as a genuine "previously unknown" case, and a granularity
+    refinement (an aid names the parent/child work — the D-13d author-gated rule; Class 3's measured
+    276-group population) scored `already_recorded` and became invisible though it is genuinely
+    informative. **The public surface is UNCHANGED IN SHAPE:** "Candidates for new finds" (the
+    2026-08-02 A-6 candidacy wording immediately above) selects `fills_gap` ONLY — the genuine
+    "previously unknown" case. `diverges` and `extends` are explicitly EXCLUDED from the candidate
+    toggle (a contradiction is not a new find; a folio-extension of an already-identified manuscript
+    is unremarkable). `refines_granularity` is stored but never voiced as a candidate. No new public
+    filter values, no new bilingual candidacy wording, no change to D-15/D-15a/D-16, no change to
+    D-24's orthogonality-to-tier rule. `not_checked` remains the sole fail-closed default — never
+    "novel by default." This amends the 2026-07-30 amendment's clause (1) above; clauses (2) (display
+    wording) and (3) (reviewed novelty identity) are UNCHANGED. Implemented by plans **136-04**
+    (novelty module + pinned LLM contract — the prompt must now elicit a shade, so the pinned prompt
+    hash necessarily changes), **136-06** and **136-12** (schema/build wiring — the `novelty_status`
+    CHECK constraint and its index in `docs/specs/discovery-sidecar-schema-v1.md` widen from three
+    values to seven), and **the release verifier** (`scripts/verify_discovery_sidecar.py`'s
+    frozen-enum-vocab check, extended in 136-12 and executed as part of 136-13's gate battery) — NOT
+    implemented in this plan (136-03), which only records the ruling. Full rationale, the
+    condition-by-shade table and the enumerated downstream-contract list are recorded in
+    `136-GATE1-DECISIONS.md` § E.
 - [ ] **NOVEL-02**: The novelty flag's **provenance** (`known_source` — which aid already had it) is masked on the public side: the boolean is publishable, but a restricted-corpus provenance value collapses to a non-identifying label (e.g. "recorded in a restricted corpus"), never the corpus name, and passes the DATA-05 masking scan on every surface that renders or exports it — including copy/clipboard output, JSON payloads, and error paths. Public surfaces therefore support "filter **and explain**" only where the explaining source is itself public; elsewhere they support "filter only". The heuristic-plus-LLM funnel's verdict cache is a build-time artifact and is never shipped in the sidecar
 
 ### Bands & Certification
