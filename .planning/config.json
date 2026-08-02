@@ -15,7 +15,7 @@
     "ai_integration_phase": true,
     "research_before_questions": true,
     "skip_discuss": false,
-    "use_worktrees": false,
+    "use_worktrees": true,
     "_auto_chain_active": false
   },
   "git": {
