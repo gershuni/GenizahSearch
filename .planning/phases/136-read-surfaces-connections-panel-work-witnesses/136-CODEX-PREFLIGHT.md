@@ -175,3 +175,60 @@ HIGH: 3   MEDIUM: 2   LOW: 2
 
 VERDICT: rework because the production deploy plan still gives contradictory asset-first and code-first instructions
 HIGH: 1   MEDIUM: 3   LOW: 2
+
+---
+
+## Round 4 — SIGN-OFF (2026-08-02)
+
+**Target:** revision 4 (commit `0939f01c`) — 21 plans / 63 tasks / 10 waves.
+**Brief:** `_tmp/136-codex-preflight-r4-brief.md`
+
+> **VERDICT: ship with 2 adjustments — HIGH: 0 · MEDIUM: 1 · LOW: 1.**
+> Trajectory across four rounds: **10/1/1 → 3/2/2 → 1/3/2 → 0/1/1.**
+>
+> Codex sign-off: *"I found no remaining disclosure-capable path."* The public projection, the
+> audience gate, the flag-off deployments and the final masking gate are all intact; neither
+> remaining defect opens a private-data path.
+>
+> Both adjustments were applied directly (see below) rather than through another planner round.
+
+### The two adjustments — APPLIED 2026-08-02
+
+1. **MEDIUM — `136-20` Task 2's `<automated>` check asserted only the two table names**, so it could
+   report green after the table work while never proving `_REQUIRED_COLUMNS` or `PRAGMA table_info`
+   existed at all. Codex: *"the exact action/verification drift this round was meant to catch."*
+   **Fixed:** the source check now asserts `_REQUIRED_COLUMNS` and `table_info` are present, each with
+   its own failure message; acceptance corrected `Six tests` → `Eight tests` and a criterion added
+   recording why a table-only check is insufficient.
+2. **LOW — `136-21` Task 1 acceptance carried the same stale `Six tests`** after its behaviour list
+   grew to eight. **Fixed.**
+
+**Swept for the class, not just the instances:** every task in all 21 plans was checked
+programmatically for a stated test count disagreeing with its own `<behavior>` bullet count, in both
+`<acceptance_criteria>` and `<done>`. Result: **no mismatches remain anywhere.** (`136-07`'s "Seven"
+and `136-08`'s "Six" are correct against their own lists.)
+
+### Verbatim findings
+
+
+4. **#4 — NOT RESOLVED (MEDIUM).** Substantively, the column set is complete against the phase amendment: all nine affected existing-table columns are named, while every new-table column is covered by the amendment-derived mapping ([136-01:237](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-01-PLAN.md:237), [136-01:248](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-01-PLAN.md:248), [136-20:143](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:143)). `_REQUIRED_COLUMNS`, `PRAGMA table_info`, subset semantics, both dropped-column fixtures, and retaining `discovery-v1` are explicit ([136-20:160](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:160), [136-20:172](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:172), [136-20:201](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:201)).
+
+   However, revision 4 did not extend its own `<automated>` source check: it still asserts only the two table names, so it can pass without `_REQUIRED_COLUMNS` or `PRAGMA table_info` appearing at all ([136-20:196](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:196)). Combined with the six-versus-eight contradiction, this recreates the revision-3 class of “action fixed, verification stale.”
+
+5. **#7 — RESOLVED.** Plan 136-19 now fails the sweep, records masking as not met, and blocks flag-on readiness when the pattern file is missing ([136-19:98](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:98), [136-19:118](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:118), [136-19:207](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:207)). The wave-1 wording is a recorded deferral, not a pass: the criterion remains NOT MET and must be rerun before closure ([136-01:364](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-01-PLAN.md:364)). Plans 136-17/18 still permit a recorded intermediate skip during flag-off deployment ([136-17:291](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:291), [136-18:205](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:205)), but it cannot become readiness evidence because 136-19 requires the actual successful rerun.
+
+6. **#10 — RESOLVED.** The roadmap says three production mutations and two surface deploys ([ROADMAP:196](C:/Genizahsearch/.planning/ROADMAP.md:196)); 136-17 identifies itself as the second production mutation and first surface deploy ([136-17:300](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:300)); 136-18 is the third and last production mutation and second surface deploy ([136-18:208](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:208)).
+
+7. **Revision 4 introduced two adjustments.**
+
+   - **MEDIUM:** 136-20’s automated verification was not updated for `_REQUIRED_COLUMNS`, and its acceptance still says six tests while `<done>` says eight ([136-20:196](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:196), [136-20:199](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:199), [136-20:211](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:211)).
+   - **LOW:** 136-21’s acceptance retains the same six-versus-eight stale count ([136-21:95](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:95), [136-21:154](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:154)).
+
+   Otherwise: 21 plans, 63 tasks, 10 waves; no same-wave `files_modified` overlap, no same/later-wave dependency edge, and no newly stale option ID or asserted path.
+
+8. **Sign-off:** not quite safe *as written*, but safe after those two narrow adjustments. Neither defect opens a private-data path. An incompletely implemented readiness-column check would surface as an exposed-then-failing/hidden surface or blocked deployment, while the public projection, audience gate, flag-off deployments, and final masking gate remain intact. I found no remaining disclosure-capable path.
+
+9. **Last look:** the most serious revision-4 item is 136-20’s unchanged automated verifier. It can report green after the table work while never proving the new column mechanism exists—the exact action/verification drift this round was meant to catch. Extend that check to require `_REQUIRED_COLUMNS` and `PRAGMA table_info`, and reconcile its test count; then correct 136-21’s count.
+
+VERDICT: ship with 2 adjustments
+HIGH: 0   MEDIUM: 1   LOW: 1
