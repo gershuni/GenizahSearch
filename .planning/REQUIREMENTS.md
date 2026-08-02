@@ -212,6 +212,54 @@
     the schema doc, where a second literal restatement is unavoidable. Full rationale, the adopted
     definition and the enumerated downstream-contract list are recorded in `136-GATE1-DECISIONS.md`
     §§ H, I.
+  - **⟨AMENDED 2026-08-02 (same day, a later continuation still) — Phase-136 plan 03, owner ruling J
+    (`136-GATE1-DECISIONS.md` § J)⟩** Closes the open design question `136-NOVELTY-PRIOR-ART.md` § 7
+    flagged and left unresolved: does the LLM arm run over ALL identifications, or only a
+    heuristic-funnel residual? Owner, verbatim: *"Makes sense to use LLM only after the heuristics."*
+    **The funnel runs FUNNEL-FIRST: the heuristic pass (bib/catalogue/FGP/PGP mechanical name-match)
+    runs over every identification first; the pinned LLM gate (decision B) sees ONLY the rows that
+    pass survive unresolved — the residual.** Rows the heuristic funnel resolves in EITHER direction
+    (a genuine name-match, or a heuristic demotion) never reach the model at all. **This is a
+    REQUIREMENT on the checked-source-set clause, not merely an implementation detail:** NOVEL-01's own
+    "checked whether ANY available finding aid already ties THAT fragment to THAT work" now happens in
+    TWO STAGES — a mechanical stage that runs over everything, and a model stage that runs only over
+    what the mechanical stage could not resolve.
+
+    **The consequence that must be stated on the record, because it is the real cost of this choice and
+    is otherwise invisible:** the funnel only ever DEMOTES (discovery → known, never the reverse), so
+    under a funnel-first design a heuristic FALSE-KNOWN is now PERMANENT and UNRECOVERABLE — the model
+    never re-examines a row the funnel has already marked "already recorded." Codex measured this exact
+    population in the reference implementation: **3,688 `published_full` false-knowns** and **2,014 PGP
+    false-knowns** (942 sole-source). The error runs in the CONSERVATIVE direction (a real finding is
+    silently lost, never that a fake one is manufactured and published) — the correct direction to be
+    wrong given this milestone's publication posture — but it is a real, measured cost, not an assumed
+    one, and must be reported as such wherever this axis's behavior is described.
+
+    **Effects this ruling has, enumerated:** (1) **the `~$27` cost basis**
+    (`reference_discovery_llm_gate_cost`; decision B) was estimated against the FULL identification
+    set; under funnel-first, the true denominator is the RESIDUAL, a strict subset — the figure must be
+    re-derived against the actual residual size once the heuristic funnel runs for real (136-04), not
+    repeated against the full count without this caveat. (2) **Which Codex-flagged defects the model can
+    ever catch**: findings 1 (`published_full` over-demotion) and 6 (PGP over-demotion) are now defects
+    the model structurally CANNOT catch (a row they wrongly demote never reaches it); findings 2/3/4/5
+    remain correctable, because they concern rows that DO reach the model (the residual). (3) **NOVEL-01's
+    honesty wording**: a row demoted by the heuristic funnel receives NO model verdict at all — its
+    stored `novelty_status` reflects a MECHANICAL judgment only, never a model's; `docs/specs/discovery-novelty-v1.md`
+    (136-04's own contract doc) must state this two-stage distinction explicitly rather than implying a
+    uniform pipeline.
+
+    No enum value changes (this ruling is about PIPELINE ORDER, not a new shade or column). Implemented
+    by **136-04** (the funnel runner's Task 3 action text is reconciled by this same continuation from
+    "run the authorized funnel over the full identification set" to residual-only, funnel-first wording
+    — a surgical edit, not a restructuring). The hard-case evaluation set (this continuation's own
+    Task 3/4) is restructured into a **three-arm, source-stratified sample** built against the REAL
+    bib/PGP/FGP/FJMS-catalogue sidecars (Arm 1 residual, Arm 2 heuristic-demoted, Arm 3 no-source-text)
+    that replaces the former Classes 4/5/7, per `136-NOVELTY-PRIOR-ART.md` § 7's own finding that those
+    classes read only `libraries.csv` column 7 and had zero representation of the bib/PGP/FGP failure
+    modes Codex measured as most damaging. Class 6 (catalogue divergence) and Classes 1-3 (identity
+    spot-check) are RETAINED UNCHANGED; Class 5 (generic collection works) is DROPPED (no owner ruling
+    exists for any specific Class 5 case). Full rationale, the measured arm sizes and the kept/folded/
+    dropped accounting are recorded in `136-GATE1-DECISIONS.md` § J.
 - [ ] **NOVEL-02**: The novelty flag's **provenance** (`known_source` — which aid already had it) is masked on the public side: the boolean is publishable, but a restricted-corpus provenance value collapses to a non-identifying label (e.g. "recorded in a restricted corpus"), never the corpus name, and passes the DATA-05 masking scan on every surface that renders or exports it — including copy/clipboard output, JSON payloads, and error paths. Public surfaces therefore support "filter **and explain**" only where the explaining source is itself public; elsewhere they support "filter only". The heuristic-plus-LLM funnel's verdict cache is a build-time artifact and is never shipped in the sidecar
 
 ### Bands & Certification
