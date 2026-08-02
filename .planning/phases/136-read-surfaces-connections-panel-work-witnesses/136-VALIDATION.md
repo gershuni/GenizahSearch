@@ -5,7 +5,7 @@ status: planned
 nyquist_compliant: true
 wave_0_complete: false  # Wave-0 artifacts are owned by plans 136-02 (shared honesty gate), 136-03 (gate-1 decision record + owner label file), 136-05 (preservation harness + pinned expectations) and 136-01 (budget caps)
 created: 2026-07-31
-revised: 2026-08-02  # re-scoped: 21 plans / 63 tasks / 10 waves (revision 3, post-Codex round 2)
+revised: 2026-08-02  # re-scoped: 21 plans / 63 tasks / 10 waves (revision 4, post-Codex round 3)
 ---
 
 # Phase 136 — Validation Strategy
@@ -263,6 +263,8 @@ a writer.
 | Panel render honesty | 136-17 | A precision figure in a rendered row, a stored vocabulary key in a chip, a review badge |
 | Findings render honesty | 136-18 | "New discovery" plus a precision figure; an out-of-vocabulary domain plus a header mislabelled as the manuscript's domain; a rendered row whose bucket disagrees with the shared rule |
 | Loader audience boundary | 136-20 | A private-audience artifact behind the manifest (public routes must return nothing); a MISSING audience value (must fail closed); a pre-rebuild-shaped asset (availability must stay false); a row-count disagreement on either new table |
+| Anchor all-or-none | 136-21 | The full 8-combination matrix over the three anchor fields: 2 valid states succeed, all 6 partial states must raise `ValueError` naming present and missing fields |
+| Readiness column check | 136-20 | A required column dropped from an otherwise-valid asset - run once for a NEW-table column and once for an EXISTING-table column; both must leave `discovery_available()` False |
 | Work-expansion contract | 136-21 | `relations_differ` removed from the projection; the anchor's band substituted for the weaker one; the page length returned as the total. Plus: `anchor_evidence_source` omitted from the rank call (two fixtures differing only in it must resolve differently), and a count built from the raw ranked CTE instead of the complete filtered pipeline (must diverge under a weaker-anchor filter) |
 | Surface-safe projection | 136-14 | An unexpected key added to the serializer output (allowlist must drop it); the "Expert-reviewed" value asserted absent from row, envelope, JSON and error path |
 | Masking schema coverage | 136-08 | The restricted marker seeded into a column or table NAME, caught only by `--scan-sqlite` |
