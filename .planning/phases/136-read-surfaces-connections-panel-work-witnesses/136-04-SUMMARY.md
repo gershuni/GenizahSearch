@@ -112,5 +112,39 @@ None for Tasks 1-2 (no external service configuration required to build or test 
 - **No STATE.md/ROADMAP.md edits were made** by this plan, per its own dispatch instructions (the orchestrator owns those writes after the wave completes).
 
 ---
+
+## ADDENDUM (2026-08-03, primary checkout, later session) -- Task 3's ruling-I re-measurement EXECUTED for real; production run HALTED at the gate, not deferred by environment
+
+A later session, dispatched directly (not the isolated worktree above), ran on `C:\Genizahsearch`
+where the label file, all three real sidecars, and a working `OPENROUTER_API_KEY` were all directly
+verified present. It executed `136-NOVELTY-RUN.md` §5's five steps for real:
+
+- **Ruling-I re-measurement: DONE, real cost $0.322146.** 60 real `NoveltyCandidate` rows (Class 6 +
+  Arm 1) built from the real sidecars; the real heuristic funnel resolved 1/60 mechanically (to
+  `confirms` -- but the owner's real label is `diverges_work`, a genuine, observed instance of ruling
+  J's predicted permanent mechanical false-known); the real pinned model (`gemini-3.6-flash`,
+  effort `low`, via OpenRouter, `usage.cost` read on every call) graded the 59-case residual. **Overall
+  shade agreement: 47/60 = 78.3%** (vs. the prior 99-100% benchmark on the OLD five-way/one-title
+  vocabulary); `divergence_correctness` sub-agreement only 8/28 (28.6%, at/below chance);
+  `container_predicts` only 1/4 (25%). The pre-registered `alias_merge`-vs-granularity risk was
+  UNTESTABLE (zero `alias_merge` labels in this 60-case pool).
+- **Gate applied: this is a MATERIAL REGRESSION.** Per this plan's own instruction ("a material
+  regression is the owner's decision to accept, not yours"), the session HALTED before the production
+  run rather than proceeding automatically.
+- **A free, zero-model-call full-corpus heuristic pass was ALSO run** (not gated -- costs nothing) to
+  re-derive ruling J's own outstanding cost/scale note: of 65,200 real shipped `(sys_id, work_id)`
+  pairs, 10,016 (15.4%) resolve for free and **55,184 (84.6%) are RESIDUAL** -- projecting the real
+  measured per-call cost linearly gives **~$301** (roughly 11x the stale `~$27` estimate), and the
+  observed serial latency projects to roughly one-to-two days of continuous API traffic without a
+  concurrent/batched implementation.
+- **NOVEL-01/NOVEL-02 remain NOT satisfied** -- no claim in the shipped asset carries a computed
+  `novelty_status` as a result of this session; the block is now a measured, owner-facing decision
+  gate (accept the regression / narrow the scope / harden and re-measure), not an environment gap.
+
+Full numbers, per-shade confusion matrix, and the owner-decision options: `136-NOVELTY-RUN.md`
+sections 2-3 (REPLACING the DEFERRED placeholders that section previously held; section 0's
+environment-gap account is preserved unchanged for the historical record).
+
+---
 *Phase: 136-read-surfaces-connections-panel-work-witnesses*
 *Completed: 2026-08-03*

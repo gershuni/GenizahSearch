@@ -29,6 +29,32 @@ Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
 Plan: 5 of 21
 Status: Ready to execute
 
+**136-04 Task 3 (deferred) CLOSED FOR REAL 2026-08-03 (primary checkout, dispatched directly, not
+through the standard 136-NN plan sequence below) — the ruling-I re-measurement ran against the real
+sidecars and the real pinned model; the production run HALTED at the gate, owner-decision-pending, not
+environment-blocked.** 136-04 itself was already executed (isolated worktree, 2026-08-03) and correctly
+DEFERRED Task 3's real run for a genuine environment gap (missing gitignored label file/sidecars/
+credentials in that worktree) — see `136-04-SUMMARY.md` and `136-NOVELTY-RUN.md` § 0. This later,
+directly-dispatched session ran on `C:\Genizahsearch` where all three preconditions were verified
+present, and executed `136-NOVELTY-RUN.md` §5's steps for real: 60 real `NoveltyCandidate` rows
+(Class 6 + Arm 1) built from `fist_data/fjms_enrichment.db`/`pgp_data/pgp.db`/
+`fgp_data/fgp_transcriptions.db`, real heuristic pass (1/60 resolved mechanically — WRONGLY, a
+genuine observed instance of ruling J's predicted permanent false-known), real pinned
+`gemini-3.6-flash` (effort `low`) calls via OpenRouter over the 59-case residual, real `usage.cost`
+throughout. **Result: 47/60 = 78.3% overall shade agreement** against the owner's real labels (vs. the
+prior 99-100% benchmark on the OLD five-way/one-title vocabulary) — `divergence_correctness` only
+8/28 (28.6%, at/below chance), `container_predicts` only 1/4 (25%); the pre-registered
+`alias_merge`-vs-granularity risk was untestable (zero such labels in this pool). **Judged a MATERIAL
+REGRESSION — per the plan's own instruction ("the owner's decision to accept, not yours"), the
+production run was NOT executed.** A free, zero-model-call FULL-CORPUS heuristic pass (no gate, costs
+nothing) was also run to re-derive ruling J's own outstanding cost note: of 65,200 real shipped
+`(sys_id, work_id)` pairs, 55,184 (84.6%) are residual — projecting the real per-call rate gives
+**~$301** (vs. the stale `~$27` estimate), at a naive serial runtime of roughly one-to-two days.
+**NOVEL-01/NOVEL-02 remain NOT satisfied** — no claim in the shipped asset carries a computed
+`novelty_status`. 136-12/136-13 are unaffected in code-readiness (contract/funnel/harness already
+built) but still cannot ingest real production verdicts until the owner rules on this gate. Full
+numbers: `136-NOVELTY-RUN.md` §§ 2-3 (§0's environment-gap account is preserved unchanged).
+
 **136-03 CLOSED 2026-08-02 (this continuation) — Task 3 returned (owner labelled 84 of 101 verdict cells in `136-NOVELTY-HARDCASES.xlsx`) and Task 4 wrote the label file, closing the plan.** `discovery_data/novelty_hardcase_labels-v1.json` (gitignored, matching every sibling `discovery_data/` asset) carries all 101 cases with per-entry `label_provenance`; content hash
 `sha256:ce0dc2fb176d01de5f04975eac82017feaeb390db71e9ec13f3872a77d28d4b6` recorded in `136-GATE1-DECISIONS.md`. Read back via a new `--read-labels-from`/`--labels-out` mode added to `scripts/discovery_gate1_evidence.py` (fails closed on a missing/renamed sheet, header mismatch, out-of-vocab value, or a Case # outside 1..101/duplicated). Verified cell-for-cell against the actual XLSX — zero data discrepancies across all 101 cases; one FRAMING correction found (cases 6-8 are Class 1 near-miss, not "Class 3" — Class 3 is genuinely cases 1-3, all `same_work`). Per-arm analysis recorded in `136-GATE1-DECISIONS.md` (new section after § J): Arm 1 residual (30) has ZERO `fills_gap` — 19 `diverges_work` (18 `catalogue_correct`), `container_predicts` saved 4/30 rows from false candidacy (validates ruling H); Class 6 (30) selector over-fires ~57% (15 `confirms` + 2 `refines_granularity`), and its 13 confirmed `diverges_work` calls are 13/13 `catalogue_correct`; Identity constant-answer hypothesis CONFIRMED on the 5 decided cases (cases 6-8 skipped); Arm 2 (heuristic-demoted, 25) recorded as **INCONCLUSIVE** — only 7/25 decisive, the two Codex-flagged-hardest strata (`published_full_sole`, `pgp_sole`) each produced exactly 1 decisive verdict of 10, diagnosed as an instrument-design gap (the sheet shows only the stratum rationale, never the actual bib/PGP source text a labeller needs) — the owner's ungraded prose read is recorded verbatim but explicitly NOT treated as a measurement; a redesigned Arm 2 is recommended, not built. **A genuine, currently-dormant D-13d gap was found and flagged (not fixed):** investigating the owner's skip note for cases 6-8 ("same work, different location, perhaps not the same page") led to confirming via direct query that Class 1's near-miss pairs are never actually co-located on any span (unlike Class 3, verified genuinely span-grounded) — and that D-13d's `works_related_by_title` predicate (author + >=4-char title-prefix) WOULD collapse a real example (three catalogued volumes of `המספיק לעובדי השם` by אברהם בן הרמב"ם, `w000007`/`w000036`/`w000038`) if they ever co-occurred, though a corpus-wide check found zero span-groups where 2+ of them currently do. Flagged for a future re-examination of `works_related_by_title`; the collapse rule itself is UNCHANGED. **Wave 2+ impact assessed, not acted on:** 136-04 (which grades the funnel against this label file and its hash) and 136-13 (the one authorized rebuild) are NOT blocked by any of the above — the label file exists with its hash, and every finding here is either already actionable within 136-04's existing scope (ruling I's re-measurement gate; the funnel-first residual-only wiring already reconciled) or explicitly deferred (Arm 2 redesign, D-13d re-examination) without touching any code 136-04/136-13 depend on. Full analysis: `136-GATE1-DECISIONS.md`'s new post-§-J section. Next: `136-04-PLAN.md`.
 

@@ -1,21 +1,26 @@
 # Phase 136 Plan 04 Task 3 — Novelty Funnel Run Record
 
-**Status: NEITHER the ruling-I re-measurement NOR the production run was executed. Both are
-explicitly DEFERRED, for an ENVIRONMENT reason, not an owner decision.** This section states that
-distinction up front because Task 3's own acceptance criteria explicitly anticipate and permit this
-outcome ("The production-run section is NOT populated (or is explicitly marked deferred, with a
-stated reason) unless the ruling-I re-measurement section above is present and complete") — this
-record exercises exactly that permitted path, and documents precisely why, so a future session picks
-up from an accurate starting point rather than a silently-skipped one.
+**Status (2026-08-03 session, primary checkout): the ruling-I re-measurement WAS executed, for
+real, against the real sidecars and the real pinned model, with a real measured cost. The
+authorized PRODUCTION run was NOT executed — not because of an environment gap (the 2026-08-02
+worktree gap in section 0 below is a DIFFERENT, now-resolved problem), but because the
+re-measurement itself surfaced a material accuracy regression AND a real cost/scale re-derivation
+that together make an unconditional, automatic production spend irresponsible. Per this plan's own
+Task 3 instruction and the dispatch that authorized this session's work, a material regression is
+the owner's decision to accept, not the executor's — so this record stops at that decision point and
+reports the measured numbers, rather than proceeding.** Section 0 below is preserved verbatim from
+the 2026-08-02 worktree attempt (a genuinely different problem — missing files/credentials — that
+this session's environment does not have); sections 2 and 3 are REPLACED with this session's real
+results; sections 1, 4, 5 and 6 are updated to reflect what changed.
 
-## 0. Why this run did not happen — an execution-environment gap, not an authorization gap
+## 0. Why the FIRST attempt (2026-08-02, parallel worktree) did not happen — an execution-environment gap, not an owner decision
 
 This plan (136-04) was executed by a PARALLEL executor inside an isolated git worktree
 (`isolation="worktree"`, per this plan's own dispatch). Before writing this record, the environment
 was checked directly and found to lack every precondition Task 3's real run requires:
 
 - **The owner-labelled ground-truth file is absent from this worktree.**
-  `discovery_data/novelty_hardcase_labels-v1.json` (written by plan 136-03 Task 4; recorded content
+  `discovery_data/novelty_hardcase_labels-v1.json` (written by plan 136-03 Task 4, recorded content
   hash `sha256:ce0dc2fb176d01de5f04975eac82017feaeb390db71e9ec13f3872a77d28d4b6` in
   `136-GATE1-DECISIONS.md`) does not exist anywhere under this worktree's checkout. `discovery_data/`
   is gitignored project-wide (`/discovery_data/` in `.gitignore`), and a git worktree is a SEPARATE
@@ -41,139 +46,339 @@ credentials, or copying multi-gigabyte production databases across a parallel wo
 would each be worse than reporting the gap honestly. This is recorded here, plainly, rather than
 worked around.
 
-## 1. The recorded authorization (read before any of the above was even checked)
+**This gap is fully resolved in the session that wrote sections 2–3 below.** That session ran on the
+PRIMARY CHECKOUT (`C:\Genizahsearch`, branch `master-main`), where the label file, all three real
+sidecars, and a working `OPENROUTER_API_KEY` in `.env` were all directly verified present before any
+work began.
+
+## 1. The recorded authorization
 
 Per `.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-GATE1-DECISIONS.md`
 section B, the owner's authorization on record is **`run-now-pinned`**: "RUN NOW, PINNED. The
 validated cheap configuration (`gemini-3.6-flash`, `reasoning:{effort:"low"}`), ~$27 one-time. Do NOT
 downgrade the model. Read the real `usage.cost` from the provider after the run — never estimate it."
-This authorization is honoured exactly as recorded: no model call was made under any other
-authorization, and none was made at all in this execution (see section 0 above) — this is
-consistent with, not a violation of, `run-now-pinned`, because ruling I (below) makes the production
-run's operative-ness CONDITIONAL on a re-measurement that itself could not run here either.
 
 Per section I of the same record, decision B's "run now, pinned" authorization does **NOT** become
 operative for the full production run until a re-measurement of the pinned config against the
 owner-labelled evaluation set, on the CURRENT ten-value vocabulary and ruling G's free-text input
-contract, is on the record. **That re-measurement could not be performed in this environment either**
-— it requires reading the very label file section 0 establishes is absent here, and making the same
-kind of pinned-model call this environment has no credentials for.
+contract, is on the record. **That re-measurement is now on the record (section 2 below) — real,
+not deferred.** Per this plan's own gate (and the dispatch that authorized this session), the
+re-measurement's result determines whether decision B's authorization becomes operative for the
+production run. Section 3 below explains why it does not, yet.
 
-The `~$27` figure on record is a COST estimate carried forward by size-extrapolation. **It is NOT,
-and is never cited here as, an accuracy result.** No measured cost (no `usage.cost` reading) exists
-for this task, because no model call was made.
+The `~$27` figure on record is a COST estimate carried forward by size-extrapolation, never an
+accuracy result — it is never cited as one here. Section 3 also RE-DERIVES a real, measured cost
+projection from a real (free, zero-model-call) full-corpus heuristic pass, which is a much larger
+number than `~$27` and is reported as such, per ruling J's own outstanding instruction to re-derive
+it "against the ACTUAL residual size."
 
-## 2. Ruling-I re-measurement — DEFERRED
+## 2. Ruling-I re-measurement — EXECUTED, real sidecars, real pinned model, real cost
 
-**Not performed.** The gate ruling I imposes — re-measure the pinned config against
-`discovery_data/novelty_hardcase_labels-v1.json` (content hash
-`sha256:ce0dc2fb176d01de5f04975eac82017feaeb390db71e9ec13f3872a77d28d4b6`, per
-`136-GATE1-DECISIONS.md`) on the current ten-value shade enum and the free-text input contract,
-grading via `scripts/discovery_novelty_funnel.py::grade_against_owner_labels` — requires exactly the
-two things section 0 establishes are unavailable here: the label file itself, and a live pinned-model
-connection. Neither exists in this execution environment.
+### 2.1 Preconditions verified before any model call
 
-This is recorded as its own, clearly-labelled section, distinct from and preceding the production-run
-section below, per Task 3's own acceptance criteria. It is **not** the five-way-vocabulary validation
-already on record elsewhere (`reference_discovery_llm_gate_cost`; `136-GATE1-DECISIONS.md` section B)
-— that record covers a narrower question (the five-way vocabulary, the one-title-string input
-contract) and remains what it always was; this section is the ten-value/free-text re-measurement
-ruling I requires, and it simply has not happened yet, for the environment reason stated in section 0.
+- `discovery_data/novelty_hardcase_labels-v1.json` loaded via
+  `scripts/discovery_novelty_funnel.py::load_owner_labels(path, expected_content_hash=...)` with
+  `expected_content_hash = "sha256:ce0dc2fb176d01de5f04975eac82017feaeb390db71e9ec13f3872a77d28d4b6"`
+  (the hash recorded in `136-GATE1-DECISIONS.md` Task 4). **The hash matched — verified, not
+  assumed.** Had it mismatched, `LabelHashMismatch` would have refused to grade (this refusal path is
+  itself unit-tested in `tests/test_discovery_novelty_contract.py`, per Task 2).
+- All three real checked-source sidecars (`fist_data/fjms_enrichment.db`, `pgp_data/pgp.db`,
+  `fgp_data/fgp_transcriptions.db`), the live discovery-v1 asset
+  (`discovery-v1-33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff.db`, matching
+  `discovery_data/manifest.json`), `libraries.csv`, and a working `OPENROUTER_API_KEY` in `.env` were
+  all directly verified present (file existence + a real, successful `openrouter.ai` round trip)
+  before any per-case work began.
+- The pinned contract constants read at run time from `shared/discovery_novelty.py` (never a second,
+  hand-copied literal): `LLM_MODEL="gemini-3.6-flash"`, `LLM_MODEL_VERSION="gemini-3.6-flash"`,
+  `LLM_REASONING_EFFORT="low"`, `PROMPT_SHA256=441058ae3bab6e5ee17beb0fc5ea39426d7c250feb6c2bd288f0bc1605c98be5`,
+  `INPUT_NORMALIZATION_SHA256=447f8fc7aa9bbb2c25c9db946de94b1ed236f561141e7a81e3478f3d430f2e50`. Every
+  real OpenRouter response's own `"model"` field echoed back `google/gemini-3.6-flash` — no silent
+  provider-side downgrade or snapshot substitution observed.
 
-## 3. Production run — NOT populated, per Task 3's own permitted deferral path
+### 2.2 Scope of this re-measurement — the SHADE axis only, stated explicitly
 
-Explicitly deferred. Per Task 3's own acceptance criteria, the production-run section is "NOT
-populated ... unless the ruling-I re-measurement section above is present and complete" — section 2
-above is not complete (it could not run at all), so this section correctly stays empty of any
-production result. No funnel was run over any portion of the real corpus. No `not_checked` count
-changed for any real identification as a result of this plan's execution: every identification the
-live `discovery-v1-*.db` asset carries remains exactly as it was before this plan ran — `not_checked`
-(the fail-closed default) wherever it was already `not_checked`, per NOVEL-01's coverage-gap framing.
+The 101-case label file carries FOUR question types. This re-measurement is scoped to the **60
+`shade` cases** (Class 6 catalogue-divergence, 30, + Arm 1 residual, 30) — the population the pinned
+novelty prompt is actually designed to classify:
 
-## 4. What WAS built, exercised and verified in this environment (Tasks 1–2)
+- **`identity` (8 cases)** use a wholly different four-token vocabulary
+  (`same_work`/`different_works`/`unsure`/`skip`) testing the D-13d granularity-collapse rule, not the
+  novelty shade prompt — out of scope for this measurement; no prediction was made for these (the
+  grading harness correctly reports them as `missing_predictions`, not as a disagreement).
+- **`demotion` (25 cases, Arm 2)** grade the funnel's OWN already-executed heuristic demotion directly
+  from the owner's `demotion_correct`/`false_known`/`unsure` verdicts — by ruling J's own design,
+  these rows never reach a model at all, so there is no model prediction to compare; the grading
+  harness tallies the owner's recorded verdicts unchanged (see 2.6).
+- **`no_verdict_by_design` (8 cases, Arm 3)** carry no owner verdict at all by design.
 
-Although the real corpus-scale run could not execute here, the funnel's actual MECHANISM was built,
-and its riskiest properties were exercised against fixtures, at zero cost and with zero model calls:
+### 2.3 Real candidates built from the real sidecars, per ruling G
+
+For each of the 60 shade cases, a `NoveltyCandidate` was built from the case's `sys_id` and the raw
+`ref_work_id` parsed out of its own `claim` field (the CLAIMED work, never the catalogue's
+alternative naming in a `catalogue_divergence` row), populated from the REAL sidecars:
+
+- `claimed_title` / `claimed_author` — from the live discovery-v1 asset's `works` table
+  (`neutral_title` / `author`), keyed on the raw work id (never `canonical_work_id`, per Codex finding
+  3).
+- `catalogue_text` — the union of `libraries.csv` column 7 and FJMS `catalog.TitleHeb` /
+  `GenizahTitleOrgTitle` / `Title` / `GenizahTitleEngTitle` (never the wrong `catalog_refs` field).
+- `bibliography_rows` — REAL row text (`RunningTitle`/`RunningTitleHeb`/`TitleAcronymHeb`/
+  `TitleAcronym`/`ArticleName`/`ArticleAuthorHeb`/`ArticleAuthorEng`/`NoteForDisplay`, non-null fields
+  joined) plus `TranscriptionType`, read directly from `fist_data/fjms_enrichment.db`'s
+  `bibliography` table — never merely a presence flag.
+- `pgp_description` / `pgp_transcription` — REAL text from `pgp_data/pgp.db`'s `documents` table,
+  joined through `document_fragments` on `sys_id` (concatenated across every PGP document linked to
+  this fragment) — never merely a presence flag.
+- `fgp_texts` — REAL `title_he`/`author_he`/`title_en` text from
+  `fgp_data/fgp_transcriptions.db`'s `fgp_transcriptions` table.
+- `m_source_shelfmark_text` — **`None` for every candidate.** Per `docs/specs/discovery-novelty-v1.md`
+  §3, M-source shelfmark attributions have **no prior implementation anywhere** to build from in this
+  session's scope; treating this source as absent (which the funnel already handles — see Arm 3
+  below) is the honest, fail-closed choice, not a fabricated stand-in.
+- `page_mapped=True` for all 60 — every case's `sys_id` was independently re-derivable from a real
+  shipped `discovery_claim.page_id` in the live asset (the join Codex finding 4 measured clean).
+
+### 2.4 Funnel-first execution (ruling J) — real heuristic pass, then real model calls on the residual
+
+**Heuristic pass (free, mechanical, zero model calls) over all 60 shade candidates:**
+
+- **1 of 60 resolved mechanically to `confirms`** (case 17, via a real bibliography-text name-match).
+  **The owner's actual label for this case is `diverges_work`.** This is a REAL, measured instance of
+  ruling J's own predicted risk — a mechanical false-known, now PERMANENT under the funnel-first
+  design (this row never reached the model at all). It is counted as a disagreement in section 2.5
+  below, exactly as the funnel would actually behave in production.
+- **59 of 60 were UNRESOLVED (residual)** — these are exactly, and only, the candidates that reached
+  the pinned model.
+
+**Model arm (real `gemini-3.6-flash`, `reasoning:{effort:"low"}`, via OpenRouter) over the 59-case
+residual**, run through `scripts/discovery_novelty_funnel.py::run_model_arm` with a real, file-backed
+JSONL checkpoint (`discovery_data/novelty_remeasurement_checkpoint.jsonl` — gitignored, never staged;
+`git status` confirms nothing under `discovery_data/` is tracked by this session):
+
+- Each candidate's evidence bundle (per `assemble_evidence_bundle`, tagged by provenance:
+  catalogue/bibliography/pgp/fgp/m_source_shelfmark) was sent as the user message against the pinned
+  `NOVELTY_PROMPT_TEMPLATE` system prompt, with `usage:{include:true}` so the REAL `usage.cost` field
+  came back on every call (never estimated).
+- **Resumability was exercised for real, not merely simulated.** One candidate's response was
+  truncated by an initial `max_tokens` budget that proved too small once the model's own reasoning
+  tokens were accounted for; after raising the budget, re-running the SAME driver against the SAME
+  checkpoint file resumed from exactly where it left off — the other 58 already-checkpointed
+  candidates were NOT re-billed, and the API was called again only for the one still-incomplete
+  candidate. This is a genuine, observed resumability event in this session (distinct from, and in
+  addition to, Task 2's fixture-based demonstration of the same mechanism).
+- **Real measured cost: $0.322146 total**, across 72 real API calls (some candidates needed more than
+  one call due to the truncation issue above before it was fixed) for 59 residual candidates — **never
+  estimated, read directly from each response's own `usage.cost` field.**
+
+### 2.5 Grading result — real agreement against owner labels, both error directions reported separately
+
+Graded via `scripts/discovery_novelty_funnel.py::grade_against_owner_labels` against the full 101-case
+label file (restricted internally to `label_provenance.source == "owner_supplied"` entries, per Task
+2's hard rule):
+
+| Metric | Value |
+|---|---|
+| Total cases in label file | 101 |
+| Excluded (no owner provenance — the 8 Arm-3 `no_verdict_by_design` rows) | 8 |
+| Skipped (3 identity + 9 demotion, owner left blank) | 12 |
+| Effective evaluation size (owner-provenance, non-skipped) | 81 |
+| — of which **shade** (this re-measurement's scope) | **60** |
+| — of which identity (out of scope here — see 2.2) | 5 (0 graded — no predictions attempted) |
+| — of which demotion (graded directly from owner verdicts — see 2.6) | 16 |
+
+**Shade-axis result (60 cases, real model + real heuristic predictions vs. owner labels):**
+
+- **Overall agreement: 47/60 = 78.3%.**
+- **False-novel direction (predicted `fills_gap` when the owner says it is not): 0.** The
+  reputationally expensive direction (decision B) produced zero errors in this sample.
+- **False-known direction (owner says `fills_gap`, prediction claims some other recorded shade): 0.**
+- **IMPORTANT CAVEAT, stated plainly: this sample contains ZERO true `fills_gap` cases at all** (the
+  60-case pool is drawn from Class 6 catalogue-divergence and Arm 1 residual, neither of which
+  selects for genuinely-unknown fragments — see `136-GATE1-DECISIONS.md` § J's own Arm-1 finding,
+  "ZERO fills_gap in 30"). The 0/0 result on the two-directional novelty-error axis is therefore **not
+  evidence of safety on that axis** — it means the axis decision B cares about most was simply never
+  exercised by this sample, not that it was exercised and passed.
+- **13 "other disagreements"** — real confusion among the EXCLUDED-from-candidacy shades
+  (`confirms`/`diverges_work`/`refines_granularity`/`aid_more_specific`/`container_predicts`), where
+  the shade choice still matters materially for how a row is DISPLAYED (ruling F's hidden-by-default
+  posture applies only to `diverges_work`/`diverges_part`; a `confirms` row shown normally that should
+  have been `diverges_work` is shown UNWARNED when the owner's own review found the catalogue is
+  usually right in a real divergence; the reverse hides a row that should have displayed normally).
+
+**Per-shade confusion matrix (owner label → predicted label, 60 shade cases):**
+
+| Owner label (n) | Predicted correctly | Confused with |
+|---|---|---|
+| `confirms` (19) | 14 (73.7%) | `diverges_work` ×3, `aid_more_specific` ×2 |
+| `diverges_work` (32) | 28 (87.5%) | `confirms` ×3, `refines_granularity` ×1 |
+| `refines_granularity` (4) | 4 (100%) | — |
+| `container_predicts` (4) | 1 (25.0%) | `refines_granularity` ×1, `diverges_work` ×2 |
+| `aid_more_specific` (1) | 0 (0%, n=1) | `confirms` ×1 |
+
+**No `diverges_part`, `fills_gap`, `alias_merge`, or `extends` owner labels exist anywhere in this
+60-case sample** — this measurement says nothing about model accuracy on those four shades; that is
+a real, structural limitation of the evaluation-set construction (per `docs/specs/discovery-novelty-v1.md`
+§8), not a result to extrapolate past.
+
+**Divergence-correctness sub-question** (asked only where BOTH the owner AND the prediction landed on
+a divergence shade, so the two calls are actually comparable): **8/28 = 28.6% agreement** — at or
+below the ~33% a 3-way random guess would produce on this vocabulary
+(`catalogue_correct`/`claim_correct`/`unclear`). This is the single weakest measured result in this
+re-measurement.
+
+**The specific risk this project's own pre-registered RISK CHECK named as most likely
+(`alias_merge` vs. `refines_granularity`/`aid_more_specific` confusion, `136-GATE1-DECISIONS.md`
+"Outstanding" section) is UNTESTABLE in this sample: zero `alias_merge` labels exist in the 60-case
+shade pool** (Class 2's alias cases live only in the separate 8-case `identity` spot-check, a
+different question type). **The prediction neither held nor failed — it was never exercised.** The
+confusion that DID materialize (`confirms`↔`diverges_work`, and `container_predicts` scattering
+across three OTHER shades) is a different pattern than the one the pre-registered risk check
+anticipated, and is arguably more concerning precisely because it was not the one anticipated.
+
+### 2.6 Demotion-arm result (16 graded, from the owner's own recorded verdicts — no model involved)
+
+Per ruling J's own design, Arm 2 rows never reach a model — grading here tallies the owner's already-
+recorded `demotion_correct`/`false_known`/`unsure` calls directly (this is unchanged from, not a new
+measurement beyond, `136-GATE1-DECISIONS.md` Task 4's own analysis): 5 `demotion_correct`, 2
+`false_known`, 9 `unsure` — the same instrument-design limitation already documented there (the sheet
+did not surface the actual demoting source text to the labeller) applies unchanged; this re-measurement
+adds no new information on this arm beyond re-confirming the label file's own recorded counts via the
+grading harness.
+
+### 2.7 Real cost — measured, not estimated
+
+**Total real spend for this re-measurement: $0.322146**, read from `usage.cost` on every one of 72
+real OpenRouter calls (59 residual candidates, some requiring more than one call due to the
+`max_tokens` truncation issue in §2.4). **The `~$27` figure is not cited here as an accuracy or a cost
+result for this measurement — it never applied to this scope in the first place.**
+
+## 3. Production run — NOT executed. Halted at the ruling-I gate, per this plan's own instruction
+
+### 3.1 The gate, applied honestly
+
+Comparing section 2's real, measured result against the prior validated level (`136-GATE1-DECISIONS.md`
+§ B: 40/40 = 100% agreement between the pinned config and a fuller-thinking reference config, itself
+independently validated at 99% against 103 human grades — on the OLD five-way vocabulary and the OLD
+one-title-string contract):
+
+- **78.3% overall shade agreement** (measured against REAL owner labels, the more directly comparable
+  figure to the prior 99% human-grounded number, not the 100% model-vs-model figure) is a
+  **20+ percentage point drop** from that benchmark.
+- **28.6% divergence-correctness agreement** is at or below chance for a 3-way vocabulary — the
+  weakest single result in this measurement.
+- **`container_predicts` (ruling H's own newest shade) scored only 25% (1/4)** — the shade with the
+  smallest sample in this pool also has the worst measured accuracy.
+- **A real mechanical false-known was observed** (case 17) — not a fixture, a genuine instance of the
+  exact PERMANENT, UNRECOVERABLE risk ruling J's own text names, on real data.
+
+**This is judged a MATERIAL REGRESSION, not noise from a harder task.** The task genuinely is harder
+(ten values vs. five; free-text reading vs. one title string) and some drop from a prior 99-100%
+figure would be expected and tolerable — but a drop to 78.3% overall, with a correctness sub-question
+performing at chance and the newest shade performing at 25%, is a real, substantial, measured
+degradation that this executor is not authorized to wave through. **Per this plan's own instruction
+and the dispatch that authorized this session: "A material regression is the owner's decision to
+accept, not yours." This session HALTS here rather than proceeding to the production run.**
+
+### 3.2 Cost and scale re-derivation — real, free, zero-model-call (per ruling J's own outstanding note)
+
+Ruling J's own text states the `~$27` estimate "must be re-derived... against the ACTUAL residual
+size once the heuristic funnel runs for real." That re-derivation does NOT require spending on the
+model arm — the heuristic pass itself is free and mechanical. It was run for real, over the FULL live
+identification set (every distinct `(sys_id, work_id)` pair among `shipped` claims in the live
+discovery-v1 asset — **65,200 pairs**, of any `claim_type`):
+
+| Outcome | Count | % of total |
+|---|---|---|
+| Resolved mechanically, `confirms` (real textual name-match) | 1,689 | 2.6% |
+| Resolved mechanically, `fills_gap` (Arm 3 — no checked-source text at all) | 8,327 | 12.8% |
+| **RESIDUAL — would require a real model call** | **55,184** | **84.6%** |
+
+**Re-derived cost projection:** this session's real measured rate ($0.322146 ÷ 59 residual candidates
+actually billed = **$0.00546/candidate**, including retry overhead) projected linearly across the
+real 55,184-candidate residual gives **≈$301** — roughly **11× the stale `~$27` estimate**, because
+(a) the ten-value/free-text prompt is materially larger and costs more in reasoning tokens per call
+than the five-way/one-title-string prompt the `~$27` figure was based on, and (b) even after the
+funnel-first architecture removes 15.4% of the corpus for free, the residual is still the large
+majority (84.6%) of all identifications, not a small tail.
+
+**Runtime re-derivation, reported for completeness.** This session's model calls ran sequentially
+(no concurrency), consistent with `run_model_arm`'s own one-at-a-time contract. At the observed
+per-call latency, a naive serial run across the full 55,184-candidate residual would take on the
+order of ONE TO TWO DAYS of continuous, uninterrupted API traffic — not a few minutes. A responsible
+production run would need a deliberately concurrent/batched implementation (with its own rate-limit
+and cost-monitoring design) that this session did not build, because building it before the accuracy
+gate is resolved would risk spending real money and real time on a run whose underlying verdicts are
+not yet known to be trustworthy at production scale.
+
+### 3.3 What this means, stated plainly
+
+The production run's non-execution here is **not** the same finding as section 0's environment gap.
+Every precondition Task 3 lists (label file, real sidecars, real credentials) was present and used.
+The block is now a **measured, informed, owner-facing decision gate**: proceed anyway and accept the
+measured regression (perhaps scoping the shipped `divergence_correctness` field down, or suppressing
+`container_predicts` pending a harder prompt, or accepting the residual/cost numbers as the real price
+of this feature); invest in prompt/heuristic hardening first and re-measure; or some other owner
+call this session is not authorized to make unilaterally. **No claim in the shipped asset has changed
+as a result of this session** — every identification remains `not_checked` (or whatever it already
+was), exactly as before, per NOVEL-01's fail-closed coverage-gap framing.
+
+## 4. What WAS built, exercised and verified (Tasks 1–2, unchanged by this session)
+
+Although a full production run was not executed, the funnel's actual MECHANISM was built, and its
+riskiest properties were exercised against fixtures at zero cost and with zero model calls (Task 1/2,
+unaffected by this session — restated here for continuity, not re-verified):
 
 - **The heuristic (mechanical) funnel pass** (`scripts/discovery_novelty_funnel.py::run_heuristic_pass`)
   was exercised against fixtures covering every named Codex-finding defect this plan was built to
-  avoid: a `published_full`-only bibliography row and a bare PGP description alone each correctly
-  fail to produce a decisive verdict (Codex findings 1/6); two distinct `ref_work` rows sharing a
-  conceptual collapsed identity each use their own title, never a shared representative's (Codex
-  finding 2/3); an unmapped page routes explicitly to `not_checked` with a logged reason, never a
-  silent drop (Codex finding 4); the assembled evidence bundle tags every source's free text by its
-  own provenance and always includes bibliography/PGP text even though non-decisive alone (Codex
-  finding 5); and a worked case mirroring the real `136-GATE1-DECISIONS.md` section G example (an
-  alias spelling present only in the catalogue's free text) correctly resolves to `confirms`, never
-  `diverges_work`/`diverges_part`.
+  avoid, and — as section 2.4 above shows — its real behavior on real data reproduces exactly the
+  mechanical-false-known risk the fixtures predicted.
 - **The checkpointed, resumable model-arm mechanism** (`run_model_arm`) was exercised with a fixture
-  that simulates a mid-run crash: the first candidate's verdict is checkpointed to disk, the second
-  candidate's call raises, and a subsequent invocation of `run_model_arm` against the SAME checkpoint
-  file resumes by calling the model ONLY for the still-incomplete candidate — the completed
-  candidate's model call is never repeated ("re-billed"). This demonstrates the resumability property
-  a corpus-scale run needs; the property was exercised via this fixture, not via the real
-  (unavailable) corpus.
-- **The grading harness's three hard rules** were exercised end to end: an entry lacking
-  `label_provenance` recording owner supply is excluded from grading and counted separately; a label
-  file with ZERO owner-provenance entries makes `grade_against_owner_labels` raise the dedicated
-  `NoOwnerProvenanceLabels` exception with the exact literal message `"no owner-provenance labels"` —
-  and this specific guard was MUTATION-TESTED by hand during Task 2's implementation: the guard (`if
-  len(provenance_cases) == 0: raise NoOwnerProvenanceLabels(...)`) was temporarily commented out in
-  `scripts/discovery_novelty_funnel.py`, the two tests asserting this specific exception/message were
-  re-run, and BOTH failed with `Failed: DID NOT RAISE <class '...NoOwnerProvenanceLabels'>` (the
-  no-guard code path silently returned a result instead) — proving the guard is load-bearing and the
-  tests are not vacuously satisfied by any exception. The guard was then restored and the full suite
-  re-confirmed green (93 passed). Skipped cases are excluded from grading and counted separately. The
-  two novelty error directions (a false claim that something IS novel — the reputationally expensive
-  direction per decision B — vs. a false claim that something is already recorded — ruling J's
-  conservative lost-finding-risk direction) are reported as two SEPARATE counts, never folded into one
-  combined accuracy figure, on both the fixture exercises above and by direct assertion in the test
-  suite (`test_grading_reports_two_error_directions_separately_never_combined`).
-- **`load_owner_labels`'s content-hash verification** (`LabelHashMismatch`) was exercised against a
-  synthetic label file: a mismatched expected hash correctly refuses to load, and the correct hash
-  (computed the same way `136-GATE1-DECISIONS.md` records it — sha256 over
-  `json.dumps(cases, sort_keys=True, ensure_ascii=False)`) correctly succeeds.
+  simulating a mid-run crash, AND — new in this session — exercised for real (section 2.4).
+- **The grading harness's three hard rules** were exercised end to end, including the mutation-tested
+  denominator guard (Task 2's own account, unchanged).
+- **`load_owner_labels`'s content-hash verification** was exercised against a synthetic file in Task 2,
+  AND — new in this session — against the real label file, where it correctly verified a match
+  (section 2.1).
 
-None of the above required the real label file, the real sidecars, or a real model call — it is all
-fixture-driven, and all of it is committed as automated tests (`tests/test_discovery_novelty_contract.py`,
-93 passing).
+All of the above remains committed as automated tests (`tests/test_discovery_novelty_contract.py`, 93
+passing, unaffected by this session).
 
-## 5. Path to completion — what a future execution must do
+## 5. Path to completion — what happens next
 
-Before the production run can proceed, a future execution (ideally NOT a parallel isolated worktree,
-or one with the real `discovery_data/`, `fist_data/fjms_enrichment.db`, `pgp_data/pgp.db`,
-`fgp_data/fgp_transcriptions.db` sidecars present and real LLM provider credentials configured) must:
+This is no longer "what a future execution must do to even attempt the re-measurement" (section 0's
+framing) — that has been done. What remains:
 
-1. Load `discovery_data/novelty_hardcase_labels-v1.json`, verify its content hash against
-   `sha256:ce0dc2fb176d01de5f04975eac82017feaeb390db71e9ec13f3872a77d28d4b6` via
-   `scripts/discovery_novelty_funnel.py::load_owner_labels`.
-2. Build `NoveltyCandidate` rows for the 101-case evaluation set from the real sidecars (per source:
-   catalogue text from FJMS `catalog.TitleHeb`/`GenizahTitleOrgTitle`, bibliography rows from the
-   Friedberg bibliography table, PGP description/transcription, FGP transcription text, and the
-   M-source shelfmark attribution with its corpus name masked at the point of read).
-3. Run `run_heuristic_funnel` over that set; run the pinned model (`gemini-3.6-flash`,
-   `reasoning:{effort:"low"}`) via `run_model_arm` over ONLY the residual, with a real `model_call`
-   implementation reading the actual provider's `usage.cost` field after each call and a real
-   checkpoint file path.
-4. Grade the result via `grade_against_owner_labels` against the SAME 101-case label file, restricted
-   to entries with `label_provenance.source == "owner_supplied"`. Record the effective evaluation
-   size (after excluding non-owner-provenance and skipped entries), the two error directions
-   separately, and the per-shade verdict counts.
-5. Only once that re-measurement is recorded here as its own section, with a real measured cost from
-   `usage.cost`, does decision B's authorization become operative for the full production run over
-   the live corpus — which must then ALSO be checkpointed, its own real measured cost recorded, and
-   its own two-directional agreement (against the same label file) reported, before the verdict cache
-   is staged (hash-pinned, outside the committed tree, per NOVEL-02 — the cache is a build-time
-   artifact and must never ship inside the sidecar).
+1. **The owner reviews section 3's measured regression and re-derived cost/scale**, and decides one
+   of: (a) accept the current accuracy and cost, and authorize the production run as originally
+   scoped; (b) accept a NARROWER production run (e.g., ship `novelty_status` but suppress or
+   low-confidence-flag `divergence_correctness` and/or `container_predicts` pending hardening); (c)
+   authorize a hardening pass on the prompt/heuristic (specifically targeting the `confirms`↔
+   `diverges_work` boundary and the `container_predicts` shade) and a fresh re-measurement before any
+   production spend; or (d) some other call only the owner can make.
+2. **Whichever option is chosen, a concurrent/batched production-run implementation should be built**
+   before attempting the full 55,184-candidate residual — the sequential `run_model_arm` driver used
+   for this 59-candidate re-measurement is adequate for a small evaluation set but not for a
+   corpus-scale run at the re-derived ~1–2 day serial runtime.
+3. **136-12's build wiring remains ready to consume real verdicts once they exist** — the contract
+   module, the funnel runner and the grading harness are all built, tested, AND now exercised against
+   real data at small scale; only the corpus-scale production run (gated on the above) remains
+   outstanding.
 
 ## 6. Compliance checks for this record
 
-- No prompt text, model response, or raw provenance value appears anywhere in this document (none
-  was ever produced — no model call was made).
-- No verdict-cache file exists or is staged in this worktree (`git status` shows nothing under
-  `discovery_data/` because that directory does not exist here at all).
+- No prompt text, raw model response, or raw provenance value appears anywhere in this document. Case
+  examples are cited by case number, shade token, and English shelfmark/manuscript identifier only —
+  never by the raw Hebrew claim/catalogue text this session's driver scripts read (those scripts and
+  their intermediate JSON outputs live entirely outside the repository, in the session's own scratch
+  directory, and were never staged).
+- No verdict-cache file, and no model checkpoint file, is staged in this repository —
+  `discovery_data/novelty_remeasurement_checkpoint.jsonl` is gitignored (`git check-ignore` confirms
+  it) and `git status` shows nothing under `discovery_data/` tracked by this session.
 - This document does not name any restricted corpus — every checked source is referred to generically
   (catalogue / bibliography / PGP / FGP / the internal shelfmark-attribution source), consistent with
   D-25/NOVEL-02 and the project's own codename discipline.
-- The `~$27` figure is cited above exactly once, explicitly labelled as a cost estimate, and is never
-  presented as an accuracy or agreement result for any vocabulary, past or current.
+- The `~$27` figure is cited above only as a superseded prior estimate, explicitly re-derived (section
+  3.2) rather than repeated as if still current, and is never presented as an accuracy result for any
+  vocabulary.
+- `python scripts/check_atlas_masking.py --scan-asset` was re-run against this document after every
+  edit in this session and exits 0.
