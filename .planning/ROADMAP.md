@@ -181,7 +181,7 @@ Plans:
 - **ONE rebuild + ONE production redeploy** (flag-OFF) is the first execution gate — the surfaces need stored fields the frozen v2 asset does not carry, and the owner authorized exactly one, not a series.
 
 **Depends on**: Phase 135 (band-display contract + methods page + certificate framework; CERT-01 measured PASS — weighted 0.9382 CI [0.9084, 0.9644]). Builds on the LIVE v2 asset, NOT on the gen-2 evidence refresh — that becomes discovery-v2.1 in its own later phase (D-01). Translations, RTL, and accessibility are built into these surfaces from line one per house convention; comprehensive cross-surface i18n/RTL/a11y verification is gated in Phase 139.
-**Requirements**: PANEL-01, PANEL-02, PANEL-03, WORK-01, WORK-02, VIS-01, NOVEL-01, NOVEL-02 — and this phase AMENDS BAND-03 + BAND-05 (no precision percentages anywhere; qualitative methods page) plus `discovery-band-labels-v1.md` §2/§3 and `discovery-budgets.md`.
+**Requirements**: PANEL-01, PANEL-02, VIS-01, NOVEL-01, NOVEL-02 — and this phase AMENDS BAND-03 + BAND-05 (no precision percentages anywhere; qualitative methods page) plus `discovery-band-labels-v1.md` §2/§3 and `discovery-budgets.md`. **PANEL-03, WORK-01 and WORK-02 moved to Phase 136.1** (owner, 2026-08-02).
 **Success Criteria** (what must be TRUE):
 
   1. **The one authorized rebuild lands in production, flag-OFF, before any surface work** — one new asset carrying: the D-02a *authorization* for tier-A default visibility (`measurement_status='measured_pass'` + `ci_low`, precision still NULL — no number is stored or shown), direct-family `coverage_ppm` + validity status, the tri-state novelty flag for ALL evidence families with masked provenance, the VIS-01 public/private projection fields, and the materialized sort keys + indexes the new surfaces need. **ADDED 2026-08-01/02** (see `docs/specs/discovery-v2-bake-plan.md` Amendment 2026-08-01): **work-side match offsets `w_start`/`w_end` for every corpus** plus Sefaria reference resolution from the 322 existing `*.versemap.json` sidecars (stage 1; JA divisions deferred, M-source stored-not-displayed) — the matcher already computes the position and discards it at ingest; **the materialized main-pool bucket flag + its reason code**, since recomputing coverage/competition/aggregation at query time is not viable inside PERF-01; **`works.genre`** (entirely NULL today) for the findings-page domain facet; and a **`discovery_routing_audit` fix** so `kept_tie` rows carry `demoted_work_id`. Note `coverage_ppm` already subsumes the page-letter denominator the main-pool coverage gate needs — no separate table. The verifier, the DATA-05 masking scan, the golden fixture, and a rebuild-preservation gate (nothing silently lost versus the frozen v2 row counts) all pass; the CERT-01 pre-registration artifact is untouched.
@@ -193,118 +193,57 @@ Plans:
   7. **No precision percentage is reachable from any surface** — the methods page is rewritten qualitatively (tiers explained in words plus the non-percentage facts: that grading happened, population, unit, sample size, grader, date, method, audit state, immutable report id), `web/pages/help.py`'s existing estimates and intervals are removed, and no surface claims human review until the provenance of the 121 `human_confirmed` rows is established.
   8. Every surface hides cleanly with the flag off or the sidecar absent, stays inside the PERF-01 budgets (a versioned `discovery-budgets.md` entry for the findings page), and passes the masking scan on rendered output, JSON payloads, copy/export paths and error paths.
 
-**Plans:** 31 plans in 26 waves, organised around the **six execution gates** (D-04): (1) rebuild + the D-13d granularity rule + the D-13c threshold [136-01..136-15], (2) the panel [136-16, 136-18..136-21], (3) the evidence view [136-17, 136-22, 136-23], (4) `/work/{id}` [136-24, 136-25], (5) `/catalog-browse` + the findings page [136-26..136-29], (6) novelty wiring + the methods-page rewrite [136-30, 136-31]. Gate 1 blocks every surface wave: the rebuilt asset must be live in production, flag OFF, before any UI code that reads its new columns is deployed. Four blocking owner checkpoints: 136-04 (the five open gate-1 decisions), 136-11 (authorize the novelty funnel run), 136-15 (approve the one authorized production redeploy), 136-22 (the evidence view's render source and b-side form). A second mockup pass and a Codex pass are owed on the built surfaces, not only on the context.
+**Plans**: TBD — **RE-SCOPED 2026-08-02 (owner), replanned at `standard` granularity.** Three gates, not six: (1) the trimmed rebuild + the D-13d granularity rule + the D-13c threshold, (2) the panel, (3) the findings page — then the methods-page rewrite and the cross-surface masking sweep, both of which gate the public flag-on. Gate 1 still blocks every surface wave: the rebuilt asset must be live in production, flag OFF, before any UI code that reads its new columns deploys. Blocking owner checkpoints: the open gate-1 decisions, the novelty funnel run (~$27), and the one authorized production redeploy. A second mockup pass and a Codex pass are owed on the built surfaces.
 
-Plans:
-**Wave 1**
+**UI hint**: yes
 
-- [ ] 136-01-PLAN.md — Requirement + band-label + budget contract amendments
-- [ ] 136-02-PLAN.md — Schema + deploy contract amendments
-- [ ] 136-03-PLAN.md — Rebuild-preservation harness + expectations pinned from the LIVE asset
-- [ ] 136-04-PLAN.md — Gate-1 evidence pack + the five open owner decisions (checkpoint)
+### Phase 136.1: Read Surfaces — Evidence View, Work Pages & Catalogue Integration
 
-**Wave 2** *(blocked on Wave 1 completion)*
+**Goal**: The deferred half of Phase 136's read surfaces — an on-demand evidence view showing the
+supporting span(s) from OUR manuscript text (and, where the per-work licence permits, the reference
+text), a `/work/{id}` witness-map page grouped by codicological unit, and computed identifications
+folded into `/catalog-browse`. Work titles on the panel and the findings page render as plain text
+until this phase lands, then become links — no dead ends at either stage.
 
-- [ ] 136-05-PLAN.md — D-02a tier_a authorization lockstep (6 sites, both branches)
+**⚠ CREATED 2026-08-02** by an owner re-scope of Phase 136, to get the panel and the findings page
+live inside a one-to-two week window. Nothing here was cut for being unwanted; it was cut for being
+off the shortest path to a live surface.
 
-**Wave 3** *(blocked on Wave 2 completion)*
+**Depends on**: Phase 136 (the trimmed rebuild, the deployed asset, and both launch surfaces must
+exist before there is anywhere to link from). **PANEL-03's reference-side display additionally waits on
+discovery-v2.1** — `w_start`/`w_end` and the Sefaria versemap resolution were trimmed out of Phase 136's
+rebuild (owner, 2026-08-02) because they serve only the reference locus and the side-by-side view, and
+they carried the build's hardest work (the `body` ↔ `norm_stream` coordinate mapping). **The our-text-only
+evidence highlight does NOT wait** — it uses the page-side `span_start`/`span_end` offsets that already
+ship, so the evidence view can land in two stages if that is faster.
 
-- [ ] 136-06-PLAN.md — coverage_ppm + band_rank + the D-10a index set
+**Requirements**: PANEL-03, WORK-01, WORK-02
 
-**Wave 4** *(blocked on Wave 3 completion)*
+**Success Criteria** (what must be TRUE):
 
-- [ ] 136-07-PLAN.md — The main-pool rule + discovery_identification + manuscript_display + findings bench
+  1. An on-demand evidence view shows the supporting span(s) from OUR manuscript text with match stats,
+     highlighting only where offsets exist, failing closed on HTR-version drift. The stored offsets index
+     the NORMALIZED letter stream (652 chars off on the sampled case if sliced raw), the result must be
+     clipped per line (72 of 148 rows vs 1, silently), one renderer must emit both discovery spans and
+     search-term highlights, and the highlight drops on version change.
+  2. Reference text renders only where the acquisition manifest's per-work `reuse_ok` is `yes` (277 works),
+     carrying `attribution_text` where the licence requires it; `unclear` (46), `noncommercial_only` (1) and
+     **absent** (21 — every JA work) all fail closed, asserted on the absence of the flag too. M-source
+     never renders.
+  3. A `/work/{id}` page lists all identified carriers grouped by codicological witness unit (joined
+     fragments appear as ONE witness), AND-composed filters, server-side pagination with the real total,
+     deterministic sort, and counts that count units rather than claim rows. No tier filter.
+  4. `/catalog-browse` carries computed identifications alongside catalogued ones, visibly separated and
+     separately worded.
+  5. Work titles on the Phase 136 surfaces become links to `/work/{id}`.
+  6. Every surface hides cleanly with the flag off or the sidecar absent, stays inside the PERF-01
+     budgets, and passes the masking scan on rendered output, JSON payloads, copy/export and error paths.
 
-**Wave 5** *(blocked on Wave 4 completion)*
-
-- [ ] 136-08-PLAN.md — Work-side offsets w_start/w_end, corpus-wide, + the containment signal
-
-**Wave 6** *(blocked on Wave 5 completion)*
-
-- [ ] 136-09-PLAN.md — Sefaria reference resolution + the per-work licence metadata
-
-**Wave 7** *(blocked on Wave 6 completion)*
-
-- [ ] 136-10-PLAN.md — works.genre curation + author aliases + the kept_tie fix
-
-**Wave 8** *(blocked on Wave 7 completion)*
-
-- [ ] 136-11-PLAN.md — Novelty identity key + pinned LLM contract + verdict artifact (checkpoint)
-
-**Wave 9** *(blocked on Wave 8 completion)*
-
-- [ ] 136-12-PLAN.md — Novelty tri-state ingestion + fail-closed verification
-
-**Wave 10** *(blocked on Wave 9 completion)*
-
-- [ ] 136-13-PLAN.md — VIS-01 two-axis visibility + closed-graph public projection + VIS-02 control
-
-**Wave 11** *(blocked on Wave 10 completion)*
-
-- [ ] 136-14-PLAN.md — The rebuild run + the full gate battery + the compatibility attestation
-
-**Wave 12** *(blocked on Wave 11 completion)*
-
-- [ ] 136-15-PLAN.md — Owner approval + the asset-first production deploy, flag OFF (checkpoint)
-
-**Wave 13** *(blocked on Wave 12 completion)*
-
-- [ ] 136-16-PLAN.md — Panel service layer: envelope, the D-13g routing fix, manuscript scope
-- [ ] 136-17-PLAN.md — Offset renderer + the reference-text licence gate (pure)
-
-**Wave 14** *(blocked on Wave 13 completion)*
-
-- [ ] 136-18-PLAN.md — Panel display model + the bilingual display vocabulary (pure)
-
-**Wave 15** *(blocked on Wave 14 completion)*
-
-- [ ] 136-19-PLAN.md — Panel UI: entry control, enrichment seam, service states
-
-**Wave 16** *(blocked on Wave 15 completion)*
-
-- [ ] 136-20-PLAN.md — Panel UI: rows, buckets, panes, placeholder voting
-
-**Wave 17** *(blocked on Wave 16 completion)*
-
-- [ ] 136-21-PLAN.md — Panel render-smoke + positive controls + masking capture
-- [ ] 136-22-PLAN.md — Evidence-view decisions: render source and b-side form (checkpoint)
-
-**Wave 18** *(blocked on Wave 17 completion)*
-
-- [ ] 136-23-PLAN.md — Evidence view UI + licence-gated reference text
-
-**Wave 19** *(blocked on Wave 18 completion)*
-
-- [ ] 136-24-PLAN.md — Work-page service: D-17a display fields + the count query
-
-**Wave 20** *(blocked on Wave 19 completion)*
-
-- [ ] 136-25-PLAN.md — `/work/{id}` page
-
-**Wave 21** *(blocked on Wave 20 completion)*
-
-- [ ] 136-26-PLAN.md — `/catalog-browse` computed identifications + WORK-02 title findability
-
-**Wave 22** *(blocked on Wave 21 completion)*
-
-- [ ] 136-27-PLAN.md — Findings service: three row units, the facet cascade, the perf gate
-
-**Wave 23** *(blocked on Wave 22 completion)*
-
-- [ ] 136-28-PLAN.md — Findings page: route, gated nav entry, shell
-
-**Wave 24** *(blocked on Wave 23 completion)*
-
-- [ ] 136-29-PLAN.md — Findings page: rows, the novelty switch, render-smoke
-
-**Wave 25** *(blocked on Wave 24 completion)*
-
-- [ ] 136-30-PLAN.md — Methods-page qualitative rewrite + the no-percentage gate
-
-**Wave 26** *(blocked on Wave 25 completion)*
-
-- [ ] 136-31-PLAN.md — Novelty across all surfaces + the final cross-surface masking sweep
-
+**Plans**: TBD — **seed from the six already-written, checker-verified plans** archived at
+`.planning/phases/136-read-surfaces-connections-panel-work-witnesses/superseded-2026-08-02/`:
+136-17 (offset renderer), 136-22 (gate-3 decisions), 136-23 (evidence view), 136-24 (work service
+extension), 136-25 (`/work/{id}` page), 136-26 (titles + `/catalog-browse`). Replan against them rather
+than from scratch — they passed the plan-checker on 2026-08-02.
 **UI hint**: yes
 
 ### Phase 137: Community Judgments

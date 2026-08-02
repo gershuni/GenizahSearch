@@ -146,9 +146,9 @@ Every v9.0.0 requirement maps to exactly one phase. Phases continue from the pre
 | NOVEL-02 | Phase 136 (moved IN, owner 2026-07-30) | Pending |
 | PANEL-01 | Phase 136 | Pending |
 | PANEL-02 | Phase 136 | Pending |
-| PANEL-03 | Phase 136 | Pending |
-| WORK-01 | Phase 136 | Pending |
-| WORK-02 | Phase 136 | Pending |
+| PANEL-03 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
+| WORK-01 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
+| WORK-02 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
 | JUDGE-01 | Phase 137 | Pending |
 | JUDGE-02 | Phase 137 | Pending |
 | JUDGE-03 | Phase 137 | Pending |

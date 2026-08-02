@@ -39,6 +39,40 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
 <decisions>
 ## Implementation Decisions
 
+### ⚠⚠ RE-SCOPE 2026-08-02 (owner) — READ BEFORE EVERYTHING, INCLUDING THE AMENDMENT BELOW
+
+The owner set a **one-to-two week deadline to a live surface**. The first planning pass produced 31
+plans in 26 waves; a conflict analysis showed only ~9 waves were forced by real file conflicts. Phase
+136 is re-scoped to the shortest honest path to launch, and replanned at `standard` granularity.
+
+**Phase 136 now ships, in this order:** the trimmed rebuild → production deploy (flag OFF) → **the
+panel** → **the findings page** → the methods-page rewrite → the cross-surface masking sweep.
+**Requirements: PANEL-01, PANEL-02, VIS-01, NOVEL-01, NOVEL-02.** Two deploys are expected — the panel
+goes live as soon as it is ready, the findings page follows on the same asset.
+
+**MOVED OUT to the new Phase 136.1** (already in ROADMAP.md): the **evidence view** (PANEL-03),
+**`/work/{id}`** (WORK-01), and **`/catalog-browse`** (WORK-02). Six already-written, checker-verified
+plans seed it, archived at `superseded-2026-08-02/` (136-17, 136-22, 136-23, 136-24, 136-25, 136-26).
+
+**TRIMMED OUT of the rebuild** — these ride the already-planned **discovery-v2.1** rebake:
+`w_start`/`w_end` (was 136-08) and the **Sefaria versemap resolution** (was 136-09). They serve only
+the reference-side locus and the side-by-side view, both of which move to 136.1, and they carried the
+build's hardest work — the `body` ↔ `norm_stream` coordinate mapping. **A-5 below is amended
+accordingly: items 1 and 2 of its list are DEFERRED; the materialized main-pool flag, `works.genre` and
+the `kept_tie` fix all STAY** (genre because the findings page's domain facet needs it).
+
+**VIS-01 is NOT trimmed — deliberately.** It was considered and rejected: the requirement states
+private rows must be *structurally absent* from the public artifact, "never merely hidden by a UI
+filter or a query predicate," so any publicly-reachable surface must read the public asset. Deferring
+VIS-01 to the unscheduled v2.1 would confine both launch surfaces to an internal flag. It stays in this
+rebuild, derived at BUILD time before raw provenance ids are discarded.
+
+**Consequence to build for:** with `/work/{id}` deferred, work titles on the panel and the findings
+page render as **plain text**, not links. They become links when 136.1 lands. No dead ends at either
+stage.
+
+---
+
 ### ⚠ AMENDMENT 2026-08-02 — READ FIRST, SUPERSEDES THE DECISIONS BELOW
 
 Everything below this block was written **2026-07-30**. Between 2026-07-31 and 2026-08-02 the owner
