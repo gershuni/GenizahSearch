@@ -5,7 +5,7 @@ status: planned
 nyquist_compliant: true
 wave_0_complete: false  # Wave-0 artifacts are owned by plans 136-02 (shared honesty gate), 136-03 (gate-1 decision record + owner label file), 136-05 (preservation harness + pinned expectations) and 136-01 (budget caps)
 created: 2026-07-31
-revised: 2026-08-02  # re-scoped: 19 plans / 57 tasks / 9 waves (revision 1)
+revised: 2026-08-02  # re-scoped: 21 plans / 63 tasks / 9 waves (revision 2, post-Codex)
 ---
 
 # Phase 136 — Validation Strategy
@@ -136,15 +136,21 @@ Nothing below exists yet; each blocks the criterion it serves.
 
 ## Per-Task Verification Rows (repopulated by the planner, 2026-08-02 - RE-SCOPE, revision 1)
 
-**Supersedes the 31-plan / 26-wave table.** The re-scoped phase is **19 plans / 57 tasks / 9 waves**.
+**Supersedes the 31-plan / 26-wave table.** The re-scoped phase is **21 plans / 63 tasks / 9 waves**.
 PANEL-03, WORK-01 and WORK-02 moved to Phase 136.1, and `w_start`/`w_end` plus the Sefaria versemap
 resolution were trimmed out of the rebuild - so the rows for the archived plans 136-08, 136-09, 136-17
 and 136-22 through 136-26 no longer apply here.
 
 **Revision 1 (plan-checker round 1):** every wave-1 owner decision is consolidated into ONE sitting in
 136-03, which now carries four tasks (evidence &rarr; decision checkpoint &rarr; label checkpoint &rarr;
-record); 136-04 lost its checkpoint, became autonomous and moved to wave 2. The phase now has exactly
+record); 136-04 lost its checkpoint, became autonomous and moved to wave 2. The phase has exactly
 **two** blocking owner checkpoints, both listed below.
+
+**Revision 2 (Codex pre-flight, verdict REWORK - `136-CODEX-PREFLIGHT.md`):** two plans added rather
+than absorbed. **136-20** (wave 3) closes the public/private deployment boundary and the startup
+readiness contract; **136-21** (wave 7) does the work-expansion service change that revision 1 wrongly
+called field-wiring. Wave count is unchanged at 9. Both new plans carry their own positive controls,
+listed below.
 
 | Task ID | Plan | Wave | SC | Type | Automated verify | Status |
 |---------|------|------|----|------|------------------|--------|
@@ -205,6 +211,12 @@ record); 136-04 lost its checkpoint, became autonomous and moved to wave 2. The 
 | 136-18-T3 | 136-18 | 8 | 5,6,8 | render-smoke + perf + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
 | 136-19-T1 | 136-19 | 9 | 8 | masking + docs | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
 | 136-19-T2 | 136-19 | 9 | 8 | masking + docs | `PYTHONUTF8=1 python scripts/check_docs.py && python -c "import io; t=io.open('.planni...` | &#9744; |
+| 136-20-T1 | 136-20 | 3 | 1,8 | loader gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_a...` | &#9744; |
+| 136-20-T2 | 136-20 | 3 | 1,8 | loader gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_a...` | &#9744; |
+| 136-20-T3 | 136-20 | 3 | 1,8 | loader gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_a...` | &#9744; |
+| 136-21-T1 | 136-21 | 7 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_w...` | &#9744; |
+| 136-21-T2 | 136-21 | 7 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_w...` | &#9744; |
+| 136-21-T3 | 136-21 | 7 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_w...` | &#9744; |
 
 ### Wave-0 ownership
 
@@ -222,6 +234,8 @@ record); 136-04 lost its checkpoint, became autonomous and moved to wave 2. The 
 | `tests/render_smoke/test_panel_render_smoke.py` | 136-17 | 8 |
 | `tests/render_smoke/test_findings_render_smoke.py` | 136-18 | 8 |
 | `tests/render_smoke/test_discovery_masking_sweep.py` | 136-19 | 9 |
+| `web/discovery_assets.py` audience gate + extended readiness contract | 136-20 | 3 |
+| `shared/discovery_surface_projection.py` (allowlist projection; `review_overlay` / precision / CI excluded) | 136-14 | 6 |
 
 ### Positive controls - the assertions that must be proven able to fail
 
@@ -240,6 +254,11 @@ record); 136-04 lost its checkpoint, became autonomous and moved to wave 2. The 
 | Panel model honesty | 136-15 | A precision figure in a row field, a stored vocabulary key in a chip, a row whose bucket disagrees with the shared rule |
 | Panel render honesty | 136-17 | A precision figure in a rendered row, a stored vocabulary key in a chip, a review badge |
 | Findings render honesty | 136-18 | "New discovery" plus a precision figure; an out-of-vocabulary domain plus a header mislabelled as the manuscript's domain; a rendered row whose bucket disagrees with the shared rule |
+| Loader audience boundary | 136-20 | A private-audience artifact behind the manifest (public routes must return nothing); a MISSING audience value (must fail closed); a pre-rebuild-shaped asset (availability must stay false); a row-count disagreement on either new table |
+| Work-expansion contract | 136-21 | `relations_differ` removed from the projection; the anchor's band substituted for the weaker one; the page length returned as the total |
+| Surface-safe projection | 136-14 | An unexpected key added to the serializer output (allowlist must drop it); the "Expert-reviewed" value asserted absent from row, envelope, JSON and error path |
+| Masking schema coverage | 136-08 | The restricted marker seeded into a column or table NAME, caught only by `--scan-sqlite` |
+| Zero-owner-label mutation | 136-04 | The explicit denominator guard removed - the zero-label test must then FAIL |
 | Cross-surface masking | 136-19 | A restricted value seeded into a rendered row, a JSON payload, a copy/export output and an exception message - one per path class |
 
 ### Differing-case assertions (PANEL-02, revision 1)
