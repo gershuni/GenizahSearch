@@ -65,6 +65,18 @@ brought into agreement with the final ten-value enum, and the hard-case workshee
 regenerated to carry the new shade and a new liturgical-container class (Class 7). Sections A-G are NOT
 reopened by any of this; they remain LOCKED exactly as recorded above.
 
+**Further addendum, 2026-08-02 (same day, a later continuation still) -- RULING J.** The prior-art pass's
+own §7 flagged an open design question decisions A-I never settled: does the LLM arm run over ALL
+identifications, or only a heuristic-funnel residual? The owner ruled on it, delivered through a normal
+orchestrator dispatch to this continuation (the correct channel; see decision E's own Provenance note) --
+**J** adopts the funnel-FIRST architecture (heuristic funnel runs first to cut calls; the LLM sees only
+the residual) and records, as the real cost of that choice, that a heuristic FALSE-KNOWN is now
+PERMANENT and UNRECOVERABLE -- see **section J** below. This continuation ALSO replaces the hard-case
+pool's former Classes 4/5/7 with a THREE-ARM, SOURCE-STRATIFIED sample built against the REAL bib/PGP/
+FGP/FJMS-catalogue sidecars (not merely libraries.csv), per the same prior-art pass's finding that the
+former pool had zero representation of the source-coverage failure modes Codex measured as most
+damaging. Sections A-I are NOT reopened by any of this; they remain LOCKED exactly as recorded above.
+
 ---
 
 ## A. The five gate-1 decisions
@@ -931,6 +943,172 @@ re-litigated, re-derived or "improved" here.
 
 ---
 
+## J. The LLM arm runs ONLY on the heuristic-funnel residual, not on all identifications -- and the
+unrecoverable-false-known consequence this creates
+
+**Provenance.** This ruling closes the open design question `136-NOVELTY-PRIOR-ART.md` § 7 flagged and
+explicitly declined to resolve: *"Whether the model arm runs over ALL claims or only a heuristic-funnel
+residual is not yet decided in any plan text."* It arrived through a normal orchestrator dispatch to this
+continuation (the correct channel; see decision E's own Provenance note for why that distinction is
+load-bearing) and is recorded here with the same standing as A-I: LOCKED, not re-litigated, re-derived or
+"improved" here.
+
+- **Question:** does the pinned LLM gate (ruling B) run its judgment over EVERY identification NOVEL-01
+  checks, or only over the residual the heuristic funnel could not resolve mechanically?
+
+- **Owner's answer (verbatim):** "Makes sense to use LLM only after the heuristics."
+
+- **What this adopts.** `same_work_spike/probe/rsource/GEN2-HANDOFF.md` § 6's own recommendation:
+  "heuristic funnel first to cut calls; scope the LLM pass to shipped/same-work headline claims." The
+  heuristic funnel (bib/catalogue/FGP/PGP mechanical name-match, per `gen2_novelty_gate.py`'s reference
+  design and the checked-source set NOVEL-01 names) runs FIRST, over every identification. Only the rows
+  it cannot resolve mechanically -- the RESIDUAL -- are ever presented to the pinned model. Rows the
+  funnel resolves (in either direction: a genuine name-match, or a heuristic demotion) never reach the
+  model at all.
+
+- **The consequence that must be recorded explicitly, because it is the real cost of this choice and is
+  otherwise invisible.** The funnel only ever DEMOTES (discovery -> known/checked-off, never the
+  reverse -- this has been the funnel's stated design principle since `discovery_identified_gate.py`'s
+  own docstring: "Sources only ever demote, never the reverse"). Under a funnel-first architecture, the
+  LLM only ever sees SURVIVORS of that demotion pass. **Therefore a heuristic FALSE-KNOWN -- a row the
+  mechanical funnel wrongly marks "already recorded" because a source merely has SOME text, not because
+  that text actually names this specific work -- is now PERMANENT and UNRECOVERABLE.** Nothing downstream
+  ever re-examines a demoted row; no model verdict is ever computed for it; the row is marked "already
+  recorded" and stays that way. Codex measured this exact population in the reference implementation:
+  **3,688 `published_full` false-knowns** (bib presence alone, Codex finding 1) and **2,014 PGP
+  false-knowns** (PGP description/transcription presence alone, Codex finding 6), of which **942** are
+  PGP-sole (no other source also names the claim). Under the pre-J (all-claims-to-model) design, at
+  least some of these rows WOULD have reached the model and had a chance to be corrected; under the
+  funnel-first design ruling J adopts, they never will.
+
+- **The error runs in the CONSERVATIVE direction -- correct given this phase's publication posture, but a
+  real cost, not a free one.** A false-known means a genuine finding is silently LOST (never surfaced as
+  a candidate), never that a fake finding is manufactured and published. Per the standing cost-asymmetry
+  rationale already on record for the model-gate authorization (decision B: "the error this axis makes --
+  telling a reader a finding is unrecorded when it is recorded -- is the reputationally expensive one"),
+  losing a real finding is preferable to publishing a false one. But "preferable" is not "free": this is a
+  measured, real cost (up to several thousand real findings silently never surfacing), and it MUST be
+  measured going forward, not assumed away because the direction of the error happens to be the safer
+  one.
+
+- **Date:** 2026-08-02 (same day as A-I, a later dispatch still).
+
+- **What this ruling directly affects, enumerated per this continuation's own instruction:**
+
+  1. **The `~$27` cost basis** (`reference_discovery_llm_gate_cost` memory; decision B). That estimate
+     was carried forward by size-extrapolation over the FULL identification set. Under ruling J's
+     funnel-first design, the model only ever sees the RESIDUAL -- a strict subset of all identifications
+     -- so **the true denominator shrinks to the residual, not the full set.** The `~$27` figure must be
+     re-derived (or at minimum re-scoped and re-labelled) against the ACTUAL residual size once the
+     heuristic funnel runs for real (plan 136-04); citing it against the full identification count is now
+     stale and must not be repeated without this caveat.
+  2. **Which Codex-flagged defects ever reach the model.** Codex findings 1 and 6 (bib `published_full`
+     over-demotion, PGP over-demotion) are now, structurally, defects the MODEL CAN NEVER CATCH -- a row
+     they wrongly demote never reaches the model's judgment at all. Findings 2/3/4/5 (the catalogue field,
+     canonical-id collapse, the page-join, the residual's own evidence-assembly quality) all concern rows
+     that DO reach the model (the residual), so those remain correctable by 136-04's implementation. This
+     is why this continuation's own hard-case redesign (the three-arm sampler, see below) treats Arm 2
+     (heuristic-demoted) as a SEPARATE, DEDICATED measurement -- it is the ONLY place a false-known from
+     findings 1/6 can ever be caught, precisely because ruling J makes it permanent everywhere else.
+  3. **NOVEL-01's honesty wording.** A row demoted by the heuristic funnel receives NO model verdict at
+     all -- its stored `novelty_status` reflects the FUNNEL's mechanical judgment, never a model's. Any
+     future documentation or UI copy describing how a `novelty_status` value was determined must account
+     for this: some rows are funnel-only (never modeled), others are funnel-then-model (the residual).
+     `docs/specs/discovery-novelty-v1.md` (136-04's own contract doc) must state this distinction
+     explicitly, not imply every shade passed through the same pipeline stage.
+
+- **Code consequence.** No enum value changes here (this ruling is about PIPELINE ORDER, not a new shade
+  or column). The consequence is entirely architectural: plan 136-04's funnel runner must implement the
+  heuristic pass FIRST and gate the model call on "did the heuristic pass leave this row unresolved" --
+  this is now a REQUIRED acceptance criterion for 136-04 (reconciled into `136-04-PLAN.md`'s Task 3 action
+  text by this continuation, replacing its prior "run the authorized funnel over the full identification
+  set" wording with residual-only, funnel-first wording -- a surgical edit, not a restructuring of that
+  plan).
+
+- **Consequence for the hard-case evaluation set (this continuation's own Task 3/4 -- the ground-truth
+  labelling instrument).** Per `136-NOVELTY-PRIOR-ART.md` § 7's own recommendation, the labelling pool is
+  restructured into a **three-arm, SOURCE-STRATIFIED sample** that measures what the funnel-first
+  architecture actually needs measured, rather than continuing to test only the catalogue-text axis
+  (former Classes 4/5/7, which read exclusively `libraries.csv` column 7 and had ZERO representation of
+  the bib/PGP/FGP failure modes Codex measured as most damaging):
+
+  - **Arm 1 -- RESIDUAL** (rows that WOULD reach the model under ruling J): stratified by which source
+    supplied text that failed mechanical name-match -- `bib_sole` / `pgp_sole` / `fgp_sole` /
+    `catalogue_sole` / `multi_source`, plus two shape-based strata folding in the former Class 4
+    (`terse_catalogue`) and Class 7 (`container_predicts`) as strata of the residual, per this ruling's
+    own instruction, rather than as a separate exercise. Measures the model arm's accuracy on the ONLY
+    population it will ever actually see.
+  - **Arm 2 -- HEURISTIC-DEMOTED** (rows the funnel marks known; the LLM NEVER sees them): oversamples
+    `published_full`-sole and PGP-sole demotions -- the two Codex-flagged populations named above. This is
+    the ONLY arm that can surface a false-known, because nothing downstream re-examines a demoted row.
+    Carries a NEW owner-facing question, `demotion_correct` / `false_known` / `unsure` / `skip`
+    (`DEMOTION_VOCABULARY`), since this is a straight correctness check on the demotion itself, not a
+    shade or an identity judgment.
+  - **Arm 3 -- NO-SOURCE-TEXT** (rows with no checked-source text at all): ship as novelty candidates
+    automatically, with NO verdict collected -- checks, informationally, whether that bypass looks safe,
+    rather than producing a graded label.
+
+  Measured this continuation (`scripts/discovery_gate1_evidence.py`, real bib/PGP/FGP/FJMS-catalogue
+  sidecars joined to the live `discovery-v1-33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff.db`
+  asset): **101 total candidates** -- 8 identity spot-check (UNCHANGED) + 30 Class 6 catalogue divergence
+  (UNCHANGED, per this continuation's own "do not silently discard owner-authorized work" accounting) +
+  30 Arm 1 residual (across 6 of 7 strata at a 5-case cap each; `pgp_sole` populated ZERO candidates in
+  Arm 1 -- see the note below, not a bug) + 25 Arm 2 heuristic-demoted (`published_full_sole` 10 /
+  `pgp_sole` 10 / `other_demotion` 5) + 8 Arm 3 no-source-text.
+
+  **A stratum that cannot be populated from available data is reported as zero, never backfilled from
+  elsewhere (per this continuation's own instruction).** Arm 1's `pgp_sole` stratum measured ZERO
+  candidates: empirically, a PGP-linked fragment whose document has NEITHER a description NOR a
+  transcription (the condition for PGP "present but not named") is rare in this corpus -- PGP's
+  "present" and "named" tests are close to synonymous under the current (Codex-flagged over-broad)
+  heuristic, so PGP-present rows overwhelmingly land in Arm 2 (heuristic-demoted) rather than Arm 1
+  (residual). This is itself a measured finding worth recording: it means Arm 2, not Arm 1, is where PGP's
+  behavior is actually exercised and graded.
+
+  Superseded/kept/dropped accounting (per this continuation's Task 5 instruction, restated here for a
+  single citable record): Classes 1-3 (identity) and Class 6 (catalogue divergence, including the owner's
+  F/G annotations on 12 of the original 15 cases) are KEPT UNCHANGED -- Class 6 specifically because
+  rulings F/G already characterize real, specific manuscripts and dropping it would discard that
+  owner-authorized work before its own Task-3 confirmation ever ran. Class 4 (terse/missing catalogue
+  text) and Class 7 (container_predicts) are FOLDED IN as Arm 1 strata, per this ruling's own instruction.
+  Class 5 (generic collection works) is DROPPED outright: no owner ruling exists for any specific Class 5
+  case (only generic PROPOSALS), and its collection-level-identity question is orthogonal to source
+  coverage -- it does not correspond to any of the three arms.
+
+- **Sizing, and what each arm can and cannot answer (per this continuation's own instruction -- stated
+  here and in `136-NOVELTY-HARDCASES.md`'s own intro, not resolved by fiat).** Total candidate pool:
+  101 (8 identity + 93 novelty-evaluation, of which 30 is the unchanged Class 6 and 63 is ruling J's own
+  new three-arm sample -- under the ~100-novelty-case guidance once Class 6's pre-existing, separately
+  engaged work is counted apart from the new redesign).
+  - Class 6 (30, unchanged) answers whether the owner confirms the shade/correctness proposals already
+    characterized on specific real cases, and how the selector's own measured over-fire rate holds up
+    across the pool -- it does NOT test source coverage.
+  - Arm 1 (30 across 6 populated strata) answers a per-stratum ACCURACY question ("does the model
+    classify a representative case from each source family/shape correctly") -- it does NOT establish a
+    corpus-wide RATE for how common each stratum is (the cap is fixed, not proportional).
+  - Arm 2 (25, oversampling the two Codex-flagged populations) answers "of the rows the funnel
+    demotes WITHOUT ever consulting a model, how many are false-knowns" on a small, oversampled slice --
+    it does NOT give a project-wide false-known RATE (Codex's own 3,688/2,014 population counts are
+    corpus-wide; this arm samples a tiny, deliberately oversampled fraction of each, never the full
+    population).
+  - Arm 3 (8, no verdict) answers, qualitatively, whether the "ship with no check at all" bypass looks
+    safe -- it is explicitly NOT a labelling exercise and produces no graded number.
+  - **What this sizing does not cover:** no arm measures a corpus-wide base rate; a future pass wanting
+    base rates must run the real funnel (plan 136-04) over the full corpus and report its own per-stratum
+    counts, not re-derive them from this labelling sample.
+
+- **What this plan (136-03) does NOT do:** it does not run the pinned model against anything (no model
+  call is made by this continuation, consistent with every prior continuation of this plan). This
+  continuation DOES (per its own Task 1-5 instructions): amend `.planning/REQUIREMENTS.md` (NOVEL-01),
+  surgically reconcile `136-04-PLAN.md`'s Task 3 action text to residual-only/funnel-first wording, and
+  extend `scripts/discovery_gate1_evidence.py` with the three-arm stratified sampler, regenerating both
+  `136-NOVELTY-HARDCASES.md` and `.xlsx` (verified reproducible across two consecutive runs, byte-for-byte
+  on the Markdown/evidence brief; the XLSX is reproducible at the cell-value/validation-list/sheet-
+  structure level, per its own pre-existing "not byte-for-byte, openpyxl embeds a save timestamp"
+  methodology note).
+
+---
+
 ## Provisional-value / omission audit
 
 None of the five gate-1 answers above (A) were flagged by the owner as provisional -- all five are
@@ -1064,6 +1242,43 @@ candidates, nine shade values, Classes 1-6 only) is now SUPERSEDED by:
   judgment, structurally similar in kind to E′'s and F's own splits, which the existing RISK CHECK already
   treats as low-confusability relative to the underlying test. Flagged here rather than silently assumed:
   a future session MAY want to extend the RISK CHECK explicitly once Class 7 labels are in hand.
+
+**Updated by ruling J (this continuation) -- retained above unchanged, not rewritten, per this file's own
+"record what changed, do not silently overwrite" discipline.** The 95-case, Classes-1-7 state described
+above is now SUPERSEDED by a three-arm, SOURCE-STRATIFIED redesign (§ J above), per
+`136-NOVELTY-PRIOR-ART.md` § 7's own finding that Classes 4/5/7 had zero representation of the bib/PGP/FGP
+failure modes Codex measured as most damaging:
+
+- **101 total candidates** (measured this continuation, real bib/PGP/FGP/FJMS-catalogue sidecars joined
+  to the live asset): 8 identity spot-check (Classes 1-3, UNCHANGED) + 30 Class 6 catalogue divergence
+  (UNCHANGED) + 30 Arm 1 residual (7 strata, cap 5 each -- 6 strata populated, `pgp_sole` measured zero,
+  see § J's note) + 25 Arm 2 heuristic-demoted (`published_full_sole` 10 / `pgp_sole` 10 /
+  `other_demotion` 5) + 8 Arm 3 no-source-text (no verdict collected).
+- **Classes 4 and 7 are RETIRED as standalone classes** -- folded into Arm 1's `terse_catalogue` and
+  `container_predicts` strata respectively. **Class 5 is DROPPED** (no owner ruling exists for any
+  specific Class 5 case). Class 6 and Classes 1-3 are UNCHANGED -- see § J's own "kept, folded, dropped"
+  accounting for the full rationale.
+- **Two NEW owner-facing questions.** Arm 2 introduces `DEMOTION_VOCABULARY`
+  (`demotion_correct` / `false_known` / `unsure` / `skip`) -- a straight correctness check on the funnel's
+  demotion, distinct from a shade or an identity call. Arm 3 introduces NO question at all -- it is
+  explicitly informational, per ruling J's own "ships as candidates with no verdict" design.
+- **The XLSX widens from THREE sheets to FIVE**: "Identity Spot-Check" (unchanged), "Novelty Shades"
+  (now Class 6 + Arm 1, not Classes 4-7), "Heuristic-Demoted" (Arm 2, NEW), "No-Source-Text" (Arm 3, NEW,
+  no verdict column), "Vocabulary & Instructions" (extended with `DEMOTION_VOCABULARY` and the kept/
+  folded/dropped accounting).
+- **Reproducibility verified**: two consecutive runs of `scripts/discovery_gate1_evidence.py` against the
+  same live asset produced byte-identical `136-GATE1-EVIDENCE.md` and `136-NOVELTY-HARDCASES.md`; the
+  XLSX is reproducible at the cell-value/validation-list/sheet-structure level (its own pre-existing
+  methodology note -- openpyxl embeds a save timestamp, so byte-for-byte is not claimed).
+- **A real logic bug was found and fixed during this continuation's own dry run** (not left in): an
+  earlier version of the Arm 1 stratum-priority ordering let a terse/absent catalogue field claim
+  priority unconditionally, which made `bib_sole` / `pgp_sole` / `fgp_sole` structurally UNREACHABLE (the
+  only way a manuscript could be "sole" for one of those sources was for the catalogue to also be
+  terse/absent -- exactly the condition the old ordering diverted to `terse_catalogue` first). Fixed by
+  only treating the catalogue as a "present" source for the sole/multi-source test when it is
+  SUBSTANTIAL (non-terse); `terse_catalogue` now means what the former Class 4 actually tested (the
+  catalogue offers nothing AND no other source does either). Recorded here as a durable note against a
+  future session re-introducing the same ordering mistake.
 
 ### Historical (pre-restructure) record, retained for the decision trail
 
