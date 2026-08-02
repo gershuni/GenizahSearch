@@ -85,6 +85,31 @@
     implemented in this plan (136-03), which only records the ruling. Full rationale, the
     condition-by-shade table and the enumerated downstream-contract list are recorded in
     `136-GATE1-DECISIONS.md` § E.
+  - **⟨AMENDED 2026-08-02 (same day, later dispatch) — Phase-136 plan 03, owner CORRECTION E′
+    (`136-GATE1-DECISIONS.md` § E′)⟩** A correction to the immediately-preceding amendment, not a
+    new ruling: decision E's `refines_granularity` row collapsed TWO opposite directions of a
+    granularity relationship into one shade. The owner (verbatim): *"if we have רש"י על התורה and
+    catalog has רש"י בראשית כב we are different but for worse, so no novelty at all"* — a catalogue
+    that already names the chapter knows strictly MORE than a claim naming only the whole work, and
+    that direction must not score the same as the opposite one (our claim being the finer one, which
+    genuinely adds information). **The shade enum widens from SEVEN to EIGHT values** by splitting
+    `refines_granularity` into two direction-gated shades (both still require the D-13d author-gated
+    title relationship): `refines_granularity` — OUR claim is finer than the aid's (we add precision);
+    `aid_more_specific` — the AID's identification is finer than ours (we add nothing; the catalogue
+    already knew more). **`aid_more_specific` is the LEAST novel shade** and joins `confirms` /
+    `refines_granularity` / `diverges` / `extends` as EXCLUDED from the "Candidates for new finds"
+    toggle — `fills_gap` remains the ONLY shade that predicate selects, UNCHANGED by this correction.
+    **Display ruling (owner): SHOW, BUT NEVER AS A CANDIDATE FIND** — `aid_more_specific` rows render
+    normally with their tier, exactly like every other non-candidate shade. Three alternatives were
+    offered and explicitly DECLINED: demoting these rows below the main pool, showing the aid's
+    more-specific wording alongside ours, and hiding them entirely. This is a NOVELTY-ONLY fix: no
+    change to the main-pool rule, no new public surface wording, no additional masking surface.
+    Implemented by the SAME plans decision E already named (136-04's pinned LLM contract now elicits
+    DIRECTION as well, so the pinned prompt hash changes again on this account; 136-06/136-12's
+    schema CHECK and frozen-enum-vocab widen from seven to eight values; the release verifier's
+    frozen-enum-vocab check) — NOT implemented in this plan (136-03), which only records the
+    correction. Full rationale, the corrected two-row table and the enumerated downstream-contract
+    list are recorded in `136-GATE1-DECISIONS.md` § E′.
 - [ ] **NOVEL-02**: The novelty flag's **provenance** (`known_source` — which aid already had it) is masked on the public side: the boolean is publishable, but a restricted-corpus provenance value collapses to a non-identifying label (e.g. "recorded in a restricted corpus"), never the corpus name, and passes the DATA-05 masking scan on every surface that renders or exports it — including copy/clipboard output, JSON payloads, and error paths. Public surfaces therefore support "filter **and explain**" only where the explaining source is itself public; elsewhere they support "filter only". The heuristic-plus-LLM funnel's verdict cache is a build-time artifact and is never shipped in the sidecar
 
 ### Bands & Certification
