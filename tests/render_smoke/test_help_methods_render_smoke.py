@@ -2,10 +2,12 @@
 """Render-smoke test: NiceGUI User drives the live server-render path for /help.
 
 Phase 135, Plan 02 (BAND-05) — rewritten QUALITATIVELY in Phase 136, Plan 02
-(D-06a, Tasks 1-2): every precision percentage, confidence interval, weighted
-estimate and strata table is STRUCK from the methods section; each band's
-measurement is explained in words, and three new qualitative subsections (the
-two-bucket rule, known limitations, the novelty check) are added.
+(D-06a): every precision percentage, confidence interval, weighted estimate
+and strata table is STRUCK from the methods section; each band's measurement
+is explained in words, and three new qualitative subsections (the two-bucket
+rule, known limitations, the novelty check) are added. This suite is also the
+FIRST caller of the shared ``tests/render_smoke/discovery_honesty_gate.py``
+no-numbers gate that every later Phase-136 surface suite will import.
 
 Scope
 -----
@@ -34,9 +36,10 @@ the flag-gated "Confidence Bands & Methods" methods section:
   * both language paths render the SAME field-label set (field parity);
   * the Phase-139 noindex transition (Codex #18): pre-release → noindex,
     released → indexed, flag-off → section absent AND indexed;
-  * the D-06/D-06a word gate: "certified" (EN) and its HE equivalents
-    (מאומת / מאושר / מוסמך) appear NOWHERE in the confidence section (scoped
-    to the section — מאושר legitimately appears in the Joins-Lab Help copy);
+  * the D-06/D-06a word gate, run via the SHARED
+    ``tests/render_smoke/discovery_honesty_gate.py::assert_discovery_honesty``
+    — proven able to fail via two positive controls (a seeded
+    precision+interval, and a seeded raw stored vocabulary key);
   * HE renders RTL.
 
 It does NOT exercise the real sidecar or the DiscoveryService — those are
@@ -53,12 +56,14 @@ time, registering ``@ui.page('/help')`` on ``core.app``; we clear
 from __future__ import annotations
 
 import asyncio
+import html
 import os
 from contextlib import ExitStack, asynccontextmanager
 from typing import Callable
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import pytest
 
 # Import web.main at module load — registers /help on core.app (also done by the
 # package conftest; the import is idempotent).
@@ -68,6 +73,12 @@ from nicegui.context import context as _nicegui_context
 from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
+
+from tests.render_smoke.discovery_honesty_gate import (
+    DiscoveryHonestyScopeError,
+    DiscoveryHonestyViolation,
+    assert_discovery_honesty,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +259,20 @@ def _confidence_section_text(user) -> str:
                         if isinstance(v, str) and v:
                             parts.append(v)
     return '\n'.join(parts)
+
+
+def _scoped_html_fragment(user) -> str:
+    """Wrap the confidence section's rendered TEXT in a class-scoped div so
+    the SHARED discovery_honesty_gate (which extracts by class name over
+    real markup — mandatory scope, per its own module docstring) can run
+    over it. The render-smoke harness reads NiceGUI's server-side element
+    tree directly (no literal serialized HTML is available from the test
+    client for a Vue-reactive page); this produces a faithful
+    text-equivalent scoped fragment, which is sufficient because every gate
+    check operates on TEXT content, never on markup structure."""
+    from web.pages.help import _CONFIDENCE_SECTION_CLASS
+    text = _confidence_section_text(user)
+    return f'<div class="{_CONFIDENCE_SECTION_CLASS}">{html.escape(text)}</div>'
 
 
 def _column_directions(user) -> list:
@@ -467,6 +492,127 @@ def test_help_methods_confidence_anchor_set_exact():
         )
 
     _run_help_smoke(driver, lang='en', discovery_on=True, noindex=True)
+
+
+# ---------------------------------------------------------------------------
+# Tests: the shared discovery_honesty_gate wired against the REAL rendered
+# section, in both languages, plus its positive controls (Task 3).
+# ---------------------------------------------------------------------------
+
+def test_help_methods_honesty_gate_passes_on_real_render_en():
+    """The shared gate does NOT raise over the real EN rendered section — the
+    methods page is honest by construction."""
+    async def driver(user):
+        await user.open('/help')
+        fragment = _scoped_html_fragment(user)
+        from web.pages.help import _CONFIDENCE_SECTION_CLASS
+        assert_discovery_honesty(fragment, scope_selector=_CONFIDENCE_SECTION_CLASS, lang='en')
+
+    _run_help_smoke(driver, lang='en', discovery_on=True, noindex=True)
+
+
+def test_help_methods_honesty_gate_passes_on_real_render_he():
+    """The shared gate does NOT raise over the real HE rendered section."""
+    async def driver(user):
+        await user.open('/help')
+        fragment = _scoped_html_fragment(user)
+        from web.pages.help import _CONFIDENCE_SECTION_CLASS
+        assert_discovery_honesty(fragment, scope_selector=_CONFIDENCE_SECTION_CLASS, lang='he')
+
+    _run_help_smoke(driver, lang='he', discovery_on=True, noindex=True)
+
+
+def test_help_methods_honesty_gate_positive_control_precision_and_interval():
+    """Positive control 1: seed a precision figure PLUS a confidence interval
+    into the REAL rendered section and confirm the shared gate raises — a
+    green check that cannot fail is worthless. Turns 2 assertions red: the
+    unqualified-percentage check AND the bracketed-interval check."""
+    async def driver(user):
+        await user.open('/help')
+        fragment = _scoped_html_fragment(user)
+        from web.pages.help import _CONFIDENCE_SECTION_CLASS
+        poisoned = fragment.replace(
+            '</div>',
+            ' estimated band precision 93.8% [0.9084, 0.9644]</div>',
+            1,
+        )
+        with pytest.raises(DiscoveryHonestyViolation) as exc_info:
+            assert_discovery_honesty(poisoned, scope_selector=_CONFIDENCE_SECTION_CLASS, lang='en')
+        message = str(exc_info.value)
+        assert 'unqualified percentage' in message, (
+            f"Positive control FAIL: percentage violation not reported. Got: {message}"
+        )
+        assert 'bracketed interval' in message, (
+            f"Positive control FAIL: interval violation not reported. Got: {message}"
+        )
+
+    _run_help_smoke(driver, lang='en', discovery_on=True, noindex=True)
+
+
+def test_help_methods_honesty_gate_positive_control_stored_vocab_key():
+    """Positive control 2: seed a stored vocabulary key (`direct_witness`)
+    into the REAL rendered section and confirm the shared gate catches it.
+    Turns 1 assertion red: the raw-vocab-key check."""
+    async def driver(user):
+        await user.open('/help')
+        fragment = _scoped_html_fragment(user)
+        from web.pages.help import _CONFIDENCE_SECTION_CLASS
+        poisoned = fragment.replace('</div>', ' evidence family: direct_witness</div>', 1)
+        with pytest.raises(DiscoveryHonestyViolation) as exc_info:
+            assert_discovery_honesty(poisoned, scope_selector=_CONFIDENCE_SECTION_CLASS, lang='en')
+        message = str(exc_info.value)
+        assert "raw stored vocabulary key 'direct_witness'" in message, (
+            f"Positive control FAIL: direct_witness violation not reported. Got: {message}"
+        )
+
+    _run_help_smoke(driver, lang='en', discovery_on=True, noindex=True)
+
+
+# ---------------------------------------------------------------------------
+# Tests: the discovery_honesty_gate module's own contract (unit-level, no
+# NiceGUI needed) — the mandatory-scope guard, the qualified-coverage
+# exception, and the negation-proof word gate.
+# ---------------------------------------------------------------------------
+
+def test_discovery_honesty_gate_requires_scope_selector():
+    """Calling the gate without a scope_selector, or with one matching
+    nothing, raises rather than passing vacuously."""
+    with pytest.raises(DiscoveryHonestyScopeError):
+        assert_discovery_honesty(
+            '<div class="discovery-methods-section">99%</div>', scope_selector='', lang='en'
+        )
+    with pytest.raises(DiscoveryHonestyScopeError):
+        assert_discovery_honesty(
+            '<div class="unrelated-class">hello</div>',
+            scope_selector='discovery-methods-section',
+            lang='en',
+        )
+
+
+def test_discovery_honesty_gate_permits_qualified_coverage_percentage_only():
+    """A percentage adjacent to the matched-letter coverage qualifier PASSES;
+    a bare percentage (no qualifier) FAILS — the exception cannot become a
+    loophole."""
+    qualified = (
+        '<div class="discovery-methods-section">Matches the work &middot; 68% of page</div>'
+    )
+    assert_discovery_honesty(qualified, scope_selector='discovery-methods-section', lang='en')
+
+    bare = '<div class="discovery-methods-section">estimated band precision 92.6%</div>'
+    with pytest.raises(DiscoveryHonestyViolation):
+        assert_discovery_honesty(bare, scope_selector='discovery-methods-section', lang='en')
+
+
+def test_discovery_honesty_gate_catches_negated_prohibited_wording():
+    """A NEGATED use of a prohibited relation word still fails — exactly the
+    trap the findings-page sketch fell into ('a match is not proof that a
+    folio is a copy of the work')."""
+    negated = (
+        '<div class="discovery-methods-section">a match is not proof that a folio is a '
+        'copy of the work</div>'
+    )
+    with pytest.raises(DiscoveryHonestyViolation):
+        assert_discovery_honesty(negated, scope_selector='discovery-methods-section', lang='en')
 
 
 # ---------------------------------------------------------------------------
