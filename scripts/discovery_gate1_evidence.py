@@ -71,6 +71,34 @@ now carries the ONE question type it was actually constructed to support
 where Decision E's shade vocabulary was applied uniformly to all six classes
 even though Classes 1-3 have no claim-vs-aid relationship to judge.
 
+**Rulings H and I** (``136-GATE1-DECISIONS.md`` §§ H/I, a later dispatch still,
+prompted by the read-only ``136-NOVELTY-PRIOR-ART.md`` research pass): (H) the
+prior-art pass measured a real, non-trivial "witness" shape under the OLDER
+five-way title-gate vocabulary -- a catalogue entry names a broader standard-
+rite prayer-book/cycle/ceremony whose predictable content includes the
+claimed unit, without ever naming that unit itself (1,327 of 20,410 in-scope
+rows, 6.5%, in the population that vocabulary scored) -- which the CURRENT
+shade enum has no bucket for and would misfile as ``fills_gap`` by
+elimination. The owner adopted this as a TENTH shade, under a
+NON-COLLIDING name (``container_predicts`` -- "witness" already names five
+OTHER distinct concepts in this project, per the prior-art pass's own §8
+sweep): excluded from "Candidates for new finds" like every other
+non-``fills_gap`` shade, but shown NORMALLY (never hidden by default) --
+ruling F's default-hidden posture was specifically about rows the owner has
+measured reason to believe are OUR false positives, which does not apply
+here (there is no disagreement between the aid and the claim). (I) The
+pinned gate's validation (40/40 agreement; 99% vs 103 human grades) covers
+the FIVE-way vocabulary and the one-title-string input contract -- it does
+NOT cover the widened shade enum or ruling G's free-text input contract, so
+the owner ruled the pinned config must be RE-MEASURED against the owner-
+labelled evaluation set on the new vocabulary/contract before the
+production run, not merely run because it was once validated on a
+different question. Consequence for this module: a NEW Class 7
+(liturgical-container predictability) is added to the hard-case candidate
+set, built with the identical zero-model-call, script-reproducible
+selection discipline as Classes 4-6, targeting ~12 cases, so the model's
+FIRST encounter with this shape is a graded evaluation, not production.
+
 This module also emits an XLSX labelling workbook (``write_hardcases_xlsx``)
 alongside the Markdown, per the owner's request for something easier to work
 with than Hebrew RTL in Markdown; it now carries THREE sheets -- "Identity
@@ -138,14 +166,16 @@ DEFAULT_HARDCASES_XLSX_OUT = os.path.join(PHASE_DIR, "136-NOVELTY-HARDCASES.xlsx
 # Verdict vocabulary -- the SINGLE source of truth for every owner-facing
 # shade token, shared verbatim by the Markdown worksheet, the XLSX dropdown
 # validation and the XLSX vocabulary sheet, so the three surfaces can never
-# drift out of sync. Order matches the owner's own E/E′/F shade table
+# drift out of sync. Order matches the owner's own E/E′/F/H shade table
 # (decision E's six original shades, E′'s aid_more_specific inserted right
 # after its sibling refines_granularity, F's diverges_work/diverges_part
-# replacing the single diverges token, then not_checked's owner-facing alias
-# `unsure` and the `skip` non-answer). ``not_checked`` itself is NOT
-# owner-facing -- only its owner-facing alias `unsure` is offered as an
-# answer token. THIS vocabulary is used ONLY on Class 4-6 ("shade") rows --
-# see IDENTITY_VOCABULARY below for the separate Class 1-3 question.
+# replacing the single diverges token, H's container_predicts inserted right
+# before its sibling fills_gap -- the shade it would otherwise be misfiled
+# into by elimination -- then not_checked's owner-facing alias `unsure` and
+# the `skip` non-answer). ``not_checked`` itself is NOT owner-facing -- only
+# its owner-facing alias `unsure` is offered as an answer token. THIS
+# vocabulary is used ONLY on Class 4-7 ("shade") rows -- see
+# IDENTITY_VOCABULARY below for the separate Class 1-3 question.
 # ---------------------------------------------------------------------------
 SHADE_VOCABULARY: Tuple[Tuple[str, str], ...] = (
     ("confirms", "an aid already ties this fragment to this work"),
@@ -182,6 +212,18 @@ SHADE_VOCABULARY: Tuple[Tuple[str, str], ...] = (
         "vice versa. Same Correctness column and same hidden-by-default posture as diverges_work.",
     ),
     (
+        "container_predicts",
+        "an aid names a BROADER rite/cycle/ceremony/container -- a full standard-rite prayer-book "
+        "(siddur/machzor) or a named ceremony/occasion -- whose STANDARD, PREDICTABLE content includes "
+        "this specific unit, WITHOUT ever naming the unit itself (owner ruling H; e.g. the catalogue "
+        "names 'מחזור מנהג אשכנז לשלש רגלים', the claim is a Yotzer for one of its festivals). Distinct "
+        "from `confirms` (the aid never names this specific unit) and from `fills_gap` (the content IS "
+        "predictable, so it is not 'previously unknown' -- under the pre-H enum this fell through to "
+        "`fills_gap` by elimination). Excluded from the candidate toggle like every other non-`fills_gap` "
+        "shade, but -- UNLIKE `diverges_work`/`diverges_part` -- shown NORMALLY, never hidden by "
+        "default: there is no disagreement here to warn about, only a container relationship.",
+    ),
+    (
         "fills_gap",
         "the aids identify this fragment as nothing at all -- the genuine \"previously unknown\" case",
     ),
@@ -207,8 +249,8 @@ SHADE_VOCABULARY: Tuple[Tuple[str, str], ...] = (
 )
 # The real SHADE tokens only (excludes the two non-shade answer tokens
 # `unsure` / `skip`) -- this is the XLSX DataValidation list together with
-# `unsure` / `skip` appended (ten tokens total): eight real shades that are
-# owner-facing (the ninth stored value, `not_checked`, is a fail-closed
+# `unsure` / `skip` appended (eleven tokens total): nine real shades that are
+# owner-facing (the tenth stored value, `not_checked`, is a fail-closed
 # system default never picked directly -- `unsure` is its owner-facing
 # alias) plus the two non-shade answers.
 SHADE_TOKENS: Tuple[str, ...] = tuple(tok for tok, _ in SHADE_VOCABULARY)
@@ -1392,6 +1434,140 @@ def select_catalogue_divergence_candidates(
 
 
 # ---------------------------------------------------------------------------
+# Liturgical-container detection (owner ruling H, 136-GATE1-DECISIONS.md § H;
+# 136-NOVELTY-PRIOR-ART.md § 4's worked examples: `יוצר ח פסח` where the aid
+# names `מחזור מנהג אשכנז לשלש רגלים`; `יוצרות לשבתות` where the aid names
+# `סדור מנהג אשכנז המזרחי`). Both worked examples share ONE precise shape:
+# a container NOUN (מחזור/סדור/סידור) immediately followed by `מנהג`
+# ("the custom/rite of ...") -- i.e. the aid names a SPECIFIC, NAMED
+# standard-rite prayer-book, not merely a generic liturgical-genre
+# CLASSIFICATION TAG. This distinction is load-bearing and was verified
+# empirically against the live asset before being pinned here: a bare
+# container-noun substring test (no `מנהג` qualifier) fires on catalogue
+# TAGS like "תוספות של סידור" ("Siddur additions" -- a structural
+# classification label, not a named rite book) at a rate that would dilute
+# this class with weaker cases; requiring the `מנהג` collocation isolates
+# the genuinely NAMED-rite shape the owner's own worked examples describe.
+# Defined HERE independently of same_work_spike/probe/scripts/title_gate.py's
+# gitignored GENRE_OF/GENERIC_TOKENS vocabularies, which this project's
+# committed code may never depend on (see the module docstring's
+# masking/import discipline).
+# ---------------------------------------------------------------------------
+_LITURGICAL_CONTAINER_RITE_RE = re.compile(r"(מחזור|סדור|סידור)\s*מנהג")
+
+
+def select_liturgical_container_candidates(
+    claims: List[Dict[str, Any]],
+    works: Dict[str, Dict[str, Any]],
+    libraries: Dict[str, Dict[str, str]],
+    cap: int = 12,
+) -> List[Dict[str, Any]]:
+    """Class 7 (liturgical-container predictability, owner rulings H and I --
+    136-GATE1-DECISIONS.md §§ H, I; 136-NOVELTY-PRIOR-ART.md § 4): shipped
+    ``direct_witness`` claims where the manuscript's OWN ``libraries.csv``
+    catalogue-identification text names a SPECIFIC, NAMED standard-rite
+    prayer-book/cycle (the ``_LITURGICAL_CONTAINER_RITE_RE`` collocation --
+    a container noun immediately followed by ``מנהג``) whose standard,
+    predictable content plausibly includes the claimed unit, without the
+    catalogue text ever naming that unit itself. This is the shape the
+    prior-art research pass measured as 1,327 of 20,410 in-scope rows
+    (6.5%) under the OLDER five-way title-gate vocabulary's ``witness``
+    verdict, which owner ruling H adopts as a shade under the non-colliding
+    name ``container_predicts`` (see SHADE_VOCABULARY above -- "witness"
+    already names five OTHER distinct concepts in this project).
+
+    Measured against the live asset (verified before this selector was
+    pinned): the dominant real-world instance of this shape is a
+    Genizah leaf catalogued as a named-rite siddur/machzor carrying a
+    Psalm, or another fixed liturgical component, as its claimed
+    identification -- a standard prayer-rite predictably includes specific
+    Psalms/blessings as part of its fixed liturgy, so a novelty check that
+    only reads the container's OWN name (never naming "Psalm 145"
+    specifically) would otherwise misfile that claim as `fills_gap`.
+
+    Selection is pure deterministic string containment, the identical
+    discipline as ``select_catalogue_divergence_candidates`` above -- ZERO
+    model calls, fully reproducible. A candidate requires BOTH:
+    (1) the catalogue text (normalized) matches the named-rite container
+        collocation;
+    (2) the claimed work's own FULL normalized title is NOT already
+        contained in the catalogue text (that would be `confirms` -- the
+        aid already names the specific unit -- not a container relationship
+        at all).
+
+    One candidate per manuscript (sys_id): the claim with the most
+    ``matched_letters``, then lexicographically smallest ``page_id`` and
+    ``work_id`` -- a total order, never "whichever row the query happens to
+    return first". Candidates are then GROUPED by the claimed work and
+    round-robined across groups (largest group first, ties by work_id) --
+    the identical discipline ``select_generic_collection_candidates`` and
+    ``select_catalogue_divergence_candidates`` above use for their own
+    clusters: a single dominant liturgical unit (measured: Psalms, by a wide
+    margin) would otherwise crowd out every other container-predicted work
+    in the capped list. Deterministic, no randomness, no sampling;
+    re-running against the same asset reproduces the identical candidate
+    list byte-for-byte.
+    """
+    best_by_sys: Dict[str, Dict[str, Any]] = {}
+    container_phrase_by_sys: Dict[str, str] = {}
+    for c in claims:
+        if c.get("claim_type") != "direct_witness" or c.get("routing_status") != "shipped":
+            continue
+        sid = c["sys_id"]
+        cat_text = libraries.get(sid, {}).get("catalogue_text", "")
+        if not cat_text:
+            continue
+        cat_norm = normalize_title(cat_text)
+        match = _LITURGICAL_CONTAINER_RITE_RE.search(cat_norm) if cat_norm else None
+        if match is None:
+            continue
+        w = works.get(c["work_id"])
+        if w is None:
+            continue
+        claimed_norm = normalize_title(w.get("neutral_title"))
+        if not claimed_norm:
+            continue
+        if claimed_norm in cat_norm:
+            continue  # the aid already names this exact unit -- confirms, not a container relationship
+        key = (-(c["matched_letters"] or 0), c["page_id"], c["work_id"])
+        prev = best_by_sys.get(sid)
+        if prev is None or key < prev["_key"]:
+            d = dict(c)
+            d["_key"] = key
+            best_by_sys[sid] = d
+            container_phrase_by_sys[sid] = match.group(0)
+
+    by_work: Dict[str, List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
+    for sid, entry in best_by_sys.items():
+        by_work[entry["work_id"]].append((sid, entry))
+    groups: List[Tuple[int, str, List[Tuple[str, Dict[str, Any]]]]] = []
+    for wid, entries in by_work.items():
+        entries.sort(key=lambda e: e[0])  # sys_id
+        groups.append((len(entries), wid, entries))
+    groups.sort(key=lambda t: (-t[0], t[1]))
+
+    out: List[Dict[str, Any]] = []
+    round_idx = 0
+    while len(out) < cap:
+        added_this_round = False
+        for _size, _wid, entries in groups:
+            if round_idx < len(entries):
+                sid, entry = entries[round_idx]
+                out.append({
+                    "sys_id": sid,
+                    "claim": entry,
+                    "container_phrase": container_phrase_by_sys[sid],
+                })
+                added_this_round = True
+                if len(out) >= cap:
+                    break
+        if not added_this_round:
+            break
+        round_idx += 1
+    return out[:cap]
+
+
+# ---------------------------------------------------------------------------
 # Class-6 owner scope/shade annotations (rulings F/G, 136-GATE1-DECISIONS.md
 # §§ F/G). The owner read all 15 of the ORIGINAL Class-6 candidates directly
 # (not merely the shade's abstract definition) and issued explicit verdicts
@@ -1448,6 +1624,7 @@ def build_hardcases(
     class4_cap: int = 20,
     class5_cap: int = 25,
     class6_cap: int = 30,
+    class7_cap: int = 12,
 ) -> List[Dict[str, Any]]:
     cases: List[Dict[str, Any]] = []
 
@@ -1711,6 +1888,44 @@ def build_hardcases(
             "proposal": proposal,
         })
 
+    # --- Class 7: liturgical-container predictability (owner rulings H/I,
+    # 136-GATE1-DECISIONS.md §§ H/I) -- NOVELTY SHADE question. A NEW class,
+    # not part of the Class 4-6 owner-authorized expansion: ruling I asks
+    # this shape be represented in the owner-labelled evaluation set BEFORE
+    # the pinned model gate meets it in production, since the pinned
+    # config's 40/40-agreement / 99%-vs-103-human-grades validation covers
+    # neither the widened shade enum nor this container relationship (a
+    # different input question from the five-way vocabulary's own
+    # `witness` verdict, which this class's shade is adopted FROM but not
+    # re-validated against). Target ~12 cases. ---
+    container = select_liturgical_container_candidates(claims, works, libraries, cap=class7_cap)
+    for entry in container:
+        sid = entry["sys_id"]
+        c = entry["claim"]
+        w = works.get(c["work_id"])
+        cat = libraries.get(sid, {})
+        title = f"{w['neutral_title']} ({c['work_id']})" if w else c["work_id"]
+        cases.append({
+            "class": "liturgical_container",
+            "question_type": "shade",
+            "sys_id": sid,
+            "shelfmark": cat.get("shelfmark", ""),
+            "catalogue_text": cat.get("catalogue_text", ""),
+            "work_titles": [title],
+            "reason": (
+                "This manuscript's own catalogue identification text names a SPECIFIC, NAMED "
+                f"standard-rite prayer-book/cycle (a container collocation: {entry['container_phrase']!r}), "
+                "whose standard, predictable content plausibly includes this specific claimed unit -- "
+                "without the catalogue text ever naming the unit itself. Under the pre-H shade enum "
+                "this would fall through to `fills_gap` by elimination, which would publish a "
+                "standard siddur/machzor component as a candidate new find."
+            ),
+            "proposal": (
+                "PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): "
+                "plausibly `container_predicts` -- confirm or correct."
+            ),
+        })
+
     return cases
 
 
@@ -1941,14 +2156,15 @@ def render_evidence_brief(
 # continuation as rulings F/G): these rows compare two of OUR OWN claims and
 # have no claim-vs-aid relationship to judge, so decision E's shade
 # vocabulary never applied to them coherently in the first place. Classes
-# 4-6 ask the NOVELTY SHADE question. See the module docstring and
-# 136-GATE1-DECISIONS.md's labelling-restructure note for the full rationale.
+# 4-7 ask the NOVELTY SHADE question (Class 7 added later, owner rulings
+# H/I). See the module docstring and 136-GATE1-DECISIONS.md's
+# labelling-restructure note for the full rationale.
 _IDENTITY_CLASSES: frozenset = frozenset({"granularity", "alias", "near_miss"})
 
 # Per-class guidance for which of the shade vocabulary's tokens are actually
 # plausible answers for that class's kind of hard case (136-03 Task 4 --
 # "say plainly, per class, which shades are plausible answers for that
-# class"). ONLY meaningful for the three SHADE classes (4-6) -- every case
+# class"). ONLY meaningful for the four SHADE classes (4-7) -- every case
 # can still receive ANY shade, `unsure`, or `skip`; this is a reading aid for
 # the owner, never a constraint enforced by this script.
 _PLAUSIBLE_SHADES_BY_CLASS: Dict[str, Tuple[str, ...]] = {
@@ -1960,6 +2176,11 @@ _PLAUSIBLE_SHADES_BY_CLASS: Dict[str, Tuple[str, ...]] = {
     "catalogue_divergence": (
         "diverges_work", "diverges_part", "aid_more_specific", "refines_granularity", "confirms",
     ),
+    # H: the selector's own PROPOSAL is `container_predicts`, but `fills_gap`
+    # and `confirms` remain plausible corrections (e.g. if the "container"
+    # match is coincidental, or the catalogue text turns out to name the
+    # unit itself under a phrasing the selector's substring test missed).
+    "liturgical_container": ("container_predicts", "fills_gap", "confirms"),
 }
 
 # Per-class guidance for the IDENTITY classes (1-3) -- always the same two
@@ -1980,10 +2201,11 @@ _CLASS_TITLES: Dict[str, str] = {
     "terse_catalogue": "Class 4 -- terse or missing catalogue identification text (NOVELTY SHADE, owner-authorized extension)",
     "generic_collection": "Class 5 -- generic collection works (NOVELTY SHADE, owner-authorized extension)",
     "catalogue_divergence": "Class 6 -- catalogue divergence (NOVELTY SHADE, owner rulings E/E′/F/G)",
+    "liturgical_container": "Class 7 -- liturgical-container predictability (NOVELTY SHADE, owner rulings H/I)",
 }
 _CLASS_ORDER: Tuple[str, ...] = (
     "granularity", "alias", "near_miss", "terse_catalogue", "generic_collection",
-    "catalogue_divergence",
+    "catalogue_divergence", "liturgical_container",
 )
 
 
@@ -2013,10 +2235,12 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
     a = lines.append
     identity_total = sum(1 for c in cases if c["class"] in _IDENTITY_CLASSES)
     shade_total = len(cases) - identity_total
+    class7_total = sum(1 for c in cases if c["class"] == "liturgical_container")
+    classes_4_6_total = shade_total - class7_total
     a("# Phase 136 Plan 03 -- Novelty Hard-Case Candidates")
     a("")
     a(f"**{len(cases)} candidates total: {identity_total} IDENTITY spot-check cases (Classes 1-3) + "
-      f"{shade_total} NOVELTY SHADE cases (Classes 4-6).** Restructured per an owner-authorized "
+      f"{shade_total} NOVELTY SHADE cases (Classes 4-7).** Restructured per an owner-authorized "
       "labelling-restructure ruling (`136-GATE1-DECISIONS.md`, the note appended after items F/G) "
       "made AFTER the owner read the original 97-case worksheet directly: Classes 1-3 compare two of "
       "OUR OWN claims to each other (an A↔B \"is this the same work\" identity judgment) and were "
@@ -2025,9 +2249,13 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
       f"{identity_total}-case SPOT-CHECK that TESTS the constant-answer assumption rather than "
       "building ground truth. Classes 4-6 are where the answer genuinely varies and carry the "
       "NOVELTY SHADE question (a claim-vs-finding-aid judgment); they are EXPANDED from the original "
-      f"45 to {shade_total} candidates. Every case in both groups is selected entirely by "
-      "string/title/metadata comparison over the works and manuscripts already in the deployed asset "
-      "-- **zero model calls, measured cost $0.00**. Any attached draft verdict below is explicitly "
+      f"45 to {classes_4_6_total} candidates. **Class 7 is NEW** (owner rulings H/I, "
+      "`136-GATE1-DECISIONS.md` §§ H/I -- not part of that 45→"
+      f"{classes_4_6_total} expansion): {class7_total} liturgical-container-predictability candidates, "
+      "added so the pinned model gate's FIRST encounter with this shape is a graded evaluation, not "
+      "production. Every case in every group is selected entirely by string/title/metadata comparison "
+      "over the works and manuscripts already in the deployed asset -- **zero model calls, measured "
+      "cost $0.00**. Any attached draft verdict below is explicitly "
       "marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this "
       "script as an owner answer. This worksheet is also emitted as `136-NOVELTY-HARDCASES.xlsx` "
       "(same phase directory, THREE sheets: \"Identity Spot-Check\", \"Novelty Shades\", "
@@ -2082,19 +2310,21 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
               "`unsure` / `skip`)_")
             a("")
 
-    a("## Part B -- NOVELTY SHADE cases (Classes 4-6)")
+    a("## Part B -- NOVELTY SHADE cases (Classes 4-7)")
     a("")
     a("**Question type: NOVELTY SHADE, a claim-vs-finding-aid judgment (never A↔B identity).** For "
       "EACH case below, answer with the shade that best describes what an enumerable finding aid "
       "(the catalogue's own identification field, bibliography, titles, PGP, FGP, M-source shelfmark "
       "attributions) actually says about THIS fragment and THIS work -- or `unsure` / `skip`. "
-      "Amended 2026-08-02 by owner decisions E / E′ / F / G (`136-GATE1-DECISIONS.md` items E, E′, "
-      "F, G): the tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`) collapsed "
+      "Amended 2026-08-02 by owner decisions E / E′ / F / G / H (`136-GATE1-DECISIONS.md` items E, "
+      "E′, F, G, H): the tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`) collapsed "
       "materially different findings into one bucket -- a catalogue CONTRADICTION and a genuine "
       "\"previously unknown\" both scored the same way, a granularity refinement that helps and one "
-      "that adds nothing also scored the same way (E′), and a flat wrong-work divergence and a "
-      "same-work-wrong-part divergence also scored the same way, with no way to record WHICH SIDE is "
-      "actually correct (F) -- so the shade enum now carries NINE values.")
+      "that adds nothing also scored the same way (E′), a flat wrong-work divergence and a "
+      "same-work-wrong-part divergence also scored the same way with no way to record WHICH SIDE is "
+      "actually correct (F), and a broader-container relationship (a standard-rite prayer-book "
+      "predicting a specific unit it never names) had NO shade at all and fell through to `fills_gap` "
+      "by elimination (H) -- so the shade enum now carries TEN values.")
     a("")
     a("| Shade | Choose this when... |")
     a("|---|---|")
@@ -2188,8 +2418,8 @@ def write_hardcases_xlsx(cases: List[Dict[str, Any]], path: str) -> None:
 
     - "Identity Spot-Check" (Classes 1-3, the ~8-case A↔B spot-check): an
       Identity dropdown (`same_work` / `different_works` / `unsure` / `skip`).
-    - "Novelty Shades" (Classes 4-6, ~75 cases): a Verdict dropdown (the full
-      nine-shade vocabulary) PLUS a Correctness dropdown (owner ruling F --
+    - "Novelty Shades" (Classes 4-7, ~87 cases): a Verdict dropdown (the full
+      ten-shade vocabulary) PLUS a Correctness dropdown (owner ruling F --
       `catalogue_correct` / `claim_correct` / `unclear`, meaningful only on
       `diverges_work` / `diverges_part` rows; blank elsewhere).
     - "Vocabulary & Instructions" (both vocabularies + per-class hints + the
@@ -2294,7 +2524,7 @@ def write_hardcases_xlsx(cases: List[Dict[str, Any]], path: str) -> None:
     if last_row1 >= 2:
         dv_identity.add(f"B2:B{last_row1}")
 
-    # --- Sheet 2: Novelty Shades (Classes 4-6) ---
+    # --- Sheet 2: Novelty Shades (Classes 4-7) ---
     ws2 = wb.create_sheet(title="Novelty Shades")
     ws2.sheet_view.rightToLeft = True
     headers2 = [
@@ -2328,8 +2558,8 @@ def write_hardcases_xlsx(cases: List[Dict[str, Any]], path: str) -> None:
     ws2.freeze_panes = "D2"
     ws2.auto_filter.ref = f"A1:{get_column_letter(len(headers2))}{last_row2}"
 
-    # Shade Verdict dropdown -- the FULL vocabulary (eight real shades +
-    # `unsure` + `skip`, i.e. every token in SHADE_VOCABULARY -- ten total).
+    # Shade Verdict dropdown -- the FULL vocabulary (nine real shades +
+    # `unsure` + `skip`, i.e. every token in SHADE_VOCABULARY -- eleven total).
     # Blank is allowed ("not yet answered" is a legitimate transient state);
     # the Vocabulary sheet explains a blank is NOT a label.
     dv_shade = DataValidation(
@@ -2402,7 +2632,7 @@ def write_hardcases_xlsx(cases: List[Dict[str, Any]], path: str) -> None:
     _note(
         "\"Identity Spot-Check\" (Classes 1-3): these rows compare two of OUR OWN claims to each "
         "other -- an A vs B \"same underlying work?\" judgment, no finding aid involved at all. "
-        "\"Novelty Shades\" (Classes 4-6): these rows judge ONE claim against the finding aids -- the "
+        "\"Novelty Shades\" (Classes 4-7): these rows judge ONE claim against the finding aids -- the "
         "question genuinely varies here, which is why it carries the fuller shade vocabulary plus a "
         "Correctness column for divergence rows."
     )
@@ -2553,6 +2783,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ledger.check("hardcases_class4_terse_catalogue", sum(1 for c in hardcases if c["class"] == "terse_catalogue"))
         ledger.check("hardcases_class5_generic_collection", sum(1 for c in hardcases if c["class"] == "generic_collection"))
         ledger.check("hardcases_class6_catalogue_divergence", sum(1 for c in hardcases if c["class"] == "catalogue_divergence"))
+        ledger.check("hardcases_class7_liturgical_container", sum(1 for c in hardcases if c["class"] == "liturgical_container"))
         ledger.check("hardcases_identity_total", sum(1 for c in hardcases if c["class"] in _IDENTITY_CLASSES))
         ledger.check("hardcases_shade_total", sum(1 for c in hardcases if c["class"] not in _IDENTITY_CLASSES))
         # Acceptance criteria: any attached draft verdict MUST be explicitly

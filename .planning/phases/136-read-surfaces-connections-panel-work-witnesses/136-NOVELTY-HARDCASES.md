@@ -1,6 +1,6 @@
 # Phase 136 Plan 03 -- Novelty Hard-Case Candidates
 
-**83 candidates total: 8 IDENTITY spot-check cases (Classes 1-3) + 75 NOVELTY SHADE cases (Classes 4-6).** Restructured per an owner-authorized labelling-restructure ruling (`136-GATE1-DECISIONS.md`, the note appended after items F/G) made AFTER the owner read the original 97-case worksheet directly: Classes 1-3 compare two of OUR OWN claims to each other (an A↔B "is this the same work" identity judgment) and were found, on reading the actual cases, to bake "same work" into their own selection criterion (same author + common title stem) -- so full labelling of all 52 is REPLACED by this 8-case SPOT-CHECK that TESTS the constant-answer assumption rather than building ground truth. Classes 4-6 are where the answer genuinely varies and carry the NOVELTY SHADE question (a claim-vs-finding-aid judgment); they are EXPANDED from the original 45 to 75 candidates. Every case in both groups is selected entirely by string/title/metadata comparison over the works and manuscripts already in the deployed asset -- **zero model calls, measured cost $0.00**. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer. This worksheet is also emitted as `136-NOVELTY-HARDCASES.xlsx` (same phase directory, THREE sheets: "Identity Spot-Check", "Novelty Shades", "Vocabulary & Instructions") for owners who find Hebrew RTL easier to work with in a spreadsheet; both files render the SAME cases in the SAME order, from the same pre-numbered case list, so the two agree case-for-case.
+**95 candidates total: 8 IDENTITY spot-check cases (Classes 1-3) + 87 NOVELTY SHADE cases (Classes 4-7).** Restructured per an owner-authorized labelling-restructure ruling (`136-GATE1-DECISIONS.md`, the note appended after items F/G) made AFTER the owner read the original 97-case worksheet directly: Classes 1-3 compare two of OUR OWN claims to each other (an A↔B "is this the same work" identity judgment) and were found, on reading the actual cases, to bake "same work" into their own selection criterion (same author + common title stem) -- so full labelling of all 52 is REPLACED by this 8-case SPOT-CHECK that TESTS the constant-answer assumption rather than building ground truth. Classes 4-6 are where the answer genuinely varies and carry the NOVELTY SHADE question (a claim-vs-finding-aid judgment); they are EXPANDED from the original 45 to 75 candidates. **Class 7 is NEW** (owner rulings H/I, `136-GATE1-DECISIONS.md` §§ H/I -- not part of that 45→75 expansion): 12 liturgical-container-predictability candidates, added so the pinned model gate's FIRST encounter with this shape is a graded evaluation, not production. Every case in every group is selected entirely by string/title/metadata comparison over the works and manuscripts already in the deployed asset -- **zero model calls, measured cost $0.00**. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer. This worksheet is also emitted as `136-NOVELTY-HARDCASES.xlsx` (same phase directory, THREE sheets: "Identity Spot-Check", "Novelty Shades", "Vocabulary & Instructions") for owners who find Hebrew RTL easier to work with in a spreadsheet; both files render the SAME cases in the SAME order, from the same pre-numbered case list, so the two agree case-for-case.
 
 ## Part A -- IDENTITY spot-check (Classes 1-3)
 
@@ -90,9 +90,9 @@
 - **Why this pair is adversarial to a STRING heuristic:** Same author; normalized titles are 93.6% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
 - **Identity verdict:** _(pending Task 3 -- `same_work` / `different_works` / `unsure` / `skip`)_
 
-## Part B -- NOVELTY SHADE cases (Classes 4-6)
+## Part B -- NOVELTY SHADE cases (Classes 4-7)
 
-**Question type: NOVELTY SHADE, a claim-vs-finding-aid judgment (never A↔B identity).** For EACH case below, answer with the shade that best describes what an enumerable finding aid (the catalogue's own identification field, bibliography, titles, PGP, FGP, M-source shelfmark attributions) actually says about THIS fragment and THIS work -- or `unsure` / `skip`. Amended 2026-08-02 by owner decisions E / E′ / F / G (`136-GATE1-DECISIONS.md` items E, E′, F, G): the tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`) collapsed materially different findings into one bucket -- a catalogue CONTRADICTION and a genuine "previously unknown" both scored the same way, a granularity refinement that helps and one that adds nothing also scored the same way (E′), and a flat wrong-work divergence and a same-work-wrong-part divergence also scored the same way, with no way to record WHICH SIDE is actually correct (F) -- so the shade enum now carries NINE values.
+**Question type: NOVELTY SHADE, a claim-vs-finding-aid judgment (never A↔B identity).** For EACH case below, answer with the shade that best describes what an enumerable finding aid (the catalogue's own identification field, bibliography, titles, PGP, FGP, M-source shelfmark attributions) actually says about THIS fragment and THIS work -- or `unsure` / `skip`. Amended 2026-08-02 by owner decisions E / E′ / F / G / H (`136-GATE1-DECISIONS.md` items E, E′, F, G, H): the tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`) collapsed materially different findings into one bucket -- a catalogue CONTRADICTION and a genuine "previously unknown" both scored the same way, a granularity refinement that helps and one that adds nothing also scored the same way (E′), a flat wrong-work divergence and a same-work-wrong-part divergence also scored the same way with no way to record WHICH SIDE is actually correct (F), and a broader-container relationship (a standard-rite prayer-book predicting a specific unit it never names) had NO shade at all and fell through to `fills_gap` by elimination (H) -- so the shade enum now carries TEN values.
 
 | Shade | Choose this when... |
 |---|---|
@@ -101,6 +101,7 @@
 | `aid_more_specific` | an AID names a MORE SPECIFIC (finer) variant of this fragment's work than our claim does -- e.g. the catalogue names a chapter/book, our claim names the whole work (the D-13d same-author/related-title rule); the OPPOSITE direction from `refines_granularity` -- we add NOTHING here, the aid already knew more (owner correction E′; the LEAST novel shade) |
 | `diverges_work` | an aid ties this fragment to a genuinely DIFFERENT WORK (not a granularity variant of ours) -- the aid and the claim contradict each other on WHICH WORK this is (owner ruling F, replacing the single `diverges` token). Owner: reading real cases, USUALLY the catalogue is right and this is OUR false positive -- but not always; record which side is correct in the separate Correctness column. Hidden by default on every surface, behind an explicit warned toggle -- never silently shown, never silently suppressed. |
 | `diverges_part` | an aid ties this fragment to a DIFFERENT OR FINER PART of the SAME work (owner ruling F -- "more delicate and essentially less important" than diverges_work) -- e.g. the aid names a specific chapter/section of the work while we name a different one, or the whole work, or vice versa. Same Correctness column and same hidden-by-default posture as diverges_work. |
+| `container_predicts` | an aid names a BROADER rite/cycle/ceremony/container -- a full standard-rite prayer-book (siddur/machzor) or a named ceremony/occasion -- whose STANDARD, PREDICTABLE content includes this specific unit, WITHOUT ever naming the unit itself (owner ruling H; e.g. the catalogue names 'מחזור מנהג אשכנז לשלש רגלים', the claim is a Yotzer for one of its festivals). Distinct from `confirms` (the aid never names this specific unit) and from `fills_gap` (the content IS predictable, so it is not 'previously unknown' -- under the pre-H enum this fell through to `fills_gap` by elimination). Excluded from the candidate toggle like every other non-`fills_gap` shade, but -- UNLIKE `diverges_work`/`diverges_part` -- shown NORMALLY, never hidden by default: there is no disagreement here to warn about, only a container relationship. |
 | `fills_gap` | the aids identify this fragment as nothing at all -- the genuine "previously unknown" case |
 | `extends` | aids tie OTHER folios of the SAME manuscript to this work, but not this specific folio |
 | `alias_merge` | the two work_ids shown ARE the same underlying work, not yet canonically merged (Class 2's situation) |
@@ -813,4 +814,116 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **PROPOSAL (draft, not a label): plausibly `diverges_work` or `diverges_part` (scope not yet distinguished by owner rulings F/G for this specific case) -- the catalogue and this claim name different works or parts; per ruling G, first check whether the catalogue's own FREE TEXT already states this claim's identification under a different spelling/phrasing before confirming a divergence -- confirm the shade, the scope, and (if divergent) the Correctness call, or correct.**
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
+
+### Class 7 -- liturgical-container predictability (NOVELTY SHADE, owner rulings H/I) (12 candidates)
+
+**Plausible shades for this class:** `container_predicts`, `fills_gap`, `confirms` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
+
+#### Case 84
+
+- **Manuscript:** Cambridge University Library Ms. Add. 3356 (sys_id `990001398970205171`)
+- **Work(s):** תנ"ך, תהלים (w000112)
+- **Catalogue's own identification text:** מחזור מנהג ארץ ישראל הקדמון.
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'מחזור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 85
+
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 33/03 (sys_id `990001413070205171`)
+- **Work(s):** תנ"ך, שמות (w000087)
+- **Catalogue's own identification text:** מחזור מנהג אשכנז לשלש רגלים : ; קטעי גניזה.
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'מחזור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 86
+
+- **Manuscript:** Ms. EVR II A 58 (sys_id `990001429050205171`)
+- **Work(s):** תנ"ך, ישעיהו (w000097)
+- **Catalogue's own identification text:** מחזור מנהג ספרד לשלש רגלים.
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'מחזור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 87
+
+- **Manuscript:** Ms. EVR II A 300/4 (sys_id `990001436770205171`)
+- **Work(s):** תנ"ך, דברים (w000090)
+- **Catalogue's own identification text:** סדור מנהג קראים.
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 88
+
+- **Manuscript:** Ms. EVR II A 810 (sys_id `990001442520205171`)
+- **Work(s):** תנ"ך, ויקרא (w000088)
+- **Catalogue's own identification text:** סדור מנהג קראים (קטע).
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 89
+
+- **Manuscript:** Ms. EVR II A 1006 (sys_id `990001444570205171`)
+- **Work(s):** תנ"ך, יחזקאל (w000099)
+- **Catalogue's own identification text:** סדור מנהג קראים.
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 90
+
+- **Manuscript:** Ms. EVR II A 642 (sys_id `990001441300205171`)
+- **Work(s):** תנ"ך, במדבר (w000089)
+- **Catalogue's own identification text:** סדור מנהג קראים (קטע).
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 91
+
+- **Manuscript:** Library of the Hungarian Academy of Sciences Ms. 116 (sys_id `990001035960205171`)
+- **Work(s):** משנה תורה, ספר אהבה (w000176)
+- **Catalogue's own identification text:** מחזור מנהג ספרד לראש השנה (קטע).
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'מחזור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 92
+
+- **Manuscript:** Ms. EVR II A 834 (sys_id `990001442760205171`)
+- **Work(s):** תנ"ך, ירמיהו (w000098)
+- **Catalogue's own identification text:** סדור מנהג קראים (קטעים).
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 93
+
+- **Manuscript:** Ms. EVR II A 2007 (sys_id `990001454910205171`)
+- **Work(s):** תנ"ך, דניאל (w000120)
+- **Catalogue's own identification text:** סדור מנהג קראים (קטעים).
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 94
+
+- **Manuscript:** Ms. EVR II A 2060 (sys_id `990001455500205171`)
+- **Work(s):** תנ"ך, דברי הימים ב (w000124)
+- **Catalogue's own identification text:** סדור מנהג קראים (קטעים).
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 95
+
+- **Manuscript:** Ms. EVR II A 867 (sys_id `990001443150205171`)
+- **Work(s):** תנ"ך, דברי הימים א (w000123)
+- **Catalogue's own identification text:** סדור מנהג קראים (קטעים).
+- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
+- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
