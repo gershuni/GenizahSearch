@@ -168,6 +168,8 @@ from __future__ import annotations
 import argparse
 import csv
 import difflib
+import hashlib
+import json
 import os
 import re
 import sqlite3
@@ -2839,6 +2841,12 @@ _CLASS_ORDER: Tuple[str, ...] = (
     "granularity", "alias", "near_miss", "catalogue_divergence",
     "residual", "heuristic_demoted", "no_source_text",
 )
+# Reverse lookup (rendered "Class" column text -> internal class code) --
+# used by the Task 4 read-back below so the JSON label file stores the SAME
+# short codes the rest of this module already uses internally, without a
+# second, hand-maintained copy of the class-title strings drifting out of
+# sync with `_CLASS_TITLES` above.
+_CLASS_TITLE_TO_CODE: Dict[str, str] = {v: k for k, v in _CLASS_TITLES.items()}
 
 
 def assign_case_numbers(cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -3523,6 +3531,358 @@ def write_hardcases_xlsx(cases: List[Dict[str, Any]], path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Task 4 -- reading the owner's verdicts back from the labelled XLSX.
+#
+# 136-GATE1-DECISIONS.md's own "Outstanding" section spells out the contract
+# this implements: read by Case #, never by row position; a truly blank
+# verdict cell is an explicit `skip`, NEVER silently filled from its own
+# PROPOSAL draft; reject any value outside the sheet's own vocabulary
+# (defense in depth behind the workbook's DataValidation, which a real
+# spreadsheet application re-save is not guaranteed to preserve); fail
+# CLOSED on a missing/renamed sheet, a missing/renamed column, or a Case #
+# that does not match one of the 101 emitted cases (T-136-03-06 -- a label
+# file must not silently tolerate a tampered or hand-edited workbook).
+# ---------------------------------------------------------------------------
+
+DEFAULT_LABELS_OUT = os.path.join(REPO_ROOT, "discovery_data", "novelty_hardcase_labels-v1.json")
+# The date the owner returned the filled-in workbook (136-GATE1-DECISIONS.md,
+# "Status of this record" / rulings A-J all share this date).
+LABEL_PROVENANCE_DATE = "2026-08-02"
+
+_SHADE_DIVERGENCE_TOKENS = frozenset({"diverges_work", "diverges_part"})
+
+# The exact header row `write_hardcases_xlsx` writes for each sheet -- read
+# back and compared verbatim so a renamed/reordered column fails closed
+# rather than silently misreading a different field.
+_EXPECTED_SHEET_HEADERS: Dict[str, Tuple[str, ...]] = {
+    "Identity Spot-Check": (
+        "Case #", "Identity verdict", "Class", "Manuscript", "sys_id",
+        "A vs B (claim pair)", "Catalogue's own identification text",
+        "Why adversarial to a string heuristic", "PROPOSAL (draft -- NOT a label)",
+    ),
+    "Novelty Shades": (
+        "Case #", "Shade verdict", "Correctness (diverges_work/diverges_part only)", "Class",
+        "Plausible shades", "Manuscript", "sys_id", "Claimed work(s)",
+        "Catalogue's own identification text", "Why it is hard",
+        "PROPOSAL (draft -- NOT a label)",
+    ),
+    "Heuristic-Demoted": (
+        "Case #", "Demotion verdict", "Stratum", "Class", "Manuscript", "sys_id",
+        "Claimed work", "Catalogue's own identification text",
+        "Why this demotion is being checked", "PROPOSAL (draft -- NOT a label)",
+    ),
+    "No-Source-Text": (
+        "Case #", "Class", "Manuscript", "sys_id", "Claimed work",
+        "Why no verdict is collected",
+    ),
+}
+
+_RESIDUAL_STRATUM_RE = re.compile(r"Residual stratum `([a-zA-Z0-9_]+)`")
+_PROPOSAL_TOKEN_RE = re.compile(r"plausibly `([a-zA-Z0-9_]+)`")
+
+
+class LabelReadError(Exception):
+    """Raised to fail CLOSED on any structural defect in the labelled workbook."""
+
+
+def _header_row(ws) -> Tuple[Any, ...]:
+    return tuple(c.value for c in next(ws.iter_rows(min_row=1, max_row=1)))
+
+
+def _require_sheet(wb, name: str):
+    if name not in wb.sheetnames:
+        raise LabelReadError(
+            f"expected sheet {name!r} not found in workbook (sheets present: {wb.sheetnames})"
+        )
+    ws = wb[name]
+    got = _header_row(ws)
+    want = _EXPECTED_SHEET_HEADERS[name]
+    if got != want:
+        raise LabelReadError(
+            f"sheet {name!r} header row does not match the expected contract.\n"
+            f"  expected: {want}\n  got:      {got}"
+        )
+    return ws
+
+
+def _clean_cell(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
+
+
+def _proposal_token(proposal_text: Optional[str]) -> Optional[str]:
+    if not proposal_text:
+        return None
+    m = _PROPOSAL_TOKEN_RE.search(proposal_text)
+    return m.group(1) if m else None
+
+
+def _provenance(
+    sheet: str,
+    proposal_token: Optional[str],
+    verdict: Optional[str],
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Confirmed vs corrected is derived, never asserted -- a case with no
+    draft PROPOSAL simply carries ``proposal_shown: false`` and
+    ``confirmed_proposal: None`` (not applicable), matching the plan's own
+    "leaving it untouched does not count as confirming" discipline applied
+    to whichever token WAS in the draft, if any."""
+    confirmed: Optional[bool] = None
+    if proposal_token is not None and verdict not in (None, "skip", "unsure"):
+        confirmed = verdict == proposal_token
+    prov: Dict[str, Any] = {
+        "source": "owner_supplied",
+        "method": "xlsx_round_trip",
+        "workbook": "136-NOVELTY-HARDCASES.xlsx",
+        "sheet": sheet,
+        "date": LABEL_PROVENANCE_DATE,
+        "proposal_shown": proposal_token is not None,
+        "proposal_token": proposal_token,
+        "confirmed_proposal": confirmed,
+    }
+    if extra:
+        prov.update(extra)
+    return prov
+
+
+def read_owner_labels_from_xlsx(xlsx_path: str) -> Dict[str, Any]:
+    """Reads the owner-filled ``136-NOVELTY-HARDCASES.xlsx`` back and returns
+    the structure written to ``discovery_data/novelty_hardcase_labels-v1.json``
+    (minus the enclosing content-hash, added by ``write_owner_labels_json``
+    so this function stays a pure read).
+
+    Fails CLOSED (raises ``LabelReadError``) on: a missing/renamed sheet, a
+    header row that does not match the written contract, a Case # outside
+    1..101 or seen twice, or a verdict/correctness value outside its sheet's
+    own vocabulary. A truly BLANK verdict cell is recorded as an explicit
+    skip and is NEVER filled from the row's own PROPOSAL draft.
+    """
+    import openpyxl  # deferred, mirrors write_hardcases_xlsx's own pattern
+
+    wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+    cases: Dict[int, Dict[str, Any]] = {}
+
+    def _case_no(d: Dict[str, Any], sheet_name: str) -> int:
+        case_no = d["Case #"]
+        if not isinstance(case_no, int):
+            raise LabelReadError(f"{sheet_name}: non-integer Case # {case_no!r}")
+        if case_no in cases:
+            raise LabelReadError(f"Case # {case_no} appears more than once across the workbook")
+        return case_no
+
+    # ---- Identity Spot-Check (Classes 1-3) ----
+    ws = _require_sheet(wb, "Identity Spot-Check")
+    headers = _header_row(ws)
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        d = dict(zip(headers, row))
+        case_no = _case_no(d, "Identity Spot-Check")
+        verdict = _clean_cell(d["Identity verdict"])
+        if verdict is not None and verdict not in IDENTITY_TOKENS:
+            raise LabelReadError(f"case {case_no}: identity verdict {verdict!r} outside {IDENTITY_TOKENS}")
+        skipped = verdict is None or verdict == "skip"
+        proposal_text = _clean_cell(d["PROPOSAL (draft -- NOT a label)"])
+        proposal_token = _proposal_token(proposal_text)
+        class_title = _clean_cell(d["Class"])
+        cases[case_no] = {
+            "case_id": case_no,
+            "question_type": "identity",
+            "class": _CLASS_TITLE_TO_CODE.get(class_title, class_title),
+            "stratum": None,
+            "sys_id": _clean_cell(d["sys_id"]),
+            "manuscript": _clean_cell(d["Manuscript"]),
+            "claim": _clean_cell(d["A vs B (claim pair)"]),
+            "catalogue_identification_text": _clean_cell(d["Catalogue's own identification text"]),
+            "why_hard": _clean_cell(d["Why adversarial to a string heuristic"]),
+            "verdict": {
+                "type": "identity",
+                "value": None if skipped else verdict,
+                "correctness": None,
+                "skipped": skipped,
+            },
+            "label_provenance": _provenance("Identity Spot-Check", proposal_token, verdict),
+        }
+
+    # ---- Novelty Shades (Class 6 + Arm 1 residual) ----
+    ws = _require_sheet(wb, "Novelty Shades")
+    headers = _header_row(ws)
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        d = dict(zip(headers, row))
+        case_no = _case_no(d, "Novelty Shades")
+        shade = _clean_cell(d["Shade verdict"])
+        if shade is not None and shade not in SHADE_TOKENS:
+            raise LabelReadError(f"case {case_no}: shade verdict {shade!r} outside {SHADE_TOKENS}")
+        correctness = _clean_cell(d["Correctness (diverges_work/diverges_part only)"])
+        if correctness is not None and correctness not in CORRECTNESS_TOKENS:
+            raise LabelReadError(f"case {case_no}: correctness {correctness!r} outside {CORRECTNESS_TOKENS}")
+        skipped = shade is None or shade == "skip"
+        correctness_gap = (not skipped) and shade in _SHADE_DIVERGENCE_TOKENS and correctness is None
+        if correctness_gap:
+            print(
+                f"WARNING: case {case_no} carries shade {shade!r} but no Correctness call -- "
+                "flagged (not failed) per the plan's own instruction",
+                file=sys.stderr,
+            )
+        class_title = _clean_cell(d["Class"])
+        class_code = _CLASS_TITLE_TO_CODE.get(class_title, class_title)
+        why = _clean_cell(d["Why it is hard"]) or ""
+        stratum = None
+        if class_code == "residual":
+            m = _RESIDUAL_STRATUM_RE.search(why)
+            stratum = m.group(1) if m else None
+        proposal_text = _clean_cell(d["PROPOSAL (draft -- NOT a label)"])
+        proposal_token = _proposal_token(proposal_text)
+        cases[case_no] = {
+            "case_id": case_no,
+            "question_type": "shade",
+            "class": class_code,
+            "stratum": stratum,
+            "sys_id": _clean_cell(d["sys_id"]),
+            "manuscript": _clean_cell(d["Manuscript"]),
+            "claim": _clean_cell(d["Claimed work(s)"]),
+            "catalogue_identification_text": _clean_cell(d["Catalogue's own identification text"]),
+            "why_hard": why or None,
+            "verdict": {
+                "type": "shade",
+                "value": None if skipped else shade,
+                "correctness": correctness,
+                "skipped": skipped,
+                "correctness_gap": correctness_gap,
+            },
+            "label_provenance": _provenance("Novelty Shades", proposal_token, shade),
+        }
+
+    # ---- Heuristic-Demoted (Arm 2) ----
+    ws = _require_sheet(wb, "Heuristic-Demoted")
+    headers = _header_row(ws)
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        d = dict(zip(headers, row))
+        case_no = _case_no(d, "Heuristic-Demoted")
+        verdict = _clean_cell(d["Demotion verdict"])
+        if verdict is not None and verdict not in DEMOTION_TOKENS:
+            raise LabelReadError(f"case {case_no}: demotion verdict {verdict!r} outside {DEMOTION_TOKENS}")
+        skipped = verdict is None or verdict == "skip"
+        proposal_text = _clean_cell(d["PROPOSAL (draft -- NOT a label)"])
+        proposal_token = _proposal_token(proposal_text)
+        class_title = _clean_cell(d["Class"])
+        cases[case_no] = {
+            "case_id": case_no,
+            "question_type": "demotion",
+            "class": _CLASS_TITLE_TO_CODE.get(class_title, class_title),
+            "stratum": _clean_cell(d["Stratum"]),
+            "sys_id": _clean_cell(d["sys_id"]),
+            "manuscript": _clean_cell(d["Manuscript"]),
+            "claim": _clean_cell(d["Claimed work"]),
+            "catalogue_identification_text": _clean_cell(d["Catalogue's own identification text"]),
+            "why_hard": _clean_cell(d["Why this demotion is being checked"]),
+            "verdict": {
+                "type": "demotion",
+                "value": None if skipped else verdict,
+                "correctness": None,
+                "skipped": skipped,
+            },
+            "label_provenance": _provenance(
+                "Heuristic-Demoted", proposal_token, verdict,
+                extra={"blank_cell": d["Demotion verdict"] in (None, "")},
+            ),
+        }
+
+    # ---- No-Source-Text (Arm 3 -- NO verdict column, by design) ----
+    ws = _require_sheet(wb, "No-Source-Text")
+    headers = _header_row(ws)
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        d = dict(zip(headers, row))
+        case_no = _case_no(d, "No-Source-Text")
+        class_title = _clean_cell(d["Class"])
+        cases[case_no] = {
+            "case_id": case_no,
+            "question_type": "no_verdict_by_design",
+            "class": _CLASS_TITLE_TO_CODE.get(class_title, class_title),
+            "stratum": None,
+            "sys_id": _clean_cell(d["sys_id"]),
+            "manuscript": _clean_cell(d["Manuscript"]),
+            "claim": _clean_cell(d["Claimed work"]),
+            "catalogue_identification_text": None,
+            "why_hard": _clean_cell(d["Why no verdict is collected"]),
+            "verdict": {
+                "type": "no_verdict_by_design",
+                "value": None,
+                "correctness": None,
+                "skipped": False,
+            },
+            "label_provenance": {
+                "source": "no_verdict_by_design",
+                "method": "xlsx_round_trip",
+                "workbook": "136-NOVELTY-HARDCASES.xlsx",
+                "sheet": "No-Source-Text",
+                "date": LABEL_PROVENANCE_DATE,
+                "note": (
+                    "Arm 3 ships as a candidate automatically per owner ruling J; no verdict "
+                    "column exists on this sheet and none was ever solicited."
+                ),
+            },
+        }
+
+    expected_ids = set(range(1, 102))
+    got_ids = set(cases.keys())
+    if got_ids != expected_ids:
+        missing = sorted(expected_ids - got_ids)
+        extra = sorted(got_ids - expected_ids)
+        raise LabelReadError(
+            f"case numbering does not match the expected 1..101 contiguous set. "
+            f"missing={missing} extra={extra}"
+        )
+
+    ordered = [cases[i] for i in range(1, 102)]
+
+    labelled_ct = sum(1 for c in ordered if c["verdict"]["value"] is not None)
+    skipped_ct = sum(1 for c in ordered if c["verdict"].get("skipped"))
+    no_verdict_ct = sum(1 for c in ordered if c["question_type"] == "no_verdict_by_design")
+    correctness_gap_ct = sum(1 for c in ordered if c["verdict"].get("correctness_gap"))
+
+    return {
+        "schema_version": 1,
+        "source_workbook": "136-NOVELTY-HARDCASES.xlsx",
+        "generated_at": LABEL_PROVENANCE_DATE,
+        "total_cases": len(ordered),
+        "labelled_count": labelled_ct,
+        "skipped_count": skipped_ct,
+        "no_verdict_by_design_count": no_verdict_ct,
+        "correctness_gaps_flagged": correctness_gap_ct,
+        "cases": ordered,
+    }
+
+
+def write_owner_labels_json(xlsx_path: str, json_out_path: str) -> Dict[str, Any]:
+    """Reads ``xlsx_path`` (see ``read_owner_labels_from_xlsx``), computes a
+    content hash over the ``cases`` array -- the one thing plan 136-04 must
+    re-verify has not been hand-edited post-labelling (T-136-03-06) -- and
+    writes the result to ``json_out_path``. Returns the written dict."""
+    result = read_owner_labels_from_xlsx(xlsx_path)
+    canonical_cases = json.dumps(result["cases"], sort_keys=True, ensure_ascii=False)
+    content_hash = "sha256:" + hashlib.sha256(canonical_cases.encode("utf-8")).hexdigest()
+    result = dict(result)
+    result["hash_method"] = "sha256 over json.dumps(cases, sort_keys=True, ensure_ascii=False)"
+    result["content_hash"] = content_hash
+
+    if not all("label_provenance" in c for c in result["cases"]):
+        raise LabelReadError("internal error: a case is missing label_provenance")
+    for c in result["cases"]:
+        if c["verdict"].get("skipped") and c["verdict"]["value"] is not None:
+            raise LabelReadError(
+                f"internal error: case {c['case_id']} is marked skipped but carries a verdict value"
+            )
+
+    os.makedirs(os.path.dirname(json_out_path), exist_ok=True)
+    with open(json_out_path, "w", encoding="utf-8") as fh:
+        json.dump(result, fh, ensure_ascii=False, indent=2, sort_keys=False)
+        fh.write("\n")
+    return result
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -3531,7 +3891,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         description="Phase 136 plan 03 -- gate-1 decision evidence + novelty hard-case candidates "
                     "(read-only measurement over the deployed discovery sidecar)."
     )
-    parser.add_argument("asset", help="path to the discovery-v1-*.db sidecar to measure")
+    parser.add_argument(
+        "asset", nargs="?", default=None,
+        help="path to the discovery-v1-*.db sidecar to measure (not required with "
+             "--read-labels-from, which only round-trips the labelled XLSX)",
+    )
+    parser.add_argument(
+        "--read-labels-from", default=None, metavar="XLSX_PATH",
+        help="Task 4: read the owner-filled 136-NOVELTY-HARDCASES.xlsx back and write "
+             "discovery_data/novelty_hardcase_labels-v1.json (see --labels-out). Skips the "
+             "asset measurement pipeline entirely -- 'asset' is not required with this flag.",
+    )
+    parser.add_argument(
+        "--labels-out", default=DEFAULT_LABELS_OUT,
+        help=f"output path for the owner-labels JSON (default: {DEFAULT_LABELS_OUT})",
+    )
     parser.add_argument(
         "--research-db", default=DEFAULT_RESEARCH_DB,
         help="path to the (gitignored, local-only) fullcorpus.db research DB used for the D-13c/gate-4 "
@@ -3564,6 +3938,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="print console tables only; do not write the Markdown/XLSX artifacts",
     )
     args = parser.parse_args(argv)
+
+    # Task 4 mode: read the owner-labelled workbook back and write the JSON
+    # ground-truth file. Entirely independent of the asset-measurement
+    # pipeline below (no DB is opened), so it exits before the ledger/asset
+    # handling that mode does not need.
+    if args.read_labels_from:
+        try:
+            result = write_owner_labels_json(args.read_labels_from, args.labels_out)
+        except LabelReadError as exc:
+            print(f"FAIL: {exc}", file=sys.stderr)
+            return 1
+        print(
+            f"wrote {args.labels_out}: {result['total_cases']} cases "
+            f"({result['labelled_count']} labelled, {result['skipped_count']} skipped, "
+            f"{result['no_verdict_by_design_count']} no-verdict-by-design, "
+            f"{result['correctness_gaps_flagged']} correctness gaps flagged) "
+            f"content_hash={result['content_hash']}"
+        )
+        return 0
+
+    if not args.asset:
+        parser.error("the following arguments are required: asset (unless --read-labels-from is given)")
 
     ledger = NonzeroLedger()
 
