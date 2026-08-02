@@ -47,3 +47,57 @@ passed them twice (revision 1, commit `b37b0d7a`).
 
 VERDICT: rework because the public/private deployment boundary, human-confirmed materialization, canonical identity grain, and service/UI contracts are unsafe as written
 HIGH: 10   MEDIUM: 1   LOW: 1
+
+---
+
+## Round 2 — convergence check (2026-08-02)
+
+**Target:** revision 2 (commit `eb2bda4f`) — 21 plans / 63 tasks / 9 waves.
+**Brief:** `_tmp/136-codex-preflight-r2-brief.md`
+
+> **VERDICT: rework** — **3 HIGH · 2 MEDIUM · 2 LOW** (was 10/1/1).
+> 8 of 12 round-1 findings RESOLVED and re-confirmed against the live DB.
+> Survivors cluster in three places: the 136-13 deploy checkpoint still authorizes the
+> **private** asset (contradicting its own Task 3), the two wave-8 production deploys run
+> **concurrently**, and the work-expansion filter/count contract can still drift.
+>
+> Note finding #13 is invisible to a `files_modified` check by construction — the conflict is
+> two concurrent mutations of **production**, not of the repo.
+
+### Verbatim findings
+
+1. **NOT RESOLVED (HIGH)** — The expansion contract remains internally inconsistent. The weaker band requires `_band_rank(evidence_source, confidence_band)`, but only the anchor relation and band are passed ([136-21:105](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:105), [live helper:175](C:/Genizahsearch/shared/discovery_service.py:175)). More importantly, the plan says filtering applies to the final weaker band while also preserving the existing other-carrier filter unchanged ([136-21:99](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:99), [136-21:119](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:119)). That fails when the anchor is weaker. The count also shares only the raw ranked CTE, while unit selection/filtering is presently separate SQL ([discovery_service.py:797](C:/Genizahsearch/shared/discovery_service.py:797)). Fix by passing `anchor_evidence_source`, factoring the complete ranked→unit-best→filtered CTE for both list and count, and testing both stronger-anchor and weaker-anchor filtering.
+
+2. **RESOLVED** — `genre` is correctly identified as an existing column, its 1,269 NULL rows match the live DB, and both action and acceptance prohibit `ADD COLUMN genre` ([136-01:271](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-01-PLAN.md:271)).
+
+3. **RESOLVED** — The live DB confirms 19/121 across all human-confirmed evidence and 14/116 among display evidence. Materialization now uses `shipped OR human_confirmed`, records the admission rule, and requires a non-NULL bucket/reason for the review-only regression ([136-11:150](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-11-PLAN.md:150), [136-14:171](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-14-PLAN.md:171)).
+
+4. **RESOLVED** — The DB reconfirms 15 duplicate canonical groups, three with differing titles and mixed corpora, and the 64,509→65,587 fan-out. The contract requires a NOT NULL, ordered-total `display_work_id`, exact 1:1 build/service joins, and the public projection recomputes both identifications and the representative from surviving public claims ([136-01:258](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-01-PLAN.md:258), [136-08:141](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-08-PLAN.md:141)).
+
+5. **RESOLVED** — The page-ID accessor is explicitly NEW PLUMBING, bounded and off-loop, with an explicit empty result and a panel test distinguishing “unresolvable pages” from a genuine zero ([136-14:209](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-14-PLAN.md:209), [136-17:137](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:137)).
+
+6. **RESOLVED** — `surface_safe_claim` is explicitly an allowlist, including an unexpected-key control and key-and-value assertions over row, envelope, JSON, error path, and the literal badge ([136-14:148](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-14-PLAN.md:148), [136-14:177](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-14-PLAN.md:177)).
+
+7. **RESOLVED** — The novelty harness now requires the dedicated `no owner-provenance labels` failure and a mutation test proving removal of the denominator guard makes the test fail ([136-04:189](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-04-PLAN.md:189), [136-04:207](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-04-PLAN.md:207)).
+
+8. **NOT RESOLVED (LOW)** — The real CLI accepts the required four flags, database scans and schema-level control are correct, and executable acceptance blocks on a missing pattern file. But the threat register still says an unavailable file is an “explicit skip,” directly contradicting the task ([136-19:98](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:98), [136-19:197](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:197)). Replace that stale mitigation with fail/block wording.
+
+9. **NOT RESOLVED (HIGH)** — The loader gate itself is correctly placed in startup readiness and all public wrappers inherit it. However, 136-13’s blocking owner checkpoint still asks authorization to deploy the private asset and merely stage the public projection ([136-13:150](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:150)), contradicting Task 3’s public-manifest/private-off-box requirement ([136-13:212](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:212)). The checkpoint must authorize exactly the public projection.
+
+10. **RESOLVED** — Plans 136-14/17 define one synchronous enveloped implementation, one `run.io_bound(..., client=page_client)` crossing, captured user state, and guards against both coroutine-to-worker and nested-offload mistakes ([136-17:107](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:107)).
+
+11. **NOT RESOLVED (HIGH)** — F-14 is now preserved end-to-end as four states through the single offload boundary. F-05 is not fully converged because the checkpoint still authorizes the exact private-artifact deployment that its three controls are supposed to prevent; see answer 9.
+
+12. **NOT RESOLVED (MEDIUM)** — Required tables, meta count pairs, missing-key checks, and the pre-rebuild rollback fixture are present. But the schema-marker decision was not made: the executor may bump or not bump it ([136-20:152](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:152)). The preferred bump requires editing the builder and schema document, although 136-20 declares only loader/test files ([136-20:7](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:7)); following it also creates an undeclared same-wave overlap with 136-11. Decide “retain v1 and rely on required-table/count checks,” or explicitly rehome and serialize the bump.
+
+13. **NOT RESOLVED (HIGH)** — The declared graph itself has 21 plans, 63 tasks, no same-wave declared-file overlap, and every dependency points to an earlier wave. Plans 136-20 and 136-21 are correctly placed. But both wave-8 plans perform production deployments concurrently: 136-17 deploys the panel ([136-17:293](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:293)), while 136-18 assumes the panel is already deployed and deploys findings ([136-18:202](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:202)). Serialize these external mutations even though their repository file lists do not overlap.
+
+14. **NOT RESOLVED (HIGH)** — The phase is not safe to execute until answers 1, 9, 12, and 13 are corrected. The new loader is fail-closed, so a private artifact selected after that code is installed becomes an outage rather than a disclosure. But 136-13 simultaneously requires production already have compatible code before the asset copy ([136-13:209](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:209)) and requires asset-first ordering ([136-13:222](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:222)). Combined with the private-deploy checkpoint, that leaves the most important disclosure boundary procedurally ambiguous. Once corrected, I found no further disclosure path that would evade the loader, projection, and masking gates.
+
+15. **NOT RESOLVED (MEDIUM)** — Two additional cleanup problems:
+
+   - No builder-owning plan explicitly writes `meta.audience='private'`; 136-08 merely asserts that the private build carries it ([136-08:187](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-08-PLAN.md:187)). Assign that write and its verifier check to 136-11 or 136-12.
+   - `136-VALIDATION.md` still contains stale moved-out validation—five surfaces, `/work/{id}`, and a work-page smoke test—and incorrectly assigns the differing-relation service assertion to 136-14 rather than 136-21 ([136-VALIDATION:62](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-VALIDATION.md:62), [136-VALIDATION:69](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-VALIDATION.md:69), [136-VALIDATION:272](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-VALIDATION.md:272)).
+
+VERDICT: rework because the private/public deployment authorization still contradicts itself, the wave-8 production deploys are unsafely concurrent, and the work-expansion filter/count contract can still drift
+HIGH: 3   MEDIUM: 2   LOW: 2
