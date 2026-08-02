@@ -1,6 +1,8 @@
 # Discovery Acceptance Budgets v1 (PERF-01)
 
-**Status:** ACTIVE. Version 1, created 2026-07-22 (Phase 134, plan 134-02).
+**Status:** ACTIVE. Version 1, created 2026-07-22 (Phase 134, plan 134-02). Amended 2026-08-02
+(Phase 136, plan 136-01) — added §5, the corpus-wide findings-page ("Computed Identifications") cap
+table plus two build-time PENDING slots; no pre-existing cap in §1-§4 is changed by this amendment.
 
 **Tunable ONLY by versioning this artifact.** These numeric caps are a phase
 exit criterion (PERF-01) and a hard contract for every downstream Discovery
@@ -172,6 +174,49 @@ DB-side cost only and well inside the ≤ 1.5 s request budget.
 
 These later-surface caps and defaults exist now so those plans have a stable
 contract to implement against, not because they are measured yet.
+
+## 5. Amendment 2026-08-02 (Phase 136) — Corpus-wide findings page (Computed Identifications)
+
+The Phase-136 corpus-wide findings page ("Computed Identifications" / "זיהויים מחושבים" nav entry)
+gets its own versioned budget entry, per D-10a and the `main-pool-rule.md` PERF-01 confirmation. This
+section is ADDITIVE — no pre-existing cap in §1-§4 above is changed.
+
+| Metric | Cap |
+|---|---|
+| Rows per page | ≤ **200** (default **50**, matching the existing Work/Leads §1.2 defaults) |
+| Response size | ≤ **500 KB** |
+| Server response time | p95 ≤ **1.5 s** |
+| Per-request timeout | ≤ **5 s** |
+| Visible total count — a SEPARATE cap from the row fetch above | p95 ≤ **0.5 s** |
+
+**Why the visible-count cap is separate.** Two measured hazards motivate splitting it out from the
+row-fetch p95: a representative novelty/quality/coverage ordering measured **3.41–3.55 s** across four
+runs against the 1.5 s row-fetch cap (D-10a; the count alone in that same measurement took 0.50-0.55 s),
+and — separately, and far more severe — a deduped identification COUNT alone measured **16 s**
+(`main-pool-rule.md` finding 13, "PERF-01 confirmed twice"). The count cap above is met by reading a
+MATERIALIZED identification-grain table (`discovery_identification`, one row per `(sys_id,
+canonical_work_id)`), never by counting claim rows at request time. An approximate or cached count is
+acceptable only if the surface says so in words (e.g. "approximately N results") — a silent
+approximation presented as exact is not acceptable.
+
+**Build-time (offline) section — two PENDING slots.** Both are marked `PENDING — measure at the
+rebuild, then version`; no number is invented here, and no committed doc records these runtimes yet:
+
+| Metric | Status |
+|---|---|
+| Rebuild-preservation full-table diff runtime (D-02b) | PENDING — measure at the rebuild, then version |
+| Public-projection masking scan runtime (VIS-02) | PENDING — measure at the rebuild, then version |
+
+**New env vars** (following the existing `DISCOVERY_*` convention in §3 above):
+
+```
+DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT=50   # rows/page default for the findings page; the existing
+                                           # DISCOVERY_PAGE_SIZE_MAX=200 ceiling is unchanged and shared
+DISCOVERY_QUERY_TIMEOUT_FINDINGS=5.0      # seconds, per-request timeout for the findings-page query
+```
+
+No pre-existing numeric cap in §1-§4 above is loosened, tightened, or otherwise modified by this
+amendment.
 
 ---
 

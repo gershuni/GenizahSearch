@@ -240,6 +240,69 @@ the v2 verifier's **no-mixed-enum-state assertion over the built asset**
 (135-06/135-07) guarantees the shipped v2 asset carries only the v2 key. The v1
 key `expert_verified` is dropped only once the v2 manifest is live (135-08).
 
+## Amendment 2026-08-02 (Phase 136)
+
+Four dated notes amending §2, §3 and §4 for the Phase-136 read surfaces (the browse-page "Computed
+identifications" panel and the corpus-wide findings page). None of these notes edit
+`shared/discovery_band_labels.py` — that module's strings and predicates are UNCHANGED; the notes
+describe how its EXISTING computed values are surfaced (or deliberately withheld) on the new surfaces.
+
+### Note 1 (§2 — band labels become tooltip-only)
+
+The frozen bilingual band labels in §2 are UNCHANGED as strings and remain the authoritative
+vocabulary — `BAND_LABELS` must NOT be edited. On the Phase-136 read surfaces they render as the row
+chip's `title` tooltip ONLY. The visible chip instead carries the RELATION — "Direct match / Partial
+match / Shared text" — which introduces NO new display vocabulary, so this is a note, not a contract
+rewrite. The tooltip is the reversibility mechanism: the precise label is always one hover away, never
+lost. The retired three-level Strong/Medium/Weak confidence scale (sketch 003, ruled system-wide
+2026-07-31, retired 2026-08-01) must NOT be reintroduced, and `confOf()`, `STRONG_BANDS` and
+`LONG_CITATION` must NOT be ported out of the sketch HTML into product code — that scale was a second,
+disagreeing implementation of `is_default_eligible()` that sent the best-measured population in the
+system (`corroborated ∪ weak`, held-out precision 0.926) to the bottom level.
+
+### Note 2 (§2 — the review overlay renders nowhere)
+
+No Phase-136 surface renders the human-review overlay (`review_overlay()`'s output). The 121
+`adjudication_status='human_confirmed'` rows keep their band and lose only the badge, because Phase
+134's own closeout left their provenance unresolved ("internal deck vs owner", never resolved — their
+source is the 174-row `e1_adjudicated_a.jsonl` individually-adjudicated deck, §4.1 above).
+`review_overlay()` and `serialize_banded_claim()` keep COMPUTING the value in code — the surfaces
+simply do not render it. **Reopening condition:** once the provenance of those 121 rows is established
+(who reviewed them and when), the badge may return with a sourced wording; until then every row on the
+surface reads "unreviewed · algorithmic estimate", which is at least uniform and true.
+
+### Note 3 (§3 — qualitative only, everywhere, including tooltips)
+
+No precision percentage, confidence interval, weighted estimate or strata table is reachable from ANY
+surface, tooltip included. The methods page explains each band qualitatively plus the non-percentage
+facts — that grading happened, the population, the unit, the sample size, the grader, the date, the
+method, the audit state and the immutable report identifier. `format_precision_copy()` therefore has
+NO surface caller after this phase; it is retained for offline/report use only (e.g. the CERT-01
+measurement record).
+
+### Note 4 (§4 — `human_confirmed` must not be pre-filtered by routing status)
+
+`is_default_eligible()` returns True for `human_confirmed` UNCONDITIONALLY, BEFORE it inspects
+`routing_status` (`shared/discovery_band_labels.py::is_default_eligible`) — so a read path that
+filters `routing_status='shipped'` in SQL BEFORE the predicate ever runs drops rows the predicate
+exists to protect. This is a CONTRACT CLARIFICATION, not a code change made by this amendment: any read
+path feeding a default-shown surface must not pre-filter `human_confirmed` rows by routing status;
+such a row renders with an explicit coverage note instead of being silently dropped.
+
+Two different denominators are in play and the coarser one has been quoted loosely — name the measured
+scope precisely: **19 of 121** across ALL human-confirmed EVIDENCE rows carry
+`routing_status != 'shipped'` and would be dropped by a naive `routing_status='shipped'` SQL filter;
+but the page-panel query reads DISPLAY evidence (one row per claim, post `display_evidence_id`
+selection), where the affected population is **14 of 116** — all `low_coverage`. Record both numbers
+and which query each applies to: **19/121 is the all-evidence-rows count**; **14/116 is the
+display-evidence count** the panel actually reads.
+
+The two-bucket disclosure model
+(`.claude/skills/sketch-findings-genizahsearch/references/main-pool-rule.md`) applies by reference
+here: `human_confirmed` is always Main pool, ahead of every gate. §4's screening exclusion (the
+`screening_rb`/`screening_canon`/`not_evaluated` bands staying behind the "show more" toggle) survives
+as gate 2 of that rule.
+
 ## 6. Cross-references
 
 - `docs/specs/discovery-budgets.md` — PERF-01 caps (same versioning discipline).
