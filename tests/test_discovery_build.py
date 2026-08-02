@@ -22,6 +22,7 @@ import pytest
 from scripts import build_discovery_sidecar as sidecar_build
 from scripts import discovery_ids as ids
 from scripts import verify_discovery_sidecar as verify_mod
+from shared.discovery_band_labels import is_default_eligible
 
 # `build_discovery_sidecar.py` imports `check_atlas_masking` FLAT (via its own
 # sys.path insertion, not as `scripts.check_atlas_masking`) so its
@@ -1780,6 +1781,112 @@ def test_resolve_band_precision_spec_accepts_frozen_rows_unchanged():
         precision_spec=frozen, frozen_precision_defaults=False, release=True,
     )
     assert result is frozen
+
+
+# ---------------------------------------------------------------------------
+# D-02a (136-06, docs/specs/discovery-sidecar-schema-v1.md SS1.6 amendment
+# 2026-08-02): the tier_a CERT-01 AUTHORIZATION lockstep -- fixtures proving
+# BOTH the pass and the fail branch (136-CONTEXT.md D-02a).
+# ---------------------------------------------------------------------------
+
+def _tier_a_row(rows):
+    return next(
+        r for r in rows
+        if r["scope"] == "band" and r["evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+        and r["confidence_band"] == ids.CONFIDENCE_BAND_TIER_A
+    )
+
+
+def test_d02a_pass_branch_authorized_pair_validates_and_flips_default_eligible():
+    """PASS branch: the frozen (unmodified) row-set carries the authorized
+    tier_a pair and `_validate_precision_spec` raises nothing. The SAME
+    authorized values, fed through `is_default_eligible`, flip the D-18 gate
+    True -- and the test documents the delta by also asserting the
+    PRE-AMENDMENT all-NULL shape still reads False."""
+    frozen = sidecar_build._frozen_real_band_precision_rows()
+    sidecar_build._validate_precision_spec(frozen)  # must not raise
+
+    tier_a = _tier_a_row(frozen)
+    assert tier_a["precision"] is None
+    assert tier_a["ci_low"] == 0.9084
+    assert tier_a["measurement_status"] == "measured_pass"
+
+    assert is_default_eligible(
+        ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A,
+        "unreviewed", "shipped", "measured_pass", ci_low=0.9084,
+    ) is True
+    # Documents exactly what changed: the PRE-amendment shape (no stored
+    # measurement_status/ci_low at all) never qualified tier_a for default
+    # visibility.
+    assert is_default_eligible(
+        ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A,
+        "unreviewed", "shipped", None, ci_low=None,
+    ) is False
+
+
+def test_d02a_fail_a_ci_low_below_strict_floor_rejected():
+    """FAIL (a): a tier_a ci_low below STRICT_FLOOR (0.85) can never match
+    the frozen 0.9084 -- _validate_precision_spec rejects it."""
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    _tier_a_row(custom)["ci_low"] = 0.70
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError, match="tier_a"):
+        sidecar_build._validate_precision_spec(custom)
+
+
+def test_d02a_fail_b_measurement_status_outside_closed_vocabulary_rejected():
+    """FAIL (b): a measurement_status outside MEASUREMENT_STATUSES is a
+    build error, independent of whether it happens to also mismatch the
+    frozen row's expected value."""
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    _tier_a_row(custom)["measurement_status"] = "bogus_status_outside_vocab"
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError, match="tier_a"):
+        sidecar_build._validate_precision_spec(custom)
+
+
+def test_d02a_fail_c_non_null_precision_on_tier_a_rejected():
+    """FAIL (c): the pre-existing rule -- any non-NULL tier_a precision is
+    rejected. Proves this rule survived the D-02a widening unrelaxed."""
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    _tier_a_row(custom)["precision"] = 0.90  # any fabricated non-NULL number must be rejected
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError, match="tier_a"):
+        sidecar_build._validate_precision_spec(custom)
+
+
+def test_d02a_fail_d_measured_pass_on_unauthorized_band_rejected():
+    """FAIL (d): `measured_pass` asserted on a band OTHER than tier_a (not
+    part of the frozen authorized set) is rejected -- otherwise an
+    arbitrary band could smuggle itself into default visibility through
+    this exact slot."""
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    for r in custom:
+        if r["scope"] == "band" and r["confidence_band"] == ids.CONFIDENCE_BAND_SCREENING_RB:
+            r["measurement_status"] = "measured_pass"
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError, match=ids.CONFIDENCE_BAND_SCREENING_RB):
+        sidecar_build._validate_precision_spec(custom)
+
+
+def test_d02a_mechanism_dict_override_carries_measurement_status_into_insert_params():
+    """Mechanism test: `{"measurement_status": None, **r}` (the exact
+    expression at the band_precision INSERT site) lets a row's OWN
+    `measurement_status` key win over the `None` default -- non-obvious from
+    reading the INSERT alone, so it is pinned here directly."""
+    frozen = sidecar_build._frozen_real_band_precision_rows()
+    tier_a = _tier_a_row(frozen)
+    merged = {"measurement_status": None, **tier_a}
+    assert merged["measurement_status"] == "measured_pass"
+
+
+def test_d02a_masking_never_echoes_supplied_ci_low_sentinel():
+    """Masking-discipline test: a recognisable sentinel ci_low value must
+    never appear anywhere in the raised violation text -- only the frozen
+    expected value may be named (same discipline as the existing R4/R5
+    masking tests above)."""
+    sentinel = "RESTRICTED_D02A_CI_LOW_SENTINEL_DO_NOT_LEAK"
+    custom = [dict(r) for r in sidecar_build._frozen_real_band_precision_rows()]
+    _tier_a_row(custom)["ci_low"] = sentinel
+    with pytest.raises(sidecar_build.InvalidPrecisionSpecError) as exc_info:
+        sidecar_build._validate_precision_spec(custom)
+    assert sentinel not in str(exc_info.value)
 
 
 def test_resolve_band_precision_spec_frozen_defaults_tier_a_is_null():
