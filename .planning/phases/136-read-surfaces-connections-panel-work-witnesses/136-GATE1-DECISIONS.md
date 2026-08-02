@@ -44,6 +44,27 @@ building ground truth), and Classes 4-6 are EXPANDED from 45 to ~75 NOVELTY SHAD
 "Labelling restructure" note appended to the "Outstanding (pending Task 3)" section below. Sections
 A-E/E′ are NOT reopened by any of this; they remain LOCKED exactly as recorded above.
 
+**Further addendum, 2026-08-02 (same day, after a READ-ONLY research pass) -- RULINGS H AND I.** A
+read-only prior-art reconciliation pass (`136-NOVELTY-PRIOR-ART.md`, commit `d9e3ff79`) found that
+decisions E/E′/F/G had been recorded but never propagated into the documents that implement them (the
+plans, the schema contract, ROADMAP.md), and separately surfaced two open questions the owner had not
+yet ruled on: a real, measured "witness" shape (a catalogue naming a broader liturgical container that
+predicts a specific unit without naming it) with no shade to hold it, and an unresolved gap between the
+pinned novelty gate's validated scope (the five-way vocabulary, the one-title-string input contract) and
+what it is now being asked to do (the widened shade enum, ruling G's free-text input contract). The
+owner ruled on both, delivered through a normal orchestrator dispatch to the continuation that performs
+the reconciliation (the correct channel; see decision E's own Provenance note for why that distinction is
+load-bearing): **H** adds a TENTH shade, `container_predicts`, under a name chosen specifically to avoid
+colliding with the five OTHER meanings "witness" already carries in this project -- see **section H**
+below. **I** conditions the "run now, pinned" authorization in section B above on a RE-MEASUREMENT of the
+pinned gate against the widened vocabulary and input contract, using the owner-labelled evaluation set,
+BEFORE the production run -- see **section I** below. This continuation ALSO performs the surgical
+reconciliation the prior-art pass found overdue: `136-04-PLAN.md`, `136-12-PLAN.md`,
+`docs/specs/discovery-sidecar-schema-v1.md`, `.planning/ROADMAP.md` and `.planning/REQUIREMENTS.md` are
+brought into agreement with the final ten-value enum, and the hard-case worksheet/workbook are
+regenerated to carry the new shade and a new liturgical-container class (Class 7). Sections A-G are NOT
+reopened by any of this; they remain LOCKED exactly as recorded above.
+
 ---
 
 ## A. The five gate-1 decisions
@@ -735,6 +756,181 @@ with the same standing as A-E/E′ -- LOCKED, not re-litigated, re-derived or "i
 
 ---
 
+## H. Adopt the `witness` concept as a shade, under a NON-COLLIDING name -- `container_predicts`
+
+**Provenance.** This ruling arrived after a READ-ONLY research pass, `136-NOVELTY-PRIOR-ART.md` (commit
+`d9e3ff79`), which reconciled the in-conversation decisions E/E′/F/G against substantial prior novelty
+engineering already sitting in this repo (chiefly the gitignored `same_work_spike/probe/` research tree)
+that was never consulted when those decisions were made. The ruling itself was delivered through a
+normal orchestrator dispatch to the continuation performing the reconciliation -- the correct channel,
+per decision E's own Provenance note -- and is recorded here with the same standing as A-G: LOCKED, not
+re-litigated, re-derived or "improved" here.
+
+- **Question:** the prior-art pass measured a real, non-trivial "witness" shape under the OLDER five-way
+  title-gate vocabulary (`same_work_spike/probe/scripts/title_gate_llm.py`) -- 1,327 of 20,410 in-scope
+  rows (6.5%) in the population that gate actually scored -- that the CURRENT nine-value shade enum has
+  no bucket for: a catalogue entry names a broader rite/cycle/ceremony/container whose STANDARD,
+  PREDICTABLE content includes a specific unit, without the catalogue ever naming that unit itself (e.g.
+  `יוצר ח פסח` where the aid names `מחזור מנהג אשכנז לשלש רגלים`; `יוצרות לשבתות` where the aid names
+  `סדור מנהג אשכנז המזרחי`). Under the current enum these rows fall through to `fills_gap` by
+  elimination -- publishing a standard machzor/siddur component as a "Candidate for new finds." Does the
+  project adopt this as a shade?
+
+- **Owner's answer (verbatim, condensed for this record):** "Adopt the `witness` concept as a shade,
+  under a NON-colliding name." The owner explicitly declined the literal name `witness`: it already
+  carries FIVE distinct meanings in this project, catalogued by the prior-art pass's own §8 sweep --
+  (1) the shipped `claim_type`/`evidence_kind` enum member `direct_witness` (a span-competition rule);
+  (2) the schema's `evidence_source=propagated` "witness family" (§4.2), itself built from a DIFFERENT
+  upstream `_bucket=='witness'` router classification in the SEED-029/Q2 pipeline; (3)
+  `HANDOFF-TO-135.md`'s informal prose "the page **witnesses** the work" (the GEN2 `coverage_route`
+  surface label `same_work`, D-01-deferred, not consumed in 136); (4) the OLDER MAPV2-15o LLM title-gate's
+  `witness` VERDICT itself (the concept this ruling adopts -- never shipped); (5) the owner's own 10-way
+  grading vocabulary's `co-witness` QC label. A sixth meaning of the same word is not acceptable.
+  **Chosen name: `container_predicts`** (the suggested default; `predictable_context` was offered as the
+  alternative). Verified to collide with nothing else in the codebase or specs before being pinned
+  (`grep -rn "container_predicts" --include='*.py' --include='*.md'` returns only this ruling's own
+  occurrences at the time of recording).
+
+- **Date:** 2026-08-02 (same day as A-G, after the prior-art research pass).
+
+- **Adopted DEFINITION -- verbatim from the prior measured work, only the name changes.** *"An aid names
+  a broader rite/cycle/ceremony/container whose standard, predictable content includes this specific
+  unit, without naming the unit itself."* No re-derivation, no re-scoping -- the five-way gate's own
+  `witness` verdict condition (`title_gate_llm.py`'s `SYS_PROMPT`, quoted in `136-NOVELTY-PRIOR-ART.md`
+  §3) is carried forward unchanged in substance.
+
+- **Treatment -- excluded from candidates, but NOT hidden by default (this distinction is the load-bearing
+  point of this ruling, recorded explicitly so a later implementer does not generalise ruling F's
+  posture onto it).** `container_predicts` joins `confirms` / `refines_granularity` / `aid_more_specific`
+  / `diverges_work` / `diverges_part` / `extends` as EXCLUDED from the "Candidates for new finds"
+  toggle -- `fills_gap` remains the ONLY shade that predicate selects. UNLIKE `diverges_work` /
+  `diverges_part`, `container_predicts` rows are shown NORMALLY on every surface -- NOT hidden behind
+  ruling F's default-hidden, explicit-warned toggle. **Ruling F's default-hidden posture was specifically
+  about rows the owner has MEASURED REASON to believe are OUR false positives** (reading the real Class-6
+  cases, the owner found the catalogue is usually right when it disagrees with a claim) -- a genuine
+  disagreement between the aid and the claim that the system must not silently adjudicate. **That
+  reasoning does not apply here: there is no disagreement.** The aid and the claim are CONSISTENT -- the
+  container predicts the unit, it just doesn't name it. Hiding a `container_predicts` row by default would
+  misapply F's rationale to a shade where it does not hold, and is explicitly NOT authorized by this
+  ruling.
+
+- **Code consequence -- an enum widening, not a new axis.** The shade enum widens from NINE to TEN
+  values: `confirms` / `refines_granularity` / `aid_more_specific` / `diverges_work` / `diverges_part` /
+  `container_predicts` / `fills_gap` / `extends` / `alias_merge` / `not_checked`. `container_predicts` is
+  inserted immediately before `fills_gap` in the enum's canonical ordering -- the shade it would otherwise
+  be misfiled into by elimination. `novelty_source_label` populates on `container_predicts` exactly as it
+  already does on `confirms` / `refines_granularity` / `aid_more_specific` / `alias_merge` / `extends` /
+  `diverges_work` / `diverges_part` (an aid says SOMETHING nameable -- the container's own name -- about
+  this fragment-work pair, even though it does not name the specific unit); this is a new instance of the
+  SAME rule decision E already established for "every shade where some finding aid says something," not
+  an exception.
+
+- **Downstream contracts this decision amends** (same enumeration shape as decisions E/E′/F, extended):
+
+  1. **D-23a** -- the enum descriptor is further amended from "NINE-VALUE SHADE ENUM, direction-split
+     granularity AND scope-split divergence, plus an orthogonal correctness field on divergence rows" to
+     "TEN-VALUE SHADE ENUM," adding the same-shown-normally `container_predicts` shade.
+  2. **NOVEL-01** -- gains a further dated `⟨AMENDED 2026-08-02 -- H⟩` sub-bullet (see
+     `.planning/REQUIREMENTS.md`).
+  3. **The `novelty_status` CHECK constraint and its index** (`docs/specs/discovery-sidecar-schema-v1.md`)
+     -- the `IN (...)` list widens from nine to ten values in both places the schema doc states it
+     (currently STALE at the pre-E three-value tri-state in both places -- see the reconciliation this
+     same continuation performs, tracked separately from this decision record).
+  4. **The frozen-enum-vocab readiness check** (`web/discovery_assets.py::discovery_available()`) -- when
+     wired (per decision E's item 4), the frozenset checked must be the TEN-value shade set.
+  5. **D-23c's pinned LLM contract** -- the prompt must now also be able to recognise and elicit the
+     container-predicts relationship (does the aid name a broader rite/container whose standard content
+     predicts this unit, without naming it?) alongside every other shade test. The PINNED PROMPT HASH
+     changes again on this account (the fourth net change across E/E′/F/H, still pinned ONCE at 136-04,
+     never sequentially).
+  6. **The D-02b rebuild-preservation gate allowlist** (plan 136-05) -- covers the TEN-value shade set on
+     the same `novelty_status` column-keyed entry decision E already named; no further code change needed
+     in 136-05 itself.
+
+- **Plans that must implement this ruling:** the SAME plans decision E already named (136-04, 136-06,
+  136-12, the release verifier, and the unaffected-in-shape UI consumers) now build the TEN-value shade
+  classifier instead of the nine-value one, with `container_predicts` rendered normally (not behind
+  ruling F's toggle) wherever `diverges_work`/`diverges_part` are rendered behind it.
+
+- **What this plan (136-03) does NOT do:** exactly as decisions E/E′/F already state -- 136-03 does not
+  edit `web/discovery_assets.py`, `scripts/verify_discovery_sidecar.py`, or any build/service module.
+  UNLIKE E/E′/F, this continuation's own dispatch DOES additionally reconcile
+  `docs/specs/discovery-sidecar-schema-v1.md`, `136-04-PLAN.md`, `136-12-PLAN.md` and
+  `.planning/ROADMAP.md` to the current enum -- an explicit, narrow exception to the "records the ruling,
+  does not implement it" convention A-G established, authorized by the objective that dispatched this
+  continuation (the prior-art pass's own headline finding was that exactly this propagation had been
+  skipped). This plan (its Task 2) amends `.planning/REQUIREMENTS.md`, and (its Task 3) reissues
+  `136-NOVELTY-HARDCASES.md`/`.xlsx` via the script to carry `container_predicts` and a new Class 7 --
+  see ruling I below and the "XLSX round-trip" note.
+
+---
+
+## I. Re-measure the pinned gate on the WIDENED task before the production run
+
+- **Question:** decision B above authorized "RUN NOW, PINNED" based on the pinned config's prior
+  validation (40/40 verdict agreement with a fuller-thinking reference config; that reference config
+  itself validated at 99% against 103 human grades). That validation was measured on the FIVE-way
+  vocabulary and a ONE-title-string input contract. Since then, the shade enum has widened to TEN values
+  (E/E′/F/H) and ruling G mandates reading the aid's free text alongside its structured field. Does the
+  prior validation still license running the pinned config on the WIDENED task, or does it need
+  re-measuring first?
+
+- **Owner's answer (verbatim, condensed):** decision B's "run now, pinned" stands as an intention, but is
+  now CONDITIONED: run the pinned config against the owner-labelled evaluation set on the NEW vocabulary
+  and the NEW input contract FIRST, and only THEN authorize the production run. The prior validation
+  covers a DIFFERENT, narrower question than the one the production run will actually ask; the pinned
+  model has never been measured on the ten-value enum or the free-text-reading contract.
+
+- **Date:** 2026-08-02 (same day as A-H, after the prior-art research pass).
+
+- **What is NOT reopened.** Decision B's model/version/effort pin (`gemini-3.6-flash`,
+  `reasoning:{effort:"low"}`) is UNCHANGED -- ruling I is a re-measurement GATE on top of the existing
+  pin, not a new model authorization, and does not reopen "do NOT downgrade the model." The `~$27` cost
+  figure on record (`reference_discovery_llm_gate_cost`, cited in decision B) is EXPLICITLY a COST
+  estimate carried forward by size-extrapolation -- it has never been, and must never be cited as, an
+  ACCURACY measurement of this model on this task. Confusing the two is precisely the error this ruling
+  exists to prevent: `136-NOVELTY-PRIOR-ART.md` §5c independently reached the same posture and is the
+  proximate cause of this ruling.
+
+- **Consequence for the evaluation set (per this ruling and per `136-NOVELTY-PRIOR-ART.md` §5c/§7's own
+  recommendation).** The hard-case evaluation set gains a SEVENTH class -- **Class 7, liturgical-container
+  predictability** (the `container_predicts` shape ruling H names) -- built with the IDENTICAL
+  zero-model-call, script-reproducible selection discipline already used for Classes 4-6 (see
+  `select_liturgical_container_candidates` in `scripts/discovery_gate1_evidence.py`), target ~12 cases.
+  This is NOT part of the Classes-4-6 45→75 expansion decision C/the labelling restructure already
+  authorized -- it is a NEW class, added specifically so the model's FIRST encounter with the
+  container-predicts question is a graded evaluation, never production. Measured outcome (this
+  continuation): **12** Class 7 candidates, selected on a genuinely NAMED standard-rite container
+  collocation (a container noun immediately followed by `מנהג` -- the exact shape of both of the owner's
+  own worked H examples) with the claimed work's own title not already named in the catalogue text,
+  grouped by claimed work and round-robined (largest group first) so the corpus's dominant instance
+  (Psalms, by a wide margin) does not crowd out the other eleven. **Total candidate pool: 95** (83 + 12;
+  every one of the 83 kept unchanged in content -- verified by re-running the script and diffing the
+  regenerated worksheet against the pre-H version, Classes 1-6 byte-identical).
+
+- **Gating relationship to decision B and to plan 136-04's Task 3.** Plan 136-04's Task 3 ("Run the
+  authorized funnel...") must, before authorizing the production run, first run the pinned config against
+  the FULL 95-case owner-labelled evaluation set (once the owner labels it) on the CURRENT ten-value
+  vocabulary and the free-text input contract, and report agreement against the owner's labels using the
+  SAME two-directional-error discipline Task 2's grading harness already implements. Only after that
+  re-measurement is on the record does decision B's "run now, pinned" authorization become operative for
+  the full production run. This is a NEW acceptance criterion for 136-04, recorded here and reconciled
+  into `136-04-PLAN.md` by this same continuation (see the plan's own updated Task 3 acceptance criteria).
+
+- **Code consequence.** No enum value changes here (this ruling is about a MEASUREMENT gate, not a new
+  shade or column). The consequence is entirely procedural: 136-04's Task 3 may not authorize the
+  production run merely because decision B was recorded; it must first produce and record a
+  re-measurement report against the CURRENT vocabulary/contract, using the CURRENT (95-case) evaluation
+  set, before proceeding.
+
+- **What this plan (136-03) does NOT do:** it does not run the pinned model against anything (no model
+  call is made by this continuation, consistent with every prior continuation of this plan) and it does
+  not itself perform the re-measurement -- that is 136-04's Task 3's job, now conditioned by this ruling.
+  This plan (its Task 3) adds Class 7 to the candidate pool and regenerates the worksheet/workbook so the
+  owner's eventual labelling pass covers it.
+
+---
+
 ## Provisional-value / omission audit
 
 None of the five gate-1 answers above (A) were flagged by the owner as provisional -- all five are
@@ -833,6 +1029,41 @@ described first.
     that role by this restructure (only their content updated for the new tokens).
   - **This assessment is reported for the owner's decision, per this plan's own instruction -- no
     collapse is applied in this plan.**
+
+**Updated by rulings H and I (this continuation) -- retained above unchanged, not rewritten, per this
+file's own "record what changed, do not silently overwrite" discipline.** The state described above (83
+candidates, nine shade values, Classes 1-6 only) is now SUPERSEDED by:
+
+- **A NEW Class 7 -- liturgical-container predictability, 12 cases** (owner rulings H/I, §§ H/I above),
+  bringing the total candidate pool to **95** (83 + 12). Selected by
+  `select_liturgical_container_candidates` in `scripts/discovery_gate1_evidence.py`: a manuscript whose
+  own catalogue text names a SPECIFIC, NAMED standard-rite container (a container noun immediately
+  followed by `מנהג` -- the exact collocation shape of both of the owner's own worked H examples) and
+  whose claimed work is NOT already named in that text, grouped by claimed work and round-robined
+  (largest group first) so the corpus's dominant real instance (Psalms, by a wide margin -- a standard
+  prayer-rite predictably includes specific Psalms as fixed liturgy, so a novelty check reading only the
+  container's own name would otherwise misfile the specific Psalm as `fills_gap`) does not crowd out the
+  other eleven candidates. Every one of the 83 pre-H candidates is UNCHANGED in content (verified: two
+  consecutive script runs against the same asset reproduce byte-identical Markdown for Classes 1-6, Class
+  7 appended after them per `_CLASS_ORDER`).
+- **The shade vocabulary widens again, per ruling H: TEN shade values** (`confirms` /
+  `refines_granularity` / `aid_more_specific` / `diverges_work` / `diverges_part` /
+  **`container_predicts`** / `fills_gap` / `extends` / `alias_merge` / `not_checked`) --
+  `container_predicts` inserted immediately before `fills_gap`, the shade it would otherwise be misfiled
+  into by elimination. Class 7's own "Plausible shades" hint is `container_predicts` / `fills_gap` /
+  `confirms` (the same three-token narrowing discipline as every other shade class).
+- **Ruling I's re-measurement gate is a NEW acceptance criterion on plan 136-04's Task 3** (reconciled
+  into `136-04-PLAN.md` by this continuation), not a change to this worksheet's own construction --
+  recorded here only so a reader of this "Outstanding" section knows the evaluation-set-size story is not
+  yet finished once Task 3 returns: the 95-case pool must be labelled, AND the pinned gate must be
+  re-measured against those labels on the ten-value/free-text-reading contract, BEFORE decision B's
+  "run now, pinned" authorization becomes operative for the full production run.
+- **The RISK CHECK above is not re-run for `container_predicts`** in this continuation (no new pairwise
+  confusability analysis performed) -- `container_predicts` is a single, well-scoped predicate (does a
+  named-rite container predict this unit without naming it?) layered onto the existing nine-value
+  judgment, structurally similar in kind to E′'s and F's own splits, which the existing RISK CHECK already
+  treats as low-confusability relative to the underlying test. Flagged here rather than silently assumed:
+  a future session MAY want to extend the RISK CHECK explicitly once Class 7 labels are in hand.
 
 ### Historical (pre-restructure) record, retained for the decision trail
 
