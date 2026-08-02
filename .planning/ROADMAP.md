@@ -198,7 +198,8 @@ Plans:
 Wave rationale: two real chokepoints, not twenty-six. `scripts/build_discovery_sidecar.py` is split into parallel MODULE work (waves 2-3) and two serial WIRING passes (waves 3-4); `shared/discovery_service.py` + `web/discovery.py` are done once (wave 6) so the panel and findings tracks run concurrently afterwards. The methods rewrite (136-02) sits in wave 1 and blocks nothing. **Owner latency is concentrated into ONE wave-1 sitting** (136-03): because this project's waves are hard barriers, a checkpoint anywhere in a wave blocks the next wave regardless of dependency edges, so the fix is to minimise round-trips rather than to scatter checkpoints. Every wave-1 decision — the five gate-1 answers, the novelty spend and evaluation size, the hard-case ground-truth labels, and the needs-ruling domain posture — is answered in that one sitting, and the novelty funnel (136-04) starts immediately after it.
 
 Plans:
-- [ ] 136-01-PLAN.md — Contract & requirement amendments (REQUIREMENTS, band-labels §2/§3, budgets, schema new-field contract + the narrow tier_a amendment, deploy runbook) · wave 1
+
+- [x] 136-01-PLAN.md — Contract & requirement amendments (REQUIREMENTS, band-labels §2/§3, budgets, schema new-field contract + the narrow tier_a amendment, deploy runbook) · wave 1
 - [ ] 136-02-PLAN.md — Methods-page rewrite (qualitative BAND-05) + the ONE shared honesty gate · wave 1
 - [ ] 136-03-PLAN.md — ALL wave-1 owner decisions in one sitting: the five gate-1 answers (D-13e, D-16, D-13c, D-13b, D-13d), the novelty authorization + evaluation size, the owner-supplied hard-case labels, the needs-ruling posture · wave 1 · **checkpoint**
 - [ ] 136-04-PLAN.md — Novelty: identity key, pinned LLM contract, committed funnel runner, authorized run, verdict cache · wave 2
@@ -253,15 +254,19 @@ ship, so the evidence view can land in two stages if that is faster.
      the NORMALIZED letter stream (652 chars off on the sampled case if sliced raw), the result must be
      clipped per line (72 of 148 rows vs 1, silently), one renderer must emit both discovery spans and
      search-term highlights, and the highlight drops on version change.
+
   2. Reference text renders only where the acquisition manifest's per-work `reuse_ok` is `yes` (277 works),
      carrying `attribution_text` where the licence requires it; `unclear` (46), `noncommercial_only` (1) and
      **absent** (21 — every JA work) all fail closed, asserted on the absence of the flag too. M-source
      never renders.
+
   3. A `/work/{id}` page lists all identified carriers grouped by codicological witness unit (joined
      fragments appear as ONE witness), AND-composed filters, server-side pagination with the real total,
      deterministic sort, and counts that count units rather than claim rows. No tier filter.
+
   4. `/catalog-browse` carries computed identifications alongside catalogued ones, visibly separated and
      separately worded.
+
   5. Work titles on the Phase 136 surfaces become links to `/work/{id}`.
   6. Every surface hides cleanly with the flag off or the sidecar absent, stays inside the PERF-01
      budgets, and passes the masking scan on rendered output, JSON payloads, copy/export and error paths.
@@ -328,7 +333,7 @@ than from scratch — they passed the plan-checker on 2026-08-02.
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
 | 135. Precision Certificate & Confidence Bands | 9/9 | Complete   | 2026-07-28 |
-| 136. Read Surfaces — Connections Panel & Work→Witnesses | 0/TBD | Not started | - |
+| 136. Read Surfaces — Connections Panel & Work→Witnesses | 1/21 | In Progress|  |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |
 | 139. Atlas Drill-down, Homepage & Release Hardening | 0/TBD | Not started | - |
