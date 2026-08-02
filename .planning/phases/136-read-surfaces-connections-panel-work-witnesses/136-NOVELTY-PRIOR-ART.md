@@ -264,11 +264,27 @@ would be premature.
   a fundamentally different input contract (comparing a claimed title against ONE catalogue title
   string — never "read the aid's full free text alongside its structured field," which ruling G now
   requires as a PROMPT-DESIGN mandate).
-- `gemini-3.6-flash effort-low` has **zero measured accuracy** against ANY version of this task in this
-  repo. The `~$27` figure on record (`reference_discovery_llm_gate_cost` memory, cited verbatim in
-  `136-GATE1-DECISIONS.md` §B: *"the validated cheap configuration... matches the validated quality"*)
-  is a COST estimate carried forward by size-extrapolation, not an accuracy measurement of this model on
-  this vocabulary.
+- **⟨CORRECTED 2026-08-02, same day, a later dispatch — this bullet OVERSTATED the gap and is amended in
+  place, not deleted, per the discipline this pass asks of others.⟩** The original text here read
+  *"`gemini-3.6-flash effort-low` has **zero measured accuracy** against ANY version of this task in this
+  repo."* That is WRONG and must not be propagated. `gemini-3.6-flash effort-low` **was measured at 100%
+  verdict agreement (40/40) against `gemini-3.5-flash` running the fuller-thinking reference config**,
+  and that reference config was itself independently validated at **99% against 103 human grades** —
+  on the FIVE-way vocabulary, with the ORIGINAL one-title-string input contract (`reference_discovery_llm_gate_cost`
+  memory; `136-GATE1-DECISIONS.md` §B cites this measurement, not merely a cost estimate, as the basis for
+  "the validated cheap configuration... matches the validated quality"). The `~$27` figure on the SAME
+  record is a SEPARATE, COST estimate carried forward by size-extrapolation — that half of the original
+  sentence was correct and is unchanged. **The accurate scoping, stated plainly:** the pinned config DOES
+  have a real, measured accuracy result — but that result was measured on the FIVE-way vocabulary and the
+  one-title-string input contract. It does **NOT EXTEND** to the WIDENED shade enum (now ten values,
+  E/E′/F/H) or to ruling G's free-text input contract (reading the aid's full free text alongside its
+  structured field) — both of which the pinned config has never been measured against. This scoping gap,
+  not a total absence of measurement, is what motivated owner ruling I (`136-GATE1-DECISIONS.md` § I):
+  re-measure the pinned config against the owner-labelled evaluation set on the widened vocabulary and
+  input contract BEFORE the production run. Wherever this document (or any other) cites the pinned
+  config's accuracy, cite it with this scoping — "validated on the five-way vocabulary/one-title-string
+  contract, not yet re-measured on the ten-value/free-text contract" — never as "zero measured accuracy"
+  and never as "the ~$27 figure IS the accuracy evidence."
 - `136-CONTEXT.md` D-23c already states, in its own words, that agreement on the OLD 40-card evaluation
   is *"too weak for an axis this reputationally loaded"* and calls for *"a substantially larger
   owner-labelled hard-case evaluation."* `136-GATE1-DECISIONS.md`'s own "RISK CHECK on the growing shade
