@@ -10,6 +10,10 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+import pytest
+
+from scripts import build_discovery_sidecar as sidecar_build
+from scripts import discovery_ids as ids
 from scripts import verify_discovery_sidecar as verify_mod
 
 FIXTURE_DB = (
@@ -100,3 +104,63 @@ def test_no_reference_columns_fails_on_raw_work_id_shaped_value(tmp_path):
     finally:
         conn.close()
     assert any("raw-shaped work_id" in v for v in violations)
+
+
+# ---------------------------------------------------------------------------
+# D-02a (136-06, docs/specs/discovery-sidecar-schema-v1.md SS1.6 amendment
+# 2026-08-02): the tier_a CERT-01 authorization at the RAW SQL/DDL layer --
+# a check independent of the Python-level _validate_precision_spec /
+# check_measurement_status_ci_consistency tests in tests/test_discovery_build.py.
+# ---------------------------------------------------------------------------
+
+def _fresh_schema_db(tmp_path, name="fresh-schema.db"):
+    db_path = tmp_path / name
+    conn = sqlite3.connect(str(db_path))
+    sidecar_build.create_schema(conn)
+    return conn
+
+
+def test_band_precision_check_constraint_accepts_tier_a_authorization(tmp_path):
+    """The band_precision.measurement_status CHECK constraint (create_schema)
+    must accept the frozen D-02a tier_a authorization value 'measured_pass'
+    with precision NULL -- proven by inserting the EXACT frozen row and
+    asserting no sqlite3.IntegrityError."""
+    conn = _fresh_schema_db(tmp_path)
+    tier_a = next(
+        r for r in sidecar_build._frozen_real_band_precision_rows()
+        if r["scope"] == "band" and r["evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+        and r["confidence_band"] == ids.CONFIDENCE_BAND_TIER_A
+    )
+    conn.execute(
+        "INSERT INTO band_precision (scope, collection_id, evidence_source, confidence_band, "
+        "numerator, denominator, precision, ci_low, ci_high, method, sampling_frame, ins_policy, "
+        "weighting, notes, measurement_status) VALUES "
+        "(:scope, :collection_id, :evidence_source, :confidence_band, :numerator, :denominator, "
+        ":precision, :ci_low, :ci_high, :method, :sampling_frame, :ins_policy, :weighting, :notes, "
+        ":measurement_status)",
+        tier_a,
+    )
+    conn.commit()
+    (stored,) = conn.execute(
+        "SELECT measurement_status FROM band_precision WHERE confidence_band=? AND "
+        "evidence_source=?", (ids.CONFIDENCE_BAND_TIER_A, ids.EVIDENCE_SOURCE_TRACK1_DIRECT)
+    ).fetchone()
+    assert stored == "measured_pass"
+    conn.close()
+
+
+def test_band_precision_check_constraint_rejects_out_of_vocab_measurement_status(tmp_path):
+    """The SAME CHECK constraint must reject a measurement_status outside the
+    closed vocabulary -- proven at the raw SQL layer, independent of the
+    Python-level closed-vocabulary cross-check in _validate_precision_spec."""
+    conn = _fresh_schema_db(tmp_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO band_precision (scope, collection_id, evidence_source, "
+                "confidence_band, measurement_status) VALUES "
+                "('band', 'e1_certification_registry_v1', ?, ?, 'bogus_status_outside_vocab')",
+                (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A),
+            )
+    finally:
+        conn.close()
