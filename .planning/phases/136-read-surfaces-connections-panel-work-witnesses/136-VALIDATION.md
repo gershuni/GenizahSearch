@@ -5,7 +5,7 @@ status: planned
 nyquist_compliant: true
 wave_0_complete: false  # Wave-0 artifacts are owned by plans 136-02 (shared honesty gate), 136-03 (gate-1 decision record + owner label file), 136-05 (preservation harness + pinned expectations) and 136-01 (budget caps)
 created: 2026-07-31
-revised: 2026-08-02  # re-scoped: 21 plans / 63 tasks / 9 waves (revision 2, post-Codex)
+revised: 2026-08-02  # re-scoped: 21 plans / 63 tasks / 10 waves (revision 3, post-Codex round 2)
 ---
 
 # Phase 136 — Validation Strategy
@@ -59,16 +59,16 @@ are appended by the planner; this table is the contract those rows must satisfy.
 | 1 | Expected-hash pinning (F-04 fix) | `136-REBUILD-PRESERVATION-EXPECTED.json` generated from the **currently-live** asset **before** the rebuild; hashes reuse `cert01_frame.py::population_hash()`/`cluster_map_hash()`. Never read expectations from the candidate's own manifest. | artifact | **NEW** | 1→2 |
 | 1 | CERT-01 card binding (D-02c) | For every graded card, assert `claim_id`, `display_evidence_id`, `span_start/end`, `snapshot_hash` byte-identical old vs new. Hard fail. `verify_cert01_grading.py` check 10 is **never weakened** — publish a separate compatibility attestation instead. | offline gate | **NEW** check in the new script | 2 |
 | 1 | D-02a lockstep (6 sites) | Fixtures proving **both** branches: PASS (authorized `ci_low=0.9084` + `measurement_status='measured_pass'` → `is_default_eligible` flips True for `tier_a`) and FAIL (`ci_low` < `STRICT_FLOOR`, status outside vocab, or any non-NULL `precision` → rejected). Includes a test pinning the dict-literal `**r`-override semantics in the `band_precision` INSERT. | unit | extend `test_discovery_schema.py`, `test_discovery_build.py` | 1 |
-| 1 | Masking (DATA-05) | `check_atlas_masking.py --scan-sqlite / --scan-asset / --scan-repo --strict` over: rebuilt private asset, public projection, rendered HTML of all 5 surfaces, JSON payloads, copy/clipboard paths, error paths. `MASKING_SCAN_PATTERNS_FILE` unset must fail closed. | offline gate | extend (script exists) | 2, 4–6 |
+| 1 | Masking (DATA-05) | `check_atlas_masking.py --scan-sqlite / --scan-asset / --scan-repo --strict` over: rebuilt private asset, public projection, rendered HTML of BOTH shipped surfaces (panel + findings), JSON payloads, copy/clipboard paths, error paths. `MASKING_SCAN_PATTERNS_FILE` unset must fail closed. | offline gate | extend (script exists) | 2, 4–6 |
 | 1 | VIS-02 positive control | `tests/test_vis02_positive_control.py` — seed a throwaway copy of the public projection with one row carrying restricted (M-source) origin, scan with the **real** pattern file, assert **nonzero exit**. The built-in `--self-test` proves the matcher is encoding-robust but does **not** prove a real leak would be caught. | integration | **NEW** | 2 |
 | 1 | VIS-01 closed graph | FK closure, no unreachable works, routing-audit rows, counts, aggregates, sort behaviour and auxiliary tables all projected and verified — not claim rows alone. Public/private row-count reconciliation recorded in a new dated frame doc. | offline gate | extend `verify_discovery_sidecar.py` | 2 |
 | 2 | Panel display rules (D-13a/b/d/e/f/g/h/i) | Pure-function tests over fabricated claim-row fixtures: collapse by `canonical_work_id`; identical-span group extraction; short-passage bucketing; three-bucket assignment. | unit | extend | 4 |
 | 2 | D-13g routing bug | Regression test for the exact mockup symptom: a `human_confirmed` row with `routing_status='review_only'` must render (with a low-coverage note), not be filtered out in SQL before `is_default_eligible` runs. | unit | **NEW** | 4 |
 | 2 | D-13 envelope (F-14) | `{status, items, total}` — assert timeout/overload/absent-sidecar are distinguishable from a genuine zero, and that a genuine zero hides the entry control while an outage shows a visible retry state. | unit + render-smoke | **NEW** | 4 |
-| 3 | Offset renderer (D-12) | Byte-for-byte fixture with `&`/`<`/`>` **before** the target span, proving slice-then-escape is correct where `highlight_text` (escape-then-substitute) would corrupt offsets. Plus per-side fail-closed on `snapshot_hash` drift: identification + tier still render, span withheld. Plus the b-side structural-absence copy (permanent note, *not* a drift error). | unit | **NEW** | 6 |
-| 4 | `/work/{id}` pagination | Sort stability across pages (page 2's first row never duplicates/skips page 1's last) with the tie-break extended to the new display fields. Unit counts asserted against the corrected F-11 figures (heaviest work 4,796 manuscripts / 4,637 units — **not** 13,038 claim rows). | unit | extend | 4 |
+| — | ~~Offset renderer (D-12)~~ **MOVED to Phase 136.1** | Byte-for-byte fixture with `&`/`<`/`>` **before** the target span, proving slice-then-escape is correct where `highlight_text` (escape-then-substitute) would corrupt offsets. Plus per-side fail-closed on `snapshot_hash` drift: identification + tier still render, span withheld. Plus the b-side structural-absence copy (permanent note, *not* a drift error). | unit | **NEW** | 6 |
+| — | ~~`/work/{id}` pagination~~ **MOVED to Phase 136.1** | Sort stability across pages (page 2's first row never duplicates/skips page 1's last) with the tie-break extended to the new display fields. Unit counts asserted against the corrected F-11 figures (heaviest work 4,796 manuscripts / 4,637 units — **not** 13,038 claim rows). | unit | extend | 4 |
 | 5 | Findings-page perf (F-10) | Re-run the representative novelty/tier/coverage ordering via `bench_discovery.py::bench_findings_page()` after D-10a's materialized `band_rank`/`coverage_ppm` + indexes land. **Known failing baseline: 3.41–3.55 s vs the 1.5 s cap** — strongest kind of perf test, it already caught something real. | perf | extend `bench_discovery.py` | 5 |
-| 5 | Catalogue honesty (D-18/D-21) | Assert catalogued FJMS titles and computed neutral titles are never rendered under a shared "identified as" wording; "copy of" / "quotes" / "witness of" absent from display. | render-smoke | **NEW** | 5 |
+| — | ~~Catalogue honesty (D-18/D-21)~~ **MOVED to Phase 136.1** | Assert catalogued FJMS titles and computed neutral titles are never rendered under a shared "identified as" wording; "copy of" / "quotes" / "witness of" absent from display. | render-smoke | **NEW** | 5 |
 | 6 | Novelty fail-closed (D-23a) | One forced-failure test per named path — source unavailable, unnormalizable identifier, truncated snapshot, stale cache, model abstention — each asserting `indeterminate`, never silently `not_found`. | unit | **NEW** | 6 |
 | 6 | One result per claim | New verifier check: every claim with ≥2 evidence rows agrees on the novelty tri-state. (665 of 29,054 multi-evidence claims currently disagree on the legacy boolean.) | offline gate | extend `verify_discovery_sidecar.py` | 2/6 |
 | 6 | LLM contract (D-23c) | Assert committed constants for prompt hash, model+version (`gemini-3.6-flash`, `reasoning:{effort:"low"}`) and normalized-input hash appear literally in the request payload, so a silent model downgrade fails CI rather than surfacing in a cost report. Structured abstention → `indeterminate` via a test double. | unit | **NEW** | 6 |
@@ -136,7 +136,7 @@ Nothing below exists yet; each blocks the criterion it serves.
 
 ## Per-Task Verification Rows (repopulated by the planner, 2026-08-02 - RE-SCOPE, revision 1)
 
-**Supersedes the 31-plan / 26-wave table.** The re-scoped phase is **21 plans / 63 tasks / 9 waves**.
+**Supersedes the 31-plan / 26-wave table.** The re-scoped phase is **21 plans / 63 tasks / 10 waves**.
 PANEL-03, WORK-01 and WORK-02 moved to Phase 136.1, and `w_start`/`w_end` plus the Sefaria versemap
 resolution were trimmed out of the rebuild - so the rows for the archived plans 136-08, 136-09, 136-17
 and 136-22 through 136-26 no longer apply here.
@@ -149,8 +149,16 @@ record); 136-04 lost its checkpoint, became autonomous and moved to wave 2. The 
 **Revision 2 (Codex pre-flight, verdict REWORK - `136-CODEX-PREFLIGHT.md`):** two plans added rather
 than absorbed. **136-20** (wave 3) closes the public/private deployment boundary and the startup
 readiness contract; **136-21** (wave 7) does the work-expansion service change that revision 1 wrongly
-called field-wiring. Wave count is unchanged at 9. Both new plans carry their own positive controls,
-listed below.
+called field-wiring. Both new plans carry their own positive controls, listed below.
+
+**Revision 3 (Codex round 2 - 3 HIGH / 2 MEDIUM / 2 LOW, down from 10/1/1):** eight findings confirmed
+RESOLVED and untouched. The wave count moved 9 -> 10 for one reason only: **136-17 and 136-18 both
+deploy to production**, and a `files_modified` check cannot see that conflict because the contended
+resource is the box, not the repo. 136-18 moved to wave 9 and 136-19 to wave 10, so **no wave contains
+two plans mutating production**. Also: 136-13's checkpoint now authorizes the PUBLIC projection only
+and states one deploy order (code first); 136-21's filter/count contract was made self-consistent; the
+schema-marker decision was made in-plan (retain `discovery-v1`); `meta.audience='private'` was assigned
+a writer.
 
 | Task ID | Plan | Wave | SC | Type | Automated verify | Status |
 |---------|------|------|----|------|------------------|--------|
@@ -206,11 +214,11 @@ listed below.
 | 136-17-T1 | 136-17 | 8 | 2,8 | render-smoke + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "browse_enri...` | &#9744; |
 | 136-17-T2 | 136-17 | 8 | 2,8 | render-smoke + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "discovery_p...` | &#9744; |
 | 136-17-T3 | 136-17 | 8 | 2,8 | render-smoke + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
-| 136-18-T1 | 136-18 | 8 | 5,6,8 | render-smoke + perf + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_findings_pa...` | &#9744; |
-| 136-18-T2 | 136-18 | 8 | 5,6,8 | render-smoke + perf + deploy | `python -c "import io; s=io.open('scripts/bench_discovery.py',encoding='utf-8').read()...` | &#9744; |
-| 136-18-T3 | 136-18 | 8 | 5,6,8 | render-smoke + perf + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
-| 136-19-T1 | 136-19 | 9 | 8 | masking + docs | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
-| 136-19-T2 | 136-19 | 9 | 8 | masking + docs | `PYTHONUTF8=1 python scripts/check_docs.py && python -c "import io; t=io.open('.planni...` | &#9744; |
+| 136-18-T1 | 136-18 | 9 | 5,6,8 | render-smoke + perf + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_findings_pa...` | &#9744; |
+| 136-18-T2 | 136-18 | 9 | 5,6,8 | render-smoke + perf + deploy | `python -c "import io; s=io.open('scripts/bench_discovery.py',encoding='utf-8').read()...` | &#9744; |
+| 136-18-T3 | 136-18 | 9 | 5,6,8 | render-smoke + perf + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
+| 136-19-T1 | 136-19 | 10 | 8 | masking + docs | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
+| 136-19-T2 | 136-19 | 10 | 8 | masking + docs | `PYTHONUTF8=1 python scripts/check_docs.py && python -c "import io; t=io.open('.planni...` | &#9744; |
 | 136-20-T1 | 136-20 | 3 | 1,8 | loader gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_a...` | &#9744; |
 | 136-20-T2 | 136-20 | 3 | 1,8 | loader gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_a...` | &#9744; |
 | 136-20-T3 | 136-20 | 3 | 1,8 | loader gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_a...` | &#9744; |
@@ -232,8 +240,8 @@ listed below.
 | `bench_discovery.py::bench_findings_page()` | 136-11 | 3 |
 | `docs/specs/discovery-budgets.md` findings cap + build-time budget | 136-01 (caps) / 136-11, 136-13, 136-18 (measured) | 1 / 3, 5, 8 |
 | `tests/render_smoke/test_panel_render_smoke.py` | 136-17 | 8 |
-| `tests/render_smoke/test_findings_render_smoke.py` | 136-18 | 8 |
-| `tests/render_smoke/test_discovery_masking_sweep.py` | 136-19 | 9 |
+| `tests/render_smoke/test_findings_render_smoke.py` | 136-18 | 9 |
+| `tests/render_smoke/test_discovery_masking_sweep.py` | 136-19 | 10 |
 | `web/discovery_assets.py` audience gate + extended readiness contract | 136-20 | 3 |
 | `shared/discovery_surface_projection.py` (allowlist projection; `review_overlay` / precision / CI excluded) | 136-14 | 6 |
 
@@ -255,7 +263,7 @@ listed below.
 | Panel render honesty | 136-17 | A precision figure in a rendered row, a stored vocabulary key in a chip, a review badge |
 | Findings render honesty | 136-18 | "New discovery" plus a precision figure; an out-of-vocabulary domain plus a header mislabelled as the manuscript's domain; a rendered row whose bucket disagrees with the shared rule |
 | Loader audience boundary | 136-20 | A private-audience artifact behind the manifest (public routes must return nothing); a MISSING audience value (must fail closed); a pre-rebuild-shaped asset (availability must stay false); a row-count disagreement on either new table |
-| Work-expansion contract | 136-21 | `relations_differ` removed from the projection; the anchor's band substituted for the weaker one; the page length returned as the total |
+| Work-expansion contract | 136-21 | `relations_differ` removed from the projection; the anchor's band substituted for the weaker one; the page length returned as the total. Plus: `anchor_evidence_source` omitted from the rank call (two fixtures differing only in it must resolve differently), and a count built from the raw ranked CTE instead of the complete filtered pipeline (must diverge under a weaker-anchor filter) |
 | Surface-safe projection | 136-14 | An unexpected key added to the serializer output (allowlist must drop it); the "Expert-reviewed" value asserted absent from row, envelope, JSON and error path |
 | Masking schema coverage | 136-08 | The restricted marker seeded into a column or table NAME, caught only by `--scan-sqlite` |
 | Zero-owner-label mutation | 136-04 | The explicit denominator guard removed - the zero-label test must then FAIL |
@@ -269,8 +277,21 @@ relation kinds genuinely DIFFER, plus a same-relation companion:
 
 | Plan | Assertion |
 |---|---|
-| 136-14 | `relations_differ` is true and both `claim_type` values are present and distinct on a differing fixture; false on a same-relation fixture |
+| **136-21** | `relations_differ` is true and both `claim_type` values are present and distinct on a differing fixture; false on a same-relation fixture. Plus the two FILTER directions: a stronger-anchor fixture where the other carrier's band decides inclusion, and a weaker-anchor fixture where the anchor's band decides it and the row is excluded |
 | 136-17 | TWO distinct relation chips render with the correct label on each; exactly ONE renders when the kinds agree; neither chip carries a stored vocabulary key or a kind-keyed colour |
+
+### Externally-contended resources (added revision 3)
+
+A `files_modified` check only sees the repository. These resources are outside it, and two plans
+touching one in the same wave would run concurrently against it:
+
+| Resource | Plans | Waves | Serialized? |
+|---|---|---|---|
+| **Production box / deployed asset / manifest** | 136-13, 136-17, 136-18 | 5, 8, 9 | **yes** - one per wave |
+| LLM provider + the authorized spend | 136-04 | 2 | yes - single plan |
+| Owner attention (blocking checkpoints) | 136-03, 136-13 | 1, 5 | yes - one per wave |
+| Staged build inputs in `discovery_data/` | 136-03 (labels), 136-09 (curation), 136-04 (verdict cache) | 1, 2 | yes - distinct artifacts, no shared writer |
+| The production discovery flag | none | - | **no plan in this phase flips it**; Phase 139 owns the flip |
 
 ### Blocking owner checkpoints
 
