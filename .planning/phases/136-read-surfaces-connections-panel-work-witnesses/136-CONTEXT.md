@@ -299,6 +299,12 @@ note · `NOVEL-01`/`D-23b` candidacy wording · `discovery-budgets.md` findings-
   does use `ix_discovery_claim_page_id`, so it is the right approach. Per manuscript: median **2**
   shipped claims / **1** distinct work; max 427 claims / 47 works; **429** manuscripts over 50 claims
   → the manuscript group needs pagination.
+  - **⟨AMENDED 2026-08-02⟩ Strike "collapsed".** Variant D (the selected layout) never collapses the
+    manuscript group — the two panes carry **even** weight (1fr/1fr ≥900px, stacking page-then-manuscript
+    on mobile), because the primary reader job is understanding the whole manuscript, not judging one
+    row. The left-to-right **ordering** above is unchanged: "On this page" first, then "Elsewhere in
+    this manuscript". The manuscript pane **NAMES** the works. Pagination above 50 claims still applies.
+    Implemented by plans 136-19 / 136-20.
 - **D-10 — Nested structure.** Top level = identification rows. "Other manuscripts matching ⟨work⟩"
   nests per work as an on-demand expansion via `get_work_witnesses(work_id, anchor_sys_id=…)`.
   "Pages matching this page in other manuscripts" is a separate section below.
@@ -318,6 +324,23 @@ note · `NOVEL-01`/`D-23b` candidacy wording · `discovery-budgets.md` findings-
   (`discovery-sidecar-schema-v1.md:165-175`), so when the viewed page is the b-side the section shows
   the relation and its stats with an explicit "the passage location was not recorded" note. PANEL-03
   ships in execution gate 6, last.
+  - **⟨AMENDED 2026-08-02 — the mechanism above is WRONG as written; sketch 002 found four defects⟩**
+    1. **Stored offsets index the NORMALIZED Hebrew-letter stream, not the raw text.** "Slice the RAW
+       page text at the stored offsets" lands in the wrong place — **652 characters off** on the
+       sampled case. A normalized→raw offset map is required first.
+    2. **The result must additionally be clipped PER LINE**, because the line-number gutter splits
+       highlight HTML on `\n`. Done correctly 72 of 148 grid rows highlight; done naively, **1** —
+       silently.
+    3. **Search-term highlighting and discovery spans compete for one render parameter.** One renderer
+       must emit both, with an explicit precedence rule.
+    4. **The version selector invalidates stored offsets** — the highlight must be **dropped** on
+       source change, not recomputed.
+
+    Also: **only the largest span is stored**, so a row's stated matched-letter count can exceed what
+    is highlightable. The rejection of `browse.py::highlight_text` and the b-side note above are both
+    unchanged and still correct. Implemented by plan 136-17 (offset renderer), consumed by 136-22 /
+    136-23. **Treat "name the coordinate space of every offset at the point of definition" as a schema
+    rule** — the same trap recurs on the work side with `w_start`/`w_end` (see A-5).
 - **D-13 — The entry control is hidden only on a SUCCESSFUL zero (Codex F-14).** Only 44,375 of ~255K
   manuscripts carry shipped claims (~17%), so hiding on zero is right — but today's wrappers collapse
   timeout, overload, unavailable sidecar and genuine zero all to `[]`, which would hide the panel

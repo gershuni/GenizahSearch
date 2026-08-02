@@ -174,6 +174,7 @@ Plans:
 **Goal**: A researcher browsing a manuscript sees its computed same-work identifications and related manuscripts — banded, masked, with our-text-only evidence, and honestly framed as text matches rather than asserted identifications — can navigate to a per-work witness-map page grouped by codicological unit, and can sweep the whole corpus for findings that no finding aid already records. Everything ships behind the flag; nothing goes public until Phase 139.
 
 **⚠ SCOPE EXPANDED 2026-07-30** (owner, `136-CONTEXT.md`; discuss-phase ran both the real-data mockup gate and the Codex adversarial gate before planning). Four decisions reshape this entry:
+
 - **The novelty axis (NOVEL-01/02) moved IN**, reversing the 2026-07-28 addendum's post-136 homing — the owner's primary reason the surfaces are worth shipping is finding what is *not* already in the finding aids, and the surfaces cannot be designed around a filter that does not exist. This carries the `track1_direct` coverage gap (the frozen v2 asset leaves all 254,612 direct rows at `is_new = 0`), the rewired LLM title gate, and the heuristic funnel.
 - **VIS-01** (public/private projection) is homed here and must be derived at BUILD time, before raw provenance ids are discarded.
 - **Two NEW surfaces** beyond the panel and the work page: computed identifications on `/catalog-browse`, and a corpus-wide **findings page** with its own nav entry (owner: *"a big new amazing feature… maximum ability to see new findings"*).
@@ -195,37 +196,115 @@ Plans:
 **Plans:** 31 plans in 26 waves, organised around the **six execution gates** (D-04): (1) rebuild + the D-13d granularity rule + the D-13c threshold [136-01..136-15], (2) the panel [136-16, 136-18..136-21], (3) the evidence view [136-17, 136-22, 136-23], (4) `/work/{id}` [136-24, 136-25], (5) `/catalog-browse` + the findings page [136-26..136-29], (6) novelty wiring + the methods-page rewrite [136-30, 136-31]. Gate 1 blocks every surface wave: the rebuilt asset must be live in production, flag OFF, before any UI code that reads its new columns is deployed. Four blocking owner checkpoints: 136-04 (the five open gate-1 decisions), 136-11 (authorize the novelty funnel run), 136-15 (approve the one authorized production redeploy), 136-22 (the evidence view's render source and b-side form). A second mockup pass and a Codex pass are owed on the built surfaces, not only on the context.
 
 Plans:
+**Wave 1**
+
 - [ ] 136-01-PLAN.md — Requirement + band-label + budget contract amendments
 - [ ] 136-02-PLAN.md — Schema + deploy contract amendments
 - [ ] 136-03-PLAN.md — Rebuild-preservation harness + expectations pinned from the LIVE asset
 - [ ] 136-04-PLAN.md — Gate-1 evidence pack + the five open owner decisions (checkpoint)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 136-05-PLAN.md — D-02a tier_a authorization lockstep (6 sites, both branches)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 136-06-PLAN.md — coverage_ppm + band_rank + the D-10a index set
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 136-07-PLAN.md — The main-pool rule + discovery_identification + manuscript_display + findings bench
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 136-08-PLAN.md — Work-side offsets w_start/w_end, corpus-wide, + the containment signal
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 136-09-PLAN.md — Sefaria reference resolution + the per-work licence metadata
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 136-10-PLAN.md — works.genre curation + author aliases + the kept_tie fix
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
 - [ ] 136-11-PLAN.md — Novelty identity key + pinned LLM contract + verdict artifact (checkpoint)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
 - [ ] 136-12-PLAN.md — Novelty tri-state ingestion + fail-closed verification
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
 - [ ] 136-13-PLAN.md — VIS-01 two-axis visibility + closed-graph public projection + VIS-02 control
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
 - [ ] 136-14-PLAN.md — The rebuild run + the full gate battery + the compatibility attestation
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
 - [ ] 136-15-PLAN.md — Owner approval + the asset-first production deploy, flag OFF (checkpoint)
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
 - [ ] 136-16-PLAN.md — Panel service layer: envelope, the D-13g routing fix, manuscript scope
 - [ ] 136-17-PLAN.md — Offset renderer + the reference-text licence gate (pure)
+
+**Wave 14** *(blocked on Wave 13 completion)*
+
 - [ ] 136-18-PLAN.md — Panel display model + the bilingual display vocabulary (pure)
+
+**Wave 15** *(blocked on Wave 14 completion)*
+
 - [ ] 136-19-PLAN.md — Panel UI: entry control, enrichment seam, service states
+
+**Wave 16** *(blocked on Wave 15 completion)*
+
 - [ ] 136-20-PLAN.md — Panel UI: rows, buckets, panes, placeholder voting
+
+**Wave 17** *(blocked on Wave 16 completion)*
+
 - [ ] 136-21-PLAN.md — Panel render-smoke + positive controls + masking capture
 - [ ] 136-22-PLAN.md — Evidence-view decisions: render source and b-side form (checkpoint)
+
+**Wave 18** *(blocked on Wave 17 completion)*
+
 - [ ] 136-23-PLAN.md — Evidence view UI + licence-gated reference text
+
+**Wave 19** *(blocked on Wave 18 completion)*
+
 - [ ] 136-24-PLAN.md — Work-page service: D-17a display fields + the count query
+
+**Wave 20** *(blocked on Wave 19 completion)*
+
 - [ ] 136-25-PLAN.md — `/work/{id}` page
+
+**Wave 21** *(blocked on Wave 20 completion)*
+
 - [ ] 136-26-PLAN.md — `/catalog-browse` computed identifications + WORK-02 title findability
+
+**Wave 22** *(blocked on Wave 21 completion)*
+
 - [ ] 136-27-PLAN.md — Findings service: three row units, the facet cascade, the perf gate
+
+**Wave 23** *(blocked on Wave 22 completion)*
+
 - [ ] 136-28-PLAN.md — Findings page: route, gated nav entry, shell
+
+**Wave 24** *(blocked on Wave 23 completion)*
+
 - [ ] 136-29-PLAN.md — Findings page: rows, the novelty switch, render-smoke
+
+**Wave 25** *(blocked on Wave 24 completion)*
+
 - [ ] 136-30-PLAN.md — Methods-page qualitative rewrite + the no-percentage gate
+
+**Wave 26** *(blocked on Wave 25 completion)*
+
 - [ ] 136-31-PLAN.md — Novelty across all surfaces + the final cross-surface masking sweep
+
 **UI hint**: yes
 
 ### Phase 137: Community Judgments

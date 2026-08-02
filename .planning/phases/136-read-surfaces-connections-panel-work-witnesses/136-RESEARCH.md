@@ -249,7 +249,21 @@ This is a NEW, small, pure function — it does not touch `highlight_text` (whic
 
 **Note on `[ASSUMED]` tagging:** every other claim in this document above the Assumptions Log line was verified directly against a tool call (file read, grep, git check-ignore) during this research session and is tagged implicitly HIGH confidence by virtue of that verification — this document does not carry package-installation claims (`[VERIFIED: npm registry]`-style provenance is not applicable; this phase installs no new external packages).
 
-## Open Questions
+## Open Questions (RESOLVED 2026-08-02 — both closed in planning)
+
+> **Q1 → resolved by plan `136-03` Task 1**, which resolves the verdict-manifest path dynamically at
+> execution time (grep-based, `--cards`, raising a loud violation unless explicitly `SKIP`) rather than
+> hardcoding a path this research could not confirm. **Q2 → resolved by plans `136-21` Task 3 and
+> `136-31` Task 3**, which adopt this section's own recommendation: probe for the tool, and on absence
+> skip **loudly** — naming the missing tool and recording the residual risk in the verification report
+> — so the Phase 133 atlas's silent skip is not repeated.
+>
+> ⚠ **Staleness notice (2026-08-02).** This document was written 2026-07-31 and is **stale on the six
+> items** the owner settled 2026-08-01/02: the two-bucket main-pool model (the three-level confidence
+> scale was retired), tooltip-only band labels, the deleted tier filter, licence-gated reference-text
+> rendering, the five added rebuild fields, and the settled findings page. See the **AMENDMENT
+> 2026-08-02** block at the top of `136-CONTEXT.md` `<decisions>`, which supersedes. Use this file for
+> codebase orientation, integration points and the validation architecture only.
 
 1. **Exact path of the CERT-01 graded-deck verdict manifest for card-binding (Success Criterion 1, step 5).**
    - What we know: the deck lives in the gitignored `same_work_spike/probe/` tree per `docs/specs/discovery-coordination.md`; `verify_cert01_grading.py` references a verdicts file.

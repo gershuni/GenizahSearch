@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
-status: Phase 135 closed 2026-07-28. CERT-01 MEASURED and PASSED (validator 12/12).
+status: executing
 stopped_at: "Phase 136 DISCUSS COMPLETE 2026-07-30 — context revised after BOTH pre-planning gates (real-data mockup: 2 real display defects + 1 self-inflicted false alarm; Codex adversarial: REWORK, 3 BLOCKER/9 HIGH, every finding dispositioned), scope EXPANDED by the owner (NOVEL-01/02 moved IN, VIS-01 homed, 2 new surfaces, ONE authorized rebuild), and the REQUIREMENTS/ROADMAP/STATE bookkeeping applied (commit 2251fccb). Next: /clear then /gsd-plan-phase 136"
-last_updated: "2026-07-30T12:55:00.000Z"
-last_activity: 2026-07-30
+last_updated: "2026-08-02T04:46:18.250Z"
+last_activity: 2026-08-02 -- Phase 136 planning complete
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 24
+  total_plans: 55
   completed_plans: 22
   percent: 14
 ---
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 
 Phase: 135 (precision-certificate-confidence-bands) — COMPLETE (9/9)
 Plan: 9 of 9
-Status: Phase 135 closed 2026-07-28. CERT-01 MEASURED and PASSED (validator 12/12).
-Last activity: 2026-07-28
+Status: Ready to execute
+Last activity: 2026-08-02 -- Phase 136 planning complete
 
 **PHASE 135 CLOSED 2026-07-28.** 135-08 deployed the v2 sidecar to production (atomic manifest swap, `discovery-v1-33499c5b…`, flag OFF, rollback drilled, prod-box PERF-01 actuals recorded: browse p95 0.49 ms / added RSS 11.2 MB). 135-09 froze the CERT-01 pre-registration + OC table + 280-card deck + twelve-check validator, rendered the deck, and the owner then **GRADED ALL 280 CARDS** catalogue-blind (zero reveals) — **validator 12/12 exit 0**, closing on the real D-02 signal.
 
