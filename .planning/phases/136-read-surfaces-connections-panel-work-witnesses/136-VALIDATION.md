@@ -3,9 +3,9 @@ phase: 136
 slug: read-surfaces-connections-panel-work-witnesses
 status: planned
 nyquist_compliant: true
-wave_0_complete: false  # Wave-0 artifacts are owned by plans 136-02 (shared honesty gate), 136-03 (gate-1 decision record), 136-05 (preservation harness + pinned expectations) and 136-01 (budget caps)
+wave_0_complete: false  # Wave-0 artifacts are owned by plans 136-02 (shared honesty gate), 136-03 (gate-1 decision record + owner label file), 136-05 (preservation harness + pinned expectations) and 136-01 (budget caps)
 created: 2026-07-31
-revised: 2026-08-02  # re-scoped: 19 plans / 56 tasks / 9 waves
+revised: 2026-08-02  # re-scoped: 19 plans / 57 tasks / 9 waves (revision 1)
 ---
 
 # Phase 136 — Validation Strategy
@@ -134,13 +134,17 @@ Nothing below exists yet; each blocks the criterion it serves.
 
 ---
 
-## Per-Task Verification Rows (repopulated by the planner, 2026-08-02 — RE-SCOPE)
+## Per-Task Verification Rows (repopulated by the planner, 2026-08-02 - RE-SCOPE, revision 1)
 
-**Supersedes the 31-plan / 26-wave table.** The re-scoped phase is **19 plans / 56 tasks / 9 waves**.
+**Supersedes the 31-plan / 26-wave table.** The re-scoped phase is **19 plans / 57 tasks / 9 waves**.
 PANEL-03, WORK-01 and WORK-02 moved to Phase 136.1, and `w_start`/`w_end` plus the Sefaria versemap
-resolution were trimmed out of the rebuild — so the rows for the archived plans 136-08, 136-09, 136-17
-and 136-22 through 136-26 no longer apply here. Every task carries an `<automated>` verify command;
-three are blocking owner checkpoints whose verify is the recorded reply.
+resolution were trimmed out of the rebuild - so the rows for the archived plans 136-08, 136-09, 136-17
+and 136-22 through 136-26 no longer apply here.
+
+**Revision 1 (plan-checker round 1):** every wave-1 owner decision is consolidated into ONE sitting in
+136-03, which now carries four tasks (evidence &rarr; decision checkpoint &rarr; label checkpoint &rarr;
+record); 136-04 lost its checkpoint, became autonomous and moved to wave 2. The phase now has exactly
+**two** blocking owner checkpoints, both listed below.
 
 | Task ID | Plan | Wave | SC | Type | Automated verify | Status |
 |---------|------|------|----|------|------------------|--------|
@@ -150,12 +154,13 @@ three are blocking owner checkpoints whose verify is the recorded reply.
 | 136-02-T1 | 136-02 | 1 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
 | 136-02-T2 | 136-02 | 1 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
 | 136-02-T3 | 136-02 | 1 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
-| 136-03-T1 | 136-03 | 1 | 2,5 | offline report + decision | `python scripts/discovery_gate1_evidence.py --help && python -c "import io,os; p='.pla...` | &#9744; |
-| 136-03-T2 | 136-03 | 1 | 2,5 | offline report + decision (checkpoint) | `echo "CHECKPOINT: owner reply to all five decisions recorded verbatim in the plan sum...` | &#9744; |
-| 136-03-T3 | 136-03 | 1 | 2,5 | offline report + decision | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel...` | &#9744; |
-| 136-04-T1 | 136-04 | 1 | 1,6 | unit + decision (checkpoint) | `python -c "import io,os; p='.planning/phases/136-read-surfaces-connections-panel-work...` | &#9744; |
-| 136-04-T2 | 136-04 | 1 | 1,6 | unit + decision | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_n...` | &#9744; |
-| 136-04-T3 | 136-04 | 1 | 1,6 | unit + decision | `python scripts/discovery_novelty_funnel.py --help && python -c "import io; s=io.open(...` | &#9744; |
+| 136-03-T1 | 136-03 | 1 | 2,5,6 | evidence + consolidated owner gate | `python scripts/discovery_gate1_evidence.py --help && python -c "import io; t=io.open(...` | &#9744; |
+| 136-03-T2 | 136-03 | 1 | 2,5,6 | evidence + consolidated owner gate (checkpoint) | `echo "CHECKPOINT: owner replies to A (five decisions), B (spend), C (eval size) and D...` | &#9744; |
+| 136-03-T3 | 136-03 | 1 | 2,5,6 | evidence + consolidated owner gate (checkpoint) | `echo "CHECKPOINT: owner verdicts recorded per case; unanswered cases explicitly liste...` | &#9744; |
+| 136-03-T4 | 136-03 | 1 | 2,5,6 | evidence + consolidated owner gate | `python -c "import io,json; t=io.open('.planning/phases/136-read-surfaces-connections-...` | &#9744; |
+| 136-04-T1 | 136-04 | 2 | 6 | unit + funnel run | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_n...` | &#9744; |
+| 136-04-T2 | 136-04 | 2 | 6 | unit + funnel run | `python scripts/discovery_novelty_funnel.py --help && GITHUB_ACTIONS=true QT_QPA_PLATF...` | &#9744; |
+| 136-04-T3 | 136-04 | 2 | 6 | unit + funnel run | `python -c "import io; r=io.open('.planning/phases/136-read-surfaces-connections-panel...` | &#9744; |
 | 136-05-T1 | 136-05 | 1 | 1 | offline gate | `python scripts/verify_rebuild_preservation.py --help && python -c "import io; s=io.op...` | &#9744; |
 | 136-05-T2 | 136-05 | 1 | 1 | offline gate | `python -c "import json,io; d=json.load(io.open('.planning/phases/136-read-surfaces-co...` | &#9744; |
 | 136-05-T3 | 136-05 | 1 | 1 | offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_rebuild_pre...` | &#9744; |
@@ -207,41 +212,57 @@ three are blocking owner checkpoints whose verify is the recorded reply.
 |---|---|---|
 | `tests/render_smoke/discovery_honesty_gate.py` (the ONE shared no-numbers gate, imported by every later surface suite) | 136-02 | 1 |
 | `scripts/discovery_gate1_evidence.py` + `136-GATE1-DECISIONS.md` (the constants three later plans cite) | 136-03 | 1 |
+| `discovery_data/novelty_hardcase_labels-v1.json` (OWNER-supplied ground truth; `label_provenance` enforced downstream) | 136-03 | 1 |
 | `scripts/verify_rebuild_preservation.py` | 136-05 | 1 |
 | `136-REBUILD-PRESERVATION-EXPECTED.json` (pinned from the LIVE asset, BEFORE the rebuild) | 136-05 | 1 |
 | `tests/test_vis01_projection.py` (leak + structural-absence controls) | 136-08 | 2 |
+| Pinned novelty-verdict-cache handoff artifact | 136-04 | 2 |
 | `bench_discovery.py::bench_findings_page()` | 136-11 | 3 |
 | `docs/specs/discovery-budgets.md` findings cap + build-time budget | 136-01 (caps) / 136-11, 136-13, 136-18 (measured) | 1 / 3, 5, 8 |
-| Pinned novelty-verdict-cache handoff artifact | 136-04 | 1 |
 | `tests/render_smoke/test_panel_render_smoke.py` | 136-17 | 8 |
 | `tests/render_smoke/test_findings_render_smoke.py` | 136-18 | 8 |
 | `tests/render_smoke/test_discovery_masking_sweep.py` | 136-19 | 9 |
 
-### Positive controls — the assertions that must be proven able to fail
+### Positive controls - the assertions that must be proven able to fail
 
 | Control | Plan | What it seeds |
 |---|---|---|
 | No-numbers gate (methods page) | 136-02 | A precision figure plus an interval; a stored vocabulary key; a bare percentage without the matched-letter qualifier; a NEGATED prohibited word |
+| Self-labelling guard | 136-04 | A label entry with no owner `label_provenance` (must be excluded from grading); a label file with ZERO owner entries (the harness must FAIL, not report a vacuous score); an edited label file failing its content hash |
 | Novelty masking | 136-04 | An adversarial-input table asserting the restricted name never appears for unknown / `None` / malformed provenance codes |
 | Rebuild preservation | 136-05 | In-stratum `matched_letters` drift, a deleted evidence row, an added claim, a changed `works` title, an unauthorized `band_precision` change, a repointed graded card, and a candidate self-attesting its own frame |
 | D-02a both branches | 136-06 | An unauthorized `ci_low`, an out-of-vocabulary status, any non-NULL `tier_a` precision, `measured_pass` on an undeclared band |
 | Second-implementation guard | 136-07 | A locally-defined band-set predicate in a scratch module |
 | VIS-01 leak + structural absence | 136-08 | A restricted marker in a projected title, an orphaned FK, a copied total, a ruleless table, and an unset masking pattern file |
-| Curation vocabulary | 136-09 | An out-of-tree domain leaf, a non-canonical key, a duplicate assignment |
+| Curation vocabulary + needs-ruling | 136-09 | An out-of-tree domain leaf, a non-canonical key, a duplicate assignment, and a `needs-ruling` row carrying a guessed leaf |
 | Novelty ingestion | 136-12 | An unmasked provenance label, a disagreeing per-claim novelty fixture, a substituted verdict cache, a `kept_tie` row with a NULL `demoted_work_id` |
 | Wrong-axis guard | 136-14 | A findings query path calling the manuscript-domain accessor |
 | Panel model honesty | 136-15 | A precision figure in a row field, a stored vocabulary key in a chip, a row whose bucket disagrees with the shared rule |
 | Panel render honesty | 136-17 | A precision figure in a rendered row, a stored vocabulary key in a chip, a review badge |
 | Findings render honesty | 136-18 | "New discovery" plus a precision figure; an out-of-vocabulary domain plus a header mislabelled as the manuscript's domain; a rendered row whose bucket disagrees with the shared rule |
-| Cross-surface masking | 136-19 | A restricted value seeded into a rendered row, a JSON payload, a copy/export output and an exception message — one per path class |
+| Cross-surface masking | 136-19 | A restricted value seeded into a rendered row, a JSON payload, a copy/export output and an exception message - one per path class |
+
+### Differing-case assertions (PANEL-02, revision 1)
+
+PANEL-02's clause *"shows each side's own relation type when they differ"* is unamended by this phase,
+so presence-of-field is not sufficient evidence. Two plans carry a fixture where the two sides'
+relation kinds genuinely DIFFER, plus a same-relation companion:
+
+| Plan | Assertion |
+|---|---|
+| 136-14 | `relations_differ` is true and both `claim_type` values are present and distinct on a differing fixture; false on a same-relation fixture |
+| 136-17 | TWO distinct relation chips render with the correct label on each; exactly ONE renders when the kinds agree; neither chip carries a stored vocabulary key or a kind-keyed colour |
 
 ### Blocking owner checkpoints
 
-| Plan | Wave | Decision |
-|---|---|---|
-| 136-03 | 1 | D-13e bucket count, D-16 relation filter on the findings page, the D-13c threshold, the D-13b tie-break, the D-13d granularity separation rule |
-| 136-04 | 1 | Authorize the novelty funnel run (~$27), its pinned model configuration and the hard-case evaluation-set size |
-| 136-13 | 5 | Approve the ONE authorized production redeploy on the gate evidence, flag OFF |
+| Plan | Wave | Tasks | Decision |
+|---|---|---|---|
+| 136-03 | 1 | T2 (`checkpoint:decision`) + T3 (`checkpoint:human-action`) | **ONE sitting, four groups:** (A) the five gate-1 decisions - D-13e bucket count, D-16 relation filter on the findings page, the D-13c threshold, the D-13b tie-break, the D-13d granularity separation rule; (B) the novelty funnel authorization (~$27, pinned model); (C) the hard-case evaluation-set size; (D) the `needs-ruling` domain posture. T3 then collects the owner's ground-truth verdict per hard case. |
+| 136-13 | 5 | T2 (`checkpoint:decision`) | Approve the ONE authorized production redeploy on the gate evidence, flag OFF |
+
+Waves are hard barriers in this project, so a checkpoint anywhere in a wave blocks the next wave
+regardless of dependency edges. That is why owner latency is concentrated into one wave-1 sitting
+rather than spread across two plans: the fix for barrier semantics is fewer round-trips, not more waves.
 
 ### What is no longer verified here (moved to Phase 136.1)
 
