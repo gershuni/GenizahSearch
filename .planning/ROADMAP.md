@@ -201,9 +201,9 @@ Plans:
 
 - [x] 136-01-PLAN.md — Contract & requirement amendments (REQUIREMENTS, band-labels §2/§3, budgets, schema new-field contract + the narrow tier_a amendment, deploy runbook) · wave 1
 - [x] 136-02-PLAN.md — Methods-page rewrite (qualitative BAND-05) + the ONE shared honesty gate · wave 1
-- [ ] 136-03-PLAN.md — ALL wave-1 owner decisions in one sitting: the five gate-1 answers (D-13e, D-16, D-13c, D-13b, D-13d), the novelty authorization + evaluation size, the owner-supplied hard-case labels, the needs-ruling posture · wave 1 · **checkpoint**
+- [x] 136-03-PLAN.md — ALL wave-1 owner decisions in one sitting: the five gate-1 answers (D-13e, D-16, D-13c, D-13b, D-13d), the novelty authorization + evaluation size, the owner-supplied hard-case labels, the needs-ruling posture · wave 1 · **checkpoint**
 - [ ] 136-04-PLAN.md — Novelty: identity key, pinned LLM contract, committed funnel runner, authorized run, verdict cache · wave 2
-- [ ] 136-05-PLAN.md — Rebuild-preservation gate, pinned from the live asset BEFORE the rebuild · wave 1
+- [x] 136-05-PLAN.md — Rebuild-preservation gate, pinned from the live asset BEFORE the rebuild · wave 1
 - [ ] 136-06-PLAN.md — D-02a tier_a authorization lockstep (builder + verifier + both-branch fixtures) · wave 2
 - [ ] 136-07-PLAN.md — Main-pool rule + grouping predicates as shared pure modules · wave 2
 - [ ] 136-08-PLAN.md — VIS-01 two-axis derivation + closed-graph public projection + leak control · wave 2
@@ -333,7 +333,7 @@ than from scratch — they passed the plan-checker on 2026-08-02.
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
 | 135. Precision Certificate & Confidence Bands | 9/9 | Complete   | 2026-07-28 |
-| 136. Read Surfaces — Connections Panel & Work→Witnesses | 2/21 | In Progress|  |
+| 136. Read Surfaces — Connections Panel & Work→Witnesses | 4/21 | In Progress|  |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |
 | 139. Atlas Drill-down, Homepage & Release Hardening | 0/TBD | Not started | - |
