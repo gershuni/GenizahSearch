@@ -20,6 +20,15 @@ LOCKED exactly as recorded above. Decision E was first attempted through an inte
 channel and correctly refused as a possible injection before being re-delivered through a normal
 orchestrator dispatch -- see section E's own Provenance note for the full account.
 
+**Further addendum, 2026-08-02 (same day, a later orchestrator dispatch still) -- CORRECTION E′.**
+The owner spotted an asymmetry in decision E's shade table and issued a correction, delivered
+through a normal orchestrator dispatch (the correct channel; see this record's own standing
+discipline above for why that provenance matters). This is recorded as a **correction to E**, not
+a new ruling -- the shade enum widens from seven values to EIGHT. See the new **"E′ -- correction"**
+block appended at the end of section E below, after its Provenance note. Section E's original table,
+rationale and Provenance note are left exactly as recorded (repudiation-resistance, T-136-03-04) --
+E′ documents what changed and why, rather than silently rewriting the original.
+
 ---
 
 ## A. The five gate-1 decisions
@@ -359,6 +368,114 @@ orchestrator dispatch -- see section E's own Provenance note for the full accoun
 
 ---
 
+### E′ -- CORRECTION (owner, same day, later dispatch): the granularity shade splits by direction
+
+**This is a correction to decision E above, not a new ruling.** Everything in section E not
+touched here (the shade table's other six rows, the display posture "store the full shade set /
+ship a conservative public toggle", the Provenance note, `not_checked`'s role) stands unchanged.
+Only the single `refines_granularity` row is split into two, by direction.
+
+- **The defect the owner found.** Decision E's `refines_granularity` row read "an aid ties F to a
+  coarser/finer variant of W, per the D-13d author-gated rule" -- ONE shade covering BOTH
+  directions of a granularity relationship. The owner rejected this as an asymmetry error, in the
+  owner's own words (verbatim):
+
+  > "if we have רש"י על התורה and catalog has רש"י בראשית כב we are different but for worse, so no
+  > novelty at all"
+
+  A catalogue that already names the CHAPTER (רש"י בראשית כב, "Rashi on Genesis 22") knows strictly
+  MORE than a claim that only names the whole Torah commentary (רש"י על התורה) -- that direction
+  contributes nothing new, and collapsing it into the same shade as the OPPOSITE direction (our
+  claim being the finer one, which genuinely adds information) hid a real distinction.
+
+- **The corrected two-row table** (replaces the single `refines_granularity` row in decision E's
+  table above; nothing else in that table changes):
+
+  | Shade | Condition | Meaning |
+  |---|---|---|
+  | `refines_granularity` | OUR claim is **FINER** than the aid's -- e.g. catalogue: רש"י על התורה, our claim: רש"י על בראשית | we ADD precision; informative |
+  | `aid_more_specific` | the AID's identification is **FINER** than ours -- e.g. catalogue: רש"י בראשית כב, our claim: רש"י על התורה | we add NOTHING; the catalogue already knows more than we do |
+
+  Both rows still require the D-13d author-gated title relationship to apply (same non-null author
+  AND identical/prefix-shared normalized title) -- E′ splits the DIRECTION of an existing
+  relationship, it does not change what counts as a granularity relationship in the first place.
+
+- **The shade enum widens from SEVEN to EIGHT values:** `confirms`, `refines_granularity`,
+  `aid_more_specific`, `diverges`, `fills_gap`, `extends`, `alias_merge`, `not_checked`.
+
+- **`aid_more_specific` is definitively NOT novel -- the LEAST novel row in the corpus.** It joins
+  `confirms`, `refines_granularity`, `diverges` and `extends` as EXCLUDED from the "Candidates for
+  new finds" toggle. `fills_gap` remains the ONLY shade that predicate selects -- unchanged by E′.
+
+- **Display ruling (owner): SHOW, BUT NEVER AS A CANDIDATE FIND.** `aid_more_specific` rows display
+  normally, with their tier, exactly like every other non-candidate shade -- nothing else about
+  rendering changes. The owner was offered, and explicitly **DECLINED**, three alternatives (recorded
+  here so none of them is silently revived by a later plan):
+  1. Demoting `aid_more_specific` rows below the main pool -- declined.
+  2. Showing the aid's more-specific wording alongside ours -- declined.
+  3. Hiding `aid_more_specific` rows entirely -- declined.
+
+- **E′ is a NOVELTY-ONLY fix.** No change to the main-pool rule (plan 136-07's scope untouched), no
+  new public surface wording, no additional masking surface. The only surface-visible effect is the
+  one-shade addition to the (never-public) stored vocabulary and its exclusion from the candidate
+  predicate -- identical in shape to how decision E itself touched the public surface.
+
+- **Worked case already in the worksheet.** Class 3 Case 1 (T-S Misc. 12.31.14, sys_id
+  `990051079570205171`) claims `רש"י על התורה` / `רש"י על בראשית` while the catalogue's own
+  identification text names `בראשית מד` (Genesis chapter 44) -- finer than BOTH claims. `aid_more_specific`
+  is the shade required to label that case honestly; `refines_granularity` alone (the pre-E′
+  vocabulary) could not.
+
+- **Date:** 2026-08-02 (same day as decisions A-E, delivered later in the session, through a normal
+  orchestrator dispatch).
+
+- **Code consequence (supersedes the seven-value figures in decision E's own "Code consequence"
+  above with the same structure, widened by one value):** `novelty_status` keeps its name,
+  nullability, default (`not_checked`) and role; its permitted value set widens from SEVEN to EIGHT:
+  `confirms` / `refines_granularity` / `aid_more_specific` / `diverges` / `fills_gap` / `extends` /
+  `alias_merge` / `not_checked`. The public "Candidates for new finds" predicate is UNCHANGED by E′
+  (`novelty_status = 'fills_gap'`). `novelty_source_label` populates on `aid_more_specific` exactly as
+  it already does on `confirms` / `refines_granularity` / `alias_merge` / `extends` (an aid says
+  SOMETHING nameable about this fragment-work pair) and stays NULL on `diverges` / `fills_gap` as
+  decision E already specifies.
+
+- **Downstream contracts E′ additionally amends** (same six items decision E enumerated above; each
+  gains the `aid_more_specific` value on this account -- not a new list, an extension of E's own):
+  1. **D-23a** -- "SEVEN-VALUE SHADE ENUM" (as amended by decision E) is further amended to
+     "EIGHT-VALUE SHADE ENUM, direction-split granularity".
+  2. **NOVEL-01** -- gains a further dated `⟨AMENDED 2026-08-02 -- E′⟩` sub-bullet (this plan's
+     Task 2; see `.planning/REQUIREMENTS.md`), sibling to decision E's own amendment, not a
+     replacement of it.
+  3. **The `novelty_status` CHECK constraint and its index** (`docs/specs/discovery-sidecar-schema-v1.md`)
+     -- the `IN (...)` list widens from seven to eight values in both places the schema doc states it.
+  4. **The frozen-enum-vocab readiness check** (`web/discovery_assets.py::discovery_available()`) --
+     when `novelty_status` is wired into this runtime spot-check (per decision E's item 4), the
+     frozenset checked must be the EIGHT-value shade set.
+  5. **D-23c's pinned LLM contract** -- the prompt must now elicit DIRECTION as well as which finding
+     aid says what -- "does the aid name a coarser or a finer variant of our claim?" -- not merely
+     "granularity variant, yes/no". The PINNED PROMPT HASH changes on this account too, on top of
+     decision E's own prompt-hash change (the shade-eliciting rewrite was never pinned before either
+     correction landed, so this is one net hash change to pin at 136-04, not two sequential ones).
+     Model/version/reasoning-effort (`gemini-3.6-flash`, `effort:"low"`) remain UNCHANGED per ruling B.
+  6. **The D-02b rebuild-preservation gate allowlist** (plan 136-05) -- covers the EIGHT-value shade
+     set on the same `novelty_status` column-keyed entry decision E already named; no further code
+     change needed in 136-05 itself.
+
+- **Plans that must implement this correction** -- the SAME plans decision E already named
+  (136-04, 136-06, 136-12, the release verifier, and the unaffected-in-shape UI consumers listed
+  under decision E) now build the EIGHT-value shade classifier instead of the seven-value one.
+  No plan not already named by decision E is newly implicated by E′.
+
+- **What this correction does NOT do:** exactly what decision E's own "What this plan (136-03) does
+  NOT do" already states -- 136-03 does not edit the schema doc, `web/discovery_assets.py`, the
+  verifier, or any build/service module. 136-03 DOES (per this continuation's own Task 3 instruction):
+  amend NOVEL-01 again (Task 2 here), reissue `136-NOVELTY-HARDCASES.md`'s vocabulary via the script
+  (never by hand) to carry `aid_more_specific`, and add a NEW XLSX labelling-workbook deliverable
+  emitted by the same script (`scripts/discovery_gate1_evidence.py`) -- see the "XLSX round-trip"
+  note appended to the "Outstanding (pending Task 3)" section below.
+
+---
+
 ## Provisional-value / omission audit
 
 None of the five gate-1 answers above (A) were flagged by the owner as provisional -- all five are
@@ -380,18 +497,87 @@ addresses it -- it must not be silently treated as ratified by this record.
 ## Outstanding (pending Task 3)
 
 - `discovery_data/novelty_hardcase_labels-v1.json` -- the owner-supplied ground truth, one entry per
-  hard case with its verdict (one of decision E's seven shades, or `unsure`), date and
+  hard case with its verdict (one of the eight decision-E/E′ shades, or `unsure`), date and
   `label_provenance`. **Not yet created.**
 - The content hash of that file, to be recorded in an update to this section once it exists.
 - The effective (as opposed to candidate-pool) evaluation-set size, once the owner has labelled or
   explicitly skipped each of the **97** candidates (82 original + 15 Class 6, added under decision
   E) up to whatever portion they choose to judge.
-- **Vocabulary note:** the worksheet (`136-NOVELTY-HARDCASES.md`) has been REGENERATED against
-  decision E's seven-shade vocabulary (`confirms` / `refines_granularity` / `diverges` /
-  `fills_gap` / `extends` / `alias_merge`, plus `unsure` / `skip`) -- the old 4-value set
-  (`already_recorded` / `not_in_finding_aids` / `unsure` / `skip`) no longer appears anywhere in
-  that file. No verdict has been pre-filled anywhere; every `PROPOSAL` draft remains explicitly
-  marked as a draft, never a label.
+- **Vocabulary note (updated by correction E′):** the worksheet (`136-NOVELTY-HARDCASES.md`) has
+  been REGENERATED against the corrected EIGHT-shade vocabulary (`confirms` / `refines_granularity`
+  / `aid_more_specific` / `diverges` / `fills_gap` / `extends` / `alias_merge`, plus `unsure` /
+  `skip`) -- `aid_more_specific` is the one new row E′ adds; every other shade is unchanged from
+  decision E. The old 4-value tri-state-era set (`already_recorded` / `not_in_finding_aids` /
+  `unsure` / `skip`) still does not appear anywhere in that file. All **97** cases are
+  content-unchanged from the decision-E worksheet -- only the vocabulary table and the per-class
+  "Plausible shades" hints changed (`aid_more_specific` added to the Class 3 and Class 6 hint lists,
+  the two classes where it is genuinely plausible: Class 3's own algorithm already tests the D-13d
+  title relationship the shade is defined over, and Class 6 is precisely the boundary where the
+  algorithm's own `diverges` classification could, on owner review, turn out to be a missed
+  granularity relationship instead). No verdict has been pre-filled anywhere; every `PROPOSAL` draft
+  remains explicitly marked as a draft, never a label. Reproducibility re-verified: two consecutive
+  script runs against the same asset produced byte-identical Markdown.
+
+- **NEW deliverable: an XLSX labelling workbook, emitted by the same script.** The owner reported
+  that Hebrew RTL is hard to work with in Markdown and asked for a spreadsheet instead.
+  `scripts/discovery_gate1_evidence.py` now also writes
+  `136-NOVELTY-HARDCASES.xlsx` alongside the Markdown (same phase directory; same `cases` data,
+  same 97-case content, same class order and case numbering -- the two files are guaranteed to
+  agree case-for-case by construction, since both render from one shared, pre-numbered case list).
+  RTL sheet view, wrapped text, frozen header + the Case-number/Verdict columns, autofilter, a
+  **Verdict** column with an openpyxl `DataValidation` in-cell dropdown restricted to the full
+  vocabulary (the seven real shades + `unsure` + `skip` -- nine tokens; blank is allowed by the
+  validation itself, since "not yet answered" is a legitimate transient state while the owner works
+  through the sheet, but a second sheet explains in words that a blank is NOT a label and `unsure`
+  is the real answer for "cannot tell"). A second "Vocabulary & Instructions" sheet carries the same
+  shade table, the same per-class plausible-shade hints, and that blank-is-not-a-label note.
+  Deterministic: two consecutive runs produce the same logical workbook content (cell values,
+  validation list, sheet structure) -- byte-for-byte zip equality is NOT claimed (openpyxl embeds a
+  save timestamp in the workbook's internal `docProps/core.xml`), so reproducibility for this
+  artifact is verified at the DECOMPRESSED-content level, not the raw-file-bytes level.
+
+  **Masking note, specific to this artifact.** `.xlsx` is a ZIP archive whose inner XML parts are
+  DEFLATE-compressed by default -- a raw `check_atlas_masking.py --scan-asset` pass over the `.xlsx`
+  file's OUTER bytes was measured (this plan) to be unable to find a literal string that IS present,
+  uncompressed, in the workbook's inner XML (verified with a synthetic marker string: present in the
+  decompressed `xl/worksheets/sheet1.xml`, ABSENT from the raw file bytes). The scan was therefore
+  additionally run against the workbook's DECOMPRESSED inner text (the actual masking-relevant
+  surface) via `zipfile` extraction into a scratch file passed as a single explicit `--scan-asset`
+  path (a single explicit file is always scanned regardless of suffix, per that script's own
+  `scan_asset` logic) -- both the naive raw-file pass and the decompressed-content pass came back
+  clean. This is recorded here as a durable methodology note: **a bare `--scan-asset foo.xlsx` on
+  this or any future `.xlsx` artifact verifies nothing about its cell text** and must not be relied
+  upon alone; `scripts/check_atlas_masking.py` itself was NOT modified by this plan (out of this
+  continuation's stated scope) to add native zip-awareness -- that remains a gap for a future plan
+  to close if `.xlsx` exports become a recurring surface.
+
+- **Task 4's round-trip now reads verdicts back FROM the XLSX, not the Markdown.** Once the owner
+  returns the filled-in workbook, Task 4 (still not implemented by this continuation, per its own
+  instruction) must: (1) read the **Verdict** column of the returned `.xlsx` by **Case #**, matching
+  each row back to its case by the same stable `case_num` the emitting script assigns (never by row
+  position alone, in case the owner reorders/filters/hides rows while working); (2) treat a truly
+  blank Verdict cell as an explicit **skip** for that case (never silently filled from its
+  `PROPOSAL` draft); (3) reject any cell value outside the nine-token vocabulary (defense in depth
+  behind the DataValidation, in case the owner pastes a value or a spreadsheet application silently
+  drops the validation on save/re-open); (4) write `discovery_data/novelty_hardcase_labels-v1.json`
+  with `label_provenance` recording that the label came from the returned XLSX (not the Markdown),
+  and the Markdown file's `136-NOVELTY-HARDCASES.md` remains the authoritative human-readable record
+  of the candidate set and its "why it is hard" reasoning -- the XLSX is a labelling INSTRUMENT, the
+  Markdown is the record.
+
+  **Foreseen blocker, flagged rather than solved here (per this continuation's own instruction):**
+  round-tripping a `.xlsx` the owner has actually opened and edited in a real spreadsheet
+  application (Excel, LibreOffice, Google Sheets via download/upload) is a materially less
+  controlled input surface than reading back a script's own Markdown -- the application MAY
+  re-save with a different sheet name, MAY not preserve the DataValidation on re-open depending on
+  the application, and a formula-injection-style value (e.g. a cell starting `=`) could appear in a
+  free-text column if the owner ever types into one, though `openpyxl` reads cell VALUES (not
+  live-recalculated formulas from another app) so this is a lower-severity concern for reading
+  values back than for writing them. Task 4 should read via `openpyxl` in `data_only=True` mode and
+  fail closed (never silently coerce) on: a missing/renamed sheet, a missing Case-# column, a
+  Verdict value outside the nine-token vocabulary, or a row whose Case # does not match any emitted
+  case. None of this is implemented here -- it is recorded so Task 4's own plan text is written
+  against a real, already-identified risk list rather than discovering it fresh.
 
 This record will be updated (not silently overwritten) once plan Task 3 returns and Task 4 writes
 the label file.
