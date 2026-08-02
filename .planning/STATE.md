@@ -4,14 +4,14 @@ milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
 stopped_at: "Phase 136 DISCUSS COMPLETE 2026-07-30 — context revised after BOTH pre-planning gates (real-data mockup: 2 real display defects + 1 self-inflicted false alarm; Codex adversarial: REWORK, 3 BLOCKER/9 HIGH, every finding dispositioned), scope EXPANDED by the owner (NOVEL-01/02 moved IN, VIS-01 homed, 2 new surfaces, ONE authorized rebuild), and the REQUIREMENTS/ROADMAP/STATE bookkeeping applied (commit 2251fccb). Next: /clear then /gsd-plan-phase 136"
-last_updated: "2026-08-02T04:46:18.250Z"
+last_updated: "2026-08-02T06:42:24.229Z"
 last_activity: 2026-08-02 -- Phase 136 planning complete
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 1
-  total_plans: 55
+  total_plans: 43
   completed_plans: 22
-  percent: 14
+  percent: 13
 ---
 
 # Project State
