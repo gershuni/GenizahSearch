@@ -322,7 +322,15 @@ def test_release_contract_row_count_mismatch_fails(tmp_path):
 def _make_band_precision_only_db(tmp_path, band_precision_rows, *, sidecar_version):
     """A minimal db carrying ONLY a `meta.sidecar_version` + `band_precision`
     rows -- enough to exercise `check_band_precision` in isolation without
-    needing a full claims/evidence/works graph."""
+    needing a full claims/evidence/works graph.
+
+    D-02a (136-06): the INSERT now also carries `measurement_status`, using
+    the SAME `{"measurement_status": None, **r}` dict-literal override the
+    real builder uses (`build_discovery_sidecar.py`'s own band_precision
+    INSERT) -- a row's own `measurement_status` key (the frozen `tier_a`
+    row's `measured_pass`) wins over this default, so a caller passing
+    `_frozen_real_band_precision_rows()` gets the SAME shape a real build
+    would write."""
     db_path = tmp_path / "band-precision-only.db"
     conn = sqlite3.connect(str(db_path))
     try:
@@ -331,12 +339,13 @@ def _make_band_precision_only_db(tmp_path, band_precision_rows, *, sidecar_versi
             """
             INSERT INTO band_precision (
                 scope, collection_id, evidence_source, confidence_band, numerator, denominator,
-                precision, ci_low, ci_high, method, sampling_frame, ins_policy, weighting, notes
+                precision, ci_low, ci_high, method, sampling_frame, ins_policy, weighting, notes,
+                measurement_status
             ) VALUES (:scope, :collection_id, :evidence_source, :confidence_band, :numerator,
                        :denominator, :precision, :ci_low, :ci_high, :method, :sampling_frame,
-                       :ins_policy, :weighting, :notes)
+                       :ins_policy, :weighting, :notes, :measurement_status)
             """,
-            band_precision_rows,
+            [{"measurement_status": None, **r} for r in band_precision_rows],
         )
         conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", ("sidecar_version", sidecar_version))
         conn.commit()

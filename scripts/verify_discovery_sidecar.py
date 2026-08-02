@@ -90,6 +90,14 @@ _COLLECTION_ID = "propagated_witness_collection_v1"
 # (collection_id, evidence_source, confidence_band) key-set below.
 _E1_REGISTRY_COLLECTION_ID = "e1_certification_registry_v1"
 
+# D-02a (136-06, docs/specs/discovery-sidecar-schema-v1.md SS1.6 amendment
+# 2026-08-02): the ONE authorized `tier_a` CERT-01 pair -- stores the
+# authorization `is_default_eligible()` reads, NEVER a measured precision
+# number. Mirrors (never imports) `scripts/build_discovery_sidecar.py`'s
+# frozen `tier_a` row so this check stays independent of the builder.
+_TIER_A_AUTHORIZED_MEASUREMENT_STATUS = "measured_pass"
+_TIER_A_AUTHORIZED_CI_LOW = 0.9084
+
 
 def _top_tier_band_key(v2: bool) -> str:
     """135-07: the ONE helper that selects the version-specific track1_direct
@@ -402,9 +410,17 @@ def check_release_contract_counts(conn: sqlite3.Connection):
 def check_band_precision(conn: sqlite3.Connection, meta: dict) -> List[str]:
     violations = []
     cur = conn.cursor()
+    # D-02a (136-06): `measurement_status` is read here so the M4 strict
+    # checks below (which now assert the tier_a CERT-01 authorization pair)
+    # have it available -- but the pinned 134-03 golden fixture predates the
+    # 135-05 column and must stay byte-identical, so this degrades to a
+    # literal NULL select on a pre-135-05 asset rather than erroring.
+    has_measurement_status = _has_column(conn, "band_precision", "measurement_status")
+    measurement_status_expr = "measurement_status" if has_measurement_status else "NULL"
     cur.execute(
         "SELECT scope, collection_id, evidence_source, confidence_band, numerator, "
-        "denominator, precision, ci_low, ci_high, method FROM band_precision"
+        f"denominator, precision, ci_low, ci_high, method, {measurement_status_expr} "
+        "FROM band_precision"
     )
     rows = cur.fetchall()
     collection_rows = [r for r in rows if r[0] == "collection"]
@@ -425,7 +441,7 @@ def check_band_precision(conn: sqlite3.Connection, meta: dict) -> List[str]:
                 f"{_COLLECTION_PRECISION_VALUE} (G8)"
             )
 
-    for scope, _collection_id, source, band, _numerator, _denominator, precision, ci_low, ci_high, _method in rows:
+    for scope, _collection_id, source, band, _numerator, _denominator, precision, ci_low, ci_high, _method, _measurement_status in rows:
         if scope != "band":
             continue
         if precision is not None and abs(precision - _COLLECTION_PRECISION_VALUE) <= _PRECISION_TOLERANCE:
@@ -459,7 +475,12 @@ def _check_band_precision_release_strict(rows, *, v2_bands: bool = False) -> Lis
     non-null numerator/denominator/ci/method); BOTH propagated bands
     (corroborated, weak) present with NULL precision/ci; the THREE measured
     track1_direct bands present at their frozen values; tier_a present with
-    NULL precision; and no OTHER band carries a non-null precision.
+    NULL precision AND the D-02a `measurement_status='measured_pass'`/
+    `ci_low=0.9084` authorization (with `ci_high`/`numerator`/`denominator`
+    NULL); no OTHER band carries a non-null precision; and no OTHER band
+    carries `measurement_status='measured_pass'` (the D-02a smuggling
+    check -- only `tier_a` may hold this slot, since it is exactly what
+    `is_default_eligible()` reads).
 
     Codex R2 MED (dict-collapse fix): band rows are grouped by the FULL
     (collection_id, evidence_source, confidence_band) key into a LIST of
@@ -475,12 +496,12 @@ def _check_band_precision_release_strict(rows, *, v2_bands: bool = False) -> Lis
     expected_measured = _expected_measured_band_precisions(v2_bands)
     collection_rows = []
     band_rows_by_key: Dict[Tuple[Optional[str], Optional[str], Optional[str]], List[Tuple]] = {}
-    for scope, collection_id, source, band, numerator, denominator, precision, ci_low, ci_high, method in rows:
+    for scope, collection_id, source, band, numerator, denominator, precision, ci_low, ci_high, method, measurement_status in rows:
         if scope == "collection":
             collection_rows.append((collection_id, precision, numerator, denominator, ci_low, ci_high, method))
         elif scope == "band":
             band_rows_by_key.setdefault((collection_id, source, band), []).append(
-                (precision, ci_low, ci_high, numerator, denominator)
+                (precision, ci_low, ci_high, numerator, denominator, measurement_status)
             )
 
     matching = [r for r in collection_rows if r[0] == _COLLECTION_ID]
@@ -533,7 +554,7 @@ def _check_band_precision_release_strict(rows, *, v2_bands: bool = False) -> Lis
         row = _single_row((_COLLECTION_ID, ids.EVIDENCE_SOURCE_PROPAGATED, band))
         if row is None:
             continue  # already flagged above (missing/duplicate)
-        precision, ci_low, ci_high, _numerator, _denominator = row
+        precision, ci_low, ci_high, _numerator, _denominator, _measurement_status = row
         if precision is not None or ci_low is not None or ci_high is not None:
             violations.append(
                 f"release band_precision (M4): propagated/{band} carries non-null precision/CI"
@@ -553,11 +574,50 @@ def _check_band_precision_release_strict(rows, *, v2_bands: bool = False) -> Lis
     tier_a_key = (_E1_REGISTRY_COLLECTION_ID, ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.CONFIDENCE_BAND_TIER_A)
     tier_a_row = _single_row(tier_a_key)
     if tier_a_row is not None:
-        precision = tier_a_row[0]
+        precision, ci_low, ci_high, numerator, denominator, measurement_status = tier_a_row
+        # Pre-existing check -- unrelaxed, unmodified wording.
         if precision is not None:
             violations.append(
                 f"release band_precision (M4): tier_a precision must be NULL, got {precision}"
             )
+        # D-02a (136-06, docs/specs/discovery-sidecar-schema-v1.md SS1.6
+        # amendment 2026-08-02): tier_a additionally REQUIRES the CERT-01
+        # AUTHORIZATION pair (`measurement_status='measured_pass'`,
+        # `ci_low=0.9084`) that `is_default_eligible()` reads, with
+        # `ci_high`/`numerator`/`denominator` all NULL -- one violation per
+        # mismatched field, never the found value (masking discipline).
+        if measurement_status != _TIER_A_AUTHORIZED_MEASUREMENT_STATUS:
+            violations.append(
+                "release band_precision (M4): tier_a measurement_status must be "
+                f"{_TIER_A_AUTHORIZED_MEASUREMENT_STATUS!r}"
+            )
+        if ci_low is None or abs(ci_low - _TIER_A_AUTHORIZED_CI_LOW) > _PRECISION_TOLERANCE:
+            violations.append(
+                f"release band_precision (M4): tier_a ci_low must be {_TIER_A_AUTHORIZED_CI_LOW}"
+            )
+        if ci_high is not None:
+            violations.append("release band_precision (M4): tier_a ci_high must be NULL")
+        if numerator is not None:
+            violations.append("release band_precision (M4): tier_a numerator must be NULL")
+        if denominator is not None:
+            violations.append("release band_precision (M4): tier_a denominator must be NULL")
+
+    # D-02a inverse risk (136-06): no OTHER band row may carry
+    # measurement_status='measured_pass' -- otherwise an arbitrary band could
+    # be smuggled into default visibility through this exact slot
+    # (is_default_eligible() reads it). Independent of the builder's own
+    # frozen row-set -- `_TIER_A_AUTHORIZED_MEASUREMENT_STATUS`/`tier_a_key`
+    # above are local literals, never imported from build_discovery_sidecar.
+    for key, matches in band_rows_by_key.items():
+        if key == tier_a_key:
+            continue
+        for match in matches:
+            if match[5] == "measured_pass":
+                violations.append(
+                    "release band_precision (M4): unauthorized measurement_status="
+                    f"'measured_pass' on band {key} -- only tier_a may carry this "
+                    "authorization (D-02a)"
+                )
 
     return violations
 
@@ -897,13 +957,27 @@ def check_measurement_status_ci_consistency(conn: sqlite3.Connection) -> List[st
     STRICT_FLOOR`; `not_measured`/`insufficient_evidence` require ALL FIVE
     NULL; any other stored status is a HARD FAIL. A NULL measurement_status
     (legacy/v1-compat, the current real-build default) is exempt. A pre-v2
-    asset (no `measurement_status` column) degrades gracefully to []."""
+    asset (no `measurement_status` column) degrades gracefully to [].
+
+    D-02a CARVE-OUT (136-06, docs/specs/discovery-sidecar-schema-v1.md SS1.6
+    amendment 2026-08-02 -- discovered as a direct consequence of that
+    amendment, since a stored `tier_a` `measured_pass` row now legitimately
+    carries ONLY `ci_low` and no other of the five fields): for
+    `evidence_source=track1_direct, confidence_band=tier_a` specifically,
+    `measured_pass` means the CERT-01 AUTHORIZATION shape -- `ci_low`
+    present and `>= STRICT_FLOOR`, with `precision`/`ci_high`/`numerator`/
+    `denominator` ALL NULL (never a fabricated number, per the no-numbers
+    posture) -- rather than the all-five-fields "genuinely measured" shape
+    every other band's `measured_pass`/`measured_fail` still requires
+    unchanged below. `tier_a`'s own `measured_fail`/`not_measured`/
+    `insufficient_evidence` outcomes (e.g. a reband-invalidated row) are
+    UNAFFECTED by this carve-out and keep the original all-five rule."""
     if not _has_column(conn, "band_precision", "measurement_status"):
         return []
     violations: List[str] = []
-    for (cb, status, precision, ci_low, ci_high, num, den) in conn.execute(
-        "SELECT confidence_band, measurement_status, precision, ci_low, ci_high, "
-        "numerator, denominator FROM band_precision"
+    for (source, cb, status, precision, ci_low, ci_high, num, den) in conn.execute(
+        "SELECT evidence_source, confidence_band, measurement_status, precision, ci_low, "
+        "ci_high, numerator, denominator FROM band_precision"
     ).fetchall():
         if status is None:
             continue
@@ -913,7 +987,21 @@ def check_measurement_status_ci_consistency(conn: sqlite3.Connection) -> List[st
         five = (precision, ci_low, ci_high, num, den)
         all_present = all(v is not None for v in five)
         all_null = all(v is None for v in five)
-        if status == "measured_pass":
+        is_tier_a_authorization = (
+            status == "measured_pass"
+            and source == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+            and cb == ids.CONFIDENCE_BAND_TIER_A
+        )
+        if is_tier_a_authorization:
+            if ci_low is None or ci_low < _STRICT_FLOOR:
+                violations.append(
+                    f"band_precision ({cb}): measured_pass authorization requires "
+                    f"ci_low>={_STRICT_FLOOR} (D-02a, Codex #B3)")
+            if precision is not None or ci_high is not None or num is not None or den is not None:
+                violations.append(
+                    f"band_precision ({cb}): measured_pass authorization must carry NULL "
+                    "precision/ci_high/numerator/denominator (D-02a no-numbers posture)")
+        elif status == "measured_pass":
             if not all_present or ci_low is None or ci_low < _STRICT_FLOOR:
                 violations.append(
                     f"band_precision ({cb}): measured_pass requires all five fields non-NULL AND "
