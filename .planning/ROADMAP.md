@@ -192,7 +192,40 @@ Plans:
   7. **No precision percentage is reachable from any surface** — the methods page is rewritten qualitatively (tiers explained in words plus the non-percentage facts: that grading happened, population, unit, sample size, grader, date, method, audit state, immutable report id), `web/pages/help.py`'s existing estimates and intervals are removed, and no surface claims human review until the provenance of the 121 `human_confirmed` rows is established.
   8. Every surface hides cleanly with the flag off or the sidecar absent, stays inside the PERF-01 budgets (a versioned `discovery-budgets.md` entry for the findings page), and passes the masking scan on rendered output, JSON payloads, copy/export paths and error paths.
 
-**Plans**: TBD — **six execution gates** (D-04): (1) rebuild + the D-13d granularity rule + the D-13c threshold, (2) the panel, (3) the evidence view, (4) `/work/{id}`, (5) `/catalog-browse` + the findings page, (6) novelty wiring + the methods-page rewrite. A second mockup pass and a Codex pass are owed on the built surfaces, not only on the context.
+**Plans:** 31 plans in 26 waves, organised around the **six execution gates** (D-04): (1) rebuild + the D-13d granularity rule + the D-13c threshold [136-01..136-15], (2) the panel [136-16, 136-18..136-21], (3) the evidence view [136-17, 136-22, 136-23], (4) `/work/{id}` [136-24, 136-25], (5) `/catalog-browse` + the findings page [136-26..136-29], (6) novelty wiring + the methods-page rewrite [136-30, 136-31]. Gate 1 blocks every surface wave: the rebuilt asset must be live in production, flag OFF, before any UI code that reads its new columns is deployed. Four blocking owner checkpoints: 136-04 (the five open gate-1 decisions), 136-11 (authorize the novelty funnel run), 136-15 (approve the one authorized production redeploy), 136-22 (the evidence view's render source and b-side form). A second mockup pass and a Codex pass are owed on the built surfaces, not only on the context.
+
+Plans:
+- [ ] 136-01-PLAN.md — Requirement + band-label + budget contract amendments
+- [ ] 136-02-PLAN.md — Schema + deploy contract amendments
+- [ ] 136-03-PLAN.md — Rebuild-preservation harness + expectations pinned from the LIVE asset
+- [ ] 136-04-PLAN.md — Gate-1 evidence pack + the five open owner decisions (checkpoint)
+- [ ] 136-05-PLAN.md — D-02a tier_a authorization lockstep (6 sites, both branches)
+- [ ] 136-06-PLAN.md — coverage_ppm + band_rank + the D-10a index set
+- [ ] 136-07-PLAN.md — The main-pool rule + discovery_identification + manuscript_display + findings bench
+- [ ] 136-08-PLAN.md — Work-side offsets w_start/w_end, corpus-wide, + the containment signal
+- [ ] 136-09-PLAN.md — Sefaria reference resolution + the per-work licence metadata
+- [ ] 136-10-PLAN.md — works.genre curation + author aliases + the kept_tie fix
+- [ ] 136-11-PLAN.md — Novelty identity key + pinned LLM contract + verdict artifact (checkpoint)
+- [ ] 136-12-PLAN.md — Novelty tri-state ingestion + fail-closed verification
+- [ ] 136-13-PLAN.md — VIS-01 two-axis visibility + closed-graph public projection + VIS-02 control
+- [ ] 136-14-PLAN.md — The rebuild run + the full gate battery + the compatibility attestation
+- [ ] 136-15-PLAN.md — Owner approval + the asset-first production deploy, flag OFF (checkpoint)
+- [ ] 136-16-PLAN.md — Panel service layer: envelope, the D-13g routing fix, manuscript scope
+- [ ] 136-17-PLAN.md — Offset renderer + the reference-text licence gate (pure)
+- [ ] 136-18-PLAN.md — Panel display model + the bilingual display vocabulary (pure)
+- [ ] 136-19-PLAN.md — Panel UI: entry control, enrichment seam, service states
+- [ ] 136-20-PLAN.md — Panel UI: rows, buckets, panes, placeholder voting
+- [ ] 136-21-PLAN.md — Panel render-smoke + positive controls + masking capture
+- [ ] 136-22-PLAN.md — Evidence-view decisions: render source and b-side form (checkpoint)
+- [ ] 136-23-PLAN.md — Evidence view UI + licence-gated reference text
+- [ ] 136-24-PLAN.md — Work-page service: D-17a display fields + the count query
+- [ ] 136-25-PLAN.md — `/work/{id}` page
+- [ ] 136-26-PLAN.md — `/catalog-browse` computed identifications + WORK-02 title findability
+- [ ] 136-27-PLAN.md — Findings service: three row units, the facet cascade, the perf gate
+- [ ] 136-28-PLAN.md — Findings page: route, gated nav entry, shell
+- [ ] 136-29-PLAN.md — Findings page: rows, the novelty switch, render-smoke
+- [ ] 136-30-PLAN.md — Methods-page qualitative rewrite + the no-percentage gate
+- [ ] 136-31-PLAN.md — Novelty across all surfaces + the final cross-surface masking sweep
 **UI hint**: yes
 
 ### Phase 137: Community Judgments
