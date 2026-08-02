@@ -26,7 +26,9 @@ from shared.discovery_main_pool import (
     REASON_SHARED_WORDING,
     SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS,
     Identification,
+    bucket_label,
     main_pool_decision,
+    main_pool_sentence,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -275,3 +277,243 @@ def test_constants_are_cited_and_state_provisional_status():
     assert "PROVISIONAL" in source
     assert SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS == 150
     assert COVERAGE_FLOOR == 0.8
+
+
+# ---------------------------------------------------------------------------
+# Task 3 (PANEL-01/PANEL-02): "One wording for the rule" -- main_pool_sentence,
+# bucket_label, the parity assertion against web/pages/help.py's own
+# MAIN_POOL_SENTENCE constant, and the standing "no second bucket-membership
+# predicate" guard (T-136-07-01/02).
+# ---------------------------------------------------------------------------
+
+HELP_MODULE_PATH = REPO_ROOT / "web" / "pages" / "help.py"
+
+_PROHIBITED_RELATION_WORDS = ("copy of", "quotes", "witness of")
+
+
+def test_main_pool_sentence_has_no_percent_or_prohibited_words():
+    """main_pool_sentence('en')/('he') are non-empty and contain no `%` and
+    none of the prohibited relation words D-06/D-21 bar from every discovery
+    surface."""
+    for lang in ("en", "he"):
+        sentence = main_pool_sentence(lang)
+        assert sentence, f"main_pool_sentence({lang!r}) must be non-empty"
+        assert "%" not in sentence
+        lowered = sentence.lower()
+        for phrase in _PROHIBITED_RELATION_WORDS:
+            assert phrase not in lowered, (
+                f"main_pool_sentence({lang!r}) contains the prohibited phrase {phrase!r}"
+            )
+
+
+def _extract_help_page_main_pool_sentence():
+    """Read (never import) `web/pages/help.py`'s source text and extract its
+    `MAIN_POOL_SENTENCE` dict via `ast.literal_eval` -- `shared/` must not
+    import `web/`, and the literal's EN/HE values are each split across
+    multiple adjacent string-literal lines in the source (Python's implicit
+    string concatenation), so a plain substring search over the raw file
+    text cannot locate the merged value. AST-based extraction reads the
+    file's own source text -- exactly what the plan's action text asks
+    for -- without ever executing or importing the module."""
+    source = HELP_MODULE_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "MAIN_POOL_SENTENCE":
+                    return ast.literal_eval(node.value)
+    raise AssertionError(
+        "web/pages/help.py has no top-level MAIN_POOL_SENTENCE assignment -- "
+        "the parity test has nothing to compare against"
+    )
+
+
+def test_main_pool_sentence_parity_with_help_page():
+    """`main_pool_sentence('en')`/`('he')` must equal `web/pages/help.py`'s
+    own `MAIN_POOL_SENTENCE` constant byte-for-byte in BOTH languages, so the
+    rule can never be described two different ways on two surfaces. Fails
+    with both values printed when they diverge."""
+    help_sentence = _extract_help_page_main_pool_sentence()
+    for lang in ("en", "he"):
+        ours = main_pool_sentence(lang)
+        theirs = help_sentence.get(lang)
+        assert ours == theirs, (
+            f"main_pool_sentence({lang!r}) diverges from web/pages/help.py's "
+            f"MAIN_POOL_SENTENCE[{lang!r}]:\n"
+            f"  shared/discovery_main_pool.py -> {ours!r}\n"
+            f"  web/pages/help.py             -> {theirs!r}"
+        )
+
+
+def test_bucket_label_returns_bilingual_names_and_is_sole_definition():
+    """`bucket_label` returns the two owner-named bilingual bucket labels,
+    and is the ONLY definition of a function by this name anywhere under
+    `shared/`."""
+    assert bucket_label(True, "en") == "main pool"
+    assert bucket_label(False, "en") == "more matches"
+    assert bucket_label(True, "he") == "מאגר עיקרי"
+    assert bucket_label(False, "he") == "התאמות נוספות"
+
+    other_definitions = []
+    for path in sorted((REPO_ROOT / "shared").rglob("*.py")):
+        if path.resolve() == MODULE_PATH.resolve():
+            continue
+        source = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "bucket_label"
+            ):
+                other_definitions.append(str(path))
+    assert other_definitions == [], (
+        f"found a SECOND bucket_label definition under shared/: {other_definitions} -- "
+        "shared/discovery_main_pool.py must be the ONLY definition"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The standing "no second bucket-membership predicate" guard (T-136-07-01).
+# Scans `shared/` and `web/` for a LOCALLY-DEFINED predicate that decides
+# bucket membership by testing a band name against a hand-picked set of >= 2
+# confidence-band-name literals -- exactly the shape of sketch 003's
+# `confOf()`/`STRONG_BANDS`, which disagreed with the codebase's own rule
+# and rendered the best-measured population in the system "Weak".
+# `shared/discovery_band_labels.py` (the CANONICAL `is_default_eligible`
+# implementation) and this module itself (already separately asserted, above,
+# to carry no raw band-name literal at all) are the two legitimate places a
+# band-name literal may appear in a membership test, and are exempted.
+# ---------------------------------------------------------------------------
+
+_BAND_NAME_LITERALS = frozenset({
+    "expert_verified", "high_confidence_algorithmic", "tier_a",
+    "screening_rb", "screening_canon", "corroborated", "weak", "not_evaluated",
+})
+
+_SECOND_IMPL_GUARD_EXEMPT = {
+    (REPO_ROOT / "shared" / "discovery_band_labels.py").resolve(),
+    MODULE_PATH.resolve(),
+}
+
+
+def _string_literals_in(node) -> set:
+    literals = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            literals.add(n.value)
+    return literals
+
+
+def _resolve_named_literal_string_sets(tree) -> dict:
+    """Map every Name assigned a set/list/tuple literal (or a `set(...)`/
+    `frozenset(...)` call over one) ANYWHERE in the module to the set of
+    string literals it contains -- so `STRONG_BANDS = {'tier_a', ...}`
+    followed by `band in STRONG_BANDS` resolves through the named constant,
+    exactly the shape of sketch 003's real `confOf()`/`STRONG_BANDS` bug
+    (an inline literal alone would have missed the actual historical case)."""
+    resolved: dict = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        value = node.value
+        literals = None
+        if isinstance(value, (ast.Set, ast.List, ast.Tuple)):
+            literals = _string_literals_in(value)
+        elif (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id in ("set", "frozenset")
+        ):
+            literals = _string_literals_in(value.args[0]) if value.args else set()
+        if literals is None:
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                resolved[target.id] = literals
+    return resolved
+
+
+def _find_second_bucket_membership_predicates(roots):
+    """Scan every `.py` file under each root in `roots` (skipping the two
+    exempted canonical files) for an `ast.Compare` node testing membership
+    (`in` / `not in`) against a literal collection -- OR a named constant
+    resolving to one, per `_resolve_named_literal_string_sets` -- containing
+    >= 2 confidence-band-name strings. That is a local reimplementation of
+    the bucket rule, never routed through `is_default_eligible` or
+    `main_pool_decision`. Returns a list of `(path, lineno)` violations."""
+    violations = []
+    for root in roots:
+        root = pathlib.Path(root)
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            if path.resolve() in _SECOND_IMPL_GUARD_EXEMPT:
+                continue
+            source = path.read_text(encoding="utf-8")
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                continue
+            named_sets = _resolve_named_literal_string_sets(tree)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Compare):
+                    for op, comparator in zip(node.ops, node.comparators):
+                        if not isinstance(op, (ast.In, ast.NotIn)):
+                            continue
+                        if isinstance(comparator, ast.Name):
+                            literals = named_sets.get(comparator.id, set())
+                        else:
+                            literals = _string_literals_in(comparator)
+                        if len(literals & _BAND_NAME_LITERALS) >= 2:
+                            violations.append((str(path), node.lineno))
+    return violations
+
+
+def test_second_implementation_guard_finds_none_on_the_real_tree():
+    """The standing guard: scanning `shared/` and `web/` today finds no
+    second, locally-defined bucket-membership predicate -- gate 2 delegates
+    to `is_default_eligible` and no other module re-derives a band
+    allowlist. Names what it scanned: every `.py` file under `shared/` and
+    `web/`, excluding `shared/discovery_band_labels.py` (the canonical
+    implementation) and `shared/discovery_main_pool.py` (this module,
+    separately proven band-literal-free); the pattern is a membership test
+    against >= 2 confidence-band-name string literals."""
+    violations = _find_second_bucket_membership_predicates(
+        [REPO_ROOT / "shared", REPO_ROOT / "web"]
+    )
+    assert violations == [], (
+        f"found a candidate second bucket-membership predicate: {violations} -- "
+        "this is exactly the class of bug sketch 003's confOf() was"
+    )
+
+
+def test_second_implementation_guard_catches_a_seeded_duplicate(tmp_path):
+    """Positive control, proving the guard is not vacuously green: seed a
+    scratch module containing a hand-picked band-set predicate (the
+    `confOf()`/`STRONG_BANDS` shape) under a throwaway `tmp_path` root --
+    never inside the tracked tree -- and assert the guard actually fails on
+    it. The scratch file is removed at the end of this test (`finally:
+    scratch_file.unlink()`), on top of pytest's own automatic `tmp_path`
+    teardown, so this is the seed-then-revert exercise the plan's own
+    acceptance criteria ask for, observed actually failing before being
+    reverted."""
+    scratch_dir = tmp_path / "shared"
+    scratch_dir.mkdir()
+    scratch_file = scratch_dir / "scratch_confof.py"
+    scratch_file.write_text(
+        "STRONG_BANDS = {'tier_a', 'high_confidence_algorithmic'}\n\n"
+        "def confOf(band):\n"
+        "    return band in STRONG_BANDS\n",
+        encoding="utf-8",
+    )
+    try:
+        violations = _find_second_bucket_membership_predicates([tmp_path])
+        assert violations, (
+            "the guard failed to catch a seeded confOf()-shaped band-set "
+            "predicate -- it must fail on this input"
+        )
+    finally:
+        scratch_file.unlink()

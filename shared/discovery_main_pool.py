@@ -42,6 +42,23 @@ Gate 2 (the screening-band exclusion) delegates to
 `shared.discovery_band_labels.is_default_eligible` rather than picking its
 own band allowlist -- gate 2 IS §4's screening-band exclusion, not a
 re-derivation of band quality (136-07-PLAN.md's own key_links contract).
+
+**One wording for the rule (Task 3, PANEL-01/PANEL-02).** `main_pool_sentence`
+and `bucket_label` below are the ONLY place the two-bucket rule and its
+bucket names are worded -- so the methods page (`web/pages/help.py`), the
+panel and the corpus-wide findings page can never paraphrase the rule three
+different ways. `main_pool_sentence` is asserted, by a test in
+`tests/test_discovery_main_pool.py` that reads (never imports)
+`web/pages/help.py`'s own source text, to equal that page's
+`MAIN_POOL_SENTENCE` constant byte-for-byte in both languages.
+
+**The second bucket means "not enough evidence for the rule" -- never
+"probably wrong."** (main-pool-rule.md, "Wording and internal state": it
+holds probable quotations, shared wording, unresolved ties, missing signals
+and genuinely indeterminate cases alike; a reader must never read bucket
+membership as a verdict on correctness.) `bucket_label`'s own docstring
+repeats this so the distinction travels with the function, not only with
+this module docstring.
 """
 
 from __future__ import annotations
@@ -236,3 +253,79 @@ def main_pool_decision(identification: Any) -> Tuple[bool, str]:
     if max_coverage < COVERAGE_FLOOR:
         return False, REASON_LOW_COVERAGE
     return True, REASON_MAIN_FULL_COVERAGE
+
+
+# ---------------------------------------------------------------------------
+# Task 3 (PANEL-01/PANEL-02): "One wording for the rule." `main_pool_sentence`
+# and `bucket_label` are the SOLE place the two-bucket rule and its bucket
+# names are worded, in EN and HE, so the methods page (`web/pages/help.py`),
+# the panel and the corpus-wide findings page can never each phrase the rule
+# differently. Source of the exact wording:
+# `.claude/skills/sketch-findings-genizahsearch/references/main-pool-rule.md`
+# § "The rule" (the scholar sentence) and § "Wording and internal state" (the
+# bucket names, and the "not enough evidence, never probably wrong" framing).
+#
+# `main_pool_sentence('en')`/`main_pool_sentence('he')` are pinned, by a test
+# in `tests/test_discovery_main_pool.py`, to equal `web/pages/help.py`'s own
+# `MAIN_POOL_SENTENCE` constant byte-for-byte -- that test reads (never
+# imports) help.py's source text, because this module must not import
+# `web/`. If either side is ever edited without the other, that test fails
+# and prints both values.
+# ---------------------------------------------------------------------------
+
+_MAIN_POOL_SENTENCE: Mapping[str, str] = {
+    "en": (
+        "A fragment is treated as a probable identification when it matches the work across "
+        "more than one leaf, or covers almost a whole page on its own. Everything else appears "
+        "under ‘more matches’."
+    ),
+    "he": (
+        "קטע נחשב לזיהוי סביר כאשר הוא תואם את החיבור ביותר מדף אחד, או מכסה כמעט עמוד שלם "
+        "בפני עצמו. כל השאר מופיע תחת ‘התאמות נוספות’."
+    ),
+}
+
+
+def main_pool_sentence(lang: str = "en") -> str:
+    """The ONE reader-facing sentence describing the two-bucket rule, in EN
+    or HE (unknown `lang` defaults to EN, matching
+    `shared.discovery_band_labels.band_label`'s own convention). Contains no
+    percentage and none of the prohibited relation words ("copy of",
+    "quotes", "witness of") -- D-06/D-21's no-numbers, no-overclaiming
+    posture. This exact string is pinned byte-for-byte against
+    `web/pages/help.py`'s `MAIN_POOL_SENTENCE` constant by a test that reads
+    (never imports) that module's source."""
+    lang_key = "he" if lang == "he" else "en"
+    return _MAIN_POOL_SENTENCE[lang_key]
+
+
+# The two bilingual bucket names (main-pool-rule.md, "Wording and internal
+# state": "Bucket names follow the owner: main pool / more matches"). Kept
+# as a private table so `bucket_label` is the ONLY way to read them --
+# nothing outside this module names a bucket directly.
+_BUCKET_LABEL_MAIN: Mapping[str, str] = {
+    "en": "main pool",
+    "he": "מאגר עיקרי",
+}
+
+_BUCKET_LABEL_MORE: Mapping[str, str] = {
+    "en": "more matches",
+    "he": "התאמות נוספות",
+}
+
+
+def bucket_label(in_main_pool: bool, lang: str = "en") -> str:
+    """The bilingual display name of the bucket `in_main_pool` selects --
+    `main_pool_decision`'s own boolean, never re-derived. `bucket_label` is
+    the ONLY definition of these two names anywhere under `shared/` (a
+    standing guard in `tests/test_discovery_main_pool.py` asserts no module
+    under `shared/` or `web/` defines a second bucket-membership predicate).
+
+    **The second bucket ("more matches") means there was not enough
+    evidence for the main-pool rule -- it never means the identification is
+    probably wrong.** It holds probable quotations, shared wording,
+    unresolved ties, missing signals and genuinely indeterminate cases
+    alike (main-pool-rule.md, "Wording and internal state"); a caller must
+    never render it as a confidence level or a correctness verdict."""
+    lang_key = "he" if lang == "he" else "en"
+    return _BUCKET_LABEL_MAIN[lang_key] if in_main_pool else _BUCKET_LABEL_MORE[lang_key]
