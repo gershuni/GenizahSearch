@@ -3,8 +3,9 @@ phase: 136
 slug: read-surfaces-connections-panel-work-witnesses
 status: planned
 nyquist_compliant: true
-wave_0_complete: false  # Wave-0 artifacts are owned by plans 136-03 (preservation harness + pinned expectations) and 136-01 (budgets)
+wave_0_complete: false  # Wave-0 artifacts are owned by plans 136-02 (shared honesty gate), 136-03 (gate-1 decision record), 136-05 (preservation harness + pinned expectations) and 136-01 (budget caps)
 created: 2026-07-31
+revised: 2026-08-02  # re-scoped: 19 plans / 56 tasks / 9 waves
 ---
 
 # Phase 136 — Validation Strategy
@@ -133,145 +134,119 @@ Nothing below exists yet; each blocks the criterion it serves.
 
 ---
 
-## Per-Task Verification Rows (populated by the planner, 2026-08-02)
+## Per-Task Verification Rows (repopulated by the planner, 2026-08-02 — RE-SCOPE)
 
-31 plans / 93 tasks / 26 waves. Every task carries an `<automated>` verify command;
-four are blocking owner checkpoints whose verify is the recorded reply.
+**Supersedes the 31-plan / 26-wave table.** The re-scoped phase is **19 plans / 56 tasks / 9 waves**.
+PANEL-03, WORK-01 and WORK-02 moved to Phase 136.1, and `w_start`/`w_end` plus the Sefaria versemap
+resolution were trimmed out of the rebuild — so the rows for the archived plans 136-08, 136-09, 136-17
+and 136-22 through 136-26 no longer apply here. Every task carries an `<automated>` verify command;
+three are blocking owner checkpoints whose verify is the recorded reply.
 
 | Task ID | Plan | Wave | SC | Type | Automated verify | Status |
 |---------|------|------|----|------|------------------|--------|
-| 136-01-T1 | 136-01 | 1 | 7,8 | doc gate | `python -c "import io,re,sys; t=io.open('.planning/REQUIREMENTS.md',encoding='utf-8').read(); ...` | ⬜ |
-| 136-01-T2 | 136-01 | 1 | 7,8 | doc gate | `python -c "import io; t=io.open('docs/specs/discovery-band-labels-v1.md',encoding='utf-8').re...` | ⬜ |
-| 136-01-T3 | 136-01 | 1 | 7,8 | doc gate | `python -c "import io,re; t=io.open('docs/specs/discovery-budgets.md',encoding='utf-8').read()...` | ⬜ |
-| 136-02-T1 | 136-02 | 1 | 1 | doc gate + unit | `python -c "import io; t=io.open('docs/specs/discovery-sidecar-schema-v1.md',encoding='utf-8')...` | ⬜ |
-| 136-02-T2 | 136-02 | 1 | 1 | doc gate + unit | `python -c "import io; t=io.open('docs/specs/discovery-deploy.md',encoding='utf-8').read(); [t...` | ⬜ |
-| 136-02-T3 | 136-02 | 1 | 1 | doc gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_schema_am...` | ⬜ |
-| 136-03-T1 | 136-03 | 1 | 1 | offline gate | `python scripts/verify_rebuild_preservation.py --help && python -c "import ast,io; src=io.open...` | ⬜ |
-| 136-03-T2 | 136-03 | 1 | 1 | offline gate | `python -c "import json,io; d=json.load(io.open('.planning/phases/136-read-surfaces-connection...` | ⬜ |
-| 136-03-T3 | 136-03 | 1 | 1 | offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_rebuild_preservatio...` | ⬜ |
-| 136-04-T1 | 136-04 | 1 | 2,5 | offline report + decision | `python scripts/discovery_gate1_evidence.py --out .planning/phases/136-read-surfaces-connectio...` | ⬜ |
-| 136-04-T2 | 136-04 | 1 | 2,5 | offline report + decision (checkpoint) | `echo "CHECKPOINT: Owner reply recorded in the plan summary, quoting the chosen option id for ...` | ⬜ |
-| 136-04-T3 | 136-04 | 1 | 2,5 | offline report + decision | `python -c "import json,io,hashlib; p='discovery_data/granularity_aliases.json'; b=io.open(p,'...` | ⬜ |
-| 136-05-T1 | 136-05 | 2 | 1,7 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-05-T2 | 136-05 | 2 | 1,7 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "verify_discovery or...` | ⬜ |
-| 136-05-T3 | 136-05 | 2 | 1,7 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-06-T1 | 136-06 | 3 | 1 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-06-T2 | 136-06 | 3 | 1 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-06-T3 | 136-06 | 3 | 1 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-07-T1 | 136-07 | 4 | 1,5 | unit + perf | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_main_pool...` | ⬜ |
-| 136-07-T2 | 136-07 | 4 | 1,5 | unit + perf | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-07-T3 | 136-07 | 4 | 1,5 | unit + perf | `python scripts/bench_discovery.py --help && python -c "import io; s=io.open('scripts/bench_di...` | ⬜ |
-| 136-08-T1 | 136-08 | 5 | 1,3 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-08-T2 | 136-08 | 5 | 1,3 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-08-T3 | 136-08 | 5 | 1,3 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_work_offs...` | ⬜ |
-| 136-09-T1 | 136-09 | 6 | 1,3 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_workref.p...` | ⬜ |
-| 136-09-T2 | 136-09 | 6 | 1,3 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-09-T3 | 136-09 | 6 | 1,3 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_workref.p...` | ⬜ |
-| 136-10-T1 | 136-10 | 7 | 1,5 | offline gate + unit | `python -c "import json,io,hashlib; p='discovery_data/work_domains.build.json'; b=io.open(p,'r...` | ⬜ |
-| 136-10-T2 | 136-10 | 7 | 1,5 | offline gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-10-T3 | 136-10 | 7 | 1,5 | offline gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_work_doma...` | ⬜ |
-| 136-11-T1 | 136-11 | 8 | 6 | unit + decision | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_novelty_c...` | ⬜ |
-| 136-11-T2 | 136-11 | 8 | 6 | unit + decision (checkpoint) | `echo "CHECKPOINT: Owner reply recorded in the plan summary, quoting the chosen option id for ...` | ⬜ |
-| 136-11-T3 | 136-11 | 8 | 6 | unit + decision | `python -c "import json,io,hashlib; p='discovery_data/novelty_verdicts.build.json'; b=io.open(...` | ⬜ |
-| 136-12-T1 | 136-12 | 9 | 6 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-12-T2 | 136-12 | 9 | 6 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "verify_discovery" -q` | ⬜ |
-| 136-12-T3 | 136-12 | 9 | 6 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_novelty_i...` | ⬜ |
-| 136-13-T1 | 136-13 | 10 | 1 | offline gate + integration | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_build.py ...` | ⬜ |
-| 136-13-T2 | 136-13 | 10 | 1 | offline gate + integration | `python scripts/project_discovery_public.py --help && GITHUB_ACTIONS=true QT_QPA_PLATFORM=offs...` | ⬜ |
-| 136-13-T3 | 136-13 | 10 | 1 | offline gate + integration | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_vis02_positive_cont...` | ⬜ |
-| 136-14-T1 | 136-14 | 11 | 1 | offline gate | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel-work-wi...` | ⬜ |
-| 136-14-T2 | 136-14 | 11 | 1 | offline gate | `python -c "import io,re; t=io.open('.planning/phases/136-read-surfaces-connections-panel-work...` | ⬜ |
-| 136-14-T3 | 136-14 | 11 | 1 | offline gate | `python -c "import io; a=io.open('.planning/phases/136-read-surfaces-connections-panel-work-wi...` | ⬜ |
-| 136-15-T1 | 136-15 | 12 | 1,8 | deploy + perf (checkpoint) | `echo "CHECKPOINT: Owner reply recorded in the plan summary, quoting the chosen option id for ...` | ⬜ |
-| 136-15-T2 | 136-15 | 12 | 1,8 | deploy + perf | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel-work-wi...` | ⬜ |
-| 136-15-T3 | 136-15 | 12 | 1,8 | deploy + perf | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel-work-wi...` | ⬜ |
-| 136-16-T1 | 136-16 | 13 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_service.p...` | ⬜ |
-| 136-16-T2 | 136-16 | 13 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_service.p...` | ⬜ |
-| 136-16-T3 | 136-16 | 13 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_service.p...` | ⬜ |
-| 136-17-T1 | 136-17 | 13 | 3 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_render.py -q` | ⬜ |
-| 136-17-T2 | 136-17 | 13 | 3 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_render.py...` | ⬜ |
-| 136-17-T3 | 136-17 | 13 | 3 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_render.py...` | ⬜ |
-| 136-18-T1 | 136-18 | 14 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_panel_mod...` | ⬜ |
-| 136-18-T2 | 136-18 | 14 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_panel_mod...` | ⬜ |
-| 136-18-T3 | 136-18 | 14 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_panel_mod...` | ⬜ |
-| 136-19-T1 | 136-19 | 15 | 2,8 | unit + render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "browse and not desk...` | ⬜ |
-| 136-19-T2 | 136-19 | 15 | 2,8 | unit + render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "browse_enrichment o...` | ⬜ |
-| 136-19-T3 | 136-19 | 15 | 2,8 | unit + render-smoke | `python -c "import io; c=io.open('web/static/common.css',encoding='utf-8').read(); import re; ...` | ⬜ |
-| 136-20-T1 | 136-20 | 16 | 2 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "discovery_rows or p...` | ⬜ |
-| 136-20-T2 | 136-20 | 16 | 2 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "discovery_panel or ...` | ⬜ |
-| 136-20-T3 | 136-20 | 16 | 2 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "translations or i18...` | ⬜ |
-| 136-21-T1 | 136-21 | 17 | 2,7,8 | render-smoke + masking | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_panel_...` | ⬜ |
-| 136-21-T2 | 136-21 | 17 | 2,7,8 | render-smoke + masking | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_panel_...` | ⬜ |
-| 136-21-T3 | 136-21 | 17 | 2,7,8 | render-smoke + masking | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_panel_...` | ⬜ |
-| 136-22-T1 | 136-22 | 17 | 3 | offline report + decision | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel-work-wi...` | ⬜ |
-| 136-22-T2 | 136-22 | 17 | 3 | offline report + decision (checkpoint) | `echo "CHECKPOINT: Owner reply recorded in the plan summary, quoting the chosen option id for ...` | ⬜ |
-| 136-22-T3 | 136-22 | 17 | 3 | offline report + decision | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel-work-wi...` | ⬜ |
-| 136-23-T1 | 136-23 | 18 | 3 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "evidence" -q && pyt...` | ⬜ |
-| 136-23-T2 | 136-23 | 18 | 3 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "browse and not desk...` | ⬜ |
-| 136-23-T3 | 136-23 | 18 | 3 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_eviden...` | ⬜ |
-| 136-24-T1 | 136-24 | 19 | 4 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_service.p...` | ⬜ |
-| 136-24-T2 | 136-24 | 19 | 4 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_service.p...` | ⬜ |
-| 136-24-T3 | 136-24 | 19 | 4 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_service.p...` | ⬜ |
-| 136-25-T1 | 136-25 | 20 | 4,8 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "work_page or routes...` | ⬜ |
-| 136-25-T2 | 136-25 | 20 | 4,8 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "work_page" -q && GI...` | ⬜ |
-| 136-25-T3 | 136-25 | 20 | 4,8 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_work_p...` | ⬜ |
-| 136-26-T1 | 136-26 | 21 | 5 | unit + render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_titles.py -q` | ⬜ |
-| 136-26-T2 | 136-26 | 21 | 5 | unit + render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "catalog_browse" -q ...` | ⬜ |
-| 136-26-T3 | 136-26 | 21 | 5 | unit + render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_catalo...` | ⬜ |
-| 136-27-T1 | 136-27 | 22 | 5 | unit + perf | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_findings_...` | ⬜ |
-| 136-27-T2 | 136-27 | 22 | 5 | unit + perf | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_findings_...` | ⬜ |
-| 136-27-T3 | 136-27 | 22 | 5 | unit + perf | `python -c "import io; s=io.open('scripts/bench_discovery.py',encoding='utf-8').read(); assert...` | ⬜ |
-| 136-28-T1 | 136-28 | 23 | 5,8 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "findings or routes ...` | ⬜ |
-| 136-28-T2 | 136-28 | 23 | 5,8 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "findings" -q && pyt...` | ⬜ |
-| 136-28-T3 | 136-28 | 23 | 5,8 | render-smoke | `python -c "import io; c=io.open('web/static/common.css',encoding='utf-8').read(); i=c.find('f...` | ⬜ |
-| 136-29-T1 | 136-29 | 24 | 5,6 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "findings" -q` | ⬜ |
-| 136-29-T2 | 136-29 | 24 | 5,6 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "novelty or findings...` | ⬜ |
-| 136-29-T3 | 136-29 | 24 | 5,6 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_findin...` | ⬜ |
-| 136-30-T1 | 136-30 | 25 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_help_m...` | ⬜ |
-| 136-30-T2 | 136-30 | 25 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/test_help_m...` | ⬜ |
-| 136-30-T3 | 136-30 | 25 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/ -q` | ⬜ |
-| 136-31-T1 | 136-31 | 26 | 6,8 | integration + masking | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/ -q -k "pan...` | ⬜ |
-| 136-31-T2 | 136-31 | 26 | 6,8 | integration + masking | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_masking_s...` | ⬜ |
-| 136-31-T3 | 136-31 | 26 | 6,8 | integration + masking | `python scripts/check_atlas_masking.py --scan-repo --strict && python -c "import io; t=io.open...` | ⬜ |
+| 136-01-T1 | 136-01 | 1 | 1,7,8 | doc gate | `python -c "import io; t=io.open('.planning/REQUIREMENTS.md',encoding='utf-8').read();...` | &#9744; |
+| 136-01-T2 | 136-01 | 1 | 1,7,8 | doc gate | `python -c "import io; t=io.open('docs/specs/discovery-band-labels-v1.md',encoding='ut...` | &#9744; |
+| 136-01-T3 | 136-01 | 1 | 1,7,8 | doc gate | `python -c "import io; t=io.open('docs/specs/discovery-sidecar-schema-v1.md',encoding=...` | &#9744; |
+| 136-02-T1 | 136-02 | 1 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
+| 136-02-T2 | 136-02 | 1 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
+| 136-02-T3 | 136-02 | 1 | 7 | render-smoke | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
+| 136-03-T1 | 136-03 | 1 | 2,5 | offline report + decision | `python scripts/discovery_gate1_evidence.py --help && python -c "import io,os; p='.pla...` | &#9744; |
+| 136-03-T2 | 136-03 | 1 | 2,5 | offline report + decision (checkpoint) | `echo "CHECKPOINT: owner reply to all five decisions recorded verbatim in the plan sum...` | &#9744; |
+| 136-03-T3 | 136-03 | 1 | 2,5 | offline report + decision | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel...` | &#9744; |
+| 136-04-T1 | 136-04 | 1 | 1,6 | unit + decision (checkpoint) | `python -c "import io,os; p='.planning/phases/136-read-surfaces-connections-panel-work...` | &#9744; |
+| 136-04-T2 | 136-04 | 1 | 1,6 | unit + decision | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_n...` | &#9744; |
+| 136-04-T3 | 136-04 | 1 | 1,6 | unit + decision | `python scripts/discovery_novelty_funnel.py --help && python -c "import io; s=io.open(...` | &#9744; |
+| 136-05-T1 | 136-05 | 1 | 1 | offline gate | `python scripts/verify_rebuild_preservation.py --help && python -c "import io; s=io.op...` | &#9744; |
+| 136-05-T2 | 136-05 | 1 | 1 | offline gate | `python -c "import json,io; d=json.load(io.open('.planning/phases/136-read-surfaces-co...` | &#9744; |
+| 136-05-T3 | 136-05 | 1 | 1 | offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_rebuild_pre...` | &#9744; |
+| 136-06-T1 | 136-06 | 2 | 1 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_b...` | &#9744; |
+| 136-06-T2 | 136-06 | 2 | 1 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "verify_disc...` | &#9744; |
+| 136-06-T3 | 136-06 | 2 | 1 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_s...` | &#9744; |
+| 136-07-T1 | 136-07 | 2 | 2,5 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_m...` | &#9744; |
+| 136-07-T2 | 136-07 | 2 | 2,5 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_g...` | &#9744; |
+| 136-07-T3 | 136-07 | 2 | 2,5 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_m...` | &#9744; |
+| 136-08-T1 | 136-08 | 2 | 1 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_v...` | &#9744; |
+| 136-08-T2 | 136-08 | 2 | 1 | unit + offline gate | `python scripts/project_discovery_public.py --help && python -c "import io; s=io.open(...` | &#9744; |
+| 136-08-T3 | 136-08 | 2 | 1 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_vis01_proje...` | &#9744; |
+| 136-09-T1 | 136-09 | 2 | 1,5 | offline gate + unit | `python scripts/curate_work_domains.py --help && GITHUB_ACTIONS=true QT_QPA_PLATFORM=o...` | &#9744; |
+| 136-09-T2 | 136-09 | 2 | 1,5 | offline gate + unit | `python scripts/curate_work_domains.py --validate discovery_data/work_domains-v1.json ...` | &#9744; |
+| 136-09-T3 | 136-09 | 2 | 1,5 | offline gate + unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_work_domain...` | &#9744; |
+| 136-10-T1 | 136-10 | 3 | 2,5 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_d...` | &#9744; |
+| 136-10-T2 | 136-10 | 3 | 2,5 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "translation...` | &#9744; |
+| 136-10-T3 | 136-10 | 3 | 2,5 | unit | `python -c "import io,re; s=io.open('web/static/common.css',encoding='utf-8').read(); ...` | &#9744; |
+| 136-11-T1 | 136-11 | 3 | 1,8 | unit + perf | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_b...` | &#9744; |
+| 136-11-T2 | 136-11 | 3 | 1,8 | unit + perf | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_b...` | &#9744; |
+| 136-11-T3 | 136-11 | 3 | 1,8 | unit + perf | `python scripts/bench_discovery.py --help && python -c "import io; s=io.open('scripts/...` | &#9744; |
+| 136-12-T1 | 136-12 | 4 | 1,6 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_b...` | &#9744; |
+| 136-12-T2 | 136-12 | 4 | 1,6 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_b...` | &#9744; |
+| 136-12-T3 | 136-12 | 4 | 1,6 | unit + offline gate | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_s...` | &#9744; |
+| 136-13-T1 | 136-13 | 5 | 1,8 | offline gate + deploy | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel...` | &#9744; |
+| 136-13-T2 | 136-13 | 5 | 1,8 | offline gate + deploy (checkpoint) | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel...` | &#9744; |
+| 136-13-T3 | 136-13 | 5 | 1,8 | offline gate + deploy | `python -c "import io; t=io.open('.planning/phases/136-read-surfaces-connections-panel...` | &#9744; |
+| 136-14-T1 | 136-14 | 6 | 2,5,8 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_s...` | &#9744; |
+| 136-14-T2 | 136-14 | 6 | 2,5,8 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_s...` | &#9744; |
+| 136-14-T3 | 136-14 | 6 | 2,5,8 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_f...` | &#9744; |
+| 136-15-T1 | 136-15 | 7 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_p...` | &#9744; |
+| 136-15-T2 | 136-15 | 7 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_p...` | &#9744; |
+| 136-15-T3 | 136-15 | 7 | 2 | unit | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_discovery_p...` | &#9744; |
+| 136-16-T1 | 136-16 | 7 | 5,8 | unit + render | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_findings_pa...` | &#9744; |
+| 136-16-T2 | 136-16 | 7 | 5,8 | unit + render | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_findings_pa...` | &#9744; |
+| 136-16-T3 | 136-16 | 7 | 5,8 | unit + render | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_findings_pa...` | &#9744; |
+| 136-17-T1 | 136-17 | 8 | 2,8 | render-smoke + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "browse_enri...` | &#9744; |
+| 136-17-T2 | 136-17 | 8 | 2,8 | render-smoke + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/ -k "discovery_p...` | &#9744; |
+| 136-17-T3 | 136-17 | 8 | 2,8 | render-smoke + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
+| 136-18-T1 | 136-18 | 8 | 5,6,8 | render-smoke + perf + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_findings_pa...` | &#9744; |
+| 136-18-T2 | 136-18 | 8 | 5,6,8 | render-smoke + perf + deploy | `python -c "import io; s=io.open('scripts/bench_discovery.py',encoding='utf-8').read()...` | &#9744; |
+| 136-18-T3 | 136-18 | 8 | 5,6,8 | render-smoke + perf + deploy | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
+| 136-19-T1 | 136-19 | 9 | 8 | masking + docs | `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/render_smoke/tes...` | &#9744; |
+| 136-19-T2 | 136-19 | 9 | 8 | masking + docs | `PYTHONUTF8=1 python scripts/check_docs.py && python -c "import io; t=io.open('.planni...` | &#9744; |
 
 ### Wave-0 ownership
 
 | Wave-0 artifact | Owning plan | Wave |
 |---|---|---|
-| `scripts/verify_rebuild_preservation.py` | 136-03 | 1 |
-| `136-REBUILD-PRESERVATION-EXPECTED.json` (pinned from the LIVE asset, BEFORE the rebuild) | 136-03 | 1 |
-| `tests/test_vis02_positive_control.py` | 136-13 | 10 |
-| `tests/render_smoke/test_panel_render_smoke.py` | 136-21 | 17 |
-| `tests/render_smoke/test_work_page_render_smoke.py` | 136-25 | 20 |
-| `tests/render_smoke/test_findings_page_render_smoke.py` | 136-29 | 24 |
-| `bench_discovery.py::bench_findings_page()` | 136-07 | 4 |
-| `docs/specs/discovery-budgets.md` findings cap + build-time budget | 136-01 (caps) / 136-14 (measured) | 1 / 11 |
-| Pinned novelty-verdict-cache handoff artifact | 136-11 | 8 |
-| `tests/render_smoke/test_evidence_view_render_smoke.py` (added by the planner) | 136-23 | 18 |
-| `tests/test_discovery_masking_surfaces.py` (added by the planner) | 136-31 | 26 |
+| `tests/render_smoke/discovery_honesty_gate.py` (the ONE shared no-numbers gate, imported by every later surface suite) | 136-02 | 1 |
+| `scripts/discovery_gate1_evidence.py` + `136-GATE1-DECISIONS.md` (the constants three later plans cite) | 136-03 | 1 |
+| `scripts/verify_rebuild_preservation.py` | 136-05 | 1 |
+| `136-REBUILD-PRESERVATION-EXPECTED.json` (pinned from the LIVE asset, BEFORE the rebuild) | 136-05 | 1 |
+| `tests/test_vis01_projection.py` (leak + structural-absence controls) | 136-08 | 2 |
+| `bench_discovery.py::bench_findings_page()` | 136-11 | 3 |
+| `docs/specs/discovery-budgets.md` findings cap + build-time budget | 136-01 (caps) / 136-11, 136-13, 136-18 (measured) | 1 / 3, 5, 8 |
+| Pinned novelty-verdict-cache handoff artifact | 136-04 | 1 |
+| `tests/render_smoke/test_panel_render_smoke.py` | 136-17 | 8 |
+| `tests/render_smoke/test_findings_render_smoke.py` | 136-18 | 8 |
+| `tests/render_smoke/test_discovery_masking_sweep.py` | 136-19 | 9 |
 
 ### Positive controls — the assertions that must be proven able to fail
 
 | Control | Plan | What it seeds |
 |---|---|---|
-| Rebuild preservation | 136-03 | In-stratum `matched_letters` drift, a deleted claim, a non-NULL tier-A precision, a changed card binding, a candidate self-attesting its own hashes |
-| D-02a both branches | 136-05 | An unauthorized `ci_low`, an out-of-vocabulary status, any non-NULL precision |
-| Licence gate | 136-09, 136-17, 136-23 | A misspelled/padded permissive flag, an absent work, a seeded non-permissive work rendered as permissive |
-| M-source locus | 136-09, 136-31 | A locus string on a restricted row |
-| VIS-02 leak | 136-13 | A restricted row inserted into a copy of the public projection; plus an unset pattern file |
-| Panel honesty | 136-18, 136-21 | A precision figure, an interval, a review badge, a NEGATED prohibited word, a stored vocabulary key, a bare page percentage, a removed caveat, a same-phrase-elsewhere scope case |
-| Catalogue separation | 136-26 | A catalogued row and a computed row under one shared heading; a prohibited word in the computed heading |
-| Findings honesty | 136-29 | A precision figure plus the prohibited stronger novelty wording; an out-of-vocabulary domain plus a header mislabelled as the manuscript's domain; a locally-computed bucket disagreeing with the shared rule |
-| No-numbers gate | 136-30 | A precision figure and an interval on the methods page and one row per surface; a bare percentage without the matched-letter qualifier |
-| Cross-surface masking | 136-31 | A restricted value seeded into a row, a JSON payload, a copy string and an error message |
+| No-numbers gate (methods page) | 136-02 | A precision figure plus an interval; a stored vocabulary key; a bare percentage without the matched-letter qualifier; a NEGATED prohibited word |
+| Novelty masking | 136-04 | An adversarial-input table asserting the restricted name never appears for unknown / `None` / malformed provenance codes |
+| Rebuild preservation | 136-05 | In-stratum `matched_letters` drift, a deleted evidence row, an added claim, a changed `works` title, an unauthorized `band_precision` change, a repointed graded card, and a candidate self-attesting its own frame |
+| D-02a both branches | 136-06 | An unauthorized `ci_low`, an out-of-vocabulary status, any non-NULL `tier_a` precision, `measured_pass` on an undeclared band |
+| Second-implementation guard | 136-07 | A locally-defined band-set predicate in a scratch module |
+| VIS-01 leak + structural absence | 136-08 | A restricted marker in a projected title, an orphaned FK, a copied total, a ruleless table, and an unset masking pattern file |
+| Curation vocabulary | 136-09 | An out-of-tree domain leaf, a non-canonical key, a duplicate assignment |
+| Novelty ingestion | 136-12 | An unmasked provenance label, a disagreeing per-claim novelty fixture, a substituted verdict cache, a `kept_tie` row with a NULL `demoted_work_id` |
+| Wrong-axis guard | 136-14 | A findings query path calling the manuscript-domain accessor |
+| Panel model honesty | 136-15 | A precision figure in a row field, a stored vocabulary key in a chip, a row whose bucket disagrees with the shared rule |
+| Panel render honesty | 136-17 | A precision figure in a rendered row, a stored vocabulary key in a chip, a review badge |
+| Findings render honesty | 136-18 | "New discovery" plus a precision figure; an out-of-vocabulary domain plus a header mislabelled as the manuscript's domain; a rendered row whose bucket disagrees with the shared rule |
+| Cross-surface masking | 136-19 | A restricted value seeded into a rendered row, a JSON payload, a copy/export output and an exception message — one per path class |
 
 ### Blocking owner checkpoints
 
 | Plan | Wave | Decision |
 |---|---|---|
-| 136-04 | 1 | D-13e bucket count, D-16 relation filter on the findings page, the D-13c threshold, the D-13b tie-break, the D-13d granularity rule + alias ratification |
-| 136-11 | 8 | Authorize the novelty funnel run, its pinned model configuration and the evaluation-set size |
-| 136-15 | 12 | Approve the one authorized production redeploy on the gate evidence |
-| 136-22 | 17 | The evidence view's render source and the b-side form |
+| 136-03 | 1 | D-13e bucket count, D-16 relation filter on the findings page, the D-13c threshold, the D-13b tie-break, the D-13d granularity separation rule |
+| 136-04 | 1 | Authorize the novelty funnel run (~$27), its pinned model configuration and the hard-case evaluation-set size |
+| 136-13 | 5 | Approve the ONE authorized production redeploy on the gate evidence, flag OFF |
 
-*Status legend: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+### What is no longer verified here (moved to Phase 136.1)
+
+PANEL-03's offset renderer and evidence view, the `/work/{id}` service extension and page, and the
+`/catalog-browse` integration. Their validation rows live with the six archived plans at
+`superseded-2026-08-02/`. The licence-gate and M-source-locus positive controls move with them.
+
+*Status legend: &#9744; pending &middot; &#9989; green &middot; &#10060; red &middot; &#9888; flaky*

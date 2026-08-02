@@ -193,7 +193,30 @@ Plans:
   7. **No precision percentage is reachable from any surface** — the methods page is rewritten qualitatively (tiers explained in words plus the non-percentage facts: that grading happened, population, unit, sample size, grader, date, method, audit state, immutable report id), `web/pages/help.py`'s existing estimates and intervals are removed, and no surface claims human review until the provenance of the 121 `human_confirmed` rows is established.
   8. Every surface hides cleanly with the flag off or the sidecar absent, stays inside the PERF-01 budgets (a versioned `discovery-budgets.md` entry for the findings page), and passes the masking scan on rendered output, JSON payloads, copy/export paths and error paths.
 
-**Plans**: TBD — **RE-SCOPED 2026-08-02 (owner), replanned at `standard` granularity.** Three gates, not six: (1) the trimmed rebuild + the D-13d granularity rule + the D-13c threshold, (2) the panel, (3) the findings page — then the methods-page rewrite and the cross-surface masking sweep, both of which gate the public flag-on. Gate 1 still blocks every surface wave: the rebuilt asset must be live in production, flag OFF, before any UI code that reads its new columns deploys. Blocking owner checkpoints: the open gate-1 decisions, the novelty funnel run (~$27), and the one authorized production redeploy. A second mockup pass and a Codex pass are owed on the built surfaces.
+**Plans**: **19 plans in 9 waves** — replanned 2026-08-02 at `standard` granularity after the owner re-scope. Three gates, not six: (1) the trimmed rebuild + the D-13d granularity rule + the D-13c threshold, (2) the panel, (3) the findings page — then the methods-page rewrite and the cross-surface masking sweep, both of which gate the public flag-on. Gate 1 still blocks every surface wave: the rebuilt asset must be live in production, flag OFF, before any UI code that reads its new columns deploys. **Two deploys**: the panel ships in wave 8 (136-17), the findings page follows on the same asset (136-18). Blocking owner checkpoints: **136-03** (the five open gate-1 decisions), **136-04** (the novelty funnel run, ~$27), **136-13** (the one authorized production redeploy). A second mockup pass and a Codex pass are owed on the built surfaces.
+
+Wave rationale: two real chokepoints, not twenty-six. `scripts/build_discovery_sidecar.py` is split into parallel MODULE work (waves 2-3) and two serial WIRING passes (waves 3-4); `shared/discovery_service.py` + `web/discovery.py` are done once (wave 6) so the panel and findings tracks run concurrently afterwards. The methods rewrite and the novelty LLM gate sit in wave 1, off the critical path entirely.
+
+Plans:
+- [ ] 136-01-PLAN.md — Contract & requirement amendments (REQUIREMENTS, band-labels §2/§3, budgets, schema new-field contract + the narrow tier_a amendment, deploy runbook) · wave 1
+- [ ] 136-02-PLAN.md — Methods-page rewrite (qualitative BAND-05) + the ONE shared honesty gate · wave 1
+- [ ] 136-03-PLAN.md — Gate-1 open decisions, measured then ratified (D-13e, D-16, D-13c, D-13b, D-13d) · wave 1 · **checkpoint**
+- [ ] 136-04-PLAN.md — Novelty: spend authorization, identity key, pinned LLM contract, funnel run, verdict cache · wave 1 · **checkpoint**
+- [ ] 136-05-PLAN.md — Rebuild-preservation gate, pinned from the live asset BEFORE the rebuild · wave 1
+- [ ] 136-06-PLAN.md — D-02a tier_a authorization lockstep (builder + verifier + both-branch fixtures) · wave 2
+- [ ] 136-07-PLAN.md — Main-pool rule + grouping predicates as shared pure modules · wave 2
+- [ ] 136-08-PLAN.md — VIS-01 two-axis derivation + closed-graph public projection + leak control · wave 2
+- [ ] 136-09-PLAN.md — `works.genre` curation artifact + author alias map · wave 2
+- [ ] 136-10-PLAN.md — Display strings, translations and the discovery CSS block (shared by both surfaces) · wave 3
+- [ ] 136-11-PLAN.md — Build wiring A: coverage_ppm, band_rank, indexes, discovery_identification, manuscript_display, bench · wave 3
+- [ ] 136-12-PLAN.md — Build wiring B: novelty ingestion, visibility axes, curated load, kept_tie fix, verifier extensions · wave 4
+- [ ] 136-13-PLAN.md — The rebuild, the gate battery, the owner authorization and the one production redeploy · wave 5 · **checkpoint**
+- [ ] 136-14-PLAN.md — Service layer, once: envelope, panel paths, findings query, facet cascade · wave 6
+- [ ] 136-15-PLAN.md — Panel display model (pure) · wave 7
+- [ ] 136-16-PLAN.md — Findings page shell: route, nav, caveat, modes, filter bar, result bar, pager · wave 7
+- [ ] 136-17-PLAN.md — Panel: browse attachment, body render, render-smoke, **panel deploy** · wave 8
+- [ ] 136-18-PLAN.md — Findings rows, novelty switch, combination benchmark, render-smoke, **findings deploy** · wave 8
+- [ ] 136-19-PLAN.md — Cross-surface masking sweep + flag-on readiness attestation + closeout · wave 9
 
 **UI hint**: yes
 
