@@ -27,12 +27,55 @@ value. The shade enum now widens from SEVEN to EIGHT values by splitting it:
 nothing). ``aid_more_specific`` is the least-novel shade and is excluded from
 the candidate toggle alongside ``confirms`` / ``refines_granularity`` /
 ``diverges`` / ``extends``; ``fills_gap`` remains the sole candidate
-selector. This module's vocabulary table, per-class plausible-shade hints
-(Class 3 and Class 6, per the owner's own scoping) and case footers are
-updated for E′; the 97 candidate cases themselves are UNCHANGED in content.
+selector.
+
+**Rulings F and G** (``136-GATE1-DECISIONS.md`` §§ F/G, a later continuation
+after the owner read the actual 97 candidate cases): (F) ``diverges`` is
+RETIRED and replaced by a SCOPE split -- ``diverges_work`` (a genuinely
+different work) / ``diverges_part`` (a different or finer part of the SAME
+work) -- widening the shade enum from EIGHT to NINE values, plus a NEW
+sibling ``divergence_correctness`` question (``catalogue_correct`` /
+``claim_correct`` / ``unclear``) recorded separately from the shade, because
+the owner's own review of the real cases found the catalogue is often right
+when it disagrees with a claim -- a fact this module must surface to the
+user (hidden by default, explicit warning) without ever letting the system
+itself adjudicate on the catalogue's say-so (the catalogue-never-evidence
+discipline, applied to a new axis). (G) A boundary correction: when the
+catalogue's STRUCTURED identification is generic but its own FREE TEXT
+already states our specific identification in prose, the shade is
+``confirms``, not ``refines_granularity`` -- with a systemic consequence
+that a novelty check keying only on structured ids manufactures false
+novelty at scale; this module's OWN Class-6 selector
+(``select_catalogue_divergence_candidates``) demonstrates the failure
+(over-fires on roughly half of its candidates per the owner's own
+characterization) and is left UNCORRECTED here deliberately, per the
+"measure it, do not quietly fix it away" instruction.
+
+**Labelling restructure** (same continuation, owner ruling): Classes 1-3
+(near-miss / alias / granularity) compare two of OUR OWN claims -- an A↔B
+"is this the same work" identity judgment, not a claim-vs-aid novelty
+judgment -- and were found, on reading the actual cases, to bake "same work"
+into their own selection (same-author + common-title-stem is the selection
+criterion itself), so full labelling of all 52 was REPLACED by an ~8-case
+IDENTITY SPOT-CHECK per class (``same_work`` / ``different_works`` /
+``unsure`` / ``skip``) that tests the constant-answer assumption rather than
+building ground truth. Classes 4-6 (terse catalogue / generic collection /
+catalogue divergence) are where the answer genuinely varies and carry the
+NOVELTY SHADE question; they are EXPANDED from 45 to ~75 candidates
+(20/25/30), proportioned to how genuinely hard/consequential each family is
+(Class 6 -- the most consequential and, per ruling G, measurably flawed --
+gets the largest expansion; Class 5's collection-level ambiguity is second;
+Class 4's terse/absent text is the most mechanical of the three). Each row
+now carries the ONE question type it was actually constructed to support
+(identity XOR shade), fixing an incoherence in the pre-restructure worksheet
+where Decision E's shade vocabulary was applied uniformly to all six classes
+even though Classes 1-3 have no claim-vs-aid relationship to judge.
+
 This module also emits an XLSX labelling workbook (``write_hardcases_xlsx``)
 alongside the Markdown, per the owner's request for something easier to work
-with than Hebrew RTL in Markdown.
+with than Hebrew RTL in Markdown; it now carries THREE sheets -- "Identity
+Spot-Check", "Novelty Shades" (with its own Correctness column) and
+"Vocabulary & Instructions".
 
 Mirrors the shape of ``scripts/bench_discovery.py``: open the live asset
 read-only, drive real queries against it, print a table per measurement, and
@@ -95,11 +138,14 @@ DEFAULT_HARDCASES_XLSX_OUT = os.path.join(PHASE_DIR, "136-NOVELTY-HARDCASES.xlsx
 # Verdict vocabulary -- the SINGLE source of truth for every owner-facing
 # shade token, shared verbatim by the Markdown worksheet, the XLSX dropdown
 # validation and the XLSX vocabulary sheet, so the three surfaces can never
-# drift out of sync. Order matches the owner's own E/E′ shade table (decision
-# E's six original shades, E′'s aid_more_specific inserted right after its
-# sibling refines_granularity, then not_checked's owner-facing alias `unsure`
-# and the `skip` non-answer). ``not_checked`` itself is NOT owner-facing --
-# only its owner-facing alias `unsure` is offered as an answer token.
+# drift out of sync. Order matches the owner's own E/E′/F shade table
+# (decision E's six original shades, E′'s aid_more_specific inserted right
+# after its sibling refines_granularity, F's diverges_work/diverges_part
+# replacing the single diverges token, then not_checked's owner-facing alias
+# `unsure` and the `skip` non-answer). ``not_checked`` itself is NOT
+# owner-facing -- only its owner-facing alias `unsure` is offered as an
+# answer token. THIS vocabulary is used ONLY on Class 4-6 ("shade") rows --
+# see IDENTITY_VOCABULARY below for the separate Class 1-3 question.
 # ---------------------------------------------------------------------------
 SHADE_VOCABULARY: Tuple[Tuple[str, str], ...] = (
     ("confirms", "an aid already ties this fragment to this work"),
@@ -107,7 +153,10 @@ SHADE_VOCABULARY: Tuple[Tuple[str, str], ...] = (
         "refines_granularity",
         "OUR claim is MORE SPECIFIC (finer) than what an aid says -- e.g. the catalogue names the "
         "whole work, our claim names a specific book/chapter of it (the D-13d same-author/related-"
-        "title rule); the OPPOSITE direction from `aid_more_specific` -- we ADD precision here",
+        "title rule); the OPPOSITE direction from `aid_more_specific` -- we ADD precision here. "
+        "OWNER RULING G: if the aid's own FREE TEXT already states this identification in ANY form "
+        "(even under a coarser structured work-id), the correct shade is `confirms`, not this one -- "
+        "reserve `refines_granularity` for information the aid contains in NO form, structured or free.",
     ),
     (
         "aid_more_specific",
@@ -117,9 +166,20 @@ SHADE_VOCABULARY: Tuple[Tuple[str, str], ...] = (
         "add NOTHING here, the aid already knew more (owner correction E′; the LEAST novel shade)",
     ),
     (
-        "diverges",
-        "an aid ties this fragment to a DIFFERENT work that is NOT a granularity variant -- the aid "
-        "and the claim contradict each other",
+        "diverges_work",
+        "an aid ties this fragment to a genuinely DIFFERENT WORK (not a granularity variant of ours) "
+        "-- the aid and the claim contradict each other on WHICH WORK this is (owner ruling F, "
+        "replacing the single `diverges` token). Owner: reading real cases, USUALLY the catalogue is "
+        "right and this is OUR false positive -- but not always; record which side is correct in the "
+        "separate Correctness column. Hidden by default on every surface, behind an explicit warned "
+        "toggle -- never silently shown, never silently suppressed.",
+    ),
+    (
+        "diverges_part",
+        "an aid ties this fragment to a DIFFERENT OR FINER PART of the SAME work (owner ruling F -- "
+        "\"more delicate and essentially less important\" than diverges_work) -- e.g. the aid names a "
+        "specific chapter/section of the work while we name a different one, or the whole work, or "
+        "vice versa. Same Correctness column and same hidden-by-default posture as diverges_work.",
     ),
     (
         "fills_gap",
@@ -147,11 +207,66 @@ SHADE_VOCABULARY: Tuple[Tuple[str, str], ...] = (
 )
 # The real SHADE tokens only (excludes the two non-shade answer tokens
 # `unsure` / `skip`) -- this is the XLSX DataValidation list together with
-# `unsure` / `skip` appended (nine tokens total): seven real shades that are
-# owner-facing (the eighth stored value, `not_checked`, is a fail-closed
+# `unsure` / `skip` appended (ten tokens total): eight real shades that are
+# owner-facing (the ninth stored value, `not_checked`, is a fail-closed
 # system default never picked directly -- `unsure` is its owner-facing
 # alias) plus the two non-shade answers.
 SHADE_TOKENS: Tuple[str, ...] = tuple(tok for tok, _ in SHADE_VOCABULARY)
+
+# ---------------------------------------------------------------------------
+# Correctness vocabulary (owner ruling F, 136-GATE1-DECISIONS.md § F) -- a
+# SEPARATE axis from the shade, applicable ONLY when the shade verdict is
+# `diverges_work` or `diverges_part`. A divergence shade records only THAT
+# the aid and the claim disagree (and at what scope); it cannot also record
+# WHICH side is right, because the owner's own review of the real cases
+# found BOTH directions occur under the identical shade. Blank is allowed
+# (meaning "not applicable / not yet answered" -- the same convention as a
+# blank Verdict cell) and is the correct answer for every non-divergence row.
+# ---------------------------------------------------------------------------
+CORRECTNESS_VOCABULARY: Tuple[Tuple[str, str], ...] = (
+    (
+        "catalogue_correct",
+        "the catalogue/aid is right; our claim is the false positive -- owner ruling F: reading the "
+        "real cases, this is the COMMON outcome",
+    ),
+    (
+        "claim_correct",
+        "our claim is right; the aid is wrong, thinner, or itself mistaken",
+    ),
+    (
+        "unclear",
+        "cannot tell which side is correct from the information shown",
+    ),
+)
+CORRECTNESS_TOKENS: Tuple[str, ...] = tuple(tok for tok, _ in CORRECTNESS_VOCABULARY)
+
+# ---------------------------------------------------------------------------
+# Identity vocabulary (owner-authorized labelling restructure, same
+# continuation as rulings F/G) -- the question Classes 1-3 (near-miss /
+# alias / granularity) were ACTUALLY constructed to support: are the two
+# claims/works shown (A and B) the same underlying work, or genuinely
+# different works? This is NOT a novelty shade -- these rows compare two of
+# OUR OWN claims against each other, never a claim against a finding aid.
+# ---------------------------------------------------------------------------
+IDENTITY_VOCABULARY: Tuple[Tuple[str, str], ...] = (
+    (
+        "same_work",
+        "A and B are the same underlying work (or two parts/granularities of the same work)",
+    ),
+    (
+        "different_works",
+        "A and B are genuinely different works",
+    ),
+    (
+        "unsure",
+        "you cannot judge this pair from the information shown -- a real and useful answer",
+    ),
+    (
+        "skip",
+        "you choose not to judge this pair at all -- recorded as skipped",
+    ),
+)
+IDENTITY_TOKENS: Tuple[str, ...] = tuple(tok for tok, _ in IDENTITY_VOCABULARY)
 
 # ---------------------------------------------------------------------------
 # D-13c / gate-4 page-coverage normalizer -- a faithful, standalone port of
@@ -945,6 +1060,29 @@ def compute_d13d(
 # title_similarity_ratio from the D-13d machinery above.
 # ---------------------------------------------------------------------------
 
+def _evenly_spaced_indices(n: int, k: int) -> List[int]:
+    """``k`` evenly-spaced 0-based indices across a list of length ``n``,
+    inclusive of the first and last positions when ``k >= 2``. Deterministic
+    (round-half-to-even via Python's ``round``, but every input here is a
+    fixed, already-sorted pool, so re-running against the same asset always
+    yields the same indices) -- used to build the Class 1-3 IDENTITY
+    spot-check (owner-authorized labelling restructure) by sampling spread
+    positions across each class's existing deterministic candidate order,
+    rather than hand-picking specific cases -- so the selection stays a
+    reproducible function of the data, never a manually pinned case list."""
+    if k <= 0 or n <= 0:
+        return []
+    if k == 1:
+        return [0]
+    if k >= n:
+        return list(range(n))
+    seen: List[int] = []
+    for i in range(k):
+        idx = round(i * (n - 1) / (k - 1))
+        if idx not in seen:
+            seen.append(idx)
+    return seen
+
 def select_alias_pair_candidates(works: Dict[str, Dict[str, Any]]) -> List[Tuple[Dict, Dict]]:
     """Class 2 (alias pairs): cluster works by (author, normalized title);
     a cluster of EXACTLY 2 members with DIFFERENT canonical_work_id is a
@@ -1253,25 +1391,79 @@ def select_catalogue_divergence_candidates(
     return out[:cap]
 
 
+# ---------------------------------------------------------------------------
+# Class-6 owner scope/shade annotations (rulings F/G, 136-GATE1-DECISIONS.md
+# §§ F/G). The owner read all 15 of the ORIGINAL Class-6 candidates directly
+# (not merely the shade's abstract definition) and issued explicit verdicts
+# on 12 of them, keyed here by sys_id (stable across a case-number
+# renumbering, unlike the "Case N" labels in the pre-restructure worksheet
+# those verdicts were originally phrased against). This dict does NOT decide
+# the owner's Task-3 verdict for these cases -- it only upgrades their
+# PROPOSAL text (still explicitly marked PROPOSAL, still not a label) to
+# reflect what the owner has ALREADY told this project about that specific
+# manuscript/work pair, so the regenerated worksheet does not silently
+# regress to a stale generic "plausibly diverges" proposal for cases the
+# owner has already spoken to directly. The 3 original candidates NOT named
+# in either ruling (sys_ids not present here) are left with a generic,
+# undetermined-scope proposal -- genuinely open, not silently resolved.
+# ---------------------------------------------------------------------------
+_CLASS6_OWNER_SCOPE: Dict[str, Dict[str, str]] = {
+    # --- ruling F: diverges_work ("usually our claim is wrong") ---
+    "990001004230205171": {"shade": "diverges_work", "ruling": "F"},  # case 92: ילקוט שמעוני / תנחומא
+    "990000413480205171": {"shade": "diverges_work", "ruling": "F"},  # case 84: משנה תורה ספר זמנים / הגדה של פסח
+    "990001398690205171": {"shade": "diverges_work", "ruling": "F"},  # case 86: משנה תורה ספר אהבה / ברכת המזון
+    "990000621960205171": {"shade": "diverges_work", "ruling": "F"},  # case 95: תנ"ך בראשית / שאילתות
+    "990051080280205171": {"shade": "diverges_work", "ruling": "F"},  # case 97: ויקרא רבה / חובות הלבבות
+    "990000905560205171": {"shade": "diverges_work", "ruling": "F"},  # case 91: מכילתא דרשב"י / מכילתא דרבי ישמעאל
+    "990000555810205171": {"shade": "diverges_work", "ruling": "F"},  # case 85: הלכות פסוקות / הלכות גדולות
+    # --- ruling F: diverges_part ("more delicate and essentially less important") ---
+    "990001935160205171": {"shade": "diverges_part", "ruling": "F"},  # case 90: הלכות פסוקות...קידושין / הלכות פסוקות
+    "990051173260205171": {"shade": "diverges_part", "ruling": "F"},  # case 94: משנה תורה הקדמה ומניין המצוות / הלכות ציצית
+    "990051150540205171": {"shade": "diverges_part", "ruling": "F"},  # case 96: בראשית רבה צה-צו תוספת / בראשית רבה
+    # --- ruling G: NOT a divergence at all -- the aid's own FREE TEXT
+    # already states the claimed identification; only the structured
+    # work-id keying differed (the selector's own over-fire failure mode) ---
+    "990000555880205171": {
+        "shade": "confirms",
+        "ruling": "G",
+        "free_text_quote": "שאלות ותשובות מאת האי בן שרירא גאון",
+    },  # case 83: תשובות האיי גאון (structured match: תשובות)
+    "990001394270205171": {
+        "shade": "confirms",
+        "ruling": "G",
+        "free_text_quote": "יוסיפון בערבית",
+    },  # case 87: ספר יוסיפון (ערבי) (structured match: יוסיפון)
+}
+
+
 def build_hardcases(
     claims: List[Dict[str, Any]],
     works: Dict[str, Dict[str, Any]],
     d13d: Dict[str, Any],
     libraries: Dict[str, Dict[str, str]],
+    class1_spotcheck_cap: int = 3,
+    class2_spotcheck_cap: int = 2,
+    class3_spotcheck_cap: int = 3,
     cap_per_class: int = 20,
-    class4_cap: int = 15,
-    class5_cap: int = 15,
-    class6_cap: int = 15,
+    class4_cap: int = 20,
+    class5_cap: int = 25,
+    class6_cap: int = 30,
 ) -> List[Dict[str, Any]]:
     cases: List[Dict[str, Any]] = []
 
-    # --- Class 3: granularity (reuse the D-13d collapse-candidate groups) ---
+    # --- Class 3: granularity -- IDENTITY spot-check (owner-authorized
+    # labelling restructure, same continuation as rulings F/G). Full
+    # labelling of the class's candidate pool was REPLACED by an
+    # ~class3_spotcheck_cap-case spread, testing the constant-answer
+    # assumption ("A and B are the same work at two granularities") rather
+    # than building ground truth over all of it -- see the module docstring
+    # and 136-GATE1-DECISIONS.md's labelling-restructure note. ---
     # Dedupe to ONE representative group per manuscript (sys_id) first --
     # a single large manuscript can contribute dozens of near-duplicate
     # span-groups (verified: sys_id 990000852430205171 alone supplies 11 of
     # the 276 collapse candidates), which would otherwise crowd out
-    # diversity in the capped candidate list. Keep each manuscript's
-    # LARGEST (most matched_letters) group as its representative.
+    # diversity in the candidate pool. Keep each manuscript's LARGEST (most
+    # matched_letters) group as its representative.
     by_sys_id: Dict[str, Tuple[Tuple[str, int, int], int]] = {}
     for key in d13d["collapse_candidate_keys"]:
         page_id, s0, s1 = key
@@ -1284,8 +1476,9 @@ def build_hardcases(
     # Worked example first if present, then the rest in stable key order.
     worked_page_id = (d13d["worked_example"] or {}).get("page_id")
     granularity_keys.sort(key=lambda k: (k[0] != worked_page_id, k))
-    for key in granularity_keys[:cap_per_class]:
-        page_id, s0, s1 = key
+    granularity_pool = granularity_keys[:cap_per_class]
+    for pool_idx in _evenly_spaced_indices(len(granularity_pool), class3_spotcheck_cap):
+        page_id, s0, s1 = granularity_pool[pool_idx]
         sid = sys_id_from_page_id(page_id)
         cat = libraries.get(sid, {})
         # find the two related work_ids on this exact span
@@ -1301,6 +1494,7 @@ def build_hardcases(
         ]
         cases.append({
             "class": "granularity",
+            "question_type": "identity",
             "sys_id": sid,
             "shelfmark": cat.get("shelfmark", ""),
             "catalogue_text": cat.get("catalogue_text", ""),
@@ -1312,19 +1506,22 @@ def build_hardcases(
                 "commentary at two catalogued granularities, or two genuinely distinct works?)."
             ),
             "proposal": (
-                "PROPOSAL (draft, not a label): plausibly the SAME underlying work at two granularities "
-                "-- confirm or correct."
+                "PROPOSAL (draft, not a label): plausibly `same_work` (the SAME underlying work at two "
+                "granularities) -- confirm or correct."
             ),
         })
 
-    # --- Class 2: alias pairs ---
+    # --- Class 2: alias pairs -- IDENTITY spot-check (same restructure) ---
     alias_pairs = select_alias_pair_candidates(works)
-    for wa, wb in alias_pairs[:cap_per_class]:
+    alias_pool = alias_pairs[:cap_per_class]
+    for pool_idx in _evenly_spaced_indices(len(alias_pool), class2_spotcheck_cap):
+        wa, wb = alias_pool[pool_idx]
         rep = best_claim_for_work(claims, wa["work_id"]) or best_claim_for_work(claims, wb["work_id"])
         sid = rep["sys_id"] if rep else None
         cat = libraries.get(sid, {}) if sid else {}
         cases.append({
             "class": "alias",
+            "question_type": "identity",
             "sys_id": sid,
             "shelfmark": cat.get("shelfmark", ""),
             "catalogue_text": cat.get("catalogue_text", ""),
@@ -1338,19 +1535,22 @@ def build_hardcases(
                 "cross-corpus alias/duplicate."
             ),
             "proposal": (
-                "PROPOSAL (draft, not a label): plausibly an alias pair (same work, not yet canonically "
-                "merged) -- confirm or correct."
+                "PROPOSAL (draft, not a label): plausibly `same_work` (an alias pair, not yet "
+                "canonically merged) -- confirm or correct."
             ),
         })
 
-    # --- Class 1: near-miss titles ---
+    # --- Class 1: near-miss titles -- IDENTITY spot-check (same restructure) ---
     near_miss = select_near_miss_candidates(works)
-    for wa, wb, ratio in near_miss[:cap_per_class]:
+    near_miss_pool = near_miss[:cap_per_class]
+    for pool_idx in _evenly_spaced_indices(len(near_miss_pool), class1_spotcheck_cap):
+        wa, wb, ratio = near_miss_pool[pool_idx]
         rep = best_claim_for_work(claims, wa["work_id"]) or best_claim_for_work(claims, wb["work_id"])
         sid = rep["sys_id"] if rep else None
         cat = libraries.get(sid, {}) if sid else {}
         cases.append({
             "class": "near_miss",
+            "question_type": "identity",
             "sys_id": sid,
             "shelfmark": cat.get("shelfmark", ""),
             "catalogue_text": cat.get("catalogue_text", ""),
@@ -1367,7 +1567,9 @@ def build_hardcases(
         })
 
     # --- Class 4: terse or missing catalogue identification text (owner-
-    # authorized scope extension, 136-GATE1-DECISIONS.md item C) ---
+    # authorized scope extension, 136-GATE1-DECISIONS.md item C; EXPANDED
+    # 15->class4_cap in the labelling restructure -- see module docstring
+    # for the proportioning rationale) -- NOVELTY SHADE question ---
     terse = select_terse_catalogue_candidates(claims, libraries, cap=class4_cap)
     for entry in terse:
         sid = entry["sys_id"]
@@ -1392,6 +1594,7 @@ def build_hardcases(
             display_cat_text = cat_text
         cases.append({
             "class": "terse_catalogue",
+            "question_type": "shade",
             "sys_id": sid,
             "shelfmark": cat.get("shelfmark", ""),
             "catalogue_text": display_cat_text,
@@ -1401,7 +1604,8 @@ def build_hardcases(
         })
 
     # --- Class 5: generic collection works (owner-authorized scope
-    # extension, 136-GATE1-DECISIONS.md item C) ---
+    # extension, 136-GATE1-DECISIONS.md item C; EXPANDED 15->class5_cap in
+    # the labelling restructure) -- NOVELTY SHADE question ---
     generic = select_generic_collection_candidates(claims, works, cap=class5_cap)
     for entry in generic:
         author, cluster_title = entry["cluster_key"]
@@ -1415,6 +1619,7 @@ def build_hardcases(
         sample_siblings = ", ".join(sibling_ids[:5]) + ("..." if len(sibling_ids) > 5 else "")
         cases.append({
             "class": "generic_collection",
+            "question_type": "shade",
             "sys_id": sid,
             "shelfmark": cat.get("shelfmark", ""),
             "catalogue_text": cat.get("catalogue_text", ""),
@@ -1436,8 +1641,19 @@ def build_hardcases(
         })
 
     # --- Class 6: catalogue divergence (owner decision E, 136-GATE1-DECISIONS.md
-    # item E -- the seven-shade novelty enum's "diverges" shade, with ZERO
-    # representation in Classes 1-5 above) ---
+    # item E; SHADE SPLIT BY SCOPE + a separate correctness axis per owner
+    # ruling F, 136-GATE1-DECISIONS.md item F; EXPANDED 15->class6_cap in the
+    # labelling restructure). The underlying selector's structured-id-vs-
+    # free-text conflation is left DELIBERATELY UNCORRECTED (owner ruling G,
+    # § G -- "measure it, do not quietly fix it away"): it over-fires on
+    # roughly half of the original 15 candidates, and expanding the pool
+    # with the SAME heuristic is expected to keep surfacing that same
+    # failure mode, which is itself the measured signal a future hardening
+    # pass should be built against. NOVELTY SHADE question, PLUS a
+    # Correctness sub-question (see CORRECTNESS_VOCABULARY) -- neither
+    # forced by this script; _CLASS6_OWNER_SCOPE only upgrades the PROPOSAL
+    # text for the 12 of 15 original candidates the owner has already ruled
+    # on directly (still a PROPOSAL, never a label). ---
     divergence = select_catalogue_divergence_candidates(claims, works, libraries, cap=class6_cap)
     for entry in divergence:
         sid = entry["sys_id"]
@@ -1447,8 +1663,34 @@ def build_hardcases(
         c = entry["claim"]
         claimed_title = f"{w_claimed['neutral_title']} ({c['work_id']})"
         divergent_title = f"{w_divergent['neutral_title']} ({w_divergent['work_id']})"
+        owner_scope = _CLASS6_OWNER_SCOPE.get(sid)
+        if owner_scope is None:
+            proposal = (
+                "PROPOSAL (draft, not a label): plausibly `diverges_work` or `diverges_part` (scope "
+                "not yet distinguished by owner rulings F/G for this specific case) -- the catalogue "
+                "and this claim name different works or parts; per ruling G, first check whether the "
+                "catalogue's own FREE TEXT already states this claim's identification under a "
+                "different spelling/phrasing before confirming a divergence -- confirm the shade, the "
+                "scope, and (if divergent) the Correctness call, or correct."
+            )
+        elif owner_scope["shade"] == "confirms":
+            proposal = (
+                "PROPOSAL (draft, not a label; owner ruling G -- see 136-GATE1-DECISIONS.md § G): "
+                "plausibly `confirms`, NOT a divergence -- the catalogue's own free text "
+                f"({owner_scope['free_text_quote']!r}) already states this claim's identification; "
+                "only the structured work-id keying differed (this class's own selector over-fired "
+                "here) -- confirm or correct."
+            )
+        else:
+            proposal = (
+                f"PROPOSAL (draft, not a label; owner ruling F -- see 136-GATE1-DECISIONS.md § F): "
+                f"plausibly `{owner_scope['shade']}` -- confirm the shade AND supply the separate "
+                "Correctness call (catalogue_correct / claim_correct / unclear), or correct."
+            )
         cases.append({
             "class": "catalogue_divergence",
+            "question_type": "shade",
+            "correctness_applicable": True,
             "sys_id": sid,
             "shelfmark": cat.get("shelfmark", ""),
             "catalogue_text": cat.get("catalogue_text", ""),
@@ -1461,12 +1703,12 @@ def build_hardcases(
                 f"({w_divergent['neutral_title']!r}) than the one this claim identifies "
                 f"({w_claimed['neutral_title']!r}); the two are NOT a granularity variant under the "
                 "D-13d author-gated rule (different author, or an unrelated title) -- a genuine "
-                "catalogue/claim divergence, the shade decision E calls `diverges`."
+                "catalogue/claim divergence CANDIDATE (owner ruling F splits the shade into "
+                "`diverges_work` / `diverges_part` by scope; owner ruling G warns this selector can "
+                "over-fire when the catalogue's free text actually already agrees with the claim under "
+                "a different structured key -- see the Vocabulary sheet/table)."
             ),
-            "proposal": (
-                "PROPOSAL (draft, not a label): plausibly `diverges` -- the catalogue and this claim "
-                "name different works -- confirm or correct."
-            ),
+            "proposal": proposal,
         })
 
     return cases
@@ -1694,38 +1936,50 @@ def render_evidence_brief(
     return "\n".join(lines) + "\n"
 
 
-# Per-class guidance for which of decision E's seven shades are actually
+# Classes 1-3 ask the IDENTITY question (same_work / different_works /
+# unsure / skip) -- an owner-authorized labelling restructure (same
+# continuation as rulings F/G): these rows compare two of OUR OWN claims and
+# have no claim-vs-aid relationship to judge, so decision E's shade
+# vocabulary never applied to them coherently in the first place. Classes
+# 4-6 ask the NOVELTY SHADE question. See the module docstring and
+# 136-GATE1-DECISIONS.md's labelling-restructure note for the full rationale.
+_IDENTITY_CLASSES: frozenset = frozenset({"granularity", "alias", "near_miss"})
+
+# Per-class guidance for which of the shade vocabulary's tokens are actually
 # plausible answers for that class's kind of hard case (136-03 Task 4 --
 # "say plainly, per class, which shades are plausible answers for that
-# class"). Every case can still receive ANY shade, `unsure`, or `skip`; this
-# is a reading aid for the owner, never a constraint enforced by this script.
+# class"). ONLY meaningful for the three SHADE classes (4-6) -- every case
+# can still receive ANY shade, `unsure`, or `skip`; this is a reading aid for
+# the owner, never a constraint enforced by this script.
 _PLAUSIBLE_SHADES_BY_CLASS: Dict[str, Tuple[str, ...]] = {
-    # E′ adds `aid_more_specific` to Class 3 and Class 6 ONLY -- the two
-    # classes the owner scoped this to. Both are genuinely grounded: Class
-    # 3's own selection algorithm already computes the D-13d title
-    # relationship `aid_more_specific` is defined over, and Class 6 is
-    # exactly the boundary where the algorithm's own `diverges` call could,
-    # on owner review, turn out to be a missed granularity direction instead
-    # of a genuine divergence. Deliberately NOT extended to Class 5 (generic
-    # collection) -- that class's own selection algorithm never tests title-
-    # relatedness/directionality at all, so a plausible-shade hint there
-    # would not be grounded in what the class actually measures.
-    "granularity": ("refines_granularity", "aid_more_specific", "confirms", "diverges"),
-    "alias": ("alias_merge", "confirms", "fills_gap"),
-    "near_miss": ("confirms", "diverges", "fills_gap"),
     "terse_catalogue": ("fills_gap", "confirms"),
     "generic_collection": ("fills_gap", "confirms", "extends"),
-    "catalogue_divergence": ("diverges", "aid_more_specific", "refines_granularity", "confirms"),
+    # F replaces `diverges` with the scope-split pair; G adds `confirms` as
+    # a live possibility here (the class's own selector can over-fire a
+    # genuine confirms case into a divergence candidate -- see ruling G).
+    "catalogue_divergence": (
+        "diverges_work", "diverges_part", "aid_more_specific", "refines_granularity", "confirms",
+    ),
+}
+
+# Per-class guidance for the IDENTITY classes (1-3) -- always the same two
+# substantive answers (same_work / different_works) plus unsure/skip; kept
+# as a dict (rather than a single shared tuple) so a future class-specific
+# note can be added without touching the render/xlsx code that reads it.
+_PLAUSIBLE_IDENTITY_BY_CLASS: Dict[str, Tuple[str, ...]] = {
+    "granularity": ("same_work", "different_works"),
+    "alias": ("same_work", "different_works"),
+    "near_miss": ("same_work", "different_works"),
 }
 
 
 _CLASS_TITLES: Dict[str, str] = {
-    "granularity": "Class 3 -- catalogue entry naming a different granularity of the same work",
-    "alias": "Class 2 -- alias pairs",
-    "near_miss": "Class 1 -- near-miss titles",
-    "terse_catalogue": "Class 4 -- terse or missing catalogue identification text (owner-authorized extension)",
-    "generic_collection": "Class 5 -- generic collection works (owner-authorized extension)",
-    "catalogue_divergence": "Class 6 -- catalogue divergence (owner decision E)",
+    "granularity": "Class 3 -- catalogue entry naming a different granularity of the same work (IDENTITY spot-check)",
+    "alias": "Class 2 -- alias pairs (IDENTITY spot-check)",
+    "near_miss": "Class 1 -- near-miss titles (IDENTITY spot-check)",
+    "terse_catalogue": "Class 4 -- terse or missing catalogue identification text (NOVELTY SHADE, owner-authorized extension)",
+    "generic_collection": "Class 5 -- generic collection works (NOVELTY SHADE, owner-authorized extension)",
+    "catalogue_divergence": "Class 6 -- catalogue divergence (NOVELTY SHADE, owner rulings E/E′/F/G)",
 }
 _CLASS_ORDER: Tuple[str, ...] = (
     "granularity", "alias", "near_miss", "terse_catalogue", "generic_collection",
@@ -1757,44 +2011,90 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
     """``cases`` must already carry ``case_num`` (see ``assign_case_numbers``)."""
     lines: List[str] = []
     a = lines.append
+    identity_total = sum(1 for c in cases if c["class"] in _IDENTITY_CLASSES)
+    shade_total = len(cases) - identity_total
     a("# Phase 136 Plan 03 -- Novelty Hard-Case Candidates")
     a("")
-    a("Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn "
-      "from. The original three classes D-23c names -- **near-miss titles**, **alias pairs**, and a "
-      "**catalogue entry naming a different GRANULARITY of the same work** -- were selected "
-      "adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 are an OWNER-AUTHORIZED "
-      "scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured novelty-funnel error "
-      "rate is not flattered by cases an LLM finds easy: **terse or missing catalogue identification "
-      "text** and **generic collection works** (responsa/piyyut/collection titles recurring across "
-      "many distinct catalogued items, where \"already recorded\" is genuinely ill-defined rather than "
-      "merely hard to string-match). **Class 6 -- catalogue divergence -- is a further "
-      "owner-authorized extension (`136-GATE1-DECISIONS.md` item E)**: real shipped claims where an "
-      "available finding aid ties the SAME fragment to a DIFFERENT work that is NOT a D-13d "
-      "granularity variant -- the shade item E's ruling calls `diverges`, with ZERO representation in "
-      "Classes 1-5. All six classes are selected entirely by string/title/metadata comparison over the "
-      "works and manuscripts already in the deployed asset -- **zero model calls, measured cost "
-      "$0.00**. Every existing case from the original 82 is kept unchanged; Class 6 is purely "
-      "additive. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid "
-      "only, never a label -- it is NOT filled in by this script as an owner answer. **Correction E′ "
-      "(`136-GATE1-DECISIONS.md` § E′, same day as decision E, a correction to it and not a new "
-      "ruling)** splits decision E's `refines_granularity` shade by direction, adding "
-      "`aid_more_specific` -- see the updated vocabulary table below. This worksheet is also emitted "
-      "as `136-NOVELTY-HARDCASES.xlsx` (same phase directory) for owners who find Hebrew RTL easier "
-      "to work with in a spreadsheet; both files render the SAME 97 cases in the SAME order, from "
-      "the same pre-numbered case list, so the two agree case-for-case.")
+    a(f"**{len(cases)} candidates total: {identity_total} IDENTITY spot-check cases (Classes 1-3) + "
+      f"{shade_total} NOVELTY SHADE cases (Classes 4-6).** Restructured per an owner-authorized "
+      "labelling-restructure ruling (`136-GATE1-DECISIONS.md`, the note appended after items F/G) "
+      "made AFTER the owner read the original 97-case worksheet directly: Classes 1-3 compare two of "
+      "OUR OWN claims to each other (an A↔B \"is this the same work\" identity judgment) and were "
+      "found, on reading the actual cases, to bake \"same work\" into their own selection criterion "
+      "(same author + common title stem) -- so full labelling of all 52 is REPLACED by this "
+      f"{identity_total}-case SPOT-CHECK that TESTS the constant-answer assumption rather than "
+      "building ground truth. Classes 4-6 are where the answer genuinely varies and carry the "
+      "NOVELTY SHADE question (a claim-vs-finding-aid judgment); they are EXPANDED from the original "
+      f"45 to {shade_total} candidates. Every case in both groups is selected entirely by "
+      "string/title/metadata comparison over the works and manuscripts already in the deployed asset "
+      "-- **zero model calls, measured cost $0.00**. Any attached draft verdict below is explicitly "
+      "marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this "
+      "script as an owner answer. This worksheet is also emitted as `136-NOVELTY-HARDCASES.xlsx` "
+      "(same phase directory, THREE sheets: \"Identity Spot-Check\", \"Novelty Shades\", "
+      "\"Vocabulary & Instructions\") for owners who find Hebrew RTL easier to work with in a "
+      "spreadsheet; both files render the SAME cases in the SAME order, from the same pre-numbered "
+      "case list, so the two agree case-for-case.")
     a("")
-    a("## Verdict vocabulary (amended 2026-08-02, owner decisions E / E′ -- see "
-      "`136-GATE1-DECISIONS.md` items E and E′)")
+    a("## Part A -- IDENTITY spot-check (Classes 1-3)")
     a("")
-    a("Novelty is no longer a tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`). The "
-      "owner ruled it into an EIGHT-shade enum (decision E's original seven, direction-split by "
-      "correction E′ into eight) because the tri-state collapsed materially different findings into "
-      "one bucket -- a catalogue CONTRADICTION and a genuine \"previously unknown\" both used to "
-      "score the same way, and (per E′) a granularity refinement that helps and one that adds "
-      "nothing also used to score the same way. For EACH case below, answer with the shade that best "
-      "describes what an enumerable finding aid (the catalogue's own identification field, "
-      "bibliography, titles, PGP, FGP, M-source shelfmark attributions) actually says about THIS "
-      "fragment and THIS work -- or `unsure` / `skip`.")
+    a("**Question type: IDENTITY, not a novelty shade.** These rows compare two of OUR OWN claims "
+      "(A and B) -- there is no finding aid in this judgment at all. Answer ONE of:")
+    a("")
+    a("| Answer | Choose this when... |")
+    a("|---|---|")
+    for token, description in IDENTITY_VOCABULARY:
+        a(f"| `{token}` | {description} |")
+    a("")
+    a("**How to read the result (recorded in `136-GATE1-DECISIONS.md` so the interpretation is fixed "
+      "BEFORE the answers come in, not chosen afterward to fit them):** if ALL cases below come back "
+      "`same_work`, that is a measured fact and an argument that the D-13d author-gated collapse rule "
+      "(currently collapsing only 276 of 1,367 identical-span groups, 20.2% -- see this plan's D-13d "
+      "section) is TOO CONSERVATIVE and should collapse more aggressively. If even ONE case comes back "
+      "`different_works`, the constant-answer assumption FAILS and the full 52-case pool needs real "
+      "labelling after all, not just a spot-check.")
+    a("")
+    by_class: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for c in cases:
+        by_class[c["class"]].append(c)
+
+    for cls in _CLASS_ORDER:
+        if cls not in _IDENTITY_CLASSES:
+            continue
+        items = by_class.get(cls, [])
+        a(f"### {_CLASS_TITLES[cls]} ({len(items)} candidates)")
+        a("")
+        for item in items:
+            a(f"#### Case {item['case_num']}")
+            a("")
+            if item.get("shelfmark"):
+                a(f"- **Manuscript:** {item['shelfmark']} (sys_id `{item['sys_id']}`)")
+            elif item.get("sys_id"):
+                a(f"- **Manuscript:** sys_id `{item['sys_id']}` (no shelfmark on file)")
+            else:
+                a("- **Manuscript:** (no shipped claim instance found for either work)")
+            a(f"- **A vs B:** {' / '.join(item['work_titles'])}")
+            if item.get("catalogue_text"):
+                a(f"- **Catalogue's own identification text:** {item['catalogue_text']}")
+            a(f"- **Why this pair is adversarial to a STRING heuristic:** {item['reason']}")
+            if item.get("proposal"):
+                a(f"- **{item['proposal']}**")
+            a("- **Identity verdict:** _(pending Task 3 -- `same_work` / `different_works` / "
+              "`unsure` / `skip`)_")
+            a("")
+
+    a("## Part B -- NOVELTY SHADE cases (Classes 4-6)")
+    a("")
+    a("**Question type: NOVELTY SHADE, a claim-vs-finding-aid judgment (never A↔B identity).** For "
+      "EACH case below, answer with the shade that best describes what an enumerable finding aid "
+      "(the catalogue's own identification field, bibliography, titles, PGP, FGP, M-source shelfmark "
+      "attributions) actually says about THIS fragment and THIS work -- or `unsure` / `skip`. "
+      "Amended 2026-08-02 by owner decisions E / E′ / F / G (`136-GATE1-DECISIONS.md` items E, E′, "
+      "F, G): the tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`) collapsed "
+      "materially different findings into one bucket -- a catalogue CONTRADICTION and a genuine "
+      "\"previously unknown\" both scored the same way, a granularity refinement that helps and one "
+      "that adds nothing also scored the same way (E′), and a flat wrong-work divergence and a "
+      "same-work-wrong-part divergence also scored the same way, with no way to record WHICH SIDE is "
+      "actually correct (F) -- so the shade enum now carries NINE values.")
     a("")
     a("| Shade | Choose this when... |")
     a("|---|---|")
@@ -1804,13 +2104,24 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
     a("`not_checked` (the fail-closed system default for an unrun/failed/abstained check) is not a "
       "verdict the owner picks directly -- `unsure` is its owner-facing equivalent.")
     a("")
-    by_class: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for c in cases:
-        by_class[c["class"]].append(c)
+    a("### Correctness (Class 6 ONLY -- answer ONLY if your shade verdict is `diverges_work` or "
+      "`diverges_part`, owner ruling F)")
+    a("")
+    a("A divergence shade records only THAT the aid and the claim disagree, never WHICH SIDE is "
+      "right -- the owner's own review of the real cases found BOTH directions occur under the "
+      "identical shade. Leave blank / not applicable for every non-divergence shade.")
+    a("")
+    a("| Correctness | Choose this when... |")
+    a("|---|---|")
+    for token, description in CORRECTNESS_VOCABULARY:
+        a(f"| `{token}` | {description} |")
+    a("")
 
     for cls in _CLASS_ORDER:
+        if cls in _IDENTITY_CLASSES:
+            continue
         items = by_class.get(cls, [])
-        a(f"## {_CLASS_TITLES[cls]} ({len(items)} candidates)")
+        a(f"### {_CLASS_TITLES[cls]} ({len(items)} candidates)")
         a("")
         plausible = _PLAUSIBLE_SHADES_BY_CLASS[cls]
         plausible_str = ", ".join(f"`{s}`" for s in plausible)
@@ -1819,7 +2130,7 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
           "`skip` are always available).")
         a("")
         for item in items:
-            a(f"### Case {item['case_num']}")
+            a(f"#### Case {item['case_num']}")
             a("")
             if item.get("shelfmark"):
                 a(f"- **Manuscript:** {item['shelfmark']} (sys_id `{item['sys_id']}`)")
@@ -1833,8 +2144,12 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
             a(f"- **Why it is hard:** {item['reason']}")
             if item.get("proposal"):
                 a(f"- **{item['proposal']}**")
-            a(f"- **Owner verdict:** _(pending Task 3 -- {plausible_str}, any other shade from the "
+            a(f"- **Shade verdict:** _(pending Task 3 -- {plausible_str}, any other shade from the "
               "vocabulary table above, or `unsure` / `skip`)_")
+            if item.get("correctness_applicable"):
+                a("- **Correctness (only if `diverges_work` / `diverges_part` above):** "
+                  "_(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if "
+                  "not applicable)_")
             a("")
 
     return "\n".join(lines) + "\n"
@@ -1867,14 +2182,25 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
 def write_hardcases_xlsx(cases: List[Dict[str, Any]], path: str) -> None:
     """``cases`` must already carry ``case_num`` (see ``assign_case_numbers``).
 
-    Writes a two-sheet workbook: "Hard Cases" (one row per case, Case #/
-    Verdict frozen at the reading-order edge alongside the header row, RTL,
-    wrapped text, autofilter, a ``DataValidation`` dropdown on the Verdict
-    column restricted to the full vocabulary) and "Vocabulary" (the same
-    shade table + per-class plausible-shade hints + an explicit "blank is
-    NOT a label" note). Deterministic at the cell-value / validation-list /
-    sheet-structure level -- NOT claimed byte-for-byte on the saved ``.xlsx``
-    file itself, since openpyxl embeds a save timestamp in the workbook's
+    Writes a THREE-sheet workbook (owner-authorized labelling restructure,
+    same continuation as rulings F/G -- each sheet carries the ONE question
+    type the class was actually built to support):
+
+    - "Identity Spot-Check" (Classes 1-3, the ~8-case A↔B spot-check): an
+      Identity dropdown (`same_work` / `different_works` / `unsure` / `skip`).
+    - "Novelty Shades" (Classes 4-6, ~75 cases): a Verdict dropdown (the full
+      nine-shade vocabulary) PLUS a Correctness dropdown (owner ruling F --
+      `catalogue_correct` / `claim_correct` / `unclear`, meaningful only on
+      `diverges_work` / `diverges_part` rows; blank elsewhere).
+    - "Vocabulary & Instructions" (both vocabularies + per-class hints + the
+      "blank is not a label" note).
+
+    Case #s are GLOBAL across both data sheets (assigned once by
+    ``assign_case_numbers``, never renumbered per-sheet), so Task 4's
+    round-trip can locate a case by number regardless of which sheet it came
+    from. Deterministic at the cell-value / validation-list / sheet-structure
+    level -- NOT claimed byte-for-byte on the saved ``.xlsx`` file itself,
+    since openpyxl embeds a save timestamp in the workbook's
     ``docProps/core.xml`` on every save.
     """
     # Deferred heavy import (mirrors scripts/bench_discovery.py's own
@@ -1899,144 +2225,225 @@ def write_hardcases_xlsx(cases: List[Dict[str, Any]], path: str) -> None:
     wrap_top = Alignment(horizontal="right", vertical="top", wrap_text=True, readingOrder=2)
     wrap_top_center = Alignment(horizontal="center", vertical="top", wrap_text=True)
 
+    identity_cases = [c for c in cases if c["class"] in _IDENTITY_CLASSES]
+    shade_cases = [c for c in cases if c["class"] not in _IDENTITY_CLASSES]
+
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Hard Cases"
-    ws.sheet_view.rightToLeft = True
 
-    # Column order: Case # and Verdict adjacent so BOTH sit in the frozen
-    # "alongside the case number" region the plan asks for; in an RTL sheet
-    # column A renders at the visual right edge, i.e. the natural reading
-    # start for this predominantly-Hebrew content.
-    headers = [
-        "Case #", "Verdict", "Class", "Plausible shades",
-        "Manuscript", "sys_id", "Claimed work(s)",
-        "Catalogue's own identification text", "Why it is hard",
-        "PROPOSAL (draft -- NOT a label)",
-    ]
-    ws.append(headers)
-    for col_idx in range(1, len(headers) + 1):
-        cell = ws.cell(row=1, column=col_idx)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_align
-
-    widths = {
-        "A": 9, "B": 20, "C": 46, "D": 30, "E": 32, "F": 22, "G": 48, "H": 46, "I": 55, "J": 46,
-    }
-    for col_letter, width in widths.items():
-        ws.column_dimensions[col_letter].width = width
-
-    for item in cases:
-        manuscript = (
+    def _manuscript_str(item: Dict[str, Any]) -> str:
+        return (
             item["shelfmark"] if item.get("shelfmark")
             else (f"sys_id {item['sys_id']} (no shelfmark on file)" if item.get("sys_id")
                   else "(no shipped claim instance found for either work)")
         )
-        row = [
+
+    def _apply_header(ws, headers: List[str]) -> None:
+        ws.append(headers)
+        for col_idx in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+
+    def _apply_body_alignment(ws, n_cols: int) -> None:
+        last_row = ws.max_row
+        for row_idx in range(2, last_row + 1):
+            ws.cell(row=row_idx, column=1).alignment = wrap_top_center
+            for col_idx in range(2, n_cols + 1):
+                ws.cell(row=row_idx, column=col_idx).alignment = wrap_top
+
+    # --- Sheet 1: Identity Spot-Check (Classes 1-3) ---
+    ws1 = wb.active
+    ws1.title = "Identity Spot-Check"
+    ws1.sheet_view.rightToLeft = True
+    headers1 = [
+        "Case #", "Identity verdict", "Class",
+        "Manuscript", "sys_id", "A vs B (claim pair)",
+        "Catalogue's own identification text", "Why adversarial to a string heuristic",
+        "PROPOSAL (draft -- NOT a label)",
+    ]
+    _apply_header(ws1, headers1)
+    widths1 = {"A": 9, "B": 20, "C": 40, "D": 32, "E": 22, "F": 48, "G": 46, "H": 55, "I": 46}
+    for col_letter, width in widths1.items():
+        ws1.column_dimensions[col_letter].width = width
+    for item in identity_cases:
+        ws1.append([
             item["case_num"],
-            "",  # Verdict -- left blank; owner fills in, never pre-filled from a draft
+            "",  # Identity verdict -- left blank; owner fills in
             _s(_CLASS_TITLES[item["class"]]),
-            _s(", ".join(_PLAUSIBLE_SHADES_BY_CLASS[item["class"]])),
-            _s(manuscript),
+            _s(_manuscript_str(item)),
             _s(item.get("sys_id")),
             _s(" / ".join(item["work_titles"])),
             _s(item.get("catalogue_text")),
             _s(item["reason"]),
             _s(item.get("proposal")),
-        ]
-        ws.append(row)
+        ])
+    _apply_body_alignment(ws1, len(headers1))
+    last_row1 = ws1.max_row
+    ws1.freeze_panes = "C2"
+    ws1.auto_filter.ref = f"A1:{get_column_letter(len(headers1))}{last_row1}"
+    dv_identity = DataValidation(
+        type="list", formula1='"' + ",".join(IDENTITY_TOKENS) + '"',
+        allow_blank=True, showErrorMessage=True,
+        errorTitle="Invalid identity verdict",
+        error="Choose 'same_work', 'different_works', 'unsure' or 'skip'. Free text is rejected.",
+        promptTitle="Identity verdict",
+        prompt="Are A and B the same underlying work? Blank = not yet answered.",
+    )
+    ws1.add_data_validation(dv_identity)
+    if last_row1 >= 2:
+        dv_identity.add(f"B2:B{last_row1}")
 
-    last_row = ws.max_row
-    for row_idx in range(2, last_row + 1):
-        ws.cell(row=row_idx, column=1).alignment = wrap_top_center
-        for col_idx in range(2, len(headers) + 1):
-            ws.cell(row=row_idx, column=col_idx).alignment = wrap_top
+    # --- Sheet 2: Novelty Shades (Classes 4-6) ---
+    ws2 = wb.create_sheet(title="Novelty Shades")
+    ws2.sheet_view.rightToLeft = True
+    headers2 = [
+        "Case #", "Shade verdict", "Correctness (diverges_work/diverges_part only)", "Class",
+        "Plausible shades", "Manuscript", "sys_id", "Claimed work(s)",
+        "Catalogue's own identification text", "Why it is hard",
+        "PROPOSAL (draft -- NOT a label)",
+    ]
+    _apply_header(ws2, headers2)
+    widths2 = {
+        "A": 9, "B": 20, "C": 30, "D": 46, "E": 30, "F": 32, "G": 22, "H": 48, "I": 46, "J": 55, "K": 46,
+    }
+    for col_letter, width in widths2.items():
+        ws2.column_dimensions[col_letter].width = width
+    for item in shade_cases:
+        ws2.append([
+            item["case_num"],
+            "",  # Shade verdict -- left blank; owner fills in
+            "",  # Correctness -- left blank; only meaningful on divergence rows
+            _s(_CLASS_TITLES[item["class"]]),
+            _s(", ".join(_PLAUSIBLE_SHADES_BY_CLASS[item["class"]])),
+            _s(_manuscript_str(item)),
+            _s(item.get("sys_id")),
+            _s(" / ".join(item["work_titles"])),
+            _s(item.get("catalogue_text")),
+            _s(item["reason"]),
+            _s(item.get("proposal")),
+        ])
+    _apply_body_alignment(ws2, len(headers2))
+    last_row2 = ws2.max_row
+    ws2.freeze_panes = "D2"
+    ws2.auto_filter.ref = f"A1:{get_column_letter(len(headers2))}{last_row2}"
 
-    ws.freeze_panes = "C2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{last_row}"
-
-    # Verdict dropdown -- the FULL vocabulary (seven real shades + `unsure` +
-    # `skip`, i.e. every token in SHADE_VOCABULARY -- nine total). Blank is
-    # allowed by the validation itself ("not yet answered" is a legitimate
-    # transient state); the Vocabulary sheet explains in words that a blank
-    # is NOT a label and `unsure` is the real answer for "cannot tell".
-    dv_formula = '"' + ",".join(SHADE_TOKENS) + '"'
-    dv = DataValidation(
-        type="list", formula1=dv_formula, allow_blank=True, showErrorMessage=True,
+    # Shade Verdict dropdown -- the FULL vocabulary (eight real shades +
+    # `unsure` + `skip`, i.e. every token in SHADE_VOCABULARY -- ten total).
+    # Blank is allowed ("not yet answered" is a legitimate transient state);
+    # the Vocabulary sheet explains a blank is NOT a label.
+    dv_shade = DataValidation(
+        type="list", formula1='"' + ",".join(SHADE_TOKENS) + '"',
+        allow_blank=True, showErrorMessage=True,
         errorTitle="Invalid verdict",
         error="Choose one of the listed shades, or 'unsure' / 'skip'. Free text is rejected.",
-        promptTitle="Verdict",
+        promptTitle="Shade verdict",
         prompt="Pick the shade that best fits, or 'unsure' / 'skip'. Blank = not yet answered.",
     )
-    ws.add_data_validation(dv)
-    dv.add(f"B2:B{last_row}")
+    ws2.add_data_validation(dv_shade)
+    if last_row2 >= 2:
+        dv_shade.add(f"B2:B{last_row2}")
 
-    # --- Sheet 2: Vocabulary & Instructions ---
-    ws2 = wb.create_sheet(title="Vocabulary")
-    ws2.sheet_view.rightToLeft = True
-    ws2.column_dimensions["A"].width = 24
-    ws2.column_dimensions["B"].width = 90
+    # Correctness dropdown (owner ruling F) -- applied to EVERY row for
+    # simplicity (Excel data validation is range-based, not conditional on
+    # another cell's value); the Vocabulary sheet + column header explain it
+    # is meaningful ONLY on diverges_work/diverges_part rows and should stay
+    # blank otherwise.
+    dv_correctness = DataValidation(
+        type="list", formula1='"' + ",".join(CORRECTNESS_TOKENS) + '"',
+        allow_blank=True, showErrorMessage=True,
+        errorTitle="Invalid correctness call",
+        error="Choose 'catalogue_correct', 'claim_correct' or 'unclear', or leave blank.",
+        promptTitle="Correctness (divergence rows only)",
+        prompt="Only answer if the Shade verdict is diverges_work or diverges_part. Otherwise leave blank.",
+    )
+    ws2.add_data_validation(dv_correctness)
+    if last_row2 >= 2:
+        dv_correctness.add(f"C2:C{last_row2}")
+
+    # --- Sheet 3: Vocabulary & Instructions ---
+    ws3 = wb.create_sheet(title="Vocabulary & Instructions")
+    ws3.sheet_view.rightToLeft = True
+    ws3.column_dimensions["A"].width = 24
+    ws3.column_dimensions["B"].width = 90
 
     def _note(text: str) -> None:
-        ws2.append([_s(text)])
-        ws2.cell(row=ws2.max_row, column=1).alignment = Alignment(
+        ws3.append([_s(text)])
+        ws3.cell(row=ws3.max_row, column=1).alignment = Alignment(
             horizontal="right", vertical="top", wrap_text=True, readingOrder=2
         )
-        ws2.merge_cells(start_row=ws2.max_row, start_column=1, end_row=ws2.max_row, end_column=2)
+        ws3.merge_cells(start_row=ws3.max_row, start_column=1, end_row=ws3.max_row, end_column=2)
+
+    def _table_header(a_text: str, b_text: str) -> None:
+        ws3.append([a_text, b_text])
+        ws3.cell(row=ws3.max_row, column=1).font = header_font
+        ws3.cell(row=ws3.max_row, column=2).font = header_font
+        ws3.cell(row=ws3.max_row, column=1).fill = header_fill
+        ws3.cell(row=ws3.max_row, column=2).fill = header_fill
+
+    def _table_row(a_text: str, b_text: str) -> None:
+        ws3.append([a_text, _s(b_text)])
+        ws3.cell(row=ws3.max_row, column=1).alignment = Alignment(
+            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
+        )
+        ws3.cell(row=ws3.max_row, column=2).alignment = Alignment(
+            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
+        )
 
     _note(
         "This workbook is a labelling instrument for the novelty hard-case evaluation set "
         "(plan 136-03 Task 3). The Markdown file 136-NOVELTY-HARDCASES.md in the same phase "
-        "directory remains the authoritative human-readable record of the 97 candidate cases and "
-        "the reasoning for why each is hard; this workbook renders the SAME 97 cases, in the SAME "
-        "order, from one shared pre-numbered case list."
+        f"directory remains the authoritative human-readable record of these {len(cases)} candidate "
+        "cases and the reasoning for why each is hard; this workbook renders the SAME cases, in the "
+        "SAME order, from one shared pre-numbered case list, split across two data sheets by the "
+        "question type each case was actually built to support."
     )
-    ws2.append([])
+    ws3.append([])
     _note(
-        "IMPORTANT: a BLANK Verdict cell is NOT a label -- it means \"not yet answered\". If you "
-        "cannot judge a case, enter `unsure` explicitly (it maps to the fail-closed system default "
-        "and costs nothing) rather than leaving the cell blank. If you choose not to judge a case at "
-        "all, enter `skip` explicitly -- it is recorded as skipped, never silently filled from the "
-        "case's own draft PROPOSAL."
+        "\"Identity Spot-Check\" (Classes 1-3): these rows compare two of OUR OWN claims to each "
+        "other -- an A vs B \"same underlying work?\" judgment, no finding aid involved at all. "
+        "\"Novelty Shades\" (Classes 4-6): these rows judge ONE claim against the finding aids -- the "
+        "question genuinely varies here, which is why it carries the fuller shade vocabulary plus a "
+        "Correctness column for divergence rows."
     )
-    ws2.append([])
+    ws3.append([])
+    _note(
+        "IMPORTANT: a BLANK verdict cell (Identity OR Shade) is NOT a label -- it means \"not yet "
+        "answered\". If you cannot judge a case, enter `unsure` explicitly (it costs nothing and is a "
+        "real, useful answer) rather than leaving the cell blank. If you choose not to judge a case at "
+        "all, enter `skip` explicitly -- it is recorded as skipped, never silently filled from the "
+        "case's own draft PROPOSAL. The Correctness column is meaningful ONLY when the Shade verdict "
+        "is `diverges_work` or `diverges_part` -- leave it blank on every other row."
+    )
+    ws3.append([])
 
-    ws2.append(["Shade", "Choose this when..."])
-    ws2.cell(row=ws2.max_row, column=1).font = header_font
-    ws2.cell(row=ws2.max_row, column=2).font = header_font
-    ws2.cell(row=ws2.max_row, column=1).fill = header_fill
-    ws2.cell(row=ws2.max_row, column=2).fill = header_fill
+    _table_header("Identity answer", "Choose this when...")
+    for token, description in IDENTITY_VOCABULARY:
+        _table_row(token, description)
+    ws3.append([])
+
+    _table_header("Shade", "Choose this when...")
     for token, description in SHADE_VOCABULARY:
-        ws2.append([token, _s(description)])
-        ws2.cell(row=ws2.max_row, column=1).alignment = Alignment(
-            horizontal="right", vertical="top", readingOrder=2
-        )
-        ws2.cell(row=ws2.max_row, column=2).alignment = Alignment(
-            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
-        )
-    ws2.append([])
-
+        _table_row(token, description)
+    ws3.append([])
     _note(
         "`not_checked` (the fail-closed system default for an unrun/failed/abstained check) is not "
         "a verdict you pick directly -- `unsure` is its owner-facing equivalent."
     )
-    ws2.append([])
+    ws3.append([])
 
-    ws2.append(["Class", "Plausible shades (a reading aid -- any shade above is still a valid answer)"])
-    ws2.cell(row=ws2.max_row, column=1).font = header_font
-    ws2.cell(row=ws2.max_row, column=2).font = header_font
-    ws2.cell(row=ws2.max_row, column=1).fill = header_fill
-    ws2.cell(row=ws2.max_row, column=2).fill = header_fill
+    _table_header("Correctness (divergence rows only)", "Choose this when...")
+    for token, description in CORRECTNESS_VOCABULARY:
+        _table_row(token, description)
+    ws3.append([])
+
+    _table_header("Class", "Plausible answers (a reading aid -- any answer above is still valid)")
     for cls in _CLASS_ORDER:
-        plausible_str = ", ".join(_PLAUSIBLE_SHADES_BY_CLASS[cls])
-        ws2.append([_s(_CLASS_TITLES[cls]), _s(plausible_str)])
-        ws2.cell(row=ws2.max_row, column=1).alignment = Alignment(
-            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
-        )
-        ws2.cell(row=ws2.max_row, column=2).alignment = Alignment(
-            horizontal="right", vertical="top", wrap_text=True, readingOrder=2
-        )
+        if cls in _IDENTITY_CLASSES:
+            plausible_str = ", ".join(_PLAUSIBLE_IDENTITY_BY_CLASS[cls])
+        else:
+            plausible_str = ", ".join(_PLAUSIBLE_SHADES_BY_CLASS[cls])
+        _table_row(_CLASS_TITLES[cls], plausible_str)
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     wb.save(path)
@@ -2140,9 +2547,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         hardcases = build_hardcases(claims, works, d13d, libraries)
         ledger.check("hardcases", len(hardcases))
+        ledger.check("hardcases_class1_near_miss_spotcheck", sum(1 for c in hardcases if c["class"] == "near_miss"))
+        ledger.check("hardcases_class2_alias_spotcheck", sum(1 for c in hardcases if c["class"] == "alias"))
+        ledger.check("hardcases_class3_granularity_spotcheck", sum(1 for c in hardcases if c["class"] == "granularity"))
         ledger.check("hardcases_class4_terse_catalogue", sum(1 for c in hardcases if c["class"] == "terse_catalogue"))
         ledger.check("hardcases_class5_generic_collection", sum(1 for c in hardcases if c["class"] == "generic_collection"))
         ledger.check("hardcases_class6_catalogue_divergence", sum(1 for c in hardcases if c["class"] == "catalogue_divergence"))
+        ledger.check("hardcases_identity_total", sum(1 for c in hardcases if c["class"] in _IDENTITY_CLASSES))
+        ledger.check("hardcases_shade_total", sum(1 for c in hardcases if c["class"] not in _IDENTITY_CLASSES))
         # Acceptance criteria: any attached draft verdict MUST be explicitly
         # marked PROPOSAL and separable from an owner's answer -- assert it
         # on every case that carries one (a case may also carry none at all,
