@@ -14,7 +14,7 @@ from web.components.typography import h1, h2, h3
 from shared.discovery_band_labels import (
     BAND_LABELS,
     band_label,
-    format_precision_copy,
+    band_measurement_status,
     NUMERATOR_LABEL,
     DENOMINATOR_LABEL,
     DRAW_SIZE_LABEL,
@@ -23,12 +23,24 @@ from shared.discovery_band_labels import (
 
 # ---------------------------------------------------------------------------
 # BAND-05 "Confidence Bands & Methods" methods section (Phase 135, plan 135-02,
-# D-10). A flag-gated, bilingual SECTION inside this Help page (never a new
-# route), with per-band anchors for tooltip deep-links. Band labels + precision
-# copy are rendered THROUGH shared.discovery_band_labels (never re-worded here);
-# only the section's own field labels + placeholders are local UI copy. The
-# body card + its TOC entry are each independently gated on discovery_available()
-# (Codex #11). noindex until REL-01 is driven separately in web/main.py.
+# D-10; rewritten QUALITATIVELY in Phase 136, plan 136-02, D-06a). A flag-gated,
+# bilingual SECTION inside this Help page (never a new route), with per-band
+# anchors for tooltip deep-links. Band labels are rendered THROUGH
+# shared.discovery_band_labels (never re-worded here); only the section's own
+# field labels + placeholders are local UI copy. The body card + its TOC entry
+# are each independently gated on discovery_available() (Codex #11). noindex
+# until REL-01 is driven separately in web/main.py.
+#
+# D-06a / docs/specs/discovery-band-labels-v1.md Amendment 2026-08-02 Note 3:
+# NO precision percentage, confidence interval, weighted estimate or strata
+# table is reachable from this section, or from any Phase-136 surface,
+# tooltip included. The band-labels module's per-band precision-copy
+# formatter is DELIBERATELY NOT imported here -- it has no surface caller
+# after this plan and is retained ONLY for offline/report use (e.g. the
+# CERT-01 measurement record). Each band's status is instead rendered
+# qualitatively via `band_measurement_status()`. See
+# tests/render_smoke/discovery_honesty_gate.py for the shared no-numbers
+# gate every later discovery surface suite imports.
 # ---------------------------------------------------------------------------
 
 # Unique marker class so a render-smoke test can scope its assertions (esp. the
@@ -43,15 +55,18 @@ _CONFIDENCE_TOC_TITLE = {
 
 _CONFIDENCE_INTRO = {
     'en': (
-        'These are estimated band-population precisions, not per-item probabilities. '
-        'All numbers are provisional pending owner grading; a sampled band estimate is '
-        'never applied to an individual identification. Each identification remains an '
-        'unreviewed algorithmic estimate unless it carries an expert-reviewed marker.'
+        'Confidence here is a group-level status, not a per-item probability. Each band below '
+        'names its population, its unit of measurement and sample size, and whether it has '
+        'been graded to completion — in words, never as a percentage or an interval. A '
+        'sampled band status is never applied to an individual identification. Every '
+        'identification remains an unreviewed algorithmic estimate; see “Known '
+        'limitations” below for what that does and does not mean.'
     ),
     'he': (
-        'אלה הערכות דיוק ברמת אוכלוסיית הדרגה, ולא הסתברויות פרטניות. כל המספרים ראשוניים '
-        'עד להכרעת הבעלים; הערכת דרגה מדגמית לעולם אינה מיוחסת לזיהוי בודד. כל זיהוי נותר '
-        'הערכה אלגוריתמית שלא נבדקה, אלא אם כן מצורף לו סימון של בדיקת מומחה.'
+        'מידת הביטחון כאן היא סטטוס ברמת הקבוצה, ולא הסתברות פרטנית. כל דרגה למטה מציינת את '
+        'האוכלוסייה שלה, את יחידת המדידה וגודל המדגם, ואם היא נבדקה עד תום — במילים, לעולם '
+        'לא כאחוז או כטווח. סטטוס דגימה ברמת דרגה לעולם אינו מיוחס לזיהוי בודד. כל זיהוי נותר '
+        'הערכה אלגוריתמית שלא נבדקה; ראו "מגבלות ידועות" למטה למה זה אומר ומה לא.'
     ),
 }
 
@@ -62,8 +77,7 @@ _CONFIDENCE_FIELD_LABELS = {
     },
     'unit': {'en': 'Unit of measurement', 'he': 'יחידת מדידה'},
     'sample': {'en': 'Sample size', 'he': 'גודל המדגם'},
-    'strata': {'en': 'Strata', 'he': 'שכבות דגימה'},
-    'estimate': {'en': 'Weighted estimate', 'he': 'הערכה משוקללת'},
+    'status': {'en': 'Measurement status', 'he': 'סטטוס מדידה'},
     'measurement_date': {'en': 'Measurement date', 'he': 'תאריך מדידה'},
     'grader': {'en': 'Grader', 'he': 'מדרג'},
     'audit_status': {'en': 'Audit status', 'he': 'סטטוס ביקורת'},
@@ -82,16 +96,173 @@ _CONFIDENCE_UNIT_PROSE = {
     'he': 'לכל טענת (עמוד, חיבור); רווח סמך מקובץ לפי כתב-יד פיזי',
 }
 
-# D-08 strata (generic — the data-driven sampling_frame overrides this when present).
-_CONFIDENCE_STRATA_FALLBACK = {
-    'en': 'source corpus × coverage band (CERT-01 sampling design)',
-    'he': 'קורפוס מקור × דרגת כיסוי (מערך הדגימה של CERT-01)',
+# D-06a / Amendment 2026-08-02 Note 3: the qualitative replacement for the
+# STRUCK weighted-estimate + confidence-interval line. Keyed by the
+# band_measurement_status() return value (shared/discovery_band_labels.py) so
+# a status change needs no code edit here — only a sidecar data change, same
+# discipline as the label table it replaces. Any status this table does not
+# (yet) name falls back to the "not yet measured" placeholder.
+_MEASUREMENT_STATUS_COPY = {
+    'not_measured': {'en': 'not yet measured', 'he': 'טרם נמדד'},
+    'measured_pass': {
+        'en': 'graded to completion and passed its pre-registered floor',
+        'he': 'סווג עד תום ועבר את הסף שנקבע מראש',
+    },
+    'measured_fail': {
+        'en': 'graded to completion; did not pass its pre-registered floor',
+        'he': 'סווג עד תום; לא עבר את הסף שנקבע מראש',
+    },
+    'insufficient_evidence': {
+        'en': 'graded; not enough evidence to reach a pass/fail floor',
+        'he': 'סווג; אין די ראיות כדי להכריע מעבר או כישלון בסף',
+    },
+    'measured_audit_pending': {
+        'en': 'graded; independent audit pending',
+        'he': 'סווג; ביקורת בלתי-תלויה בהמתנה',
+    },
 }
 
-_CONFIDENCE_COLLECTION_LABEL = {
-    'en': 'Propagated witness collection (corroborated ∪ weak), collection scope',
-    'he': 'אוסף עדי הפצה (מאושש ∪ חלש), בהיקף האוסף',
+
+def _measurement_status_copy(status, lk):
+    """The qualitative sentence for a band_measurement_status() value, never a
+    bare percentage or interval. Falls back to "not yet measured" for any
+    status this table does not name."""
+    entry = _MEASUREMENT_STATUS_COPY.get(status) or _MEASUREMENT_STATUS_COPY['not_measured']
+    return entry[lk]
+
+
+# ---------------------------------------------------------------------------
+# Phase 136, plan 136-02 (Task 2): the two-bucket rule, its known limitations,
+# and the novelty check — each rendered qualitatively, in words, exactly ONCE
+# per language at section scope (not per band). Source of the wording:
+# .claude/skills/sketch-findings-genizahsearch/references/main-pool-rule.md
+# ("The rule" + "Known limitations, stated plainly" + "Wording and internal
+# state") and 136-CONTEXT.md D-23/D-23b.
+# ---------------------------------------------------------------------------
+
+_BUCKET_RULE_HEADING = {'en': 'The two-bucket rule', 'he': 'כלל שתי הקבוצות'}
+
+# MAIN_POOL_SENTENCE is the SINGLE source of the bucket-rule wording on this
+# page. Plan 136-07 asserts that shared.discovery_main_pool.main_pool_sentence()
+# returns this text byte-identical, so the rule can never be described two
+# different ways on two surfaces.
+MAIN_POOL_SENTENCE = {
+    'en': (
+        'A fragment is treated as a probable identification when it matches the work across '
+        'more than one leaf, or covers almost a whole page on its own. Everything else appears '
+        'under ‘more matches’.'
+    ),
+    'he': (
+        'קטע נחשב לזיהוי סביר כאשר הוא תואם את החיבור ביותר מדף אחד, או מכסה כמעט עמוד שלם '
+        'בפני עצמו. כל השאר מופיע תחת ‘התאמות נוספות’.'
+    ),
 }
+
+# The second bucket means insufficient evidence, never "probably wrong" — a
+# distinction the sketch's own honesty gate exists to protect.
+_SECOND_BUCKET_MEANING = {
+    'en': (
+        'The second group does not mean the match is wrong — it means there was not enough '
+        'evidence for the rule above. It holds probable quotations, shared wording, unresolved '
+        'ties, missing signals, and genuinely indeterminate cases alike.'
+    ),
+    'he': (
+        'הקבוצה השנייה אינה אומרת שההתאמה שגויה — היא אומרת שלא הייתה מספיק ראיה לכלל '
+        'שלמעלה. היא כוללת ציטוטים אפשריים, ניסוח משותף, תיקו שלא הוכרע, סימנים חסרים, '
+        'ומקרים שלא ניתן להכריע בהם באופן מובהק, לצד אלה.'
+    ),
+}
+
+_LIMITATIONS_HEADING = {'en': 'Known limitations, stated plainly', 'he': 'מגבלות ידועות, כפי שהן'}
+
+_LIMITATIONS_TEXT = {
+    'en': (
+        "A work that contains another work's text can absorb matches that really belong to the "
+        'contained work — a blessing or prayer embedded inside a larger legal code is the live '
+        'example — so a small minority of the main pool, a low single-digit share, is '
+        'misattributed for this reason. A two-page agreement is often the two sides of one '
+        'physical leaf rather than two independent leaves. A composition date can rule out an '
+        'implausible direction of borrowing, but it cannot settle identity by itself.'
+    ),
+    'he': (
+        'חיבור המכיל בתוכו טקסט של חיבור אחר עלול לספוג התאמות ששייכות למעשה לחיבור המוכל '
+        'בתוכו — ברכה או תפילה המשובצת בתוך קובץ הלכתי גדול היא הדוגמה החיה — כך שמיעוט קטן '
+        'מהמאגר העיקרי, נתח נמוך וחד-ספרתי, משויך בטעות מסיבה זו. הסכמה בין שני עמודים היא '
+        'לעיתים קרובות שני צדי אותו דף פיזי, ולא שני דפים עצמאיים. תאריך חיבור יכול לשלול '
+        'כיוון היווצרות בלתי סביר, אך אינו יכול לקבוע זהות בפני עצמו.'
+    ),
+}
+
+_NOVELTY_CHECK_HEADING = {'en': 'The novelty check', 'he': 'בדיקת החידוש'}
+
+# TODO(136-04): the enumerable checked-source list (FJMS + NLI catalogue and
+# bibliography, titles, PGP, FGP, M-source shelfmark attributions) plus each
+# source's as-of date lands with plan 136-04's novelty ingestion. Until then
+# this names only the CATEGORY of sources checked and does not invent a date.
+# 136-CONTEXT.md D-23 is the frozen source of truth for the eventual list.
+_NOVELTY_CHECKED_SOURCES_PLACEHOLDER = {
+    'en': (
+        'the finding aids we check today — catalogue descriptions, titles, bibliography, and '
+        'scholarly reference attributions (the full dated list publishes once plan 136-04 lands)'
+    ),
+    'he': (
+        'אמצעי העזר שאנו בודקים כיום — תיאורי קטלוג, כותרות, ביבליוגרפיה וייחוסים '
+        'ביבליוגרפיים-מדעיים (הרשימה המלאה עם תאריכים תתפרסם עם תוכנית 136-04)'
+    ),
+}
+
+_NOVELTY_CHECK_TEXT = {
+    'en': (
+        'Every identification is checked against a fixed, enumerable set of finding aids — '
+        '{sources}. Even when nothing turns up, the identification behind a candidate is still '
+        'an unreviewed algorithmic match, so a candidate is not a confirmed find. Absence from '
+        'the finding aids checked is not evidence that a match is correct — it only means the '
+        'checked sources do not already record it.'
+    ),
+    'he': (
+        'כל זיהוי נבדק מול קבוצה קבועה וניתנת למניה של אמצעי עזר — {sources}. גם כאשר לא נמצא '
+        'דבר, הזיהוי שביסוד המועמד נותר התאמה אלגוריתמית שלא נבדקה, כך שמועמד אינו ממצא '
+        'סופי. היעדרות מאמצעי העזר שנבדקו אינה ראיה לכך שההתאמה נכונה — היא אומרת רק '
+        'שהמקורות שנבדקו אינם מתעדים אותה כבר.'
+    ),
+}
+
+
+def _render_bucket_rule_subsection(lk, text_style):
+    """Task 2.1: the two-bucket rule, verbatim from MAIN_POOL_SENTENCE, plus
+    what the second bucket does NOT mean (insufficient evidence, never
+    "probably wrong")."""
+    h3(
+        _BUCKET_RULE_HEADING[lk],
+        classes='text-lg font-semibold mt-3 mb-1',
+        style='color: var(--text-primary);',
+    )
+    ui.label(MAIN_POOL_SENTENCE[lk]).style(text_style)
+    ui.label(_SECOND_BUCKET_MEANING[lk]).style(text_style)
+
+
+def _render_known_limitations_subsection(lk, text_style):
+    """Task 2.2: containment, the two-sides-of-one-leaf caveat, and the dating
+    caveat — every share stated in words, never as a measured percentage."""
+    h3(
+        _LIMITATIONS_HEADING[lk],
+        classes='text-lg font-semibold mt-3 mb-1',
+        style='color: var(--text-primary);',
+    )
+    ui.label(_LIMITATIONS_TEXT[lk]).style(text_style)
+
+
+def _render_novelty_check_subsection(lk, text_style):
+    """Task 2.3: the enumerable checked-source set + the candidate-is-not-a-
+    confirmed-find framing (NOVEL-01/D-23b)."""
+    h3(
+        _NOVELTY_CHECK_HEADING[lk],
+        classes='text-lg font-semibold mt-3 mb-1',
+        style='color: var(--text-primary);',
+    )
+    ui.label(
+        _NOVELTY_CHECK_TEXT[lk].format(sources=_NOVELTY_CHECKED_SOURCES_PLACEHOLDER[lk])
+    ).style(text_style)
 
 # D-10 per-band deep-link anchor registry (help-confidence-<band>): one anchor
 # per band, keyed by the canonical (evidence_source, band) pair. This is the
@@ -142,22 +313,20 @@ def _band_precision_row(precision, evidence_source, canonical_band):
     return row or {}
 
 
-def _precision_copy_safe(row, lang):
-    """format_precision_copy, but fail-open on a malformed (partial-CI) stored
-    row: render the not-yet-measured placeholder rather than crash the whole
-    Help page (T-135-02-03 availability). A well-formed row is unaffected."""
-    try:
-        return format_precision_copy(row or {}, lang)
-    except ValueError:
-        return _CONFIDENCE_PLACEHOLDERS['not_measured'][_confidence_lang_key(lang)]
-
-
 def _render_confidence_section(lang, precision, band_counts):
     """Render the flag-gated BAND-05 methods section body card.
 
     Codex #11: the CALLER must guard this on discovery_available() — the body
     is its OWN conditional card, NOT part of the TOC render loop (that loop
     emits only ui.link TOC entries), so the loop-continue does not gate it.
+
+    D-06a (Phase 136, plan 136-02): every number below is either a runtime
+    COUNT (population, sample size) or absent — no precision percentage, no
+    confidence interval, no weighted estimate, no strata table anywhere in
+    this section, in either language. Each band's measurement is instead
+    explained in words via band_measurement_status(). Three qualitative
+    subsections (the two-bucket rule, known limitations, the novelty check)
+    render once per language, ahead of the per-band detail.
     """
     lk = _confidence_lang_key(lang)
     rtl = lk == 'he'
@@ -179,13 +348,9 @@ def _render_confidence_section(lang, precision, band_counts):
 
             ui.label(_CONFIDENCE_INTRO[lk]).style(text_style).classes('mb-2')
 
-            # Collection-scope propagated-witness precision (the 0.926) — rendered
-            # ONLY here, NEVER on the corroborated/weak per-band rows below.
-            collection_row = (precision or {}).get('collection') or {}
-            ui.label(
-                f"{_CONFIDENCE_COLLECTION_LABEL[lk]}: "
-                f"{_precision_copy_safe(collection_row, lang)}"
-            ).style(text_style).classes('mb-2')
+            _render_bucket_rule_subsection(lk, text_style)
+            _render_known_limitations_subsection(lk, text_style)
+            _render_novelty_check_subsection(lk, text_style)
 
             for evidence_source, canonical_band in _confidence_bands():
                 _render_one_band(
@@ -238,17 +403,12 @@ def _render_one_band(evidence_source, canonical_band, lang, precision, band_coun
     ]
     ui.label(f"{fl['sample'][lk]}: " + "; ".join(sample_parts)).style(text_style)
 
-    # strata — data-driven sampling_frame, else the static D-08 description.
-    strata = row.get('sampling_frame') or _CONFIDENCE_STRATA_FALLBACK[lk]
-    ui.label(f"{fl['strata'][lk]}: {strata}").style(text_style)
-
-    # weighted estimate + CI via the values module (tier_a / corroborated /
-    # weak → "precision not yet measured"; the 0.926 is collection-scope only).
-    estimate = _precision_copy_safe(row, lang)
-    weighting = row.get('weighting')
-    if weighting:
-        estimate = f"{estimate} ({weighting})"
-    ui.label(f"{fl['estimate'][lk]}: {estimate}").style(text_style)
+    # measurement status — QUALITATIVE ONLY (D-06a): no percentage, no CI, no
+    # strata table. band_measurement_status() is the SAME status-derivation
+    # function is_default_eligible() reads — a status change here needs no
+    # code edit, only a sidecar data change.
+    status = band_measurement_status(row)
+    ui.label(f"{fl['status'][lk]}: {_measurement_status_copy(status, lk)}").style(text_style)
 
     # the four CERT-01 registry fields — read via .get(), placeholder when
     # absent/NULL, NEVER fabricated (135-05 columns; filled by 135-09).

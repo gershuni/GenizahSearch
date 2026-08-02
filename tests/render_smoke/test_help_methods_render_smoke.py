@@ -1,39 +1,52 @@
 # -*- coding: utf-8 -*-
 """Render-smoke test: NiceGUI User drives the live server-render path for /help.
 
-Phase 135, Plan 02 (BAND-05).
+Phase 135, Plan 02 (BAND-05) — rewritten QUALITATIVELY in Phase 136, Plan 02
+(D-06a, Tasks 1-2): every precision percentage, confidence interval, weighted
+estimate and strata table is STRUCK from the methods section; each band's
+measurement is explained in words, and three new qualitative subsections (the
+two-bucket rule, known limitations, the novelty check) are added.
 
 Scope
 -----
-Proves what a SERVER-SIDE render of the async ``/help`` route can prove for the
-flag-gated "Confidence Bands & Methods" methods section:
+Proves what a SERVER-SIDE render of the async ``/help`` route can prove for
+the flag-gated "Confidence Bands & Methods" methods section:
 
-  * with ``web.pages.help.discovery_available`` mocked True (the ACTUAL body/TOC
-    gate call-site — Codex #11) and the band-precision + per-band claim-count
-    wrappers the route awaits patched to fakes (no real sidecar needed), the
-    section renders in EN and HE with the section heading, all 7 per-band deep-
-    link anchors (``help-confidence-<band>``), and the BAND-05 field set;
+  * with ``web.pages.help.discovery_available`` mocked True (the ACTUAL
+    body/TOC gate call-site — Codex #11) and the band-precision + per-band
+    claim-count wrappers the route awaits patched to fakes (no real sidecar
+    needed), the section renders in EN and HE with the section heading, all
+    7 per-band deep-link anchors (``help-confidence-<band>``), and the
+    BAND-05 field set (population/unit/sample/measurement status/registry);
   * the ``population`` field renders from the RUNTIME DISPLAY-DEDUPLICATED
-    shipped-claim count (the fake ``band_counts``), NOT the denominator / raw
-    evidence rows / the Wave-4 frame doc;
-  * the propagated **0.926** collection estimate renders ONLY at collection
-    scope (exactly once), never on the corroborated/weak per-band rows;
+    shipped-claim count (the fake ``band_counts``), NOT the denominator /
+    raw evidence rows / the Wave-4 frame doc;
+  * each band's MEASUREMENT STATUS renders qualitatively (never a bare
+    percentage or interval) via ``band_measurement_status()``;
   * the four registry fields render placeholder-safe (never fabricated) —
-    tier_a shows "not yet measured" / "independent audit pending";
+    both the populated case (tier_a) and the not-yet-measured case
+    (screening/corroborated/weak/not_evaluated);
+  * the three new qualitative subsections (bucket rule / known limitations /
+    novelty check) render in both languages, with ``MAIN_POOL_SENTENCE`` as
+    the SINGLE source of the bucket-rule wording;
+  * the confidence-section anchor set is EXACTLY the section anchor plus the
+    7 band anchors — no more, no fewer;
+  * both language paths render the SAME field-label set (field parity);
   * the Phase-139 noindex transition (Codex #18): pre-release → noindex,
     released → indexed, flag-off → section absent AND indexed;
-  * the D-06 / WARNING-4 word gate: "certified" (EN) and its HE equivalents
-    (מאומת / מאושר / מוסמך) appear NOWHERE in the confidence section (scoped to
-    the section — מאושר legitimately appears in the Joins-Lab Help copy);
+  * the D-06/D-06a word gate: "certified" (EN) and its HE equivalents
+    (מאומת / מאושר / מוסמך) appear NOWHERE in the confidence section (scoped
+    to the section — מאושר legitimately appears in the Joins-Lab Help copy);
   * HE renders RTL.
 
-It does NOT exercise the real sidecar or the DiscoveryService — those are unit-
-tested in tests/test_discovery_band_labels.py + the discovery-service suites.
+It does NOT exercise the real sidecar or the DiscoveryService — those are
+unit-tested in tests/test_discovery_band_labels.py + the discovery-service
+suites.
 
 Harness shape mirrors ``test_atlas_render_smoke.py``: a NiceGUI ``User`` over
 ``httpx.ASGITransport(core.app)``, auto-tagged ``render_smoke`` by
-tests/conftest.py. The package conftest imports ``web.main`` at collection time,
-registering ``@ui.page('/help')`` on ``core.app``; we clear
+tests/conftest.py. The package conftest imports ``web.main`` at collection
+time, registering ``@ui.page('/help')`` on ``core.app``; we clear
 ``_startup_handlers`` so the real SearchEngine is never built.
 """
 
@@ -76,6 +89,13 @@ FAKE_COUNTS = {
     ('propagated', 'not_evaluated'): 60156,
 }
 
+# Deliberately covers BOTH the "measured_audit_pending" derivation
+# (high_confidence_algorithmic: precision present, no stored status) and the
+# "measured_pass" derivation (tier_a: stored status + ci_low above
+# STRICT_FLOOR) — the other five bands are absent here, so they exercise the
+# {} → band_measurement_status → "not_measured" placeholder path. NOTE:
+# `precision`/`ci_low`/`ci_high` are read ONLY to derive the qualitative
+# status (band_measurement_status) — no surface renders them as a number.
 FAKE_PRECISION = {
     ('track1_direct', 'high_confidence_algorithmic'): {
         'scope': 'band',
@@ -91,18 +111,14 @@ FAKE_PRECISION = {
         'scope': 'band',
         'evidence_source': 'track1_direct',
         'confidence_band': 'tier_a',
-        'precision': None, 'ci_low': None, 'ci_high': None,
-        'numerator': None, 'denominator': None,
+        'precision': None, 'ci_low': 0.9084, 'ci_high': None,
+        'numerator': None, 'denominator': None, 'draw_size': None,
         'sampling_frame': None, 'weighting': None,
-        'measurement_status': None, 'measurement_date': None,
-        'grader': None, 'audit_status': None, 'report_id': None,
-    },
-    # The 0.926 propagated-witness collection estimate — collection scope ONLY.
-    'collection': {
-        'scope': 'collection',
-        'collection_id': 'propagated_witness_collection_v1',
-        'evidence_source': None, 'confidence_band': None,
-        'precision': 0.926, 'ci_low': 0.875, 'ci_high': 0.968,
+        'measurement_status': 'measured_pass',
+        'measurement_date': '2026-07-28',
+        'grader': 'Owner (catalogue-blind)',
+        'audit_status': None,
+        'report_id': 'CERT-01-2026-07-28',
     },
 }
 
@@ -247,13 +263,15 @@ def _column_directions(user) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Tests: section render (EN + HE)
+# Tests: section render (EN + HE) — D-06a qualitative content
 # ---------------------------------------------------------------------------
 
 def test_help_methods_section_renders_en():
     """EN: the flag-gated methods section renders with the heading, all 7 band
-    anchors, the runtime-count population, placeholder-safe registry fields, and
-    the 0.926 at collection scope only. No 'certified' anywhere in the section."""
+    anchors, the runtime-count population, the qualitative measurement-status
+    copy (both the populated and not-yet-measured cases), placeholder-safe
+    registry fields, and the three new qualitative subsections. No 'certified'
+    anywhere in the section, and no percentage/interval anywhere."""
     async def driver(user):
         await user.open('/help')
 
@@ -273,27 +291,78 @@ def test_help_methods_section_renders_en():
             "Help methods EN FAIL: tier_a population not rendered from band_counts."
         )
 
-        # registry fields placeholder-safe (never fabricated) for tier_a.
+        # measurement status — qualitative, both derivations exercised.
+        assert 'graded to completion and passed its pre-registered floor' in section, (
+            "Help methods EN FAIL: tier_a measured_pass status copy missing."
+        )
+        assert 'graded; independent audit pending' in section, (
+            "Help methods EN FAIL: high_confidence_algorithmic measured_audit_pending "
+            "status copy missing."
+        )
+        assert 'not yet measured' in section, (
+            "Help methods EN FAIL: 'not yet measured' status/placeholder missing "
+            "(screening/corroborated/weak/not_evaluated bands have no fixture row)."
+        )
+
+        # registry fields — populated case (tier_a) + placeholder case (others).
         assert 'Report identifier' in section, "Help methods EN FAIL: report-id field label missing."
-        assert 'not yet measured' in section, "Help methods EN FAIL: 'not yet measured' placeholder missing."
+        assert 'CERT-01-2026-07-28' in section, "Help methods EN FAIL: populated report_id missing."
+        assert '2026-07-28' in section, "Help methods EN FAIL: populated measurement_date missing."
         assert 'independent audit pending' in section, (
-            "Help methods EN FAIL: 'independent audit pending' audit placeholder missing."
-        )
-        # tier_a precision copy from the values module (never a bare percentage).
-        assert 'precision not yet measured' in section, (
-            "Help methods EN FAIL: tier_a should read 'precision not yet measured'."
+            "Help methods EN FAIL: audit-status placeholder missing."
         )
 
-        # 0.926 collection estimate — rendered ONCE, at collection scope only.
-        assert section.count('92.6%') == 1, (
-            f"Help methods EN FAIL: 0.926 must appear exactly once (collection scope). "
-            f"count={section.count('92.6%')}"
+        # the three new qualitative subsections.
+        from web.pages.help import MAIN_POOL_SENTENCE
+        assert MAIN_POOL_SENTENCE['en'] in section, (
+            "Help methods EN FAIL: the bucket-rule sentence (MAIN_POOL_SENTENCE) is missing."
         )
-        assert '[87.5%, 96.8%]' in section, "Help methods EN FAIL: collection CI missing."
+        assert 'The two-bucket rule' in section, "Help methods EN FAIL: bucket-rule heading missing."
+        assert 'Known limitations, stated plainly' in section, (
+            "Help methods EN FAIL: known-limitations heading missing."
+        )
+        assert 'The novelty check' in section, "Help methods EN FAIL: novelty-check heading missing."
+        assert 'not a confirmed find' in section, (
+            "Help methods EN FAIL: candidate-is-not-a-confirmed-find framing missing."
+        )
+        assert 'not evidence that a match is correct' in section, (
+            "Help methods EN FAIL: absence-is-not-evidence framing missing."
+        )
 
-        # WARNING-4 / D-06 word gate: never 'certified'.
+        # the second bucket = insufficient evidence, never "probably wrong".
+        assert 'does not mean the match is wrong' in section, (
+            "Help methods EN FAIL: second-bucket-meaning sentence missing."
+        )
+        assert 'not enough evidence for the rule above' in section, (
+            "Help methods EN FAIL: second-bucket insufficient-evidence framing missing."
+        )
+
+        # known limitations: containment, two-sides-of-one-leaf, dating caveat.
+        assert 'can absorb matches that really belong to the' in section, (
+            "Help methods EN FAIL: containment limitation missing."
+        )
+        assert 'a low single-digit share' in section, (
+            "Help methods EN FAIL: containment share must be stated in WORDS, not a percentage."
+        )
+        assert 'two sides of one physical leaf' in section, (
+            "Help methods EN FAIL: two-sides-of-one-leaf caveat missing."
+        )
+        assert 'cannot settle identity by itself' in section, (
+            "Help methods EN FAIL: composition-date caveat missing."
+        )
+
+        # D-06/WARNING-4 word gate: never 'certified'.
         assert 'certified' not in section.lower(), (
             "Help methods EN FAIL: prohibited word 'certified' present in section."
+        )
+
+        # No percentage/interval reachable anywhere in the section (D-06a).
+        import re
+        assert not re.search(r'\d+(?:\.\d+)?%', section), (
+            f"Help methods EN FAIL: a percentage figure is still reachable. Section: {section!r}"
+        )
+        assert not re.search(r'\[\s*0\.\d+\s*,\s*0\.\d+\s*\]', section), (
+            "Help methods EN FAIL: a bracketed confidence interval is still reachable."
         )
 
     _run_help_smoke(driver, lang='en', discovery_on=True, noindex=True)
@@ -301,8 +370,8 @@ def test_help_methods_section_renders_en():
 
 def test_help_methods_section_renders_he_rtl():
     """HE: the section renders in Hebrew (RTL) with the 7 anchors + the runtime
-    population + placeholder registry fields, and NONE of the prohibited HE
-    'verified/approved/certified' words appear in the section."""
+    population + placeholder registry fields + the three new subsections, and
+    NONE of the prohibited HE 'verified/approved/certified' words appear."""
     async def driver(user):
         await user.open('/help')
 
@@ -319,9 +388,17 @@ def test_help_methods_section_renders_he_rtl():
         assert '654,321' in section, "Help methods HE FAIL: population not rendered from band_counts."
         assert 'מזהה דוח' in section, "Help methods HE FAIL: HE report-id field label missing."
         assert 'טרם נמדד' in section, "Help methods HE FAIL: HE 'not yet measured' placeholder missing."
-        assert section.count('92.6%') == 1, (
-            f"Help methods HE FAIL: 0.926 must appear once (collection scope). count={section.count('92.6%')}"
+        assert 'סווג עד תום ועבר את הסף שנקבע מראש' in section, (
+            "Help methods HE FAIL: HE measured_pass status copy missing."
         )
+
+        from web.pages.help import MAIN_POOL_SENTENCE
+        assert MAIN_POOL_SENTENCE['he'] in section, (
+            "Help methods HE FAIL: the HE bucket-rule sentence is missing."
+        )
+        assert 'כלל שתי הקבוצות' in section, "Help methods HE FAIL: HE bucket-rule heading missing."
+        assert 'מגבלות ידועות' in section, "Help methods HE FAIL: HE known-limitations heading missing."
+        assert 'בדיקת החידוש' in section, "Help methods HE FAIL: HE novelty-check heading missing."
 
         # HE word gate — none of the prohibited review/certification words.
         for forbidden in ('מאומת', 'מאושר', 'מוסמך'):
@@ -330,11 +407,66 @@ def test_help_methods_section_renders_he_rtl():
             )
         assert 'certified' not in section.lower(), "Help methods HE FAIL: 'certified' present in section."
 
+        # No percentage/interval reachable in the HE section either.
+        import re
+        assert not re.search(r'\d+(?:\.\d+)?%', section), (
+            f"Help methods HE FAIL: a percentage figure is still reachable. Section: {section!r}"
+        )
+
         # HE renders RTL.
         dirs = _column_directions(user)
         assert 'rtl' in dirs, f"Help methods HE FAIL: no RTL column under HE. directions={dirs}"
 
     _run_help_smoke(driver, lang='he', discovery_on=True, noindex=True)
+
+
+def test_help_methods_field_labels_render_in_both_languages():
+    """Field parity: both language paths render through the SAME
+    _render_confidence_section function, so every field label defined in
+    _CONFIDENCE_FIELD_LABELS must appear in BOTH rendered sections, in its
+    own language."""
+    from web.pages.help import _CONFIDENCE_FIELD_LABELS
+
+    captured = {}
+
+    def _make_driver(lang_key):
+        async def driver(user):
+            await user.open('/help')
+            captured[lang_key] = _confidence_section_text(user)
+        return driver
+
+    _run_help_smoke(_make_driver('en'), lang='en', discovery_on=True, noindex=True)
+    _run_help_smoke(_make_driver('he'), lang='he', discovery_on=True, noindex=True)
+
+    for field_key, labels in _CONFIDENCE_FIELD_LABELS.items():
+        assert labels['en'] in captured['en'], (
+            f"Field parity FAIL: EN label for {field_key!r} ({labels['en']!r}) missing "
+            "from the EN section."
+        )
+        assert labels['he'] in captured['he'], (
+            f"Field parity FAIL: HE label for {field_key!r} ({labels['he']!r}) missing "
+            "from the HE section."
+        )
+
+
+def test_help_methods_confidence_anchor_set_exact():
+    """The confidence-section anchor set is EXACTLY the section anchor plus
+    the 7 per-band anchors — no more, no fewer. Filtered to the
+    'help-confidence' prefix so this does not need to enumerate every other
+    anchor on the rest of the Help page."""
+    async def driver(user):
+        await user.open('/help')
+        anchors = _anchor_names(user)
+        confidence_anchors = {
+            a for a in anchors if a == 'help-confidence' or a.startswith('help-confidence-')
+        }
+        expected = {'help-confidence', *_EXPECTED_BAND_ANCHORS}
+        assert confidence_anchors == expected, (
+            f"Confidence anchor set FAIL: got {sorted(confidence_anchors)}, "
+            f"expected {sorted(expected)}"
+        )
+
+    _run_help_smoke(driver, lang='en', discovery_on=True, noindex=True)
 
 
 # ---------------------------------------------------------------------------
