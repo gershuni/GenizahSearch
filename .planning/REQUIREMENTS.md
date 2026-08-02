@@ -163,6 +163,55 @@
     for the claimed work's own identity, not merely test structured-field disagreement). NOT
     implemented in this plan (136-03), which only records the ruling. Full rationale recorded in
     `136-GATE1-DECISIONS.md` § G.
+  - **⟨AMENDED 2026-08-02 (same day, after a READ-ONLY prior-art research pass) — Phase-136 plan 03,
+    owner rulings H and I (`136-GATE1-DECISIONS.md` §§ H, I)⟩** A read-only reconciliation pass
+    (`136-NOVELTY-PRIOR-ART.md`) found decisions E/E′/F/G recorded but never propagated into the
+    documents that implement them, and separately surfaced two open questions the owner then ruled on.
+    **H — a TENTH shade, `container_predicts`.** The prior-art pass measured a real "witness" shape
+    under the OLDER five-way title-gate vocabulary — a catalogue names a broader standard-rite
+    prayer-book/cycle/ceremony whose predictable content includes the claimed unit without naming it
+    (1,327 of 20,410 in-scope rows, 6.5%, in that population) — which the CURRENT shade enum had no
+    bucket for and would misfile as `fills_gap`. Owner: adopt the concept as a shade, under a
+    NON-colliding name — "witness" already names five other distinct concepts in this project (per the
+    prior-art pass's own sweep). **Chosen name: `container_predicts`**, verified to collide with nothing
+    else in the codebase or specs. **The shade enum widens from NINE to TEN values**, `container_predicts`
+    inserted immediately before `fills_gap` — the shade it would otherwise be misfiled into by
+    elimination. Adopted DEFINITION is VERBATIM from the prior measured work; only the name changes.
+    **Treatment: excluded from "Candidates for new finds" like every non-`fills_gap` shade, but — UNLIKE
+    `diverges_work`/`diverges_part` — NOT hidden by default.** Ruling F's default-hidden posture was
+    specifically about rows the owner has measured reason to believe are OUR false positives; that
+    reasoning does not apply here, because there is no disagreement between the aid and the claim — the
+    container predicts the unit, it just doesn't name it. A future implementer must NOT generalise F's
+    hiding rule onto this shade. `novelty_source_label` populates on `container_predicts` exactly as it
+    already does on the other aid-says-something shades. **I — re-measure the pinned gate on the
+    WIDENED task before the production run.** Decision B ("run now, pinned") stands as an intention but
+    is now CONDITIONED: the pinned config's validation (40/40 agreement; 99% vs 103 human grades) covers
+    the FIVE-way vocabulary and the ORIGINAL one-title-string input contract ONLY — it does NOT cover the
+    ten-value shade enum or ruling G's free-text input contract. Owner: run the pinned config against the
+    owner-labelled evaluation set on the NEW vocabulary/contract FIRST, and only THEN authorize the
+    production run. The `~$27` figure on record is a COST estimate carried forward by size-extrapolation
+    — NEVER cite it as accuracy evidence for this widened task. **Consequence for the evaluation set:**
+    per the prior-art pass's own §5c/§7 recommendation, a NEW Class 7 (liturgical-container
+    predictability, ~12 cases) is added to the hard-case worksheet, built with the identical
+    zero-model-call, script-reproducible selection discipline used for Classes 4-6 — so the model's FIRST
+    encounter with the `container_predicts` question is a graded evaluation, never production. Measured
+    outcome (this continuation): 12 Class 7 candidates added, total candidate pool **95** (83 + 12; every
+    prior candidate unchanged). Implemented by the SAME plans decision E already named (**136-04** — the
+    shade classifier widens to ten values, Task 3 gains the ruling-I re-measurement as a NEW acceptance
+    criterion gating the production run; **136-06/136-12** — schema/build wiring for the ten-value CHECK;
+    **the release verifier**; **136-05** — allowlist covers the ten-value set), plus — newly, per H's
+    display distinction — **136-15/136-16/136-17/136-18** must render `container_predicts` NORMALLY, not
+    behind ruling F's toggle. NOT implemented in this plan (136-03) beyond amending this requirement and
+    extending the hard-case candidate set (Task 3) — the re-measurement itself is 136-04 Task 3's job.
+    This same continuation ALSO performs the surgical reconciliation the prior-art pass found overdue:
+    `136-04-PLAN.md`, `136-12-PLAN.md`, `docs/specs/discovery-sidecar-schema-v1.md` and
+    `.planning/ROADMAP.md` success criterion 6 are brought into agreement with this ten-value enum. The
+    CANONICAL, single-cited restatement of the full enum going forward is `docs/specs/discovery-novelty-v1.md`
+    (136-04's own artifact, not yet written as of this amendment) — every document above cites it or
+    `136-GATE1-DECISIONS.md` §§ E-H rather than re-deriving the list, except the SQL CHECK constraint in
+    the schema doc, where a second literal restatement is unavoidable. Full rationale, the adopted
+    definition and the enumerated downstream-contract list are recorded in `136-GATE1-DECISIONS.md`
+    §§ H, I.
 - [ ] **NOVEL-02**: The novelty flag's **provenance** (`known_source` — which aid already had it) is masked on the public side: the boolean is publishable, but a restricted-corpus provenance value collapses to a non-identifying label (e.g. "recorded in a restricted corpus"), never the corpus name, and passes the DATA-05 masking scan on every surface that renders or exports it — including copy/clipboard output, JSON payloads, and error paths. Public surfaces therefore support "filter **and explain**" only where the explaining source is itself public; elsewhere they support "filter only". The heuristic-plus-LLM funnel's verdict cache is a build-time artifact and is never shipped in the sidecar
 
 ### Bands & Certification
