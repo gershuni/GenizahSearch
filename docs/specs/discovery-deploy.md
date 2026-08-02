@@ -94,6 +94,19 @@ python scripts/check_atlas_masking.py --scan-sqlite $DB --scan-asset $DB --scan-
 Both MUST exit 0. If either fails, STOP — do not upload. (These are the same
 gates 134-07 already passed for the current frame; re-run them on any rebuild.)
 
+> **⚠ Amendment 2026-08-02 (Phase 136) — `$FRAME` here is NOT an externally
+> pinned value.** It is read from the CANDIDATE build's own `manifest.json` —
+> the artifact being verified vouching for itself. That can prove internal
+> self-consistency (the DB matches the frame it claims) but it CANNOT detect
+> a wrong rebuild (a build over the wrong inputs still produces an internally
+> self-consistent manifest). For the Phase-136 rebuild, `$FRAME` MUST instead
+> be the PRE-rebuild frame hash from an externally pinned source — today that
+> is `docs/specs/discovery-frames-v2.md` §1 `frame_content_hash`
+> (`53725098…`, the currently-deployed v2 frame), superseded once plan 136-05
+> lands its rebuild-preservation baseline artifact (pinned from the live
+> asset BEFORE the rebuild begins). See the `## Amendment 2026-08-02` section
+> below for the full rebuild-preservation gate this feeds.
+
 ### 2.2 Upload the asset first (temp name → final name)
 
 `scp` the `.db` to the box's `discovery_data/` while the live `manifest.json`
@@ -132,7 +145,12 @@ export PYTHONUTF8=1
 export MASKING_SCAN_PATTERNS_FILE=.masking_patterns
 # resolve the staged asset_basename from the CANDIDATE manifest, not the live one:
 STAGED_DB="discovery_data/$(python -c "import json;print(json.load(open('discovery_data/manifest.json.candidate'))['asset_basename'])").db"
-STAGED_FRAME="$(python -c "import json;print(json.load(open('discovery_data/manifest.json.candidate'))['frame_content_hash'])")"
+# ⚠ Amendment 2026-08-02 (Phase 136): do NOT read the expected frame hash from
+# the candidate manifest being verified (self-vouching — see the §2.1 note
+# above). Pin it from an EXTERNAL source instead: the pre-rebuild frame from
+# docs/specs/discovery-frames-v2.md §1, or plan 136-05's rebuild-preservation
+# baseline once it lands.
+STAGED_FRAME="<external pinned frame_content_hash — docs/specs/discovery-frames-v2.md §1, or the 136-05 rebuild-preservation baseline>"
 
 python scripts/verify_discovery_sidecar.py "$STAGED_DB" --expected-frame-hash "$STAGED_FRAME"
 python scripts/check_atlas_masking.py --scan-sqlite "$STAGED_DB" --scan-asset "$STAGED_DB" --scan-repo --strict
@@ -140,7 +158,10 @@ python scripts/check_atlas_masking.py --scan-sqlite "$STAGED_DB" --scan-asset "$
 
 Both MUST exit 0 on the box before the swap. This re-checks the asset AT ITS
 DESTINATION (defends against a corrupt transfer) and re-runs the masking gate
-against the exact bytes that will go live.
+against the exact bytes that will go live. **Reading `frame_content_hash` FROM
+the staged candidate manifest itself (the pre-2026-08-02 form of this command)
+cannot detect a wrong rebuild** — a build over the wrong inputs still produces
+an internally self-consistent manifest that would pass its own self-check.
 
 ### 2.5 ATOMIC live-manifest swap
 
@@ -208,11 +229,16 @@ re-point forward. This proves the swap is reversible before it matters.
 
 ## 4. REBUILD (reproducible)
 
-The build is fully reproducible from four pinned inputs + a precision source.
-Re-using the durable `crosswalk.json` keeps every opaque `work_id` stable across
-re-distillations (a deferred work added later never disturbs a shipped id). The
-source-DB + crosswalk SHA-256 hashes are recorded in the built `meta` (and in
-`docs/specs/discovery-frames.md`), so any rebuild is auditable against the frame.
+**⚠ Amendment 2026-08-02 (Phase 136): the command below was corrected.** The
+prior form of this command was v1-shaped — it named only the source DB,
+`--from-approved`, `--crosswalk`, `--research-data-dir`, `--libraries-csv`,
+`--fjms-db` and `--out`, silently OMITTING the three v2-specific hash-pinned
+inputs (`--canonical-merges`, `--composition-dates`, `--seftja-dates`) the
+LIVE deployed v2 asset actually requires. A rebuild run against the OLD command
+would silently drop those inputs and produce a v1-shaped asset, not a v2
+rebuild. The corrected command below names all seven pinned inputs (crosswalk
++ the three v2 inputs, each with its SHA-256) explicitly rather than
+defaulting:
 
 ```powershell
 # dev box (Windows / PowerShell). Exact filenames only; no glob.
@@ -221,27 +247,51 @@ $env:MASKING_SCAN_PATTERNS_FILE = '.masking_patterns'
 
 python scripts/build_discovery_sidecar.py `
     same_work_spike/probe/data/fullcorpus_v2.db `
-    --from-approved   discovery_data/discovery-review-approved-final.csv `
-    --crosswalk       discovery_data/crosswalk.json `
-    --research-data-dir same_work_spike/probe/data `
-    --libraries-csv   libraries.csv `
-    --fjms-db         fist_data/fjms_enrichment.db `
-    --out             discovery_data/discovery-v1-<new_content_hash>.db `
+    --from-approved              discovery_data/discovery-review-approved-final.csv `
+    --crosswalk                  discovery_data/crosswalk.json `
+    --canonical-merges           same_work_spike/probe/rsource/data/v2_canonical_merges.json `
+    --canonical-merges-sha256    cc054d111b9b4a76dd69912923ba50cd2b63f7820cb632617f645c12c207429a `
+    --composition-dates          discovery_data/composition_dates.json `
+    --composition-dates-sha256   2b46b4708ddccb9f26961dcb9ba6d62b23d64cc1da225d133af1be21bf2e9476 `
+    --seftja-dates               same_work_spike/probe/rsource/data/seftja_dates.json `
+    --seftja-dates-sha256        0076028917c60044ac72ee36504c173b9e6decd0a5aef9890ec0f0fe934b22d7 `
+    --research-data-dir          same_work_spike/probe/data `
+    --libraries-csv              libraries.csv `
+    --fjms-db                    fist_data/fjms_enrichment.db `
+    --out                        discovery_data/discovery-v1-<new_content_hash>.db `
     --release `
-    --frozen-precision-defaults
+    --precision-spec             <path to the §1.6-amended precision spec — see the note below>
 ```
+
+The three v2 SHA-256 pins above are the CURRENTLY-DEPLOYED values, recorded in
+`docs/specs/discovery-frames-v2.md` §1 (`canonical_merges_sha256` /
+`composition_dates_sha256` / `seftja_dates_sha256`) alongside `source_db_sha256`
+and `crosswalk_sha256`. **Re-verify them against the live asset's own `meta`
+table before reusing them for a new rebuild** — if the owner-held source files
+named above have moved or changed since the 135-07 bake, the correct current
+paths and hashes must be re-pinned here as a further dated amendment, never
+silently substituted with a default.
 
 Notes:
 
 - `--release` REQUIRES a precision source: either `--frozen-precision-defaults`
-  (bakes the pre-registered contract precision — what the current frame uses) OR
-  `--precision-spec <json>` (an explicit spec, validated against the frozen
-  release band_precision). The two are one-or-the-other.
+  (bakes the UNAMENDED pre-registered contract precision — insufficient for
+  this rebuild, since it does not carry the §1.6 `tier_a` authorization from
+  `docs/specs/discovery-sidecar-schema-v1.md`'s 2026-08-02 amendment) OR
+  `--precision-spec <json>` (an explicit spec, validated by
+  `_validate_precision_spec` against the frozen release `band_precision`
+  row-set). **The Phase-136 rebuild REQUIRES `--precision-spec`** — the spec
+  JSON must be the frozen §1.6 row-set WITH the amended `tier_a` row
+  (`measurement_status='measured_pass'`, `ci_low=0.9084`, `precision` still
+  NULL); `--frozen-precision-defaults` would silently omit that authorization.
 - The build writes `discovery_data/manifest.json` alongside the `.db`; its
   `asset_basename` == the `.db` stem, its `content_hash` == the DB bytes' SHA-256,
   and its `frame_content_hash` == the membership-based frame hash. The final
   filename is chosen by the build's own content hash — set `--out` to the exact
-  intended name (or let the build name it and read the manifest back).
+  intended name (or let the build name it and read the manifest back). **This
+  self-reported `frame_content_hash` is NEVER the value used as
+  `--expected-frame-hash` when verifying THIS SAME build** — see the §2.1/§2.4
+  external-pin notes above and the Amendment section below.
 - `--include-masked-metadata` (default OFF) only ever ungates raw author/genre
   for M-source works; it NEVER ungates the M-source title. Do not pass it for a
   public release build.
@@ -250,7 +300,36 @@ Notes:
 A full rebuild + re-deploy of the SAME membership produces the SAME
 `frame_content_hash` (volatile `meta` excluded from the hash), so a rebuild that
 changes the frame hash means the membership changed — treat that as a NEW
-versioned frame (`discovery-frames-v2.md`), not an in-place swap.
+versioned frame (`docs/specs/discovery-frames-v2.md`, dated-amended in place),
+not an in-place swap. The Phase-136 rebuild is ADDITIVE (new columns/tables
+only, no membership change), so its `frame_content_hash` is EXPECTED to equal
+the pre-rebuild value (`53725098…`) — an unexpected change here is a signal to
+investigate before deploying, not to update the pin and proceed.
+
+## Amendment 2026-08-02 (Phase 136) — externally pinned frame hash + rebuild-preservation gate
+
+**Reading the expected frame hash from the candidate build's own manifest cannot detect a wrong
+rebuild** (D-02b) — a build run over the wrong inputs still produces an internally self-consistent
+manifest whose `frame_content_hash` matches its own DB. This amendment corrects that at both points in
+§2 where `$FRAME`/`STAGED_FRAME` was previously read from the artifact being verified:
+
+- **§2.1 (dev-box build verify):** `$FRAME` must be an EXTERNALLY pinned value, not read from the
+  just-built `manifest.json`.
+- **§2.4 (staged pre-swap verify):** `STAGED_FRAME` must be an EXTERNALLY pinned value, not read from
+  `manifest.json.candidate`.
+
+**The pinned source, until plan 136-05 lands:** `docs/specs/discovery-frames-v2.md` §1
+`frame_content_hash` (`53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7`) — the frozen,
+committed, pre-Phase-136 frame identity. **Once plan 136-05's rebuild-preservation gate lands** (pinned
+from the live asset BEFORE this rebuild begins — the full old/new allowlisted-diff gate D-02b
+describes: every pre-existing column byte-identical, only the new coverage/novelty/visibility columns
+and the amended `tier_a` registry row permitted to differ), its baseline artifact supersedes
+`discovery-frames-v2.md` as the authoritative external pin for this specific rebuild, and this note
+should be updated to point at it by name.
+
+This amendment does not itself change the deploy MECHANISM (the atomic manifest swap, the
+exact-basename resolver, and the rollback procedure in §1-§3 above are unaffected) — it changes WHERE
+the verification commands' expected-frame-hash value comes from.
 
 ---
 

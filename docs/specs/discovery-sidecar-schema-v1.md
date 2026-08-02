@@ -681,8 +681,235 @@ NO row is populated by 135-05 — this is DDL + vocabulary only.
 
 ---
 
+## Amendment 2026-08-02 (Phase 136)
+
+This dated amendment ADDS to the frozen contract above (the "Frozen Enum Vocabularies" block, §1-§9,
+and the 2026-07-24 amendment are left UNTOUCHED in place — dated-amendment discipline, never a silent
+edit). It defines, as contract, EVERY field and table the ONE authorized Phase-136 rebuild adds.
+**Nothing outside this list is authorized to appear in the asset.** `scripts/build_discovery_sidecar.py`
+and `scripts/verify_discovery_sidecar.py` implement against this section; plans 136-05/136-06/136-11/
+136-12 consume it.
+
+### (A) `discovery_evidence` / `discovery_claim` additions
+
+- **`coverage_ppm`** (`discovery_evidence`, INTEGER, indexed) — an indexed fixed-point integer:
+  `round(matched_letters / page_norm_letters * 1_000_000)`, DIRECT FAMILY ONLY
+  (`evidence_source='track1_direct'`). Propagated rows carry NO coverage value — `coverage_ppm IS
+  NULL` for every `evidence_source='propagated'` row (all shipped propagated evidence rows have NULL
+  `matched_letters` today). The number is MATCHED-LETTER coverage, never bare "of page" — display
+  wording must say so explicitly. A companion **`coverage_status`** TEXT validity enum (`{measured,
+  no_denominator, not_applicable}` — `not_applicable` for propagated rows, `no_denominator` when
+  `page_norm_letters` is zero/missing for a direct row) records why a value is or is not present, so an
+  absent `coverage_ppm` is never misread as zero coverage.
+- **`band_rank`** (`discovery_evidence`, INTEGER, indexed) — a MATERIALIZED integer sort key mirroring
+  the existing §6 global band-rank lattice (`track1_direct`/`expert_verified` = 1 … `propagated`/
+  `not_evaluated` = 7), computed once at build time so the findings page and the panel never recompute
+  the CASE-based rank at query time (D-10a).
+- **`novelty_status`** (`discovery_evidence`, TEXT, indexed on the status, not on a boolean) — a
+  TRI-STATE CLOSED vocabulary: `not_in_finding_aids` / `already_recorded` / `not_checked` (ROADMAP
+  SC-6's names — see `.planning/REQUIREMENTS.md`'s NOVEL-01 2026-08-02 amendment for the D-23a alias
+  mapping), **DEFAULTING to `not_checked`**. Computed for ALL evidence families (`track1_direct` AND
+  `propagated`) — this is the coverage-gap fix the frozen v2 asset left open (all 254,612
+  `track1_direct` rows shipped at `is_new = 0`, meaning UNCHECKED, not "known"). This is the field a
+  read path filters/groups on; the legacy `is_new` boolean stays in the schema unmodified for
+  read-compat but is no longer the query target.
+- **`novelty_source_label`** (`discovery_evidence`, TEXT, nullable) — populated only when
+  `novelty_status='already_recorded'`; values are the MASKED label set ONLY — name the source where
+  nameable (e.g. "recorded in the FJMS catalogue"), otherwise the fixed fallback "recorded in another
+  reference source". The raw provenance value (which finding aid, which restricted corpus) is NEVER
+  stored in the asset — masked at build time, before this column is written (NOVEL-02).
+- **`assertion_visibility`** and **`identity_visibility`** (`discovery_evidence` / `works`
+  respectively, TEXT, closed `{public, private}` enums) — the VIS-01 two-axis derivation (D-22):
+  `assertion_visibility` is derived from the raw evidence origin (per evidence row),
+  `identity_visibility` from the displayed work's origin (per work). **Public eligibility requires
+  BOTH to be `public`.** Neither axis is a proxy for the other — `works.source_corpus` alone is
+  insufficient (a restricted-corpus id prefix maps to both restricted-identity AND open-identity works
+  in the live asset — 656 restricted-identity works AND 235 open (Sefaria) ones).
+
+### (B) New tables
+
+```sql
+CREATE TABLE discovery_identification (
+  identification_id   TEXT PRIMARY KEY,   -- deterministic content key — see the ID recipe below
+  sys_id              TEXT NOT NULL,
+  canonical_work_id   TEXT NOT NULL,
+  display_work_id     TEXT NOT NULL REFERENCES works(work_id),  -- see (B1) — NEVER canonical_work_id
+  main_pool           INTEGER NOT NULL,   -- boolean (0/1)
+  main_pool_reason    TEXT NOT NULL CHECK (main_pool_reason IN (
+                         'shared_wording','overlapping_tie','low_coverage',
+                         'insufficient_length','missing_signal',
+                         'main_multifolio','main_full_coverage','main_human_confirmed')),
+  best_band_rank      INTEGER NOT NULL,
+  page_count          INTEGER NOT NULL,
+  max_coverage_ppm    INTEGER,            -- NULL when no direct-family evidence contributes
+  relation_kind       TEXT NOT NULL,      -- the display relation ("direct match"/"partial match"/"shared text") basis
+  novelty_status      TEXT NOT NULL CHECK (novelty_status IN
+                         ('not_in_finding_aids','already_recorded','not_checked')),
+  assertion_visibility TEXT NOT NULL CHECK (assertion_visibility IN ('public','private')),
+  identity_visibility  TEXT NOT NULL CHECK (identity_visibility IN ('public','private')),
+  UNIQUE (sys_id, canonical_work_id)
+);
+CREATE TABLE manuscript_display (
+  sys_id              TEXT PRIMARY KEY,
+  library_code        TEXT NOT NULL,
+  library_sort_key    TEXT NOT NULL,
+  shelfmark_display   TEXT NOT NULL,
+  shelfmark_sort_key  TEXT NOT NULL
+);
+```
+
+`discovery_identification` is one row per `(sys_id, canonical_work_id)` — the identification grain the
+main-pool bucket rule (`.claude/skills/sketch-findings-genizahsearch/references/main-pool-rule.md`) and
+the findings page both operate on. `identification_id` is a deterministic content key, recipe frozen in
+the same style as §2's existing ID recipes: SHA-256 over
+`"discovery_identification_v1|{sys_id}|{canonical_work_id}"`, UTF-8 encoded, backed by the
+`UNIQUE(sys_id, canonical_work_id)` constraint above. `main_pool_reason` is a CLOSED vocabulary — five
+reasons that send an identification to "more matches" (mirroring the four main-pool-rule gates plus the
+shared-wording no-same-work-claim case) and three AFFIRMATIVE reasons recording why an identification
+landed in the main pool (`main_multifolio`, `main_full_coverage`, `main_human_confirmed`) — a value
+outside this list is a build error, never a silent default. `manuscript_display` is sourced ONLY from
+`libraries.csv` (masking-safe catalogue metadata — the same source the existing panel/browse surfaces
+already read) and carries NO work title, NO reference text, and NO locus; it exists purely so the
+findings page and panel can sort/display library + shelfmark without a per-row `libraries.csv` lookup
+at request time.
+
+#### (B1) `display_work_id` — the canonical-identity grain is NOT unambiguous
+
+Measured on the live asset: `works` contains **15 duplicated `canonical_work_id` groups**, three of
+them carrying DIFFERENT titles AND mixed source corpora. Joining the 64,509-row identification grain
+to `works` on `canonical_work_id` therefore yields **65,587 rows** — a FAN-OUT, not a lookup. Left
+unaddressed, title selection and `identity_visibility` are undefined for those groups, and a PRIVATE
+work in a duplicated group could influence what looks like a shared public aggregate.
+
+`display_work_id` is the deterministic REPRESENTATIVE of the canonical group, selected by an ORDERED,
+TOTAL rule — never "whichever row the join returns":
+
+1. Prefer the row whose `work_id == canonical_work_id` (the canonical anchor, if it is itself a
+   member of its own group).
+2. Else prefer the row with the LOWEST `source_corpus` in the fixed order `sefaria < ja < msource`
+   (public-before-private, so a mixed-visibility group's representative is public whenever a public
+   member exists).
+3. Else (a tie within the same `source_corpus`) the lexicographically SMALLEST `work_id`.
+
+This selection is deterministic and total over every duplicated group. Every identity join — title,
+author, `identity_visibility` — reads `display_work_id`, NEVER `canonical_work_id`; the join from
+`discovery_identification` to `works` is REQUIRED to be exactly 1:1 (`COUNT(*)` after the join must
+equal the identification row count — a release-verifier check). The public projection RECOMPUTES each
+identification's `main_pool`/`best_band_rank`/`novelty_status`/etc. from its OWN surviving public
+claims rather than copying the private row's values, so a private contribution can never survive into
+the public asset as part of a shared aggregate.
+
+### (C) `works.genre` — an EXISTING column, populated and constrained
+
+`genre` ALREADY EXISTS on `works` (§1.1 above) and is NULL on all 1,269 rows today; this amendment does
+**NOT** add it — no schema migration that introduces a new `genre` column (an `ALTER TABLE` DDL
+statement targeting this field) may ever be emitted, because the column already exists. The change this
+rebuild makes is that the column BECOMES populated from a curated, hash-pinned artifact (the ~1,088-work
+one-time domain-curation pass) and CONSTRAINED to the FJMS closed domain vocabulary (39 parents / 202
+leaves, bilingual) or to an explicit `Unassigned` value — never silently NULL-as-absent. Assignment is
+at the CANONICAL work level (via `display_work_id`, so a duplicate is never assigned twice), and a
+value outside the closed vocabulary is a BUILD ERROR, never a new ad hoc domain. The same curation pass
+also produces the author alias map referenced in plan 136-09.
+
+### (C1) `meta.audience`
+
+Add **`meta.audience`** — a closed enum, `public` | `private`, written by the private build (`private`)
+and by the public-projection step (`public`). This is the field the RUNTIME LOADER gates on so a public
+route can never resolve a private artifact by accident — without it the public/private exclusion is
+procedural (a code-review discipline) rather than STRUCTURAL (a fact the loader itself can check). Add
+the release-contract count meta keys for the two new tables alongside it, following the existing §1.5
+convention: `expected_rows_discovery_identification`, `expected_rows_manuscript_display` — the startup
+readiness contract validates counts from `meta`, and these two new tables need the same validation as
+`expected_rows_claims`/`expected_rows_evidence`/`expected_rows_works`/`expected_rows_units`.
+
+### (D) Index set (D-10a)
+
+- A composite ordering index over `discovery_identification(main_pool, best_band_rank,
+  max_coverage_ppm)` — the findings-page default sort (main pool first, tier-first within it).
+- Lookup indexes on `discovery_identification(canonical_work_id)` and
+  `discovery_identification(sys_id)`.
+- An index on `manuscript_display(library_sort_key, shelfmark_sort_key)` — the deterministic
+  library-then-shelfmark sort the work page and the findings page both need.
+- A UNIQUE index on `discovery_claim(display_evidence_id)` — D-10a's measured findings-query fix.
+- An index on `discovery_evidence(novelty_status)` — the STATUS column, replacing the legacy `is_new`
+  boolean as the indexed filter target (the boolean stays in the schema for read-compat, unindexed as a
+  filter basis).
+
+### (E) The narrow §1.6 `tier_a` amendment (D-02a)
+
+Amend the FROZEN `band_precision` row-set (§1.6 above, left otherwise untouched) to permit — for the
+`tier_a` band ONLY (`scope='band'`, `evidence_source='track1_direct'`, `confidence_band='tier_a'`) —
+`measurement_status = 'measured_pass'` and `ci_low = 0.9084` (the CERT-01 measured lower confidence
+bound), while **`precision` STAYS NULL**. No other row in the frozen §1.6 set changes.
+
+**Reasoning, stated in the contract:** this stores the AUTHORIZATION that `is_default_eligible()` reads
+(`measurement_status == 'measured_pass' AND ci_low is not None AND ci_low >= STRICT_FLOOR`) — NOT an
+estimate. `tier_a` becomes default-visible because its certificate PASSED, while the asset still stores
+zero numeric precision for it, which is exactly what keeps the asset consistent with the D-06
+no-numbers posture: the band goes default-shown on the strength of a pass/fail authorization, never on
+the strength of a displayed number.
+
+**Lockstep sites (enumerate — all six move together, one bake, per the discipline in §5 above):**
+
+1. This §1.6 row-set (the frozen contract, amended here).
+2. `scripts/build_discovery_sidecar.py::_frozen_real_band_precision_rows` — the ONE source of truth
+   the builder reads (must emit the same `measurement_status`/`ci_low` for the `tier_a` row).
+3. `scripts/build_discovery_sidecar.py::_validate_precision_spec` — the cross-check gate for any
+   explicit `--precision-spec` (must accept the amended row and continue to reject a non-NULL `tier_a`
+   `precision`).
+4. `scripts/verify_discovery_sidecar.py`'s release-strict tier-A check (M4) — must be updated to
+   accept `measurement_status='measured_pass'`/`ci_low=0.9084` on `tier_a` while continuing to REJECT
+   any non-NULL `tier_a` `precision`.
+5. The `band_precision` INSERT column list (`scripts/build_discovery_sidecar.py`, the
+   `measurement_status` column already exists per the 2026-07-24 amendment above) — must carry the
+   amended `tier_a` values through to the built row.
+6. The schema/builder/verifier tests — REQUIRE fixtures proving BOTH branches: a `tier_a` row at
+   `measurement_status='measured_pass'`/`ci_low=0.9084` PASSES verification and reads
+   default-eligible=True; a `tier_a` row with any non-NULL `precision`, OR a `ci_low` below
+   `STRICT_FLOOR` (0.85), OR a `measurement_status` other than `measured_pass` FAILS verification /
+   reads default-eligible=False.
+
+### (F) `discovery_routing_audit` — `kept_tie` rows must carry `demoted_work_id`
+
+The 2026-07-24-amendment `discovery_routing_audit` table (§ above) is amended: every row with
+`decision='kept_tie'` MUST carry a non-NULL `demoted_work_id` — a NULL `demoted_work_id` on a
+`kept_tie` decision makes the tie pair unreconstructable from the audit table alone (there is no way to
+tell which two works were tied). The build must populate `demoted_work_id` for every `kept_tie` row it
+writes; the release verifier gains a check rejecting any `kept_tie` row with a NULL `demoted_work_id`.
+
+### (G) A standing schema rule — every offset column names its coordinate space
+
+**Every offset column in this schema names the coordinate space it indexes, at the point of
+definition.** This is stated here as a STANDING RULE, not a one-off note, because the same trap has
+already been found twice (the manuscript side in Phase 136, the work side deferred to
+discovery-v2.1). Applied RETROACTIVELY to the existing §1.3 columns: **`span_start`/`span_end` index
+the NORMALIZED Hebrew-letter stream** (the `norm_stream_letter_count`/`compute_page_coverage` space in
+`scripts/build_discovery_sidecar.py`), **NOT raw page text** — slicing raw text at these offsets lands
+in the wrong place (652 characters off on the sampled case). Any future offset column (e.g. a
+discovery-v2.1 `w_start`/`w_end` on the work side) MUST state its coordinate space in the same
+sentence that defines it.
+
+### (H) Explicitly OUT of this rebuild
+
+`w_start`/`w_end` (work-side match offsets) and the Sefaria versemap reference-resolution stage are
+DEFERRED to discovery-v2.1 by owner decision 2026-08-02 (`136-CONTEXT.md` RE-SCOPE block) — they serve
+only the reference-side locus and the side-by-side evidence view, both moved to Phase 136.1/v2.1, and
+they carried the build's hardest work (the `body` ↔ `norm_stream` coordinate mapping). **No field for
+either may appear in this asset.** A schema reviewer finding a `w_start`/`w_end`-shaped column, or a
+versemap-derived reference field, on the `discovery_evidence`/`discovery_claim`/`works` tables in this
+rebuild has found a build error.
+
+---
+
 *This document is FROZEN as of 2026-07-22 (plan 134-01, Task 1). Later
 Phase 134 plans (fixture/distillation/loader/service/frame) implement
 against this contract; any correction requires a new dated amendment
 section here, never a silent edit. Dated amendments: 2026-07-24 (Phase 135,
-plan 135-05 — v2 vocabulary + registry lockstep).*
+plan 135-05 — v2 vocabulary + registry lockstep); 2026-08-02 (Phase 136,
+plan 136-01 — the trimmed-rebuild new-field contract: coverage_ppm,
+band_rank, novelty_status/novelty_source_label, the VIS-01 visibility axes,
+discovery_identification, manuscript_display, display_work_id, the
+works.genre population rule, meta.audience, the D-10a index set, the narrow
+§1.6 tier_a authorization, the discovery_routing_audit demoted_work_id fix,
+the offset coordinate-space standing rule, and the explicit v2.1 deferral of
+w_start/w_end + versemap resolution).*
