@@ -13,6 +13,13 @@ still-open `checkpoint:human-action` (see the executor's completion report). **T
 content hash, and the corresponding entry in this record are PENDING and will be appended once
 Task 3 returns.**
 
+**Addendum, 2026-08-02 (same day, later dispatch).** The owner issued ONE more ruling after A-D
+above -- **Decision E**, amending the locked D-23a tri-state and NOVEL-01 to a seven-value shade
+enum. See **section E** below, appended after section D. This does NOT reopen A-D; those remain
+LOCKED exactly as recorded above. Decision E was first attempted through an inter-agent side
+channel and correctly refused as a possible injection before being re-delivered through a normal
+orchestrator dispatch -- see section E's own Provenance note for the full account.
+
 ---
 
 ## A. The five gate-1 decisions
@@ -173,11 +180,20 @@ Task 3 returns.**
   corpus noise -- largest cluster first, up to 2 manuscripts per cluster). **Total candidate pool:
   82** (52 original + 15 + 15), written to `136-NOVELTY-HARDCASES.md` (verified reproducible: two
   consecutive runs against the same asset produce byte-identical Markdown).
-- **Evaluation-set size vs. candidate-pool size:** 82 is the size of the candidate pool put in front
-  of the owner at Task 3, not yet the size of the labelled evaluation set -- that is determined by
-  how many cases the owner actually labels (`already_recorded` / `not_in_finding_aids` / `unsure`)
-  versus explicitly skips at Task 3, which has **not yet run** (see Status note above and the
-  executor's `human-action` checkpoint).
+- **Evaluation-set size vs. candidate-pool size:** 82 was the size of the candidate pool put in
+  front of the owner at the first Task-3 attempt, not yet the size of the labelled evaluation set.
+  **Updated by decision E (this same plan, later dispatch):** a sixth class -- catalogue divergence,
+  the shade decision E calls `diverges` and names as having ZERO representation across Classes 1-5
+  -- was added per this plan's own Task 3 instruction, using the identical zero-model-call,
+  script-reproducible selection discipline (`select_catalogue_divergence_candidates` in
+  `scripts/discovery_gate1_evidence.py`, round-robined across distinct divergent-work targets so no
+  single frequently-quoted title crowds out the others -- mirroring Class 5's cluster round-robin).
+  Measured result: **15** Class 6 candidates, bringing the **total candidate pool to 97** (82 + 15;
+  every one of the original 82 kept unchanged in content, verified by two consecutive script runs
+  producing byte-identical Markdown). The effective (as opposed to candidate-pool) evaluation-set
+  size is still determined by how many of the 97 the owner actually labels (one of the seven
+  decision-E shades, or `unsure`) versus explicitly skips at Task 3, which has **not yet run** (see
+  the Status note above and the executor's `human-action` checkpoint).
 
 ## D. The `needs-ruling` domain rows
 
@@ -193,6 +209,153 @@ Task 3 returns.**
   `Unassigned` bucket. **No such list exists yet -- plan 136-09 produces it** as part of its own
   execution; this record only fixes the posture (owner rules, no silent default) that 136-09 must
   honor.
+
+---
+
+## E. Novelty becomes a SHADE ENUM, not a tri-state (amends D-23a / NOVEL-01)
+
+- **Question:** does the tri-state novelty flag (`not_in_finding_aids` / `already_recorded` /
+  `not_checked`) correctly distinguish the qualitatively different findings a computed
+  identification can represent, or does it collapse materially different cases into the same
+  bucket?
+
+- **Owner's answer (verbatim ruling, condensed for this record -- the full text is reproduced
+  below):** "Novelty becomes a SHADE ENUM, not a tri-state. Amends D-23a and NOVEL-01." The owner
+  identified a defect in the locked tri-state. Under NOVEL-01's rule ("does ANY finding aid already
+  tie THAT fragment to THAT work"), two very different situations collapse wrongly:
+
+  1. If an aid ties fragment F to work X and we claim work Y, nothing ties F to Y -- so it scores
+     `not_in_finding_aids` and surfaces under "Candidates for new finds". But that is not a new
+     find; it is a claim that THE CATALOGUE IS WRONG about this page -- a different and far more
+     reputationally loaded assertion, currently voiced as novelty.
+  2. Conversely a granularity refinement (aid names the parent work, we name the specific book)
+     scores `already_recorded` and becomes invisible, though it is genuinely informative. Class 3 is
+     20 such cases; the D-13d author-gated rule measured 276 such groups (of 1,367 identical-span
+     groups carrying >=2 different canonical works -- see section A's D-13d entry above).
+
+  **Ruling: store the full shade set in the asset; ship a conservative public toggle.**
+
+  | Shade | Condition on claim (fragment F, work W) |
+  |---|---|
+  | `confirms` | an aid already ties F to W |
+  | `refines_granularity` | an aid ties F to a coarser/finer variant of W, per the D-13d author-gated rule |
+  | `diverges` | an aid ties F to a different work that is NOT a granularity variant |
+  | `fills_gap` | the aids identify F as nothing at all -- the true "previously unknown" |
+  | `extends` | aids tie OTHER folios of the same manuscript to W, but not this folio |
+  | `alias_merge` | the claim asserts two catalogued works are one (Class 2's situation) |
+  | `not_checked` | fail-closed: unrun, failed, or abstained (D-23c structured abstention) |
+
+  **The public surface is UNCHANGED IN SHAPE.** "Candidates for new finds" selects `fills_gap`
+  ONLY. `diverges` and `extends` are EXCLUDED from the candidate toggle -- a contradiction is not a
+  new find, and a folio-extension is nearly always right and unremarkable. `refines_granularity` is
+  stored but never voiced as a new find. No new public filter values, no new bilingual surface
+  wording, no change to D-15/D-15a/D-16, no change to D-24's orthogonality to tier. The finer shade
+  exists in the asset for Phase 137's judgments and any later filter. `not_checked` remains the
+  fail-closed default -- never "novel by default".
+
+  Owner's stated rationale, for the record: novelty is not binary; "previously unknown", "sharply
+  diverges from the current identification", and "different granularity" are materially different
+  findings and should not be collapsed.
+
+- **Date:** 2026-08-02 (same day as rulings A-D, delivered later in the session).
+
+- **Provenance note (repudiation-resistance, per threat T-136-03-04).** This ruling was FIRST
+  presented to the prior executor through an inter-agent side channel -- attached to a tool result
+  rather than an orchestrator dispatch -- and was CORRECTLY REFUSED as a possible injection: it
+  asked for unilateral amendment of LOCKED decisions (D-23a, NOVEL-01) with real downstream
+  schema/verifier/LLM-contract consequences, delivered through a channel that cannot establish
+  owner authorship. That refusal cost nothing (no commits needed undoing) and remains the correct
+  standing behavior for any future instruction arriving by a route other than an orchestrator
+  dispatch. Decision E is recorded here only because it was RE-DELIVERED through a normal
+  orchestrator dispatch in the continuation that produced this section, and is treated as an owner
+  ruling of the same standing as A-D above -- LOCKED, not re-litigated, re-derived or "improved"
+  here.
+
+- **Code consequence -- an enum widening, not a data-model change.** The single existing
+  `novelty_status` column (`discovery_evidence`, TEXT, indexed on the status per
+  `docs/specs/discovery-sidecar-schema-v1.md`) keeps its name, its nullability, its default
+  (`not_checked`), and its role as "the field a read path filters/groups on" -- only its permitted
+  value set widens from three values to seven: `confirms` / `refines_granularity` / `diverges` /
+  `fills_gap` / `extends` / `alias_merge` / `not_checked`. The public "Candidates for new finds"
+  predicate becomes `novelty_status = 'fills_gap'` (previously `novelty_status =
+  'not_in_finding_aids'`) -- a one-value substitution, no shape change to the toggle, the badge, the
+  sub-line, or the help-affordance text fixed in NOVEL-01's 2026-08-02 (A-6) amendment.
+  `novelty_source_label` (populated only on a "recorded" outcome) now populates on `confirms` /
+  `refines_granularity` / `alias_merge` / `extends` (every shade where SOME finding aid says
+  something about this fragment-work pair) and stays NULL on `diverges` (the aid names a DIFFERENT
+  work -- the masked label would misleadingly imply agreement) and `fills_gap` (nothing to name).
+
+- **Downstream contracts this decision amends** (enumerated per this plan's Task 1 instruction;
+  **NOT implemented in this plan** -- 136-03 only records the ruling and prepares the ground truth):
+
+  1. **D-23a** (`136-CONTEXT.md`) -- "TRI-STATE, fail-closed" is amended to "SEVEN-VALUE SHADE
+     ENUM, fail-closed"; `not_checked` remains the sole fail-closed default value, unchanged in
+     meaning.
+  2. **NOVEL-01's 2026-07-30 amendment, clause (1)** (`.planning/REQUIREMENTS.md`) -- "The flag is
+     TRI-STATE, fail-closed, not boolean: `not_in_finding_aids` / `already_recorded` /
+     `not_checked`" is superseded by the shade enum; clauses (2) (display wording) and (3)
+     (reviewed novelty identity) are UNCHANGED. Recorded as a new dated `<AMENDED 2026-08-02>`
+     sub-bullet on NOVEL-01 by this plan's Task 2.
+  3. **The `novelty_status` CHECK constraint and its index** in
+     `docs/specs/discovery-sidecar-schema-v1.md` (the `discovery_evidence.novelty_status` column
+     definition, the `discovery_identification.novelty_status` CHECK, and the D-10a index "on
+     `discovery_evidence(novelty_status)` -- the STATUS column, replacing the legacy `is_new`
+     boolean") -- the CHECK's `IN (...)` list widens from three to seven values in both places the
+     schema doc currently states it.
+  4. **The frozen-enum-vocab readiness check** that `web/discovery_assets.py::discovery_available()`
+     fails closed on -- today this runtime spot-check covers `claim_type` (`_CLAIM_TYPES`) and
+     `(evidence_source, confidence_band)` (`_CONFIDENCE_BANDS_BY_SOURCE`) but does NOT yet cover
+     `novelty_status` (novelty is not wired into this module until 136-12/136-14 build it). When it
+     IS wired, the frozenset checked must be the seven-value shade set, not the three-value
+     tri-state -- an out-of-vocab novelty value must fail the whole sidecar load closed, exactly as
+     an out-of-vocab `claim_type` does today.
+  5. **D-23c's pinned LLM contract** (`136-CONTEXT.md`) -- the prompt must now elicit a shade
+     (which finding aid, if any, says what about this fragment-work pair), not a boolean/tri-state
+     judgement, so the PINNED PROMPT HASH necessarily changes from whatever 136-04 would otherwise
+     have pinned. The model, its version, and the reasoning-effort setting (`gemini-3.6-flash`,
+     `effort:"low"`) are UNCHANGED per ruling B above -- only the prompt template's output contract
+     widens.
+  6. **(Beyond this plan's stated minimum, flagged here for completeness.)** The **D-02b
+     rebuild-preservation gate** (plan 136-05, already executed per this plan's own
+     `completed_state`) allowlists "the authorized novelty changes" as one of the few columns
+     permitted to differ between the pre-rebuild and post-rebuild asset. That allowlist entry must
+     be read as covering the SEVEN-value shade set, not the three-value tri-state, when 136-05's
+     diff harness actually runs against the rebuilt asset in wave 5 (136-13) -- no code change is
+     needed in 136-05 itself (the allowlist keys on the COLUMN, `novelty_status`, not its value
+     vocabulary), but the diff harness's assumptions should be reviewed for exactly this reason
+     before that gate runs.
+
+- **Plans that must implement this ruling** (named by plan id, per this plan's Task 1 instruction;
+  none of these plans run inside 136-03):
+
+  - **136-04** -- Novelty: identity key, pinned LLM contract, committed funnel runner, authorized
+    run, verdict cache. Must build the seven-value shade classifier (not a boolean/tri-state one)
+    and pin a NEW prompt hash for the shade-eliciting prompt.
+  - **136-06** -- D-02a tier_a authorization lockstep (builder + verifier + both-branch fixtures).
+    Touches the same schema-doc row-set area the novelty CHECK constraint lives beside; must not
+    silently narrow the novelty CHECK back to three values while amending the tier_a row-set
+    nearby.
+  - **136-12** -- Build wiring B: novelty ingestion, visibility axes, curated load, kept_tie fix,
+    verifier extensions. This is where `novelty_status` is actually COMPUTED and WRITTEN, and where
+    `scripts/verify_discovery_sidecar.py`'s verifier extensions must enforce the seven-value CHECK
+    (not the tri-state) and, per item 6 above, where `web/discovery_assets.py`'s runtime spot-check
+    should gain a `novelty_status` frozenset.
+  - **The release verifier** -- `scripts/verify_discovery_sidecar.py`'s frozen-enum-vocab
+    enforcement, extended in 136-12 and actually RUN as part of the gate battery in **136-13** (the
+    rebuild, the gate battery, the owner authorization and the one production redeploy) before the
+    asset goes live.
+  - Downstream UI consumers of the toggle (136-16/136-18 for the findings page, 136-15/136-17 for
+    the panel) are UNAFFECTED in shape -- they read `novelty_status = 'fills_gap'` exactly where
+    they would previously have read `= 'not_in_finding_aids'`; no plan review is owed there beyond
+    that one-value substitution, which this record now makes citable.
+
+- **What this plan (136-03) does NOT do:** it does not edit
+  `docs/specs/discovery-sidecar-schema-v1.md`, `web/discovery_assets.py`,
+  `scripts/verify_discovery_sidecar.py`, or any build/service module. This section only records the
+  ruling and its enumerated consequences so later plans build from a single citable ground truth,
+  per this plan's own Task 1 instruction. This plan DOES amend `.planning/REQUIREMENTS.md` (Task 2)
+  and extend the novelty hard-case candidate set with a new Class 6 (Task 3) -- both are recorded
+  separately below and in `136-NOVELTY-HARDCASES.md`.
 
 ---
 
@@ -217,10 +380,18 @@ addresses it -- it must not be silently treated as ratified by this record.
 ## Outstanding (pending Task 3)
 
 - `discovery_data/novelty_hardcase_labels-v1.json` -- the owner-supplied ground truth, one entry per
-  hard case with its verdict, date and `label_provenance`. **Not yet created.**
+  hard case with its verdict (one of decision E's seven shades, or `unsure`), date and
+  `label_provenance`. **Not yet created.**
 - The content hash of that file, to be recorded in an update to this section once it exists.
 - The effective (as opposed to candidate-pool) evaluation-set size, once the owner has labelled or
-  explicitly skipped each of the 82 candidates up to whatever portion they choose to judge.
+  explicitly skipped each of the **97** candidates (82 original + 15 Class 6, added under decision
+  E) up to whatever portion they choose to judge.
+- **Vocabulary note:** the worksheet (`136-NOVELTY-HARDCASES.md`) has been REGENERATED against
+  decision E's seven-shade vocabulary (`confirms` / `refines_granularity` / `diverges` /
+  `fills_gap` / `extends` / `alias_merge`, plus `unsure` / `skip`) -- the old 4-value set
+  (`already_recorded` / `not_in_finding_aids` / `unsure` / `skip`) no longer appears anywhere in
+  that file. No verdict has been pre-filled anywhere; every `PROPOSAL` draft remains explicitly
+  marked as a draft, never a label.
 
 This record will be updated (not silently overwritten) once plan Task 3 returns and Task 4 writes
 the label file.
