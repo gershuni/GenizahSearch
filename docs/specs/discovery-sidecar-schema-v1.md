@@ -705,19 +705,41 @@ and `scripts/verify_discovery_sidecar.py` implement against this section; plans 
   the existing §6 global band-rank lattice (`track1_direct`/`expert_verified` = 1 … `propagated`/
   `not_evaluated` = 7), computed once at build time so the findings page and the panel never recompute
   the CASE-based rank at query time (D-10a).
-- **`novelty_status`** (`discovery_evidence`, TEXT, indexed on the status, not on a boolean) — a
-  TRI-STATE CLOSED vocabulary: `not_in_finding_aids` / `already_recorded` / `not_checked` (ROADMAP
-  SC-6's names — see `.planning/REQUIREMENTS.md`'s NOVEL-01 2026-08-02 amendment for the D-23a alias
-  mapping), **DEFAULTING to `not_checked`**. Computed for ALL evidence families (`track1_direct` AND
-  `propagated`) — this is the coverage-gap fix the frozen v2 asset left open (all 254,612
-  `track1_direct` rows shipped at `is_new = 0`, meaning UNCHECKED, not "known"). This is the field a
-  read path filters/groups on; the legacy `is_new` boolean stays in the schema unmodified for
-  read-compat but is no longer the query target.
-- **`novelty_source_label`** (`discovery_evidence`, TEXT, nullable) — populated only when
-  `novelty_status='already_recorded'`; values are the MASKED label set ONLY — name the source where
+- **`novelty_status`** (`discovery_evidence`, TEXT, indexed on the status, not on a boolean) —
+  **⟨AMENDED 2026-08-02, owner rulings E/E′/F/G/H — `.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-GATE1-DECISIONS.md`
+  §§ E, E′, F, G, H — supersedes the tri-state this amendment originally recorded, which was never
+  propagated past this dated block; `.planning/REQUIREMENTS.md`'s NOVEL-01 amendment trail carries the
+  full rationale for each widening step and is the amendment-by-amendment record; `docs/specs/discovery-novelty-v1.md`
+  (plan 136-04) is the CANONICAL, single restatement of this list going forward — cite that file rather
+  than re-deriving the list from this schema doc's own prose.⟩** a TEN-VALUE CLOSED vocabulary:
+  `confirms` / `refines_granularity` / `aid_more_specific` / `diverges_work` / `diverges_part` /
+  `container_predicts` / `fills_gap` / `extends` / `alias_merge` / `not_checked`, **DEFAULTING to
+  `not_checked`** (fail-closed, unchanged in meaning across every widening). `fills_gap` is the SOLE
+  value the public "Candidates for new finds" predicate selects. `diverges_work`/`diverges_part` carry a
+  default-hidden, explicit-warned-toggle display posture (ruling F); `container_predicts` does NOT —
+  ruling H is explicit that F's default-hidden rationale (rows the owner has measured reason to believe
+  are OUR false positives) does not apply to a container relationship, where there is no disagreement to
+  warn about. Computed for ALL evidence families (`track1_direct` AND `propagated`) — this is the
+  coverage-gap fix the frozen v2 asset left open (all 254,612 `track1_direct` rows shipped at
+  `is_new = 0`, meaning UNCHECKED, not "known"). This is the field a read path filters/groups on; the
+  legacy `is_new` boolean stays in the schema unmodified for read-compat but is no longer the query
+  target.
+- **`novelty_source_label`** (`discovery_evidence`, TEXT, nullable) — populated when `novelty_status` is
+  any shade where SOME finding aid says something nameable about this fragment-work pair (`confirms` /
+  `refines_granularity` / `aid_more_specific` / `alias_merge` / `extends` / `diverges_work` /
+  `diverges_part` / `container_predicts`); values are the MASKED label set ONLY — name the source where
   nameable (e.g. "recorded in the FJMS catalogue"), otherwise the fixed fallback "recorded in another
-  reference source". The raw provenance value (which finding aid, which restricted corpus) is NEVER
-  stored in the asset — masked at build time, before this column is written (NOVEL-02).
+  reference source". `NULL` on `fills_gap` (nothing to name) and `not_checked` (nothing was checked).
+  The raw provenance value (which finding aid, which restricted corpus) is NEVER stored in the asset —
+  masked at build time, before this column is written (NOVEL-02).
+- **`divergence_correctness`** (`discovery_evidence`, TEXT, nullable) — **⟨ADDED 2026-08-02, owner ruling
+  F — `136-GATE1-DECISIONS.md` § F⟩** a SEPARATE, sibling closed vocabulary — `catalogue_correct` /
+  `claim_correct` / `unclear` — recording which side is right on a divergence row. Populated
+  IF-AND-ONLY-IF `novelty_status IN ('diverges_work', 'diverges_part')`; `NULL` for every other shade (a
+  `confirms`/`fills_gap`/etc. row has no divergence to adjudicate correctness on). NOT part of the
+  `novelty_status` enum — correctness is orthogonal to shade because the owner's own review of real
+  divergence cases found BOTH directions occur under the identical shade token, so one column cannot
+  carry both meanings.
 - **`assertion_visibility`** and **`identity_visibility`** (`discovery_evidence` / `works`
   respectively, TEXT, closed `{public, private}` enums) — the VIS-01 two-axis derivation (D-22):
   `assertion_visibility` is derived from the raw evidence origin (per evidence row),
@@ -743,8 +765,29 @@ CREATE TABLE discovery_identification (
   page_count          INTEGER NOT NULL,
   max_coverage_ppm    INTEGER,            -- NULL when no direct-family evidence contributes
   relation_kind       TEXT NOT NULL,      -- the display relation ("direct match"/"partial match"/"shared text") basis
+  -- ⟨AMENDED 2026-08-02, owner rulings E/E′/F/G/H — 136-GATE1-DECISIONS.md §§ E-H⟩ widened from the
+  -- original three-value tri-state to the current TEN-value shade enum. This CHECK is one of the two
+  -- places (the other is the mirrored discovery_evidence.novelty_status column, § A above) where the
+  -- vocabulary is UNAVOIDABLY restated as a SQL literal rather than cited by reference — SQLite CHECK
+  -- constraints cannot import a shared constant. `docs/specs/discovery-novelty-v1.md` (plan 136-04) is
+  -- the CANONICAL prose statement of this list; if this literal and that file's list ever disagree, that
+  -- is a build/verifier bug, and `shared/discovery_novelty.py::NOVELTY_STATUSES` is the tie-breaker
+  -- (a test there asserts equality against this schema's vocabulary).
   novelty_status      TEXT NOT NULL CHECK (novelty_status IN
-                         ('not_in_finding_aids','already_recorded','not_checked')),
+                         ('confirms','refines_granularity','aid_more_specific','diverges_work',
+                          'diverges_part','container_predicts','fills_gap','extends','alias_merge',
+                          'not_checked')),
+  -- ⟨ADDED 2026-08-02, owner ruling F — 136-GATE1-DECISIONS.md § F⟩ a SEPARATE sibling column, never
+  -- part of the novelty_status enum above (correctness is orthogonal to shade). NULL required outside
+  -- the two divergence shades; the CHECK enforces that direction. Populated only on divergence rows,
+  -- drawn from its own three-value vocabulary when non-NULL.
+  divergence_correctness TEXT CHECK (
+                         (novelty_status IN ('diverges_work','diverges_part')
+                          AND divergence_correctness IN ('catalogue_correct','claim_correct','unclear'))
+                         OR
+                         (novelty_status NOT IN ('diverges_work','diverges_part')
+                          AND divergence_correctness IS NULL)
+                       ),
   assertion_visibility TEXT NOT NULL CHECK (assertion_visibility IN ('public','private')),
   identity_visibility  TEXT NOT NULL CHECK (identity_visibility IN ('public','private')),
   UNIQUE (sys_id, canonical_work_id)
@@ -912,4 +955,21 @@ discovery_identification, manuscript_display, display_work_id, the
 works.genre population rule, meta.audience, the D-10a index set, the narrow
 §1.6 tier_a authorization, the discovery_routing_audit demoted_work_id fix,
 the offset coordinate-space standing rule, and the explicit v2.1 deferral of
-w_start/w_end + versemap resolution).*
+w_start/w_end + versemap resolution); 2026-08-02 (Phase 136, plan 136-03
+continuation — novelty shade-enum reconciliation, prompted by
+`136-NOVELTY-PRIOR-ART.md`'s finding that owner rulings E/E′/F/G had been
+recorded in `136-GATE1-DECISIONS.md` but never propagated here: the
+`novelty_status` vocabulary widens from the plan-136-01-era three-value
+tri-state to the current TEN-value shade enum (`confirms` /
+`refines_granularity` / `aid_more_specific` / `diverges_work` /
+`diverges_part` / `container_predicts` / `fills_gap` / `extends` /
+`alias_merge` / `not_checked`), in both the `discovery_evidence` prose bullet
+and the `discovery_identification` CHECK constraint; a new sibling
+`divergence_correctness` column is added (owner ruling F), nullable, CHECK'd
+to `catalogue_correct`/`claim_correct`/`unclear` and required NULL outside
+`diverges_work`/`diverges_part`. `docs/specs/discovery-novelty-v1.md`
+(plan 136-04, not yet written as of this amendment) is designated the
+CANONICAL single-cited prose statement of the shade enum going forward; the
+SQL CHECK literals in this document are the one place a second restatement
+is unavoidable, per this amendment's own inline note at the point of
+definition).*
