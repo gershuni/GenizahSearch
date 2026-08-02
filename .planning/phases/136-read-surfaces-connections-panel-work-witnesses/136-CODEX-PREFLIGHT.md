@@ -101,3 +101,77 @@ HIGH: 10   MEDIUM: 1   LOW: 1
 
 VERDICT: rework because the private/public deployment authorization still contradicts itself, the wave-8 production deploys are unsafely concurrent, and the work-expansion filter/count contract can still drift
 HIGH: 3   MEDIUM: 2   LOW: 2
+
+---
+
+## Round 3 — final convergence (2026-08-02)
+
+**Target:** revision 3 (commit `3048832b`) — 21 plans / 63 tasks / **10 waves**.
+**Brief:** `_tmp/136-codex-preflight-r3-brief.md`
+
+> **VERDICT: rework** — **1 HIGH · 3 MEDIUM · 2 LOW** (10/1/1 → 3/2/2 → 1/3/2).
+>
+> **The remaining HIGH is wording, not substance.** Codex confirmed the disclosure-critical
+> authorization is resolved ("the only go option names the public projection, and I found no
+> active wording authorizing the private database onto the public box") and that **code-first is
+> safe**. What survives is that 136-13's objective, task name and `read_first` still say
+> *asset-first* while its action and acceptance require *code-first*.
+>
+> **The one residual disclosure-capable item is LOW-tagged (#7):** 136-19's final verification
+> still says an unset masking pattern file is "recorded as a skip", contradicting the
+> "never a skip and never a pass" rule the same plan now states elsewhere. If followed and later
+> trusted as readiness evidence, unscanned restricted text could survive to Phase 139.
+>
+> Round 3 also caught a defect **revision 3 introduced**: the checkpoint option was renamed to
+> `deploy-public-now` but its automated verification still greps `deploy-now`, so a valid
+> authorization fails its own check.
+
+### Verbatim findings
+
+1. **NOT RESOLVED (MEDIUM) — work-expansion contract.** The intended paths are now well specified:
+
+   - Both stronger- and weaker-anchor directions are tested.
+   - Evidence source is varied independently.
+   - Count and list share the complete filtered pipeline, including a weaker-anchor count/list test.
+
+   However, the three anchor parameters independently default to `None`, without an all-or-none invariant. “Anchor arguments are supplied” is therefore ambiguous for partially populated calls, which can rank with an unranked/default side or produce incomplete relation metadata ([136-21-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:111)). Require exactly all three anchor fields or none, reject every partial combination, and test that matrix. Also change the stale `<done>` statement, which still says only that the count reuses the ranked CTE ([136-21-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:211)).
+
+2. **NOT RESOLVED (HIGH) — deploy authorization/order.** The disclosure-critical authorization is resolved: the only go option names the public projection, and I found no active wording authorizing the private database onto the public box.
+
+   Code-first is safe: the new loader encountering the live old asset fails readiness because the new tables are absent, leaving discovery hidden; after the verified public projection and manifest swap, restart loads the new asset while the public flag remains off.
+
+   But the plan still gives contradictory production instructions:
+
+   - Objective: “asset first” ([136-13-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:38)).
+   - Task name: “asset-first production redeploy” ([136-13-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:220)).
+   - `read_first`: directs the executor to the runbook’s asset-first ordering ([136-13-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:223)).
+   - Action and acceptance instead require code-first ([136-13-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:229)).
+
+   Thus the asset-first clause was not fully deleted, and the plan does not state exactly one order throughout.
+
+3. **RESOLVED — concurrent production mutations.** The external-resource scan is correct and sufficiently complete. Production box/code/asset/manifest mutations occur in waves 5, 8, and 9; the LLM/finding-aid calls and spend belong only to 136-04; owner checkpoints are isolated; staged artifacts have distinct writers; and no plan flips the production flag. I found no additional shared cache, API, or deployment target being concurrently mutated.
+
+4. **NOT RESOLVED (MEDIUM) — schema marker/readiness.** Retaining `discovery-v1` safely rejects the exact current rollback asset: the live DB lacks both new tables. Content-hash verification and the atomic manifest workflow also prevent a half-copied database from becoming live.
+
+   It does not cover every partial-schema case claimed by the plan. Phase 136 also adds required columns to existing tables, but startup validation checks only table presence and row counts ([136-20-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-20-PLAN.md:147), [live readiness loop](C:/Genizahsearch/web/discovery_assets.py:247)). An audience-public asset with both tables and correct counts but a missing required column can pass readiness, expose navigation, and fail only when queried. Either validate the required column sets/types at startup or use a new marker emitted only by the complete builder.
+
+5. **RESOLVED — private audience marker.** Plan 136-12 owns the `meta.audience='private'` write, independently verifies the closed enum, and requires missing/out-of-enum fixtures to fail ([136-12-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-12-PLAN.md:132), [acceptance](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-12-PLAN.md:210)).
+
+6. **RESOLVED — validation cleanup.** The differing-relation assertion is assigned to 136-21 with both filter directions; the three moved rows are struck and labeled Phase 136.1; and masking now says both shipped surfaces ([136-VALIDATION.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-VALIDATION.md:62), [moved rows](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-VALIDATION.md:68), [work-expansion assertion](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-VALIDATION.md:277)).
+
+7. **NOT RESOLVED (LOW) — unavailable masking pattern.** The task, acceptance criterion, and `T-136-19-03` are corrected. But the plan’s final verification still says an unset pattern file should be recorded as a skip ([136-19-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:207)), contradicting “never a skip and never a pass.”
+
+8. **Revision-3 graph: structurally clean, with one newly broken check.** I confirmed 21 plans, 63 tasks, 10 waves, no same-wave `files_modified` overlap, and no dependency pointing to the same or a later wave. The new ordering is correct: 136-18 is wave 9 and depends on 136-17; 136-19 is wave 10 and depends on 136-18.
+
+   Revision 3 did break the checkpoint’s automated verification: the valid option is `deploy-public-now`, but the command still searches for `deploy-now` ([option](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:193), [broken verification](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-13-PLAN.md:206)). A valid authorization therefore fails its check. **MEDIUM.**
+
+   Also, Git confirms that 136-17 changed in revision 3, although it was omitted from the prompt’s changed-file list.
+
+9. **Not yet safe to execute as written.** The private-database disclosure path is closed, and no phase-136 plan turns the flag on. Most remaining defects would manifest as a blocked deployment, hidden surface, service error, or incorrect band placement—not as private-data disclosure.
+
+   The one residual disclosure-capable ambiguity is the masking verification’s “record the skip” sentence: if followed and later trusted as readiness evidence, unscanned restricted text in markup, JSON, copy, or error paths could survive to Phase 139. Fixing that sentence restores the intended fail-closed chain.
+
+10. **Additional competent-reviewer cleanup.** Phase-wide deployment counting remains misleading: the roadmap says “Two deploys,” and 136-17 calls itself the first of the phase’s two deploys, despite the separate wave-5 code-plus-asset production redeploy ([ROADMAP.md](C:/Genizahsearch/.planning/ROADMAP.md:196), [136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:299)). Say “three production mutations / two surface deploys.” **LOW.**
+
+VERDICT: rework because the production deploy plan still gives contradictory asset-first and code-first instructions
+HIGH: 1   MEDIUM: 3   LOW: 2
