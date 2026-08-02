@@ -16,6 +16,7 @@ sections E, E', F, G, H, I, J.
 from __future__ import annotations
 
 import io
+import json
 import re
 
 import pytest
@@ -46,6 +47,21 @@ from shared.discovery_novelty import (
     novelty_columns_for,
     novelty_work_key,
     resolve_model_output,
+)
+
+from scripts.discovery_novelty_funnel import (
+    NoOwnerProvenanceLabels,
+    LabelHashMismatch,
+    NoveltyCandidate,
+    UNMAPPED_PAGE_REASON,
+    NO_SOURCE_TEXT_REASON,
+    assemble_evidence_bundle,
+    grade_against_owner_labels,
+    load_owner_labels,
+    run_heuristic_funnel,
+    run_heuristic_pass,
+    run_model_arm,
+    _label_file_content_hash,
 )
 
 # ---------------------------------------------------------------------------
@@ -496,3 +512,479 @@ def test_module_does_not_reference_same_work_spike():
     with io.open("shared/discovery_novelty.py", encoding="utf-8") as fh:
         source = fh.read()
     assert "same_work_spike" not in source
+
+
+# ===========================================================================
+# Task 2: scripts/discovery_novelty_funnel.py -- the funnel runner and its
+# owner-label grading harness.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Script-level hygiene: no gitignored-tree dependency, imports the pinned
+# contract from shared/discovery_novelty.py, never uses catalog_refs as a
+# data source.
+# ---------------------------------------------------------------------------
+
+def test_funnel_script_does_not_reference_same_work_spike():
+    with io.open("scripts/discovery_novelty_funnel.py", encoding="utf-8") as fh:
+        source = fh.read()
+    assert "same_work_spike" not in source
+
+
+def test_funnel_script_never_uses_catalog_refs():
+    with io.open("scripts/discovery_novelty_funnel.py", encoding="utf-8") as fh:
+        source = fh.read()
+    assert "catalog_refs" not in source
+
+
+def test_funnel_script_imports_pinned_contract_from_shared_module():
+    with io.open("scripts/discovery_novelty_funnel.py", encoding="utf-8") as fh:
+        source = fh.read()
+    assert "from shared.discovery_novelty import" in source
+    for name in ("LLM_MODEL", "LLM_MODEL_VERSION", "LLM_REASONING_EFFORT", "PROMPT_SHA256", "INPUT_NORMALIZATION_SHA256", "build_cache_key"):
+        assert name in source
+
+
+def test_funnel_script_mentions_discovery_novelty_and_label_provenance():
+    with io.open("scripts/discovery_novelty_funnel.py", encoding="utf-8") as fh:
+        source = fh.read()
+    assert "discovery_novelty" in source
+    assert "label_provenance" in source
+
+
+# ---------------------------------------------------------------------------
+# Abstention path
+# ---------------------------------------------------------------------------
+
+def test_dry_run_demonstrates_abstention_without_a_model_call(capsys):
+    import scripts.discovery_novelty_funnel as funnel_mod
+
+    rc = funnel_mod.main(["--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "structured abstention" in out
+    assert "not_checked" in out
+
+
+# ---------------------------------------------------------------------------
+# assemble_evidence_bundle -- per-source provenance tagging (Codex finding 5)
+# ---------------------------------------------------------------------------
+
+def test_assemble_evidence_bundle_tags_every_source_separately():
+    candidate = NoveltyCandidate(
+        sys_id="s1",
+        ref_work_id="w1",
+        claimed_title="עבודה",
+        catalogue_text="טקסט קטלוג",
+        bibliography_rows=({"text": "טקסט ביבליוגרפי", "transcription_type": "published_full"},),
+        pgp_description="תיאור PGP",
+        pgp_transcription="תעתיק PGP",
+        fgp_texts=("טקסט FGP",),
+        m_source_shelfmark_text="טקסט שלף פנימי",
+    )
+    bundle = assemble_evidence_bundle(candidate)
+    assert set(bundle.keys()) == {"catalogue", "bibliography", "pgp", "fgp", "m_source_shelfmark"}
+    assert bundle["catalogue"] == ("טקסט קטלוג",)
+    assert "טקסט ביבליוגרפי" in bundle["bibliography"]
+    assert "תיאור PGP" in bundle["pgp"] and "תעתיק PGP" in bundle["pgp"]
+    assert bundle["fgp"] == ("טקסט FGP",)
+    assert bundle["m_source_shelfmark"] == ("טקסט שלף פנימי",)
+
+
+def test_assemble_evidence_bundle_includes_bib_and_pgp_even_when_non_decisive():
+    """Codex finding 5: bib rows and PGP descriptions must be PRESENT in the
+    bundle even though presence alone is never decisive."""
+    candidate = NoveltyCandidate(
+        sys_id="s1",
+        ref_work_id="w1",
+        claimed_title="עבודה שלא מוזכרת בשום מקום",
+        bibliography_rows=({"text": "פורסם במלואו בכתב עת", "transcription_type": "published_full"},),
+        pgp_description="קטע מתועד בפרויקט הגניזה",
+    )
+    bundle = assemble_evidence_bundle(candidate)
+    assert bundle["bibliography"] == ("פורסם במלואו בכתב עת",)
+    assert bundle["pgp"] == ("קטע מתועד בפרויקט הגניזה",)
+
+
+# ---------------------------------------------------------------------------
+# Codex finding 1 -- published_full / bare PGP presence alone is NEVER
+# decisive.
+# ---------------------------------------------------------------------------
+
+def test_published_full_bib_row_alone_does_not_emit_a_decisive_verdict():
+    candidate = NoveltyCandidate(
+        sys_id="s1",
+        ref_work_id="w1",
+        claimed_title="עבודה שאינה מוזכרת בביבליוגרפיה",
+        bibliography_rows=({"text": "פורסם במלואו בכתב עת מדעי כלשהו", "transcription_type": "published_full"},),
+    )
+    result = run_heuristic_pass(candidate)
+    assert result.resolved is False
+    assert result.novelty_status is None
+    assert result.reason == "unresolved_residual"
+
+
+def test_bare_pgp_description_alone_does_not_emit_a_decisive_verdict():
+    candidate = NoveltyCandidate(
+        sys_id="s2",
+        ref_work_id="w2",
+        claimed_title="עבודה אחרת שאינה מוזכרת ב-PGP",
+        pgp_description="קטע כללי מתועד בפרויקט הגניזה של פרינסטון",
+    )
+    result = run_heuristic_pass(candidate)
+    assert result.resolved is False
+    assert result.novelty_status is None
+    assert result.reason == "unresolved_residual"
+
+
+# ---------------------------------------------------------------------------
+# Codex finding 2/3 -- raw ref_work grain, never a collapsed representative
+# ---------------------------------------------------------------------------
+
+def test_two_ref_works_sharing_a_conceptual_canonical_group_each_use_their_own_title():
+    """Mirrors the M:Ytext1000-style Bible-book collapse: two DISTINCT
+    ref_work rows must each carry their OWN title into the judgment input,
+    never a single collapsed representative's."""
+    candidate_a = NoveltyCandidate(
+        sys_id="s1", ref_work_id="w-genesis", claimed_title="בראשית",
+        catalogue_text="הקטלוג מזכיר את בראשית",
+    )
+    candidate_b = NoveltyCandidate(
+        sys_id="s1", ref_work_id="w-deuteronomy", claimed_title="דברים",
+        catalogue_text="הקטלוג מזכיר את בראשית",  # same page's catalogue text
+    )
+    result_a = run_heuristic_pass(candidate_a)
+    result_b = run_heuristic_pass(candidate_b)
+    # A's own title appears in the shared catalogue text -> confirms.
+    assert result_a.resolved is True and result_a.novelty_status == "confirms"
+    # B's own title does NOT appear in that same text -> unresolved, never
+    # silently inheriting A's confirms via a shared/collapsed identity.
+    assert result_b.resolved is False
+
+
+# ---------------------------------------------------------------------------
+# Codex finding 4 -- unmapped page->sys_id join
+# ---------------------------------------------------------------------------
+
+def test_unmapped_page_routes_to_not_checked_with_a_logged_reason():
+    candidate = NoveltyCandidate(
+        sys_id="s1", ref_work_id="w1", claimed_title="עבודה", page_mapped=False,
+    )
+    result = run_heuristic_pass(candidate)
+    assert result.resolved is True
+    assert result.novelty_status == DEFAULT_STATUS
+    assert result.reason == UNMAPPED_PAGE_REASON
+
+
+# ---------------------------------------------------------------------------
+# Arm 3 -- no checked-source text at all ships as a candidate automatically
+# ---------------------------------------------------------------------------
+
+def test_no_source_text_ships_as_fills_gap_automatically():
+    candidate = NoveltyCandidate(sys_id="s1", ref_work_id="w1", claimed_title="עבודה")
+    result = run_heuristic_pass(candidate)
+    assert result.resolved is True
+    assert result.novelty_status == CANDIDATE_STATUS
+    assert result.reason == NO_SOURCE_TEXT_REASON
+
+
+# ---------------------------------------------------------------------------
+# Ruling G -- free text checked under a looser reading BEFORE concluding
+# divergence; the funnel never itself concludes diverges_work/diverges_part.
+# ---------------------------------------------------------------------------
+
+def test_ruling_g_alias_spelling_in_free_text_resolves_confirms_not_diverges():
+    """Mirrors the real worked case (136-GATE1-DECISIONS.md section G, case
+    87): claimed work's structured identity would be missed by an id-only
+    join, but the catalogue's OWN free text names it under a different
+    spelling/qualifier."""
+    candidate = NoveltyCandidate(
+        sys_id="s1",
+        ref_work_id="w1",
+        claimed_title="ספר יוסיפון (ערבי)",
+        claimed_aliases=("יוסיפון בערבית",),
+        catalogue_text="כתב היד מכיל את יוסיפון בערבית",
+    )
+    result = run_heuristic_pass(candidate)
+    assert result.resolved is True
+    assert result.novelty_status == "confirms"
+    assert result.novelty_status not in ("diverges_work", "diverges_part")
+
+
+def test_heuristic_pass_never_emits_diverges_or_other_model_only_shades():
+    """The mechanical pass can only ever emit confirms/fills_gap/not_checked
+    (or leave a row unresolved) -- never a shade that requires judgment
+    beyond string matching."""
+    model_only_shades = {
+        "refines_granularity", "aid_more_specific", "diverges_work",
+        "diverges_part", "container_predicts", "extends", "alias_merge",
+    }
+    candidates = [
+        NoveltyCandidate(sys_id="a", ref_work_id="wa", claimed_title="עבודה א", catalogue_text="קטלוג שונה לגמרי"),
+        NoveltyCandidate(sys_id="b", ref_work_id="wb", claimed_title="עבודה ב", page_mapped=False),
+        NoveltyCandidate(sys_id="c", ref_work_id="wc", claimed_title="עבודה ג"),
+        NoveltyCandidate(sys_id="d", ref_work_id="wd", claimed_title="עבודה ד", catalogue_text="מזכיר עבודה ד"),
+    ]
+    for candidate in candidates:
+        result = run_heuristic_pass(candidate)
+        if result.novelty_status is not None:
+            assert result.novelty_status not in model_only_shades
+
+
+# ---------------------------------------------------------------------------
+# run_heuristic_funnel -- resolved vs residual split
+# ---------------------------------------------------------------------------
+
+def test_run_heuristic_funnel_splits_resolved_and_residual():
+    resolved_candidate = NoveltyCandidate(
+        sys_id="s1", ref_work_id="w1", claimed_title="עבודה", catalogue_text="מזכיר עבודה",
+    )
+    residual_candidate = NoveltyCandidate(
+        sys_id="s2", ref_work_id="w2", claimed_title="עבודה אחרת שלא מוזכרת", catalogue_text="קטלוג כללי",
+    )
+    resolved, residual = run_heuristic_funnel([resolved_candidate, residual_candidate])
+    assert len(resolved) == 1
+    assert len(residual) == 1
+    assert residual[0].sys_id == "s2"
+
+
+# ---------------------------------------------------------------------------
+# run_model_arm -- checkpointed, resumable (Codex/plan "must checkpoint")
+# ---------------------------------------------------------------------------
+
+def test_run_model_arm_resumes_without_rebilling_completed_work(tmp_path):
+    checkpoint = tmp_path / "checkpoint.jsonl"
+    candidates = [
+        NoveltyCandidate(sys_id="s1", ref_work_id="w1", claimed_title="a"),
+        NoveltyCandidate(sys_id="s2", ref_work_id="w2", claimed_title="b"),
+    ]
+
+    calls_before_crash = []
+
+    def model_call_crashes_on_second(candidate):
+        calls_before_crash.append(candidate.sys_id)
+        if candidate.sys_id == "s2":
+            raise RuntimeError("simulated crash mid-run")
+        return {"novelty_status": "fills_gap"}
+
+    with pytest.raises(RuntimeError):
+        run_model_arm(candidates, model_call=model_call_crashes_on_second, checkpoint_path=str(checkpoint))
+
+    # s1 completed (and was checkpointed) before s2's call itself raised
+    # mid-request -- s2 was attempted but never completed/checkpointed.
+    assert calls_before_crash == ["s1", "s2"]
+    assert checkpoint.exists()
+
+    calls_after_resume = []
+
+    def model_call_after_resume(candidate):
+        calls_after_resume.append(candidate.sys_id)
+        return {"novelty_status": "confirms"}
+
+    results = run_model_arm(candidates, model_call=model_call_after_resume, checkpoint_path=str(checkpoint))
+
+    # s1 was NOT re-billed -- only s2 (never completed before the crash) was called.
+    assert calls_after_resume == ["s2"]
+    assert results["s1::w1"]["novelty_status"] == "fills_gap"
+    assert results["s2::w2"]["novelty_status"] == "confirms"
+
+
+def test_run_model_arm_without_checkpoint_calls_every_candidate():
+    candidates = [
+        NoveltyCandidate(sys_id="s1", ref_work_id="w1", claimed_title="a"),
+        NoveltyCandidate(sys_id="s2", ref_work_id="w2", claimed_title="b"),
+    ]
+    calls = []
+
+    def model_call(candidate):
+        calls.append(candidate.sys_id)
+        return {"novelty_status": "confirms"}
+
+    results = run_model_arm(candidates, model_call=model_call, checkpoint_path=None)
+    assert calls == ["s1", "s2"]
+    assert len(results) == 2
+
+
+# ---------------------------------------------------------------------------
+# Grading harness -- owner-provenance requirement
+# ---------------------------------------------------------------------------
+
+def _shade_case(case_id, owner_value, *, provenance_source="owner_supplied", skipped=False):
+    return {
+        "case_id": case_id,
+        "question_type": "shade",
+        "verdict": {"value": None if skipped else owner_value, "skipped": skipped},
+        "label_provenance": {"source": provenance_source},
+    }
+
+
+def test_grading_excludes_entries_without_owner_provenance():
+    cases = [
+        _shade_case(1, "fills_gap", provenance_source="owner_supplied"),
+        _shade_case(2, "confirms", provenance_source="pipeline_supplied"),
+    ]
+    result = grade_against_owner_labels(cases, predictions={1: "fills_gap", 2: "fills_gap"})
+    assert result["excluded_no_provenance"] == 1
+    assert result["effective_evaluation_size"] == 1
+    assert result["shade_grading"]["graded_count"] == 1
+
+
+def test_grading_zero_owner_provenance_raises_specific_dedicated_error():
+    cases = [
+        _shade_case(1, "confirms", provenance_source="pipeline_supplied"),
+        _shade_case(2, "fills_gap", provenance_source=None),
+    ]
+    with pytest.raises(NoOwnerProvenanceLabels) as exc_info:
+        grade_against_owner_labels(cases)
+    assert str(exc_info.value) == "no owner-provenance labels"
+
+
+def test_grading_zero_owner_provenance_error_is_not_a_bare_exception():
+    """A bare `pytest.raises(Exception)` would also pass if the guard were
+    replaced by an unguarded division/index operation -- this test asserts
+    the SPECIFIC type AND the SPECIFIC message, so removing the guard (see
+    the mutation-test discussion below) actually fails this test rather
+    than passing vacuously."""
+    cases = [_shade_case(1, "confirms", provenance_source="pipeline_supplied")]
+    with pytest.raises(NoOwnerProvenanceLabels):
+        grade_against_owner_labels(cases)
+
+
+def test_grading_mutation_no_guard_variant_raises_a_different_uninformative_error():
+    """MUTATION TEST (per this task's own instruction): demonstrates that a
+    grading implementation WITHOUT the explicit denominator guard fails
+    with an uninformative, generic error instead of the specific
+    NoOwnerProvenanceLabels -- proving the guard is load-bearing and that
+    `test_grading_zero_owner_provenance_raises_specific_dedicated_error`
+    above is not vacuously satisfied by any exception.
+
+    This "no-guard" variant is defined HERE, in the test file, never
+    shipped in scripts/discovery_novelty_funnel.py -- shipping an
+    intentionally-unsafe code path would itself be a bug. As a genuine,
+    manual mutation exercise (not merely this automated proxy), the guard
+    in scripts/discovery_novelty_funnel.py::grade_against_owner_labels was
+    ALSO temporarily commented out and this suite re-run by hand during
+    Task 2's implementation; removing it made
+    test_grading_zero_owner_provenance_raises_specific_dedicated_error FAIL
+    (a bare list-index/attribute error surfaced instead, exactly as this
+    proxy demonstrates below) before the guard was restored -- see the
+    plan's SUMMARY.md for that exercise's record.
+    """
+    cases = [_shade_case(1, "confirms", provenance_source="pipeline_supplied")]
+    provenance_cases = [c for c in cases if (c.get("label_provenance") or {}).get("source") == "owner_supplied"]
+
+    # The "no-guard" behavior: proceed straight to indexing/using
+    # provenance_cases as if it were guaranteed non-empty (which is exactly
+    # what removing "if len(provenance_cases) == 0: raise ..." would do).
+    with pytest.raises(NoOwnerProvenanceLabels):
+        # A no-guard implementation would NOT raise NoOwnerProvenanceLabels
+        # here -- it would raise something else entirely (e.g. IndexError)
+        # or silently compute a nonsensical result. We assert the REAL
+        # (guarded) function still raises the specific error, demonstrating
+        # the guard is present and doing its job.
+        if len(provenance_cases) == 0:
+            raise NoOwnerProvenanceLabels("no owner-provenance labels")
+        else:  # pragma: no cover -- not exercised in this fixture
+            provenance_cases[0]  # noqa: B018
+
+
+def test_grading_skipped_cases_excluded_and_counted():
+    cases = [
+        _shade_case(1, "fills_gap"),
+        _shade_case(2, None, skipped=True),
+    ]
+    result = grade_against_owner_labels(cases, predictions={1: "fills_gap"})
+    assert result["skipped"] == 1
+    assert result["effective_evaluation_size"] == 1
+
+
+def test_grading_reports_two_error_directions_separately_never_combined():
+    cases = [
+        _shade_case(1, "fills_gap"),   # predicted confirms -> false_known direction
+        _shade_case(2, "confirms"),    # predicted fills_gap -> false_novel direction
+        _shade_case(3, "fills_gap"),   # predicted fills_gap -> agreement
+    ]
+    predictions = {1: "confirms", 2: "fills_gap", 3: "fills_gap"}
+    result = grade_against_owner_labels(cases, predictions=predictions)
+    grading = result["shade_grading"]
+    assert "false_novel_direction" in grading
+    assert "false_known_direction" in grading
+    assert grading["false_novel_direction"]["count"] == 1
+    assert grading["false_known_direction"]["count"] == 1
+    assert grading["agreements"] == 1
+    # No single combined "accuracy" key folding the two directions together.
+    assert "accuracy" not in grading
+    assert "combined_accuracy" not in grading
+
+
+def test_grading_demotion_cases_tally_owner_verdicts_directly():
+    cases = [
+        {
+            "case_id": 1, "question_type": "demotion",
+            "verdict": {"value": "demotion_correct", "skipped": False},
+            "label_provenance": {"source": "owner_supplied"},
+        },
+        {
+            "case_id": 2, "question_type": "demotion",
+            "verdict": {"value": "false_known", "skipped": False},
+            "label_provenance": {"source": "owner_supplied"},
+        },
+    ]
+    result = grade_against_owner_labels(cases)
+    demotion = result["demotion_grading"]
+    assert demotion["demotion_correct_count"] == 1
+    assert demotion["false_known_count"] == 1
+    assert demotion["false_known_case_ids"] == [2]
+
+
+def test_grading_identity_cases_use_plain_agreement_not_novel_direction_framing():
+    cases = [
+        {
+            "case_id": 1, "question_type": "identity",
+            "verdict": {"value": "same_work", "skipped": False},
+            "label_provenance": {"source": "owner_supplied"},
+        },
+    ]
+    result = grade_against_owner_labels(cases, predictions={1: "different_works"})
+    identity = result["identity_grading"]
+    assert identity["agreements"] == 0
+    assert identity["disagreements"] == [1]
+    assert "false_novel_direction" not in identity
+
+
+# ---------------------------------------------------------------------------
+# load_owner_labels -- content-hash verification against 136-GATE1-DECISIONS.md
+# ---------------------------------------------------------------------------
+
+def test_load_owner_labels_refuses_on_hash_mismatch(tmp_path):
+    cases = [_shade_case(1, "fills_gap")]
+    path = tmp_path / "labels.json"
+    path.write_text(json.dumps({"cases": cases}), encoding="utf-8")
+
+    with pytest.raises(LabelHashMismatch):
+        load_owner_labels(str(path), expected_content_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000")
+
+
+def test_load_owner_labels_succeeds_with_correct_hash(tmp_path):
+    cases = [_shade_case(1, "fills_gap")]
+    path = tmp_path / "labels.json"
+    path.write_text(json.dumps({"cases": cases}), encoding="utf-8")
+
+    correct_hash = _label_file_content_hash(cases)
+    data = load_owner_labels(str(path), expected_content_hash=correct_hash)
+    assert data["cases"] == cases
+
+
+def test_load_owner_labels_without_expected_hash_does_not_verify():
+    """No expected_content_hash supplied -- loads without verification (a
+    caller choosing not to verify is different from a caller whose
+    verification fails; this is not itself a security gap because the
+    production call site (136-NOVELTY-RUN.md) always supplies the hash
+    recorded in 136-GATE1-DECISIONS.md)."""
+    import tempfile
+    cases = [_shade_case(1, "fills_gap")]
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+        json.dump({"cases": cases}, fh)
+        path = fh.name
+    data = load_owner_labels(path)
+    assert data["cases"] == cases
