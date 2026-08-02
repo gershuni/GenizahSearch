@@ -490,8 +490,16 @@ LEVER1_COVERAGE_CLIFF = 0.45
 # Mirrors shared/discovery_band_labels.STRICT_FLOOR (D-07) -- the CERT-01 pass
 # threshold. Kept as a local literal so this stdlib-only build script never
 # imports the values module (avoids a build->shared coupling); the verifier's
-# gate 12 imports the authoritative constant from shared for its own checks.
+# gate 12 keeps the SAME literal mirror for its own checks (see
+# scripts/verify_discovery_sidecar.py's own `_STRICT_FLOOR`).
 STRICT_FLOOR_FROZEN = 0.85
+# Mirrors shared/discovery_band_labels.MEASUREMENT_STATUSES (135-05 closed
+# vocab) as a local literal, same rationale as STRICT_FLOOR_FROZEN above --
+# used by D-02a's widened `_validate_precision_spec` cross-check (136-06,
+# docs/specs/discovery-sidecar-schema-v1.md SS1.6 amendment 2026-08-02).
+MEASUREMENT_STATUSES_FROZEN = frozenset({
+    "not_measured", "measured_pass", "measured_fail", "insufficient_evidence",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -1748,11 +1756,16 @@ def _frozen_real_band_precision_rows(v2_bands: bool = False) -> List[Dict]:
             "scope": "band", "collection_id": "e1_certification_registry_v1",
             "evidence_source": _TRACK1, "confidence_band": _TIER_A,
             "numerator": None, "denominator": None, "precision": None,
-            "ci_low": None, "ci_high": None, "method": None,
+            "ci_low": 0.9084, "ci_high": None, "method": None,
             "sampling_frame": None, "ins_policy": None, "weighting": None,
-            "notes": "H3: tier_a carries NO measured precision in the frozen contract -- "
-                     "NEVER a fabricated number in a real/release build (unlike the "
-                     "SYNTHETIC-fixture-only 0.90 placeholder in _band_precision_rows).",
+            "measurement_status": "measured_pass",
+            "notes": "D-02a (docs/specs/discovery-sidecar-schema-v1.md SS1.6 amendment "
+                     "2026-08-02, 136-GATE1-DECISIONS.md SS D-02a): stores ONLY the CERT-01 "
+                     "AUTHORIZATION that is_default_eligible() reads -- "
+                     "measurement_status='measured_pass', ci_low=0.9084 -- NEVER a measured "
+                     "precision number. 'precision' STAYS NULL; this is not a fabricated "
+                     "number in a real/release build (unlike the SYNTHETIC-fixture-only 0.90 "
+                     "placeholder in _band_precision_rows).",
         },
         {
             "scope": "band", "collection_id": "e1_certification_registry_v1",
@@ -3888,6 +3901,18 @@ def _validate_precision_spec(rows: List[Dict], *, v2_bands: bool = False) -> Non
     frozen tolerance, raises `InvalidPrecisionSpecError` -- a spec with a
     fabricated `tier_a` precision or a missing frozen row must never reach
     a real/release build's output before the separate verifier ever runs.
+
+    D-02a (docs/specs/discovery-sidecar-schema-v1.md SS1.6 amendment
+    2026-08-02): the per-band loop ALSO asserts `ci_low` and
+    `measurement_status` match the frozen row exactly on every band --
+    `tier_a`'s frozen row now carries the CERT-01 AUTHORIZATION pair
+    (`ci_low=0.9084`, `measurement_status='measured_pass'`) while `precision`
+    stays NULL; every other band's frozen `ci_low`/`measurement_status`
+    remain unchanged (NULL/None), so a spec asserting `measured_pass` on any
+    band other than `tier_a` is rejected here, and a `measurement_status`
+    outside the closed vocabulary (shared/discovery_band_labels.
+    MEASUREMENT_STATUSES, mirrored locally as MEASUREMENT_STATUSES_FROZEN)
+    is rejected independently of whether it happens to also mismatch.
     """
     frozen = _frozen_real_band_precision_rows(v2_bands=v2_bands)
     frozen_collection = next(r for r in frozen if r["scope"] == "collection")
@@ -4024,6 +4049,42 @@ def _validate_precision_spec(rows: List[Dict], *, v2_bands: bool = False) -> Non
             # the frozen expected value, never the supplied one.
             problems.append(
                 f"band {key}: precision mismatch (expected frozen {expected_precision!r})"
+            )
+
+        # D-02a (136-06, docs/specs/discovery-sidecar-schema-v1.md SS1.6
+        # amendment 2026-08-02): the `tier_a` row now also carries a frozen
+        # `ci_low`/`measurement_status` AUTHORIZATION pair -- widen this loop
+        # to assert those two fields match the frozen row EXACTLY, same
+        # masking discipline as the precision check above (never render the
+        # supplied value, only the frozen expected one).
+        actual_ci_low = matches[0].get("ci_low")
+        expected_ci_low = frozen_row.get("ci_low")
+        if not _precision_matches(actual_ci_low, expected_ci_low):
+            problems.append(
+                f"band {key}: ci_low mismatch (expected frozen {expected_ci_low!r})"
+            )
+
+        # Closed-vocabulary cross-check FIRST (Codex #B3 discipline, mirrors
+        # shared/discovery_band_labels.MEASUREMENT_STATUSES): a supplied
+        # `measurement_status` outside the frozen enum is its own build error,
+        # independent of whether it happens to also mismatch the frozen row --
+        # never named an unexpected value not in this closed set may reach
+        # the D-18 default-eligibility predicate.
+        actual_measurement_status = matches[0].get("measurement_status")
+        expected_measurement_status = frozen_row.get("measurement_status")
+        if (
+            actual_measurement_status is not None
+            and actual_measurement_status not in MEASUREMENT_STATUSES_FROZEN
+        ):
+            problems.append(
+                f"band {key}: measurement_status is outside the closed vocabulary "
+                f"{sorted(MEASUREMENT_STATUSES_FROZEN)}"
+            )
+        elif actual_measurement_status != expected_measurement_status:
+            # masking: never render the supplied value, only the frozen one.
+            problems.append(
+                f"band {key}: measurement_status mismatch (expected frozen "
+                f"{expected_measurement_status!r})"
             )
 
     # NOTE: an extra/wrong-collection band row can never reach here -- the
@@ -4414,6 +4475,12 @@ def finalize_build(
         # schema exists to insert it into. measurement_status is written too
         # (v2, gate 12/13): NULL for a normal build; 'not_measured' for a
         # reband-invalidated band.
+        # D-02a (136-06): the `{"measurement_status": None, **r}` dict-literal
+        # below lets a row's OWN `measurement_status` key (e.g. the frozen
+        # `tier_a` row's `measured_pass`, set in
+        # `_frozen_real_band_precision_rows`) win over this `None` default --
+        # `_frozen_real_band_precision_rows` is the ONE source of truth for
+        # that value; do not "fix" this line to always write NULL.
         cur.executemany(
             """
             INSERT INTO band_precision (
