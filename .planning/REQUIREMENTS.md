@@ -36,6 +36,28 @@
 
 - [ ] **NOVEL-01**: Every claim carries a computed **novelty flag** decided per `(sys_id, work)` — NOT per work — by checking whether ANY available finding aid already ties THAT fragment to THAT work. The checked source set is enumerable, versioned, and recorded in the sidecar `meta`: FJMS and NLI catalogue + bibliography, titles, PGP, FGP, and M-source shelfmark attributions. The flag is computed for **ALL evidence families** (`track1_direct` AND `propagated`) — the frozen v2 asset computes it only for `propagated`, leaving all 254,612 `track1_direct` rows at `is_new = 0`, which is a coverage gap, not a result. Public display wording is **"not identified in any available finding aid" / "לא מזוהה באמצעי העזר הקיימים"**, shown with the checked-source list and the as-of date, and with the owner's confidence estimate stated AS an estimate. The wordings "new discovery" / "new" / "unknown to scholarship" are PROHIBITED on public surfaces (they assert a construct the check cannot establish). Novelty is a filterable axis on the panel and `/work/{id}`, and is **structurally orthogonal to the confidence band**: it must never feed band assignment, precision copy, ranking weight, or certified styling — absence from a finding aid is not evidence a claim is correct (the catalogue-never-evidence rule, applied in reverse)
   - **⟨AMENDED 2026-07-30 — Phase-136 discuss, owner (`136-CONTEXT.md` D-23a/D-23b/D-23d)⟩** Three changes. (1) The flag is **TRI-STATE, fail-closed**, not boolean: `not_in_finding_aids` / `already_recorded` / `not_checked`; only the first is filterable as novel, and an unrun or failed check reads `not_checked` — never "novel by default". (2) Display wording is **"Not found in the finding aids checked" / "לא נמצא באמצעי העזר שנבדקו"** (past tense, scoped to what was actually checked) — replacing "not identified in any available finding aid", which overclaims coverage we do not have; the checked-source list and as-of date still ship with it. **The owner's confidence estimate is DROPPED** from the surface, per D-06 (no percentages anywhere). (3) The check keys on a **reviewed novelty identity** (alias/containment-aware), not raw source work ids, which split aliases and would manufacture false novelty.
+  - **⟨AMENDED 2026-08-02 — Phase-136 re-scope, owner (`136-CONTEXT.md` A-6, D-23a)⟩** The shipped
+    candidacy wording is fixed on the record: toggle **"Candidates for new finds" / "מועמדים לממצאים
+    חדשים"**, row badge **"Candidate new find" / "מועמד לממצא חדש"**, sub-line **"Findings you would not
+    reach by searching the catalogues"**, and a help affordance carrying the checked-source list, the
+    as-of date, and the explicit sentence that the identification itself is an unreviewed algorithmic
+    match, so this is a candidate, not a confirmed find. "New discovery" and "likely new find" were
+    **offered and DECLINED** because they stack two unearned claims on a row carrying no human review
+    until Phase 137 — that the match is correct, and that it is new; a wrong match that no catalogue
+    records is not a discovery. "Not found in the finding aids checked" survives as the explanatory
+    sentence carried alongside the toggle/badge; "new discovery" / "unknown to scholarship" stay
+    PROHIBITED. D-15a is restated: novelty filters and MAY group; it never orders and never styles a row.
+    Strike the base requirement's clause "with the owner's confidence estimate stated AS an estimate" —
+    replaced by the tri-state fail-closed vocabulary and the reviewed alias-aware identity key already
+    named in the 2026-07-30 amendment above.
+
+    **Reconcile the two novelty vocabularies on the record.** `.planning/ROADMAP.md` Phase 136 success
+    criterion 6 names the tri-state `not_in_finding_aids` / `already_recorded` / `not_checked`;
+    `136-CONTEXT.md` D-23a names the same three states `not_found` / `known` / `indeterminate`. ROADMAP
+    outranks the CONTEXT body under this phase's own stated precedence order, so **the STORED enum is
+    ROADMAP's: `not_in_finding_aids` / `already_recorded` / `not_checked`, defaulting to `not_checked`.**
+    D-23a's `not_found` / `known` / `indeterminate` are recorded here as descriptive ALIASES of those same
+    three states respectively, so no later plan invents a fourth value or a second storage vocabulary.
 - [ ] **NOVEL-02**: The novelty flag's **provenance** (`known_source` — which aid already had it) is masked on the public side: the boolean is publishable, but a restricted-corpus provenance value collapses to a non-identifying label (e.g. "recorded in a restricted corpus"), never the corpus name, and passes the DATA-05 masking scan on every surface that renders or exports it — including copy/clipboard output, JSON payloads, and error paths. Public surfaces therefore support "filter **and explain**" only where the explaining source is itself public; elsewhere they support "filter only". The heuristic-plus-LLM funnel's verdict cache is a build-time artifact and is never shipped in the sidecar
 
 ### Bands & Certification
@@ -55,11 +77,42 @@
 
 - [ ] **PANEL-01**: The browse page offers a "Computed identifications" / "זיהויים מחושבים" button (enrichment section on the existing staleness-guarded path) opening the manuscript's list of potential identifications, each with band label and inline voting — ✓ / ? / ✗ + optional note — wired to JUDGE-01
 - [ ] **PANEL-02**: The panel shows two relation types, both with band labels + click-through: (1) "Other manuscripts of ⟨work⟩" — MS-to-MS with title info, derived from shared work–witness claims (displays the weaker band of the pair; shows each side's own relation type when they differ); (2) "Pages in other manuscripts related to this page" — direct page-to-page alignment claims presented in the context of the currently viewed page
+  - **⟨AMENDED 2026-08-02 — Phase-136 re-scope, owner (`136-CONTEXT.md` A-2, A-3, D-09)⟩** Amends BOTH
+    PANEL-01 and PANEL-02. A panel-level **relation filter** ("Direct match / Partial match / Shared
+    text", AND-composed with every other active filter, empty set = all) is IN SCOPE for this phase; it
+    was previously specified only for `/work/{id}` under D-16. D-09's amendment: the manuscript group is
+    **not collapsed** — the two panes carry EVEN weight (1fr/1fr at ≥900px, stacking page-then-manuscript
+    on mobile) and the manuscript pane NAMES the works; the left-to-right ordering ("On this page" first,
+    then "Elsewhere in this manuscript") is unchanged. Quality is displayed as **two buckets** ("main
+    pool" / "more matches"), per the rule in `main-pool-rule.md`; band labels are tooltip-only (the frozen
+    strings are unchanged; only their surface changes); no human-review badge is rendered on any row
+    (D-13f). Work titles render as **plain text, not links**, until Phase 136.1 ships `/work/{id}`.
 - [ ] **PANEL-03**: An on-demand evidence view shows the supporting span(s) from OUR manuscript text with match stats; for MS–MS relation claims each side shows its own span; reference text is never rendered
+  - **⟨AMENDED 2026-08-02 — Phase-136 re-scope, owner (`136-CONTEXT.md` A-4, D-12); forward note —
+    delivered in Phase 136.1, moved out of Phase 136⟩** Strike "reference text is never rendered".
+    Reference text MAY render, licence-gated PER WORK — the operative test is the acquisition manifest's
+    per-work `reuse_ok` flag, NOT the source corpus: `reuse_ok='yes'` (**277** works — PD 264 · CC-BY 11 ·
+    CC0 1 · CC-BY-SA 1) may render, carrying the manifest's generated `attribution_text` where the licence
+    requires it; `unclear` (**46** — 42 `unknown` · 4 CC-BY-NC), `noncommercial_only` (1) and **absent**
+    (**21** — every JA work) all **fail closed** — a work ABSENT from the manifest fails closed, it never
+    defaults open. Two counter-intuitive facts to plan around: "public corpus" is NOT the operative
+    test — being on Sefaria is not permission, and a meaningful share of Sefaria works are not clearly
+    reusable — and every JA work is absent from the licence metadata, so JA text cannot render today even
+    though JA rows display elsewhere in the UI. D-12's corrected mechanism, in one sentence: stored
+    offsets index the normalized Hebrew-letter stream (not raw text), the result must be clipped per
+    line, one renderer must emit both discovery spans and search-term marks, and the highlight is dropped
+    on version change.
 
 ### Work → Witnesses
 
 - [ ] **WORK-01**: A `/work/{id}` page lists all identified carriers in the dated snapshot grouped by codicological witness unit (DATA-10: joined fragments appear as one witness) with per-witness band labels, server-side pagination (PERF-01 page cap), deterministic sorting, visible counts, and band + library filters with defined semantics (filters compose as AND; empty filter = all currently ENABLED bands — screening rows appear on any surface only while the BAND-03 toggle is on)
+  - **⟨AMENDED 2026-08-02 — Phase-136 re-scope, owner (`136-CONTEXT.md` A-3); forward note — delivered
+    in Phase 136.1, moved out of Phase 136⟩** Strike "band + library filters". A tier-labelled control is
+    **DELETED, not renamed** — quality is displayed as the two-bucket main-pool split (a default plus a
+    "show more matches" toggle) and kind is the relation filter; a tier-labelled control would be a second
+    vocabulary for an axis the rows no longer speak. Tier A stays reachable behind the screening toggle.
+    Novelty and coverage filters remain; the library filter is included only if the existing web
+    library-filter component drops in cheaply (D-16), otherwise deferred.
 - [ ] **WORK-02**: Works are findable by neutral title with defined bilingual title normalization and alias/duplicate-title handling, linked from panel + atlas; the identification-browse surface reuses/extends the existing `/catalog` Browse-by-Identification structure (domain/author/work facets) rather than inventing a new browse paradigm (exact shape fixed in the UX discuss-phase)
 
 ### Atlas & Homepage
