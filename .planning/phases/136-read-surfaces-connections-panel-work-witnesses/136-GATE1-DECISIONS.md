@@ -1366,3 +1366,262 @@ failure modes Codex measured as most damaging:
 
 This record will be updated (not silently overwritten) once plan Task 3 returns and Task 4 writes
 the label file.
+
+---
+
+## Task 4 (this continuation, 2026-08-02) -- THE LABEL FILE IS WRITTEN. Task 3 has returned; here is
+the measured analysis, per-arm, never as a single headline
+
+**Provenance.** The owner filled the canonical workbook, `136-NOVELTY-HARDCASES.xlsx` (84 of 101
+verdict cells), and this ruling was delivered to this continuation through a normal orchestrator
+dispatch -- the correct channel (see decision E's own Provenance note for why that distinction is
+load-bearing; every prior ruling in this file that arrived by any other route was refused). Before
+trusting the dispatch's own summary of the owner's answers, this continuation independently
+re-opened the actual `.xlsx` (via `openpyxl`, `data_only=True`, reading every one of the four data
+sheets by header name, not position) and cross-checked every cell against what was asserted. **The
+verdict DATA matched exactly, cell for cell, across all 101 cases and all four sheets** -- no
+discrepancy found in any shade, correctness, demotion or identity value. **One FRAMING discrepancy
+was found and is flagged here rather than silently corrected:** the dispatch that requested this
+analysis characterized the three skipped identity cases as "Class 3." They are not -- per the
+workbook's own "Class" column and per `scripts/discovery_gate1_evidence.py::_CLASS_TITLES`, cases
+6-8 are **Class 1 (near-miss titles)**; Class 3 (catalogue entry naming a different granularity of
+the same work) is genuinely cases 1-3, which the owner marked `same_work`. The distinction matters
+for the D-13d finding below -- see "Class 1 vs. Class 3" section.
+
+### The label file
+
+- **Path:** `discovery_data/novelty_hardcase_labels-v1.json`.
+- **Written by:** a new Task-4 read-back mode added to the SAME canonical script this plan already
+  uses for every other artifact (`scripts/discovery_gate1_evidence.py`, functions
+  `read_owner_labels_from_xlsx` / `write_owner_labels_json`, invoked via
+  `python scripts/discovery_gate1_evidence.py --read-labels-from <xlsx> --labels-out <json>`) --
+  not a one-off, throwaway script, so the read-back is reproducible and citable the same way the
+  workbook's own generation already is. It reuses this module's OWN vocabulary constants
+  (`IDENTITY_TOKENS` / `SHADE_TOKENS` / `CORRECTNESS_TOKENS` / `DEMOTION_TOKENS`) as the sole source
+  of truth for rejecting an out-of-vocabulary cell value -- never a second, hand-copied list.
+- **Content hash:** `sha256:ce0dc2fb176d01de5f04975eac82017feaeb390db71e9ec13f3872a77d28d4b6` --
+  computed over `json.dumps(cases, sort_keys=True, ensure_ascii=False)` (the `cases` array only, so
+  the hash is stable under any future change to the file's own header/summary fields); recorded in
+  the JSON's own `content_hash` field and here, per T-136-03-06, so plan 136-04 can re-verify the
+  file it grades against has not been hand-edited since the owner supplied it.
+- **Structural guarantees enforced by the read-back (fail CLOSED, not merely reported):** every one
+  of the 101 case numbers is present exactly once (1..101, no gaps, no duplicates); every verdict/
+  correctness/demotion cell value is one of that sheet's own vocabulary tokens (rejects free text);
+  every entry carries `label_provenance` recording owner supply, the source sheet, the date, and
+  (where a draft PROPOSAL was shown) whether the owner's verdict confirmed or corrected it; a truly
+  blank verdict cell is recorded as `skipped: true` with `value: null` -- **never** filled from the
+  row's own PROPOSAL draft (verified: zero cases carry both `skipped: true` and a non-null verdict
+  value).
+- **Counts:** 101 total cases -- **81 labelled**, **12 skipped** (3 identity + 9 heuristic-demoted
+  blanks), **8 no-verdict-by-design** (Arm 3), **0 correctness gaps** (every `diverges_work`/
+  `diverges_part` row in both Class 6 and Arm 1 carries a Correctness call -- the owner left none of
+  the 32 divergence rows unanswered on that axis).
+
+### A. Identity spot-check (8 cases) -- the constant-answer hypothesis is CONFIRMED on the decided
+cases, not disproven
+
+Cases 1-5 (Class 3 granularity ×3, Class 2 alias ×2) all came back `same_work`. Cases 6-8 (Class 1
+near-miss) were all **skipped**, with the owner's own note (delivered alongside the workbook, per
+the dispatch): *"same work, different location (perhaps not the same page in the ms?)."*
+Per the interpretation rule this file itself pre-registered ("Outstanding" section, "How to read the
+result"): all-`same_work` on the DECIDED cases argues the D-13d author-gated collapse rule (276 of
+1,367 groups, 20.2%) is, if anything, too conservative -- **5 of 5 decided cases confirm this; the
+constant-answer hypothesis is CONFIRMED on the population that was actually judged.** The 3 skips
+are not evidence against it (a skip is not a `different_works` verdict), but they are also not free
+of information -- see the next section, which investigates exactly what the owner's skip note
+implies.
+
+### Class 1 vs. Class 3 -- the span/page identity premise, investigated for cases 6-8
+
+**Finding, stated precisely.** Class 3 (granularity, cases 1-3) and Class 1 (near-miss, cases 6-8)
+are built by genuinely DIFFERENT selection mechanisms in `scripts/discovery_gate1_evidence.py`, and
+only one of them rests on the "byte-identical span claimed by both works" premise:
+
+- **Class 3 (`build_hardcases`'s granularity block) genuinely IS built from real identical-span
+  co-occurrence.** Verified directly against the live asset for all three sampled cases: Case 1
+  (sys_id `990051079570205171`) has `w000171` and `w001281` BOTH on page
+  `..._P000002_FL158601518`, span **0-962**, exactly as rendered. Case 3 (sys_id
+  `990001588480205171`) has `w000171` and `w001304` BOTH on page `..._P000007_FL50086673`, span
+  **0-246**. Case 2 (sys_id `990000872080205171`) has `w000171` and `w001278` both present with an
+  identical span **0-780** on page `..._P000033_FL49277200` (among several pages where the two
+  works' claims exist but do not share an identical span -- the rendered "byte-identical span
+  0-780" claim in the worksheet is correct for the page it names). **Class 3's own construction is
+  sound; this finding does NOT undermine it.**
+- **Class 1 (`select_near_miss_candidates` + `build_hardcases`'s near-miss block) is NOT built on
+  any co-occurrence premise at all, and its own rendered "why it is hard" text never claims one** --
+  it reads "Same author; normalized titles are N% similar (SequenceMatcher) but NOT identical," with
+  no mention of a shared span. The manuscript shown for a near-miss pair is picked by
+  `best_claim_for_work(claims, wa) or best_claim_for_work(claims, wb)` -- the best claim for
+  work A if it has ANY shipped claim, full stop, regardless of whether work B is claimed ANYWHERE in
+  that same manuscript. **Directly queried against the live asset for all three sampled cases: the
+  "other" work has ZERO claims on the shown manuscript in every one of the three.** Case 6 (sys_id
+  `990051317430205171`): only `w000007` has claims there; `w000036` never appears. Case 7 (sys_id
+  `990001835240205171`): only `w001167` has claims there; `w001181` never appears. Case 8 (sys_id
+  `990051181430205171`): only `w000452` has claims there; `w000467` never appears. **The premise the
+  dispatching brief attributed to these three cases -- a byte-identical span claimed by both works
+  -- was never true of them; it does not need to be disproven, because it was never asserted by the
+  worksheet in the first place.** This is a genuine, if narrow, characterization gap in how the
+  request for this analysis was framed (conflating Class 1 with Class 3), not a defect in the
+  worksheet or its Markdown/XLSX rendering, both of which describe Class 1's actual construction
+  accurately.
+
+**What the owner's skip note is actually evidence of, and the real (dormant) D-13d gap it points
+to.** The owner's note -- "same work, different location, perhaps not the same page" -- reads,
+against Case 6's actual pair (`המספיק לעובדי השם (כרך ב חלק ב)` / `...(כרך ט חלק ב)`, i.e. the SAME
+multi-volume treatise by אברהם בן הרמב"ם, volumes 2 and 9), as an accurate, savvy intuition: these
+ARE plausibly "the same work" in the loose sense of belonging to one authored treatise, but they are
+DIFFERENT VOLUMES, not interchangeable, and (confirmed above) never co-located in this manuscript --
+exactly the kind of case a labeller is right to decline rather than force into `same_work` or
+`different_works`. This prompted a targeted, narrow check of whether D-13d's own collapse predicate
+(`works_related_by_title`: same non-null author AND identical-or->=4-char-shared-prefix normalized
+title) would ALSO fire on this specific pair if it ever did co-occur -- **and it does**:
+`works_related_by_title(works["w000007"], works["w000036"])` returns `True` (both share author
+`אברהם בן הרמב"ם` and the 4-character prefix `"כרך "`). There is a third catalogued volume in this
+same title family, `w000038` ("...(כרך ט חלק א)"), so any 2-of-3 pairing would collapse under the
+current predicate. **Empirically, this is currently a DORMANT gap, not an active defect in the
+shipped 276-group collapse population:** a direct query of every `load_identical_span_groups` group
+in the live asset found **zero** span-groups anywhere in the whole corpus containing two or more of
+`{w000007, w000036, w000038}` together -- these three volumes never actually compete for the same
+byte span in this asset. A full audit of the 25 unique same-author/related-title pairs that DO drive
+the current 276-group collapse population confirms every one is a genuine whole-work/part-of-work
+hierarchical relationship (e.g. `רש"י על התורה` / `רש"י על בראשית` -- the whole Torah commentary vs.
+one book of it; `משנה תורה, הקדמה ומניין המצוות` / `משנה תורה, ספר X` -- the Code's own
+introduction vs. one of its constituent Books) -- **none is a "different volume of a multi-volume
+opus" case.** **D-13d is therefore FLAGGED for re-examination, not found broken:** the author-gated
+4-character-prefix predicate does not, in principle, distinguish "the same intellectual work at two
+levels of containment" (correct to collapse) from "two distinct, non-interchangeable volumes/parts
+of one multi-volume opus" (arguably should NOT silently collapse into a single displayed
+identification, since that would obscure WHICH volume a fragment actually witnesses) -- this
+distinction is not currently exercised by the measured population, but the predicate's own logic
+does not prevent it from firing this way in a future corpus growth or a differently-catalogued
+multi-volume work. **This plan does NOT change the collapse rule** (per its own instruction) --
+this is a flag for whoever next touches `works_related_by_title` in `shared/discovery_grouping.py`,
+not an authorized code change.
+
+### B. Novelty-evaluation analysis -- per arm, never as one headline (the arms are capped, not
+proportional; the residual is a biased slice by construction; Class 6's distribution is a selection
+artifact)
+
+**Arm 1 -- RESIDUAL (30 cases, the EXACT population the pinned LLM gate would score under ruling J's
+funnel-first architecture): ZERO `fills_gap` in 30.** Shade distribution: `diverges_work` 19 (63%) /
+`container_predicts` 4 (13%) / `confirms` 4 (13%) / `refines_granularity` 2 (7%) / `aid_more_specific`
+1 (3%) / `fills_gap` **0** (0%). Of the 19 `diverges_work` rows, correctness is `catalogue_correct`
+18, `unclear` 1, `claim_correct` 0. **~60% of residual claims are the claim being WRONG** (19
+`diverges_work`, of which 18 carry a recorded `catalogue_correct` call) -- this is not a base rate
+(Arm 1's per-stratum cap of 5 is fixed, not proportional, and `pgp_sole` populated zero candidates --
+see ruling J's own sizing note), but it is a direct, measured answer to the question this arm was
+built to answer: *of the rows that would actually reach the model, is the model's job mostly "confirm
+a real gap" or mostly "adjudicate a claim that is probably already wrong"?* **The answer, measured:
+mostly the latter.** The novelty gate answers "is this recorded", never "is this right" -- and on
+this population, "is this right" is where most of the actual disagreement lives, a question the gate
+is not designed to answer at all.
+
+**Ruling H is validated with numbers, not merely adopted on faith.** 4 of the 30 residual cases
+(13%) are `container_predicts` -- under the pre-H, nine-value enum these would have fallen through to
+`fills_gap` by elimination and shipped as "Candidates for new finds," a wrong "previously unknown"
+claim for a standard-rite liturgical unit a catalogue already predicts without naming. Ruling H's
+adoption is not merely theoretically motivated; it demonstrably prevents 4 of 30 (one in
+roughly every 7-8) residual rows from becoming a false candidate-new-find in this sample.
+
+**Class 6 -- catalogue divergence (30 cases, unchanged, owner rulings E/E'/F/G): the selector
+over-fires ~57%.** Shade distribution: `confirms` 15 (50%) / `diverges_work` 13 (43%) /
+`refines_granularity` 2 (7%). Of the 13 `diverges_work` rows, correctness is `catalogue_correct` 13
+(100%), `unclear` 0, `claim_correct` 0. **The Class-6 divergence selector
+(`select_catalogue_divergence_candidates`) over-fires on 15 + 2 = 17 of 30 (57%)** -- cases it
+proposed as a plausible divergence that the owner instead judged `confirms` (the catalogue's free
+text already states the claim, per ruling G) or `refines_granularity` (a genuine granularity
+addition, not a contradiction). This is not a new finding -- ruling G already characterized this
+selector's flaw and explicitly declined to fix it so the failure mode would keep surfacing as the
+pool grew; the 30-case pool confirms the ~50% figure ruling G estimated from 2 of the original 15
+worked cases holds at the larger sample (57% vs. the original ~50% estimate, well within the
+uncertainty of a 2-case anecdote). **Where the selector's `diverges_work` call WAS confirmed by the
+owner (13 of 30, 43%), the correctness call is unanimous: the catalogue is right, the claim is wrong,
+every single time (13/13).** Combined with Arm 1's 18/19 finding above, this is a strong, convergent
+signal across BOTH the Class-6 (catalogue-text-only selection) and Arm-1 (source-stratified
+selection) populations: **when this project's own heuristics flag a genuine divergence, the
+catalogue is very likely to be right.** Per the standing catalogue-never-evidence discipline, this
+finding is recorded as a measured property of THESE TWO SAMPLES, not adopted as a rule the system
+applies to auto-adjudicate any future case -- ruling F's own resolution (opt-in, warned, user-decided
+visibility) already embodies exactly this caution, and this data supports why that caution was
+warranted rather than excessive. **Reminder per this plan's own critical invariant:** the
+Correctness column's use of the catalogue to judge OUR claims is a deliberate, owner-ruled exception
+(ruling F) scoped to labelling THIS evaluation set -- it must not be read as license to let any
+production code path treat catalogue disagreement as a verdict.
+
+**No arm here measures, or should be read as measuring, a corpus-wide rate.** Arm 1's per-stratum cap
+(5) is fixed, not proportional -- `pgp_sole` populated 0 of a possible 5, `container_predicts` /
+`terse_catalogue` / `bib_sole` / `fgp_sole` / `catalogue_sole` / `multi_source` populated 5 each.
+Class 6's 30 cases are selected purely by a catalogue-text-containment heuristic already shown above
+to over-fire -- its distribution describes what THAT SELECTOR proposes, filtered through the owner's
+correction, not what fraction of all claims diverge from their catalogue entry.
+
+### C. Arm 2 -- HEURISTIC-DEMOTED (25 cases): recorded as INCONCLUSIVE -- an instrument failure, not
+an owner failure
+
+**Only 7 of 25 rows received a decisive verdict** (`demotion_correct` or `false_known`); 9 came back
+`unsure`, and 9 were left genuinely blank (recorded as `skipped`, never filled from the draft
+PROPOSAL). By stratum: **`published_full_sole`** (the Codex-finding-1 population, bib-presence-alone
+false-knowns) -- 1 `false_known`, 9 blank: **1 of 10 decisive.** **`pgp_sole`** (the Codex-finding-6
+population, PGP-presence-alone false-knowns) -- 1 `demotion_correct`, 9 `unsure`: **1 of 10
+decisive.** **`other_demotion`** (the non-Codex-flagged stratum) -- 4 `demotion_correct`, 1
+`false_known`: **5 of 5 decisive.** **The two strata Codex flagged as the most damaging populations
+in the reference implementation (3,688 `published_full` false-knowns; 2,014 PGP false-knowns, 942
+PGP-sole) are exactly the two that produced only ONE decisive verdict each out of ten** -- the
+oversampling this arm's design intended (per ruling J) to characterize the false-known risk directly
+did not, in practice, produce gradeable data for those two populations.
+
+**Diagnosis, verified against the actual workbook text, not assumed.** Judging "was this demotion
+correct" requires the ACTUAL bibliography row (its own title/author text) or the actual PGP
+description/transcription snippet in front of the labeller. The sheet does not supply either --
+its "Why this demotion is being checked" column carries only the STRATUM-level mechanical rationale
+(verbatim, Case 69: *"the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full'
+as naming this claim, regardless of whether that row's own title/author actually matches (Codex
+finding 1) -- no OTHER checked source agrees"*), never the specific bib/PGP text that would let a
+labeller actually check whether that specific row names this specific work. This is precisely why
+`published_full_sole` and `pgp_sole` -- where the whole judgment turns on reading unshown source text
+-- produced almost no decisive verdicts, while `other_demotion` (whose rationale text apparently gave
+enough to judge from) produced 5 of 5. **This is a genuine instrument-design gap in this labelling
+pass, not a labelling effort failure** -- the owner engaged with all 25 rows (only 9 are truly blank)
+and gave the honest answer the sheet's own information supported (`unsure` for 9 of the 10
+unresolvable `pgp_sole` rows).
+
+**The false-known question ruling J's cost analysis depends on remains OPEN and ungraded.** Ruling
+J's own text states the funnel-first architecture makes a heuristic false-known PERMANENT and
+UNRECOVERABLE, and treats this as an accepted, measured cost precisely BECAUSE the error runs in the
+conservative direction. This labelling pass was meant to measure how often that cost is actually paid
+on the two populations Codex flagged hardest; it did not produce that measurement. The best available
+evidence remains the owner's own prose read of the underlying rationale, offered alongside the
+workbook and recorded here EXPLICITLY as ungraded prose, not a measurement:
+
+> "some of them are not the same but most of them are anyway wrong so no harm. Some granularity
+> misses. No big deal most of them."
+
+This is recorded as the best available signal, not upgraded to a number: it is consistent with (and
+no stronger than) the 1-of-10 decisive rate actually measured on the two hardest strata, and should
+not be cited alongside the Arm 1 / Class 6 percentages above as if it carried the same evidentiary
+weight.
+
+**Recommendation, not built now:** a redesigned Arm 2 that surfaces the actual demoting source's own
+text (the bib row's title/author, or the PGP description/transcription snippet) alongside each case,
+so the labeller can judge the demotion the way `other_demotion`'s apparently-sufficient rationale text
+let them. This is a recommendation for a future pass, per this plan's own "do not build it now"
+instruction -- no new selector, sheet, or script change is made here.
+
+### D. Arm 3 -- NO-SOURCE-TEXT (8 cases): no verdict collected, by design
+
+Unchanged from ruling J's own specification -- these 8 rows ship as candidates automatically
+regardless of any observation here; no owner verdict was solicited and none is recorded beyond the
+structural fact that all 8 carry `question_type: "no_verdict_by_design"` in the label file.
+
+### Summary table (measured this continuation; every count traceable to the label file's own
+`cases` array)
+
+| Population | n | Decisive/labelled | Headline (per-arm, NOT a corpus rate) |
+|---|---|---|---|
+| Identity spot-check | 8 | 5 same_work / 3 skip | Constant-answer hypothesis CONFIRMED on the 5 decided |
+| Class 6 (catalogue divergence) | 30 | 30 | Selector over-fires ~57% (15 confirms + 2 refines) |
+| Arm 1 (residual) | 30 | 30 | 0 fills_gap; 19 diverges_work (18 catalogue_correct); container_predicts saved 4 rows from false candidacy |
+| Arm 2 (heuristic-demoted) | 25 | 7 decisive / 9 unsure / 9 blank | INCONCLUSIVE -- instrument failure (needs source text, not stratum rationale) |
+| Arm 3 (no-source-text) | 8 | n/a | No verdict by design |
+
+**Total: 101 cases, 81 labelled, 12 skipped, 8 no-verdict-by-design, 0 correctness gaps.**
