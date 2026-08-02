@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: "Phase 136 DISCUSS COMPLETE 2026-07-30 — context revised after BOTH pre-planning gates (real-data mockup: 2 real display defects + 1 self-inflicted false alarm; Codex adversarial: REWORK, 3 BLOCKER/9 HIGH, every finding dispositioned), scope EXPANDED by the owner (NOVEL-01/02 moved IN, VIS-01 homed, 2 new surfaces, ONE authorized rebuild), and the REQUIREMENTS/ROADMAP/STATE bookkeeping applied (commit 2251fccb). Next: /clear then /gsd-plan-phase 136"
-last_updated: "2026-08-02T08:38:07.405Z"
+stopped_at: Completed 136-02-PLAN.md (BAND-05 methods qualitative rewrite + shared discovery honesty gate)
+last_updated: "2026-08-02T09:23:00.562Z"
 last_activity: 2026-08-02
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 45
-  completed_plans: 23
+  completed_plans: 24
   percent: 13
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 2 of 21
+Plan: 3 of 21
 Status: Ready to execute
 Last activity: 2026-08-02
 
@@ -116,8 +116,8 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-08-02T08:38:07.396Z
-Stopped at: Phase 136 DISCUSS COMPLETE 2026-07-30 — context revised after BOTH pre-planning gates (real-data mockup: 2 real display defects + 1 self-inflicted false alarm; Codex adversarial: REWORK, 3 BLOCKER/9 HIGH, every finding dispositioned), scope EXPANDED by the owner (NOVEL-01/02 moved IN, VIS-01 homed, 2 new surfaces, ONE authorized rebuild), and the REQUIREMENTS/ROADMAP/STATE bookkeeping applied (commit 2251fccb). Next: /clear then /gsd-plan-phase 136
+Last session: 2026-08-02T09:23:00.552Z
+Stopped at: Completed 136-02-PLAN.md (BAND-05 methods qualitative rewrite + shared discovery honesty gate)
 Historical: Completed 135-02-PLAN.md (BAND-05 methods section). The flag-gated bilingual "Confidence Bands & Methods" section now renders inside the existing /help page (never a new route): its TOC entry AND its body card are each INDEPENDENTLY gated on discovery_available() (Codex #11 — the render loop emits only TOC links, so the body card carries its own gate). Each of the 7 bands has a help-confidence-<band> deep-link anchor (D-10) from an explicit registry. Fields render STRICTLY per the plan's field-sourcing: population from the RUNTIME display-deduplicated SHIPPED-CLAIM count (web.discovery.get_band_claim_counts — never band_precision.denominator, never raw evidence rows, never the Wave-4 frame doc); unit = (page, work); sample split into draw/determinate/successes; strata from sampling_frame else the D-08 fallback; weighted estimate + CI via format_precision_copy; the propagated 0.926 ONLY in a collection-scope paragraph (get_band_precision_collection), never on the corroborated/weak rows; the 4 CERT-01 registry fields (measurement_date/grader/audit_status/report_id) via .get() → placeholder ("not yet measured" / "independent audit pending"), NEVER fabricated. /help is now an async route reading rows+counts through the new web/discovery.py wrappers (get_band_precision / get_band_precision_collection / get_band_claim_counts / get_all_band_precision, all fail-open) and noindexed by the dedicated pre-release SEO predicate discovery_methods_noindex() = discovery_available() AND NOT DISCOVERY_PUBLIC_RELEASED (new web/feature_flags.py flag, default OFF) — noindex ONLY in the pre-release window, FLIPS to indexed at the Phase-139 REL-01 gate (Codex #18). Render-smoke (tests/render_smoke/test_help_methods_render_smoke.py, 6 tests): EN+HE section render, all 7 anchors, runtime population, placeholder-safe registry fields, three-state noindex transition + the predicate truth-table, the no-"certified" gate (EN + HE מאומת/מאושר/מוסמך, scoped to the section since מאושר legitimately appears in Joins-Lab help), and HE RTL. Gates: ruff clean (5 files); per-file --scan-asset masking clean; real-name grep 0; render_smoke package 59 pass + discovery suites 48 pass + back-edge guard 7 pass (no regression). Wave 2 COMPLETE; Wave 3 = 135-06 next.
 Historical (superseded, retained for the v2 decision trail): Completed 135-05-PLAN.md (v2 vocabulary + schema lockstep landed as vocabulary/DDL/spec only — NO bake logic: routing_reason gains later_shared_text [5-member frozenset + discovery_evidence DDL CHECK]; track1_direct band adds high_confidence_algorithmic alongside the RETAINED v1 expert_verified [v1-read-compat, Codex #8]; band_precision gains 5 CERT-01 registry columns incl the closed-vocab measurement_status CHECK [Codex #B3]; new masking-safe discovery_routing_audit table [decision CHECK]; dual-key band-rank in web spot-check + service _BAND_RANK_ORDER; dated amendments to discovery-sidecar-schema-v1.md [+meta provenance keys], band-labels §4 D-18 + §5 asset/bake-level atomicity, discovery-frames.md rename note). The real-build band-assignment flip + verifier release-strict expected-key rename are deferred to 135-06 (the v2 bake). Wave 2 remaining: 135-02.
 Resume file: None
@@ -147,6 +147,7 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 | Phase 135 P02 | 40min | 2 tasks | 5 files |
 | Phase 135 P09 | 170min | 3 tasks | 10 files |
 | Phase 136 P01 | 18min | 3 tasks | 5 files |
+| Phase 136 P02 | 40min | 3 tasks | 3 files |
 
 ## Decisions
 
@@ -213,3 +214,7 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 - [Phase 136]: The narrow §1.6 tier_a amendment stores ONLY the authorization (measurement_status=measured_pass, ci_low=0.9084) that is_default_eligible() reads -- precision stays NULL
 - [Phase 136]: Deploy runbook's expected-frame-hash source corrected to an externally pinned value (discovery-frames-v2.md, pending plan 136-05) rather than the candidate build's own manifest
 - [Phase 136]: Skipped requirements mark-complete for PANEL-01/PANEL-02/VIS-01/NOVEL-01/NOVEL-02 at plan 136-01 -- this plan lands only contract amendments; marking Complete is premature until phase closeout (same precedent as Phase 134)
+- [Phase 136]: 136-02: Shared discovery_honesty_gate's raw-vocab-key check is scoped to underscore-bearing schema enum tokens only, so plain English band words (weak/corroborated/unreviewed) can never false-positive on future honest surface prose
+- [Phase 136]: 136-02: Novelty check's enumerable checked-source list on the methods page is a TODO(136-04)-tagged placeholder naming only the source CATEGORY, not a dated list -- never invented dates ahead of that plan
+- [Phase 136]: 136-02: Tasks 1+2 (help.py qualitative rewrite) committed together because Task 1's own verify step runs the same render-smoke suite Task 2 also extends -- an intermediate git state was built and independently verified green before committing, rather than leaving the suite red between task commits
+- [Phase 136]: 136-02: Skipped requirements mark-complete for PANEL-01/PANEL-02/NOVEL-01 (this plan's shared frontmatter IDs) -- this plan lands only the methods-page rewrite + the honesty gate; the bulk of each requirement lands in later Phase-136 plans
