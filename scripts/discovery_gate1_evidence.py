@@ -7,7 +7,11 @@ A READ-ONLY measurement script over the deployed discovery sidecar
 run yet). It computes every number the owner needs to rule on the five
 "Still OPEN by design" wave-1 decisions named in
 ``136-CONTEXT.md`` (D-13e, D-16, D-13c, D-13b, D-13d), plus the zero-cost
-novelty hard-case candidate set that feeds plan 136-03 Task 3.
+novelty hard-case candidate set that feeds plan 136-03 Task 3 — originally
+three D-23c classes (near-miss titles, alias pairs, granularity), extended
+per an OWNER-AUTHORIZED gate-1 ruling (recorded in ``136-GATE1-DECISIONS.md``
+item C) with two additional classes: terse/missing catalogue identification
+text, and generic collection works.
 
 Mirrors the shape of ``scripts/bench_discovery.py``: open the live asset
 read-only, drive real queries against it, print a table per measurement, and
@@ -910,12 +914,140 @@ def select_near_miss_candidates(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Classes 4 and 5 -- OWNER-AUTHORIZED scope extension recorded in
+# 136-GATE1-DECISIONS.md (item C). Added AFTER the original 52 candidates,
+# at the gate, because the original three classes were selected adversarially
+# to a STRING heuristic, not to an LLM -- these two classes exist so the
+# measured error rate is not flattered by cases an LLM finds easy. Same
+# discipline as classes 1-3: zero model calls, pure metadata/string
+# comparison, fully deterministic (every selection below is either a total
+# order over a stable key or an explicit sort before slicing).
+# ---------------------------------------------------------------------------
+
+def select_terse_catalogue_candidates(
+    claims: List[Dict[str, Any]],
+    libraries: Dict[str, Dict[str, str]],
+    cap: int = 15,
+    max_len: int = 20,
+) -> List[Dict[str, Any]]:
+    """Class 4 (terse or missing catalogue identification text): shipped
+    ``direct_witness`` claims on a manuscript (sys_id) whose OWN
+    ``libraries.csv`` ``catalogue_text`` field is either entirely absent
+    (empty string, or no row at all) or so short (<= ``max_len`` characters,
+    nonzero) that a title comparison has almost nothing to work with.
+
+    One representative claim per sys_id: the highest ``matched_letters``,
+    then lexicographically smallest ``page_id``, then ``work_id`` -- a total
+    order, never "whichever row the query happens to return first".
+    Candidate sys_ids are then sorted by (catalogue-text length ascending,
+    sys_id) so the emptiest cases surface first, and capped at ``cap``.
+    """
+    best_by_sys: Dict[str, Dict[str, Any]] = {}
+    for c in claims:
+        if c.get("claim_type") != "direct_witness" or c.get("routing_status") != "shipped":
+            continue
+        sid = c["sys_id"]
+        cat = libraries.get(sid, {}).get("catalogue_text", "")
+        if len(cat) > max_len:
+            continue
+        key = (-(c["matched_letters"] or 0), c["page_id"], c["work_id"])
+        prev = best_by_sys.get(sid)
+        if prev is None or key < prev["_key"]:
+            d = dict(c)
+            d["_key"] = key
+            best_by_sys[sid] = d
+
+    ordered_sys_ids = sorted(
+        best_by_sys.keys(),
+        key=lambda sid: (len(libraries.get(sid, {}).get("catalogue_text", "")), sid),
+    )
+    return [{"sys_id": sid, "claim": best_by_sys[sid]} for sid in ordered_sys_ids[:cap]]
+
+
+def select_generic_collection_candidates(
+    claims: List[Dict[str, Any]],
+    works: Dict[str, Dict[str, Any]],
+    cap: int = 15,
+    min_cluster_size: int = 3,
+) -> List[Dict[str, Any]]:
+    """Class 5 (generic collection works): (author, normalized-title)
+    clusters of >= ``min_cluster_size`` works carrying >= 2 distinct
+    ``canonical_work_id``s -- precisely the large generic-collection-title
+    clusters ``select_alias_pair_candidates`` (above) explicitly EXCLUDES as
+    corpus noise (its own docstring: "large clusters are generic multi-item
+    collection titles -- e.g. many distinct M-source responsa items sharing
+    one collector's name as both author and title stem"). Here they ARE the
+    signal, not the noise: for "already recorded" to mean anything for a
+    single witness of such a collection is genuinely ill-defined, not merely
+    hard to string-match.
+
+    For each such cluster this returns REAL shipped ``direct_witness``
+    manuscripts (best claim per sys_id, by matched_letters descending then
+    page_id then work_id -- a total order), round-robin across clusters
+    (largest cluster first, ties broken by the cluster key) one at a time so
+    no single collection crowds out the others, capped at ``cap``.
+    """
+    clusters: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for w in sorted(works.values(), key=lambda w: w["work_id"]):
+        author = w.get("author")
+        nt = normalize_title(w.get("neutral_title"))
+        if author and nt:
+            clusters[(author, nt)].append(w)
+
+    big_clusters: List[Tuple[int, Tuple[str, str], List[Dict[str, Any]]]] = []
+    for key, members in clusters.items():
+        if len(members) >= min_cluster_size:
+            canon_ids = {m["canonical_work_id"] for m in members}
+            if len(canon_ids) >= 2:
+                big_clusters.append((len(members), key, members))
+    big_clusters.sort(key=lambda t: (-t[0], t[1]))
+
+    claims_by_workid: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for c in claims:
+        if c.get("claim_type") == "direct_witness" and c.get("routing_status") == "shipped":
+            claims_by_workid[c["work_id"]].append(c)
+
+    per_cluster_reps: List[Tuple[Tuple[str, str], List[Dict[str, Any]], List[Dict[str, Any]]]] = []
+    for _size, key, members in big_clusters:
+        work_ids = sorted({m["work_id"] for m in members})
+        by_sys: Dict[str, Dict[str, Any]] = {}
+        for wid in work_ids:
+            for c in claims_by_workid.get(wid, []):
+                sid = c["sys_id"]
+                cand_key = (-(c["matched_letters"] or 0), c["page_id"], c["work_id"])
+                prev = by_sys.get(sid)
+                if prev is None or cand_key < prev["_key"]:
+                    d = dict(c)
+                    d["_key"] = cand_key
+                    by_sys[sid] = d
+        reps = sorted(by_sys.values(), key=lambda d: d["_key"])
+        per_cluster_reps.append((key, members, reps))
+
+    out: List[Dict[str, Any]] = []
+    round_idx = 0
+    while len(out) < cap:
+        added_this_round = False
+        for key, members, reps in per_cluster_reps:
+            if round_idx < len(reps):
+                out.append({"cluster_key": key, "members": members, "claim": reps[round_idx]})
+                added_this_round = True
+                if len(out) >= cap:
+                    break
+        if not added_this_round:
+            break
+        round_idx += 1
+    return out[:cap]
+
+
 def build_hardcases(
     claims: List[Dict[str, Any]],
     works: Dict[str, Dict[str, Any]],
     d13d: Dict[str, Any],
     libraries: Dict[str, Dict[str, str]],
     cap_per_class: int = 20,
+    class4_cap: int = 15,
+    class5_cap: int = 15,
 ) -> List[Dict[str, Any]]:
     cases: List[Dict[str, Any]] = []
 
@@ -1018,6 +1150,75 @@ def build_hardcases(
                 "titles a string comparison could easily conflate in EITHER direction."
             ),
             "proposal": None,
+        })
+
+    # --- Class 4: terse or missing catalogue identification text (owner-
+    # authorized scope extension, 136-GATE1-DECISIONS.md item C) ---
+    terse = select_terse_catalogue_candidates(claims, libraries, cap=class4_cap)
+    for entry in terse:
+        sid = entry["sys_id"]
+        c = entry["claim"]
+        w = works.get(c["work_id"])
+        cat = libraries.get(sid, {})
+        cat_text = cat.get("catalogue_text", "")
+        title = f"{w['neutral_title']} ({c['work_id']})" if w else c["work_id"]
+        if not cat_text:
+            reason = (
+                "This manuscript's own catalogue identification field is EMPTY -- there is no "
+                "catalogue text at all for a title comparison to work with, only the identified "
+                "work's title itself."
+            )
+            display_cat_text = "_(none on file -- explicit marker of absence, not an omission)_"
+        else:
+            reason = (
+                f"This manuscript's own catalogue identification field is only {len(cat_text)} "
+                "characters -- too short/generic for a title comparison to have anything meaningful "
+                "to compare against."
+            )
+            display_cat_text = cat_text
+        cases.append({
+            "class": "terse_catalogue",
+            "sys_id": sid,
+            "shelfmark": cat.get("shelfmark", ""),
+            "catalogue_text": display_cat_text,
+            "work_titles": [title],
+            "reason": reason,
+            "proposal": None,
+        })
+
+    # --- Class 5: generic collection works (owner-authorized scope
+    # extension, 136-GATE1-DECISIONS.md item C) ---
+    generic = select_generic_collection_candidates(claims, works, cap=class5_cap)
+    for entry in generic:
+        author, cluster_title = entry["cluster_key"]
+        members = entry["members"]
+        c = entry["claim"]
+        sid = c["sys_id"]
+        cat = libraries.get(sid, {})
+        claimed_work = works.get(c["work_id"])
+        claimed_title = f"{claimed_work['neutral_title']} ({c['work_id']})" if claimed_work else c["work_id"]
+        sibling_ids = sorted({m["work_id"] for m in members} - {c["work_id"]})
+        sample_siblings = ", ".join(sibling_ids[:5]) + ("..." if len(sibling_ids) > 5 else "")
+        cases.append({
+            "class": "generic_collection",
+            "sys_id": sid,
+            "shelfmark": cat.get("shelfmark", ""),
+            "catalogue_text": cat.get("catalogue_text", ""),
+            "work_titles": [
+                f"{claimed_title} -- one of {len(members)} works sharing author {author!r} and "
+                f"title stem {cluster_title!r} (siblings incl. {sample_siblings})"
+            ],
+            "reason": (
+                f"This work belongs to a {len(members)}-member same-author/same-title-stem collection "
+                "(a generic responsa/piyyut/collection title recurring across many distinct catalogued "
+                "items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is "
+                "'already recorded' is genuinely ill-defined at the collection level, not merely hard "
+                "for a string comparison to settle."
+            ),
+            "proposal": (
+                "PROPOSAL (draft, not a label): a generic collection member -- confirm whether this "
+                "specific witness/passage is already recorded, or correct."
+            ),
         })
 
     return cases
@@ -1251,11 +1452,19 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
     a("# Phase 136 Plan 03 -- Novelty Hard-Case Candidates")
     a("")
     a("Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn "
-      "from, in the three classes D-23c names: **near-miss titles**, **alias pairs**, and a **catalogue "
-      "entry naming a different GRANULARITY of the same work**. Selected entirely by string/title "
-      "comparison over the works already in the deployed asset -- **zero model calls, measured cost "
-      "$0.00**. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid "
-      "only, never a label -- it is NOT filled in by this script as an owner answer.")
+      "from. The original three classes D-23c names -- **near-miss titles**, **alias pairs**, and a "
+      "**catalogue entry naming a different GRANULARITY of the same work** -- were selected "
+      "adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 below are an "
+      "OWNER-AUTHORIZED scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured "
+      "novelty-funnel error rate is not flattered by cases an LLM finds easy: **terse or missing "
+      "catalogue identification text** and **generic collection works** (responsa/piyyut/collection "
+      "titles recurring across many distinct catalogued items, where \"already recorded\" is genuinely "
+      "ill-defined rather than merely hard to string-match). All five classes are selected entirely by "
+      "string/title/metadata comparison over the works and manuscripts already in the deployed asset "
+      "-- **zero model calls, measured cost $0.00**. Every existing case from the original 52 is kept "
+      "unchanged; classes 4 and 5 are purely additive. Any attached draft verdict below is explicitly "
+      "marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script "
+      "as an owner answer.")
     a("")
     by_class: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for c in cases:
@@ -1265,9 +1474,11 @@ def render_hardcases_brief(cases: List[Dict[str, Any]]) -> str:
         "granularity": "Class 3 -- catalogue entry naming a different granularity of the same work",
         "alias": "Class 2 -- alias pairs",
         "near_miss": "Class 1 -- near-miss titles",
+        "terse_catalogue": "Class 4 -- terse or missing catalogue identification text (owner-authorized extension)",
+        "generic_collection": "Class 5 -- generic collection works (owner-authorized extension)",
     }
     n = 0
-    for cls in ("granularity", "alias", "near_miss"):
+    for cls in ("granularity", "alias", "near_miss", "terse_catalogue", "generic_collection"):
         items = by_class.get(cls, [])
         a(f"## {class_titles[cls]} ({len(items)} candidates)")
         a("")
@@ -1391,6 +1602,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         hardcases = build_hardcases(claims, works, d13d, libraries)
         ledger.check("hardcases", len(hardcases))
+        ledger.check("hardcases_class4_terse_catalogue", sum(1 for c in hardcases if c["class"] == "terse_catalogue"))
+        ledger.check("hardcases_class5_generic_collection", sum(1 for c in hardcases if c["class"] == "generic_collection"))
         # Acceptance criteria: any attached draft verdict MUST be explicitly
         # marked PROPOSAL and separable from an owner's answer -- assert it
         # on every case that carries one (a case may also carry none at all,

@@ -1,6 +1,6 @@
 # Phase 136 Plan 03 -- Novelty Hard-Case Candidates
 
-Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn from, in the three classes D-23c names: **near-miss titles**, **alias pairs**, and a **catalogue entry naming a different GRANULARITY of the same work**. Selected entirely by string/title comparison over the works already in the deployed asset -- **zero model calls, measured cost $0.00**. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer.
+Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3) will be drawn from. The original three classes D-23c names -- **near-miss titles**, **alias pairs**, and a **catalogue entry naming a different GRANULARITY of the same work** -- were selected adversarially to a STRING heuristic, not to an LLM. Classes 4 and 5 below are an OWNER-AUTHORIZED scope extension (`136-GATE1-DECISIONS.md` item C), added so the measured novelty-funnel error rate is not flattered by cases an LLM finds easy: **terse or missing catalogue identification text** and **generic collection works** (responsa/piyyut/collection titles recurring across many distinct catalogued items, where "already recorded" is genuinely ill-defined rather than merely hard to string-match). All five classes are selected entirely by string/title/metadata comparison over the works and manuscripts already in the deployed asset -- **zero model calls, measured cost $0.00**. Every existing case from the original 52 is kept unchanged; classes 4 and 5 are purely additive. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer.
 
 ## Class 3 -- catalogue entry naming a different granularity of the same work (20 candidates)
 
@@ -448,5 +448,263 @@ Candidates the novelty funnel's owner-labelled ground truth (plan 136-03 Task 3)
 - **Work(s):** רבנו חננאל על מסכת שבת (w000452) / רבנו חננאל על מסכת שבועות (w000467)
 - **Catalogue's own identification text:** פירוש רבנו חננאל לתלמוד;שאלות ותשובות- גאונים. ; Responsa- Gaonim ; חננאל בן חושיאל, פירוש רבנו חננאל לתלמוד: שבת קמא ע"ב – קמו ע"ב
 - **Why it is hard:** Same author; normalized titles are 93.6% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+## Class 4 -- terse or missing catalogue identification text (owner-authorized extension) (15 candidates)
+
+### Case 53
+
+- **Manuscript:** Ms. B 3672 (sys_id `990002098550205171`)
+- **Work(s):** כתר מלכות (רשב"ג/אבן גבירול) (w001129)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 54
+
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.14 (sys_id `990051124400205171`)
+- **Work(s):** פירוש אבות לדוד הנגיד (w001135)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 55
+
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.20 (sys_id `990051124460205171`)
+- **Work(s):** רס"ג, שמות תרגום (תפסיר תורה) (w000033)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 56
+
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.23 (sys_id `990051124490205171`)
+- **Work(s):** משנה תורה, ספר אהבה (w000176)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 57
+
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.29 (sys_id `990051124550205171`)
+- **Work(s):** תנ"ך, בראשית (w000086)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 58
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.5 (sys_id `990051220230205171`)
+- **Work(s):** נתנאל בן פיומי, גן השכלים (w000039)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 59
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.26 (sys_id `990051220440205171`)
+- **Work(s):** הלכות גדולות (w001196)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 60
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.28 (sys_id `990051220460205171`)
+- **Work(s):** מדרש אגור (w000836)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 61
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.34 (sys_id `990051220530205171`)
+- **Work(s):** תשובות האיי גאון (w000654)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 62
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.35 (sys_id `990051220540205171`)
+- **Work(s):** מונחי המסורה וכלליה (w000906)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 63
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.39 (sys_id `990051220580205171`)
+- **Work(s):** סדר אליהו זוטא א-טו (w000162)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 64
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.41 (sys_id `990051220600205171`)
+- **Work(s):** תנ"ך, ויקרא (w000088)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 65
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.42 (sys_id `990051220610205171`)
+- **Work(s):** דברי הימים של משה רבנו (w000944)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 66
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.46 (sys_id `990051220650205171`)
+- **Work(s):** פירוש ליחזקאל ותרי עשר (w000918)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 67
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.48 (sys_id `990051220670205171`)
+- **Work(s):** מדרש חסרות ויתרות (w000859)
+- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
+- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+## Class 5 -- generic collection works (owner-authorized extension) (15 candidates)
+
+### Case 68
+
+- **Manuscript:** Cambridge University Library Ms. T-S G 2.23 (sys_id `990051181330205171`)
+- **Work(s):** תשובות האיי גאון (w000695) -- one of 43 works sharing author 'האיי גאון' and title stem 'תשובות האיי גאון' (siblings incl. w000650, w000651, w000652, w000653, w000654...)
+- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
+- **Why it is hard:** This work belongs to a 43-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 69
+
+- **Manuscript:** Cambridge University Library Ms. T-S G 2.29 (sys_id `990051181390205171`)
+- **Work(s):** תשובות שרירא גאון והאיי גאון (w000629) -- one of 33 works sharing author 'שרירא גאון והאיי גאון' and title stem 'תשובות שרירא גאון והאיי גאון' (siblings incl. w000597, w000599, w000600, w000601, w000602...)
+- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
+- **Why it is hard:** This work belongs to a 33-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 70
+
+- **Manuscript:** Cambridge University Library Ms. L-G Talm. II 1 (sys_id `990001843080205171`)
+- **Work(s):** תשובות צמח גאון (w000573) -- one of 12 works sharing author 'צמח גאון' and title stem 'תשובות צמח גאון' (siblings incl. w000562, w000563, w000564, w000565, w000566...)
+- **Catalogue's own identification text:** תשובות הגאונים.
+- **Why it is hard:** This work belongs to a 12-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 71
+
+- **Manuscript:** Cambridge University Library Ms. T-S NS 309.106 (sys_id `990051703120205171`)
+- **Work(s):** תשובות שרירא גאון (w000581) -- one of 9 works sharing author 'שרירא גאון' and title stem 'תשובות שרירא גאון' (siblings incl. w000582, w000584, w000589, w000590, w000591...)
+- **Catalogue's own identification text:** ספרות הלכתית ופרשנות תלמודית;ספרות חז"ל;שאלות ותשובות- גאונים. ; Halakhic Literature and Talmudic Commentaries ; Responsa; geonic, concerning oaths (whether a married woman should be made to swear in court, and whether some members of a partnership can waive an oath due them without the remaining partners consent).
+- **Why it is hard:** This work belongs to a 9-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 72
+
+- **Manuscript:** Catalogue Brumer Rab. 2360, fol. 1 (sys_id `990053344530205171`)
+- **Work(s):** תשובות שמואל גאון (w000428) -- one of 6 works sharing author 'שמואל גאון' and title stem 'תשובות שמואל גאון' (siblings incl. w000429, w000430, w000432, w000433, w000435)
+- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; תשובות בעניין המגרש בגט בטל, אונאה וחזרה במכירת קרקע
+- **Why it is hard:** This work belongs to a 6-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 73
+
+- **Manuscript:** Ms. Evr. Antonin B 266 (sys_id `990000907150205171`)
+- **Work(s):** תשובות יצחק (w000559) -- one of 5 works sharing author 'נחשון גאון' and title stem 'תשובות יצחק' (siblings incl. w000554, w000556, w000557, w000561)
+- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
+- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 74
+
+- **Manuscript:** Cambridge University Library Ms. T-S G 1.78 (sys_id `990051180910205171`)
+- **Work(s):** תשובות נטרונאי גאון (w000534) -- one of 5 works sharing author 'נטרונאי גאון' and title stem 'תשובות נטרונאי גאון' (siblings incl. w000535, w000536, w000537, w000538)
+- **Catalogue's own identification text:** שאלות ותשובות. ; Responsa and Halakhic Decisions
+- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 75
+
+- **Manuscript:** Cambridge University Library Ms. T-S 20.183 (sys_id `990051346380205171`)
+- **Work(s):** תשובות עמרם גאון (w000553) -- one of 5 works sharing author 'עמרם גאון' and title stem 'תשובות עמרם גאון' (siblings incl. w000547, w000548, w000551, w000552)
+- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 76
+
+- **Manuscript:** Cambridge University Library Ms. T-S G 2.14 (sys_id `990051181240205171`)
+- **Work(s):** תשובות פלטוי גאון (w000542) -- one of 4 works sharing author 'פלטוי גאון' and title stem 'תשובות פלטוי גאון' (siblings incl. w000539, w000540, w000541)
+- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
+- **Why it is hard:** This work belongs to a 4-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 77
+
+- **Manuscript:** Ms. Evr. Antonin B 308 (sys_id `990000555750205171`)
+- **Work(s):** תשובות שר שלום גאון (w000499) -- one of 4 works sharing author 'שר שלום גאון' and title stem 'תשובות שר שלום גאון' (siblings incl. w000497, w000498, w000500)
+- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
+- **Why it is hard:** This work belongs to a 4-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 78
+
+- **Manuscript:** Cambridge University Library Ms. T-S 8 G 7.2 (sys_id `990051222370205171`)
+- **Work(s):** תשובות יוסף בן אביתור (w000730) -- one of 3 works sharing author 'יוסף בן אביתור' and title stem 'תשובות יוסף בן אביתור' (siblings incl. w000729, w000731)
+- **Catalogue's own identification text:** שאלות ותשובות- גאונים.
+- **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 79
+
+- **Manuscript:** Cambridge University Library Ms. T-S G 1.86 (sys_id `990051180990205171`)
+- **Work(s):** תשובות משרשיה (w000528) -- one of 3 works sharing author 'משה (משרשיה) הכהן גאון' and title stem 'תשובות משרשיה' (siblings incl. w000527, w000529)
+- **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; Responsa and Halakhic Decisions ; ד' תשובות בענייני כתובה: א. כנראה בעניין אשה שהוציאה שטר כתובה ונמצא מזוייף. ב. תשובת רב צמח גאון בעניין אשה שאבדה כתובתה. ג. תשובת רב צמח גאון בעניין פירוש דברי רב רב יוסף "בביתי ולא בביקתי" (כתובות נד ע"א). ד. תשובת מר רבנא משה גאון (בן יעקב, ראש ישיבת מתא מחסיא) בעניין בחור שנשא אשה והתברר שהיא נכפית.
+- **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 80
+
+- **Manuscript:** Ms. EVR II A 721 (sys_id `990001442050205171`)
+- **Work(s):** תשובות קלונימוס הזקן מלוקא בר׳ משה (w000416) -- one of 3 works sharing author 'קלונימוס הזקן מלוקא בר׳ משה' and title stem 'תשובות קלונימוס הזקן מלוקא בר משה' (siblings incl. w000760, w000761)
+- **Catalogue's own identification text:** תשובות.
+- **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 81
+
+- **Manuscript:** Cambridge University Library Ms. T-S 16.99 (sys_id `990051341890205171`)
+- **Work(s):** תשובות האיי גאון (w000694) -- one of 43 works sharing author 'האיי גאון' and title stem 'תשובות האיי גאון' (siblings incl. w000650, w000651, w000652, w000653, w000654...)
+- **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; Responsa- Gaonim ; שאלות ותשובות- גאונים
+- **Why it is hard:** This work belongs to a 43-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
+- **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
+
+### Case 82
+
+- **Manuscript:** Ms. EVR II A 32 (sys_id `990001428310205171`)
+- **Work(s):** תשובות שרירא גאון והאיי גאון (w000606) -- one of 33 works sharing author 'שרירא גאון והאיי גאון' and title stem 'תשובות שרירא גאון והאיי גאון' (siblings incl. w000597, w000599, w000600, w000601, w000602...)
+- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
+- **Why it is hard:** This work belongs to a 33-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
+- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
 - **Owner verdict:** _(pending Task 3 -- `already_recorded` / `not_in_finding_aids` / `unsure`, or `skip`)_
 
