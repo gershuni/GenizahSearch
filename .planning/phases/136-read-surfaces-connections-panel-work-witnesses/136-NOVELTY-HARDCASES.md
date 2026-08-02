@@ -1,8 +1,31 @@
 # Phase 136 Plan 03 -- Novelty Hard-Case Candidates
 
-**95 candidates total: 8 IDENTITY spot-check cases (Classes 1-3) + 87 NOVELTY SHADE cases (Classes 4-7).** Restructured per an owner-authorized labelling-restructure ruling (`136-GATE1-DECISIONS.md`, the note appended after items F/G) made AFTER the owner read the original 97-case worksheet directly: Classes 1-3 compare two of OUR OWN claims to each other (an A↔B "is this the same work" identity judgment) and were found, on reading the actual cases, to bake "same work" into their own selection criterion (same author + common title stem) -- so full labelling of all 52 is REPLACED by this 8-case SPOT-CHECK that TESTS the constant-answer assumption rather than building ground truth. Classes 4-6 are where the answer genuinely varies and carry the NOVELTY SHADE question (a claim-vs-finding-aid judgment); they are EXPANDED from the original 45 to 75 candidates. **Class 7 is NEW** (owner rulings H/I, `136-GATE1-DECISIONS.md` §§ H/I -- not part of that 45→75 expansion): 12 liturgical-container-predictability candidates, added so the pinned model gate's FIRST encounter with this shape is a graded evaluation, not production. Every case in every group is selected entirely by string/title/metadata comparison over the works and manuscripts already in the deployed asset -- **zero model calls, measured cost $0.00**. Any attached draft verdict below is explicitly marked `PROPOSAL` and is a reading aid only, never a label -- it is NOT filled in by this script as an owner answer. This worksheet is also emitted as `136-NOVELTY-HARDCASES.xlsx` (same phase directory, THREE sheets: "Identity Spot-Check", "Novelty Shades", "Vocabulary & Instructions") for owners who find Hebrew RTL easier to work with in a spreadsheet; both files render the SAME cases in the SAME order, from the same pre-numbered case list, so the two agree case-for-case.
+**101 candidates total: 8 IDENTITY spot-check cases (Classes 1-3, UNCHANGED) + 93 novelty-evaluation cases** (Class 6 catalogue divergence, RETAINED unchanged, plus owner ruling J's new three-arm, SOURCE-STRATIFIED sample). **Redesigned per owner ruling J** (`136-GATE1-DECISIONS.md` § J, 2026-08-02) after a read-only prior-art pass (`136-NOVELTY-PRIOR-ART.md` §§ 6-7) found that the FORMER Classes 4/5/7 all read EXACTLY ONE field (libraries.csv column 7) and therefore had ZERO representation of the bib/PGP/FGP failure modes Codex measured as most damaging in the prior heuristic funnel (`gen2_novelty_gate.py`): 3,688 `published_full` false-knowns, 2,014 PGP false-knowns (942 sole-source), FGP's 1,177-known/9,373-fail split. A gate could score perfectly on the pre-J pool and still reproduce every one of those defects in production.
 
-## Part A -- IDENTITY spot-check (Classes 1-3)
+**What changed, explicitly (per this continuation's own accounting instruction -- nothing is silently dropped):**
+
+| Former pool item | Disposition | Why |
+|---|---|---|
+| Classes 1-3 (identity spot-check, 8 cases) | **KEPT, unchanged** | Tests a different assumption (A↔B same-work identity), already correctly sized |
+| Class 6 (catalogue divergence, 30 cases incl. the owner's F/G annotations on 12 of the original 15) | **KEPT, unchanged** | Owner rulings F/G are substantive, dated characterizations of SPECIFIC real manuscripts (worked cases 83-97) -- dropping or reselecting this class would silently discard that owner-authorized work before its Task-3 confirmation ever ran. It also tests a different, already-owner-engaged axis (divergence SHAPE/correctness, deliberately left an uncorrected heuristic per ruling G) orthogonal to source coverage |
+| Class 4 (terse/missing catalogue text) | **FOLDED IN** as Arm 1's `terse_catalogue` stratum | Ruling J's own instruction: fold in as a stratum, not a separate exercise; now checked against the REAL bib/PGP/FGP signal, not catalogue text alone |
+| Class 7 (liturgical-container predictability, owner rulings H/I) | **FOLDED IN** as Arm 1's `container_predicts` stratum | Same instruction: "a container-only machzor title has text, fails name-match, and therefore lands in the residual" |
+| Class 5 (generic collection works) | **DROPPED** | No owner ruling exists for any specific Class 5 case (only generic PROPOSALS, unlike Class 6). Its phenomenon -- whether a single witness of a same-author/same-title-stem collection is "already recorded" -- is a WORK-IDENTITY ambiguity, not a source-coverage gap; it does not correspond to any of the three arms and forcing it into one would blur what that arm measures. The underlying question remains valid and is flagged for a future, separately-scoped pass -- not silently discarded, just not carried by THIS redesign |
+
+Every case in every group is still selected entirely by deterministic string/metadata/source-presence comparison over the works, manuscripts and finding-aid sidecars already on this machine (fist_data/fjms_enrichment.db, pgp_data/pgp.db, fgp_data/fgp_transcriptions.db, libraries.csv) -- **zero model calls, measured cost $0.00**. Any attached draft verdict is explicitly marked `PROPOSAL` and is a reading aid only, never a label. This worksheet is also emitted as `136-NOVELTY-HARDCASES.xlsx` (same phase directory, FIVE sheets: "Identity Spot-Check", "Novelty Shades", "Heuristic-Demoted", "No-Source-Text", "Vocabulary & Instructions") for owners who find Hebrew RTL easier to work with in a spreadsheet; both files render the SAME cases in the SAME order, from the same pre-numbered case list, so the two agree case-for-case.
+
+## Sizing -- what each arm can and cannot answer, and why this size
+
+**Total: 101** (8 identity + 93 novelty-evaluation, of which owner ruling J's own sizing instruction covers the 63 non-Class-6 cases -- kept under the ~100 novelty-case guidance with Class 6 counted separately as pre-existing, unchanged owner-engaged work).
+
+- **Class 6 (catalogue divergence, 30 cases, unchanged):** answers "does the owner confirm the shade + correctness proposals already characterized on 12 of the original 15 real cases, and how does the selector's own measured over-fire rate (~50%) hold up across the expanded pool." It does NOT test source coverage -- a case here is selected purely on catalogue-text containment, same as before.
+- **Arm 1 -- RESIDUAL, 30 cases across 7 strata (a FIXED per-stratum cap, not a proportional sample, where the population supports it):** answers "of the rows that WOULD reach the pinned model gate, does the model correctly classify a representative case from EACH source family and from the two folded-in shapes." It does NOT establish a base rate for how COMMON each stratum is in the full corpus -- the cap is a fixed ceiling per stratum, not a proportional sample, so this arm answers a per-stratum ACCURACY question, never a POPULATION-SIZE question.
+- **Arm 2 -- HEURISTIC-DEMOTED, 25 cases across 3 strata (oversampling `published_full`-sole and PGP-sole demotions specifically, per Codex findings 1 and 6):** answers "of the rows the funnel marks known WITHOUT ever consulting a model, how many are FALSE-knowns -- lost findings that ruling J's funnel-first architecture can never recover." It does NOT give a project-wide false-known RATE (3,688 `published_full` and 2,014 PGP pairs exist corpus-wide per Codex's own measurement; this arm samples a small, oversampled slice of each, never the full population) -- a rate estimate would need a much larger, proportionally-stratified sample, which is explicitly NOT what this size buys.
+- **Arm 3 -- NO-SOURCE-TEXT, 8 cases, NO verdict collected:** answers, qualitatively, "does this population look like genuinely untouched fragments, or does something in it look surprising/wrong." It is NOT a labelling exercise -- these rows ship as candidates automatically regardless of what the owner observes here, per ruling J's own design ("these ship as candidates with no verdict"); this section exists so the owner can eyeball the bypass rather than trust it blindly, not to produce a graded number.
+
+**What this sizing does NOT cover, stated plainly:** none of the three arms measures a corpus-wide RATE (what fraction of all claims fall in each stratum) -- only a per-stratum, per-shape ACCURACY/correctness check on a small, capped, deterministically-selected representative. A future pass wanting base rates would need to run the real funnel (plan 136-04) over the full corpus and report its own per-stratum counts, not re-derive them from this labelling sample.
+
+## Part A -- IDENTITY spot-check (Classes 1-3, UNCHANGED)
 
 **Question type: IDENTITY, not a novelty shade.** These rows compare two of OUR OWN claims (A and B) -- there is no finding aid in this judgment at all. Answer ONE of:
 
@@ -90,7 +113,7 @@
 - **Why this pair is adversarial to a STRING heuristic:** Same author; normalized titles are 93.6% similar (SequenceMatcher) but NOT identical -- genuinely different works (e.g. different books/chapters/parts) whose titles a string comparison could easily conflate in EITHER direction.
 - **Identity verdict:** _(pending Task 3 -- `same_work` / `different_works` / `unsure` / `skip`)_
 
-## Part B -- NOVELTY SHADE cases (Classes 4-7)
+## Part B -- NOVELTY SHADE cases (Class 6, unchanged, + Arm 1 residual)
 
 **Question type: NOVELTY SHADE, a claim-vs-finding-aid judgment (never A↔B identity).** For EACH case below, answer with the shade that best describes what an enumerable finding aid (the catalogue's own identification field, bibliography, titles, PGP, FGP, M-source shelfmark attributions) actually says about THIS fragment and THIS work -- or `unsure` / `skip`. Amended 2026-08-02 by owner decisions E / E′ / F / G / H (`136-GATE1-DECISIONS.md` items E, E′, F, G, H): the tri-state (`already_recorded` / `not_in_finding_aids` / `unsure`) collapsed materially different findings into one bucket -- a catalogue CONTRADICTION and a genuine "previously unknown" both scored the same way, a granularity refinement that helps and one that adds nothing also scored the same way (E′), a flat wrong-work divergence and a same-work-wrong-part divergence also scored the same way with no way to record WHICH SIDE is actually correct (F), and a broader-container relationship (a standard-rite prayer-book predicting a specific unit it never names) had NO shade at all and fell through to `fills_gap` by elimination (H) -- so the shade enum now carries TEN values.
 
@@ -112,7 +135,7 @@
 
 ### Correctness (Class 6 ONLY -- answer ONLY if your shade verdict is `diverges_work` or `diverges_part`, owner ruling F)
 
-A divergence shade records only THAT the aid and the claim disagree, never WHICH SIDE is right -- the owner's own review of the real cases found BOTH directions occur under the identical shade. Leave blank / not applicable for every non-divergence shade.
+A divergence shade records only THAT the aid and the claim disagree, never WHICH SIDE is right -- the owner's own review of the real cases found BOTH directions occur under the identical shade. Leave blank / not applicable for every non-divergence shade, and for every Arm 1 residual row (Arm 1 excludes the manuscripts already selected for Class 6, so a residual row is never ALSO a divergence candidate).
 
 | Correctness | Choose this when... |
 |---|---|
@@ -120,402 +143,11 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 | `claim_correct` | our claim is right; the aid is wrong, thinner, or itself mistaken |
 | `unclear` | cannot tell which side is correct from the information shown |
 
-### Class 4 -- terse or missing catalogue identification text (NOVELTY SHADE, owner-authorized extension) (20 candidates)
-
-**Plausible shades for this class:** `fills_gap`, `confirms` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
-
-#### Case 9
-
-- **Manuscript:** Ms. B 3672 (sys_id `990002098550205171`)
-- **Work(s):** כתר מלכות (רשב"ג/אבן גבירול) (w001129)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 10
-
-- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.14 (sys_id `990051124400205171`)
-- **Work(s):** פירוש אבות לדוד הנגיד (w001135)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 11
-
-- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.20 (sys_id `990051124460205171`)
-- **Work(s):** רס"ג, שמות תרגום (תפסיר תורה) (w000033)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 12
-
-- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.23 (sys_id `990051124490205171`)
-- **Work(s):** משנה תורה, ספר אהבה (w000176)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 13
-
-- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.29 (sys_id `990051124550205171`)
-- **Work(s):** תנ"ך, בראשית (w000086)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 14
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.5 (sys_id `990051220230205171`)
-- **Work(s):** נתנאל בן פיומי, גן השכלים (w000039)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 15
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.26 (sys_id `990051220440205171`)
-- **Work(s):** הלכות גדולות (w001196)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 16
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.28 (sys_id `990051220460205171`)
-- **Work(s):** מדרש אגור (w000836)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 17
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.34 (sys_id `990051220530205171`)
-- **Work(s):** תשובות האיי גאון (w000654)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 18
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.35 (sys_id `990051220540205171`)
-- **Work(s):** מונחי המסורה וכלליה (w000906)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 19
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.39 (sys_id `990051220580205171`)
-- **Work(s):** סדר אליהו זוטא א-טו (w000162)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 20
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.41 (sys_id `990051220600205171`)
-- **Work(s):** תנ"ך, ויקרא (w000088)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 21
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.42 (sys_id `990051220610205171`)
-- **Work(s):** דברי הימים של משה רבנו (w000944)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 22
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.46 (sys_id `990051220650205171`)
-- **Work(s):** פירוש ליחזקאל ותרי עשר (w000918)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 23
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.48 (sys_id `990051220670205171`)
-- **Work(s):** מדרש חסרות ויתרות (w000859)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 24
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.53 (sys_id `990051220720205171`)
-- **Work(s):** מחברת (w000911)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 25
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.56 (sys_id `990051220750205171`)
-- **Work(s):** הלכות פסוקות (w001084)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 26
-
-- **Manuscript:** Cambridge University Library Ms. T-S K 27.33b (sys_id `990051221550205171`)
-- **Work(s):** תנ"ך, דברים (w000090)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 27
-
-- **Manuscript:** Cambridge University Library Ms. T-S 8 K 3 (sys_id `990051232460205171`)
-- **Work(s):** חיבור נגד אל-קומסי (w001057)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 28
-
-- **Manuscript:** Cambridge University Library Ms. T-S 8 K 13.8 (sys_id `990051232630205171`)
-- **Work(s):** תשובות הרמב״ם ב (w001143)
-- **Catalogue's own identification text:** _(none on file -- explicit marker of absence, not an omission)_
-- **Why it is hard:** This manuscript's own catalogue identification field is EMPTY -- there is no catalogue text at all for a title comparison to work with, only the identified work's title itself.
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-### Class 5 -- generic collection works (NOVELTY SHADE, owner-authorized extension) (25 candidates)
-
-**Plausible shades for this class:** `fills_gap`, `confirms`, `extends` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
-
-#### Case 29
-
-- **Manuscript:** Cambridge University Library Ms. T-S G 2.23 (sys_id `990051181330205171`)
-- **Work(s):** תשובות האיי גאון (w000695) -- one of 43 works sharing author 'האיי גאון' and title stem 'תשובות האיי גאון' (siblings incl. w000650, w000651, w000652, w000653, w000654...)
-- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
-- **Why it is hard:** This work belongs to a 43-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 30
-
-- **Manuscript:** Cambridge University Library Ms. T-S G 2.29 (sys_id `990051181390205171`)
-- **Work(s):** תשובות שרירא גאון והאיי גאון (w000629) -- one of 33 works sharing author 'שרירא גאון והאיי גאון' and title stem 'תשובות שרירא גאון והאיי גאון' (siblings incl. w000597, w000599, w000600, w000601, w000602...)
-- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
-- **Why it is hard:** This work belongs to a 33-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 31
-
-- **Manuscript:** Cambridge University Library Ms. L-G Talm. II 1 (sys_id `990001843080205171`)
-- **Work(s):** תשובות צמח גאון (w000573) -- one of 12 works sharing author 'צמח גאון' and title stem 'תשובות צמח גאון' (siblings incl. w000562, w000563, w000564, w000565, w000566...)
-- **Catalogue's own identification text:** תשובות הגאונים.
-- **Why it is hard:** This work belongs to a 12-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 32
-
-- **Manuscript:** Cambridge University Library Ms. T-S NS 309.106 (sys_id `990051703120205171`)
-- **Work(s):** תשובות שרירא גאון (w000581) -- one of 9 works sharing author 'שרירא גאון' and title stem 'תשובות שרירא גאון' (siblings incl. w000582, w000584, w000589, w000590, w000591...)
-- **Catalogue's own identification text:** ספרות הלכתית ופרשנות תלמודית;ספרות חז"ל;שאלות ותשובות- גאונים. ; Halakhic Literature and Talmudic Commentaries ; Responsa; geonic, concerning oaths (whether a married woman should be made to swear in court, and whether some members of a partnership can waive an oath due them without the remaining partners consent).
-- **Why it is hard:** This work belongs to a 9-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 33
-
-- **Manuscript:** Catalogue Brumer Rab. 2360, fol. 1 (sys_id `990053344530205171`)
-- **Work(s):** תשובות שמואל גאון (w000428) -- one of 6 works sharing author 'שמואל גאון' and title stem 'תשובות שמואל גאון' (siblings incl. w000429, w000430, w000432, w000433, w000435)
-- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; תשובות בעניין המגרש בגט בטל, אונאה וחזרה במכירת קרקע
-- **Why it is hard:** This work belongs to a 6-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 34
-
-- **Manuscript:** Ms. Evr. Antonin B 266 (sys_id `990000907150205171`)
-- **Work(s):** תשובות יצחק (w000559) -- one of 5 works sharing author 'נחשון גאון' and title stem 'תשובות יצחק' (siblings incl. w000554, w000556, w000557, w000561)
-- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
-- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 35
-
-- **Manuscript:** Cambridge University Library Ms. T-S G 1.78 (sys_id `990051180910205171`)
-- **Work(s):** תשובות נטרונאי גאון (w000534) -- one of 5 works sharing author 'נטרונאי גאון' and title stem 'תשובות נטרונאי גאון' (siblings incl. w000535, w000536, w000537, w000538)
-- **Catalogue's own identification text:** שאלות ותשובות. ; Responsa and Halakhic Decisions
-- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 36
-
-- **Manuscript:** Cambridge University Library Ms. T-S 20.183 (sys_id `990051346380205171`)
-- **Work(s):** תשובות עמרם גאון (w000553) -- one of 5 works sharing author 'עמרם גאון' and title stem 'תשובות עמרם גאון' (siblings incl. w000547, w000548, w000551, w000552)
-- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 37
-
-- **Manuscript:** Cambridge University Library Ms. T-S G 2.14 (sys_id `990051181240205171`)
-- **Work(s):** תשובות פלטוי גאון (w000542) -- one of 4 works sharing author 'פלטוי גאון' and title stem 'תשובות פלטוי גאון' (siblings incl. w000539, w000540, w000541)
-- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Responsa- Gaonim
-- **Why it is hard:** This work belongs to a 4-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 38
-
-- **Manuscript:** Ms. Evr. Antonin B 308 (sys_id `990000555750205171`)
-- **Work(s):** תשובות שר שלום גאון (w000499) -- one of 4 works sharing author 'שר שלום גאון' and title stem 'תשובות שר שלום גאון' (siblings incl. w000497, w000498, w000500)
-- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
-- **Why it is hard:** This work belongs to a 4-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 39
-
-- **Manuscript:** Cambridge University Library Ms. T-S 8 G 7.2 (sys_id `990051222370205171`)
-- **Work(s):** תשובות יוסף בן אביתור (w000730) -- one of 3 works sharing author 'יוסף בן אביתור' and title stem 'תשובות יוסף בן אביתור' (siblings incl. w000729, w000731)
-- **Catalogue's own identification text:** שאלות ותשובות- גאונים.
-- **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 40
-
-- **Manuscript:** Cambridge University Library Ms. T-S G 1.86 (sys_id `990051180990205171`)
-- **Work(s):** תשובות משרשיה (w000528) -- one of 3 works sharing author 'משה (משרשיה) הכהן גאון' and title stem 'תשובות משרשיה' (siblings incl. w000527, w000529)
-- **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; Responsa and Halakhic Decisions ; ד' תשובות בענייני כתובה: א. כנראה בעניין אשה שהוציאה שטר כתובה ונמצא מזוייף. ב. תשובת רב צמח גאון בעניין אשה שאבדה כתובתה. ג. תשובת רב צמח גאון בעניין פירוש דברי רב רב יוסף "בביתי ולא בביקתי" (כתובות נד ע"א). ד. תשובת מר רבנא משה גאון (בן יעקב, ראש ישיבת מתא מחסיא) בעניין בחור שנשא אשה והתברר שהיא נכפית.
-- **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 41
-
-- **Manuscript:** Ms. EVR II A 721 (sys_id `990001442050205171`)
-- **Work(s):** תשובות קלונימוס הזקן מלוקא בר׳ משה (w000416) -- one of 3 works sharing author 'קלונימוס הזקן מלוקא בר׳ משה' and title stem 'תשובות קלונימוס הזקן מלוקא בר משה' (siblings incl. w000760, w000761)
-- **Catalogue's own identification text:** תשובות.
-- **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 42
-
-- **Manuscript:** Cambridge University Library Ms. T-S 16.99 (sys_id `990051341890205171`)
-- **Work(s):** תשובות האיי גאון (w000694) -- one of 43 works sharing author 'האיי גאון' and title stem 'תשובות האיי גאון' (siblings incl. w000650, w000651, w000652, w000653, w000654...)
-- **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; Responsa- Gaonim ; שאלות ותשובות- גאונים
-- **Why it is hard:** This work belongs to a 43-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 43
-
-- **Manuscript:** Ms. EVR II A 32 (sys_id `990001428310205171`)
-- **Work(s):** תשובות שרירא גאון והאיי גאון (w000606) -- one of 33 works sharing author 'שרירא גאון והאיי גאון' and title stem 'תשובות שרירא גאון והאיי גאון' (siblings incl. w000597, w000599, w000600, w000601, w000602...)
-- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
-- **Why it is hard:** This work belongs to a 33-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 44
-
-- **Manuscript:** Cambridge University Library Ms. T-S Loan Collection 98 (sys_id `990051125820205171`)
-- **Work(s):** תשובות צמח גאון (w000570) -- one of 12 works sharing author 'צמח גאון' and title stem 'תשובות צמח גאון' (siblings incl. w000562, w000563, w000564, w000565, w000566...)
-- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; Lists, Responsa lists ; רשימות, רשימות שו"ת
-- **Why it is hard:** This work belongs to a 12-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 45
-
-- **Manuscript:** Cambridge University Library Ms. T-S 12.459 (sys_id `990051337150205171`)
-- **Work(s):** תשובות שרירא גאון (w000581) -- one of 9 works sharing author 'שרירא גאון' and title stem 'תשובות שרירא גאון' (siblings incl. w000582, w000584, w000589, w000590, w000591...)
-- **Catalogue's own identification text:** תשובות הגאונים (קטע).
-- **Why it is hard:** This work belongs to a 9-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 46
-
-- **Manuscript:** Ms. Evr. Antonin B 1037 (sys_id `990000555740205171`)
-- **Work(s):** תשובות שמואל גאון (w000428) -- one of 6 works sharing author 'שמואל גאון' and title stem 'תשובות שמואל גאון' (siblings incl. w000429, w000430, w000432, w000433, w000435)
-- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
-- **Why it is hard:** This work belongs to a 6-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 47
-
-- **Manuscript:** MS heb. c.23/43 (sys_id `990053397750205171`)
-- **Work(s):** תשובות יצחק (w000559) -- one of 5 works sharing author 'נחשון גאון' and title stem 'תשובות יצחק' (siblings incl. w000554, w000556, w000557, w000561)
-- **Catalogue's own identification text:** שאלות ותשובות. ; תשובות
-- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 48
-
-- **Manuscript:** Cambridge University Library Ms. T-S G 1.87 (sys_id `990051181000205171`)
-- **Work(s):** תשובות נטרונאי גאון (w000534) -- one of 5 works sharing author 'נטרונאי גאון' and title stem 'תשובות נטרונאי גאון' (siblings incl. w000535, w000536, w000537, w000538)
-- **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; Responsa and Halakhic Decisions ; ו' תשובות רב נטרונאי גאון: א. בעניין קבורת מת ביום טוב שני של גלויות. ב. בעניין הכרעת ההלכה בסוגיית "כשותא בכרמא" (שבת קלט ע"א). ג. בעניין הכרעת ההלכה בסוגיית "אין מוליכין חלה ומתנות לכהן ביום טוב" (ביצה דף יב ע"ב). ד. אם נוהגת תרומה בזמן הזה. ה. פירוש דברי הגמרא "ומסיקין ואופין בפורני" (ביצה לד ע"א). ו. בעניין אפיה ביום טוב בתנור של גוי.
-- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 49
-
-- **Manuscript:** MS heb. d.63/70 (sys_id `990053419080205171`)
-- **Work(s):** תשובות עמרם גאון (w000547) -- one of 5 works sharing author 'עמרם גאון' and title stem 'תשובות עמרם גאון' (siblings incl. w000548, w000551, w000552, w000553)
-- **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; פירושים לתלמוד בתשובות גאונים, בהלכות ציצית ע"פ מנחות ועוד לט-מג; ר' נטרונאי גאון?
-- **Why it is hard:** This work belongs to a 5-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 50
-
-- **Manuscript:** Cambridge University Library Ms. T-S 12.854 (sys_id `990051340950205171`)
-- **Work(s):** תשובות פלטוי גאון (w000541) -- one of 4 works sharing author 'פלטוי גאון' and title stem 'תשובות פלטוי גאון' (siblings incl. w000539, w000540, w000542)
-- **Why it is hard:** This work belongs to a 4-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 51
-
-- **Manuscript:** MS heb. c.18/40 (sys_id `990053395550205171`)
-- **Work(s):** תשובות שר שלום גאון (w000498) -- one of 4 works sharing author 'שר שלום גאון' and title stem 'תשובות שר שלום גאון' (siblings incl. w000497, w000499, w000500)
-- **Catalogue's own identification text:** שאלות ותשובות- גאונים. ; תשובות הגאונים, ברכות ה,א\ פסחים עד,ב
-- **Why it is hard:** This work belongs to a 4-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 52
-
-- **Manuscript:** Adler, Elkan Nathan Ms. 2632.1 (sys_id `990053180470205171`)
-- **Work(s):** תשובות יוסף בן אביתור (w000730) -- one of 3 works sharing author 'יוסף בן אביתור' and title stem 'תשובות יוסף בן אביתור' (siblings incl. w000729, w000731)
-- **Catalogue's own identification text:** שאלות ותשובות;שאלות ותשובות- גאונים. ; תשובות שונות לגאון או לר' יוסף אבן אביתור?
-- **Why it is hard:** This work belongs to a 3-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 53
-
-- **Manuscript:** Ms. EVR II A 32 (sys_id `990001428310205171`)
-- **Work(s):** תשובות האיי גאון (w000670) -- one of 43 works sharing author 'האיי גאון' and title stem 'תשובות האיי גאון' (siblings incl. w000650, w000651, w000652, w000653, w000654...)
-- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
-- **Why it is hard:** This work belongs to a 43-member same-author/same-title-stem collection (a generic responsa/piyyut/collection title recurring across many distinct catalogued items) with >=2 distinct canonical_work_ids in the cluster -- whether THIS witness is 'already recorded' is genuinely ill-defined at the collection level, not merely hard for a string comparison to settle.
-- **PROPOSAL (draft, not a label): a generic collection member -- confirm whether this specific witness/passage is already recorded, or correct.**
-- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `extends`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-### Class 6 -- catalogue divergence (NOVELTY SHADE, owner rulings E/E′/F/G) (30 candidates)
+### Class 6 -- catalogue divergence (NOVELTY SHADE, owner rulings E/E′/F/G -- RETAINED UNCHANGED by the ruling-J redesign) (30 candidates)
 
 **Plausible shades for this class:** `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
-#### Case 54
+#### Case 9
 
 - **Manuscript:** Ms. Evr. Antonin B 1104 (sys_id `990000555880205171`)
 - **Work(s):** CLAIMED (this identification): תשובות האיי גאון (w000650) / CATALOGUE NAMES (found in the identification text): תשובות (w000543)
@@ -525,7 +157,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 55
+#### Case 10
 
 - **Manuscript:** Allony, Nehemia Ms. 304 (sys_id `990000413480205171`)
 - **Work(s):** CLAIMED (this identification): משנה תורה, ספר זמנים (w000177) / CATALOGUE NAMES (found in the identification text): הגדה של פסח (w001159)
@@ -535,7 +167,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 56
+#### Case 11
 
 - **Manuscript:** Ms. Evr. Antonin B 915 (sys_id `990000555810205171`)
 - **Work(s):** CLAIMED (this identification): הלכות פסוקות (w001084) / CATALOGUE NAMES (found in the identification text): הלכות גדולות (w001196)
@@ -545,7 +177,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 57
+#### Case 12
 
 - **Manuscript:** Cambridge University Library Ms. Add. 3162 (sys_id `990001398690205171`)
 - **Work(s):** CLAIMED (this identification): משנה תורה, ספר אהבה (w000176) / CATALOGUE NAMES (found in the identification text): ברכת המזון (w001158)
@@ -555,7 +187,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 58
+#### Case 13
 
 - **Manuscript:** Cambridge University Library Ms. Add. 1246 (sys_id `990001394270205171`)
 - **Work(s):** CLAIMED (this identification): ספר יוסיפון (ערבי) (w001152) / CATALOGUE NAMES (found in the identification text): יוסיפון (w000853)
@@ -565,7 +197,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 59
+#### Case 14
 
 - **Manuscript:** Ms. Evr. Antonin B 961 (sys_id `990000555730205171`)
 - **Work(s):** CLAIMED (this identification): תשובה בעניין סוכה (w000434) / CATALOGUE NAMES (found in the identification text): תשובות הגאונים (w000349)
@@ -575,7 +207,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 60
+#### Case 15
 
 - **Manuscript:** Ms. EVR ARAB I 3085 (sys_id `990000801470205171`)
 - **Work(s):** CLAIMED (this identification): רס"ג, ספר יצירה פירוש (w000021) / CATALOGUE NAMES (found in the identification text): ספר יצירה (w000522)
@@ -585,7 +217,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 61
+#### Case 16
 
 - **Manuscript:** Catalogue Halper, Philadelphia 120 (sys_id `990001935160205171`)
 - **Work(s):** CLAIMED (this identification): הלכות פסוקות, תרגומים ועיבודים עבריים, הלכות קידושין (w001037) / CATALOGUE NAMES (found in the identification text): הלכות פסוקות (w001084)
@@ -595,7 +227,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 62
+#### Case 17
 
 - **Manuscript:** Ms. Evr. Antonin B 236 (sys_id `990000905560205171`)
 - **Work(s):** CLAIMED (this identification): מכילתא דרבי שמעון בן יוחאי (w000321) / CATALOGUE NAMES (found in the identification text): מכילתא דרבי ישמעאל (w000766)
@@ -605,7 +237,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 63
+#### Case 18
 
 - **Manuscript:** Library of the Hungarian Academy of Sciences Ms. 57 (sys_id `990001004230205171`)
 - **Work(s):** CLAIMED (this identification): ילקוט שמעוני על התורה (w001384) / CATALOGUE NAMES (found in the identification text): תנחומא (w000926)
@@ -615,7 +247,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 64
+#### Case 19
 
 - **Manuscript:** Cambridge University Library Ms. T-S NS 169.52 (sys_id `990051091870205171`)
 - **Work(s):** CLAIMED (this identification): נסים גאון, חמשה ספרים (w000071) / CATALOGUE NAMES (found in the identification text): מגילת סתרים (w000509)
@@ -625,7 +257,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 65
+#### Case 20
 
 - **Manuscript:** Cambridge University Library Ms. T-S F 7.45 (sys_id `990051173260205171`)
 - **Work(s):** CLAIMED (this identification): משנה תורה, הקדמה ומניין המצוות (w000174) / CATALOGUE NAMES (found in the identification text): הלכות ציצית (w001052)
@@ -635,7 +267,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 66
+#### Case 21
 
 - **Manuscript:** Ms. EVR II A 33 (sys_id `990000621960205171`)
 - **Work(s):** CLAIMED (this identification): תנ"ך, בראשית (w000086) / CATALOGUE NAMES (found in the identification text): שאילתות (w000732)
@@ -645,7 +277,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 67
+#### Case 22
 
 - **Manuscript:** Cambridge University Library Ms. T-S C 1.23 (sys_id `990051150540205171`)
 - **Work(s):** CLAIMED (this identification): בראשית רבה צה-צו, תוספת (w000900) / CATALOGUE NAMES (found in the identification text): בראשית רבה (w000156)
@@ -655,7 +287,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 68
+#### Case 23
 
 - **Manuscript:** Cambridge University Library Ms. T-S Misc. 15.67 (sys_id `990051080280205171`)
 - **Work(s):** CLAIMED (this identification): ויקרא רבה (w000169) / CATALOGUE NAMES (found in the identification text): חובות הלבבות (תרגום אבן תיבון) (w000195)
@@ -665,7 +297,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 69
+#### Case 24
 
 - **Manuscript:** Library of the Alliance Israélite Un Ms. III A 101 (sys_id `990001506030205171`)
 - **Work(s):** CLAIMED (this identification): רי"ף ברכות (w001317) / CATALOGUE NAMES (found in the identification text): מסכת דרך ארץ זוטא (w000787)
@@ -675,7 +307,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 70
+#### Case 25
 
 - **Manuscript:** Cambridge University Library Ms. T-S C 1.19 (sys_id `990051150500205171`)
 - **Work(s):** CLAIMED (this identification): פסיקתא דרב כהנא (w000904) / CATALOGUE NAMES (found in the identification text): ויקרא רבה (w000169)
@@ -685,7 +317,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 71
+#### Case 26
 
 - **Manuscript:** Cambridge University Library Ms. T-S NS 291.103 (sys_id `990051104680205171`)
 - **Work(s):** CLAIMED (this identification): רד"ק על יחזקאל (w001245) / CATALOGUE NAMES (found in the identification text): מדרש תהלים (w001124)
@@ -695,7 +327,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 72
+#### Case 27
 
 - **Manuscript:** Adler, Elkan Nathan Ms. 2160.12 (sys_id `990053147670205171`)
 - **Work(s):** CLAIMED (this identification): רס"ג, איכה תרגום (w000012) / CATALOGUE NAMES (found in the identification text): תרגום איכה (w001413)
@@ -705,7 +337,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 73
+#### Case 28
 
 - **Manuscript:** Ms. EVR ARAB I 1771 (sys_id `990001535860205171`)
 - **Work(s):** CLAIMED (this identification): ראב"ש, שמואל א פירוש (w000046) / CATALOGUE NAMES (found in the identification text): ספר הרקמה (w000037)
@@ -715,7 +347,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 74
+#### Case 29
 
 - **Manuscript:** Cambridge University Library Ms. T-S E 1.2 (sys_id `990051158320205171`)
 - **Work(s):** CLAIMED (this identification): משנה, פאה (w000259) / CATALOGUE NAMES (found in the identification text): ברייתא דמלאכת המשכן (w000157)
@@ -725,7 +357,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 75
+#### Case 30
 
 - **Manuscript:** Cambridge University Library Ms. T-S C 6.113 (sys_id `990051154860205171`)
 - **Work(s):** CLAIMED (this identification): תלמוד בבלי, מגילה (w000957) / CATALOGUE NAMES (found in the identification text): ספרי דברים (w000166)
@@ -735,7 +367,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 76
+#### Case 31
 
 - **Manuscript:** Cambridge University Library Ms. T-S F 17.48 (sys_id `990051180030205171`)
 - **Work(s):** CLAIMED (this identification): ויקרא רבה (w000169) / CATALOGUE NAMES (found in the identification text): קהלת רבה (w000891)
@@ -745,7 +377,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 77
+#### Case 32
 
 - **Manuscript:** Cambridge University Library Ms. T-S F 2(2).64 (sys_id `990051167990205171`)
 - **Work(s):** CLAIMED (this identification): תלמוד בבלי, עבודה זרה (w000973) / CATALOGUE NAMES (found in the identification text): פסיקתא דרב כהנא (w000904)
@@ -755,7 +387,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 78
+#### Case 33
 
 - **Manuscript:** Cambridge University Library Ms. L-G Talm. I 45 (sys_id `990001842460205171`)
 - **Work(s):** CLAIMED (this identification): הלכות ארץ ישראליות ובבליות וליקוטים ממעשים לבני ארץ ישראל (w001075) / CATALOGUE NAMES (found in the identification text): מעשים לבני ארץ ישראל (w001030)
@@ -765,7 +397,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 79
+#### Case 34
 
 - **Manuscript:** MS heb. e.22/1 (sys_id `990053426460205171`)
 - **Work(s):** CLAIMED (this identification): הלכות פסוקות (w001084) / CATALOGUE NAMES (found in the identification text): והזהיר (w000779)
@@ -775,7 +407,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 80
+#### Case 35
 
 - **Manuscript:** Cambridge University Library Ms. T-S NS 309.81 (sys_id `990051106940205171`)
 - **Work(s):** CLAIMED (this identification): מסכת דרך ארץ זוטא (w000787) / CATALOGUE NAMES (found in the identification text): מסכת דרך ארץ רבה (w000786)
@@ -785,7 +417,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 81
+#### Case 36
 
 - **Manuscript:** Adler, Elkan Nathan Ms. 2700.24 (sys_id `990053586310205171`)
 - **Work(s):** CLAIMED (this identification): פירוש המשנה, נזיקין (w000028) / CATALOGUE NAMES (found in the identification text): משנה, סנהדרין (w000291)
@@ -795,7 +427,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 82
+#### Case 37
 
 - **Manuscript:** Cambridge University Library Ms. T-S C 1.60 (sys_id `990051150910205171`)
 - **Work(s):** CLAIMED (this identification): ברייתא דישועה, הפירוש, נוסח אחר (w000755) / CATALOGUE NAMES (found in the identification text): ברייתא דישועה (w000754)
@@ -805,7 +437,7 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-#### Case 83
+#### Case 38
 
 - **Manuscript:** Cambridge University Library Ms. T-S NS 329/0609 (sys_id `990001420410205171`)
 - **Work(s):** CLAIMED (this identification): פסיקתא, ״אנכי אדוני אלהיך״ (איש שלום צח) (w000506) / CATALOGUE NAMES (found in the identification text): פסיקתא רבתי (w000803)
@@ -815,115 +447,620 @@ A divergence shade records only THAT the aid and the claim disagree, never WHICH
 - **Shade verdict:** _(pending Task 3 -- `diverges_work`, `diverges_part`, `aid_more_specific`, `refines_granularity`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 - **Correctness (only if `diverges_work` / `diverges_part` above):** _(pending Task 3 -- `catalogue_correct` / `claim_correct` / `unclear`, or blank if not applicable)_
 
-### Class 7 -- liturgical-container predictability (NOVELTY SHADE, owner rulings H/I) (12 candidates)
+### Arm 1 -- RESIDUAL: rows that would reach the model (NOVELTY SHADE, source-stratified, owner ruling J -- folds in the former Classes 4 and 7) (30 candidates)
 
-**Plausible shades for this class:** `container_predicts`, `fills_gap`, `confirms` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
+**Plausible shades for this class:** `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific` (any other shade from the vocabulary table above is still a valid answer if the case warrants it; `unsure` / `skip` are always available).
 
-#### Case 84
+#### Case 39
 
-- **Manuscript:** Cambridge University Library Ms. Add. 3356 (sys_id `990001398970205171`)
-- **Work(s):** תנ"ך, תהלים (w000112)
-- **Catalogue's own identification text:** מחזור מנהג ארץ ישראל הקדמון.
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'מחזור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Manuscript:** Ms. Evr. Antonin B 3 (sys_id `990000905190205171`)
+- **Work(s):** משנה, אבות (w000296)
+- **Catalogue's own identification text:** סדור מנהג רומניא לכל השנה (קטע). משנה [טקסט] Mishnah [Text] משנה [טקסט] Mishnah [Text] משנה [טקסט] Mishnah [Text]
+- **Residual stratum:** `container_predicts`
+- **Why it is hard:** Residual stratum `container_predicts`: this manuscript's own catalogue text names a specific, NAMED standard-rite container (a container noun immediately followed by מנהג) whose standard, predictable content plausibly includes this claimed unit, without the catalogue ever naming the unit itself -- folds in the former Class 7 (owner rulings H/I). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
-#### Case 85
+#### Case 40
 
-- **Manuscript:** Cambridge University Library Ms. T-S Misc. 33/03 (sys_id `990001413070205171`)
-- **Work(s):** תנ"ך, שמות (w000087)
-- **Catalogue's own identification text:** מחזור מנהג אשכנז לשלש רגלים : ; קטעי גניזה.
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'מחזור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Manuscript:** Ms. Evr. Antonin B 3 (sys_id `990000905190205171`)
+- **Work(s):** הלכות מסידור (w000345)
+- **Catalogue's own identification text:** סדור מנהג רומניא לכל השנה (קטע). משנה [טקסט] Mishnah [Text] משנה [טקסט] Mishnah [Text] משנה [טקסט] Mishnah [Text]
+- **Residual stratum:** `container_predicts`
+- **Why it is hard:** Residual stratum `container_predicts`: this manuscript's own catalogue text names a specific, NAMED standard-rite container (a container noun immediately followed by מנהג) whose standard, predictable content plausibly includes this claimed unit, without the catalogue ever naming the unit itself -- folds in the former Class 7 (owner rulings H/I). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
-#### Case 86
+#### Case 41
 
-- **Manuscript:** Ms. EVR II A 58 (sys_id `990001429050205171`)
+- **Manuscript:** Library of the Hungarian Academy of Sciences Ms. 116 (sys_id `990001035960205171`)
+- **Work(s):** התגלות הסודות (w000052)
+- **Catalogue's own identification text:** מחזור מנהג ספרד לראש השנה (קטע).
+- **Residual stratum:** `container_predicts`
+- **Why it is hard:** Residual stratum `container_predicts`: this manuscript's own catalogue text names a specific, NAMED standard-rite container (a container noun immediately followed by מנהג) whose standard, predictable content plausibly includes this claimed unit, without the catalogue ever naming the unit itself -- folds in the former Class 7 (owner rulings H/I). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 42
+
+- **Manuscript:** Library of the Hungarian Academy of Sciences Ms. 116 (sys_id `990001035960205171`)
 - **Work(s):** תנ"ך, ישעיהו (w000097)
-- **Catalogue's own identification text:** מחזור מנהג ספרד לשלש רגלים.
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'מחזור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Catalogue's own identification text:** מחזור מנהג ספרד לראש השנה (קטע).
+- **Residual stratum:** `container_predicts`
+- **Why it is hard:** Residual stratum `container_predicts`: this manuscript's own catalogue text names a specific, NAMED standard-rite container (a container noun immediately followed by מנהג) whose standard, predictable content plausibly includes this claimed unit, without the catalogue ever naming the unit itself -- folds in the former Class 7 (owner rulings H/I). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
 
-#### Case 87
-
-- **Manuscript:** Ms. EVR II A 300/4 (sys_id `990001436770205171`)
-- **Work(s):** תנ"ך, דברים (w000090)
-- **Catalogue's own identification text:** סדור מנהג קראים.
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 88
-
-- **Manuscript:** Ms. EVR II A 810 (sys_id `990001442520205171`)
-- **Work(s):** תנ"ך, ויקרא (w000088)
-- **Catalogue's own identification text:** סדור מנהג קראים (קטע).
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 89
-
-- **Manuscript:** Ms. EVR II A 1006 (sys_id `990001444570205171`)
-- **Work(s):** תנ"ך, יחזקאל (w000099)
-- **Catalogue's own identification text:** סדור מנהג קראים.
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 90
-
-- **Manuscript:** Ms. EVR II A 642 (sys_id `990001441300205171`)
-- **Work(s):** תנ"ך, במדבר (w000089)
-- **Catalogue's own identification text:** סדור מנהג קראים (קטע).
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
-
-#### Case 91
+#### Case 43
 
 - **Manuscript:** Library of the Hungarian Academy of Sciences Ms. 116 (sys_id `990001035960205171`)
 - **Work(s):** משנה תורה, ספר אהבה (w000176)
 - **Catalogue's own identification text:** מחזור מנהג ספרד לראש השנה (קטע).
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'מחזור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Residual stratum:** `container_predicts`
+- **Why it is hard:** Residual stratum `container_predicts`: this manuscript's own catalogue text names a specific, NAMED standard-rite container (a container noun immediately followed by מנהג) whose standard, predictable content plausibly includes this claimed unit, without the catalogue ever naming the unit itself -- folds in the former Class 7 (owner rulings H/I). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `container_predicts` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 44
+
+- **Manuscript:** Ms. 2069 (sys_id `990000617200205171`)
+- **Work(s):** כתר מלכות (רשב"ג/אבן גבירול) (w001129)
+- **Catalogue's own identification text:** תפלות על דרך הקבלה.
+- **Residual stratum:** `terse_catalogue`
+- **Why it is hard:** Residual stratum `terse_catalogue`: this manuscript's own catalogue identification field is empty or too short (<=20 characters) to compare against -- folds in the former Class 4 (terse/missing catalogue text). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 45
+
+- **Manuscript:** Ms. EVR II A 28 (sys_id `990000621930205171`)
+- **Work(s):** נסים גאון, חמשה ספרים (w000071)
+- **Catalogue's own identification text:** קובץ ברפואה.
+- **Residual stratum:** `terse_catalogue`
+- **Why it is hard:** Residual stratum `terse_catalogue`: this manuscript's own catalogue identification field is empty or too short (<=20 characters) to compare against -- folds in the former Class 4 (terse/missing catalogue text). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 46
+
+- **Manuscript:** Ms. EVR II A 28 (sys_id `990000621930205171`)
+- **Work(s):** היכלות רבתי (w000170)
+- **Catalogue's own identification text:** קובץ ברפואה.
+- **Residual stratum:** `terse_catalogue`
+- **Why it is hard:** Residual stratum `terse_catalogue`: this manuscript's own catalogue identification field is empty or too short (<=20 characters) to compare against -- folds in the former Class 4 (terse/missing catalogue text). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 47
+
+- **Manuscript:** Ms. EVR II A 28 (sys_id `990000621930205171`)
+- **Work(s):** ספר יצירה (w000522)
+- **Catalogue's own identification text:** קובץ ברפואה.
+- **Residual stratum:** `terse_catalogue`
+- **Why it is hard:** Residual stratum `terse_catalogue`: this manuscript's own catalogue identification field is empty or too short (<=20 characters) to compare against -- folds in the former Class 4 (terse/missing catalogue text). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 48
+
+- **Manuscript:** Ms. EVR II A 28 (sys_id `990000621930205171`)
+- **Work(s):** מסכת היכלות (w000840)
+- **Catalogue's own identification text:** קובץ ברפואה.
+- **Residual stratum:** `terse_catalogue`
+- **Why it is hard:** Residual stratum `terse_catalogue`: this manuscript's own catalogue identification field is empty or too short (<=20 characters) to compare against -- folds in the former Class 4 (terse/missing catalogue text). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 49
+
+- **Manuscript:** Ms. EVR II A 6 (sys_id `990000589160205171`)
+- **Work(s):** נסים גאון, חמשה ספרים (w000071)
+- **Catalogue's own identification text:** קובץ. זוהר
+- **Residual stratum:** `bib_sole`
+- **Why it is hard:** Residual stratum `bib_sole`: the Friedberg bibliography has text for this manuscript that does NOT name this specific claimed work (no other checked source has any text at all for this manuscript). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 50
+
+- **Manuscript:** Ms. EVR II A 6 (sys_id `990000589160205171`)
+- **Work(s):** היכלות רבתי (w000170)
+- **Catalogue's own identification text:** קובץ. זוהר
+- **Residual stratum:** `bib_sole`
+- **Why it is hard:** Residual stratum `bib_sole`: the Friedberg bibliography has text for this manuscript that does NOT name this specific claimed work (no other checked source has any text at all for this manuscript). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 51
+
+- **Manuscript:** Ms. EVR II A 6 (sys_id `990000589160205171`)
+- **Work(s):** ספר יצירה (w000522)
+- **Catalogue's own identification text:** קובץ. זוהר
+- **Residual stratum:** `bib_sole`
+- **Why it is hard:** Residual stratum `bib_sole`: the Friedberg bibliography has text for this manuscript that does NOT name this specific claimed work (no other checked source has any text at all for this manuscript). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 52
+
+- **Manuscript:** Ms. EVR II A 6 (sys_id `990000589160205171`)
+- **Work(s):** מדרש עשרת הרוגי מלכות, נוסח ארוך (w000937)
+- **Catalogue's own identification text:** קובץ. זוהר
+- **Residual stratum:** `bib_sole`
+- **Why it is hard:** Residual stratum `bib_sole`: the Friedberg bibliography has text for this manuscript that does NOT name this specific claimed work (no other checked source has any text at all for this manuscript). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 53
+
+- **Manuscript:** Ms. EVR II A 6 (sys_id `990000589160205171`)
+- **Work(s):** רד"ק על דברי הימים א׳ (w001249)
+- **Catalogue's own identification text:** קובץ. זוהר
+- **Residual stratum:** `bib_sole`
+- **Why it is hard:** Residual stratum `bib_sole`: the Friedberg bibliography has text for this manuscript that does NOT name this specific claimed work (no other checked source has any text at all for this manuscript). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 54
+
+- **Manuscript:** Ms. EVR ARAB I 1722 (sys_id `990001535460205171`)
+- **Work(s):** פירוש המשנה, נשים (w000024)
+- **Catalogue's own identification text:** ספר תשובה. כתאב אלרד
+- **Residual stratum:** `fgp_sole`
+- **Why it is hard:** Residual stratum `fgp_sole`: an FGP transcription's own title/author fields do NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 55
+
+- **Manuscript:** Ms. EVR ARAB I 1722 (sys_id `990001535460205171`)
+- **Work(s):** פירוש המשנה, זרעי (w000026)
+- **Catalogue's own identification text:** ספר תשובה. כתאב אלרד
+- **Residual stratum:** `fgp_sole`
+- **Why it is hard:** Residual stratum `fgp_sole`: an FGP transcription's own title/author fields do NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 56
+
+- **Manuscript:** Ms. EVR ARAB I 1722 (sys_id `990001535460205171`)
+- **Work(s):** פירוש המשנה, מועד (w000027)
+- **Catalogue's own identification text:** ספר תשובה. כתאב אלרד
+- **Residual stratum:** `fgp_sole`
+- **Why it is hard:** Residual stratum `fgp_sole`: an FGP transcription's own title/author fields do NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 57
+
+- **Manuscript:** Ms. EVR ARAB I 1722 (sys_id `990001535460205171`)
+- **Work(s):** ראב"ש, שמואל א פירוש (w000046)
+- **Catalogue's own identification text:** ספר תשובה. כתאב אלרד
+- **Residual stratum:** `fgp_sole`
+- **Why it is hard:** Residual stratum `fgp_sole`: an FGP transcription's own title/author fields do NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 58
+
+- **Manuscript:** Ms. EVR ARAB I 1722 (sys_id `990001535460205171`)
+- **Work(s):** מדרש הבאור ב (w000050)
+- **Catalogue's own identification text:** ספר תשובה. כתאב אלרד
+- **Residual stratum:** `fgp_sole`
+- **Why it is hard:** Residual stratum `fgp_sole`: an FGP transcription's own title/author fields do NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 59
+
+- **Manuscript:** Ms. 526 (sys_id `990000432020205171`)
+- **Work(s):** תלמוד בבלי, תענית (w000956)
+- **Catalogue's own identification text:** מעשיות מן התלמוד : ; מעשיות מן התלמוד בתרגום לערבית-יהודית.
+- **Residual stratum:** `catalogue_sole`
+- **Why it is hard:** Residual stratum `catalogue_sole`: this manuscript's own catalogue identification (NLI title and/or the FJMS catalog table) does NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 60
+
+- **Manuscript:** Ms. 526 (sys_id `990000432020205171`)
+- **Work(s):** ילקוט שמעוני על נ"ך (w001383)
+- **Catalogue's own identification text:** מעשיות מן התלמוד : ; מעשיות מן התלמוד בתרגום לערבית-יהודית.
+- **Residual stratum:** `catalogue_sole`
+- **Why it is hard:** Residual stratum `catalogue_sole`: this manuscript's own catalogue identification (NLI title and/or the FJMS catalog table) does NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 61
+
+- **Manuscript:** Allony, Nehemia Ms. 30g (sys_id `990000465650205171`)
+- **Work(s):** תנ"ך, דברים (w000090)
+- **Catalogue's own identification text:** תורה (דברים יד:ג-יד:כא, טז:ח-טז:יז).
+- **Residual stratum:** `catalogue_sole`
+- **Why it is hard:** Residual stratum `catalogue_sole`: this manuscript's own catalogue identification (NLI title and/or the FJMS catalog table) does NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 62
+
+- **Manuscript:** Ms. Evr. Antonin B 1093 (sys_id `990000555840205171`)
+- **Work(s):** פרקי רבי אליעזר (w000807)
+- **Catalogue's own identification text:** תורת האדם : ; קטע מענין האבל-ענין שבתות וימים טובים. תורת האדם תורת האדם תורת האדם תורת האדם
+- **Residual stratum:** `catalogue_sole`
+- **Why it is hard:** Residual stratum `catalogue_sole`: this manuscript's own catalogue identification (NLI title and/or the FJMS catalog table) does NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 63
+
+- **Manuscript:** Ms. EVR II A 313/22 (sys_id `990000622340205171`)
+- **Work(s):** משנה תורה, ספר אהבה (w000176)
+- **Catalogue's own identification text:** משנה תורה (ספר אהבה).
+- **Residual stratum:** `catalogue_sole`
+- **Why it is hard:** Residual stratum `catalogue_sole`: this manuscript's own catalogue identification (NLI title and/or the FJMS catalog table) does NOT name this specific claimed work (no other checked source has any text at all). Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 64
+
+- **Manuscript:** Ms. 523 (sys_id `990000432000205171`)
+- **Work(s):** משנה, מעשרות (w000264)
+- **Catalogue's own identification text:** משנה סדר זרעים (קטעים) : ; קטע ממס' מעשר-שני, מעשרות, קטע ממס' חלה. עם טעמים וניקוד חלקי. משנה [טקסט] Mishnah [Text] משנה [טקסט] Mishnah [Text]
+- **Residual stratum:** `multi_source`
+- **Why it is hard:** Residual stratum `multi_source`: >=2 checked sources have text for this manuscript, but NONE of them names this specific claimed work. Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 65
+
+- **Manuscript:** Ms. 523 (sys_id `990000432000205171`)
+- **Work(s):** משנה, מעשר שני (w000265)
+- **Catalogue's own identification text:** משנה סדר זרעים (קטעים) : ; קטע ממס' מעשר-שני, מעשרות, קטע ממס' חלה. עם טעמים וניקוד חלקי. משנה [טקסט] Mishnah [Text] משנה [טקסט] Mishnah [Text]
+- **Residual stratum:** `multi_source`
+- **Why it is hard:** Residual stratum `multi_source`: >=2 checked sources have text for this manuscript, but NONE of them names this specific claimed work. Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 66
+
+- **Manuscript:** Ms. 523 (sys_id `990000432000205171`)
+- **Work(s):** משנה, חלה (w000266)
+- **Catalogue's own identification text:** משנה סדר זרעים (קטעים) : ; קטע ממס' מעשר-שני, מעשרות, קטע ממס' חלה. עם טעמים וניקוד חלקי. משנה [טקסט] Mishnah [Text] משנה [טקסט] Mishnah [Text]
+- **Residual stratum:** `multi_source`
+- **Why it is hard:** Residual stratum `multi_source`: >=2 checked sources have text for this manuscript, but NONE of them names this specific claimed work. Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 67
+
+- **Manuscript:** Constantin von Tischendorf Collection Ms. 43 (sys_id `990000571680205171`)
+- **Work(s):** תנ"ך, יהושע (w000091)
+- **Catalogue's own identification text:** נביאים ראשונים (קטעים) : ; עם ניקוד וטעמים, מסורה קטנה וגדולה. מקרא [טקסט] Bible [Text]
+- **Residual stratum:** `multi_source`
+- **Why it is hard:** Residual stratum `multi_source`: >=2 checked sources have text for this manuscript, but NONE of them names this specific claimed work. Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+#### Case 68
+
+- **Manuscript:** Constantin von Tischendorf Collection Ms. 43 (sys_id `990000571680205171`)
+- **Work(s):** תנ"ך, שופטים (w000092)
+- **Catalogue's own identification text:** נביאים ראשונים (קטעים) : ; עם ניקוד וטעמים, מסורה קטנה וגדולה. מקרא [טקסט] Bible [Text]
+- **Residual stratum:** `multi_source`
+- **Why it is hard:** Residual stratum `multi_source`: >=2 checked sources have text for this manuscript, but NONE of them names this specific claimed work. Under owner ruling J's funnel-first architecture, this row WOULD reach the pinned model gate.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `fills_gap` -- confirm or correct.**
+- **Shade verdict:** _(pending Task 3 -- `fills_gap`, `confirms`, `container_predicts`, `refines_granularity`, `aid_more_specific`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+
+## Part C -- HEURISTIC-DEMOTED cases (Arm 2, owner ruling J)
+
+**Question type: DEMOTION CORRECTNESS.** These rows were marked "already recorded" by the CURRENT heuristic funnel's own decisive test (a bib `published_full` row, or a PGP document with any non-empty description/transcription) -- they NEVER reach the model at all under ruling J's funnel-first architecture. For EACH case, judge whether the demoting source genuinely names THIS specific claimed work, or only tripped the heuristic through generic presence:
+
+| Answer | Choose this when... |
+|---|---|
+| `demotion_correct` | the demoting source genuinely already names/records THIS SPECIFIC work on THIS fragment -- the heuristic's demotion (marking it already known, never reaching the model) is right |
+| `false_known` | the demoting source does NOT actually name this specific work -- only its GENERIC presence (e.g. a bibliography record, a PGP description/transcription on the fragment) tripped the heuristic. Per owner ruling J this is an UNRECOVERABLE lost finding: the funnel only ever demotes (discovery -> known, never the reverse) and the model never sees a heuristically-demoted row, so a false_known here is permanent unless this labelling catches it |
+| `unsure` | you cannot judge this case from the information shown -- a real and useful answer |
+| `skip` | you choose not to judge this case at all -- recorded as skipped |
+
+#### Case 69
+
+- **Manuscript:** Allony, Nehemia Ms. 113 (sys_id `990000465700205171`)
+- **Claimed work:** הלכות גדולות (w001196)
+- **Catalogue's own identification text:** כתאב אלנפקאת (קטע). כתאב אלנפקאת
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 70
+
+- **Manuscript:** Ms. Evr. Antonin B 1037 (sys_id `990000555740205171`)
+- **Claimed work:** תשובות שמואל גאון (w000428)
+- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 71
+
+- **Manuscript:** Ms. Evr. Antonin B 292 (sys_id `990000555790205171`)
+- **Claimed work:** במדבר רבה א-יד (w000496)
+- **Catalogue's own identification text:** אבות דרבי נתן נוסח א : ; קטעים מפרקים א-ב. אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I אבות דרבי נתן Avot de-Rabbi Natan אבות דרבי נתן Avot de-Rabbi Natan אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 72
+
+- **Manuscript:** Ms. EVR ARAB I 1467 (sys_id `990000635630205171`)
+- **Claimed work:** הלכות גדולות (w001196)
+- **Catalogue's own identification text:** קובץ חבורי הלכה מאת שמואל בן חפני גאון בשפה הערבית. כתאב אלשפעה כתאב אחכאם שרע אלציצית כתאב אלבלוג כתאב אלבלוג ואל אדראך כתאב אחכאם שרע אלציצית כתאב אלשפעה
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 73
+
+- **Manuscript:** Ms. EVR ARAB I 1793 (sys_id `990000635770205171`)
+- **Claimed work:** משנה, ראש השנה (w000276)
+- **Catalogue's own identification text:** כתאב אלאסתבצאר : ; בערבית. כתאב אלאסתבצאר
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 74
+
+- **Manuscript:** Ms. EVR II A 85/14 (sys_id `990000847320205171`)
+- **Claimed work:** אגרות הרמב״ם (שילת) (w001140)
+- **Catalogue's own identification text:** מקמה (קטע).
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 75
+
+- **Manuscript:** Ms. EVR II A 380 (sys_id `990000848410205171`)
+- **Claimed work:** הכוזרי (w000053)
+- **Catalogue's own identification text:** קובץ בהגות. זוהר
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 76
+
+- **Manuscript:** Ms. EVR II A 380 (sys_id `990000848410205171`)
+- **Claimed work:** ספר יצירה (w000522)
+- **Catalogue's own identification text:** קובץ בהגות. זוהר
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 77
+
+- **Manuscript:** Ms. EVR ARAB I 4633 (sys_id `990000854530205171`)
+- **Claimed work:** תנ"ך, בראשית (w000086)
+- **Catalogue's own identification text:** פרוש התורה (בראשית). פירוש על התורה פירוש על התורה
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 78
+
+- **Manuscript:** Ms. EVR ARAB I 1687 (sys_id `990000854930205171`)
+- **Claimed work:** משנה, ראש השנה (w000276)
+- **Catalogue's own identification text:** כתאב אלאנואר ואלמראקב (קטעים). כתאב אלאנואר ואלמראקב כתאב אלאנואר ואלמראקב
+- **Demotion stratum:** `published_full_sole`
+- **Why this demotion is being checked:** Demotion stratum `published_full_sole`: the CURRENT heuristic treats ANY bibliography row with TranscriptionType='Full' as naming this claim, regardless of whether that row's own title/author actually matches (Codex finding 1) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 79
+
+- **Manuscript:** Ms. EVR II B 159 (sys_id `990000571710205171`)
+- **Claimed work:** תנ"ך, דברים (w000090)
+- **Catalogue's own identification text:** תורה (דברים לא:י-לד:יב) : ; עם ניקוד וטעמים, מסורה קטנה וגדולה. מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 80
+
+- **Manuscript:** Ms. EVR II B 25 (sys_id `990000571720205171`)
+- **Claimed work:** תנ"ך, יהושע (w000091)
+- **Catalogue's own identification text:** נביאים (קטעים). מקרא [טקסט] Bible [Text] מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 81
+
+- **Manuscript:** Ms. EVR II B 25 (sys_id `990000571720205171`)
+- **Claimed work:** תנ"ך, שופטים (w000092)
+- **Catalogue's own identification text:** נביאים (קטעים). מקרא [טקסט] Bible [Text] מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 82
+
+- **Manuscript:** Ms. EVR II B 25 (sys_id `990000571720205171`)
+- **Claimed work:** תנ"ך, שמואל א (w000093)
+- **Catalogue's own identification text:** נביאים (קטעים). מקרא [טקסט] Bible [Text] מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 83
+
+- **Manuscript:** Ms. EVR II B 25 (sys_id `990000571720205171`)
+- **Claimed work:** תנ"ך, שמואל ב (w000094)
+- **Catalogue's own identification text:** נביאים (קטעים). מקרא [טקסט] Bible [Text] מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 84
+
+- **Manuscript:** Ms. EVR II B 25 (sys_id `990000571720205171`)
+- **Claimed work:** תנ"ך, מלכים א (w000095)
+- **Catalogue's own identification text:** נביאים (קטעים). מקרא [טקסט] Bible [Text] מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 85
+
+- **Manuscript:** Ms. EVR II B 25 (sys_id `990000571720205171`)
+- **Claimed work:** תנ"ך, מלכים ב (w000096)
+- **Catalogue's own identification text:** נביאים (קטעים). מקרא [טקסט] Bible [Text] מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 86
+
+- **Manuscript:** Ms. EVR II B 25 (sys_id `990000571720205171`)
+- **Claimed work:** תנ"ך, ישעיהו (w000097)
+- **Catalogue's own identification text:** נביאים (קטעים). מקרא [טקסט] Bible [Text] מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 87
+
+- **Manuscript:** Ms. EVR II B 25 (sys_id `990000571720205171`)
+- **Claimed work:** תנ"ך, דברי הימים ב (w000124)
+- **Catalogue's own identification text:** נביאים (קטעים). מקרא [טקסט] Bible [Text] מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 88
+
+- **Manuscript:** Ms. EVR II B 1283 (sys_id `990000571850205171`)
+- **Claimed work:** תנ"ך, ישעיהו (w000097)
+- **Catalogue's own identification text:** נביאים אחרונים (קטעים). מקרא [טקסט] Bible [Text]
+- **Demotion stratum:** `pgp_sole`
+- **Why this demotion is being checked:** Demotion stratum `pgp_sole`: the CURRENT heuristic treats ANY PGP document with a non-empty description or transcription as naming this claim, regardless of whether that text actually names this specific work (Codex finding 6) -- no OTHER checked source agrees.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 89
+
+- **Manuscript:** Ms. Evr. Antonin B 308 (sys_id `990000555750205171`)
+- **Claimed work:** תשובות שר שלום גאון (w000499)
+- **Catalogue's own identification text:** שאלות ותשובות הגאונים.
+- **Demotion stratum:** `other_demotion`
+- **Why this demotion is being checked:** Demotion stratum `other_demotion`: a genuine token-name-match (catalogue, FGP, or bib known_bib) demotes this claim -- included for comparison against the two oversampled over-broad categories above.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 90
+
+- **Manuscript:** Ms. Evr. Antonin B 297 (sys_id `990000555760205171`)
+- **Claimed work:** מסכת אבות דרבי נתן, נוסח ב (w000789)
+- **Catalogue's own identification text:** אבות דרבי נתן נוסח ב : ; קטע מפרקים ד-ז. אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II אבות דרבי נתן Avot de-Rabbi Natan אבות דרבי נתן, נוסחא א Avot de-Rabbi Natan I אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II אבות דרבי נתן Avot de-Rabbi Natan אבות דרבי נתן Avot de-Rabbi Natan אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II
+- **Demotion stratum:** `other_demotion`
+- **Why this demotion is being checked:** Demotion stratum `other_demotion`: a genuine token-name-match (catalogue, FGP, or bib known_bib) demotes this claim -- included for comparison against the two oversampled over-broad categories above.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+#### Case 91
+
+- **Manuscript:** Ms. Evr. Antonin B 249 (sys_id `990000555770205171`)
+- **Claimed work:** מסכת אבות דרבי נתן, נוסח ב (w000789)
+- **Catalogue's own identification text:** אבות דרבי נתן נוסח ב : ; כולל קטעים מפרק מג, רובו של פרק מו ותחילת פרק מז. אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II אבות דרבי נתן Avot de-Rabbi Natan אבות דרבי נתן Avot de-Rabbi Natan אבות דרבי נתן Avot de-Rabbi Natan אבות דרבי נתן, נוסחא ב Avot de-Rabbi Natan II
+- **Demotion stratum:** `other_demotion`
+- **Why this demotion is being checked:** Demotion stratum `other_demotion`: a genuine token-name-match (catalogue, FGP, or bib known_bib) demotes this claim -- included for comparison against the two oversampled over-broad categories above.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
 
 #### Case 92
 
-- **Manuscript:** Ms. EVR II A 834 (sys_id `990001442760205171`)
-- **Work(s):** תנ"ך, ירמיהו (w000098)
-- **Catalogue's own identification text:** סדור מנהג קראים (קטעים).
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Manuscript:** Ms. Evr. Antonin B 902 (sys_id `990000555800205171`)
+- **Claimed work:** הלכות ראו (w000797)
+- **Catalogue's own identification text:** הלכות ראו (אבל-מועד) : ; הוא התרגום העברי של הלכות פסוקות. הלכות פסוקות Halakhot Pesuqot הלכות פסוקות Halakhot Pesuqot
+- **Demotion stratum:** `other_demotion`
+- **Why this demotion is being checked:** Demotion stratum `other_demotion`: a genuine token-name-match (catalogue, FGP, or bib known_bib) demotes this claim -- included for comparison against the two oversampled over-broad categories above.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
 
 #### Case 93
 
-- **Manuscript:** Ms. EVR II A 2007 (sys_id `990001454910205171`)
-- **Work(s):** תנ"ך, דניאל (w000120)
-- **Catalogue's own identification text:** סדור מנהג קראים (קטעים).
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Manuscript:** Ms. Evr. Antonin B 276 (sys_id `990000555830205171`)
+- **Claimed work:** הלכות גדולות (w001196)
+- **Catalogue's own identification text:** הלכות גדולות (קטע). הלכות גדולות Halakhot Gedolot הלכות גדולות Halakhot Gedolot הלכות גדולות Halakhot Gedolot הלכות גדולות Halakhot Gedolot
+- **Demotion stratum:** `other_demotion`
+- **Why this demotion is being checked:** Demotion stratum `other_demotion`: a genuine token-name-match (catalogue, FGP, or bib known_bib) demotes this claim -- included for comparison against the two oversampled over-broad categories above.
+- **PROPOSAL (draft, not a label; owner ruling J -- see 136-GATE1-DECISIONS.md § J): plausibly `demotion_correct` -- confirm or correct to `false_known` if the demoting source does not actually name this specific work.**
+- **Demotion verdict:** _(pending Task 3 -- `demotion_correct` / `false_known` / `unsure` / `skip`)_
+
+## Part D -- NO-SOURCE-TEXT cases (Arm 3, owner ruling J -- NO VERDICT REQUIRED)
+
+**Question type: none -- informational only.** None of the four checked-source families has ANY text at all for these manuscripts, so they ship as novelty candidates automatically, with no source to check them against. This section exists ONLY so the owner can eyeball whether that bypass looks safe -- there is nothing to confirm or correct, and no verdict is collected here.
 
 #### Case 94
 
-- **Manuscript:** Ms. EVR II A 2060 (sys_id `990001455500205171`)
-- **Work(s):** תנ"ך, דברי הימים ב (w000124)
-- **Catalogue's own identification text:** סדור מנהג קראים (קטעים).
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.20 (sys_id `990051124460205171`)
+- **Claimed work:** רס"ג, שמות תרגום (תפסיר תורה) (w000033)
+- **Why no verdict is collected:** None of the four checked-source families (bib, PGP, FGP, catalogue) has ANY text at all for this manuscript -- this row ships as a novelty candidate automatically, with no source to check it against.
 
 #### Case 95
 
-- **Manuscript:** Ms. EVR II A 867 (sys_id `990001443150205171`)
-- **Work(s):** תנ"ך, דברי הימים א (w000123)
-- **Catalogue's own identification text:** סדור מנהג קראים (קטעים).
-- **Why it is hard:** This manuscript's own catalogue identification text names a SPECIFIC, NAMED standard-rite prayer-book/cycle (a container collocation: 'סדור מנהג'), whose standard, predictable content plausibly includes this specific claimed unit -- without the catalogue text ever naming the unit itself. Under the pre-H shade enum this would fall through to `fills_gap` by elimination, which would publish a standard siddur/machzor component as a candidate new find.
-- **PROPOSAL (draft, not a label; owner ruling H -- see 136-GATE1-DECISIONS.md § H): plausibly `container_predicts` -- confirm or correct.**
-- **Shade verdict:** _(pending Task 3 -- `container_predicts`, `fills_gap`, `confirms`, any other shade from the vocabulary table above, or `unsure` / `skip`)_
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.23 (sys_id `990051124490205171`)
+- **Claimed work:** משנה תורה, ספר אהבה (w000176)
+- **Why no verdict is collected:** None of the four checked-source families (bib, PGP, FGP, catalogue) has ANY text at all for this manuscript -- this row ships as a novelty candidate automatically, with no source to check it against.
+
+#### Case 96
+
+- **Manuscript:** Cambridge University Library Ms. T-S Misc. 34.29 (sys_id `990051124550205171`)
+- **Claimed work:** תנ"ך, בראשית (w000086)
+- **Why no verdict is collected:** None of the four checked-source families (bib, PGP, FGP, catalogue) has ANY text at all for this manuscript -- this row ships as a novelty candidate automatically, with no source to check it against.
+
+#### Case 97
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.26 (sys_id `990051220440205171`)
+- **Claimed work:** הלכות גדולות (w001196)
+- **Why no verdict is collected:** None of the four checked-source families (bib, PGP, FGP, catalogue) has ANY text at all for this manuscript -- this row ships as a novelty candidate automatically, with no source to check it against.
+
+#### Case 98
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.28 (sys_id `990051220460205171`)
+- **Claimed work:** מדרש אגור (w000836)
+- **Why no verdict is collected:** None of the four checked-source families (bib, PGP, FGP, catalogue) has ANY text at all for this manuscript -- this row ships as a novelty candidate automatically, with no source to check it against.
+
+#### Case 99
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.39 (sys_id `990051220580205171`)
+- **Claimed work:** סדר אליהו זוטא א-טו (w000162)
+- **Why no verdict is collected:** None of the four checked-source families (bib, PGP, FGP, catalogue) has ANY text at all for this manuscript -- this row ships as a novelty candidate automatically, with no source to check it against.
+
+#### Case 100
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.41 (sys_id `990051220600205171`)
+- **Claimed work:** תנ"ך, ויקרא (w000088)
+- **Why no verdict is collected:** None of the four checked-source families (bib, PGP, FGP, catalogue) has ANY text at all for this manuscript -- this row ships as a novelty candidate automatically, with no source to check it against.
+
+#### Case 101
+
+- **Manuscript:** Cambridge University Library Ms. T-S K 27.42 (sys_id `990051220610205171`)
+- **Claimed work:** דברי הימים של משה רבנו (w000944)
+- **Why no verdict is collected:** None of the four checked-source families (bib, PGP, FGP, catalogue) has ANY text at all for this manuscript -- this row ships as a novelty candidate automatically, with no source to check it against.
 
