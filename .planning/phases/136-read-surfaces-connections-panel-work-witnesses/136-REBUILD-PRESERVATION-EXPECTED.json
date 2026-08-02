@@ -1,0 +1,53 @@
+{
+  "allowlisted_columns": {
+    "discovery_claim": [],
+    "discovery_evidence": [
+      "assertion_visibility",
+      "band_rank",
+      "coverage_ppm",
+      "coverage_status",
+      "novelty_source_label",
+      "novelty_status"
+    ],
+    "discovery_routing_audit": [
+      "demoted_work_id"
+    ],
+    "witness_unit_members": [],
+    "witness_units": [],
+    "works": [
+      "genre",
+      "identity_visibility"
+    ]
+  },
+  "cluster_map_hash": "00fa8bf47ae9a48d8b3c21e4c3ce1a39ee66857ef227c113debfe7c2185bdaa3",
+  "db_content_hash": "33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff",
+  "frame_content_hash": "53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7",
+  "generated": "2026-08-02T09:45:29Z",
+  "note": "This artifact is the EXTERNALLY pinned pre-rebuild expectation for the Phase-136 rebuild-preservation gate (D-02b). It supersedes docs/specs/discovery-frames-v2.md as the external frame-hash pin for THIS rebuild only. The CERT-01 pre-registration (.planning/phases/135-precision-certificate-confidence-bands/cert01_prereg.json) stays IMMUTABLE -- scripts/verify_cert01_grading.py's check 10 continues to pin the CURRENT (pre-rebuild) db_content_hash, so a rebuilt byte-stream fails it BY DESIGN; that check is never weakened. The rebuilt asset instead receives a separate compatibility attestation (plan 136-13).",
+  "population_hash": "d3d1cc44e96fc3b7971a8239949478ffb2a14b61f26daf3f7a234574b8845ca3",
+  "source_asset": "discovery-v1-33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff.db",
+  "stratum_counts": {
+    "ja:high": 12526,
+    "ja:medium": 1977,
+    "msource:high": 11257,
+    "msource:medium": 2130,
+    "sefaria:high": 89474,
+    "sefaria:medium": 16759
+  },
+  "table_hashes": {
+    "discovery_claim": "5322849bf3893827367034eefd9cd717d9903fca3d1ae130032c898fb1dc874b",
+    "discovery_evidence": "06b1dea309b132fe78e7e0716093b8fea4076ae7798a71bd0f8ef5c34a07dcdf",
+    "discovery_routing_audit": "ed3c1e4d5e4b58579ea66b5ccc44060e1ac6ce39e2d2afb9010e55ea68d8207a",
+    "witness_unit_members": "62acbaa4fc7c91af17bf91cb81ab5fb58d4b2cfbd19ab5c2cb82706ef43f8422",
+    "witness_units": "2adf437e0d42a2685fb480a26b2078ade2521a8ff070d9c493679918c8be3349",
+    "works": "c1036e9fe01bbc577b816e5a3f547a5d41d4c6e732bd99016fe027fb1c41d897"
+  },
+  "table_rowcounts": {
+    "discovery_claim": 268361,
+    "discovery_evidence": 297415,
+    "discovery_routing_audit": 6270,
+    "witness_unit_members": 19554,
+    "witness_units": 5547,
+    "works": 1269
+  }
+}
