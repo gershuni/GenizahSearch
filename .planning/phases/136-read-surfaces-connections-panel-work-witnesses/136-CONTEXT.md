@@ -2,6 +2,9 @@
 
 **Gathered:** 2026-07-30
 **Revised:** 2026-07-30 — post mockup + Codex gate (both gates RUN in the discuss session, before planning)
+**Amended:** 2026-08-02 — reconciles the 2026-08-01/02 owner decisions (two-bucket main pool, tier
+filter deleted, band labels tooltip-only, licence-gated reference text, five added rebuild items,
+findings page settled). See the AMENDMENT block at the top of `<decisions>` — it supersedes.
 **Status:** Ready for planning
 
 <domain>
@@ -35,6 +38,143 @@ discovery-v2.1 evidence refresh**, which becomes its own later phase (D-01).
 
 <decisions>
 ## Implementation Decisions
+
+### ⚠ AMENDMENT 2026-08-02 — READ FIRST, SUPERSEDES THE DECISIONS BELOW
+
+Everything below this block was written **2026-07-30**. Between 2026-07-31 and 2026-08-02 the owner
+settled six things through the sketch sessions and the bake-plan amendments. **Where this block and a
+`D-nn` below disagree, this block wins.**
+
+**Precedence for planning and execution, highest first:**
+
+1. `.planning/ROADMAP.md` § Phase 136 (amendments dated 2026-08-01/02)
+2. `.claude/skills/sketch-findings-genizahsearch/` — `SKILL.md` + all four `references/`
+   (`main-pool-rule.md` **read this first**, `discovery-panel-layout.md`, `findings-page.md`,
+   `browse-integration-and-highlighting.md`)
+3. `docs/specs/discovery-v2-bake-plan.md` § Amendment 2026-08-01 (+ the 2026-08-02 licence ruling)
+4. This CONTEXT.md
+5. `136-RESEARCH.md` and `136-PATTERNS.md` — **stale on all six items below**; they predate the change
+   and contain no occurrence of "main pool". Use them for codebase orientation, integration points and
+   file-level analogs only, never for the disclosure model, the filter set, or the evidence view.
+
+#### A-1 — Two buckets replace the three-level confidence scale (supersedes the scale entirely)
+
+Evidence quality is displayed as **"main pool" / "more matches"** on every discovery surface. This is
+**not a new rule** — it is `shared/discovery_band_labels.py::is_default_eligible()`, which already
+exists. The split rule lives in `references/main-pool-rule.md`: *a fragment is a probable
+identification when it matches the work **across more than one leaf**, or **covers almost a whole
+page** on its own* — four **non-compensating** gates, `human_confirmed` always main. Split is
+**36,152 (56%) / 28,357 (44%)**.
+
+A three-level Strong/Medium/Weak scale was designed in sketch 003, ruled system-wide 2026-07-31, then
+**retired 2026-08-01** when a check against the live asset showed it was a second, disagreeing
+implementation of `is_default_eligible()` that had sent the best-measured population in the system
+(`corroborated`, 0.926) to the bottom level. **Do not reintroduce it**; do not port `confOf()`,
+`STRONG_BANDS` or `LONG_CITATION` out of the sketch HTML. `LONG_CITATION = 200` is dropped — it existed
+only to define the Medium level.
+
+Bucket-precision figures (0.92 main vs 0.88 naive) are **design numbers only — D-06 forbids them on any
+surface.**
+
+#### A-2 — Band labels become tooltip-only; the visible chip states the relation
+
+The frozen band labels survive as **tooltips**. The visible chip on a row carries the **relation** —
+"Direct match / Partial match / Shared text". No new display vocabulary is introduced, so
+`discovery-band-labels-v1.md` §2 needs only a **dated note**, not a contract rewrite; §3, §4 and
+BAND-03 are unaffected. §4's screening exclusion survives as a gate-2 concern.
+
+#### A-3 — The tier filter is DELETED, not renamed (supersedes D-16's "tier + novelty + coverage")
+
+On **both** `/work/{id}` and the findings page: quality is the bucket (a default plus a "show more"
+toggle), kind is the relation filter. A tier-labelled control would be a second vocabulary for an axis
+the rows no longer speak. Tier A stays reachable because §4 already holds it behind the screening
+toggle. **Novelty and coverage filters remain.** D-16's library-filter-if-cheap clause is unchanged.
+
+#### A-4 — Reference text MAY render, licence-gated PER WORK (supersedes SC-3's absolute ban)
+
+SC-3 originally read *"reference text is NEVER rendered."* Lifted 2026-08-02. **"Public corpus" is NOT
+the operative test** — the gate is the per-work `reuse_ok` flag that already exists in
+`refs_staging/manifest.json`, alongside a generated `attribution_text`:
+
+| `reuse_ok` | works | may render? |
+|---|---|---|
+| `yes` | **277** (PD 264 · CC-BY 11 · CC0 1 · CC-BY-SA 1) | **yes**, carrying `attribution_text` where the licence requires it |
+| `unclear` | 46 (`unknown` 42 · CC-BY-NC 4) | no — fail closed |
+| `noncommercial_only` | 1 | no — fail closed |
+| *absent* | 21 — **every JA work, zero licence metadata** | no — fail closed |
+
+M-source text never renders. Two non-intuitive consequences to plan around: **~17% of Sefaria works are
+not clearly reusable** (being on Sefaria is not permission), and **JA text cannot render at all today**
+despite JA being public and displayed elsewhere in the UI — a licensing question entirely separate from
+its missing divisions. **Assert on the absence of the flag**: a work missing from the manifest fails
+closed, never defaults open.
+
+**Still owed as a gate-3 decision:** the render source. Staged bodies are lossy by design (HTML
+stripped, `<small>` rubrics and kavanah instructions dropped, nikud/te'amim/punctuation removed at
+acquisition). Either accept stripped text as the comparison view **and say so on the surface**, or
+re-fetch display text at render time.
+
+#### A-5 — The rebuild carries five more items (extends gate 1, per bake-plan Amendment 2026-08-01)
+
+- **Work-side match offsets `w_start`/`w_end` on `discovery_evidence`, ALL corpora** — the matcher
+  already computes the position (`track1_match.py`, `SEG_LEN = 3800` windows with tracked `seg_off`)
+  and discards it at ingest. Highest-value rebuild item: it fixes containment **and** makes citations
+  locatable. Do **not** overload the existing `b_start`/`b_end` (those are the propagated B side).
+  **Name the indexed coordinate space in `discovery-sidecar-schema-v1.md` at the point of definition.**
+- **Offset → human reference: Sefaria only in stage 1** (451 works, 124,941 claims = 75%), from the
+  **322 existing `*.versemap.json` sidecars** (`verse` 295, `hierarchical` 25, `flat` 2). Two
+  acquisition gaps to close: 2 liturgy bodies without a versemap, and 322 staged vs 451 works with
+  claims. ⚠ **Coordinate trap:** versemaps index the **body**; the matcher indexes
+  `normalize.norm_stream`. A per-work `body ↔ norm_stream` map is required — the identical problem
+  sketch 002 solved on the manuscript side. **JA divisions deferred to stage 2** (JA rows still
+  display, with an approximate position). **M-source: store, never display the locus.**
+- **Materialized main-pool bucket flag + its reason code** — recomputing coverage/competition/
+  aggregation at query time is not viable inside PERF-01.
+- **`works.genre`** — entirely NULL today; needs a one-time curation pass (~1,088 works, ~96%
+  high-confidence in one pass) for the findings-page domain facet.
+- **`discovery_routing_audit` fix** so `kept_tie` rows carry `demoted_work_id` (NULL today makes tie
+  pairs unreconstructable).
+
+`coverage_ppm` already subsumes the page-letter denominator the main-pool coverage gate needs — **no
+separate `page_norm_letters` table.**
+
+#### A-6 — The findings page, settled (supersedes D-19's "row unit is OPEN")
+
+- **Nav label: "Computed Identifications" / "זיהויים מחושבים".** Not "Discoveries" (taken by the
+  Community page), not a bare "Identifications" (collides with Browse-by-Identification), and D-23b
+  bars "new".
+- **All three row units ship, user-selectable** via a "Show as" control, **defaulting to one row per
+  identification (65,200)**. Per-page counting inflates same-work matches ~2.3×.
+- **Domain/author/work cascade on the IDENTIFIED WORK's domain — never the manuscript's catalogue
+  domain.** Moss. V,374 is catalogued *Court Records* while carrying a correct Rashi finding, and 338
+  tier-A findings sit on documentary-catalogued manuscripts; filtering on the catalogue axis hides
+  exactly the findings that disagree with the catalogue.
+- **A mode strip ships now**, with Phase 138's leads and Phase 137's saved judgments greyed and
+  phase-tagged — so each later phase adds a tab, not a page.
+- **Novelty is voiced "Candidates for new finds"**, a prominent switch asserting candidacy only. "New
+  discovery" was offered and declined: it stacks two unearned claims (that the match is correct, and
+  that it is new) on a row carrying no human review until Phase 137. This owes a **NOVEL-01 / D-23b
+  amendment** with the *candidate ≠ discovery* reasoning on the record — D-23b currently mandates "Not
+  found in the finding aids checked" and prohibits "new".
+
+#### Still OPEN by design — decide at gate 1, do not guess
+
+- **D-13e** — does the panel's middle bucket (*"also shares text with"*) survive? Under the two-bucket
+  model it is behind-the-default on quality *and* distinguished only by relation, which the relation
+  chip now carries — so it arguably collapses into "more matches". D-13e as written below locks three
+  buckets.
+- **D-16 / PANEL-01** — does the findings page also gain the relation filter currently specified only
+  for the panel? (Panel-level relation/tier filters are themselves new scope; D-16 covers `/work/{id}`
+  only.)
+
+#### Amendments this phase owes (carry into the plans)
+
+`D-09` strike "collapsed" (variant D never collapses the manuscript group), keep the left-to-right
+ordering · `D-12` full rewrite (offsets index the normalized letter stream; clip per line; drop the
+highlight on version change; search-term precedence) · `discovery-band-labels-v1.md` §2 tooltip-only
+note · `NOVEL-01`/`D-23b` candidacy wording · `discovery-budgets.md` findings-page entry.
+
+---
 
 ### Asset & sequencing
 
