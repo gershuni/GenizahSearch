@@ -110,6 +110,59 @@
     frozen-enum-vocab check) — NOT implemented in this plan (136-03), which only records the
     correction. Full rationale, the corrected two-row table and the enumerated downstream-contract
     list are recorded in `136-GATE1-DECISIONS.md` § E′.
+  - **⟨AMENDED 2026-08-02 (same day, a further dispatch) — Phase-136 plan 03, owner decision F
+    (`136-GATE1-DECISIONS.md` § F)⟩** Having read the actual 15 Class-6 candidate cases (not merely
+    the shade's abstract definition), the owner ruled `diverges` into its own OPT-IN, HIDDEN-BY-
+    DEFAULT category, split by SCOPE, with correctness recorded as a SEPARATE axis. **The shade enum
+    widens from EIGHT to NINE values**, `diverges` RETIRED and replaced by `diverges_work` (the aid
+    names a genuinely different work) and `diverges_part` (the aid names a different/finer part of
+    the SAME work — owner: "more delicate and essentially less important"). Owner's stated reason:
+    reading the real cases showed divergent rows are largely OUR false positives (worked examples:
+    case 92 — we claim ילקוט שמעוני, the aid says תנחומא; case 84 — we claim משנה תורה, ספר זמנים,
+    the aid says הגדה של פסח) — but silently trusting the catalogue over the claim would breach the
+    catalogue-never-evidence discipline (the catalogue is a recall yardstick, never acceptance
+    evidence), so **neither the catalogue nor the system adjudicates; the user does**, via a NEW
+    default-visibility rule: `diverges_work`/`diverges_part` rows are HIDDEN BY DEFAULT (not merely
+    excluded from the candidate toggle, as decision E already had it) behind an explicit toggle
+    carrying a clear warning — reusing BAND-03's "show more possible identifications" shape for a
+    different axis. A NEW sibling column, `divergence_correctness` (`catalogue_correct` /
+    `claim_correct` / `unclear`, NULL outside the two divergence shades), records which side is
+    actually right — an axis the shade token itself cannot carry, since the owner's own review found
+    BOTH directions occur under the identical shade. Implemented by **136-04** (shade classifier +
+    correctness field + a further-changed pinned prompt hash), **136-06/136-12** (schema/build
+    wiring, both the nine-value CHECK and the new column), **the release verifier**, **136-05**
+    (allowlist gains the new column), and — newly, not implied by decision E — **136-15/136-17**
+    (panel) and **136-16/136-18** (findings page), which must build the hidden-by-default/explicit-
+    warned-toggle behavior fresh. NOT implemented in this plan (136-03), which only records the
+    ruling. Full rationale and the enumerated downstream-contract list are recorded in
+    `136-GATE1-DECISIONS.md` § F.
+  - **⟨AMENDED 2026-08-02 (same day, a further dispatch still) — Phase-136 plan 03, owner decision G
+    (`136-GATE1-DECISIONS.md` § G)⟩** A boundary correction to the `confirms`/`refines_granularity`
+    distinction, with a systemic consequence for the novelty check's own coverage. Worked cases: case
+    83 (we claim תשובות האיי גאון against a catalogue structured entry keyed to the generic תשובות —
+    but the catalogue's OWN identification TEXT already reads שאלות ותשובות מאת האי בן שרירא גאון) and
+    case 87 (we claim ספר יוסיפון (ערבי) against a structured entry keyed to the generic יוסיפון — but
+    the catalogue's own text reads יוסיפון בערבית). Owner, verbatim: "What you called situation 2 is
+    plain and simple nothing new from our side." **Rule:** `refines_granularity` is reserved for
+    cases where we genuinely add information the aid contains IN NO FORM — neither a structured field
+    NOR free text; where the aid's own prose already states the identification and only the
+    structured work-id keying differs, the shade is `confirms`. **This amends NOVEL-01's own checked-
+    source-set clause as a REQUIREMENT, not merely a labelling nuance:** the checked-source list
+    already named "catalogue... bibliography, titles, PGP, FGP, and M-source shelfmark attributions",
+    but this ruling makes explicit that the check MUST read the aid's FREE-TEXT identification field
+    as a genuine input to the confirms/refines/diverges decision — an id-only join against a
+    structured field is NOT sufficient and would manufacture false novelty (`fills_gap`) at scale on
+    precisely the rows most damaging to publish. Measured finding, recorded not fixed: this project's
+    OWN Class-6 selector (`select_catalogue_divergence_candidates`) is exactly such an id-only-join
+    heuristic and, per the owner's characterization in ruling F, over-fired on roughly half of the 15
+    Class-6 candidates on this account — left uncorrected in this plan (136-03) deliberately, so the
+    same failure mode continues to surface as the candidate pool is expanded, per the plan's own
+    instruction not to quietly fix it away. Flagged explicitly to **136-04** (the pinned LLM contract
+    must present the aid's full free-text identification to the judgment step and must state this rule
+    directly) and **136-12** (any heuristic first pass before the model gate must check the free text
+    for the claimed work's own identity, not merely test structured-field disagreement). NOT
+    implemented in this plan (136-03), which only records the ruling. Full rationale recorded in
+    `136-GATE1-DECISIONS.md` § G.
 - [ ] **NOVEL-02**: The novelty flag's **provenance** (`known_source` — which aid already had it) is masked on the public side: the boolean is publishable, but a restricted-corpus provenance value collapses to a non-identifying label (e.g. "recorded in a restricted corpus"), never the corpus name, and passes the DATA-05 masking scan on every surface that renders or exports it — including copy/clipboard output, JSON payloads, and error paths. Public surfaces therefore support "filter **and explain**" only where the explaining source is itself public; elsewhere they support "filter only". The heuristic-plus-LLM funnel's verdict cache is a build-time artifact and is never shipped in the sidecar
 
 ### Bands & Certification
