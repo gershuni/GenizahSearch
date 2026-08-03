@@ -884,7 +884,19 @@ def check_routing_audit_replayability(conn: sqlite3.Connection) -> List[str]:
                 violations.append(
                     f"routing_audit page {page_id}: demoted delta {computed} < DELTA "
                     f"{_D17_DELTA_YEARS} (a within-DELTA pair must never be 'demoted')")
-        elif decision in ("kept_tie", "fail_safe_unknown_date"):
+        elif decision == "kept_tie":
+            # Schema amendment (F), 2026-08-02: a kept_tie row MUST name the work
+            # it beat, or the tie pair is unreconstructable from the audit table
+            # alone. This branch previously required the opposite (NULL), which
+            # directly contradicted `check_kept_tie_names_its_pair` in this same
+            # script -- whichever way the builder wrote the column, one of the two
+            # checks was guaranteed to fail. 136-12 fixed the builder and added
+            # the new check but left this one on the pre-amendment rule.
+            if demoted is None:
+                violations.append(
+                    f"routing_audit page {page_id}: kept_tie row missing demoted_work_id "
+                    "(schema amendment (F): the tie pair must be reconstructable)")
+        elif decision == "fail_safe_unknown_date":
             if demoted is not None:
                 violations.append(
                     f"routing_audit page {page_id}: {decision} row must have NULL demoted_work_id")
