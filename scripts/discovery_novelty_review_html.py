@@ -377,11 +377,50 @@ mark.hl{background:#facc15;color:#000;border-radius:3px;padding:0 2px}
     return "\n".join(P)
 
 
+def _public_candidate_keys(public_db: str, asset: str) -> set:
+    """The `sys_id::work_id` keys that a reader would ACTUALLY meet as candidate
+    finds in the deployed public artifact.
+
+    The verdict cache is the full private candidate set. The public artifact is
+    narrower: restricted-identity works are withheld, dependency-closure pruning
+    removed rows whose routing reason could not be substantiated, and only
+    `main_pool` rows are shown by default. Reviewing the verdict set would show
+    the owner rows that will never ship. Keys are mapped through the canonical
+    work id, because a candidate carries its own `ref_work_id` while the
+    identification grain is keyed on the canonical."""
+    pub = sqlite3.connect(f"file:{public_db}?mode=ro", uri=True)
+    try:
+        shipping = {
+            (r[0], r[1]) for r in pub.execute(
+                "SELECT sys_id, canonical_work_id FROM discovery_identification "
+                "WHERE novelty_status = 'fills_gap' AND main_pool = 1")
+        }
+    finally:
+        pub.close()
+    src = sqlite3.connect(f"file:{asset}?mode=ro", uri=True)
+    try:
+        members = collections.defaultdict(list)
+        for work_id, canon in src.execute("SELECT work_id, canonical_work_id FROM works"):
+            members[canon].append(work_id)
+    finally:
+        src.close()
+    return {
+        f"{sys_id}::{work_id}"
+        for (sys_id, canon) in shipping
+        for work_id in members.get(canon, ())
+    }
+
+
 def build_works_page(args) -> int:
     print("loading verdicts…")
     verdicts = load_verdicts(args.verdicts)
     fg = [k for k, s in verdicts.items() if s == SHIPS_AS_CANDIDATE]
-    print(f"{len(fg):,} fills_gap rows")
+    print(f"{len(fg):,} fills_gap rows in the verdict cache")
+    if args.restrict_to_public:
+        shipping = _public_candidate_keys(args.restrict_to_public, args.asset)
+        fg = [k for k in fg if k in shipping]
+        print(f"{len(fg):,} of those actually ship as default-visible candidates "
+              f"in {os.path.basename(args.restrict_to_public)}")
 
     print("rebuilding candidate evidence…")
     candidates, works, libraries = build_all_candidates(
@@ -444,6 +483,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--fills-gap", type=int, default=25)
     p.add_argument("--seed", type=int, default=20260803)
     p.add_argument("--cost", default="40.12")
+    p.add_argument("--restrict-to-public", metavar="PUBLIC_DB", default=None,
+                   help="Path to the PUBLIC projection. Restricts the rendered rows to the "
+                        "candidate finds a reader would actually meet there (default-visible "
+                        "main_pool fills_gap), so a pre-deploy review shows exactly what ships "
+                        "rather than the full private verdict set.")
     p.add_argument("--mode", choices=("shades", "fills-gap-by-work"), default="shades",
                    help="'shades' samples every shade; 'fills-gap-by-work' renders ALL "
                         "fills_gap rows grouped by the work we identified")
