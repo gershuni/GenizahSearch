@@ -419,6 +419,57 @@ def _manuscript_str(sys_id: str, libraries: Dict[str, Dict[str, str]]) -> str:
     return shelfmark if shelfmark else f"sys_id {sys_id} (no shelfmark on file)"
 
 
+# The owner cannot adjudicate "is this identified in the aids?" without SEEING
+# what each aid actually says -- showing only the selection rationale repeats the
+# arm-2 instrument failure (a stratum label where the source text belonged, which
+# left 18/25 cases undecidable). Every checked source therefore gets its own
+# column carrying its OWN free text, provenance-separated exactly as
+# `assemble_evidence_bundle` hands it to the model, so what the owner reads is
+# what the model read.
+_EVIDENCE_CAP = 3000
+_NO_TEXT = "(none -- this source has no text at all for this manuscript)"
+
+
+def _evidence_cell(texts: Sequence[str]) -> str:
+    """Renders one source family's own free text for the instrument. Multiple
+    rows stay visibly separate. Over-long text is truncated with an EXPLICIT,
+    counted marker -- never silently, since a truncation that hid the naming
+    phrase would flip a verdict without the owner ever knowing."""
+    joined = "\n---\n".join(t.strip() for t in texts if t and t.strip())
+    if not joined:
+        return _NO_TEXT
+    if len(joined) > _EVIDENCE_CAP:
+        return (
+            joined[:_EVIDENCE_CAP]
+            + f"\n[... TRUNCATED for display: {len(joined)} chars total. "
+            "Check the source directly before recording `genuinely_novel` on this row.]"
+        )
+    return joined
+
+
+def _row_evidence(c: NoveltyCandidate) -> Dict[str, str]:
+    """Pulls each checked source's text off the SAME bundle the model was given.
+
+    Refuses to emit restricted-corpus text. This instrument is a TRACKED file
+    under `.planning/`, and D-25 forbids restricted-source content in committed
+    files; the probe never populates that field today, so a non-empty value here
+    means an upstream change has quietly routed restricted text at a committed
+    artifact -- fail closed rather than write it out.
+    """
+    bundle = assemble_evidence_bundle(c)
+    if bundle.get("m_source_shelfmark"):
+        raise RuntimeError(
+            f"restricted-corpus text present on {c.sys_id}/{c.ref_work_id}; refusing to write it "
+            "into a tracked owner instrument (D-25). Mask or drop it upstream first."
+        )
+    return {
+        "ev_catalogue": _evidence_cell(bundle.get("catalogue", ())),
+        "ev_bibliography": _evidence_cell(bundle.get("bibliography", ())),
+        "ev_pgp": _evidence_cell(bundle.get("pgp", ())),
+        "ev_fgp": _evidence_cell(bundle.get("fgp", ())),
+    }
+
+
 def build_instrument_rows(
     model_path_candidates: Sequence[NoveltyCandidate],
     bypass_path_candidates: Sequence[NoveltyCandidate],
@@ -439,6 +490,7 @@ def build_instrument_rows(
                 "claimed_author": c.claimed_author,
                 "manuscript": _manuscript_str(c.sys_id, libraries),
                 "catalogue_text": c.catalogue_text or "",
+                **_row_evidence(c),
                 "reason": (
                     "MODEL PATH: this row failed the mechanical heuristic name-match (it is part of "
                     "the residual) and the pinned gate (gemini-3.6-flash, effort=low) classified it "
@@ -456,6 +508,7 @@ def build_instrument_rows(
                 "claimed_author": c.claimed_author,
                 "manuscript": _manuscript_str(c.sys_id, libraries),
                 "catalogue_text": "",
+                **_row_evidence(c),
                 "reason": (
                     "BYPASS PATH: NONE of the four checked-source families (catalogue, bibliography, "
                     "PGP, FGP) has ANY text at all for this manuscript -- this row ships as a "
@@ -506,14 +559,32 @@ def write_instrument_markdown(rows: List[Dict[str, Any]], path: str, meta: Dict[
     lines.append("")
     lines.append("## Cases")
     lines.append("")
-    lines.append("| Case # | Path | Manuscript | sys_id | Claimed work | Why this row is in the set |")
-    lines.append("|---|---|---|---|---|---|")
+    lines.append(
+        "Each case below carries the ACTUAL free text of every checked source, exactly as the "
+        "pinned gate received it. A source shown as "
+        f"\"{_NO_TEXT}\" genuinely has none on file -- that is a finding, not a rendering gap."
+    )
+    lines.append("")
     for row in rows:
         work = row["claimed_title"] + (f" ({row['claimed_author']})" if row["claimed_author"] else "")
-        lines.append(
-            f"| {row['case_num']} | {row['path']} | {row['manuscript']} | {row['sys_id']} | "
-            f"{work} | {row['reason']} |"
-        )
+        lines.append(f"### Case {row['case_num']} — {row['path']} path")
+        lines.append("")
+        lines.append(f"- **Manuscript:** {row['manuscript']} (`{row['sys_id']}`)")
+        lines.append(f"- **Our claim:** {work}")
+        lines.append(f"- **Why it is in the set:** {row['reason']}")
+        lines.append("")
+        for label, key in (
+            ("Catalogue says", "ev_catalogue"),
+            ("Bibliography says", "ev_bibliography"),
+            ("PGP says", "ev_pgp"),
+            ("FGP says", "ev_fgp"),
+        ):
+            lines.append(f"**{label}:**")
+            lines.append("")
+            lines.append("```")
+            lines.append(row[key])
+            lines.append("```")
+            lines.append("")
     lines.append("")
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\n".join(lines) + "\n")
@@ -540,14 +611,32 @@ def write_instrument_xlsx(rows: List[Dict[str, Any]], path: str, meta: Dict[str,
     ws = wb.active
     ws.title = "Candidates"
     ws.sheet_view.rightToLeft = True
-    headers = ["Case #", "Verdict", "Path", "Manuscript", "sys_id", "Claimed work", "Why this row is in the set"]
+    headers = [
+        "Case #",
+        "Verdict",
+        "Path",
+        "Manuscript",
+        "sys_id",
+        "Claimed work",
+        # The four checked sources, each carrying its OWN free text -- this is
+        # the evidence the verdict is actually about, and the model saw exactly
+        # these strings. Without them the owner is grading a rationale, not a claim.
+        "Catalogue says",
+        "Bibliography says",
+        "PGP says",
+        "FGP says",
+        "Why this row is in the set",
+    ]
     ws.append(headers)
     for col_idx in range(1, len(headers) + 1):
         cell = ws.cell(row=1, column=col_idx)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = header_align
-    widths = {"A": 9, "B": 18, "C": 10, "D": 32, "E": 22, "F": 40, "G": 60}
+    widths = {
+        "A": 9, "B": 18, "C": 10, "D": 32, "E": 22, "F": 40,
+        "G": 55, "H": 55, "I": 55, "J": 55, "K": 60,
+    }
     for col_letter, width in widths.items():
         ws.column_dimensions[col_letter].width = width
     for row in rows:
@@ -560,6 +649,10 @@ def write_instrument_xlsx(rows: List[Dict[str, Any]], path: str, meta: Dict[str,
                 _s(row["manuscript"]),
                 _s(row["sys_id"]),
                 _s(work),
+                _s(row["ev_catalogue"]),
+                _s(row["ev_bibliography"]),
+                _s(row["ev_pgp"]),
+                _s(row["ev_fgp"]),
                 _s(row["reason"]),
             ]
         )
@@ -568,7 +661,13 @@ def write_instrument_xlsx(rows: List[Dict[str, Any]], path: str, meta: Dict[str,
         ws.cell(row=r, column=1).alignment = wrap_top_center
         for c in range(2, len(headers) + 1):
             ws.cell(row=r, column=c).alignment = wrap_top
-    ws.freeze_panes = "D2"
+        # Pin a uniform, readable height. Left to auto-fit, a 3000-char evidence
+        # cell would make a single row hundreds of lines tall and the sheet
+        # unnavigable; the owner expands any row that needs more.
+        ws.row_dimensions[r].height = 130
+    # Freeze the identity block (case / verdict / path / manuscript / sys_id /
+    # claim) so it stays visible while scrolling the wide evidence columns.
+    ws.freeze_panes = "G2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{last_row}"
 
     dv = DataValidation(
