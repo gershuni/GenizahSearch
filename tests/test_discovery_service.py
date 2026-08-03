@@ -1082,6 +1082,37 @@ def test_envelope_ok_on_a_genuine_empty_result():
     )
 
 
+def test_a_failing_query_is_an_outage_not_a_genuine_zero(tmp_path):
+    """A query that FAILS must never present as `ok` with a total of 0.
+
+    Found against a real PRE-REBUILD asset, which has no
+    `discovery_identification` table: the page query raised, the shared query
+    helper swallowed the exception into an empty result, and the envelope
+    reported `ok` / total 0 -- a false zero on a surface whose rule is to hide
+    itself on a zero. Every synthetic fixture in this file carries the new
+    tables, so only an asset that genuinely lacks them can reach this
+    assertion; the fixture below drops the table to reproduce that shape
+    exactly."""
+    db_path = _build_d13g_regression_db(tmp_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DROP TABLE discovery_identification")
+        conn.commit()
+    finally:
+        conn.close()
+
+    service = _service_for(db_path, _D13G_VERSION)
+    env = service.get_claims_for_page_enveloped(_D13G_SHOWN_PAGE)
+    assert env["status"] == STATUS_UNAVAILABLE, (
+        "a pre-rebuild asset must read as an OUTAGE, never as 'this manuscript "
+        "has no identifications'"
+    )
+    assert env["meta"]["reason"] == "query_failed"
+    assert is_outage(env) is True
+    # The legacy list method keeps its own contract: [] on any failure.
+    assert service.get_claims_for_page(_D13G_SHOWN_PAGE) == []
+
+
 def test_envelope_status_vocabulary_is_closed_and_pairwise_distinct():
     assert SURFACE_STATUSES == {STATUS_OK, STATUS_UNAVAILABLE, STATUS_TIMEOUT, STATUS_BUSY}
     assert len(SURFACE_STATUSES) == 4, "four states, pairwise distinct"

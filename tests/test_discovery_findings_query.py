@@ -350,6 +350,26 @@ def test_counts_are_served_from_the_materialized_grain_never_a_claim_row_scan(se
         assert env["total"] > 0
 
 
+def test_all_three_units_are_served_by_one_query_builder_not_three():
+    """One builder, parameterised by unit. Three builders would let filter,
+    sort and count semantics drift between the unit a reader selected and the
+    unit its counts were computed over -- silently, and only for readers who
+    change the unit."""
+    source = _service_source()
+    assert source.count("def _build_findings_query(") == 1
+    assert source.count("def _build_findings_filter(") == 1, (
+        "the predicate has exactly one builder too -- building it twice is how "
+        "a facet count and the result set beside it drift apart"
+    )
+    # No per-unit query function has grown alongside it.
+    for unit in sorted(FINDINGS_UNITS):
+        assert f"def _build_{unit}_findings" not in source
+        assert f"def _query_findings_{unit}" not in source
+    # The per-unit difference is DATA (a select list + a group-by), not code.
+    assert source.count("_FINDINGS_UNIT_SELECT[unit]") == 1
+    assert source.count("_FINDINGS_UNIT_GROUP_BY[unit]") == 1
+
+
 def test_an_exact_count_is_flagged_exact_and_a_capped_one_is_flagged_approximate(
         service, monkeypatch):
     exact = service.get_findings_enveloped(bucket=BUCKET_ALL)

@@ -1019,8 +1019,12 @@ class DiscoveryService:
         the panel's display fields as well; the total is available only through
         the enveloped shape below, since adding it here would change the return
         type."""
-        rows, _total = self._query_claims_for_page(
-            page_id, page=page, page_size=page_size, include_review=include_review)
+        try:
+            rows, _total = self._query_claims_for_page(
+                page_id, page=page, page_size=page_size, include_review=include_review)
+        except Exception as e:
+            logger.error("DiscoveryService.get_claims_for_page error for %s: %s", page_id, e)
+            return []
         return rows
 
     # ------------------------------------------------------------------
@@ -1059,6 +1063,15 @@ class DiscoveryService:
         all. Three closed values: ``shipped``, ``human_confirmed`` (D-13g's
         restore) and ``review_opt_in`` (present only because the caller passed
         ``include_review``).
+
+        RAISES on a query failure rather than swallowing it into an empty
+        result. That distinction is load-bearing: the legacy list method turns
+        it back into ``[]`` (its contract), while the enveloped method turns it
+        into `unavailable`. Swallowing it here produced a real false zero --
+        against a PRE-REBUILD asset (no ``discovery_identification`` table) the
+        enveloped call reported `ok` with a total of 0, i.e. exactly the
+        "this manuscript has nothing" reading D-13 exists to prevent, on a
+        surface whose rule is to hide itself on a zero.
 
         The identity join is on ``display_work_id``, NEVER ``canonical_work_id``:
         the latter is not unique on ``works`` (15 duplicated groups on the live
@@ -1121,7 +1134,7 @@ class DiscoveryService:
             rows = [dict(row) for row in cur.fetchall()]
         except Exception as e:
             logger.error("DiscoveryService.get_claims_for_page error for %s: %s", page_id, e)
-            return [], 0
+            raise
         total = rows[0].pop("_total_rows", len(rows)) if rows else 0
         for row in rows[1:]:
             row.pop("_total_rows", None)
