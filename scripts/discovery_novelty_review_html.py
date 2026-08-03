@@ -42,6 +42,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+from shared.discovery_display_strings import display_work_title  # noqa: E402
 from scripts.discovery_novelty_funnel import assemble_evidence_bundle  # noqa: E402
 from scripts.discovery_novelty_probe import (  # noqa: E402
     DEFAULT_ASSET,
@@ -421,7 +422,7 @@ def build_works_page(args) -> int:
         b = sum(1 for c in cases if c["bypass"])
         tot_b += b
         tot_m += len(cases) - b
-        groups.append({"title": titles.get(wid) or wid, "n": len(cases),
+        groups.append({"title": display_work_title(wid, titles.get(wid) or wid, "he"), "n": len(cases),
                        "bypass": b, "model": len(cases) - b, "cases": cases})
     groups.sort(key=lambda g: (-g["n"], g["title"]))
 
