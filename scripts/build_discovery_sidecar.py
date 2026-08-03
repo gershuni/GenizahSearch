@@ -5014,6 +5014,15 @@ def load_work_author_aliases(path, *, content_hash: Optional[str]) -> Tuple[Dict
                 "work_author_aliases row carries a non-string author/normalized "
                 "(row content withheld -- masking)")
         by_normalized[normalized] = row
+        # 2026-08-03 (136-13): ALSO key each row under its RAW author string.
+        # `assert_author_key_coverage` compares the asset's own `works.author`
+        # values -- which are RAW -- against this index, and 16 of the 96 curated
+        # rows normalize to something other than their raw form, so a
+        # normalized-ONLY index made the coverage check unsatisfiable by
+        # construction (it rejected the live production asset). Two rows also
+        # collide on one normalized key, so the raw keys additionally keep the
+        # 96th row reachable. Both spellings map to the same row object.
+        by_normalized.setdefault(author, row)
         if row.get("match") in ("exact", "containment"):
             matched += 1
 
@@ -5101,17 +5110,35 @@ def assert_author_key_coverage(conn: sqlite3.Connection, alias_index: Dict[str, 
     different work sets, which is precisely the drift a pin cannot catch on its
     own.
 
-    The violation message names the COUNT, never the author strings."""
+    The violation message names the COUNT, never the author strings.
+
+    Scope (2026-08-03, 136-13): the check runs over the works the artifact was
+    BUILT from -- `curate_work_domains.load_worklist` is documented as "every
+    CANONICAL work carrying at least one shipped claim", and the artifact's own
+    `counts.canonical_works` records that scope. Scanning ALL of `works`
+    demanded coverage the artifact never claimed to provide (12 author strings
+    live only on works with zero shipped claims), which is a scope error in the
+    CHECK, not drift in the asset. The drift-detection purpose is unchanged and
+    still strict: any author on a SHIPPED work that the artifact has not seen
+    still fails.
+    """
     authors = {
         r[0] for r in conn.execute(
-            "SELECT DISTINCT author FROM works WHERE author IS NOT NULL AND author != ''")
+            """
+            SELECT DISTINCT w.author
+              FROM works w
+              JOIN discovery_claim dc ON dc.work_id = w.work_id
+              JOIN discovery_evidence e ON e.claim_id = dc.claim_id
+             WHERE e.routing_status = 'shipped'
+               AND w.author IS NOT NULL AND w.author != ''
+            """)
     }
     uncovered = sorted(a for a in authors if a not in alias_index)
     if uncovered:
         raise CuratedArtifactError(
-            f"{len(uncovered)} distinct works.author value(s) are absent from the pinned "
-            "author-alias artifact -- the artifact and the asset were built from different "
-            "work sets (author strings withheld -- masking)"
+            f"{len(uncovered)} distinct works.author value(s) on SHIPPED works are absent "
+            "from the pinned author-alias artifact -- the artifact and the asset were built "
+            "from different work sets (author strings withheld -- masking)"
         )
     return {"works_author_strings": len(authors), "works_author_strings_covered": len(authors)}
 

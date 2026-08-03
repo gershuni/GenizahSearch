@@ -699,3 +699,103 @@ def test_real_artifact_keys_are_unique():
 def test_real_alias_artifact_validates():
     doc = _load(_ALIASES)
     assert cwd.validate_alias_artifact(doc) == []
+
+
+# ---------------------------------------------------------------------------
+# 136-13 regression: the author-key coverage check must be satisfiable by the
+# artifact that actually exists, against the asset that actually shipped.
+#
+# The original check (136-12) compared RAW `works.author` strings against an
+# index keyed on `normalized`, over ALL works rather than the shipped scope the
+# artifact was built from. It passed its unit fixtures -- where raw == normalized
+# and every work had a shipped claim -- and failed against the live certified
+# asset with 28 uncovered authors (16 from the key-space mismatch, 12 from the
+# scope error). These tests execute against the real objects.
+# ---------------------------------------------------------------------------
+
+_LIVE_ASSET = os.path.join(
+    "discovery_data",
+    "discovery-v1-33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff.db",
+)
+_have_live_asset = pytest.mark.skipif(
+    not os.path.isfile(_LIVE_ASSET),
+    reason="the live discovery asset is a gitignored local artifact",
+)
+
+
+@_have_aliases
+def test_alias_index_is_reachable_by_raw_author_not_only_normalized():
+    """Every curated row must be findable by the RAW author string, because the
+    asset's `works.author` values are raw. 16 of the 96 rows normalize to a
+    different string, so a normalized-only index silently loses them."""
+    import scripts.build_discovery_sidecar as bds
+
+    doc = _load(_ALIASES)
+    index, _ = bds.load_work_author_aliases(_ALIASES, content_hash=doc["content_hash"])
+    missing = [r for r in doc["aliases"] if r["author"] not in index]
+    assert not missing, (
+        f"{len(missing)} curated alias row(s) are unreachable by their raw author key "
+        "(strings withheld -- masking)"
+    )
+    divergent = [r for r in doc["aliases"] if r["author"] != r["normalized"]]
+    assert divergent, (
+        "this regression is only meaningful while some row normalizes to a different "
+        "string; if that stops being true the fixture no longer exercises the bug"
+    )
+
+
+@_have_aliases
+@_have_live_asset
+def test_author_key_coverage_accepts_the_live_certified_asset():
+    """A gate that rejects the asset already in production is wrong by
+    construction. This is the check that was never executed against a real
+    build."""
+    import sqlite3
+
+    import scripts.build_discovery_sidecar as bds
+
+    doc = _load(_ALIASES)
+    index, _ = bds.load_work_author_aliases(_ALIASES, content_hash=doc["content_hash"])
+    conn = sqlite3.connect(f"file:{_LIVE_ASSET}?mode=ro", uri=True)
+    try:
+        stats = bds.assert_author_key_coverage(conn, index)
+    finally:
+        conn.close()
+    assert stats["works_author_strings"] > 0
+    assert stats["works_author_strings_covered"] == stats["works_author_strings"]
+
+
+@_have_aliases
+@_have_live_asset
+def test_author_key_coverage_still_fails_on_genuine_drift():
+    """The scope narrowing must not defang the check: an author on a SHIPPED
+    work that the artifact has never seen still has to fail."""
+    import sqlite3
+
+    import scripts.build_discovery_sidecar as bds
+
+    doc = _load(_ALIASES)
+    index, _ = bds.load_work_author_aliases(_ALIASES, content_hash=doc["content_hash"])
+    src = sqlite3.connect(f"file:{_LIVE_ASSET}?mode=ro", uri=True)
+    conn = sqlite3.connect(":memory:")
+    try:
+        src.backup(conn)
+    finally:
+        src.close()
+    try:
+        victim = conn.execute(
+            """SELECT w.work_id FROM works w
+                 JOIN discovery_claim dc ON dc.work_id = w.work_id
+                 JOIN discovery_evidence e ON e.claim_id = dc.claim_id
+                WHERE e.routing_status = 'shipped'
+                  AND w.author IS NOT NULL AND w.author != '' LIMIT 1"""
+        ).fetchone()
+        assert victim, "fixture needs at least one shipped work carrying an author"
+        conn.execute(
+            "UPDATE works SET author = ? WHERE work_id = ?",
+            ("zzz-uncurated-author-not-in-artifact", victim[0]),
+        )
+        with pytest.raises(bds.CuratedArtifactError):
+            bds.assert_author_key_coverage(conn, index)
+    finally:
+        conn.close()
