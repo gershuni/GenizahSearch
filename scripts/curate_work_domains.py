@@ -1711,11 +1711,18 @@ def resolve_author_alias(
     """Resolve ONE discovery author string against the catalogue person list.
 
     Deterministic and ORDER-INDEPENDENT: an exact match beats every
-    containment match regardless of the order ``persons`` arrives in, and among
-    equally-good matches the smallest ``person_id`` wins (the same
+    containment match regardless of the order ``persons`` arrives in; among
+    containment matches the LONGEST (most specific) catalogue name wins; and
+    every remaining tie is broken by the smallest ``person_id`` -- the same
     "deterministic, order-independent representative" discipline
     ``shared/discovery_novelty.py::novelty_work_key`` already uses for its
-    alias groups).
+    alias groups.
+
+    The longest-first containment rule is load-bearing, not cosmetic: the
+    catalogue carries both a bare given name and the full name of the same
+    person, and a smallest-id-only tie-break resolved the corpus's second most
+    frequent author (39 works) onto the bare given name while the full name sat
+    in the same candidate list.
 
     Returns ``{"match": <exact|containment|unmatched>, "person_id", "heb_desc",
     "eng_desc", "candidates"}``.  An unmatched author is RETAINED as unmatched,
@@ -1743,7 +1750,11 @@ def resolve_author_alias(
             "candidates": sorted(int(p["person_id"]) for p in exact),
         }
     if contains:
-        winner = min(contains, key=lambda p: int(p["person_id"]))
+        # Longest (most specific) catalogue name first, then smallest id.
+        winner = min(
+            contains,
+            key=lambda p: (-len(normalize_title(p.get("heb_desc"))), int(p["person_id"])),
+        )
         return {
             "match": "containment",
             "person_id": int(winner["person_id"]),

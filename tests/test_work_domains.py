@@ -412,6 +412,23 @@ def test_alias_unmatched_author_is_retained_not_dropped():
     assert doc["counts"]["by_match"]["unmatched"] == 1
 
 
+def test_alias_containment_prefers_the_most_specific_catalogue_name():
+    """The catalogue carries both a bare given name and the full name of the
+    same person. A smallest-id-only tie-break resolved the corpus's second most
+    frequent author onto the bare given name; longest-first fixes it."""
+    persons = [
+        {"person_id": 147, "eng_desc": "Solomon", "heb_desc": "שלמה"},
+        {"person_id": 152, "eng_desc": "Solomon b. Isaac", "heb_desc": "שלמה בן יצחק"},
+    ]
+    r = cwd.resolve_author_alias('שלמה בן יצחק (רש״י)', persons)
+    assert r["match"] == "containment"
+    assert r["person_id"] == 152, "the bare given name must not beat the full name"
+    assert sorted(r["candidates"]) == [147, 152], (
+        "both candidates stay visible so the weaker evidence is auditable"
+    )
+    assert r == cwd.resolve_author_alias('שלמה בן יצחק (רש״י)', list(reversed(persons)))
+
+
 def test_alias_resolution_is_order_independent():
     forward = cwd.resolve_author_alias("שלמה בן יצחק", PERSONS)
     backward = cwd.resolve_author_alias("שלמה בן יצחק", list(reversed(PERSONS)))
