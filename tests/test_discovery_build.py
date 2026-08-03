@@ -2987,3 +2987,613 @@ def test_write_budgets_pending_block_is_honest_about_not_measuring():
     # No invented numbers.
     assert "| Shape | Cap |" not in block
     assert "3.41-3.55 s" in block and "16 s" in block
+
+
+# ===========================================================================
+# 136-12 Task 1: novelty SHADE ingestion (the ten-value enum) across BOTH
+# evidence families, at the centralized (sys_id, novelty_work_key) grain, with
+# masked provenance and the `divergence_correctness` sibling column.
+#
+# Owner rulings E / E' / F / G / H (the vocabulary), J (funnel-first), L
+# (divergence_correctness is human/owner annotation ONLY) --
+# `.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-GATE1-DECISIONS.md`.
+# Contract: docs/specs/discovery-novelty-v1.md.
+# ===========================================================================
+
+import io as _io  # noqa: E402 -- source-text guards below read the builder file
+
+from shared import discovery_novelty as novelty_mod  # noqa: E402
+
+# The RETIRED vocabularies every earlier draft of this axis used. None of these
+# tokens may ever appear in a built asset again -- they are listed here so a
+# regression that revives one fails loudly rather than passing a "is it a
+# string" check.
+_RETIRED_NOVELTY_TOKENS = frozenset({
+    "not_in_finding_aids", "already_recorded",      # the D-23a tri-state
+    "known", "not_found", "indeterminate",          # the D-23a alternative naming
+    "diverges",                                     # retired by ruling F (split by scope)
+})
+
+
+def _write_verdict_cache(tmp_path, entries, name="verdicts.json"):
+    """Write a verdict cache in the EXACT shape
+    `scripts/discovery_novelty_production_run.py` emits, and return
+    `(path, sha256)`. Every sys_id/work_id below is fabricated."""
+    path = tmp_path / name
+    path.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+    return str(path), sidecar_build._hash_file(path)
+
+
+def _novelty_fixture_conn(*, works_rows=None, evidence_specs=None):
+    """A schema'd DB carrying one direct + one propagated evidence row for the
+    same (sys_id, work) -- i.e. BOTH families, which is the coverage gap this
+    ingest closes."""
+    if works_rows is None:
+        works_rows = [("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA)]
+    if evidence_specs is None:
+        evidence_specs = _ingest_direct_and_propagated_specs()
+        for e in evidence_specs:
+            e["work_id"] = "w000001"
+    return _ident_fixture_conn(works_rows=works_rows, evidence_specs=evidence_specs)
+
+
+# ---------------------------------------------------------------------------
+# The pinned verdict cache (T-136-12-03)
+# ---------------------------------------------------------------------------
+
+def test_novelty_verdict_cache_refuses_a_hash_mismatch(tmp_path):
+    """A build input that is not the input that was MEASURED is not a pinned
+    input. The refusal happens before a single verdict row is read."""
+    path, real_sha = _write_verdict_cache(
+        tmp_path, {"s1::w000001": {"novelty_status": "fills_gap"}})
+    wrong_sha = "0" * 64
+    with pytest.raises(sidecar_build.NoveltyVerdictCacheError) as exc:
+        sidecar_build.load_novelty_verdicts(path, sha256=wrong_sha)
+    assert "pin mismatch" in str(exc.value)
+    # ...and the SAME file loads cleanly under its real pin.
+    entries, stats = sidecar_build.load_novelty_verdicts(path, sha256=real_sha)
+    assert stats["verdict_entries"] == 1
+    assert entries["s1::w000001"]["novelty_status"] == "fills_gap"
+
+
+def test_novelty_verdict_cache_refuses_an_unpinned_load(tmp_path):
+    """There is no unpinned load path at all -- not even a warned one."""
+    path, _sha = _write_verdict_cache(tmp_path, {"s1::w000001": {"novelty_status": "confirms"}})
+    with pytest.raises(sidecar_build.NoveltyVerdictCacheError) as exc:
+        sidecar_build.load_novelty_verdicts(path, sha256=None)
+    assert "not a pinned input" in str(exc.value)
+
+
+def test_novelty_verdict_cache_error_paths_never_echo_a_key_or_value(tmp_path):
+    """T-136-12-02: an error message must not become the leak. A malformed
+    entry is reported by SHAPE, never by naming the entry or its content."""
+    sentinel = "ZZZ_FAKE_RESTRICTED_SENTINEL_ZZZ"
+    path, sha = _write_verdict_cache(
+        tmp_path,
+        {"s1::" + sentinel: {"novelty_status": "confirms", "unexpected_field": sentinel}},
+    )
+    with pytest.raises(sidecar_build.NoveltyVerdictCacheError) as exc:
+        sidecar_build.load_novelty_verdicts(path, sha256=sha)
+    assert sentinel not in str(exc.value)
+    assert "masking" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Both families carry a shade, drawn from the TEN-value set
+# ---------------------------------------------------------------------------
+
+def test_novelty_status_written_on_both_evidence_families(tmp_path):
+    """The coverage-gap fix: the legacy flag was computed for the PROPAGATED
+    family only, which is why 144,294 shipped direct rows sit at a value that
+    means UNCHECKED. Both families must now carry a real shade."""
+    conn = _novelty_fixture_conn()
+    try:
+        path, sha = _write_verdict_cache(
+            tmp_path, {"s1::w000001": {"novelty_status": "fills_gap"}})
+        entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, {})
+        stats = sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups={})
+        rows = dict(conn.execute(
+            "SELECT evidence_source, novelty_status FROM discovery_evidence").fetchall())
+        written = {r[0] for r in conn.execute(
+            "SELECT DISTINCT novelty_status FROM discovery_evidence")}
+    finally:
+        conn.close()
+
+    assert rows[ids.EVIDENCE_SOURCE_TRACK1_DIRECT] == "fills_gap"
+    assert rows[ids.EVIDENCE_SOURCE_PROPAGATED] == "fills_gap"
+    assert stats["novelty_resolved_by_family"] == {
+        ids.EVIDENCE_SOURCE_TRACK1_DIRECT: 1, ids.EVIDENCE_SOURCE_PROPAGATED: 1,
+    }
+    # Drawn from the TEN-value set, and never a retired token.
+    assert written <= novelty_mod.NOVELTY_STATUSES
+    assert not (written & _RETIRED_NOVELTY_TOKENS)
+
+
+def test_novelty_ten_value_vocabulary_is_the_shared_contract_not_a_local_copy():
+    """The builder holds NO second shade list -- it imports the contract
+    module's. A local literal is exactly how the builder and the verifier come
+    to disagree about what `fills_gap` selects."""
+    assert sidecar_build.NOVELTY_STATUSES is novelty_mod.NOVELTY_STATUSES
+    assert len(novelty_mod.NOVELTY_STATUSES) == 10
+    src = _io.open(sidecar_build.__file__, encoding="utf-8").read()
+    for retired in _RETIRED_NOVELTY_TOKENS:
+        assert "'" + retired + "'" not in src, (
+            "retired novelty token " + repr(retired) + " revived in the builder"
+        )
+
+
+# ---------------------------------------------------------------------------
+# FIVE fail-closed modes, each asserting `not_checked`
+# ---------------------------------------------------------------------------
+
+def test_fail_closed_1_unavailable_source_yields_not_checked():
+    """No verdict cache at all (the gate never ran / the source was
+    unavailable): every row reads `not_checked`, which is exactly what
+    `not_checked` means -- never "novel by default"."""
+    conn = _novelty_fixture_conn()
+    try:
+        sidecar_build.apply_novelty_verdicts(conn, None, alias_groups={})
+        statuses = {r[0] for r in conn.execute(
+            "SELECT DISTINCT novelty_status FROM discovery_evidence")}
+    finally:
+        conn.close()
+    assert statuses == {novelty_mod.DEFAULT_STATUS} == {"not_checked"}
+
+
+def test_fail_closed_2_unnormalizable_identifier_yields_not_checked(tmp_path):
+    """A work with no reviewable identity (`novelty_work_key` returns None)
+    never gets a guessed key -- its rows fall through to `not_checked`."""
+    # An empty raw work id is the "does not normalize" case the contract
+    # module returns None for.
+    assert novelty_mod.novelty_work_key({"work_id": ""}, {}) is None
+    path, sha = _write_verdict_cache(tmp_path, {"s1::": {"novelty_status": "fills_gap"}})
+    entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+    grain, gstats = sidecar_build.build_novelty_grain_index(entries, {})
+    assert gstats["grain_unkeyable_works"] == 1
+    assert grain == {}
+
+
+def test_fail_closed_3_incomplete_snapshot_yields_not_checked(tmp_path):
+    """A cache covering only SOME candidates (a run stopped at its cost
+    ceiling, i.e. an incomplete snapshot) leaves the uncovered rows at
+    `not_checked` -- it never spreads a neighbour's verdict onto them."""
+    conn = _novelty_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA),
+                    ("w000002", "w000002", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[_direct_spec("p1", "s1", "w000001"),
+                        _direct_spec("p2", "s1", "w000002")],
+    )
+    try:
+        path, sha = _write_verdict_cache(
+            tmp_path, {"s1::w000001": {"novelty_status": "fills_gap"}})
+        entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, {})
+        stats = sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups={})
+        by_work = dict(conn.execute(
+            "SELECT dc.work_id, de.novelty_status FROM discovery_evidence de "
+            "JOIN discovery_claim dc ON dc.claim_id = de.claim_id").fetchall())
+    finally:
+        conn.close()
+    assert by_work == {"w000001": "fills_gap", "w000002": "not_checked"}
+    assert stats["novelty_rows_without_a_verdict"] == 1
+
+
+def test_fail_closed_4_stale_cache_entry_yields_not_checked(tmp_path):
+    """A stale entry carrying a RETIRED vocabulary token resolves to
+    `not_checked` and is counted -- never silently coerced into whichever
+    current shade looks closest."""
+    path, sha = _write_verdict_cache(
+        tmp_path,
+        {"s1::w000001": {"novelty_status": "not_in_finding_aids"},   # the retired tri-state
+         "s1::w000002": {"novelty_status": "diverges"}},              # retired by ruling F
+    )
+    entries, stats = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+    assert stats["verdict_entries_failed_closed"] == 2
+    assert {e["novelty_status"] for e in entries.values()} == {"not_checked"}
+
+
+def test_fail_closed_5_model_abstention_yields_not_checked(tmp_path):
+    """A structured abstention is a real and useful answer, stored as
+    `not_checked` -- proven against the CONTRACT module's own resolver, whose
+    output shape is what the production run checkpoints."""
+    assert novelty_mod.resolve_model_output(
+        {"abstain": True, "reason": "insufficient evidence"}
+    )["novelty_status"] == "not_checked"
+    resolved = novelty_mod.resolve_model_output({"abstain": True, "reason": "x"})
+    path, sha = _write_verdict_cache(tmp_path, {"s1::w000001": resolved})
+    entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+    assert entries["s1::w000001"]["novelty_status"] == "not_checked"
+
+
+# ---------------------------------------------------------------------------
+# Masked provenance (T-136-12-02)
+# ---------------------------------------------------------------------------
+
+def test_novelty_source_label_is_masked_and_never_the_raw_code(tmp_path):
+    """The raw provenance code dies at the loader. A restricted-corpus code
+    resolves to the FIXED non-identifying fallback, never to its own name."""
+    conn = _novelty_fixture_conn()
+    try:
+        path, sha = _write_verdict_cache(tmp_path, {
+            "s1::w000001": {"novelty_status": "confirms", "source_code": "m_source_shelfmark"},
+        })
+        entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        assert entries["s1::w000001"]["source_label"] == "recorded in another reference source"
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, {})
+        sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups={})
+        labels = {r[0] for r in conn.execute(
+            "SELECT DISTINCT novelty_source_label FROM discovery_evidence "
+            "WHERE novelty_source_label IS NOT NULL")}
+    finally:
+        conn.close()
+    assert labels <= novelty_mod.MASKED_PROVENANCE_LABELS
+    assert not any("m_source" in v for v in labels)
+
+
+def test_masked_label_assertion_fires_on_a_seeded_unmasked_value():
+    """Seed an unmasked value straight into the column (simulating some OTHER
+    code path writing it) and prove the BUILD assertion fails rather than the
+    asset shipping. The message must NOT echo the value."""
+    sentinel = "ZZZ_FAKE_UNMASKED_PROVENANCE_ZZZ"
+    conn = _novelty_fixture_conn()
+    try:
+        sidecar_build.apply_novelty_verdicts(conn, None, alias_groups={})
+        conn.execute("UPDATE discovery_evidence SET novelty_source_label = ?", (sentinel,))
+        with pytest.raises(sidecar_build.NoveltyIngestError) as exc:
+            sidecar_build.assert_novelty_source_labels_masked(conn)
+        assert sentinel not in str(exc.value)
+        assert "novelty_source_label" in str(exc.value)
+    finally:
+        conn.close()
+
+
+def test_source_label_is_null_on_the_two_ineligible_shades(tmp_path):
+    """`fills_gap` has nothing to name and `not_checked` checked nothing --
+    both store NULL even when the cache supplies a source code. The gate is
+    `novelty_columns_for`, never a second membership test in the builder."""
+    conn = _novelty_fixture_conn()
+    try:
+        path, sha = _write_verdict_cache(tmp_path, {
+            "s1::w000001": {"novelty_status": "fills_gap", "source_code": "fjms_catalogue"},
+        })
+        entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, {})
+        sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups={})
+        labels = {r[0] for r in conn.execute(
+            "SELECT DISTINCT novelty_source_label FROM discovery_evidence")}
+    finally:
+        conn.close()
+    assert labels == {None}
+
+
+# ---------------------------------------------------------------------------
+# divergence_correctness -- owner ruling L (human/owner annotation ONLY)
+# ---------------------------------------------------------------------------
+
+def test_ruling_l_note_is_still_current_in_the_contract_module():
+    """136-12's own plan text predates ruling L and describes ingesting
+    `divergence_correctness` from the verdict cache. This test is the standing
+    proof that the ruling is still in force, as the plan's amendment note
+    instructs an executor to verify."""
+    doc = novelty_mod.__doc__ or ""
+    assert "divergence_correctness is HUMAN-ONLY (ruling L" in doc
+    assert "resolve_model_output`` now ALWAYS returns ``divergence_correctness:" in doc
+    assert novelty_mod.resolve_model_output(
+        {"novelty_status": "diverges_work", "divergence_correctness": "catalogue_correct"}
+    ) == {"novelty_status": "diverges_work", "divergence_correctness": None}
+
+
+def test_divergence_correctness_is_never_ingested_from_the_verdict_cache(tmp_path):
+    """Ruling L: a `divergence_correctness` value in a cache can only be a
+    stale pre-ruling-L entry or a hallucinated key. It is DROPPED and counted,
+    never carried into the asset."""
+    conn = _novelty_fixture_conn()
+    try:
+        path, sha = _write_verdict_cache(tmp_path, {
+            "s1::w000001": {"novelty_status": "diverges_work",
+                            "divergence_correctness": "catalogue_correct"},
+        })
+        entries, stats = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        assert stats["verdict_entries_divergence_correctness_dropped"] == 1
+        assert entries["s1::w000001"]["divergence_correctness"] is None
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, {})
+        sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups={})
+        rows = conn.execute(
+            "SELECT DISTINCT novelty_status, divergence_correctness FROM discovery_evidence"
+        ).fetchall()
+    finally:
+        conn.close()
+    # The SHADE survives (ruling F's scope split is untouched by ruling L);
+    # only the correctness call is dropped.
+    assert rows == [("diverges_work", None)]
+
+
+def test_divergence_correctness_check_rejects_a_non_divergence_shade():
+    """The applicability direction that MATTERS and that SQL can enforce:
+    a non-NULL correctness value on a non-divergence shade is rejected at the
+    raw DDL layer."""
+    conn = _novelty_fixture_conn()
+    try:
+        sidecar_build.apply_novelty_verdicts(conn, None, alias_groups={})
+        conn.execute("UPDATE discovery_evidence SET novelty_status='confirms'")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE discovery_evidence SET divergence_correctness='catalogue_correct'")
+    finally:
+        conn.close()
+
+
+def test_divergence_correctness_check_rejects_an_out_of_vocab_value():
+    conn = _novelty_fixture_conn()
+    try:
+        sidecar_build.apply_novelty_verdicts(conn, None, alias_groups={})
+        conn.execute("UPDATE discovery_evidence SET novelty_status='diverges_part'")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE discovery_evidence SET divergence_correctness='bogus_correctness'")
+    finally:
+        conn.close()
+
+
+def test_divergence_shade_with_null_correctness_is_accepted_per_ruling_l():
+    """The direction 136-12-PLAN.md asks to REJECT, which ruling L makes
+    mandatory to ACCEPT -- and which SQL would not have rejected anyway.
+
+    Under SQL three-valued logic a CHECK passes unless it evaluates to FALSE,
+    and `NULL IN (...)` is NULL. So the schema doc's own CHECK literal has
+    always permitted a divergence row with a NULL correctness. That is now the
+    ONLY shape the build can produce, because ruling L removed the field from
+    the model's output contract and no human/owner annotation pathway exists
+    yet. A future plan that "fixes" this into a rejection would make every
+    `diverges_work`/`diverges_part` row unbuildable."""
+    conn = _novelty_fixture_conn()
+    try:
+        sidecar_build.apply_novelty_verdicts(conn, None, alias_groups={})
+        conn.execute("UPDATE discovery_evidence SET novelty_status='diverges_work'")
+        conn.commit()
+        rows = conn.execute(
+            "SELECT DISTINCT novelty_status, divergence_correctness FROM discovery_evidence"
+        ).fetchall()
+        # The identification grain mirrors the SAME constraint, so prove it
+        # there too -- otherwise the grain would be unbuildable for these rows.
+        sidecar_build.populate_discovery_identification(conn)
+        ident = conn.execute(
+            "SELECT DISTINCT novelty_status, divergence_correctness "
+            "FROM discovery_identification").fetchall()
+    finally:
+        conn.close()
+    assert rows == [("diverges_work", None)]
+    assert ident == [("diverges_work", None)]
+
+
+def test_novelty_columns_for_still_rejects_a_correctness_on_a_confirms_row():
+    """The Python-side gate is unchanged by ruling L -- only the SOURCE of a
+    value changed. An annotation pathway that ever supplies a correctness call
+    on a non-divergence shade must still raise."""
+    with pytest.raises(ValueError):
+        novelty_mod.novelty_columns_for("confirms", divergence_correctness="claim_correct")
+    assert novelty_mod.novelty_columns_for(
+        "diverges_work", divergence_correctness=None
+    )["divergence_correctness"] is None
+
+
+# ---------------------------------------------------------------------------
+# container_predicts is NOT hidden-by-default (ruling H, T-136-12-07)
+# ---------------------------------------------------------------------------
+
+def test_container_predicts_is_distinguishable_from_the_divergence_shades(tmp_path):
+    """Ruling H is explicit that ruling F's default-hidden rationale does NOT
+    generalize to `container_predicts`: there is no disagreement to warn
+    about. The build must therefore write NO shared "hidden" flag -- a surface
+    consumer must be able to tell the two apart from `novelty_status` alone."""
+    conn = _novelty_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA),
+                    ("w000002", "w000002", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[_direct_spec("p1", "s1", "w000001"),
+                        _direct_spec("p2", "s1", "w000002")],
+    )
+    try:
+        path, sha = _write_verdict_cache(tmp_path, {
+            "s1::w000001": {"novelty_status": "container_predicts", "source_code": "fjms_catalogue"},
+            "s1::w000002": {"novelty_status": "diverges_work", "source_code": "fjms_catalogue"},
+        })
+        entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, {})
+        sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups={})
+        stored = dict(conn.execute(
+            "SELECT dc.work_id, de.novelty_status FROM discovery_evidence de "
+            "JOIN discovery_claim dc ON dc.claim_id = de.claim_id").fetchall())
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(discovery_evidence)")}
+    finally:
+        conn.close()
+
+    assert stored == {"w000001": "container_predicts", "w000002": "diverges_work"}
+    # No column exists that would conflate the two exclusion mechanisms.
+    assert not any("hidden" in c.lower() for c in columns)
+    # The ONE authority on the posture agrees, and container_predicts is out.
+    assert novelty_mod.HIDDEN_BY_DEFAULT_SHADES == {"diverges_work", "diverges_part"}
+    assert not novelty_mod.is_hidden_by_default("container_predicts")
+    # Both are excluded from the candidate predicate, which is a DIFFERENT rule.
+    assert not novelty_mod.is_candidate_for_new_finds("container_predicts")
+    assert not novelty_mod.is_candidate_for_new_finds("diverges_work")
+
+
+def test_container_predicts_never_routes_through_the_divergence_correctness_path():
+    """T-136-12-07 explicitly: a `container_predicts` row supplied with a
+    correctness call is a category error, and the shared gate raises rather
+    than storing it."""
+    with pytest.raises(ValueError):
+        novelty_mod.novelty_columns_for(
+            "container_predicts", divergence_correctness="catalogue_correct")
+    assert not novelty_mod.divergence_correctness_applicable("container_predicts")
+
+
+# ---------------------------------------------------------------------------
+# The one-result-per-claim invariant (D-23a)
+# ---------------------------------------------------------------------------
+
+def test_one_novelty_result_per_claim_invariant_fails_a_disagreeing_fixture():
+    """The live v1 asset has 665 claims whose evidence rows disagree on the
+    legacy boolean. The build must not be able to produce a 666th."""
+    conn = _novelty_fixture_conn()
+    try:
+        sidecar_build.apply_novelty_verdicts(conn, None, alias_groups={})
+        assert sidecar_build.assert_one_novelty_result_per_claim(conn) == 0
+        # Force TWO evidence rows of ONE claim onto different shades.
+        claim_id = conn.execute(
+            "SELECT claim_id FROM discovery_evidence GROUP BY claim_id "
+            "HAVING COUNT(*) > 1").fetchone()[0]
+        victim = conn.execute(
+            "SELECT evidence_id FROM discovery_evidence WHERE claim_id = ? LIMIT 1",
+            (claim_id,)).fetchone()[0]
+        conn.execute(
+            "UPDATE discovery_evidence SET novelty_status='fills_gap' WHERE evidence_id = ?",
+            (victim,))
+        with pytest.raises(sidecar_build.NoveltyIngestError) as exc:
+            sidecar_build.assert_one_novelty_result_per_claim(conn)
+        assert "DISAGREE" in str(exc.value)
+    finally:
+        conn.close()
+
+
+def test_one_result_per_claim_also_covers_the_source_label():
+    """The RESULT is all three stored columns -- a claim whose rows agree on
+    the shade but disagree on which source justified it is just as incoherent
+    to a reader."""
+    conn = _novelty_fixture_conn()
+    try:
+        sidecar_build.apply_novelty_verdicts(conn, None, alias_groups={})
+        conn.execute("UPDATE discovery_evidence SET novelty_status='confirms'")
+        claim_id = conn.execute(
+            "SELECT claim_id FROM discovery_evidence GROUP BY claim_id "
+            "HAVING COUNT(*) > 1").fetchone()[0]
+        victim = conn.execute(
+            "SELECT evidence_id FROM discovery_evidence WHERE claim_id = ? LIMIT 1",
+            (claim_id,)).fetchone()[0]
+        conn.execute(
+            "UPDATE discovery_evidence SET novelty_source_label = ? WHERE evidence_id = ?",
+            ("recorded in the catalogue", victim))
+        with pytest.raises(sidecar_build.NoveltyIngestError):
+            sidecar_build.assert_one_novelty_result_per_claim(conn)
+    finally:
+        conn.close()
+
+
+def test_apply_novelty_verdicts_runs_both_invariants_even_with_no_cache(monkeypatch):
+    """"The gate did not run" and "the gate ran and found nothing" must never
+    be the same stored fact -- but the INVARIANTS run either way, so the
+    fixture path proves they are wired rather than merely present."""
+    conn = _novelty_fixture_conn()
+    calls = []
+    real_masked = sidecar_build.assert_novelty_source_labels_masked
+    real_one = sidecar_build.assert_one_novelty_result_per_claim
+    monkeypatch.setattr(
+        sidecar_build, "assert_novelty_source_labels_masked",
+        lambda c: (calls.append("masked"), real_masked(c))[1])
+    monkeypatch.setattr(
+        sidecar_build, "assert_one_novelty_result_per_claim",
+        lambda c: (calls.append("one_result"), real_one(c))[1])
+    try:
+        sidecar_build.apply_novelty_verdicts(conn, None, alias_groups={})
+    finally:
+        conn.close()
+    assert calls == ["masked", "one_result"]
+
+
+# ---------------------------------------------------------------------------
+# The alias-aware centralized grain (D-23a / D-23d)
+# ---------------------------------------------------------------------------
+
+def test_alias_group_members_share_one_reviewed_grain(tmp_path):
+    """"Known via ANY alias implies confirms": two raw ids curated as the same
+    work resolve to ONE grain key, so a verdict recorded under either spelling
+    reaches both."""
+    alias_groups = {"w000001": frozenset({"w000001", "w000002"}),
+                    "w000002": frozenset({"w000001", "w000002"})}
+    conn = _novelty_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA),
+                    ("w000002", "w000002", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[_direct_spec("p1", "s1", "w000001"),
+                        _direct_spec("p2", "s1", "w000002")],
+    )
+    try:
+        # The verdict is recorded under ONE spelling only.
+        path, sha = _write_verdict_cache(
+            tmp_path, {"s1::w000002": {"novelty_status": "confirms",
+                                       "source_code": "fjms_catalogue"}})
+        entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, alias_groups)
+        sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups=alias_groups)
+        by_work = dict(conn.execute(
+            "SELECT dc.work_id, de.novelty_status FROM discovery_evidence de "
+            "JOIN discovery_claim dc ON dc.claim_id = de.claim_id").fetchall())
+    finally:
+        conn.close()
+    assert by_work == {"w000001": "confirms", "w000002": "confirms"}
+
+
+def test_alias_group_disagreement_fails_closed_and_is_counted(tmp_path):
+    """Alias-group members are by curation the SAME work, so a disagreement is
+    an input defect. Picking a side would manufacture a verdict nobody
+    produced -- so the grain fails closed and the conflict is reported."""
+    alias_groups = {"w000001": frozenset({"w000001", "w000002"}),
+                    "w000002": frozenset({"w000001", "w000002"})}
+    path, sha = _write_verdict_cache(tmp_path, {
+        "s1::w000001": {"novelty_status": "fills_gap"},
+        "s1::w000002": {"novelty_status": "confirms"},
+    })
+    entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+    grain, stats = sidecar_build.build_novelty_grain_index(entries, alias_groups)
+    assert stats["grain_alias_conflicts"] == 1
+    assert list(grain.values())[0]["novelty_status"] == "not_checked"
+    assert list(grain.values())[0]["source_label"] is None
+
+
+# ---------------------------------------------------------------------------
+# The legacy boolean stays, and is never a derivation input
+# ---------------------------------------------------------------------------
+
+def test_legacy_is_new_boolean_is_unchanged_and_never_derives_the_status(tmp_path):
+    """`is_new` stays in the schema for read-compat, but nothing derives the
+    shade from it -- grep the ingest path to prove no derivation exists."""
+    conn = _novelty_fixture_conn()
+    try:
+        before = conn.execute(
+            "SELECT evidence_id, is_new FROM discovery_evidence ORDER BY evidence_id").fetchall()
+        path, sha = _write_verdict_cache(
+            tmp_path, {"s1::w000001": {"novelty_status": "fills_gap"}})
+        entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, {})
+        sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups={})
+        after = conn.execute(
+            "SELECT evidence_id, is_new FROM discovery_evidence ORDER BY evidence_id").fetchall()
+    finally:
+        conn.close()
+    assert before == after
+
+    src = _io.open(sidecar_build.__file__, encoding="utf-8").read()
+    ingest = src[src.index("def load_novelty_verdicts"):
+                 src.index("def assert_novelty_source_labels_masked")]
+    assert "is_new" not in ingest
+
+
+def test_identification_grain_inherits_the_shade_from_its_best_evidence_row(tmp_path):
+    """D-23a at the identification grain: the row inherits ONE result, taken
+    from its own best evidence row via the existing total order -- never
+    defaulted once the axis is wired, and never re-derived."""
+    conn = _novelty_fixture_conn()
+    try:
+        path, sha = _write_verdict_cache(
+            tmp_path, {"s1::w000001": {"novelty_status": "refines_granularity",
+                                       "source_code": "pgp"}})
+        entries, _ = sidecar_build.load_novelty_verdicts(path, sha256=sha)
+        grain, _ = sidecar_build.build_novelty_grain_index(entries, {})
+        sidecar_build.apply_novelty_verdicts(conn, grain, alias_groups={})
+        sidecar_build.populate_discovery_identification(conn)
+        rows = conn.execute(
+            "SELECT novelty_status, divergence_correctness FROM discovery_identification"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("refines_granularity", None)]

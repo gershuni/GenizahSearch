@@ -89,6 +89,22 @@ from shared.discovery_service import (  # noqa: E402
     _BAND_RANK_ORDER,
     _band_rank as _runtime_band_rank,
 )
+
+# 136-12 (NOVEL-01/02): the novelty axis has exactly ONE vocabulary, ONE
+# verdict->column mapping, ONE identity key and ONE masking table, all owned by
+# `shared/discovery_novelty.py` (contract: `docs/specs/discovery-novelty-v1.md`).
+# They are IMPORTED here, never restated -- a second literal shade list in this
+# file is precisely how the builder and the verifier would come to disagree
+# about what `fills_gap` selects.
+from shared.discovery_novelty import (  # noqa: E402
+    DEFAULT_STATUS as NOVELTY_DEFAULT_STATUS,
+    MASKED_PROVENANCE_LABELS,
+    NOVELTY_STATUSES,
+    load_alias_groups,
+    masked_provenance_label,
+    novelty_columns_for,
+    novelty_work_key,
+)
 SCHEMA_VERSION = "discovery-v1"
 SIDECAR_VERSION = "discovery-v1-synthetic-fixture"
 
@@ -217,6 +233,43 @@ CREATE TABLE discovery_evidence (
                         'confirms','refines_granularity','aid_more_specific','diverges_work',
                         'diverges_part','container_predicts','fills_gap','extends','alias_merge',
                         'not_checked')),
+  -- 136-12 / schema Amendment 2026-08-02 (A). The MASKED provenance label only:
+  -- one of `shared.discovery_novelty.MASKED_PROVENANCE_LABELS`, never the raw
+  -- provenance value (NOVEL-02 / D-25). NULL on `fills_gap` (nothing to name)
+  -- and `not_checked` (nothing was checked) -- gated by
+  -- `novelty_columns_for`'s SOURCE_LABEL_ELIGIBLE_SHADES, never by a second
+  -- membership test written here.
+  novelty_source_label TEXT,
+  -- A SEPARATE sibling column, never part of the shade enum (owner ruling F --
+  -- correctness is orthogonal to shade). The CHECK below is the schema doc's
+  -- own literal, reproduced VERBATIM and identical to the mirrored
+  -- discovery_identification CHECK.
+  --
+  -- WHAT IT ACTUALLY ENFORCES, stated precisely because the prose reads
+  -- stronger than SQL delivers: under SQL three-valued logic a CHECK passes
+  -- unless it evaluates to FALSE, and `NULL IN (...)` is NULL, not FALSE. So a
+  -- `diverges_work` row with a NULL correctness PASSES, while a non-NULL value
+  -- on a non-divergence shade, or an out-of-vocabulary value on a divergence
+  -- shade, is REJECTED. The constraint is therefore the one-directional rule
+  -- "non-NULL implies a divergence shade AND an in-vocabulary value" -- which
+  -- is exactly what `shared.discovery_novelty.novelty_columns_for` (the
+  -- designated tie-breaker) independently enforces, and exactly what owner
+  -- ruling L REQUIRES.
+  --
+  -- OWNER RULING L (2026-08-03, `136-GATE1-DECISIONS.md` SS L): this column is
+  -- HUMAN/OWNER ANNOTATION ONLY. The model no longer produces it
+  -- (`resolve_model_output` ALWAYS returns None for it), so the build's own
+  -- verdict-cache ingestion never writes a value here -- the column stays NULL
+  -- until a separate human/owner annotation artifact (not yet built) supplies
+  -- one. The column, its CHECK and its vocabulary are UNCHANGED by ruling L;
+  -- only the SOURCE of a value changed.
+  divergence_correctness TEXT CHECK (
+                        (novelty_status IN ('diverges_work','diverges_part')
+                         AND divergence_correctness IN ('catalogue_correct','claim_correct','unclear'))
+                        OR
+                        (novelty_status NOT IN ('diverges_work','diverges_part')
+                         AND divergence_correctness IS NULL)
+                      ),
 
   UNIQUE(claim_id, evidence_id)
 );
@@ -2200,6 +2253,12 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
     # registry. The synthetic fixture has no libraries.csv, so
     # `manuscript_display` stays empty here by design -- never back-filled from
     # some other source.
+    # 136-12 Task 1: the novelty axis. The synthetic fixture has no verdict
+    # cache, so this resolves EVERY row to the fail-closed `not_checked` -- and
+    # still runs both build-time invariants, so the fixture proves the assertions
+    # are wired rather than merely present.
+    novelty_stats = apply_novelty_verdicts(conn, None, alias_groups={})
+
     identification_stats = populate_discovery_identification(conn)
     identification_stats.update(populate_manuscript_display(conn, None))
 
@@ -2240,6 +2299,7 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
         "display_evidence_choices": display_choices,
         "band_precision_rows": len(bp_rows),
         "identification": identification_stats,
+        "novelty": novelty_stats,
     }
 
 
@@ -3623,11 +3683,13 @@ _CLAIM_TYPE_STRENGTH = {
     ids.CLAIM_TYPE_SHARED_TEXT: 2,
 }
 
-# 136-11 writes the STRUCTURE; plan 136-12 computes these three values. Both
-# visibility axes fail CLOSED to `private` here -- public eligibility requires
-# BOTH to be `public` (D-22), so an un-derived row can never leak public by
-# default. `not_checked` is novelty's own fail-closed default, never "novel".
-_IDENTIFICATION_NOVELTY_DEFAULT = "not_checked"
+# 136-11 wrote the STRUCTURE; 136-12 computes the values. Both visibility axes
+# fail CLOSED to `private` here -- public eligibility requires BOTH to be
+# `public` (D-22), so an un-derived row can never leak public by default.
+# `not_checked` is novelty's own fail-closed default, never "novel"; it now
+# survives only as the fallback for an evidence row that somehow carries no
+# shade at all (the column is NOT NULL, so this is defence in depth).
+_IDENTIFICATION_NOVELTY_DEFAULT = NOVELTY_DEFAULT_STATUS
 _IDENTIFICATION_VISIBILITY_DEFAULT = "private"
 
 
@@ -3778,6 +3840,8 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
                    de.matched_letters AS matched_letters,
                    de.span_start      AS span_start,
                    de.span_end        AS span_end,
+                   de.novelty_status  AS novelty_status,
+                   de.divergence_correctness AS divergence_correctness,
                    dc.claim_type      AS claim_type,
                    w.canonical_work_id AS canonical_work_id
             FROM discovery_evidence de
@@ -3889,8 +3953,18 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
             max_coverage_ppm,
             relation_kind,
             eligibility_basis,
-            _IDENTIFICATION_NOVELTY_DEFAULT,
-            None,   # divergence_correctness -- NULL outside the divergence shades
+            # 136-12: INHERITED from this identification's own BEST evidence row
+            # (lowest band_rank, then the D-13b lexicographic evidence_id
+            # tie-break -- already resolved as `best` above), never re-derived
+            # and never defaulted once the axis is wired. A canonical group can
+            # span two `works` rows with different reviewed identities, so
+            # "whichever row the group returns" would be nondeterministic; the
+            # existing total order is reused rather than a second one invented.
+            best["novelty_status"] or _IDENTIFICATION_NOVELTY_DEFAULT,
+            # Ruling L: human/owner annotation only -- carried through from the
+            # evidence row (which is NULL on every row today) rather than
+            # hardcoded, so an annotation pathway lands here for free.
+            best["divergence_correctness"],
             _IDENTIFICATION_VISIBILITY_DEFAULT,
             _IDENTIFICATION_VISIBILITY_DEFAULT,
         ))
@@ -4124,6 +4198,349 @@ def populate_manuscript_display(conn: sqlite3.Connection, libraries_csv_path) ->
         "manuscript_display_sys_ids_with_claims": len(claim_sys_ids),
         "manuscript_display_missing_from_libraries_csv": len(claim_sys_ids) - len(rows),
     }
+
+
+# ===========================================================================
+# 6.9b 136-12 Task 1: NOVELTY SHADE ingestion (the ten-value enum) across BOTH
+# evidence families, at the centralized (sys_id, novelty_work_key) grain, with
+# MASKED provenance.
+#
+# Why this exists at all: the frozen v2 asset only ever computed novelty for
+# the `propagated` family, so all 144,294 shipped `track1_direct` rows sit at
+# `is_new = 0` -- a value that means UNCHECKED, not "already recorded". A
+# two-state read of that data would tell a reader 144,294 findings are already
+# in the finding aids, which is false on the flagship surface.
+#
+# EVERY vocabulary decision here is delegated to `shared/discovery_novelty.py`
+# (the contract module, `docs/specs/discovery-novelty-v1.md`) -- this file
+# holds no second copy of the ten shades, no second masked-label table and no
+# second `divergence_correctness` applicability test.
+# ===========================================================================
+
+class NoveltyVerdictCacheError(RuntimeError):
+    """Raised when the hash-pinned novelty verdict cache fails its SHA-256 pin,
+    is absent, is unparseable, or is not the frozen `{key: {...}}` shape.
+
+    The pin is the whole point (T-136-12-03): the verdict cache is an external,
+    expensive build input, and a cache that is not the cache that was MEASURED
+    is not a pinned input. Refusing is always correct -- every row it would have
+    resolved simply falls back to `not_checked`, which is what `not_checked`
+    means."""
+
+
+class NoveltyIngestError(RuntimeError):
+    """Raised when a build-time novelty invariant fails: an unmasked
+    `novelty_source_label` reached a column (T-136-12-02), or the evidence rows
+    of ONE claim disagree about their novelty result (D-23a).
+
+    Both are HARD build failures. The live v1 asset already contains 665 claims
+    whose own evidence rows disagree on the legacy `is_new` boolean; the build
+    must not be able to produce a 666th."""
+
+
+# The frozen verdict-cache shape. `scripts/discovery_novelty_production_run.py`
+# writes exactly this: a JSON object keyed `"{sys_id}::{ref_work_id}"`, each
+# value an object carrying at least `novelty_status`.
+_NOVELTY_KEY_SEPARATOR = "::"
+
+# Keys a verdict entry may carry. `divergence_correctness` is TOLERATED and
+# then DROPPED -- see `load_novelty_verdicts` (owner ruling L).
+_NOVELTY_ENTRY_KEYS = frozenset({"novelty_status", "divergence_correctness", "source_code"})
+
+
+def novelty_grain_key(sys_id: str, work_key: str) -> str:
+    """The centralized (manuscript, reviewed-work) grain key (D-23a/D-23d).
+
+    `work_key` is a `shared.discovery_novelty.novelty_work_key` result -- the
+    ALIAS-GROUP representative, never a raw id and never the over-collapsed
+    `canonical_work_id` (one collapsed id covers 39 Bible books). Keying on the
+    reviewed identity is what makes "known via ANY alias implies confirms"
+    hold without the caller testing every spelling."""
+    return f"{sys_id}{_NOVELTY_KEY_SEPARATOR}{work_key}"
+
+
+def load_novelty_verdicts(path, *, sha256: Optional[str]) -> Tuple[Dict[str, Dict], Dict]:
+    """Load the hash-pinned novelty verdict cache. Returns `(entries, stats)`.
+
+    Order of enforcement, all BEFORE a single verdict is read into the build:
+    file present -> SHA-256 pin -> strict duplicate-key JSON parse -> top-level
+    object -> per-entry frozen shape.
+
+    `sha256` is REQUIRED (a `None` raises). The verdict cache is the single
+    most expensive build input in this phase and the one whose substitution
+    would silently change the flagship "Candidates for new finds" filter, so
+    there is no unpinned load path at all -- not even a warned one.
+
+    FAIL-CLOSED per entry, never fatal: a missing, non-string or
+    out-of-vocabulary `novelty_status` resolves to
+    `shared.discovery_novelty.DEFAULT_STATUS` (`not_checked`) and is COUNTED,
+    rather than raising. A machine-produced cache is allowed to contain a row
+    the pipeline could not answer; what it is NOT allowed to do is turn that
+    into a positive verdict.
+
+    **Owner ruling L (`136-GATE1-DECISIONS.md` SS L, 2026-08-03).** Any
+    `divergence_correctness` key in the cache is DROPPED here and counted --
+    never carried into the build. The model no longer produces this field
+    (`resolve_model_output` always returns `None` for it), so a value appearing
+    in a cache can only be a stale pre-ruling-L entry or a hallucinated key;
+    either way it is not owner-supplied and must not reach the asset. The
+    column is populated ONLY by a human/owner annotation pathway, which does
+    not exist yet.
+
+    Masking (NOVEL-02 / T-136-12-02): `source_code` is consumed here and never
+    stored. Only `masked_provenance_label`'s pre-written output crosses into
+    the returned structure, so a restricted-corpus code cannot reach a column,
+    a log line or an error message from this function -- including its error
+    paths, which never echo a key or a value.
+    """
+    if sha256 is None:
+        raise NoveltyVerdictCacheError(
+            "novelty verdict cache supplied without a SHA-256 pin -- refusing to load. "
+            "A build input that is not the input that was measured is not a pinned input "
+            "(136-12 Task 1 / T-136-12-03)."
+        )
+    p = Path(path)
+    if not p.exists():
+        raise NoveltyVerdictCacheError(f"novelty verdict cache not found: {path}")
+    actual_sha = _hash_file(p)
+    if actual_sha != sha256:
+        raise NoveltyVerdictCacheError(
+            "novelty verdict cache SHA-256 pin mismatch (hash gate) -- refusing to read "
+            "any verdict. Re-pin against the run record (136-NOVELTY-RUN.md) or re-run "
+            "the gate; never build against an unproven cache."
+        )
+    try:
+        doc = _json_loads_strict(p.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise NoveltyVerdictCacheError(f"novelty verdict cache parse error: {e}") from e
+    if not isinstance(doc, dict):
+        raise NoveltyVerdictCacheError(
+            "novelty verdict cache top-level value must be a JSON object"
+        )
+
+    entries: Dict[str, Dict] = {}
+    stats = {
+        "verdict_cache_sha256": actual_sha,
+        "verdict_entries": 0,
+        "verdict_entries_malformed_key": 0,
+        "verdict_entries_failed_closed": 0,
+        "verdict_entries_divergence_correctness_dropped": 0,
+    }
+    for raw_key, raw_entry in doc.items():
+        if not isinstance(raw_key, str) or _NOVELTY_KEY_SEPARATOR not in raw_key:
+            stats["verdict_entries_malformed_key"] += 1
+            continue
+        if not isinstance(raw_entry, dict) or set(raw_entry) - _NOVELTY_ENTRY_KEYS:
+            raise NoveltyVerdictCacheError(
+                "novelty verdict cache entry is not the frozen "
+                f"{sorted(_NOVELTY_ENTRY_KEYS)} shape (entry key withheld -- masking)"
+            )
+        if raw_entry.get("divergence_correctness") is not None:
+            stats["verdict_entries_divergence_correctness_dropped"] += 1
+        status = raw_entry.get("novelty_status")
+        if status not in NOVELTY_STATUSES:
+            status = NOVELTY_DEFAULT_STATUS
+            stats["verdict_entries_failed_closed"] += 1
+        sys_id, _sep, ref_work_id = raw_key.partition(_NOVELTY_KEY_SEPARATOR)
+        entries[raw_key] = {
+            "sys_id": sys_id,
+            "ref_work_id": ref_work_id,
+            "novelty_status": status,
+            # The MASKED label only -- the raw code dies here. `None` when the
+            # cache named no source, which `novelty_columns_for` then stores as
+            # NULL for the eligible shades too.
+            "source_label": (
+                masked_provenance_label(raw_entry["source_code"])
+                if raw_entry.get("source_code") is not None else None
+            ),
+            # Ruling L: structurally absent, never read from the cache.
+            "divergence_correctness": None,
+        }
+        stats["verdict_entries"] += 1
+    return entries, stats
+
+
+def build_novelty_grain_index(
+    entries: Dict[str, Dict], alias_groups: Optional[Dict] = None,
+) -> Tuple[Dict[str, Dict], Dict]:
+    """Collapse raw `(sys_id, ref_work_id)` verdict entries onto the CENTRALIZED
+    `(sys_id, novelty_work_key)` grain (D-23a/D-23d).
+
+    A work with no reviewable identity at all (`novelty_work_key` returns
+    `None`) is DROPPED and counted -- its evidence rows then fall through to
+    `not_checked`, never to a guessed key.
+
+    When two raw ids of the SAME curated alias group carry DIFFERENT shades for
+    one manuscript, the grain FAILS CLOSED to `not_checked` and the conflict is
+    counted. Alias-group members are by curation the same work, so a
+    disagreement is an input defect; resolving it by picking a side would
+    manufacture a verdict nobody produced."""
+    index: Dict[str, Dict] = {}
+    stats = {"grain_keys": 0, "grain_unkeyable_works": 0, "grain_alias_conflicts": 0}
+    for entry in entries.values():
+        work_key = novelty_work_key({"work_id": entry["ref_work_id"]}, alias_groups)
+        if work_key is None:
+            stats["grain_unkeyable_works"] += 1
+            continue
+        key = novelty_grain_key(entry["sys_id"], work_key)
+        existing = index.get(key)
+        if existing is None:
+            index[key] = dict(entry)
+            continue
+        if existing["novelty_status"] != entry["novelty_status"]:
+            stats["grain_alias_conflicts"] += 1
+            index[key] = {
+                **existing,
+                "novelty_status": NOVELTY_DEFAULT_STATUS,
+                "source_label": None,
+            }
+    stats["grain_keys"] = len(index)
+    return index, stats
+
+
+def apply_novelty_verdicts(
+    conn: sqlite3.Connection,
+    grain_index: Optional[Dict[str, Dict]] = None,
+    *,
+    alias_groups: Optional[Dict] = None,
+) -> Dict:
+    """Write `novelty_status` / `novelty_source_label` / `divergence_correctness`
+    onto EVERY `discovery_evidence` row of BOTH families.
+
+    Reads the already-inserted claims/evidence/works out of the output DB, so
+    the synthetic and the real build paths -- which assemble their rows through
+    deliberately independent code -- share ONE implementation of the ingest,
+    exactly as they already share `populate_discovery_identification`.
+
+    Called with `grain_index=None` (no verdict cache supplied) this is a
+    deliberate NO-OP over the values -- every row keeps the DDL default
+    `not_checked` -- while still running both build-time invariants. "The gate
+    did not run" and "the gate ran and found nothing" must never be the same
+    stored fact, and `not_checked` is the token that says the former.
+
+    `divergence_correctness` is NEVER written here (owner ruling L): the model
+    no longer produces it and no human/owner annotation pathway exists yet, so
+    the column stays NULL on every row. It is passed to `novelty_columns_for`
+    as `None` explicitly rather than omitted, so the day an annotation artifact
+    DOES exist, this is the one line that changes.
+    """
+    grain_index = grain_index or {}
+    rows = conn.execute(
+        """
+        SELECT de.evidence_id, de.sys_id, de.evidence_source, dc.work_id
+        FROM discovery_evidence de
+        JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+        """
+    ).fetchall()
+
+    updates = []
+    per_shade: Dict[str, int] = {}
+    per_family_resolved: Dict[str, int] = {}
+    n_unkeyable = 0
+    n_no_verdict = 0
+    for evidence_id, sys_id, evidence_source, work_id in rows:
+        work_key = novelty_work_key({"work_id": work_id}, alias_groups)
+        if work_key is None:
+            # No reviewable identity -> not_checked. Never a guessed key.
+            n_unkeyable += 1
+            verdict = None
+        else:
+            verdict = grain_index.get(novelty_grain_key(sys_id, work_key))
+            if verdict is None:
+                n_no_verdict += 1
+
+        status = verdict["novelty_status"] if verdict else NOVELTY_DEFAULT_STATUS
+        source_label = verdict["source_label"] if verdict else None
+        cols = novelty_columns_for(
+            status,
+            divergence_correctness=None,  # ruling L -- human/owner annotation only
+            source_label=source_label,
+        )
+        per_shade[cols["novelty_status"]] = per_shade.get(cols["novelty_status"], 0) + 1
+        if cols["novelty_status"] != NOVELTY_DEFAULT_STATUS:
+            per_family_resolved[evidence_source] = per_family_resolved.get(evidence_source, 0) + 1
+        updates.append((
+            cols["novelty_status"], cols["novelty_source_label"],
+            cols["divergence_correctness"], evidence_id,
+        ))
+
+    conn.executemany(
+        "UPDATE discovery_evidence SET novelty_status = ?, novelty_source_label = ?, "
+        "divergence_correctness = ? WHERE evidence_id = ?",
+        updates,
+    )
+
+    assert_novelty_source_labels_masked(conn)
+    assert_one_novelty_result_per_claim(conn)
+
+    return {
+        "novelty_evidence_rows": len(updates),
+        "novelty_shade_counts": per_shade,
+        "novelty_resolved_by_family": per_family_resolved,
+        "novelty_rows_without_a_reviewable_work_key": n_unkeyable,
+        "novelty_rows_without_a_verdict": n_no_verdict,
+    }
+
+
+def assert_novelty_source_labels_masked(conn: sqlite3.Connection) -> int:
+    """T-136-12-02: every distinct `novelty_source_label` actually written must
+    be a member of `shared.discovery_novelty.MASKED_PROVENANCE_LABELS`.
+
+    This is the assertion that makes the masking property a BUILD failure
+    rather than a shipping accident. `masked_provenance_label` is already
+    structurally incapable of returning an unmasked value (it never echoes its
+    input), so a violation here means some OTHER code path wrote this column --
+    which is exactly the thing worth failing on.
+
+    The violation message names the table, the column and the COUNT, never the
+    offending value: echoing it would perform the very leak the check exists to
+    prevent."""
+    labels = [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT novelty_source_label FROM discovery_evidence "
+            "WHERE novelty_source_label IS NOT NULL"
+        )
+    ]
+    unmasked = [v for v in labels if v not in MASKED_PROVENANCE_LABELS]
+    if unmasked:
+        raise NoveltyIngestError(
+            f"discovery_evidence.novelty_source_label carries {len(unmasked)} distinct value(s) "
+            "outside the masked label set (values withheld -- naming them here would be the "
+            "leak this assertion exists to prevent; NOVEL-02 / D-25)"
+        )
+    return len(labels)
+
+
+def assert_one_novelty_result_per_claim(conn: sqlite3.Connection) -> int:
+    """D-23a: every evidence row of ONE claim inherits ONE novelty result.
+
+    The result is all THREE stored columns, not the shade alone -- a claim
+    whose rows agree on `fills_gap` but disagree on which source label
+    justified it is just as incoherent to a reader as one that disagrees on the
+    shade.
+
+    A HARD build failure. The live v1 asset already carries 665 claims whose
+    own evidence rows disagree on the legacy `is_new` boolean (of 29,054
+    multi-evidence claims) -- this build must not be able to produce a 666th.
+    """
+    (n_disagreeing,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT claim_id FROM discovery_evidence
+            GROUP BY claim_id
+            HAVING COUNT(DISTINCT novelty_status) > 1
+                OR COUNT(DISTINCT COALESCE(novelty_source_label, '')) > 1
+                OR COUNT(DISTINCT COALESCE(divergence_correctness, '')) > 1
+        )
+        """
+    ).fetchone()
+    if n_disagreeing:
+        raise NoveltyIngestError(
+            f"{n_disagreeing} claim(s) carry evidence rows that DISAGREE about their novelty "
+            "result -- every evidence row of one claim must inherit exactly one "
+            "(novelty_status, novelty_source_label, divergence_correctness) (D-23a)"
+        )
+    return n_disagreeing
 
 
 # ---------------------------------------------------------------------------
@@ -5008,6 +5425,9 @@ def finalize_build(
     composition_dates_sha256: Optional[str] = None,
     seftja_dates_path=None,
     seftja_dates_sha256: Optional[str] = None,
+    novelty_verdicts_path=None,
+    novelty_verdicts_sha256: Optional[str] = None,
+    novelty_alias_groups_path=None,
     coverage_floor: float = 0.99,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
@@ -5145,6 +5565,21 @@ def finalize_build(
         seftja_dates_map = parse_seftja_dates(
             seftja_dates_path, sha256=seftja_dates_sha256)
         seftja_dates_sha256 = _hash_file(Path(seftja_dates_path))
+
+    # 136-12 Task 1: the hash-pinned novelty verdict cache. Loaded HERE, with
+    # the other pinned inputs, BEFORE any output mutation -- so a bad pin fails
+    # the build while every prior artifact is still untouched, exactly like the
+    # H2/H3 gates below. Absent => every evidence row keeps the fail-closed
+    # `not_checked`; that is a real, honest state, not a degraded one.
+    novelty_alias_groups = load_alias_groups(novelty_alias_groups_path)
+    novelty_grain_index: Optional[Dict[str, Dict]] = None
+    novelty_input_stats: Dict = {}
+    if novelty_verdicts_path is not None:
+        verdict_entries, verdict_stats = load_novelty_verdicts(
+            novelty_verdicts_path, sha256=novelty_verdicts_sha256)
+        novelty_grain_index, grain_stats = build_novelty_grain_index(
+            verdict_entries, novelty_alias_groups)
+        novelty_input_stats = {**verdict_stats, **grain_stats}
 
     out_path = Path(out_db_path)
 
@@ -5339,6 +5774,14 @@ def finalize_build(
         # (measurement_status/ci_low) out of that registry, so materializing
         # earlier would silently evaluate every tier_a identification against a
         # missing authorization and demote it.
+        # 136-12 Task 1: the novelty axis, written BEFORE the identification
+        # grain is materialized -- `populate_discovery_identification` inherits
+        # each identification's shade from its own evidence rows, so a grain
+        # materialized first would freeze the pre-ingest `not_checked` default.
+        novelty_stats = apply_novelty_verdicts(
+            out_conn, novelty_grain_index, alias_groups=novelty_alias_groups
+        )
+
         identification_stats = populate_discovery_identification(out_conn)
         identification_stats.update(
             populate_manuscript_display(out_conn, libraries_csv_path)
@@ -5387,6 +5830,12 @@ def finalize_build(
             meta_rows.append(("composition_dates_sha256", composition_dates_sha256))
         if seftja_dates_sha256 is not None:
             meta_rows.append(("seftja_dates_sha256", seftja_dates_sha256))
+        # 136-12: the verdict cache's own verified SHA, recorded in meta so a
+        # shipped asset proves WHICH measured cache produced its novelty column.
+        # The cache itself is a BUILD-TIME artifact and never ships (NOVEL-02).
+        if novelty_input_stats.get("verdict_cache_sha256"):
+            meta_rows.append(
+                ("novelty_verdicts_sha256", novelty_input_stats["verdict_cache_sha256"]))
         # v2 reband markers (bake plan §4.5, gate 13): the target band + the
         # rebanded-row count + the preserved trigger provenance.
         if reband_tier_a:
@@ -5473,6 +5922,11 @@ def finalize_build(
         # so the delta the D-13g `shipped OR human_confirmed` fix restores is
         # visible in the build summary rather than absorbed into one total.
         "identification": identification_stats,
+        # 136-12: the novelty ingest's own measured shape -- the per-shade
+        # counts, the per-family resolved counts (so the direct-family coverage
+        # gap this rebuild closes is a NUMBER in the report, not a claim), and
+        # every fail-closed fallback the cache triggered.
+        "novelty": {**novelty_input_stats, **novelty_stats},
         "frame_content_hash": frame_content_hash,
         "content_hash": content_hash,
         "band_precision_rows": len(bp_rows),
@@ -5635,6 +6089,21 @@ def build_parser() -> argparse.ArgumentParser:
                              "--release D-17; Codex #5). Frozen {year:int, basis:str} schema.")
     v2_group.add_argument("--seftja-dates-sha256", metavar="HEX", default=None,
                         help="SHA-256 pin verified before --seftja-dates is used.")
+    novelty_group = parser.add_argument_group("novelty axis hash-pinned inputs (136-12, NOVEL-01/02)")
+    novelty_group.add_argument("--novelty-verdicts", metavar="PATH", default=None,
+                        help="Hash-pinned novelty verdict cache -- the funnel+gate output, "
+                             "keyed '{sys_id}::{ref_work_id}'. Omit and every evidence row "
+                             "keeps the fail-closed `not_checked` (a real state, never "
+                             "'novel by default'). The cache is a BUILD-TIME artifact and "
+                             "is NEVER shipped inside the sidecar (NOVEL-02).")
+    novelty_group.add_argument("--novelty-verdicts-sha256", metavar="HEX", default=None,
+                        help="SHA-256 pin, REQUIRED whenever --novelty-verdicts is given: "
+                             "a cache that is not the cache that was MEASURED is not a "
+                             "pinned input (T-136-12-03).")
+    novelty_group.add_argument("--novelty-alias-groups", metavar="PATH", default=None,
+                        help="Curated work-id alias groups (D-23d). Absent => every work is "
+                             "its own singleton reviewed identity (fail-closed), never a "
+                             "guessed grouping.")
     real_group.add_argument("--frozen-precision-defaults", action="store_true",
                         help="H3: explicitly acknowledge using the frozen-contract "
                              "band_precision defaults (docs/specs/discovery-sidecar-"
@@ -5754,8 +6223,12 @@ def main(argv=None) -> int:
         composition_dates_sha256=args.composition_dates_sha256,
         seftja_dates_path=args.seftja_dates,
         seftja_dates_sha256=args.seftja_dates_sha256,
+        novelty_verdicts_path=args.novelty_verdicts,
+        novelty_verdicts_sha256=args.novelty_verdicts_sha256,
+        novelty_alias_groups_path=args.novelty_alias_groups,
     )
     print(f"real build OK: {stats['row_counts']}")
+    print(f"novelty={stats['novelty']}")
     print(f"content_hash={stats['content_hash']}")
     print(f"frame_content_hash={stats['frame_content_hash']}")
     print(f"evidence_id_collisions={stats['evidence_id_collisions']}")

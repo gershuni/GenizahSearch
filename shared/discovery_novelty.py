@@ -332,6 +332,21 @@ _FALLBACK_LABEL: Dict[str, str] = {
 }
 
 
+# The COMPLETE, closed set of strings `masked_provenance_label` can ever
+# return, in both languages -- DERIVED from the two tables above so it can
+# never drift from what the function actually returns. Exposed publicly
+# because the build (plan 136-12) has to assert that every
+# `novelty_source_label` value it writes is a member of this set: an
+# unmasked provenance value must fail the BUILD rather than ship. The
+# release verifier deliberately MIRRORS this set as its own literal rather
+# than importing it (its standing independence convention) --
+# `tests/test_discovery_schema.py` asserts the two agree.
+MASKED_PROVENANCE_LABELS: FrozenSet[str] = frozenset(
+    [label for entry in _NAMEABLE_SOURCE_LABELS.values() for label in entry.values()]
+    + list(_FALLBACK_LABEL.values())
+)
+
+
 def masked_provenance_label(source_code: Any, lang: str = "en") -> str:
     """D-25: name the source where it is nameable ("recorded in the
     catalogue"); otherwise the fixed non-identifying label ("recorded in
