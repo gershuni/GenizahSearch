@@ -1123,6 +1123,504 @@ def check_coverage_gap_report(conn: sqlite3.Connection) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# 17-28. 136-12: one registered check per field the Phase-136 rebuild adds
+# (docs/specs/discovery-sidecar-schema-v1.md SS Amendment 2026-08-02).
+#
+# INDEPENDENCE. Every constant below is MIRRORED as a local literal, never
+# imported from `scripts/build_discovery_sidecar.py` -- the same standing
+# convention `_MEASUREMENT_STATUSES` / `_STRICT_FLOOR` already follow, and the
+# reason the verifier can catch a builder bug at all. The vocabularies are
+# cross-checked against their contract modules by
+# `tests/test_discovery_schema.py`, so a mirror that drifts is a red suite
+# rather than a silent false green.
+#
+# MESSAGE DISCIPLINE. Every violation names the TABLE, the KEY and the FIELD --
+# never the offending cell value. On the novelty/provenance/visibility columns
+# that is not cosmetic: echoing the value is the exact leak the masking rules
+# (D-25 / NOVEL-02) exist to prevent.
+# ---------------------------------------------------------------------------
+
+# The TEN-value novelty shade enum (owner rulings E/E'/F/G/H --
+# 136-GATE1-DECISIONS.md SS E-H; canonical prose statement:
+# docs/specs/discovery-novelty-v1.md SS2). Mirrors
+# shared/discovery_novelty.py::NOVELTY_STATUSES.
+_NOVELTY_STATUSES = frozenset({
+    "confirms", "refines_granularity", "aid_more_specific", "diverges_work",
+    "diverges_part", "container_predicts", "fills_gap", "extends", "alias_merge",
+    "not_checked",
+})
+# The two shades, and ONLY these two, that may carry a divergence_correctness
+# value (ruling F).
+_DIVERGENCE_SHADES = frozenset({"diverges_work", "diverges_part"})
+# Ruling F's own three-value correctness vocabulary. Mirrors
+# shared/discovery_novelty.py::DIVERGENCE_CORRECTNESS_VALUES.
+_DIVERGENCE_CORRECTNESS_VALUES = frozenset({"catalogue_correct", "claim_correct", "unclear"})
+# The complete masked provenance label set (NOVEL-02 / D-25). Mirrors
+# shared/discovery_novelty.py::MASKED_PROVENANCE_LABELS -- an ALLOWLIST, so a
+# restricted corpus name can never be a member.
+_MASKED_PROVENANCE_LABELS = frozenset({
+    "recorded in the catalogue", "מתועד בקטלוג",
+    "recorded in the bibliography", "מתועד בביבליוגרפיה",
+    "recorded in the Princeton Geniza Project", "מתועד בפרויקט הגניזה של פרינסטון",
+    "recorded in a scholarly transcription", "מתועד בתעתיק מדעי",
+    "recorded in the NLI catalogue", "מתועד בקטלוג הספרייה הלאומית",
+    "recorded in another reference source", "מתועד במקור עזר אחר",
+})
+# The closed {public, private} visibility enum (Amendment (A) / D-22). Mirrors
+# shared/discovery_visibility.py::VISIBILITY_VALUES.
+_VISIBILITY_VALUES = frozenset({"public", "private"})
+# The closed meta.audience enum (Amendment (C1)). The PRIVATE build must write
+# exactly `private`; `scripts/project_discovery_public.py` is the sole writer of
+# `public`.
+_AUDIENCE_VALUES = frozenset({"public", "private"})
+_PRIVATE_AUDIENCE = "private"
+# The closed coverage validity vocabulary (Amendment (A)).
+_COVERAGE_STATUSES = frozenset({"measured", "no_denominator", "not_applicable"})
+# The closed main_pool_reason vocabulary (Amendment (B)).
+_MAIN_POOL_REASONS = frozenset({
+    "shared_wording", "overlapping_tie", "low_coverage", "insufficient_length",
+    "missing_signal", "main_multifolio", "main_full_coverage", "main_human_confirmed",
+})
+# The global band-rank lattice (schema SS6) is 0-INDEXED in the implementation
+# it is materialized from (`shared.discovery_service._BAND_RANK_ORDER`, 8
+# entries because BOTH the v1 and v2 top-tier band keys are present through the
+# transition), and an unknown (evidence_source, confidence_band) pair ranks
+# LAST at `len(order)`. So the stored key is bounded by [0, 8]. The sentinel 8
+# is permitted here rather than rejected because an unknown pair is already
+# rejected, more precisely, by `check_evidence_combinations` -- duplicating that
+# rejection here would report one defect as two.
+_BAND_RANK_MIN = 0
+_BAND_RANK_MAX = 8
+# `works.genre` is the FULL "{parent} / {leaf}" path, except for the explicit
+# `Unassigned` bucket -- a REAL value, never missing data (Amendment (C)).
+_GENRE_UNASSIGNED = "Unassigned"
+_GENRE_PATH_SEPARATOR = " / "
+# The authorized index set (Amendment (D)).
+_AUTHORIZED_INDEXES = frozenset({
+    "ix_discovery_evidence_coverage_ppm",
+    "ix_discovery_evidence_band_rank",
+    "ix_discovery_evidence_novelty_status",
+    "ux_discovery_claim_display_evidence_id",
+    "ix_discovery_identification_order",
+    "ix_discovery_identification_canonical_work_id",
+    "ix_discovery_identification_sys_id",
+    "ix_manuscript_display_sort",
+})
+# `manuscript_display` is sourced ONLY from libraries.csv and carries NO work
+# title, NO reference text and NO locus (T-136-11-03).
+_MANUSCRIPT_DISPLAY_FORBIDDEN_SUBSTRINGS = ("title", "text", "locus", "span", "offset")
+_SHA256_PREFIXED_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def check_coverage_persistence(conn: sqlite3.Connection) -> List[str]:
+    """Amendment (A): `coverage_ppm` is DIRECT-FAMILY ONLY, and `coverage_status`
+    is the separate validity axis. A propagated row carries no coverage value
+    because it has no page-length denominator at all -- not because the number
+    was withheld for display."""
+    if not _has_column(conn, "discovery_evidence", "coverage_ppm"):
+        return ["discovery_evidence.coverage_ppm: column absent (Amendment (A))"]
+    violations = []
+    (n_propagated_with_coverage,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_evidence WHERE evidence_source = ? "
+        "AND coverage_ppm IS NOT NULL", (ids.EVIDENCE_SOURCE_PROPAGATED,)
+    ).fetchone()
+    if n_propagated_with_coverage:
+        violations.append(
+            f"discovery_evidence.coverage_ppm: {n_propagated_with_coverage} propagated row(s) "
+            "carry a coverage value (DIRECT FAMILY ONLY, D-08a)")
+    (n_propagated_wrong_status,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_evidence WHERE evidence_source = ? "
+        "AND coverage_status IS NOT 'not_applicable'", (ids.EVIDENCE_SOURCE_PROPAGATED,)
+    ).fetchone()
+    if n_propagated_wrong_status:
+        violations.append(
+            f"discovery_evidence.coverage_status: {n_propagated_wrong_status} propagated row(s) "
+            "are not 'not_applicable'")
+    (n_direct_no_status,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_evidence WHERE evidence_source = ? "
+        "AND coverage_status IS NULL", (ids.EVIDENCE_SOURCE_TRACK1_DIRECT,)
+    ).fetchone()
+    if n_direct_no_status:
+        violations.append(
+            f"discovery_evidence.coverage_status: {n_direct_no_status} direct row(s) carry no "
+            "validity status (an absent coverage_ppm must never be readable as zero coverage)")
+    bad = [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT coverage_status FROM discovery_evidence "
+            "WHERE coverage_status IS NOT NULL")
+        if r[0] not in _COVERAGE_STATUSES
+    ]
+    if bad:
+        violations.append(
+            f"discovery_evidence.coverage_status: {len(bad)} value(s) outside the closed "
+            "vocabulary")
+    return violations
+
+
+def check_band_rank_materialized(conn: sqlite3.Connection) -> List[str]:
+    """Amendment (A) / D-10a: `band_rank` is materialized on every evidence row
+    and lies inside the known lattice range."""
+    if not _has_column(conn, "discovery_evidence", "band_rank"):
+        return ["discovery_evidence.band_rank: column absent (Amendment (A))"]
+    violations = []
+    (n_null,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_evidence WHERE band_rank IS NULL").fetchone()
+    if n_null:
+        violations.append(
+            f"discovery_evidence.band_rank: {n_null} row(s) carry no materialized sort key")
+    (n_out_of_range,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_evidence WHERE band_rank IS NOT NULL "
+        "AND (band_rank < ? OR band_rank > ?)", (_BAND_RANK_MIN, _BAND_RANK_MAX)
+    ).fetchone()
+    if n_out_of_range:
+        violations.append(
+            f"discovery_evidence.band_rank: {n_out_of_range} row(s) outside the known lattice "
+            f"range [{_BAND_RANK_MIN}, {_BAND_RANK_MAX}]")
+    return violations
+
+
+def check_identification_grain(conn: sqlite3.Connection) -> List[str]:
+    """Amendment (B): ONE row per `(sys_id, canonical_work_id)`, every
+    `main_pool_reason` in the closed vocabulary, and the `works` identity join
+    exactly 1:1 on `display_work_id` (SS(B1) -- a fan-out here silently inflates
+    every downstream count)."""
+    if not _has_table(conn, "discovery_identification"):
+        return ["discovery_identification: table absent (Amendment (B))"]
+    violations = []
+    (n_rows,) = conn.execute("SELECT COUNT(*) FROM discovery_identification").fetchone()
+    (n_pairs,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT de.sys_id, w.canonical_work_id
+            FROM discovery_evidence de
+            JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+            JOIN works w            ON w.work_id  = dc.work_id
+            WHERE de.routing_status = ? OR de.adjudication_status = ?
+        )
+        """,
+        (ids.ROUTING_STATUS_SHIPPED, ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED),
+    ).fetchone()
+    if n_rows != n_pairs:
+        violations.append(
+            f"discovery_identification: row count {n_rows} != distinct "
+            f"(sys_id, canonical_work_id) pair count {n_pairs}")
+    (n_joined,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_identification di "
+        "JOIN works w ON w.work_id = di.display_work_id").fetchone()
+    if n_joined != n_rows:
+        violations.append(
+            f"discovery_identification.display_work_id: the works identity join produced "
+            f"{n_joined} rows for {n_rows} identifications (must be exactly 1:1, SS(B1))")
+    bad = [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT main_pool_reason FROM discovery_identification")
+        if r[0] not in _MAIN_POOL_REASONS
+    ]
+    if bad:
+        violations.append(
+            f"discovery_identification.main_pool_reason: {len(bad)} value(s) outside the closed "
+            "vocabulary")
+    return violations
+
+
+def check_manuscript_display_carries_no_reference_content(conn: sqlite3.Connection) -> List[str]:
+    """T-136-11-03: `manuscript_display` is sourced ONLY from libraries.csv and
+    carries NO work title, NO reference text and NO locus. Checked on the
+    SCHEMA, so an empty table cannot pass by having no rows to inspect."""
+    if not _has_table(conn, "manuscript_display"):
+        return ["manuscript_display: table absent (Amendment (B))"]
+    violations = []
+    for row in conn.execute("PRAGMA table_info(manuscript_display)"):
+        col = row[1].lower()
+        for forbidden in _MANUSCRIPT_DISPLAY_FORBIDDEN_SUBSTRINGS:
+            if forbidden in col and "shelfmark" not in col:
+                violations.append(
+                    f"manuscript_display.{row[1]}: reference-content-shaped column "
+                    f"(forbidden token {forbidden!r})")
+    return violations
+
+
+def check_novelty_status_vocabulary(conn: sqlite3.Connection) -> List[str]:
+    """Amendment (A), owner rulings E/E'/F/G/H: `novelty_status` is a CLOSED
+    TEN-VALUE vocabulary, present on BOTH evidence families, and every evidence
+    row of one claim agrees (D-23a).
+
+    Fails closed on ANY value outside the ten -- including every retired
+    vocabulary (the three-value tri-state, the eight-value E' set with its
+    unsplit `diverges`, and the nine-value pre-ruling-H set)."""
+    if not _has_column(conn, "discovery_evidence", "novelty_status"):
+        return ["discovery_evidence.novelty_status: column absent (Amendment (A))"]
+    violations = []
+    bad = [
+        r[0] for r in conn.execute("SELECT DISTINCT novelty_status FROM discovery_evidence")
+        if r[0] not in _NOVELTY_STATUSES
+    ]
+    if bad:
+        violations.append(
+            f"discovery_evidence.novelty_status: {len(bad)} value(s) outside the closed "
+            "TEN-value shade vocabulary")
+    (n_null,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_evidence WHERE novelty_status IS NULL").fetchone()
+    if n_null:
+        violations.append(
+            f"discovery_evidence.novelty_status: {n_null} row(s) carry NULL "
+            "(the fail-closed default is 'not_checked', never absent)")
+    # Computed for ALL families -- the coverage gap this rebuild closes.
+    for family in (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.EVIDENCE_SOURCE_PROPAGATED):
+        (n_family,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_evidence WHERE evidence_source = ?",
+            (family,)).fetchone()
+        if not n_family:
+            continue
+        (n_bad_family,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_evidence WHERE evidence_source = ? "
+            "AND novelty_status IS NULL", (family,)).fetchone()
+        if n_bad_family:
+            violations.append(
+                f"discovery_evidence.novelty_status: {n_bad_family} {family} row(s) carry NULL")
+    # D-23a: one result per claim.
+    (n_disagreeing,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT claim_id FROM discovery_evidence
+            GROUP BY claim_id
+            HAVING COUNT(DISTINCT novelty_status) > 1
+                OR COUNT(DISTINCT COALESCE(novelty_source_label, '')) > 1
+                OR COUNT(DISTINCT COALESCE(divergence_correctness, '')) > 1
+        )
+        """
+    ).fetchone()
+    if n_disagreeing:
+        violations.append(
+            f"discovery_evidence.novelty_status: {n_disagreeing} claim(s) carry evidence rows "
+            "that disagree about their novelty result (D-23a)")
+    if _has_column(conn, "discovery_identification", "novelty_status"):
+        bad_ident = [
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT novelty_status FROM discovery_identification")
+            if r[0] not in _NOVELTY_STATUSES
+        ]
+        if bad_ident:
+            violations.append(
+                f"discovery_identification.novelty_status: {len(bad_ident)} value(s) outside "
+                "the closed TEN-value shade vocabulary")
+    return violations
+
+
+def check_novelty_source_label_masked(conn: sqlite3.Connection) -> List[str]:
+    """NOVEL-02 / D-25: every stored `novelty_source_label` is a member of the
+    masked label set. The raw provenance value -- which finding aid, which
+    restricted corpus -- is NEVER stored, and this check never echoes a value
+    (doing so would perform the leak it exists to detect)."""
+    if not _has_column(conn, "discovery_evidence", "novelty_source_label"):
+        return ["discovery_evidence.novelty_source_label: column absent (Amendment (A))"]
+    violations = []
+    bad = [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT novelty_source_label FROM discovery_evidence "
+            "WHERE novelty_source_label IS NOT NULL")
+        if r[0] not in _MASKED_PROVENANCE_LABELS
+    ]
+    if bad:
+        violations.append(
+            f"discovery_evidence.novelty_source_label: {len(bad)} value(s) outside the masked "
+            "label set (values withheld -- naming them would be the leak)")
+    # NULL on the two ineligible shades: `fills_gap` has nothing to name and
+    # `not_checked` checked nothing.
+    (n_ineligible,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_evidence WHERE novelty_source_label IS NOT NULL "
+        "AND novelty_status IN ('fills_gap', 'not_checked')").fetchone()
+    if n_ineligible:
+        violations.append(
+            f"discovery_evidence.novelty_source_label: {n_ineligible} row(s) name a source on a "
+            "shade where no aid says anything (fills_gap / not_checked)")
+    return violations
+
+
+def check_divergence_correctness_applicability(conn: sqlite3.Connection) -> List[str]:
+    """Owner ruling F: `divergence_correctness` is populated ONLY on
+    `diverges_work`/`diverges_part` rows and is drawn from its own closed
+    three-value vocabulary when non-NULL.
+
+    ⟨AMENDED 2026-08-03, owner ruling L⟩ The converse -- "non-NULL on every
+    divergence row" -- is deliberately NOT checked, and must not be added. The
+    model no longer produces this field at all
+    (`resolve_model_output` always returns `None` for it) and no human/owner
+    annotation pathway exists yet, so NULL is the ONLY value a build can
+    currently write on a divergence row. Requiring non-NULL here would make
+    every `diverges_work`/`diverges_part` row unshippable."""
+    if not _has_column(conn, "discovery_evidence", "divergence_correctness"):
+        return ["discovery_evidence.divergence_correctness: column absent (Amendment (A))"]
+    violations = []
+    for table in ("discovery_evidence", "discovery_identification"):
+        if not _has_column(conn, table, "divergence_correctness"):
+            continue
+        (n_misapplied,) = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE divergence_correctness IS NOT NULL "  # noqa: S608 -- fixed table names
+            "AND novelty_status NOT IN ('diverges_work', 'diverges_part')"
+        ).fetchone()
+        if n_misapplied:
+            violations.append(
+                f"{table}.divergence_correctness: {n_misapplied} row(s) carry a correctness call "
+                "on a non-divergence shade (ruling F: valid ONLY on diverges_work/diverges_part)")
+        bad = [
+            r[0] for r in conn.execute(
+                f"SELECT DISTINCT divergence_correctness FROM {table} "  # noqa: S608 -- fixed table names
+                "WHERE divergence_correctness IS NOT NULL")
+            if r[0] not in _DIVERGENCE_CORRECTNESS_VALUES
+        ]
+        if bad:
+            violations.append(
+                f"{table}.divergence_correctness: {len(bad)} value(s) outside the closed "
+                "three-value correctness vocabulary")
+    return violations
+
+
+def check_visibility_axes(conn: sqlite3.Connection) -> List[str]:
+    """Amendment (A) / D-22: BOTH axes are stored, non-NULL, and drawn from the
+    closed `{public, private}` enum. `assertion_visibility` lives on
+    `discovery_evidence`, `identity_visibility` on `works` -- neither axis is a
+    proxy for the other, so neither may substitute for the other."""
+    violations = []
+    for table, column in (
+        ("discovery_evidence", "assertion_visibility"),
+        ("works", "identity_visibility"),
+        ("discovery_identification", "assertion_visibility"),
+        ("discovery_identification", "identity_visibility"),
+    ):
+        if not _has_column(conn, table, column):
+            violations.append(f"{table}.{column}: column absent (Amendment (A)/(B))")
+            continue
+        (n_null,) = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE {column} IS NULL").fetchone()  # noqa: S608 -- fixed names
+        if n_null:
+            violations.append(
+                f"{table}.{column}: {n_null} row(s) carry NULL (public eligibility requires "
+                "BOTH axes -- an underived row must read 'private', never nothing)")
+        bad = [
+            r[0] for r in conn.execute(
+                f"SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL")  # noqa: S608
+            if r[0] not in _VISIBILITY_VALUES
+        ]
+        if bad:
+            violations.append(
+                f"{table}.{column}: {len(bad)} value(s) outside the closed "
+                "{public, private} enum")
+    return violations
+
+
+def check_kept_tie_names_its_pair(conn: sqlite3.Connection) -> List[str]:
+    """Amendment (F): every `discovery_routing_audit` row with
+    `decision='kept_tie'` carries a non-NULL `demoted_work_id`. A NULL there
+    makes the tie pair unreconstructable from the audit alone, and the
+    main-pool rule's competition gate reads exactly those ties."""
+    if not _has_table(conn, "discovery_routing_audit"):
+        return []
+    (n_bad,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_routing_audit "
+        "WHERE decision = 'kept_tie' AND demoted_work_id IS NULL").fetchone()
+    if n_bad:
+        return [
+            f"discovery_routing_audit.demoted_work_id: {n_bad} kept_tie row(s) carry NULL "
+            "(the tie pair is unreconstructable from the audit alone)"
+        ]
+    return []
+
+
+def check_works_genre_vocabulary(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """Amendment (C): `works.genre` is populated from the curated, hash-pinned
+    artifact and constrained to the closed FJMS vocabulary or the explicit
+    `Unassigned` value -- never silently NULL-as-absent.
+
+    **What an INDEPENDENT verifier can enforce, stated honestly.** The 202-leaf
+    FJMS vocabulary lives in a gitignored sidecar this verifier must not
+    require, and the curated artifact is gitignored too. The full vocabulary is
+    enforced at BUILD time against the hash-pinned artifact, which
+    `curate_work_domains.py --validate` had already validated against the live
+    tree. Independently checkable here, and checked: the `Unassigned` sentinel
+    or a well-formed `"{parent} / {leaf}"` path; canonical-grain agreement (two
+    `works` rows sharing a canonical id must agree, since assignment is at that
+    grain); and the PROVENANCE PIN -- a populated genre column must name the
+    pinned artifact that produced it."""
+    violations = []
+    values = [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT genre FROM works WHERE genre IS NOT NULL AND genre != ''")
+    ]
+    if not values:
+        return violations  # an unpopulated column is the pre-rebuild state, not a violation
+    malformed = 0
+    for value in values:
+        if value == _GENRE_UNASSIGNED:
+            continue
+        parts = value.split(_GENRE_PATH_SEPARATOR)
+        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+            malformed += 1
+    if malformed:
+        violations.append(
+            f"works.genre: {malformed} distinct value(s) are neither the explicit "
+            f"{_GENRE_UNASSIGNED!r} bucket nor a well-formed '{{parent}} / {{leaf}}' path")
+    (n_disagreeing,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT canonical_work_id FROM works
+            GROUP BY canonical_work_id
+            HAVING COUNT(DISTINCT COALESCE(genre, '')) > 1
+        )
+        """
+    ).fetchone()
+    if n_disagreeing:
+        violations.append(
+            f"works.genre: {n_disagreeing} canonical group(s) disagree about their genre "
+            "(assignment is at the CANONICAL grain, so a duplicate is never assigned twice)")
+    pin = meta.get("work_domains_content_hash")
+    if not pin:
+        violations.append(
+            "meta.work_domains_content_hash: absent while works.genre is populated -- a "
+            "populated genre column must name the pinned artifact that produced it")
+    elif not _SHA256_PREFIXED_RE.match(str(pin)):
+        violations.append(
+            "meta.work_domains_content_hash: not a 'sha256:<64 hex>' content-hash pin")
+    return violations
+
+
+def check_meta_audience(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """Amendment (C1): the PRIVATE build writes exactly `meta.audience =
+    'private'`, drawn from the closed enum.
+
+    This is the field the runtime loader gates on so a public route can never
+    resolve a private artifact by accident. Without it the exclusion is
+    procedural (a code-review discipline) rather than structural (a fact the
+    loader itself can check)."""
+    audience = meta.get("audience")
+    if audience is None:
+        return ["meta.audience: absent -- the private artifact must declare its own audience"]
+    if audience not in _AUDIENCE_VALUES:
+        return ["meta.audience: value outside the closed {public, private} enum"]
+    if audience != _PRIVATE_AUDIENCE:
+        return [
+            f"meta.audience: the private build must write {_PRIVATE_AUDIENCE!r} "
+            "(only scripts/project_discovery_public.py may write 'public')"
+        ]
+    return []
+
+
+def check_authorized_index_set(conn: sqlite3.Connection) -> List[str]:
+    """Amendment (D): the authorized index set is PRESENT. These are not
+    performance hints -- `ux_discovery_claim_display_evidence_id` is a real
+    uniqueness invariant, and the findings page's default sort depends on the
+    composite ordering index."""
+    present = {
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name IS NOT NULL")
+    }
+    missing = sorted(_AUTHORIZED_INDEXES - present)
+    if missing:
+        return [f"sqlite_master: {len(missing)} authorized index/indexes absent: {missing}"]
+    return []
+
+
+# ---------------------------------------------------------------------------
 # 8. Membership frame_content_hash
 # ---------------------------------------------------------------------------
 
@@ -1181,6 +1679,23 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         violations += check_measurement_status_ci_consistency(conn)
         violations += check_reband_precision_invalidation(conn, meta)
         violations += check_evidence_id_content_consistency(conn)
+        # 136-12: one registered check per field the Phase-136 rebuild adds
+        # (docs/specs/discovery-sidecar-schema-v1.md SS Amendment 2026-08-02),
+        # in the amendment's own subsection order: (A) evidence/works additions,
+        # (B) the new tables, (C) works.genre, (C1) meta.audience, (D) the index
+        # set, (F) the routing-audit fix.
+        violations += check_coverage_persistence(conn)
+        violations += check_band_rank_materialized(conn)
+        violations += check_novelty_status_vocabulary(conn)
+        violations += check_novelty_source_label_masked(conn)
+        violations += check_divergence_correctness_applicability(conn)
+        violations += check_visibility_axes(conn)
+        violations += check_identification_grain(conn)
+        violations += check_manuscript_display_carries_no_reference_content(conn)
+        violations += check_works_genre_vocabulary(conn, meta)
+        violations += check_meta_audience(conn, meta)
+        violations += check_authorized_index_set(conn)
+        violations += check_kept_tie_names_its_pair(conn)
         violations += check_coverage_gap_report(conn)  # non-fatal report
     finally:
         conn.close()

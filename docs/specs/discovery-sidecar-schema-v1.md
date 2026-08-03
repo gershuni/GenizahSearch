@@ -944,6 +944,92 @@ rebuild has found a build error.
 
 ---
 
+## Amendment 2026-08-03 (Phase 136, plan 136-12 — build wiring B)
+
+This dated amendment ADDS to the 2026-08-02 amendment above (which is left UNTOUCHED in place —
+dated-amendment discipline, never a silent edit). It closes five gaps the two build-wiring passes
+surfaced while implementing that contract. `scripts/build_discovery_sidecar.py` and
+`scripts/verify_discovery_sidecar.py` implement against this section.
+
+### (I) `discovery_identification.eligibility_basis` — AUTHORIZED
+
+Plan 136-11 added `eligibility_basis TEXT CHECK (eligibility_basis IN ('shipped','human_confirmed') OR
+eligibility_basis IS NULL)` to `discovery_identification`, required by its own action text (D-13g: "carry
+a column recording which of the two admitted it so the surface can render the coverage note"), but the
+2026-08-02 amendment's column list predates that analysis and never named it. Since "Nothing outside this
+list is authorized to appear in the asset", the column shipped **unauthorized**. It is authorized here.
+
+- **Deliberately NULLABLE.** `scripts/project_discovery_public.py` inserts only the columns the schema
+  names, so a `NOT NULL` column here would break the public projection outright. The nullability is a
+  compatibility requirement, not an oversight.
+- **Semantics:** `shipped` when routing alone admitted the identification; `human_confirmed` when ONLY
+  the D-13g human-confirmed carve-out did — i.e. exactly the rows the service restores and a surface
+  annotates. Never both, never a third value.
+
+### (J) `works.genre` — the STORED VALUE SHAPE
+
+Amendment (C) constrains `genre` to "the FJMS closed domain vocabulary … or to an explicit `Unassigned`
+value" but never states what a single TEXT column stores for a two-level `(parent, leaf)` node. Fixed here:
+
+- **The full path, `"{domain_parent} / {domain_leaf}"`** (separator: space-slash-space). A bare leaf is
+  NOT identifying — several parents carry an `Other` leaf — and the owner's own rulings name these nodes
+  as paths ("Rabbinic Literature / Other", `136-GATE1-DECISIONS.md` §§ Ruling P/Q).
+- **The `Unassigned` bucket stores the bare sentinel `Unassigned`**, not `"Unassigned / Unassigned"`, so
+  the value a reader filters on is literally `Unassigned`. It is a REAL value with its own bucket, never
+  missing data: a work the vocabulary cannot place stays VISIBLE in the corpus view.
+- Assignment is at the CANONICAL grain, so two `works` rows sharing a `canonical_work_id` always agree.
+- Implemented by `scripts/build_discovery_sidecar.py::work_genre_value`.
+
+### (K) Provenance meta keys for the hash-pinned build inputs
+
+Three `meta` keys, each written only when its input was supplied, recording the VERIFIED hash of a
+build input that does **not** itself ship:
+
+| key | pins |
+|---|---|
+| `work_domains_content_hash` | the curated work-domain artifact (`sha256:<64 hex>`) |
+| `work_author_aliases_content_hash` | the curated author-alias artifact (`sha256:<64 hex>`) |
+| `novelty_verdicts_sha256` | the novelty verdict cache (bare 64-hex file SHA-256) |
+
+`work_domains_content_hash` is **contractual whenever `works.genre` is populated**: a populated genre
+column that cannot name the reviewed artifact that produced it is untraceable, and the artifact is
+gitignored, so this key is the only genre provenance an independent verifier can see. The release
+verifier enforces exactly that. The verdict cache is a BUILD-TIME artifact and is NEVER shipped inside
+the sidecar (NOVEL-02); only its hash crosses into the asset.
+
+### (L) What the `divergence_correctness` CHECK actually enforces
+
+The CHECK literal stated in (A)/(B) reads, in prose, as a biconditional ("populated IF AND ONLY IF the
+shade is a divergence shade"). **Under SQL three-valued logic it is not one, and must not be made one.**
+A CHECK passes unless it evaluates to FALSE, and `NULL IN (...)` evaluates to NULL — so a
+`diverges_work` row with a NULL `divergence_correctness` has always PASSED. The constraint is, and
+remains, the one-directional rule:
+
+> a non-NULL `divergence_correctness` implies a divergence shade AND an in-vocabulary value.
+
+This is now load-bearing rather than incidental. **Owner ruling L (2026-08-03,
+`136-GATE1-DECISIONS.md` § L) removed this field from the model's output contract entirely** — measured
+at 8/28, at or below chance for a three-way vocabulary, against the owner's own 31/32 on the identical
+cases. `shared/discovery_novelty.py::resolve_model_output` now ALWAYS returns `None` for it, and no
+human/owner annotation pathway has been built, so **NULL is the only value any current build can write
+on a divergence row**. A verifier or CHECK "corrected" into requiring non-NULL there would make every
+`diverges_work`/`diverges_part` row unbuildable and would silently delete ruling F's opt-in divergence
+category from the asset. The stored column, its vocabulary and `novelty_columns_for`'s own parameter are
+otherwise UNCHANGED — only the SOURCE of a value changed (model → human/owner only).
+
+### (M) The curated author key stores NO column
+
+Plan 136-09 produced an author alias map alongside the domain artifact, and 136-12's plan text says to
+"write `works.genre` and the author key". **No author-key column is authorized**, here or in the
+2026-08-02 amendment: `works.author` is the only author field, and 136-09 explicitly DEFERRED author
+corrections. Rather than inventing an unauthorized column, the build binds the curated author key to the
+asset by an ENFORCED COVERAGE CHECK — every distinct non-NULL `works.author` must appear in the pinned
+artifact, or the build fails — plus the `work_author_aliases_content_hash` provenance pin above. A future
+plan that wants the FJMS person id materialized (the findings-page author facet, 136-16/136-18) owes its
+own dated amendment first.
+
+---
+
 *This document is FROZEN as of 2026-07-22 (plan 134-01, Task 1). Later
 Phase 134 plans (fixture/distillation/loader/service/frame) implement
 against this contract; any correction requires a new dated amendment
@@ -972,4 +1058,12 @@ to `catalogue_correct`/`claim_correct`/`unclear` and required NULL outside
 CANONICAL single-cited prose statement of the shade enum going forward; the
 SQL CHECK literals in this document are the one place a second restatement
 is unavoidable, per this amendment's own inline note at the point of
-definition).*
+definition); 2026-08-03 (Phase 136, plan 136-12 — build wiring B: authorizes
+`discovery_identification.eligibility_basis`, which 136-11 shipped ahead of
+the contract; fixes the `works.genre` stored value shape (the
+`"{parent} / {leaf}"` path plus the bare `Unassigned` sentinel); adds the
+three hash-pinned-input provenance meta keys and makes
+`work_domains_content_hash` contractual whenever `works.genre` is populated;
+states what the `divergence_correctness` CHECK actually enforces under SQL
+three-valued logic and why owner ruling L makes the one-directional reading
+mandatory; and records that the curated author key stores NO column).*

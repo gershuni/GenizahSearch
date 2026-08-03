@@ -1,6 +1,6 @@
 {
   "band_precision_rows": 7,
-  "content_hash": "e71de1f179eae22ea901901c5a5837c274f3716140c9fdb189c5279ffd7077d1",
+  "content_hash": "f6b16db44b1c2f22cb3088d7371fa14b4d253eba13502f808b19c781184ef179",
   "display_evidence_choices": {
     "01495cbc9d27962cdf07899294fbc79277d4484497d3b6d2888a173ed8b0094d": "c04d8783ddf20e2c9f776f24212c98c4378c70b09f0d128b24ccc84597b271e5",
     "079114a58cfc864f8088ee727b3dfef38c865aafe101dd98f03812aeae627dc7": "ab4e525bd677e65838a472f2f7e9ff37a228e51578561f3d02077c6e5a28457e",
@@ -23,9 +23,36 @@
     "fd9d4fadd30d6e136f6bfdcd37479ce91759766beaf6652a28e0e6e7a8b2f460": "2aa205e47e85a92e0cbaf8b504e0d0151b256d90dd9beac94536dfa4882bf6bf"
   },
   "frame_content_hash": "b5f7970e93f4a342bc8939366b5d5a994a81c1a9f2aed48555c410102a8562b4",
+  "identification": {
+    "duplicate_canonical_groups": 0,
+    "identifications": 18,
+    "identifications_main_pool": 2,
+    "identifications_more_matches": 16,
+    "identifications_restored_by_human_confirmed": 0,
+    "identifications_shipped_only": 18,
+    "main_pool_reason_counts": {
+      "main_human_confirmed": 2,
+      "missing_signal": 14,
+      "shared_wording": 2
+    },
+    "manuscript_display": 0,
+    "manuscript_display_missing_from_libraries_csv": 17,
+    "manuscript_display_sys_ids_with_claims": 17
+  },
+  "novelty": {
+    "novelty_evidence_rows": 24,
+    "novelty_resolved_by_family": {},
+    "novelty_rows_without_a_reviewable_work_key": 0,
+    "novelty_rows_without_a_verdict": 24,
+    "novelty_shade_counts": {
+      "not_checked": 24
+    }
+  },
   "row_counts": {
     "discovery_claim": 19,
     "discovery_evidence": 24,
+    "discovery_identification": 18,
+    "manuscript_display": 0,
     "witness_units": 2,
     "works": 8
   }

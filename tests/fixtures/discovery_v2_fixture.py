@@ -1,20 +1,29 @@
 # -*- coding: utf-8 -*-
 """Post-rebuild ("Amendment 2026-08-02") discovery sidecar fixture builder.
 
-Phase 136, plan 136-20. The committed golden fixture
-``tests/fixtures/discovery/discovery-v1-fixture.db`` is a PRE-REBUILD asset:
-it predates the Amendment 2026-08-02 contract, so it carries neither
-``meta.audience`` nor the two new tables nor the new columns. That is exactly
-the shape plan 136-20's readiness contract must REFUSE.
+Phase 136, plan 136-20.
 
-This module therefore does two jobs:
+⟨AMENDED 2026-08-03, plan 136-12⟩ **This module used to rely on the committed
+golden fixture BEING pre-rebuild.** That was true only because plans 136-11 and
+136-12 had not yet regenerated it: the golden carried neither ``meta.audience``
+nor the two new tables nor the new columns, so "the pre-rebuild shape" and "the
+golden fixture" were the same file. 136-12's Task 3 refreshes the golden so it
+exercises every field the rebuild adds -- which makes that coincidence false.
 
-  1. ``materialize_pre_rebuild_sidecar()`` -- hand back the golden fixture
-     untouched, as the rollback/pre-rebuild case.
-  2. ``materialize_sidecar()`` -- copy the golden fixture and UPGRADE it in
-     place to the Amendment 2026-08-02 shape (new columns, the two new tables,
+Relying on a fixture's STALENESS is not a contract, so this module no longer
+does. It now derives its own v1-shaped base by STRIPPING the Amendment
+2026-08-02 additions from the golden (``_write_v1_shaped_copy``), and both
+entry points build up from that base. Every ``omit_*`` knob therefore behaves
+exactly as it did before the refresh, and no consumer test needed changing.
+
+This module does two jobs:
+
+  1. ``materialize_pre_rebuild_sidecar()`` -- the v1-shaped (pre-Amendment)
+     asset, as the rollback/pre-rebuild case.
+  2. ``materialize_sidecar()`` -- the same v1-shaped base, UPGRADED in place to
+     the Amendment 2026-08-02 shape (new columns, the two new tables,
      ``meta.audience`` and the two new release-contract count keys), so the
-     existing ready-path tests (and the new audience tests) have a sidecar the
+     existing ready-path tests (and the audience tests) have a sidecar the
      post-rebuild loader actually accepts.
 
 Every knob a defect-mode test needs is a parameter rather than a post-hoc
@@ -118,6 +127,67 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+# Meta keys the Amendment 2026-08-02 build writes and a v1-shaped asset must
+# NOT carry. `audience` and the two count keys are the amendment's own (C1);
+# the three provenance pins are written by 136-12's curated/verdict loads.
+_POST_REBUILD_META_KEYS: Tuple[str, ...] = (
+    "audience",
+    "expected_rows_discovery_identification",
+    "expected_rows_manuscript_display",
+    "work_domains_content_hash",
+    "work_author_aliases_content_hash",
+    "novelty_verdicts_sha256",
+)
+
+
+def _write_v1_shaped_copy(dest_db: Path) -> None:
+    """Copy the golden fixture to ``dest_db`` and STRIP it back to the
+    pre-Amendment-2026-08-02 (v1) shape, in place.
+
+    Needed since 136-12 refreshed the golden fixture: "the pre-rebuild shape"
+    used to be "the golden fixture, untouched", which was only ever true
+    because the golden was stale. Deriving the v1 shape explicitly makes the
+    pre-rebuild case a STATED contract rather than an accident that a
+    regeneration silently deletes.
+
+    Columns are removed by rebuilding each affected table through
+    ``CREATE TABLE ... AS SELECT <v1 columns>`` rather than
+    ``ALTER TABLE ... DROP COLUMN`` (which is SQLite-version dependent). Table
+    constraints and indexes are NOT reproduced: every consumer of this module
+    is a LOADER-READINESS test, which inspects table/column presence, meta keys
+    and row counts -- never a constraint. A future consumer that needs the real
+    constraints should build its own fixture rather than widening this one.
+    """
+    shutil.copyfile(GOLDEN_DB, dest_db)
+    conn = sqlite3.connect(str(dest_db))
+    try:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        existing = {
+            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        for table, added in ADDED_COLUMNS_ON_EXISTING_TABLES.items():
+            if table not in existing:
+                continue
+            drop = {name for name, _decl in added}
+            keep = [
+                r[1] for r in conn.execute(f"PRAGMA table_info({table})") if r[1] not in drop
+            ]
+            if len(keep) == len(list(conn.execute(f"PRAGMA table_info({table})"))):
+                continue  # already v1-shaped
+            col_list = ", ".join(f'"{c}"' for c in keep)
+            conn.execute(f'CREATE TABLE "{table}__v1" AS SELECT {col_list} FROM "{table}"')
+            conn.execute(f'DROP TABLE "{table}"')
+            conn.execute(f'ALTER TABLE "{table}__v1" RENAME TO "{table}"')
+        for table in NEW_TABLE_COLUMNS:
+            conn.execute(f'DROP TABLE IF EXISTS "{table}"')
+        conn.executemany(
+            "DELETE FROM meta WHERE key = ?", [(k,) for k in _POST_REBUILD_META_KEYS]
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _create_table(conn: sqlite3.Connection, table: str, omit_columns: Iterable[str]) -> None:
@@ -238,23 +308,32 @@ def write_manifest(
 def materialize_pre_rebuild_sidecar(
     dest_dir: Path, *, audience: Optional[str] = None
 ) -> Path:
-    """The PRE-REBUILD shape -- the committed golden v1 fixture, untouched.
+    """The PRE-REBUILD shape -- the golden fixture stripped back to v1.
 
     This is the rollback case: no ``meta.audience``, no
     ``discovery_identification``/``manuscript_display``, none of the new
     columns. The post-rebuild readiness contract must leave it not-ready.
 
+    ⟨AMENDED 2026-08-03, plan 136-12⟩ Derived by ``_write_v1_shaped_copy``
+    rather than by handing back the golden untouched -- since the golden was
+    refreshed it carries the full post-rebuild shape, so "untouched" would now
+    return an asset the readiness contract ACCEPTS, silently inverting every
+    test that calls this.
+
     ``audience`` optionally stamps ONLY the audience key onto the otherwise
-    untouched v1 asset. That isolates the structural checks: with a `public`
+    v1-shaped asset. That isolates the structural checks: with a `public`
     marker in place, the audience gate can no longer be what refuses the asset,
     so anything that still refuses it is the required-table / required-COLUMN /
     row-count contract doing the work.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     db_path = dest_dir / f"{GOLDEN_BASENAME}.db"
-    shutil.copyfile(GOLDEN_DB, db_path)
+    _write_v1_shaped_copy(db_path)
     if audience is None:
-        shutil.copyfile(GOLDEN_MANIFEST, dest_dir / "manifest.json")
+        # The manifest must match the STRIPPED file, not the golden -- otherwise
+        # the loader's content-hash check refuses the asset before any
+        # structural check runs, and the test would pass for the wrong reason.
+        write_manifest(dest_dir, db_path)
         return db_path
 
     conn = sqlite3.connect(str(db_path))
@@ -277,7 +356,9 @@ def materialize_sidecar(dest_dir: Path, **upgrade_kwargs) -> Path:
     write a matching manifest. Returns the sidecar path."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     db_path = dest_dir / f"{GOLDEN_BASENAME}.db"
-    shutil.copyfile(GOLDEN_DB, db_path)
+    # Build UP from the v1 shape, so every `omit_tables`/`omit_columns` knob can
+    # still WITHHOLD something -- a knob cannot omit what the base already has.
+    _write_v1_shaped_copy(db_path)
     upgrade_db_to_post_rebuild(db_path, **upgrade_kwargs)
     write_manifest(dest_dir, db_path)
     return db_path

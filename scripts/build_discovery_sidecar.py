@@ -1687,15 +1687,31 @@ _OXFORD_PART = ids.MERGE_BASIS_OXFORD_PART
 _PHYSICAL_JOIN = ids.MERGE_BASIS_PHYSICAL_JOIN
 
 # Fabricated, neutral, masking-safe synthetic titles -- never a real research title.
+#
+# 136-12: the `genre` column now carries the CURATED value shape (Amendment
+# (C)) -- the full "{parent} / {leaf}" path, or the explicit `Unassigned`
+# sentinel. The parent/leaf names stay FABRICATED (never a real FJMS vocabulary
+# node), because this dataset's whole discipline is that nothing in it derives
+# from real data; only the SHAPE is contractual. `w000005`/`w000006` carry
+# `Unassigned` so the golden fixture proves the sentinel survives into an asset
+# as a real, queryable value rather than disappearing; `w000007` keeps a NULL
+# genre so the pre-rebuild "not populated" state stays exercised too.
 _WORKS = [
-    ("w000001", "sefaria", "Synthetic Neutral Title Alpha", "Synthetic Author A", "Synthetic Genre A"),
-    ("w000002", "sefaria", "Synthetic Neutral Title Beta", "Synthetic Author B", "Synthetic Genre A"),
-    ("w000003", "ja", "Synthetic Neutral Title Gamma", "Synthetic Author C", "Synthetic Genre B"),
-    ("w000004", "ja", "Synthetic Neutral Title Delta", None, "Synthetic Genre B"),
-    ("w000005", "msource", "Synthetic Neutral Title Epsilon", "Synthetic Author D", "Synthetic Genre C"),
-    ("w000006", "msource", "Synthetic Neutral Title Zeta", "Synthetic Author E", "Synthetic Genre C"),
+    ("w000001", "sefaria", "Synthetic Neutral Title Alpha", "Synthetic Author A",
+     "Synthetic Parent A / Synthetic Leaf A"),
+    ("w000002", "sefaria", "Synthetic Neutral Title Beta", "Synthetic Author B",
+     "Synthetic Parent A / Synthetic Leaf A"),
+    ("w000003", "ja", "Synthetic Neutral Title Gamma", "Synthetic Author C",
+     "Synthetic Parent B / Synthetic Leaf B"),
+    ("w000004", "ja", "Synthetic Neutral Title Delta", None,
+     "Synthetic Parent B / Synthetic Leaf B"),
+    ("w000005", "msource", "Synthetic Neutral Title Epsilon", "Synthetic Author D",
+     "Unassigned"),
+    ("w000006", "msource", "Synthetic Neutral Title Zeta", "Synthetic Author E",
+     "Unassigned"),
     ("w000007", "sefaria", "Synthetic Neutral Title Eta", None, None),
-    ("w000008", "ja", "Synthetic Neutral Title Theta", "Synthetic Author F", "Synthetic Genre B"),
+    ("w000008", "ja", "Synthetic Neutral Title Theta", "Synthetic Author F",
+     "Synthetic Parent B / Synthetic Leaf B"),
 ]
 
 
@@ -2412,6 +2428,13 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
         ("expected_rows_manuscript_display", str(identification_stats["manuscript_display"])),
         # 136-12 / schema Amendment 2026-08-02 (C1) -- see finalize_build.
         ("audience", ASSET_AUDIENCE_PRIVATE),
+        # 136-12 (Amendment (C)): a POPULATED genre column must name the pinned
+        # artifact that produced it. The synthetic path has no curated artifact,
+        # so it pins its OWN synthetic assignment rows through the identical
+        # recipe -- a real hash over real (fabricated) content, never a
+        # placeholder digest.
+        ("work_domains_content_hash", curated_content_hash(
+            [{"canonical_work_id": w[0], "genre": w[4]} for w in works if w[4]])),
         ("frame_content_hash", frame_content_hash),
     ]
     cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
@@ -4823,6 +4846,276 @@ def assert_one_novelty_result_per_claim(conn: sqlite3.Connection) -> int:
     return n_disagreeing
 
 
+# ===========================================================================
+# 6.9c 136-12 Task 3: the CURATED artifacts (plan 136-09), loaded by content
+# hash through the SAME fail-closed mechanism the existing curated build inputs
+# use -- verify the hash, validate the shape, refuse to build on a mismatch.
+#
+# `works.genre` ALREADY EXISTS (schema SS1.1); Amendment 2026-08-02 (C) is
+# explicit that this rebuild does NOT add it and that no ALTER TABLE may target
+# it. What changes is that the column becomes POPULATED from the curated,
+# hash-pinned artifact and CONSTRAINED to the closed FJMS vocabulary or the
+# explicit `Unassigned` value -- never silently NULL-as-absent.
+# ===========================================================================
+
+class CuratedArtifactError(ValueError):
+    """Raised when a hash-pinned curated artifact (the work-domain assignments
+    or the author alias map) fails its content-hash pin, its declared identity,
+    its frozen row shape, or -- for the domain artifact -- the fail-closed
+    release gate that holds an unruled `needs-ruling` row back."""
+
+
+# `Unassigned` is a REAL value with its own parent, not missing data: a work the
+# controlled vocabulary cannot place stays VISIBLE in the corpus view rather
+# than disappearing from the facet. Mirrors
+# `scripts/curate_work_domains.py::UNASSIGNED`.
+GENRE_UNASSIGNED = "Unassigned"
+
+# The stored `works.genre` separator. The value is the FULL PATH
+# (`"{domain_parent} / {domain_leaf}"`) because a bare leaf is not identifying --
+# several parents carry an `Other` leaf, and the owner's own rulings name these
+# nodes as paths ("Rabbinic Literature / Other"). The `Unassigned` bucket is the
+# one exception and stores the bare sentinel, so the value a reader filters on
+# is literally `Unassigned`.
+GENRE_PATH_SEPARATOR = " / "
+
+_DOMAIN_ARTIFACT_NAME = "work_domains"
+_DOMAIN_ARTIFACT_VERSION = "v1"
+_ALIAS_ARTIFACT_NAME = "work_author_aliases"
+_ALIAS_ARTIFACT_VERSION = "v1"
+_DOMAIN_ROW_REQUIRED = frozenset(
+    {"canonical_work_id", "domain_parent", "domain_leaf", "confidence", "provenance"})
+
+
+def curated_content_hash(payload) -> str:
+    """The curated artifacts' content-hash recipe, reproduced verbatim from
+    `scripts/curate_work_domains.py::compute_content_hash`: `sha256:` + a
+    SHA-256 over the payload ARRAY only (`sort_keys=True`, `ensure_ascii=False`),
+    so the digest is stable under later changes to the artifact's own header
+    fields.
+
+    Reproduced rather than imported because that module imports
+    `shared.fjms_service` (and through it the 1.59 GB FJMS sidecar) to read the
+    live domain tree -- a dependency this stdlib-only build script must not
+    acquire. `tests/test_discovery_schema.py` asserts the two implementations
+    agree, so the duplication is a red suite rather than a silent divergence."""
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def work_genre_value(row) -> str:
+    """The stored `works.genre` value for ONE curated assignment row.
+
+    The `Unassigned` bucket stores the bare sentinel (so a reader filters on
+    literally `Unassigned`); every other row stores the full
+    `"{parent} / {leaf}"` path."""
+    parent = row.get("domain_parent")
+    leaf = row.get("domain_leaf")
+    if parent == GENRE_UNASSIGNED and leaf == GENRE_UNASSIGNED:
+        return GENRE_UNASSIGNED
+    return f"{parent}{GENRE_PATH_SEPARATOR}{leaf}"
+
+
+def load_work_domains(path, *, content_hash: Optional[str]) -> Tuple[Dict[str, str], Dict]:
+    """Load the hash-pinned curated work-domain artifact. Returns
+    `(genre_by_canonical_work_id, stats)`.
+
+    Order of enforcement, all BEFORE a single value is written: file present ->
+    strict duplicate-key JSON parse -> declared artifact identity -> the
+    artifact's OWN declared content hash recomputed and matched -> the caller's
+    pin matched -> per-row frozen shape -> the release gate.
+
+    **The release gate keys on `owner_ruling`, NEVER on `confidence`** (plan
+    136-09 / `136-DOMAIN-CURATION.md` item 4, owner rulings P and Q). The 29
+    ruled rows deliberately RETAIN `confidence: "needs-ruling"`; the
+    `owner_ruling` citation is what marks them settled. Reading `confidence`
+    here would reject all 29 owner-ruled rows and refuse a build the owner has
+    already authorized -- and, worse, a future artifact could flip a row to
+    `high` without a ruling and slip through. A `needs-ruling` row carrying no
+    `owner_ruling` is HELD and REFUSES the build, exactly as
+    `curate_work_domains.py --validate --release` does.
+    """
+    doc, declared = _load_curated_artifact(
+        path, content_hash=content_hash, payload_key="assignments",
+        artifact=_DOMAIN_ARTIFACT_NAME, version=_DOMAIN_ARTIFACT_VERSION,
+    )
+    assignments = doc["assignments"]
+
+    genre_by_work: Dict[str, str] = {}
+    held: List[str] = []
+    n_unassigned = 0
+    for row in assignments:
+        missing = _DOMAIN_ROW_REQUIRED - set(row)
+        if missing:
+            raise CuratedArtifactError(
+                f"work_domains assignment row is missing {sorted(missing)} "
+                "(row key withheld -- masking)"
+            )
+        work_id = row["canonical_work_id"]
+        if not _is_w_id(work_id):
+            raise CuratedArtifactError(
+                "work_domains assignment row is keyed on a non-opaque work id")
+        if work_id in genre_by_work:
+            raise CuratedArtifactError(
+                f"work_domains carries a duplicate assignment for {work_id}")
+        if row.get("confidence") == "needs-ruling" and not row.get("owner_ruling"):
+            held.append(work_id)
+            continue
+        if row.get("domain_parent") is None or row.get("domain_leaf") is None:
+            raise CuratedArtifactError(
+                f"work_domains row {work_id} carries a null domain with no held posture")
+        value = work_genre_value(row)
+        if value == GENRE_UNASSIGNED:
+            n_unassigned += 1
+        genre_by_work[work_id] = value
+
+    if held:
+        raise CuratedArtifactError(
+            f"RELEASE GATE: {len(held)} work_domains row(s) are still HELD for owner ruling "
+            "(confidence='needs-ruling' with no owner_ruling citation) -- refusing to load "
+            "works.genre. The 'ship as Unassigned' default was explicitly DECLINED by the "
+            "owner (136-GATE1-DECISIONS.md SS D)."
+        )
+
+    return genre_by_work, {
+        "work_domains_content_hash": declared,
+        "work_domains_assignments": len(assignments),
+        "work_domains_assigned": len(genre_by_work),
+        "work_domains_unassigned": n_unassigned,
+    }
+
+
+def load_work_author_aliases(path, *, content_hash: Optional[str]) -> Tuple[Dict[str, Dict], Dict]:
+    """Load the hash-pinned curated author-alias artifact. Returns
+    `(alias_by_normalized_author, stats)`.
+
+    **Deliberately does NOT write a column.** Schema Amendment 2026-08-02 states
+    "Nothing outside this list is authorized to appear in the asset", and no
+    author-key column is on that list -- `works.author` is the only author
+    field, and 136-09 explicitly deferred author CORRECTIONS. So the author key
+    is bound to the asset by an ENFORCED COVERAGE CHECK
+    (`assert_author_key_coverage`) plus a recorded provenance pin, rather than
+    by inventing an unauthorized column. See 136-12-SUMMARY.md; a future plan
+    that wants the FJMS person id materialized owes a dated schema amendment
+    first."""
+    doc, declared = _load_curated_artifact(
+        path, content_hash=content_hash, payload_key="aliases",
+        artifact=_ALIAS_ARTIFACT_NAME, version=_ALIAS_ARTIFACT_VERSION,
+    )
+    aliases = doc["aliases"]
+
+    by_normalized: Dict[str, Dict] = {}
+    matched = 0
+    for row in aliases:
+        author = row.get("author")
+        normalized = row.get("normalized")
+        if not isinstance(author, str) or not isinstance(normalized, str):
+            raise CuratedArtifactError(
+                "work_author_aliases row carries a non-string author/normalized "
+                "(row content withheld -- masking)")
+        by_normalized[normalized] = row
+        if row.get("match") in ("exact", "containment"):
+            matched += 1
+
+    return by_normalized, {
+        "work_author_aliases_content_hash": declared,
+        "work_author_alias_rows": len(aliases),
+        "work_author_alias_matched": matched,
+    }
+
+
+def _load_curated_artifact(path, *, content_hash, payload_key, artifact, version):
+    """Shared fail-closed load for both curated artifacts. Returns
+    `(doc, declared_content_hash)`."""
+    if content_hash is None:
+        raise CuratedArtifactError(
+            f"{artifact} artifact supplied without a content-hash pin -- refusing to load. "
+            "A curated artifact edited after pinning is exactly the tampering case the pin "
+            "exists to catch (T-136-12-04)."
+        )
+    p = Path(path)
+    if not p.exists():
+        raise CuratedArtifactError(f"{artifact} artifact not found: {path}")
+    try:
+        doc = _json_loads_strict(p.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise CuratedArtifactError(f"{artifact} artifact parse error: {e}") from e
+    if not isinstance(doc, dict):
+        raise CuratedArtifactError(f"{artifact} artifact top-level value must be a JSON object")
+    if doc.get("artifact") != artifact or doc.get("artifact_version") != version:
+        raise CuratedArtifactError(
+            f"{artifact} artifact identity mismatch -- expected artifact={artifact!r} "
+            f"artifact_version={version!r}"
+        )
+    payload = doc.get(payload_key)
+    if not isinstance(payload, list) or not payload:
+        raise CuratedArtifactError(f"{artifact} artifact {payload_key!r} must be a non-empty list")
+    if not all(isinstance(r, dict) for r in payload):
+        raise CuratedArtifactError(f"{artifact} artifact {payload_key!r} rows must be objects")
+
+    declared = doc.get("content_hash")
+    recomputed = curated_content_hash(payload)
+    if not declared:
+        raise CuratedArtifactError(
+            f"{artifact} artifact carries no content_hash -- an unpinned artifact is not pinned")
+    if declared != recomputed:
+        raise CuratedArtifactError(
+            f"{artifact} artifact SELF content_hash mismatch -- the payload was edited after "
+            "the artifact declared its own hash")
+    if declared != content_hash:
+        raise CuratedArtifactError(
+            f"{artifact} artifact content-hash pin mismatch (hash gate) -- refusing to load. "
+            "Re-pin against 136-09-SUMMARY.md; note the PRE-RULING work_domains hash "
+            "(sha256:4cc103ff...) is superseded and must never be accepted."
+        )
+    return doc, declared
+
+
+def apply_work_genres(conn: sqlite3.Connection, genre_by_work: Dict[str, str]) -> Dict:
+    """Write `works.genre` at the CANONICAL grain.
+
+    Assignment is keyed on `canonical_work_id` (136-09's own assignment axis),
+    so a D-13a duplicate is never assigned twice and two `works` rows sharing a
+    canonical id always agree. No DDL is emitted: the column already exists
+    (Amendment (C) forbids re-adding it)."""
+    rows = conn.execute("SELECT work_id, canonical_work_id FROM works").fetchall()
+    updates = [
+        (genre_by_work[canonical], work_id)
+        for work_id, canonical in rows if canonical in genre_by_work
+    ]
+    conn.executemany("UPDATE works SET genre = ? WHERE work_id = ?", updates)
+    return {
+        "works_genre_written": len(updates),
+        "works_genre_unmatched": len(rows) - len(updates),
+    }
+
+
+def assert_author_key_coverage(conn: sqlite3.Connection, alias_index: Dict[str, Dict]) -> Dict:
+    """Bind the curated author key to the built asset: every distinct non-NULL
+    `works.author` string must appear in the hash-pinned alias artifact.
+
+    This is what "load the author artifact and apply it" means in the absence
+    of an authorized destination column -- the curated identity is ENFORCED
+    against the asset rather than merely sitting in a file. An author the
+    artifact has never seen means the artifact and the asset were built from
+    different work sets, which is precisely the drift a pin cannot catch on its
+    own.
+
+    The violation message names the COUNT, never the author strings."""
+    authors = {
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT author FROM works WHERE author IS NOT NULL AND author != ''")
+    }
+    uncovered = sorted(a for a in authors if a not in alias_index)
+    if uncovered:
+        raise CuratedArtifactError(
+            f"{len(uncovered)} distinct works.author value(s) are absent from the pinned "
+            "author-alias artifact -- the artifact and the asset were built from different "
+            "work sets (author strings withheld -- masking)"
+        )
+    return {"works_author_strings": len(authors), "works_author_strings_covered": len(authors)}
+
+
 # ---------------------------------------------------------------------------
 # 6.9a FJMS public-vocabulary enrichment (owner decision 2026-07-22): genre =
 # modal FJMS domain, author = modal FJMS composition-author, over each work's
@@ -5708,6 +6001,10 @@ def finalize_build(
     novelty_verdicts_path=None,
     novelty_verdicts_sha256: Optional[str] = None,
     novelty_alias_groups_path=None,
+    work_domains_path=None,
+    work_domains_content_hash: Optional[str] = None,
+    work_author_aliases_path=None,
+    work_author_aliases_content_hash: Optional[str] = None,
     coverage_floor: float = 0.99,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
@@ -5860,6 +6157,22 @@ def finalize_build(
         novelty_grain_index, grain_stats = build_novelty_grain_index(
             verdict_entries, novelty_alias_groups)
         novelty_input_stats = {**verdict_stats, **grain_stats}
+
+    # 136-12 Task 3: the curated artifacts (plan 136-09), loaded with the other
+    # hash-pinned inputs and BEFORE any output mutation. Both are OPT-IN: a
+    # build without them leaves `works.genre` exactly as it is today (NULL),
+    # which is honest, rather than half-populating it from a guess.
+    curated_genres: Dict[str, str] = {}
+    author_alias_index: Dict[str, Dict] = {}
+    curated_stats: Dict = {}
+    if work_domains_path is not None:
+        curated_genres, domain_stats = load_work_domains(
+            work_domains_path, content_hash=work_domains_content_hash)
+        curated_stats.update(domain_stats)
+    if work_author_aliases_path is not None:
+        author_alias_index, alias_stats = load_work_author_aliases(
+            work_author_aliases_path, content_hash=work_author_aliases_content_hash)
+        curated_stats.update(alias_stats)
 
     out_path = Path(out_db_path)
 
@@ -6058,6 +6371,13 @@ def finalize_build(
         # (measurement_status/ci_low) out of that registry, so materializing
         # earlier would silently evaluate every tier_a identification against a
         # missing authorization and demote it.
+        # 136-12 Task 3: the curated genre + author key. Written BEFORE the
+        # identification grain, which joins `works` for the identity axis.
+        if curated_genres:
+            curated_stats.update(apply_work_genres(out_conn, curated_genres))
+        if author_alias_index:
+            curated_stats.update(assert_author_key_coverage(out_conn, author_alias_index))
+
         # 136-12 Task 1: the novelty axis, written BEFORE the identification
         # grain is materialized -- `populate_discovery_identification` inherits
         # each identification's shade from its own evidence rows, so a grain
@@ -6132,6 +6452,18 @@ def finalize_build(
         if novelty_input_stats.get("verdict_cache_sha256"):
             meta_rows.append(
                 ("novelty_verdicts_sha256", novelty_input_stats["verdict_cache_sha256"]))
+        # 136-12: the curated artifacts' verified content hashes. A POPULATED
+        # `works.genre` column must be able to name the pinned artifact that
+        # produced it -- the release verifier checks exactly that, and it is the
+        # only genre provenance an independent verifier can see (the artifact
+        # itself is gitignored).
+        if curated_stats.get("work_domains_content_hash"):
+            meta_rows.append(
+                ("work_domains_content_hash", curated_stats["work_domains_content_hash"]))
+        if curated_stats.get("work_author_aliases_content_hash"):
+            meta_rows.append(
+                ("work_author_aliases_content_hash",
+                 curated_stats["work_author_aliases_content_hash"]))
         # v2 reband markers (bake plan §4.5, gate 13): the target band + the
         # rebanded-row count + the preserved trigger provenance.
         if reband_tier_a:
@@ -6229,6 +6561,9 @@ def finalize_build(
         # silently narrowing or widening the public asset is the failure this
         # number exists to prevent.
         "launch_scope_reconciliation": launch_scope_reconciliation,
+        # 136-12: the curated genre/author load -- both content hashes, the
+        # assigned/unassigned split, and the author-key coverage.
+        "curated": curated_stats,
         "frame_content_hash": frame_content_hash,
         "content_hash": content_hash,
         "band_precision_rows": len(bp_rows),
@@ -6402,6 +6737,20 @@ def build_parser() -> argparse.ArgumentParser:
                         help="SHA-256 pin, REQUIRED whenever --novelty-verdicts is given: "
                              "a cache that is not the cache that was MEASURED is not a "
                              "pinned input (T-136-12-03).")
+    novelty_group.add_argument("--work-domains", metavar="PATH", default=None,
+                        help="Hash-pinned curated work-domain artifact (plan 136-09) -> "
+                             "works.genre at the CANONICAL grain. A row still HELD for owner "
+                             "ruling refuses the build.")
+    novelty_group.add_argument("--work-domains-content-hash", metavar="SHA", default=None,
+                        help="'sha256:<hex>' content-hash pin, REQUIRED with --work-domains. "
+                             "The PRE-RULING hash is superseded and must not be used.")
+    novelty_group.add_argument("--work-author-aliases", metavar="PATH", default=None,
+                        help="Hash-pinned curated author-alias artifact (plan 136-09). Binds "
+                             "the curated author key to the asset by an enforced coverage "
+                             "check; it writes no column (none is authorized).")
+    novelty_group.add_argument("--work-author-aliases-content-hash", metavar="SHA", default=None,
+                        help="'sha256:<hex>' content-hash pin, REQUIRED with "
+                             "--work-author-aliases.")
     novelty_group.add_argument("--novelty-alias-groups", metavar="PATH", default=None,
                         help="Curated work-id alias groups (D-23d). Absent => every work is "
                              "its own singleton reviewed identity (fail-closed), never a "
@@ -6528,6 +6877,10 @@ def main(argv=None) -> int:
         novelty_verdicts_path=args.novelty_verdicts,
         novelty_verdicts_sha256=args.novelty_verdicts_sha256,
         novelty_alias_groups_path=args.novelty_alias_groups,
+        work_domains_path=args.work_domains,
+        work_domains_content_hash=args.work_domains_content_hash,
+        work_author_aliases_path=args.work_author_aliases,
+        work_author_aliases_content_hash=args.work_author_aliases_content_hash,
     )
     print(f"real build OK: {stats['row_counts']}")
     print(f"novelty={stats['novelty']}")

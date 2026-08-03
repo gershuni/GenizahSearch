@@ -228,11 +228,42 @@ def test_numerator_denominator_labels_distinct_from_population():
 # data-driven.
 # ---------------------------------------------------------------------------
 
-def test_precision_reader_tolerates_missing_135_05_columns():
+def test_precision_reader_tolerates_missing_135_05_columns(tmp_path):
+    """A LEGACY asset -- one built before the 135-05 registry columns existed --
+    must still read cleanly.
+
+    ⟨AMENDED 2026-08-03, plan 136-12⟩ This used to assert the condition against
+    the committed golden fixture, which happened to lack `measurement_status`
+    only because it had never been regenerated. 136-12 refreshes the golden, so
+    the legacy shape is now CONSTRUCTED here rather than borrowed from a stale
+    file: a fixture's staleness is not a contract, and a test that depends on
+    it silently stops testing anything the moment the fixture is rebuilt."""
+    legacy_db = _copy_fixture(tmp_path, name="legacy-no-135-05-columns.db")
+    conn = _connect_rw(legacy_db)
+    keep = [
+        r[1] for r in conn.execute("PRAGMA table_info(band_precision)")
+        if r[1] not in ("measurement_status", "measurement_date", "grader",
+                        "audit_status", "report_id")
+    ]
+    cols = ", ".join(f'"{c}"' for c in keep)
+    conn.execute(f'CREATE TABLE band_precision__legacy AS SELECT {cols} FROM band_precision')
+    conn.execute("DROP TABLE band_precision")
+    conn.execute("ALTER TABLE band_precision__legacy RENAME TO band_precision")
+    conn.commit()
+    conn.close()
+
+    row = _service_for(legacy_db).get_band_precision("track1_direct", "tier_a")
+    assert row is not None
+    assert "measurement_status" not in row  # the legacy shape, constructed above
+    assert band_measurement_status(row) == "measured_audit_pending"
+
+
+def test_precision_reader_reads_the_current_fixtures_registry_columns():
+    """The other half of the pair: the CURRENT golden fixture does carry the
+    135-05 registry columns, so the reader surfaces them."""
     row = _service_for(FIXTURE_DB).get_band_precision("track1_direct", "tier_a")
     assert row is not None
-    assert "measurement_status" not in row  # v1 fixture predates the 135-05 column extension
-    assert band_measurement_status(row) == "measured_audit_pending"
+    assert "measurement_status" in row
 
 
 def test_band_measurement_status_not_measured_when_nothing_stored():
@@ -265,7 +296,9 @@ def test_is_default_eligible_fails_closed_on_ci():
 def test_band_measurement_status_data_driven(tmp_path):
     db_path = _copy_fixture(tmp_path)
     conn = _connect_rw(db_path)
-    conn.execute("ALTER TABLE band_precision ADD COLUMN measurement_status TEXT")
+    # 136-12: `measurement_status` has existed in `create_schema` since 135-05;
+    # the ALTER TABLE that used to be here only worked because the committed
+    # golden fixture predated that column. It is now present by construction.
     conn.execute(
         "UPDATE band_precision SET precision = NULL, ci_low = NULL, ci_high = NULL, "
         "measurement_status = NULL "

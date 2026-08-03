@@ -153,6 +153,13 @@ def test_f12_cross_claim_display_pointer_fails(tmp_path):
     rows = conn.execute("SELECT claim_id, display_evidence_id FROM discovery_claim").fetchall()
     claim_a, claim_b = rows[0][0], rows[1][0]
     other_evidence_id = rows[1][1]
+    # 136-12: the D-10a UNIQUE index on `discovery_claim(display_evidence_id)`
+    # now rejects this mutation at the DDL layer -- a stronger guarantee than the
+    # F12 check, and one the previous golden fixture did not carry. The index is
+    # dropped here so the F12 VERIFIER check itself is still exercised: defence
+    # in depth means both layers must work, and only one of them is testable
+    # while the other is holding the door shut.
+    conn.execute("DROP INDEX IF EXISTS ux_discovery_claim_display_evidence_id")
     conn.execute(
         "UPDATE discovery_claim SET display_evidence_id = ? WHERE claim_id = ?",
         (other_evidence_id, claim_a),
