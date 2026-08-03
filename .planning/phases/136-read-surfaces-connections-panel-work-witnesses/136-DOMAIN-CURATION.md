@@ -1,16 +1,20 @@
 # Phase 136 Plan 09 — Work→Domain Curation and the Author Alias Map
 
 **Recorded:** 2026-08-03 · **Plan:** `136-09-PLAN.md` · **Requirements:** NOVEL-01, PANEL-02
+· **Updated:** 2026-08-03 (rulings P and Q applied — the halt is resolved)
 
-Two hash-pinned artifacts and the list of rows the owner must rule on.
+Two hash-pinned artifacts and the rows the owner ruled on.
 
-> **⛔ THIS PLAN IS HALTED, BY DESIGN, PENDING AN OWNER RULING.**
-> `136-GATE1-DECISIONS.md` § D records the owner's verdict verbatim: *"THE OWNER WILL
+> **✅ THE HALT IS RESOLVED — ALL 29 HELD ROWS ARE RULED.**
+> `136-GATE1-DECISIONS.md` § D recorded the owner's verdict verbatim: *"THE OWNER WILL
 > RULE. The 'ship as Unassigned' default is explicitly DECLINED."* Plan 136-09 was
 > therefore required to **produce** the `needs-ruling` work list and halt, not to invent
-> a default. The list is § 4 below: **23 decisions covering 29 of the 1,073 rows (2.7%)**.
-> Until those rulings land, `--validate --release` fails closed and the artifact is
-> **not shippable**.
+> a default. It did (§ 4 below: **23 decisions covering 29 of the 1,073 rows, 2.7%**),
+> and on **2026-08-03** the owner ruled: **§ Ruling P** settles 5 rows from FJMS's own
+> work-level domain, **§ Ruling Q** delegates the remaining 24 (*"Go with your judgements,
+> I trust you"*). Every ruled row now carries its `domain_leaf`, its `domain_parent` and
+> an `owner_ruling` citation; the artifact was **re-emitted and re-pinned**; and
+> **`--validate --release` exits 0**. See § 4.5 for the applied rulings.
 
 ---
 
@@ -18,7 +22,7 @@ Two hash-pinned artifacts and the list of rows the owner must rule on.
 
 | Artifact | Path | Content hash |
 |---|---|---|
-| Work → FJMS domain | `discovery_data/work_domains-v1.json` | `sha256:4cc103ff4523103c7799ab02ffbc50ec23d794f005b8eb0c72b6100f4a1af104` |
+| Work → FJMS domain | `discovery_data/work_domains-v1.json` | `sha256:573937731e2e31f4ad3fccd6f84aadecc7e67210bf4cda82513dfc5c4d94f605` |
 | Author alias map | `discovery_data/work_author_aliases-v1.json` | `sha256:acce47f67dcde456eb477fc092294ee42546963f5d977549f53e635da65f8a64` |
 | Harness + validator | `scripts/curate_work_domains.py` | committed |
 | Tests | `tests/test_work_domains.py` (41) | committed |
@@ -35,21 +39,36 @@ survives any later change to the artifact's own header fields — the same recip
 **Source asset:** `discovery-v1-33499c5b89f9e635565cd1cc8831c012f5373811c2870ddbda7d303e60d4c5ff`
 (the deployed v2 asset; D-01).
 
-**Validation, run as the last step:**
+**Validation, run as the last step (2026-08-03, after rulings P and Q were applied):**
 
 ```
+$ python scripts/curate_work_domains.py --emit-artifact
+wrote discovery_data/work_domains-v1.json
+content_hash=sha256:57393773…
+counts={"total": 1073, "by_confidence": {"high": 1012, "medium": 32,
+        "needs-ruling": 29}, "unassigned": 0,
+        "needs_ruling_held": 0, "needs_ruling_ruled": 29}
+
 $ python scripts/curate_work_domains.py --validate discovery_data/work_domains-v1.json
-VALID: 1073 assignment(s), content_hash=sha256:4cc103ff…                       exit 0
+VALID: 1073 assignment(s), content_hash=sha256:57393773…                       exit 0
 
 $ python scripts/curate_work_domains.py --validate discovery_data/work_domains-v1.json --release
-INVALID: 1 error(s)
-  - RELEASE GATE: 29 needs-ruling row(s) are still held for the owner's ruling; …   exit 1
+VALID: 1073 assignment(s), content_hash=sha256:57393773… [RELEASE GATE PASSED]   exit 0
 
 $ python scripts/curate_work_domains.py --validate-aliases discovery_data/work_author_aliases-v1.json
 VALID: 96 alias row(s), content_hash=sha256:acce47f6…                          exit 0
 ```
 
 An artifact that has not been validated is not pinned. Both were.
+
+**The re-pin was produced by the script, never by hand.** The rulings live in
+`OWNER_RULINGS` in `scripts/curate_work_domains.py` — a **tracked** input
+`--emit-artifact` reads, in the same committed-decisions / gitignored-artifact shape as
+`CURATION_RULES` and `MANUAL_ASSIGNMENTS` — so re-emitting reproduces the ruled rows
+instead of discarding them and the artifact stays regenerable. The change is provably
+confined to the 29 ruled rows: re-running the identical pass with the rulings table
+suppressed reproduces the pre-ruling hash `sha256:4cc103ff…` byte-for-byte, and a
+row-by-row diff of the two emissions returns exactly the 29 ruled ids and nothing else.
 
 ---
 
@@ -81,13 +100,27 @@ rejects a key that is not itself canonical.
 | **Canonical works carrying a shipped claim** | **1,073** | 100% |
 | `high` confidence | 1,012 | 94.3% |
 | `medium` confidence | 32 | 3.0% |
-| `needs-ruling` (**held**) | 29 | 2.7% |
+| `needs-ruling`, **ruled** (§ Ruling P: 5, § Ruling Q: 24) | 29 | 2.7% |
+| `needs-ruling`, still **held** | **0** | 0% |
 | `Unassigned` | 0 | 0% |
+
+`confidence` deliberately **stays `needs-ruling`** on a ruled row. The row's provenance is
+genuinely different from a rule-derived `high`/`medium` one — it was held, put to the
+owner, and settled by a citation — and it is the `owner_ruling` **citation**, not the
+confidence token, that the release gate reads. Rewriting the confidence would erase the
+only marker that these 29 rows were ever contested.
 
 Every row carries a `confidence` and a `provenance`; a test asserts no row is missing
 either, over the real artifact.
 
-**Distinct FJMS leaves used: 55** of the 202-node tree. The ten largest:
+**Distinct FJMS `(parent, leaf)` pairs used: 61** of the 202-node tree (55 before the
+rulings). Ruling Q's governing principle — *use the leaf the vocabulary carries for
+exactly this work; a fallback to a broader leaf leaves the specific node empty and
+destroys the information the facet exists to expose* — is what added six of them:
+`Documentary / Documentary`, `Kalam / Jewish Kalam`, `Medicine / Medical Works`,
+`Polemics / Polemics Jewish-Christian`, `Polemics / Polemics Rabbinical` and
+`Secular Poetry / Other`, each of which would otherwise have had **zero** occupants.
+The ten largest:
 
 | rows | domain |
 |---:|---|
@@ -96,7 +129,7 @@ either, over the real artifact.
 | 83 | Halakhic Literature and Talmudic Commentaries / Talmud Bavli Commentaries |
 | 67 | Midrash / Aggadic Midrashim |
 | 64 | Mishnah: Texts and Translations / Mishnah: Texts |
-| 42 | Halakhic / Halakhic- Gaonim |
+| 43 | Halakhic / Halakhic- Gaonim |
 | 40 | Bible: Texts and Translations / Aramaic Targumim |
 | 39 | Bible: Texts and Translations / Bible: Texts |
 | 35 | Talmud Bavli: Texts and Anthologies / Talmud Bavli |
@@ -114,7 +147,9 @@ resolves every rule name to a sentence.
   vocabulary**: every node it names is checked against the live FJMS tree before a single
   row is emitted, and a rule naming a node the tree does not carry is a build error.
 - **32 rows individually curated** where the rules place a work badly or not at all.
-- **29 rows held** for the owner (§ 4).
+- **29 rows held** for the owner (§ 4) and **since ruled** (§ 4.5). Their `provenance`
+  now reads `owner-ruling:136-GATE1-DECISIONS.md § Ruling P|Q -- <class>`, so a ruled row
+  is distinguishable from a rule-derived one at a glance.
 
 ### Independent check against the feasibility sample
 
@@ -139,16 +174,22 @@ bucket remains a real, reachable value in the schema.
 
 ---
 
-## 4. ⛔ The `needs-ruling` work list — 23 decisions, 29 rows
+## 4. ✅ The `needs-ruling` work list — 23 decisions, 29 rows, all ruled
 
 ### 4.1 The posture applied
 
-**One sentence, as the plan requires:** the `needs-ruling` rows are **HELD** — each carries
-`domain_leaf: null` plus its candidate leaves and a stated question, none carries a guessed
-leaf, and `--validate --release` fails closed while any remains unruled — because
-`136-GATE1-DECISIONS.md` § D records that the owner will rule and that the
-"ship as `Unassigned`" default is **explicitly DECLINED**; **29 rows (2.7% of 1,073) are
-affected**, grouped into **23 decisions**.
+**One sentence, as the plan requires:** the `needs-ruling` rows were **HELD** — each
+carrying `domain_leaf: null` plus its candidate leaves and a stated question, none
+carrying a guessed leaf, with `--validate --release` failing closed while any remained
+unruled — because `136-GATE1-DECISIONS.md` § D records that the owner will rule and that
+the "ship as `Unassigned`" default is **explicitly DECLINED**; **29 rows (2.7% of 1,073)
+were affected**, grouped into **23 decisions**, and **all 29 were ruled on 2026-08-03**
+(§ Ruling P for 5, § Ruling Q for 24), each row now carrying its leaf plus an
+`owner_ruling` citation, so the release gate passes.
+
+§§ 4.2–4.4 below are left exactly as they were written **before** the rulings — they are
+the record of the question that was actually put to the owner, and § 4.5's guard is that
+every ruling picked one of the candidates those sections offered.
 
 `--validate` checks structure only, so a `needs-ruling` row would otherwise ship into the
 asset whether or not anyone looked at it (threat T-136-09-06). Two mechanisms close that:
@@ -410,6 +451,80 @@ The remaining **19 decisions are single rows**.
 - **Author (as recorded):** — none — · **shipped claims:** 1 · **class:** (c)
 - (same question and candidates as #3)
 
+### 4.5 ✅ The rulings, as applied — 2026-08-03
+
+Recorded verbatim in `136-GATE1-DECISIONS.md` **§ Ruling P** and **§ Ruling Q**, and
+applied here through `OWNER_RULINGS` in `scripts/curate_work_domains.py`. Every row below
+carries `domain_parent`, `domain_leaf` and the `owner_ruling` citation naming the section
+that settles it.
+
+**§ Ruling P — 5 rows, settled from FJMS's OWN work-level domain.** The owner was right
+that a work-level domain exists and this pass had missed it:
+`fjms_enrichment.db::genizah_titles.DomainId` is populated for 718 of its 775 titles — a
+domain attached to a **title**, not to an AlmaId, so it does not breach § 2's
+assignment axis. It has no code→string table; the mapping was recovered empirically by
+restricting to AlmaIds with exactly one `catalog.GenizahTitleId` **and** exactly one
+`domains` row (62 DomainIds at 99.8% mean concentration). "Follow FJMS" is **scoped to
+this evidence and is not a blanket override** — FJMS exact-covers only 55 of the 1,073
+works, its taxonomy is often coarser than the rule table's, and in the largest
+disagreement (הגדה של פסח, 2,180 claims) the rule table is the better answer. Where
+comparable, agreement is **79.6%** (39/49) — this pass's first independent validation.
+Two candidate rulings were **declined as too thin** and fell through to § Ruling Q:
+מגילת אביתר (n=6) and ספר יצירה (n=1).
+
+| rows | canonical ids | ruled `parent / leaf` | FJMS support |
+|---|---|---|---|
+| Yosippon (G1) | `w001152`, `w000853`, `w000855` | `Historiography and geographical descriptions / Historiography and geographical descriptions` | DomainId 180000, 100%, n=98, exact title match |
+| Seder Olam (G3) | `w000164`, `w001066` | `Rabbinic Literature / Other` | DomainId 120000, 100%, n=87 |
+
+**§ Ruling Q — the remaining 24, DELEGATED.** The owner's instruction verbatim: *"Go with
+your judgements, I trust you."* These are **delegated judgements, not owner-authored
+ones**; delegation does not make a weak call strong, and the ⚠ rows below are the first
+things to revisit if the facet ever looks wrong. Governing principle: where the closed
+vocabulary carries a leaf for *exactly this work*, use it.
+
+| rows | canonical ids | ruled `parent / leaf` | ⚠ |
+|---|---|---|---|
+| המספיק לעובדי השם ×3 | `w000007`, `w000036`, `w000038` | `Philosophy, Theology, Ethical literature / Sufi Literature` | |
+| העיונים והדיונים | `w000001` | `Secular Poetry / Other` | |
+| תעודות יהודי סיציליה | `w001149` | `Documentary / Documentary` | catalogue override (see below) |
+| אגרות הרמב״ם (שילת) | `w001140` | `Philosophy, Theology, Ethical literature / Ethical Literature` | |
+| ספר יצירה + רס״ג's commentary | `w000522`, `w000021` | `Kabbalah / Other` | ⚠ Philosophy defensible for `w000021` alone |
+| המעשה בפולמוס הכומר | `w000058` | `Polemics / Polemics Jewish-Christian` | |
+| כתאב אלדרר | `w001132` | `Secular Poetry / Other` | ⚠ Belles Lettres arguable |
+| עשרים מאמרים | `w000057` | `Kalam / Jewish Kalam` | |
+| משיבת נפש | `w000820` | `Biblical Exegesis / Biblical Exegesis- Karaite` | |
+| אגרות שמואל בן עלי | `w000079` | `Documentary / Letters` | |
+| איגרת ההשתקה | `w000081` | `Philosophy, Theology, Ethical literature / Philosophy` | |
+| חטר בן שלמה, שאלות | `w000040` | `Philosophy, Theology, Ethical literature / Philosophy` | catalogue override (see below) |
+| מגילת אביתר | `w000444` | `Polemics / Polemics Rabbinical` | ⚠ n=6; Historiography arguable |
+| ערוגת הבושם | `w000160` | `Philology / Grammar` | ⚠ n=12; unresolved title/author collision |
+| יהודה ראש הסדר, ספר השנים | `w000065` | `Astronomy / Calendar` | ⚠ |
+| מרפא לעצם | `w000818` | `Medicine / Medical Works` | |
+| זיכרונות מימי נעוריי | `w000154` | `Historiography and geographical descriptions` | ⚠ `Unassigned` deliberately NOT used |
+| תולדות בן סירא | `w001079` | `Stories and Belles Lettres` | |
+| ספר הזיכרון | `w001055` | `Halakhic / Halakhic- Gaonim` | ⚠ **lowest-confidence call in the set** — a prior, not evidence |
+| פרקי ט׳ באב | `w001004` | `Derashot and Later Midrashim / Later Midrashim` | ⚠ |
+| תולדות רבנו הקדוש | `w001058` | `Stories and Belles Lettres` | |
+
+**Two catalogue overrides are deliberate and must not be "corrected" later:** `w000040`
+(a philosopher's questions, not responsa — the catalogue reads 51% Responsa, n=37) and
+`w001149` (the edition is a mixture even though its individual fragments are mostly
+letters — the catalogue's 55% `Letters` describes the fragments, not the edition).
+
+**`w000154` was deliberately NOT sent to `Unassigned`,** though that was on its candidate
+list: `Unassigned` would hide a row the artifact itself says may not belong in the corpus
+at all. Assigning it keeps it visible. The real question is corpus membership — a
+data-quality item (§ 6.5), not a domain question.
+
+**How a ruling is prevented from becoming a new guess.** Rulings live in `OWNER_RULINGS`
+in the committed script, and `assert_rulings_are_answerable()` refuses to emit if any of
+three things is true: the ruling names a work that was never held; the ruled
+`(parent, leaf)` is absent from the **live** FJMS tree; or the ruled leaf was **not one of
+the candidates that row itself offered** — a ruling answers the question that was put to
+the owner, it does not introduce a fourth option after the fact. All 29 pass all three;
+five tests pin the behaviour.
+
 ---
 
 ## 5. The author alias map (Task 3)
@@ -540,7 +655,7 @@ as domain problems; the Genizah corpus is overwhelmingly earlier than any of the
 | **T-136-09-01** a domain invented outside the closed vocabulary | The vocabulary is read from `shared/fjms_service.py` at runtime with no snapshot and no fallback; `assert_rules_within_vocabulary()` rejects a rule naming an unknown node before any row is emitted; `--validate` rejects an out-of-tree leaf; three tests assert it, including a behavioural one that swaps the tree and watches validation follow. |
 | **T-136-09-02** a restricted-corpus name reaching a committed artifact | `check_atlas_masking.py --scan-asset` run on both artifacts, on this report, and on the script and tests — all exit 0. A **positive control** was run in the same session (a real pattern seeded into a scratch file) and correctly tripped, so the clean results are true negatives, not a misconfigured scanner. Restricted corpora are named only as "M-source"/"R-source" anywhere in this plan's output. |
 | **T-136-09-03** a guessed assignment presented with the same weight as a confident one | Every row carries `confidence` and `provenance`; `needs-ruling` rows are listed for the owner rather than resolved. |
-| **T-136-09-06** a `needs-ruling` row shipping unreviewed | The posture is read from `136-GATE1-DECISIONS.md` § D and stated in § 4.1; a held row with a concrete leaf and no `owner_ruling` is a validation error; `--validate --release` fails while any held row is unruled; tests assert both on synthetic and real rows. |
+| **T-136-09-06** a `needs-ruling` row shipping unreviewed | The posture is read from `136-GATE1-DECISIONS.md` § D and stated in § 4.1; a held row with a concrete leaf and no `owner_ruling` is a validation error; `--validate --release` fails while any held row is unruled; tests assert both on synthetic and real rows. **Since 2026-08-03** all 29 rows carry an `owner_ruling` citation naming § Ruling P or § Ruling Q, and `assert_rulings_are_answerable()` additionally refuses a ruling on a work that was never held, a ruled leaf outside the live tree, or a ruled leaf that was never among that row's own candidates. |
 | **T-136-09-04** a work assigned twice through a duplicate id | Keys are canonical work ids; `--validate` rejects duplicates and rejects a non-canonical key. |
 | **T-136-09-05** an artifact edited after pinning | Content hash over the payload array, recorded in § 1, re-checked by `--validate` and to be re-checked at ingest in 136-12. |
 | **T-136-09-SC** package installs | None in this plan. |
@@ -550,8 +665,15 @@ as domain problems; the Genizah corpus is overwhelmingly earlier than any of the
 ## 8. What plan 136-12 must do with this
 
 1. Re-verify **both** content hashes before ingest — they are the pin.
+   **`work_domains-v1.json` is now `sha256:57393773…`, not the `sha256:4cc103ff…` this
+   report first recorded**; the earlier hash is the pre-ruling artifact and must not be
+   accepted.
 2. Load `work_domains-v1.json` into `works.genre` **at the canonical grain**, per
    `discovery-sidecar-schema-v1.md` § Amendment 2026-08-02 (C): the column already exists
    and must not be re-added by DDL; a value outside the closed vocabulary is a build error.
-3. **Refuse to build while `--validate --release` fails.** As of this record it does, on
-   29 held rows.
+3. **Refuse to build while `--validate --release` fails.** As of 2026-08-03 it **passes**
+   (exit 0, 0 held rows) — but the gate stays wired: it is what stops a future re-emission
+   that adds a held row from shipping silently.
+4. Do **not** key on `confidence` to decide whether a row is trustworthy. The 29 ruled
+   rows keep `confidence: needs-ruling` deliberately (§ 3); `owner_ruling` is the field
+   that says "settled".

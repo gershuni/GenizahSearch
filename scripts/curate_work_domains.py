@@ -106,6 +106,24 @@ A ``needs-ruling`` row may NEVER carry a guessed leaf: a concrete
 ``domain_leaf`` on such a row is rejected unless it also carries
 ``owner_ruling``.
 
+THE RULINGS ARE A TRACKED INPUT, NOT A HAND EDIT
+------------------------------------------------
+When the owner rules, the ruling is recorded in ``OWNER_RULINGS`` below -- a
+COMMITTED table in this committed module, exactly like ``CURATION_RULES`` and
+``MANUAL_ASSIGNMENTS``, and for the same reason: ``discovery_data/`` is
+gitignored, so the artifact itself can never be the record of a decision.
+``--emit-artifact`` reads ``OWNER_RULINGS`` and emits the ruled rows with
+their ``domain_leaf`` and their ``owner_ruling`` citation, so **re-emitting
+reproduces the rulings instead of discarding them** and the artifact stays
+regenerable rather than hand-edited.  Three build errors guard the table:
+
+  * a ruling on a work that is NOT held is rejected (nothing to rule on);
+  * a ruled ``(domain_parent, domain_leaf)`` outside the LIVE FJMS tree is
+    rejected (threat T-136-09-01);
+  * a ruled leaf that is not one of THAT row's own ``candidate_leaves`` is
+    rejected -- a ruling settles the question that was actually put to the
+    owner, it does not introduce a new option after the fact.
+
 MODES
 -----
   ``--emit-worklist``   the canonical works needing assignment, at the
@@ -1524,27 +1542,213 @@ for _yetzirah, _yetzirah_why in (
     )
 
 
+# -- the owner's rulings on the held rows --------------------------------
+# A TRACKED input the emitter reads, so a re-emission carries the rulings
+# rather than discarding them (see the module docstring).  Every entry cites
+# the section of `136-GATE1-DECISIONS.md` that settles it; every ruled leaf is
+# checked against the LIVE FJMS tree AND against that row's own
+# `candidate_leaves` before a row is emitted.
+#
+# The 29 held rows were ruled on 2026-08-03 in two sections:
+#   Ruling P -- 5 rows settled from FJMS's OWN work-level domain
+#               (`fjms_enrichment.db::genizah_titles.DomainId`, decoded via
+#               AlmaIds carrying exactly one title and exactly one domain row).
+#   Ruling Q -- the remaining 24, delegated by the owner ("Go with your
+#               judgements, I trust you") and therefore DELEGATED judgements,
+#               not owner-authored ones.  Ruling Q's governing principle:
+#               where the closed vocabulary carries a leaf for exactly this
+#               work, use it -- falling back to a broader leaf leaves the
+#               specific node empty and destroys the information the facet
+#               exists to expose.
+
+RULING_P = "136-GATE1-DECISIONS.md § Ruling P"
+RULING_Q = "136-GATE1-DECISIONS.md § Ruling Q"
+
+#: work id -> the ruled assignment.  ``why`` is recorded on the row's ``note``.
+OWNER_RULINGS: Dict[str, Dict[str, Any]] = {}
+
+
+def _ruled(work_id: str, parent: str, leaf: str, citation: str, why: str) -> None:
+    OWNER_RULINGS[work_id] = {
+        "domain_parent": parent,
+        "domain_leaf": leaf,
+        "owner_ruling": citation,
+        "why": why,
+    }
+
+
+# --- Ruling P: settled from FJMS's own work-level domain ----------------
+for _yosippon in ("w001152", "w000853", "w000855"):
+    _ruled(_yosippon,
+           "Historiography and geographical descriptions",
+           "Historiography and geographical descriptions", RULING_P,
+           "FJMS's own work-level domain for this title (DomainId 180000, 100% "
+           "concentration, n=98, exact normalized-title match) reads as "
+           "historiography -- history, not romance")
+for _seder_olam in ("w000164", "w001066"):
+    _ruled(_seder_olam, "Rabbinic Literature", "Other", RULING_P,
+           "FJMS's own work-level domain for this title (DomainId 120000, 100% "
+           "concentration, n=87) files Seder Olam with the rabbinic corpus, not "
+           "with historiography")
+
+# --- Ruling Q: the remaining 24, delegated ------------------------------
+for _kifayat in ("w000007", "w000036", "w000038"):
+    _ruled(_kifayat, "Philosophy, Theology, Ethical literature",
+           "Sufi Literature", RULING_Q,
+           "the paradigmatic Jewish-Sufi text; the dedicated leaf exists for it, "
+           "and falling back to Ethical Literature would leave it empty")
+_ruled("w000001", "Secular Poetry", "Other", RULING_Q,
+       "Kitab al-Muhadara is Hebrew POETICS; Grammar is about language structure")
+_ruled("w001149", "Documentary", "Documentary", RULING_Q,
+       "a deliberately MIXED documentary edition; the coarse parent avoids "
+       "mislabelling its non-letter documents. The catalogue's 55% Letters "
+       "describes the individual fragments, not the edition")
+_ruled("w001140", "Philosophy, Theology, Ethical literature",
+       "Ethical Literature", RULING_Q,
+       "Yemen / Martyrdom / Resurrection are theological-ethical treatises in "
+       "letter form; Documentary/Letters means archival correspondence and would "
+       "be a category error")
+for _yetzirah_ruled in ("w000021", "w000522"):
+    _ruled(_yetzirah_ruled, "Kabbalah", "Other", RULING_Q,
+           "the vocabulary has no Sefer Yetzirah leaf; the mystical tradition is "
+           "its conventional home, and FJMS's own (n=1, unusable) signal also "
+           "pointed mystical. Text and commentary are kept together so they do "
+           "not split across parents. THIN: Saadia's commentary is genuinely "
+           "philosophical-cosmological, and Philosophy is a defensible "
+           "alternative for w000021 alone")
+_ruled("w000058", "Polemics", "Polemics Jewish-Christian", RULING_Q,
+       "catalogue 64% (n=69); its subject IS the disputation")
+_ruled("w001132", "Secular Poetry", "Other", RULING_Q,
+       "catalogue 38% (n=100); al-Harizi is a poet and the anthology carries his "
+       "verse. THIN: Belles Lettres is arguable for a prose anthology")
+_ruled("w000057", "Kalam", "Jewish Kalam", RULING_Q,
+       "al-Muqammis' 'Ishrun Maqala is the FOUNDING Jewish kalam text; the "
+       "dedicated leaf exists for it")
+_ruled("w000820", "Biblical Exegesis", "Biblical Exegesis- Karaite", RULING_Q,
+       "the catalogue is 64% Karaite contexts (n=64), which selects Yeshua b. "
+       "Judah's commentary over the devotional readings")
+_ruled("w000079", "Documentary", "Letters", RULING_Q,
+       "unlike the Maimonidean epistles these are ACTUAL letters of the Baghdad "
+       "Gaon preserved as correspondence")
+_ruled("w000081", "Philosophy, Theology, Ethical literature", "Philosophy", RULING_Q,
+       "this row's own note leads with 'a philosophical treatise addressed as a "
+       "letter'")
+_ruled("w000040", "Philosophy, Theology, Ethical literature", "Philosophy", RULING_Q,
+       "catalogue DELIBERATELY overridden (51% Responsa, n=37): Hoter b. Solomon "
+       "is a known Yemenite philosopher and this row records the responsa reading "
+       "as surface form only. Not to be 'corrected' later")
+_ruled("w000444", "Polemics", "Polemics Rabbinical", RULING_Q,
+       "follows FJMS's own work-level domain. THIN: n=6, and it is a partisan "
+       "account, so Historiography is arguable")
+_ruled("w000160", "Philology", "Grammar", RULING_Q,
+       "the RECORDED author is Archivolti and the catalogue agrees (42%). THIN: "
+       "n=12, and this row is a title/author collision with Abraham b. Azriel's "
+       "piyyut commentary -- a data-quality item this ruling does NOT settle")
+_ruled("w000065", "Astronomy", "Calendar", RULING_Q,
+       "the title states the subject; the lexicographic reading comes only from "
+       "the author's OTHER work. THIN")
+_ruled("w000818", "Medicine", "Medical Works", RULING_Q,
+       "the title is explicit; magical recipes are a transmission context, not "
+       "the work's subject")
+_ruled("w000154", "Historiography and geographical descriptions",
+       "Historiography and geographical descriptions", RULING_Q,
+       "memoir as historical writing. Unassigned was DELIBERATELY not used -- it "
+       "would hide a row that may not belong in the corpus at all; assigning it "
+       "keeps it visible. THIN: the real question is corpus membership, recorded "
+       "as data-quality")
+_ruled("w001079", "Stories and Belles Lettres", "Stories and Belles Lettres", RULING_Q,
+       "the Alphabet of Ben Sira is a satirical folk narrative in midrashic dress")
+_ruled("w001055", "Halakhic", "Halakhic- Gaonim", RULING_Q,
+       "THIN -- the LOWEST-CONFIDENCE call in this set. This row itself says the "
+       "subject is not determinable from title+author; Saadia's monographs are "
+       "predominantly halakhic, so this is a prior, not evidence. 3 claims")
+_ruled("w001004", "Derashot and Later Midrashim", "Later Midrashim", RULING_Q,
+       "'פרקי' marks a midrashic composition (cf. Pirkei de-Rabbi Eliezer). THIN")
+_ruled("w001058", "Stories and Belles Lettres", "Stories and Belles Lettres", RULING_Q,
+       "hagiography sits closer to narrative than to historiography")
+
+
+def assert_rulings_are_answerable(
+    vocab: Vocabulary,
+    needs_ruling: Mapping[str, Mapping[str, Any]],
+    rulings: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Every ruling must settle a HELD row, with a leaf that row actually offered.
+
+    Three build errors, in the same fail-closed shape as
+    :func:`assert_rules_within_vocabulary`:
+
+      1. a ruling on a work that is not held -- there is nothing to rule on;
+      2. a ruled ``(parent, leaf)`` outside the LIVE FJMS tree (T-136-09-01);
+      3. a ruled leaf that is not one of THAT row's own ``candidate_leaves`` --
+         a ruling answers the question that was put to the owner; it does not
+         introduce a new option after the fact.
+    """
+    bad: List[str] = []
+    for wid, spec in sorted(rulings.items()):
+        parent = spec["domain_parent"]
+        leaf = spec["domain_leaf"]
+        if not spec.get("owner_ruling"):
+            bad.append(f"ruling {wid}: carries no owner_ruling citation")
+        held = needs_ruling.get(wid)
+        if held is None:
+            bad.append(
+                f"ruling {wid}: is not a held needs-ruling row -- there is "
+                "nothing here to rule on"
+            )
+            continue
+        if not vocab.has_pair(parent, leaf) and not (
+            parent == UNASSIGNED and leaf == UNASSIGNED
+        ):
+            bad.append(
+                f"ruling {wid}: {leaf!r} is not under {parent!r} in the live "
+                f"FJMS tree (actual parents: {vocab.parents_of(leaf)})"
+            )
+            continue
+        offered = {
+            (c["domain_parent"], c["domain_leaf"]) for c in held["candidate_leaves"]
+        }
+        if (parent, leaf) not in offered:
+            bad.append(
+                f"ruling {wid}: {parent!r} / {leaf!r} was not among the candidate "
+                f"leaves put to the owner ({sorted(offered)})"
+            )
+    if bad:
+        raise CurationError(
+            "owner rulings do not settle the questions that were asked:\n  "
+            + "\n  ".join(bad)
+        )
+
+
 def curate(
     worklist: Sequence[Mapping[str, Any]],
     vocab: Vocabulary,
     rules: Optional[Sequence[Mapping[str, Any]]] = None,
     manual: Optional[Mapping[str, Mapping[str, Any]]] = None,
     needs_ruling: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    rulings: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Assign every canonical work in ``worklist`` a domain.
 
-    Order of precedence: an explicit owner-held ``needs-ruling`` row, then an
+    Order of precedence: an explicit owner-held ``needs-ruling`` row (carrying
+    the owner's ruling when one has been recorded for it), then an
     individually-curated manual assignment, then the ordered rule table, then
     ``Unassigned`` (a REAL, visible bucket) for a work no rule places.
 
-    ``rules`` / ``manual`` / ``needs_ruling`` default to this module's own
-    curation tables; they are injectable so the behaviour can be exercised
-    against a small vocabulary without the FJMS sidecar.
+    ``rules`` / ``manual`` / ``needs_ruling`` / ``rulings`` default to this
+    module's own curation tables; they are injectable so the behaviour can be
+    exercised against a small vocabulary without the FJMS sidecar.  ``rulings``
+    PAIRS with ``needs_ruling``: injecting a needs-ruling table without a
+    rulings table means "no rulings", never "this module's 29 rulings against a
+    two-row test table".
     """
     rules = CURATION_RULES if rules is None else rules
     manual = MANUAL_ASSIGNMENTS if manual is None else manual
+    if rulings is None:
+        rulings = OWNER_RULINGS if needs_ruling is None else {}
     needs_ruling = NEEDS_RULING if needs_ruling is None else needs_ruling
     assert_rules_within_vocabulary(vocab, rules)
+    assert_rulings_are_answerable(vocab, needs_ruling, rulings)
     bad: List[str] = []
     for wid, spec in manual.items():
         if not vocab.has_pair(spec["domain_parent"], spec["domain_leaf"]):
@@ -1581,6 +1785,24 @@ def curate(
                 "candidate_leaves": spec["candidate_leaves"],
             }
             note = spec.get("note") or spec.get("question")
+            ruling = rulings.get(wid)
+            if ruling is not None:
+                # RULED.  `confidence` deliberately STAYS `needs-ruling`: the
+                # row was held and then settled by a ruling, which is not the
+                # same provenance as a rule-derived `high`/`medium` row, and it
+                # is the `owner_ruling` CITATION -- not the confidence value --
+                # that the release gate reads.  `candidate_leaves` is kept so
+                # the artifact still records what the ruling chose between.
+                row["domain_parent"] = ruling["domain_parent"]
+                row["domain_leaf"] = ruling["domain_leaf"]
+                row["owner_ruling"] = ruling["owner_ruling"]
+                row["provenance"] = (
+                    "owner-ruling:" + ruling["owner_ruling"] + " -- " + spec["case"]
+                )
+                why = ruling.get("why")
+                if why:
+                    note = (note + "  ") if note else ""
+                    note += "RULED (" + ruling["owner_ruling"] + "): " + why
             if note:
                 row["note"] = note
             out.append(row)
@@ -1637,6 +1859,19 @@ def build_artifact(
     by_confidence: Dict[str, int] = {}
     for r in rows:
         by_confidence[r["confidence"]] = by_confidence.get(r["confidence"], 0) + 1
+    ruled = sorted(
+        {r["owner_ruling"] for r in rows if r.get("owner_ruling")}
+    )
+    n_ruled = sum(1 for r in rows if r.get("owner_ruling"))
+    n_held = sum(
+        1 for r in rows if r["confidence"] == "needs-ruling" and not r.get("owner_ruling")
+    )
+    posture = NEEDS_RULING_POSTURE_HELD
+    if ruled:
+        posture += (
+            f" APPLIED: {n_ruled} row(s) carry an owner_ruling citation "
+            f"({'; '.join(ruled)}) and {n_held} remain held."
+        )
     doc = {
         "artifact": ARTIFACT_NAME,
         "artifact_version": ARTIFACT_VERSION,
@@ -1645,7 +1880,7 @@ def build_artifact(
         "vocabulary_source": vocab.source,
         "asset_basename": asset_basename,
         "assignment_axis": ASSIGNMENT_AXIS,
-        "needs_ruling_posture": NEEDS_RULING_POSTURE_HELD,
+        "needs_ruling_posture": posture,
         "rules": [
             {"name": r["name"], "description": r["description"],
              "domain_parent": r["domain_parent"], "domain_leaf": r["domain_leaf"]}
@@ -1655,9 +1890,8 @@ def build_artifact(
             "total": len(rows),
             "by_confidence": dict(sorted(by_confidence.items())),
             "unassigned": sum(1 for r in rows if r["domain_leaf"] == UNASSIGNED),
-            "needs_ruling_held": sum(
-                1 for r in rows if r["confidence"] == "needs-ruling" and not r.get("owner_ruling")
-            ),
+            "needs_ruling_held": n_held,
+            "needs_ruling_ruled": n_ruled,
         },
         "content_hash": compute_content_hash(rows),
         "assignments": rows,
@@ -1897,6 +2131,7 @@ def build_report(doc: Mapping[str, Any], worklist_index: Mapping[str, Mapping[st
         lines.append(f"  {token:<14}: {counts.get('by_confidence', {}).get(token, 0)}")
     lines.append(f"Unassigned        : {counts.get('unassigned')}")
     lines.append(f"needs-ruling held : {counts.get('needs_ruling_held')}")
+    lines.append(f"needs-ruling ruled: {counts.get('needs_ruling_ruled', 0)}")
     lines.append("")
 
     by_leaf: Dict[Tuple[str, str], int] = {}
@@ -1928,6 +2163,18 @@ def build_report(doc: Mapping[str, Any], worklist_index: Mapping[str, Mapping[st
                 f"   ({cand['case']})"
             )
         lines.append("")
+
+    ruled = [r for r in rows if r.get("owner_ruling")]
+    lines.append(f"RULED BY THE OWNER ({len(ruled)})")
+    lines.append("-" * 70)
+    for r in ruled:
+        meta = worklist_index.get(r["canonical_work_id"], {})
+        lines.append(
+            f"{r['canonical_work_id']}  {meta.get('neutral_title', '')}"
+            f"   ->   {r['domain_parent']} / {r['domain_leaf']}"
+        )
+        lines.append(f"            ruling: {r['owner_ruling']}")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -1974,6 +2221,9 @@ def build_parser() -> argparse.ArgumentParser:
             "  carry a guessed leaf. --validate passes on a held row; --validate --release FAILS\n"
             "  while any held row is unruled. The 'ship as Unassigned' default was explicitly\n"
             "  DECLINED by the owner (136-GATE1-DECISIONS.md group D).\n"
+            "  When the owner rules, the ruling goes in this module's OWNER_RULINGS table --\n"
+            "  a TRACKED input --emit-artifact reads -- so re-emitting reproduces the ruled\n"
+            "  rows instead of discarding them, and the artifact is never hand-edited.\n"
         ),
     )
     p.add_argument("--emit-worklist", action="store_true",

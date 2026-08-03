@@ -277,6 +277,125 @@ def test_missing_posture_statement_is_rejected(vocab):
 
 
 # ---------------------------------------------------------------------------
+# The owner's rulings -- a TRACKED input the emitter reads, so a re-emission
+# reproduces the ruled rows instead of discarding them.
+# ---------------------------------------------------------------------------
+
+
+_HELD_TABLE = {
+    "w000003": {
+        "case": "(c) between two adjacent leaves",
+        "question": "letters, or history?",
+        "candidate_leaves": [
+            {"domain_parent": "Documentary", "domain_leaf": "Letters",
+             "case": "surface form"},
+            {"domain_parent": "Historiography and geographical descriptions",
+             "domain_leaf": "Historiography and geographical descriptions",
+             "case": "content"},
+        ],
+        "note": None,
+    }
+}
+
+_HELD_WORKLIST = [
+    {"canonical_work_id": "w000003", "neutral_title": "t", "author": None,
+     "source_corpus": "sefaria", "shipped_claims": 1},
+]
+
+
+def _curate_held(vocab, rulings):
+    return cwd.curate(
+        _HELD_WORKLIST, vocab, rules=[], manual={},
+        needs_ruling=_HELD_TABLE, rulings=rulings,
+    )
+
+
+def test_a_ruled_row_emits_its_leaf_its_citation_and_passes_the_release_gate(vocab):
+    rows = _curate_held(vocab, {
+        "w000003": {"domain_parent": "Documentary", "domain_leaf": "Letters",
+                    "owner_ruling": "136-GATE1-DECISIONS.md § Ruling Q",
+                    "why": "these are actual letters"},
+    })
+    row = rows[0]
+    assert row["domain_parent"] == "Documentary"
+    assert row["domain_leaf"] == "Letters"
+    assert row["owner_ruling"] == "136-GATE1-DECISIONS.md § Ruling Q"
+    # The citation, not the confidence value, is what unlocks release: the row
+    # stays `needs-ruling` so its provenance remains distinguishable.
+    assert row["confidence"] == "needs-ruling"
+    assert row["provenance"].startswith("owner-ruling:")
+    assert "these are actual letters" in row["note"]
+    # candidate_leaves is kept: the artifact still records what was chosen between
+    assert len(row["candidate_leaves"]) == 2
+    assert _errors(rows, vocab, release=True) == []
+
+
+def test_ruling_on_a_work_that_is_not_held_is_a_build_error(vocab):
+    with pytest.raises(cwd.CurationError) as exc:
+        _curate_held(vocab, {
+            "w000004": {"domain_parent": "Documentary", "domain_leaf": "Letters",
+                        "owner_ruling": "somewhere", "why": "x"},
+        })
+    assert "nothing here to rule on" in str(exc.value)
+
+
+def test_ruling_naming_a_leaf_outside_the_live_tree_is_a_build_error(vocab):
+    with pytest.raises(cwd.CurationError) as exc:
+        _curate_held(vocab, {
+            "w000003": {"domain_parent": "Documentary", "domain_leaf": "Palaeography",
+                        "owner_ruling": "somewhere", "why": "x"},
+        })
+    assert "is not under" in str(exc.value)
+
+
+def test_ruling_naming_a_leaf_never_offered_to_the_owner_is_a_build_error(vocab):
+    """A ruling answers the question that was put to the owner; it may not
+    introduce a fourth option after the fact."""
+    with pytest.raises(cwd.CurationError) as exc:
+        _curate_held(vocab, {
+            "w000003": {"domain_parent": "Bible: Texts and Translations",
+                        "domain_leaf": "Bible: Texts",
+                        "owner_ruling": "somewhere", "why": "x"},
+        })
+    assert "was not among the candidate leaves put to the owner" in str(exc.value)
+
+
+def test_rulings_pair_with_the_needs_ruling_table_they_rule_on(vocab):
+    """Injecting a needs-ruling table without a rulings table means NO rulings,
+    never this module's own rulings against a one-row test table."""
+    rows = cwd.curate(_HELD_WORKLIST, vocab, rules=[], manual={},
+                      needs_ruling=_HELD_TABLE)
+    assert rows[0]["domain_leaf"] is None
+    assert "owner_ruling" not in rows[0]
+
+
+def test_every_module_ruling_settles_a_module_held_row():
+    """Pure structural check over this module's OWN tables -- no sidecar."""
+    assert cwd.OWNER_RULINGS, "the rulings table must not be empty"
+    for wid, spec in cwd.OWNER_RULINGS.items():
+        held = cwd.NEEDS_RULING.get(wid)
+        assert held is not None, f"{wid} is ruled but was never held"
+        offered = {(c["domain_parent"], c["domain_leaf"])
+                   for c in held["candidate_leaves"]}
+        assert (spec["domain_parent"], spec["domain_leaf"]) in offered, wid
+        assert spec["owner_ruling"] in (cwd.RULING_P, cwd.RULING_Q), wid
+        assert spec["why"].strip(), wid
+
+
+def test_the_posture_statement_records_the_applied_rulings(vocab):
+    rows = _curate_held(vocab, {
+        "w000003": {"domain_parent": "Documentary", "domain_leaf": "Letters",
+                    "owner_ruling": "136-GATE1-DECISIONS.md § Ruling Q",
+                    "why": "y"},
+    })
+    doc = cwd.build_artifact(rows, vocab, "asset")
+    assert "DECLINED" in doc["needs_ruling_posture"]
+    assert "Ruling Q" in doc["needs_ruling_posture"]
+    assert doc["counts"]["needs_ruling_ruled"] == 1
+    assert doc["counts"]["needs_ruling_held"] == 0
+
+
+# ---------------------------------------------------------------------------
 # Hash pinning.
 # ---------------------------------------------------------------------------
 
@@ -552,6 +671,21 @@ def test_real_artifact_hash_matches_and_posture_is_stated():
     assert doc["content_hash"] == cwd.compute_content_hash(doc["assignments"])
     assert doc.get("needs_ruling_posture")
     assert "DECLINED" in doc["needs_ruling_posture"]
+
+
+@_have_domains
+def test_real_artifact_holds_no_unruled_row():
+    """The release gate's own condition, asserted on the emitted artifact:
+    rulings P and Q settled all 29 held rows, so nothing is still held."""
+    doc = _load(_DOMAINS)
+    held = [r for r in doc["assignments"]
+            if r.get("confidence") == "needs-ruling" and not r.get("owner_ruling")]
+    assert held == [], [r["canonical_work_id"] for r in held]
+    ruled = [r for r in doc["assignments"] if r.get("owner_ruling")]
+    assert ruled, "the ruled rows must be present in the emitted artifact"
+    for row in ruled:
+        assert row["domain_leaf"] and row["domain_parent"], row["canonical_work_id"]
+        assert "136-GATE1-DECISIONS.md" in row["owner_ruling"], row["canonical_work_id"]
 
 
 @_have_domains
