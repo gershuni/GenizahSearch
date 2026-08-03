@@ -18,13 +18,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import sys
-from pathlib import Path
 
 import pytest
 
 import web.discovery_assets as da
+from tests.fixtures.discovery_v2_fixture import materialize_sidecar
 
-FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "discovery"
 FIXTURE_VERSION = "discovery-v1-synthetic-fixture"
 
 
@@ -70,7 +69,12 @@ def test_import_before_load_then_load_then_query_resolves_and_version_correct(mo
     # 3. NOW load the real committed fixture (simulating a later
     # rebuild+restart) -- the ALREADY-IMPORTED module must pick this up
     # purely because its providers are lazy/call-time, not import-time.
-    monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(FIXTURE_DIR))
+    # Post-136-20 the readiness contract requires the Amendment 2026-08-02
+    # shape, so the fixture is materialized as an UPGRADED copy rather than
+    # read in place from the committed (pre-rebuild) directory.
+    ready_dir = tmp_path / "ready"
+    materialize_sidecar(ready_dir)
+    monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(ready_dir))
     assert da.load_discovery_state() is True
     assert da.discovery_available() is True
 
@@ -84,8 +88,9 @@ def test_import_before_load_then_load_then_query_resolves_and_version_correct(mo
     asyncio.run(_query_after_load())
 
 
-def test_query_returns_fixture_rows_and_correct_version(monkeypatch):
-    monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(FIXTURE_DIR))
+def test_query_returns_fixture_rows_and_correct_version(monkeypatch, tmp_path):
+    materialize_sidecar(tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
     assert da.load_discovery_state() is True
 
@@ -105,11 +110,12 @@ def test_query_returns_fixture_rows_and_correct_version(monkeypatch):
     asyncio.run(_run())
 
 
-def test_discovery_available_false_makes_every_passthrough_a_noop(monkeypatch):
+def test_discovery_available_false_makes_every_passthrough_a_noop(monkeypatch, tmp_path):
     """T-134-failopen: with discovery_available() False (flag off, even
     though the sidecar itself is fully loaded/ready), every pass-through
     must no-op to an empty/None result -- never raise, never touch the DB."""
-    monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(FIXTURE_DIR))
+    materialize_sidecar(tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
     assert da.load_discovery_state() is True  # sidecar itself IS ready
 
