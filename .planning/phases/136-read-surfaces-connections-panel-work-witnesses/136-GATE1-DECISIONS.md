@@ -2260,3 +2260,49 @@ control would bury the majority of the non-Bible result.
 witness-vs-quoter / compilation lever targets. This replaces the single Yalkut anecdote with **975
 labelled cases** and a first-order estimate of the payoff (~half recoverable). See
 [[project_novelty_is_granularity_relative]] and the v2.1 track.
+
+---
+
+## Ruling U — launch framing leads with the contribution figure (2026-08-03)
+
+**Decision (owner, 2026-08-03).** The public launch leads with **what the release adds to the
+existing finding aids**, not with corpus coverage and not with first-time finds.
+
+```
+HEADLINE   9,523 identifications the finding aids did not already have
+             4,152  no prior identification            (fills_gap)
+             3,873  finer than the aid                 (refines_granularity)
+             1,498  aid named only a container         (container_predicts)
+CONTEXT    out of 38,431 fragments across 177,402 pages
+```
+
+**Why it was a decision.** Three true numbers were on the table and the choice is which one carries
+the headline: coverage (38,431 fragments / 177,402 pages), contribution (9,523), or first-time finds
+(3,666 manuscripts). Coverage is the largest number the release is entitled to claim; contribution is
+the hardest to dismiss with "we knew that already". The owner chose the harder-to-dismiss number over
+the larger one. The other two figures still appear on the page as context — this ruling governs
+emphasis, not disclosure.
+
+**Basis correction that prompted the ruling.** An earlier draft quoted **13,285** for this figure. It
+was wrong — built on two different filters, adding main-pool `fills_gap` to *unfiltered*
+`refines_granularity` and `container_predicts`. On one consistent basis (`main_pool = 1`, the default
+view) it is **9,523**, over 6,755 manuscripts. Including the "more matches" bucket it is 17,536 over
+10,959 manuscripts. Recomputed directly from the deployed public artifact
+(`discovery-v1-e9365edc…`), not copied forward.
+
+**Binding constraints on 136-16, 136-17 and 136-18.**
+
+1. **One basis, stated.** All four headline numbers are `main_pool = 1`. Any surface that mixes
+   main-pool and all-bucket counts in a single total is a defect. If a page shows an all-bucket
+   figure it must say so in words.
+2. **These three sub-numbers are now load-bearing** and are read from the artifact, never hardcoded —
+   they change on any rebuild. A hardcoded launch number is the same class of bug as the 13,285
+   above, and would not survive the next bake.
+3. **No precision percentages anywhere** (D-06/D-21). "The finding aids did not already have" is a
+   *provenance* claim about the aids, not a *correctness* claim about the match, and must be worded
+   so a reader cannot read it as an accuracy rate. This binds error paths and JSON envelopes too.
+4. **Match-framing wording throughout** — `container_predicts` renders as "the aid named only a
+   container", never as "the aid was wrong".
+5. **Ruling T still binds the same pages.** Leading with contribution does not license burying the
+   second bucket: it holds 8,013 further adds-something identifications, ~2,189 of them non-Bible
+   `fills_gap`. It stays genuinely reachable, unnumbered, in match-framing wording.
