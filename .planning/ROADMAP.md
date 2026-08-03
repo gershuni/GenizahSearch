@@ -212,7 +212,7 @@ Plans:
 - [x] 136-11-PLAN.md — Build wiring A: coverage_ppm, band_rank, indexes, discovery_identification, manuscript_display, bench · wave 3
 - [x] 136-12-PLAN.md — Build wiring B: novelty ingestion, visibility axes, curated load, kept_tie fix, verifier extensions · wave 4
 - [ ] 136-13-PLAN.md — The rebuild, the gate battery, the owner authorization and the one production redeploy · wave 5 · **checkpoint**
-- [ ] 136-14-PLAN.md — Service layer, once: envelope, panel paths, findings query, facet cascade · wave 6
+- [x] 136-14-PLAN.md — Service layer, once: envelope, panel paths, findings query, facet cascade · wave 6
 - [ ] 136-15-PLAN.md — Panel display model (pure) · wave 7
 - [ ] 136-16-PLAN.md — Findings page shell: route, nav, caveat, modes, filter bar, result bar, pager · wave 7
 - [ ] 136-17-PLAN.md — Panel: browse attachment, body render, render-smoke, **panel deploy** · wave 8
@@ -333,7 +333,7 @@ than from scratch — they passed the plan-checker on 2026-08-02.
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
 | 135. Precision Certificate & Confidence Bands | 9/9 | Complete   | 2026-07-28 |
-| 136. Read Surfaces — Connections Panel & Work→Witnesses | 13/21 | In Progress|  |
+| 136. Read Surfaces — Connections Panel & Work→Witnesses | 14/21 | In Progress|  |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |
 | 139. Atlas Drill-down, Homepage & Release Hardening | 0/TBD | Not started | - |

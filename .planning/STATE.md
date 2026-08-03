@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 136-12-PLAN.md
-last_updated: "2026-08-03T07:56:01.788Z"
+stopped_at: Completed 136-14-PLAN.md
+last_updated: "2026-08-03T19:20:08.435Z"
 last_activity: 2026-08-03
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 45
-  completed_plans: 35
+  completed_plans: 36
   percent: 13
 ---
 
@@ -26,8 +26,27 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 13 of 21 complete (136-01..136-12 + 136-20); next executable: 136-13
+Plan: 15 of 21 complete (136-01..136-14 + 136-20); next executable: 136-15 / 136-16 (wave 7)
 Status: Ready to execute
+
+**136-14 COMPLETE 2026-08-03 — the read spine both surfaces build on.** `shared/discovery_service.py`
+gains the D-13 `{status, items, total, meta}` envelope over a CLOSED four-value vocabulary, so an
+outage is no longer indistinguishable from a genuine zero on the one surface whose rule is to hide
+itself on a zero. New `shared/discovery_surface_projection.py` holds the ALLOWLIST projections: the
+band serializer always emits `review_overlay` (the "Expert-reviewed" badge D-13f dropped), and a
+renderer-level assertion cannot stop that string reaching an envelope, a JSON payload or an error
+message. **The D-13g bug is fixed in SQL** — a human-confirmed row demoted by routing is returned,
+flagged low-coverage; measured on the rebuilt asset as **14 of 116** display-evidence rows (and 19 of
+121 across all human-confirmed evidence). The panel gets every field it renders in ONE query
+(`COUNT(*) OVER ()` for the real total; the identity join on `display_work_id`, never
+`canonical_work_id`). Manuscript scope NAMES the works with page counts, gating and a real total;
+the related-page count is DISTINCT opposite pages. New browse-map page-ID accessor in
+`web/services.py` (bounded, volume-aware, `resolved=False` rather than raising). The corpus-wide
+findings query serves all three row units from ONE builder over the materialized grain — measured
+157–270 ms p50 against the 1.5 s cap, where the pre-materialization shape measured 3.41–3.55 s — with
+the domain/author/work cascade on the IDENTIFIED work and an AST wrong-axis guard that was observed
+failing on a seeded edit. A false zero found against the real pre-rebuild asset was fixed (a
+swallowed query exception reported `ok`/0). Full suite green.
 
 **136-12 COMPLETE 2026-08-03 — build wiring B; `scripts/build_discovery_sidecar.py` is now DONE.**
 The bake writes the ten-value novelty shade on BOTH evidence families with masked provenance, derives
@@ -186,8 +205,8 @@ Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition
 
 ## Session Continuity
 
-Last session: 2026-08-03T07:55:49.230Z
-Stopped at: Completed 136-12-PLAN.md
+Last session: 2026-08-03T19:20:08.425Z
+Stopped at: Completed 136-14-PLAN.md
 Historical: Completed 135-02-PLAN.md (BAND-05 methods section). The flag-gated bilingual "Confidence Bands & Methods" section now renders inside the existing /help page (never a new route): its TOC entry AND its body card are each INDEPENDENTLY gated on discovery_available() (Codex #11 — the render loop emits only TOC links, so the body card carries its own gate). Each of the 7 bands has a help-confidence-<band> deep-link anchor (D-10) from an explicit registry. Fields render STRICTLY per the plan's field-sourcing: population from the RUNTIME display-deduplicated SHIPPED-CLAIM count (web.discovery.get_band_claim_counts — never band_precision.denominator, never raw evidence rows, never the Wave-4 frame doc); unit = (page, work); sample split into draw/determinate/successes; strata from sampling_frame else the D-08 fallback; weighted estimate + CI via format_precision_copy; the propagated 0.926 ONLY in a collection-scope paragraph (get_band_precision_collection), never on the corroborated/weak rows; the 4 CERT-01 registry fields (measurement_date/grader/audit_status/report_id) via .get() → placeholder ("not yet measured" / "independent audit pending"), NEVER fabricated. /help is now an async route reading rows+counts through the new web/discovery.py wrappers (get_band_precision / get_band_precision_collection / get_band_claim_counts / get_all_band_precision, all fail-open) and noindexed by the dedicated pre-release SEO predicate discovery_methods_noindex() = discovery_available() AND NOT DISCOVERY_PUBLIC_RELEASED (new web/feature_flags.py flag, default OFF) — noindex ONLY in the pre-release window, FLIPS to indexed at the Phase-139 REL-01 gate (Codex #18). Render-smoke (tests/render_smoke/test_help_methods_render_smoke.py, 6 tests): EN+HE section render, all 7 anchors, runtime population, placeholder-safe registry fields, three-state noindex transition + the predicate truth-table, the no-"certified" gate (EN + HE מאומת/מאושר/מוסמך, scoped to the section since מאושר legitimately appears in Joins-Lab help), and HE RTL. Gates: ruff clean (5 files); per-file --scan-asset masking clean; real-name grep 0; render_smoke package 59 pass + discovery suites 48 pass + back-edge guard 7 pass (no regression). Wave 2 COMPLETE; Wave 3 = 135-06 next.
 Historical (superseded, retained for the v2 decision trail): Completed 135-05-PLAN.md (v2 vocabulary + schema lockstep landed as vocabulary/DDL/spec only — NO bake logic: routing_reason gains later_shared_text [5-member frozenset + discovery_evidence DDL CHECK]; track1_direct band adds high_confidence_algorithmic alongside the RETAINED v1 expert_verified [v1-read-compat, Codex #8]; band_precision gains 5 CERT-01 registry columns incl the closed-vocab measurement_status CHECK [Codex #B3]; new masking-safe discovery_routing_audit table [decision CHECK]; dual-key band-rank in web spot-check + service _BAND_RANK_ORDER; dated amendments to discovery-sidecar-schema-v1.md [+meta provenance keys], band-labels §4 D-18 + §5 asset/bake-level atomicity, discovery-frames.md rename note). The real-build band-assignment flip + verifier release-strict expected-key rename are deferred to 135-06 (the v2 bake). Wave 2 remaining: 135-02.
 Resume file: None
@@ -222,6 +241,7 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 | Phase 136 P07 | 35min | 3 tasks | 4 files |
 | Phase 136 P11 | 2h | 3 tasks | 5 files |
 | Phase 136 P12 | 4h | 3 tasks | 12 files |
+| Phase 136 P14 | ~5h | 3 tasks | 8 files |
 
 ## Decisions
 
@@ -298,3 +318,5 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 - [Phase ?]: 136-11: coverage_status is a separate validity axis -- a missing denominator stores NULL coverage_ppm, never a zero
 - [Phase ?]: 136-11: identification eligibility is shipped OR human_confirmed (D-13g second half) -- 13 identifications restored, measured on the live v2 asset
 - [Phase ?]: 136-11: eligibility_basis added NULLABLE -- schema-doc amendment owed at 136-12; a NOT NULL column would break scripts/project_discovery_public.py
+- [Phase ?]: 136-14: eligibility_basis is derived per row, not read from discovery_identification -- the stored column is an aggregate that mislabels a restored row inside a mixed identification, and it is not yet in the schema contract
+- [Phase ?]: 136-14: a failing sidecar query returns status=unavailable, never ok/0 -- found against the real pre-rebuild asset, where a swallowed exception produced a false zero on the one surface that hides itself on a zero
