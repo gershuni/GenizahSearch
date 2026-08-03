@@ -697,6 +697,24 @@ def run_masking_gate(
 # ---------------------------------------------------------------------------
 
 def _vis01_shortcut(evidence_source: Optional[str], source_corpus: Optional[str]) -> bool:
+    """!! STALE AND UNSAFE AS A VISIBILITY RULE -- REPORTING INPUT ONLY. !!
+
+    This is the SUPERSEDED VIS-01 launch-scope shortcut, retained for exactly
+    one purpose: to be differenced against the real rule inside
+    `compute_launch_scope_reconciliation`, so the report can state HOW the two
+    disagree. It must never gate what ships.
+
+    Why it is unsafe: the first branch returns True for EVERY `propagated`
+    row regardless of `source_corpus`, so a propagated row carrying restricted
+    (M-source / R-source) content would be admitted. The ONE rule that decides
+    publication is the two-axis conjunction
+    `shared.discovery_visibility.is_public(assertion_visibility,
+    identity_visibility)`; every projection rule in `PROJECTION_RULES` reaches
+    publication decisions through that, never through this function.
+
+    `tests/test_vis01_shortcut_containment.py` pins the containment: this
+    function may be called from `compute_launch_scope_reconciliation` and
+    nowhere else, and its name may not appear in shipping code at all."""
     if evidence_source == ids.EVIDENCE_SOURCE_PROPAGATED:
         return True
     if evidence_source == ids.EVIDENCE_SOURCE_TRACK1_DIRECT:
@@ -856,6 +874,28 @@ def project(
             # Evidence dropped as a CASCADE of the above: a claim asserting a
             # witness relation that lost its last witness row goes entirely.
             "pruned_g9_cascade_evidence": len(ctx.pruned_g9_cascade_evidence_ids),
+            # A green `project()` is NOT a release decision. The self-gate above
+            # is deliberately narrow -- it checks that what was just emitted is
+            # internally coherent (closed graph, honest counts, right audience,
+            # no invented identification keys) plus the masking gate. It does
+            # NOT re-derive the ~30 corpus invariants. Stated here in machine
+            # -readable form so a reader of the report cannot mistake this for
+            # the release gate; see docs/specs/discovery-deploy.md.
+            "self_gate": {
+                "is_release_gate": False,
+                "checks_run": [
+                    "check_fk_closure",
+                    "check_meta_counts",
+                    "check_meta_audience",
+                    "check_identification_key_subset",
+                    "run_masking_gate",
+                ],
+                "release_gate": (
+                    "scripts/verify_discovery_sidecar.py <asset> --audience public "
+                    "-- run against the exact bytes going live, on the box, before "
+                    "the swap"
+                ),
+            },
         }
         report_path = str(out_path) + ".reconciliation.json"
         with open(report_path, "w", encoding="utf-8") as fh:
