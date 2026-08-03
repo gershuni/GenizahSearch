@@ -272,3 +272,33 @@ web host.
 | other app files | `genizah_translations.py` (additive discovery strings, dead until the surfaces exist) and `CLAUDE.md` |
 
 Conclusion: with the flag OFF the code deploy is behavior-neutral for every existing surface.
+
+## Task 3 — the ONE authorized production deploy (DONE, 2026-08-03)
+
+Deployed **the public projection only**, code first then the artifact, `DISCOVERY_ENABLED` OFF
+throughout. The private asset was never uploaded and is not on the box.
+
+| step | action | result |
+|---|---|---|
+| 1 | push `master-main` | `b3faedd8 → 4824e5cf` (157 commits) |
+| 2 | `./deploy.sh master-main` | box HEAD now `4824e5cf`; service active |
+| 3 | live-site check after code deploy | `/` `/search` `/browse` `/atlas` all HTTP 200; cold-start 11 s settling to **0.6 s warm** |
+| 4 | `scp` artifact to `.uploading` temp name | live manifest still pointed at the OLD asset throughout |
+| 5 | verify transferred bytes ON THE BOX | `sha256 = e9365edc…` — matches the local hash exactly |
+| 6 | `mv` to final content-hashed name | both assets on disk; old one retained as the rollback target |
+| 7 | stage `manifest.json.candidate` | live manifest untouched |
+| 8 | verify staged asset ON THE BOX | `verify_discovery_sidecar.py --audience public --expected-frame-hash 53725098…` (EXTERNAL pin, never the candidate's own manifest) → **all invariants pass** |
+| 9 | masking gate the staged asset ON THE BOX | `--scan-sqlite --scan-asset --scan-repo --strict` with `MASKING_SCAN_PATTERNS_FILE=.masking_patterns` (present on the box, `-rw-------`) → **no matches, clean** |
+| 10 | preserve rollback target | `manifest.prev.json` ← the `33499c5b…` manifest |
+| 11 | **ATOMIC swap** | `mv -f manifest.json.candidate manifest.json` |
+| 12 | restart `genizah-web` | active; **no "Discovery sidecar not loaded (fail-closed)" line** in the log |
+| 13 | flag-bypassing readiness smoke | `bench_discovery.py` → **53,581 identifications**, 2,626 warm-burst rows, every findings shape inside cap (see `discovery-budgets.md` §5.1) |
+| 14 | post-deploy live check | `/` `/search` `/browse` `/atlas` HTTP 200; **`/findings` and `/discovery` 404** — flag OFF, no surface exposed |
+
+**Live asset:** `discovery-v1-e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181.db`
+**Rollback:** single atomic manifest repoint to `manifest.prev.json` (`33499c5b…`); the old asset is
+still on disk and the loader ignores any file that is not the manifest's exact `asset_basename`. No
+file deletion, no re-upload.
+
+Plan 136-13 is COMPLETE. The rebuilt asset is live, flag OFF, ahead of any surface code that reads
+its new columns — which is exactly the ordering the plan exists to guarantee.

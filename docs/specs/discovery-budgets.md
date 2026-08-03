@@ -238,3 +238,31 @@ amendment.
 *Phase: 134-Discovery Data Spine (plan 134-02)*
 *Exit artifact for PERF-01 (initial caps); DATA-06 default values ratified
 for 134-06 to consume.*
+
+### 5.1 MEASURED ACTUALS (prod-box) — recorded 2026-08-03, Phase 136 plan 136-13
+
+Measured on the production box immediately after the flag-OFF deploy of the PUBLIC projection
+(`discovery-v1-e9365edc…`, 53,581 identifications), via
+`python scripts/bench_discovery.py --sample 50 --warm-passes 1`. The benchmark uses the
+readiness predicate (`_state.ready`), NOT the UI flag, so this proves the swapped-in sidecar loaded
+and returns real rows while `DISCOVERY_ENABLED` stays off.
+
+| shape | p50 ms | p95 ms | cap ms | result |
+|---|---|---|---|---|
+| `findings_default_ordering` | 113.47 | **124.22** | 1500 | PASS |
+| `findings_novelty_filter` | 20.14 | 20.78 | 1500 | PASS |
+| `findings_relation_filter` | 38.39 | 40.39 | 1500 | PASS |
+| `findings_domain_filter` | 90.15 | 104.15 | 1500 | PASS |
+| `findings_visible_total` | 0.02 | 0.46 | 500 | PASS |
+| `findings_deep_page_20` | 96.87 | 106.92 | 1500 | PASS |
+
+Other families: `get_claims_for_page` p95 0.60 ms · `get_pages_related_to_page` p95 0.44 ms ·
+`get_work_witnesses` p95 363.14 ms (informational, under the 1.5 s work-page request cap) ·
+browse-enrichment p95 **0.60 ms** (cap ≤ 150 ms).
+
+**Memory: added RSS 15.3 MB against the ≤ 250 MB cap** (22.8 MB before load → 38.1 MB after burst).
+Warm-burst returned 2,626 rows — the nonzero-result sanity check.
+
+The prod box is FASTER than the dev box on every findings shape (124 ms vs 159 ms p95 on the default
+ordering). D-10a's motivating shape was 3.41–3.55 s; it now runs with ~12× headroom under its cap in
+production.
