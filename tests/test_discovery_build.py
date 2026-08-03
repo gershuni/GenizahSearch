@@ -2248,3 +2248,544 @@ def test_novelty_status_defaults_fail_closed_and_rejects_out_of_vocab():
             )
     finally:
         conn.close()
+
+
+# ===========================================================================
+# 136-11 Task 2: discovery_identification (the grain) + manuscript_display
+# ===========================================================================
+
+def _ident_fixture_conn(*, works_rows, evidence_specs, routing_audit=()):
+    """A schema'd in-memory DB carrying `works_rows` (tuples of
+    `(work_id, canonical_work_id, source_corpus)`), the assembled claims and
+    evidence for `evidence_specs`, the frozen band_precision registry, and any
+    routing-audit rows -- i.e. everything `populate_discovery_identification`
+    reads."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    cur = conn.cursor()
+    cur.executemany(
+        "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, source_corpus) "
+        "VALUES (?, ?, ?, NULL, NULL, ?)",
+        [(w, c, f"Synthetic Title {w}", corpus) for w, c, corpus in works_rows],
+    )
+    corpus_by_work = {w: corpus for w, _c, corpus in works_rows}
+    result = sidecar_build.assemble_claims_and_evidence(evidence_specs, corpus_by_work)
+    sidecar_build._insert_claims_and_evidence_real(
+        cur, result["claim_rows"], result["evidence_rows"]
+    )
+    cur.executemany(
+        """
+        INSERT INTO band_precision (
+            scope, collection_id, evidence_source, confidence_band, numerator, denominator,
+            precision, ci_low, ci_high, method, sampling_frame, ins_policy, weighting, notes,
+            measurement_status
+        ) VALUES (:scope, :collection_id, :evidence_source, :confidence_band, :numerator,
+                   :denominator, :precision, :ci_low, :ci_high, :method, :sampling_frame,
+                   :ins_policy, :weighting, :notes, :measurement_status)
+        """,
+        [{"measurement_status": None, **r}
+         for r in sidecar_build._frozen_real_band_precision_rows()],
+    )
+    cur.executemany(
+        "INSERT INTO discovery_routing_audit (page_id, kept_work_id, demoted_work_id, "
+        "kept_year, demoted_year, delta_years, decision, routing_reason) "
+        "VALUES (?, NULL, NULL, NULL, NULL, NULL, ?, NULL)",
+        list(routing_audit),
+    )
+    conn.commit()
+    return conn
+
+
+def _direct_spec(page_id, sys_id, work_id, *, span=(0, 100), coverage=0.95,
+                 page_norm_letters=100, matched_letters=95,
+                 band=None, adjudication=None, routing=None):
+    return sidecar_build._mk_evidence(
+        page_id=page_id, work_id=work_id, sys_id=sys_id,
+        evidence_kind=ids.EVIDENCE_KIND_WITNESS,
+        evidence_source=ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+        confidence_band=band or ids.CONFIDENCE_BAND_EXPERT_VERIFIED,
+        adjudication_status=adjudication or ids.ADJUDICATION_STATUS_UNREVIEWED,
+        audit_status=ids.AUDIT_STATUS_AUDIT_PENDING,
+        routing_status=routing or ids.ROUTING_STATUS_SHIPPED,
+        routing_reason=ids.ROUTING_REASON_NONE,
+        span_start=span[0], span_end=span[1],
+        matched_letters=matched_letters, density=0.2, n_spans=1,
+        coverage=coverage, page_norm_letters=page_norm_letters,
+    )
+
+
+def test_identification_grain_is_one_row_per_sys_id_x_canonical_work():
+    """Two pages of the same manuscript matching the same canonical work are
+    ONE identification -- and two `works` rows sharing a canonical_work_id
+    collapse structurally (D-13a), so every count derived from this table is
+    already deduplicated."""
+    conn = _ident_fixture_conn(
+        works_rows=[
+            ("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA),
+            # A D-13a duplicate: a second works row recording the SAME canonical id.
+            ("w000002", "w000001", ids.SOURCE_CORPUS_MSOURCE),
+        ],
+        evidence_specs=[
+            _direct_spec("p1", "s1", "w000001"),
+            _direct_spec("p2", "s1", "w000001"),
+            _direct_spec("p3", "s1", "w000002"),
+        ],
+    )
+    try:
+        stats = sidecar_build.populate_discovery_identification(conn)
+        rows = conn.execute(
+            "SELECT sys_id, canonical_work_id, page_count FROM discovery_identification"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("s1", "w000001", 3)]
+    assert stats["identifications"] == 1
+    assert stats["duplicate_canonical_groups"] == 1
+
+
+def test_identification_row_count_equals_distinct_pairs_and_records_shipped_only():
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        stats = sidecar_build.populate_synthetic(conn, source_db_hash="grain-fixture")
+        ident = stats["identification"]
+        (pairs,) = conn.execute(
+            """
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT de.sys_id, w.canonical_work_id
+                FROM discovery_evidence de
+                JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+                JOIN works w            ON w.work_id  = dc.work_id
+                WHERE de.routing_status = 'shipped'
+                   OR de.adjudication_status = 'human_confirmed'
+            )
+            """
+        ).fetchone()
+        (rows,) = conn.execute("SELECT COUNT(*) FROM discovery_identification").fetchone()
+    finally:
+        conn.close()
+    assert rows == pairs == ident["identifications"]
+    # The shipped-only figure is recorded alongside, so the D-13g delta is
+    # visible rather than absorbed.
+    assert "identifications_shipped_only" in ident
+    assert ident["identifications_shipped_only"] <= ident["identifications"]
+    assert (ident["identifications"] - ident["identifications_shipped_only"]) >= 0
+
+
+def test_grain_assertion_fires_when_the_row_count_is_tampered_with():
+    conn = _ident_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[_direct_spec("p1", "s1", "w000001")],
+    )
+    try:
+        sidecar_build.populate_discovery_identification(conn)
+        sidecar_build.assert_identification_grain_consistent(conn)  # clean
+        conn.execute("DELETE FROM discovery_identification")
+        with pytest.raises(sidecar_build.IdentificationGrainError):
+            sidecar_build.assert_identification_grain_consistent(conn)
+    finally:
+        conn.close()
+
+
+def test_review_only_human_confirmed_identification_is_materialized_with_its_basis():
+    """D-13g, second half: the service restores review-only human-confirmed rows
+    to the page query. If this table held only SHIPPED identifications, an inner
+    join would drop them a second time and a left join would leave them with no
+    bucket and no reason -- either way the fix is undone one layer down."""
+    conn = _ident_fixture_conn(
+        works_rows=[
+            ("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA),
+            ("w000002", "w000002", ids.SOURCE_CORPUS_SEFARIA),
+        ],
+        evidence_specs=[
+            _direct_spec("p1", "s1", "w000001"),
+            # Routing DEMOTED this one, but a human confirmed it.
+            _direct_spec("p2", "s1", "w000002",
+                         adjudication=ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED,
+                         routing=ids.ROUTING_STATUS_REVIEW_ONLY),
+        ],
+    )
+    try:
+        stats = sidecar_build.populate_discovery_identification(conn)
+        rows = dict(conn.execute(
+            "SELECT canonical_work_id, eligibility_basis FROM discovery_identification"
+        ).fetchall())
+        buckets = dict(conn.execute(
+            "SELECT canonical_work_id, main_pool_reason FROM discovery_identification"
+        ).fetchall())
+    finally:
+        conn.close()
+
+    assert rows == {"w000001": "shipped", "w000002": "human_confirmed"}
+    # The human-confirmed override is main pool ahead of every gate.
+    assert buckets["w000002"] == "main_human_confirmed"
+    assert stats["identifications_restored_by_human_confirmed"] == 1
+    assert stats["identifications_shipped_only"] == 1
+    assert stats["identifications"] == 2
+
+
+def test_display_work_id_rule_is_ordered_and_total():
+    select = sidecar_build.select_display_work_id
+    # 1. the canonical anchor, when it is a member of its own group
+    assert select("w000005", [("w000009", "sefaria"), ("w000005", "msource")]) == "w000005"
+    # 2. else lowest source_corpus in the fixed order sefaria < ja < msource
+    assert select("w000005", [("w000009", "msource"), ("w000007", "sefaria")]) == "w000007"
+    assert select("w000005", [("w000009", "msource"), ("w000007", "ja")]) == "w000007"
+    # 3. else the lexicographically smallest work_id
+    assert select("w000005", [("w000009", "ja"), ("w000007", "ja")]) == "w000007"
+    with pytest.raises(sidecar_build.IdentificationGrainError):
+        select("w000005", [])
+
+
+def test_display_work_id_never_null_and_works_join_is_exactly_one_to_one():
+    """A duplicated canonical_work_id group is the 65,587-row failure. Prove
+    (a) the SS(B1) rule keeps the identity join 1:1, and (b) the assertion FIRES
+    when the rule is bypassed by joining on canonical_work_id instead."""
+    conn = _ident_fixture_conn(
+        works_rows=[
+            ("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA),
+            ("w000002", "w000001", ids.SOURCE_CORPUS_MSOURCE),
+            ("w000003", "w000001", ids.SOURCE_CORPUS_JA),
+        ],
+        evidence_specs=[_direct_spec("p1", "s1", "w000002")],
+    )
+    try:
+        sidecar_build.populate_discovery_identification(conn)
+        counts = sidecar_build.assert_identification_grain_consistent(conn)
+        assert counts["identification_works_join_rows"] == counts["identifications"] == 1
+        (null_display,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification WHERE display_work_id IS NULL"
+        ).fetchone()
+        assert null_display == 0
+        # The rule picked the canonical anchor, which is itself a group member.
+        (display_work_id,) = conn.execute(
+            "SELECT display_work_id FROM discovery_identification"
+        ).fetchone()
+        assert display_work_id == "w000001"
+
+        # BYPASS the rule -- join the grain to `works` on canonical_work_id, the
+        # exact mistake SS(B1) exists to prevent -- and watch it fan out 1 -> 3.
+        (fanned,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification di "
+            "JOIN works w ON w.canonical_work_id = di.canonical_work_id"
+        ).fetchone()
+        assert fanned == 3
+    finally:
+        conn.close()
+
+
+def test_grain_assertion_fires_when_display_work_id_does_not_resolve():
+    """The SAME bypass expressed as STORED data. `canonical_work_id` is not a
+    `work_id` in a group with no anchor, so writing it into `display_work_id` is
+    exactly the SS(B1) mistake -- and it must be refused TWICE over: the FK
+    rejects it outright, and (with FK enforcement off, as it is by default on a
+    bare sqlite3 connection) assertion 2's identity-join count catches it."""
+    conn = _ident_fixture_conn(
+        works_rows=[
+            # No member equals the canonical id -- there is no anchor.
+            ("w000002", "w000001", ids.SOURCE_CORPUS_MSOURCE),
+            ("w000003", "w000001", ids.SOURCE_CORPUS_JA),
+        ],
+        evidence_specs=[
+            _direct_spec("p1", "s1", "w000002"),
+            _direct_spec("p2", "s2", "w000003"),
+        ],
+    )
+    try:
+        sidecar_build.populate_discovery_identification(conn)
+        assert sidecar_build.assert_identification_grain_consistent(conn)["identifications"] == 2
+        # The SS(B1) rule picked the lowest source_corpus member (ja < msource).
+        assert {r[0] for r in conn.execute(
+            "SELECT DISTINCT display_work_id FROM discovery_identification")} == {"w000003"}
+
+        # Layer 1: the foreign key refuses the bypass outright.
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE discovery_identification SET display_work_id = canonical_work_id")
+
+        # Layer 2: with FK enforcement off, the assertion still catches it.
+        # (`PRAGMA foreign_keys` is a no-op inside a transaction, hence the commit.)
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("UPDATE discovery_identification SET display_work_id = canonical_work_id")
+        with pytest.raises(sidecar_build.IdentificationGrainError):
+            sidecar_build.assert_identification_grain_consistent(conn)
+    finally:
+        conn.close()
+
+
+def test_every_identification_carries_a_reason_from_the_closed_vocabulary():
+    from shared.discovery_main_pool import MAIN_POOL_REASONS
+
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        sidecar_build.populate_synthetic(conn, source_db_hash="reason-fixture")
+        reasons = [r[0] for r in conn.execute(
+            "SELECT main_pool_reason FROM discovery_identification")]
+        (nulls,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification WHERE main_pool_reason IS NULL"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert reasons and nulls == 0
+    assert set(reasons) <= MAIN_POOL_REASONS
+
+
+def test_builder_has_no_local_main_pool_implementation():
+    """T-136-11-01: the bucket rule has ONE implementation. A second one in the
+    builder is exactly the drift that made sketch 003's `confOf()` disagree with
+    the predicate the codebase already had."""
+    source = Path(sidecar_build.__file__).read_text(encoding="utf-8")
+    assert len(re.findall(r"^\s*def main_pool", source, re.MULTILINE)) == 0
+    assert "from shared.discovery_main_pool import" in source
+    assert "main_pool_decision(" in source
+
+
+def test_main_pool_bucket_routes_through_the_shared_rule(monkeypatch):
+    """Prove the builder CALLS the shared rule rather than reproducing its
+    outcome: stub the shared predicate and watch the stored bucket follow it."""
+    calls = []
+
+    def _fake_decision(identification):
+        calls.append(identification)
+        return False, "overlapping_tie"
+
+    monkeypatch.setattr(sidecar_build, "main_pool_decision", _fake_decision)
+    conn = _ident_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[_direct_spec("p1", "s1", "w000001")],
+    )
+    try:
+        sidecar_build.populate_discovery_identification(conn)
+        row = conn.execute(
+            "SELECT main_pool, main_pool_reason FROM discovery_identification"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert calls, "the builder never called shared.discovery_main_pool"
+    assert row == (0, "overlapping_tie")
+
+
+def test_identification_columns_and_defaults_left_for_136_12():
+    """136-11 writes the STRUCTURE; 136-12 computes novelty + the visibility
+    axes. Until then both must fail CLOSED -- novelty `not_checked` (never
+    "novel by default") and BOTH visibility axes `private` (public eligibility
+    requires both to be public, D-22)."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        sidecar_build.populate_synthetic(conn, source_db_hash="defaults-fixture")
+        rows = conn.execute(
+            "SELECT DISTINCT novelty_status, divergence_correctness, "
+            "assertion_visibility, identity_visibility FROM discovery_identification"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("not_checked", None, "private", "private")]
+
+
+def test_identification_id_is_deterministic_across_two_builds():
+    def _ids():
+        conn = sqlite3.connect(":memory:")
+        sidecar_build.create_schema(conn)
+        try:
+            sidecar_build.populate_synthetic(conn, source_db_hash="determinism-fixture")
+            return [r[0] for r in conn.execute(
+                "SELECT identification_id FROM discovery_identification "
+                "ORDER BY sys_id, canonical_work_id")]
+        finally:
+            conn.close()
+
+    first, second = _ids(), _ids()
+    assert first and first == second
+    assert len(set(first)) == len(first)
+
+
+def test_identification_id_recipe_matches_the_public_projection():
+    """The recipe is frozen in the schema doc and (until a later plan
+    centralizes it into scripts/discovery_ids.py) implemented in TWO places.
+    Pin them to each other so a drift is a red suite, not a silent divergence."""
+    from scripts import project_discovery_public as projection
+
+    class _Ctx:
+        canonical_groups = {"w000001": [{"work_id": "w000001", "source_corpus": "sefaria"}]}
+        public_work_ids = {"w000001"}
+        claims_by_id = {"c1": {"claim_type": "direct_witness", "work_id": "w000001"}}
+
+    projected = projection._recompute_identification_row(
+        "s1", "w000001",
+        [{"evidence_id": "e1", "claim_id": "c1", "a_page_id": "p1",
+          "band_rank": 1, "coverage_ppm": 900000,
+          "evidence_source": "track1_direct", "confidence_band": "expert_verified",
+          "adjudication_status": "unreviewed", "routing_status": "shipped"}],
+        _Ctx(),
+    )
+    assert projected["identification_id"] == sidecar_build.identification_id("s1", "w000001")
+
+
+# --- manuscript_display ----------------------------------------------------
+
+def _write_libraries_csv(path, rows):
+    """`rows`: (system_number, oxford_part_id, call_numbers, library_code)."""
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["system_number", "oxford_part_id", "call_numbers",
+                          "library_code", "c4", "c5", "c6", "titles_non_placeholder"])
+        for sys_id, part, calls, lib in rows:
+            writer.writerow([sys_id, part, calls, lib, "", "", "", "SYNTHETIC TITLE MUST NOT LEAK"])
+
+
+def test_manuscript_display_carries_only_libraries_csv_catalogue_fields(tmp_path):
+    """T-136-11-03: no work title, no reference text, no locus -- the column set
+    is exactly the five catalogue fields the schema authorizes, and the title
+    column of libraries.csv is never read."""
+    csv_path = tmp_path / "libraries.csv"
+    _write_libraries_csv(csv_path, [
+        ("990000000000000001", "", "T-S 12.123|T-S 12.123 (a longer variant)", "CUL"),
+        ("990000000000000002", "", "MS Heb c 57", "Oxford"),
+        ("990000000000000003", "", "UNRELATED 1", "JTS"),
+    ])
+    conn = _ident_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[
+            _direct_spec("p1", "990000000000000001", "w000001"),
+            _direct_spec("p2", "990000000000000002", "w000001"),
+        ],
+    )
+    try:
+        stats = sidecar_build.populate_manuscript_display(conn, str(csv_path))
+        columns = [r[1] for r in conn.execute("PRAGMA table_info('manuscript_display')")]
+        rows = conn.execute(
+            "SELECT sys_id, library_code, shelfmark_display FROM manuscript_display "
+            "ORDER BY sys_id"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert columns == ["sys_id", "library_code", "library_sort_key",
+                       "shelfmark_display", "shelfmark_sort_key"]
+    forbidden = {"title", "neutral_title", "text", "reference_text", "locus",
+                 "span_start", "span_end", "work_id"}
+    assert not (set(columns) & forbidden)
+    # Only manuscripts carrying an eligible claim -- never the whole catalogue.
+    assert rows == [
+        ("990000000000000001", "CUL", "T-S 12.123"),      # SHORTEST variant wins
+        ("990000000000000002", "Oxford", "MS Heb c 57"),
+    ]
+    assert stats["manuscript_display"] == 2
+    assert stats["manuscript_display_missing_from_libraries_csv"] == 0
+
+
+def test_manuscript_display_reports_manuscripts_absent_from_libraries_csv(tmp_path):
+    csv_path = tmp_path / "libraries.csv"
+    _write_libraries_csv(csv_path, [("990000000000000001", "", "T-S 1.1", "CUL")])
+    conn = _ident_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[
+            _direct_spec("p1", "990000000000000001", "w000001"),
+            _direct_spec("p2", "990000000000000099", "w000001"),
+        ],
+    )
+    try:
+        stats = sidecar_build.populate_manuscript_display(conn, str(csv_path))
+    finally:
+        conn.close()
+    assert stats["manuscript_display"] == 1
+    assert stats["manuscript_display_sys_ids_with_claims"] == 2
+    # The gap is REPORTED, never silently absorbed -- and never back-filled from
+    # some other source, because libraries.csv is the only sanctioned one.
+    assert stats["manuscript_display_missing_from_libraries_csv"] == 1
+
+
+def test_manuscript_display_is_empty_without_a_libraries_csv():
+    conn = _ident_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[_direct_spec("p1", "s1", "w000001")],
+    )
+    try:
+        stats = sidecar_build.populate_manuscript_display(conn, None)
+        (n,) = conn.execute("SELECT COUNT(*) FROM manuscript_display").fetchone()
+    finally:
+        conn.close()
+    assert n == 0 and stats["manuscript_display"] == 0
+
+
+def test_shelfmark_sort_key_orders_numerically_not_lexically():
+    """Raw lexical order puts "T-S 12.123" before "T-S 12.9". The stored sort
+    key must not."""
+    key = sidecar_build.normalize_sort_key
+    assert "T-S 12.123" < "T-S 12.9"                    # the bug, in plain text
+    assert key("T-S 12.9") < key("T-S 12.123")          # ...fixed by the key
+    assert key("t-s  12.9") == key("T-S 12.9")          # case + whitespace folded
+    assert key(None) == "" and key("") == ""
+
+
+def test_manuscript_display_sort_index_exists_and_orders_by_library_then_shelfmark(tmp_path):
+    csv_path = tmp_path / "libraries.csv"
+    _write_libraries_csv(csv_path, [
+        ("990000000000000001", "", "T-S 12.123", "CUL"),
+        ("990000000000000002", "", "T-S 12.9", "CUL"),
+        ("990000000000000003", "", "MS Heb c 57", "Oxford"),
+    ])
+    conn = _ident_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=[
+            _direct_spec(f"p{n}", f"99000000000000000{n}", "w000001")
+            for n in (1, 2, 3)
+        ],
+    )
+    try:
+        sidecar_build.populate_manuscript_display(conn, str(csv_path))
+        ordered = [r[0] for r in conn.execute(
+            "SELECT shelfmark_display FROM manuscript_display "
+            "ORDER BY library_sort_key, shelfmark_sort_key")]
+        indexes = {r[1] for r in conn.execute("PRAGMA index_list('manuscript_display')")}
+    finally:
+        conn.close()
+    assert ordered == ["T-S 12.9", "T-S 12.123", "MS Heb c 57"]
+    assert "ix_manuscript_display_sort" in indexes
+
+
+def test_finalize_build_materializes_both_tables_end_to_end(tmp_path):
+    """The real-mode path, through `finalize_build`: both tables populated, the
+    grain assertions run, and the release-contract count meta keys written."""
+    fx = _build_minimal_finalize_fixture(tmp_path)
+    csv_path = tmp_path / "libraries.csv"
+    _write_libraries_csv(csv_path, [("s1", "", "T-S 1.1", "CUL")])
+
+    stats = sidecar_build.finalize_build(
+        source_db_path=str(fx["research_db"]),
+        from_approved_path=str(fx["approved_csv"]),
+        crosswalk_path=str(fx["crosswalk_path"]),
+        out_db_path=str(fx["out_db_path"]),
+        libraries_csv_path=str(csv_path),
+        masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+    )
+    assert stats["row_counts"]["discovery_identification"] == 1
+    assert stats["row_counts"]["manuscript_display"] == 1
+    assert stats["identification"]["identifications_shipped_only"] == 1
+
+    conn = sqlite3.connect(f"file:{stats['db_path']}?mode=ro", uri=True)
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        ident = conn.execute(
+            "SELECT sys_id, display_work_id, main_pool_reason, page_count, "
+            "relation_kind, eligibility_basis FROM discovery_identification"
+        ).fetchone()
+        display = conn.execute(
+            "SELECT sys_id, library_code, shelfmark_display FROM manuscript_display"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert meta["expected_rows_discovery_identification"] == "1"
+    assert meta["expected_rows_manuscript_display"] == "1"
+    assert ident[0] == "s1" and ident[1].startswith("w")
+    assert ident[3] == 1 and ident[4] == ids.CLAIM_TYPE_DIRECT_WITNESS
+    assert ident[5] == "shipped"
+    assert display == ("s1", "CUL", "T-S 1.1")
+
+    rc = verify_mod.verify(stats["db_path"], expected_frame_hash=stats["frame_content_hash"])
+    assert rc == 0

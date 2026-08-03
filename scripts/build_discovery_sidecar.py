@@ -67,6 +67,17 @@ for _p in (_REPO_ROOT, _SCRIPTS_DIR):
 import discovery_ids as ids  # scripts/discovery_ids.py -- FROZEN id/enum/routing primitives
 import check_atlas_masking as _cam  # scripts/check_atlas_masking.py -- DATA-05 masking gate
 
+# 136-11 (T-136-11-01): the main-pool bucket rule has exactly ONE implementation
+# across the bake, the panel and the corpus-wide findings page. This builder
+# CALLS it -- there is deliberately no `main_pool`-shaped function anywhere in
+# this file, so the three surfaces cannot disagree about which bucket an
+# identification belongs to.
+from shared.discovery_main_pool import (  # noqa: E402
+    MAIN_POOL_REASONS,
+    Identification as MainPoolIdentification,
+    main_pool_decision,
+)
+
 # 136-11 (D-10a): the MATERIALIZED `band_rank` sort key must be the SAME lattice
 # the runtime service sorts by -- so it is IMPORTED here, never re-declared. A
 # second literal band order in this file would mean the stored key and
@@ -317,6 +328,17 @@ CREATE TABLE discovery_identification (
   page_count          INTEGER NOT NULL,
   max_coverage_ppm    INTEGER,            -- NULL when no direct-family evidence contributes
   relation_kind       TEXT NOT NULL,      -- the STORED claim_type basis of the display relation
+  -- ⚠ NOT YET IN THE SCHEMA DOC. Required by plan 136-11's own action text
+  -- ("carry a column recording which of the two admitted it so the surface can
+  -- render the coverage note") but absent from the schema's Amendment
+  -- 2026-08-02 (B) column list, which predates that D-13g analysis. Deliberately
+  -- NULLABLE, so `scripts/project_discovery_public.py` -- which inserts only the
+  -- 14 columns the schema doc names -- keeps working unchanged; a NOT NULL
+  -- column here would break the public projection outright. A dated schema
+  -- amendment adding this column is OWED at 136-12 (the plan that already edits
+  -- the schema contract); see 136-11-SUMMARY.md.
+  eligibility_basis   TEXT CHECK (eligibility_basis IN ('shipped','human_confirmed')
+                                  OR eligibility_basis IS NULL),
   -- The TEN-VALUE shade enum (owner rulings E/E'/F/G/H). This CHECK and the
   -- mirrored discovery_evidence.novelty_status CHECK above are the two places
   -- the vocabulary is unavoidably restated as a SQL literal (a SQLite CHECK
@@ -2172,6 +2194,15 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
         bp_rows,
     )
 
+    # 136-11 Task 2: the identification grain + the manuscript display keys.
+    # AFTER band_precision, because the main-pool rule's gate 2 reads the
+    # `tier_a` certificate authorization (measurement_status/ci_low) out of that
+    # registry. The synthetic fixture has no libraries.csv, so
+    # `manuscript_display` stays empty here by design -- never back-filled from
+    # some other source.
+    identification_stats = populate_discovery_identification(conn)
+    identification_stats.update(populate_manuscript_display(conn, None))
+
     (n_works,) = cur.execute("SELECT COUNT(*) FROM works").fetchone()
     (n_claims,) = cur.execute("SELECT COUNT(*) FROM discovery_claim").fetchone()
     (n_evidence,) = cur.execute("SELECT COUNT(*) FROM discovery_evidence").fetchone()
@@ -2190,6 +2221,10 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
         ("expected_rows_evidence", str(n_evidence)),
         ("expected_rows_works", str(n_works)),
         ("expected_rows_units", str(n_units)),
+        # 136-11 / schema Amendment 2026-08-02 (C1): the two new tables need the
+        # same release-contract count validation the four existing ones have.
+        ("expected_rows_discovery_identification", str(identification_stats["identifications"])),
+        ("expected_rows_manuscript_display", str(identification_stats["manuscript_display"])),
         ("frame_content_hash", frame_content_hash),
     ]
     cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
@@ -2198,10 +2233,13 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
         "row_counts": {
             "works": n_works, "discovery_claim": n_claims,
             "discovery_evidence": n_evidence, "witness_units": n_units,
+            "discovery_identification": identification_stats["identifications"],
+            "manuscript_display": identification_stats["manuscript_display"],
         },
         "frame_content_hash": frame_content_hash,
         "display_evidence_choices": display_choices,
         "band_precision_rows": len(bp_rows),
+        "identification": identification_stats,
     }
 
 
@@ -3542,6 +3580,552 @@ def _insert_witness_units_real(cur: sqlite3.Cursor, unit_specs: List[Dict]) -> i
     return len(unit_rows)
 
 
+# ===========================================================================
+# 6.8b 136-11 Task 2: the IDENTIFICATION grain + the manuscript display keys
+# (schema Amendment 2026-08-02 (B)/(B1)).
+#
+# Both tables are materialized by READING the already-inserted works / claims /
+# evidence out of the output DB, so the synthetic and the real build paths --
+# which assemble their rows through deliberately independent code -- share ONE
+# implementation of the grain, the bucket rule and the display-work selection.
+# ===========================================================================
+
+class IdentificationGrainError(RuntimeError):
+    """Raised when a build-time consistency assertion over the materialized
+    identification grain fails: the row count disagrees with the distinct
+    `(sys_id, canonical_work_id)` pair count, or the `works` identity join is
+    not exactly 1:1.
+
+    Both are HARD build failures on purpose. A grouping or join error here does
+    not look like an error downstream -- it looks like a different corpus
+    total, silently."""
+
+
+# The frozen id recipe (schema SS(B)): sha256 over the canonical UTF-8
+# serialization of this prefix + sys_id + canonical_work_id, backed by the
+# table's own UNIQUE(sys_id, canonical_work_id) constraint.
+_IDENTIFICATION_ID_PREFIX = "discovery_identification_v1"
+
+# Schema SS(B1) step 2: public-before-private, so a mixed-visibility canonical
+# group's representative is public whenever a public member exists.
+_SOURCE_CORPUS_RANK = {
+    ids.SOURCE_CORPUS_SEFARIA: 0,
+    ids.SOURCE_CORPUS_JA: 1,
+    ids.SOURCE_CORPUS_MSOURCE: 2,
+}
+
+# "The strongest claim type present", using the SAME precedence
+# `ids.resolve_claim_type` already applies within one claim -- witness beats
+# shared wording, and a dominant span beats a quotation.
+_CLAIM_TYPE_STRENGTH = {
+    ids.CLAIM_TYPE_DIRECT_WITNESS: 0,
+    ids.CLAIM_TYPE_QUOTES_THIS_WORK: 1,
+    ids.CLAIM_TYPE_SHARED_TEXT: 2,
+}
+
+# 136-11 writes the STRUCTURE; plan 136-12 computes these three values. Both
+# visibility axes fail CLOSED to `private` here -- public eligibility requires
+# BOTH to be `public` (D-22), so an un-derived row can never leak public by
+# default. `not_checked` is novelty's own fail-closed default, never "novel".
+_IDENTIFICATION_NOVELTY_DEFAULT = "not_checked"
+_IDENTIFICATION_VISIBILITY_DEFAULT = "private"
+
+
+def identification_id(sys_id: str, canonical_work_id: str) -> str:
+    """The deterministic content key for one identification.
+
+    Deliberately reproduces the recipe frozen in
+    `docs/specs/discovery-sidecar-schema-v1.md` SS(B) verbatim, exactly as
+    `scripts/project_discovery_public.py` already does -- there is no
+    `identification_id()` in `scripts/discovery_ids.py` yet (the table is new in
+    the Phase-136 amendment). `tests/test_discovery_build.py` asserts the two
+    implementations produce identical ids, so the duplication is a red suite
+    rather than a silent divergence until a later plan centralizes it."""
+    key = f"{_IDENTIFICATION_ID_PREFIX}|{sys_id}|{canonical_work_id}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def select_display_work_id(canonical_work_id: str, members: Iterable[Tuple[str, str]]) -> str:
+    """The schema SS(B1) ORDERED, TOTAL representative rule over a canonical
+    group -- never "whichever row the join returns".
+
+    `members` is an iterable of `(work_id, source_corpus)`. `canonical_work_id`
+    is NOT unique on `works` (15 duplicated groups on the live asset, three with
+    different titles AND mixed source corpora), so joining the identification
+    grain to `works` on it FANS OUT 64,509 rows to 65,587. Left unaddressed,
+    title selection and `identity_visibility` are undefined for those groups,
+    and a PRIVATE work in a duplicated group could influence what looks like a
+    shared public aggregate.
+
+    1. the canonical anchor (`work_id == canonical_work_id`), if it is itself a
+       member of its own group;
+    2. else the LOWEST `source_corpus` in the fixed order sefaria < ja < msource;
+    3. else the lexicographically SMALLEST `work_id`.
+    """
+    members = list(members)
+    if not members:
+        raise IdentificationGrainError(
+            f"canonical group {canonical_work_id!r} has no member works -- "
+            "cannot select a display_work_id"
+        )
+    for work_id, _corpus in members:
+        if work_id == canonical_work_id:
+            return work_id
+    ranked = sorted(
+        members, key=lambda m: (_SOURCE_CORPUS_RANK.get(m[1], 99), m[0])
+    )
+    return ranked[0][0]
+
+
+def _canonical_group_index(conn: sqlite3.Connection) -> Dict[str, List[Tuple[str, str]]]:
+    groups: Dict[str, List[Tuple[str, str]]] = {}
+    for work_id, canonical_work_id, source_corpus in conn.execute(
+        "SELECT work_id, canonical_work_id, source_corpus FROM works"
+    ):
+        groups.setdefault(canonical_work_id, []).append((work_id, source_corpus))
+    return groups
+
+
+def _band_measurement_index(
+    conn: sqlite3.Connection,
+) -> Dict[Tuple[str, str], Tuple[Optional[str], Optional[float]]]:
+    """`(evidence_source, confidence_band) -> (measurement_status, ci_low)` from
+    the `band_precision` registry -- the two fields `is_default_eligible` reads
+    for its `tier_a` certificate gate (D-02a). Rows must therefore already be
+    inserted when the identification grain is materialized."""
+    index: Dict[Tuple[str, str], Tuple[Optional[str], Optional[float]]] = {}
+    for evidence_source, confidence_band, measurement_status, ci_low in conn.execute(
+        "SELECT evidence_source, confidence_band, measurement_status, ci_low "
+        "FROM band_precision WHERE scope = 'band'"
+    ):
+        index[(evidence_source, confidence_band)] = (measurement_status, ci_low)
+    return index
+
+
+def _page_competition_index(
+    rows: List[sqlite3.Row], kept_tie_pages: set
+) -> Dict[str, Dict[str, bool]]:
+    """`page_id -> {canonical_work_id -> has_unresolved_competitor}`.
+
+    Gate 3 of the main-pool rule
+    (`.claude/skills/sketch-findings-genizahsearch/references/main-pool-rule.md`):
+    *"Unresolved competition on every matched page (an overlapping near-tie span
+    from another canonical work, or a `kept_tie` page)"*. Both halves are
+    implemented here: a `kept_tie` audit row marks the whole page contested, and
+    otherwise a canonical work is contested on a page when its span overlaps a
+    span claimed there by a DIFFERENT canonical work.
+
+    Cheap by construction: the live v2 asset carries at most 20 evidence rows
+    and 9 distinct canonical works on any one page."""
+    spans_by_page: Dict[str, List[Tuple[str, int, int]]] = {}
+    for row in rows:
+        spans_by_page.setdefault(row["a_page_id"], []).append(
+            (row["canonical_work_id"], row["span_start"], row["span_end"])
+        )
+
+    index: Dict[str, Dict[str, bool]] = {}
+    for page_id, spans in spans_by_page.items():
+        works_on_page = {cwid for cwid, _s, _e in spans}
+        page_is_kept_tie = page_id in kept_tie_pages
+        per_work: Dict[str, bool] = {}
+        for cwid in works_on_page:
+            if page_is_kept_tie:
+                per_work[cwid] = True
+                continue
+            mine = [(s, e) for w, s, e in spans if w == cwid]
+            others = [(s, e) for w, s, e in spans if w != cwid]
+            per_work[cwid] = any(
+                _spans_overlap(s0, e0, s1, e1) for (s0, e0) in mine for (s1, e1) in others
+            )
+        index[page_id] = per_work
+    return index
+
+
+def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
+    """Materialize `discovery_identification` -- ONE row per
+    `(sys_id, canonical_work_id)`, grouping all of that identification's
+    page-claims.
+
+    **Eligibility is `shipped` OR `human_confirmed`, not `shipped` alone.** This
+    is the second half of the D-13g fix. The service restores review-only
+    human-confirmed rows to the page query; if this table held only shipped
+    identifications, an inner join would drop those rows a second time and a
+    left join would leave them with no bucket and no reason -- either way the
+    fix would be undone one layer down. `eligibility_basis` records WHICH of the
+    two rules admitted each row, so a surface can render the coverage note
+    D-13g calls for.
+
+    `main_pool`/`main_pool_reason` come from
+    `shared.discovery_main_pool.main_pool_decision` -- the shared rule, never a
+    second implementation (T-136-11-01).
+
+    Two build-time assertions run before returning; either failing raises
+    `IdentificationGrainError` rather than silently changing the corpus total.
+    """
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT de.evidence_id     AS evidence_id,
+                   de.sys_id          AS sys_id,
+                   de.a_page_id       AS a_page_id,
+                   de.evidence_source AS evidence_source,
+                   de.confidence_band AS confidence_band,
+                   de.adjudication_status AS adjudication_status,
+                   de.routing_status  AS routing_status,
+                   de.band_rank       AS band_rank,
+                   de.coverage_ppm    AS coverage_ppm,
+                   de.matched_letters AS matched_letters,
+                   de.span_start      AS span_start,
+                   de.span_end        AS span_end,
+                   dc.claim_type      AS claim_type,
+                   w.canonical_work_id AS canonical_work_id
+            FROM discovery_evidence de
+            JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+            JOIN works w            ON w.work_id  = dc.work_id
+            WHERE de.routing_status = ? OR de.adjudication_status = ?
+            """,
+            (ids.ROUTING_STATUS_SHIPPED, ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED),
+        ).fetchall()
+        kept_tie_pages = {
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT page_id FROM discovery_routing_audit "
+                "WHERE decision = 'kept_tie' AND page_id IS NOT NULL"
+            )
+        }
+        canonical_groups = _canonical_group_index(conn)
+        band_measurements = _band_measurement_index(conn)
+    finally:
+        conn.row_factory = None
+
+    competition = _page_competition_index(rows, kept_tie_pages)
+
+    groups: Dict[Tuple[str, str], List[sqlite3.Row]] = {}
+    for row in rows:
+        groups.setdefault((row["sys_id"], row["canonical_work_id"]), []).append(row)
+
+    insert_rows = []
+    reason_counts: Dict[str, int] = {}
+    n_main = 0
+    n_restored = 0
+    for (sys_id, canonical_work_id), group in sorted(groups.items()):
+        # The identification's OWN best evidence row: lowest band_rank, then
+        # lexicographic evidence_id (the D-13b tie-break, reused verbatim).
+        best = min(group, key=lambda r: ((r["band_rank"] if r["band_rank"] is not None
+                                          else BAND_RANK_LATTICE_SIZE), r["evidence_id"]))
+        best_band_rank = (best["band_rank"] if best["band_rank"] is not None
+                          else BAND_RANK_LATTICE_SIZE)
+        measurement_status, ci_low = band_measurements.get(
+            (best["evidence_source"], best["confidence_band"]), (None, None)
+        )
+
+        page_ids = {r["a_page_id"] for r in group}
+        page_competition = {
+            page_id: competition.get(page_id, {}).get(canonical_work_id, False)
+            for page_id in page_ids
+        }
+
+        coverage_values = [r["coverage_ppm"] for r in group if r["coverage_ppm"] is not None]
+        max_coverage_ppm = max(coverage_values) if coverage_values else None
+        direct_matched = [
+            r["matched_letters"] for r in group
+            if r["evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+            and r["matched_letters"] is not None
+        ]
+        max_matched_letters = max(direct_matched) if direct_matched else None
+
+        any_human_confirmed = any(
+            r["adjudication_status"] == ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED for r in group
+        )
+        any_shipped = any(r["routing_status"] == ids.ROUTING_STATUS_SHIPPED for r in group)
+        # D-13g: which rule admitted this identification. `human_confirmed` is
+        # recorded only when routing alone would NOT have admitted it -- those
+        # are exactly the rows the service restores and the surface annotates.
+        eligibility_basis = (
+            ids.ROUTING_STATUS_SHIPPED if any_shipped
+            else ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED
+        )
+        if not any_shipped:
+            n_restored += 1
+
+        in_main_pool, main_pool_reason = main_pool_decision(MainPoolIdentification(
+            has_same_work_claim=any(
+                r["claim_type"] == ids.CLAIM_TYPE_DIRECT_WITNESS for r in group
+            ),
+            any_human_confirmed=any_human_confirmed,
+            best_evidence_source=best["evidence_source"],
+            best_confidence_band=best["confidence_band"],
+            best_adjudication_status=best["adjudication_status"],
+            best_routing_status=best["routing_status"],
+            best_measurement_status=measurement_status,
+            best_ci_low=ci_low,
+            page_has_unresolved_competitor=page_competition,
+            max_matched_letters=max_matched_letters,
+            max_coverage=(None if max_coverage_ppm is None
+                          else max_coverage_ppm / COVERAGE_PPM_SCALE),
+        ))
+        if main_pool_reason not in MAIN_POOL_REASONS:  # pragma: no cover -- defensive
+            raise IdentificationGrainError(
+                f"main_pool_reason {main_pool_reason!r} is outside the closed vocabulary"
+            )
+        reason_counts[main_pool_reason] = reason_counts.get(main_pool_reason, 0) + 1
+        if in_main_pool:
+            n_main += 1
+
+        relation_kind = min(
+            (r["claim_type"] for r in group),
+            key=lambda ct: _CLAIM_TYPE_STRENGTH.get(ct, 99),
+        )
+
+        insert_rows.append((
+            identification_id(sys_id, canonical_work_id),
+            sys_id,
+            canonical_work_id,
+            select_display_work_id(canonical_work_id, canonical_groups.get(canonical_work_id, [])),
+            1 if in_main_pool else 0,
+            main_pool_reason,
+            best_band_rank,
+            len(page_ids),
+            max_coverage_ppm,
+            relation_kind,
+            eligibility_basis,
+            _IDENTIFICATION_NOVELTY_DEFAULT,
+            None,   # divergence_correctness -- NULL outside the divergence shades
+            _IDENTIFICATION_VISIBILITY_DEFAULT,
+            _IDENTIFICATION_VISIBILITY_DEFAULT,
+        ))
+
+    cur = conn.cursor()
+    cur.executemany(
+        """
+        INSERT INTO discovery_identification (
+            identification_id, sys_id, canonical_work_id, display_work_id,
+            main_pool, main_pool_reason, best_band_rank, page_count,
+            max_coverage_ppm, relation_kind, eligibility_basis,
+            novelty_status, divergence_correctness,
+            assertion_visibility, identity_visibility
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        insert_rows,
+    )
+
+    counts = assert_identification_grain_consistent(conn)
+    n_rows = counts["identifications"]
+
+    n_duplicate_groups = sum(1 for members in canonical_groups.values() if len(members) > 1)
+    return {
+        "identifications": n_rows,
+        "identifications_shipped_only": counts["identifications_shipped_only"],
+        "identifications_restored_by_human_confirmed": n_restored,
+        "identifications_main_pool": n_main,
+        "identifications_more_matches": n_rows - n_main,
+        "main_pool_reason_counts": reason_counts,
+        "duplicate_canonical_groups": n_duplicate_groups,
+    }
+
+
+def assert_identification_grain_consistent(conn: sqlite3.Connection) -> Dict:
+    """The TWO build-time consistency assertions over the materialized grain.
+
+    Extracted as its own callable so a grouping/join error fails the BUILD (and
+    is directly testable) instead of silently changing the corpus total.
+
+    1. The number of distinct `(sys_id, canonical_work_id)` pairs across claims
+       eligible under `shipped OR human_confirmed` equals the
+       `discovery_identification` row count. The shipped-ONLY figure is measured
+       alongside it and RETURNED (never enforced), so the delta the D-13g fix
+       restores stays visible rather than absorbed into one number.
+    2. `SELECT COUNT(*)` over `discovery_identification JOIN works ON
+       display_work_id` equals the row count EXACTLY. A fan-out here is the
+       65,587-row failure and it is invisible without this assertion -- the
+       query simply returns more rows than there are identifications, and every
+       downstream count inherits the inflation.
+    """
+    (n_pairs,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT de.sys_id, w.canonical_work_id
+            FROM discovery_evidence de
+            JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+            JOIN works w            ON w.work_id  = dc.work_id
+            WHERE de.routing_status = ? OR de.adjudication_status = ?
+        )
+        """,
+        (ids.ROUTING_STATUS_SHIPPED, ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED),
+    ).fetchone()
+    (n_rows,) = conn.execute("SELECT COUNT(*) FROM discovery_identification").fetchone()
+    if n_pairs != n_rows:
+        raise IdentificationGrainError(
+            f"discovery_identification row count {n_rows} != distinct "
+            f"(sys_id, canonical_work_id) pair count {n_pairs} over claims eligible "
+            "under shipped OR human_confirmed -- a grouping error would otherwise "
+            "change the corpus total silently"
+        )
+
+    (n_shipped_only,) = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT de.sys_id, w.canonical_work_id
+            FROM discovery_evidence de
+            JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+            JOIN works w            ON w.work_id  = dc.work_id
+            WHERE de.routing_status = ?
+        )
+        """,
+        (ids.ROUTING_STATUS_SHIPPED,),
+    ).fetchone()
+
+    (n_joined,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_identification di "
+        "JOIN works w ON w.work_id = di.display_work_id"
+    ).fetchone()
+    if n_joined != n_rows:
+        raise IdentificationGrainError(
+            f"discovery_identification JOIN works ON display_work_id produced "
+            f"{n_joined} rows for {n_rows} identifications -- the identity join "
+            "must be exactly 1:1 (schema SS(B1)); a duplicated canonical_work_id "
+            "group is fanning out"
+        )
+
+    (n_null_display,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_identification WHERE display_work_id IS NULL"
+    ).fetchone()
+    if n_null_display:
+        raise IdentificationGrainError(
+            f"{n_null_display} discovery_identification row(s) carry a NULL "
+            "display_work_id -- every identification must resolve a representative"
+        )
+
+    return {
+        "identifications": n_rows,
+        "identifications_shipped_only": n_shipped_only,
+        "identification_pairs": n_pairs,
+        "identification_works_join_rows": n_joined,
+    }
+
+
+# ---------------------------------------------------------------------------
+# manuscript_display -- libraries.csv ONLY (T-136-11-03).
+# ---------------------------------------------------------------------------
+
+_SORT_KEY_DIGITS = re.compile(r"\d+")
+_SORT_KEY_PAD = 8
+
+
+def normalize_sort_key(text: Optional[str]) -> str:
+    """A defensible ordering key for a shelfmark or a library code.
+
+    Raw lexical order is wrong for shelfmarks: "T-S 12.123" sorts BEFORE
+    "T-S 12.9" because '1' < '9' character-wise. Zero-padding every digit run to
+    a fixed width fixes that while staying a plain TEXT column an index can use.
+    Case is folded and whitespace collapsed so trivial transcription differences
+    do not scatter neighbours."""
+    if not text:
+        return ""
+    collapsed = " ".join(str(text).split()).upper()
+    return _SORT_KEY_DIGITS.sub(lambda m: m.group(0).zfill(_SORT_KEY_PAD), collapsed)
+
+
+def _load_manuscript_catalogue(libraries_csv_path) -> Dict[str, Tuple[str, str]]:
+    """`sys_id -> (library_code, shelfmark_display)` from libraries.csv.
+
+    Mirrors `shared/metadata_manager.py`'s own reader exactly -- digits-only
+    sys_id normalization, library_code at column 3, and the SHORTEST non-empty
+    pipe-separated `call_numbers` variant as the display shelfmark -- so the
+    shelfmark this table stores is the same string the existing panel/browse
+    surfaces already show. Reads NOTHING else from the file: no title (column
+    7), no locus, no reference text (T-136-11-03)."""
+    out: Dict[str, Tuple[str, str]] = {}
+    with open(libraries_csv_path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f)
+        next(reader, None)  # header
+        for row in reader:
+            if not row or len(row) < 3:
+                continue
+            raw_sys_id = str(row[0]).strip()
+            if raw_sys_id.startswith("#"):  # synthetic marker-block lines
+                continue
+            digits_sys_id = "".join(ch for ch in raw_sys_id if ch.isdigit())
+            if not raw_sys_id and not digits_sys_id:
+                continue
+            raw_shelves = row[2].split("|")
+            shelf = raw_shelves[0].strip() if raw_shelves else ""
+            for candidate in raw_shelves:
+                candidate = candidate.strip()
+                if candidate and (not shelf or len(candidate) < len(shelf)):
+                    shelf = candidate
+            library_code = row[3].strip() if len(row) > 3 else ""
+            if not shelf and not library_code:
+                continue
+            # Index under the digits-only form (what production sys_ids look
+            # like, and what metadata_manager keys on) AND under the raw value,
+            # so a non-numeric identifier still resolves. The raw form wins a
+            # collision -- an exact match is never displaced by a normalized one.
+            if digits_sys_id:
+                out.setdefault(digits_sys_id, (library_code, shelf))
+            out[raw_sys_id] = (library_code, shelf)
+    return out
+
+
+def populate_manuscript_display(conn: sqlite3.Connection, libraries_csv_path) -> Dict:
+    """Materialize `manuscript_display` for every sys_id carrying at least one
+    eligible claim.
+
+    This table exists because the paged result set today has no shelfmark, no
+    library sort key and no total, which makes server-side sorting by library
+    and a visible real total impossible (D-17a).
+
+    Eligibility matches `populate_discovery_identification` exactly (`shipped`
+    OR `human_confirmed`) -- a strict superset of "at least one shipped claim",
+    chosen so a D-13g-restored identification can never end up with no shelfmark
+    to render. A sys_id absent from libraries.csv gets NO row (the columns are
+    NOT NULL and there is no catalogue metadata to put in them); the count of
+    such manuscripts is returned so the gap is visible rather than silent.
+
+    With no libraries.csv supplied the table stays EMPTY -- the only sanctioned
+    source is that file (T-136-11-03), never a fallback that could pull a work
+    title or a locus into a masking-scanned asset."""
+    claim_sys_ids = {
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT sys_id FROM discovery_evidence "
+            "WHERE routing_status = ? OR adjudication_status = ?",
+            (ids.ROUTING_STATUS_SHIPPED, ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED),
+        )
+    }
+    if not libraries_csv_path:
+        return {
+            "manuscript_display": 0,
+            "manuscript_display_sys_ids_with_claims": len(claim_sys_ids),
+            "manuscript_display_missing_from_libraries_csv": len(claim_sys_ids),
+        }
+
+    catalogue = _load_manuscript_catalogue(libraries_csv_path)
+    rows = []
+    for sys_id in sorted(claim_sys_ids):
+        entry = catalogue.get(sys_id)
+        if entry is None:
+            continue
+        library_code, shelfmark = entry
+        rows.append((
+            sys_id,
+            library_code,
+            normalize_sort_key(library_code),
+            shelfmark,
+            normalize_sort_key(shelfmark),
+        ))
+    conn.executemany(
+        "INSERT INTO manuscript_display "
+        "(sys_id, library_code, library_sort_key, shelfmark_display, shelfmark_sort_key) "
+        "VALUES (?, ?, ?, ?, ?)",
+        rows,
+    )
+    return {
+        "manuscript_display": len(rows),
+        "manuscript_display_sys_ids_with_claims": len(claim_sys_ids),
+        "manuscript_display_missing_from_libraries_csv": len(claim_sys_ids) - len(rows),
+    }
+
+
 # ---------------------------------------------------------------------------
 # 6.9a FJMS public-vocabulary enrichment (owner decision 2026-07-22): genre =
 # modal FJMS domain, author = modal FJMS composition-author, over each work's
@@ -4749,6 +5333,17 @@ def finalize_build(
             [{"measurement_status": None, **r} for r in bp_rows],
         )
 
+        # 136-11 Task 2: materialize the identification grain + the manuscript
+        # display keys. Ordered AFTER band_precision on purpose -- the main-pool
+        # rule's gate 2 reads the `tier_a` certificate authorization
+        # (measurement_status/ci_low) out of that registry, so materializing
+        # earlier would silently evaluate every tier_a identification against a
+        # missing authorization and demote it.
+        identification_stats = populate_discovery_identification(out_conn)
+        identification_stats.update(
+            populate_manuscript_display(out_conn, libraries_csv_path)
+        )
+
         (n_works,) = cur.execute("SELECT COUNT(*) FROM works").fetchone()
         (n_claims,) = cur.execute("SELECT COUNT(*) FROM discovery_claim").fetchone()
         (n_evidence,) = cur.execute("SELECT COUNT(*) FROM discovery_evidence").fetchone()
@@ -4770,6 +5365,11 @@ def finalize_build(
             ("expected_rows_evidence", str(n_evidence)),
             ("expected_rows_works", str(n_works)),
             ("expected_rows_units", str(n_units)),
+            # 136-11 / schema Amendment 2026-08-02 (C1).
+            ("expected_rows_discovery_identification",
+             str(identification_stats["identifications"])),
+            ("expected_rows_manuscript_display",
+             str(identification_stats["manuscript_display"])),
             ("frame_content_hash", frame_content_hash),
             # 135-07: the explicit, durable band-vocabulary version marker
             # ("v1"/"v2"). The verifier keys its version-aware expected top-tier
@@ -4866,7 +5466,13 @@ def finalize_build(
         "row_counts": {
             "works": n_works, "discovery_claim": n_claims,
             "discovery_evidence": n_evidence, "witness_units": n_units,
+            "discovery_identification": identification_stats["identifications"],
+            "manuscript_display": identification_stats["manuscript_display"],
         },
+        # The measured identification grain, alongside the shipped-ONLY figure,
+        # so the delta the D-13g `shipped OR human_confirmed` fix restores is
+        # visible in the build summary rather than absorbed into one total.
+        "identification": identification_stats,
         "frame_content_hash": frame_content_hash,
         "content_hash": content_hash,
         "band_precision_rows": len(bp_rows),
