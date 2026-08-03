@@ -207,9 +207,9 @@ Plans:
 - [x] 136-06-PLAN.md — D-02a tier_a authorization lockstep (builder + verifier + both-branch fixtures) · wave 2
 - [x] 136-07-PLAN.md — Main-pool rule + grouping predicates as shared pure modules · wave 2
 - [x] 136-08-PLAN.md — VIS-01 two-axis derivation + closed-graph public projection + leak control · wave 2
-- [ ] 136-09-PLAN.md — `works.genre` curation artifact + author alias map · wave 2
-- [ ] 136-10-PLAN.md — Display strings, translations and the discovery CSS block (shared by both surfaces) · wave 3
-- [ ] 136-11-PLAN.md — Build wiring A: coverage_ppm, band_rank, indexes, discovery_identification, manuscript_display, bench · wave 3
+- [x] 136-09-PLAN.md — `works.genre` curation artifact + author alias map · wave 2
+- [x] 136-10-PLAN.md — Display strings, translations and the discovery CSS block (shared by both surfaces) · wave 3
+- [x] 136-11-PLAN.md — Build wiring A: coverage_ppm, band_rank, indexes, discovery_identification, manuscript_display, bench · wave 3
 - [ ] 136-12-PLAN.md — Build wiring B: novelty ingestion, visibility axes, curated load, kept_tie fix, verifier extensions · wave 4
 - [ ] 136-13-PLAN.md — The rebuild, the gate battery, the owner authorization and the one production redeploy · wave 5 · **checkpoint**
 - [ ] 136-14-PLAN.md — Service layer, once: envelope, panel paths, findings query, facet cascade · wave 6
@@ -333,7 +333,7 @@ than from scratch — they passed the plan-checker on 2026-08-02.
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
 | 135. Precision Certificate & Confidence Bands | 9/9 | Complete   | 2026-07-28 |
-| 136. Read Surfaces — Connections Panel & Work→Witnesses | 8/21 | In Progress|  |
+| 136. Read Surfaces — Connections Panel & Work→Witnesses | 11/21 | In Progress|  |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |
 | 139. Atlas Drill-down, Homepage & Release Hardening | 0/TBD | Not started | - |
