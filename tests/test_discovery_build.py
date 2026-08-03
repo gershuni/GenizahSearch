@@ -1956,3 +1956,295 @@ def test_finalize_build_default_never_writes_fabricated_tier_a_precision(tmp_pat
         conn.close()
     assert row is not None
     assert row[0] is None
+
+
+# ===========================================================================
+# 136-11 Task 1: persisted coverage (D-08a) + materialized band_rank (D-10a)
+# + the authorized index set.
+# ===========================================================================
+
+# The Hebrew page text below is FABRICATED (a repeated alef-bet run), never
+# real research content -- it exists only so `norm_stream_letter_count` has a
+# nonzero denominator to divide by.
+_HEB_PAGE_TEXT = "אבגדהוזחטיכלמנסעפצקרשת" * 5   # 110 Hebrew base letters
+
+
+def _ingest_direct_and_propagated_specs(*, page_text=_HEB_PAGE_TEXT, matched_letters=88):
+    """One track1_direct spec (through `_attach_coverage`) and one propagated
+    spec (which never gets a coverage denominator at all), over the same page."""
+    work_index = {"raw:w1": {"work_id": "w000001"}}
+    page_idx = sidecar_build.PageTextIndex(_pages_conn([("p1", "htr", page_text)]))
+    direct = sidecar_build._ingest_e1_rows(
+        [{"page_id": "p1", "sys_id": "s1", "work_id": "raw:w1",
+          "o0": 0, "o1": 90, "ml": matched_letters, "dens": 0.2, "n_spans": 1}],
+        work_index=work_index, page_index=page_idx,
+        confidence_band=ids.CONFIDENCE_BAND_EXPERT_VERIFIED,
+        adjudication_status=ids.ADJUDICATION_STATUS_UNREVIEWED,
+        audit_status=ids.AUDIT_STATUS_AUDIT_PENDING,
+    )
+    propagated = sidecar_build._ingest_propagated_witness(
+        [{"cpage": "p1", "csys": "s1", "work_id": "raw:w1", "_bucket": "witness",
+          "is_new": False, "impurity": False, "trials": 3,
+          "seeds": [{"occ0": 0, "occ1": 30, "occ_class": "core",
+                     "seed_page": "sp1", "seed_sys": "ss1"}]}],
+        work_index, page_idx,
+    )
+    return direct + propagated
+
+
+def _assemble_into_schema(evidence_specs, *, corpus=ids.SOURCE_CORPUS_SEFARIA):
+    """Assemble specs and INSERT them through the real column lists, so these
+    tests exercise the persistence path rather than the in-memory dicts."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    cur = conn.cursor()
+    work_ids = sorted({e["work_id"] for e in evidence_specs})
+    sidecar_build._insert_works_real(
+        cur,
+        [{"work_id": w, "neutral_title": f"Synthetic Title {w}", "author": None,
+          "genre": None, "source_corpus": corpus} for w in work_ids],
+    )
+    result = sidecar_build.assemble_claims_and_evidence(
+        evidence_specs, {w: corpus for w in work_ids}
+    )
+    sidecar_build._insert_claims_and_evidence_real(
+        cur, result["claim_rows"], result["evidence_rows"]
+    )
+    conn.commit()
+    return conn
+
+
+def test_coverage_ppm_direct_family_only_propagated_rows_carry_none():
+    """D-08a: the percentage is stored for the DIRECT family only. A propagated
+    row gets no `coverage_ppm` at all -- because it has no page-length
+    denominator, not because the number was omitted for display reasons."""
+    conn = _assemble_into_schema(_ingest_direct_and_propagated_specs())
+    try:
+        rows = dict(conn.execute(
+            "SELECT evidence_source, coverage_ppm FROM discovery_evidence"
+        ).fetchall())
+        statuses = dict(conn.execute(
+            "SELECT evidence_source, coverage_status FROM discovery_evidence"
+        ).fetchall())
+    finally:
+        conn.close()
+
+    # 88 matched letters / 110 normalized page letters = 0.8 -> 800000 ppm.
+    assert rows[ids.EVIDENCE_SOURCE_TRACK1_DIRECT] == 800000
+    assert statuses[ids.EVIDENCE_SOURCE_TRACK1_DIRECT] == sidecar_build.COVERAGE_STATUS_MEASURED
+    assert rows[ids.EVIDENCE_SOURCE_PROPAGATED] is None
+    assert statuses[ids.EVIDENCE_SOURCE_PROPAGATED] == sidecar_build.COVERAGE_STATUS_NOT_APPLICABLE
+
+
+def test_coverage_status_three_reachable_values_and_no_denominator_is_not_zero():
+    """T-136-11-04: a MISSING denominator must never be stored as a genuine
+    coverage of zero. `compute_page_coverage` returns 0.0 in that case (a
+    routing sentinel), so the persistence layer has to tell the two apart --
+    otherwise a surface reads "we could not measure" as "we measured almost
+    nothing"."""
+    measured = _ingest_direct_and_propagated_specs()
+    # A page whose text carries NO Hebrew base letters at all -> the Lever-1
+    # denominator is 0, `compute_page_coverage` returns its 0.0 sentinel.
+    no_denominator = _ingest_direct_and_propagated_specs(page_text="latin only text")
+
+    conn = _assemble_into_schema(measured)
+    try:
+        measured_rows = conn.execute(
+            "SELECT coverage_status, coverage_ppm FROM discovery_evidence "
+            "WHERE evidence_source='track1_direct'"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    conn = _assemble_into_schema(no_denominator)
+    try:
+        nd_rows = conn.execute(
+            "SELECT coverage_status, coverage_ppm FROM discovery_evidence "
+            "WHERE evidence_source='track1_direct'"
+        ).fetchall()
+        na_rows = conn.execute(
+            "SELECT coverage_status, coverage_ppm FROM discovery_evidence "
+            "WHERE evidence_source='propagated'"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    reachable = (
+        {r[0] for r in measured_rows} | {r[0] for r in nd_rows} | {r[0] for r in na_rows}
+    )
+    assert reachable == {
+        sidecar_build.COVERAGE_STATUS_MEASURED,
+        sidecar_build.COVERAGE_STATUS_NO_DENOMINATOR,
+        sidecar_build.COVERAGE_STATUS_NOT_APPLICABLE,
+    }
+    assert reachable == set(sidecar_build.COVERAGE_STATUSES)
+
+    # The load-bearing assertion: no_denominator stores NULL, never 0.
+    assert nd_rows[0][0] == sidecar_build.COVERAGE_STATUS_NO_DENOMINATOR
+    assert nd_rows[0][1] is None
+    # ...while the routing input itself really did see the 0.0 sentinel, so the
+    # two facts genuinely were indistinguishable before this column existed.
+    assert sidecar_build.compute_page_coverage(88, 0) == 0.0
+
+
+def test_coverage_ppm_helper_maps_every_case():
+    fn = sidecar_build.coverage_ppm_and_status
+    assert fn(ids.EVIDENCE_SOURCE_PROPAGATED, None, None) == (
+        None, sidecar_build.COVERAGE_STATUS_NOT_APPLICABLE)
+    # A propagated row stays not_applicable even if a coverage value somehow
+    # reached it -- D-08a is a family rule, not a "value present?" rule.
+    assert fn(ids.EVIDENCE_SOURCE_PROPAGATED, 0.9, 100) == (
+        None, sidecar_build.COVERAGE_STATUS_NOT_APPLICABLE)
+    assert fn(ids.EVIDENCE_SOURCE_TRACK1_DIRECT, None, 100) == (
+        None, sidecar_build.COVERAGE_STATUS_NO_DENOMINATOR)
+    assert fn(ids.EVIDENCE_SOURCE_TRACK1_DIRECT, 0.0, 0) == (
+        None, sidecar_build.COVERAGE_STATUS_NO_DENOMINATOR)
+    assert fn(ids.EVIDENCE_SOURCE_TRACK1_DIRECT, 1.0, 100) == (
+        1000000, sidecar_build.COVERAGE_STATUS_MEASURED)
+    # A genuine near-zero measurement is stored AS a measurement.
+    assert fn(ids.EVIDENCE_SOURCE_TRACK1_DIRECT, 0.000001, 1000000) == (
+        1, sidecar_build.COVERAGE_STATUS_MEASURED)
+
+
+def test_coverage_computation_functions_are_unchanged():
+    """The metric itself was always correct -- only its persistence was
+    missing. Pin the two computation functions behaviourally so a future edit
+    to the PERSISTENCE path can never quietly change the NUMBER."""
+    assert sidecar_build.norm_stream_letter_count(_HEB_PAGE_TEXT) == 110
+    assert sidecar_build.norm_stream_letter_count("latin only text") == 0
+    assert sidecar_build.norm_stream_letter_count(None) == 0
+    assert sidecar_build.compute_page_coverage(None, 100) is None
+    assert sidecar_build.compute_page_coverage(88, 110) == pytest.approx(0.8)
+    assert sidecar_build.compute_page_coverage(500, 100) == 1.0   # clamped
+    assert sidecar_build.compute_page_coverage(88, None) == 0.0   # the sentinel
+
+
+def test_band_rank_equals_the_runtime_lattice_for_every_pair():
+    """T-136-11-02: the STORED sort key and the lattice the runtime service
+    sorts by must be the same ordering -- asserted over the FULL mapping, not
+    a sample, and against `shared.discovery_service` itself rather than a
+    second literal copy of the table."""
+    from shared import discovery_service as runtime
+
+    for evidence_source, confidence_band in runtime._BAND_RANK_ORDER:
+        assert sidecar_build.evidence_band_rank(evidence_source, confidence_band) == \
+            runtime._band_rank(evidence_source, confidence_band)
+    # An unknown pair ranks last at build time exactly as it does at runtime.
+    assert sidecar_build.evidence_band_rank("track1_direct", "no_such_band") == \
+        runtime._band_rank("track1_direct", "no_such_band")
+    assert sidecar_build.BAND_RANK_LATTICE_SIZE == len(runtime._BAND_RANK_ORDER)
+
+
+def test_band_rank_materialized_matches_runtime_for_every_pair_in_a_build():
+    """The same equality, asserted over every (evidence_source,
+    confidence_band) pair a real fixture build actually produces."""
+    from shared import discovery_service as runtime
+
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        sidecar_build.populate_synthetic(conn, source_db_hash="band-rank-fixture")
+        pairs = conn.execute(
+            "SELECT DISTINCT evidence_source, confidence_band, band_rank FROM discovery_evidence"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert pairs, "fixture produced no evidence rows"
+    for evidence_source, confidence_band, stored in pairs:
+        assert stored == runtime._band_rank(evidence_source, confidence_band), (
+            f"stored band_rank {stored} != runtime lattice for "
+            f"({evidence_source!r}, {confidence_band!r})"
+        )
+    # Every band the fixture emits is a RANKED one (never the unranked sentinel).
+    assert all(stored < len(runtime._BAND_RANK_ORDER) for _, _, stored in pairs)
+
+
+def test_builder_does_not_redefine_the_band_rank_ordering():
+    """The ordering is IMPORTED, never re-declared -- a second literal list in
+    the builder is exactly the drift this test exists to prevent."""
+    source = Path(sidecar_build.__file__).read_text(encoding="utf-8")
+    assert "from shared.discovery_service import" in source
+    assert "_BAND_RANK_ORDER" in source
+    # No second assignment of the lattice anywhere in the builder.
+    assert not re.search(r"^_BAND_RANK_ORDER\s*[:=]", source, re.MULTILINE)
+
+
+_AUTHORIZED_INDEXES = {
+    "discovery_evidence": {
+        "ix_discovery_evidence_coverage_ppm",
+        "ix_discovery_evidence_band_rank",
+        "ix_discovery_evidence_novelty_status",
+    },
+    "discovery_claim": {"ux_discovery_claim_display_evidence_id"},
+    "discovery_identification": {
+        "ix_discovery_identification_order",
+        "ix_discovery_identification_canonical_work_id",
+        "ix_discovery_identification_sys_id",
+    },
+    "manuscript_display": {"ix_manuscript_display_sort"},
+}
+
+
+def test_d10a_authorized_index_set_is_present_in_a_fixture_build():
+    """Schema Amendment 2026-08-02 (D): the authorized index set, and the
+    `discovery_claim(display_evidence_id)` index is UNIQUE (a real invariant,
+    not merely a lookup hint)."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        sidecar_build.populate_synthetic(conn, source_db_hash="index-fixture")
+        for table, expected in _AUTHORIZED_INDEXES.items():
+            present = {r[1] for r in conn.execute(f"PRAGMA index_list('{table}')")}
+            assert expected <= present, f"{table}: missing {sorted(expected - present)}"
+        unique_flags = {
+            r[1]: r[2] for r in conn.execute("PRAGMA index_list('discovery_claim')")
+        }
+        assert unique_flags["ux_discovery_claim_display_evidence_id"] == 1
+        # The novelty index targets the STATUS column, never the legacy boolean.
+        (novelty_sql,) = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='ix_discovery_evidence_novelty_status'"
+        ).fetchone()
+        assert "novelty_status" in novelty_sql and "is_new" not in novelty_sql
+    finally:
+        conn.close()
+
+
+def test_display_evidence_id_uniqueness_is_enforced_not_merely_indexed():
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        conn.execute(
+            "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, source_corpus) "
+            "VALUES ('w000001','w000001','T',NULL,NULL,'sefaria')"
+        )
+        conn.execute(
+            "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, "
+            "display_evidence_id, source_corpus, sidecar_version) "
+            "VALUES ('p1','w000001','c1','direct_witness','SHARED','sefaria','v')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, "
+                "display_evidence_id, source_corpus, sidecar_version) "
+                "VALUES ('p2','w000001','c2','direct_witness','SHARED','sefaria','v')"
+            )
+    finally:
+        conn.close()
+
+
+def test_novelty_status_defaults_fail_closed_and_rejects_out_of_vocab():
+    """The COLUMN + its D-10a index land here; the VALUES are 136-12's job.
+    Until then every row must read `not_checked` -- never "novel by default"."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        sidecar_build.populate_synthetic(conn, source_db_hash="novelty-default-fixture")
+        statuses = {r[0] for r in conn.execute(
+            "SELECT DISTINCT novelty_status FROM discovery_evidence")}
+        assert statuses == {"not_checked"}
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE discovery_evidence SET novelty_status='not_in_finding_aids'"
+            )
+    finally:
+        conn.close()

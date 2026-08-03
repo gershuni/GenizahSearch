@@ -67,6 +67,17 @@ for _p in (_REPO_ROOT, _SCRIPTS_DIR):
 import discovery_ids as ids  # scripts/discovery_ids.py -- FROZEN id/enum/routing primitives
 import check_atlas_masking as _cam  # scripts/check_atlas_masking.py -- DATA-05 masking gate
 
+# 136-11 (D-10a): the MATERIALIZED `band_rank` sort key must be the SAME lattice
+# the runtime service sorts by -- so it is IMPORTED here, never re-declared. A
+# second literal band order in this file would mean the stored key and
+# `shared.discovery_service._band_rank` could silently disagree, and rows would
+# then appear in a different order depending on which code path produced the
+# ordering (T-136-11-02). `shared/discovery_service.py` imports nothing from
+# `web/` and nothing from this script, so there is no cycle and no heavy import.
+from shared.discovery_service import (  # noqa: E402
+    _BAND_RANK_ORDER,
+    _band_rank as _runtime_band_rank,
+)
 SCHEMA_VERSION = "discovery-v1"
 SIDECAR_VERSION = "discovery-v1-synthetic-fixture"
 
@@ -161,11 +172,60 @@ CREATE TABLE discovery_evidence (
   rule_version      TEXT,
   community_id      TEXT,
 
+  -- 136-11 / schema Amendment 2026-08-02 (A). APPENDED at the end of the column
+  -- list on purpose: every pre-existing column keeps its ordinal position, so a
+  -- positional reader (and the D-02b rebuild-preservation diff) sees an additive
+  -- change, never a reshuffle.
+  --
+  -- coverage_ppm: `round(matched_letters / page_norm_letters * 1_000_000)`,
+  -- DIRECT FAMILY ONLY (D-08a). Propagated rows carry NO coverage value -- not
+  -- because it is withheld for display reasons, but because those rows have NO
+  -- page-length denominator at all: `_ingest_propagated_witness` never computes
+  -- matched_letters against a page, and all 42,776 shipped propagated evidence
+  -- rows in the live v2 asset have NULL matched_letters.
+  --
+  -- coverage_status is the VALIDITY axis and must never collapse into the value
+  -- axis (T-136-11-04): `compute_page_coverage` returns 0.0 on a MISSING
+  -- denominator, which is not the same fact as a genuine near-zero match. So a
+  -- missing/zero denominator stores coverage_ppm NULL + 'no_denominator', and a
+  -- real measurement stores an integer + 'measured'. A reader can therefore
+  -- always tell "we measured almost nothing" from "we could not measure".
+  coverage_ppm      INTEGER,
+  coverage_status   TEXT CHECK (coverage_status IN ('measured','no_denominator','not_applicable')
+                                OR coverage_status IS NULL),
+  -- band_rank: the materialized (evidence_source, confidence_band) sort key --
+  -- see `_runtime_band_rank` at the top of this file. Lower is stronger.
+  band_rank         INTEGER,
+  -- novelty_status: the TEN-VALUE closed shade enum (owner rulings E/E'/F/G/H,
+  -- `136-GATE1-DECISIONS.md` SS E-H; restated in the schema doc's Amendment
+  -- 2026-08-02 (A)). The COLUMN + its D-10a index are created here because the
+  -- authorized index set names it; the VALUES are computed and written by plan
+  -- 136-12. Until then every row carries the fail-closed default `not_checked`
+  -- -- which is exactly what `not_checked` means, never "novel by default".
+  novelty_status    TEXT NOT NULL DEFAULT 'not_checked' CHECK (novelty_status IN (
+                        'confirms','refines_granularity','aid_more_specific','diverges_work',
+                        'diverges_part','container_predicts','fills_gap','extends','alias_merge',
+                        'not_checked')),
+
   UNIQUE(claim_id, evidence_id)
 );
 CREATE INDEX ix_discovery_evidence_claim_id     ON discovery_evidence(claim_id);
 CREATE INDEX ix_discovery_evidence_a_page_id    ON discovery_evidence(a_page_id);
 CREATE INDEX ix_discovery_evidence_other_page_id ON discovery_evidence(other_page_id);
+-- D-10a index set (schema Amendment 2026-08-02 (D)), part 1: the two new
+-- sort/filter keys, and the novelty STATUS column -- deliberately NOT the legacy
+-- `is_new` boolean, which stays in the schema for read-compat but is no longer
+-- the query target.
+CREATE INDEX ix_discovery_evidence_coverage_ppm   ON discovery_evidence(coverage_ppm);
+CREATE INDEX ix_discovery_evidence_band_rank      ON discovery_evidence(band_rank);
+CREATE INDEX ix_discovery_evidence_novelty_status ON discovery_evidence(novelty_status);
+-- D-10a's measured findings-query fix. UNIQUE is a real invariant, not just an
+-- index hint: each claim selects its display evidence from its OWN evidence
+-- rows, and `evidence_id` is the PK of discovery_evidence, so two claims can
+-- never name the same display row (verified on the live v2 asset: 268,361
+-- claims / 268,361 distinct display_evidence_id).
+CREATE UNIQUE INDEX ux_discovery_claim_display_evidence_id
+  ON discovery_claim(display_evidence_id);
 
 CREATE TABLE witness_units (
   unit_id  TEXT PRIMARY KEY
@@ -228,6 +288,85 @@ CREATE TABLE discovery_routing_audit (
   decision        TEXT CHECK (decision IN ('demoted','kept_tie','fail_safe_unknown_date')),
   routing_reason  TEXT
 );
+
+-- ---------------------------------------------------------------------------
+-- 136-11 / schema Amendment 2026-08-02 (B): the IDENTIFICATION grain.
+--
+-- ONE row per (sys_id, canonical_work_id) -- the unit the main-pool rule and
+-- the corpus-wide findings page both operate on. Because the grain is the
+-- CANONICAL work, the D-13a duplicate collapse is STRUCTURAL here: two `works`
+-- rows recording the same canonical_work_id produce ONE identification row, so
+-- every count derived from this table is already deduplicated.
+-- ---------------------------------------------------------------------------
+CREATE TABLE discovery_identification (
+  identification_id   TEXT PRIMARY KEY,   -- sha256("discovery_identification_v1|{sys_id}|{canonical_work_id}")
+  sys_id              TEXT NOT NULL,
+  canonical_work_id   TEXT NOT NULL,
+  -- NEVER canonical_work_id: `canonical_work_id` is NOT unique on `works` (15
+  -- duplicated groups on the live asset), so joining the identification grain
+  -- to `works` on it FANS OUT 64,509 rows to 65,587. `display_work_id` is the
+  -- deterministic representative chosen by the schema's SS(B1) ordered total
+  -- rule; every identity join (title, author, identity_visibility) reads it.
+  display_work_id     TEXT NOT NULL REFERENCES works(work_id),
+  main_pool           INTEGER NOT NULL,   -- boolean (0/1), from shared.discovery_main_pool
+  main_pool_reason    TEXT NOT NULL CHECK (main_pool_reason IN (
+                         'shared_wording','overlapping_tie','low_coverage',
+                         'insufficient_length','missing_signal',
+                         'main_multifolio','main_full_coverage','main_human_confirmed')),
+  best_band_rank      INTEGER NOT NULL,
+  page_count          INTEGER NOT NULL,
+  max_coverage_ppm    INTEGER,            -- NULL when no direct-family evidence contributes
+  relation_kind       TEXT NOT NULL,      -- the STORED claim_type basis of the display relation
+  -- The TEN-VALUE shade enum (owner rulings E/E'/F/G/H). This CHECK and the
+  -- mirrored discovery_evidence.novelty_status CHECK above are the two places
+  -- the vocabulary is unavoidably restated as a SQL literal (a SQLite CHECK
+  -- cannot import a shared constant); `shared/discovery_novelty.py::
+  -- NOVELTY_STATUSES` is the tie-breaker if they ever disagree.
+  novelty_status      TEXT NOT NULL CHECK (novelty_status IN
+                         ('confirms','refines_granularity','aid_more_specific','diverges_work',
+                          'diverges_part','container_predicts','fills_gap','extends','alias_merge',
+                          'not_checked')),
+  -- A SEPARATE sibling column, never part of the shade enum (owner ruling F --
+  -- correctness is orthogonal to shade). Required NULL outside the two
+  -- divergence shades; the CHECK enforces that direction in both directions.
+  divergence_correctness TEXT CHECK (
+                         (novelty_status IN ('diverges_work','diverges_part')
+                          AND divergence_correctness IN ('catalogue_correct','claim_correct','unclear'))
+                         OR
+                         (novelty_status NOT IN ('diverges_work','diverges_part')
+                          AND divergence_correctness IS NULL)
+                       ),
+  assertion_visibility TEXT NOT NULL CHECK (assertion_visibility IN ('public','private')),
+  identity_visibility  TEXT NOT NULL CHECK (identity_visibility IN ('public','private')),
+  UNIQUE (sys_id, canonical_work_id)
+);
+
+-- ---------------------------------------------------------------------------
+-- 136-11 / schema Amendment 2026-08-02 (B): manuscript display keys.
+--
+-- Sourced ONLY from libraries.csv (masking-safe catalogue metadata, the same
+-- source the existing panel/browse surfaces already read). Carries NO work
+-- title, NO reference text and NO locus (T-136-11-03) -- it exists purely so
+-- the findings page and the panel can sort by library + shelfmark and show a
+-- real total, neither of which the paged result set can do today (D-17a).
+-- ---------------------------------------------------------------------------
+CREATE TABLE manuscript_display (
+  sys_id              TEXT PRIMARY KEY,
+  library_code        TEXT NOT NULL,
+  library_sort_key    TEXT NOT NULL,
+  shelfmark_display   TEXT NOT NULL,
+  shelfmark_sort_key  TEXT NOT NULL
+);
+
+-- D-10a index set (schema Amendment 2026-08-02 (D)), part 2.
+CREATE INDEX ix_discovery_identification_order
+  ON discovery_identification(main_pool, best_band_rank, max_coverage_ppm);
+CREATE INDEX ix_discovery_identification_canonical_work_id
+  ON discovery_identification(canonical_work_id);
+CREATE INDEX ix_discovery_identification_sys_id
+  ON discovery_identification(sys_id);
+CREATE INDEX ix_manuscript_display_sort
+  ON manuscript_display(library_sort_key, shelfmark_sort_key);
 """
 
 
@@ -574,6 +713,85 @@ def compute_page_coverage(matched_letters: Optional[int], page_norm_letters: Opt
     if not page_norm_letters:  # None or 0
         return 0.0
     return min(1.0, matched_letters / page_norm_letters)
+
+
+# ---------------------------------------------------------------------------
+# 136-11 (D-08a / D-10a): PERSISTING the two metrics above.
+#
+# `compute_page_coverage` and `norm_stream_letter_count` are DELIBERATELY left
+# untouched -- the computation was always right, only its persistence was
+# missing (the value was computed at ingestion, used for Lever-1 routing, and
+# then thrown away because `_mk_evidence`'s returned dict had no `coverage`
+# key). Everything below is about STORING it, never about recomputing it.
+# ---------------------------------------------------------------------------
+
+COVERAGE_STATUS_MEASURED = "measured"
+COVERAGE_STATUS_NO_DENOMINATOR = "no_denominator"
+COVERAGE_STATUS_NOT_APPLICABLE = "not_applicable"
+
+# The closed validity vocabulary, mirroring the `coverage_status` CHECK in the
+# DDL above and the schema doc's Amendment 2026-08-02 (A).
+COVERAGE_STATUSES = frozenset({
+    COVERAGE_STATUS_MEASURED,
+    COVERAGE_STATUS_NO_DENOMINATOR,
+    COVERAGE_STATUS_NOT_APPLICABLE,
+})
+
+COVERAGE_PPM_SCALE = 1_000_000
+
+
+def coverage_ppm_and_status(
+    evidence_source: Optional[str],
+    coverage: Optional[float],
+    page_norm_letters: Optional[int],
+) -> Tuple[Optional[int], str]:
+    """`(coverage_ppm, coverage_status)` for one evidence row.
+
+    The validity axis is SEPARATE from the value axis on purpose (T-136-11-04).
+    `compute_page_coverage` returns `0.0` when the denominator is missing, which
+    is NOT the same fact as a genuine near-zero match -- storing that 0.0 as a
+    real coverage would understate a match that was never measurable. So:
+
+      * propagated family -> `(None, 'not_applicable')`. Not a display choice:
+        those rows have no page-length denominator at all (D-08a).
+      * direct family, denominator present and coverage computed ->
+        `(round(coverage * 1e6), 'measured')`.
+      * direct family, denominator zero/missing (or coverage never computed for
+        want of a matched-letters basis) -> `(None, 'no_denominator')`. Both
+        sub-cases mean the SAME thing to a reader -- we could not measure -- and
+        the schema's closed three-value enum has no fourth token for them; a
+        finer split would need its own dated schema amendment.
+
+    Direct family ONLY, per D-08a: a surface shows, sorts and filters the
+    percentage for `track1_direct` rows and shows nothing at all for propagated
+    ones.
+    """
+    if evidence_source != ids.EVIDENCE_SOURCE_TRACK1_DIRECT:
+        return None, COVERAGE_STATUS_NOT_APPLICABLE
+    if coverage is None or not page_norm_letters:
+        return None, COVERAGE_STATUS_NO_DENOMINATOR
+    ppm = int(round(coverage * COVERAGE_PPM_SCALE))
+    # `compute_page_coverage` already clamps to [0, 1]; clamp again so a
+    # rounding artefact can never store an out-of-range fixed-point value.
+    return max(0, min(COVERAGE_PPM_SCALE, ppm)), COVERAGE_STATUS_MEASURED
+
+
+def evidence_band_rank(evidence_source: Optional[str], confidence_band: Optional[str]) -> int:
+    """The MATERIALIZED band-rank sort key -- delegating to the runtime
+    lattice, never to a second copy of it.
+
+    `_BAND_RANK_ORDER` / `_band_rank` are imported from
+    `shared.discovery_service` at the top of this file, so the stored key and
+    the ordering the service sorts by are the same object by construction
+    (T-136-11-02). Lower is stronger; an unknown pair ranks last, exactly as it
+    does at runtime.
+    """
+    return _runtime_band_rank(evidence_source, confidence_band)
+
+
+# The lattice is imported, never redeclared -- this reference exists so a reader
+# (and a grep) can see WHICH ordering table is in force here.
+BAND_RANK_LATTICE_SIZE = len(_BAND_RANK_ORDER)
 
 
 def _verify_input_sha256(path, expected, *, exc, label) -> str:
@@ -1331,6 +1549,7 @@ def _mk_evidence(
     community=None, ge3=None, rung=None, router_bucket=None,
     matched_letters=None, density=None, n_spans=None, seed_spans=None,
     seed_ms_ids=None, rule_version=_RULE_VERSION, community_id=None,
+    coverage=None, page_norm_letters=None,
 ) -> Dict:
     if snapshot_hash is None:
         snapshot_hash = _fake_hash(f"{page_id}|{sys_id}|a")
@@ -1351,6 +1570,15 @@ def _mk_evidence(
         "rung": rung, "router_bucket": router_bucket, "matched_letters": matched_letters,
         "density": density, "n_spans": n_spans, "seed_spans": seed_spans,
         "seed_ms_ids": seed_ms_ids, "rule_version": rule_version, "community_id": community_id,
+        # 136-11: `coverage` USED to be attached post-hoc by `_attach_coverage`
+        # and then silently dropped at the INSERT, because this dict had no
+        # `coverage` key -- that is exactly where the metric was lost. Both keys
+        # default to None, so `apply_lever1_coverage`'s `e.get("coverage") is
+        # None -> skip` behaviour is byte-for-byte unchanged for every caller
+        # that does not supply one. `page_norm_letters` is carried alongside so
+        # the persistence layer can tell a MISSING denominator from a genuine
+        # near-zero coverage (see `coverage_ppm_and_status`).
+        "coverage": coverage, "page_norm_letters": page_norm_letters,
     }
 
 
@@ -1822,6 +2050,13 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
 
     # Insert discovery_claim rows with a placeholder display_evidence_id --
     # backfilled in a second pass once evidence rows exist (SS1.3 circular-FK note).
+    #
+    # 136-11: the placeholder is the claim's OWN claim_id, not the empty string
+    # it used to be. D-10a's UNIQUE index on discovery_claim(display_evidence_id)
+    # would reject the second row carrying `""`, and the placeholder is
+    # overwritten by the backfill below before anything reads it. (claim_id and
+    # evidence_id are sha256 digests from different recipes, so a placeholder can
+    # never collide with a real winner either.)
     claim_rows = []
     for (page_id, work_id), rows in claims.items():
         claim_id = ids.claim_id(page_id, work_id)
@@ -1831,7 +2066,7 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
         ]
         claim_type = ids.resolve_claim_type(resolver_input)
         claim_rows.append((
-            page_id, work_id, claim_id, claim_type, "", work_corpus[work_id], SIDECAR_VERSION,
+            page_id, work_id, claim_id, claim_type, claim_id, work_corpus[work_id], SIDECAR_VERSION,
         ))
     cur.executemany(
         "INSERT INTO discovery_claim "
@@ -1854,6 +2089,9 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
                 seed_spans=e.get("seed_spans"),
             )
             e["_evidence_id"] = evidence_id
+            coverage_ppm, coverage_status = coverage_ppm_and_status(
+                e["evidence_source"], e.get("coverage"), e.get("page_norm_letters")
+            )
             evidence_rows.append((
                 evidence_id, claim_id, e["evidence_kind"], e["evidence_source"], e["confidence_band"],
                 e["adjudication_status"], e["audit_status"], e["routing_status"], e["routing_reason"],
@@ -1868,6 +2106,8 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
                 e.get("other_page_id"), e.get("b_start"), e.get("b_end"),
                 e.get("text_layer_b"), e.get("snapshot_hash_b"),
                 e.get("rule_version"), e.get("community_id"),
+                coverage_ppm, coverage_status,
+                evidence_band_rank(e["evidence_source"], e["confidence_band"]),
             ))
     cur.executemany(
         """
@@ -1880,8 +2120,9 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
             span_start, span_end, text_layer, snapshot_hash,
             seed_spans, seed_ms_ids,
             other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
-            rule_version, community_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            rule_version, community_id,
+            coverage_ppm, coverage_status, band_rank
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         evidence_rows,
     )
@@ -2661,12 +2902,18 @@ def _attach_coverage(spec: Dict, page_index, page_id: str, matched_letters: Opti
     in-memory test double that supplies only `.get()`) yields NO coverage --
     the spec's `coverage` stays absent, so `apply_lever1_coverage` skips it and
     the row keeps its ingested routing (backward-compatible with the E1/tier_a
-    unit tests that never exercise Lever-1). Mutates and returns `spec`."""
+    unit tests that never exercise Lever-1). Mutates and returns `spec`.
+
+    136-11: the resolved denominator is recorded on the spec too, so
+    `coverage_ppm_and_status` can distinguish "the page had no normalized
+    letters" (coverage 0.0 is a SENTINEL there, not a measurement) from a real
+    measured near-zero. Nothing about the computation changes."""
     norm_fn = getattr(page_index, "norm_letters", None)
     if norm_fn is None:
         return spec
     page_norm_letters = norm_fn(page_id)
     spec["coverage"] = compute_page_coverage(matched_letters, page_norm_letters)
+    spec["page_norm_letters"] = page_norm_letters
     return spec
 
 
@@ -2975,6 +3222,9 @@ def assemble_claims_and_evidence(
 
     evidence_rows = []
     for e in evidence_by_id.values():
+        coverage_ppm, coverage_status = coverage_ppm_and_status(
+            e["evidence_source"], e.get("coverage"), e.get("page_norm_letters")
+        )
         evidence_rows.append((
             e["_evidence_id"], e["_claim_id"], e["evidence_kind"], e["evidence_source"], e["confidence_band"],
             e["adjudication_status"], e["audit_status"], e["routing_status"], e["routing_reason"],
@@ -2989,6 +3239,10 @@ def assemble_claims_and_evidence(
             e.get("other_page_id"), e.get("b_start"), e.get("b_end"),
             e.get("text_layer_b"), e.get("snapshot_hash_b"),
             e.get("rule_version"), e.get("community_id"),
+            # 136-11 (schema Amendment (A)): the two persisted sort keys. See
+            # `coverage_ppm_and_status` / `evidence_band_rank`.
+            coverage_ppm, coverage_status,
+            evidence_band_rank(e["evidence_source"], e["confidence_band"]),
         ))
 
     display_choices: Dict[str, str] = {}
@@ -3264,8 +3518,9 @@ def _insert_claims_and_evidence_real(cur: sqlite3.Cursor, claim_rows, evidence_r
             span_start, span_end, text_layer, snapshot_hash,
             seed_spans, seed_ms_ids,
             other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
-            rule_version, community_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            rule_version, community_id,
+            coverage_ppm, coverage_status, band_rank
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         evidence_rows,
     )
