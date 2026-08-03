@@ -633,3 +633,94 @@ def test_translations_split_is_documented_in_a_comment():
     assert "discovery_display_strings" in source, (
         "genizah_translations.py must state the tr()/display-strings split in a comment"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 3 -- the shared discovery CSS block. Guarded here because this plan
+# owns exactly one test file and the block serves BOTH surfaces, so neither
+# surface plan can be the one that pins it.
+# ---------------------------------------------------------------------------
+
+CSS_PATH = REPO_ROOT / "web" / "static" / "common.css"
+CSS_BLOCK_MARKER = "/* discovery"
+
+
+def discovery_css_block() -> str:
+    source = CSS_PATH.read_text(encoding="utf-8")
+    assert CSS_BLOCK_MARKER in source, (
+        "the discovery CSS block must open with a literal {!r} comment".format(CSS_BLOCK_MARKER)
+    )
+    return source[source.index(CSS_BLOCK_MARKER):]
+
+
+def test_discovery_css_block_uses_only_logical_directional_properties():
+    """Physical directional properties break RTL, and both surfaces render in
+    both directions."""
+    physical = re.findall(
+        r"(?:border|padding|margin)-(?:left|right)\s*:", discovery_css_block()
+    )
+    assert physical == [], (
+        "the discovery CSS block uses physical directional properties: {}".format(physical)
+    )
+
+
+def test_no_confidence_chip_rule_exists_anywhere_in_the_stylesheet():
+    """There is no confidence scale on either surface; the deleted
+    confidence-chip rules are the one part of the sketch CSS not to copy."""
+    source = CSS_PATH.read_text(encoding="utf-8")
+    for banned in (".conf.strong", ".conf.medium", ".conf.weak", "fchip conf"):
+        assert banned not in source, (
+            "a confidence-chip rule reappeared in common.css: {!r}".format(banned)
+        )
+
+
+def test_relation_chip_css_is_not_keyed_on_a_relation_kind():
+    """Colour-coding the chip by relation kind reintroduces per-tier
+    confidence styling through the back door (D-24)."""
+    block = discovery_css_block()
+    for kind in STORED_RELATION_KEYS:
+        assert kind not in block, (
+            "the discovery CSS block keys a rule on the stored relation kind {!r}".format(kind)
+        )
+    for suffix in ("dw", "qw", "st"):
+        assert ".rel.{}".format(suffix) not in block, (
+            "the relation chip must stay visually neutral; found a per-kind rule "
+            "`.rel.{}`".format(suffix)
+        )
+
+
+def test_discovery_css_block_is_scoped_and_carries_the_required_treatments():
+    """Every rule is scoped, so no existing selector changes -- the sketch
+    class names (`.row`, `.chip`, `.mode`, `.c`) are far too generic for a
+    global stylesheet loaded beside Quasar."""
+    block = discovery_css_block()
+
+    # Every selector line in the block is scoped under .gs-discovery.
+    unscoped = []
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped.endswith("{") or stripped.startswith(("@", "/*", "*")):
+            continue
+        if "gs-discovery" not in stripped:
+            unscoped.append(stripped)
+    assert unscoped == [], "unscoped discovery selectors: {}".format(unscoped)
+
+    # The even two-pane grid: block on mobile, 1fr 1fr at >=900px, divider
+    # on the inline start.
+    assert ".gs-discovery .dpanes { display: block; }" in block
+    assert "@media (min-width: 900px)" in block
+    assert "grid-template-columns: 1fr 1fr;" in block
+    assert "border-inline-start: 1px solid var(--border-light);" in block
+
+    # The blocked-filter treatment and its amber tag: visibly disabled, never
+    # silently absent.
+    assert ".gs-discovery .fg.blocked" in block
+    assert ".gs-discovery .needs" in block
+    assert "var(--accent-amber)" in block
+
+    # The novelty group is forced first in the filter bar.
+    assert ".gs-discovery .fg.novgrp { order: -1; }" in block
+
+    # The RTL disclosure-arrow flip and the sub-700px row stacking.
+    assert '[dir="rtl"] .gs-discovery .disc > summary::before' in block
+    assert "@media (max-width: 700px)" in block
