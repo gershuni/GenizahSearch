@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import ast
 import pathlib
-import shutil
 
 import pytest
 
 import web.discovery_assets as da
 import web.main as wm
+from tests.fixtures.discovery_v2_fixture import materialize_sidecar
 
 MAIN_PY = pathlib.Path(wm.__file__)
 MAIN_SRC = MAIN_PY.read_text(encoding="utf-8")
@@ -37,8 +37,10 @@ def _restore_state():
 def test_flag_off_hides(tmp_path, monkeypatch):
     """DATA-07: with the flag OFF, discovery_available() is False EVEN WHEN
     the sidecar loaded successfully -- flag AND readiness, never flag alone."""
-    shutil.copyfile(FIXTURE_DB, tmp_path / "discovery-v1-fixture.db")
-    shutil.copyfile(FIXTURE_MANIFEST, tmp_path / "manifest.json")
+    # Post-136-20 the readiness contract requires the Amendment 2026-08-02
+    # shape, so the ready state is built from an UPGRADED copy of the golden
+    # (pre-rebuild) fixture.
+    materialize_sidecar(tmp_path)
     monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(tmp_path))
 
     assert da.load_discovery_state() is True  # sidecar itself IS ready

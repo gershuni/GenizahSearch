@@ -19,7 +19,6 @@ nothing here touches real research data.
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
 from pathlib import Path
 
@@ -27,6 +26,10 @@ import pytest
 
 import web.discovery_assets as da
 from scripts import build_discovery_sidecar as sidecar_build
+from tests.fixtures.discovery_v2_fixture import (
+    materialize_sidecar,
+    upgrade_db_to_post_rebuild,
+)
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "discovery"
 FIXTURE_DB = FIXTURE_DIR / "discovery-v1-fixture.db"
@@ -124,6 +127,13 @@ def _build_minimal_db(db_path: Path, *, meta_overrides: dict | None = None,
     finally:
         conn.close()
 
+    # Phase 136, plan 136-20: the startup readiness contract now also requires
+    # meta.audience, the two Amendment-2026-08-02 tables, their release-contract
+    # counts and the amendment's new columns. Bring the minimal DB up to that
+    # shape LAST so each defect test below still fails for the reason it names
+    # rather than passing vacuously on a missing audience key.
+    upgrade_db_to_post_rebuild(db_path)
+
 
 def _drop_table(db_path: Path, table: str) -> None:
     conn = sqlite3.connect(str(db_path))
@@ -138,8 +148,11 @@ def _drop_table(db_path: Path, table: str) -> None:
 # ---------------------------------------------------------------------------
 
 def test_ready_sidecar_loads_and_is_available_with_flag_on(tmp_path, monkeypatch):
-    shutil.copyfile(FIXTURE_DB, tmp_path / "discovery-v1-fixture.db")
-    shutil.copyfile(FIXTURE_MANIFEST, tmp_path / "manifest.json")
+    # The golden fixture is a PRE-REBUILD asset; materialize_sidecar() upgrades
+    # a copy of it to the Amendment 2026-08-02 shape the post-136-20 readiness
+    # contract requires (plan 136-20). The pre-rebuild shape's own refusal is
+    # asserted in tests/test_discovery_assets_audience.py.
+    materialize_sidecar(tmp_path)
     monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(tmp_path))
 
     assert da.load_discovery_state() is True
@@ -153,8 +166,7 @@ def test_ready_sidecar_loads_and_is_available_with_flag_on(tmp_path, monkeypatch
 
 
 def test_ready_sidecar_flag_off_hides_even_when_loaded(tmp_path, monkeypatch):
-    shutil.copyfile(FIXTURE_DB, tmp_path / "discovery-v1-fixture.db")
-    shutil.copyfile(FIXTURE_MANIFEST, tmp_path / "manifest.json")
+    materialize_sidecar(tmp_path)
     monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(tmp_path))
 
     assert da.load_discovery_state() is True

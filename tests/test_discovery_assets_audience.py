@@ -30,20 +30,14 @@ value from the refused artifact reaches the log.
 """
 from __future__ import annotations
 
-import asyncio
-import inspect
 import logging
 import sqlite3
-import sys
 
 import pytest
 
 import web.discovery_assets as da
 from tests.fixtures.discovery_v2_fixture import (
-    ADDED_COLUMNS_ON_EXISTING_TABLES,
     GOLDEN_BASENAME,
-    NEW_TABLE_COLUMNS,
-    materialize_pre_rebuild_sidecar,
     materialize_sidecar,
     write_manifest,
 )

@@ -38,6 +38,13 @@ escaping the loader (T-134-tamper / T-134-failopen):
   - ``PRAGMA integrity_check`` does not return ``'ok'`` (corrupt/malformed DB)
   - ``meta.schema_version`` != the frozen ``_EXPECTED_SCHEMA_VERSION``
     (reject-incompatible)
+  - ``meta.audience`` is anything other than the single value this PUBLIC
+    loader is allowed to serve -- private, missing, empty or unrecognised all
+    fail closed identically (Phase 136, plan 136-20; VIS-01). This is a second,
+    INDEPENDENT gate on the CONTENT of whatever the manifest selected: the
+    manifest says WHICH file, the audience says what that file is allowed to
+    be. Without it the public/private exclusion would be procedural (a
+    deploy-time discipline) rather than structural (a fact the loader checks).
   - any required ``meta`` release-contract key is missing
   - any required table (per the frozen schema doc) is missing
   - a release-contract expected row count does not match the actual count
@@ -79,6 +86,24 @@ MANIFEST_FILENAME = "manifest.json"
 # field. A future incompatible schema bump mints a new string constant here
 # (reject-incompatible, never a silent int comparison).
 _EXPECTED_SCHEMA_VERSION = "discovery-v1"
+
+# The VIS-01 audience boundary (Phase 136, plan 136-20;
+# docs/specs/discovery-sidecar-schema-v1.md § Amendment 2026-08-02 (C1)).
+# A CLOSED module-level enum, deliberately not an inline literal comparison:
+# `meta.audience` is written `private` by the private build and `public` by the
+# public-projection step, and THIS loader -- the one every publicly reachable
+# route resolves through -- may serve exactly one of them.
+#
+# Belt and braces, deliberately. The deploy (plan 136-13) points production's
+# manifest.json at the PUBLIC projection and keeps the private database off the
+# web box entirely, so this check should never fire in a correct deployment. It
+# exists because "never fires in a correct deployment" is exactly the property
+# that stops being true under a rushed rollback or a mistyped path, and because
+# VIS-01's exclusion is supposed to be STRUCTURAL rather than procedural. A
+# control that only works when everyone is careful is a procedure, not a
+# control.
+_AUDIENCES = frozenset({"public", "private"})
+_PUBLIC_LOADER_AUDIENCE = "public"
 
 # Required tables (docs/specs/discovery-sidecar-schema-v1.md SS1) -- the full
 # two-table claim model + its supporting tables.
@@ -147,6 +172,11 @@ class _DiscoveryState:
     ready: bool = False
     path: Optional[str] = None
     version: Optional[str] = None  # meta['sidecar_version'] -- for LRU/cache versioning downstream
+    # meta['audience'] of the artifact that is actually LIVE. Only ever set on
+    # a ready state (a refused artifact leaves it None), so a later diagnostic
+    # or admin surface can report which artifact is serving without reopening
+    # the database -- reachable publicly through discovery_meta('audience').
+    audience: Optional[str] = None
     meta: Dict[str, str] = field(default_factory=dict)
 
 
@@ -244,6 +274,28 @@ def load_discovery_state() -> bool:
                 f"(expected {_EXPECTED_SCHEMA_VERSION!r}) -- reject-incompatible"
             )
 
+        # The VIS-01 audience boundary (plan 136-20). Same reject-incompatible
+        # idiom as the schema_version check directly above -- fail closed on
+        # private, missing, empty or unrecognised alike, so the DEFAULT is
+        # closed and an artifact that says nothing about its audience is never
+        # assumed public.
+        #
+        # The raw value is deliberately NEVER interpolated into the message:
+        # this loader may be looking at an artifact it has just decided not to
+        # trust, and the reason is fully expressible without echoing any of its
+        # content (T-136-20-05).
+        audience = meta.get("audience")
+        if audience != _PUBLIC_LOADER_AUDIENCE:
+            if audience in _AUDIENCES:
+                raise ValueError(
+                    "refusing a private-audience artifact: this public loader may only "
+                    f"serve meta.audience={_PUBLIC_LOADER_AUDIENCE!r} -- reject-incompatible"
+                )
+            raise ValueError(
+                "meta.audience is missing, empty or outside the closed {public, private} "
+                "enum -- fail-closed default, never treated as public"
+            )
+
         table_rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         ).fetchall()
@@ -285,6 +337,7 @@ def load_discovery_state() -> bool:
             ready=True,
             path=db_path,
             version=meta.get("sidecar_version"),
+            audience=audience,
             meta=meta,
         )
     except Exception as exc:  # fail-closed: never raise out of startup load
