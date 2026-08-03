@@ -45,15 +45,34 @@ EC_ID = ids.evidence_id(WORK2, PAGE2, SYS2, ids.EVIDENCE_KIND_WITNESS,
 ED_ID = ids.evidence_id(WORK2, PAGE2, SYS2, ids.EVIDENCE_KIND_WITNESS,
                         ids.EVIDENCE_SOURCE_PROPAGATED, ids.CONFIDENCE_BAND_CORROBORATED, 0, 20)
 
-_AMENDMENT_COLUMN_DDL = (
-    'ALTER TABLE works ADD COLUMN identity_visibility TEXT',
-    'ALTER TABLE discovery_evidence ADD COLUMN coverage_ppm INTEGER',
-    'ALTER TABLE discovery_evidence ADD COLUMN coverage_status TEXT',
-    'ALTER TABLE discovery_evidence ADD COLUMN band_rank INTEGER',
-    'ALTER TABLE discovery_evidence ADD COLUMN novelty_status TEXT',
-    'ALTER TABLE discovery_evidence ADD COLUMN novelty_source_label TEXT',
-    'ALTER TABLE discovery_evidence ADD COLUMN assertion_visibility TEXT',
+# The 2026-08-02 amendment columns. When this fixture was written none of them
+# existed in `create_schema`, so the "new" side had to ALTER them in to simulate
+# an additive rebuild. Plans 136-11/136-12 then added them to `create_schema`
+# itself, at which point every ALTER here became a `duplicate column name` error
+# and the whole module errored out on both CI platforms.
+#
+# Kept rather than deleted so the fixture still works against a build whose
+# schema PREDATES the amendment, but applied idempotently: a column that
+# `create_schema` already provides is skipped. Asserting the end state (the
+# column exists) is what this fixture actually needs; how it got there is not
+# the property under test.
+_AMENDMENT_COLUMNS = (
+    ('works', 'identity_visibility', 'TEXT'),
+    ('discovery_evidence', 'coverage_ppm', 'INTEGER'),
+    ('discovery_evidence', 'coverage_status', 'TEXT'),
+    ('discovery_evidence', 'band_rank', 'INTEGER'),
+    ('discovery_evidence', 'novelty_status', 'TEXT'),
+    ('discovery_evidence', 'novelty_source_label', 'TEXT'),
+    ('discovery_evidence', 'assertion_visibility', 'TEXT'),
 )
+
+
+def _apply_amendment_columns(conn: sqlite3.Connection) -> None:
+    for table, column, decl in _AMENDMENT_COLUMNS:
+        existing = {r[1] for r in conn.execute(f'PRAGMA table_info({table})')}
+        if column not in existing:
+            conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {decl}')
+        assert column in {r[1] for r in conn.execute(f'PRAGMA table_info({table})')}
 
 
 def _insert_row(conn: sqlite3.Connection, table: str, values: dict) -> None:
@@ -187,8 +206,7 @@ def build_fixture_pair(tmp_path: Path):
     new_conn = sqlite3.connect(str(new_path))
     new_conn.execute("PRAGMA foreign_keys = ON")
     sidecar_build.create_schema(new_conn)
-    for stmt in _AMENDMENT_COLUMN_DDL:
-        new_conn.execute(stmt)
+    _apply_amendment_columns(new_conn)
     _populate_base_rows(new_conn, is_new=True)
     new_conn.commit()
     new_conn.close()
@@ -279,7 +297,14 @@ def test_control_3_row_added_to_claim(fixture_pair):
     conn.execute(
         "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, display_evidence_id, "
         "source_corpus, sidecar_version) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (PAGE3, WORK1, ids.claim_id(PAGE3, WORK1), ids.CLAIM_TYPE_DIRECT_WITNESS, EA_ID,
+        # EB_ID, not EA_ID: phase 136 added the UNIQUE index
+        # `ux_discovery_claim_display_evidence_id` (a real uniqueness invariant,
+        # not a performance hint), so reusing EA_ID — already the display pointer
+        # of claim C1 — now fails on INSERT and the control could never reach the
+        # assertion it exists to make. EB_ID is a real evidence row in the base
+        # fixture that nothing points at yet, so it satisfies both the FK and the
+        # new uniqueness constraint.
+        (PAGE3, WORK1, ids.claim_id(PAGE3, WORK1), ids.CLAIM_TYPE_DIRECT_WITNESS, EB_ID,
          "sefaria", "fixture-v1"),
     )
     conn.commit()

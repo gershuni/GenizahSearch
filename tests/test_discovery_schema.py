@@ -523,10 +523,18 @@ def test_meta_audience_check_requires_exactly_private(tmp_path):
     conn = _fixture_conn()
     try:
         assert verify_mod.check_meta_audience(conn, {}) == ["meta.audience: absent -- "
-                                                            "the private artifact must declare "
+                                                            "the artifact must declare "
                                                             "its own audience"]
         assert verify_mod.check_meta_audience(conn, {"audience": "ZZZ_FAKE_AUDIENCE_ZZZ"})
+        # `public` still fails the DEFAULT (private) profile -- that boundary is
+        # what makes the exclusion structural, and it is unchanged.
         assert verify_mod.check_meta_audience(conn, {"audience": "public"})
+        # 2026-08-03 (136-13): the check gained an explicit audience so the same
+        # verifier can gate the PUBLIC projection, which plan 136-13 requires. The
+        # public artifact passes only when it is verified AS public, and a private
+        # artifact verified as public still fails -- neither direction is a hole.
+        assert verify_mod.check_meta_audience(conn, {"audience": "public"}, "public") == []
+        assert verify_mod.check_meta_audience(conn, {"audience": "private"}, "public")
     finally:
         conn.close()
 
@@ -806,6 +814,22 @@ def test_author_key_coverage_is_enforced_against_the_asset():
             "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, "
             "source_corpus, identity_visibility) VALUES "
             "('w000001','w000001','T','Synthetic Author A',NULL,'sefaria','public')")
+        # 2026-08-03 (136-13): the coverage check is scoped to works carrying a
+        # SHIPPED claim -- the population the curated artifact is actually built
+        # from. A work with no claims at all is outside that scope and is
+        # correctly invisible to the check, so the fixture must now give this
+        # work a shipped row or it asserts nothing.
+        conn.execute(
+            "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, "
+            "display_evidence_id, source_corpus, sidecar_version) VALUES "
+            "('p1','w000001','c1','direct_witness','e1','sefaria','fixture-v1')")
+        conn.execute(
+            "INSERT INTO discovery_evidence (evidence_id, claim_id, evidence_kind, "
+            "evidence_source, confidence_band, adjudication_status, audit_status, "
+            "routing_status, routing_reason, is_new, a_page_id, sys_id, span_start, "
+            "span_end, novelty_status, assertion_visibility) VALUES "
+            "('e1','c1','witness','track1_direct','tier_a','unreviewed','n/a',"
+            "'shipped','none',0,'p1','s1',0,10,'not_checked','public')")
         stats = sidecar_build.assert_author_key_coverage(
             conn, {"Synthetic Author A": {"author": "Synthetic Author A"}})
         assert stats["works_author_strings_covered"] == 1
