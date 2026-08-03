@@ -4784,3 +4784,72 @@ TRANSLATIONS.update({
     "Focus Search: you can no longer confirm before the manuscript count finishes — that could quietly run a search over the whole corpus instead of the scope you chose.":
         "מקד חיפוש: לא ניתן עוד לאשר לפני שחישוב מספר כתבי היד הסתיים — הדבר עלול היה להריץ חיפוש על כל הקורפוס במקום על התחום שבחרתם.",
 })
+
+# ===========================================================================
+# Discovery surfaces — PAGE CHROME ONLY (Phase 136, plan 136-10)
+#
+# THE SPLIT, stated once so it is not re-litigated per plan:
+#
+#   * `tr()` (this file) owns PAGE CHROME — the nav label, the page title and
+#     meta description, the panel's entry-control label, the mode-strip
+#     labels and their phase tags, the "Show as" control and its row-unit
+#     options, the sort options, the result-bar count phrasing, and the
+#     page-level availability card.
+#   * `shared/discovery_display_strings.py` owns the CLAIM VOCABULARY — the
+#     relation chips and their tooltips, the row headlines, coverage labels,
+#     section headers, disclosure toggles, the novelty candidacy wording and
+#     the panel's own service-state copy.
+#
+# A string lives in EXACTLY ONE of the two.
+# `tests/test_discovery_display_strings.py::test_no_translation_key_duplicates_a_display_string`
+# fails if one is ever defined in both.
+#
+# Naming note (findings-page.md § "Design Decisions"): the nav label survived
+# a three-way constraint. "Discoveries" is already taken by the pre-existing
+# Community page at `/discoveries`; a bare "Identifications" collides with the
+# existing "Browse by Identification" entry; and D-23b bars "new", so
+# "New Findings" is out. Do NOT add a "Discoveries" entry and do NOT reuse
+# the existing one.
+# ===========================================================================
+TRANSLATIONS.update({
+    # --- Nav entry + page title (the nav tag reuses the existing "Beta") ---
+    "Computed Identifications": "זיהויים מחושבים",
+    # --- Page meta description ---
+    "Computed identifications across the Cairo Genizah corpus, produced by text matching. "
+    "Every row is an algorithmic match, not a reviewed identification.":
+        "זיהויים מחושבים ברחבי קורפוס גניזת קהיר, שהופקו בהתאמת טקסט. "
+        "כל שורה היא התאמה אלגוריתמית, לא זיהוי שנבדק.",
+    # --- The browse-panel entry control (sentence case — the panel title
+    #     stays "Computed identifications" per D-21) ---
+    "Computed identifications": "זיהויים מחושבים",
+    # --- Mode strip: "All findings" is live; the other two ship visible,
+    #     inert and phase-tagged, so 137/138 add a tab rather than a page ---
+    "All findings": "כל הממצאים",
+    "Screening leads": "כיווני סינון",
+    "My saved": "השמורים שלי",
+    "Phase 137": "שלב 137",
+    "Phase 138": "שלב 138",
+    # --- "Show as": the row unit is a reader choice, not a design pick ---
+    "Show as": "הצג כ",
+    "One row per identification": "שורה לכל זיהוי",
+    "One row per manuscript": "שורה לכל כתב יד",
+    "One row per work": "שורה לכל חיבור",
+    # --- Sort options. Novelty is deliberately NOT one of them (D-15a/D-24:
+    #     absence from a finding aid is not evidence a match is correct) ---
+    "Strongest first": "החזקים תחילה",
+    "Pages matched": "דפים שהותאמו",
+    "Matched text": "טקסט שהותאם",
+    # --- Result bar. The default view is narrowed, and the bar SAYS SO
+    #     rather than silently narrowing; {bucket} is filled from
+    #     shared.discovery_display_strings.bucket_name so the bucket name has
+    #     exactly one definition ---
+    "Showing {shown} of {total} findings": "מוצגים {shown} מתוך {total} ממצאים",
+    "Showing the {bucket} by default.": "מוצג {bucket} כברירת מחדל.",
+    # --- Availability card. Distinct from the panel's own service-state copy
+    #     in shared/discovery_display_strings.py: this is the PAGE-level card
+    #     shown when the availability predicate is False ---
+    "Computed Identifications is not available right now":
+        "הזיהויים המחושבים אינם זמינים כעת",
+    "This page will return as soon as the data is ready.":
+        "הדף יחזור ברגע שהנתונים יהיו מוכנים.",
+})

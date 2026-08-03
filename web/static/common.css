@@ -1589,3 +1589,267 @@ body {
     80% { opacity: 1; }
     100% { opacity: 0; }
 }
+
+/* discovery surfaces — ONE block serving BOTH the browse-page panel and the
+   corpus-wide findings page (Phase 136, plan 136-10, PANEL-01 / PANEL-02 /
+   NOVEL-01). Sources: the validated sketches in
+   .claude/skills/sketch-findings-genizahsearch/references/
+   discovery-panel-layout.md § "CSS Patterns" and findings-page.md
+   § "CSS Patterns".
+
+   ============================ HOW TO USE ============================
+   EVERY rule below is scoped under `.gs-discovery`. The panel's root
+   element and the findings page's root element MUST carry that class, or
+   none of this applies. The scope is not decoration: the sketches use very
+   generic class names (`.row`, `.chip`, `.mode`, `.c`), and this file is a
+   GLOBAL stylesheet loaded beside Quasar — an unscoped `.row` rule here
+   would restyle every NiceGUI page in the app at phone width. The sketch
+   class names are kept EXACTLY as the reference docs record them so those
+   docs stay accurate; only the scope is added.
+
+   ============================ TWO HARD RULES ========================
+   1. EVERY directional property is LOGICAL — `border-inline-start`,
+      `padding-inline-start`, `margin-inline-start`, `text-align: start/end`.
+      Both surfaces render LTR and RTL; physical properties break RTL.
+   2. The relation chip stays VISUALLY NEUTRAL. Colour-coding it by relation
+      kind reintroduces per-tier confidence styling through the back door,
+      which is exactly what D-24 prohibits. There is NO confidence scale on
+      either surface and no per-tier chip rule exists anywhere in this file.
+
+   Phone-first: comparable surfaces on this site run ~68% mobile, so the
+   stacked layout is the base and the wide layout is the media query.
+
+   Contrast: every new text-on-background pair was measured in light,
+   parchment and dark. Three sketch values were CORRECTED because they fail
+   WCAG AA in at least one theme; each correction is noted at its rule.
+   ==================================================================== */
+
+/* ---- panel: the even two-pane grid (the selected variant D layout) ----
+   Mobile stacks page-pane first, then manuscript-pane, with nothing hidden;
+   at >=900px the two panes carry EQUAL weight. */
+.gs-discovery .dpanes { display: block; }
+
+@media (min-width: 900px) {
+    .gs-discovery .dpanes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+    /* RTL-safe divider between the panes. */
+    .gs-discovery .dpanes > div + div {
+        border-inline-start: 1px solid var(--border-light);
+        padding-inline-start: 16px;
+    }
+}
+
+/* ---- panel: a bucket that must NOT read as an identification ----
+   D-13e keeps "Also shares text with" as a distinct third disclosure level
+   and requires it be explicitly never presented as an identification:
+   tinted summary, inset inline-start rule, italic qualifier.
+   Contrast — text-primary on bg-tertiary: light 13.35, parchment 13.28,
+   dark 9.45. */
+.gs-discovery .disc.notid > summary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+.gs-discovery .disc.notid .dbody {
+    border-inline-start: 3px solid var(--border-medium);
+    margin-inline-start: 12px;
+    padding-inline-start: 10px;
+}
+/* Contrast — text-secondary on bg-primary: light 7.58, parchment 8.80,
+   dark 12.02. */
+.gs-discovery .disc.notid .dnote {
+    font-style: italic;
+    color: var(--text-secondary);
+    text-align: start;
+}
+
+/* ---- panel: the disclosure arrow, which MUST flip for RTL ---- */
+.gs-discovery .disc > summary {
+    cursor: pointer;
+    list-style: none;
+    text-align: start;
+}
+.gs-discovery .disc > summary::-webkit-details-marker { display: none; }
+.gs-discovery .disc > summary::before {
+    content: '\25B8';                 /* small right-pointing triangle */
+    display: inline-block;
+    margin-inline-end: 6px;
+    transition: transform .15s ease;
+}
+.gs-discovery .disc[open] > summary::before { transform: rotate(90deg); }
+[dir="rtl"] .gs-discovery .disc > summary::before {
+    content: '\25C2';                 /* small left-pointing triangle */
+}
+[dir="rtl"] .gs-discovery .disc[open] > summary::before { transform: rotate(-90deg); }
+
+/* ---- panel: work chips in the manuscript pane ----
+   D-13h requires NAMED works rather than a bare count, so these carry real
+   titles and must stay legible in both states.
+   `.here`  — a work present on THIS folio: solid border + tinted fill.
+   `.gated` — a work reachable only behind the screening toggle.
+
+   CORRECTION to the sketch: `.chip.gated` used `opacity: .7`, which drops
+   the label to 3.50 (light) / 4.03 (parchment) — below the 4.5 AA floor for
+   a real, readable label. Raised to .85: 4.97 / 5.86 / 7.54. The dashed
+   border and the recessed fill still carry the distinction.
+   Contrast — .chip.here text-primary on bg-active: light 13.89,
+   parchment 13.09, dark 8.87. */
+.gs-discovery .chip {
+    display: inline-block;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 2px 8px;
+    border: 1px solid var(--border-light);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    text-align: start;
+}
+.gs-discovery .chip.here {
+    border-color: var(--primary-600);
+    background: var(--bg-active);
+    color: var(--text-primary);
+    font-weight: 700;
+}
+.gs-discovery .chip.gated {
+    border-style: dashed;
+    border-color: var(--border-medium);
+    opacity: .85;
+}
+
+/* ---- findings page: the novelty switch is FIRST in the filter bar,
+   regardless of DOM order (it is the page's headline axis). ---- */
+.gs-discovery .fg.novgrp { order: -1; }
+
+/* ---- findings page: a filter rendered but BLOCKED on missing data ----
+   Never silently absent: a filter that vanishes is indistinguishable from a
+   filter that never existed. Dimmed + dashed + an amber tag naming the
+   reason. `.fg.blocked` and `.mode.future` are INACTIVE user-interface
+   components, which WCAG 1.4.3 exempts from the contrast minimum; their
+   effective ratios at opacity .55 are 2.59 / 2.87 / 4.45 and that is
+   deliberate — they must read as unavailable. */
+.gs-discovery .fg.blocked { opacity: .55; }
+.gs-discovery .fg.blocked .fchip {
+    cursor: not-allowed;
+    border-style: dashed;
+}
+.gs-discovery .fg.blocked .fchip:hover { border-color: var(--border-medium); }
+
+/* The amber "needs the rebuild" tag.
+   CORRECTION to the sketch: it set `color: var(--text-inverse)` on the amber
+   fill, which is white in light AND parchment — 2.15 against #f59e0b, a
+   clear AA failure. The amber token is theme-INVARIANT (defined only in
+   :root), so a theme-varying foreground token cannot work here; a fixed
+   dark foreground is correct and measures 6.81 in all three themes. */
+.gs-discovery .needs {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    background: var(--accent-amber);
+    color: #1e293b;
+    border-radius: 999px;
+    padding: 1px 6px;
+    margin-inline-start: 6px;
+}
+
+/* ---- both surfaces: the relation chip on a row ----
+   NEUTRAL BY DESIGN. Do NOT add a per-kind colour rule here or anywhere
+   else; see hard rule 2 at the top of this block. The frozen band label
+   rides on the element's `title` attribute, never as visible text.
+   Contrast — text-secondary on bg-secondary: light 7.24, parchment 8.53,
+   dark 9.85. */
+.gs-discovery .rel {
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border-light);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* ---- both surfaces: the novelty badge ----
+   Solid presence for a candidate; the `unknown` variant is the fail-closed
+   "not checked" state and reads as muted through WEIGHT and STYLE, not
+   through a colour that fails contrast.
+   CORRECTION to the sketch: `.nov.unknown` used `--text-muted` on
+   bg-tertiary — 4.49 (parchment) and 4.04 (dark), both under AA. Switched
+   to --text-secondary: 6.92 / 8.27 / 6.97, with italic + normal weight
+   carrying the "muted" reading instead.
+   Contrast — .nov primary-700 on bg-active: light 5.21, parchment 6.37,
+   dark 6.38. */
+.gs-discovery .nov {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--primary-600);
+    color: var(--primary-700);
+    background: var(--bg-active);
+}
+.gs-discovery .nov.unknown {
+    border-color: var(--border-medium);
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    font-weight: 400;
+    font-style: italic;
+}
+
+/* ---- both surfaces: the PERMANENT caveat slot ----
+   A designed element between header and body — not fine print, not a
+   warning banner. Gold inline-start rule, RTL-safe.
+   Contrast — text-primary on bg-tertiary: light 13.35, parchment 13.28,
+   dark 9.45. */
+.gs-discovery .phead .caveat {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-inline-start: 3px solid var(--accent-gold);
+    padding: 8px 12px;
+    border-radius: 0 6px 6px 0;
+    text-align: start;
+}
+[dir="rtl"] .gs-discovery .phead .caveat { border-radius: 6px 0 0 6px; }
+
+/* ---- findings page: the domain facet tree ----
+   Leaf indent and the trailing count both flip for RTL. */
+.gs-discovery .dnode { text-align: start; }
+.gs-discovery .dnode.leaf { padding-inline-start: 22px; }
+.gs-discovery .dnode .c {
+    margin-inline-start: auto;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- findings page: the mode strip ----
+   Phase 137's saved judgments and Phase 138's leads ship VISIBLE but inert
+   and phase-tagged, so those phases add a tab rather than a page. */
+.gs-discovery .mode.future {
+    opacity: .55;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ---- both surfaces: the low-coverage note under a row ----
+   Contrast — text-secondary on bg-primary: light 7.58, parchment 8.80,
+   dark 12.02. */
+.gs-discovery .dnote {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-align: start;
+}
+
+/* ---- findings page: rows stack below 700px ---- */
+@media (max-width: 700px) {
+    .gs-discovery .row {
+        flex-direction: column;
+        gap: 6px;
+    }
+    .gs-discovery .row .side {
+        text-align: start;
+        align-items: flex-start;
+    }
+}
