@@ -1908,3 +1908,102 @@ Recorded here with the same standing as A-K -- LOCKED, not re-litigated, re-deri
 
 - **NOT actioned in Phase 136** (out of scope; the gate under test was novelty, and ruling M accepts
   it). Carried to the discovery-v2.1 refresh alongside the reference-granularity stage.
+
+---
+
+## Ruling O — BATCH the pinned gate (owner, 2026-08-03)
+
+- **Owner's authorization, verbatim:** *"Of course we'll want batching"*, then *"We can go to batch 10,
+  perhaps we need guardrails against connection losses and price balooning"*.
+
+- **What was actually wrong.** The cost objection was NOT the model's fault and NOT a reason to
+  downgrade it. The pinned system prompt is **4,070 chars — 88% of every call's input** — and the probe
+  re-sent it for ONE judgment at a time. The originally validated gate
+  (`reference_discovery_llm_gate_cost`) ran **batch 40**; our implementation had silently regressed to
+  batch 1. That regression *is* the cost problem.
+
+- **Two cost corrections, both mine, both now superseded:**
+  1. The **~$301** figure quoted to the owner was wrong. It came from the ruling-I hard-case pool
+     ($0.005369/call), which has longer evidence than typical. The probe's own 305 calls ARE residual
+     draws, mean $0.003375/call => the honest batch-1 projection was **$186.25** (p90 $276.97).
+  2. Batched, the MEASURED projection is **~$34** (batch 10). The `~$27` in the memory was right all
+     along; it was measured on a batch-40 gate.
+
+- **Measured batch-size sweep** (real `usage.cost`, same 300 residual cases the single-case arm had
+  already classified, so every row has a reference verdict; the accepted batch-1 gate is the reference):
+
+  | batch | real cost | projected over 55,184 | exact 10-shade | 3-way behavioural | **new `fills_gap` (false-novel injected)** | lost `fills_gap` |
+  |---|---|---|---|---|---|---|
+  | 40 | $0.1517 | $27.91 | 80.7% | 88.3% | **+11** | −2 |
+  | 20 | $0.1600 | $29.44 | 76.3% | 87.3% | **+10** | −5 |
+  | **10 (CHOSEN)** | $0.1853 | **$34.09** | 72.0% | **89.0%** | **+2** | −4 |
+  | 5 | $0.2548 | $46.87 | 79.7% | 92.3% | +2 | −3 |
+
+  **The knee is sharp between 20 and 10** and it is the safety-critical column that moves: false
+  `fills_gap` promotions collapse from +10 to +2 and then stop improving. Batch 5 buys 3 points of
+  behavioural agreement for another $13 and NO safety gain. Hence 10.
+
+  **Honest reading of the exact-shade column:** it bounces 72–81% with no clean trend, so most of it is
+  the model's own run-to-run instability, not a batching effect — consistent with the batch-1 arm
+  itself scoring only 78.3% against the owner's own labels in the ruling-I re-measurement. The 3-way
+  behavioural decision and the false-novel count are the stable, meaningful signals; do NOT quote the
+  exact-shade column as a batching regression.
+
+- **Cheaper models are NOT needed and were NOT adopted.** `gemma4:latest` is installed locally, returns
+  valid JSON for this prompt, and is free — but measured **~54s/call**, i.e. weeks of wall-clock for the
+  residual. `gemini-flash-lite` carries a measured 30% agreement prior on this task family. Both are
+  moot: batching reaches the target cost on the model the owner already validated. **Do not revisit
+  model downgrades to cut cost** — the lever is the prompt/judgment ratio.
+
+- **A short-circuit on vacuous titles was investigated and REJECTED as a cost lever** (owner's own
+  suggestion). Measured on the real residual: rows whose every checked source is vacuous
+  (`''`, `קטעי גניזה`, `ספק גניזה … אין בידנו`, FGP `לא הוגדר`/`not define`, `Placeholder [ASE]`) are only
+  **1,056 (1.9%)**, and adding genre-generic rows (`תורה (קטעים)`, `פיוט`, `תפילה וברכות`) reaches
+  **2,961 (5.4%)** — together saving **~$14 of $186**. 92.7% of the residual has a source saying
+  something substantive that genuinely needs judgment. **The idea is still CORRECT and worth keeping
+  for accuracy reasons** (a vacuous aid means `fills_gap`; a genre-generic aid means
+  `refines_granularity`, NOT a candidate — treating the latter as novel would inject exactly the false
+  Bible-fragment novelty the owner flagged on the bypass path). It is simply not a cost lever.
+
+- **Implemented (this ruling):**
+  - `shared/discovery_novelty.py`: `NOVELTY_BATCH_PROMPT_TEMPLATE` derived by string surgery from the
+    single-case template (so the judgment instructions stay byte-identical and only the response
+    contract differs), guarded by a module-level `assert` that fails loudly if the single template is
+    ever edited without re-pinning; `DEFAULT_BATCH_SIZE = 10`; `BatchResponseInvalid`;
+    `resolve_batch_model_output`.
+    ```
+    BATCH_PROMPT_SHA256 = 3adb6f1e363fec13792fc517b642f864ac54f0aecaecd805623f822ea05590bb
+    ```
+    The single-case `PROMPT_SHA256 = 4b28747…` is **retained UNCHANGED** and remains the validated
+    fallback contract.
+  - `scripts/discovery_novelty_funnel.py`: `run_model_arm_batched` + `CostCeilingExceeded`.
+
+- **Guardrail 1 — connection loss / malformed replies.** Checkpointing stays per-CANDIDATE and is
+  flushed after every batch, so a killed run resumes without re-billing. Alignment is
+  **all-or-nothing**: a reply missing a case number, carrying an unexpected one, or repeating one
+  raises `BatchResponseInvalid` and NOTHING from it is checkpointed — because accepting the
+  well-formed subset could attribute one fragment's verdict to a different fragment, an error that
+  would be invisible downstream. Unaligned batches retry (`max_batch_attempts`, default 3) and then
+  **degrade to the single-case contract**; with no fallback supplied the batch is left unresolved for
+  the next run rather than recorded as a guess. Per-case vocabulary still fails closed to
+  `not_checked` independently.
+
+- **Guardrail 2 — price ballooning.** `cost_probe` is consulted **BEFORE** each batch is sent and must
+  return REAL cumulative spend read from the provider's own `usage.cost` (never an estimate, per the
+  standing rule). At or above `cost_ceiling_usd` the run raises `CostCeilingExceeded` and stops with
+  its checkpoint intact. Checking before the call means the ceiling can never be crossed by the batch
+  that discovers it.
+
+- **Cache-key correctness.** `prompt_sha256` is a `CACHE_KEY_FIELDS` member, so a batched run MUST
+  supply `BATCH_PROMPT_SHA256`; supplying the single-case hash would let a cache hit silently reuse an
+  answer produced under a different response contract (only 89% behaviourally interchangeable).
+  Pinned by `test_batched_run_must_not_reuse_single_case_cache_entries`.
+
+- **Tests:** 15 new in `tests/test_discovery_novelty_contract.py` (94 → 109), covering prompt
+  derivation + hash pinning, the batch-size knee, all-or-nothing alignment (5 misalignment shapes),
+  per-case fail-closed, ceiling-stops-before-spending, checkpoint resume without re-billing,
+  degrade-to-single-case, nothing-checkpointed-from-unaligned, and cache-key separation.
+
+- **STILL NOT AUTHORIZED: the production run itself.** The owner rejected $301 and has approved batch
+  10 as the mechanism; the ~$34 production run needs its own explicit go. Whoever runs it must pass an
+  explicit `cost_ceiling_usd` and use `BATCH_PROMPT_SHA256` in the cache key.

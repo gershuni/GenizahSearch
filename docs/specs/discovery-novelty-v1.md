@@ -198,6 +198,35 @@ evaluation set on THIS document's current vocabulary/contract BEFORE the product
 authorized — see `136-NOVELTY-RUN.md` for that re-measurement's own report (or its documented
 deferral, if the environment executing Task 3 could not perform it).
 
+### 5a. Batched invocation ⟨AMENDED 2026-08-03, owner ruling O⟩
+
+The single-case contract in section 5 re-sends a 4,070-char system prompt for ONE judgment — **88% of
+every call's input**. It is retained UNCHANGED as the validated fallback, but production runs judge
+`DEFAULT_BATCH_SIZE = 10` candidates per call.
+
+- **Pinned batch prompt hash:** `BATCH_PROMPT_SHA256 = 3adb6f1e363fec13792fc517b642f864ac54f0aecaecd805623f822ea05590bb`
+  — computed at import time from `NOVELTY_BATCH_PROMPT_TEMPLATE`, which is derived by string surgery
+  from the single-case template so the judgment instructions stay byte-identical and only the response
+  contract differs. A module-level `assert` fails loudly if the single-case template is edited without
+  re-pinning the batch variant.
+- **A batched run MUST pass `BATCH_PROMPT_SHA256` as the `prompt_sha256` cache-key field.** Supplying
+  the single-case hash would let a cache hit reuse an answer produced under a different response
+  contract; the two arms agree behaviourally only 89% of the time and are NOT interchangeable.
+- **Batch size 10 is a measured knee, not a guess.** Over the same 300 residual cases the single-case
+  arm had already classified: false `fills_gap` promotions are +11 at batch 40, +10 at batch 20, and
+  **+2 at batch 10**, improving no further at batch 5. Cost projected over the 55,184-row residual:
+  $27.91 / $29.44 / **$34.09** / $46.87. Do NOT raise the batch size without re-running that
+  measurement against a known-good reference arm.
+- **Alignment is all-or-nothing.** `resolve_batch_model_output` raises `BatchResponseInvalid` if the
+  reply's case numbers are not exactly 1..N with no repeats, and NOTHING from that reply is
+  checkpointed — a positional mis-map would attribute one fragment's verdict to another and would be
+  invisible downstream. Unaligned batches retry, then degrade to the single-case contract. Per-case
+  vocabulary still fails closed to `not_checked` independently.
+- **Spend is hard-bounded.** `run_model_arm_batched` consults `cost_probe` (REAL cumulative
+  `usage.cost`, never an estimate) BEFORE each batch and raises `CostCeilingExceeded` at
+  `cost_ceiling_usd`, stopping with the checkpoint intact so the ceiling cannot be crossed by the
+  batch that discovers it.
+
 ## 6. Masking (D-25 / NOVEL-02)
 
 `shared/discovery_novelty.py::masked_provenance_label(source_code, lang)` names the source where it

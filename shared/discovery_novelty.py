@@ -502,6 +502,106 @@ Respond ONLY with a single JSON object: {"novelty_status": "<one of the ten valu
 
 PROMPT_SHA256: str = hashlib.sha256(NOVELTY_PROMPT_TEMPLATE.encode("utf-8")).hexdigest()
 
+# ---------------------------------------------------------------------------
+# Batched variant of the pinned gate (owner ruling O, 2026-08-03).
+#
+# The single-case contract above re-sends a ~4,070-char system prompt for ONE
+# judgment: 88% of every call's input is the instruction block. Judging N cases
+# per call amortizes it. MEASURED over the same 300 residual cases the
+# single-case arm had already classified: batch 10 costs $34 projected over the
+# 55,184-row residual vs $186 at batch 1 (5.5x), holds 3-way behavioural
+# agreement at 89.0%, and -- the safety-critical number -- injects only +2 new
+# `fills_gap` verdicts per 300 vs +10 at batch 20 and +11 at batch 40. The knee
+# is sharp between 20 and 10, which is why the default is 10 and NOT larger.
+#
+# The single-case template above is DELIBERATELY retained unchanged: it stays
+# the validated fallback that a repeatedly-malformed batch degrades to.
+# ---------------------------------------------------------------------------
+
+_SINGLE_RESPONSE_TAIL: str = (
+    'Respond ONLY with a single JSON object: {"novelty_status": "<one of the ten values>"} '
+    "OR the abstention object above. No prose outside the JSON object, and no field beyond the one shown."
+)
+
+# Fail loudly if the single-case template is ever edited without revisiting the
+# batch variant derived from it, rather than silently shipping a batch prompt
+# built from a stale tail.
+assert NOVELTY_PROMPT_TEMPLATE.rstrip().endswith(_SINGLE_RESPONSE_TAIL), (
+    "NOVELTY_PROMPT_TEMPLATE no longer ends with the response tail the batch prompt is derived from -- "
+    "update _SINGLE_RESPONSE_TAIL and re-pin BATCH_PROMPT_SHA256."
+)
+
+_BATCH_RESPONSE_TAIL: str = (
+    "You will be given SEVERAL numbered cases at once. Judge EACH ONE INDEPENDENTLY, exactly as if it "
+    "were the only case given; a case must never influence another. Respond ONLY with a single JSON object "
+    'mapping every case number to its own verdict: {"results": {"1": {"novelty_status": "<one of the ten values>"}, '
+    '"2": {"abstain": true, "reason": "<short reason>"}}}. Include EVERY case number exactly once. '
+    "No prose outside the JSON object."
+)
+
+NOVELTY_BATCH_PROMPT_TEMPLATE: str = (
+    NOVELTY_PROMPT_TEMPLATE.rstrip()[: -len(_SINGLE_RESPONSE_TAIL)].rstrip()
+    + "\n\n"
+    + _BATCH_RESPONSE_TAIL
+    + "\n"
+)
+
+BATCH_PROMPT_SHA256: str = hashlib.sha256(NOVELTY_BATCH_PROMPT_TEMPLATE.encode("utf-8")).hexdigest()
+
+# Measured knee (see the block comment above). Raising this past 10 measurably
+# increases false `fills_gap` promotions -- do not raise it without re-running
+# the batch-size measurement against a known-good reference arm.
+DEFAULT_BATCH_SIZE: int = 10
+
+
+class BatchResponseInvalid(Exception):
+    """A batched response could not be safely aligned to the cases sent.
+
+    Raised INSTEAD of returning partial results. A batch reply that is missing
+    a case, carries an unexpected case number, or repeats one cannot be trusted
+    positionally -- accepting the well-formed subset risks silently attributing
+    one fragment's verdict to a different fragment, which is precisely the
+    error class that would be invisible downstream. Fail closed; the caller
+    retries and ultimately degrades to the single-case contract.
+    """
+
+
+def resolve_batch_model_output(
+    raw: Optional[Mapping[str, Any]], batch_size: int
+) -> Dict[int, Dict[str, Optional[str]]]:
+    """Maps a raw BATCHED response to per-case stored columns, keyed by the
+    1-based case number sent.
+
+    All-or-nothing by design: every case number 1..batch_size must be present
+    exactly once, or ``BatchResponseInvalid`` is raised and NOTHING is returned.
+    Individual case payloads still fail closed to ``not_checked`` through
+    ``resolve_model_output``, so a malformed or out-of-vocabulary verdict for
+    one case degrades that case only -- it is the ALIGNMENT that is all-or-
+    nothing, not the vocabulary check.
+    """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+    if not isinstance(raw, Mapping):
+        raise BatchResponseInvalid("response is not a JSON object")
+    results = raw.get("results")
+    if not isinstance(results, Mapping):
+        raise BatchResponseInvalid("response has no 'results' object")
+
+    expected = {str(i) for i in range(1, batch_size + 1)}
+    got = {str(k) for k in results.keys()}
+    if got != expected:
+        missing = sorted(expected - got, key=int)
+        unexpected = sorted(got - expected)
+        raise BatchResponseInvalid(
+            f"case-number mismatch: missing={missing} unexpected={unexpected} "
+            f"(expected exactly 1..{batch_size})"
+        )
+
+    return {
+        i: resolve_model_output(results.get(str(i)) if isinstance(results.get(str(i)), Mapping) else None)
+        for i in range(1, batch_size + 1)
+    }
+
 INPUT_NORMALIZATION_SPEC: str = """Input normalization for the pinned novelty LLM gate (ruling G's free-text contract): each free-text field entering the prompt is NFC-normalized, then run through shared.text_normalize.strip_nikud and shared.text_normalize.strip_search_diacritics, then whitespace-collapsed (consecutive whitespace becomes a single space, leading/trailing stripped) -- see normalize_free_text in shared/discovery_novelty.py. The cache key is built over the fields in CACHE_KEY_FIELDS, IN THAT ORDER: the pinned model/version/effort/prompt-hash/input-normalization-hash identifiers FIRST (so a change to any of them invalidates every existing cache entry), then sys_id, ref_work_id, and the NORMALIZED claimed title/author and per-source free text, in that fixed order. A cache hit therefore provably means the identical question (same pinned contract, same candidate, same evidence) was already asked and answered."""
 
 INPUT_NORMALIZATION_SHA256: str = hashlib.sha256(INPUT_NORMALIZATION_SPEC.encode("utf-8")).hexdigest()

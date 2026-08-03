@@ -74,8 +74,11 @@ from shared.discovery_novelty import (  # noqa: E402
     LLM_REASONING_EFFORT,
     PROMPT_SHA256,
     INPUT_NORMALIZATION_SHA256,
+    DEFAULT_BATCH_SIZE,
+    BatchResponseInvalid,
     build_cache_key,
     normalize_free_text,
+    resolve_batch_model_output,
     resolve_model_output,
 )
 
@@ -231,6 +234,13 @@ def _candidate_key(sys_id: str, ref_work_id: str) -> str:
     return f"{sys_id}::{ref_work_id}"
 
 
+class CostCeilingExceeded(Exception):
+    """Raised to stop a run cleanly when real cumulative spend reaches the
+    caller's ceiling. Not an error condition -- the checkpoint is intact and
+    the run resumes from exactly where it stopped, having spent no more than
+    authorized."""
+
+
 # ---------------------------------------------------------------------------
 # The model arm -- runs ONLY over the residual (ruling J). Checkpointed and
 # resumable: a killed-and-restarted run never re-bills a candidate whose
@@ -290,6 +300,142 @@ def run_model_arm(
                     **resolved,
                 }
                 checkpoint_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                checkpoint_fh.flush()
+    finally:
+        if checkpoint_fh is not None:
+            checkpoint_fh.close()
+
+    return results
+
+
+def run_model_arm_batched(
+    residual_candidates: Sequence[NoveltyCandidate],
+    *,
+    batch_model_call: Callable[[Sequence[NoveltyCandidate]], Optional[Mapping[str, Any]]],
+    checkpoint_path: Optional[str] = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    cost_probe: Optional[Callable[[], float]] = None,
+    cost_ceiling_usd: Optional[float] = None,
+    single_model_call: Optional[Callable[[NoveltyCandidate], Optional[Mapping[str, Any]]]] = None,
+    max_batch_attempts: int = 3,
+    progress: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Dict[str, Optional[str]]]:
+    """Batched counterpart to `run_model_arm` (owner ruling O), judging
+    `batch_size` candidates per provider call instead of one.
+
+    Guardrails, both requested by the owner before authorizing a production run:
+
+    **Connection loss / malformed replies.** Checkpointing is per CANDIDATE and
+    flushed after every batch, so a killed run resumes without re-billing
+    answered cases. A reply that cannot be aligned 1:1 to the cases sent raises
+    `BatchResponseInvalid` and is retried up to `max_batch_attempts`; if it
+    still cannot be aligned, the batch DEGRADES to `single_model_call` -- the
+    original, separately-validated single-case contract -- rather than guessing
+    at alignment. If no single-case fallback is supplied, the batch is left
+    entirely unresolved and retried on the next invocation. Nothing partial is
+    ever checkpointed from an unaligned reply, because a positional mis-map
+    would silently attribute one fragment's verdict to another and would be
+    invisible downstream.
+
+    **Price ballooning.** `cost_probe` is consulted BEFORE each batch is sent
+    and must return REAL cumulative spend (read from the provider's own
+    `usage.cost`, never an estimate). At or above `cost_ceiling_usd` the run
+    raises `CostCeilingExceeded` and stops with its checkpoint intact, so the
+    ceiling is a hard bound on authorized spend rather than a warning. The
+    check is deliberately before the call, so the ceiling can never be crossed
+    by the batch that discovers it.
+    """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+
+    results: Dict[str, Dict[str, Optional[str]]] = {}
+    already_done: set = set()
+
+    if checkpoint_path and os.path.isfile(checkpoint_path):
+        with open(checkpoint_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                key = _candidate_key(rec["sys_id"], rec["ref_work_id"])
+                results[key] = {
+                    "novelty_status": rec.get("novelty_status"),
+                    "divergence_correctness": rec.get("divergence_correctness"),
+                }
+                already_done.add(key)
+
+    pending = [
+        c for c in residual_candidates
+        if _candidate_key(c.sys_id, c.ref_work_id) not in already_done
+    ]
+    if progress is not None:
+        progress(
+            f"{len(already_done)} already checkpointed; {len(pending)} pending "
+            f"in batches of {batch_size}"
+        )
+
+    checkpoint_fh = open(checkpoint_path, "a", encoding="utf-8") if checkpoint_path else None
+    try:
+        for start in range(0, len(pending), batch_size):
+            chunk = pending[start:start + batch_size]
+
+            if cost_ceiling_usd is not None and cost_probe is not None:
+                spent = cost_probe()
+                if spent >= cost_ceiling_usd:
+                    raise CostCeilingExceeded(
+                        f"real spend ${spent:.4f} reached the ${cost_ceiling_usd:.2f} ceiling "
+                        f"with {len(pending) - start} candidates still pending; checkpoint is "
+                        "intact and the run resumes from here once a higher ceiling is authorized"
+                    )
+
+            resolved_chunk: Optional[Dict[int, Dict[str, Optional[str]]]] = None
+            last_error: Optional[BaseException] = None
+            for attempt in range(1, max_batch_attempts + 1):
+                try:
+                    raw = batch_model_call(chunk)
+                    resolved_chunk = resolve_batch_model_output(raw, len(chunk))
+                    break
+                except BatchResponseInvalid as exc:
+                    last_error = exc
+                    if progress is not None:
+                        progress(f"batch at offset {start} unaligned (attempt {attempt}): {exc}")
+
+            if resolved_chunk is None:
+                if single_model_call is None:
+                    if progress is not None:
+                        progress(
+                            f"batch at offset {start} left UNRESOLVED after {max_batch_attempts} "
+                            f"attempts ({last_error}); it is not checkpointed and will be retried"
+                        )
+                    continue
+                if progress is not None:
+                    progress(
+                        f"batch at offset {start} degrading to the single-case contract "
+                        f"after {max_batch_attempts} unaligned replies"
+                    )
+                resolved_chunk = {
+                    i + 1: resolve_model_output(single_model_call(c))
+                    for i, c in enumerate(chunk)
+                }
+
+            for i, candidate in enumerate(chunk):
+                key = _candidate_key(candidate.sys_id, candidate.ref_work_id)
+                resolved = resolved_chunk[i + 1]
+                results[key] = resolved
+                if checkpoint_fh is not None:
+                    checkpoint_fh.write(
+                        json.dumps(
+                            {
+                                "sys_id": candidate.sys_id,
+                                "ref_work_id": candidate.ref_work_id,
+                                **resolved,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            if checkpoint_fh is not None:
                 checkpoint_fh.flush()
     finally:
         if checkpoint_fh is not None:

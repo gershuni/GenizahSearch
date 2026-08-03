@@ -1004,3 +1004,187 @@ def test_load_owner_labels_without_expected_hash_does_not_verify():
         path = fh.name
     data = load_owner_labels(path)
     assert data["cases"] == cases
+
+
+# ---------------------------------------------------------------------------
+# Batched gate (owner ruling O) -- prompt derivation, alignment safety, and the
+# two guardrails the owner required before authorizing a production run:
+# resilience to connection loss / malformed replies, and a hard spend ceiling.
+# ---------------------------------------------------------------------------
+
+from shared.discovery_novelty import (  # noqa: E402
+    BATCH_PROMPT_SHA256,
+    DEFAULT_BATCH_SIZE,
+    NOVELTY_BATCH_PROMPT_TEMPLATE,
+    NOVELTY_PROMPT_TEMPLATE,
+    BatchResponseInvalid,
+    resolve_batch_model_output,
+)
+from scripts.discovery_novelty_funnel import (  # noqa: E402
+    CostCeilingExceeded,
+    run_model_arm_batched,
+)
+
+
+def _cand(n):
+    return NoveltyCandidate(sys_id=f"s{n}", ref_work_id=f"w{n}", claimed_title=f"t{n}")
+
+
+def test_batch_prompt_is_derived_from_the_single_prompt_and_differs_from_it():
+    # The shared judgment instructions must be byte-identical; only the
+    # response contract differs. A drifted batch prompt would silently be
+    # a different gate.
+    shared_head = NOVELTY_PROMPT_TEMPLATE.split("Respond ONLY")[0].rstrip()
+    assert NOVELTY_BATCH_PROMPT_TEMPLATE.startswith(shared_head)
+    assert BATCH_PROMPT_SHA256 != PROMPT_SHA256
+    assert '"results"' in NOVELTY_BATCH_PROMPT_TEMPLATE
+
+
+def test_batch_prompt_hash_is_pinned():
+    import hashlib
+    assert (
+        hashlib.sha256(NOVELTY_BATCH_PROMPT_TEMPLATE.encode("utf-8")).hexdigest()
+        == BATCH_PROMPT_SHA256
+    )
+
+
+def test_default_batch_size_is_the_measured_knee():
+    # Measured: +2 new fills_gap per 300 at batch 10, +10 at 20, +11 at 40.
+    # Raising this without re-measuring re-introduces false candidates.
+    assert DEFAULT_BATCH_SIZE == 10
+
+
+def test_resolve_batch_output_maps_every_case():
+    raw = {"results": {"1": {"novelty_status": "fills_gap"}, "2": {"abstain": True, "reason": "x"}}}
+    out = resolve_batch_model_output(raw, 2)
+    assert out[1]["novelty_status"] == "fills_gap"
+    assert out[2]["novelty_status"] == DEFAULT_STATUS
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        {"no_results_key": {}},
+        {"results": {"1": {"novelty_status": "fills_gap"}}},                      # missing case 2
+        {"results": {"1": {}, "2": {}, "3": {}}},                                 # unexpected case 3
+        {"results": {"1": {"novelty_status": "fills_gap"}, "9": {}}},             # wrong numbering
+    ],
+)
+def test_resolve_batch_output_fails_closed_on_any_misalignment(raw):
+    # All-or-nothing: a positional mis-map would attribute one fragment's
+    # verdict to another and be invisible downstream.
+    with pytest.raises(BatchResponseInvalid):
+        resolve_batch_model_output(raw, 2)
+
+
+def test_resolve_batch_output_still_fails_closed_per_case_on_bad_vocabulary():
+    raw = {"results": {"1": {"novelty_status": "not_a_real_shade"}, "2": {"novelty_status": "confirms"}}}
+    out = resolve_batch_model_output(raw, 2)
+    assert out[1]["novelty_status"] == DEFAULT_STATUS
+    assert out[2]["novelty_status"] == "confirms"
+
+
+def test_batched_arm_stops_at_the_cost_ceiling_before_spending_more():
+    calls = []
+
+    def batch_call(chunk):
+        calls.append(len(chunk))
+        return {"results": {str(i + 1): {"novelty_status": "confirms"} for i in range(len(chunk))}}
+
+    spend = {"usd": 0.0}
+
+    def probe():
+        return spend["usd"]
+
+    def spending_batch_call(chunk):
+        spend["usd"] += 5.0
+        return batch_call(chunk)
+
+    with pytest.raises(CostCeilingExceeded):
+        run_model_arm_batched(
+            [_cand(i) for i in range(20)],
+            batch_model_call=spending_batch_call,
+            batch_size=2,
+            cost_probe=probe,
+            cost_ceiling_usd=10.0,
+        )
+    # Checked BEFORE each batch, so spend never runs past the ceiling by more
+    # than the batch that crossed it.
+    assert spend["usd"] <= 15.0
+
+
+def test_batched_arm_resumes_from_checkpoint_without_rebilling(tmp_path):
+    ckpt = tmp_path / "ck.jsonl"
+    ckpt.write_text(
+        json.dumps({"sys_id": "s0", "ref_work_id": "w0", "novelty_status": "confirms",
+                    "divergence_correctness": None}) + "\n",
+        encoding="utf-8",
+    )
+    seen = []
+
+    def batch_call(chunk):
+        seen.extend(c.sys_id for c in chunk)
+        return {"results": {str(i + 1): {"novelty_status": "fills_gap"} for i in range(len(chunk))}}
+
+    out = run_model_arm_batched(
+        [_cand(0), _cand(1), _cand(2)],
+        batch_model_call=batch_call,
+        checkpoint_path=str(ckpt),
+        batch_size=2,
+    )
+    assert "s0" not in seen                       # never re-billed
+    assert out["s0::w0"]["novelty_status"] == "confirms"
+    assert out["s1::w1"]["novelty_status"] == "fills_gap"
+
+
+def test_batched_arm_degrades_to_single_case_contract_when_replies_never_align():
+    def bad_batch(chunk):
+        return {"results": {"1": {"novelty_status": "fills_gap"}}}   # always short
+
+    singles = []
+
+    def single(candidate):
+        singles.append(candidate.sys_id)
+        return {"novelty_status": "diverges_work"}
+
+    out = run_model_arm_batched(
+        [_cand(1), _cand(2)],
+        batch_model_call=bad_batch,
+        batch_size=2,
+        single_model_call=single,
+        max_batch_attempts=2,
+    )
+    assert singles == ["s1", "s2"]
+    assert out["s1::w1"]["novelty_status"] == "diverges_work"
+
+
+def test_batched_arm_checkpoints_nothing_from_an_unaligned_reply(tmp_path):
+    ckpt = tmp_path / "ck.jsonl"
+
+    def bad_batch(chunk):
+        return {"results": {"1": {"novelty_status": "fills_gap"}}}
+
+    out = run_model_arm_batched(
+        [_cand(1), _cand(2)],
+        batch_model_call=bad_batch,
+        checkpoint_path=str(ckpt),
+        batch_size=2,
+        max_batch_attempts=2,
+    )
+    # No single-case fallback supplied => leave it for the next run rather
+    # than record a guess.
+    assert out == {}
+    assert not ckpt.exists() or ckpt.read_text(encoding="utf-8").strip() == ""
+
+
+def test_batched_run_must_not_reuse_single_case_cache_entries():
+    # prompt_sha256 is a cache-key field, so a batched run MUST supply
+    # BATCH_PROMPT_SHA256. If it supplied the single-case hash instead, a
+    # cache hit would silently reuse an answer produced under a different
+    # response contract -- measured at only 89% behavioural agreement, so the
+    # two are NOT interchangeable.
+    base = {f: "x" for f in CACHE_KEY_FIELDS}
+    single = dict(base, prompt_sha256=PROMPT_SHA256)
+    batched = dict(base, prompt_sha256=BATCH_PROMPT_SHA256)
+    assert build_cache_key(single) != build_cache_key(batched)
