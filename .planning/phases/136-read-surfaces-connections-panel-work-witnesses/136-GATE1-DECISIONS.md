@@ -2007,3 +2007,64 @@ Recorded here with the same standing as A-K -- LOCKED, not re-litigated, re-deri
 - **STILL NOT AUTHORIZED: the production run itself.** The owner rejected $301 and has approved batch
   10 as the mechanism; the ~$34 production run needs its own explicit go. Whoever runs it must pass an
   explicit `cost_ceiling_usd` and use `BATCH_PROMPT_SHA256` in the cache key.
+
+---
+
+## Ruling P — two held domain rows settled from FJMS's OWN work-level identification (owner, 2026-08-03)
+
+- **Owner's question, verbatim:** *"Many of the works listed there are already in FGP, so in our database,
+  so they have their domain. Am I wrong? If not, we can take the decision from FGP original domain info"*,
+  refined to *"The question is how FJMS calls what in ITS IDENTIFICATION these works like Seder Olam"*,
+  then **"We need to follow FJMS"**, confirmed against the corrected, narrower reading below.
+
+- **The owner was right that a work-level domain exists, and the 136-09 curation pass missed it.**
+  `fjms_enrichment.db::genizah_titles` carries a **`DomainId` populated for 718 of its 775 titles** — a
+  domain attached to a TITLE (a work), not to an AlmaId. The curation pass deliberately avoided the
+  manuscript-keyed `domains` table (correctly — that is the catalogue axis) but never discovered this
+  work-level source. Record this as a real gap in that pass, not as a rules failure.
+
+- **Decoding `DomainId`.** There is NO code→string table (`code_values` does not contain these codes;
+  `catalog` has no `DomainId` column). The mapping was recovered empirically and must be recovered the
+  SAME way by anyone repeating this: restrict to AlmaIds having **exactly one** `catalog.GenizahTitleId`
+  AND **exactly one** `domains` row, then join. That yields **62 DomainIds at 99.8% mean / 100% median
+  concentration** — effectively deterministic. **Do NOT decode by modal co-occurrence over all
+  manuscripts** (26–54% concentration); that mixes in the domains of other works sharing a codex.
+
+- **RULED — 5 of the 29 held rows, all mapping onto candidate leaves the artifact already offered:**
+
+  | rows | canonical ids | ruled leaf | FJMS support |
+  |---|---|---|---|
+  | Yosippon (G1) | `w001152`, `w000853`, `w000855` | `Historiography and geographical descriptions / Historiography and geographical descriptions` | DomainId 180000, 100%, n=98, exact title match |
+  | Seder Olam (G3) | `w000164`, `w001066` | `Rabbinic Literature / Other` | DomainId 120000, 100%, n=87 |
+
+  Each ruled row must carry an `owner_ruling` citation pointing at THIS section. The remaining **24 rows
+  stay held**; `--validate --release` must continue to fail closed until they are ruled.
+
+- **NOT ruled, deliberately — the support is too thin:** `מגילת אביתר` (DomainId 170400 → Polemics
+  Rabbinical) rests on **n=6**, and `ספר יצירה` (150500 → Mystical Literature (not Kabbalah)) on **n=1**.
+  A 100% concentration over one manuscript is noise wearing a confident face.
+
+- **"Follow FJMS" is SCOPED to this evidence, and is NOT a blanket override.** An initial, WRONGER
+  reading of the cross-check was put to the owner and then retracted before anything was applied. Three
+  findings bound it:
+  1. **FJMS exact-covers only 55 of 1,073 works** (the earlier "195" came from loose containment matching
+     and was an artifact).
+  2. **FJMS's taxonomy is often COARSER than the rule table's.** One DomainId (n=200) lumps
+     `מדרש חסרות ויתרות`, `ברייתא דמזלות`, `מדרש פטירת משה`, `ספר זרובבל` and `ברייתא דישועה` together as
+     `Later Midrashim`, where the rule table distinguishes Massorah, Astrology and Philosophy.
+  3. **In the largest disagreement the rule table is BETTER:** `הגדה של פסח` (2,180 claims) —
+     ours `Liturgy and Brakhot / Passover Haggada` vs FJMS `Liturgy and Brakhot / Liturgical additions`.
+  Agreement where comparable is **79.6%** (39/49 exact-matched works), which stands as the rule table's
+  first independent validation.
+
+- **RETRACTED before application — the "midrash convention" cluster does not exist.** An earlier analysis
+  reported ~14 works and ~8,700 claims turning on an `Aggadic Midrashim` vs `Later Midrashim` boundary
+  (Yalkut ×2, Lekach Tov ×5, Tanna de-Bei Eliyahu ×3, Avot de-Rabbi Natan ×2). **None of those works
+  exact-matches an FJMS title** — every one was a loose-containment false match. Under exact matching they
+  vanish from the disagreement list entirely. No convention ruling was made and none is needed. Anyone
+  revisiting this must use exact normalized title matching; containment produced false positives
+  including `מחברת` → a DomainId decoding to `Bible: Texts` at n=93,237.
+
+- **Plans that must implement this:** **136-09** (re-emit + re-pin `work_domains-v1.json` with these 5
+  rows carrying `domain_leaf` + `owner_ruling`; it remains HALTED for the other 24), and **136-12**
+  (must not load `works.genre` until `--validate --release` exits 0).
