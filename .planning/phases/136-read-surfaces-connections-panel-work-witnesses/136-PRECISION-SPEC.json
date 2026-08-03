@@ -73,7 +73,7 @@
     "ins_policy": null,
     "measurement_status": "measured_pass",
     "method": null,
-    "notes": "D-02a (docs/specs/discovery-sidecar-schema-v1.md SS1.6 amendment 2026-08-02, 136-GATE1-DECISIONS.md SS D-02a): stores ONLY the CERT-01 AUTHORIZATION that is_default_eligible() reads -- measurement_status='measured_pass', ci_low=0.9084 -- NEVER a measured precision number. 'precision' STAYS NULL; this is not a fabricated number in a real/release build (unlike the SYNTHETIC-fixture-only 0.90 placeholder in _band_precision_rows).",
+    "notes": "H3: tier_a carries NO measured precision in the frozen contract -- NEVER a fabricated number in a real/release build (unlike the SYNTHETIC-fixture-only 0.90 placeholder in _band_precision_rows).",
     "numerator": null,
     "precision": null,
     "sampling_frame": null,
