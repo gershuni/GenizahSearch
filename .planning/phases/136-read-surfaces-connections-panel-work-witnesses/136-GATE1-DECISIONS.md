@@ -1830,3 +1830,81 @@ Recorded here with the same standing as A-K -- LOCKED, not re-litigated, re-deri
   -- all of that is explicitly preserved per the owner's own "nothing is deleted" instruction. It does
   not build a human/owner annotation pathway for this column going forward (out of scope; flagged for
   a future plan).
+
+---
+
+## Ruling M — the `fills_gap` novelty gate is ACCEPTED (owner, 2026-08-03)
+
+- **Owner's verdict, verbatim:** *"Almost all are novel. No. 4 is not novel as attested in
+  bibliography, but it has specific identification that is not apparent even in bibliography. No. 8 is
+  just untrue. Also No. 12, 16 (it's a prayer but not sefer Ahava, common pitfall). Other prayers as
+  well (no. 19, 25), are not well identified. All in all I am satisfied from this gate"*
+
+- **What was graded:** the 33-row `fills_gap` probe (`136-NOVELTY-FILLSGAP-PROBE.xlsx`), 13 model-path
+  + 20 bypass-path rows, after the instrument was corrected to show each checked source's OWN free
+  text (commit `80d54ca5`). The pre-correction instrument showed only our claim and a selection
+  rationale and was NOT gradeable -- the same defect that made arm 2 inconclusive.
+
+- **The decisive distinction the owner drew.** Only **case 4** is a NOVELTY error (the bibliography
+  does attest it). Cases **8, 12, 16, 19, 25** are *identification* errors: the novelty gate correctly
+  reported "not identified in the aids we checked" -- the aids genuinely do not identify these -- but
+  the work our pipeline claims is wrong. **These are a different defect, with a different owner, and
+  they are NOT evidence against the novelty gate.** Do not conflate the two rates when quoting this
+  probe.
+
+- **Ruled: the novelty gate's `fills_gap` judgments are sound enough to ship.** The measured
+  false-novel rate on this probe is 1/33 on the novelty question proper.
+
+## Ruling N — an imprecise claim still SHIPS; the baseline is absence, not correctness
+
+- **Owner's ruling, verbatim:** *"It's a wrong claim but it's BETTER than the current absent one since
+  it points the reader to the fact it's a prayer"*
+
+- **Context:** cases 12/16/19 claim `משנה תורה, ספר אהבה` for fragments that are liturgy. Sefer Ahava
+  contains the order of prayers, so prayer text is drawn to it -- the owner's "common pitfall". The
+  bypass-path rows in particular have NO identification in ANY checked aid, so the comparison that
+  matters is not *our claim vs. the correct work* but ***our claim vs. nothing at all***.
+
+- **Ruled: these rows ship.** An imprecise but directionally informative claim ("this is liturgy") beats
+  silence. This is NOT a defect to suppress, and no plan should add a filter to hide it. Consistent
+  with the standing `aid_more_specific` ruling (show, never as a candidate find) and with
+  "catalogue is a recall yardstick, never acceptance evidence".
+
+- **Scale (measured 2026-08-03 against the live v2 asset):** `משנה תורה, ספר אהבה` (`w000176`) is the
+  **10th most-claimed work in the corpus at 6,437 claim pairs** of 268,361 -- 2.4%, and the largest
+  non-Bible claim after Yalkut. So this pattern is a visible fraction of the surface, shipping by
+  design under this ruling.
+
+- **Forward link:** this is exactly the population the DEFERRED reference-granularity stage converts
+  into precision (a prayer identified as its own composition rather than as its halakhic container).
+  Counting it is a forward indicator of what granularity unlocks.
+
+## Recorded — NEW evidence for the deferred witness-vs-quoter lever (compilations absorb their sources)
+
+- **Owner's observation, verbatim:** *"Yalkut may also be many times wrong since it's a compilation"*
+
+- **Why this is new.** The witness-vs-quoter lever is already deferred to discovery-v2.1
+  (`136-CONTEXT.md` lines 232/292/800), but the only evidence recorded for it to date runs the OTHER
+  way: `low_coverage` routing DEMOTING correct identifications (`docs/OPEN_ISSUES.md`, 100,159 rows).
+  The **quoter direction** -- an anthology claimed where the fragment is really the source work it
+  quotes -- had no recorded evidence. It does now.
+
+- **Measured exposure (2026-08-03, live v2 asset):**
+
+  | claimed work | claim pairs |
+  |---|---|
+  | `ילקוט שמעוני על התורה` | 3,040 |
+  | `ילקוט שמעוני על נ"ך` | 1,890 |
+  | **Yalkut total** | **4,930** |
+  | `תנחומא` (a work Yalkut quotes) | 1,480 |
+
+  Yalkut is claimed **3.3x more often than Tanhuma**. Yalkut Shimoni is a 13th-century anthology; the
+  Genizah corpus is overwhelmingly earlier. An anthology outranking its own sources by 3:1 is prima
+  facie backwards and is consistent with the compilation absorbing fragments of the works it quotes.
+
+- **Not detectable today:** `works.genre` is **NULL for all 1,269 works** -- there is no compilation/
+  anthology flag in the asset, so this cannot currently be filtered, measured precisely, or routed.
+  Any v2.1 work on this lever needs a work-level compilation classification first.
+
+- **NOT actioned in Phase 136** (out of scope; the gate under test was novelty, and ruling M accepts
+  it). Carried to the discovery-v2.1 refresh alongside the reference-granularity stage.
