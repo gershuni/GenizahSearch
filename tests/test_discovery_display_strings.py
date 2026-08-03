@@ -93,6 +93,12 @@ def gate_string(value: str, lang: str, *, where: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 SWEEP_INPUTS = {
+    # Curated titles must clear the same honesty gate as any other reader-facing
+    # string: both a curated work and an uncurated pass-through (ruling R).
+    "display_work_title": [
+        {"work_id": "w000176", "neutral_title": "משנה תורה, ספר אהבה"},
+        {"work_id": "w000164", "neutral_title": "סדר עולם רבה"},
+    ],
     "relation_chip": [{"relation_kind": k} for k in STORED_RELATION_KEYS],
     "relation_tooltip": [
         {"evidence_source": src, "confidence_band": band}
@@ -724,3 +730,41 @@ def test_discovery_css_block_is_scoped_and_carries_the_required_treatments():
     # The RTL disclosure-arrow flip and the sub-700px row stacking.
     assert '[dir="rtl"] .gs-discovery .disc > summary::before' in block
     assert "@media (max-width: 700px)" in block
+
+
+# ---------------------------------------------------------------------------
+# Curated display titles (owner ruling R)
+# ---------------------------------------------------------------------------
+
+from shared.discovery_display_strings import (  # noqa: E402
+    CURATED_WORK_TITLES,
+    display_work_title,
+)
+
+
+def test_curated_title_overrides_sefer_ahava_in_both_languages():
+    assert display_work_title("w000176", "משנה תורה, ספר אהבה", "he") == "משנה תורה, ספר אהבה / סידור"
+    assert display_work_title("w000176", "משנה תורה, ספר אהבה", "en") == "Mishneh Torah, Sefer Ahava / Siddur"
+
+
+def test_uncurated_work_passes_its_recorded_title_through_unchanged():
+    assert display_work_title("w000164", "סדר עולם רבה", "he") == "סדר עולם רבה"
+    assert display_work_title("w999999", "Anything At All", "en") == "Anything At All"
+
+
+def test_curated_title_names_both_possibilities_never_asserts_one():
+    # Ruling R's whole point: the label must not assert the halakhic work, and
+    # must not drop it either -- a reader has to see both readings.
+    for lang in ("he", "en"):
+        t = display_work_title("w000176", "x", lang)
+        assert "/" in t, "curated label must name both readings, not pick one"
+    assert "סידור" in display_work_title("w000176", "x", "he")
+    assert "Siddur" in display_work_title("w000176", "x", "en")
+
+
+def test_curated_titles_are_bilingual_and_nonempty():
+    # A half-filled entry would silently fall back to the other language.
+    for work_id, entry in CURATED_WORK_TITLES.items():
+        assert set(entry) >= {"he", "en"}, f"{work_id} is missing a language"
+        for lang, value in entry.items():
+            assert value.strip(), f"{work_id}/{lang} is empty"

@@ -701,3 +701,48 @@ def service_state_message(state: str, lang: str = "en") -> str:
 def retry_label(lang: str = "en") -> str:
     """The retry affordance that accompanies every non-ok service state."""
     return _pick(_RETRY_LABEL, lang)
+
+
+# ---------------------------------------------------------------------------
+# Curated display titles (owner ruling R, 2026-08-03)
+#
+# A DISPLAY-time override, deliberately not a data change. The reference text a
+# row matched against really is the named work; what is wrong is the impression
+# the bare title gives a reader. Rewriting `works.neutral_title` would falsify
+# what the matcher actually compared and would silently change the novelty
+# funnel's own name-matching if it were ever re-run, so the correction lives
+# here, at the surface, where the misleading impression is.
+#
+# First entry, and the reason the mechanism exists: `משנה תורה, ספר אהבה` is the
+# 10th most-claimed work in the corpus at 6,437 claim pairs (448 of them on the
+# candidates surface), because Sefer Ahava CONTAINS the order of prayers -- so
+# liturgy is drawn to it. The owner's ruling: most of these pages are liturgy,
+# and the honest label names both possibilities rather than asserting the
+# halakhic work or hiding the row (ruling N already settled that these rows
+# SHIP: an imprecise claim that points a reader at "this is prayer" beats the
+# silence these fragments otherwise have).
+#
+# This is the first instance of the deferred ~2,670-work title curation. Keep
+# entries rare and owner-ruled; this is not a place to fix data quality.
+# ---------------------------------------------------------------------------
+
+CURATED_WORK_TITLES: Dict[str, Dict[str, str]] = {
+    "w000176": {
+        "he": "משנה תורה, ספר אהבה / סידור",
+        "en": "Mishneh Torah, Sefer Ahava / Siddur",
+    },
+}
+
+
+def display_work_title(work_id: str, neutral_title: str, lang: str = "en") -> str:
+    """The title a READER sees for a work, applying any owner-ruled curated
+    override and otherwise passing the recorded title through unchanged.
+
+    Every surface that renders a work title must route through this -- a
+    surface that formats `neutral_title` directly silently opts out of the
+    curation and will show the misleading bare title.
+    """
+    entry = CURATED_WORK_TITLES.get(work_id)
+    if entry is None:
+        return neutral_title
+    return _pick(entry, lang)

@@ -2118,3 +2118,52 @@ Recorded here with the same standing as A-K -- LOCKED, not re-litigated, re-deri
 - **With rulings P and Q together all 29 held rows are ruled**, so `--validate --release` can pass once
   the artifact is re-emitted and re-pinned. **136-09 must apply these and re-pin; 136-12 must not load
   `works.genre` until `--validate --release` exits 0.**
+
+---
+
+## Ruling R — curated display title for `משנה תורה, ספר אהבה` (owner, 2026-08-03)
+
+- **Owner's ruling, verbatim:** *"Most MT Ahava is liturgy, so we can label it manually
+  משנה תורה ספר אהבה / סידור"* — made after reviewing all 9,887 `fills_gap` rows grouped by
+  identification (`novelty-FILLSGAP-by-work.PRIVATE.html`).
+
+- **The problem.** `w000176` (`משנה תורה, ספר אהבה`, source_corpus `msource`) is the **10th
+  most-claimed work in the corpus at 6,437 claim pairs**, and **448 of them are on the candidates
+  surface**. Sefer Ahava CONTAINS the order of prayers, so liturgy is drawn to it — the text match is
+  real, but the bare title tells a reader "this is Maimonides' halakhic book", which for most of these
+  pages is wrong.
+
+- **RULED — a DISPLAY-time relabel, corpus-wide for this work:**
+
+  | | |
+  |---|---|
+  | HE | `משנה תורה, ספר אהבה / סידור` |
+  | EN | `Mishneh Torah, Sefer Ahava / Siddur` |
+
+  The label **names both readings and asserts neither** — pinned by a test
+  (`test_curated_title_names_both_possibilities_never_asserts_one`).
+
+- **Why display-time and NOT a data change.** The reference text these rows matched against genuinely
+  IS Sefer Ahava; what misleads is the impression the title gives a reader. Rewriting
+  `works.neutral_title` would (a) falsify what the matcher actually compared, and (b) silently change
+  the novelty funnel's own mechanical name-matching if it were ever re-run. The correction therefore
+  lives at the surface, where the misleading impression is.
+
+- **Consistent with ruling N**, which already settled that these rows SHIP: an imprecise claim that
+  points a reader at "this page is prayer" beats the silence these fragments otherwise have. Ruling R
+  makes that pointer explicit instead of leaving the reader to infer it.
+
+- **Implemented:** `shared/discovery_display_strings.py` — `CURATED_WORK_TITLES` +
+  `display_work_title(work_id, neutral_title, lang)`. **Every surface that renders a work title MUST
+  route through `display_work_title`**; a surface formatting `neutral_title` directly silently opts out
+  of the curation and shows the misleading bare title. Applies to **136-15, 136-16, 136-17, 136-18** and
+  any later title-rendering surface.
+
+- **This is the FIRST instance of the deferred ~2,670-work title curation** (`136-CONTEXT.md` line 800,
+  carried to the v2.1 phase). The mechanism is deliberately a small owner-ruled table, not a
+  data-quality workshop: entries stay rare and each one needs a ruling. Registered in the honesty sweep
+  (`SWEEP_INPUTS`), so the curated string clears the same gate as every other reader-facing string.
+
+- **Tests:** 4 new in `tests/test_discovery_display_strings.py` (26 → 30) — bilingual override,
+  uncurated pass-through, the both-readings invariant, and a bilingual-completeness check so a
+  half-filled entry cannot silently fall back to the other language.
