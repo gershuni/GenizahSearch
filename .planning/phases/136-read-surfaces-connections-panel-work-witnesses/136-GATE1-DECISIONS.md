@@ -2167,3 +2167,46 @@ Recorded here with the same standing as A-K -- LOCKED, not re-litigated, re-deri
 - **Tests:** 4 new in `tests/test_discovery_display_strings.py` (26 → 30) — bilingual override,
   uncurated pass-through, the both-readings invariant, and a bilingual-completeness check so a
   half-filled entry cannot silently fall back to the other language.
+
+---
+
+## Ruling S — the public artifact ships the two-axis conjunction, including JA direct matches (2026-08-03)
+
+**Context.** Gate 9 of the 136-13 rebuild battery reported that the two ways of computing the public
+scope disagree on **36,989 of 297,415 evidence rows (12.4%)**. The projection had shipped the two-axis
+conjunction. The plan deliberately makes this a REPORT, not a resolution, because a projection
+silently widening or narrowing the published set is the failure the number exists to catch.
+
+**Direction, measured (not inferred from the counts):**
+
+| | rows | corpus × family |
+|---|---|---|
+| the conjunction ships, the VIS-01 shortcut would NOT | 24,094 | `ja` × `track1_direct` |
+| the VIS-01 shortcut would ship, the conjunction does NOT | 12,895 | `msource` × `propagated` |
+
+The second half is not a decision: `_vis01_shortcut` returns True for EVERY `propagated` row
+regardless of corpus, so it would publish restricted-identity material. The per-row conjunction
+correctly withholds it. The shortcut is wrong there and the current behaviour is right.
+
+**Owner ruling: SHIP the JA direct matches.** The per-row visibility flags are the authoritative rule
+everywhere else in the system; those works are public and their matches cleared the same routing and
+quality gates as the Sefaria ones.
+
+**The claim-integrity question was raised and then ANSWERED, not deferred.** The concern was that
+CERT-01 measured precision over a specific population, and the certified figures are recorded per
+confidence band, never per corpus — so shipping JA direct rows might extend the certificate over rows
+it was never measured on. Checked directly against the graded deck
+(`same_work_spike/probe/data/cert01_deck_key.json` + `review/cert01_deck_verdicts.json`, joined to the
+rebuilt asset):
+
+- 48 of the 280 graded cards sit on JA-corpus works (6 `track1_direct` only, 42 carrying both families).
+- Of the 220 **candidate-role** cards — the population the precision estimand is computed over —
+  **44 are JA**, against 133 Sefaria and 43 restricted-corpus.
+
+JA is therefore ~20% of the graded candidates while JA direct matches are ~10% of the shipped public
+evidence rows: the corpus is if anything OVER-represented in the measurement relative to what ships.
+The certificate covers these rows; it is not being stretched over them.
+
+**Consequence:** the artifact is correct as built. No rebuild, no re-projection, no change to the gate
+battery. `_vis01_shortcut` is now known to be a stale, unsafe rule — it survives only as one input to
+this reconciliation report and must never be used as a publication gate.
