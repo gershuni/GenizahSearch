@@ -742,7 +742,15 @@ def test_d17_within_delta_tie_demotes_neither():
         specs, cross_corpus_map={}, year_by_canonical={"w000001": 950, "w000002": 990})  # delta 40 < 100
     assert all(s["routing_status"] == ids.ROUTING_STATUS_SHIPPED for s in specs)
     assert len(audit) == 1 and audit[0]["decision"] == "kept_tie"
-    assert audit[0]["demoted_work_id"] is None
+    # 136-12 / schema Amendment 2026-08-02 (F): a `kept_tie` row now NAMES the
+    # other member of the pair. Nothing is demoted by a tie -- both specs are
+    # still shipped, asserted above -- but the audit row must make the PAIR
+    # reconstructable, because the main-pool rule's competition gate reads
+    # exactly these ties. This assertion previously pinned the NULL that made
+    # the pair unrecoverable.
+    assert audit[0]["demoted_work_id"] == "w000002"
+    assert audit[0]["kept_work_id"] == "w000001"
+    assert sidecar_build.assert_kept_tie_rows_name_their_pair(audit) == 0
 
 
 def test_d17_distinctive_non_overlapping_span_keeps_shipped():

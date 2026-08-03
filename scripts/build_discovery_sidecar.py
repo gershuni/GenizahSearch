@@ -105,6 +105,21 @@ from shared.discovery_novelty import (  # noqa: E402
     novelty_columns_for,
     novelty_work_key,
 )
+
+# 136-12 (VIS-01 / D-22): the two visibility axes are DERIVED by the shared
+# module, never by a second `source_corpus == 'sefaria'` test written here. The
+# builder's job is to call them at the point the RAW evidence origin is still in
+# scope and to STORE the results -- `is_public` (the ONE eligibility rule) is
+# deliberately NOT imported: the builder stores the axes and lets
+# `scripts/project_discovery_public.py` apply the conjunction, so the
+# eligibility rule has exactly one caller-facing home.
+from shared.discovery_visibility import (  # noqa: E402
+    VISIBILITY_PRIVATE,
+    VISIBILITY_PUBLIC,
+    assertion_visibility as derive_assertion_visibility,
+    identity_visibility as derive_identity_visibility,
+    reconcile_launch_scope,
+)
 SCHEMA_VERSION = "discovery-v1"
 SIDECAR_VERSION = "discovery-v1-synthetic-fixture"
 
@@ -121,6 +136,15 @@ FROZEN_HTR_SNAPSHOT_HASH = hashlib.sha256(b"discovery-v1-synthetic-htr-corpus").
 
 _RULE_VERSION = "discovery-v1-synthetic"
 
+# 136-12 / schema Amendment 2026-08-02 (C1): the closed `meta.audience` enum.
+# THIS builder only ever writes the private value -- `scripts/project_discovery_public.py`
+# is the sole writer of `public`, and the two must never converge into one
+# configurable knob (that is what makes the boundary structural rather than
+# procedural). Mirrors `web/discovery_assets.py::_AUDIENCES`.
+ASSET_AUDIENCE_PRIVATE = "private"
+ASSET_AUDIENCE_PUBLIC = "public"
+ASSET_AUDIENCES = frozenset({ASSET_AUDIENCE_PRIVATE, ASSET_AUDIENCE_PUBLIC})
+
 
 # ---------------------------------------------------------------------------
 # 1. Schema DDL (docs/specs/discovery-sidecar-schema-v1.md SS1, verbatim)
@@ -135,7 +159,17 @@ CREATE TABLE works (
   neutral_title        TEXT NOT NULL,
   author               TEXT,
   genre                TEXT,
-  source_corpus        TEXT NOT NULL CHECK (source_corpus IN ('sefaria','ja','msource'))
+  source_corpus        TEXT NOT NULL CHECK (source_corpus IN ('sefaria','ja','msource')),
+  -- 136-12 / schema Amendment 2026-08-02 (A). VIS-01 axis TWO (D-22): the
+  -- visibility of this WORK's own identity source. Derived by
+  -- `shared.discovery_visibility.identity_visibility` -- the ONE derivation,
+  -- never a second `source_corpus == 'sefaria'` test written here.
+  --
+  -- NOT NULL DEFAULT 'private' is the fail-closed posture: public eligibility
+  -- requires BOTH axes public (`is_public`), so a row some future insert path
+  -- forgets to derive is private, never public by omission.
+  identity_visibility  TEXT NOT NULL DEFAULT 'private'
+                       CHECK (identity_visibility IN ('public','private'))
 );
 CREATE INDEX ix_works_canonical ON works(canonical_work_id);
 
@@ -270,6 +304,24 @@ CREATE TABLE discovery_evidence (
                         (novelty_status NOT IN ('diverges_work','diverges_part')
                          AND divergence_correctness IS NULL)
                       ),
+  -- 136-12 / schema Amendment 2026-08-02 (A). VIS-01 axis ONE (D-22): the
+  -- visibility of the ORIGIN OF THIS ASSERTION -- the specific evidence
+  -- occurrence -- NOT of the identified work's corpus.
+  --
+  -- This column exists because the origin of the displayed assertion is not
+  -- otherwise representable in the shipped schema: SS1.2 REQUIRES
+  -- `discovery_claim.source_corpus` to equal the identified work's, so
+  -- `works.source_corpus` is exactly the proxy D-22 measured insufficient
+  -- (the restricted-corpus id prefix maps to 656 restricted-identity works AND
+  -- 235 open ones -- it mislabels in BOTH directions).
+  --
+  -- The DERIVED masked enum only. The raw origin is consumed at ingest, while
+  -- it is still in scope, and never stored, logged or interpolated -- once the
+  -- private asset is built the raw provenance is gone, and this stored value is
+  -- what `scripts/project_discovery_public.py` reads. NOT NULL DEFAULT
+  -- 'private': fail-closed, exactly as on `works.identity_visibility`.
+  assertion_visibility TEXT NOT NULL DEFAULT 'private'
+                       CHECK (assertion_visibility IN ('public','private')),
 
   UNIQUE(claim_id, evidence_id)
 );
@@ -1273,7 +1325,19 @@ def apply_d17_demotion(
                 d = abs(yr_hi - yr_lo)
                 if d < delta:
                     audit_rows.append({
-                        "page_id": page_id, "kept_work_id": lo, "demoted_work_id": None,
+                        # 136-12 / schema Amendment 2026-08-02 (F): a `kept_tie`
+                        # row MUST name the OTHER member of the tie pair. It used
+                        # to write NULL here, which made the pair
+                        # unreconstructable from the audit table alone -- there
+                        # was no way to tell WHICH two works were tied. That
+                        # matters concretely: the main-pool rule's competition
+                        # gate reads exactly these ties
+                        # (`_page_competition_index`). Neither work is demoted by
+                        # a tie (that is what "tie" means); `demoted_work_id`
+                        # simply records the pair's second member, `hi`, against
+                        # `kept_work_id = lo` -- and `lo`/`hi` are the sorted
+                        # canonical ids, so the pairing is deterministic.
+                        "page_id": page_id, "kept_work_id": lo, "demoted_work_id": hi,
                         "kept_year": yr_lo, "demoted_year": yr_hi, "delta_years": d,
                         "decision": "kept_tie", "routing_reason": None,
                     })
@@ -1317,6 +1381,35 @@ def apply_d17_demotion(
                     "decision": "demoted", "routing_reason": _LATER_SHARED_TEXT,
                 })
     return audit_rows
+
+
+class RoutingAuditError(RuntimeError):
+    """Raised when a `discovery_routing_audit` row would ship in a shape that
+    makes the decision it records unreplayable -- today, a `kept_tie` row with
+    no `demoted_work_id`."""
+
+
+def assert_kept_tie_rows_name_their_pair(audit_rows: Iterable[Dict]) -> int:
+    """Schema Amendment 2026-08-02 (F): no `kept_tie` row may be written with a
+    NULL `demoted_work_id`.
+
+    Asserted on the ROWS, before the INSERT -- a DB-level check would only
+    catch it after the audit trail had already been written. `fail_safe_unknown_date`
+    rows are deliberately NOT covered: the amendment scopes this rule to
+    `kept_tie`, and a fail-safe row records that a date was missing, not that a
+    pair competed."""
+    offenders = [
+        a for a in audit_rows
+        if a.get("decision") == "kept_tie" and a.get("demoted_work_id") is None
+    ]
+    if offenders:
+        raise RoutingAuditError(
+            f"{len(offenders)} discovery_routing_audit row(s) with decision='kept_tie' carry a "
+            "NULL demoted_work_id -- the tie pair would be unreconstructable from the audit "
+            "alone, and the main-pool competition gate reads exactly these ties "
+            "(schema Amendment 2026-08-02 (F))"
+        )
+    return len(offenders)
 
 
 def compute_pair_coverage(audit_rows: List[Dict]) -> Tuple[int, int, float]:
@@ -1624,7 +1717,7 @@ def _mk_evidence(
     community=None, ge3=None, rung=None, router_bucket=None,
     matched_letters=None, density=None, n_spans=None, seed_spans=None,
     seed_ms_ids=None, rule_version=_RULE_VERSION, community_id=None,
-    coverage=None, page_norm_letters=None,
+    coverage=None, page_norm_letters=None, assertion_source_corpus=None,
 ) -> Dict:
     if snapshot_hash is None:
         snapshot_hash = _fake_hash(f"{page_id}|{sys_id}|a")
@@ -1654,6 +1747,12 @@ def _mk_evidence(
         # the persistence layer can tell a MISSING denominator from a genuine
         # near-zero coverage (see `coverage_ppm_and_status`).
         "coverage": coverage, "page_norm_letters": page_norm_letters,
+        # 136-12 (D-22): the RAW origin of THIS evidence occurrence, carried on
+        # the spec ONLY until `assemble_claims_and_evidence` derives the masked
+        # `assertion_visibility` from it. It is a build-time-only key -- it is
+        # never inserted, never logged and has no column. `None` (no caller
+        # supplied one) fails closed to `private` at derivation time.
+        "assertion_source_corpus": assertion_source_corpus,
     }
 
 
@@ -1801,13 +1900,19 @@ def synthetic_discovery_dataset():
         span_start=3, span_end=33,
     ))
 
-    # -- C8 (p008/w6): plain weak
+    # -- C8 (p008/w6): plain weak.
+    #    136-12 (D-22) MISLABELLING DIRECTION A: w000006's identity corpus is
+    #    the restricted one, so the corpus field ALONE would call this
+    #    assertion private -- but THIS occurrence originates in an open corpus.
+    #    Only a build-time derivation from the raw origin can see that; a
+    #    post-hoc `works.source_corpus` join cannot.
     evidence_specs.append(_mk_evidence(
         page_id=p008, work_id="w000006", sys_id=s008,
         evidence_kind=_WITNESS, evidence_source=_PROPAGATED, confidence_band=_WEAK,
         adjudication_status=_PROVISIONAL, audit_status=_NA,
         routing_status=_SHIPPED, routing_reason=_NONE_REASON,
         span_start=6, span_end=26, rung="B2", is_new=1,
+        assertion_source_corpus=ids.SOURCE_CORPUS_SEFARIA,
     ))
 
     # -- C9 (p009/w7): plain corroborated
@@ -1831,6 +1936,11 @@ def synthetic_discovery_dataset():
         routing_status=_REVIEW_ONLY, routing_reason=_CO_CITATION,
         span_start=4, span_end=44, router_bucket="tafsir_targum",
         other_page_id=p010b, is_new=0,
+        # 136-12 (D-22) MISLABELLING DIRECTION B: w000008's identity corpus is
+        # open, so the corpus field ALONE would call this assertion public --
+        # but THIS occurrence originates in the restricted corpus. Public
+        # eligibility requires BOTH axes, so this row is correctly NOT public.
+        assertion_source_corpus=ids.SOURCE_CORPUS_MSOURCE,
     ))
 
     # -- C11 (p011/w1): plain shared_text (non-router)
@@ -2099,11 +2209,22 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
     works, evidence_specs, unit_specs = synthetic_discovery_dataset()
     work_corpus = {w[0]: w[1] for w in works}
 
+    # 136-12 (D-22): give every spec that did not NAME its own assertion origin
+    # the matched work's corpus -- the exact fallback `_assertion_source_corpus`
+    # applies on the real path for sources that carry no per-row `cat` (rule 2).
+    # The two specs that DO name one (C8/C10) are the deliberate mislabelling
+    # fixtures and are left untouched, so the golden fixture exercises both
+    # directions in which a corpus-keyed shortcut gets the answer wrong.
+    for e in evidence_specs:
+        if e.get("assertion_source_corpus") is None:
+            e["assertion_source_corpus"] = work_corpus.get(e["work_id"])
+
     cur = conn.cursor()
     cur.executemany(
-        "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, source_corpus) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        [(w[0], ids.canonical_work_id(w[0]), w[2], w[3], w[4], w[1]) for w in works],
+        "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, "
+        "source_corpus, identity_visibility) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(w[0], ids.canonical_work_id(w[0]), w[2], w[3], w[4], w[1],
+          derive_identity_visibility({"source_corpus": w[1]})) for w in works],
     )
 
     # Group witness evidence by page_id to compute the largest-span-dominates
@@ -2183,6 +2304,11 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
                 e.get("rule_version"), e.get("community_id"),
                 coverage_ppm, coverage_status,
                 evidence_band_rank(e["evidence_source"], e["confidence_band"]),
+                # 136-12 (D-22): axis ONE, derived while the spec still carries
+                # its raw origin. The synthetic dataset supplies none, so every
+                # fixture row fails closed to `private` unless the spec names an
+                # `assertion_source_corpus` -- never public by omission.
+                derive_assertion_visibility(e),
             ))
     cur.executemany(
         """
@@ -2196,8 +2322,8 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
             seed_spans, seed_ms_ids,
             other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
             rule_version, community_id,
-            coverage_ppm, coverage_status, band_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            coverage_ppm, coverage_status, band_rank, assertion_visibility
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         evidence_rows,
     )
@@ -2284,6 +2410,8 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
         # same release-contract count validation the four existing ones have.
         ("expected_rows_discovery_identification", str(identification_stats["identifications"])),
         ("expected_rows_manuscript_display", str(identification_stats["manuscript_display"])),
+        # 136-12 / schema Amendment 2026-08-02 (C1) -- see finalize_build.
+        ("audience", ASSET_AUDIENCE_PRIVATE),
         ("frame_content_hash", frame_content_hash),
     ]
     cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
@@ -3015,6 +3143,37 @@ def _attach_coverage(spec: Dict, page_index, page_id: str, matched_letters: Opti
     return spec
 
 
+def _assertion_source_corpus(row: Dict, work: Dict) -> Optional[str]:
+    """The RAW origin of ONE evidence occurrence, resolved at INGEST -- while
+    the raw research row is still in scope and before it is discarded (D-22,
+    T-136-12-05).
+
+    Order, most specific first:
+
+    1. **The occurrence's OWN raw `cat`**, mapped through
+       `_map_cat_to_source_corpus`. `track1_matches` carries a `cat` per ROW,
+       and `select_shown_works` deliberately reads only ONE representative row
+       per raw work id ("first by page_id") to fix the work's IDENTITY corpus.
+       So an individual occurrence's origin genuinely can differ from the
+       work's -- which is precisely the case a `works.source_corpus` join
+       cannot see, and precisely the mislabelling D-22 measured in both
+       directions.
+    2. **Else the matched reference work's own ingest-time `source_corpus`** --
+       still the RAW-derived value carried on the shown-work record (the
+       sources that reach us as JSONL, e.g. the E1/Q2 collections, carry no
+       per-row `cat` of their own), NOT a post-hoc `works` table join.
+    3. **Else `None`** -> `assertion_visibility` fails closed to `private`.
+
+    Returns a MASKED corpus code or `None`. The raw `cat` value never leaves
+    this function.
+    """
+    if "cat" in row:
+        mapped = _map_cat_to_source_corpus(row.get("cat"))
+        if mapped is not None:
+            return mapped
+    return work.get("source_corpus")
+
+
 def _ingest_e1_rows(
     rows: Iterable[Dict], *, work_index: Dict[str, Dict], page_index,
     confidence_band: str, adjudication_status: str, audit_status: str,
@@ -3039,6 +3198,7 @@ def _ingest_e1_rows(
             span_start=row["o0"], span_end=row["o1"],
             matched_letters=matched_letters, density=row.get("dens"), n_spans=row.get("n_spans"),
             text_layer=text_layer, snapshot_hash=snapshot_hash,
+            assertion_source_corpus=_assertion_source_corpus(row, work),
         )
         out.append(_attach_coverage(spec, page_index, row["page_id"], matched_letters))
     return out
@@ -3046,14 +3206,22 @@ def _ingest_e1_rows(
 
 def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_index) -> List[Dict]:
     """Ingest `track1_matches WHERE shadowed_by IS NULL` (Landmine 9) -> the
-    `tier_a` band; offsets = the largest `spans_json` span (R7)."""
+    `tier_a` band; offsets = the largest `spans_json` span (R7).
+
+    136-12: `cat` is selected alongside, because this is the ONE ingest path
+    whose rows carry a PER-OCCURRENCE raw origin. `select_shown_works` reads a
+    single representative row per raw work id to fix the work's IDENTITY
+    corpus, so an individual match's own `cat` can differ from it -- and that
+    difference is exactly what `assertion_visibility` has to see while it is
+    still in scope (D-22 / T-136-12-05). The raw value is consumed by
+    `_assertion_source_corpus` and never stored."""
     out = []
     cur = conn.cursor()
     cur.execute(
-        "SELECT page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json "
+        "SELECT page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json, cat "
         "FROM track1_matches WHERE shadowed_by IS NULL"
     )
-    for page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json in cur:
+    for page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json, cat in cur:
         work = work_index.get(work_id)
         if work is None:
             continue
@@ -3067,6 +3235,7 @@ def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_i
             span_start=start, span_end=end,
             matched_letters=matched_letters, density=best_density, n_spans=n_spans,
             text_layer=text_layer, snapshot_hash=snapshot_hash,
+            assertion_source_corpus=_assertion_source_corpus({"cat": cat}, work),
         )
         out.append(_attach_coverage(spec, page_index, page_id, matched_letters))
     return out
@@ -3109,6 +3278,7 @@ def _ingest_propagated_witness(
             community=row.get("community"), ge3=ge3_val, rung=row.get("rung"),
             seed_spans=seed_spans, seed_ms_ids=seed_ms_ids,
             text_layer=text_layer, snapshot_hash=snapshot_hash,
+            assertion_source_corpus=_assertion_source_corpus(row, work),
         ))
     return out
 
@@ -3145,6 +3315,7 @@ def _ingest_family_router(
             is_new=1 if row.get("is_new") else 0,
             text_layer=text_layer, snapshot_hash=snapshot_hash,
             other_page_id=other_page_id, text_layer_b=text_layer_b, snapshot_hash_b=snapshot_hash_b,
+            assertion_source_corpus=_assertion_source_corpus(row, work),
         ))
     return out
 
@@ -3179,6 +3350,7 @@ def _ingest_shared_text(
             is_new=1 if row.get("is_new") else 0,
             text_layer=text_layer, snapshot_hash=snapshot_hash,
             other_page_id=other_page_id, text_layer_b=text_layer_b, snapshot_hash_b=snapshot_hash_b,
+            assertion_source_corpus=_assertion_source_corpus(row, work),
         ))
     return out
 
@@ -3341,6 +3513,11 @@ def assemble_claims_and_evidence(
             # `coverage_ppm_and_status` / `evidence_band_rank`.
             coverage_ppm, coverage_status,
             evidence_band_rank(e["evidence_source"], e["confidence_band"]),
+            # 136-12 (D-22): axis ONE, derived HERE -- the last point at which
+            # the spec still carries its raw `assertion_source_corpus`. After
+            # this the spec dicts are discarded and the axis is unrecoverable:
+            # `works.source_corpus` is exactly the proxy D-22 rejects.
+            derive_assertion_visibility(e),
         ))
 
     display_choices: Dict[str, str] = {}
@@ -3588,12 +3765,18 @@ def _insert_works_real(
     # own canonical), so existing callers are unaffected.
     rows = [
         (w["work_id"], ids.canonical_work_id(w["work_id"], cross_corpus_map), w["neutral_title"],
-         w.get("author"), w.get("genre"), w["source_corpus"])
+         w.get("author"), w.get("genre"), w["source_corpus"],
+         # 136-12 (D-22): axis TWO. `works.source_corpus` is an insufficient
+         # proxy for the ASSERTION axis but is exactly right for THIS one -- it
+         # answers "does this work's own identity originate in an open or a
+         # restricted corpus", which is what the column records. Derived by the
+         # shared module so there is no second mapping to keep in step.
+         derive_identity_visibility(w))
         for w in works
     ]
     cur.executemany(
-        "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, source_corpus) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, "
+        "source_corpus, identity_visibility) VALUES (?, ?, ?, ?, ?, ?, ?)",
         rows,
     )
 
@@ -3617,8 +3800,8 @@ def _insert_claims_and_evidence_real(cur: sqlite3.Cursor, claim_rows, evidence_r
             seed_spans, seed_ms_ids,
             other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
             rule_version, community_id,
-            coverage_ppm, coverage_status, band_rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            coverage_ppm, coverage_status, band_rank, assertion_visibility
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         evidence_rows,
     )
@@ -3690,7 +3873,6 @@ _CLAIM_TYPE_STRENGTH = {
 # survives only as the fallback for an evidence row that somehow carries no
 # shade at all (the column is NOT NULL, so this is defence in depth).
 _IDENTIFICATION_NOVELTY_DEFAULT = NOVELTY_DEFAULT_STATUS
-_IDENTIFICATION_VISIBILITY_DEFAULT = "private"
 
 
 def identification_id(sys_id: str, canonical_work_id: str) -> str:
@@ -3746,6 +3928,83 @@ def _canonical_group_index(conn: sqlite3.Connection) -> Dict[str, List[Tuple[str
     ):
         groups.setdefault(canonical_work_id, []).append((work_id, source_corpus))
     return groups
+
+
+def compute_launch_scope_reconciliation(conn: sqlite3.Connection) -> Dict:
+    """Run `shared.discovery_visibility.reconcile_launch_scope` over the BUILT
+    rows and return its result for the build report (136-12 Task 2).
+
+    VIS-01's own prose describes a corpus/family shortcut ("launch scope:
+    Sefaria-direct matches union all MS-relationship/propagated claims") that is
+    EXACTLY the proxy D-22 proves insufficient. This reports both counts and the
+    symmetric difference by corpus x family; it does NOT resolve the
+    disagreement, does not drop, keep or relabel a single row, and is never
+    consulted by any eligibility decision. Plan 136-13 puts the real number in
+    front of the owner.
+
+    **Why the assertion axis is fed back in as a corpus code.** By this point
+    the raw evidence origin is deliberately gone -- that is the entire property
+    D-22 asks the build to guarantee -- so the STORED `assertion_visibility` is
+    the only surviving authority. `reconcile_launch_scope` derives that axis
+    itself from a masked corpus code, so each row is handed the code that
+    reproduces its stored value. The round-trip is faithful for this
+    comparison's purposes because `_corpus_code_to_visibility` maps BOTH open
+    codes (`sefaria`, `ja`) to `public`: the public/private outcome is
+    preserved exactly, even though the specific open code is not. The VIS-01
+    shortcut's own inputs (`evidence_source`, the claim's `source_corpus`) are
+    read straight from the columns, unmodified."""
+    rows = [
+        {
+            "evidence_source": evidence_source,
+            "source_corpus": source_corpus,
+            # `reconcile_launch_scope` derives axis one via
+            # `assertion_visibility(row)`, which reads `assertion_source_corpus`.
+            # The raw origin no longer exists at this point -- by design -- so we
+            # hand it the ALREADY-DERIVED masked corpus code that produced the
+            # stored value: `sefaria` reproduces `public`, and the restricted
+            # code reproduces `private`. The stored column stays the authority;
+            # this only feeds the comparison the report exists to print.
+            "assertion_source_corpus": (
+                ids.SOURCE_CORPUS_SEFARIA if assertion_vis == VISIBILITY_PUBLIC
+                else ids.SOURCE_CORPUS_MSOURCE
+            ),
+        }
+        for evidence_source, source_corpus, assertion_vis in conn.execute(
+            """
+            SELECT de.evidence_source, dc.source_corpus, de.assertion_visibility
+            FROM discovery_evidence de
+            JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+            """
+        )
+    ]
+    result = reconcile_launch_scope(rows)
+    # JSON-safe: the shared module keys the breakdown on a (corpus, family)
+    # TUPLE, which no JSON report can carry.
+    result["symmetric_difference_by_corpus_family"] = {
+        f"{corpus}|{family}": count
+        for (corpus, family), count in
+        result["symmetric_difference_by_corpus_family"].items()
+    }
+    return result
+
+
+def _identity_visibility_index(conn: sqlite3.Connection) -> Dict[str, str]:
+    """`work_id -> identity_visibility`, READ back from the stored column rather
+    than re-derived (136-12 / D-22).
+
+    Schema SS(B1) is explicit that every identity join -- title, author,
+    `identity_visibility` -- reads `display_work_id`, NEVER
+    `canonical_work_id`: the latter is not unique on `works` (15 duplicated
+    groups on the live asset, three with mixed source corpora), so joining on
+    it fans out AND leaves `identity_visibility` undefined for exactly the
+    groups where a PRIVATE member could otherwise influence a shared public
+    aggregate."""
+    return {
+        work_id: visibility
+        for work_id, visibility in conn.execute(
+            "SELECT work_id, identity_visibility FROM works"
+        )
+    }
 
 
 def _band_measurement_index(
@@ -3842,6 +4101,7 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
                    de.span_end        AS span_end,
                    de.novelty_status  AS novelty_status,
                    de.divergence_correctness AS divergence_correctness,
+                   de.assertion_visibility AS assertion_visibility,
                    dc.claim_type      AS claim_type,
                    w.canonical_work_id AS canonical_work_id
             FROM discovery_evidence de
@@ -3858,6 +4118,7 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
             )
         }
         canonical_groups = _canonical_group_index(conn)
+        identity_visibilities = _identity_visibility_index(conn)
         band_measurements = _band_measurement_index(conn)
     finally:
         conn.row_factory = None
@@ -3941,11 +4202,30 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
             key=lambda ct: _CLAIM_TYPE_STRENGTH.get(ct, 99),
         )
 
+        display_work_id = select_display_work_id(
+            canonical_work_id, canonical_groups.get(canonical_work_id, []))
+
+        # 136-12 (D-22), at the AGGREGATE grain. An identification row is a
+        # summary over several evidence rows, so it may call its assertion
+        # origin public only when EVERY contributing assertion is public --
+        # otherwise a "public" label would sit on an aggregate (page_count,
+        # best_band_rank, max_coverage_ppm) that a restricted assertion helped
+        # produce. Conservative by construction: `all()` over an empty group is
+        # unreachable here (a group exists because it has rows), and any row
+        # that failed closed to `private` carries the whole identification with
+        # it. The identity axis reads the DISPLAY work, per schema SS(B1).
+        assertion_vis = (
+            VISIBILITY_PUBLIC
+            if all(r["assertion_visibility"] == VISIBILITY_PUBLIC for r in group)
+            else VISIBILITY_PRIVATE
+        )
+        identity_vis = identity_visibilities.get(display_work_id, VISIBILITY_PRIVATE)
+
         insert_rows.append((
             identification_id(sys_id, canonical_work_id),
             sys_id,
             canonical_work_id,
-            select_display_work_id(canonical_work_id, canonical_groups.get(canonical_work_id, [])),
+            display_work_id,
             1 if in_main_pool else 0,
             main_pool_reason,
             best_band_rank,
@@ -3965,8 +4245,8 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
             # evidence row (which is NULL on every row today) rather than
             # hardcoded, so an annotation pathway lands here for free.
             best["divergence_correctness"],
-            _IDENTIFICATION_VISIBILITY_DEFAULT,
-            _IDENTIFICATION_VISIBILITY_DEFAULT,
+            assertion_vis,
+            identity_vis,
         ))
 
     cur = conn.cursor()
@@ -5733,6 +6013,10 @@ def finalize_build(
         # discovery_routing_audit table (opaque ids + numeric years only) so
         # each demotion is replayable DB-only (gate 10).
         if routing_audit_rows:
+            # 136-12 (schema Amendment (F)): assert BEFORE the insert -- a
+            # DB-level check would only catch an unreconstructable tie after the
+            # audit trail had already been written.
+            assert_kept_tie_rows_name_their_pair(routing_audit_rows)
             cur.executemany(
                 """
                 INSERT INTO discovery_routing_audit
@@ -5787,6 +6071,9 @@ def finalize_build(
             populate_manuscript_display(out_conn, libraries_csv_path)
         )
 
+        # 136-12 (VIS-01 vs D-22): REPORT the disagreement, never resolve it.
+        launch_scope_reconciliation = compute_launch_scope_reconciliation(out_conn)
+
         (n_works,) = cur.execute("SELECT COUNT(*) FROM works").fetchone()
         (n_claims,) = cur.execute("SELECT COUNT(*) FROM discovery_claim").fetchone()
         (n_evidence,) = cur.execute("SELECT COUNT(*) FROM discovery_evidence").fetchone()
@@ -5813,6 +6100,15 @@ def finalize_build(
              str(identification_stats["identifications"])),
             ("expected_rows_manuscript_display",
              str(identification_stats["manuscript_display"])),
+            # 136-12 / schema Amendment 2026-08-02 (C1): the audience marker
+            # on the PRIVATE artifact. The public projection writes `public` on
+            # its own output; nothing wrote the private value, so the private
+            # artifact would have shipped without a field its own contract
+            # defines. This does not change the security property -- the runtime
+            # loader treats MISSING and `private` identically and fails closed
+            # either way -- but a contract field that is defined and never
+            # written is a contract that decays.
+            ("audience", ASSET_AUDIENCE_PRIVATE),
             ("frame_content_hash", frame_content_hash),
             # 135-07: the explicit, durable band-vocabulary version marker
             # ("v1"/"v2"). The verifier keys its version-aware expected top-tier
@@ -5927,6 +6223,12 @@ def finalize_build(
         # gap this rebuild closes is a NUMBER in the report, not a claim), and
         # every fail-closed fallback the cache triggered.
         "novelty": {**novelty_input_stats, **novelty_stats},
+        # 136-12: VIS-01's launch-scope shortcut vs the D-22 two-axis
+        # conjunction over the SAME rows -- both counts and the symmetric
+        # difference by corpus x family. REPORTED, never resolved: a projection
+        # silently narrowing or widening the public asset is the failure this
+        # number exists to prevent.
+        "launch_scope_reconciliation": launch_scope_reconciliation,
         "frame_content_hash": frame_content_hash,
         "content_hash": content_hash,
         "band_precision_rows": len(bp_rows),

@@ -2568,22 +2568,35 @@ def test_main_pool_bucket_routes_through_the_shared_rule(monkeypatch):
     assert row == (0, "overlapping_tie")
 
 
-def test_identification_columns_and_defaults_left_for_136_12():
-    """136-11 writes the STRUCTURE; 136-12 computes novelty + the visibility
-    axes. Until then both must fail CLOSED -- novelty `not_checked` (never
-    "novel by default") and BOTH visibility axes `private` (public eligibility
-    requires both to be public, D-22)."""
+def test_identification_columns_are_computed_by_136_12_not_defaulted():
+    """136-11 wrote the STRUCTURE and asserted all four columns sat at their
+    fail-closed defaults; 136-12 COMPUTES them, so this test now asserts the
+    computed behaviour that supersedes those defaults.
+
+    Novelty still fails closed to `not_checked` on the synthetic fixture (no
+    verdict cache exists there -- which is what `not_checked` means), and
+    `divergence_correctness` is NULL on every row (owner ruling L: human/owner
+    annotation only). The two visibility axes are now DERIVED, so both values
+    are reached rather than every row reading `private` by omission."""
     conn = sqlite3.connect(":memory:")
     sidecar_build.create_schema(conn)
     try:
         sidecar_build.populate_synthetic(conn, source_db_hash="defaults-fixture")
-        rows = conn.execute(
-            "SELECT DISTINCT novelty_status, divergence_correctness, "
-            "assertion_visibility, identity_visibility FROM discovery_identification"
-        ).fetchall()
+        novelty = conn.execute(
+            "SELECT DISTINCT novelty_status, divergence_correctness "
+            "FROM discovery_identification").fetchall()
+        axes = {r for r in conn.execute(
+            "SELECT DISTINCT assertion_visibility, identity_visibility "
+            "FROM discovery_identification")}
     finally:
         conn.close()
-    assert rows == [("not_checked", None, "private", "private")]
+
+    assert novelty == [("not_checked", None)]
+    # Every stored pair is drawn from the closed enum...
+    assert all(a in ("public", "private") and i in ("public", "private") for a, i in axes)
+    # ...and the axes are genuinely INDEPENDENT: the fixture reaches a pair
+    # where they disagree, which a defaulted-to-private column could not.
+    assert any(a != i for a, i in axes)
 
 
 def test_identification_id_is_deterministic_across_two_builds():
@@ -3597,3 +3610,368 @@ def test_identification_grain_inherits_the_shade_from_its_best_evidence_row(tmp_
     finally:
         conn.close()
     assert rows == [("refines_granularity", None)]
+
+
+# ===========================================================================
+# 136-12 Task 2: the TWO visibility axes (VIS-01 / D-22), derived at BUILD time
+# while the raw evidence origin is still in scope; `meta.audience`; the
+# launch-scope reconciliation; and the `kept_tie` routing-audit fix.
+# ===========================================================================
+
+from shared import discovery_visibility as vis_mod  # noqa: E402
+
+
+def _synthetic_build_conn():
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    sidecar_build.populate_synthetic(conn, source_db_hash="visibility-fixture")
+    return conn
+
+
+# ---------------------------------------------------------------------------
+# Both axes are written, as separate stored columns, on every row
+# ---------------------------------------------------------------------------
+
+def test_both_visibility_axes_are_non_null_on_every_row():
+    """The axes are STORED, not derivable later: once the private asset is
+    built the raw provenance is gone, and `works.source_corpus` is exactly the
+    proxy D-22 rejects."""
+    conn = _synthetic_build_conn()
+    try:
+        (n_null_assertion,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_evidence WHERE assertion_visibility IS NULL"
+        ).fetchone()
+        (n_null_identity,) = conn.execute(
+            "SELECT COUNT(*) FROM works WHERE identity_visibility IS NULL"
+        ).fetchone()
+        (n_null_ident,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification "
+            "WHERE assertion_visibility IS NULL OR identity_visibility IS NULL"
+        ).fetchone()
+        evidence_values = {r[0] for r in conn.execute(
+            "SELECT DISTINCT assertion_visibility FROM discovery_evidence")}
+        works_values = {r[0] for r in conn.execute(
+            "SELECT DISTINCT identity_visibility FROM works")}
+    finally:
+        conn.close()
+
+    assert (n_null_assertion, n_null_identity, n_null_ident) == (0, 0, 0)
+    assert evidence_values <= vis_mod.VISIBILITY_VALUES
+    assert works_values <= vis_mod.VISIBILITY_VALUES
+    # Both values are actually REACHED -- a fixture that only ever produced
+    # `private` would pass a subset check while proving nothing.
+    assert evidence_values == vis_mod.VISIBILITY_VALUES
+    assert works_values == vis_mod.VISIBILITY_VALUES
+
+
+def test_the_two_axes_are_separate_columns_on_separate_tables():
+    """Schema Amendment (A): `assertion_visibility` on `discovery_evidence`,
+    `identity_visibility` on `works`. Neither axis is a proxy for the other, so
+    neither may be stored once and reused for both."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        evidence_cols = {r[1] for r in conn.execute("PRAGMA table_info(discovery_evidence)")}
+        works_cols = {r[1] for r in conn.execute("PRAGMA table_info(works)")}
+    finally:
+        conn.close()
+    assert "assertion_visibility" in evidence_cols
+    assert "identity_visibility" not in evidence_cols
+    assert "identity_visibility" in works_cols
+    assert "assertion_visibility" not in works_cols
+
+
+# ---------------------------------------------------------------------------
+# The derivation runs BEFORE the raw origin leaves scope (T-136-12-05)
+# ---------------------------------------------------------------------------
+
+def test_mislabelling_direction_a_restricted_work_open_assertion():
+    """Direction A: the identified work's corpus is the RESTRICTED one, so a
+    corpus-keyed shortcut would call this assertion private -- but the
+    occurrence itself originates in an open corpus. Only a derivation taken
+    while the raw origin was in scope can see this."""
+    conn = _synthetic_build_conn()
+    try:
+        rows = conn.execute(
+            "SELECT dc.source_corpus, de.assertion_visibility, w.identity_visibility "
+            "FROM discovery_evidence de "
+            "JOIN discovery_claim dc ON dc.claim_id = de.claim_id "
+            "JOIN works w ON w.work_id = dc.work_id "
+            "WHERE dc.source_corpus = ? AND de.assertion_visibility = ?",
+            (ids.SOURCE_CORPUS_MSOURCE, vis_mod.VISIBILITY_PUBLIC),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows, "the fixture must carry a restricted-identity / open-assertion row"
+    for corpus, assertion_vis, identity_vis in rows:
+        assert corpus == ids.SOURCE_CORPUS_MSOURCE
+        assert assertion_vis == vis_mod.VISIBILITY_PUBLIC   # the axis disagrees...
+        assert identity_vis == vis_mod.VISIBILITY_PRIVATE   # ...with the corpus field
+        # ...and public eligibility still requires BOTH, so the row is not public.
+        assert not vis_mod.is_public(assertion_vis, identity_vis)
+
+
+def test_mislabelling_direction_b_open_work_restricted_assertion():
+    """Direction B, the dangerous one: the work's corpus is OPEN, so a
+    corpus-keyed shortcut would call this assertion public -- but the
+    occurrence originates in the restricted corpus."""
+    conn = _synthetic_build_conn()
+    try:
+        rows = conn.execute(
+            "SELECT dc.source_corpus, de.assertion_visibility, w.identity_visibility "
+            "FROM discovery_evidence de "
+            "JOIN discovery_claim dc ON dc.claim_id = de.claim_id "
+            "JOIN works w ON w.work_id = dc.work_id "
+            "WHERE dc.source_corpus = ? AND de.assertion_visibility = ?",
+            (ids.SOURCE_CORPUS_JA, vis_mod.VISIBILITY_PRIVATE),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows, "the fixture must carry an open-identity / restricted-assertion row"
+    for corpus, assertion_vis, identity_vis in rows:
+        assert corpus == ids.SOURCE_CORPUS_JA
+        assert identity_vis == vis_mod.VISIBILITY_PUBLIC    # the corpus field says public...
+        assert assertion_vis == vis_mod.VISIBILITY_PRIVATE  # ...the real origin says otherwise
+        assert not vis_mod.is_public(assertion_vis, identity_vis)
+
+
+def test_assertion_origin_resolver_prefers_the_occurrences_own_raw_cat():
+    """`select_shown_works` fixes a work's IDENTITY corpus from ONE
+    representative row, so an individual occurrence's own `cat` genuinely can
+    differ. The resolver must read the occurrence's own value first."""
+    work = {"source_corpus": ids.SOURCE_CORPUS_MSOURCE}
+    # Rule 1: the row carries its own raw cat -> that wins.
+    assert sidecar_build._assertion_source_corpus(
+        {"cat": "Sefaria"}, work) == ids.SOURCE_CORPUS_SEFARIA
+    assert sidecar_build._assertion_source_corpus({"cat": "JA"}, work) == ids.SOURCE_CORPUS_JA
+    # Rule 2: no per-row cat (the JSONL collections) -> the matched work's own
+    # ingest-time corpus, NOT a post-hoc works-table join.
+    assert sidecar_build._assertion_source_corpus({}, work) == ids.SOURCE_CORPUS_MSOURCE
+    # Rule 3: nothing resolvable -> None -> fails closed to private downstream.
+    assert sidecar_build._assertion_source_corpus({"cat": None}, {}) is None
+    assert vis_mod.assertion_visibility(
+        {"assertion_source_corpus": None}) == vis_mod.VISIBILITY_PRIVATE
+
+
+def test_unrecognized_raw_origin_fails_closed_to_private():
+    """Anything outside the frozen three-code corpus vocabulary is `private` --
+    there is no "unknown counts as open" branch anywhere."""
+    for bogus in ("ZZZ_FAKE_UNKNOWN_CORPUS_ZZZ", "", None, 17, object()):
+        assert vis_mod.assertion_visibility(
+            {"assertion_source_corpus": bogus}) == vis_mod.VISIBILITY_PRIVATE
+
+
+def test_no_raw_origin_value_is_stored_or_logged(capsys):
+    """T-136-12-02: seed a fabricated raw origin id, build, and prove it
+    appears in NO cell of ANY table and in NO build output. The raw origin is
+    consumed at derivation and discarded."""
+    sentinel = "ZZZ_FAKE_RAW_ORIGIN_ID_ZZZ"
+    specs = _ingest_direct_and_propagated_specs()
+    for e in specs:
+        e["work_id"] = "w000001"
+        e["assertion_source_corpus"] = sentinel
+
+    conn = _ident_fixture_conn(
+        works_rows=[("w000001", "w000001", ids.SOURCE_CORPUS_SEFARIA)],
+        evidence_specs=specs,
+    )
+    try:
+        sidecar_build.populate_discovery_identification(conn)
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+        hits = []
+        for table in tables:
+            cols = [r[1] for r in conn.execute('PRAGMA table_info("%s")' % table)]
+            for row in conn.execute('SELECT * FROM "%s"' % table):
+                for col, value in zip(cols, row):
+                    if isinstance(value, str) and sentinel in value:
+                        hits.append("%s.%s" % (table, col))
+        stored_axis = {r[0] for r in conn.execute(
+            "SELECT DISTINCT assertion_visibility FROM discovery_evidence")}
+    finally:
+        conn.close()
+
+    assert hits == []
+    # An unrecognized origin is not merely dropped -- it fails CLOSED.
+    assert stored_axis == {vis_mod.VISIBILITY_PRIVATE}
+    captured = capsys.readouterr()
+    assert sentinel not in captured.out
+    assert sentinel not in captured.err
+
+
+def test_builder_does_not_restate_the_public_eligibility_conjunction():
+    """`is_public` is the ONE eligibility rule and lives in the shared module.
+    The builder STORES the axes and lets the projection apply the conjunction --
+    a second, textually-identical conjunction here would still be a duplicated
+    eligibility rule."""
+    # Strip comments and string literals before looking: this file DISCUSSES
+    # `is_public` at length in its import block, and a naive substring guard
+    # would only be pinning that prose. What matters is executable code.
+    import tokenize
+
+    with tokenize.open(sidecar_build.__file__) as fh:
+        code_tokens = [
+            tok.string for tok in tokenize.generate_tokens(fh.readline)
+            if tok.type not in (tokenize.COMMENT, tokenize.STRING)
+        ]
+    code = " ".join(code_tokens)
+    assert "is_public" not in code
+    # No hand-rolled conjunction either -- the duplicated-rule shape the shared
+    # module's own docstring prohibits.
+    assert "VISIBILITY_PUBLIC and" not in code
+    # ...and the shared module still owns exactly one implementation of it.
+    assert vis_mod.is_public("public", "public") is True
+    assert vis_mod.is_public("public", "private") is False
+    assert vis_mod.is_public("private", "public") is False
+
+
+# ---------------------------------------------------------------------------
+# meta.audience
+# ---------------------------------------------------------------------------
+
+def test_built_asset_carries_meta_audience_private():
+    """The projection writes `public` on its output; nothing wrote the private
+    value, so the private artifact shipped without a field its own contract
+    defines."""
+    conn = _synthetic_build_conn()
+    try:
+        (audience,) = conn.execute(
+            "SELECT value FROM meta WHERE key='audience'").fetchone()
+    finally:
+        conn.close()
+    assert audience == sidecar_build.ASSET_AUDIENCE_PRIVATE == "private"
+    assert audience in sidecar_build.ASSET_AUDIENCES
+
+
+def test_builder_never_writes_the_public_audience_value():
+    """The two writers must never converge into one configurable knob -- that
+    is what makes the public/private boundary structural rather than
+    procedural. This builder writes `private`, full stop."""
+    src = _io.open(sidecar_build.__file__, encoding="utf-8").read()
+    assert '("audience", ASSET_AUDIENCE_PRIVATE)' in src
+    assert '("audience", ASSET_AUDIENCE_PUBLIC)' not in src
+
+
+# ---------------------------------------------------------------------------
+# The launch-scope reconciliation (reported, never resolved)
+# ---------------------------------------------------------------------------
+
+def test_launch_scope_reconciliation_reports_both_counts_and_the_difference():
+    """VIS-01's own prose describes the corpus/family shortcut D-22 proves
+    insufficient. The build REPORTS the disagreement so 136-13 can put a real
+    number in front of the owner -- it never resolves it."""
+    conn = _synthetic_build_conn()
+    try:
+        report = sidecar_build.compute_launch_scope_reconciliation(conn)
+        (n_evidence,) = conn.execute("SELECT COUNT(*) FROM discovery_evidence").fetchone()
+    finally:
+        conn.close()
+
+    assert report["total_rows"] == n_evidence
+    assert isinstance(report["vis01_launch_scope_count"], int)
+    assert isinstance(report["conjunction_count"], int)
+    # The two rules genuinely DISAGREE on this fixture -- otherwise the report
+    # would be a tautology and would prove nothing.
+    assert report["symmetric_difference_count"] > 0
+    assert report["vis01_launch_scope_count"] != report["conjunction_count"]
+    # Broken down by corpus x family, per D-22's own reference framing, and
+    # JSON-safe (the shared module keys on a tuple no report can carry).
+    breakdown = report["symmetric_difference_by_corpus_family"]
+    assert breakdown
+    assert sum(breakdown.values()) == report["symmetric_difference_count"]
+    for key in breakdown:
+        assert isinstance(key, str) and "|" in key
+        corpus, family = key.split("|", 1)
+        assert corpus in ids.SOURCE_CORPUS_CODES
+        assert family in (ids.EVIDENCE_SOURCE_TRACK1_DIRECT, ids.EVIDENCE_SOURCE_PROPAGATED)
+    json.dumps(report)  # must survive a build report round-trip
+
+
+def test_launch_scope_reconciliation_never_mutates_a_row():
+    """"Report, do not resolve": running the reconciliation must leave every
+    stored axis byte-identical."""
+    conn = _synthetic_build_conn()
+    try:
+        before = conn.execute(
+            "SELECT evidence_id, assertion_visibility FROM discovery_evidence "
+            "ORDER BY evidence_id").fetchall()
+        sidecar_build.compute_launch_scope_reconciliation(conn)
+        after = conn.execute(
+            "SELECT evidence_id, assertion_visibility FROM discovery_evidence "
+            "ORDER BY evidence_id").fetchall()
+    finally:
+        conn.close()
+    assert before == after
+
+
+# ---------------------------------------------------------------------------
+# discovery_routing_audit: kept_tie rows name their pair (Amendment (F))
+# ---------------------------------------------------------------------------
+
+def test_kept_tie_rows_carry_their_demoted_work_id():
+    """A NULL `demoted_work_id` on a `kept_tie` row makes the tie pair
+    unreconstructable from the audit alone -- and the main-pool rule's
+    competition gate reads exactly those ties."""
+    # Two works, overlapping spans on one page, dated within the D-17 delta.
+    specs = [
+        sidecar_build._mk_evidence(
+            page_id="p1", work_id=w, sys_id="s1",
+            evidence_kind=ids.EVIDENCE_KIND_WITNESS,
+            evidence_source=ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+            confidence_band=ids.CONFIDENCE_BAND_TIER_A,
+            adjudication_status=ids.ADJUDICATION_STATUS_UNREVIEWED,
+            audit_status=ids.AUDIT_STATUS_NA,
+            routing_status=ids.ROUTING_STATUS_SHIPPED,
+            routing_reason=ids.ROUTING_REASON_NONE,
+            span_start=0, span_end=100, matched_letters=500,
+        )
+        for w in ("w000001", "w000002")
+    ]
+    audit = sidecar_build.apply_d17_demotion(
+        specs, cross_corpus_map={},
+        year_by_canonical={"w000001": 1000, "w000002": 1010},  # delta 10 < 100 -> tie
+    )
+    ties = [a for a in audit if a["decision"] == "kept_tie"]
+    assert ties, "the fixture must produce a kept_tie row"
+    for tie in ties:
+        assert tie["demoted_work_id"] is not None
+        assert tie["kept_work_id"] != tie["demoted_work_id"]
+    # The pair is reconstructable: both members are named.
+    assert {ties[0]["kept_work_id"], ties[0]["demoted_work_id"]} == {"w000001", "w000002"}
+    assert sidecar_build.assert_kept_tie_rows_name_their_pair(audit) == 0
+
+
+def test_kept_tie_assertion_fires_on_a_seeded_null_demoted_work_id():
+    """Seed the violation the old code produced on every tie and prove the
+    build refuses it."""
+    bad = [{"page_id": "p1", "kept_work_id": "w000001", "demoted_work_id": None,
+            "kept_year": 1000, "demoted_year": 1010, "delta_years": 10,
+            "decision": "kept_tie", "routing_reason": None}]
+    with pytest.raises(sidecar_build.RoutingAuditError) as exc:
+        sidecar_build.assert_kept_tie_rows_name_their_pair(bad)
+    assert "kept_tie" in str(exc.value)
+    assert "demoted_work_id" in str(exc.value)
+
+
+def test_fail_safe_unknown_date_rows_are_deliberately_not_covered():
+    """The amendment scopes the rule to `kept_tie`. A `fail_safe_unknown_date`
+    row records that a DATE was missing, not that a pair competed, and keeps
+    its NULL -- widening the assertion to cover it would be a silent contract
+    change."""
+    rows = [{"page_id": "p1", "kept_work_id": "w000001", "demoted_work_id": None,
+             "kept_year": None, "demoted_year": 1010, "delta_years": None,
+             "decision": "fail_safe_unknown_date", "routing_reason": None}]
+    assert sidecar_build.assert_kept_tie_rows_name_their_pair(rows) == 0
+
+
+def test_pair_coverage_arithmetic_is_unchanged_by_the_kept_tie_fix():
+    """The fix names the pair's second member; it must not change WHICH rows
+    count toward the D-17 date-coverage gate."""
+    audit = [
+        {"decision": "kept_tie", "demoted_work_id": "w000002"},
+        {"decision": "demoted", "demoted_work_id": "w000003"},
+        {"decision": "fail_safe_unknown_date", "demoted_work_id": None},
+    ]
+    r, u, cov = sidecar_build.compute_pair_coverage(audit)
+    assert (r, u) == (2, 3)
+    assert cov == pytest.approx(2 / 3)
