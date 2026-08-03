@@ -94,6 +94,42 @@ a looser reading (spelling variant, author-name match, language/edition
 qualifier -- ruling G), is required before the mechanical pass demotes
 anything.
 
+## divergence_correctness is HUMAN-ONLY (ruling L, 2026-08-03)
+
+``136-GATE1-DECISIONS.md`` section L drops ``divergence_correctness`` from
+the model's job entirely, after the ruling-I re-measurement measured it at
+8/28 (28.6%) -- at or below chance for a three-way vocabulary, on cases
+where the owner's own review scored 31/32 on the identical questions.
+Ruling F's rationale for hiding ``diverges_work``/``diverges_part`` rows by
+default (``HIDDEN_BY_DEFAULT_SHADES``) applies REGARDLESS of which side is
+right, so no shipped surface ever needed the model's correctness call in
+the first place -- only the shade token itself gates visibility.
+
+Concretely, as of ruling L:
+
+- ``NOVELTY_PROMPT_TEMPLATE`` no longer asks the model for a
+  ``divergence_correctness`` value at all -- the model's ONLY output is the
+  ten-value ``novelty_status`` shade (unchanged in vocabulary; only the
+  correctness sub-question is removed). ``PROMPT_SHA256`` changed again on
+  this account (see the module's own computed value; the literal old hash,
+  ``441058ae3bab6e5ee17beb0fc5ea39426d7c250feb6c2bd288f0bc1605c98be5``, is
+  retired and must never be cited as current going forward -- see
+  ``136-GATE1-DECISIONS.md`` section L for the new value on record).
+- ``resolve_model_output`` now ALWAYS returns ``divergence_correctness:
+  None`` -- structurally incapable of surfacing a model-supplied value for
+  that field, exactly like ``masked_provenance_label`` is structurally
+  incapable of leaking a restricted corpus name. This holds regardless of
+  what a raw response happens to contain (a stale pre-ruling-L cached
+  response, a hallucinated key, anything).
+- The STORED column, the CHECK constraint, ``DIVERGENCE_CORRECTNESS_VALUES``,
+  ``divergence_correctness_applicable``, and ``novelty_columns_for``'s own
+  ``divergence_correctness`` parameter are ALL UNCHANGED -- ruling L keeps
+  the column and every owner-supplied value already collected; nothing is
+  deleted. A human/owner annotation pass (not this module, not the model
+  arm) remains the SOLE path that may ever populate this column going
+  forward -- ``novelty_columns_for`` is the mapping such an annotation pass
+  would call, exactly as it always was.
+
 ## Masking (D-25 / NOVEL-02)
 
 ``masked_provenance_label`` implements an ALLOWLIST, not a denylist: it can
@@ -459,11 +495,9 @@ Choose exactly ONE of these ten values for `novelty_status`:
   - alias_merge: the two work-ids under discussion are the SAME underlying work, not yet canonically merged
   - (structured abstention: see below -- never a guess)
 
-If `novelty_status` is `diverges_work` or `diverges_part`, ALSO choose exactly one `divergence_correctness`: `catalogue_correct` (the aid is right; our claim is the false positive), `claim_correct` (our claim is right; the aid is wrong, thinner, or mistaken), or `unclear`. Leave `divergence_correctness` null for every other `novelty_status`.
-
 STRUCTURED ABSTENTION: if you cannot make this judgment from the information given -- ambiguous, insufficient, or contradictory evidence -- respond with {"abstain": true, "reason": "<short reason>"} instead of guessing. An abstention is a real and useful answer; it is NEVER penalized and is stored as `not_checked`. NEVER emit a `novelty_status` value outside the ten listed above.
 
-Respond ONLY with a single JSON object: {"novelty_status": "<one of the ten values>", "divergence_correctness": "<one of the three values, or null>"} OR the abstention object above. No prose outside the JSON object.
+Respond ONLY with a single JSON object: {"novelty_status": "<one of the ten values>"} OR the abstention object above. No prose outside the JSON object, and no field beyond the one shown.
 """
 
 PROMPT_SHA256: str = hashlib.sha256(NOVELTY_PROMPT_TEMPLATE.encode("utf-8")).hexdigest()
@@ -511,18 +545,25 @@ def build_cache_key(fields: Mapping[str, Any]) -> str:
 
 def resolve_model_output(raw: Optional[Mapping[str, Any]]) -> Dict[str, Optional[str]]:
     """Maps a raw structured model response to the stored
-    ``(novelty_status, divergence_correctness)`` columns, FAILING CLOSED to
-    ``not_checked`` on anything that is not a well-formed, in-vocabulary
-    response: ``raw`` is not a mapping, the model explicitly abstains
-    (``raw["abstain"] is True`` or ``raw["novelty_status"] ==
-    ABSTENTION_TOKEN``), or ``raw["novelty_status"]`` is missing or outside
-    ``NOVELTY_STATUSES``. A ``divergence_correctness`` value is kept only
-    when the resolved status is actually a divergence shade AND the value
-    itself is in ``DIVERGENCE_CORRECTNESS_VALUES``; otherwise it is
-    dropped (set to ``None``) rather than stored malformed -- this degrades
-    the correctness call alone, never the shade itself, since a shade the
-    model DID commit to should not be discarded merely because its sibling
-    field was malformed.
+    ``novelty_status`` column, FAILING CLOSED to ``not_checked`` on anything
+    that is not a well-formed, in-vocabulary response: ``raw`` is not a
+    mapping, the model explicitly abstains (``raw["abstain"] is True`` or
+    ``raw["novelty_status"] == ABSTENTION_TOKEN``), or ``raw["novelty_status"]``
+    is missing or outside ``NOVELTY_STATUSES``.
+
+    ``divergence_correctness`` is ALWAYS returned as ``None`` -- owner ruling
+    L (``136-GATE1-DECISIONS.md`` section L) removes this field from the
+    model's output contract entirely (measured at 8/28, at or below chance
+    for a three-way vocabulary); this function is structurally incapable of
+    surfacing a model-supplied correctness value, exactly like
+    ``masked_provenance_label`` is structurally incapable of leaking a
+    restricted corpus name -- even a malformed or legacy ``raw`` payload
+    that happens to still carry a ``divergence_correctness`` key (a stale
+    pre-ruling-L cached response, a hallucinated key) can never reach the
+    return value. ``divergence_correctness`` remains a HUMAN/owner
+    annotation ONLY, attached through a different path
+    (``novelty_columns_for``'s own ``divergence_correctness`` parameter),
+    never through this function.
     """
     if not isinstance(raw, Mapping):
         return {"novelty_status": DEFAULT_STATUS, "divergence_correctness": None}
@@ -533,10 +574,4 @@ def resolve_model_output(raw: Optional[Mapping[str, Any]]) -> Dict[str, Optional
     if status == ABSTENTION_TOKEN or status not in NOVELTY_STATUSES:
         return {"novelty_status": DEFAULT_STATUS, "divergence_correctness": None}
 
-    correctness = raw.get("divergence_correctness")
-    if not divergence_correctness_applicable(status):
-        correctness = None
-    elif correctness not in DIVERGENCE_CORRECTNESS_VALUES:
-        correctness = None
-
-    return {"novelty_status": status, "divergence_correctness": correctness}
+    return {"novelty_status": status, "divergence_correctness": None}

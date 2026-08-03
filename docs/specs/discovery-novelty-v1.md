@@ -53,6 +53,19 @@ for every other shade. It is orthogonal to the shade because the owner's own rev
 divergence cases found BOTH directions (catalogue right / claim right) occur under the identical
 shade token — one column cannot carry both meanings (ruling F).
 
+**⟨AMENDED 2026-08-03, owner ruling L — `136-GATE1-DECISIONS.md` § L⟩ `divergence_correctness` is now
+a HUMAN/OWNER ANNOTATION ONLY — the model never computes it.** The ruling-I re-measurement
+(`136-NOVELTY-RUN.md` § 2.5) scored this axis at 8/28 (28.6%) — at or below chance for a three-way
+vocabulary — on cases where the owner's own review of the identical cases scored 31/32. Ruling F's
+default-hidden/explicit-warned-toggle posture for `diverges_work`/`diverges_part` rows applies
+REGARDLESS of which side is right, so no shipped surface has ever needed the model's correctness
+call to decide anything. The STORED column, its CHECK constraint, and every owner-supplied value
+already collected are UNCHANGED — nothing is deleted. Only the model's OUTPUT CONTRACT changes: the
+pinned prompt (section 5 below) no longer asks for this field at all, and
+`shared/discovery_novelty.py::resolve_model_output` now ALWAYS returns `divergence_correctness: None`,
+structurally incapable of surfacing a model-supplied value. A future human/owner annotation pass
+(not the model arm) is the sole remaining path that may populate this column.
+
 `novelty_source_label` populates on every shade where SOME finding aid says something nameable about
 this fragment-work pair: `confirms` / `refines_granularity` / `aid_more_specific` / `alias_merge` /
 `extends` / `diverges_work` / `diverges_part` / `container_predicts`. It stays `NULL` on `fills_gap`
@@ -145,7 +158,14 @@ residual).
   result) to the judgment step, states ruling G's rule directly ("if the aid's own prose already
   names this identification under any spelling/phrasing, the answer is `confirms`, even if the aid's
   structured field points elsewhere"), and is able to recognise and elicit the container-predicts
-  relationship (ruling H).
+  relationship (ruling H). **⟨AMENDED 2026-08-03, owner ruling L⟩** the prompt's response contract is
+  now the ten-value `novelty_status` shade ALONE — it no longer asks for `divergence_correctness` at
+  all (measured at 8/28, at or below chance; ruling F's hidden-by-default posture for
+  `diverges_work`/`diverges_part` applies regardless of which side is right, so no shipped surface
+  ever needed this call from the model). `PROMPT_SHA256` changed again on this account — the OLD,
+  now-retired hash from the ruling-I re-measurement
+  (`441058ae3bab6e5ee17beb0fc5ea39426d7c250feb6c2bd288f0bc1605c98be5`) must never be cited as current;
+  see `136-GATE1-DECISIONS.md` section L for the new value on record.
 - **Input normalization:** `INPUT_NORMALIZATION_SHA256`, computed from the literal
   `INPUT_NORMALIZATION_SPEC` string — NFC normalize, strip nikud
   (`shared.text_normalize.strip_nikud`), strip combining diacritics/quote variants
@@ -228,8 +248,10 @@ reader must not lose sight of:
 
 ## 9. Cross-references
 
-- `136-GATE1-DECISIONS.md` sections E, E′, F, G, H, I, J — the ratified rulings this contract
-  implements, with full rationale and worked cases.
+- `136-GATE1-DECISIONS.md` sections E, E′, F, G, H, I, J, K, L — the ratified rulings this contract
+  implements, with full rationale and worked cases. **K** halts the ~$301 production run pending a
+  purpose-built `fills_gap` probe (see `136-NOVELTY-RUN.md`'s probe section); **L** drops
+  `divergence_correctness` from the model's output contract (section 2 and section 5 above).
 - `136-NOVELTY-PRIOR-ART.md` — the prior-art reconciliation pass (Codex REWORK findings, the
   five-way↔ten-shade mapping, the eval-population analysis).
 - `docs/specs/discovery-sidecar-schema-v1.md` — the `novelty_status` / `novelty_source_label` /

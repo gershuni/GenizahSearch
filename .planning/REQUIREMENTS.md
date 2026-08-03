@@ -260,6 +260,34 @@
     spot-check) are RETAINED UNCHANGED; Class 5 (generic collection works) is DROPPED (no owner ruling
     exists for any specific Class 5 case). Full rationale, the measured arm sizes and the kept/folded/
     dropped accounting are recorded in `136-GATE1-DECISIONS.md` § J.
+  - **⟨AMENDED 2026-08-03 — Phase-136 continuation, owner ruling K (`136-GATE1-DECISIONS.md` § K)⟩**
+    The ruling-I re-measurement (60 shade cases) scored 47/60 (78.3%) with ZERO errors in the
+    reputationally-expensive false-novel direction — but the 60-case pool contained ZERO true
+    `fills_gap` cases, so the axis decision B actually authorizes spend on (does the model correctly
+    say "genuinely unknown" only when it is true) was never exercised. **The 0/0 is not evidence of
+    safety.** The same re-measurement also re-derived the real production cost at **~$301** over
+    55,184 residual pairs — an 11× jump from the `~$27` figure decision B authorized, itself a new
+    authorization decision. **Owner ruling: the ~$301 production run stays UNAUTHORIZED until a
+    purpose-built probe measures the false-novel rate on the population that would actually ship as
+    candidates** — covering BOTH the model path (residual rows the pinned model classifies
+    `fills_gap`) AND the bypass path (rows with no checked-source text at all, which ship as
+    candidates automatically with nothing checked against them — Arm 3's own 8-case, no-verdict
+    design). Full rationale, the measured evidence and the probe's own design are recorded in
+    `136-GATE1-DECISIONS.md` § K and `136-NOVELTY-RUN.md`'s probe section.
+  - **⟨AMENDED 2026-08-03 — Phase-136 continuation, owner ruling L (`136-GATE1-DECISIONS.md` § L)⟩**
+    `divergence_correctness` (the sibling axis ruling F added, recording which side is right on a
+    `diverges_work`/`diverges_part` row) is **DROPPED from the model's job entirely.** Measured at
+    8/28 (28.6%) in the ruling-I re-measurement — at or below chance for a three-way vocabulary — on
+    cases where the owner's own review of the identical cases scored 31/32. Ruling F's default-hidden,
+    explicit-warned-toggle posture for divergence rows applies REGARDLESS of which side is right, so
+    NO shipped surface ever needed this call from the model. `divergence_correctness` remains a
+    HUMAN/owner annotation ONLY — the stored column, its CHECK constraint, and every owner-supplied
+    value already collected are UNCHANGED (nothing is deleted); only the model's PINNED PROMPT and
+    `resolve_model_output` change, dropping the field from the model's output contract entirely (the
+    prompt hash changes again on this account). `docs/specs/discovery-novelty-v1.md` and
+    `shared/discovery_novelty.py` are updated accordingly; NOT implemented in 136-03 (this amendment is
+    recorded by a later continuation, not that plan). Full rationale recorded in
+    `136-GATE1-DECISIONS.md` § L.
 - [ ] **NOVEL-02**: The novelty flag's **provenance** (`known_source` — which aid already had it) is masked on the public side: the boolean is publishable, but a restricted-corpus provenance value collapses to a non-identifying label (e.g. "recorded in a restricted corpus"), never the corpus name, and passes the DATA-05 masking scan on every surface that renders or exports it — including copy/clipboard output, JSON payloads, and error paths. Public surfaces therefore support "filter **and explain**" only where the explaining source is itself public; elsewhere they support "filter only". The heuristic-plus-LLM funnel's verdict cache is a build-time artifact and is never shipped in the sidecar
 
 ### Bands & Certification

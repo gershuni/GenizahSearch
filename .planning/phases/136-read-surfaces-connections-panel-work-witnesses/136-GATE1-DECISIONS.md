@@ -77,6 +77,21 @@ FGP/FJMS-catalogue sidecars (not merely libraries.csv), per the same prior-art p
 former pool had zero representation of the source-coverage failure modes Codex measured as most
 damaging. Sections A-I are NOT reopened by any of this; they remain LOCKED exactly as recorded above.
 
+**Further addendum, 2026-08-03 (a later, directly-dispatched continuation, following the ruling-I
+re-measurement in `136-NOVELTY-RUN.md` §§ 2-3) -- RULINGS K AND L.** After reading the re-measurement's
+real, measured results, the owner issued two further rulings, delivered through a normal orchestrator
+dispatch (the correct channel; see decision E's own Provenance note) -- **K** keeps the re-derived
+~$301 production run UNAUTHORIZED: the 60-case re-measurement scored 47/60 (78.3%) with ZERO
+false-novel errors, but the pool contained ZERO true `fills_gap` cases, so the axis that matters most
+was never exercised; a purpose-built probe measuring the false-novel rate on the ACTUAL candidate
+population (both the model path and the ungated no-source-text bypass path) must run first -- see
+**section K** below and `136-NOVELTY-RUN.md`'s new probe section. **L** drops `divergence_correctness`
+from the model's job entirely (measured 8/28, at/below chance, against the owner's own 31/32 on the
+identical cases) -- it remains a human/owner annotation only; the stored column and every owner value
+already collected are unchanged, but the pinned prompt and `resolve_model_output` no longer elicit or
+carry it (new prompt hash) -- see **section L** below. Sections A-J are NOT reopened by any of this;
+they remain LOCKED exactly as recorded above.
+
 ---
 
 ## A. The five gate-1 decisions
@@ -1625,3 +1640,193 @@ structural fact that all 8 carry `question_type: "no_verdict_by_design"` in the 
 | Arm 3 (no-source-text) | 8 | n/a | No verdict by design |
 
 **Total: 101 cases, 81 labelled, 12 skipped, 8 no-verdict-by-design, 0 correctness gaps.**
+
+---
+
+## K. The ~$301 production run stays UNAUTHORIZED -- test the `fills_gap` axis first
+
+**Provenance.** This ruling was delivered through a normal orchestrator dispatch to a later,
+directly-dispatched continuation (running on the primary checkout, `C:\Genizahsearch`, per that
+session's own preconditions check) after the owner read `136-NOVELTY-RUN.md`'s real, measured
+re-measurement results (section 2-3 of that record). This is the correct channel (see decision E's
+own Provenance note for why that distinction is load-bearing); this ruling is recorded here with the
+same standing as A-J -- LOCKED, not re-litigated, re-derived or "improved" here.
+
+- **Question.** The ruling-I re-measurement (`136-NOVELTY-RUN.md` § 2) scored the pinned config at
+  47/60 (78.3%) shade agreement against real owner labels, with **ZERO errors in the reputationally
+  expensive false-novel direction** (predicting `fills_gap` when the owner says it is not). Does that
+  clean result on the false-novel axis license the ~$301 production run (the cost `136-NOVELTY-RUN.md`
+  § 3.2 re-derived, an 11x jump from the `~$27` figure decision B authorized), or does the measurement
+  itself have a gap that must be closed first?
+
+- **Owner's answer (verbatim, condensed for this record):** "Do NOT authorize the ~$301 production
+  run yet. Test the `fills_gap` axis first." The owner identified that the clean 0-error result is
+  **not evidence of safety on the axis that matters**: the 60-case pool (30 Class 6 + 30 Arm 1
+  residual) contains **ZERO true `fills_gap` cases anywhere in it** (`136-NOVELTY-RUN.md` § 2.5's own
+  caveat, and `136-GATE1-DECISIONS.md`'s own Task-4 "Arm 1 -- 0 fills_gap in 30" finding above) -- so
+  the question decision B actually authorizes spend on (does the model correctly say "genuinely
+  unknown" ONLY when it is actually unknown, and never miss a genuine one) was simply never
+  exercised by this sample. A 0/0 result is silence, not a passing grade. Separately, the same
+  re-measurement re-derived the real production cost at **~$301** over the real 55,184-candidate
+  residual (`136-NOVELTY-RUN.md` § 3.2) -- an **11x** jump from the `~$27` figure decision B
+  authorized, itself a new authorization decision the owner had not yet ruled on when this figure was
+  re-derived.
+
+- **Date:** 2026-08-03.
+
+- **What is NOT reopened.** Decision B's model/version/effort pin (`gemini-3.6-flash`,
+  `reasoning:{effort:"low"}`) is UNCHANGED. Ruling I's re-measurement (60 shade cases, real sidecars,
+  real model, real cost) stands as a valid, real measurement of the SHADE axis on the current
+  ten-value/free-text contract -- it is not discarded or redone; it is simply insufficient, on its
+  own, to license the specific false-novel-rate question ruling K asks. The `~$27` figure remains
+  permanently superseded (per ruling J's own instruction and `136-NOVELTY-RUN.md` § 3.2's
+  re-derivation) -- **the ~$301 figure is now the operative cost basis, and must never be cited as
+  `~$27` again in any future record.**
+
+- **What ruling K requires before the production run may be authorized.** A purpose-built probe that
+  measures the false-novel rate on the population that would ACTUALLY ship as "Candidates for new
+  finds" -- covering BOTH paths a row can take to become a candidate:
+  1. **The model path** -- residual rows the pinned model classifies `fills_gap`.
+  2. **The bypass path** -- rows where NO checked source has any text at all (ruling J's Arm 3 design:
+     these never reach the model at all; the funnel ships them as `fills_gap` automatically). Arm 3
+     sampled 8 of these with NO verdict collected by design (ruling J's own specification) -- ruling K
+     explicitly calls this path "arguably the HIGHER risk precisely because nothing examines it,"
+     since nothing -- not the heuristic funnel, not the model -- ever checks these rows against
+     anything before they ship.
+  The probe's own design, sizing, and the owner-labelling instrument it produces are recorded in
+  `136-NOVELTY-RUN.md`'s new probe section (§ 4) -- this ruling authorizes and requires the probe;
+  it does not itself perform it (this record documents the ruling, per this file's own standing
+  discipline of recording ownership decisions separately from their execution).
+
+- **Code consequence.** No enum value, column, or schema change -- this ruling is a SPENDING GATE, not
+  a contract change. The consequence is entirely procedural: **the ~$301 production run may not be
+  executed on decision B's or ruling I's authorization alone.** A NEW acceptance criterion is added on
+  top of ruling I's existing re-measurement gate: before the production run, a probe measuring the
+  false-novel rate on the ACTUAL candidate population (both paths) must be built, run, and its results
+  (once the owner labels the resulting instrument) brought back to the owner for a final go/no-go call.
+
+- **Downstream contracts this decision amends:**
+  1. **Decision B / ruling I's gate** (`136-GATE1-DECISIONS.md` §§ B, I) -- gains a further condition:
+     re-measurement on the current vocabulary/contract (ruling I, already satisfied per
+     `136-NOVELTY-RUN.md` § 2) is necessary but NOT sufficient; the `fills_gap`-axis probe (ruling K) is
+     an ADDITIONAL, separate gate on the SAME production-run authorization.
+  2. **`136-NOVELTY-RUN.md`** -- gains a new section documenting the probe's design, its real measured
+     cost, and what it will and will not be able to answer once labelled (see that file's own new
+     section for the full account).
+  3. **`.planning/REQUIREMENTS.md` NOVEL-01** -- gains a further dated `⟨AMENDED 2026-08-03 -- ruling
+     K⟩` sub-bullet recording that the ~$301 run stays unauthorized pending the probe.
+
+- **Plans that must implement this ruling:** **136-04** (Task 3's own acceptance criteria gain this as
+  a further condition -- the production run instructed there may not proceed on ruling I's
+  re-measurement alone); any future plan that would actually execute the ~$301 production run must
+  cite this ruling's resolution (a labelled probe result and a subsequent owner go/no-go) as its own
+  precondition.
+
+- **What this continuation does NOT do:** it does not run the ~$301 production funnel (explicitly
+  unauthorized, per the ruling above) and does not itself render a go/no-go verdict on the probe's
+  eventual results (that is the owner's call, once the probe is labelled). This continuation DOES
+  build and run the probe itself (real corpus sample, real pinned model calls on the model-path
+  sample, real measured cost) and emit the owner-labelling instrument -- see `136-NOVELTY-RUN.md` § 4.
+
+---
+
+## L. `divergence_correctness` is DROPPED from the model's job -- human/owner annotation only
+
+**Provenance.** Delivered through the SAME normal orchestrator dispatch as ruling K above (the
+correct channel; see decision E's own Provenance note), to the same directly-dispatched continuation,
+after the owner read `136-NOVELTY-RUN.md` § 2.5's real, measured divergence-correctness result.
+Recorded here with the same standing as A-K -- LOCKED, not re-litigated, re-derived or "improved" here.
+
+- **Question.** Ruling F added `divergence_correctness` (`catalogue_correct` / `claim_correct` /
+  `unclear`) as a SEPARATE axis from the shade, asked of the model on every `diverges_work`/
+  `diverges_part` row, because the owner's own review of the real Class-6 cases found BOTH directions
+  occur under the identical shade token. The ruling-I re-measurement scored the model's own
+  correctness calls at **8/28 = 28.6%** against the owner's real labels -- at or below the ~33% a
+  three-way random guess would produce, and the single weakest measured result in that re-measurement
+  (`136-NOVELTY-RUN.md` § 2.5). Does this axis remain part of the model's job, given that measured
+  result?
+
+- **Owner's answer (verbatim, condensed for this record):** "`divergence_correctness` is DROPPED from
+  the model's job." The owner's stated rationale: this axis "asks for scholarly judgment," which the
+  owner supplied directly at **31/32** on the identical cases (the owner's own labelling pass over
+  Class 6 + Arm 1's divergence rows -- see the Task-4 section above, "13/13" and "18/19"
+  `catalogue_correct` findings, a combined 31 of 32 total divergence-row correctness calls the owner
+  made across both populations). A model scoring at or below chance on a question the owner answers
+  correctly essentially every time is not a defensible thing to ship. Separately, and independently
+  dispositive: **ruling F's own default-hidden, explicit-warned-toggle posture for
+  `diverges_work`/`diverges_part` rows applies REGARDLESS of which side is right** -- a divergence row
+  is hidden by default and shown only behind an explicit warned toggle whether the catalogue turns out
+  to be correct or the claim turns out to be correct. **No shipped surface therefore needs this answer
+  from the model at all** -- the shade token alone already drives every display decision ruling F
+  specifies.
+
+- **Date:** 2026-08-03.
+
+- **What is NOT reopened.** Ruling F's shade split (`diverges_work` / `diverges_part`, replacing the
+  single `diverges` token) is UNCHANGED -- this ruling touches ONLY the correctness sub-question, not
+  the scope-split shade itself. The default-hidden/explicit-warned-toggle display rule for these two
+  shades (ruling F) is UNCHANGED and, per the rationale above, is exactly WHY dropping the correctness
+  axis from the model costs nothing on any shipped surface.
+
+- **What is kept, explicitly -- nothing is deleted.** The STORED `divergence_correctness` column, its
+  CHECK constraint (`docs/specs/discovery-sidecar-schema-v1.md`), and every owner-supplied value
+  already collected (the label file's 32 divergence-row correctness calls, `136-GATE1-DECISIONS.md`'s
+  own Task-4 findings quoting them) are ALL UNCHANGED. `divergence_correctness` remains a real,
+  meaningful, closed-vocabulary column -- it simply may never again be populated by the model. A
+  future human/owner annotation pass (not specified or authorized by this ruling; out of scope here)
+  remains the sole path that may populate it going forward, exactly as the owner's own Task-4
+  labelling already did for the 32 rows on record.
+
+- **Code consequence.** `shared/discovery_novelty.py`'s pinned prompt
+  (`NOVELTY_PROMPT_TEMPLATE`) no longer asks the model for `divergence_correctness` at all -- the
+  model's sole output is the ten-value `novelty_status` shade (UNCHANGED in vocabulary; only the
+  correctness sub-question is removed from what the model is asked). `resolve_model_output` now
+  ALWAYS returns `divergence_correctness: None`, structurally incapable of surfacing a model-supplied
+  value for that field (mirroring `masked_provenance_label`'s own "cannot leak because it never echoes
+  its input" discipline) -- this holds even against a malformed or legacy raw response that happens to
+  still carry the key. **The PROMPT HASH changes again on this account.** The OLD hash recorded for
+  the ruling-I re-measurement,
+  `PROMPT_SHA256 = 441058ae3bab6e5ee17beb0fc5ea39426d7c250feb6c2bd288f0bc1605c98be5`, is RETIRED and
+  must never be cited as current going forward. **The NEW hash, computed from the literal
+  post-ruling-L `NOVELTY_PROMPT_TEMPLATE` string in `shared/discovery_novelty.py` at import time:**
+
+  ```
+  PROMPT_SHA256 = 4b2874794e82236655e1ca08d8866969350c6302965197dea8f18e06844e5e60
+  ```
+
+  `INPUT_NORMALIZATION_SHA256` is UNCHANGED by this ruling (ruling G's free-text normalization contract
+  is untouched) -- only `PROMPT_SHA256` moves.
+
+- **Downstream contracts this decision amends:**
+  1. **`docs/specs/discovery-novelty-v1.md`** -- section 2 (`divergence_correctness`'s own row) and
+     section 5 (the pinned LLM contract) both gain a dated `⟨AMENDED 2026-08-03, owner ruling L⟩`
+     sub-note stating the column is now human/owner-only and citing the new prompt hash above.
+  2. **`.planning/REQUIREMENTS.md` NOVEL-01** -- gains a further dated `⟨AMENDED 2026-08-03 -- ruling
+     L⟩` sub-bullet.
+  3. **`.planning/ROADMAP.md`** success criterion 6 -- gains a brief dated note that
+     `divergence_correctness` is human-only going forward; the column's existence and CHECK-constraint
+     shape are otherwise unaffected.
+  4. **`136-12-PLAN.md`'s Task 1** (not yet executed as of this ruling) -- its action text describes
+     ingesting `divergence_correctness` from "the verdicts" (the model's own verdict cache); as of this
+     ruling, the verdict cache's own `resolve_model_output` output ALWAYS carries `divergence_correctness:
+     None`, so Task 1, when actually executed, must NOT expect to ingest a model-supplied value for this
+     column -- it stays NULL on every row unless and until a separate human/owner annotation artifact
+     (not yet built) supplies it. A dated note has been added to that plan file flagging this for
+     whoever executes it next.
+  5. **`tests/test_discovery_novelty_contract.py`** -- updated: the test that previously asserted a
+     model-supplied `divergence_correctness` value passes through `resolve_model_output` unchanged is
+     replaced with one asserting it is ALWAYS dropped (`test_resolve_model_output_divergence_shade_never_carries_correctness_from_model`);
+     a new test asserts the pinned prompt template no longer mentions `divergence_correctness` or
+     "correctness" at all (`test_prompt_no_longer_elicits_divergence_correctness`).
+
+- **Plans that must implement this ruling:** **136-04** (already executed; this ruling amends its
+  shipped artifact directly, per the same continuation that recorded this ruling -- not a re-run of
+  Tasks 1-3, a surgical amendment to code those tasks already produced), **136-12** (not yet executed;
+  gains the dated note above so its Task 1 does not wire a model-sourced `divergence_correctness`
+  value that no longer exists).
+
+- **What this continuation does NOT do:** it does not delete the stored column, the CHECK constraint,
+  or any owner-supplied `divergence_correctness` value already in `discovery_data/novelty_hardcase_labels-v1.json`
+  -- all of that is explicitly preserved per the owner's own "nothing is deleted" instruction. It does
+  not build a human/owner annotation pathway for this column going forward (out of scope; flagged for
+  a future plan).

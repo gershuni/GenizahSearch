@@ -408,6 +408,16 @@ def test_prompt_states_ruling_g_and_ruling_h_directly():
     assert "structured field points elsewhere" in NOVELTY_PROMPT_TEMPLATE
 
 
+def test_prompt_no_longer_elicits_divergence_correctness():
+    """Ruling L (136-GATE1-DECISIONS.md section L): divergence_correctness
+    is removed from the model's job entirely -- the pinned prompt must never
+    mention it, ask for it, or describe a response shape that includes it."""
+    from shared.discovery_novelty import NOVELTY_PROMPT_TEMPLATE
+
+    assert "divergence_correctness" not in NOVELTY_PROMPT_TEMPLATE
+    assert "correctness" not in NOVELTY_PROMPT_TEMPLATE.lower()
+
+
 def test_cache_key_fields_order_is_fixed_and_pins_first():
     assert CACHE_KEY_FIELDS[0] == "llm_model"
     assert CACHE_KEY_FIELDS[1] == "llm_model_version"
@@ -465,10 +475,16 @@ def test_resolve_model_output_valid_shade_passes_through():
     assert out["divergence_correctness"] is None
 
 
-def test_resolve_model_output_divergence_with_correctness():
+def test_resolve_model_output_divergence_shade_never_carries_correctness_from_model():
+    """Ruling L (136-GATE1-DECISIONS.md section L): divergence_correctness is
+    dropped from the model's job entirely (measured 8/28, at or below chance
+    for a three-way vocabulary) -- resolve_model_output must NEVER surface a
+    model-supplied correctness value, even if a raw response happens to
+    carry one (a stale pre-ruling-L cached response, a hallucinated key,
+    anything). The shade itself still passes through unaffected."""
     out = resolve_model_output({"novelty_status": "diverges_work", "divergence_correctness": "claim_correct"})
     assert out["novelty_status"] == "diverges_work"
-    assert out["divergence_correctness"] == "claim_correct"
+    assert out["divergence_correctness"] is None
 
 
 def test_resolve_model_output_drops_malformed_correctness_keeps_shade():

@@ -29,6 +29,24 @@ Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
 Plan: 5 of 21
 Status: Ready to execute
 
+**Rulings K and L recorded 2026-08-03 (primary checkout, direct dispatch following the ruling-I
+re-measurement halt below), plus the `fills_gap` probe the re-measurement could not provide.**
+**K:** the ~$301 production run stays UNAUTHORIZED — the 60-case re-measurement scored 47/60 (78.3%)
+with ZERO false-novel errors, but contained ZERO true `fills_gap` cases, so the axis decision B cares
+about most was never exercised; a purpose-built probe must measure the false-novel rate on the
+population that would actually ship as candidates (both the model's `fills_gap` verdict AND the
+ungated no-source-text bypass) before that run is authorized. **L:** `divergence_correctness` is
+DROPPED from the model's job (measured 8/28, at/below chance) — remains a human/owner annotation
+only; `shared/discovery_novelty.py`'s pinned prompt and `resolve_model_output` no longer elicit/carry
+it (new `PROMPT_SHA256`, recorded in `136-GATE1-DECISIONS.md` § L); the stored column and every
+owner-supplied value already collected are unchanged. The probe: built and ran the real committed
+funnel (`scripts/discovery_novelty_funnel.py`) over the FULL real 65,200-pair shipped population
+(free, mechanical — reproduced the prior session's exact 1,689 confirms / 8,327 no-source-text /
+55,184 residual split byte-for-byte, validating the reconstruction), sampled BOTH paths to candidacy,
+ran the real pinned model over the model-path sample, and emitted an owner-labelling instrument
+(`136-NOVELTY-FILLSGAP-PROBE.md`/`.xlsx`) capped at ~40 cases, path-labelled. Full record:
+`136-GATE1-DECISIONS.md` §§ K, L; `136-NOVELTY-RUN.md` § 4 (new probe section).
+
 **136-04 Task 3 (deferred) CLOSED FOR REAL 2026-08-03 (primary checkout, dispatched directly, not
 through the standard 136-NN plan sequence below) — the ruling-I re-measurement ran against the real
 sidecars and the real pinned model; the production run HALTED at the gate, owner-decision-pending, not
