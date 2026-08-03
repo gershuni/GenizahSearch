@@ -232,3 +232,95 @@ and `136-08`'s "Six" are correct against their own lists.)
 
 VERDICT: ship with 2 adjustments
 HIGH: 0   MEDIUM: 1   LOW: 1
+
+---
+
+# Round 5 — the six UNEXECUTED plans vs. the BUILT code (2026-08-03)
+
+**Run:** 2026-08-03 · `codex exec --dangerously-bypass-approvals-and-sandbox -C C:/Genizahsearch`
+**Audited HEAD:** `5ef9b45e` (read-only; worktree untouched).
+**Scope:** `136-15`, `136-16`, `136-17`, `136-18`, `136-19`, `136-21` only.
+**Brief:** `_tmp/136-codex-preflight-r5-brief.md` (masking-scanned clean before the run).
+**Log:** `_tmp/136-codex-preflight-r5.log` (gitignored).
+
+> **VERDICT: rework** — 1 BLOCKER · 8 HIGH · 3 MEDIUM · 1 LOW · 4 CONFIRM.
+
+**Why a round 5 after round 4 signed off at 0 HIGH.** Round 4 was correct for the repo of
+2026-08-02. Since then plans 136-01…136-14 executed (144 commits), the asset was rebuilt, the
+public projection was built, and 136-13's output was **deployed to production**. The six remaining
+plans were written against a repo where the discovery service layer, the rebuilt asset and the
+public projection did not exist. Additionally, **owner rulings S, T and U were all recorded
+2026-08-03** — after sign-off — so no plan can reference them.
+
+Two findings below were predicted before the run (ruling T's reachability, ruling R's title
+routing); the rest were not.
+
+## Verbatim findings
+
+1. **BLOCKER — 136-16 / 136-18 — Ruling U has no implementation owner.**  
+   The page header is specified only as title, sub-line, and caveat in [136-16-PLAN.md:138](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-16-PLAN.md:138); the completed-page plan likewise never adds the contribution headline or three sub-numbers in [136-18-PLAN.md:40](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:40). The existing service returns paged findings and per-query metadata only ([discovery_service.py:1431](C:/Genizahsearch/shared/discovery_service.py:1431), [discovery_service.py:1501](C:/Genizahsearch/shared/discovery_service.py:1501)); there is no artifact-backed launch-stat reader. Read-only queries found 9,523 in the deployed public artifact but 10,432 on the private rebuild, proving these numbers already differ between current artifacts.  
+   **Change:** assign a plan to add a version-aware artifact query/envelope for the main-pool contribution total and its three shades, render it as the lead framing, and test that neither code nor translations contain numeric literals for those values.
+
+2. **HIGH — 136-16 / 136-18 — “More matches” is mentioned but not acceptance-gated.**  
+   Plan 136-16 mentions a toggle at [136-16-PLAN.md:146](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-16-PLAN.md:146), but none of its acceptance criteria at [136-16-PLAN.md:166](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-16-PLAN.md:166) asserts that the control exists, is prominent, works, uses match framing, or is unnumbered. Plan 136-18 delegates membership to the bucket at [136-18-PLAN.md:106](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:106) but has the same omission. The service already supports `BUCKET_MORE` ([discovery_service.py:293](C:/Genizahsearch/shared/discovery_service.py:293), [discovery_service.py:457](C:/Genizahsearch/shared/discovery_service.py:457)). The deployed artifact contains 2,189 non-Bible `fills_gap` rows there versus 769 in the main pool. A broken page omitting the control could satisfy every current criterion.  
+   **Change:** require an always-visible, directly operable control; test the main→more interaction against a populated fixture, bilingual match-framing text, no attached count, and mobile visibility.
+
+3. **HIGH — 136-15 — the pure-model input contract is still the pre-envelope “service rows” abstraction.**  
+   `build_panel_rows(service_rows, ...)` is specified at [136-15-PLAN.md:88](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-15-PLAN.md:88), yet the model must distinguish four service states at [136-15-PLAN.md:140](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-15-PLAN.md:140). Live code now supplies separate envelopes for claims, page-ID resolution, manuscript works, related count, and related rows ([web/discovery.py:91](C:/Genizahsearch/web/discovery.py:91), [web/discovery.py:122](C:/Genizahsearch/web/discovery.py:122), [web/discovery.py:160](C:/Genizahsearch/web/discovery.py:160), [web/discovery.py:176](C:/Genizahsearch/web/discovery.py:176)). Bare rows cannot distinguish `ok/0` from an outage or carry `meta.resolved`. Synthetic row fixtures could therefore pass while real composition is broken.  
+   **Change:** define an explicit `PanelServiceBundle` or equivalent input containing all envelopes, their totals and metadata; specify status arbitration and unresolved/truncated page-scope behavior; add contract tests using exact live envelope shapes.
+
+4. **HIGH — 136-17 — its single-offload callable does not exist, and the accessor envelope is underspecified.**  
+   The plan requires one synchronous enveloped callable via `run.io_bound` at [136-17-PLAN.md:108](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:108). Live `web.discovery` instead exposes separate async wrappers, each already dispatching internally ([web/discovery.py:91](C:/Genizahsearch/web/discovery.py:91), [discovery_service.py:2006](C:/Genizahsearch/shared/discovery_service.py:2006)). The page-ID result is itself `{status, items, total, meta}` with `resolved`, `truncated`, and `volume_ie` ([web/discovery.py:122](C:/Genizahsearch/web/discovery.py:122)), while the plan merely says to pass “its result” at [136-17-PLAN.md:138](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:138).  
+   **Change:** specify a public synchronous bundle callable that executes the raw page-ID accessor and all panel reads inside one worker, passing `page.volume_ie`, then returns one composite envelope. Explicitly unpack and branch on `status` and `meta.resolved`; do not import the private `_service` or nest the async wrappers.
+
+5. **HIGH — 136-21 / 136-17 — the expansion still cannot render its promised carrier rows.**  
+   Plan 136-17 requires library and shelfmark for each other carrier at [136-17-PLAN.md:204](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:204). Plan 136-21 adds anchor relation/band fields only at [136-21-PLAN.md:138](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:138). The live return dictionary has only nine keys and no library, shelfmark, displayed evidence source, or band label ([discovery_service.py:1808](C:/Genizahsearch/shared/discovery_service.py:1808)); `manuscript_display` is not joined in its CTE ([discovery_service.py:610](C:/Genizahsearch/shared/discovery_service.py:610)).  
+   **Change:** extend the factored query with `manuscript_display`, return `library_code` and `shelfmark_display`, and return the resolved displayed `(evidence_source, confidence_band)` pair plus a surface label. Add exact non-null assertions on a real-shaped expansion fixture.
+
+6. **HIGH — 136-21 — its public projection file and actual envelope shape are missing from the plan.**  
+   The files list excludes `shared/discovery_surface_projection.py` at [136-21-PLAN.md:7](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:7), although Task 3 requires a surface-safe expansion projection at [136-21-PLAN.md:250](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:250). Current allowlists contain no expansion row type ([discovery_surface_projection.py:230](C:/Genizahsearch/shared/discovery_surface_projection.py:230)). The plan also repeatedly states `{status, items, total}` ([136-21-PLAN.md:175](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:175), [136-21-PLAN.md:183](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:183)), but the live closed contract is `{status, items, total, meta}` ([discovery_surface_projection.py:318](C:/Genizahsearch/shared/discovery_surface_projection.py:318)).  
+   **Change:** add the projection module to `files_modified`, define a dedicated expansion allowlist, and separately pin the internal and public exact key sets—including `meta`.
+
+7. **HIGH — 136-21 — an item-query failure can still become a false zero.**  
+   The plan promises four statuses and tests only count timeout at [136-21-PLAN.md:179](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:179). The live `get_work_witnesses()` catches every query exception and returns `[]` ([discovery_service.py:1822](C:/Genizahsearch/shared/discovery_service.py:1822)). An envelope implemented by wrapping that legacy method can therefore return `ok` with no items after a failed list/member query—the exact false-zero class fixed for claims in 136-14.  
+   **Change:** factor a raising internal query helper, retain `[]` only in the legacy list API, and let the envelope map failures. Add separate forced failures for page query, member query, and count query.
+
+8. **HIGH — 136-18 — “matched-letter count” no longer exists on findings rows, and the criterion is vacuous.**  
+   The row anatomy requests a matched-letter count at [136-18-PLAN.md:83](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:83). The current identification grain exposes `max_coverage_ppm`, not matched letters ([discovery_service.py:311](C:/Genizahsearch/shared/discovery_service.py:311)); the exact surface allowlist likewise has no `matched_letters` ([discovery_surface_projection.py:194](C:/Genizahsearch/shared/discovery_surface_projection.py:194). The existing test explicitly warns that the surface must not imply a letter count ([test_discovery_findings_query.py:312](C:/Genizahsearch/tests/test_discovery_findings_query.py:312)). The only planned acceptance test asserts omission for a missing value at [136-18-PLAN.md:119](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:119), so omitting the element for every row passes.  
+   **Change:** replace “matched-letter count” with qualified matched-letter coverage sourced from `max_coverage_ppm`, and add a positive non-null direct-row assertion plus missing/propagated omission assertions.
+
+9. **HIGH — 136-15 / 136-16 / 136-17 / 136-18 — title acceptance still permits raw `neutral_title`.**  
+   The plans ask for canonical/plain-text titles but never require `display_work_title()` ([136-15-PLAN.md:73](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-15-PLAN.md:73), [136-17-PLAN.md:190](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:190), [136-18-PLAN.md:83](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:83)). Work facets are also received as raw labels. The binding helper states every surface must use it ([discovery_display_strings.py:737](C:/Genizahsearch/shared/discovery_display_strings.py:737)), while current service rows deliberately carry raw titles ([discovery_service.py:1200](C:/Genizahsearch/shared/discovery_service.py:1200), [discovery_service.py:1310](C:/Genizahsearch/shared/discovery_service.py:1310), [discovery_service.py:1552](C:/Genizahsearch/shared/discovery_service.py:1552)). “Plain text, not a link” tests would pass with the wrong title.  
+   **Change:** require `display_work_title(display_work_id, neutral_title, lang)` for panel rows, manuscript chips, findings rows, and work-facet labels; add the curated work as a bilingual fixture on every title-rendering path.
+
+10. **MEDIUM — 136-16 — its off-loop acceptance can pass with a blocking results read.**  
+    The plan says to use async envelopes at [136-16-PLAN.md:157](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-16-PLAN.md:157), then says to follow a separate `run.io_bound` fetch model at [136-16-PLAN.md:199](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-16-PLAN.md:199). The existing `test_no_await_sync_function` only detects `await` on a locally defined synchronous function ([test_no_await_sync_function.py:46](C:/Genizahsearch/tests/test_no_await_sync_function.py:46)); direct synchronous service calls, nested offloads, and wrapping an imported coroutine all evade it.  
+    **Change:** state that page code directly awaits `web.discovery`’s async wrappers and adds no `run.io_bound`; add an AST/spy guard forbidding direct sync service calls and verifying one internal executor dispatch per request.
+
+11. **MEDIUM — 136-17 / 136-18 — pre-deploy honesty checks stop at markup.**  
+    Both plans deploy after rendered-output tests ([136-17-PLAN.md:278](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:278), [136-18-PLAN.md:182](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:182)); JSON and error-path coverage is deferred to 136-19. Current envelope validation checks forbidden key names, not arbitrary values under innocuous keys ([discovery_surface_projection.py:296](C:/Genizahsearch/shared/discovery_surface_projection.py:296)). Thus a percentage or badge string could leak in an envelope/error message, be discarded by the renderer, and deploy green.  
+    **Change:** before each surface deploy, scan its exact envelopes and forced error paths for percentages, intervals, review badges, stored vocabulary, and masking terms. Keep 136-19 as the final cross-surface sweep.
+
+12. **MEDIUM — 136-18 — two positive controls combine independent defects.**  
+    One control seeds both “New discovery” and a precision figure; another seeds both an invalid domain and a wrong facet header at [136-18-PLAN.md:199](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:199). The honesty gate has independent detectors ([discovery_honesty_gate.py:276](C:/Genizahsearch/tests/render_smoke/discovery_honesty_gate.py:276)), so either combined control can turn red while the other property is completely untested.  
+    **Change:** use one mutation per property and assert the expected failing assertion identifier/message, not merely that “the suite went red.”
+
+13. **LOW — 136-15 — its population literal is private-asset-specific.**  
+    The plan fixes 14/116 and 19/121 into acceptance prose at [136-15-PLAN.md:114](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-15-PLAN.md:114), matching the private rebuild and the code comment at [discovery_service.py:224](C:/Genizahsearch/shared/discovery_service.py:224). The deployed public artifact contains 12/84 display human-confirmed rows instead.  
+    **Change:** label every population by artifact/audience and record both current public and private values; keep fixtures behavioral rather than count-derived.
+
+14. **CONFIRM — 136-17 — the page-ID accessor now exists and meets the substantive requirements.**  
+    The accessor is bounded at 500, derives IDs from page headers, filters by `volume_ie`, and reports resolution/truncation ([services.py:427](C:/Genizahsearch/web/services.py:427)). Its public wrapper dispatches off-loop and returns the four-key envelope ([web/discovery.py:122](C:/Genizahsearch/web/discovery.py:122)). `BrowsePage` carries `volume_ie` at [services.py:121](C:/Genizahsearch/web/services.py:121). Only the integration wording in finding 4 needs correction.
+
+15. **CONFIRM — 136-19 — all three masking requirements remain correctly stated and executable.**  
+    The plan requires a blocking missing-pattern outcome, both strict surfaces, and cell-by-cell SQLite scanning at [136-19-PLAN.md:98](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:98) and [136-19-PLAN.md:104](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:104). The live CLI implements exactly those contracts ([check_atlas_masking.py:1327](C:/Genizahsearch/scripts/check_atlas_masking.py:1327), [check_atlas_masking.py:1367](C:/Genizahsearch/scripts/check_atlas_masking.py:1367), [check_atlas_masking.py:1377](C:/Genizahsearch/scripts/check_atlas_masking.py:1377)). I ran strict repo + asset + SQLite scans over all three named sidecars; all returned clean.
+
+16. **CONFIRM — 136-16 / 136-18 — rulings M, N, P, Q, and S are not contradicted.**  
+    The findings plans retain candidacy framing and do not add a correctness suppression filter ([136-18-PLAN.md:95](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:95), [136-18-PLAN.md:106](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:106)). The live cascade reads the identified work’s `works.genre` through `display_work_id` ([discovery_service.py:415](C:/Genizahsearch/shared/discovery_service.py:415), [discovery_service.py:1516](C:/Genizahsearch/shared/discovery_service.py:1516)), and the findings filter contains no corpus/VIS-shortcut gate ([discovery_service.py:431](C:/Genizahsearch/shared/discovery_service.py:431)). The two-axis public projection therefore remains authoritative.
+
+17. **CONFIRM — 136-15 / 136-16 — the base service row shapes otherwise match the rebuilt substrate.**  
+    Claim rows carry the panel’s IDs, relation, band, coverage, matched letters, offsets, bucket, novelty, and human-confirmation markers through an exact allowlist ([discovery_surface_projection.py:113](C:/Genizahsearch/shared/discovery_surface_projection.py:113)). Findings return the three shipped units with unit-specific nullability and a four-key envelope; live public totals were 27,709 identifications, 23,312 manuscripts, and 478 works. The actionable mismatches are the envelope composition, curated-title routing, launch stats, and nonexistent matched-letter count identified above.
+
+VERDICT: rework — BLOCKER 1, HIGH 8, MEDIUM 3, LOW 1, CONFIRM 4
+
+VERDICT: rework — BLOCKER 1, HIGH 8, MEDIUM 3, LOW 1, CONFIRM 4
