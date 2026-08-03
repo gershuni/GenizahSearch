@@ -107,7 +107,7 @@ None for Tasks 1-2 (no external service configuration required to build or test 
 ## Next Phase Readiness
 
 - **136-12 (novelty ingestion / build wiring) is NOT blocked by this plan's own scope**, but IS blocked, by ruling I's own design, from authorizing the FULL production run until the re-measurement `136-NOVELTY-RUN.md` section 2 describes is actually performed and recorded. The contract module, the funnel runner and the grading harness are all built, tested, and ready for 136-12 to call.
-- **The ruling-I re-measurement and the production run remain genuinely open work**, not merely deferred paperwork -- `136-NOVELTY-RUN.md` section 5 states the exact five steps a future execution (with the label file, the real sidecars, and real credentials all present) must follow. This should be flagged to whichever session or environment next has access to those three things.
+- **The ruling-I re-measurement and the production run remain genuinely open work**, not merely deferred paperwork -- `136-NOVELTY-RUN.md` section 5 (renumbered to section 6, "Path to completion," by a 2026-08-03 continuation that inserted a new section 4 for owner ruling K's `fills_gap` probe -- content unchanged, only the section number moved) states the exact five steps a future execution (with the label file, the real sidecars, and real credentials all present) must follow. This should be flagged to whichever session or environment next has access to those three things.
 - **The checkpoint/resume mechanism (`run_model_arm`) and the grading harness are fully exercised by fixtures**, so 136-12's build wiring (and the eventual real run) can call them with confidence that the mechanism itself is correct -- only the real-data exercise remains outstanding.
 - **No STATE.md/ROADMAP.md edits were made** by this plan, per its own dispatch instructions (the orchestrator owns those writes after the wave completes).
 
@@ -117,7 +117,7 @@ None for Tasks 1-2 (no external service configuration required to build or test 
 
 A later session, dispatched directly (not the isolated worktree above), ran on `C:\Genizahsearch`
 where the label file, all three real sidecars, and a working `OPENROUTER_API_KEY` were all directly
-verified present. It executed `136-NOVELTY-RUN.md` §5's five steps for real:
+verified present. It executed `136-NOVELTY-RUN.md` §5's (now §6's -- see the addendum above) five steps for real:
 
 - **Ruling-I re-measurement: DONE, real cost $0.322146.** 60 real `NoveltyCandidate` rows (Class 6 +
   Arm 1) built from the real sidecars; the real heuristic funnel resolved 1/60 mechanically (to

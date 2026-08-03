@@ -322,7 +322,152 @@ call this session is not authorized to make unilaterally. **No claim in the ship
 as a result of this session** — every identification remains `not_checked` (or whatever it already
 was), exactly as before, per NOVEL-01's fail-closed coverage-gap framing.
 
-## 4. What WAS built, exercised and verified (Tasks 1–2, unchanged by this session)
+## 4. The `fills_gap` probe (owner ruling K) — EXECUTED 2026-08-03, real corpus, real model, real cost
+
+**Provenance.** Owner ruling K (`136-GATE1-DECISIONS.md` § K) keeps the ~$301 production run
+UNAUTHORIZED until a purpose-built probe measures the false-novel rate on the population that would
+ACTUALLY ship as "Candidates for new finds" — the ruling-I re-measurement above (§ 2) scored ZERO
+false-novel errors on 60 cases, but the pool contained ZERO true `fills_gap` cases, so that axis was
+never exercised. This section reports that probe, built and run in the same directly-dispatched
+session as rulings K and L, on the primary checkout, against the real sidecars and the real pinned
+model (post-ruling-L: the `divergence_correctness` sub-question is no longer part of the model's
+output contract — see § 2.5 above's now-superseded correctness figure and `136-GATE1-DECISIONS.md`
+§ L).
+
+### 4.1 The probe's design — both paths to candidacy, real data throughout
+
+Per `136-GATE1-DECISIONS.md` § K, the probe covers BOTH ways a row can become a "Candidate for new
+finds":
+
+1. **The model path** — real residual rows (the mechanical heuristic funnel could not resolve them)
+   that the REAL pinned gate (`gemini-3.6-flash`, `reasoning.effort=low`, called for real via
+   OpenRouter, post-ruling-L prompt) classifies `fills_gap`.
+2. **The bypass path** — rows where NO checked source has any text at all. These NEVER reach the
+   model at all; the funnel ships them as `fills_gap` automatically, with nothing checked against
+   them (ruling J's own Arm 3 design, which sampled only 8 of these with no verdict collected).
+
+New committed script: `scripts/discovery_novelty_probe.py`. It reuses the REAL, committed funnel
+(`scripts/discovery_novelty_funnel.py`'s `NoveltyCandidate`/`run_heuristic_pass`/
+`run_heuristic_funnel`/`run_model_arm`/`assemble_evidence_bundle`) and the REAL data loaders already
+committed for the ruling-J hard-case sampler (`scripts/discovery_gate1_evidence.py`'s
+`load_works`/`load_claims`/`load_libraries_csv`/`load_fjms_catalog_text`/`load_bib_rows`/
+`load_fgp_rows`/`_combined_catalogue_text`) — never a second, hand-copied loader. A new PGP-text
+loader (`load_pgp_texts`, reading REAL `description`/`transcription` text from `pgp_data/pgp.db`,
+joined through `document_fragments` on `sys_id`) was added because the existing
+`discovery_gate1_evidence.py::load_pgp_signal_index` returns only presence/named booleans for its
+own SAMPLING-ONLY approximation — this probe needed the real text to feed the real committed funnel.
+
+**Real, independent validation of the reconstruction.** Before sampling anything, the script builds
+a `NoveltyCandidate` for EVERY real shipped `(sys_id, work_id)` pair in the live asset (across ALL
+`claim_type`s, not just `direct_witness` — this is the population definition that reproduces the
+real 65,200-pair figure § 3.2 above reports) and runs the real committed heuristic pass over the
+FULL population (free, mechanical, zero model calls). **Result: 65,200 total candidates → 1,689
+resolved `confirms` mechanically, 8,327 no-source-text bypass, 55,184 residual** — an EXACT,
+byte-for-byte match to the ruling-I re-measurement session's own full-corpus heuristic pass (§ 3.2
+above), independently re-derived from scratch in this session rather than assumed. This is strong
+evidence the reconstruction (real sidecars, real committed funnel, real population definition) is
+faithful.
+
+### 4.2 Sampling — sized for low single-digit dollars, capped at ~40 for the owner
+
+- **Model-path sample: 300** real residual candidates, drawn by seeded random sample (`seed=20260803`,
+  `random.Random(seed).sample(...)` over the deterministic `(sys_id, work_id)`-sorted population — a
+  reproducible draw, not a hand-picked one) from the real 55,184-candidate residual. Sized so the real
+  model-call cost stays in the low single-digit dollars the task's own guidance allowed (the ruling-I
+  re-measurement was $0.32 for 59 calls) while giving a broad, UNSTRATIFIED read across the residual —
+  deliberately different from the ruling-J hard-case pool's Arm 1 (which is capped per-stratum at 5 and
+  therefore cannot answer a rate question at all).
+- **Bypass-path sample: 20** real no-source-text candidates, drawn the same way (`seed=20260804`) from
+  the real 8,327-candidate bypass population. Every one of these rows is, by construction, ALREADY a
+  shipped candidate — no filtering happens to this path at all, so a plain random sample directly
+  exercises the risk ruling K's own text calls out: "arguably the HIGHER risk precisely because nothing
+  examines it."
+- **Split rationale (owner's time is the scarce resource, cap ~40 total):** the model path's final
+  instrument size is NOT the 300-candidate sample itself — it is capped to however many of those 300
+  the model actually classified `fills_gap` (bounded separately at 20 if that number were larger; it
+  was not, in this run — see § 4.3). The bypass path gets a flat, generous 20-case sample because EVERY
+  bypass row is already a candidate by definition (no model filtering reduces it), so 20 is the
+  direct, unfiltered read on that path; the model path's 300-candidate INPUT sample is much larger
+  than 20 because most residual candidates are NOT classified `fills_gap` (see § 4.3's `diverges_work`-
+  heavy finding in the ruling-J hard-case pool), so a much larger input sample was needed to surface
+  enough true "would-ship" rows to make the model path's rate meaningful at all.
+
+### 4.3 Real results — measured, not estimated
+
+- **Real total spend: $1.029420** across **305 real OpenRouter calls** (300 from this run + 5 from an
+  initial small integration-validation batch under a different seed, both logged to the same real cost
+  log and summed together here — real spend on this probe project, in total). Read directly from each
+  response's own `usage.cost` field, never estimated. **Average $0.00338/call — cheaper than the
+  ruling-I re-measurement's $0.00546/call** (this prompt no longer elicits `divergence_correctness`,
+  per ruling L, which plausibly shortens the response). Every response's own `"model"` field echoed
+  `google/gemini-3.6-flash` — no silent downgrade observed across any of the 305 calls.
+- **Of the 300 model-path candidates, 13 were classified `fills_gap`** (would ship as a "Candidate for
+  new finds" in production) — **4.3%** of this UNSTRATIFIED sample. This is a materially different,
+  and more informative, number than the ruling-J hard-case pool's Arm 1 (0 of 30, but that pool is
+  capped at 5 per source-stratum, not a random draw, and explicitly does not answer a rate question
+  per its own sizing note). No subsampling/cap was needed on the model path (13 < the 20-case cap).
+- **20 bypass-path candidates** — a plain random sample of the real 8,327-row no-source-text
+  population; no model call, no filtering.
+- **Total instrument: 33 cases** (13 model-path + 20 bypass-path) — under the ~40-case cap.
+- **Every row is a REAL manuscript, a REAL claimed work, and a REAL selection reason** — no fabricated
+  case. Examples from the model path (case titles only, per this record's own no-raw-provenance-text
+  discipline): a Saadia Gaon Daniel translation (Alliance Israélite Universelle Ms. VII A), a Bible
+  Isaiah fragment (NLR Box D.221), a Maimonides Mishneh Torah book (MS heb. d.67/49), a Rashi Torah
+  commentary (Adler Ms. 2869.20). Examples from the bypass path: several Bible-book fragments (Genesis,
+  Numbers, Jeremiah, Daniel, Isaiah, Joshua), a Targum Onkelos fragment, a Maimonides Mishneh Torah
+  book, a weekday Amidah fragment — several of which are plausibly well-known Biblical/liturgical texts
+  that a human labeller may judge `actually_recorded` in the ordinary sense even though no CHECKED
+  source in this project's own enumerable set happens to have text for this specific manuscript; this
+  is exactly the kind of case the probe exists to surface.
+
+### 4.4 The owner-labelling instrument
+
+**Deliverables:** `136-NOVELTY-FILLSGAP-PROBE.md` (this phase directory) + `136-NOVELTY-FILLSGAP-PROBE.xlsx`
+(same RTL/data-validation house style as `136-NOVELTY-HARDCASES.xlsx`, one "Candidates" sheet + one
+"Vocabulary & Instructions" sheet). 33 rows, each carrying: case #, an EMPTY verdict cell (never
+pre-filled — verified: every verdict cell in the saved workbook is `None`), the path (`model` /
+`bypass`), the manuscript/shelfmark, `sys_id`, the claimed work, and a plain-language reason stating
+WHY the row is in the set (its selection path — never a shade guess or a pre-filled answer).
+
+**The single owner question, identical for every row regardless of path** (per this task's own
+plain-English instruction): *"Is this fragment GENUINELY NOT IDENTIFIED in the finding aids we
+checked — catalogue, bibliography, PGP, FGP, and (where present) an internal reference-corpus
+shelfmark attribution?"* Vocabulary: `genuinely_novel` / `actually_recorded` / `unsure` / `skip`
+(XLSX dropdown, free text rejected; a blank cell means "not yet answered", never a label).
+
+**Masking:** both the MD and the XLSX (outer bytes AND the decompressed inner XML, per this project's
+own standing methodology for `.xlsx` masking verification — a bare outer-byte scan cannot see
+DEFLATE-compressed inner content) pass `scripts/check_atlas_masking.py --scan-asset` clean.
+`MASKING_SCAN_PATTERNS_FILE` pointed at the real, gitignored `.masking_patterns` file at the repo
+root (unset makes the scan fail closed by design — never a silent false-green).
+
+### 4.5 What this number can and cannot support — stated plainly, per this task's own instruction
+
+- **A 33-case sample gives a COARSE per-path rate, not a tight one.** Do not treat 13/300 = 4.3%
+  (model path) or any fraction the owner's eventual labelling produces on the 20 bypass-path rows as a
+  precise, publishable corpus-wide false-novel rate. Neither the model-path input sample (300, random
+  but unstratified) nor the bypass-path sample (20, a small slice of 8,327) is sized for a tight
+  confidence interval — this mirrors the ruling-J hard-case pool's own "coarse, not tight" framing for
+  its Arm 1/Arm 2 samples.
+- **What it CAN support:** a real, owner-labelled read on whether EITHER path is producing
+  disproportionately false "Candidates for new finds" — the specific, concrete question ruling K asks,
+  which the ruling-I re-measurement's 60-case pool could not answer at all (zero true `fills_gap`
+  cases in that pool). If the owner's labelling finds the model path's 13 rows are mostly
+  `genuinely_novel`, that is real, if coarse, evidence the false-novel risk on THAT path is low. If the
+  bypass path's 20 rows are disproportionately `actually_recorded` (plausible for common Biblical/
+  liturgical texts, per § 4.3's examples), that is a real, concrete finding about the SPECIFIC risk
+  ruling K named as the higher-risk, unexamined path — actionable independent of the model-path result.
+- **What it CANNOT support:** a base rate for either path across the full corpus (55,184 residual /
+  8,327 bypass); a per-source-family breakdown of WHERE false novelty concentrates on the model path
+  (this sample is unstratified, unlike the ruling-J Arm 1 design); a statistically rigorous confidence
+  interval on either path's rate; or a decision to authorize the ~$301 production run BY ITSELF — per
+  ruling K, that decision remains the owner's, informed by (not automatically settled by) this probe's
+  eventual labelled result.
+- **The ~$301 production run remains UNAUTHORIZED.** It was NOT executed by this session (explicitly
+  out of scope per ruling K and this task's own `<do_not>` instruction). This probe's real spend
+  ($1.03) is entirely separate from, and far smaller than, that unauthorized figure.
+
+## 5. What WAS built, exercised and verified (Tasks 1–2, unchanged by this session)
 
 Although a full production run was not executed, the funnel's actual MECHANISM was built, and its
 riskiest properties were exercised against fixtures at zero cost and with zero model calls (Task 1/2,
@@ -343,7 +488,7 @@ unaffected by this session — restated here for continuity, not re-verified):
 All of the above remains committed as automated tests (`tests/test_discovery_novelty_contract.py`, 93
 passing, unaffected by this session).
 
-## 5. Path to completion — what happens next
+## 6. Path to completion — what happens next
 
 This is no longer "what a future execution must do to even attempt the re-measurement" (section 0's
 framing) — that has been done. What remains:
@@ -364,7 +509,7 @@ framing) — that has been done. What remains:
    real data at small scale; only the corpus-scale production run (gated on the above) remains
    outstanding.
 
-## 6. Compliance checks for this record
+## 7. Compliance checks for this record
 
 - No prompt text, raw model response, or raw provenance value appears anywhere in this document. Case
   examples are cited by case number, shade token, and English shelfmark/manuscript identifier only —
@@ -382,3 +527,30 @@ framing) — that has been done. What remains:
   vocabulary.
 - `python scripts/check_atlas_masking.py --scan-asset` was re-run against this document after every
   edit in this session and exits 0.
+
+**Additions for the § 4 probe (this later continuation, 2026-08-03):**
+
+- Section 4 above cites manuscripts and claimed works by case number, English shelfmark, and an
+  ENGLISH paraphrase of the claimed work (e.g. "a Saadia Gaon Daniel translation") only — never a
+  literal Hebrew claim/catalogue string, consistent with this document's own standing discipline
+  (unlike `136-NOVELTY-FILLSGAP-PROBE.md`/`.xlsx` themselves, which — like `136-NOVELTY-HARDCASES.md`
+  before them — render real, already-public `works.neutral_title`/`author` strings, the SAME
+  DATA-04-cleared values the live product already displays; never a raw M-source/restricted-corpus
+  identifier or reference text).
+- `scripts/discovery_novelty_probe.py` (the new committed script) has NO import-time dependency on any
+  gitignored research tree, matches `scripts/discovery_gate1_evidence.py`'s own "read-only measurement
+  script" shape, and is ruff-clean.
+- `discovery_data/novelty_probe_model_checkpoint.jsonl` and `discovery_data/novelty_probe_cost_log.jsonl`
+  (this session's real, per-call cost log and model-verdict checkpoint) are gitignored
+  (`git check-ignore -v` confirms both against the blanket `/discovery_data/` rule) and were never
+  staged.
+- Both `136-NOVELTY-FILLSGAP-PROBE.md` and `136-NOVELTY-FILLSGAP-PROBE.xlsx` passed
+  `scripts/check_atlas_masking.py --scan-asset` clean — the XLSX scanned BOTH as outer bytes AND via
+  `zipfile` extraction of its decompressed inner XML into a scratch directory (this project's own
+  standing methodology for `.xlsx` masking verification, since a bare outer-byte scan cannot see
+  DEFLATE-compressed inner content). `MASKING_SCAN_PATTERNS_FILE` pointed at the real,
+  gitignored `.masking_patterns` file at the repo root throughout — never unset, never a silent
+  false-green.
+- The real, independent full-corpus heuristic-pass re-derivation (§ 4.1: 65,200 → 1,689/8,327/55,184)
+  reproduced the ruling-I re-measurement session's own figures (§ 3.2) EXACTLY, byte-for-byte on every
+  count — cited here as a durable cross-session reproducibility record, not merely asserted.

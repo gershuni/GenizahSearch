@@ -43,9 +43,13 @@ owner-supplied value already collected are unchanged. The probe: built and ran t
 funnel (`scripts/discovery_novelty_funnel.py`) over the FULL real 65,200-pair shipped population
 (free, mechanical — reproduced the prior session's exact 1,689 confirms / 8,327 no-source-text /
 55,184 residual split byte-for-byte, validating the reconstruction), sampled BOTH paths to candidacy,
-ran the real pinned model over the model-path sample, and emitted an owner-labelling instrument
-(`136-NOVELTY-FILLSGAP-PROBE.md`/`.xlsx`) capped at ~40 cases, path-labelled. Full record:
-`136-GATE1-DECISIONS.md` §§ K, L; `136-NOVELTY-RUN.md` § 4 (new probe section).
+ran the real pinned model over 300 real residual candidates (real cost **$1.029420** across 305 real
+calls, incl. a 5-call integration test), and emitted an owner-labelling instrument
+(`136-NOVELTY-FILLSGAP-PROBE.md`/`.xlsx`, **33 cases** — 13 model-path `fills_gap` predictions of 300
+sampled + 20 bypass-path, capped well under the ~40 target), path-labelled, NO pre-filled verdict.
+Masking clean (outer bytes + decompressed inner XLSX XML). The ~$301 production run was NOT executed.
+Full record: `136-GATE1-DECISIONS.md` §§ K, L; `136-NOVELTY-RUN.md` § 4 (new probe section). HALTED
+with a human-action checkpoint: the owner labels the probe.
 
 **136-04 Task 3 (deferred) CLOSED FOR REAL 2026-08-03 (primary checkout, dispatched directly, not
 through the standard 136-NN plan sequence below) — the ruling-I re-measurement ran against the real
