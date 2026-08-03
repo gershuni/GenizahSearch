@@ -191,8 +191,11 @@ def upgrade_db_to_post_rebuild(
             meta["audience"] = audience
         for table, meta_key in NEW_COUNT_META_KEY_BY_TABLE.items():
             if table in omit_tables:
-                # A partial asset that never created the table also never
-                # learned its count -- mirror that rather than papering over it.
+                # Deliberately still write the count key (as 0) when the table
+                # itself is omitted, so a missing-TABLE test fails on the table
+                # check rather than vacuously on the missing meta key. A test
+                # that wants both missing asks for it via `omit_meta_keys`.
+                meta[meta_key] = "0"
                 continue
             (count,) = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
             meta[meta_key] = str(count)
@@ -232,17 +235,39 @@ def write_manifest(
     (dir_path / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
-def materialize_pre_rebuild_sidecar(dest_dir: Path) -> Path:
+def materialize_pre_rebuild_sidecar(
+    dest_dir: Path, *, audience: Optional[str] = None
+) -> Path:
     """The PRE-REBUILD shape -- the committed golden v1 fixture, untouched.
 
     This is the rollback case: no ``meta.audience``, no
     ``discovery_identification``/``manuscript_display``, none of the new
     columns. The post-rebuild readiness contract must leave it not-ready.
+
+    ``audience`` optionally stamps ONLY the audience key onto the otherwise
+    untouched v1 asset. That isolates the structural checks: with a `public`
+    marker in place, the audience gate can no longer be what refuses the asset,
+    so anything that still refuses it is the required-table / required-COLUMN /
+    row-count contract doing the work.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     db_path = dest_dir / f"{GOLDEN_BASENAME}.db"
     shutil.copyfile(GOLDEN_DB, db_path)
-    shutil.copyfile(GOLDEN_MANIFEST, dest_dir / "manifest.json")
+    if audience is None:
+        shutil.copyfile(GOLDEN_MANIFEST, dest_dir / "manifest.json")
+        return db_path
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('audience', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (audience,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    write_manifest(dest_dir, db_path)
     return db_path
 
 

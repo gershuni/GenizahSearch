@@ -47,6 +47,10 @@ escaping the loader (T-134-tamper / T-134-failopen):
     deploy-time discipline) rather than structural (a fact the loader checks).
   - any required ``meta`` release-contract key is missing
   - any required table (per the frozen schema doc) is missing
+  - any required COLUMN is missing from a table that IS present -- a subset
+    check per ``_REQUIRED_COLUMNS``, because a partially-built asset can carry
+    every required table and still be missing a column a read path needs
+    (Phase 136, plan 136-20)
   - a release-contract expected row count does not match the actual count
   - a ``confidence_band``/``claim_type`` value falls outside the frozen enum
     vocab for its family (a cheap startup spot-check; the FULL 8-invariant
@@ -85,6 +89,28 @@ MANIFEST_FILENAME = "manifest.json"
 # meta table stores it as text, matching the manifest's own "schema_version"
 # field. A future incompatible schema bump mints a new string constant here
 # (reject-incompatible, never a silent int comparison).
+#
+# RETAIN DECISION (Phase 136, plan 136-20): the Amendment 2026-08-02 rebuild
+# does NOT bump this marker. Three reasons, recorded here so a later reader
+# never mistakes the non-bump for an oversight:
+#
+#  1. The amendment is purely ADDITIVE -- new tables and new columns; no
+#     existing field changes meaning. This marker's stated job is
+#     reject-incompatible, and nothing in the amendment is incompatible.
+#  2. The `_REQUIRED_TABLES`, `_REQUIRED_COLUMNS` and `_RELEASE_CONTRACT_COUNTS`
+#     checks below catch the exact failure this gate exists to close -- a
+#     pre-rebuild or partially-deployed sidecar passing readiness --
+#     deterministically, by table name, by column name and by row count, which
+#     is a sharper signal than a version string.
+#  3. Rolling BACK to the pre-rebuild asset must leave the surfaces hidden
+#     rather than crashing. Those checks give exactly that; a marker bump would
+#     too, but with no added safety and a lockstep edit across the builder and
+#     the frozen schema document.
+#
+# Reason 2 is only honest because COLUMNS are actually checked. Without
+# `_REQUIRED_COLUMNS`, this marker would have been the only thing standing
+# between a partially-built asset and a live nav entry that errors on its first
+# query.
 _EXPECTED_SCHEMA_VERSION = "discovery-v1"
 
 # The VIS-01 audience boundary (Phase 136, plan 136-20;
@@ -106,7 +132,8 @@ _AUDIENCES = frozenset({"public", "private"})
 _PUBLIC_LOADER_AUDIENCE = "public"
 
 # Required tables (docs/specs/discovery-sidecar-schema-v1.md SS1) -- the full
-# two-table claim model + its supporting tables.
+# two-table claim model + its supporting tables, plus the two tables the
+# Amendment 2026-08-02 (B) adds.
 _REQUIRED_TABLES = frozenset({
     "works",
     "discovery_claim",
@@ -115,7 +142,70 @@ _REQUIRED_TABLES = frozenset({
     "witness_unit_members",
     "meta",
     "band_precision",
+    # Amendment 2026-08-02 (B), Phase 136 plan 136-20.
+    "discovery_identification",
+    "manuscript_display",
 })
+
+# Required COLUMNS, per table (Amendment 2026-08-02). `_REQUIRED_TABLES` only
+# proves a table is PRESENT; this phase also adds columns to tables that already
+# existed, so an audience-public asset with both new tables and correct row
+# counts but a missing `coverage_ppm` or `novelty_status` would otherwise pass
+# readiness, expose the nav entry, and fail on the first query that touched it
+# -- the same failure `_REQUIRED_TABLES` exists to prevent, one level down.
+#
+# Validated via `PRAGMA table_info` as a SUBSET check, so an unexpected EXTRA
+# column is never a failure (a future additive build must not be gratuitously
+# rejected).
+#
+# ADDING A COLUMN TO THE CONTRACT MEANS ADDING IT HERE. The source of truth is
+# docs/specs/discovery-sidecar-schema-v1.md § Amendment 2026-08-02 -- sections
+# (A) (evidence/works additions), (B) (the two new tables' DDL), (C)
+# (`works.genre`, an EXISTING column the amendment populates and constrains) and
+# (F) (`discovery_routing_audit.demoted_work_id`, made contractual by the
+# kept_tie rule).
+#
+# NOTE on `discovery_routing_audit`: it is NOT in `_REQUIRED_TABLES` above, but
+# naming it here makes it effectively required -- `PRAGMA table_info` on an
+# absent table returns no rows, so its required column reads as missing. That is
+# intended: the amendment makes `demoted_work_id` contractual, and the builder
+# creates the table unconditionally.
+_REQUIRED_COLUMNS: Dict[str, frozenset] = {
+    "discovery_evidence": frozenset({
+        "coverage_ppm",
+        "coverage_status",
+        "band_rank",
+        "novelty_status",
+        "novelty_source_label",
+        "divergence_correctness",
+        "assertion_visibility",
+    }),
+    "works": frozenset({"genre", "identity_visibility"}),
+    "discovery_routing_audit": frozenset({"demoted_work_id"}),
+    "discovery_identification": frozenset({
+        "identification_id",
+        "sys_id",
+        "canonical_work_id",
+        "display_work_id",
+        "main_pool",
+        "main_pool_reason",
+        "best_band_rank",
+        "page_count",
+        "max_coverage_ppm",
+        "relation_kind",
+        "novelty_status",
+        "divergence_correctness",
+        "assertion_visibility",
+        "identity_visibility",
+    }),
+    "manuscript_display": frozenset({
+        "sys_id",
+        "library_code",
+        "library_sort_key",
+        "shelfmark_display",
+        "shelfmark_sort_key",
+    }),
+}
 
 # Required release-contract meta keys (docs/specs/discovery-sidecar-schema-v1.md SS1.5).
 _REQUIRED_META_KEYS = frozenset({
@@ -130,6 +220,10 @@ _REQUIRED_META_KEYS = frozenset({
     "expected_rows_works",
     "expected_rows_units",
     "frame_content_hash",
+    # Amendment 2026-08-02 (C1) -- the two new tables need the same
+    # release-contract validation as claims/evidence/works/units.
+    "expected_rows_discovery_identification",
+    "expected_rows_manuscript_display",
 })
 
 # (meta release-contract key, table) pairs cross-checked against actual counts.
@@ -138,6 +232,10 @@ _RELEASE_CONTRACT_COUNTS = (
     ("expected_rows_evidence", "discovery_evidence"),
     ("expected_rows_works", "works"),
     ("expected_rows_units", "witness_units"),
+    # Amendment 2026-08-02 (C1) -- fed through the SAME count loop below, no
+    # new mechanism.
+    ("expected_rows_discovery_identification", "discovery_identification"),
+    ("expected_rows_manuscript_display", "manuscript_display"),
 )
 
 # Frozen enum vocab spot-check (docs/specs/discovery-sidecar-schema-v1.md
@@ -303,6 +401,19 @@ def load_discovery_state() -> bool:
         missing_tables = _REQUIRED_TABLES - actual_tables
         if missing_tables:
             raise ValueError(f"missing required table(s): {sorted(missing_tables)}")
+
+        # Required COLUMNS (Amendment 2026-08-02). A SUBSET check per table via
+        # PRAGMA table_info -- an unexpected extra column is NOT a failure. The
+        # table names come from the fixed `_REQUIRED_COLUMNS` allowlist above,
+        # never from user input (PRAGMA cannot be parameterized).
+        for table in sorted(_REQUIRED_COLUMNS):
+            column_rows = conn.execute(f"PRAGMA table_info({table})").fetchall()  # noqa: S608 -- fixed allowlisted table names, never user input
+            actual_columns = {row["name"] for row in column_rows}
+            missing_columns = _REQUIRED_COLUMNS[table] - actual_columns
+            if missing_columns:
+                raise ValueError(
+                    f"table {table!r} missing required column(s): {sorted(missing_columns)}"
+                )
 
         for meta_key, table in _RELEASE_CONTRACT_COUNTS:
             expected = meta.get(meta_key)

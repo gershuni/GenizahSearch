@@ -38,6 +38,7 @@ import pytest
 import web.discovery_assets as da
 from tests.fixtures.discovery_v2_fixture import (
     GOLDEN_BASENAME,
+    materialize_pre_rebuild_sidecar,
     materialize_sidecar,
     write_manifest,
 )
@@ -203,3 +204,229 @@ def test_sibling_ignoring_resolution_is_unchanged(tmp_path, monkeypatch):
 
     assert da.load_discovery_state() is False
     assert da._state.path is None
+
+
+# ===========================================================================
+# Task 2 -- the extended readiness contract: the two new tables, their
+# release-contract row counts, and the amendment's required COLUMNS.
+# ===========================================================================
+
+# The Amendment 2026-08-02 column set, restated here INDEPENDENTLY of the
+# loader so the mapping test is a real pin rather than a tautology. Sourced
+# from docs/specs/discovery-sidecar-schema-v1.md § Amendment 2026-08-02:
+#   (A) discovery_evidence / works additions
+#   (B) the two new tables' DDL
+#   (C) works.genre -- an EXISTING column the amendment populates and constrains
+#   (F) discovery_routing_audit.demoted_work_id -- made contractual by the
+#       amendment's kept_tie rule
+_AMENDMENT_COLUMNS = {
+    "discovery_evidence": frozenset({
+        "coverage_ppm",
+        "coverage_status",
+        "band_rank",
+        "novelty_status",
+        "novelty_source_label",
+        # ADDED 2026-08-02 (owner ruling F) by the schema doc's own
+        # 136-03-continuation amendment, AFTER plan 136-20 was drafted -- so it
+        # is absent from the plan's inline enumeration but squarely inside
+        # "every column the Amendment 2026-08-02 adds". Omitting it would leave
+        # open exactly the partial-builder hole this contract exists to close.
+        "divergence_correctness",
+        "assertion_visibility",
+    }),
+    "works": frozenset({"genre", "identity_visibility"}),
+    "discovery_routing_audit": frozenset({"demoted_work_id"}),
+    "discovery_identification": frozenset({
+        "identification_id", "sys_id", "canonical_work_id", "display_work_id",
+        "main_pool", "main_pool_reason", "best_band_rank", "page_count",
+        "max_coverage_ppm", "relation_kind", "novelty_status",
+        "divergence_correctness", "assertion_visibility", "identity_visibility",
+    }),
+    "manuscript_display": frozenset({
+        "sys_id", "library_code", "library_sort_key",
+        "shelfmark_display", "shelfmark_sort_key",
+    }),
+}
+
+
+def test_fully_valid_post_rebuild_public_asset_passes(tmp_path, monkeypatch):
+    """Behavior 8: the positive control. Without it every failure assertion
+    below could be passing for an unrelated reason."""
+    materialize_sidecar(tmp_path)
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is True
+    assert da.discovery_available() is True
+
+
+def test_missing_discovery_identification_table_fails_readiness(tmp_path, monkeypatch):
+    """Behavior 1."""
+    materialize_sidecar(tmp_path, omit_tables=["discovery_identification"])
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is False
+    assert da.discovery_available() is False
+
+
+def test_missing_manuscript_display_table_fails_readiness(tmp_path, monkeypatch):
+    """Behavior 2."""
+    materialize_sidecar(tmp_path, omit_tables=["manuscript_display"])
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is False
+    assert da.discovery_available() is False
+
+
+@pytest.mark.parametrize(
+    "meta_key",
+    ["expected_rows_discovery_identification", "expected_rows_manuscript_display"],
+)
+def test_new_table_row_count_disagreement_fails_readiness(tmp_path, monkeypatch, meta_key):
+    """Behavior 3: both tables present, but a release-contract count disagrees
+    with the actual row count -- on EITHER new table."""
+    materialize_sidecar(tmp_path, meta_overrides={meta_key: "7"})
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is False
+    assert da.discovery_available() is False
+
+
+def test_missing_required_column_on_a_new_table_fails_readiness(tmp_path, monkeypatch):
+    """Behavior 4a: both tables present with correct row counts, but a required
+    column on a NEW table is absent. Tables and counts alone would have passed
+    this asset, exposed the nav entry, and failed on the first query."""
+    materialize_sidecar(
+        tmp_path, omit_columns=[("discovery_identification", "max_coverage_ppm")]
+    )
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is False
+    assert da.discovery_available() is False
+
+
+def test_missing_required_column_on_an_existing_table_fails_readiness(tmp_path, monkeypatch):
+    """Behavior 4b: the same, for a column this phase adds to a PRE-EXISTING
+    table. This is the case `_REQUIRED_TABLES` structurally cannot catch."""
+    materialize_sidecar(tmp_path, omit_columns=[("discovery_evidence", "coverage_ppm")])
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is False
+    assert da.discovery_available() is False
+
+
+def test_extra_unexpected_column_does_not_fail_readiness(tmp_path, monkeypatch):
+    """The column check is a SUBSET check: a column the contract does not name
+    is not a failure, so a future additive build is not gratuitously rejected."""
+    materialize_sidecar(
+        tmp_path,
+        extra_columns=[
+            ("manuscript_display", "some_future_additive_column", "TEXT"),
+            ("discovery_evidence", "another_future_column", "INTEGER"),
+        ],
+    )
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is True
+    assert da.discovery_available() is True
+
+
+def test_required_columns_mapping_matches_the_amendment_exactly(tmp_path):
+    """Behavior 5: the required-column set covers every column the Amendment
+    2026-08-02 adds -- including the ones on PRE-EXISTING tables, not only the
+    new tables' own columns."""
+    assert isinstance(da._REQUIRED_COLUMNS, dict)
+    assert da._REQUIRED_COLUMNS == _AMENDMENT_COLUMNS
+    for table, columns in da._REQUIRED_COLUMNS.items():
+        assert isinstance(columns, frozenset), f"{table} must map to a frozenset"
+
+    # The nine columns the plan enumerates for EXISTING tables must all be
+    # present, wherever they live.
+    existing_table_columns = (
+        da._REQUIRED_COLUMNS["discovery_evidence"]
+        | da._REQUIRED_COLUMNS["works"]
+        | da._REQUIRED_COLUMNS["discovery_routing_audit"]
+    )
+    assert {
+        "coverage_ppm", "coverage_status", "band_rank", "novelty_status",
+        "novelty_source_label", "assertion_visibility", "identity_visibility",
+        "genre", "demoted_work_id",
+    } <= existing_table_columns
+
+
+def test_missing_new_meta_key_fails_readiness(tmp_path, monkeypatch):
+    """Behavior 6: a sidecar missing a new release-contract meta key fails
+    readiness rather than silently skipping the count check for that table."""
+    materialize_sidecar(
+        tmp_path, omit_meta_keys=["expected_rows_discovery_identification"]
+    )
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is False
+    assert da.discovery_available() is False
+
+
+def test_pre_rebuild_asset_fails_readiness_so_a_rollback_hides_cleanly(tmp_path, monkeypatch):
+    """Behavior 7 -- THE case that is easiest to skip. Deploying forward is
+    tested by everything downstream; rolling BACK to the pre-rebuild asset is
+    tested by nothing unless it is tested here.
+
+    The committed golden fixture IS the pre-rebuild shape: no `meta.audience`,
+    no `discovery_identification`/`manuscript_display`, none of the amendment's
+    new columns. Under the new contract it must leave the surfaces HIDDEN rather
+    than half-working -- and it must do so without raising.
+    """
+    materialize_pre_rebuild_sidecar(tmp_path)
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is False
+    assert da.discovery_available() is False
+    assert da.discovery_db_path() is None
+
+
+def test_pre_rebuild_asset_fails_on_the_structural_checks_alone(tmp_path, monkeypatch):
+    """The evidence behind the retain-`discovery-v1` decision.
+
+    That decision rests on the required-table / required-COLUMN / row-count
+    checks carrying the whole weight -- so it must be shown that they do, with
+    the audience gate taken out of the picture. Stamp a `public` audience marker
+    onto the otherwise untouched PRE-REBUILD asset: the audience gate now passes,
+    and the asset is still refused, by structure alone.
+    """
+    materialize_pre_rebuild_sidecar(tmp_path, audience="public")
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+
+    assert da.load_discovery_state() is False
+    assert da.discovery_available() is False
+
+
+def test_new_tables_are_in_the_required_set_with_count_pairs():
+    """Both new tables are required, and each has a release-contract
+    (meta_key, table) pair so the EXISTING count loop covers them without a new
+    mechanism."""
+    assert "discovery_identification" in da._REQUIRED_TABLES
+    assert "manuscript_display" in da._REQUIRED_TABLES
+
+    pairs = dict((table, meta_key) for meta_key, table in da._RELEASE_CONTRACT_COUNTS)
+    assert pairs["discovery_identification"] == "expected_rows_discovery_identification"
+    assert pairs["manuscript_display"] == "expected_rows_manuscript_display"
+
+    assert "expected_rows_discovery_identification" in da._REQUIRED_META_KEYS
+    assert "expected_rows_manuscript_display" in da._REQUIRED_META_KEYS
+
+
+def test_schema_marker_is_not_bumped():
+    """The retain-`discovery-v1` decision, pinned. The amendment is purely
+    ADDITIVE, and the required-table / required-COLUMN / count checks carry the
+    whole weight deterministically -- which is only honest because columns are
+    actually checked (see the dropped-column tests above)."""
+    assert da._EXPECTED_SCHEMA_VERSION == "discovery-v1"
