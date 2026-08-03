@@ -210,7 +210,7 @@ Plans:
 - [x] 136-09-PLAN.md — `works.genre` curation artifact + author alias map · wave 2
 - [x] 136-10-PLAN.md — Display strings, translations and the discovery CSS block (shared by both surfaces) · wave 3
 - [x] 136-11-PLAN.md — Build wiring A: coverage_ppm, band_rank, indexes, discovery_identification, manuscript_display, bench · wave 3
-- [ ] 136-12-PLAN.md — Build wiring B: novelty ingestion, visibility axes, curated load, kept_tie fix, verifier extensions · wave 4
+- [x] 136-12-PLAN.md — Build wiring B: novelty ingestion, visibility axes, curated load, kept_tie fix, verifier extensions · wave 4
 - [ ] 136-13-PLAN.md — The rebuild, the gate battery, the owner authorization and the one production redeploy · wave 5 · **checkpoint**
 - [ ] 136-14-PLAN.md — Service layer, once: envelope, panel paths, findings query, facet cascade · wave 6
 - [ ] 136-15-PLAN.md — Panel display model (pure) · wave 7
@@ -218,7 +218,7 @@ Plans:
 - [ ] 136-17-PLAN.md — Panel: browse attachment, body render, render-smoke, **panel deploy** · wave 8
 - [ ] 136-18-PLAN.md — Findings rows, novelty switch, combination benchmark, render-smoke, **findings deploy** · wave 9
 - [ ] 136-19-PLAN.md — Cross-surface masking sweep + flag-on readiness attestation + closeout · wave 10
-- [ ] 136-20-PLAN.md — **Public/private loader boundary + readiness contract** (audience gate; the two new tables and their row counts in startup validation; rollback + partial-asset tests) · wave 3
+- [x] 136-20-PLAN.md — **Public/private loader boundary + readiness contract** (audience gate; the two new tables and their row counts in startup validation; rollback + partial-asset tests) · wave 3
 - [ ] 136-21-PLAN.md — **Work-expansion service work** (anchor-side relation + band, weaker-band rule, count query for a real total) · wave 7
 
 Numbering note: 136-20 and 136-21 were added by the Codex pre-flight round and carry the next free numbers rather than forcing a renumber; the `wave` field, not the plan number, drives execution order.
@@ -333,7 +333,7 @@ than from scratch — they passed the plan-checker on 2026-08-02.
 | 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
 | 134. Discovery Data Spine | 6/8 | In Progress|  |
 | 135. Precision Certificate & Confidence Bands | 9/9 | Complete   | 2026-07-28 |
-| 136. Read Surfaces — Connections Panel & Work→Witnesses | 11/21 | In Progress|  |
+| 136. Read Surfaces — Connections Panel & Work→Witnesses | 13/21 | In Progress|  |
 | 137. Community Judgments | 0/TBD | Not started | - |
 | 138. Leads Queue | 0/TBD | Not started | - |
 | 139. Atlas Drill-down, Homepage & Release Hardening | 0/TBD | Not started | - |
