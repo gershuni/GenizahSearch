@@ -249,7 +249,7 @@ python scripts/build_discovery_sidecar.py `
     same_work_spike/probe/data/fullcorpus_v2.db `
     --from-approved              discovery_data/discovery-review-approved-final.csv `
     --crosswalk                  discovery_data/crosswalk.json `
-    --canonical-merges           same_work_spike/probe/rsource/data/v2_canonical_merges.json `
+    --canonical-merges           same_work_spike/probe/rsource/data/v2_canonical_merges.build.json `
     --canonical-merges-sha256    cc054d111b9b4a76dd69912923ba50cd2b63f7820cb632617f645c12c207429a `
     --composition-dates          discovery_data/composition_dates.json `
     --composition-dates-sha256   2b46b4708ddccb9f26961dcb9ba6d62b23d64cc1da225d133af1be21bf2e9476 `
@@ -330,6 +330,44 @@ should be updated to point at it by name.
 This amendment does not itself change the deploy MECHANISM (the atomic manifest swap, the
 exact-basename resolver, and the rollback procedure in §1-§3 above are unaffected) — it changes WHERE
 the verification commands' expected-frame-hash value comes from.
+
+---
+
+## Amendment 2026-08-03 (Phase 136, plan 136-13) — `--canonical-merges` named the WRONG FILE
+
+The §4 rebuild command block named `same_work_spike/probe/rsource/data/v2_canonical_merges.json`
+(86,163 bytes, SHA-256 `86b1d0ea…`). The **live v2 asset was not built from that file.** Its `meta`
+table pins `canonical_merges_sha256 = cc054d11…`, which is
+`same_work_spike/probe/rsource/data/v2_canonical_merges.build.json` (2,382 bytes). The command block
+above is corrected in place to name the `.build.json` file.
+
+This was caught by the §4 instruction to re-verify the pinned hashes against the live asset's own
+`meta` table before reusing them. That check is load-bearing and must not be skipped: it is the only
+thing standing between the documented command and a wrong-input rebuild.
+
+**Naming the census file is not a harmless synonym.** Per
+`same_work_spike/probe/rsource/scripts/emit_canonical_merges_build.py`, the full census carries nine
+fields per merge entry including **Hebrew titles that are masking-sensitive**, while the build's
+`--canonical-merges` parser accepts EXACTLY `{dropped_by_135, merges}` with exactly three frozen
+fields per entry and **halts on any extra field**. The `.build.json` is the deliberate slim, pure-ASCII
+projection that keeps restricted titles out of the build input entirely. Pointing the rebuild at the
+census would therefore either halt the parser or route restricted text into a build input — the slim
+file is a masking control, not a convenience.
+
+**Membership is unaffected.** Both files carry the same 16 merges and the same
+`dropped_by_135 = ["w001239"]`; only the per-entry field set differs. So this correction does not
+change the frame, and the Phase-136 rebuild's `frame_content_hash` is still EXPECTED to equal the
+pre-rebuild `53725098…`.
+
+The other four pinned inputs (`source_db_sha256`, `crosswalk_sha256`, `composition_dates_sha256`,
+`seftja_dates_sha256`) were re-verified against the live asset's `meta` on 2026-08-03 and all MATCH.
+
+`--precision-spec` for this rebuild is
+`.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-PRECISION-SPEC.json`,
+generated from the module's own `_frozen_real_band_precision_rows(v2_bands=True)` — the single source
+of truth `_validate_precision_spec` cross-checks against — so it carries the D-02a `tier_a`
+authorization pair (`ci_low=0.9084`, `measurement_status='measured_pass'`, `precision` still NULL) by
+construction rather than by hand-transcription.
 
 ---
 
