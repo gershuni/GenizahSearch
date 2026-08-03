@@ -23,6 +23,17 @@ Two independent gates, deliberately:
     manifest selected -- its ``meta.audience``, its required tables, its
     required COLUMNS and its release-contract row counts.
 
+**Read paths that do not exist yet.** At this plan's execution time
+``web/discovery.py`` exposes the page-claims path, the work/manuscript scope,
+the related-page path, the evidence expansion, and the band-precision readers.
+The related-page COUNT wrapper and the corpus-wide findings reader are added by
+later Phase-136 plans and so cannot be named here. Rather than freeze a list
+that would go stale, the refusal test SWEEPS every public async reader in
+``web/discovery.py`` dynamically and REFUSES to skip one whose required
+parameter it does not recognise -- so a later plan adding a reader is forced to
+register it rather than quietly escaping this proof. Plan 136-19's sweep carries
+the follow-up assertion for the two named-but-absent paths.
+
 Masking discipline (D-25): every value in this module is fabricated/synthetic;
 no restricted corpus is named anywhere (they appear only as "M-source" /
 "R-source" repo-wide), and the refusal-log test asserts positively that no cell
@@ -30,14 +41,18 @@ value from the refused artifact reaches the log.
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 import sqlite3
+import sys
 
 import pytest
 
 import web.discovery_assets as da
 from tests.fixtures.discovery_v2_fixture import (
     GOLDEN_BASENAME,
+    GOLDEN_DB,
     materialize_pre_rebuild_sidecar,
     materialize_sidecar,
     write_manifest,
@@ -430,3 +445,178 @@ def test_schema_marker_is_not_bumped():
     whole weight deterministically -- which is only honest because columns are
     actually checked (see the dropped-column tests above)."""
     assert da._EXPECTED_SCHEMA_VERSION == "discovery-v1"
+
+
+# ===========================================================================
+# Task 3 -- end to end: no PUBLIC READ PATH can reach a private artifact.
+#
+# The predicate-level assertions above prove `discovery_available()` is False.
+# That is necessary but not what VIS-01 actually asks for. What it asks for is
+# that no public read path returns a row. These tests exercise the REAL wrappers
+# in `web/discovery.py` -- the ones a page renders through -- and assert each
+# returns its unavailable envelope, then assert the SAME paths do return rows
+# against a valid public artifact so the refusal cannot pass vacuously.
+# ===========================================================================
+
+# Arguments for the public read wrappers, keyed by PARAMETER NAME rather than
+# by function, so the sweep below automatically covers a reader a later plan
+# adds. Values are ids that genuinely exist in the golden fixture, so the same
+# map drives the inverse (non-empty) control.
+def _golden_claim_id(page_id: str) -> str:
+    """A REAL claim id from the golden fixture. Claim ids are content hashes, so
+    resolving one at import time is the only way to keep this map honest across
+    a fixture rebuild."""
+    conn = sqlite3.connect(f"file:{GOLDEN_DB}?mode=ro", uri=True)
+    try:
+        row = conn.execute(
+            "SELECT claim_id FROM discovery_claim WHERE page_id = ? ORDER BY claim_id LIMIT 1",
+            (page_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, f"golden fixture has no claim on page {page_id!r}"
+    return row[0]
+
+
+_READ_PATH_ARGS = {
+    "page_id": "p012",
+    "claim_id": _golden_claim_id("p012"),
+    "work_id": "w000005",
+    "sys_id": "s001",
+    "evidence_source": "track1_direct",
+    "confidence_band": "expert_verified",
+    "collection_id": "propagated_witness_collection_v1",
+    "enabled_bands": None,
+}
+
+# The unavailable envelope each wrapper shape returns. Anything else is data.
+_EMPTY_ENVELOPES = (None, [], {}, (), False, 0)
+
+
+def _reimport_web_discovery():
+    """Force a FRESH import of web.discovery so its module-level
+    DiscoveryService re-resolves against the currently loaded state (the
+    tests/test_discovery_composition.py idiom)."""
+    sys.modules.pop("web.discovery", None)
+    import web.discovery as disc  # noqa: PLC0415 -- deliberate controlled re-import
+
+    return disc
+
+
+def _public_async_read_paths(disc):
+    """Every public async read wrapper in web/discovery.py, with a call-ready
+    kwargs dict. A wrapper whose required parameter is not in `_READ_PATH_ARGS`
+    raises here rather than being silently skipped -- so a later plan adding a
+    reader with a new parameter is FORCED to register it instead of quietly
+    escaping this proof."""
+    paths = {}
+    for name, fn in sorted(vars(disc).items()):
+        if name.startswith("_") or not inspect.iscoroutinefunction(fn):
+            continue
+        if getattr(fn, "__module__", None) != disc.__name__:
+            continue
+        kwargs = {}
+        for param_name, param in inspect.signature(fn).parameters.items():
+            if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+                continue
+            if param.default is not inspect.Parameter.empty:
+                continue
+            if param_name not in _READ_PATH_ARGS:
+                raise AssertionError(
+                    f"web.discovery.{name}() takes an unregistered required parameter "
+                    f"{param_name!r} -- add it to _READ_PATH_ARGS so the VIS-01 "
+                    "end-to-end refusal proof covers this read path"
+                )
+            kwargs[param_name] = _READ_PATH_ARGS[param_name]
+        paths[name] = (fn, kwargs)
+    return paths
+
+
+def _first_claim_id(disc):
+    async def _run():
+        claims = await disc.get_claims_for_page(_READ_PATH_ARGS["page_id"])
+        return claims[0]["claim_id"] if claims else None
+
+    return asyncio.run(_run())
+
+
+def test_private_artifact_returns_no_row_on_any_public_read_path(tmp_path, monkeypatch):
+    """The VIS-01 end-to-end refusal: manifest pointing at a PRIVATE-audience
+    database, flag ON, and NOT ONE public read path returns a row.
+
+    Asserted per path by name, so a failure says which surface leaked.
+    """
+    materialize_sidecar(tmp_path, audience="private")
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+    assert da.load_discovery_state() is False
+
+    disc = _reimport_web_discovery()
+    paths = _public_async_read_paths(disc)
+
+    # The four wrappers the plan names explicitly must be among them -- a
+    # regression that deleted one would otherwise shrink the sweep silently.
+    for required in (
+        "get_claims_for_page",          # the page claims path
+        "get_work_witnesses",           # the work / manuscript scope
+        "get_pages_related_to_page",    # the related-page path
+        "get_evidence",                 # on-demand evidence expansion
+    ):
+        assert required in paths, f"{required} is no longer a public read path"
+
+    async def _run():
+        for name, (fn, kwargs) in paths.items():
+            result = await fn(**kwargs)
+            assert result in _EMPTY_ENVELOPES, (
+                f"web.discovery.{name}() returned data from a PRIVATE-audience "
+                "artifact -- the audience boundary leaked"
+            )
+
+    asyncio.run(_run())
+
+    # The sync predicate too: nothing to noindex when nothing is available.
+    assert disc.discovery_methods_noindex() is False
+
+
+def test_public_paths_do_return_rows_against_a_valid_public_artifact(tmp_path, monkeypatch):
+    """The inverse control. Without it the refusal test above would also pass
+    against an empty database, and would prove nothing."""
+    materialize_sidecar(tmp_path, audience="public")
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+    assert da.load_discovery_state() is True
+
+    disc = _reimport_web_discovery()
+
+    async def _run():
+        assert await disc.get_version() is not None
+        claims = await disc.get_claims_for_page(_READ_PATH_ARGS["page_id"])
+        assert len(claims) > 0, "the page claims path returned nothing"
+        related = await disc.get_pages_related_to_page("p004")
+        assert len(related) > 0, "the related-page path returned nothing"
+        witnesses = await disc.get_work_witnesses(_READ_PATH_ARGS["work_id"])
+        assert len(witnesses) > 0, "the work/manuscript scope returned nothing"
+        evidence = await disc.get_evidence(claims[0]["claim_id"])
+        assert len(evidence) > 0, "the evidence path returned nothing"
+
+    asyncio.run(_run())
+
+
+def test_registered_read_path_arguments_resolve_to_real_fixture_rows(tmp_path, monkeypatch):
+    """Keeps `_READ_PATH_ARGS` honest: the refusal sweep must never start
+    passing merely because it is asking for ids that do not exist. Each id used
+    by the sweep is proved to resolve to a real row against the PUBLIC artifact.
+    """
+    materialize_sidecar(tmp_path, audience="public")
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+    assert da.load_discovery_state() is True
+
+    disc = _reimport_web_discovery()
+    assert _first_claim_id(disc) == _READ_PATH_ARGS["claim_id"]
+
+    async def _run():
+        assert len(await disc.get_evidence(_READ_PATH_ARGS["claim_id"])) > 0
+        assert len(await disc.get_work_witnesses(_READ_PATH_ARGS["work_id"])) > 0
+
+    asyncio.run(_run())
