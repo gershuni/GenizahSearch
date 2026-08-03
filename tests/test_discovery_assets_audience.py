@@ -487,10 +487,28 @@ _READ_PATH_ARGS = {
     "confidence_band": "expert_verified",
     "collection_id": "propagated_witness_collection_v1",
     "enabled_bands": None,
+    # 136-14: the manuscript scope is served by `page_id IN (...)` over the
+    # browse page's own page list, so its read path takes a page LIST.
+    "page_ids": ["p012"],
 }
 
 # The unavailable envelope each wrapper shape returns. Anything else is data.
 _EMPTY_ENVELOPES = (None, [], {}, (), False, 0)
+
+
+def _is_empty_read_result(result) -> bool:
+    """True when NO ROW came back, in either wrapper shape.
+
+    Two shapes coexist deliberately (136-14): the legacy list/None wrappers,
+    which fail open to the values in `_EMPTY_ENVELOPES`, and the enveloped
+    wrappers, which return `{status, items, total, meta}` so an outage is
+    distinguishable from a genuine zero (D-13). For THIS proof only one
+    question matters -- did a row escape the audience boundary -- so an
+    envelope counts as empty when it carries no item and a zero total.
+    """
+    if isinstance(result, dict) and "status" in result and "items" in result:
+        return not result["items"] and result["total"] == 0
+    return result in _EMPTY_ENVELOPES
 
 
 def _reimport_web_discovery():
@@ -567,7 +585,7 @@ def test_private_artifact_returns_no_row_on_any_public_read_path(tmp_path, monke
     async def _run():
         for name, (fn, kwargs) in paths.items():
             result = await fn(**kwargs)
-            assert result in _EMPTY_ENVELOPES, (
+            assert _is_empty_read_result(result), (
                 f"web.discovery.{name}() returned data from a PRIVATE-audience "
                 "artifact -- the audience boundary leaked"
             )
@@ -598,6 +616,19 @@ def test_public_paths_do_return_rows_against_a_valid_public_artifact(tmp_path, m
         assert len(witnesses) > 0, "the work/manuscript scope returned nothing"
         evidence = await disc.get_evidence(claims[0]["claim_id"])
         assert len(evidence) > 0, "the evidence path returned nothing"
+
+        # 136-14: the ENVELOPED paths need the same inverse control, or their
+        # refusal above would pass merely because they always return an empty
+        # envelope.
+        enveloped = await disc.get_claims_for_page_enveloped(
+            _READ_PATH_ARGS["page_id"])
+        assert enveloped["status"] == "ok" and enveloped["total"] > 0
+        scope = await disc.get_manuscript_works_enveloped(_READ_PATH_ARGS["page_ids"])
+        assert scope["status"] == "ok" and scope["total"] > 0
+        count = await disc.get_related_page_count_enveloped("p004")
+        assert count["status"] == "ok" and count["total"] > 0
+        rows = await disc.get_related_pages_enveloped("p004")
+        assert rows["status"] == "ok" and len(rows["items"]) > 0
 
     asyncio.run(_run())
 

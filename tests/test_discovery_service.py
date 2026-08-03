@@ -1500,3 +1500,414 @@ def test_web_enveloped_wrapper_honours_the_browse_timeout(monkeypatch):
     env = asyncio.run(web_discovery.get_claims_for_page_enveloped("p001"))
     assert env["status"] == STATUS_OK
     assert seen["timeout"] == 1.25
+
+
+# ===========================================================================
+# Phase 136, plan 136-14, Task 2: manuscript scope that NAMES the works
+# (D-13h), the related-page count (D-11a), and the page-ID accessor the
+# manuscript scope is served by (D-09).
+# ===========================================================================
+
+# --- the manuscript-scope fixture ------------------------------------------
+
+_MS_VERSION = "test-manuscript-scope"
+_MS_SYS = "990000000000000920"
+_MS_PAGES = [f"m_p{i}" for i in range(1, 9)]
+
+
+def _build_manuscript_scope_db(tmp_path):
+    """One manuscript, EIGHT pages, SEVEN distinct canonical works:
+
+    - `w000920` on two pages   -> main pool via multi-folio, page_count 2
+    - `w000921` review_only    -> reachable only behind the screening toggle
+    - `w000922` EMPTY title    -> the missing-title marker has something to mark
+    - `w000923`..`w000926`     -> four more, so pagination has a real total
+    """
+    works = [
+        ("w000920", "w000920", "Synthetic Manuscript Work Alpha", "Synthetic Author P",
+         "Synthetic Parent A / Synthetic Leaf A", "sefaria"),
+        ("w000921", "w000921", "Synthetic Manuscript Work Beta", None, None, "sefaria"),
+        # An EMPTY neutral_title -- `works.neutral_title` is NOT NULL, so this is
+        # the only shape a title-less work can actually take in the asset. Four
+        # of thirteen sampled manuscripts had no work title available for their
+        # "elsewhere" claims, which the panel reference calls a service-layer
+        # gap rather than a display choice.
+        ("w000922", "w000922", "", None, None, "sefaria"),
+        ("w000923", "w000923", "Synthetic Manuscript Work Delta", None, None, "sefaria"),
+        ("w000924", "w000924", "Synthetic Manuscript Work Epsilon", None, None, "sefaria"),
+        ("w000925", "w000925", "Synthetic Manuscript Work Zeta", None, None, "sefaria"),
+        ("w000926", "w000926", "Synthetic Manuscript Work Eta", None, None, "sefaria"),
+    ]
+
+    def _ev(page_id, work_id, *, band, routing, adjudication, reason, span=(0, 600),
+            matched=500, coverage=0.95):
+        return sidecar_build._mk_evidence(
+            page_id=page_id, work_id=work_id, sys_id=_MS_SYS,
+            evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+            confidence_band=band, adjudication_status=adjudication,
+            audit_status=sidecar_build._NA, routing_status=routing, routing_reason=reason,
+            span_start=span[0], span_end=span[1], matched_letters=matched, n_spans=1,
+            coverage=coverage, page_norm_letters=int(matched / coverage),
+        )
+
+    specs = [
+        # Alpha across two folios -> main_multifolio.
+        _ev("m_p1", "w000920", band=sidecar_build._EXPERT_VERIFIED,
+            routing=sidecar_build._SHIPPED, adjudication=sidecar_build._UNREVIEWED,
+            reason=sidecar_build._NONE_REASON),
+        _ev("m_p2", "w000920", band=sidecar_build._EXPERT_VERIFIED,
+            routing=sidecar_build._SHIPPED, adjudication=sidecar_build._UNREVIEWED,
+            reason=sidecar_build._NONE_REASON),
+        # Beta: review_only + unreviewed -> no identification row at all.
+        _ev("m_p3", "w000921", band=sidecar_build._SCREENING_RB,
+            routing=sidecar_build._REVIEW_ONLY, adjudication=sidecar_build._UNREVIEWED,
+            reason=sidecar_build._LOW_COVERAGE, matched=90, coverage=0.1),
+        # The title-less work.
+        _ev("m_p4", "w000922", band=sidecar_build._EXPERT_VERIFIED,
+            routing=sidecar_build._SHIPPED, adjudication=sidecar_build._UNREVIEWED,
+            reason=sidecar_build._NONE_REASON),
+    ]
+    for i, work_id in enumerate(("w000923", "w000924", "w000925", "w000926")):
+        specs.append(_ev(f"m_p{5 + i}", work_id, band=sidecar_build._EXPERT_VERIFIED,
+                         routing=sidecar_build._SHIPPED,
+                         adjudication=sidecar_build._UNREVIEWED,
+                         reason=sidecar_build._NONE_REASON))
+    return _new_sidecar(tmp_path, "manuscript-scope.db", works=works,
+                        evidence_specs=specs, version=_MS_VERSION)
+
+
+@pytest.fixture()
+def ms_scope_service(tmp_path):
+    return _service_for(_build_manuscript_scope_db(tmp_path), _MS_VERSION)
+
+
+def test_manuscript_scope_names_the_works_with_pages_band_and_gating(ms_scope_service):
+    """D-13h: "Elsewhere in this manuscript" reads "Rashi on Song of Songs
+    (5 pages), ..." -- NAMES, not a bare count. One row per distinct canonical
+    work, each carrying its page count, its strongest band rank and its gating."""
+    env = ms_scope_service.get_manuscript_works_enveloped(_MS_PAGES)
+    assert env["status"] == STATUS_OK
+    assert env["total"] == 7, "one row per DISTINCT canonical work"
+    by_work = {row["canonical_work_id"]: row for row in env["items"]}
+    assert len(by_work) == 7
+
+    alpha = by_work["w000920"]
+    assert alpha["neutral_title"] == "Synthetic Manuscript Work Alpha"
+    assert alpha["page_count"] == 2, "the work is identified on two folios"
+    assert alpha["best_band_rank"] == _band_rank("track1_direct", "expert_verified")
+    assert alpha["gated"] is False
+    assert alpha["main_pool"] is True
+    assert alpha["relation_kind"] == "direct_witness"
+
+    # Deterministic ordering: strongest band first, then a stable key.
+    ranks = [row["best_band_rank"] for row in env["items"]]
+    assert ranks == sorted(ranks)
+
+
+def test_gated_work_is_returned_with_the_flag_set_not_omitted(ms_scope_service):
+    """The manuscript pane renders a gated work as a dashed chip -- so the
+    service must RETURN it, flagged, rather than filter it out. On the mockup's
+    teaching case the five folios that make the anchor judgeable were all
+    review_only/low_coverage; omitting them removed the context."""
+    env = ms_scope_service.get_manuscript_works_enveloped(_MS_PAGES)
+    beta = next(r for r in env["items"] if r["canonical_work_id"] == "w000921")
+    assert beta["gated"] is True
+    assert beta["main_pool"] is not True
+    assert beta["neutral_title"] == "Synthetic Manuscript Work Beta"
+
+
+def test_manuscript_scope_paginates_with_a_real_total(ms_scope_service):
+    page1 = ms_scope_service.get_manuscript_works_enveloped(_MS_PAGES, page=1, page_size=3)
+    page2 = ms_scope_service.get_manuscript_works_enveloped(_MS_PAGES, page=2, page_size=3)
+    page3 = ms_scope_service.get_manuscript_works_enveloped(_MS_PAGES, page=3, page_size=3)
+    assert [len(p["items"]) for p in (page1, page2, page3)] == [3, 3, 1]
+    for env in (page1, page2, page3):
+        assert env["total"] == 7, "the total is the REAL group count, not the page length"
+    seen = [r["canonical_work_id"] for p in (page1, page2, page3) for r in p["items"]]
+    assert len(set(seen)) == 7, "pagination must be a partition, not a resample"
+
+
+def test_title_less_work_is_returned_with_an_explicit_missing_title_marker(ms_scope_service):
+    env = ms_scope_service.get_manuscript_works_enveloped(_MS_PAGES)
+    row = next(r for r in env["items"] if r["canonical_work_id"] == "w000922")
+    assert row["title_missing"] is True
+    assert row["neutral_title"] is None, (
+        "an unavailable title must be an explicit marker the surface can voice, "
+        "never a blank chip"
+    )
+    # Every other row is the control.
+    others = [r for r in env["items"] if r["canonical_work_id"] != "w000922"]
+    assert all(r["title_missing"] is False for r in others)
+
+
+def test_manuscript_scope_query_uses_the_claim_page_index(ms_scope_service, tmp_path):
+    """D-09: served by `page_id IN (...)` over the browse page's own page list,
+    because `discovery_evidence` has NO `sys_id` index. The plan is asserted,
+    not assumed."""
+    from shared.discovery_service import _build_manuscript_works_sql
+
+    sql = _build_manuscript_works_sql(len(_MS_PAGES))
+    conn = ms_scope_service._get_conn()
+    plan = " ".join(
+        str(row[3]) for row in conn.execute(
+            "EXPLAIN QUERY PLAN " + sql, [*_MS_PAGES, 50, 0]).fetchall()
+    )
+    assert "ix_discovery_claim_page_id" in plan, plan
+
+
+def test_empty_page_set_is_distinguishable_from_no_identifications(ms_scope_service):
+    """T-136-14-11: an unresolvable page set must never render as a genuine
+    zero. Both calls return `ok` with total 0 -- the DIFFERENCE is in the meta,
+    and that difference is the whole point."""
+    unresolved = ms_scope_service.get_manuscript_works_enveloped([])
+    assert unresolved["status"] == STATUS_OK
+    assert unresolved["total"] == 0
+    assert unresolved["meta"]["page_scope_resolved"] is False
+
+    resolved_but_empty = ms_scope_service.get_manuscript_works_enveloped(
+        ["a-page-with-no-claims"])
+    assert resolved_but_empty["status"] == STATUS_OK
+    assert resolved_but_empty["total"] == 0
+    assert resolved_but_empty["meta"]["page_scope_resolved"] is True
+
+
+# --- the related-page count (D-11a) ----------------------------------------
+
+_REL_VERSION = "test-related-pages"
+_REL_ANCHOR = "r_p1"
+
+
+def _build_related_pages_db(tmp_path):
+    """FOUR shared-text evidence rows touching the anchor page, over THREE
+    distinct opposite pages -- two of them on the same opposite page, and one
+    from the b-side. The earlier published figure conflated exactly these:
+    40,968 shipped shared-text evidence rows vs 37,397 directed pairs vs
+    30,539 unordered pairs. The header counts DISTINCT OPPOSITE PAGES."""
+    works = [("w000930", "w000930", "Synthetic Shared Text Work", None, None, "sefaria")]
+
+    def _st(a_page, other_page, sys_id, span):
+        return sidecar_build._mk_evidence(
+            page_id=a_page, work_id="w000930", sys_id=sys_id,
+            evidence_kind=sidecar_build._SHARED_TEXT,
+            evidence_source=sidecar_build._PROPAGATED,
+            confidence_band=sidecar_build._NOT_EVALUATED,
+            adjudication_status=sidecar_build._UNREVIEWED,
+            audit_status=sidecar_build._NA, routing_status=sidecar_build._SHIPPED,
+            routing_reason=sidecar_build._NONE_REASON,
+            span_start=span[0], span_end=span[1],
+            other_page_id=other_page, b_start=None, b_end=None,
+        )
+
+    specs = [
+        _st(_REL_ANCHOR, "r_p2", "990000000000000930", (0, 100)),
+        _st(_REL_ANCHOR, "r_p2", "990000000000000930", (200, 300)),  # SAME opposite page
+        _st(_REL_ANCHOR, "r_p3", "990000000000000930", (400, 500)),
+        _st("r_p4", _REL_ANCHOR, "990000000000000931", (0, 50)),      # the b-side
+    ]
+    return _new_sidecar(tmp_path, "related-pages.db", works=works,
+                        evidence_specs=specs, version=_REL_VERSION)
+
+
+@pytest.fixture()
+def related_service(tmp_path):
+    return _service_for(_build_related_pages_db(tmp_path), _REL_VERSION)
+
+
+def test_related_page_count_is_distinct_opposite_pages_not_evidence_rows(related_service):
+    raw_rows = related_service.get_pages_related_to_page(_REL_ANCHOR)
+    assert len(raw_rows) == 4, "the fixture must actually contain a duplicate opposite page"
+
+    env = related_service.get_related_page_count_enveloped(_REL_ANCHOR)
+    assert env["status"] == STATUS_OK
+    assert env["total"] == 3, (
+        "the count is DISTINCT opposite pages, deduplicated -- not evidence "
+        "rows (4 here) and not directed pairs (D-11a)"
+    )
+    assert env["total"] != len(raw_rows)
+    assert env["items"] == [], (
+        "the header shows a count by default; the rows come only behind the "
+        "toggle, so the count call returns no rows at all (D-11)"
+    )
+
+
+def test_related_pages_rows_are_returned_separately_from_the_count(related_service):
+    env = related_service.get_related_pages_enveloped(_REL_ANCHOR)
+    assert env["status"] == STATUS_OK
+    assert env["total"] == 3
+    ids_seen = [row["related_page_id"] for row in env["items"]]
+    assert sorted(ids_seen) == ["r_p2", "r_p3", "r_p4"]
+    doubled = next(r for r in env["items"] if r["related_page_id"] == "r_p2")
+    assert doubled["evidence_row_count"] == 2, (
+        "one row per DISTINCT opposite page, carrying how many evidence rows "
+        "collapsed into it"
+    )
+    single = next(r for r in env["items"] if r["related_page_id"] == "r_p4")
+    assert single["evidence_row_count"] == 1
+
+    paged = related_service.get_related_pages_enveloped(_REL_ANCHOR, page=1, page_size=2)
+    assert len(paged["items"]) == 2 and paged["total"] == 3
+
+
+# --- the page-ID accessor (NEW plumbing) -----------------------------------
+
+def _stub_browse_pages(sys_id, n, ie_id="IE500001", start=1):
+    return [
+        {
+            "uid": f"{sys_id}-{i}",
+            "p_num": i,
+            "ie_id": ie_id,
+            "full_header": f"{sys_id}_{ie_id}_P{i:06d}_FL{600000 + i}",
+        }
+        for i in range(start, start + n)
+    ]
+
+
+class _StubSearcher:
+    def __init__(self, browse_map, raises=False):
+        self._browse_map = browse_map
+        self._raises = raises
+
+    def _load_browse_map(self):
+        if self._raises:
+            raise RuntimeError("browse map unavailable")
+        return self._browse_map
+
+
+class _StubState:
+    def __init__(self, searcher):
+        self.searcher = searcher
+
+
+def test_page_id_accessor_derives_discovery_page_ids_from_the_browse_map(monkeypatch):
+    import web.services as web_services
+
+    sys_id = "990000000000000940"
+    monkeypatch.setattr(web_services, "state", _StubState(
+        _StubSearcher({sys_id: _stub_browse_pages(sys_id, 3)})))
+
+    result = web_services.get_service().get_manuscript_page_ids(sys_id)
+    assert result.resolved is True
+    assert result.total == 3
+    assert result.truncated is False
+    assert result.page_ids == [
+        f"{sys_id}_IE500001_P000001_FL600001",
+        f"{sys_id}_IE500001_P000002_FL600002",
+        f"{sys_id}_IE500001_P000003_FL600003",
+    ]
+
+
+def test_page_id_accessor_is_volume_aware_and_bounded(monkeypatch):
+    """A multi-volume manuscript can carry many pages (the largest is 427), so
+    the accessor is BOUNDED and says when it truncated. It is also
+    volume-aware: browse itself navigates one IE at a time."""
+    import web.services as web_services
+
+    sys_id = "990000000000000941"
+    pages = (_stub_browse_pages(sys_id, 600, ie_id="IE500002")
+             + _stub_browse_pages(sys_id, 40, ie_id="IE500003", start=1000))
+    monkeypatch.setattr(web_services, "state", _StubState(_StubSearcher({sys_id: pages})))
+    service = web_services.get_service()
+
+    bounded = service.get_manuscript_page_ids(sys_id)
+    assert bounded.total == 640
+    assert len(bounded.page_ids) == web_services.DISCOVERY_PAGE_ID_LIMIT
+    assert bounded.truncated is True
+
+    one_volume = service.get_manuscript_page_ids(sys_id, volume_ie="IE500003")
+    assert one_volume.total == 40
+    assert one_volume.truncated is False
+    assert all("IE500003" in pid for pid in one_volume.page_ids)
+
+
+@pytest.mark.parametrize("searcher,label", [
+    (None, "no searcher at all"),
+    (_StubSearcher({}), "an empty browse map"),
+    (_StubSearcher({}, raises=True), "a browse map that raises"),
+])
+def test_page_id_accessor_returns_an_explicit_empty_result_rather_than_raising(
+        monkeypatch, searcher, label):
+    """T-136-14-11: the panel must be able to say "we could not resolve this
+    manuscript's pages" instead of querying an empty page set and rendering a
+    false zero."""
+    import web.services as web_services
+
+    monkeypatch.setattr(web_services, "state", _StubState(searcher))
+    result = web_services.get_service().get_manuscript_page_ids("990000000000000942")
+    assert result.page_ids == [], label
+    assert result.total == 0
+    assert result.resolved is False, label
+
+
+def test_page_id_accessor_runs_off_the_event_loop(monkeypatch):
+    """Every read here runs OFF the loop. The web app runs a SINGLE uvicorn
+    worker, so a synchronous browse-map load on the loop stalls every
+    concurrent request while burning no CPU."""
+    import web.discovery as web_discovery
+    import web.services as web_services
+
+    sys_id = "990000000000000943"
+    monkeypatch.setattr(web_services, "state", _StubState(
+        _StubSearcher({sys_id: _stub_browse_pages(sys_id, 2)})))
+    monkeypatch.setattr(web_discovery, "discovery_available", lambda: True)
+
+    threads = {}
+
+    async def _run():
+        threads["loop"] = threading.get_ident()
+        return await web_discovery.get_manuscript_page_ids(sys_id)
+
+    real_accessor = web_services.GenizahService.get_manuscript_page_ids
+
+    def _recording(self, *a, **k):
+        threads["worker"] = threading.get_ident()
+        return real_accessor(self, *a, **k)
+
+    monkeypatch.setattr(web_services.GenizahService, "get_manuscript_page_ids", _recording)
+    env = asyncio.run(_run())
+
+    assert env["status"] == STATUS_OK
+    assert env["total"] == 2
+    assert env["meta"]["resolved"] is True
+    assert threads["worker"] != threads["loop"], (
+        "the accessor ran ON the event loop -- it must be dispatched through "
+        "the off-loop executor like every other read here"
+    )
+
+
+def test_page_id_helper_rejects_a_header_it_cannot_resolve():
+    from web.services import discovery_page_id_from_header
+
+    assert discovery_page_id_from_header("") is None
+    assert discovery_page_id_from_header("not a header") is None
+    # A LOCAL ("My Library") header carries no IE component and must never be
+    # mistaken for a Genizah page.
+    assert discovery_page_id_from_header("970000000000000001_F0001_P000001") is None
+    # Zero-padding is normalized to the asset's own six-digit form.
+    assert discovery_page_id_from_header("990000000000000944_IE1_P2_FL3") == (
+        "990000000000000944_IE1_P000002_FL3")
+
+
+def test_manuscript_scope_and_related_page_wrappers_exist_and_honour_the_browse_timeout(monkeypatch):
+    import web.discovery as web_discovery
+
+    monkeypatch.setattr(web_discovery, "discovery_available", lambda: True)
+    monkeypatch.setenv("DISCOVERY_QUERY_TIMEOUT_BROWSE", "1.75")
+    seen = []
+
+    for name, args in (
+        ("get_manuscript_works_enveloped", (["m_p1"],)),
+        ("get_related_page_count_enveloped", ("r_p1",)),
+        ("get_related_pages_enveloped", ("r_p1",)),
+    ):
+        wrapper = getattr(web_discovery, name)
+        assert asyncio.iscoroutinefunction(wrapper), name
+
+        async def _fake(*a, _n=name, **k):
+            seen.append((_n, web_discovery._service._browse_timeout()))
+            return make_envelope(STATUS_OK, [], 0)
+
+        monkeypatch.setattr(web_discovery._service, name + "_async", _fake)
+        env = asyncio.run(wrapper(*args))
+        assert env["status"] == STATUS_OK
+
+    assert [t for _n, t in seen] == [1.75, 1.75, 1.75]

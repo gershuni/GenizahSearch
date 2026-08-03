@@ -65,6 +65,8 @@ from shared.discovery_surface_projection import (
     busy_envelope,
     make_envelope,
     surface_safe_claim,
+    surface_safe_related_page,
+    surface_safe_work_summary,
     timeout_envelope,
     unavailable_envelope,
 )
@@ -233,6 +235,59 @@ _CLAIMS_DEFAULT_ROUTING_CLAUSE = (
     "AND (de.routing_status = 'shipped' "
     "OR de.adjudication_status = 'human_confirmed')"
 )
+
+# The manuscript scope is served by `page_id IN (...)` over the browse page's
+# own page list, NOT by `discovery_evidence.sys_id` -- that column has no
+# index, while `ix_discovery_claim_page_id` exists and is confirmed in use by
+# EXPLAIN QUERY PLAN (asserted by a test, not assumed). Bounded so an
+# unbounded caller cannot build a giant IN list: the largest manuscript in the
+# corpus carries 427 claims, and 429 manuscripts carry over 50.
+_MAX_MANUSCRIPT_PAGE_IDS = 500
+
+
+def _build_manuscript_works_sql(n_page_ids: int) -> str:
+    """The D-13h manuscript-scope query, as SQL, for `n_page_ids` bound
+    parameters.
+
+    A module-level builder rather than an inline f-string so a test can run
+    `EXPLAIN QUERY PLAN` over the EXACT statement the service executes -- an
+    index assertion against a hand-retyped near-copy proves nothing.
+
+    Only the placeholder COUNT is interpolated; every value is bound.
+    """
+    placeholders = ",".join("?" for _ in range(n_page_ids))
+    return f"""
+        SELECT w.canonical_work_id AS canonical_work_id,
+               MIN(di.display_work_id) AS display_work_id,
+               MIN(dw.neutral_title) AS display_neutral_title,
+               MIN(w.neutral_title) AS neutral_title,
+               MIN(COALESCE(dw.author, w.author)) AS author,
+               MIN(COALESCE(dw.genre, w.genre)) AS genre,
+               COUNT(DISTINCT dc.page_id) AS page_count,
+               MIN(COALESCE(de.band_rank, {_UNRANKED_BAND})) AS best_band_rank,
+               MAX(COALESCE(di.main_pool, 0)) AS any_main_pool,
+               MIN(CASE dc.claim_type WHEN 'direct_witness' THEN 0
+                                      WHEN 'quotes_this_work' THEN 1
+                                      ELSE 2 END) AS _relation_strength,
+               CASE MIN(CASE dc.claim_type WHEN 'direct_witness' THEN 0
+                                           WHEN 'quotes_this_work' THEN 1
+                                           ELSE 2 END)
+                    WHEN 0 THEN 'direct_witness'
+                    WHEN 1 THEN 'quotes_this_work'
+                    ELSE 'shared_text' END AS relation_kind,
+               COUNT(*) OVER () AS _total_rows
+        FROM discovery_claim dc
+        JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
+        JOIN works w ON w.work_id = dc.work_id
+        LEFT JOIN discovery_identification di
+               ON di.sys_id = de.sys_id
+              AND di.canonical_work_id = w.canonical_work_id
+        LEFT JOIN works dw ON dw.work_id = di.display_work_id
+        WHERE dc.page_id IN ({placeholders})
+        GROUP BY w.canonical_work_id
+        ORDER BY best_band_rank ASC, canonical_work_id ASC
+        LIMIT ? OFFSET ?
+    """
 
 # The per-work "ranked" CTE body (H1): every witness claim's display
 # evidence for `work_id`, its physical-MS unit_key (a real unit_id, or a
@@ -871,6 +926,171 @@ class DiscoveryService:
             meta={"page_id": page_id, "include_review": bool(include_review)},
         )
 
+    # ------------------------------------------------------------------
+    # 136-14 Task 2: manuscript scope that NAMES the works (D-13h).
+    # ------------------------------------------------------------------
+
+    def get_manuscript_works_enveloped(
+        self, page_ids: Iterable[str], page: int = 1, page_size: Optional[int] = None,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """"Elsewhere in this manuscript", as NAMED works (D-13h).
+
+        One row per DISTINCT canonical work identified anywhere in the given
+        page set, each carrying its page count, its strongest band rank, its
+        gating and its title. A bare count was rejected for a measured reason:
+        manuscript-level coherence is the context that makes a single claim
+        judgeable -- a page-23 Esther identification looks arbitrary alone and
+        obviously right once the reader sees that P2-P8 carry Song of Songs and
+        P22 Lamentations, i.e. a Megillot codex in the standard order. (Reader
+        aid ONLY -- it must never feed band assignment or routing, which would
+        be circular.)
+
+        NO routing filter. A work reachable only behind the screening toggle is
+        returned with `gated=True`, never omitted: on the mockup's teaching
+        case the five folios that made the anchor judgeable were ALL
+        `review_only/low_coverage`, so filtering them out removes exactly the
+        context this pane exists to supply.
+
+        `page_ids` empty is reported as `page_scope_resolved=False` rather than
+        as an ordinary zero, so a manuscript whose pages could not be resolved
+        never renders as "no identifications" (T-136-14-11).
+        """
+        page_id_list = [p for p in (page_ids or []) if p]
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        if not page_id_list:
+            return make_envelope(STATUS_OK, [], 0, meta={"page_scope_resolved": False})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        page = self._clamp_page(page)
+        page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+        # A page list is bounded by the accessor that produced it; clamp again
+        # here so an unbounded caller cannot build a giant IN (...) list.
+        page_id_list = page_id_list[:_MAX_MANUSCRIPT_PAGE_IDS]
+        try:
+            cur = conn.execute(
+                _build_manuscript_works_sql(len(page_id_list)),
+                [*page_id_list, page_size, offset],
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            logger.error("DiscoveryService.get_manuscript_works error: %s", e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+
+        total = int(rows[0]["_total_rows"]) if rows else 0
+        items = []
+        for row in rows:
+            title = row.get("display_neutral_title") or row.get("neutral_title")
+            items.append(surface_safe_work_summary({
+                **row,
+                "neutral_title": title or None,
+                "title_missing": not bool(title),
+                "gated": not bool(row.get("any_main_pool")),
+                "main_pool": bool(row.get("any_main_pool")),
+            }))
+        return make_envelope(STATUS_OK, items, total,
+                             meta={"page_scope_resolved": True, "lang": lang})
+
+    # ------------------------------------------------------------------
+    # 136-14 Task 2: the related-page count (D-11a) and its rows (D-11).
+    # ------------------------------------------------------------------
+
+    def get_related_page_count_enveloped(
+        self, page_id: str, include_review: bool = False,
+    ) -> Dict[str, Any]:
+        """The header figure: DISTINCT opposite pages for this anchor,
+        deduplicated (D-11a).
+
+        NOT evidence rows and NOT directed pairs -- the three populations are
+        genuinely different (40,968 shipped shared-text evidence rows / 37,397
+        directed page pairs / 30,539 unordered), and an earlier published
+        figure conflated them. Returns the count with NO rows: the panel shows
+        the header and count by default and fetches the rows only behind the
+        toggle (D-11).
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        routing_clause = "" if include_review else "AND routing_status = 'shipped'"
+        try:
+            cur = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT CASE WHEN a_page_id = ? THEN other_page_id
+                                           ELSE a_page_id END) AS n
+                FROM discovery_evidence
+                WHERE evidence_kind = 'shared_text'
+                  AND (a_page_id = ? OR other_page_id = ?)
+                  {routing_clause}
+                """,
+                (page_id, page_id, page_id),
+            )
+            row = cur.fetchone()
+            total = int(row["n"] or 0) if row else 0
+        except Exception as e:
+            logger.error(
+                "DiscoveryService.get_related_page_count error for %s: %s", page_id, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        return make_envelope(STATUS_OK, [], total, meta={"unit": "distinct_opposite_pages"})
+
+    def get_related_pages_enveloped(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> Dict[str, Any]:
+        """The rows behind the toggle: ONE row per DISTINCT opposite page,
+        carrying how many evidence rows collapsed into it. The total agrees
+        with `get_related_page_count_enveloped` by construction (same
+        grouping)."""
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        page = self._clamp_page(page)
+        page_size = self._clamp_page_size(page_size)
+        offset = (page - 1) * page_size
+        routing_clause = "" if include_review else "AND routing_status = 'shipped'"
+        try:
+            cur = conn.execute(
+                f"""
+                SELECT related_page_id,
+                       MIN(evidence_id) AS evidence_id,
+                       MIN(evidence_source) AS evidence_source,
+                       MIN(confidence_band) AS confidence_band,
+                       MIN(COALESCE(band_rank, {_UNRANKED_BAND})) AS band_rank,
+                       COUNT(*) AS evidence_row_count,
+                       COUNT(*) OVER () AS _total_rows
+                FROM (
+                    SELECT CASE WHEN a_page_id = ? THEN other_page_id ELSE a_page_id END
+                               AS related_page_id,
+                           evidence_id, evidence_source, confidence_band, band_rank
+                    FROM discovery_evidence
+                    WHERE evidence_kind = 'shared_text'
+                      AND (a_page_id = ? OR other_page_id = ?)
+                      {routing_clause}
+                )
+                WHERE related_page_id IS NOT NULL
+                GROUP BY related_page_id
+                ORDER BY band_rank ASC, related_page_id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (page_id, page_id, page_id, page_size, offset),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            logger.error(
+                "DiscoveryService.get_related_pages error for %s: %s", page_id, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        total = int(rows[0]["_total_rows"]) if rows else 0
+        items = [surface_safe_related_page(row) for row in rows]
+        return make_envelope(STATUS_OK, items, total,
+                             meta={"unit": "distinct_opposite_pages"})
+
     def get_pages_related_to_page(
         self, page_id: str, page: int = 1, page_size: Optional[int] = None,
         include_review: bool = False,
@@ -1303,6 +1523,60 @@ class DiscoveryService:
             (page_id, page, page_size, include_review, lang),
             timeout=self._browse_timeout(),
             cache_name="claims_for_page_enveloped",
+        )
+
+    async def get_manuscript_works_enveloped_async(
+        self, page_ids: Iterable[str], page: int = 1, page_size: Optional[int] = None,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        # The page list is part of the cache key, so it must be hashable.
+        return await self._enveloped_off_loop(
+            self.get_manuscript_works_enveloped,
+            (tuple(page_ids or ()), page, page_size, lang),
+            timeout=self._browse_timeout(),
+            cache_name="manuscript_works_enveloped",
+        )
+
+    async def get_related_page_count_enveloped_async(
+        self, page_id: str, include_review: bool = False,
+    ) -> Dict[str, Any]:
+        return await self._enveloped_off_loop(
+            self.get_related_page_count_enveloped,
+            (page_id, include_review),
+            timeout=self._browse_timeout(),
+            cache_name="related_page_count_enveloped",
+        )
+
+    async def get_related_pages_enveloped_async(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> Dict[str, Any]:
+        return await self._enveloped_off_loop(
+            self.get_related_pages_enveloped,
+            (page_id, page, page_size, include_review),
+            timeout=self._browse_timeout(),
+            cache_name="related_pages_enveloped",
+        )
+
+    async def run_off_loop(
+        self, sync_fn: Callable, *args, timeout: Optional[float] = None,
+        heavy: bool = False,
+    ):
+        """PUBLIC alias of the off-loop dispatch discipline, for the web
+        composition module.
+
+        `web/discovery.py` has one blocking read that is NOT a sidecar query --
+        the browse-map page-ID accessor the manuscript scope is served by
+        (D-09) -- and it must run under the SAME rules as every sidecar read:
+        `run_in_executor` + `asyncio.wait` (never `wait_for`, because executor
+        threads are not cancellable), under the browse budget. Exposed here
+        rather than duplicated there, so there is one implementation of the
+        discipline and not two.
+        """
+        return await self._run_off_loop(
+            sync_fn, *args,
+            timeout=self._browse_timeout() if timeout is None else timeout,
+            heavy=heavy,
         )
 
     async def get_evidence_async(

@@ -125,6 +125,25 @@ class BrowsePage:
     volumes: List[Dict] = field(default_factory=list)  # [{ie_id, suffix, page_count}, ...]
 
 @dataclass
+class ManuscriptPageIds:
+    """A manuscript's discovery `page_id` list (Phase 136, plan 136-14).
+
+    `resolved` is the load-bearing field. An EMPTY `page_ids` means one of two
+    completely different things -- "this manuscript has no resolvable pages"
+    (the browse map is absent, the sys_id is unknown, no header parsed) or
+    "there is nothing here" -- and the discovery panel must be able to tell
+    them apart, because querying an empty page set and rendering a zero would
+    present a resolution failure as a fact about the manuscript
+    (T-136-14-11).
+    """
+    sys_id: str
+    page_ids: List[str] = field(default_factory=list)
+    total: int = 0          # BEFORE the bound below is applied
+    truncated: bool = False
+    resolved: bool = False
+
+
+@dataclass
 class DocumentPage:
     """Single page data for document viewer."""
     uid: str
@@ -180,6 +199,47 @@ def build_iiif_image_url(base_url: str, size: str = 'full') -> str:
     elif size == 'full': size_param = '2000,'
     else: size_param = size
     return f"{base_url}/full/{size_param}/0/default.jpg"
+
+
+# ============================================================================
+# Discovery page-ID resolution (Phase 136, plan 136-14, D-09)
+# ============================================================================
+
+#: A multi-volume manuscript can carry many pages (the largest in the corpus
+#: carries 427 claims, and 429 manuscripts carry over 50), and the resulting
+#: list becomes an `IN (...)` bind list -- so it is BOUNDED, and the accessor
+#: says when it truncated rather than silently shortening the manuscript.
+DISCOVERY_PAGE_ID_LIMIT = 500
+
+#: A discovery `page_id` IS the corpus page header:
+#: `{sys_id}_{IE...}_{P00000N}_{FL...}` -- verified against both the asset and
+#: `Transcriptions.txt`, whose `==> ... <==` markers carry exactly this token.
+#: All four components are REQUIRED: a LOCAL ("My Library") header carries an
+#: `F####` component instead of an `IE` one and is not a Genizah page at all,
+#: so it must never resolve here.
+_DISCOVERY_PAGE_ID_RE = re.compile(
+    r'((?:99|97)\d{8,})_(IE\d+)_P(\d+)_(FL\d+)'
+)
+
+
+def discovery_page_id_from_header(full_header: str) -> Optional[str]:
+    """The discovery `page_id` for a browse-map page header, or None.
+
+    Normalizes the page component to the asset's own six-digit zero padding,
+    so a header written `P2` resolves to the same id the sidecar stores as
+    `P000002`. Pure and side-effect free -- unit-testable without app state.
+    """
+    if not full_header:
+        return None
+    match = _DISCOVERY_PAGE_ID_RE.search(str(full_header))
+    if not match:
+        return None
+    sys_id, ie_id, p_num, fl_id = match.groups()
+    try:
+        page_component = f"P{int(p_num):06d}"
+    except (TypeError, ValueError):  # pragma: no cover -- \d+ guarantees an int
+        return None
+    return f"{sys_id}_{ie_id}_{page_component}_{fl_id}"
 
 
 def is_oxford_manuscript(shelfmark: str = '', library_code: str = '') -> bool:
@@ -363,6 +423,65 @@ class GenizahService:
         except Exception as e:
             logger.error("Browse page error: %s", e)
             return None
+
+    def get_manuscript_page_ids(
+        self, sys_id: str, volume_ie: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> ManuscriptPageIds:
+        """A manuscript's discovery `page_id` list (Phase 136, plan 136-14).
+
+        NEW plumbing, and the reason it is needed: the discovery panel's
+        manuscript scope is served by `page_id IN (...)` -- `discovery_evidence`
+        has no `sys_id` index, while `ix_discovery_claim_page_id` exists -- and
+        `BrowsePage` does not carry the manuscript's page ids at all (it holds
+        the CURRENT uid, page number and totals only). The browse map does, so
+        this derives them from it.
+
+        BLOCKING (it may load the browse map). Call it through
+        `web.discovery.get_manuscript_page_ids`, which dispatches it off the
+        event loop -- the web app runs a SINGLE uvicorn worker, so a
+        synchronous load on the loop stalls every concurrent request.
+
+        Volume-aware: `volume_ie` restricts to one IE, exactly as browse
+        navigation does for a multi-volume manuscript.
+
+        NEVER raises. An unresolvable manuscript comes back as
+        `resolved=False`, which is a DIFFERENT fact from an empty result, and
+        the panel must render it differently (T-136-14-11).
+        """
+        bound = DISCOVERY_PAGE_ID_LIMIT if limit is None else max(1, int(limit))
+        empty = ManuscriptPageIds(sys_id=sys_id)
+        if not sys_id:
+            return empty
+        try:
+            searcher = getattr(state, 'searcher', None)
+            if searcher is None or not hasattr(searcher, '_load_browse_map'):
+                return empty
+            browse_map = searcher._load_browse_map() or {}
+            pages = browse_map.get(sys_id) or []
+            if volume_ie:
+                pages = [p for p in pages if p.get('ie_id') == volume_ie]
+
+            page_ids: List[str] = []
+            seen = set()
+            for entry in pages:
+                page_id = discovery_page_id_from_header(entry.get('full_header', ''))
+                if page_id and page_id not in seen:
+                    seen.add(page_id)
+                    page_ids.append(page_id)
+        except Exception as e:
+            logger.error("get_manuscript_page_ids error for %s: %s", sys_id, e)
+            return empty
+
+        if not page_ids:
+            return empty
+        return ManuscriptPageIds(
+            sys_id=sys_id,
+            page_ids=page_ids[:bound],
+            total=len(page_ids),
+            truncated=len(page_ids) > bound,
+            resolved=True,
+        )
 
     def get_metadata_only_browse_page(
         self, sys_id: str, p_num: Optional[int] = None

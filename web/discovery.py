@@ -25,7 +25,9 @@ import scripts.discovery_ids as _ids
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
 from shared.discovery_service import DiscoveryService
 from shared.discovery_surface_projection import (
+    STATUS_OK,
     busy_envelope,
+    make_envelope,
     timeout_envelope,
     unavailable_envelope,
 )
@@ -105,6 +107,92 @@ async def get_claims_for_page_enveloped(
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
         logger.info("discovery.get_claims_for_page_enveloped: timeout for page_id=%s", page_id)
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+async def get_manuscript_page_ids(
+    sys_id: str, *, volume_ie: Optional[str] = None, limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """The manuscript's discovery `page_id` list, resolved OFF the event loop.
+
+    The one blocking read here that is not a sidecar query: it loads the browse
+    map, which `BrowsePage` does not carry the page ids of. It runs under the
+    same off-loop discipline and the same browse budget as every sidecar read.
+
+    `meta['resolved']` is what the panel branches on. An empty item list with
+    `resolved=False` means the manuscript's pages could not be resolved -- NOT
+    that the manuscript has no identifications. Querying the empty page set and
+    rendering a zero would present a resolution failure as a fact about the
+    manuscript (T-136-14-11).
+    """
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    from web.services import get_service  # lazy: avoids a heavy import at module load
+
+    try:
+        result = await _service.run_off_loop(
+            get_service().get_manuscript_page_ids, sys_id, volume_ie, limit)
+    except DiscoveryOverload:
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:
+        logger.info("discovery.get_manuscript_page_ids: timeout for sys_id=%s", sys_id)
+        return timeout_envelope(meta={"reason": "query_timeout"})
+    return make_envelope(
+        STATUS_OK, list(result.page_ids), result.total,
+        meta={
+            "sys_id": sys_id,
+            "resolved": result.resolved,
+            "truncated": result.truncated,
+            "volume_ie": volume_ie,
+        },
+    )
+
+
+async def get_manuscript_works_enveloped(
+    page_ids: Iterable[str], *, page: int = 1, page_size: Optional[int] = None,
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """D-13h: "Elsewhere in this manuscript", as NAMED works."""
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_manuscript_works_enveloped_async(
+            page_ids, page=page, page_size=page_size, lang=lang)
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+async def get_related_page_count_enveloped(
+    page_id: str, *, include_review: bool = False,
+) -> Dict[str, Any]:
+    """D-11/D-11a: the header count -- DISTINCT opposite pages, deduplicated,
+    with no rows (the rows come only behind the toggle)."""
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_related_page_count_enveloped_async(
+            page_id, include_review=include_review)
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+async def get_related_pages_enveloped(
+    page_id: str, *, page: int = 1, page_size: Optional[int] = None,
+    include_review: bool = False,
+) -> Dict[str, Any]:
+    """D-11: the rows behind the toggle, one per DISTINCT opposite page."""
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_related_pages_enveloped_async(
+            page_id, page=page, page_size=page_size, include_review=include_review)
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
         return timeout_envelope(meta={"reason": "query_timeout"})
 
 
