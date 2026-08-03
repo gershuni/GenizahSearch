@@ -175,6 +175,17 @@ DB-side cost only and well inside the ≤ 1.5 s request budget.
 These later-surface caps and defaults exist now so those plans have a stable
 contract to implement against, not because they are measured yet.
 
+### 4.4 Corpus-wide findings page (§5 caps) — PENDING
+
+Not yet measurable: the materialized findings tables are absent from this asset (discovery_identification, manuscript_display) -- this is a PRE-REBUILD asset; the findings shapes are measurable only after the Phase-136 rebuild materializes them.
+
+`scripts/bench_discovery.py` carries the `bench_findings_page()` probe
+(six named shapes: default ordering, novelty filter, relation filter,
+domain filter, the visible TOTAL count, and deep paging), which records
+these actuals automatically on the first run against a rebuilt asset.
+The prior, PRE-materialization measurement this probe must beat is
+**3.41-3.55 s across four runs (D-10a), against the 1.5 s cap, when the same ordering was computed over display CLAIMS with no materialized band_rank / coverage_ppm and no identification grain**, and **16 s for the deduped identification COUNT alone (main-pool-rule.md finding 13, "PERF-01 confirmed twice")**.
+
 ## 5. Amendment 2026-08-02 (Phase 136) — Corpus-wide findings page (Computed Identifications)
 
 The Phase-136 corpus-wide findings page ("Computed Identifications" / "זיהויים מחושבים" nav entry)

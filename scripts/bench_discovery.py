@@ -39,6 +39,7 @@ import argparse
 import asyncio
 import math
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -195,6 +196,337 @@ def pick_live_keys(db_path: str, sample: int) -> Dict[str, List[Any]]:
 
 
 # ---------------------------------------------------------------------------
+# 136-11 Task 3: the corpus-wide findings page ("Computed Identifications").
+#
+# Measured DIRECTLY against the built asset rather than through
+# ``DiscoveryService``: the findings read path does not exist on the service yet
+# (it is wired later in Phase 136), so what is benchmarked here is the SQL the
+# surface will issue against the materialized ``discovery_identification`` grain.
+#
+# This probe exists because the pre-materialization shape was MEASURED to fail:
+# see ``_PRIOR_ORDERING_MEASUREMENT`` / ``_PRIOR_COUNT_MEASUREMENT`` below.
+# ---------------------------------------------------------------------------
+
+# docs/specs/discovery-budgets.md §5 (Amendment 2026-08-02). READ, never
+# rewritten by this script: a shape that exceeds its cap is reported and the run
+# fails -- relaxing a cap requires versioning the budget artifact (T-136-11-06).
+FINDINGS_ORDERING_CAP_MS = 1500.0
+FINDINGS_COUNT_CAP_MS = 500.0
+
+# The known FAILING baseline this materialization exists to beat. Quoted
+# verbatim in the regression assertion message -- a performance assertion that
+# says what the number used to be is worth several that do not.
+_PRIOR_ORDERING_MEASUREMENT = (
+    "3.41-3.55 s across four runs (D-10a), against the 1.5 s cap, when the same "
+    "ordering was computed over display CLAIMS with no materialized band_rank / "
+    "coverage_ppm and no identification grain"
+)
+_PRIOR_COUNT_MEASUREMENT = (
+    "16 s for the deduped identification COUNT alone (main-pool-rule.md finding "
+    "13, \"PERF-01 confirmed twice\")"
+)
+
+_FINDINGS_REQUIRED_TABLES = ("discovery_identification", "manuscript_display")
+
+# The default findings ordering: main pool first, tier-first within it, then
+# coverage. Mirrors the composite index
+# discovery_identification(main_pool, best_band_rank, max_coverage_ppm).
+_FINDINGS_ORDER_BY = (
+    "ORDER BY di.main_pool DESC, di.best_band_rank ASC, "
+    "di.max_coverage_ppm IS NULL, di.max_coverage_ppm DESC, di.identification_id ASC"
+)
+
+_FINDINGS_SELECT = """
+SELECT di.identification_id, di.sys_id, di.display_work_id, di.main_pool,
+       di.best_band_rank, di.max_coverage_ppm, di.relation_kind,
+       md.library_code, md.shelfmark_display
+FROM discovery_identification di
+LEFT JOIN manuscript_display md ON md.sys_id = di.sys_id
+"""
+
+
+def findings_probe_readiness(db_path: str) -> Dict[str, Any]:
+    """Whether the asset carries the tables the findings probe needs.
+
+    Against a PRE-rebuild asset the materialized tables simply do not exist yet.
+    That is an expected state, not a crash: this returns a structured skip with
+    the missing table names so the caller can say exactly which shapes it did
+    not measure and why."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        present = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    missing = [t for t in _FINDINGS_REQUIRED_TABLES if t not in present]
+    if missing:
+        return {
+            "ready": False,
+            "missing_tables": missing,
+            "reason": (
+                "the materialized findings tables are absent from this asset ("
+                + ", ".join(missing)
+                + ") -- this is a PRE-REBUILD asset; the findings shapes are "
+                "measurable only after the Phase-136 rebuild materializes them"
+            ),
+        }
+    return {"ready": True, "missing_tables": [], "reason": ""}
+
+
+def pick_findings_filters(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """Live filter VALUES drawn from the asset itself, so the filtered shapes
+    below can never silently benchmark an empty query (the same nonzero-result
+    discipline ``pick_live_keys`` already applies to the browse/work reads).
+
+    Novelty prefers ``fills_gap`` -- the value the public "Candidates for new
+    finds" toggle actually selects -- and otherwise falls back to the most
+    frequent status present, so the shape is still measured on a pre-novelty
+    asset instead of being skipped."""
+    out: Dict[str, Any] = {"novelty_status": None, "relation_kind": None, "domain": None}
+
+    novelty_counts = conn.execute(
+        "SELECT novelty_status, COUNT(*) n FROM discovery_identification "
+        "GROUP BY novelty_status ORDER BY n DESC"
+    ).fetchall()
+    if novelty_counts:
+        preferred = [r for r in novelty_counts if r[0] == "fills_gap"]
+        out["novelty_status"] = (preferred or novelty_counts)[0][0]
+
+    relation_counts = conn.execute(
+        "SELECT relation_kind, COUNT(*) n FROM discovery_identification "
+        "GROUP BY relation_kind ORDER BY n DESC LIMIT 1"
+    ).fetchall()
+    if relation_counts:
+        out["relation_kind"] = relation_counts[0][0]
+
+    # D-19/A-6: the domain facet cascades on the IDENTIFIED WORK's domain, never
+    # the manuscript's catalogue domain. `works.genre` is NULL corpus-wide until
+    # the 136-09 curation pass lands, so this shape skips cleanly until then.
+    domain_counts = conn.execute(
+        "SELECT w.genre, COUNT(*) n FROM discovery_identification di "
+        "JOIN works w ON w.work_id = di.display_work_id "
+        "WHERE w.genre IS NOT NULL AND w.genre != '' "
+        "GROUP BY w.genre ORDER BY n DESC LIMIT 1"
+    ).fetchall()
+    if domain_counts:
+        out["domain"] = domain_counts[0][0]
+    return out
+
+
+def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int) -> Dict[str, Any]:
+    latencies_ms: List[float] = []
+    rows = 0
+    for _ in range(max(1, repeats)):
+        t0 = time.perf_counter()
+        fetched = conn.execute(sql, params).fetchall()
+        latencies_ms.append((time.perf_counter() - t0) * 1000.0)
+        rows = len(fetched)
+    return {
+        "rows": rows,
+        "p50_ms": _pct(latencies_ms, 50),
+        "p95_ms": _pct(latencies_ms, 95),
+        "max_ms": max(latencies_ms),
+    }
+
+
+def _query_plan(conn: sqlite3.Connection, sql: str, params) -> str:
+    try:
+        plan = conn.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
+    except sqlite3.Error as exc:  # pragma: no cover -- diagnostic path only
+        return f"(query plan unavailable: {exc})"
+    return "\n".join("  " + " ".join(str(c) for c in row) for row in plan)
+
+
+def bench_findings_page(
+    db_path: str, *, page_size: int = 50, repeats: int = 5, deep_page: int = 20
+) -> Dict[str, Any]:
+    """Measure the representative corpus-wide findings shapes.
+
+    Six named shapes: the default ordering at the default page size; the same
+    with a novelty filter; with a relation filter; with a domain filter; the
+    visible TOTAL count; and page 20 of the pager -- deep paging is where an
+    ordering index earns its keep, and it is the shape a spot check at page 1
+    will never expose.
+
+    Every shape asserts a NONZERO row count before its timing is recorded, and a
+    shape whose live filter value or page depth does not exist in this asset is
+    SKIPPED with a stated reason rather than measured as an empty no-op.
+
+    Returns a structured result; the caller decides the exit code. Caps are READ
+    from docs/specs/discovery-budgets.md §5 and never rewritten here."""
+    readiness = findings_probe_readiness(db_path)
+    if not readiness["ready"]:
+        return {
+            "skipped": True,
+            "reason": readiness["reason"],
+            "missing_tables": readiness["missing_tables"],
+            "shapes": [],
+            "skipped_shapes": [
+                {"label": label, "reason": readiness["reason"]}
+                for label in (
+                    "findings_default_ordering", "findings_novelty_filter",
+                    "findings_relation_filter", "findings_domain_filter",
+                    "findings_visible_total", "findings_deep_page",
+                )
+            ],
+            "failures": [],
+        }
+
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        (total_rows,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification"
+        ).fetchone()
+        filters = pick_findings_filters(conn)
+
+        specs: List[Dict[str, Any]] = [
+            {
+                "label": "findings_default_ordering",
+                "cap_ms": FINDINGS_ORDERING_CAP_MS,
+                "kind": "ordering",
+                "sql": f"{_FINDINGS_SELECT} {_FINDINGS_ORDER_BY} LIMIT ? OFFSET 0",
+                "params": (page_size,),
+                "skip": None if total_rows else "the asset carries no identifications",
+            },
+            {
+                "label": "findings_novelty_filter",
+                "cap_ms": FINDINGS_ORDERING_CAP_MS,
+                "kind": "ordering",
+                "sql": f"{_FINDINGS_SELECT} WHERE di.novelty_status = ? "
+                       f"{_FINDINGS_ORDER_BY} LIMIT ? OFFSET 0",
+                "params": (filters["novelty_status"], page_size),
+                "skip": None if filters["novelty_status"]
+                        else "no novelty_status value present in this asset",
+            },
+            {
+                "label": "findings_relation_filter",
+                "cap_ms": FINDINGS_ORDERING_CAP_MS,
+                "kind": "ordering",
+                "sql": f"{_FINDINGS_SELECT} WHERE di.relation_kind = ? "
+                       f"{_FINDINGS_ORDER_BY} LIMIT ? OFFSET 0",
+                "params": (filters["relation_kind"], page_size),
+                "skip": None if filters["relation_kind"]
+                        else "no relation_kind value present in this asset",
+            },
+            {
+                "label": "findings_domain_filter",
+                "cap_ms": FINDINGS_ORDERING_CAP_MS,
+                "kind": "ordering",
+                "sql": f"{_FINDINGS_SELECT} JOIN works w ON w.work_id = di.display_work_id "
+                       f"WHERE w.genre = ? {_FINDINGS_ORDER_BY} LIMIT ? OFFSET 0",
+                "params": (filters["domain"], page_size),
+                "skip": None if filters["domain"] else (
+                    "works.genre is NULL corpus-wide until the domain-curation "
+                    "pass lands -- the findings domain facet cascades on the "
+                    "IDENTIFIED WORK's domain, so there is nothing to filter on yet"
+                ),
+            },
+            {
+                "label": "findings_visible_total",
+                "cap_ms": FINDINGS_COUNT_CAP_MS,
+                "kind": "count",
+                "sql": "SELECT COUNT(*) FROM discovery_identification di",
+                "params": (),
+                "skip": None if total_rows else "the asset carries no identifications",
+            },
+            {
+                "label": f"findings_deep_page_{deep_page}",
+                "cap_ms": FINDINGS_ORDERING_CAP_MS,
+                "kind": "ordering",
+                "sql": f"{_FINDINGS_SELECT} {_FINDINGS_ORDER_BY} LIMIT ? OFFSET ?",
+                "params": (page_size, (deep_page - 1) * page_size),
+                "skip": None if total_rows > (deep_page - 1) * page_size else (
+                    f"the asset carries only {total_rows} identifications -- fewer "
+                    f"than the page-{deep_page} offset, so deep paging cannot be "
+                    "measured on a nonzero result set"
+                ),
+            },
+        ]
+
+        shapes: List[Dict[str, Any]] = []
+        skipped_shapes: List[Dict[str, Any]] = []
+        failures: List[Dict[str, Any]] = []
+        for spec in specs:
+            if spec["skip"]:
+                skipped_shapes.append({"label": spec["label"], "reason": spec["skip"]})
+                continue
+            measured = _time_sql(conn, spec["sql"], spec["params"], repeats)
+            if measured["rows"] == 0:
+                raise AssertionError(
+                    f"{spec['label']}: the measured query returned ZERO rows "
+                    "(the benchmark must never silently measure an empty no-op -- "
+                    "F14). Fix the live filter selection rather than recording "
+                    "the timing."
+                )
+            row = {
+                "label": spec["label"],
+                "kind": spec["kind"],
+                "cap_ms": spec["cap_ms"],
+                **measured,
+            }
+            if measured["p95_ms"] > spec["cap_ms"]:
+                row["query_plan"] = _query_plan(conn, spec["sql"], spec["params"])
+                failures.append(row)
+            shapes.append(row)
+
+        return {
+            "skipped": False,
+            "reason": "",
+            "missing_tables": [],
+            "identifications": total_rows,
+            "filters": filters,
+            "page_size": page_size,
+            "deep_page": deep_page,
+            "shapes": shapes,
+            "skipped_shapes": skipped_shapes,
+            "failures": failures,
+        }
+    finally:
+        conn.close()
+
+
+def report_findings_page(result: Dict[str, Any]) -> None:
+    """Print the findings probe result, including a NAMED reason for every shape
+    that was not measured."""
+    print("-" * 72)
+    print("Findings page (Computed Identifications) -- corpus-wide shapes")
+    print("-" * 72)
+    if result["skipped"]:
+        print(f"SKIPPED: {result['reason']}")
+        for s in result["skipped_shapes"]:
+            print(f"  - {s['label']}: not measured")
+        return
+
+    print(f"identifications  : {result['identifications']}")
+    print(f"filters in use   : {result['filters']}")
+    print(f"{'shape':<34}{'rows':>6}{'p50 ms':>10}{'p95 ms':>10}{'max ms':>10}{'cap ms':>9}")
+    for r in result["shapes"]:
+        flag = "  FAIL" if r in result["failures"] else ""
+        print(
+            f"{r['label']:<34}{r['rows']:>6}{r['p50_ms']:>10.2f}{r['p95_ms']:>10.2f}"
+            f"{r['max_ms']:>10.2f}{r['cap_ms']:>9.0f}{flag}"
+        )
+    for s in result["skipped_shapes"]:
+        print(f"  - {s['label']}: SKIPPED -- {s['reason']}")
+
+    for r in result["failures"]:
+        print()
+        print(
+            f"FAIL {r['label']}: p95 {r['p95_ms']:.2f} ms exceeds its "
+            f"{r['cap_ms']:.0f} ms cap.\n"
+            f"  This shape previously measured {_PRIOR_ORDERING_MEASUREMENT}, and "
+            f"{_PRIOR_COUNT_MEASUREMENT}.\n"
+            "  The cap is NOT relaxed to make this pass -- a cap change requires "
+            "versioning docs/specs/discovery-budgets.md. SQLite query plan:",
+            file=sys.stderr,
+        )
+        print(r.get("query_plan", "(unavailable)"), file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
 # Async measurement over the DiscoveryService chokepoint.
 # ---------------------------------------------------------------------------
 
@@ -282,7 +614,20 @@ def main() -> int:
     )
     parser.add_argument(
         "--write-budgets", action="store_true",
-        help="record the measured dev-box actuals into docs/specs/discovery-budgets.md",
+        help="record the measured dev-box actuals into docs/specs/discovery-budgets.md "
+             "(including the findings-page actuals table; caps are never rewritten)",
+    )
+    parser.add_argument(
+        "--findings-repeats", type=int, default=5,
+        help="timed repeats per corpus-wide findings shape (default 5)",
+    )
+    parser.add_argument(
+        "--findings-page-size", type=int, default=50,
+        help="findings rows/page (default 50, matching DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT)",
+    )
+    parser.add_argument(
+        "--findings-deep-page", type=int, default=20,
+        help="which pager page to measure for deep paging (default 20)",
     )
     args = parser.parse_args()
 
@@ -377,6 +722,18 @@ def main() -> int:
     print(f"browse-enrichment p95 : {browse_p95:.2f} ms   (cap <= 150 ms)")
     print(f"work-page query p95   : {work_p95:.2f} ms   (informational; work-page request cap <= 1.5 s)")
 
+    # --- Corpus-wide findings page (136-11 Task 3). Measured directly against
+    #     the asset; skips CLEANLY (never a bare exception) on a pre-rebuild
+    #     asset that has no materialized identification grain.
+    findings = bench_findings_page(
+        db_path,
+        page_size=args.findings_page_size,
+        repeats=args.findings_repeats,
+        deep_page=args.findings_deep_page,
+    )
+    print()
+    report_findings_page(findings)
+
     if args.write_budgets:
         _write_budgets(
             latency_results=latency_results,
@@ -385,10 +742,67 @@ def main() -> int:
             added_rss_mb=(_mb(added_rss_bytes) if added_rss_bytes >= 0 else None),
             sidecar_size_mb=_mb(sidecar_size),
             sidecar_basename=os.path.basename(db_path),
+            findings=findings,
         )
         print("\nWrote MEASURED ACTUALS (dev-box) into docs/specs/discovery-budgets.md")
 
+    if findings["failures"]:
+        # Report and STOP -- never relax a cap to make a slow shape pass.
+        return 1
     return 0
+
+
+def _findings_actuals_block(findings: Optional[Dict[str, Any]]) -> str:
+    """The §4.4 findings-page actuals sub-block.
+
+    Records the ORDERING numbers and the visible-COUNT number in SEPARATE rows,
+    because §5 gives them separate caps (p95 <= 1.5 s vs p95 <= 0.5 s). Writes
+    an explicit PENDING block -- never an invented number -- when the probe
+    could not run."""
+    if not findings or findings.get("skipped"):
+        reason = (findings or {}).get("reason") or "the probe did not run"
+        return (
+            "### 4.4 Corpus-wide findings page (§5 caps) — PENDING\n\n"
+            f"Not yet measurable: {reason}.\n\n"
+            "`scripts/bench_discovery.py` carries the `bench_findings_page()` probe\n"
+            "(six named shapes: default ordering, novelty filter, relation filter,\n"
+            "domain filter, the visible TOTAL count, and deep paging), which records\n"
+            "these actuals automatically on the first run against a rebuilt asset.\n"
+            "The prior, PRE-materialization measurement this probe must beat is\n"
+            f"**{_PRIOR_ORDERING_MEASUREMENT}**, and **{_PRIOR_COUNT_MEASUREMENT}**.\n\n"
+        )
+
+    lines = [
+        "### 4.4 Corpus-wide findings page (§5 caps) — measured\n",
+        "",
+        f"Measured by `scripts/bench_discovery.py::bench_findings_page()` over "
+        f"{findings['identifications']} materialized identifications "
+        f"(`discovery_identification`), page size {findings['page_size']}, "
+        f"deep page {findings['deep_page']}. Every shape asserted a NONZERO row "
+        "count before its timing was recorded.",
+        "",
+        "The ordering and the visible-count numbers are recorded SEPARATELY "
+        "because §5 gives them separate caps. The prior, PRE-materialization "
+        f"measurement was {_PRIOR_ORDERING_MEASUREMENT}, and "
+        f"{_PRIOR_COUNT_MEASUREMENT}.",
+        "",
+        "| Shape | Cap | p50 | p95 | max | Rows |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in findings["shapes"]:
+        verdict = " ✓" if r["p95_ms"] <= r["cap_ms"] else " ✗"
+        lines.append(
+            f"| `{r['label']}` | p95 ≤ {r['cap_ms']:.0f} ms | {r['p50_ms']:.2f} ms | "
+            f"**{r['p95_ms']:.2f} ms**{verdict} | {r['max_ms']:.2f} ms | {r['rows']} |"
+        )
+    if findings["skipped_shapes"]:
+        lines.append("")
+        lines.append("Shapes NOT measured, and why:")
+        lines.append("")
+        for s in findings["skipped_shapes"]:
+            lines.append(f"- `{s['label']}` — {s['reason']}")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _write_budgets(
@@ -399,9 +813,24 @@ def _write_budgets(
     added_rss_mb: Optional[float],
     sidecar_size_mb: float,
     sidecar_basename: str,
+    findings: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Replace the PENDING §4 block in docs/specs/discovery-budgets.md with the
-    measured dev-box actuals (prod-box RSS stays a PENDING human step)."""
+    """Replace the §4 Measured Actuals block in docs/specs/discovery-budgets.md
+    with the measured dev-box actuals (prod-box RSS stays a PENDING human step).
+
+    Rewrites the §4 header + §4.1 (this script's own dev-box measurement) and
+    the §4.4 findings block, and NOTHING ELSE. Two bugs are fixed here
+    (T-136-11-06 -- a benchmark must never edit a cap, nor destroy a
+    measurement):
+
+      * the replacement used to run to the next `\\n---\\n`, which since the
+        2026-08-02 amendment sits AFTER §5 -- so a `--write-budgets` run would
+        have silently DELETED the findings-page CAP section this probe measures
+        against;
+      * the replacement block also re-wrote §4.2 as "PENDING", which would have
+        destroyed the human-recorded prod-box actuals of 2026-07-28.
+
+    §4.2 and §4.3 are now left byte-identical."""
     path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "docs", "specs", "discovery-budgets.md",
@@ -413,10 +842,15 @@ def _write_budgets(
     idx = text.find(marker)
     if idx == -1:
         raise RuntimeError("could not find '## 4. Measured Actuals' section to replace")
-    tail_marker = "\n---\n"
-    tail_idx = text.find(tail_marker, idx)
+    # The §4 region this script owns ends where the FIRST subsection it does not
+    # own begins (§4.2, the prod-box actuals). Fall back to the next top-level
+    # heading if the document ever loses §4.2.
+    tail_idx = text.find("### 4.2", idx)
     if tail_idx == -1:
-        tail_idx = len(text)
+        next_section = re.search(r"^## (?!4\. )", text[idx + len(marker):], re.MULTILINE)
+        tail_idx = (
+            idx + len(marker) + next_section.start() if next_section else len(text)
+        )
 
     claims = latency_results[0]
     related = latency_results[1]
@@ -455,28 +889,35 @@ cache-miss DB query (worst case; the production cache only lowers this).
 `get_pages_related_to_page` = {related['queries']} queries / {related['rows']} rows;
 `get_work_witnesses` = {work['queries']} queries / {work['rows']} unit rows.
 
-### 4.2 Prod-box + later-surface caps — PENDING
-
-- **Additional RSS on the prod box (vs the ≤ 250 MB cap)** — PENDING: the
-  authoritative measurement is the 134-08 Task 3 human/live-server step (owner
-  runs `bench_discovery.py` / samples the web process RSS around restart on the
-  web box); recorded here as **MEASURED ACTUALS (prod-box)** after that run.
-- **Work/Leads request-time p95 / response size (§1.2)** — PENDING until Phase
-  136 ships the `/work/{{id}}` + `/leads` surfaces (the query-latency figures
-  above are the DB-side cost only; the full request-time budget is measured
-  when the surface exists).
-- **Atlas drill-down p95 / node-edge counts / response size (§1.3)** — PENDING
-  until Phase 139 ships the bounded explorer (ATLAS-02).
-- Any §2 default that measurement shows is mis-set would require a version bump
-  per the "tunable only by versioning" rule above.
-
-These later-surface caps and defaults exist now so those plans have a stable
-contract to implement against, not because they are measured yet.
-
 """
-    new_text = text[:idx] + block + text[tail_idx + 1:]
+    text = text[:idx] + block + text[tail_idx:]
+    text = _upsert_findings_block(text, _findings_actuals_block(findings))
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(new_text)
+        fh.write(text)
+
+
+def _upsert_findings_block(text: str, block: str) -> str:
+    """Replace §4.4 in place, or insert it at the END of §4 (immediately before
+    the next top-level heading) when it does not exist yet.
+
+    Never touches §5 or any other cap section -- a benchmark that can silently
+    rewrite the number it is measured against is not a gate (T-136-11-06)."""
+    start = text.find("### 4.4")
+    if start != -1:
+        rest = text[start + len("### 4.4"):]
+        nxt = re.search(r"^(?:### |## )", rest, re.MULTILINE)
+        end = start + len("### 4.4") + (nxt.start() if nxt else len(rest))
+        return text[:start] + block + text[end:]
+
+    section4 = text.find("## 4. Measured Actuals")
+    if section4 == -1:
+        return text + "\n" + block
+    rest = text[section4 + len("## 4. Measured Actuals"):]
+    nxt = re.search(r"^## ", rest, re.MULTILINE)
+    insert_at = (
+        section4 + len("## 4. Measured Actuals") + (nxt.start() if nxt else len(rest))
+    )
+    return text[:insert_at] + block.rstrip("\n") + "\n\n" + text[insert_at:]
 
 
 if __name__ == "__main__":

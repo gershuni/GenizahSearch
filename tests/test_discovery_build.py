@@ -2789,3 +2789,201 @@ def test_finalize_build_materializes_both_tables_end_to_end(tmp_path):
 
     rc = verify_mod.verify(stats["db_path"], expected_frame_hash=stats["frame_content_hash"])
     assert rc == 0
+
+
+# ===========================================================================
+# 136-11 Task 3: bench_findings_page() -- the corpus-wide findings probe
+# ===========================================================================
+
+def _bench_fixture_db(tmp_path, name="bench-fixture.db"):
+    db_path = tmp_path / name
+    conn = sqlite3.connect(str(db_path))
+    sidecar_build.create_schema(conn)
+    try:
+        sidecar_build.populate_synthetic(conn, source_db_hash="bench-fixture")
+        conn.commit()
+    finally:
+        conn.close()
+    return db_path
+
+
+def test_bench_findings_page_skips_cleanly_against_a_pre_rebuild_asset(tmp_path):
+    """Against a PRE-rebuild asset the materialized tables do not exist. The
+    probe must say WHICH shapes it skipped and why -- not crash with a bare
+    exception, and not silently report zero shapes as a pass."""
+    from scripts import bench_discovery
+
+    db_path = tmp_path / "pre-rebuild.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # The pre-136-11 shape: claims + evidence, no identification grain.
+        conn.executescript(
+            "CREATE TABLE discovery_claim (page_id TEXT, work_id TEXT);"
+            "CREATE TABLE discovery_evidence (evidence_id TEXT PRIMARY KEY);"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    readiness = bench_discovery.findings_probe_readiness(str(db_path))
+    assert readiness["ready"] is False
+    assert set(readiness["missing_tables"]) == {"discovery_identification", "manuscript_display"}
+
+    result = bench_discovery.bench_findings_page(str(db_path))
+    assert result["skipped"] is True
+    assert result["shapes"] == [] and result["failures"] == []
+    assert "discovery_identification" in result["reason"]
+    assert "PRE-REBUILD" in result["reason"]
+    # Every shape is named as skipped, so a reader can never mistake "not
+    # measured" for "measured and fine".
+    assert len(result["skipped_shapes"]) == 6
+    # ...and the reporter renders it without raising.
+    bench_discovery.report_findings_page(result)
+
+
+def test_bench_findings_page_measures_six_named_shapes(tmp_path):
+    from scripts import bench_discovery
+
+    db_path = _bench_fixture_db(tmp_path)
+    result = bench_discovery.bench_findings_page(
+        str(db_path), page_size=2, repeats=3, deep_page=2
+    )
+    assert result["skipped"] is False
+
+    measured = {r["label"] for r in result["shapes"]}
+    skipped = {s["label"] for s in result["skipped_shapes"]}
+    assert len(measured | skipped) == 6
+    for expected in ("findings_default_ordering", "findings_novelty_filter",
+                     "findings_relation_filter", "findings_domain_filter",
+                     "findings_visible_total", "findings_deep_page_2"):
+        assert expected in (measured | skipped), expected
+
+    for r in result["shapes"]:
+        assert r["rows"] > 0, f"{r['label']} recorded a timing on an EMPTY result"
+        for key in ("p50_ms", "p95_ms", "max_ms"):
+            assert key in r
+        assert r["p50_ms"] <= r["max_ms"] and r["p95_ms"] <= r["max_ms"]
+
+    # The visible TOTAL count carries its OWN, tighter cap -- §5 gives the count
+    # and the row fetch separate budgets.
+    by_label = {r["label"]: r for r in result["shapes"]}
+    assert by_label["findings_visible_total"]["cap_ms"] == bench_discovery.FINDINGS_COUNT_CAP_MS
+    assert by_label["findings_default_ordering"]["cap_ms"] == bench_discovery.FINDINGS_ORDERING_CAP_MS
+    assert bench_discovery.FINDINGS_COUNT_CAP_MS < bench_discovery.FINDINGS_ORDERING_CAP_MS
+
+
+def test_bench_findings_page_never_records_a_timing_on_an_empty_result(tmp_path, monkeypatch):
+    """F14's discipline, on the new shapes: a filter value that matches nothing
+    must RAISE, never be recorded as a fast query."""
+    from scripts import bench_discovery
+
+    db_path = _bench_fixture_db(tmp_path)
+    monkeypatch.setattr(
+        bench_discovery, "pick_findings_filters",
+        lambda conn: {"novelty_status": "NO-SUCH-STATUS",
+                      "relation_kind": "direct_witness", "domain": None},
+    )
+    with pytest.raises(AssertionError, match="ZERO rows"):
+        bench_discovery.bench_findings_page(str(db_path), page_size=2, repeats=1, deep_page=2)
+
+
+def test_bench_findings_page_reports_a_failing_shape_with_its_query_plan(tmp_path, monkeypatch):
+    """T-136-11-06: a shape over its cap must FAIL with its SQLite query plan --
+    the cap is never relaxed to make it pass."""
+    from scripts import bench_discovery
+
+    db_path = _bench_fixture_db(tmp_path)
+    # An impossible cap, so every measured shape trips -- the point under test is
+    # the failure PATH, not the machine this runs on.
+    monkeypatch.setattr(bench_discovery, "FINDINGS_ORDERING_CAP_MS", -1.0)
+    monkeypatch.setattr(bench_discovery, "FINDINGS_COUNT_CAP_MS", -1.0)
+    result = bench_discovery.bench_findings_page(
+        str(db_path), page_size=2, repeats=1, deep_page=2
+    )
+    assert result["failures"], "a shape over its cap must be reported as a failure"
+    for r in result["failures"]:
+        assert r["query_plan"], f"{r['label']} failed without a query plan"
+    bench_discovery.report_findings_page(result)   # must not raise
+
+
+def test_findings_regression_message_names_the_prior_measurement():
+    """A performance assertion that says what the number USED to be is worth
+    several that do not."""
+    from scripts import bench_discovery
+
+    assert "3.41-3.55 s" in bench_discovery._PRIOR_ORDERING_MEASUREMENT
+    assert "1.5 s cap" in bench_discovery._PRIOR_ORDERING_MEASUREMENT
+    assert "16 s" in bench_discovery._PRIOR_COUNT_MEASUREMENT
+    assert "COUNT" in bench_discovery._PRIOR_COUNT_MEASUREMENT
+
+
+def _fake_findings_result():
+    return {
+        "skipped": False, "reason": "", "missing_tables": [],
+        "identifications": 64522, "page_size": 50, "deep_page": 20,
+        "filters": {"novelty_status": "fills_gap", "relation_kind": "direct_witness",
+                    "domain": "Synthetic Domain"},
+        "shapes": [
+            {"label": "findings_default_ordering", "kind": "ordering",
+             "cap_ms": 1500.0, "rows": 50, "p50_ms": 41.2, "p95_ms": 58.9, "max_ms": 61.0},
+            {"label": "findings_visible_total", "kind": "count",
+             "cap_ms": 500.0, "rows": 1, "p50_ms": 3.1, "p95_ms": 4.4, "max_ms": 4.9},
+        ],
+        "skipped_shapes": [{"label": "findings_domain_filter", "reason": "works.genre is NULL"}],
+        "failures": [],
+    }
+
+
+def test_write_budgets_records_findings_actuals_and_never_edits_a_cap():
+    """`--write-budgets` must add a findings-page actuals table with p50/p95/max
+    per shape, record the COUNT query separately from the ordering, and leave
+    every CAP section byte-identical -- a benchmark that can silently rewrite
+    the number it is measured against is not a gate (T-136-11-06)."""
+    from scripts import bench_discovery
+
+    budgets_path = (Path(bench_discovery.__file__).resolve().parent.parent
+                    / "docs" / "specs" / "discovery-budgets.md")
+    original = budgets_path.read_text(encoding="utf-8")
+
+    block = bench_discovery._findings_actuals_block(_fake_findings_result())
+    updated = bench_discovery._upsert_findings_block(original, block)
+
+    assert "| Shape | Cap | p50 | p95 | max | Rows |" in updated
+    assert "`findings_default_ordering`" in updated and "58.90 ms" in updated
+    # The count query is recorded SEPARATELY, with its own tighter cap.
+    assert "`findings_visible_total`" in updated and "p95 ≤ 500 ms" in updated
+    assert "p95 ≤ 1500 ms" in updated
+    # A skipped shape is NAMED with its reason, never silently dropped.
+    assert "`findings_domain_filter` — works.genre is NULL" in updated
+
+    # Every CAP section survives byte-identical.
+    def _section(text, header):
+        start = text.index(header)
+        rest = text[start + len(header):]
+        nxt = re.search(r"^## ", rest, re.MULTILINE)
+        return rest[: nxt.start()] if nxt else rest
+
+    for header in ("## 1. Initial Numeric Caps", "## 2. DATA-06 Discretion Defaults",
+                   "## 5. Amendment 2026-08-02"):
+        assert _section(original, header) == _section(updated, header), header
+    # The recorded prod-box actuals of 2026-07-28 are human-measured and must
+    # never be overwritten by a dev-box run.
+    assert "### 4.2 MEASURED ACTUALS (prod-box)" in updated
+    assert "**0.49 ms** ✓" in updated
+
+    # Idempotent: a second write replaces §4.4 rather than appending a second one.
+    twice = bench_discovery._upsert_findings_block(updated, block)
+    assert twice.count("### 4.4 Corpus-wide findings page") == 1
+
+
+def test_write_budgets_pending_block_is_honest_about_not_measuring():
+    from scripts import bench_discovery
+
+    block = bench_discovery._findings_actuals_block(
+        {"skipped": True, "reason": "the tables are absent (PRE-REBUILD asset)"}
+    )
+    assert "PENDING" in block
+    assert "the tables are absent (PRE-REBUILD asset)" in block
+    # No invented numbers.
+    assert "| Shape | Cap |" not in block
+    assert "3.41-3.55 s" in block and "16 s" in block
