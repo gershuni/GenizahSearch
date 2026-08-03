@@ -490,6 +490,9 @@ _READ_PATH_ARGS = {
     # 136-14: the manuscript scope is served by `page_id IN (...)` over the
     # browse page's own page list, so its read path takes a page LIST.
     "page_ids": ["p012"],
+    # 136-14: the findings facet cascade. `domain` is the first level, and the
+    # only one that needs no level above it selected.
+    "level": "domain",
 }
 
 # The unavailable envelope each wrapper shape returns. Anything else is data.
@@ -629,6 +632,19 @@ def test_public_paths_do_return_rows_against_a_valid_public_artifact(tmp_path, m
         assert count["status"] == "ok" and count["total"] > 0
         rows = await disc.get_related_pages_enveloped("p004")
         assert rows["status"] == "ok" and len(rows["items"]) > 0
+        # The two findings paths get a WEAKER control here, stated plainly:
+        # this fixture CREATES `discovery_identification` but seeds no rows
+        # (see tests/fixtures/discovery_v2_fixture.py), so there is nothing for
+        # them to return. What IS provable -- and what distinguishes them from
+        # the private-artifact case above, where they answer `unavailable` -- is
+        # that against a valid public artifact they reach the database and
+        # report SUCCESS. Their row-level non-vacuity is proved in
+        # tests/test_discovery_findings_query.py against a populated fixture.
+        findings = await disc.get_findings_enveloped(bucket="all")
+        assert findings["status"] == "ok"
+        facets = await disc.get_findings_facets_enveloped(
+            _READ_PATH_ARGS["level"], bucket="all")
+        assert facets["status"] == "ok"
 
     asyncio.run(_run())
 
