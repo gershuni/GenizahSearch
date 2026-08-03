@@ -268,6 +268,171 @@ mark.hl{background:#facc15;color:#000;border-radius:3px;padding:0 2px}
     return "\n".join(P)
 
 
+def excerpt(text: str, start: Optional[int], end: Optional[int], ctx: int = 260, cap: int = 700) -> str:
+    """The matched span plus a little context — the evidence that the
+    identification is right. Deliberately NOT the whole page: at 9,887 cases a
+    full-page pane would make the file unopenable, and the span is what carries
+    the argument."""
+    if not text:
+        return '<span class="muted">(no transcription on file)</span>'
+    if start is not None and end is not None and 0 <= start < end <= len(text):
+        mid = text[start:end]
+        if len(mid) > cap:
+            mid = mid[:cap] + " …"
+        pre, post = text[max(0, start - ctx):start], text[end:end + ctx]
+        return (f'<span class="muted">…{html.escape(pre)}</span>'
+                f'<mark class="hl">{html.escape(mid)}</mark>'
+                f'<span class="muted">{html.escape(post)}…</span>')
+    return html.escape(text[:cap] + (" …" if len(text) > cap else ""))
+
+
+def render_works(groups, meta) -> str:
+    """All fills_gap rows, grouped by the WORK we identified — so the question
+    becomes 'is this work being identified well?' rather than 9,887 separate
+    judgements."""
+    P: List[str] = []
+    A = P.append
+    A('<!doctype html>\n<html lang="he" dir="rtl">\n<head>\n<meta charset="utf-8">')
+    A('<meta name="robots" content="noindex,nofollow">')
+    A('<meta name="viewport" content="width=device-width,initial-scale=1">')
+    A("<title>fills_gap by identification — local review (PRIVATE)</title>\n<style>")
+    A("""
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--fg:#e7e9ee;--mut:#9aa3b2;
+      --A:#22c55e;--H:#38bdf8;--R:#f59e0b}
+@media(prefers-color-scheme:light){:root{--bg:#f7f8fa;--panel:#fff;--panel2:#f0f2f6;--line:#dfe3ea;--fg:#1a1d24;--mut:#5b6472}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,Segoe UI,Roboto,Arial,"Noto Sans Hebrew",sans-serif}
+header{padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+h1{font-size:17px;margin:0 0 3px}.sub{color:var(--mut);font-size:12px}
+.warn{background:#7c2d12;color:#fed7aa;padding:7px 20px;font-size:12.5px}
+@media(prefers-color-scheme:light){.warn{background:#fff7ed;color:#9a3412}}
+main{padding:18px 20px;max-width:1400px;margin:0 auto}
+input[type=search]{width:100%;max-width:520px;padding:9px 12px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--fg);font-size:14px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600;position:sticky;top:64px;background:var(--panel);z-index:3}
+tr.w{cursor:pointer}tr.w:hover{background:var(--panel2)}
+.bar{display:inline-block;height:9px;border-radius:3px;vertical-align:middle}
+.bar.byp{background:var(--R)}.bar.mod{background:var(--H)}
+.det{display:none}.det.open{display:table-row}
+.cases{padding:6px 0 14px}
+.case{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:8px 0}
+.case .ms{font-weight:600;font-size:13px}
+.pill{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11px;margin-inline-start:6px;
+  border:1px solid var(--line);color:var(--mut)}
+.pill.byp{background:var(--R);color:#04121c;border:none;font-weight:600}
+.pill.mod{background:var(--H);color:#04121c;border:none;font-weight:600}
+.ex{white-space:pre-wrap;word-break:break-word;font-size:12.5px;margin-top:6px;
+  background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:8px;max-height:200px;overflow:auto}
+.aid{margin-top:6px;font-size:12px;color:var(--mut)}
+.aid b{color:var(--fg)}
+mark.hl{background:#facc15;color:#000;border-radius:3px;padding:0 2px}
+.muted{color:var(--mut)}
+""")
+    A("</style></head><body>")
+    A('<header><h1>fills_gap לפי זיהוי / by identification</h1>')
+    A(f'<div class="sub">{meta["rows"]:,} rows · {meta["works"]:,} distinct works · '
+      f'{meta["bypass"]:,} bypass (no aid text at all) · {meta["model"]:,} model-judged</div></header>')
+    A('<div class="warn">PRIVATE — local review. Our transcription + the checked aids only; '
+      'no reference-corpus text. Do not publish.</div><main>')
+    A('<input type="search" id="q" placeholder="סנן לפי שם חיבור / filter works…" oninput="flt()">')
+    A('<table><thead><tr><th>חיבור / work</th><th>rows</th><th>bypass</th><th>model</th>'
+      '<th style="width:180px">split</th></tr></thead><tbody id="tb">')
+    for i, g in enumerate(groups):
+        w = max(1, g["n"])
+        bw = int(g["bypass"] / w * 150)
+        mw = int(g["model"] / w * 150)
+        A(f'<tr class="w" data-t="{html.escape(g["title"].lower())}" onclick="tg({i})">'
+          f'<td>{html.escape(g["title"])}</td><td>{g["n"]:,}</td>'
+          f'<td>{g["bypass"]:,}</td><td>{g["model"]:,}</td>'
+          f'<td><span class="bar byp" style="width:{bw}px"></span>'
+          f'<span class="bar mod" style="width:{mw}px"></span></td></tr>')
+        A(f'<tr class="det" id="d{i}"><td colspan="5"><div class="cases">')
+        for c in g["cases"]:
+            pill = ('<span class="pill byp">bypass — nothing checked</span>' if c["bypass"]
+                    else '<span class="pill mod">model-judged</span>')
+            A('<div class="case">')
+            A(f'<div class="ms">{html.escape(c["manuscript"])} {pill}')
+            if c["matched_letters"]:
+                A(f'<span class="pill">{c["matched_letters"]:,} letters</span>')
+            if c["density"] is not None:
+                A(f'<span class="pill">{c["density"]*100:.0f}% of page</span>')
+            A("</div>")
+            A(f'<div class="ex">{c["ex"]}</div>')
+            if not c["bypass"]:
+                bits = [f"<b>{html.escape(lab.split(' / ')[-1])}:</b> {html.escape(v[:220])}"
+                        for lab, v in c["aids"]]
+                A(f'<div class="aid">{" · ".join(bits)}</div>')
+            A("</div>")
+        A("</div></td></tr>")
+    A("</tbody></table></main><script>")
+    A("function tg(i){var d=document.getElementById('d'+i);d.classList.toggle('open');}")
+    A("function flt(){var q=document.getElementById('q').value.toLowerCase();"
+      "document.querySelectorAll('tr.w').forEach(function(r){"
+      "var hit=r.dataset.t.indexOf(q)>=0;r.style.display=hit?'':'none';"
+      "var d=r.nextElementSibling;if(!hit)d.classList.remove('open');});}")
+    A("</script></body></html>")
+    return "\n".join(P)
+
+
+def build_works_page(args) -> int:
+    print("loading verdicts…")
+    verdicts = load_verdicts(args.verdicts)
+    fg = [k for k, s in verdicts.items() if s == SHIPS_AS_CANDIDATE]
+    print(f"{len(fg):,} fills_gap rows")
+
+    print("rebuilding candidate evidence…")
+    candidates, works, libraries = build_all_candidates(
+        args.asset, DEFAULT_LIBRARIES_CSV, DEFAULT_FJMS_DB, DEFAULT_PGP_DB, DEFAULT_FGP_DB
+    )
+    by_key = {f"{c.sys_id}::{c.ref_work_id}": c for c in candidates}
+    con = sqlite3.connect(f"file:{args.asset}?mode=ro", uri=True)
+    cur = con.cursor()
+    titles = dict(cur.execute("SELECT work_id, neutral_title FROM works").fetchall())
+
+    grouped = collections.defaultdict(list)
+    wanted = set()
+    for key in sorted(fg):
+        c = by_key.get(key)
+        if c is None:
+            continue
+        page, ml, dens, s0, s1 = page_and_metrics(cur, c.sys_id, c.ref_work_id)
+        if page:
+            wanted.add(page)
+        bundle = assemble_evidence_bundle(c)
+        aids = [(lab, " ||| ".join(t for t in bundle.get(k, ()) if t)) for k, lab in _SRC_LABEL]
+        aids = [(lab, v) for lab, v in aids if v]
+        grouped[c.ref_work_id].append({
+            "manuscript": libraries.get(c.sys_id, {}).get("shelfmark") or f"sys_id {c.sys_id}",
+            "page": page, "matched_letters": ml, "density": dens, "span": (s0, s1),
+            "bypass": not aids, "aids": aids,
+        })
+
+    print(f"streaming transcriptions for {len(wanted):,} pages (one pass over the 1.47 GB file)…")
+    texts = load_page_texts(args.transcriptions, wanted)
+    print(f"  found {len(texts):,}")
+
+    groups = []
+    tot_b = tot_m = 0
+    for wid, cases in grouped.items():
+        for c in cases:
+            c["ex"] = excerpt(texts.get(c["page"], ""), *c["span"])
+        b = sum(1 for c in cases if c["bypass"])
+        tot_b += b
+        tot_m += len(cases) - b
+        groups.append({"title": titles.get(wid) or wid, "n": len(cases),
+                       "bypass": b, "model": len(cases) - b, "cases": cases})
+    groups.sort(key=lambda g: (-g["n"], g["title"]))
+
+    meta = {"rows": sum(g["n"] for g in groups), "works": len(groups),
+            "bypass": tot_b, "model": tot_m}
+    with open(args.out, "w", encoding="utf-8") as fh:
+        fh.write(render_works(groups, meta))
+    print(f"wrote {args.out} ({os.path.getsize(args.out)/1024/1024:.1f} MB)")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--verdicts", default=DEFAULT_VERDICTS)
@@ -278,7 +443,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--fills-gap", type=int, default=25)
     p.add_argument("--seed", type=int, default=20260803)
     p.add_argument("--cost", default="40.12")
+    p.add_argument("--mode", choices=("shades", "fills-gap-by-work"), default="shades",
+                   help="'shades' samples every shade; 'fills-gap-by-work' renders ALL "
+                        "fills_gap rows grouped by the work we identified")
     args = p.parse_args(argv)
+
+    if args.mode == "fills-gap-by-work":
+        if args.out == DEFAULT_OUT:
+            args.out = os.path.join(REPO_ROOT, "discovery_data",
+                                    "novelty-FILLSGAP-by-work.PRIVATE.html")
+        return build_works_page(args)
 
     print("loading verdicts…")
     verdicts = load_verdicts(args.verdicts)
