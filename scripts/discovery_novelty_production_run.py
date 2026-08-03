@@ -249,9 +249,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "divergence_correctness": rec.get("divergence_correctness"),
                     }
 
-    with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(verdicts, fh, ensure_ascii=False)
+    # BOTH ARMS, or the output is silently wrong (caught by plan 136-12).
+    #
+    # Ruling J's funnel resolves ~10,016 rows mechanically -- Arm 1's `confirms`
+    # name-matches and Arm 3's no-source-text `fills_gap` bypass -- and ONLY the
+    # residual reaches the model. Writing the model arm alone produced a file
+    # that looked complete but left every heuristically-resolved row at the
+    # fail-closed `not_checked` default on ingest, quietly discarding every
+    # bypass-path candidate: the 8,327 rows that are the LARGEST single source
+    # of "Candidates for new finds".
+    merged: Dict[str, Dict[str, Optional[str]]] = {
+        key: {"novelty_status": r.novelty_status, "divergence_correctness": None}
+        for key, r in resolved.items()
+    }
+    overlap = set(merged) & set(verdicts)
+    if overlap:
+        raise RuntimeError(
+            f"{len(overlap)} row(s) resolved by BOTH the heuristic funnel and the model arm "
+            f"(e.g. {sorted(overlap)[:3]}) -- the two arms must partition the candidate set. "
+            "Refusing to write an output whose provenance is ambiguous."
+        )
+    merged.update(verdicts)
 
+    covered, expected = len(merged), len(candidates)
+    if not stopped_at_ceiling and not args.limit and covered != expected:
+        raise RuntimeError(
+            f"output covers {covered:,} of {expected:,} candidates -- a completed run must cover "
+            "every one. Refusing to write a partial file that would ingest as `not_checked`."
+        )
+    log(f"merged arms: heuristic={len(resolved):,} + model={len(verdicts):,} = {covered:,} "
+        f"of {expected:,} candidates")
+
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(merged, fh, ensure_ascii=False)
+
+    verdicts = merged
     total, calls = sum_real_cost(args.cost_log)
     counts: Dict[str, int] = {}
     for v in verdicts.values():
