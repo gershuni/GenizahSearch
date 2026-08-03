@@ -862,3 +862,641 @@ def test_project_work_witnesses_tied_same_band_representative_is_stable_across_i
     assert len(items_b) == 1
     assert items_a[0]["representative_page_id"] == "lp000A"
     assert items_b[0]["representative_page_id"] == "lp000A"
+
+
+# ===========================================================================
+# Phase 136, plan 136-14, Task 1: the {status, items, total} envelope (D-13),
+# the human-confirmed routing fix (D-13g) and the panel's display fields.
+#
+# Masking discipline unchanged: every fixture below is fabricated in-test via
+# scripts/build_discovery_sidecar (synthetic ids, synthetic titles) -- never
+# real research data, never a corpus name.
+# ===========================================================================
+
+import json as _json  # noqa: E402 -- appended section, grouped with its own tests
+
+from shared.discovery_surface_projection import (  # noqa: E402
+    OUTAGE_STATUSES,
+    STATUS_BUSY,
+    STATUS_OK,
+    STATUS_TIMEOUT,
+    STATUS_UNAVAILABLE,
+    SURFACE_CLAIM_FIELDS,
+    SURFACE_STATUSES,
+    is_outage,
+    make_envelope,
+    surface_safe_claim,
+)
+
+
+def _new_sidecar(tmp_path, name, *, works, evidence_specs, version, unit_specs=None):
+    """Build a fresh synthetic sidecar carrying the FULL Phase-136 grain:
+    claims + evidence + the materialized `discovery_identification` table, the
+    latter produced by the REAL builder (`populate_discovery_identification`),
+    never a hand-written stand-in -- so these tests exercise the shipped
+    eligibility rule (`routing_status='shipped'` OR
+    `adjudication_status='human_confirmed'`) rather than a test-local copy.
+
+    `works`: list of (work_id, canonical_work_id, neutral_title, author, genre,
+    source_corpus).
+    """
+    result = sidecar_build.assemble_claims_and_evidence(
+        evidence_specs,
+        {w[0]: w[5] for w in works},
+        sidecar_version=version,
+    )
+    db_path = tmp_path / name
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        sidecar_build.create_schema(conn)
+        cur = conn.cursor()
+        cur.executemany(
+            "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, "
+            "genre, source_corpus, identity_visibility) VALUES (?, ?, ?, ?, ?, ?, 'public')",
+            works,
+        )
+        sidecar_build._insert_claims_and_evidence_real(
+            cur, result["claim_rows"], result["evidence_rows"])
+        if unit_specs:
+            sidecar_build._insert_witness_units_real(cur, unit_specs)
+        cur.executemany(
+            "INSERT INTO meta (key, value) VALUES (?, ?)",
+            [
+                ("schema_version", "discovery-v1"), ("sidecar_version", version),
+                ("source_db_sha256", "test"), ("build_date", "2026-01-01T00:00:00Z"),
+                ("data_as_of", "2026-01-01"), ("htr_snapshot_hash", "test"),
+                ("expected_rows_claims", str(len(result["claim_rows"]))),
+                ("expected_rows_evidence", str(len(result["evidence_rows"]))),
+                ("expected_rows_works", str(len(works))),
+                ("expected_rows_units", "0"), ("frame_content_hash", "test"),
+                ("audience", "private"),
+            ],
+        )
+        conn.commit()
+        sidecar_build.populate_discovery_identification(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return str(db_path)
+
+
+def _service_for(db_path, version):
+    return DiscoveryService(
+        path_provider=lambda: db_path,
+        availability_callable=lambda: True,
+        sidecar_version_provider=lambda: version,
+    )
+
+
+# --- D-13g regression fixture ----------------------------------------------
+#
+# The EXACT observed symptom (136-CONTEXT.md D-13g, quantified in the sketch
+# reference discovery-panel-layout.md): on ONE manuscript, two rows a human
+# confirmed were treated differently -- one page's human_confirmed row was
+# hidden because routing had demoted it for low coverage, while another page's
+# human_confirmed row showed. The routing predicate ran BEFORE
+# is_default_eligible(), which returns True for human_confirmed
+# unconditionally, so the predicate meant to protect those rows never ran.
+
+_D13G_VERSION = "test-d13g-regression"
+_D13G_SYS = "990000000000000901"
+_D13G_HIDDEN_PAGE = "d13g_p22"      # human_confirmed, routing demoted (low_coverage)
+_D13G_SHOWN_PAGE = "d13g_p23"       # human_confirmed, shipped
+_D13G_UNREVIEWED_PAGE = "d13g_p24"  # unreviewed + review_only -> still hidden
+
+
+def _build_d13g_regression_db(tmp_path):
+    works = [
+        ("w000901", "w000901", "Synthetic Commentary On Alpha", "Synthetic Author Z",
+         "Synthetic Parent A / Synthetic Leaf A", "sefaria"),
+        ("w000902", "w000902", "Synthetic Commentary On Beta", "Synthetic Author Z",
+         "Synthetic Parent A / Synthetic Leaf A", "sefaria"),
+        ("w000903", "w000903", "Synthetic Unreviewed Work", None, None, "sefaria"),
+    ]
+    specs = [
+        # The row the routing filter dropped: a human CONFIRMED identification
+        # demoted to review_only for low coverage (a commentary occupying only
+        # part of a densely-written page).
+        sidecar_build._mk_evidence(
+            page_id=_D13G_HIDDEN_PAGE, work_id="w000901", sys_id=_D13G_SYS,
+            evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+            confidence_band=sidecar_build._TIER_A,
+            adjudication_status=sidecar_build._HUMAN_CONFIRMED,
+            audit_status=sidecar_build._NA,
+            routing_status=sidecar_build._REVIEW_ONLY,
+            routing_reason=sidecar_build._LOW_COVERAGE,
+            span_start=0, span_end=1400, matched_letters=1329, n_spans=1,
+            coverage=0.21, page_norm_letters=6300,
+        ),
+        # The row that showed: same manuscript, same human review, shipped.
+        sidecar_build._mk_evidence(
+            page_id=_D13G_SHOWN_PAGE, work_id="w000902", sys_id=_D13G_SYS,
+            evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+            confidence_band=sidecar_build._TIER_A,
+            adjudication_status=sidecar_build._HUMAN_CONFIRMED,
+            audit_status=sidecar_build._NA,
+            routing_status=sidecar_build._SHIPPED,
+            routing_reason=sidecar_build._NONE_REASON,
+            span_start=0, span_end=900, matched_letters=880, n_spans=1,
+            coverage=0.9, page_norm_letters=978,
+        ),
+        # The control: review_only WITHOUT human review stays hidden by default.
+        sidecar_build._mk_evidence(
+            page_id=_D13G_UNREVIEWED_PAGE, work_id="w000903", sys_id=_D13G_SYS,
+            evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+            confidence_band=sidecar_build._SCREENING_RB,
+            adjudication_status=sidecar_build._UNREVIEWED,
+            audit_status=sidecar_build._NA,
+            routing_status=sidecar_build._REVIEW_ONLY,
+            routing_reason=sidecar_build._LOW_COVERAGE,
+            span_start=0, span_end=120, matched_letters=90, n_spans=1,
+        ),
+    ]
+    return _new_sidecar(tmp_path, "d13g.db", works=works,
+                        evidence_specs=specs, version=_D13G_VERSION)
+
+
+@pytest.fixture()
+def d13g_service(tmp_path):
+    return _service_for(_build_d13g_regression_db(tmp_path), _D13G_VERSION)
+
+
+# ---------------------------------------------------------------------------
+# The four envelope states, pairwise distinct (D-13 / T-136-14-01)
+# ---------------------------------------------------------------------------
+
+def test_envelope_unavailable_when_sidecar_is_not_serving():
+    service = _make_service(available=False)
+    env = service.get_claims_for_page_enveloped("p001")
+    assert env["status"] == STATUS_UNAVAILABLE
+    assert env["items"] == []
+    assert env["total"] == 0
+    assert is_outage(env) is True
+
+
+def test_envelope_timeout_is_distinct_from_unavailable(monkeypatch):
+    monkeypatch.setenv("DISCOVERY_QUERY_TIMEOUT_BROWSE", "0.05")
+    monkeypatch.setenv("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", "0")
+    service = _make_service()
+    block = threading.Event()
+
+    def _slow(page_id, page=1, page_size=None, include_review=False, lang="en"):
+        block.wait(timeout=5)
+        return make_envelope(STATUS_OK, [], 0)
+
+    service.get_claims_for_page_enveloped = _slow
+    try:
+        env = asyncio.run(service.get_claims_for_page_enveloped_async("p001"))
+    finally:
+        block.set()
+        time.sleep(0.1)
+    assert env["status"] == STATUS_TIMEOUT
+    assert env["status"] != STATUS_UNAVAILABLE
+    assert env["items"] == []
+    assert env["total"] == 0
+
+
+def test_envelope_busy_is_distinct_from_timeout_and_unavailable():
+    service = _make_service()
+
+    async def _overloaded(*a, **k):
+        raise DiscoveryOverload("temporarily unavailable")
+
+    service._run_off_loop = _overloaded
+    env = asyncio.run(service.get_claims_for_page_enveloped_async("p001"))
+    assert env["status"] == STATUS_BUSY
+    assert env["status"] not in (STATUS_TIMEOUT, STATUS_UNAVAILABLE)
+    assert is_outage(env) is True
+
+
+def test_envelope_ok_on_a_genuine_empty_result():
+    service = _make_service()
+    env = service.get_claims_for_page_enveloped("page-that-does-not-exist")
+    assert env["status"] == STATUS_OK
+    assert env["items"] == []
+    assert env["total"] == 0
+    assert is_outage(env) is False, (
+        "a genuine zero must be distinguishable from an outage -- this is the "
+        "whole point of D-13 (the panel hides on a SUCCESSFUL zero only)"
+    )
+
+
+def test_envelope_status_vocabulary_is_closed_and_pairwise_distinct():
+    assert SURFACE_STATUSES == {STATUS_OK, STATUS_UNAVAILABLE, STATUS_TIMEOUT, STATUS_BUSY}
+    assert len(SURFACE_STATUSES) == 4, "four states, pairwise distinct"
+    assert OUTAGE_STATUSES == SURFACE_STATUSES - {STATUS_OK}
+    with pytest.raises(ValueError):
+        make_envelope("degraded")  # a surface cannot invent a fifth state
+
+
+def test_preexisting_list_methods_keep_signature_and_empty_behaviour():
+    """The legacy list-returning API is UNCHANGED: same call shape, still a
+    list, still `[]` (never an exception) on every failure path."""
+    import inspect
+
+    sig = inspect.signature(DiscoveryService.get_claims_for_page)
+    assert list(sig.parameters) == ["self", "page_id", "page", "page_size", "include_review"]
+
+    unavailable = _make_service(available=False)
+    assert unavailable.get_claims_for_page("p001") == []
+    assert unavailable.get_pages_related_to_page("p004") == []
+    assert unavailable.get_evidence("whatever") == []
+    assert unavailable.get_work_witnesses("w000001") == []
+
+    service = _make_service()
+    rows = service.get_claims_for_page("p001")
+    assert isinstance(rows, list) and rows and isinstance(rows[0], dict)
+
+
+# ---------------------------------------------------------------------------
+# D-13g: the human-confirmed routing fix (T-136-14-07)
+# ---------------------------------------------------------------------------
+
+def test_two_human_confirmed_rows_on_one_manuscript_are_treated_alike(d13g_service):
+    """THE regression. Population, recorded so the two figures are never
+    conflated: 19 of 121 human-confirmed rows are dropped across ALL
+    human-confirmed evidence; on the DISPLAY evidence this page query actually
+    reads it is 14 of 116."""
+    hidden = d13g_service.get_claims_for_page(_D13G_HIDDEN_PAGE)
+    shown = d13g_service.get_claims_for_page(_D13G_SHOWN_PAGE)
+
+    assert len(shown) == 1, "the shipped human-confirmed row always showed"
+    assert len(hidden) == 1, (
+        "a human-confirmed row demoted by routing must NOT be dropped by the "
+        "query before is_default_eligible() -- which returns True for "
+        "human_confirmed unconditionally -- ever runs (D-13g)"
+    )
+    assert hidden[0]["adjudication_status"] == "human_confirmed"
+    assert hidden[0]["routing_status"] == "review_only"
+    assert shown[0]["adjudication_status"] == "human_confirmed"
+
+
+def test_unreviewed_review_only_row_still_hidden_by_default_and_shown_under_flag(d13g_service):
+    assert d13g_service.get_claims_for_page(_D13G_UNREVIEWED_PAGE) == []
+    opted_in = d13g_service.get_claims_for_page(_D13G_UNREVIEWED_PAGE, include_review=True)
+    assert len(opted_in) == 1
+    assert opted_in[0]["adjudication_status"] == "unreviewed"
+    assert opted_in[0]["routing_status"] == "review_only"
+
+
+def test_restored_human_confirmed_row_carries_a_low_coverage_marker_not_a_band_change(d13g_service):
+    env = d13g_service.get_claims_for_page_enveloped(_D13G_HIDDEN_PAGE)
+    row = env["items"][0]
+    assert row["low_coverage_marker"] is True
+    assert row["restored_by_human_confirmation"] is True
+    assert row["eligibility_basis"] == "human_confirmed"
+    # The band is UNCHANGED -- the marker is a note, never a re-banding.
+    assert row["confidence_band"] == "tier_a"
+    assert row["band_rank"] == _band_rank("track1_direct", "tier_a")
+
+    shipped = d13g_service.get_claims_for_page_enveloped(_D13G_SHOWN_PAGE)["items"][0]
+    assert shipped["low_coverage_marker"] is False
+    assert shipped["restored_by_human_confirmation"] is False
+    assert shipped["eligibility_basis"] == "shipped"
+
+
+def test_review_only_human_confirmed_row_resolves_to_an_identification(d13g_service):
+    """The restore must not be undone one layer down: the materialized
+    identification grain admits `shipped` OR `human_confirmed`, so the join
+    finds a row carrying a bucket AND a reason."""
+    row = d13g_service.get_claims_for_page_enveloped(_D13G_HIDDEN_PAGE)["items"][0]
+    assert row["identification_id"], "no identification row for a restored human-confirmed claim"
+    assert row["main_pool"] in (True, False)
+    assert row["main_pool_reason"]
+    assert row["main_pool"] is True and row["main_pool_reason"] == "main_human_confirmed", (
+        "main_pool_decision puts every human_confirmed identification in the main pool"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The panel's display fields, in ONE query (T-136-14-03)
+# ---------------------------------------------------------------------------
+
+def test_enveloped_claim_row_key_set_is_exactly_the_surface_allowlist(d13g_service):
+    env = d13g_service.get_claims_for_page_enveloped(_D13G_SHOWN_PAGE)
+    assert env["status"] == STATUS_OK
+    row = env["items"][0]
+    assert set(row) == set(SURFACE_CLAIM_FIELDS)
+    # Every display field the panel renders, present and populated in ONE query.
+    assert row["display_work_id"] == "w000902"
+    assert row["neutral_title"] == "Synthetic Commentary On Beta"
+    assert row["relation_kind"] == "direct_witness"
+    assert row["confidence_band"] == "tier_a"
+    assert row["band_label"]
+    assert row["band_rank"] == _band_rank("track1_direct", "tier_a")
+    assert row["coverage_ppm"] == 900000
+    assert row["coverage_status"] == "measured"
+    assert row["main_pool"] is True
+    assert row["main_pool_reason"]
+    assert row["novelty_status"] == "not_checked"
+    assert row["matched_letters"] == 880
+    assert row["span_start"] == 0 and row["span_end"] == 900
+    assert row["n_spans"] == 1
+    assert row["evidence_id"]
+
+
+class _ExecuteSpy:
+    """Counts `execute` calls on a real connection object, delegating
+    everything else -- so a per-row follow-up query is visible as a count that
+    GROWS with the row count."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.calls = []
+
+    def execute(self, sql, params=()):
+        self.calls.append(sql)
+        return self._inner.execute(sql, params)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_one_query_per_page_no_per_row_followup(tmp_path):
+    """T-136-14-03: the execute count must NOT grow with the number of rows on
+    the page. A fixture with 1 row and one with 6 rows on a single page are
+    compared -- a per-row follow-up shows up as a difference."""
+    def _page_db(name, n_works):
+        works = [
+            (f"w0010{i:02d}", f"w0010{i:02d}", f"Synthetic Work {i}", None, None, "sefaria")
+            for i in range(n_works)
+        ]
+        specs = [
+            sidecar_build._mk_evidence(
+                page_id="spy_p1", work_id=f"w0010{i:02d}", sys_id="990000000000000902",
+                evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+                confidence_band=sidecar_build._TIER_A,
+                adjudication_status=sidecar_build._UNREVIEWED, audit_status=sidecar_build._NA,
+                routing_status=sidecar_build._SHIPPED, routing_reason=sidecar_build._NONE_REASON,
+                span_start=0, span_end=100 + i, matched_letters=200 + i, n_spans=1,
+            )
+            for i in range(n_works)
+        ]
+        return _new_sidecar(tmp_path, name, works=works, evidence_specs=specs,
+                            version="test-spy")
+
+    def _count_executes(db_path, expected_rows):
+        service = _service_for(db_path, "test-spy")
+        service.is_available()  # build the connection OUTSIDE the measurement
+        spy = _ExecuteSpy(service._get_conn())
+        service._get_conn = lambda: spy
+        env = service.get_claims_for_page_enveloped("spy_p1")
+        assert len(env["items"]) == expected_rows, "fixture did not reach its own assertion"
+        return len(spy.calls)
+
+    one_row = _count_executes(_page_db("spy-1.db", 1), 1)
+    six_rows = _count_executes(_page_db("spy-6.db", 6), 6)
+
+    assert one_row == six_rows, (
+        f"execute count grew with row count ({one_row} -> {six_rows}) -- a "
+        "per-row follow-up query multiplies browse-enrichment latency by the "
+        "row count (T-136-14-03)"
+    )
+    assert six_rows <= 2, (
+        f"expected the page query (plus at most the cached band-measurement "
+        f"lookup), got {six_rows} executes"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-136-14-10: the `works` join is 1:1 and keys on `display_work_id`
+# ---------------------------------------------------------------------------
+
+_DUP_VERSION = "test-duplicate-canonical"
+_DUP_SYS = "990000000000000903"
+_DUP_PAGE = "dup_p1"
+
+
+def _build_duplicated_canonical_group_db(tmp_path):
+    """A duplicated `canonical_work_id` group with DIFFERENT titles -- the
+    measured hazard: 15 such groups exist on the live asset, three with
+    different titles and mixed source corpora, and a `canonical_work_id` join
+    fans the 64,509-row identification grain out to 65,587."""
+    works = [
+        # The canonical anchor (work_id == canonical_work_id) -- schema (B1)
+        # rule 1 selects it as the group's display representative.
+        ("w000910", "w000910", "Synthetic Canonical Title", "Synthetic Author Y", None, "sefaria"),
+        # A second row in the SAME canonical group, carrying a DIFFERENT title.
+        ("w000911", "w000910", "Synthetic Duplicate Title", "Synthetic Author Y", None, "sefaria"),
+    ]
+    specs = [
+        sidecar_build._mk_evidence(
+            page_id=_DUP_PAGE, work_id="w000911", sys_id=_DUP_SYS,
+            evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+            confidence_band=sidecar_build._TIER_A,
+            adjudication_status=sidecar_build._UNREVIEWED, audit_status=sidecar_build._NA,
+            routing_status=sidecar_build._SHIPPED, routing_reason=sidecar_build._NONE_REASON,
+            span_start=0, span_end=500, matched_letters=400, n_spans=1,
+        ),
+    ]
+    return _new_sidecar(tmp_path, "dup-canonical.db", works=works,
+                        evidence_specs=specs, version=_DUP_VERSION)
+
+
+def test_works_join_is_1to1_and_keys_on_display_work_id(tmp_path):
+    db_path = _build_duplicated_canonical_group_db(tmp_path)
+
+    # The fixture MUST be able to reach its own assertion: prove the fan-out a
+    # canonical_work_id join would produce actually exists here.
+    probe = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        (fanned,) = probe.execute(
+            "SELECT COUNT(*) FROM discovery_identification di "
+            "JOIN works w ON w.canonical_work_id = di.canonical_work_id"
+        ).fetchone()
+        (grain,) = probe.execute("SELECT COUNT(*) FROM discovery_identification").fetchone()
+    finally:
+        probe.close()
+    assert fanned > grain, (
+        "the fixture does not contain a duplicated canonical group -- it cannot "
+        "prove the join hazard it exists to prove"
+    )
+
+    service = _service_for(db_path, _DUP_VERSION)
+    env = service.get_claims_for_page_enveloped(_DUP_PAGE)
+    assert env["total"] == 1, "the works join fanned out (T-136-14-10)"
+    assert len(env["items"]) == 1
+    row = env["items"][0]
+    assert row["work_id"] == "w000911", "the claim's own work is unchanged"
+    assert row["display_work_id"] == "w000910", "the join key must be display_work_id"
+    assert row["neutral_title"] == "Synthetic Canonical Title", (
+        "D-13a: the canonical work's OWN title wins -- a canonical_work_id join "
+        "would make the displayed title depend on which row it happened to return"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-136-14-09: the allowlist, and four assertions that the badge / precision /
+# interval never leave the service.
+# ---------------------------------------------------------------------------
+
+def test_surface_safe_claim_is_an_allowlist_not_a_denylist():
+    from shared.discovery_band_labels import serialize_banded_claim
+
+    serialized = serialize_banded_claim({
+        "evidence_source": "track1_direct",
+        "confidence_band": "tier_a",
+        "adjudication_status": "human_confirmed",
+        "routing_status": "shipped",
+    })
+    # A field the serializer might grow LATER must be excluded by DEFAULT.
+    serialized["a_future_serializer_field"] = "should not reach a surface"
+    serialized["review_overlay_v2"] = "Expert-reviewed"
+    projected = surface_safe_claim(serialized)
+
+    assert "a_future_serializer_field" not in projected
+    assert "review_overlay_v2" not in projected
+    assert "review_overlay" not in projected
+    assert set(projected) == set(SURFACE_CLAIM_FIELDS)
+
+
+def test_forbidden_fields_absent_from_a_returned_row(d13g_service):
+    row = d13g_service.get_claims_for_page_enveloped(_D13G_HIDDEN_PAGE)["items"][0]
+    for forbidden in ("review_overlay", "precision", "ci_low", "ci_high"):
+        assert forbidden not in row
+
+
+def test_forbidden_fields_absent_from_the_envelope(d13g_service):
+    env = d13g_service.get_claims_for_page_enveloped(_D13G_HIDDEN_PAGE)
+    for forbidden in ("review_overlay", "precision", "ci_low", "ci_high"):
+        assert forbidden not in env
+        assert forbidden not in env["meta"]
+
+
+def test_forbidden_values_absent_from_a_serialized_json_payload(d13g_service):
+    env = d13g_service.get_claims_for_page_enveloped(_D13G_HIDDEN_PAGE)
+    payload = _json.dumps(env, ensure_ascii=False)
+    for forbidden_key in ("review_overlay", "ci_low", "ci_high", "precision"):
+        assert forbidden_key not in payload
+    for forbidden_value in ("Expert-reviewed", "נבדק בידי מומחה"):
+        assert forbidden_value not in payload
+
+
+def test_forbidden_fields_absent_from_an_error_path_payload():
+    """The error paths -- unavailable, timeout, busy -- carry no forbidden key
+    and no forbidden value either. An error path is exactly where a leak would
+    otherwise be invisible to a renderer-level assertion."""
+    unavailable = _make_service(available=False).get_claims_for_page_enveloped("p001")
+
+    service = _make_service()
+
+    async def _overloaded(*a, **k):
+        raise DiscoveryOverload("busy")
+
+    service._run_off_loop = _overloaded
+    busy = asyncio.run(service.get_claims_for_page_enveloped_async("p001"))
+
+    async def _timed_out(*a, **k):
+        raise DiscoveryUnavailable("timeout")
+
+    service._run_off_loop = _timed_out
+    timed_out = asyncio.run(service.get_claims_for_page_enveloped_async("p001"))
+
+    for env in (unavailable, busy, timed_out):
+        payload = _json.dumps(env, ensure_ascii=False)
+        for forbidden in ("review_overlay", "ci_low", "ci_high", "precision", "Expert-reviewed"):
+            assert forbidden not in payload
+
+
+def test_expert_reviewed_badge_never_appears_in_service_output_for_a_human_confirmed_row(d13g_service):
+    """D-13f: no row on any surface claims human review. The badge string must
+    not appear ANYWHERE in the service's output for the very row whose
+    adjudication_status would produce it."""
+    from shared.discovery_band_labels import review_overlay
+
+    badge_en = review_overlay("human_confirmed", "en")
+    badge_he = review_overlay("human_confirmed", "he")
+    assert "Expert-reviewed" in badge_en  # the fixture reaches its own assertion
+
+    outputs = [
+        d13g_service.get_claims_for_page_enveloped(_D13G_HIDDEN_PAGE),
+        d13g_service.get_claims_for_page_enveloped(_D13G_SHOWN_PAGE),
+        d13g_service.get_claims_for_page_enveloped(_D13G_HIDDEN_PAGE, lang="he"),
+    ]
+    for env in outputs:
+        payload = _json.dumps(env, ensure_ascii=False)
+        assert badge_en not in payload
+        assert badge_he not in payload
+
+
+# ---------------------------------------------------------------------------
+# The band presentation goes through serialize_banded_claim, never a hardcoded
+# string (T-136-14-08); and the two enveloped shapes share ONE implementation.
+# ---------------------------------------------------------------------------
+
+def test_no_hardcoded_band_display_string_in_the_service_module():
+    import pathlib
+
+    from shared.discovery_band_labels import BAND_LABELS
+
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    source = (repo_root / "shared" / "discovery_service.py").read_text(encoding="utf-8")
+    for entry in BAND_LABELS.values():
+        for label in entry.values():
+            assert label not in source, (
+                f"band display string {label!r} is hardcoded in the service -- "
+                "presentation must go through serialize_banded_claim (SC#1)"
+            )
+    assert "serialize_banded_claim" in source
+
+
+def test_bandless_row_raises_rather_than_rendering_without_its_band():
+    from shared.discovery_band_labels import serialize_banded_claim
+
+    with pytest.raises(ValueError):
+        serialize_banded_claim({"evidence_source": "track1_direct", "confidence_band": None,
+                                "adjudication_status": "unreviewed"})
+
+
+def test_enveloped_sync_and_async_are_one_implementation_in_two_shapes(monkeypatch):
+    monkeypatch.setenv("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", "0")
+    service = _make_service()
+    sentinel = make_envelope(STATUS_OK, [{"page_id": "sentinel"}], 1)
+    calls = []
+
+    def _sync(page_id, page=1, page_size=None, include_review=False, lang="en"):
+        calls.append((page_id, page, page_size, include_review, lang))
+        return sentinel
+
+    service.get_claims_for_page_enveloped = _sync
+    got = asyncio.run(service.get_claims_for_page_enveloped_async("p001"))
+    assert got == sentinel, "the async shape must delegate to the SYNC one, not re-query"
+    assert calls, "the async wrapper did not call the sync implementation"
+
+
+# ---------------------------------------------------------------------------
+# web/discovery.py: the enveloped wrappers still fail OPEN, but the failure is
+# now NAMED rather than collapsed into an empty list.
+# ---------------------------------------------------------------------------
+
+def test_web_wrapper_returns_unavailable_envelope_when_discovery_is_off(monkeypatch):
+    import web.discovery as web_discovery
+
+    monkeypatch.setattr(web_discovery, "discovery_available", lambda: False)
+    env = asyncio.run(web_discovery.get_claims_for_page_enveloped("p001"))
+    assert env["status"] == STATUS_UNAVAILABLE
+    assert env["items"] == [] and env["total"] == 0
+    # The pre-existing list wrapper is untouched and still fails open to [].
+    assert asyncio.run(web_discovery.get_claims_for_page("p001")) == []
+
+
+def test_web_enveloped_wrapper_honours_the_browse_timeout(monkeypatch):
+    """The wrapper must dispatch through the service's browse-budget path --
+    the enveloped call is on the browse hot path, where PERF-01 caps added
+    latency at p95 <= 150 ms and the per-query timeout at 2 s."""
+    import web.discovery as web_discovery
+
+    monkeypatch.setattr(web_discovery, "discovery_available", lambda: True)
+    seen = {}
+
+    async def _fake(page_id, page=1, page_size=None, include_review=False, lang="en"):
+        seen["timeout"] = web_discovery._service._browse_timeout()
+        return make_envelope(STATUS_OK, [], 0)
+
+    monkeypatch.setattr(
+        web_discovery._service, "get_claims_for_page_enveloped_async", _fake)
+    monkeypatch.setenv("DISCOVERY_QUERY_TIMEOUT_BROWSE", "1.25")
+    env = asyncio.run(web_discovery.get_claims_for_page_enveloped("p001"))
+    assert env["status"] == STATUS_OK
+    assert seen["timeout"] == 1.25

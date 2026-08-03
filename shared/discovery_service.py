@@ -56,9 +56,18 @@ import os
 import sqlite3
 import threading
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from shared.discovery_band_labels import serialize_banded_claim
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
+from shared.discovery_surface_projection import (
+    STATUS_OK,
+    busy_envelope,
+    make_envelope,
+    surface_safe_claim,
+    timeout_envelope,
+    unavailable_envelope,
+)
 from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
@@ -197,6 +206,33 @@ def _build_band_rank_case_sql() -> str:
 
 
 _BAND_RANK_CASE_SQL = _build_band_rank_case_sql()
+
+
+# ---------------------------------------------------------------------------
+# D-13g: the default-surface routing predicate.
+#
+# The bug this replaces: the page query filtered `routing_status = 'shipped'`
+# in SQL, while `shared/discovery_band_labels.py::is_default_eligible` returns
+# True for `human_confirmed` UNCONDITIONALLY, before it inspects routing --
+# and `discovery-band-labels-v1.md` SS4 says the same. So a human-confirmed row
+# that routing had demoted was dropped by the query BEFORE the predicate meant
+# to protect it ever ran: 19 of the 121 human-confirmed rows across all
+# human-confirmed evidence, and 14 of 116 on the DISPLAY evidence this query
+# actually reads. Live symptom: on one manuscript, one page's human-confirmed
+# row was hidden while another page's human-confirmed row showed -- two rows a
+# human confirmed, treated differently.
+#
+# The fix is in SQL, not in a display-layer patch, and it MIRRORS the
+# eligibility rule the build already materializes into
+# `discovery_identification` (`scripts/build_discovery_sidecar.py::
+# populate_discovery_identification`) -- so the restore cannot be undone one
+# layer down by the identification join.
+# ---------------------------------------------------------------------------
+
+_CLAIMS_DEFAULT_ROUTING_CLAUSE = (
+    "AND (de.routing_status = 'shipped' "
+    "OR de.adjudication_status = 'human_confirmed')"
+)
 
 # The per-work "ranked" CTE body (H1): every witness claim's display
 # evidence for `work_id`, its physical-MS unit_key (a real unit_id, or a
@@ -383,6 +419,10 @@ class DiscoveryService:
         # Browse-enrichment LRU (version-keyed, F15).
         self._browse_lru: "OrderedDict[tuple, Any]" = OrderedDict()
         self._browse_lru_lock = threading.Lock()
+
+        # 136-14: the `scope='band'` measurement lookup, cached per
+        # (path, version) -- see _band_measurements().
+        self._band_measurement_cache: Optional[Tuple[tuple, Dict]] = None
 
         # Heavy-query bounded concurrency (mirrors web/search_api.py's
         # _HeavySemaphoreState, kept per-instance since this class -- unlike
@@ -602,22 +642,75 @@ class DiscoveryService:
         """PANEL-01/02: the manuscript's banded claims on this page, each at
         its display_evidence_id-selected band.
 
-        L1 fix: defaults to SHIPPED-only -- a review_only display evidence
-        row (e.g. a family-router co-citation collection, C-1/R3/F9) is
-        excluded unless the caller explicitly opts in via
-        ``include_review=True``. Review-only rows still PERSIST in the
-        sidecar (queryable) -- they are only hidden from this default read
-        surface, never deleted (docs/specs/discovery-sidecar-schema-v1.md
-        SS7)."""
+        Defaults to the DEFAULT-SURFACE population, which is NOT "shipped
+        only" -- see ``_CLAIMS_DEFAULT_ROUTING_CLAUSE`` and D-13g. Review-only
+        rows still PERSIST in the sidecar (queryable) -- they are only hidden
+        from this default read surface, never deleted
+        (docs/specs/discovery-sidecar-schema-v1.md SS7); ``include_review=True``
+        opts into all of them.
+
+        Signature and return type are UNCHANGED from 134-06 (a list of dicts,
+        ``[]`` on every failure path, never an exception). The row now carries
+        the panel's display fields as well; the total is available only through
+        the enveloped shape below, since adding it here would change the return
+        type."""
+        rows, _total = self._query_claims_for_page(
+            page_id, page=page, page_size=page_size, include_review=include_review)
+        return rows
+
+    # ------------------------------------------------------------------
+    # 136-14 Task 1: the panel's ONE query.
+    # ------------------------------------------------------------------
+
+    def _query_claims_for_page(
+        self, page_id: str, *, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """The single page query: claim + display evidence + the materialized
+        identification + the DISPLAY work, plus the real total, in ONE
+        statement.
+
+        ``COUNT(*) OVER ()`` is what makes the total free: SQLite evaluates a
+        window function over the whole result set BEFORE ``LIMIT``, so the
+        panel gets its "N identifications" header without a second query and
+        without a per-row follow-up (T-136-14-03).
+
+        The identification join is a LEFT join deliberately. Its eligibility
+        rule (`shipped` OR `human_confirmed`) matches this query's own default
+        predicate, so it is total for the default population -- but under
+        ``include_review=True`` a review-only/unreviewed claim legitimately has
+        NO identification row, and an inner join would silently drop exactly
+        the rows the opt-in flag exists to reveal. A missing identification
+        surfaces as a NULL bucket, never as a vanished row.
+
+        ``eligibility_basis`` is derived PER ROW here rather than read from
+        ``discovery_identification.eligibility_basis``, for two reasons. It is
+        more precise: the stored column is an AGGREGATE over an identification's
+        evidence rows, so an identification carrying one shipped row and one
+        restored review-only row reports ``shipped`` for both, mislabelling the
+        row the surface must annotate. And it is more portable: that column is
+        not yet in the schema contract's authorized column list (a dated
+        amendment is owed), so a contract-shaped artifact may not carry it at
+        all. Three closed values: ``shipped``, ``human_confirmed`` (D-13g's
+        restore) and ``review_opt_in`` (present only because the caller passed
+        ``include_review``).
+
+        The identity join is on ``display_work_id``, NEVER ``canonical_work_id``:
+        the latter is not unique on ``works`` (15 duplicated groups on the live
+        asset, three with different titles and mixed source corpora), so joining
+        on it FANS OUT the identification grain (64,509 -> 65,587 rows) and
+        makes both the displayed title and ``identity_visibility`` a matter of
+        which row the join happened to return.
+        """
         if not self.is_available():
-            return []
+            return [], 0
         conn = self._get_conn()
         if conn is None:
-            return []
+            return [], 0
         page = self._clamp_page(page)
         page_size = self._clamp_page_size(page_size)
         offset = (page - 1) * page_size
-        routing_clause = "" if include_review else "AND de.routing_status = 'shipped'"
+        routing_clause = "" if include_review else _CLAIMS_DEFAULT_ROUTING_CLAUSE
         try:
             cur = conn.execute(
                 f"""
@@ -626,21 +719,157 @@ class DiscoveryService:
                        de.adjudication_status, de.audit_status, de.routing_status, de.routing_reason,
                        de.is_new, de.a_page_id, de.sys_id, de.span_start, de.span_end,
                        de.text_layer, de.snapshot_hash,
-                       w.neutral_title, w.author, w.genre
+                       de.matched_letters, de.n_spans, de.band_rank,
+                       de.coverage_ppm, de.coverage_status,
+                       de.novelty_status, de.novelty_source_label,
+                       w.neutral_title, w.author, w.genre, w.canonical_work_id,
+                       di.identification_id, di.display_work_id, di.main_pool,
+                       di.main_pool_reason, di.page_count AS identification_page_count,
+                       CASE WHEN de.routing_status = 'shipped' THEN 'shipped'
+                            WHEN de.adjudication_status = 'human_confirmed'
+                                 THEN 'human_confirmed'
+                            ELSE 'review_opt_in' END AS eligibility_basis,
+                       dw.neutral_title AS display_neutral_title,
+                       dw.author AS display_author,
+                       dw.genre AS display_genre,
+                       CASE WHEN de.routing_status <> 'shipped'
+                             AND de.adjudication_status = 'human_confirmed'
+                            THEN 1 ELSE 0 END AS restored_by_human_confirmation,
+                       CASE WHEN de.routing_status <> 'shipped'
+                             AND de.routing_reason = 'low_coverage'
+                            THEN 1 ELSE 0 END AS low_coverage_marker,
+                       COUNT(*) OVER () AS _total_rows
                 FROM discovery_claim dc
                 JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
                 JOIN works w ON w.work_id = dc.work_id
+                LEFT JOIN discovery_identification di
+                       ON di.sys_id = de.sys_id
+                      AND di.canonical_work_id = w.canonical_work_id
+                LEFT JOIN works dw ON dw.work_id = di.display_work_id
                 WHERE dc.page_id = ?
                 {routing_clause}
-                ORDER BY dc.work_id
+                ORDER BY COALESCE(de.band_rank, {_UNRANKED_BAND}) ASC, dc.work_id ASC
                 LIMIT ? OFFSET ?
                 """,
                 (page_id, page_size, offset),
             )
-            return [dict(row) for row in cur.fetchall()]
+            rows = [dict(row) for row in cur.fetchall()]
         except Exception as e:
             logger.error("DiscoveryService.get_claims_for_page error for %s: %s", page_id, e)
-            return []
+            return [], 0
+        total = rows[0].pop("_total_rows", len(rows)) if rows else 0
+        for row in rows[1:]:
+            row.pop("_total_rows", None)
+        return rows, int(total)
+
+    def _band_measurements(self) -> Dict[Tuple[str, str], Tuple[Optional[str], Optional[float]]]:
+        """`(evidence_source, confidence_band) -> (measurement_status, ci_low)`
+        for every stored `scope='band'` row, cached per sidecar version.
+
+        Read ONCE per version rather than joined into the page query on
+        purpose: `band_precision` carries `precision`/`ci_low`/`ci_high`, and a
+        join would put those columns on every raw row the service returns --
+        one careless caller away from a D-06 violation. Here they exist only
+        inside this module, are consumed by `serialize_banded_claim`, and are
+        dropped by `surface_safe_claim` before anything leaves.
+        """
+        version = None
+        if self._sidecar_version_provider is not None:
+            try:
+                version = self._sidecar_version_provider()
+            except Exception:
+                version = None
+        key = (self._last_path, version)
+        cached = self._band_measurement_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        measurements: Dict[Tuple[str, str], Tuple[Optional[str], Optional[float]]] = {}
+        conn = self._get_conn()
+        if conn is not None:
+            try:
+                cur = conn.execute(
+                    "SELECT evidence_source, confidence_band, measurement_status, ci_low "
+                    "FROM band_precision WHERE scope = 'band'"
+                )
+                for row in cur.fetchall():
+                    measurements[(row["evidence_source"], row["confidence_band"])] = (
+                        row["measurement_status"], row["ci_low"],
+                    )
+            except Exception as e:
+                logger.error("DiscoveryService._band_measurements error: %s", e)
+                return {}
+        self._band_measurement_cache = (key, measurements)
+        return measurements
+
+    def _present_claim_row(
+        self, row: Mapping[str, Any], measurements, lang: str,
+    ) -> Dict[str, Any]:
+        """One raw query row -> the surface-safe panel row.
+
+        Band presentation goes through `serialize_banded_claim`, which RAISES
+        rather than emitting a bandless presentation (SC#1); the result is then
+        projected through the allowlist, which drops `review_overlay` and the
+        band measurement inputs. Both steps are mandatory: the serializer
+        guarantees the band is present, the projection guarantees the badge is
+        not.
+        """
+        measurement_status, ci_low = measurements.get(
+            (row.get("evidence_source"), row.get("confidence_band")), (None, None))
+        banded = serialize_banded_claim(
+            {**row, "measurement_status": measurement_status, "ci_low": ci_low}, lang)
+
+        display_title = row.get("display_neutral_title")
+        claim_title = row.get("neutral_title")
+        title = display_title if display_title else claim_title
+        presented = {
+            **row,
+            "band_label": banded["band_label"],
+            "measurement_status": banded["measurement_status"],
+            "default_eligible": banded["default_eligible"],
+            "display_work_id": row.get("display_work_id") or row.get("work_id"),
+            "neutral_title": title or None,
+            "title_missing": not bool(title),
+            "author": row.get("display_author") if display_title else row.get("author"),
+            "genre": row.get("display_genre") if display_title else row.get("genre"),
+            "relation_kind": row.get("claim_type"),
+            "main_pool": None if row.get("main_pool") is None else bool(row.get("main_pool")),
+            "restored_by_human_confirmation": bool(row.get("restored_by_human_confirmation")),
+            "low_coverage_marker": bool(row.get("low_coverage_marker")),
+        }
+        return surface_safe_claim(presented)
+
+    def get_claims_for_page_enveloped(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False, lang: str = "en",
+    ) -> Dict[str, Any]:
+        """The SYNC enveloped shape of `get_claims_for_page` (D-13).
+
+        Two shapes, ONE implementation. This sync callable exists because the
+        panel crosses into `run.io_bound` with an explicit client, and an async
+        function handed to a sync worker silently returns a coroutine nobody
+        awaits; the async wrapper below exists because every other caller is on
+        the loop. Both go through this method -- never two query paths.
+
+        A failed query returns `unavailable`, never `ok` with an empty list: an
+        outage that renders as a genuine zero is the exact defect D-13 exists to
+        prevent (the panel hides itself on a SUCCESSFUL zero).
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        try:
+            rows, total = self._query_claims_for_page(
+                page_id, page=page, page_size=page_size, include_review=include_review)
+            measurements = self._band_measurements()
+            items = [self._present_claim_row(row, measurements, lang) for row in rows]
+        except Exception as e:
+            logger.error(
+                "DiscoveryService.get_claims_for_page_enveloped error for %s: %s", page_id, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        return make_envelope(
+            STATUS_OK, items, total,
+            meta={"page_id": page_id, "include_review": bool(include_review)},
+        )
 
     def get_pages_related_to_page(
         self, page_id: str, page: int = 1, page_size: Optional[int] = None,
@@ -1018,6 +1247,62 @@ class DiscoveryService:
             )
         return await self._browse_cached_call(
             "pages_related_to_page", self.get_pages_related_to_page, (page_id, page, page_size)
+        )
+
+    # ------------------------------------------------------------------
+    # 136-14: the enveloped async shapes. ONE exception->status mapping,
+    # shared by every enveloped read, so the four states cannot be
+    # classified differently on two surfaces.
+    # ------------------------------------------------------------------
+
+    async def _enveloped_off_loop(
+        self, sync_fn: Callable, args: tuple, *, timeout: float,
+        heavy: bool = False, cache_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run an enveloped SYNC callable off the loop and classify its failure
+        modes into the closed status vocabulary.
+
+        The three outage statuses come from three genuinely different places
+        and must stay distinguishable (T-136-01): the availability predicate
+        returning False is `unavailable` (handled inside the sync callable),
+        `DiscoveryUnavailable` from the timeout path is `timeout`, and the
+        bounded-concurrency rejection is `busy`.
+
+        Blocking work goes through `_run_off_loop` (`run_in_executor` +
+        `asyncio.wait`, NEVER `asyncio.wait_for`, since executor threads are
+        not cancellable). The web app runs a SINGLE uvicorn worker: a
+        synchronous database call on the loop stalls every concurrent request
+        while burning no CPU, which is why it is invisible in load average.
+        """
+        try:
+            if cache_name is not None:
+                cached = await self._browse_cached_call(cache_name, sync_fn, args)
+                # The LRU hands the SAME envelope object to every caller; a
+                # surface that appended to `items` would poison the cache for
+                # the next request. Copy the mutable containers (rows
+                # themselves are treated as immutable by contract).
+                return {
+                    **cached,
+                    "items": list(cached.get("items") or []),
+                    "meta": dict(cached.get("meta") or {}),
+                }
+            return await self._run_off_loop(sync_fn, *args, timeout=timeout, heavy=heavy)
+        except DiscoveryOverload:
+            return busy_envelope(meta={"reason": "bounded_concurrency"})
+        except DiscoveryUnavailable:
+            return timeout_envelope(meta={"reason": "query_timeout"})
+
+    async def get_claims_for_page_enveloped_async(
+        self, page_id: str, page: int = 1, page_size: Optional[int] = None,
+        include_review: bool = False, lang: str = "en",
+    ) -> Dict[str, Any]:
+        """The async shape of `get_claims_for_page_enveloped` -- a thin wrapper
+        over the SAME sync implementation, never a second query path."""
+        return await self._enveloped_off_loop(
+            self.get_claims_for_page_enveloped,
+            (page_id, page, page_size, include_review, lang),
+            timeout=self._browse_timeout(),
+            cache_name="claims_for_page_enveloped",
         )
 
     async def get_evidence_async(

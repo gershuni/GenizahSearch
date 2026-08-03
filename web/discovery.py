@@ -22,8 +22,13 @@ import logging
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import scripts.discovery_ids as _ids
-from shared.discovery_errors import DiscoveryUnavailable
+from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
 from shared.discovery_service import DiscoveryService
+from shared.discovery_surface_projection import (
+    busy_envelope,
+    timeout_envelope,
+    unavailable_envelope,
+)
 from web.discovery_assets import (
     discovery_available,
     discovery_db_path,
@@ -70,6 +75,37 @@ async def get_claims_for_page(
     except DiscoveryUnavailable:
         logger.info("discovery.get_claims_for_page: temporarily unavailable for page_id=%s", page_id)
         return []
+
+
+async def get_claims_for_page_enveloped(
+    page_id: str, *, page: int = 1, page_size: Optional[int] = None,
+    include_review: bool = False, lang: str = "en",
+) -> Dict[str, Any]:
+    """PANEL-01/02, the ENVELOPED shape (D-13, plan 136-14).
+
+    Prefer this over `get_claims_for_page` above on any surface that decides
+    whether to RENDER: the list-returning wrapper collapses a timeout, an
+    overload, an absent sidecar and a genuine zero all into `[]`, so the panel's
+    hide-on-zero rule would hide the panel during an outage exactly as though
+    the manuscript had nothing on it. Only ~17% of manuscripts carry shipped
+    claims, so hiding on a zero is right -- which is precisely why the zero has
+    to be a TRUE zero.
+
+    Still fails open (never raises); the failure is simply *named* now.
+    """
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_claims_for_page_enveloped_async(
+            page_id, page=page, page_size=page_size,
+            include_review=include_review, lang=lang,
+        )
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        logger.info("discovery.get_claims_for_page_enveloped: busy for page_id=%s", page_id)
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        logger.info("discovery.get_claims_for_page_enveloped: timeout for page_id=%s", page_id)
+        return timeout_envelope(meta={"reason": "query_timeout"})
 
 
 async def get_pages_related_to_page(
