@@ -249,3 +249,26 @@ rows that never ship. Only **1,253 shipped rows** are unchecked — 0.7% of the 
 evidence rows — corresponding to the 652 candidate pairs the model left unresolved. These fail in
 the safe direction: `not_checked` never renders as a candidate find, so the cost is a small number
 of possible discoveries staying hidden, never a false claim.
+
+## Task 2 — owner deploy authorization
+
+**Owner, 2026-08-03, verbatim:** *"OK proceed to deploy"* — given after reviewing the pre-deploy
+content of the artifact itself (`PREDEPLOY-candidates-by-work.PRIVATE.html`, all 4,152 shipping
+candidate finds) and the held-out set (`EXCLUDED-STRONG-nonbible.PRIVATE.html`, 975 rows), and after
+rulings S and T.
+
+Authorized: deploy **the public projection and only the public projection**, code first then the
+artifact, `DISCOVERY_ENABLED` OFF throughout. The private asset is NOT deployed and NOT staged on the
+web host.
+
+**Pre-flight checks run before touching production:**
+
+| check | result |
+|---|---|
+| production HEAD | `b3faedd8` (2026-07-31, the v8.5.2 web release) — an ancestor of local HEAD, 157 commits behind. The box's branch NAME (`phase-98-nli-resilience`) is stale leftover, not stale code. |
+| `DISCOVERY_ENABLED` on the box | not set in `.env` → defaults OFF |
+| live manifest | points at `discovery-v1-33499c5b…` (the current v2 asset), the rollback target |
+| web-facing diff | `web/discovery_assets.py`, `web/pages/help.py`, `web/static/common.css` only — every help section gated on `discovery_available()`, CSS purely additive (0 deletions) |
+| other app files | `genizah_translations.py` (additive discovery strings, dead until the surfaces exist) and `CLAUDE.md` |
+
+Conclusion: with the flag OFF the code deploy is behavior-neutral for every existing surface.
