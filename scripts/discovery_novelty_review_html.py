@@ -359,6 +359,11 @@ mark.hl{background:#facc15;color:#000;border-radius:3px;padding:0 2px}
                 A(f'<span class="pill">{c["matched_letters"]:,} letters</span>')
             if c["density"] is not None:
                 A(f'<span class="pill">{c["density"]*100:.0f}% of page</span>')
+            # Optional per-case note: used by the excluded-strong review to show
+            # WHY the main-pool rule held this row back, which is the thing under
+            # judgement there.
+            if c.get("note"):
+                A(f'<span class="pill byp">{html.escape(str(c["note"]))}</span>')
             A("</div>")
             A(f'<div class="ex">{c["ex"]}</div>')
             if not c["bypass"]:
@@ -411,12 +416,60 @@ def _public_candidate_keys(public_db: str, asset: str) -> set:
     }
 
 
+def _excluded_strong_keys(public_db: str, asset: str, max_band_rank: int):
+    """Non-Bible `fills_gap` identifications that the main-pool rule holds OUT of
+    the default view despite STRONG evidence.
+
+    Measured on the 136-13 public artifact: the corpus is 35.1% non-Bible but the
+    default candidates surface is only 18.5% non-Bible, and 2,189 non-Bible
+    fills_gap rows sit outside the pool. The two exclusion reasons that hit
+    non-Bible ~3x harder than Bible are `shared_wording` and `overlapping_tie` --
+    which is what the witness-vs-quoter problem looks like at scale. This
+    selection exists so the rule can be judged on the actual cases rather than on
+    the counts, and so gen-2 inherits evidence instead of one anecdote.
+
+    Returns {key: main_pool_reason}."""
+    pub = sqlite3.connect(f"file:{public_db}?mode=ro", uri=True)
+    try:
+        rows = pub.execute(
+            """SELECT di.sys_id, di.canonical_work_id, di.main_pool_reason
+               FROM discovery_identification di
+               JOIN works w ON w.work_id = di.display_work_id
+               WHERE di.novelty_status = 'fills_gap'
+                 AND di.main_pool = 0
+                 AND di.best_band_rank IS NOT NULL
+                 AND di.best_band_rank <= ?
+                 AND NOT (COALESCE(w.genre, '') LIKE 'Bible%')""",
+            (max_band_rank,),
+        ).fetchall()
+    finally:
+        pub.close()
+    src = sqlite3.connect(f"file:{asset}?mode=ro", uri=True)
+    try:
+        members = collections.defaultdict(list)
+        for work_id, canon in src.execute("SELECT work_id, canonical_work_id FROM works"):
+            members[canon].append(work_id)
+    finally:
+        src.close()
+    out = {}
+    for sys_id, canon, reason in rows:
+        for work_id in members.get(canon, ()):
+            out[f"{sys_id}::{work_id}"] = reason
+    return out
+
+
 def build_works_page(args) -> int:
     print("loading verdicts…")
     verdicts = load_verdicts(args.verdicts)
     fg = [k for k, s in verdicts.items() if s == SHIPS_AS_CANDIDATE]
     print(f"{len(fg):,} fills_gap rows in the verdict cache")
-    if args.restrict_to_public:
+    notes = {}
+    if args.excluded_strong:
+        notes = _excluded_strong_keys(args.excluded_strong, args.asset, args.max_band_rank)
+        fg = [k for k in fg if k in notes]
+        print(f"{len(fg):,} are STRONG (band_rank <= {args.max_band_rank}) non-Bible fills_gap "
+              f"rows the main-pool rule holds out of the default view")
+    elif args.restrict_to_public:
         shipping = _public_candidate_keys(args.restrict_to_public, args.asset)
         fg = [k for k in fg if k in shipping]
         print(f"{len(fg):,} of those actually ship as default-visible candidates "
@@ -447,6 +500,7 @@ def build_works_page(args) -> int:
             "manuscript": libraries.get(c.sys_id, {}).get("shelfmark") or f"sys_id {c.sys_id}",
             "page": page, "matched_letters": ml, "density": dens, "span": (s0, s1),
             "bypass": not aids, "aids": aids,
+            "note": (f"held out: {notes[key]}" if notes.get(key) else None),
         })
 
     print(f"streaming transcriptions for {len(wanted):,} pages (one pass over the 1.47 GB file)…")
@@ -483,6 +537,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--fills-gap", type=int, default=25)
     p.add_argument("--seed", type=int, default=20260803)
     p.add_argument("--cost", default="40.12")
+    p.add_argument("--excluded-strong", metavar="PUBLIC_DB", default=None,
+                   help="Review the OTHER side of the main-pool rule: non-Bible fills_gap rows "
+                        "with strong evidence that the rule holds OUT of the default view, each "
+                        "labelled with the reason it was held out. Takes precedence over "
+                        "--restrict-to-public.")
+    p.add_argument("--max-band-rank", type=int, default=2,
+                   help="Strength ceiling for --excluded-strong (lower rank = stronger). Default 2.")
     p.add_argument("--restrict-to-public", metavar="PUBLIC_DB", default=None,
                    help="Path to the PUBLIC projection. Restricts the rendered rows to the "
                         "candidate finds a reader would actually meet there (default-visible "
