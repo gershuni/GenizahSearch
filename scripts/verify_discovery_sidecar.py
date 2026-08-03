@@ -1186,6 +1186,7 @@ _VISIBILITY_VALUES = frozenset({"public", "private"})
 # `public`.
 _AUDIENCE_VALUES = frozenset({"public", "private"})
 _PRIVATE_AUDIENCE = "private"
+_PUBLIC_AUDIENCE = "public"
 # The closed coverage validity vocabulary (Amendment (A)).
 _COVERAGE_STATUSES = frozenset({"measured", "no_denominator", "not_applicable"})
 # The closed main_pool_reason vocabulary (Amendment (B)).
@@ -1596,22 +1597,31 @@ def check_works_genre_vocabulary(conn: sqlite3.Connection, meta: dict) -> List[s
     return violations
 
 
-def check_meta_audience(conn: sqlite3.Connection, meta: dict) -> List[str]:
-    """Amendment (C1): the PRIVATE build writes exactly `meta.audience =
-    'private'`, drawn from the closed enum.
+def check_meta_audience(
+    conn: sqlite3.Connection, meta: dict, expected_audience: str = _PRIVATE_AUDIENCE
+) -> List[str]:
+    """Amendment (C1): an artifact declares its own audience, drawn from the
+    closed enum, and it must be the audience it was verified AS.
 
     This is the field the runtime loader gates on so a public route can never
     resolve a private artifact by accident. Without it the exclusion is
     procedural (a code-review discipline) rather than structural (a fact the
-    loader itself can check)."""
+    loader itself can check).
+
+    2026-08-03 (136-13): `expected_audience` added. This verifier hard-coded
+    `'private'`, so running it over the PUBLIC projection -- which plan 136-13
+    requires as a gate -- reported a guaranteed false violation, and the only way
+    to read the result was to eyeball which failures "did not apply". A gate
+    whose output needs manual triage is not a gate."""
     audience = meta.get("audience")
     if audience is None:
-        return ["meta.audience: absent -- the private artifact must declare its own audience"]
+        return ["meta.audience: absent -- the artifact must declare its own audience"]
     if audience not in _AUDIENCE_VALUES:
         return ["meta.audience: value outside the closed {public, private} enum"]
-    if audience != _PRIVATE_AUDIENCE:
+    if audience != expected_audience:
         return [
-            f"meta.audience: the private build must write {_PRIVATE_AUDIENCE!r} "
+            f"meta.audience: this artifact declares {audience!r} but was verified as "
+            f"{expected_audience!r} -- pass --audience to verify a public projection "
             "(only scripts/project_discovery_public.py may write 'public')"
         ]
     return []
@@ -1636,10 +1646,30 @@ def check_authorized_index_set(conn: sqlite3.Connection) -> List[str]:
 # 8. Membership frame_content_hash
 # ---------------------------------------------------------------------------
 
-def check_frame_content_hash(conn: sqlite3.Connection, meta: dict, expected_frame_hash) -> List[str]:
+def check_frame_content_hash(
+    conn: sqlite3.Connection, meta: dict, expected_frame_hash,
+    audience: str = _PRIVATE_AUDIENCE,
+) -> List[str]:
+    """On a PRIVATE artifact the frame hash recomputes to the value it stores.
+
+    On a PUBLIC projection it CANNOT: the frame hash is membership-based, and
+    the projection deliberately removes rows, so recomputing over the public
+    membership necessarily yields a different value. What the public artifact's
+    `meta.frame_content_hash` records is the frame it was PROJECTED FROM, and
+    that is the invariant worth checking -- it pins the projection to a specific
+    private bake. Recomputing and demanding equality would be checking that the
+    projection did nothing (2026-08-03, 136-13)."""
     violations = []
-    recomputed = sidecar_build.compute_frame_content_hash(conn)
     meta_hash = meta.get("frame_content_hash")
+    if audience == _PUBLIC_AUDIENCE:
+        if expected_frame_hash is not None and meta_hash != expected_frame_hash:
+            violations.append(
+                f"frame_content_hash: public artifact records source frame {meta_hash} "
+                f"!= --expected-frame-hash {expected_frame_hash} -- it was projected "
+                "from a different private bake than the one being verified"
+            )
+        return violations
+    recomputed = sidecar_build.compute_frame_content_hash(conn)
     if recomputed != meta_hash:
         violations.append(
             f"frame_content_hash mismatch: recomputed {recomputed} != meta.frame_content_hash {meta_hash}"
@@ -1656,7 +1686,8 @@ def check_frame_content_hash(conn: sqlite3.Connection, meta: dict, expected_fram
 # verify() -- the single all-invariant entry point
 # ---------------------------------------------------------------------------
 
-def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optional[str] = None) -> int:
+def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optional[str] = None,
+           audience: str = _PRIVATE_AUDIENCE) -> int:
     """Run ALL release-contract invariants over `db_path`. Returns 0 on a
     clean DB, 1 (fail-closed) on ANY violation. Prints every violation found
     to stderr.
@@ -1679,7 +1710,7 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         count_violations, meta = check_release_contract_counts(conn)
         violations += count_violations
         violations += check_band_precision(conn, meta)
-        violations += check_frame_content_hash(conn, meta, expected_frame_hash)
+        violations += check_frame_content_hash(conn, meta, expected_frame_hash, audience)
         # v2 re-distill invariants (135-06).
         violations += check_no_mixed_enum_state(conn)
         violations += check_band_vocabulary(
@@ -1705,7 +1736,7 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         violations += check_identification_grain(conn)
         violations += check_manuscript_display_carries_no_reference_content(conn)
         violations += check_works_genre_vocabulary(conn, meta)
-        violations += check_meta_audience(conn, meta)
+        violations += check_meta_audience(conn, meta, audience)
         violations += check_authorized_index_set(conn)
         violations += check_kept_tie_names_its_pair(conn)
         violations += check_coverage_gap_report(conn)  # non-fatal report
@@ -1731,6 +1762,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("db_path", help="Path to the discovery.db sidecar to verify")
+    parser.add_argument("--audience", choices=["private", "public"], default="private",
+                        help="Which artifact is being verified. 'public' selects the "
+                             "public-projection profile: meta.audience must be 'public', and "
+                             "frame_content_hash is checked as the SOURCE frame it was projected "
+                             "from rather than recomputed over the (deliberately smaller) public "
+                             "membership. Default 'private'.")
     parser.add_argument("--expected-frame-hash", metavar="HEX", default=None,
                         help="Expected membership frame_content_hash (hex); required for a full "
                              "release-gate run, optional for ad-hoc local verification")
@@ -1753,7 +1790,8 @@ def main(argv=None) -> int:
         if expected_vocab not in (None, "v2"):
             parser.error("--require-v2 conflicts with --expected-band-vocabulary v1")
         expected_vocab = "v2"
-    return verify(args.db_path, args.expected_frame_hash, expected_band_vocabulary=expected_vocab)
+    return verify(args.db_path, args.expected_frame_hash, expected_band_vocabulary=expected_vocab,
+                  audience=args.audience)
 
 
 if __name__ == "__main__":

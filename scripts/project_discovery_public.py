@@ -33,7 +33,6 @@ and refuses to leave a masking-dirty artifact on disk.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sqlite3
@@ -58,6 +57,24 @@ class ProjectionError(Exception):
     output path, or a masking-gate failure the caller must not silently
     swallow. Distinct from an ordinary "no violations" empty-list return --
     this exception means the build itself must stop."""
+
+
+# The routing reason whose meaning DEPENDS on a surviving audit row (see the
+# dependency-closure block in ProjectionContext).
+_LATER_SHARED_TEXT = "later_shared_text"
+
+# Dependency closure iterates because pruning evidence can make a work
+# unreachable, which can drop a further audit row, which can orphan further
+# evidence. A bound that is never reached in practice, so a non-converging
+# graph raises instead of looping forever.
+_MAX_CLOSURE_PASSES = 25
+
+# G9: claim types that ASSERT a witness relation and therefore require at least
+# one witness-kind evidence row to survive with them.
+_WITNESS_ASSERTING_CLAIM_TYPES = (
+    ids.CLAIM_TYPE_DIRECT_WITNESS,
+    ids.CLAIM_TYPE_QUOTES_THIS_WORK,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +176,97 @@ class ProjectionContext:
                 surviving_evidence_by_claim.setdefault(ev["claim_id"], []).append(ev)
                 surviving_evidence_ids.add(ev["evidence_id"])
                 reachable_sys_ids.add(ev["sys_id"])
+        # --- Dependency-closure pruning (2026-08-03, 136-13 gate 5) --------
+        #
+        # `routing_reason='later_shared_text'` ASSERTS that an earlier work beat
+        # this one on this page, and `check_unknown_date_never_demoted` requires
+        # a backing `demoted` audit row with both years non-NULL. But an audit
+        # row naming a non-public work is dropped by
+        # `_project_discovery_routing_audit` -- correctly, since publishing it
+        # would disclose a restricted work's identity. Measured on the first real
+        # run: 680 demoted audit rows dropped (486 naming a non-public
+        # demoted_work_id), orphaning 164 surviving evidence rows.
+        #
+        # Owner ruling (2026-08-03): DROP the citing evidence. An evidence row
+        # whose stated routing reason cannot be substantiated in the artifact
+        # that carries it is asserting a fact its own provenance cannot back --
+        # and redaction/surrogate ids would still disclose that a hidden
+        # competitor exists.
+        #
+        # This runs as part of SURVIVAL, not as a post-hoc delete, because
+        # `public_work_ids` depends on surviving claims which depends on
+        # surviving evidence: pruning can make a further work unreachable, whose
+        # loss can drop further audit rows. Iterate to a fixed point.
+        audit_rows = (
+            _rows_as_dicts(conn, "discovery_routing_audit")
+            if "discovery_routing_audit" in _table_names(conn) else []
+        )
+        self.pruned_unreplayable_evidence_ids: Set[str] = set()
+        self.pruned_g9_cascade_evidence_ids: Set[str] = set()
+        for _ in range(_MAX_CLOSURE_PASSES):
+            surviving_claim_ids = {cid for cid, rows in surviving_evidence_by_claim.items() if rows}
+            public_work_ids = {
+                self.claims_by_id[cid]["work_id"] for cid in surviving_claim_ids
+            }
+            public_work_ids = {
+                wid for wid in public_work_ids
+                if self.works_by_id.get(wid, {}).get("identity_visibility")
+                == visibility.VISIBILITY_PUBLIC
+            }
+            # pages that will still carry a replayable demotion after projection
+            replayable_pages = {
+                r["page_id"] for r in audit_rows
+                if r.get("decision") == "demoted"
+                and r.get("kept_year") is not None and r.get("demoted_year") is not None
+                and (r.get("kept_work_id") is None or r["kept_work_id"] in public_work_ids)
+                and (r.get("demoted_work_id") is None or r["demoted_work_id"] in public_work_ids)
+            }
+            doomed: Set[str] = set()
+            for cid, rows in surviving_evidence_by_claim.items():
+                page_id = self.claims_by_id[cid]["page_id"]
+                for ev in rows:
+                    if (ev.get("routing_reason") == _LATER_SHARED_TEXT
+                            and page_id not in replayable_pages):
+                        doomed.add(ev["evidence_id"])
+            self.pruned_unreplayable_evidence_ids |= doomed
+
+            # G9 cascade: a claim whose type ASSERTS a witness relation must keep
+            # at least one witness-kind evidence row. Pruning above can strip a
+            # claim's ONLY witness row while leaving non-witness rows behind --
+            # the claim would then survive asserting a relation nothing in the
+            # artifact supports. Measured on the first real run: 54 such claims
+            # (31 direct_witness + 23 quotes_this_work). Drop the whole claim.
+            for cid, rows in surviving_evidence_by_claim.items():
+                claim_type = self.claims_by_id[cid].get("claim_type")
+                if claim_type not in _WITNESS_ASSERTING_CLAIM_TYPES:
+                    continue
+                kept = [e for e in rows if e["evidence_id"] not in doomed]
+                if kept and not any(
+                    e.get("evidence_kind") == ids.EVIDENCE_KIND_WITNESS for e in kept
+                ):
+                    cascade = {e["evidence_id"] for e in kept}
+                    doomed |= cascade
+                    self.pruned_g9_cascade_evidence_ids |= cascade
+
+            if not doomed:
+                break
+            for cid in list(surviving_evidence_by_claim):
+                kept = [e for e in surviving_evidence_by_claim[cid]
+                        if e["evidence_id"] not in doomed]
+                if kept:
+                    surviving_evidence_by_claim[cid] = kept
+                else:
+                    del surviving_evidence_by_claim[cid]
+            surviving_evidence_ids -= doomed
+        else:
+            raise ProjectionError(
+                f"dependency closure did not converge in {_MAX_CLOSURE_PASSES} passes -- "
+                "refusing to emit a public artifact whose graph may still be open"
+            )
+        reachable_sys_ids = {
+            ev["sys_id"] for rows in surviving_evidence_by_claim.values() for ev in rows
+        }
+
         self.surviving_evidence_by_claim = surviving_evidence_by_claim
         self.surviving_evidence_ids = surviving_evidence_ids
         self.reachable_sys_ids = reachable_sys_ids
@@ -184,133 +292,24 @@ class ProjectionContext:
             if self.works_by_id.get(wid, {}).get("identity_visibility") == visibility.VISIBILITY_PUBLIC
         }
 
-        # --- discovery_identification groups, built BOTTOM-UP from
-        #     surviving evidence only -- never filtered from the private
-        #     build's own discovery_identification rows (Task 2 action
-        #     text: "re-derived over the claims that survive the
-        #     projection, never copied from the private build").
-        groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
-        for cid in self.surviving_claim_ids:
-            claim = self.claims_by_id[cid]
-            work = self.works_by_id.get(claim["work_id"])
-            if work is None:
-                continue
-            canonical_work_id = work["canonical_work_id"]
-            for ev in surviving_evidence_by_claim[cid]:
-                key = (ev["sys_id"], canonical_work_id)
-                groups.setdefault(key, []).append(ev)
-        self.identification_groups = groups
 
 
 # ---------------------------------------------------------------------------
-# display_work_id re-selection (schema SS(B1)), restricted to PUBLIC members.
-# ---------------------------------------------------------------------------
-
-def _select_public_display_work_id(
-    canonical_work_id: str, ctx: ProjectionContext
-) -> Optional[str]:
-    """The SS(B1) deterministic-representative rule, restricted to the
-    canonical group's PUBLIC members only: (1) the canonical anchor
-    (work_id == canonical_work_id) if it is itself public; (2) else the
-    lowest `source_corpus` in the fixed order sefaria < ja < msource among
-    the public members; (3) tie -> lexicographically smallest `work_id`.
-    Returns `None` (the identification must then be DROPPED, never left
-    dangling) when the canonical group has NO public member at all."""
-    members = ctx.canonical_groups.get(canonical_work_id, [])
-    public_members = [w for w in members if w["work_id"] in ctx.public_work_ids]
-    if not public_members:
-        return None
-    for w in public_members:
-        if w["work_id"] == canonical_work_id:
-            return w["work_id"]
-    ranked = sorted(
-        public_members,
-        key=lambda w: (
-            visibility.SOURCE_CORPUS_RANK.get(w.get("source_corpus"), 99),
-            w["work_id"],
-        ),
-    )
-    return ranked[0]["work_id"]
-
-
-# ---------------------------------------------------------------------------
-# discovery_identification recomputation policy.
+# discovery_identification is NOT recomputed here.
 #
-# NOTE (documented simplification, not the real main-pool-rule engine): the
-# ACTUAL main-pool bucketing predicate
-# (`.claude/skills/sketch-findings-genizahsearch/references/main-pool-rule.md`,
-# owner ruling D-13c/D-13d/D-13e) is owned by plans 136-07/136-11/136-12,
-# which had not yet landed a shared, importable module
-# (`shared/discovery_main_pool.py`) as of this plan's execution. This
-# function implements a SIMPLE, deterministic, and clearly-labeled stand-in
-# so the CLOSED-GRAPH / RECOMPUTE-NOT-COPY structural properties this plan
-# is actually responsible for (VIS-01) are genuinely testable. When
-# `shared/discovery_main_pool.py` lands, THIS function should import and
-# call it directly rather than reimplementing bucket logic -- flagged here
-# for 136-11/136-12 to reconcile (see the plan's own SUMMARY.md).
-# ---------------------------------------------------------------------------
-
-def _recompute_identification_row(
-    sys_id: str, canonical_work_id: str, group_evidence: List[Dict[str, Any]], ctx: ProjectionContext
-) -> Optional[Dict[str, Any]]:
-    display_work_id = _select_public_display_work_id(canonical_work_id, ctx)
-    if display_work_id is None:
-        return None  # no public representative -- drop, never dangling
-
-    page_count = len({ev["a_page_id"] for ev in group_evidence})
-    band_ranks = [ev["band_rank"] for ev in group_evidence if ev.get("band_rank") is not None]
-    # A sentinel "unranked" fallback for the (should-not-happen-in-practice)
-    # case a surviving evidence row carries no materialized band_rank at all
-    # -- every real asset row does (Amendment A), this only guards synthetic
-    # fixtures from raising.
-    _UNRANKED_BAND_FALLBACK = 99
-    best_band_rank = min(band_ranks) if band_ranks else _UNRANKED_BAND_FALLBACK
-    coverage_values = [ev["coverage_ppm"] for ev in group_evidence if ev.get("coverage_ppm") is not None]
-    max_coverage_ppm = max(coverage_values) if coverage_values else None
-
-    winning_evidence_id = ids.select_display_evidence(group_evidence)
-    winning_evidence = next(ev for ev in group_evidence if ev["evidence_id"] == winning_evidence_id)
-    winning_claim = ctx.claims_by_id[winning_evidence["claim_id"]]
-
-    if any(ev.get("adjudication_status") == ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED for ev in group_evidence):
-        main_pool, main_pool_reason = True, "main_human_confirmed"
-    elif page_count >= 2:
-        main_pool, main_pool_reason = True, "main_multifolio"
-    elif best_band_rank == 1:
-        main_pool, main_pool_reason = True, "main_full_coverage"
-    else:
-        main_pool, main_pool_reason = False, "insufficient_length"
-
-    # Frozen recipe (docs/specs/discovery-sidecar-schema-v1.md SS(B)): SHA-256
-    # over "discovery_identification_v1|{sys_id}|{canonical_work_id}". No
-    # `identification_id()` helper exists yet in `scripts/discovery_ids.py`
-    # (the table is new in this Phase-136 amendment) -- implemented here
-    # verbatim per the frozen recipe rather than duplicating a competing one.
-    ident_id = hashlib.sha256(
-        f"discovery_identification_v1|{sys_id}|{canonical_work_id}".encode("utf-8")
-    ).hexdigest()
-
-    return {
-        "identification_id": ident_id,
-        "sys_id": sys_id,
-        "canonical_work_id": canonical_work_id,
-        "display_work_id": display_work_id,
-        "main_pool": 1 if main_pool else 0,
-        "main_pool_reason": main_pool_reason,
-        "best_band_rank": best_band_rank,
-        "page_count": page_count,
-        "max_coverage_ppm": max_coverage_ppm,
-        "relation_kind": winning_claim.get("claim_type"),
-        "novelty_status": winning_evidence.get("novelty_status") or "not_checked",
-        "divergence_correctness": winning_evidence.get("divergence_correctness"),
-        "assertion_visibility": visibility.VISIBILITY_PUBLIC,
-        "identity_visibility": visibility.VISIBILITY_PUBLIC,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Per-table projection rules. EVERY table in the private asset MUST have an
-# entry here -- an unrecognized table is a build error (see `project()`).
+# Until 2026-08-03 this module carried its own `_select_public_display_work_id`
+# (an SS(B1) re-implementation) and `_recompute_identification_row` (a
+# deliberately "simplified, clearly-labeled stand-in" for the main-pool
+# bucketing predicate, written when `shared/discovery_main_pool.py` did not yet
+# exist). Both are DELETED: the projection now calls the production
+# materializer, `build_discovery_sidecar.populate_discovery_identification`,
+# against the populated public artifact. See `_materialize_public_identification`.
+#
+# The stand-in was not merely redundant -- it derived the grain over a different
+# evidence population than the private builder (no D-13g eligibility rule),
+# which is how a public artifact came to hold 95,149 identification rows against
+# a 64,522-row private superset. A second implementation of a shared rule is the
+# hazard, not the fix.
 # ---------------------------------------------------------------------------
 
 def _project_works(ctx: ProjectionContext) -> List[Dict[str, Any]]:
@@ -393,12 +392,91 @@ def _project_band_precision(ctx: ProjectionContext) -> List[Dict[str, Any]]:
 
 
 def _project_discovery_identification(ctx: ProjectionContext) -> List[Dict[str, Any]]:
-    out = []
-    for (sys_id, canonical_work_id), group_evidence in ctx.identification_groups.items():
-        row = _recompute_identification_row(sys_id, canonical_work_id, group_evidence, ctx)
-        if row is not None:
-            out.append(row)
-    return out
+    """Emits NOTHING here by design (2026-08-03, 136-13 gate 5).
+
+    `discovery_identification` is materialized AFTER the base tables are
+    written, by calling the private builder's own
+    `populate_discovery_identification` against the PUBLIC connection -- see
+    `_materialize_public_identification`. Returning [] keeps this table in
+    `PROJECTION_RULES` (so the "every table needs an explicit rule" guard still
+    covers it) while making the ordering dependency explicit.
+
+    Why not filter-and-recompute here: this function used to re-derive the
+    table over ALL surviving evidence, omitting the `shipped OR
+    human_confirmed` eligibility rule (D-13g) that the private builder and
+    `check_identification_grain` both apply. That produced 95,149 public rows
+    where only 53,616 were shipped-backed -- MORE rows than the 64,522-row
+    private superset it was projected from. Adding the missing filter would
+    have fixed the row count while leaving `main_pool`/`main_pool_reason`
+    computed by the documented stand-in below rather than the shared rule, and
+    `eligibility_basis` unwritten entirely. Reusing the production materializer
+    removes the whole divergence class instead of patching one symptom."""
+    return []
+
+
+def _materialize_public_identification(out_conn: sqlite3.Connection) -> int:
+    """Run the PRIVATE builder's identification materializer against the public
+    artifact, after its base tables are populated.
+
+    Every input that materializer reads -- `discovery_evidence`,
+    `discovery_claim`, `works`, `discovery_routing_audit`, `band_precision` --
+    is already projected at this point, and each holds ONLY public rows. So the
+    same code that produced the private table produces the public one from the
+    public row set: the eligibility rule (D-13g), the shared main-pool decision
+    (`shared.discovery_main_pool`), `eligibility_basis`, and the SS(B1)
+    `display_work_id` selection all come out right by construction. The
+    canonical-group index is built from the PUBLIC `works` table, so the
+    representative is automatically chosen among public members only."""
+    import build_discovery_sidecar as builder  # local: avoid a module-load cycle
+
+    out_conn.execute("DELETE FROM discovery_identification")
+    builder.populate_discovery_identification(out_conn)
+    (n,) = out_conn.execute("SELECT COUNT(*) FROM discovery_identification").fetchone()
+    return n
+
+
+def check_identification_key_subset(
+    private_conn: sqlite3.Connection, public_conn: sqlite3.Connection
+) -> List[str]:
+    """The public identification KEY SET must be a subset of the private one.
+
+    Removing evidence cannot mint a new `(sys_id, canonical_work_id)` key, so a
+    public key absent privately means the two were materialized over different
+    populations -- which is exactly the defect this check was added for (gate 5,
+    136-13: 95,149 public rows against a 64,522-row private superset).
+
+    Deliberately a KEY-set check, not a row-count check: public rows may
+    legitimately carry different aggregate VALUES (page counts, coverage, band
+    rank) because they are computed over fewer evidence rows. Only the key set
+    is constrained."""
+    if not _has_identification(private_conn) or not _has_identification(public_conn):
+        return []
+    priv = {
+        tuple(r) for r in private_conn.execute(
+            "SELECT sys_id, canonical_work_id FROM discovery_identification")
+    }
+    pub = {
+        tuple(r) for r in public_conn.execute(
+            "SELECT sys_id, canonical_work_id FROM discovery_identification")
+    }
+    extra = pub - priv
+    if extra:
+        return [
+            f"discovery_identification: {len(extra)} public key(s) absent from the private "
+            "asset -- the two were materialized over different populations (a projection "
+            "cannot mint a key its source lacks)"
+        ]
+    return []
+
+
+def _has_identification(conn: sqlite3.Connection) -> bool:
+    # Deliberately does NOT use `_table_names`, which indexes rows by name and
+    # therefore requires `conn.row_factory = sqlite3.Row`. The production
+    # identification materializer resets `row_factory` to None on exit, so this
+    # runs against a plain-tuple connection.
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_identification'"
+    ).fetchone() is not None
 
 
 def _project_meta(ctx: ProjectionContext, projected_counts: Dict[str, int]) -> List[Dict[str, Any]]:
@@ -716,6 +794,14 @@ def project(
                 _insert_rows(out_conn, table, rows)
 
             projected_counts = {t: len(rows) for t, rows in projected_rows.items()}
+            # discovery_identification is materialized from the now-populated
+            # public base tables by the production builder, not projected
+            # row-by-row -- see _materialize_public_identification. Must run
+            # BEFORE _project_meta, which publishes its row count.
+            if "discovery_identification" in projected_counts:
+                projected_counts["discovery_identification"] = (
+                    _materialize_public_identification(out_conn)
+                )
             meta_rows = _project_meta(ctx, projected_counts)
             _insert_rows(out_conn, "meta", meta_rows)
             out_conn.commit()
@@ -729,6 +815,7 @@ def project(
             violations = check_fk_closure(out_conn)
             violations += check_meta_counts(out_conn)
             violations += check_meta_audience(out_conn, "public")
+            violations += check_identification_key_subset(private_conn, out_conn)
             if violations:
                 out_conn.close()
                 out_path.unlink(missing_ok=True)
@@ -760,6 +847,15 @@ def project(
                 for t in sorted(table_names)
             },
             "launch_scope_reconciliation": compute_launch_scope_reconciliation(private_conn),
+            # Owner ruling 2026-08-03: evidence dropped because its
+            # `later_shared_text` routing reason could not be substantiated by a
+            # publishable audit row. Reported in the OFFLINE release report, never
+            # inside the deployed artifact -- a reader must not be able to infer
+            # how many rows were withheld or why.
+            "pruned_unreplayable_evidence": len(ctx.pruned_unreplayable_evidence_ids),
+            # Evidence dropped as a CASCADE of the above: a claim asserting a
+            # witness relation that lost its last witness row goes entirely.
+            "pruned_g9_cascade_evidence": len(ctx.pruned_g9_cascade_evidence_ids),
         }
         report_path = str(out_path) + ".reconciliation.json"
         with open(report_path, "w", encoding="utf-8") as fh:

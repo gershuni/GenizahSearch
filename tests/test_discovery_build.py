@@ -2616,26 +2616,30 @@ def test_identification_id_is_deterministic_across_two_builds():
     assert len(set(first)) == len(first)
 
 
-def test_identification_id_recipe_matches_the_public_projection():
-    """The recipe is frozen in the schema doc and (until a later plan
-    centralizes it into scripts/discovery_ids.py) implemented in TWO places.
-    Pin them to each other so a drift is a red suite, not a silent divergence."""
+def test_public_projection_has_no_second_identification_implementation():
+    """This test used to pin TWO implementations of the identification recipe to
+    each other -- the builder's and a stand-in inside the public projection --
+    "so a drift is a red suite, not a silent divergence".
+
+    The pin did not prevent the divergence it was written for: the two
+    implementations agreed on the identification_id RECIPE while disagreeing on
+    the evidence POPULATION the grain is derived over, and the projection
+    shipped 95,149 rows against a 64,522-row private superset (136-13, gate 5).
+
+    Since 2026-08-03 there is exactly ONE implementation: the projection calls
+    `populate_discovery_identification` against the public artifact. This test
+    now pins THAT -- a reintroduced second implementation is the regression."""
     from scripts import project_discovery_public as projection
 
-    class _Ctx:
-        canonical_groups = {"w000001": [{"work_id": "w000001", "source_corpus": "sefaria"}]}
-        public_work_ids = {"w000001"}
-        claims_by_id = {"c1": {"claim_type": "direct_witness", "work_id": "w000001"}}
-
-    projected = projection._recompute_identification_row(
-        "s1", "w000001",
-        [{"evidence_id": "e1", "claim_id": "c1", "a_page_id": "p1",
-          "band_rank": 1, "coverage_ppm": 900000,
-          "evidence_source": "track1_direct", "confidence_band": "expert_verified",
-          "adjudication_status": "unreviewed", "routing_status": "shipped"}],
-        _Ctx(),
+    assert not hasattr(projection, "_recompute_identification_row"), (
+        "the public projection has grown a second identification implementation "
+        "again -- call build_discovery_sidecar.populate_discovery_identification "
+        "instead, so the eligibility rule and the main-pool decision cannot drift"
     )
-    assert projected["identification_id"] == sidecar_build.identification_id("s1", "w000001")
+    assert not hasattr(projection, "_select_public_display_work_id"), (
+        "the public projection has grown a second display_work_id rule again"
+    )
+    assert hasattr(projection, "_materialize_public_identification")
 
 
 # --- manuscript_display ----------------------------------------------------

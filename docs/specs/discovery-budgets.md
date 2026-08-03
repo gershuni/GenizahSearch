@@ -105,10 +105,10 @@ None of these env vars exist in code yet -- this section only fixes the
 NAMES and DEFAULTS 134-06 must implement against, so this artifact and the
 DiscoveryService code stay in lockstep from the first line of that plan.
 
-## 4. Measured Actuals — dev-box + prod-box measured
+## 4. Measured Actuals — dev-box measured (prod-box PENDING)
 
 Measured 2026-07-23 by `scripts/bench_discovery.py` over the real sidecar
-`discovery-v1-8e43451300429ed4ace5e29e5513359a29674ac49731d5c969eb1d607e0ca065.db` (368.5 MB on disk), through the
+`discovery-public-136rebuild.db` (375.5 MB on disk), through the
 `shared.discovery_service.DiscoveryService` async chokepoint, using a
 benchmark-only readiness predicate that ANDs the loader's `_state.ready`
 WITHOUT the `DISCOVERY_ENABLED` UI flag (F14 — the flag was never set) and
@@ -121,16 +121,16 @@ cache-miss DB query (worst case; the production cache only lowers this).
 
 | Metric | Cap | Dev-box actual | Note |
 |---|---|---|---|
-| Browse-enrichment added latency (p95) | ≤ 150 ms | **0.57 ms** | max of the two browse reads below; cache OFF (worst case) |
-| &nbsp;&nbsp;• `get_claims_for_page` (p95 / max) | — | 0.57 / 6.99 ms | 200 distinct pages, 326 rows total |
-| &nbsp;&nbsp;• `get_pages_related_to_page` (p95 / max) | — | 0.54 / 0.95 ms | 200 distinct pages, 425 rows total |
-| `get_work_witnesses` query (p95 / max) | (request cap ≤ 1.5 s) | 117.21 / 478.95 ms | 200 works incl. the heaviest; 9930 unit rows total |
-| **Additional RSS (dev-box, sidecar+service+LRU warm)** | ≤ 250 MB | **11.1 MB** | dev-box indicative; prod-box authoritative (Task 3) |
+| Browse-enrichment added latency (p95) | ≤ 150 ms | **0.65 ms** | max of the two browse reads below; cache OFF (worst case) |
+| &nbsp;&nbsp;• `get_claims_for_page` (p95 / max) | — | 0.65 / 5.91 ms | 50 distinct pages, 51 rows total |
+| &nbsp;&nbsp;• `get_pages_related_to_page` (p95 / max) | — | 0.64 / 1.06 ms | 50 distinct pages, 75 rows total |
+| `get_work_witnesses` query (p95 / max) | (request cap ≤ 1.5 s) | 523.65 / 753.90 ms | 50 works incl. the heaviest; 2500 unit rows total |
+| **Additional RSS (dev-box, sidecar+service+LRU warm)** | ≤ 250 MB | **12.2 MB** | dev-box indicative; prod-box authoritative (Task 3) |
 
 **Executed-query counts (nonzero-result assertion passed for all):**
-`get_claims_for_page` = 200 queries / 326 rows;
-`get_pages_related_to_page` = 200 queries / 425 rows;
-`get_work_witnesses` = 200 queries / 9930 unit rows.
+`get_claims_for_page` = 50 queries / 51 rows;
+`get_pages_related_to_page` = 50 queries / 75 rows;
+`get_work_witnesses` = 50 queries / 2500 unit rows.
 
 ### 4.2 MEASURED ACTUALS (prod-box) — recorded 2026-07-28
 
@@ -175,17 +175,21 @@ DB-side cost only and well inside the ≤ 1.5 s request budget.
 These later-surface caps and defaults exist now so those plans have a stable
 contract to implement against, not because they are measured yet.
 
-### 4.4 Corpus-wide findings page (§5 caps) — PENDING
+### 4.4 Corpus-wide findings page (§5 caps) — measured
 
-Not yet measurable: the materialized findings tables are absent from this asset (discovery_identification, manuscript_display) -- this is a PRE-REBUILD asset; the findings shapes are measurable only after the Phase-136 rebuild materializes them.
 
-`scripts/bench_discovery.py` carries the `bench_findings_page()` probe
-(six named shapes: default ordering, novelty filter, relation filter,
-domain filter, the visible TOTAL count, and deep paging), which records
-these actuals automatically on the first run against a rebuilt asset.
-The prior, PRE-materialization measurement this probe must beat is
-**3.41-3.55 s across four runs (D-10a), against the 1.5 s cap, when the same ordering was computed over display CLAIMS with no materialized band_rank / coverage_ppm and no identification grain**, and **16 s for the deduped identification COUNT alone (main-pool-rule.md finding 13, "PERF-01 confirmed twice")**.
+Measured by `scripts/bench_discovery.py::bench_findings_page()` over 53581 materialized identifications (`discovery_identification`), page size 50, deep page 20. Every shape asserted a NONZERO row count before its timing was recorded.
 
+The ordering and the visible-count numbers are recorded SEPARATELY because §5 gives them separate caps. The prior, PRE-materialization measurement was 3.41-3.55 s across four runs (D-10a), against the 1.5 s cap, when the same ordering was computed over display CLAIMS with no materialized band_rank / coverage_ppm and no identification grain, and 16 s for the deduped identification COUNT alone (main-pool-rule.md finding 13, "PERF-01 confirmed twice").
+
+| Shape | Cap | p50 | p95 | max | Rows |
+|---|---|---|---|---|---|
+| `findings_default_ordering` | p95 ≤ 1500 ms | 146.17 ms | **159.38 ms** ✓ | 159.38 ms | 50 |
+| `findings_novelty_filter` | p95 ≤ 1500 ms | 16.07 ms | **17.09 ms** ✓ | 17.09 ms | 50 |
+| `findings_relation_filter` | p95 ≤ 1500 ms | 26.87 ms | **36.06 ms** ✓ | 36.06 ms | 50 |
+| `findings_domain_filter` | p95 ≤ 1500 ms | 128.84 ms | **133.66 ms** ✓ | 133.66 ms | 50 |
+| `findings_visible_total` | p95 ≤ 500 ms | 0.04 ms | **1.16 ms** ✓ | 1.16 ms | 1 |
+| `findings_deep_page_20` | p95 ≤ 1500 ms | 145.79 ms | **148.80 ms** ✓ | 148.80 ms | 50 |
 ## 5. Amendment 2026-08-02 (Phase 136) — Corpus-wide findings page (Computed Identifications)
 
 The Phase-136 corpus-wide findings page ("Computed Identifications" / "זיהויים מחושבים" nav entry)

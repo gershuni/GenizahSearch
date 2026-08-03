@@ -46,13 +46,120 @@ build parser halts on extra fields; the slim file is a masking control. Membersh
 | 2 | Recomputed hashes | same run `--research-db fullcorpus_v2.db --manifest manifest.json` | **PASS** | population_hash / cluster_map_hash / stratum_counts recomputed and compared against the external pin |
 | 3 | CERT-01 card binding | same run `--cert01-cards <280 graded>` | **PASS** | 280 graded cards checked; **240 bound identically**; 40 resolve in neither asset (the 20 `diagnostic_demoted` + 20 `gold` controls, absent from the shipped estimand by construction) |
 | 4 | Release verification (private asset) | `verify_discovery_sidecar.py <new> --expected-frame-hash 53725098…` | **PASS** | all invariants clean; routing_audit decisions = demoted 2,062 / kept_tie 4,208 |
-| 5 | Release verification (public projection) | `verify_discovery_sidecar.py <public> --expected-frame-hash 53725098…` | **FAIL — 168 violations** | see "Gate 5 failure" below |
+| 5 | Release verification (public projection) | `verify_discovery_sidecar.py <public> --audience public --expected-frame-hash 53725098…` | **PASS** (after two artifact fixes + an audience mode — see below) | all invariants clean; routing_audit decisions = demoted 1,348 / kept_tie 3,466 |
 | 6 | Masking (both artifacts) | `check_atlas_masking.py --strict --scan-repo --scan-asset <db> --scan-sqlite <db>` | **PASS** | `MASKING_SCAN_PATTERNS_FILE` **was set** (`C:/Genizahsearch/.masking_patterns`); private asset clean, public projection clean; the projection also runs its own scan internally — clean |
-| 7 | Golden fixture | — | **NOT RUN** | blocked: gate 5 must pass first, and the public artifact will be rebuilt |
-| 8 | Performance | `bench_discovery.py … --write-budgets` | **NOT RUN** | blocked: same reason |
+| 7 | Golden fixture | `pytest` over the discovery suites (assets/audience, build, VIS-01 projection, work domains, novelty contract, display strings) | **PASS** | 413 passed |
+| 8 | Performance | `bench_discovery.py --sample 50 --warm-passes 1 --write-budgets`, against the PUBLIC artifact | **PASS** | see the findings-page table below; actuals written into `docs/specs/discovery-budgets.md` |
 | 9 | Launch-scope reconciliation | projection reconciliation report | **REPORTED** (not a pass/fail) | VIS-01 launch-scope 240,566 vs two-axis conjunction 251,765 over 297,415 rows; symmetric difference **36,989 (12.4%)** = `ja\|track1_direct` 24,094 + `msource\|propagated` 12,895. The projection shipped the **conjunction**. Material — goes to the owner. |
 
-## Gate 5 failure — the PUBLIC artifact is defective (STOPPED; not deployed)
+## Gate 8 — the D-10a performance claim, measured for the first time
+
+D-10a's premise was that the findings-page query took **3.41–3.55 s against a 1.5 s cap**, which is
+why 136-11 added materialized columns and indexes. That fix had only ever been unit-tested on
+fixtures. Measured here against the PUBLIC artifact (375.5 MB, 53,581 identifications), with the
+latency cache disabled so every call is a real DB query:
+
+| shape | p50 ms | p95 ms | cap ms |
+|---|---|---|---|
+| `findings_default_ordering` | 146.17 | **159.38** | 1500 |
+| `findings_novelty_filter` | 16.07 | 17.09 | 1500 |
+| `findings_relation_filter` | 26.87 | 36.06 | 1500 |
+| `findings_domain_filter` | 128.84 | 133.66 | 1500 |
+| `findings_visible_total` | 0.04 | 1.16 | 500 |
+| `findings_deep_page_20` | 145.79 | 148.80 | 1500 |
+
+The previously-failing default ordering is **159 ms p95 against a 1,500 ms cap** — roughly 21× faster
+than the shape that motivated D-10a, with ~9× headroom.
+
+Other families: `get_claims_for_page` p95 0.65 ms, `get_pages_related_to_page` p95 0.64 ms,
+`get_work_witnesses` p95 523.65 ms (informational, under the 1.5 s work-page request cap),
+browse-enrichment p95 0.65 ms (cap 150 ms), added RSS 12.2 MB (cap 250 MB).
+
+## Gate 5 — the PUBLIC artifact was defective; two artifact fixes + an audience mode
+
+Unlike the four check defects below, here the checks were correct and the ARTIFACT was wrong. Both
+defects were in `scripts/project_discovery_public.py` (plan 136-08). The battery STOPPED, the defects
+were reviewed externally (Codex) and traced to their originating plans before any fix was written,
+and one of the two needed an owner ruling because no document decided it.
+
+Violations went **168 → 57 → 3 → 0**.
+
+**(a) Identification inflated 1.77× — RULED, obeyed.** The private builder derives
+`discovery_identification` over evidence that is `shipped` OR `human_confirmed` (D-13g) and lands 1:1
+— 64,522 rows. The projection re-derived it over ALL surviving evidence including 92,710
+`review_only` rows, producing **95,149 rows where only 53,616 were shipped-backed** — more rows than
+the private superset it came from.
+
+Fixed NOT by adding the missing filter but by **deleting the projection's parallel implementation
+entirely** and calling the production materializer
+(`build_discovery_sidecar.populate_discovery_identification`) against the populated public artifact.
+Codex's point: filtering alone would fix the row count while leaving `main_pool`/`main_pool_reason`
+computed by the module's own documented "simplified stand-in" and `eligibility_basis` unwritten. One
+rule now produces both sides. Public identification is **53,581** — a proper subset of the private
+64,522. New `check_identification_key_subset` pins it: removing evidence cannot mint a
+`(sys_id, canonical_work_id)` key, so a public key absent privately proves the two were materialized
+over different populations. Deliberately a KEY-set check, not a row-count one — public rows may
+legitimately carry different aggregate VALUES.
+
+**(b) Closed-graph break — genuinely UNDECIDED, owner ruled.** 680 `demoted` audit rows exist
+privately but not publicly (486 name a `demoted_work_id` that is not a public work), orphaning 164
+public evidence rows whose `routing_reason='later_shared_text'` asserts a demotion the artifact could
+no longer substantiate. Nothing in the schema, `136-CONTEXT.md`, `v9-PUBLICATION-STRATEGY.md` or
+136-08 addressed the case.
+
+**Owner ruling 2026-08-03: drop the citing evidence.** An evidence row whose stated routing reason
+cannot be substantiated in the artifact carrying it is asserting a fact its own provenance cannot
+back; redaction or a surrogate id would still disclose that a hidden competitor exists.
+
+Implemented as **survival-time pruning iterated to a fixed point**, not a post-hoc delete — pruning
+can make a work unreachable, which drops further audit rows, which orphans further evidence. Two
+cascade rules, reported separately in the offline reconciliation report (never inside the artifact,
+so a reader cannot infer how much was withheld):
+
+- `pruned_unreplayable_evidence` = **164** — the orphaned `later_shared_text` rows.
+- `pruned_g9_cascade_evidence` = **54** — claims asserting a witness relation (31 `direct_witness` +
+  23 `quotes_this_work`) that lost their LAST witness-kind row while keeping non-witness rows. These
+  surfaced only after (b) was fixed: they would otherwise have survived asserting a relation nothing
+  in the artifact supports.
+
+**(c) The verifier had no audience mode.** The remaining 3 violations were structural false
+positives: it hard-coded `meta.audience='private'` and recomputed `frame_content_hash`, so run over a
+public projection it ALWAYS failed, and the result could only be read by eyeballing which violations
+"did not apply". A gate whose output needs manual triage is not a gate. Added `--audience
+public|private` (default `private`, so the private profile is unchanged and still passes): the public
+profile expects the artifact to declare itself public, and checks `meta.frame_content_hash` as the
+SOURCE frame it was projected from rather than recomputing over the deliberately-smaller public
+membership — recomputing and demanding equality was checking that the projection did nothing.
+
+**Root cause, and the fixture repair.** Per the provenance trace, neither defect was a divergence
+from a stated rule: 136-08 (wave 2) wrote the projection's survival logic BEFORE 136-11 (later wave)
+specified the D-13g eligibility rule, and 136-08 never knew about Phase-135's `later_shared_text`
+invariant (grep: zero occurrences in its plan or summary). A sequencing gap, not an execution slip.
+`tests/test_vis01_projection.py` could not have caught either: its evidence table lacked columns the
+production rule reads, and its private identification rows were hand-written rather than derived, so
+the two sides were never comparable. Fixtures now build BOTH sides with the production rule, carry
+the real columns, and two new tests cover the previously-missing shapes — a `review_only` row inside
+an otherwise-public group, and a public `later_shared_text` row whose demotion names a restricted
+work. `tests/test_discovery_build.py`'s test that existed to pin the two implementations against
+drift did NOT catch this (they agreed on the id recipe while disagreeing on the population); it now
+asserts the second implementation stays deleted.
+
+## Artifacts
+
+| | path | content_hash |
+|---|---|---|
+| private (never deployed) | `discovery_data/discovery-v1-136rebuild.db` | `9b4e740efaca09a89bc37d356c23864c433ac3460a20b9e508278b160bd6e07e` |
+| public (the deploy candidate) | `discovery_data/discovery-public-136rebuild.db` | `e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181` |
+
+Final public counts: works 613 · discovery_claim 231,244 · discovery_evidence 251,547 ·
+discovery_identification 53,581 · witness_units 1,959 · manuscript_display 39,518 ·
+discovery_routing_audit 4,814.
+
+`discovery_data/manifest.json` currently describes the PUBLIC artifact (written for the gate-8
+benchmark, and the manifest a deploy would carry). The private build's own manifest is preserved at
+`discovery_data/manifest.private-136rebuild.json`.
+
+## Superseded gate-5 failure record
 
 Unlike the four defects below, here the checks are correct and the **artifact** is wrong. Both live in
 `scripts/project_discovery_public.py` (plan 136-08). Per this plan's own instruction, the battery

@@ -64,6 +64,13 @@ _SCHEMA_DDL = [
         sys_id TEXT NOT NULL,
         span_start INTEGER NOT NULL,
         span_end INTEGER NOT NULL,
+        -- 2026-08-03 (136-13): `matched_letters` is read by the production
+        -- identification materializer, which the projection now calls instead of
+        -- reimplementing the grain. Its absence here is why these fixtures could
+        -- not detect that the projection was materializing over a different
+        -- evidence population than the private builder.
+        matched_letters INTEGER,
+        density REAL,
         coverage_ppm INTEGER,
         coverage_status TEXT,
         band_rank INTEGER,
@@ -89,7 +96,12 @@ _SCHEMA_DDL = [
         denominator INTEGER,
         precision REAL,
         ci_low REAL,
-        ci_high REAL
+        ci_high REAL,
+        -- 2026-08-03 (136-13): read by the production materializer's
+        -- band-measurement index (the D-02a tier_a authorization pair).
+        measurement_status TEXT,
+        method TEXT,
+        notes TEXT
     )""",
     """CREATE TABLE discovery_routing_audit (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,6 +125,9 @@ _SCHEMA_DDL = [
         page_count INTEGER NOT NULL,
         max_coverage_ppm INTEGER,
         relation_kind TEXT NOT NULL,
+        -- 2026-08-03 (136-13): written by the production materializer; records
+        -- WHICH of the two D-13g rules admitted the row.
+        eligibility_basis TEXT,
         novelty_status TEXT NOT NULL,
         divergence_correctness TEXT,
         assertion_visibility TEXT NOT NULL,
@@ -197,6 +212,28 @@ def _add_meta(conn, **kv):
 
 
 def _finalize(conn) -> None:
+    """Commit, and materialize the PRIVATE fixture's `discovery_identification`
+    with the same production rule the projection now uses.
+
+    2026-08-03 (136-13): these fixtures previously left the private
+    identification table empty (or hand-written), so nothing here could notice
+    that the projection was deriving its own table over a DIFFERENT evidence
+    population than the private builder -- the defect that shipped a public
+    artifact with 95,149 identification rows against a 64,522-row private
+    superset. Building both sides with one rule makes the fixture internally
+    consistent, which is what lets `check_identification_key_subset` mean
+    anything here."""
+    conn.commit()
+    import build_discovery_sidecar as builder
+
+    try:
+        builder.populate_discovery_identification(conn)
+    except Exception:
+        # A control fixture may be deliberately malformed (an orphan work, a
+        # broken FK). Those tests assert on the projection's own failure, not on
+        # the identification grain, so a materializer refusal here is not the
+        # property under test.
+        conn.rollback()
     conn.commit()
     conn.close()
 
@@ -672,3 +709,109 @@ def test_output_path_refused_inside_web_static(tmp_path):
     with pytest.raises(proj.ProjectionError):
         proj.project(str(path), str(bad_out), masking_patterns=[_DISPOSABLE_PATTERN])
     assert not bad_out.exists()
+
+
+# ---------------------------------------------------------------------------
+# 136-13 gate-5 regressions. Both defects below shipped because no fixture in
+# this suite ever built the shape that exposes them: the suite covered the four
+# VIS-01 visibility combinations it was scoped to prove, and these two failures
+# live in the INTERACTION between VIS-01 and rules owned by other plans
+# (136-11's D-13g eligibility rule; Phase-135's later_shared_text invariant).
+# ---------------------------------------------------------------------------
+
+def test_review_only_evidence_does_not_create_a_public_identification(tmp_path):
+    """D-13g: identification eligibility is `shipped` OR `human_confirmed`.
+
+    A review_only, unreviewed evidence row can be perfectly VIS-01-public and
+    still must not mint an identification. The projection used to derive the
+    grain over every surviving row, producing more public identifications than
+    the private asset it came from."""
+    path, conn = _new_private_conn(tmp_path)
+    _add_work(conn, "W_PUB")
+    _add_claim_with_evidence(
+        conn, claim_id="C_SHIP", page_id="P1", work_id="W_PUB",
+        evidence_id="E_SHIP", sys_id="SYS_A", routing_status="shipped",
+    )
+    _add_claim_with_evidence(
+        conn, claim_id="C_REVIEW", page_id="P2", work_id="W_PUB",
+        evidence_id="E_REVIEW", sys_id="SYS_B",
+        routing_status="review_only", adjudication_status="unreviewed",
+    )
+    _add_meta(conn, audience="private", schema_version="discovery-v1")
+    _finalize(conn)
+    conn.close()
+
+    out = tmp_path / "public.db"
+    proj.project(str(path), str(out), masking_patterns=[_DISPOSABLE_PATTERN])
+    out_conn = sqlite3.connect(str(out))
+    try:
+        sys_ids = {r[0] for r in out_conn.execute(
+            "SELECT sys_id FROM discovery_identification")}
+        # the review_only row's manuscript survives as EVIDENCE ...
+        assert out_conn.execute(
+            "SELECT COUNT(*) FROM discovery_evidence WHERE sys_id='SYS_B'"
+        ).fetchone()[0] == 1
+        # ... but must NOT appear as an identification
+        assert "SYS_A" in sys_ids
+        assert "SYS_B" not in sys_ids, (
+            "a review_only/unreviewed row minted a public identification -- the "
+            "D-13g eligibility rule was not applied"
+        )
+    finally:
+        out_conn.close()
+
+
+def test_later_shared_text_evidence_is_pruned_when_its_demotion_cannot_be_published(tmp_path):
+    """Owner ruling 2026-08-03: an evidence row whose `later_shared_text` reason
+    is backed by an audit row naming a NON-PUBLIC work must not be published.
+
+    The audit row is correctly withheld (publishing it would disclose the
+    restricted work's identity); the evidence row that cites it must go too,
+    or the artifact asserts a routing decision it cannot substantiate."""
+    path, conn = _new_private_conn(tmp_path)
+    _add_work(conn, "W_PUB")
+    _add_work(conn, "W_HIDDEN", identity_visibility="private", source_corpus="msource")
+    _add_claim_with_evidence(
+        conn, claim_id="C_KEEP", page_id="P_OK", work_id="W_PUB",
+        evidence_id="E_KEEP", sys_id="SYS_OK",
+    )
+    _add_claim_with_evidence(
+        conn, claim_id="C_LST", page_id="P_LST", work_id="W_PUB",
+        evidence_id="E_LST", sys_id="SYS_LST",
+    )
+    conn.execute(
+        "UPDATE discovery_evidence SET routing_reason='later_shared_text' "
+        "WHERE evidence_id='E_LST'"
+    )
+    # the demotion that explains it names a work that cannot be published
+    _insert(
+        conn, "discovery_routing_audit",
+        page_id="P_LST", kept_work_id="W_PUB", demoted_work_id="W_HIDDEN",
+        kept_year=900, demoted_year=1400, delta_years=500, decision="demoted",
+    )
+    _add_meta(conn, audience="private", schema_version="discovery-v1")
+    _finalize(conn)
+    conn.close()
+
+    out = tmp_path / "public.db"
+    report = proj.project(str(path), str(out), masking_patterns=[_DISPOSABLE_PATTERN])
+    out_conn = sqlite3.connect(str(out))
+    try:
+        surviving = {r[0] for r in out_conn.execute(
+            "SELECT evidence_id FROM discovery_evidence")}
+        assert "E_KEEP" in surviving
+        assert "E_LST" not in surviving, (
+            "a later_shared_text row survived without a publishable demotion -- "
+            "the public artifact cannot substantiate its own routing reason"
+        )
+        # and the hidden work never appears
+        assert not out_conn.execute(
+            "SELECT 1 FROM works WHERE work_id='W_HIDDEN'").fetchone()
+        assert not out_conn.execute(
+            "SELECT 1 FROM discovery_routing_audit WHERE demoted_work_id='W_HIDDEN'"
+        ).fetchone()
+    finally:
+        out_conn.close()
+    assert report["pruned_unreplayable_evidence"] == 1, (
+        "the prune must be reported in the OFFLINE reconciliation report"
+    )
