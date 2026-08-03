@@ -557,6 +557,7 @@ DISCOVERY_TR_KEYS = (
     "Pages matched",
     "Matched text",
     "Showing {shown} of {total} findings",
+    "Showing the {bucket} by default.",
     "Computed Identifications is not available right now",
     "This page will return as soon as the data is ready.",
 )
