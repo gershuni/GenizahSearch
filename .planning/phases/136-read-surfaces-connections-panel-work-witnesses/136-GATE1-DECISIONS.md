@@ -2068,3 +2068,53 @@ Recorded here with the same standing as A-K -- LOCKED, not re-litigated, re-deri
 - **Plans that must implement this:** **136-09** (re-emit + re-pin `work_domains-v1.json` with these 5
   rows carrying `domain_leaf` + `owner_ruling`; it remains HALTED for the other 24), and **136-12**
   (must not load `works.genre` until `--validate --release` exits 0).
+
+---
+
+## Ruling Q — the remaining 24 held domain rows, delegated (owner, 2026-08-03)
+
+- **Owner's instruction, verbatim:** *"Go with your judgements, I trust you"* — issued after the full
+  24-decision list, with candidates and evidence, was put to them.
+
+- **Provenance note.** These are DELEGATED judgements, not owner-authored ones. Each ruled row cites this
+  section. Where a call is thin it is marked ⚠ below and should be the first thing revisited if the facet
+  ever looks wrong. Delegation does not make a weak call strong.
+
+- **Governing principle:** where the closed vocabulary carries a leaf for *exactly this work*, use it.
+  Falling back to a broader leaf leaves the specific node empty and destroys the information the facet
+  exists to expose (so Kifayat al-Abidin → `Sufi Literature`, not the safer `Ethical Literature`).
+
+| # | work | ruled | why |
+|---|---|---|---|
+| 1,3,14 | המספיק לעובדי השם (×3, 429 claims) | `Philosophy… / Sufi Literature` | the paradigmatic Jewish-Sufi text; the dedicated leaf exists for it |
+| 2 | העיונים והדיונים | `Secular Poetry / Other` | Kitab al-Muhadara is Hebrew *poetics*; Grammar is about language structure |
+| 4 | תעודות יהודי סיציליה | `Documentary / Documentary` | a deliberately MIXED documentary edition; the coarse parent avoids mislabelling its non-letter documents. Catalogue's 55% `Letters` describes the individual fragments, not the edition |
+| 5 | אגרות הרמב״ם (שילת) | `Philosophy… / Ethical Literature` | Yemen / Martyrdom / Resurrection are theological-ethical treatises in letter form; `Documentary/Letters` means archival correspondence and would be a category error |
+| 6,9 | ספר יצירה + רס"ג's commentary (224) | `Kabbalah / Other` | the vocabulary has no Sefer Yetzirah leaf; the mystical tradition is its conventional home, and FJMS's own (n=1, unusable) signal also pointed mystical. Kept together so text and commentary do not split across parents ⚠ *Saadia's commentary is genuinely philosophical-cosmological; a defensible alternative is `Philosophy` for #6 alone* |
+| 7 | המעשה בפולמוס הכומר | `Polemics / Polemics Jewish-Christian` | catalogue 64% (n=69); its subject IS the disputation |
+| 8 | כתאב אלדרר | `Secular Poetry / Other` | catalogue 38% (n=100); al-Harizi is a poet and the anthology carries his verse ⚠ *`Belles Lettres` is arguable for a prose anthology* |
+| 10 | עשרים מאמרים | `Kalam / Jewish Kalam` | al-Muqammis' 'Ishrun Maqala is the FOUNDING Jewish kalam text; the dedicated leaf exists for it |
+| 11 | משיבת נפש | `Biblical Exegesis / Biblical Exegesis- Karaite` | catalogue is 64% Karaite contexts (n=64), which selects Yeshua b. Judah's commentary over the devotional readings |
+| 12 | אגרות שמואל בן עלי | `Documentary / Letters` | unlike #5 these are ACTUAL letters of the Baghdad Gaon preserved as correspondence |
+| 13 | איגרת ההשתקה | `Philosophy… / Philosophy` | the artifact's own note leads with "a philosophical treatise addressed as a letter" |
+| 15 | חטר בן שלמה, שאלות | `Philosophy… / Philosophy` | **catalogue DELIBERATELY overridden** (51% Responsa, n=37): Hoter b. Solomon is a known Yemenite philosopher and the artifact records the responsa reading as surface form only |
+| 16 | מגילת אביתר | `Polemics / Polemics Rabbinical` | follows FJMS's own work-level domain ⚠ *n=6; it is a partisan account, so Historiography is arguable* |
+| 17 | ערוגת הבושם | `Philology / Grammar` | the RECORDED author is Archivolti and the catalogue agrees (42%) ⚠ *n=12, and the artifact flags this row as a title/author collision with Abraham b. Azriel's piyyut commentary — a data-quality item, not settled by this ruling* |
+| 18 | יהודה ראש הסדר, ספר השנים | `Astronomy / Calendar` | the title states the subject; the lexicographic reading comes only from the author's other work ⚠ |
+| 19 | מרפא לעצם | `Medicine / Medical Works` | the title is explicit; magical recipes are a transmission context, not the work's subject |
+| 20 | זיכרונות מימי נעוריי | `Historiography and geographical descriptions` | memoir as historical writing. **`Unassigned` deliberately NOT used** — it would hide a row the artifact says may not belong in the corpus at all; assigning it keeps it visible ⚠ *the real question is corpus membership, recorded as data-quality* |
+| 21 | תולדות בן סירא | `Stories and Belles Lettres` | the Alphabet of Ben Sira is a satirical folk narrative in midrashic dress |
+| 22 | ספר הזיכרון | `Halakhic / Halakhic- Gaonim` | ⚠ **LOWEST-CONFIDENCE CALL IN THIS SET.** The artifact itself says the subject is not determinable from title+author; Saadia's monographs are predominantly halakhic, so this is a prior, not evidence. 3 claims |
+| 23 | פרקי ט׳ באב | `Derashot and Later Midrashim / Later Midrashim` | "פרקי" marks a midrashic composition (cf. Pirkei de-Rabbi Eliezer) ⚠ |
+| 24 | תולדות רבנו הקדוש | `Stories and Belles Lettres` | hagiography sits closer to narrative than to historiography |
+
+- **Two catalogue overrides are deliberate and should not be "corrected" later**: #15 (philosopher's
+  questions, not responsa) and #4 (the edition is mixed even though its fragments are mostly letters).
+
+- **Data-quality items raised, NOT resolved by this ruling:** #17 (title/author collision), #20 (a
+  19th-century maskilic memoir carrying claims in a Genizah corpus). Both belong in `docs/OPEN_ISSUES.md`
+  for a later pass; a domain assignment does not settle whether the row should exist.
+
+- **With rulings P and Q together all 29 held rows are ruled**, so `--validate --release` can pass once
+  the artifact is re-emitted and re-pinned. **136-09 must apply these and re-pin; 136-12 must not load
+  `works.genre` until `--validate --release` exits 0.**
