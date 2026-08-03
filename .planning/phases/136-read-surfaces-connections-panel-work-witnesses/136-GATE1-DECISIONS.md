@@ -2210,3 +2210,53 @@ The certificate covers these rows; it is not being stretched over them.
 **Consequence:** the artifact is correct as built. No rebuild, no re-projection, no change to the gate
 battery. `_vis01_shortcut` is now known to be a stale, unsafe rule — it survives only as one input to
 this reconciliation report and must never be used as a publication gate.
+
+---
+
+## Ruling T — the "more matches" bucket carries ~half the non-Bible discovery value (2026-08-03)
+
+**How this surfaced.** Pre-deploy content review of the public artifact. The corpus is **35.1%
+non-Bible** but the default candidates surface is only **18.5%** non-Bible — 3,153 of the 4,152
+default-visible candidate finds are Bible. The owner's reaction ("~1,000 non-Bible findings is a bit
+disappointing") prompted a diagnosis rather than a reassurance.
+
+**What the numbers showed.** Non-Bible material is not missing; it is in the second bucket.
+**2,189 non-Bible `fills_gap` identifications sit outside the main pool** — ~3× the 769 shown.
+Hold-out reasons, non-Bible vs Bible: `shared_wording` 983/329, `overlapping_tie` 450/162,
+`missing_signal` 458/896, `low_coverage` 263/550, `insufficient_length` 35/125. The two that hit
+non-Bible ~3× harder are `shared_wording` and `overlapping_tie`.
+
+**Restricted to STRONG evidence** (`best_band_rank <= 2`) the picture flips: **989 rows**, of which
+`overlapping_tie` **462**, `low_coverage` 281, `shared_wording` 205, `insufficient_length` 41. So at
+the strong end the dominant cause is *two works competing for the same span and the rule declining to
+pick* — a **disambiguation** failure, not a match-quality failure.
+
+**Owner assessment (2026-08-03), on the 975-row review page
+`discovery_data/EXCLUDED-STRONG-nonbible.PRIVATE.html`:** *"about half of them are right, and we lose
+quite a bit if we give them up."*
+
+**This is a vibe-check, NOT a measurement** — an owner impression over a rendered sample, with no
+draw protocol, no blind grading and no held-out frame. It must never be quoted as a precision figure,
+and per D-06/D-21 no percentage derived from it may reach any reader-facing surface.
+
+**Ruling: change nothing in the artifact; the rows already ship.** They are present in the public
+projection as `fills_gap` with `main_pool = 0`, i.e. in the **"more matches" / "עוד התאמות"** bucket,
+whose contract (`shared/discovery_main_pool.py::bucket_label`) already states that it *"means there
+was not enough evidence for the main-pool rule — it never means the identification is probably
+wrong"* and that a caller *"must never render it as a confidence level or a correctness verdict"*.
+The owner's ~half-right reading is consistent with that contract, and is the first evidence for it.
+
+**Do NOT loosen the main-pool rule to promote them.** At roughly half right they sit below every
+shipped band, including the weakest (`screening_canon`, 0.647). Promoting them would degrade the
+headline surface to raise a count.
+
+**Consequences for the surface plans (136-16 findings page, 136-18 polish):** the "more matches"
+bucket is not a long tail to be tucked away — it holds ~2,189 non-Bible candidate finds, roughly half
+the non-Bible discovery value in the release. It must be **genuinely reachable** from the findings
+page, in match-framing wording, with no number attached. A design that hides it behind an obscure
+control would bury the majority of the non-Bible result.
+
+**Consequence for gen-2:** `overlapping_tie` at strong evidence is exactly what the deferred
+witness-vs-quoter / compilation lever targets. This replaces the single Yalkut anecdote with **975
+labelled cases** and a first-order estimate of the payoff (~half recoverable). See
+[[project_novelty_is_granularity_relative]] and the v2.1 track.
