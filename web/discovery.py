@@ -23,7 +23,16 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import scripts.discovery_ids as _ids
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
-from shared.discovery_service import DiscoveryService
+from shared.discovery_service import (
+    BUCKET_MAIN,
+    FACET_LEVELS,  # noqa: F401 -- exported for surfaces to validate against
+    FINDINGS_BUCKETS,  # noqa: F401 -- exported for surfaces to validate against
+    FINDINGS_SORT_BAND_RANK,
+    FINDINGS_SORTS,  # noqa: F401 -- exported for surfaces to validate against
+    FINDINGS_UNIT_IDENTIFICATION,
+    FINDINGS_UNITS,  # noqa: F401 -- exported for surfaces to validate against
+    DiscoveryService,
+)
 from shared.discovery_surface_projection import (
     STATUS_OK,
     busy_envelope,
@@ -190,6 +199,60 @@ async def get_related_pages_enveloped(
     try:
         return await _service.get_related_pages_enveloped_async(
             page_id, page=page, page_size=page_size, include_review=include_review)
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+async def get_findings_enveloped(
+    unit: str = FINDINGS_UNIT_IDENTIFICATION,
+    *,
+    bucket: str = BUCKET_MAIN,
+    novelty: Optional[Iterable[str]] = None,
+    domain: Optional[str] = None,
+    author: Optional[str] = None,
+    work_id: Optional[str] = None,
+    sort: str = FINDINGS_SORT_BAND_RANK,
+    page: int = 1,
+    page_size: Optional[int] = None,
+) -> Dict[str, Any]:
+    """The corpus-wide "Computed Identifications" query (A-6).
+
+    NOTE for callers: an out-of-vocabulary `unit` / `sort` / `bucket` raises
+    `ValueError` and is NOT converted into an envelope. Those values come from
+    closed enums the surface maps (`FINDINGS_UNITS`, `FINDINGS_SORTS`,
+    `FINDINGS_BUCKETS`, all exported here), so an unknown one is a bug to fix,
+    not a service state to render. Validate the request against those sets
+    before calling.
+    """
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_findings_enveloped_async(
+            unit, bucket=bucket, novelty=novelty, domain=domain, author=author,
+            work_id=work_id, sort=sort, page=page, page_size=page_size)
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+async def get_findings_facets_enveloped(
+    level: str,
+    *,
+    bucket: str = BUCKET_MAIN,
+    novelty: Optional[Iterable[str]] = None,
+    domain: Optional[str] = None,
+    author: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The domain / author / work cascade -- on the IDENTIFIED WORK's domain,
+    never the manuscript's catalogue domain."""
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_findings_facets_enveloped_async(
+            level, bucket=bucket, novelty=novelty, domain=domain, author=author)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself

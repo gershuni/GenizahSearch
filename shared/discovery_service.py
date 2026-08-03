@@ -53,6 +53,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 from collections import OrderedDict
@@ -65,6 +66,8 @@ from shared.discovery_surface_projection import (
     busy_envelope,
     make_envelope,
     surface_safe_claim,
+    surface_safe_facet,
+    surface_safe_finding,
     surface_safe_related_page,
     surface_safe_work_summary,
     timeout_envelope,
@@ -243,6 +246,313 @@ _CLAIMS_DEFAULT_ROUTING_CLAUSE = (
 # unbounded caller cannot build a giant IN list: the largest manuscript in the
 # corpus carries 427 claims, and 429 manuscripts carry over 50.
 _MAX_MANUSCRIPT_PAGE_IDS = 500
+
+
+# ---------------------------------------------------------------------------
+# 136-14 Task 3: the corpus-wide findings query ("Computed Identifications").
+#
+# THREE row units, ONE implementation. Serving them from one parameterised
+# builder is not tidiness -- it is the only way filter, sort and count
+# semantics cannot diverge between the unit a reader selects and the unit the
+# counts were computed over.
+#
+# The base grain is `discovery_identification`, NEVER a claim-row scan: that
+# shape measured 3.41-3.55 s against a 1.5 s cap, and the deduped count alone
+# measured 16 s. Over the materialized grain the same shapes measure 124 ms p95
+# in production, with the visible count at 0.46 ms against its own 500 ms cap.
+#
+# The domain axis is the IDENTIFIED WORK's (`works.genre`, reached through
+# `display_work_id`), never the manuscript's catalogue domain -- see the
+# wrong-axis guard in tests/test_discovery_findings_query.py.
+# ---------------------------------------------------------------------------
+
+FINDINGS_UNIT_IDENTIFICATION = "identification"
+FINDINGS_UNIT_MANUSCRIPT = "manuscript"
+FINDINGS_UNIT_WORK = "work"
+
+#: The three OFFERED units. `claim` is deliberately absent: the same
+#: identification repeats once per folio, which inflates same-work matches
+#: ~2.3x relative to citations (a fragment that copies a work matches on every
+#: folio; a citation matches once).
+FINDINGS_UNITS: frozenset = frozenset({
+    FINDINGS_UNIT_IDENTIFICATION, FINDINGS_UNIT_MANUSCRIPT, FINDINGS_UNIT_WORK,
+})
+
+FINDINGS_SORT_BAND_RANK = "band_rank"
+FINDINGS_SORT_PAGE_COUNT = "page_count"
+FINDINGS_SORT_MATCHED_TEXT = "matched_text"
+
+#: The three offered sorts. `novelty` is deliberately absent: absence from a
+#: finding aid is not evidence a match is correct, and ordering by it would
+#: imply otherwise (D-15a / D-24). Novelty filters and may group; it never
+#: orders.
+FINDINGS_SORTS: frozenset = frozenset({
+    FINDINGS_SORT_BAND_RANK, FINDINGS_SORT_PAGE_COUNT, FINDINGS_SORT_MATCHED_TEXT,
+})
+
+BUCKET_MAIN = "main"
+BUCKET_MORE = "more"
+BUCKET_ALL = "all"
+FINDINGS_BUCKETS: frozenset = frozenset({BUCKET_MAIN, BUCKET_MORE, BUCKET_ALL})
+
+#: The visible bucket for a work the domain vocabulary cannot place. It is a
+#: SELECTABLE value with a real count, never a silent disappearance.
+DOMAIN_UNASSIGNED = "Unassigned"
+
+FACET_LEVELS: frozenset = frozenset({"domain", "author", "work"})
+
+_DEFAULT_QUERY_TIMEOUT_FINDINGS = 5.0
+_DEFAULT_FINDINGS_PAGE_SIZE_DEFAULT = 50
+
+# The per-unit SELECT lists. Every unit exposes the SAME output aliases
+# (`main_pool`, `best_band_rank`, `page_count`, `max_coverage_ppm`), so ONE
+# ORDER BY serves all three and a sort cannot mean different things on
+# different units.
+_FINDINGS_UNIT_SELECT: Dict[str, str] = {
+    FINDINGS_UNIT_IDENTIFICATION: """
+        di.identification_id           AS identification_id,
+        di.sys_id                      AS sys_id,
+        di.canonical_work_id           AS canonical_work_id,
+        di.display_work_id             AS display_work_id,
+        w.neutral_title                AS neutral_title,
+        w.author                       AS author,
+        w.genre                        AS genre,
+        di.main_pool                   AS main_pool,
+        di.main_pool_reason            AS main_pool_reason,
+        di.best_band_rank              AS best_band_rank,
+        di.page_count                  AS page_count,
+        di.max_coverage_ppm            AS max_coverage_ppm,
+        di.relation_kind               AS relation_kind,
+        di.novelty_status              AS novelty_status,
+        1                              AS work_count,
+        1                              AS manuscript_count,
+        md.library_code                AS library_code,
+        md.shelfmark_display           AS shelfmark_display
+    """,
+    FINDINGS_UNIT_MANUSCRIPT: """
+        NULL                           AS identification_id,
+        di.sys_id                      AS sys_id,
+        NULL                           AS canonical_work_id,
+        NULL                           AS display_work_id,
+        NULL                           AS neutral_title,
+        NULL                           AS author,
+        NULL                           AS genre,
+        MAX(di.main_pool)              AS main_pool,
+        NULL                           AS main_pool_reason,
+        MIN(di.best_band_rank)         AS best_band_rank,
+        SUM(di.page_count)             AS page_count,
+        MAX(di.max_coverage_ppm)       AS max_coverage_ppm,
+        NULL                           AS relation_kind,
+        CASE WHEN COUNT(DISTINCT di.novelty_status) = 1
+             THEN MIN(di.novelty_status) ELSE NULL END AS novelty_status,
+        COUNT(DISTINCT di.display_work_id) AS work_count,
+        1                              AS manuscript_count,
+        MIN(md.library_code)           AS library_code,
+        MIN(md.shelfmark_display)      AS shelfmark_display
+    """,
+    FINDINGS_UNIT_WORK: """
+        NULL                           AS identification_id,
+        NULL                           AS sys_id,
+        MIN(di.canonical_work_id)      AS canonical_work_id,
+        di.display_work_id             AS display_work_id,
+        MIN(w.neutral_title)           AS neutral_title,
+        MIN(w.author)                  AS author,
+        MIN(w.genre)                   AS genre,
+        MAX(di.main_pool)              AS main_pool,
+        NULL                           AS main_pool_reason,
+        MIN(di.best_band_rank)         AS best_band_rank,
+        SUM(di.page_count)             AS page_count,
+        MAX(di.max_coverage_ppm)       AS max_coverage_ppm,
+        NULL                           AS relation_kind,
+        NULL                           AS novelty_status,
+        1                              AS work_count,
+        COUNT(DISTINCT di.sys_id)      AS manuscript_count,
+        NULL                           AS library_code,
+        NULL                           AS shelfmark_display
+    """,
+}
+
+_FINDINGS_UNIT_GROUP_BY: Dict[str, Optional[str]] = {
+    FINDINGS_UNIT_IDENTIFICATION: None,
+    FINDINGS_UNIT_MANUSCRIPT: "di.sys_id",
+    FINDINGS_UNIT_WORK: "di.display_work_id",
+}
+
+# The deterministic final tie-break per unit -- a page boundary must never
+# depend on unspecified scan order.
+_FINDINGS_UNIT_TIEBREAK: Dict[str, str] = {
+    FINDINGS_UNIT_IDENTIFICATION: "di.identification_id ASC",
+    FINDINGS_UNIT_MANUSCRIPT: "di.sys_id ASC",
+    FINDINGS_UNIT_WORK: "di.display_work_id ASC",
+}
+
+# Sorts as FIXED SQL fragments over the shared output aliases -- a closed enum
+# mapped to a constant, never user text interpolated into SQL (T-136-14-04).
+# `max_coverage_ppm IS NULL` first puts unmeasurable rows LAST rather than
+# treating a missing measurement as a zero.
+_FINDINGS_QUALITY_ORDER = (
+    "main_pool DESC, best_band_rank ASC, "
+    "max_coverage_ppm IS NULL, max_coverage_ppm DESC"
+)
+_FINDINGS_SORT_SQL: Dict[str, str] = {
+    FINDINGS_SORT_BAND_RANK: _FINDINGS_QUALITY_ORDER,
+    FINDINGS_SORT_PAGE_COUNT: f"page_count DESC, {_FINDINGS_QUALITY_ORDER}",
+    # The identification grain materializes COVERAGE, not matched letters
+    # (matched_letters lives per evidence row, and all shipped propagated rows
+    # have none at all). Coverage is therefore the grain's own measure of "how
+    # much text matched"; the envelope's `sort_basis` names it, so the surface
+    # never implies a letter count it does not have.
+    FINDINGS_SORT_MATCHED_TEXT: (
+        f"max_coverage_ppm IS NULL, max_coverage_ppm DESC, {_FINDINGS_QUALITY_ORDER}"
+    ),
+}
+_FINDINGS_SORT_BASIS: Dict[str, str] = {
+    FINDINGS_SORT_BAND_RANK: "best_band_rank",
+    FINDINGS_SORT_PAGE_COUNT: "page_count",
+    FINDINGS_SORT_MATCHED_TEXT: "max_coverage_ppm",
+}
+
+_FINDINGS_FROM = """
+    FROM discovery_identification di
+    JOIN works w ON w.work_id = di.display_work_id
+    LEFT JOIN manuscript_display md ON md.sys_id = di.sys_id
+"""
+
+_LIKE_ESCAPE_RE = re.compile(r"([\\%_])")
+
+
+def _like_prefix(value: str) -> str:
+    r"""`value` as a LIKE pattern matching its own children (`value / ...`),
+    with `\`, `%` and `_` escaped so a domain containing one cannot behave as a
+    wildcard. Bound as a PARAMETER; never interpolated."""
+    return _LIKE_ESCAPE_RE.sub(r"\\\1", value) + " / %"
+
+
+def _build_findings_filter(
+    *, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+    bucket: str = BUCKET_MAIN,
+    novelty: Optional[Iterable[str]] = None,
+    domain: Optional[str] = None,
+    author: Optional[str] = None,
+    work_id: Optional[str] = None,
+) -> Tuple[str, List[Any]]:
+    """The ONE findings predicate, shared by the row query and the facet
+    counts.
+
+    Building the predicate twice is exactly how a facet count and the result
+    set it sits beside drift apart, so both callers come through here.
+
+    Filters compose as AND; an empty filter set returns the whole current
+    bucket. Every VALUE is bound -- the only interpolation is placeholder
+    punctuation (T-136-14-04).
+    """
+    if bucket not in FINDINGS_BUCKETS:
+        raise ValueError(
+            f"unknown findings bucket {bucket!r} -- offered buckets are "
+            f"{sorted(FINDINGS_BUCKETS)}"
+        )
+    where: List[str] = []
+    params: List[Any] = []
+
+    if bucket == BUCKET_MAIN:
+        where.append("di.main_pool = 1")
+    elif bucket == BUCKET_MORE:
+        where.append("di.main_pool = 0")
+
+    novelty_list = list(novelty) if novelty else []
+    if novelty_list:
+        if unit == FINDINGS_UNIT_WORK:
+            raise ValueError(
+                "novelty is not offered on the per-work unit -- a work spanning "
+                "many manuscripts has no single novelty verdict"
+            )
+        where.append("di.novelty_status IN (%s)" % ",".join("?" for _ in novelty_list))
+        params.extend(novelty_list)
+
+    if domain:
+        if domain == DOMAIN_UNASSIGNED:
+            where.append("(w.genre IS NULL OR w.genre = '' OR w.genre = ?)")
+            params.append(DOMAIN_UNASSIGNED)
+        else:
+            # Matches the domain itself OR any leaf beneath it, so a parent
+            # selection is a strict superset of each of its leaves.
+            where.append(r"(w.genre = ? OR w.genre LIKE ? ESCAPE '\')")
+            params.extend([domain, _like_prefix(domain)])
+
+    if author:
+        if author == DOMAIN_UNASSIGNED:
+            where.append("(w.author IS NULL OR w.author = '')")
+        else:
+            where.append("w.author = ?")
+            params.append(author)
+
+    if work_id:
+        where.append("di.display_work_id = ?")
+        params.append(work_id)
+
+    return ("WHERE " + " AND ".join(where)) if where else "", params
+
+
+def _build_findings_query(
+    *, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+    sort: str = FINDINGS_SORT_BAND_RANK,
+    bucket: str = BUCKET_MAIN,
+    novelty: Optional[Iterable[str]] = None,
+    domain: Optional[str] = None,
+    author: Optional[str] = None,
+    work_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    count_only: bool = False,
+    count_cap: Optional[int] = None,
+) -> Tuple[str, List[Any]]:
+    """Build the findings query for ONE unit. The single query builder -- all
+    three offered units come through here.
+
+    Returns `(sql, params)`. Every user-supplied VALUE is bound; the only
+    interpolated fragments come from closed enums mapped to fixed constants
+    above, so the large filter/sort/unit combination space cannot reach SQL as
+    text (T-136-14-04).
+
+    `count_only` builds the bounded-count form used when an exact count is
+    capped; otherwise the row query carries `COUNT(*) OVER ()`, which SQLite
+    evaluates over the whole (post-GROUP BY) result set BEFORE `LIMIT`, so the
+    real total costs no second query.
+    """
+    if unit not in FINDINGS_UNITS:
+        raise ValueError(
+            f"unknown findings unit {unit!r} -- offered units are "
+            f"{sorted(FINDINGS_UNITS)} (the per-claim unit is deliberately not offered)"
+        )
+    if sort not in FINDINGS_SORTS:
+        raise ValueError(
+            f"unknown findings sort {sort!r} -- offered sorts are "
+            f"{sorted(FINDINGS_SORTS)} (novelty is deliberately not a sort key)"
+        )
+
+    where_sql, params = _build_findings_filter(
+        unit=unit, bucket=bucket, novelty=novelty, domain=domain,
+        author=author, work_id=work_id)
+    group_by = _FINDINGS_UNIT_GROUP_BY[unit]
+    group_sql = f"GROUP BY {group_by}" if group_by else ""
+
+    if count_only:
+        inner = f"SELECT 1 {_FINDINGS_FROM} {where_sql} {group_sql}"
+        if count_cap:
+            inner += f" LIMIT {int(count_cap) + 1}"
+        return f"SELECT COUNT(*) AS n FROM ({inner})", params
+
+    order_sql = f"{_FINDINGS_SORT_SQL[sort]}, {_FINDINGS_UNIT_TIEBREAK[unit]}"
+    sql = f"""
+        SELECT {_FINDINGS_UNIT_SELECT[unit]},
+               COUNT(*) OVER () AS _total_rows
+        {_FINDINGS_FROM}
+        {where_sql}
+        {group_sql}
+        ORDER BY {order_sql}
+        LIMIT ? OFFSET ?
+    """
+    return sql, [*params, page_size, max(0, (page - 1) * page_size)]
 
 
 def _build_manuscript_works_sql(n_page_ids: int) -> str:
@@ -1091,6 +1401,211 @@ class DiscoveryService:
         return make_envelope(STATUS_OK, items, total,
                              meta={"unit": "distinct_opposite_pages"})
 
+    # ------------------------------------------------------------------
+    # 136-14 Task 3: the corpus-wide findings query and its facet cascade.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clamp_findings_page_size(page_size: Any) -> int:
+        if page_size is None:
+            page_size = _get_int_env(
+                "DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT",
+                _DEFAULT_FINDINGS_PAGE_SIZE_DEFAULT,
+            )
+        # The shared DISCOVERY_PAGE_SIZE_MAX ceiling is unchanged and applies.
+        return DiscoveryService._clamp_page_size(page_size)
+
+    def get_findings_enveloped(
+        self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        sort: str = FINDINGS_SORT_BAND_RANK,
+        page: int = 1,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """The corpus-wide findings query, in whichever of the three offered
+        units the reader selected.
+
+        The default result set is the MAIN POOL, and the envelope's meta says
+        so -- the surface narrows the corpus view visibly, never silently.
+
+        An out-of-vocabulary `unit`, `sort` or `bucket` raises `ValueError`
+        rather than returning an outage envelope: those values come from closed
+        enums the surface maps, so an unknown one is a programming error, not a
+        service state. The four envelope statuses stay reserved for things that
+        actually happened to the service.
+        """
+        page = self._clamp_page(page)
+        page_size = self._clamp_findings_page_size(page_size)
+        # Validate the vocabulary BEFORE the availability check, so a bad unit
+        # is a loud error even while the sidecar is off.
+        sql, params = _build_findings_query(
+            unit=unit, sort=sort, bucket=bucket, novelty=novelty, domain=domain,
+            author=author, work_id=work_id, page=page, page_size=page_size)
+
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        novelty_offered = unit != FINDINGS_UNIT_WORK
+        count_cap = _get_int_env("DISCOVERY_FINDINGS_COUNT_MAX", 0)
+        try:
+            rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
+            approximate = False
+            if count_cap > 0:
+                count_sql, count_params = _build_findings_query(
+                    unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+                    domain=domain, author=author, work_id=work_id,
+                    count_only=True, count_cap=count_cap)
+                counted = int(conn.execute(count_sql, count_params).fetchone()["n"])
+                if counted > count_cap:
+                    total, approximate = count_cap, True
+                else:
+                    total = counted
+            else:
+                total = int(rows[0]["_total_rows"]) if rows else 0
+        except Exception as e:
+            logger.error("DiscoveryService.get_findings error (unit=%s): %s", unit, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+
+        items = []
+        for row in rows:
+            work_count = int(row.get("work_count") or 1)
+            items.append(surface_safe_finding({
+                **row,
+                "unit": unit,
+                "domain": row.get("genre") or DOMAIN_UNASSIGNED,
+                "main_pool": bool(row.get("main_pool")),
+                "novelty_offered": novelty_offered,
+                "novelty_status": row.get("novelty_status") if novelty_offered else None,
+                "multi_work_annotation": work_count > 1,
+            }))
+        return make_envelope(STATUS_OK, items, total, meta={
+            "unit": unit,
+            "bucket": bucket,
+            "sort": sort,
+            "sort_basis": _FINDINGS_SORT_BASIS[sort],
+            "novelty_offered": novelty_offered,
+            "approximate_total": approximate,
+        })
+
+    def get_findings_facets_enveloped(
+        self, level: str, bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """The domain / author / work cascade, mirroring the catalogue page's
+        accessor SHAPE (`get_browse_authors(domain)` ->
+        `get_browse_works(domain, author)`) but sourced from `works.genre` and
+        the work's own author -- i.e. from the IDENTIFIED WORK.
+
+        Counts come from the materialized grain, so opening the facet tree
+        costs no scan. Every level is cross-filtered by the levels above it,
+        and by the same bucket/novelty filters the result set carries, so a
+        facet count and the result set it sits beside always agree.
+        """
+        if level not in FACET_LEVELS:
+            raise ValueError(
+                f"unknown facet level {level!r} -- offered levels are {sorted(FACET_LEVELS)}")
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        # The ONE filter builder, cross-filtered by the levels ABOVE this one:
+        # the author list narrows by domain, the work list by domain and
+        # author, and a level never filters by itself (that would collapse the
+        # facet to the single value already selected).
+        where_sql, params = _build_findings_filter(
+            unit=FINDINGS_UNIT_IDENTIFICATION, bucket=bucket, novelty=novelty,
+            domain=None if level == "domain" else domain,
+            author=author if level == "work" else None,
+        )
+
+        if level == "domain":
+            key_sql = f"COALESCE(NULLIF(w.genre, ''), '{DOMAIN_UNASSIGNED}')"
+            label_sql = key_sql
+        elif level == "author":
+            key_sql = f"COALESCE(NULLIF(w.author, ''), '{DOMAIN_UNASSIGNED}')"
+            label_sql = key_sql
+        else:
+            key_sql = "di.display_work_id"
+            label_sql = "MIN(w.neutral_title)"
+
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT {key_sql} AS value, {label_sql} AS label, COUNT(*) AS count
+                {_FINDINGS_FROM}
+                {where_sql}
+                GROUP BY {key_sql}
+                ORDER BY count DESC, value ASC
+                """,
+                params,
+            ).fetchall()
+        except Exception as e:
+            logger.error("DiscoveryService.get_findings_facets error (%s): %s", level, e)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+
+        items = self._project_facets(level, rows)
+        return make_envelope(STATUS_OK, items, len(items), meta={
+            "level": level, "bucket": bucket, "domain": domain, "author": author,
+        })
+
+    @staticmethod
+    def _project_facets(level: str, rows) -> List[Dict[str, Any]]:
+        """Shape the grouped rows into facet rows.
+
+        For `domain` this rebuilds the two-level TREE: the stored genre is a
+        `Parent / Leaf` string, so each leaf's parent is emitted as its own
+        selectable node carrying the SUM of its leaves. Done in Python over at
+        most a few hundred groups rather than in a second SQL pass.
+        """
+        if level != "domain":
+            return [
+                surface_safe_facet({
+                    "level": level, "value": row["value"],
+                    "label": row["label"] or row["value"],
+                    "parent": None, "is_leaf": True, "count": int(row["count"]),
+                })
+                for row in rows
+            ]
+
+        leaves: List[Dict[str, Any]] = []
+        parents: "OrderedDict[str, int]" = OrderedDict()
+        for row in rows:
+            value = row["value"]
+            count = int(row["count"])
+            parent = value.split(" / ", 1)[0] if " / " in value else None
+            leaves.append({
+                "level": level, "value": value, "label": value,
+                "parent": parent, "is_leaf": True, "count": count,
+            })
+            if parent is not None:
+                parents[parent] = parents.get(parent, 0) + count
+
+        items = [
+            surface_safe_facet({
+                "level": level, "value": parent, "label": parent,
+                "parent": None, "is_leaf": False, "count": count,
+            })
+            for parent, count in parents.items()
+        ]
+        items.extend(surface_safe_facet(leaf) for leaf in leaves)
+        items.sort(key=lambda it: (it["parent"] or it["value"], it["is_leaf"], it["value"]))
+        return items
+
+    def _findings_timeout(self) -> float:
+        return _get_positive_float_env(
+            "DISCOVERY_QUERY_TIMEOUT_FINDINGS", _DEFAULT_QUERY_TIMEOUT_FINDINGS)
+
     def get_pages_related_to_page(
         self, page_id: str, page: int = 1, page_size: Optional[int] = None,
         include_review: bool = False,
@@ -1556,6 +2071,39 @@ class DiscoveryService:
             (page_id, page, page_size, include_review),
             timeout=self._browse_timeout(),
             cache_name="related_pages_enveloped",
+        )
+
+    async def get_findings_enveloped_async(
+        self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        sort: str = FINDINGS_SORT_BAND_RANK,
+        page: int = 1,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Heavy by design: the corpus-wide query gets a bounded-concurrency
+        slot, so a burst of findings requests degrades to an explicit `busy`
+        rather than queueing behind each other and starving the browse path."""
+        return await self._enveloped_off_loop(
+            self.get_findings_enveloped,
+            (unit, bucket, tuple(novelty or ()) or None, domain, author, work_id,
+             sort, page, page_size),
+            timeout=self._findings_timeout(), heavy=True,
+        )
+
+    async def get_findings_facets_enveloped_async(
+        self, level: str, bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return await self._enveloped_off_loop(
+            self.get_findings_facets_enveloped,
+            (level, bucket, tuple(novelty or ()) or None, domain, author),
+            timeout=self._findings_timeout(), heavy=True,
         )
 
     async def run_off_loop(
