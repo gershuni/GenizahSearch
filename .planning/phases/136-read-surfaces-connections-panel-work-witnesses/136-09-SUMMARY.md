@@ -219,3 +219,7 @@ so the audit trail is reconstructable.
 2. Rulings are recorded in `136-GATE1-DECISIONS.md`; each held row gains its leaf plus an
    `owner_ruling` citation; the artifact is re-emitted and re-pinned.
 3. `--validate --release` must exit 0 before 136-12 may load `works.genre`.
+
+## Self-Check: PASSED
+
+All five created files exist on disk; all four commits (`a26e3e67`, `db4d9c6c`, `0d448517`, `436251c7`) are reachable in `git log`; `tests/test_work_domains.py` 41/41 green; `ruff check` clean on both new files. Verified 2026-08-03.
