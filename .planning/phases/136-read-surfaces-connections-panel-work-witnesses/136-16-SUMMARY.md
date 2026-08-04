@@ -107,8 +107,8 @@ Commits claimed, verified in `git log --oneline --all`: `164d1d8b` — FOUND; `d
 | (b) DOM-ancestry supplement | **MET** (and declared insufficient alone in the test's own docstring) | `test_more_matches_control_sits_in_no_overflow_or_disclosure_ancestor` |
 | (c) INTERACTION through the NiceGUI `User` simulation, no preceding disclosure action, clicked THROUGH the simulated user, RENDERED result region REPLACED | **MET** | `test_more_matches_click_replaces_the_rendered_result_set[en/he]` — asserts main-pool rows gone and second-bucket rows present, not that a service call changed. **Watched failing**: with `on_click` removed the test failed with `expected to see at least one element with content=MORE-MATCHES-ROW-SENTINEL` |
 | (d) Control's subtree carries no digit and no count element | **MET** | `test_more_matches_control_subtree_carries_no_digit_and_no_count` |
-| **(e) REAL-BROWSER actionability at 375px and desktop, both languages** | **NOT MET** | see below |
-| **(f) Positive control for (e), watched failing on a collapsed ancestor** | **NOT MET** | see below |
+| **(e) REAL-BROWSER actionability at 375px and desktop, both languages** | **NOT MET — wired into CI, awaiting first green run** | see below |
+| **(f) Positive control for (e), watched failing on a collapsed ancestor** | **NOT MET — wired into CI, awaiting first green run** | see below |
 | Mode strip: three modes, two inert and phase-tagged, not clickable | **MET** | `test_mode_strip_renders_three_modes_with_two_inert_and_phase_tagged` |
 | Novelty switch first in the filter bar, both directions | **MET** | `test_novelty_switch_renders_first_in_the_filter_bar` — asserts `fg novgrp` on the group AND the `order: -1` rule in the shared CSS |
 | No grade/tier filter | **MET** | `test_no_grade_filter_control_exists` (whole-word scan; `\bStrong\b` deliberately does not match the legitimate "Strongest first" sort label) |
@@ -139,6 +139,35 @@ Commits claimed, verified in `git log --oneline --all`: `164d1d8b` — FOUND; `d
 ## ⚠ NOT MET — criteria (e) and (f), the real-browser actionability check
 
 **Status: NOT MET. Not a skip, not a pass.**
+
+> **UPDATE 2026-08-04 — the check now runs in CI.** It is wired as the
+> **`findings-browser-check`** job in `.github/workflows/ci.yml` (ubuntu-latest,
+> `needs: lint-and-docs`). The job installs Playwright + Chromium, materializes
+> the synthetic fixture sidecar into a temp directory
+> (`scripts/ci_materialize_discovery_fixture.py`, pointed at by the new
+> dev/CI-only `GENIZAH_DISCOVERY_DATA_DIR`), serves the app against it with
+> `DISCOVERY_ENABLED=1`, polls the origin until it answers
+> (`scripts/wait_for_http.py` — never `sleep`), and runs the check with both env
+> vars set.
+>
+> **The criteria remain NOT MET until that job has actually passed a run.** A
+> wired gate is not a met criterion, and nothing below has been demonstrated
+> against a live server yet. What HAS been demonstrated locally: the check does
+> not skip once `GENIZAH_FINDINGS_BROWSER_CHECK` is set (an empty base URL and a
+> missing Playwright both FAIL), and with Chromium installed it drives a real
+> browser and fails on a dead port rather than degrading to green.
+>
+> **One defect was fixed while wiring it.** The check navigated to
+> `?lang=en`/`?lang=he`; nothing in the app reads that parameter
+> (`web/main.py::_resolve_ui_language` resolves the UI language from per-user
+> storage and defaults to Hebrew), so the "EN" pass looked for an English control
+> that was never on the page and would have failed on its first run for a reason
+> unrelated to the control. The check now reads the rendered language off the
+> control itself and reaches English the only way a reader can — by clicking the
+> header's own language toggle — and asserts it covered both. It also now asserts
+> WHAT the click changed to (the result bar names the second bucket) rather than
+> only that the region's HTML differs, because NiceGUI re-mints element ids on
+> every paint and a bare difference is satisfied by any re-render at all.
 
 - **What was required:** at 375px and at desktop width, in both languages, with no preceding disclosure action, the browser's own actionability conditions must hold at the "more matches" control's locator (visible, stable, enabled, receiving pointer events at its hit point); then a real click; then the results region's DOM asserted CHANGED. Plus (f): an ancestor deliberately collapsed, the same check confirmed FAILING, and reverted.
 - **Why it was not met:** **Playwright is not installed in the execution environment.** `scripts/capture_atlas_html.py` documents it as an ad-hoc dev/ops tool, deliberately absent from every requirements file, and installing it (plus a Chromium download) is a package-manager install — excluded from what an executor may do unattended.
@@ -217,7 +246,7 @@ None. This plan adds one publicly reachable route, and it is gated on the same f
 | `git diff --stat web/static/common.css` | **empty** |
 | `ruff check` on all three files | **clean** |
 | Percent signs in `web/pages/findings.py` | **0** |
-| Real-browser actionability (e) + positive control (f) | **NOT MET** — Playwright unavailable |
+| Real-browser actionability (e) + positive control (f) | **NOT MET** — Playwright unavailable at execution time; since 2026-08-04 wired as the CI `findings-browser-check` job, awaiting its first green run |
 
 The full suite was deliberately **not** run: two other agents hold uncommitted work in this shared checkout, including a mid-edit `tests/test_discovery_panel_model.py`, so full-suite failures would carry no signal about this plan.
 
@@ -234,4 +263,4 @@ The full suite was deliberately **not** run: two other agents hold uncommitted w
 - **136-18** can fill the reserved headline slot: the container class is `gs-findings-headline`, its empty child is `gs-findings-headline-value`, and the region already carries a bilingual `aria-label`. The dispatch-total test is written as `dispatches == len(reads)`, so adding the launch-headline read will not turn it red.
 - **136-17** is unaffected: this plan touched no shared file.
 - **136-22's** figure-specific guard already covers `web/pages/findings.py`; this module is currently digit-free in every user-facing string and carries no `%` at all.
-- **Blocker for launch, not for the next plan:** criteria (e) and (f) are NOT MET and must be run against a real browser before the surface ships.
+- **Blocker for launch, not for the next plan:** criteria (e) and (f) are NOT MET and must be run against a real browser before the surface ships. **Since 2026-08-04 the run is automated** — the `findings-browser-check` job in `.github/workflows/ci.yml` — so the blocker clears the first time that job passes, and stays closed on every subsequent push rather than being a one-off check nobody re-runs.

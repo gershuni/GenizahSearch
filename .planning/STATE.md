@@ -41,14 +41,29 @@ was rejected: it leaves the suite RED across a wave boundary. Graph re-verified 
 in Codex pre-flight rounds 8 and 9 landed on 136-17/18/21/22, and 136-15/136-16 had been stable for
 two rounds and one round respectively. Both are complete and their tests are green (157 + 72).
 
-⚠ **`136-16` reports acceptance criteria (e) and (f) NOT MET** — the real-browser actionability check
-for the "more matches" control. Playwright is not installed and is in no requirements file; the check
-is written and runnable (`run_browser_actionability_check`, 375x812 + 1440x900, EN + HE, with its own
-collapsed-parent positive control) and **fails rather than greening** when the tooling is absent.
-Ruling T makes this control the reachability of roughly half the non-Bible discovery value, so it is
-a **launch blocker**, not a nicety. It cannot be run from an unattended agent here: it needs both a
-package install and a live server, and launching the web server from a shell on this machine leaves
-unkillable Windows processes. Run it manually or in a CI lane before flag-on.
+⚠ **`136-16` acceptance criteria (e) and (f): still NOT MET, but now WIRED INTO CI (2026-08-04).**
+The real-browser actionability check for the "more matches" control runs as the
+**`findings-browser-check`** job in `.github/workflows/ci.yml` (ubuntu-latest, `needs: lint-and-docs`).
+The job installs Playwright + Chromium, materializes the synthetic fixture sidecar into a temp dir
+(`scripts/ci_materialize_discovery_fixture.py` + the new dev/CI-only `GENIZAH_DISCOVERY_DATA_DIR`
+override in `web/discovery_assets.py` — CI has no `discovery_data/`, it is gitignored, so without it
+the page clean-hides and the check would fail for an unrelated reason), serves the app with
+`DISCOVERY_ENABLED=1`, polls the origin until it answers (`scripts/wait_for_http.py`, never `sleep`),
+and runs the check with both env vars set. The check still **fails rather than greening** when the
+tooling is absent or the base URL is empty — do not "fix" a red run by unsetting
+`GENIZAH_FINDINGS_BROWSER_CHECK`.
+
+Ruling T makes this control the reachability of roughly half the non-Bible discovery value, so it
+remains a **launch blocker** until the job has actually passed a run — a wired gate is not a met
+criterion. **The end-to-end path has never executed:** the server step could not be reproduced on this
+Windows machine (launching the web server from a shell leaves unkillable processes), so the first CI
+run is what confirms the app boots against the fixture and the control is actionable. What WAS proven
+locally: the fixture sidecar loads and both buckets return rows (2 main / 16 more), the check does not
+skip once the env var is set, and with Chromium installed it drives a real browser and fails on a dead
+port. One latent defect was fixed while wiring: the check navigated to `?lang=en`, which the app does
+not read (language comes from per-user storage, default Hebrew), so the EN pass would have looked for
+a control that was never on the page; it now reads the rendered language off the control and reaches
+English via the header's own language toggle.
 
 ⚠ **Bookkeeping ticked by hand.** Both executors deliberately left `STATE.md` / `ROADMAP.md` /
 `REQUIREMENTS.md` alone and said so: `state advance-plan` would write an untrustworthy counter from
