@@ -26,6 +26,7 @@ that invented a row shape would prove nothing about the code that will run.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import io
 import pathlib
 import re
@@ -1150,26 +1151,118 @@ _EXPECTED_SCOPE_STATE = {
 }
 
 
-@pytest.mark.parametrize("claims_status", sorted(pm.SURFACE_STATUSES_ORDERED))
-@pytest.mark.parametrize("page_id_state", sorted(_PAGE_ID_ENVELOPE_STATES))
-def test_arbitration_cross_product_of_claim_status_and_page_scope(claims_status, page_id_state):
-    """All SIXTEEN combinations, read out of the model's own arbitration table.
+#: `(claims status, page-scope state) -> (panel status, the hide rule may
+#: apply, the pane may report manuscript facts)`.
+#:
+#: WRITTEN OUT, all sixteen, from D-13's own sentences -- never read from
+#: `ARBITRATION_TABLE`, and not derived by a formula either. Reading the
+#: expectation from the table production uses makes the two agree by
+#: construction: flip a cell and both change together (code review 2B, finding
+#: 7). The three sentences this table encodes:
+#:
+#:   * the PANEL's status is the claims envelope's own status, never invented
+#:     from a section's;
+#:   * the entry control's hide-on-zero rule may apply only on `ok` -- an
+#:     outage is never a zero;
+#:   * the pane may report facts ABOUT the manuscript only when the page scope
+#:     resolved (or resolved and truncated); otherwise anything it said would
+#:     be our own plumbing failure wearing the manuscript's name.
+_INDEPENDENT_ARBITRATION_MATRIX = {
+    ("ok", pm.SCOPE_RESOLVED): ("ok", True, True),
+    ("ok", pm.SCOPE_TRUNCATED): ("ok", True, True),
+    ("ok", pm.SCOPE_UNRESOLVED): ("ok", True, False),
+    ("ok", pm.SCOPE_OUTAGE): ("ok", True, False),
+    ("unavailable", pm.SCOPE_RESOLVED): ("unavailable", False, True),
+    ("unavailable", pm.SCOPE_TRUNCATED): ("unavailable", False, True),
+    ("unavailable", pm.SCOPE_UNRESOLVED): ("unavailable", False, False),
+    ("unavailable", pm.SCOPE_OUTAGE): ("unavailable", False, False),
+    ("timeout", pm.SCOPE_RESOLVED): ("timeout", False, True),
+    ("timeout", pm.SCOPE_TRUNCATED): ("timeout", False, True),
+    ("timeout", pm.SCOPE_UNRESOLVED): ("timeout", False, False),
+    ("timeout", pm.SCOPE_OUTAGE): ("timeout", False, False),
+    ("busy", pm.SCOPE_RESOLVED): ("busy", False, True),
+    ("busy", pm.SCOPE_TRUNCATED): ("busy", False, True),
+    ("busy", pm.SCOPE_UNRESOLVED): ("busy", False, False),
+    ("busy", pm.SCOPE_OUTAGE): ("busy", False, False),
+}
 
-    Not a spot check: the states that were never enumerated are exactly the
-    ones that shipped wrong.
-    """
+
+def assert_table_matches_the_independent_matrix():
+    assert set(pm.ARBITRATION_TABLE) == set(_INDEPENDENT_ARBITRATION_MATRIX)
+    for key in sorted(_INDEPENDENT_ARBITRATION_MATRIX):
+        panel_status, hide_may_apply, reports_facts = _INDEPENDENT_ARBITRATION_MATRIX[key]
+        outcome = pm.ARBITRATION_TABLE[key]
+        assert (outcome.panel_status, outcome.panel_hidden_on_zero,
+                outcome.scope_state, outcome.pane_reports_manuscript_facts) == \
+            (panel_status, hide_may_apply, key[1], reports_facts), key
+
+
+def assert_arbitration_behavior(claims_status, page_id_state):
     claims = claims_envelope([claim_row()]) if claims_status == "ok" \
         else claims_envelope(status=claims_status)
     made = bundle(claims=claims, page_ids=_PAGE_ID_ENVELOPE_STATES[page_id_state]())
     model = pm.build_panel_rows(made)
 
     expected_scope = _EXPECTED_SCOPE_STATE[page_id_state]
-    outcome = pm.ARBITRATION_TABLE[(claims_status, expected_scope)]
+    panel_status, hide_may_apply, reports_facts = \
+        _INDEPENDENT_ARBITRATION_MATRIX[(claims_status, expected_scope)]
 
-    assert model.panel_status == claims_status == outcome.panel_status
-    assert model.manuscript_pane["scope_state"] == expected_scope == outcome.scope_state
-    if not outcome.pane_reports_manuscript_facts:
+    assert model.panel_status == panel_status
+    assert model.manuscript_pane["scope_state"] == expected_scope
+
+    # BOTH directions. The earlier version asserted the pane only when it was
+    # forbidden to speak, so flipping a cell to True removed its only pane
+    # assertion instead of failing it.
+    if reports_facts:
+        assert model.manuscript_pane["state"] != pm.PANE_UNRESOLVED
+        assert model.manuscript_pane["state"] in {
+            pm.PANE_POPULATED, pm.PANE_EMPTY, pm.PANE_OUTAGE}
+    else:
         assert model.manuscript_pane["state"] == pm.PANE_UNRESOLVED
+        assert "total" not in model.manuscript_pane
+        assert "works" not in model.manuscript_pane
+
+    # The hide rule may apply only where the matrix says so.
+    if not hide_may_apply:
+        assert model.entry_control["hidden"] is False
+
+
+@pytest.mark.parametrize("claims_status", sorted(pm.SURFACE_STATUSES_ORDERED))
+@pytest.mark.parametrize("page_id_state", sorted(_PAGE_ID_ENVELOPE_STATES))
+def test_arbitration_cross_product_of_claim_status_and_page_scope(claims_status, page_id_state):
+    """All SIXTEEN combinations, against an INDEPENDENTLY written matrix.
+
+    Not a spot check: the states that were never enumerated are exactly the
+    ones that shipped wrong.
+    """
+    assert_arbitration_behavior(claims_status, page_id_state)
+
+
+def test_the_model_table_agrees_with_the_independent_matrix():
+    assert_table_matches_the_independent_matrix()
+
+
+def test_positive_control_a_flipped_arbitration_cell(monkeypatch):
+    """The control the cross-product could not have while it read its
+    expectation from the table under test."""
+    key = ("ok", pm.SCOPE_RESOLVED)
+    monkeypatch.setitem(
+        pm.ARBITRATION_TABLE, key,
+        dataclasses.replace(pm.ARBITRATION_TABLE[key],
+                            pane_reports_manuscript_facts=False))
+    with pytest.raises(AssertionError):
+        assert_table_matches_the_independent_matrix()
+    with pytest.raises(AssertionError):
+        assert_arbitration_behavior("ok", "ok_resolved")
+
+
+def test_positive_control_a_flipped_hide_rule(monkeypatch):
+    key = ("timeout", pm.SCOPE_RESOLVED)
+    monkeypatch.setitem(
+        pm.ARBITRATION_TABLE, key,
+        dataclasses.replace(pm.ARBITRATION_TABLE[key], panel_hidden_on_zero=True))
+    with pytest.raises(AssertionError):
+        assert_table_matches_the_independent_matrix()
 
 
 def test_the_arbitration_table_is_total_over_the_cross_product():
@@ -1178,6 +1271,7 @@ def test_the_arbitration_table_is_total_over_the_cross_product():
                 for scope in pm.SCOPE_STATES}
     assert set(pm.ARBITRATION_TABLE) == expected
     assert len(expected) == 16
+    assert len(_INDEPENDENT_ARBITRATION_MATRIX) == 16
 
 
 @pytest.mark.parametrize("status,total,hidden", [
