@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 136-14-PLAN.md
-last_updated: "2026-08-03T19:20:08.435Z"
-last_activity: 2026-08-03
+stopped_at: Completed 136-14-PLAN.md; plans 136-15..136-19/21 revised + 136-22 created (Codex round 5)
+last_updated: "2026-08-04T00:00:00.000Z"
+last_activity: 2026-08-04
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 45
+  total_plans: 46
   completed_plans: 36
   percent: 13
 ---
@@ -26,8 +26,57 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 15 of 21 complete (136-01..136-14 + 136-20); next executable: 136-15 / 136-16 (wave 7)
+Plan: 15 of **22** complete (136-01..136-14 + 136-20); next executable: 136-15 / 136-16 / 136-21 (wave 7)
 Status: Ready to execute
+
+**PLANS REVISED 2026-08-04 — Codex pre-flight ROUND 5 folded in; plan count 21 -> 22.**
+Round 5 (2026-08-03, audited HEAD `5ef9b45e`) re-ran the pre-flight over the six then-unexecuted
+surface plans against the substrate 136-01..136-14 had actually built, and returned **rework: 1
+BLOCKER / 8 HIGH / 3 MEDIUM / 1 LOW / 4 CONFIRM**. Two causes, neither a planning error at the
+time: (a) rounds 1-4 signed off against a repo where the discovery service layer, the rebuilt
+asset and the public projection did not exist; (b) **owner rulings R, S, T and U were all recorded
+2026-08-03, AFTER the round-4 sign-off**, so no plan could reference them.
+
+What changed, per plan:
+
+- **NEW `136-22` (wave 8)** — the launch-statistics reader ruling U requires and nothing owned
+  (round-5 BLOCKER). Version-aware, artifact-backed: the main-pool contribution total and its three
+  shades (`fills_gap` / `refines_granularity` / `container_predicts`) on the single basis
+  `main_pool = 1`, through the four-key envelope, with the total computed AS the sum of the shades so
+  the decomposition is structural. Ships a guard scanning source **and** `genizah_translations.py`
+  for every launch figure as a literal — including the retired **13,285** — with its forbidden list
+  derived from the loaded artifact. The numbers are artifact properties, not constants: Codex
+  measured **9,523** in the deployed public artifact against **10,432** on the private rebuild.
+  Wave 8 rather than 7 because 136-21 owns the same three service files in wave 7 — file ownership,
+  not a contract edge.
+- **`136-15`** — the model's input was bare `service_rows`, which cannot distinguish `ok`-with-zero
+  from an outage or carry `meta.resolved`; replaced with an explicit `PanelServiceBundle` over all
+  five live envelopes plus a 16-state arbitration cross-product test. Ruling R title routing added.
+  The 14/116 and 19/121 human-confirmed populations are relabelled as PRIVATE-rebuild values.
+- **`136-16`** — five acceptance criteria that FAIL if the ruling-T 'more matches' control is
+  omitted (a page without it previously passed everything); a reserved, digit-free headline slot;
+  ruling-R routing for work-facet labels; and the `run.io_bound` instruction replaced — the live
+  wrappers are already async and already dispatch internally, so wrapping them was a nested offload.
+- **`136-17`** — the 'one synchronous enveloped callable' it required does not exist; new
+  `<offload_contract>` awaits the async wrappers directly. **One clause of the Codex remedy is
+  deliberately declined with a stated reason**: a composite bundle callable would bypass the four
+  per-read version-keyed LRU caches and re-run every query on each folio turn. Honesty checks now
+  cover envelopes and error paths, not only markup.
+- **`136-18`** — renders the ruling-U headline from 136-22 (new `depends_on` edge); 'matched-letter
+  count' replaced with qualified coverage from `max_coverage_ppm` (the grain has no matched letters,
+  and the only planned test passed if the element was omitted for every row); second-bucket rows
+  asserted to render with main-pool anatomy, unnumbered; controls split 3 -> 7, one property each.
+- **`136-21`** — the expansion could not render its promised rows (`manuscript_display` was never
+  joined); `shared/discovery_surface_projection.py` added to `files_modified` with a registered
+  `SURFACE_EXPANSION_FIELDS`; every `{status, items, total}` corrected to the live four-key shape;
+  and a raising query helper so a failed list/member/count query cannot report `ok` with zero.
+- **`136-19`** — no round-5 findings (CONFIRM 15); updated to enumerate 136-22 and to disposition
+  rulings R/S/T/U, and to record every launch figure with the artifact and audience producing it.
+
+Phase-wide standard applied to every revised criterion: **would a broken implementation satisfy
+this?** Positive assertions on populated fixtures replace 'absent when missing'; one mutation per
+positive control, each asserting the specific expected failure rather than that the suite went red.
+Full record: `136-CODEX-PREFLIGHT.md` § 'Round 5'.
 
 **136-14 COMPLETE 2026-08-03 — the read spine both surfaces build on.** `shared/discovery_service.py`
 gains the D-13 `{status, items, total, meta}` envelope over a CLOSED four-value vocabulary, so an
