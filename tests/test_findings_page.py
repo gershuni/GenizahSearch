@@ -1520,6 +1520,7 @@ def _positive_control(page, lang: str, width: int) -> None:
 def run_browser_actionability_check(base_url: str) -> None:
     """(e) at 375px and desktop, in both languages, plus (f) its positive
     control at each of the four combinations."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
     from playwright.sync_api import sync_playwright
 
     from shared.discovery_display_strings import bucket_name
@@ -1558,6 +1559,37 @@ def run_browser_actionability_check(base_url: str) -> None:
                     page = context.new_page()
                     page.goto(f"{base_url}{FINDINGS_ROUTE}", wait_until="domcontentloaded")
                     _wait_for_findings_page(page)
+
+                    # Let the nav drawer settle before probing.
+                    #
+                    # `web/main.py` renders the drawer OPEN (`value=True`) and
+                    # only closes it ~500ms later, from `_deferred_close_drawer`,
+                    # which has to round-trip `window.innerWidth` to the client
+                    # to learn it is on mobile. Until that lands, the drawer's
+                    # full-screen backdrop intercepts every click -- so at 375px
+                    # the probe below timed out on a control Playwright itself
+                    # reported "visible, enabled and stable". That was this job's
+                    # SECOND real finding; the mobile flash is recorded in
+                    # docs/OPEN_ISSUES.md as a product issue in its own right.
+                    #
+                    # THIS IS NOT THE FORBIDDEN PRECEDING ACTION. Criterion (e)
+                    # forbids a preceding DISCLOSURE action -- one that reveals
+                    # the control under test. Waiting for page load to finish
+                    # reveals nothing and clicks nothing. A drawer that never
+                    # settles IS a real defect for a reader on this viewport, so
+                    # this fails loudly rather than proceeding into a misleading
+                    # timeout.
+                    try:
+                        page.wait_for_selector(
+                            ".q-drawer__backdrop", state="hidden", timeout=5000
+                        )
+                    except PlaywrightTimeout:
+                        raise AssertionError(
+                            "the nav drawer's backdrop still covers the findings page "
+                            f"at {width}x{height} five seconds after load — a reader on "
+                            "this viewport cannot tap anything underneath it"
+                        ) from None
+
                     # Fail loudly if a modal is over the page anyway: a silent
                     # retry-until-timeout reads as "the control is broken" when
                     # the real cause is something covering it.
