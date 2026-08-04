@@ -1146,6 +1146,63 @@ def test_control_11_accuracy_0_91_in_a_forced_exception_message():
     assert_envelope_honesty(make_envelope(STATUS_OK, [], 0, meta={'lang': 'en'}))
 
 
+@pytest.mark.parametrize('lang,sentence', [
+    ('en', 'accuracy is 91 percent'),
+    ('en', 'accuracy is 91 per cent'),
+    ('en', 'we are right 91 pct of the time'),
+    ('he', 'הדיוק הוא 91 אחוז'),
+    ('he', 'שיעור הנכונות הוא 91 אחוזים'),
+])
+def test_control_11a_a_word_spelled_percentage_in_a_rendered_row(lang, sentence):
+    """The sign is not the claim (round 12, finding 3).
+
+    `91%` failed the percentage detector from the start, while `91 percent`
+    passed ALL SIX -- `_PERCENT_RE` requires the glyph, and a bare integer is
+    not a rate-shaped quantity, so rule 1 had nothing to sit beside either.
+    """
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_surface_honesty(_panel_fragment_with(sentence),
+                               scope_selector=dp.PANEL_ROW_CLASS, lang=lang)
+    assert 'unqualified percentage' in str(exc.value)
+
+
+@pytest.mark.parametrize('lang', LANGS)
+def test_control_11b_a_word_spelled_percentage_in_the_other_two_egress_classes(lang):
+    """The same form through the envelope scan and the error path -- neither of
+    which the markup scan can see."""
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_envelope_honesty({**make_envelope(STATUS_TIMEOUT),
+                                 'meta': {'reason': 'accuracy fell to 91 percent'}}, lang=lang)
+    assert 'unqualified percentage' in str(exc.value)
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_error_path_honesty('the model reported 91 percent accuracy', lang=lang)
+    assert 'unqualified percentage' in str(exc.value)
+
+
+@pytest.mark.parametrize('key', ['quality', 'score', 'confidence_of_match'])
+def test_control_11c_a_ONE_place_float_under_a_neutral_envelope_key(key):
+    """The numeric envelope rule required MORE THAN ONE significant decimal
+    place, so `{"quality": 0.9}` and `{"score": 0.9}` passed while
+    `{"quality": 0.91}` failed (round 12, finding 3). A rate rounded to one
+    place is not less of a rate -- it is the likelier way an estimate gets
+    softened onto a surface."""
+    envelope = {**make_envelope(STATUS_OK, [], 0), 'meta': {key: 0.9}}
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_envelope_honesty(envelope)
+    assert 'rate-shaped float' in str(exc.value)
+
+
+def test_control_11d_a_one_place_float_on_a_ROW_field_too():
+    """NUMERIC_RULE_EXEMPTIONS is `NEVER permitted on a ROW field`; the rule it
+    guards must therefore reach one."""
+    row = surface_safe_claim(_claim_source(coverage_ppm=0.9))
+    envelope = make_envelope(STATUS_OK, [row], 1, meta={
+        'page_id': 'p', 'include_review': False})
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_envelope_honesty(envelope)
+    assert 'rate-shaped float' in str(exc.value)
+
+
 def _live_limitations_text(lang: str) -> str:
     from web.pages.help import _LIMITATIONS_TEXT
     return _LIMITATIONS_TEXT['he' if lang == 'he' else 'en']
@@ -1254,6 +1311,65 @@ def test_FP_SAMPLE_SIZE():
     with pytest.raises(DiscoveryHonestyViolation):
         assert_surface_honesty(_panel_fragment_with('correct in 380 out of 400 cases'),
                                scope_selector=dp.PANEL_ROW_CLASS, lang='en')
+
+
+@pytest.mark.parametrize('lang,permitted', [
+    ('en', 'Matches Commentary on Song of Songs · 68 percent of page'),
+    ('he', 'התאמה לפירוש שיר השירים · 68 אחוז מהדף'),
+])
+def test_FP_PERCENT_WORD_COVERAGE(lang, permitted):
+    """The ONE permitted percentage, spelled as a WORD, must survive the
+    widening exactly as the glyph form does -- the coverage qualifier is what
+    licenses it, never the notation."""
+    assert_surface_honesty(_panel_fragment_with(permitted),
+                           scope_selector=dp.PANEL_ROW_CLASS, lang=lang)
+
+
+@pytest.mark.parametrize('lang,sentence', [
+    # The shipped methods page's own promise. A number is REQUIRED before the
+    # word precisely so this sentence -- which exists to say there is no
+    # percentage -- does not read as one.
+    ('en', 'stated in words, never as a percentage or an interval'),
+    ('he', 'מנוסח במילים, לא כאחוז או כטווח'),
+    # Ordinary reader text that happens to carry a number and a percent-shaped
+    # WORD far apart, or neither.
+    ('en', 'MS Heb c.57, folio 12, dated 1157'),
+    ('en', 'the percentage of the page that matched is not published'),
+    ('he', 'אחוז הכיסוי אינו מפורסם'),
+])
+def test_FP_PERCENT_WORD_NEEDS_A_NUMBER(lang, sentence):
+    """The bare word is honest prose in both languages; only `<number> word` is
+    a claim. Without the number requirement the widening turns the
+    owner-approved D-06a sentence red on its own promise."""
+    assert_surface_honesty(_panel_fragment_with(sentence),
+                           scope_selector=dp.PANEL_ROW_CLASS, lang=lang)
+
+
+def test_FP_INTEGRAL_FLOAT_IS_NOT_A_RATE():
+    """`0.0` and `1.0` stay out of the widened numeric rule: a counter that
+    arrives as a float is the realistic source of both, and no figure this
+    system measures is integral. `0.9` in the same slot still fails, so the
+    exclusion is bounded rather than a hole."""
+    for value in (0.0, 1.0):
+        assert_envelope_honesty({**make_envelope(STATUS_OK, [], 0),
+                                 'meta': {'weight': value}})
+    with pytest.raises(DiscoveryHonestyViolation):
+        assert_envelope_honesty({**make_envelope(STATUS_OK, [], 0),
+                                 'meta': {'weight': 0.9}})
+
+
+def test_no_rate_key_token_collides_with_an_allowlisted_field():
+    """`_RATE_KEY_TOKENS` fires on the KEY regardless of the value's type, so a
+    token that is also a word of a real allowlisted field would reject every
+    correct envelope. Asserted against `_ALL_ALLOWLISTS` rather than against a
+    remembered list."""
+    from tests.render_smoke.discovery_honesty_gate import _RATE_KEY_TOKENS
+    tokens = set()
+    for field in ALLOWLIST_FIELD_UNION:
+        tokens.update(re.split(r'[^a-z0-9]+', str(field).lower()))
+    collisions = tokens & set(_RATE_KEY_TOKENS)
+    assert not collisions, (
+        f'_RATE_KEY_TOKENS collides with allowlisted field words: {sorted(collisions)}')
 
 
 def test_FP_VERSION_BOUNDARY():

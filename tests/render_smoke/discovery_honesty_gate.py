@@ -184,6 +184,22 @@ def _extract_scoped_text(rendered_html: str, scope_selector: str) -> str:
 
 _PERCENT_RE = re.compile(r"\d+(?:\.\d+)?\s*%")
 
+#: The SAME quantity spelled as a WORD. `91%` failed every detector while
+#: `accuracy is 91 percent` passed all six -- the sign is not the claim, and a
+#: surface that writes the word instead of the glyph makes exactly the assertion
+#: D-06 prohibits (round 12, finding 3).
+#:
+#: A NUMBER is required immediately before the word, and that requirement is
+#: load-bearing in both languages. Bare "percentage" is honest prose the shipped
+#: methods page already carries -- "in words, never as a percentage or an
+#: interval" / "לא כאחוז או כטווח" -- and a detector that fires on it would turn
+#: an owner-approved page red on the sentence that promises no percentage.
+_PERCENT_WORD_RE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:percentage\s+points?|percent|per\s+cent|pct"
+    r"|אחוזים|אחוזי|אחוז)",
+    re.IGNORECASE,
+)
+
 # The coverage qualifier that must sit near a permitted percentage --
 # "Matches <work> · 68% of page" (EN) / "התאמה
 # ל<חיבור> · 68% מהדף" (HE).
@@ -194,10 +210,18 @@ _COVERAGE_QUALIFIER_BY_LANG = {
 _COVERAGE_QUALIFIER_WINDOW = 32  # chars scanned after the percentage match
 
 
+def _iter_percentages(text: str):
+    """Every percentage in `text`, glyph-formatted OR word-formatted."""
+    for m in _PERCENT_RE.finditer(text):
+        yield m
+    for m in _PERCENT_WORD_RE.finditer(text):
+        yield m
+
+
 def _find_unqualified_percentages(text: str, lang: str) -> List[str]:
     qualifier = _COVERAGE_QUALIFIER_BY_LANG.get("he" if lang == "he" else "en")
     violations = []
-    for m in _PERCENT_RE.finditer(text):
+    for m in _iter_percentages(text):
         window = text[m.end():m.end() + _COVERAGE_QUALIFIER_WINDOW]
         if qualifier not in window:
             violations.append(f"unqualified percentage {m.group(0)!r}")
@@ -313,7 +337,9 @@ def _find_raw_vocab_keys(text: str) -> List[str]:
 #   1. a RATE WORD within a short window of a RATE-SHAPED QUANTITY. Deliberately
 #      NOT "any number": a methods surface may legitimately write "measured on
 #      400 cards", and a detector that fires on that is one the next person
-#      deletes.
+#      deletes. A rate-shaped quantity includes a percentage spelled as a WORD
+#      ("91 percent" / "91 אחוז"), which is the form that escaped every detector
+#      until round 12.
 #   2. a bare decimal fraction in [0, 1] with two or more decimal places, which
 #      is never legitimate discovery prose.
 #
@@ -373,7 +399,10 @@ def _strip_version_tokens(text: str) -> str:
 def _rate_shaped_spans(text: str) -> List[Tuple[int, int, str]]:
     """Every rate-SHAPED quantity in `text`, as `(start, end, what)`."""
     spans: List[Tuple[int, int, str]] = []
-    for m in _PERCENT_RE.finditer(text):
+    # BOTH spellings of a percentage. `_iter_percentages` is the shared
+    # authority: adding a form there arms check 1, this detector and the D-06a
+    # words-only test at once, which is what stops the three drifting apart.
+    for m in _iter_percentages(text):
         spans.append((m.start(), m.end(), f"percentage {m.group(0).strip()!r}"))
     for m in _DECIMAL_RE.finditer(text):
         try:
@@ -462,7 +491,12 @@ def _is_words_only_rate_statement(text: str) -> bool:
     thing the accuracy detector could have fired on is the qualitative
     vocabulary itself."""
     stripped = _strip_version_tokens(text)
-    if _PERCENT_RE.search(stripped) or _BRACKET_INTERVAL_RE.search(stripped):
+    if _BRACKET_INTERVAL_RE.search(stripped):
+        return False
+    # A WORD-spelled percentage is a number-shaped rate too, so the D-06a
+    # exemption never reaches it: "wrong in a minority of cases" is words-only,
+    # "wrong 9 percent of the time" is not.
+    for _m in _iter_percentages(stripped):
         return False
     if _N_OUT_OF_M_RE.search(stripped):
         return False
@@ -847,6 +881,12 @@ def value_rule_flags(field: Any, value: Any) -> List[str]:
 _RATE_KEY_TOKENS: frozenset = frozenset({
     "accuracy", "accurate", "precision", "recall", "correct", "ratio",
     "proportion", "share", "rate", "f1",
+    # `quality` and `score` are the two neutral-sounding names an estimate
+    # actually arrives under -- neither is a token of ANY field in
+    # `_ALL_ALLOWLISTS` (asserted by
+    # `test_no_rate_key_token_collides_with_an_allowlisted_field`), so naming
+    # them here costs no correct envelope.
+    "quality", "score",
 })
 
 #: `(envelope_name, key)` pairs exempt from the NUMERIC rule, each with a
@@ -856,14 +896,24 @@ NUMERIC_RULE_EXEMPTIONS: Tuple[Tuple[str, str, str], ...] = ()
 
 
 def _numeric_rate_violation(value: Any) -> bool:
-    """A float in [0, 1] with more than one decimal place. Booleans excluded --
-    `True == 1` in Python, and a boolean flag is not a rate."""
+    """A FRACTIONAL float in [0, 1]. Two exclusions, each with a reason.
+
+    * Booleans -- `True == 1` in Python, and a flag is not a rate.
+    * An INTEGRAL value (`0.0`, `1.0`). A counter that happens to arrive as a
+      float is the realistic source of those two, and no measured figure this
+      system reports is integral.
+
+    The previous revision additionally required MORE THAN ONE significant
+    decimal place, which let `{"quality": 0.9}` and `{"score": 0.9}` through
+    (round 12, finding 3). One place is a rate as surely as four are -- and a
+    rate rounded to one place is the likelier way an estimate gets "softened"
+    onto a surface, not a less likely one.
+    """
     if isinstance(value, bool) or not isinstance(value, float):
         return False
     if not (0.0 <= value <= 1.0):
         return False
-    text = repr(value)
-    return "." in text and len(text.split(".")[1].rstrip("0")) > 1
+    return float(value) != float(int(value))
 
 
 def _rate_shaped_key(key: Any) -> bool:
