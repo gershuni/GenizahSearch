@@ -213,20 +213,40 @@ class ProjectionContext:
                 if self.works_by_id.get(wid, {}).get("identity_visibility")
                 == visibility.VISIBILITY_PUBLIC
             }
-            # pages that will still carry a replayable demotion after projection
-            replayable_pages = {
-                r["page_id"] for r in audit_rows
+            # (page, demoted work) pairs that will still carry a replayable
+            # demotion after projection.
+            #
+            # Keyed by BOTH, never by page alone. A page-only key lets an
+            # unrelated but publishable demotion on the same page vouch for
+            # evidence whose OWN backing demotion was dropped for naming a
+            # private work -- the evidence survives while the audit row that
+            # explains it does not, which is precisely the unreplayable state
+            # this prune exists to prevent (Codex code review 2026-08-03,
+            # finding 2). 65 pages in the deployed public artifact carry more
+            # than one demotion, so the collision is reachable; it happens to be
+            # unrealised there today (0 mismatches measured), which is why the
+            # deployed bytes are unaffected by this correction.
+            #
+            # `demoted_work_id` is compared against the claim work's CANONICAL
+            # id, because audit rows carry canonical ids. A NULL demoted_work_id
+            # substantiates nothing and is therefore excluded -- fail closed.
+            replayable_page_works = {
+                (r["page_id"], r["demoted_work_id"]) for r in audit_rows
                 if r.get("decision") == "demoted"
                 and r.get("kept_year") is not None and r.get("demoted_year") is not None
+                and r.get("demoted_work_id") is not None
+                and r["demoted_work_id"] in public_work_ids
                 and (r.get("kept_work_id") is None or r["kept_work_id"] in public_work_ids)
-                and (r.get("demoted_work_id") is None or r["demoted_work_id"] in public_work_ids)
             }
             doomed: Set[str] = set()
             for cid, rows in surviving_evidence_by_claim.items():
-                page_id = self.claims_by_id[cid]["page_id"]
+                claim = self.claims_by_id[cid]
+                page_id = claim["page_id"]
+                canonical = self.works_by_id.get(claim["work_id"], {}).get(
+                    "canonical_work_id")
                 for ev in rows:
                     if (ev.get("routing_reason") == _LATER_SHARED_TEXT
-                            and page_id not in replayable_pages):
+                            and (page_id, canonical) not in replayable_page_works):
                         doomed.add(ev["evidence_id"])
             self.pruned_unreplayable_evidence_ids |= doomed
 

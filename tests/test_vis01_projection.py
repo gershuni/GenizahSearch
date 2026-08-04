@@ -815,3 +815,90 @@ def test_later_shared_text_evidence_is_pruned_when_its_demotion_cannot_be_publis
     assert report["pruned_unreplayable_evidence"] == 1, (
         "the prune must be reported in the OFFLINE reconciliation report"
     )
+
+
+def test_page_with_two_demotions_does_not_vouch_for_the_wrong_work(tmp_path):
+    """The false-green the page-only closure key allowed (Codex code review
+    2026-08-03, finding 2).
+
+    Setup: ONE page carrying TWO demotions.
+      * (P_SHARED, demoted=W_A) -- kept_work_id names a PRIVATE work, so the
+        audit row cannot be published. E_A cites this decision.
+      * (P_SHARED, demoted=W_C) -- both sides public, so this row IS published.
+
+    Keyed by page alone, the second row makes P_SHARED "replayable" and E_A
+    survives -- asserting a routing decision the artifact does not contain.
+    Keyed by (page, demoted canonical work), E_A is correctly pruned while the
+    legitimately-backed evidence on the same page is untouched.
+
+    The pre-existing prune test cannot express this: it puts exactly one
+    demotion on its page, so the two keys agree there by construction.
+    """
+    path, conn = _new_private_conn(tmp_path)
+    _add_work(conn, "W_A")
+    _add_work(conn, "W_B")
+    _add_work(conn, "W_C")
+    _add_work(conn, "W_HIDDEN", identity_visibility="private", source_corpus="msource")
+
+    # E_A: later_shared_text, backed ONLY by the unpublishable demotion.
+    _add_claim_with_evidence(
+        conn, claim_id="C_A", page_id="P_SHARED", work_id="W_A",
+        evidence_id="E_A", sys_id="SYS_A",
+    )
+    conn.execute(
+        "UPDATE discovery_evidence SET routing_reason='later_shared_text' "
+        "WHERE evidence_id='E_A'"
+    )
+    # W_B and W_C need surviving public claims to count as public works.
+    _add_claim_with_evidence(
+        conn, claim_id="C_B", page_id="P_OTHER", work_id="W_B",
+        evidence_id="E_B", sys_id="SYS_B",
+    )
+    _add_claim_with_evidence(
+        conn, claim_id="C_C", page_id="P_OTHER2", work_id="W_C",
+        evidence_id="E_C", sys_id="SYS_C",
+    )
+
+    # Row 1 -- explains E_A, but names a private work as kept => withheld.
+    _insert(
+        conn, "discovery_routing_audit",
+        page_id="P_SHARED", kept_work_id="W_HIDDEN", demoted_work_id="W_A",
+        kept_year=900, demoted_year=1400, delta_years=500, decision="demoted",
+    )
+    # Row 2 -- same page, unrelated to E_A, fully publishable.
+    _insert(
+        conn, "discovery_routing_audit",
+        page_id="P_SHARED", kept_work_id="W_B", demoted_work_id="W_C",
+        kept_year=800, demoted_year=1500, delta_years=700, decision="demoted",
+    )
+    _add_meta(conn, audience="private", schema_version="discovery-v1")
+    _finalize(conn)
+    conn.close()
+
+    out = tmp_path / "public.db"
+    report = proj.project(str(path), str(out), masking_patterns=[_DISPOSABLE_PATTERN])
+    out_conn = sqlite3.connect(str(out))
+    try:
+        surviving = {r[0] for r in out_conn.execute(
+            "SELECT evidence_id FROM discovery_evidence")}
+        assert "E_A" not in surviving, (
+            "a publishable demotion on the SAME PAGE vouched for evidence whose own "
+            "backing demotion was withheld -- the closure is keyed by page instead "
+            "of by (page, demoted work)"
+        )
+        assert {"E_B", "E_C"} <= surviving, (
+            "the tightened key over-pruned: evidence with no later_shared_text "
+            "reason at all was dropped"
+        )
+        # the publishable demotion is still there; the withheld one is not
+        kept_audit = {
+            (r[0], r[1]) for r in out_conn.execute(
+                "SELECT page_id, demoted_work_id FROM discovery_routing_audit")
+        }
+        assert ("P_SHARED", "W_C") in kept_audit
+        assert ("P_SHARED", "W_A") not in kept_audit
+        assert not out_conn.execute(
+            "SELECT 1 FROM works WHERE work_id='W_HIDDEN'").fetchone()
+    finally:
+        out_conn.close()
+    assert report["pruned_unreplayable_evidence"] == 1

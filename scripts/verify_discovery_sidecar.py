@@ -822,30 +822,48 @@ def check_never_orphan_shipped(conn: sqlite3.Connection) -> List[str]:
 
 def check_unknown_date_never_demoted(conn: sqlite3.Connection) -> List[str]:
     """Every `routing_reason='later_shared_text'` evidence row MUST correspond
-    to a `discovery_routing_audit` row on the same page with
-    `decision='demoted'` and BOTH years non-NULL -- an unknown-date pair is
-    fail-safe and can NEVER produce a demotion. A pre-v2 asset (no
-    `discovery_routing_audit` table) degrades gracefully to [] (compat-gate)."""
+    to a `discovery_routing_audit` row on the same page **naming that evidence's
+    own canonical work as the demoted one**, with `decision='demoted'` and BOTH
+    years non-NULL -- an unknown-date pair is fail-safe and can NEVER produce a
+    demotion.
+
+    Keyed by (page, demoted canonical work), not by page alone. A page-only test
+    lets an unrelated demotion on the same page satisfy the check for evidence
+    whose own backing demotion is absent, so the gate would pass an artifact in
+    exactly the state it exists to reject (Codex code review 2026-08-03, finding
+    2 -- the projection carried the identical defect and is corrected in the same
+    change). Audit rows carry canonical work ids, hence the join through
+    `works.canonical_work_id`. A NULL `demoted_work_id` substantiates nothing and
+    is excluded: fail closed.
+
+    A pre-v2 asset (no `discovery_routing_audit` table) degrades gracefully to
+    [] (compat-gate); `check_gate_bearing_tables_present` is what stops that
+    compatibility from silently covering a current asset."""
     if not _has_table(conn, "discovery_routing_audit"):
         return []
     violations: List[str] = []
     cur = conn.cursor()
-    demoted_pages = set()
-    for page_id, ky, dy in cur.execute(
-        "SELECT page_id, kept_year, demoted_year FROM discovery_routing_audit WHERE decision='demoted'"
-    ).fetchall():
-        if ky is not None and dy is not None:
-            demoted_pages.add(page_id)
+    demoted_page_works = {
+        (page_id, demoted_work_id)
+        for page_id, demoted_work_id, ky, dy in cur.execute(
+            "SELECT page_id, demoted_work_id, kept_year, demoted_year "
+            "FROM discovery_routing_audit WHERE decision='demoted'"
+        ).fetchall()
+        if ky is not None and dy is not None and demoted_work_id is not None
+    }
     rows = cur.execute(
-        "SELECT de.evidence_id, de.a_page_id FROM discovery_evidence de "
+        "SELECT de.evidence_id, de.a_page_id, w.canonical_work_id "
+        "FROM discovery_evidence de "
+        "JOIN discovery_claim dc ON dc.claim_id = de.claim_id "
+        "JOIN works w ON w.work_id = dc.work_id "
         "WHERE de.routing_reason=?", (ids.ROUTING_REASON_LATER_SHARED_TEXT,)
     ).fetchall()
-    for evid, page_id in rows:
-        if page_id not in demoted_pages:
+    for evid, page_id, canonical_work_id in rows:
+        if (page_id, canonical_work_id) not in demoted_page_works:
             violations.append(
                 f"evidence {evid}: routing_reason='later_shared_text' on page {page_id} has NO "
-                "discovery_routing_audit decision='demoted' row with both years non-NULL "
-                "(unknown-date-never-demoted)"
+                "discovery_routing_audit decision='demoted' row naming its own canonical work "
+                "with both years non-NULL (unknown-date-never-demoted)"
             )
     return violations
 
