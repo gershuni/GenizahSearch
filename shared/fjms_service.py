@@ -710,6 +710,10 @@ class FjmsService:
         self._works_lock = threading.Lock()
         self._unclassified_cache: Optional[int] = None
         self._unclassified_lock = threading.Lock()
+        # English domain name -> Hebrew domain name (see get_domain_translations).
+        # None = never built; a dict (possibly empty) = built.
+        self._domain_translations_cache: Optional[dict] = None
+        self._domain_translations_lock = threading.Lock()
         self._has_persons_titles: bool = False  # Set True if v5+ tables exist
         self._has_bib_extended: bool = False  # Set True if extended bib columns exist
         # R2-#3: cache of distinct catalog_fields.FieldValue for FragmentMaterial.
@@ -1567,6 +1571,66 @@ class FjmsService:
         except Exception as e:
             logger.error(f"FjmsService.get_all_domains error: {e}")
             return []
+
+    def get_domain_translations(self) -> dict:
+        """English domain name -> Hebrew domain name, over the WHOLE vocabulary.
+
+        FJMS is the authority for the bilingual domain vocabulary: every row of
+        ``domains`` carries ``Domain``/``DomainHeb`` and ``ParentDomain``/
+        ``ParentDomainHeb``. This returns the flat union of both pairs, so a
+        caller holding either a leaf name or a parent name can translate it
+        without knowing which it is.
+
+        Deliberately NOT derived from :meth:`get_domain_hierarchy`. That
+        accessor nests and de-duplicates for the browse tree and drops names in
+        the process (measured 2026-08-04: 126 names out of 188, leaving 10 of
+        the findings page's 38 genre strings untranslatable), so a caller that
+        reused it would silently fall back to English on a quarter of the
+        vocabulary. This query keeps every name.
+
+        Cached in memory after the first call (the vocabulary is static) and
+        thread-safe via double-checked locking, like the hierarchy cache. Runs
+        one ``SELECT DISTINCT`` (~0.08 s over ~390K rows, measured); callers on
+        an event loop must still reach it off-loop.
+
+        Returns ``{}`` when the sidecar is absent or the query fails -- never a
+        partial map and never an exception, so a caller can fall back to the
+        English name rather than rendering a blank label.
+        """
+        if self._domain_translations_cache is not None:
+            return self._domain_translations_cache
+
+        if self._conn is None:
+            return {}
+
+        with self._domain_translations_lock:
+            if self._domain_translations_cache is not None:
+                return self._domain_translations_cache
+            try:
+                cursor = self._conn.execute(
+                    "SELECT DISTINCT Domain, DomainHeb, ParentDomain, ParentDomainHeb "
+                    "FROM domains"
+                )
+                mapping: dict = {}
+                for row in cursor:
+                    for english, hebrew in (
+                        (row["Domain"], row["DomainHeb"]),
+                        (row["ParentDomain"], row["ParentDomainHeb"]),
+                    ):
+                        if not english or not hebrew:
+                            continue
+                        english = str(english).strip()
+                        hebrew = str(hebrew).strip()
+                        if english and hebrew:
+                            mapping.setdefault(english, hebrew)
+                self._domain_translations_cache = mapping
+                logger.info(
+                    "FjmsService.get_domain_translations: %d domain names", len(mapping)
+                )
+            except Exception as e:
+                logger.error(f"FjmsService.get_domain_translations error: {e}")
+                return {}
+        return self._domain_translations_cache
 
     def get_domain_hierarchy(self) -> dict:
         """
