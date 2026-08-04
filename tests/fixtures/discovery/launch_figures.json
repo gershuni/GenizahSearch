@@ -1,0 +1,77 @@
+{
+  "_comment": "GENERATED -- do not hand-edit. The artifact-derived half of the no-literals forbidden list (plan 136-22, ruling U). Committed so the guard forbids something in EVERY environment, artifact present or not. Regenerate with: DISCOVERY_LAUNCH_GUARD_DB=<sidecar.db> python -c \"from tests.test_discovery_launch_stats import regenerate_committed_figures as r; r()\"",
+  "figures": {
+    "items[0].identification_count": {
+      "value": 4152,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "items[0].manuscript_count": {
+      "value": 3666,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "items[1].identification_count": {
+      "value": 3873,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "items[1].manuscript_count": {
+      "value": 2101,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "items[2].identification_count": {
+      "value": 1498,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "items[2].manuscript_count": {
+      "value": 995,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "total": {
+      "value": 9523,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "meta.main_pool_manuscript_count": {
+      "value": 6755,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "meta.all_bucket_total": {
+      "value": 17536,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "meta.all_bucket_manuscript_count": {
+      "value": 10959,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "meta.corpus_manuscript_count": {
+      "value": 38431,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "meta.corpus_page_count": {
+      "value": 177402,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    }
+  }
+}

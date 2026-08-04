@@ -238,6 +238,40 @@ async def get_findings_enveloped(
         return timeout_envelope(meta={"reason": "query_timeout"})
 
 
+async def get_launch_stats_enveloped() -> Dict[str, Any]:
+    """Ruling U's launch statistics: the main-pool contribution total, its three
+    shades, and the context figures beside them (plan 136-22).
+
+    THE ONLY SUPPORTED WAY TO OBTAIN ANY OF THESE NUMBERS. Every figure is
+    computed from the artifact being served at request time, on the single basis
+    `main_pool = 1`, and carries the sidecar version and audience that produced
+    it -- because the same query against the public projection and the private
+    rebuild returns two different, both-correct answers while BOTH report the
+    identical `sidecar_version` string.
+
+    Not one of these numbers may appear as a literal anywhere in code or in a
+    translation. `tests/test_discovery_launch_stats.py` enforces that over a
+    glob-derived source set and the translation table, and fails naming the
+    file, the line, the figure and this accessor.
+
+    NOTHING re-caches above this wrapper: the service's own cache is keyed on
+    `(path, sidecar_version)`, and the outer `_browse_cached_call` LRU carries no
+    path at all -- layering it here would serve the previous artifact's headline
+    after a rebuild swap, while every reader-level test still passed.
+
+    Fails open like every other wrapper; never raises.
+    """
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_launch_stats_enveloped_async()
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        logger.info("discovery.get_launch_stats_enveloped: timeout")
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
 async def get_findings_facets_enveloped(
     level: str,
     *,
