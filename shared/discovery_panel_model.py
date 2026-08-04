@@ -1097,13 +1097,32 @@ def _compose_rows(
     return rows, generic_groups
 
 
+def _sort_offset(value: Any, field_name: str) -> Tuple[int, int]:
+    """One passage offset as a sort key: `(present, magnitude)`.
+
+    `str(offset)` sorted lexicographically, which puts offset 100 before offset
+    20 -- so a page's rows came out in an order no reader could explain, and
+    the more offsets a page carried the more scrambled it looked. The leading
+    flag is an EXPLICIT sentinel for a missing offset, so an absent value sorts
+    last by decision rather than by whatever `None` happens to compare like.
+    """
+    if value is None:
+        return (1, 0)
+    return (0, _int_or_refuse(value, field_name))
+
+
 def _lead_sort_key(row: Mapping[str, Any]):
     """Deterministic emission order: strongest band first, then the passage's
-    offsets, then the display work id, then the claim id -- never input order,
-    which a caller could vary."""
+    offsets NUMERICALLY, then the display work id, then the claim id -- never
+    input order, which a caller could vary.
+
+    The ids stay lexicographic on purpose: they are opaque strings, and the
+    only property asked of them here is that the order be total.
+    """
     return (
         _band_rank(row),
-        str(row.get("span_start")),
+        _sort_offset(row.get("span_start"), "span_start"),
+        _sort_offset(row.get("span_end"), "span_end"),
         str(_display_work_id(row)),
         str(row.get("claim_id")),
     )

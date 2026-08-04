@@ -634,6 +634,42 @@ def test_lead_attribution_nests_competing_attributions_deterministically():
         r["display_work_id"] for r in expected_rest]
 
 
+def test_identifications_sort_by_numeric_offset_never_lexicographically():
+    """20 before 100. Under `str(offset)` the passage at 100 came first, and a
+    page's rows arrived in an order no reader could explain.
+
+    The work ids are chosen so that a fall-through to the id would ALSO put the
+    100-row first -- so this passes only if the numeric offset decides.
+    """
+    rows = [
+        claim_row(claim_id="claim-at-100", evidence_id="ev-100",
+                  work_id="w000001", canonical_work_id="w000001",
+                  display_work_id="w000001", neutral_title="At one hundred",
+                  span_start=100, span_end=180),
+        claim_row(claim_id="claim-at-20", evidence_id="ev-20",
+                  work_id="w000002", canonical_work_id="w000002",
+                  display_work_id="w000002", neutral_title="At twenty",
+                  span_start=20, span_end=90),
+    ]
+    emitted = list(pm.iter_rows(pm.build_panel_rows(bundle(rows))))
+    assert [row["span_start"] for row in emitted] == [20, 100]
+    assert [row["claim_id"] for row in emitted] == ["claim-at-20", "claim-at-100"]
+
+
+def test_a_row_with_no_offset_sorts_last_behind_an_explicit_sentinel():
+    """Never first, and never a comparison against `None`."""
+    rows = [
+        claim_row(claim_id="claim-none", evidence_id="ev-none", work_id="w000001",
+                  canonical_work_id="w000001", display_work_id="w000001",
+                  neutral_title="No offsets", span_start=None, span_end=None),
+        claim_row(claim_id="claim-900", evidence_id="ev-900", work_id="w000002",
+                  canonical_work_id="w000002", display_work_id="w000002",
+                  neutral_title="At nine hundred", span_start=900, span_end=980),
+    ]
+    emitted = list(pm.iter_rows(pm.build_panel_rows(bundle(rows))))
+    assert [row["claim_id"] for row in emitted] == ["claim-900", "claim-none"]
+
+
 def test_sixty_six_letter_rows_are_gated_not_deleted(sixty_six_letter_liturgical):
     assert 66 < SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS
     model = pm.build_panel_rows(bundle(sixty_six_letter_liturgical))
