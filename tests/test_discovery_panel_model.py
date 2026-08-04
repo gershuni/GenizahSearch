@@ -43,12 +43,25 @@ from shared.discovery_main_pool import (
     REASON_MAIN_HUMAN_CONFIRMED,
     REASON_MAIN_MULTIFOLIO,
     SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS,
+    bucket_label,
 )
 from shared.discovery_surface_projection import (
     SURFACE_CLAIM_FIELDS,
     SURFACE_RELATED_PAGE_FIELDS,
     SURFACE_WORK_SUMMARY_FIELDS,
     make_envelope,
+)
+# The FIVE independent detectors of the ONE shared discovery-surface honesty
+# gate (plan 136-02), reused rather than re-implemented so the rule can drift in
+# exactly one place. Asserting at the MODEL level is cheaper than rendering and
+# catches a violation earlier.
+from tests.render_smoke.discovery_honesty_gate import (  # noqa: E402
+    DiscoveryHonestyViolation,
+    _find_bracketed_intervals,
+    _find_prohibited_phrases,
+    _find_raw_vocab_keys,
+    _find_review_badges,
+    _find_unqualified_percentages,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -1155,3 +1168,302 @@ def test_no_literal_bucket_name_is_defined_in_the_module():
     for label in ("main pool", "more matches", "מאגר עיקרי", "התאמות נוספות"):
         assert label.lower() not in source, label
     assert "bucket_label" in _model_source()
+
+
+# ===========================================================================
+# Task 3 -- model-level honesty invariants, with one positive control per
+# property.
+#
+# Asserting at the MODEL level is cheaper than rendering and catches a
+# violation earlier; the DETECTORS are the shared gate's own five, imported
+# rather than re-implemented, so the rule can drift in exactly one place.
+# ===========================================================================
+
+
+#: `(detector name, callable(text, lang) -> [violation, ...])`. The five are
+#: INDEPENDENT, which is why each positive control below seeds exactly one
+#: property: a control seeding two at once can go red on either while the other
+#: stays completely untested.
+_HONESTY_DETECTORS = (
+    ("percentage", lambda text, lang: _find_unqualified_percentages(text, lang)),
+    ("interval", lambda text, lang: _find_bracketed_intervals(text)),
+    ("review-marker", lambda text, lang: _find_review_badges(text)),
+    ("prohibited-wording", lambda text, lang: _find_prohibited_phrases(text)),
+)
+
+_RAW_VOCAB_DETECTOR = "raw-vocabulary"
+
+
+def _leaf_field(path):
+    return path.rsplit(".", 1)[-1]
+
+
+def assert_model_honesty(model):
+    """Every emitted STRING field of `model`, checked FIELD BY FIELD.
+
+    Scoped per field on purpose: a model-wide substring search can pass for the
+    wrong reason -- the findings sketch had exactly that failure, where a header
+    assertion passed while the header was wrong because unrelated prose
+    contained the phrase it grepped for.
+
+    The qualified matched-letter coverage ("... 68% of page (matched letters)")
+    is the ONE permitted percentage, and it is recognised as such by the shared
+    detector's own qualifier window rather than by an exception listed here.
+    Raw stored vocabulary is checked on every field EXCEPT the ones the model
+    declares as machine vocabulary -- values that feed a later query or a
+    renderer branch and are never rendered as text.
+    """
+    lang = model.lang
+    violations = []
+    for path, value in _walk_strings(model.as_dict()):
+        for name, detector in _HONESTY_DETECTORS:
+            for hit in detector(value, lang):
+                violations.append("%s: %s [%s]" % (path, hit, name))
+        if _leaf_field(path) not in pm.MACHINE_VOCABULARY_FIELDS:
+            for hit in _find_raw_vocab_keys(value):
+                violations.append("%s: %s [%s]" % (path, hit, _RAW_VOCAB_DETECTOR))
+    if violations:
+        raise DiscoveryHonestyViolation(
+            "panel model (lang=%r): " % lang + "; ".join(violations))
+
+
+def _iter_bucket_bearing(model):
+    """`(path, row)` for every emitted object that names a bucket."""
+    for index, row in enumerate(pm.iter_rows(model)):
+        yield "model.rows[%d]" % index, row
+    for index, chip in enumerate(model.manuscript_pane.get("works", ())):
+        yield "model.manuscript_pane.works[%d]" % index, chip
+
+
+def assert_bucket_membership(model):
+    """Every emitted bucket equals what `shared.discovery_main_pool` says.
+
+    A comparison, never a re-derivation: a future local reimplementation then
+    fails the suite instead of silently diverging -- which is exactly what the
+    retired hand-picked band set was.
+    """
+    for path, row in _iter_bucket_bearing(model):
+        expected = bucket_label(bool(row["in_main_pool"]), model.lang)
+        if row["bucket"] != expected:
+            raise AssertionError(
+                "%s.bucket: %r disagrees with the shared rule, which says %r"
+                % (path, row["bucket"], expected))
+
+
+def kitchen_sink_bundle(lang="en", **overrides):
+    """One bundle exercising every emitted branch: a default row, a gated
+    short-evidence row, a routing-demoted human-confirmed row, a granularity
+    pair, a generic identical-span group, the curated work, a propagated row,
+    a populated manuscript pane (curated + gated + title-less) and populated
+    related-page rows."""
+    rashi_author = "שלמה בן יצחק (רש\"י)"
+    claims = [
+        claim_row(claim_id="claim-main", evidence_id="ev-main", span_start=0, span_end=500),
+        claim_row(claim_id="claim-short", evidence_id="ev-short", work_id="w000002",
+                  canonical_work_id="w000002", display_work_id="w000002",
+                  neutral_title="A short liturgical piece", span_start=600, span_end=666,
+                  matched_letters=66, coverage_ppm=20000, main_pool=False,
+                  main_pool_reason=REASON_INSUFFICIENT_LENGTH),
+        claim_row(claim_id="claim-eicha", evidence_id="ev-eicha", work_id="w000701",
+                  canonical_work_id="w000701", display_work_id="w000701",
+                  neutral_title="רש\"י על איכה", span_start=700, span_end=800,
+                  matched_letters=90, coverage_ppm=40000,
+                  adjudication_status=ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED,
+                  routing_status=ids.ROUTING_STATUS_REVIEW_ONLY,
+                  routing_reason=ids.ROUTING_REASON_LOW_COVERAGE,
+                  main_pool_reason=REASON_MAIN_HUMAN_CONFIRMED,
+                  restored_by_human_confirmation=True, low_coverage_marker=True),
+        claim_row(claim_id="claim-rashi-torah", evidence_id="ev-rashi-a",
+                  work_id="w000171", canonical_work_id="w000171",
+                  display_work_id="w000171", neutral_title="רש\"י על התורה",
+                  author=rashi_author, span_start=900, span_end=1862),
+        claim_row(claim_id="claim-rashi-gen", evidence_id="ev-rashi-b",
+                  work_id="w001281", canonical_work_id="w001281",
+                  display_work_id="w001281", neutral_title="רש\"י על בראשית",
+                  author=rashi_author, span_start=900, span_end=1862),
+        claim_row(claim_id="claim-generic-a", evidence_id="ev-generic-a",
+                  work_id="w000300", canonical_work_id="w000300",
+                  display_work_id="w000300", neutral_title="One work",
+                  author="מחבר א", span_start=2000, span_end=2555),
+        claim_row(claim_id="claim-generic-b", evidence_id="ev-generic-b",
+                  work_id="w000400", canonical_work_id="w000400",
+                  display_work_id="w000400", neutral_title="Another work",
+                  author="מחבר ב", span_start=2000, span_end=2555,
+                  relation_kind=ids.CLAIM_TYPE_SHARED_TEXT),
+        claim_row(claim_id="claim-176", evidence_id="ev-176", work_id="w000176",
+                  canonical_work_id="w000176", display_work_id="w000176",
+                  neutral_title=W000176_RAW_TITLE, span_start=3000, span_end=3300,
+                  relation_kind=ids.CLAIM_TYPE_QUOTES_THIS_WORK),
+        claim_row(claim_id="claim-prop", evidence_id="ev-prop", work_id="w000900",
+                  canonical_work_id="w000900", display_work_id="w000900",
+                  neutral_title="A propagated carrier", span_start=3400, span_end=3500,
+                  evidence_source=ids.EVIDENCE_SOURCE_PROPAGATED,
+                  confidence_band=ids.CONFIDENCE_BAND_CORROBORATED,
+                  band_label=band_label(ids.EVIDENCE_SOURCE_PROPAGATED,
+                                        ids.CONFIDENCE_BAND_CORROBORATED),
+                  band_rank=2, coverage_ppm=None, matched_letters=None),
+    ]
+    works = [
+        work_summary_row(canonical_work_id="w000176", display_work_id="w000176",
+                         neutral_title=W000176_RAW_TITLE, page_count=3),
+        work_summary_row(canonical_work_id="w000801", display_work_id="w000801",
+                         neutral_title="Behind the screening gate", page_count=5,
+                         best_band_rank=3, gated=True, main_pool=False),
+        work_summary_row(canonical_work_id="w000802", display_work_id="w000802",
+                         neutral_title=None, title_missing=True, page_count=1,
+                         best_band_rank=4),
+    ]
+    kwargs = {
+        "claims": claims_envelope(claims),
+        "manuscript_works": works_envelope(works, 61),
+        "related_count": related_count_envelope(total=12),
+        "related_rows": related_rows_envelope([related_page_row()], 12),
+        "lang": lang,
+        "show_more": True,
+    }
+    kwargs.update(overrides)
+    return bundle(**kwargs)
+
+
+def _honesty_models(lang):
+    """The kitchen sink plus every service-state branch, so the sweep sees the
+    outage copy, the unresolved pane and all four related-row states too."""
+    return {
+        "kitchen_sink": pm.build_panel_rows(kitchen_sink_bundle(lang)),
+        "claims_outage": pm.build_panel_rows(kitchen_sink_bundle(
+            lang, claims=claims_envelope(status="timeout"))),
+        "works_outage": pm.build_panel_rows(kitchen_sink_bundle(
+            lang, manuscript_works=works_envelope(status="unavailable"))),
+        "unresolved_scope": pm.build_panel_rows(kitchen_sink_bundle(
+            lang, page_ids=page_ids_envelope(items=(), total=0, resolved=False))),
+        "related_not_requested": pm.build_panel_rows(kitchen_sink_bundle(
+            lang, related_rows=None)),
+        "related_empty": pm.build_panel_rows(kitchen_sink_bundle(
+            lang, related_rows=related_rows_envelope([], 0))),
+        "related_outage": pm.build_panel_rows(kitchen_sink_bundle(
+            lang, related_rows=related_rows_envelope(status="busy"))),
+        "count_outage": pm.build_panel_rows(kitchen_sink_bundle(
+            lang, related_count=related_count_envelope(status="unavailable"))),
+    }
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("case", sorted(_honesty_models("en")))
+def test_the_emitted_model_carries_no_dishonest_field_in_either_language(case, lang):
+    assert_model_honesty(_honesty_models(lang)[case])
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("case", sorted(_honesty_models("en")))
+def test_every_emitted_bucket_equals_the_shared_rule(case, lang):
+    assert_bucket_membership(_honesty_models(lang)[case])
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_qualified_coverage_passes_and_a_bare_percentage_fails(lang):
+    """The ONE permitted percentage, and the reason it is permitted: the
+    matched-letter qualifier travels with it."""
+    model = pm.build_panel_rows(bundle([claim_row()], lang=lang))
+    row = list(pm.iter_rows(model))[0]
+    assert "68%" in row["headline"]
+    assert_model_honesty(model)          # qualified -> passes
+
+    row["headline"] = "68%"              # bare -> fails
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    assert "unqualified percentage" in str(exc.value)
+
+
+# --- POSITIVE CONTROLS: one mutation per property -------------------------
+#
+# Each seeds exactly ONE violation and asserts the SPECIFIC failure -- the
+# detector that fired AND the field it fired on -- never merely that the suite
+# went red. The counts each control raised are recorded in the plan summary.
+
+
+def _sole_violation(exc):
+    """The message must name one property and one field, not a scattergun."""
+    message = str(exc.value)
+    fired = [name for name, _ in _HONESTY_DETECTORS if "[%s]" % name in message]
+    fired += [_RAW_VOCAB_DETECTOR] if "[%s]" % _RAW_VOCAB_DETECTOR in message else []
+    return message, fired
+
+
+def test_positive_control_a_precision_figure_in_a_row_field():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = list(pm.iter_rows(model))[0]
+    row["headline"] = "Matches a work · estimated precision 94.2%"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == ["percentage"], fired
+    assert "unqualified percentage '94.2%'" in message
+    assert ".headline:" in message
+
+
+def test_positive_control_a_stored_vocabulary_key_in_a_manuscript_pane_chip():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    model.manuscript_pane["works"][0]["relation_chip"] = ids.CLAIM_TYPE_DIRECT_WITNESS
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == [_RAW_VOCAB_DETECTOR], fired
+    assert "raw stored vocabulary key 'direct_witness'" in message
+    assert ".relation_chip:" in message
+
+
+def test_positive_control_a_human_review_marker_in_a_row_field():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = [r for r in pm.iter_rows(model) if "low_coverage_note" in r][0]
+    row["low_coverage_note"] = "Expert-reviewed ✓"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == ["review-marker"], fired
+    assert "human-review badge" in message
+    assert ".low_coverage_note:" in message
+
+
+def test_positive_control_a_row_whose_bucket_disagrees_with_the_shared_rule():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = list(pm.iter_rows(model))[0]
+    row["bucket"] = bucket_label(not row["in_main_pool"], "en")
+    with pytest.raises(AssertionError) as exc:
+        assert_bucket_membership(model)
+    message = str(exc.value)
+    assert "disagrees with the shared rule" in message
+    assert "model.rows[0].bucket" in message
+
+
+# --- two ADDITIONAL controls, for the two detectors the four above do not
+# --- exercise. The four required controls are the ones above.
+
+
+def test_additional_control_a_bracketed_confidence_interval():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["low_coverage_note"] = "[0.9084, 0.9644]"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == ["interval"], fired
+    assert "bracketed interval" in message
+
+
+def test_additional_control_a_negated_prohibited_relation_word():
+    """A grep-based CI guard cannot see negation; this detector can."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    model.manuscript_pane["works"][0]["work_title"] = "This is not a copy of anything"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    message, fired = _sole_violation(exc)
+    assert fired == ["prohibited-wording"], fired
+    assert "prohibited relation wording 'copy of'" in message
+    assert ".work_title:" in message
+
+
+def test_the_sweep_reports_the_field_it_inspected_not_the_whole_model():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["headline"] = "94.2%"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_model_honesty(model)
+    assert re.search(r"model\.disclosure_levels\[\d+\]\.rows\[\d+\]\.headline", str(exc.value))
