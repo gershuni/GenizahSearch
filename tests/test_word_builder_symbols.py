@@ -115,12 +115,27 @@ def test_added_word_boxes_are_narrow_without_placeholder():
             f'multi-word box should be narrow, got {col_style}'
 
 
+def _parent_of(el):
+    """The element's parent, or None once the chain ends OR leaves this test's
+    own tree.
+
+    `Element._parent_slot` is a WEAKREF, so walking up past our throwaway root
+    reaches an ambient slot owned by whatever ran before us; if it has been
+    collected, `.parent_slot` raises. A collected ancestor cannot carry the
+    class we are looking for. Same guard as
+    tests/test_joins_lab_new_search_reset.py — see the note there.
+    """
+    try:
+        slot = getattr(el, 'parent_slot', None)
+    except RuntimeError:
+        return None
+    return slot.parent if slot else None
+
+
 def _has_class_ancestor(el, cls):
-    slot = getattr(el, 'parent_slot', None)
-    p = slot.parent if slot else None
+    p = _parent_of(el)
     while p is not None:
         if _has_class(p, cls):
             return True
-        slot = getattr(p, 'parent_slot', None)
-        p = slot.parent if slot else None
+        p = _parent_of(p)
     return False

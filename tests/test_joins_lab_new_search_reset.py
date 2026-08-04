@@ -41,14 +41,32 @@ def _has_class(el, cls):
     return cls in ' '.join(getattr(el, '_classes', []) or [])
 
 
+def _parent_of(el):
+    """The element's parent, or None once the chain ends OR leaves the tree
+    this test owns.
+
+    `Element._parent_slot` is a WEAKREF: walking up past our own throwaway
+    column reaches the ambient slot, whose lifetime belongs to whatever ran
+    before us. If that slot has been collected, `.parent_slot` raises
+    `RuntimeError: The parent slot of the element has been deleted.` — which is
+    how this test failed only in a combined run, after a NiceGUI simulation
+    test elsewhere replaced the auto-index client. A collected ancestor cannot
+    carry the class we are looking for, so ending the walk is the correct
+    answer, not a workaround.
+    """
+    try:
+        slot = getattr(el, 'parent_slot', None)
+    except RuntimeError:
+        return None
+    return slot.parent if slot else None
+
+
 def _has_class_ancestor(el, cls):
-    slot = getattr(el, 'parent_slot', None)
-    p = slot.parent if slot else None
+    p = _parent_of(el)
     while p is not None:
         if _has_class(p, cls):
             return True
-        slot = getattr(p, 'parent_slot', None)
-        p = slot.parent if slot else None
+        p = _parent_of(p)
     return False
 
 

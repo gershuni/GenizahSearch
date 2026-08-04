@@ -345,7 +345,30 @@ def _nicegui_loop_and_slot_isolation():
                 ng_context.slot_stack[:] = _NICEGUI_DEFAULT_SLOT_STACK
         except Exception:
             pass
-    yield
+
+    # (c) Restore `nicegui.core.loop` afterwards. It is a MODULE-LEVEL global
+    # that several tests assign their own running loop to (directly, or via
+    # NiceGUI's lifespan under `asyncio.run`). `asyncio.run` then CLOSES that
+    # loop, but `core.loop` keeps pointing at the corpse -- and
+    # `nicegui.background_tasks.create()` does `core.loop.create_task(...)`
+    # with only an `is not None` assert to protect it. The next test to render
+    # anything therefore dies with `RuntimeError: Event loop is closed`, in a
+    # file that never touched asyncio.
+    #
+    # Concretely: tests/test_findings_page.py took down tests/test_joins_builder.py
+    # and tests/test_joins_lab_new_search_reset.py this way (8 failures), while
+    # both files passed in isolation. Restoring the PREVIOUS value (rather than
+    # forcing None) is what makes a combined run behave like a solo run.
+    try:
+        from nicegui import core as ng_core
+    except Exception:
+        ng_core = None
+    saved_core_loop = getattr(ng_core, "loop", None) if ng_core is not None else None
+    try:
+        yield
+    finally:
+        if ng_core is not None:
+            ng_core.loop = saved_core_loop
 
 
 # ---------------------------------------------------------------------------
