@@ -51,12 +51,18 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from nicegui import ui
 
 from shared.discovery_display_strings import (
+    bucket_name,
+    coverage_label,
+    display_work_title,
+    missing_title,
+    novelty_strings,
     recall_disclaimer,
+    rule_sentence,
 )
 from shared.discovery_novelty import CANDIDATE_STATUS
 from web.discovery import (
@@ -74,6 +80,24 @@ from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import get_language, tr
 
 logger = logging.getLogger(__name__)
+
+#: The second bucket's stored value.
+#:
+#: `web.discovery` re-exports `BUCKET_MAIN` and the closed `FINDINGS_BUCKETS`
+#: set, but not this member; and this page's off-loop guard forbids naming the
+#: service module here at all (a page that can reach the service module can
+#: reach its private singleton). So the value is written ONCE and immediately
+#: CHECKED against the exported vocabulary at module load: a rename in the
+#: service breaks this import loudly rather than silently sending an
+#: out-of-vocabulary bucket that would raise at request time. A test pins it
+#: byte-for-byte against the service's own constant.
+BUCKET_MORE = "more"
+if BUCKET_MORE not in FINDINGS_BUCKETS or BUCKET_MORE == BUCKET_MAIN:
+    raise RuntimeError(
+        "web/pages/findings.py: BUCKET_MORE is no longer a member of the exported "
+        "FINDINGS_BUCKETS vocabulary (or has collided with BUCKET_MAIN) -- the "
+        "second bucket's stored value moved and this module was not updated"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +131,7 @@ STATE_CLASS = "gs-findings-state"
 
 # ---------------------------------------------------------------------------
 # Per-user state. Everything goes through the storage chokepoint
-# (`web/safe_storage.py`) -- never `app.storage.user` directly (T-136-16-07).
+# (`web/safe_storage.py`) -- never the raw per-user store (T-136-16-07).
 # ---------------------------------------------------------------------------
 
 _STORAGE_PREFIX = "discovery_findings_"
@@ -359,9 +383,6 @@ async def create_findings_page() -> None:
 
     The route has already proved availability and rendered the layout; this
     builder is never even imported while discovery is unavailable.
-
-    Task 1 ships the SHELL ROOT only -- the header, mode strip, filter bar,
-    result bar and pager are added by the remaining tasks of plan 136-16.
     """
     lang = get_language()
     # Bound at RENDER time, inside the UI context, before any await. A late
@@ -373,17 +394,286 @@ async def create_findings_page() -> None:
         page_client = None
 
     state = read_state()
-    write_state(state)
 
     with ui.column().classes(f"{ROOT_CLASS} {PAGE_CLASS} w-full max-w-5xl mx-auto p-4 gap-4"):
-        with ui.column().classes(f"phead {HEAD_CLASS} w-full gap-2"):
-            ui.label(tr("Computed Identifications")).classes("text-2xl font-bold")
-            ui.label(recall_disclaimer(lang)).classes("sub text-sm").style(
-                "color: var(--text-secondary);"
-            )
+        _render_head(lang)
+        _render_mode_strip(lang)
         body = ui.column().classes("w-full gap-3")
 
     if _page_is_gone(page_client):
         return
     with body:
-        ui.element("div").classes(f"{RESULTS_CLASS}")
+        await _render_body(state, lang, page_client)
+
+
+def _render_head(lang: str) -> None:
+    """Title, sub-line, the RESERVED launch-headline region, and the permanent
+    caveat slot -- in that order, with the caveat between header and body."""
+    with ui.column().classes(f"phead {HEAD_CLASS} w-full gap-2"):
+        ui.label(tr("Computed Identifications")).classes("text-2xl font-bold")
+        ui.label(recall_disclaimer(lang)).classes("sub text-sm").style(
+            "color: var(--text-secondary);"
+        )
+        _render_headline_slot(lang)
+        _render_caveat(lang)
+
+
+def _render_headline_slot(lang: str) -> None:
+    """The launch-headline region: RESERVED, never populated here.
+
+    Plan 136-22 (wave 8) supplies the artifact-backed, version-aware reader and
+    plan 136-18 (wave 9) fills this slot. This plan is wave 7 and cannot consume
+    either, so its whole share is a named, structurally-present container with
+    bilingual label scaffolding and NO DIGIT of any kind. A placeholder digit
+    here would survive as a hardcoded launch number, which is precisely the
+    failure ruling U was issued to prevent.
+    """
+    region = ui.column().classes(f"{HEADLINE_SLOT_CLASS} w-full gap-1")
+    region.props(f'role=region aria-label="{copy_text("headline_slot_label", lang)}"')
+    with region:
+        # An empty, stable child for 136-18 to fill. No text, hence no digit.
+        ui.element("div").classes(f"{HEADLINE_SLOT_CLASS}-value")
+
+
+def _render_caveat(lang: str) -> None:
+    """The permanent caveat slot -- a designed element with the gold
+    inline-start rule, never fine print and never a dismissible warning."""
+    with ui.element("div").classes(f"caveat {CAVEAT_CLASS} w-full p-3 text-sm"):
+        ui.label(copy_text("caveat", lang))
+
+
+def _render_mode_strip(lang: str) -> None:
+    """Three modes: one live, two visible-inert-and-phase-tagged, so plans
+    137/138 add a tab rather than a page."""
+    with ui.row().classes(f"modes {MODES_CLASS} w-full gap-2 items-center flex-wrap"):
+        for label_key, phase_key in _MODES:
+            future = phase_key is not None
+            button = ui.button(tr(label_key)).props("flat dense no-caps")
+            button.classes(("mode future" if future else "mode") + f" {MODES_CLASS}-item")
+            if future:
+                button.disable()
+                ui.label(tr(phase_key)).classes(f"needs {MODES_CLASS}-phase")
+
+
+async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> None:
+    """Filter bar and results, with ONE refresh path shared by every control --
+    so a filter change and a bucket change take exactly the same route."""
+    filter_bar = ui.row().classes(
+        f"fbar {FILTER_BAR_CLASS} w-full gap-4 items-start flex-wrap"
+    )
+    results_region = ui.column().classes(f"{RESULTS_CLASS} w-full gap-2")
+
+    async def refresh() -> None:
+        write_state(state)
+        if _page_is_gone(page_client):
+            return
+        envelope = await fetch_findings(state)
+        if _page_is_gone(page_client):
+            return
+        results_region.clear()
+        with results_region:
+            _render_results(envelope, state, lang, refresh)
+
+    with filter_bar:
+        _render_filter_bar(state, lang, refresh)
+
+    await refresh()
+    await _populate_facets(filter_bar, state, lang, refresh)
+
+
+# ---------------------------------------------------------------------------
+# Filter bar. The novelty switch is FIRST by CSS order (`.fg.novgrp {order:-1}`)
+# regardless of DOM order, which is what keeps it first in BOTH directions.
+# ---------------------------------------------------------------------------
+
+def _render_filter_bar(state: Dict[str, Any], lang: str, refresh) -> None:
+    _render_novelty_switch(state, lang, refresh)
+    _render_bucket_control(state, lang, refresh)
+    _render_coverage_filter(lang)
+    _render_facet_groups(lang)
+
+
+def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh) -> None:
+    """The candidacy switch, first in the filter bar by CSS order."""
+    words = novelty_strings(lang)
+    with ui.column().classes(f"fg novgrp {FILTER_BAR_CLASS}-novelty gap-1"):
+        async def _toggle(_event=None) -> None:
+            state["novelty_only"] = not state["novelty_only"]
+            state["page"] = 1
+            switch.props(f'aria-pressed={"true" if state["novelty_only"] else "false"}')
+            await refresh()
+
+        switch = ui.button(words["toggle"], on_click=_toggle).props("flat dense no-caps")
+        switch.classes("fchip")
+        switch.props(f'aria-pressed={"true" if state["novelty_only"] else "false"}')
+        switch.tooltip(words["help"])
+        ui.label(words["subline"]).classes("dnote text-xs")
+
+
+def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
+    """THE "more matches" control (ruling T).
+
+    A first-class, always-rendered control in the filter bar -- never inside an
+    overflow menu, a `<details>`, an "advanced" disclosure or a footer link, and
+    never below the results. ONE interaction switches the result set between the
+    two buckets.
+
+    It carries NO count. The owner's assessment of that bucket is an impression
+    over a rendered sample with no draw protocol and no blind grading; it must
+    never become a percentage, a quality score or a number here or anywhere
+    else. The bucket names come from the shared vocabulary, in match framing:
+    the second bucket means there was not enough evidence for the main-pool
+    rule, never that those identifications are probably wrong.
+    """
+    with ui.column().classes(f"fg {BUCKET_CONTROL_CLASS}-group gap-1"):
+        with ui.row().classes(f"{BUCKET_CONTROL_CLASS} gap-2 items-center"):
+            for in_main in (True, False):
+                target = BUCKET_MAIN if in_main else BUCKET_MORE
+                label = bucket_name(in_main, lang)
+                selected = state["bucket"] == target
+
+                async def _select(_event=None, target=target) -> None:
+                    state["bucket"] = target
+                    state["page"] = 1
+                    await refresh()
+
+                chip = ui.button(label, on_click=_select).props("flat dense no-caps")
+                chip.classes("fchip here" if selected else "fchip")
+                chip.props(f'aria-pressed={"true" if selected else "false"}')
+        # The rule, in the one place it is worded. Deliberately a SIBLING of the
+        # control row, never a child: the control's own subtree must stay
+        # digit-free and count-free.
+        ui.label(rule_sentence(lang)).classes("dnote text-xs")
+
+
+def _render_coverage_filter(lang: str) -> None:
+    """Rendered, visibly disabled, and tagged -- never silently absent.
+
+    The service exposes no coverage predicate, so this filter has no backing
+    data to act on. A filter that silently vanishes is indistinguishable from a
+    filter that never existed, so the treatment stays even though the state
+    should not occur once the axis is wired.
+    """
+    with ui.column().classes(f"fg blocked {FILTER_BAR_CLASS}-coverage gap-1"):
+        with ui.row().classes("gap-2 items-center"):
+            ui.label(coverage_label(lang)).classes("text-xs font-bold")
+            ui.label(copy_text("needs_tag", lang)).classes("needs")
+        chip = ui.button(coverage_label(lang)).props("flat dense no-caps")
+        chip.classes("fchip")
+        chip.disable()
+
+
+def _render_facet_groups(lang: str) -> None:
+    """The domain / author / work cascade's containers.
+
+    Populated after the first paint by `_populate_facets`, so the filter bar's
+    structure exists before any facet read returns.
+    """
+    for level, label_key in (("domain", "Domain"), ("author", "Author"), ("work", "Work")):
+        with ui.column().classes(f"fg {FILTER_BAR_CLASS}-{level} gap-1"):
+            ui.label(tr(label_key)).classes("text-xs font-bold")
+            ui.column().classes(f"{FILTER_BAR_CLASS}-{level}-items gap-1")
+
+
+def _facet_containers(filter_bar: Any) -> Dict[str, Any]:
+    containers: Dict[str, Any] = {}
+    for element in filter_bar.descendants(include_self=True):
+        classes = getattr(element, "_classes", None) or []
+        for level in ("domain", "author", "work"):
+            if f"{FILTER_BAR_CLASS}-{level}-items" in classes:
+                containers[level] = element
+    return containers
+
+
+async def _populate_facets(
+    filter_bar: Any, state: Dict[str, Any], lang: str, refresh
+) -> None:
+    """Fill the three facet lists from the cascade.
+
+    Every work-level label routes through `display_work_title` (ruling R): the
+    cascade selects the RAW recorded title at the work level, and a facet list
+    that prints it directly opts out of the curation in the very control a
+    reader uses to find that work.
+    """
+    containers = _facet_containers(filter_bar)
+    for level in ("domain", "author", "work"):
+        container = containers.get(level)
+        if container is None:  # pragma: no cover -- structural
+            continue
+        envelope = await fetch_facets(level, state)
+        container.clear()
+        with container:
+            _render_facet_items(level, envelope, state, lang, refresh)
+
+
+def _render_facet_items(
+    level: str, envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh
+) -> None:
+    if (envelope or {}).get("status") != "ok":
+        # Backing data absent: visibly disabled and tagged, never absent.
+        with ui.column().classes(f"fg blocked {FILTER_BAR_CLASS}-{level}-blocked gap-1"):
+            ui.label(copy_text("needs_tag", lang)).classes("needs")
+        return
+
+    state_key = "work_id" if level == "work" else level
+    for item in envelope.get("items") or []:
+        value = item.get("value")
+        raw_label = item.get("label") or value or ""
+        if level == "work":
+            # Ruling R -- the curated display title, never the raw recorded one.
+            label = display_work_title(value, raw_label, lang) or missing_title(lang)
+        else:
+            label = raw_label
+        selected = state.get(state_key) == value
+
+        async def _pick(_event=None, value=value, state_key=state_key) -> None:
+            state[state_key] = None if state.get(state_key) == value else value
+            state["page"] = 1
+            await refresh()
+
+        node = ui.button(label, on_click=_pick).props("flat dense no-caps align=left")
+        node.classes(
+            " ".join(
+                part for part in (
+                    "dnode",
+                    "leaf" if item.get("is_leaf") else "",
+                    "here" if selected else "",
+                ) if part
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
+# Results. Task 3 of plan 136-16 wraps these rows in the result bar, the pager
+# and the four service states.
+# ---------------------------------------------------------------------------
+
+def _render_results(
+    envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh
+) -> None:
+    items: List[Dict[str, Any]] = list((envelope or {}).get("items") or [])
+    with ui.column().classes(f"rows {RESULTS_CLASS}-rows w-full gap-2"):
+        if not items:
+            ui.label(tr("No results found")).classes(f"{RESULTS_CLASS}-empty")
+        for item in items:
+            _render_row(item, lang)
+
+
+def _render_row(item: Dict[str, Any], lang: str) -> None:
+    """A MINIMAL identity row -- enough for the shell to be verifiable.
+
+    The full row anatomy (relation chip with the band label on hover, novelty
+    badge, matched-letter coverage, side actions) belongs to the row track.
+    """
+    work_id = item.get("display_work_id") or item.get("canonical_work_id") or ""
+    raw_title = item.get("neutral_title") or ""
+    # Ruling R -- every work title a reader sees routes through this.
+    title = display_work_title(work_id, raw_title, lang) if raw_title else missing_title(lang)
+
+    with ui.column().classes(f"row {ROW_CLASS} w-full gap-1 p-2"):
+        ui.label(title).classes(f"{ROW_CLASS}-title font-bold")
+        shelf = " ".join(
+            part for part in (item.get("library_code"), item.get("shelfmark_display")) if part
+        )
+        if shelf:
+            ui.label(shelf).classes(f"{ROW_CLASS}-shelfmark r-sub text-xs")
