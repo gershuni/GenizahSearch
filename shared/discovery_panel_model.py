@@ -106,16 +106,37 @@ LAZY_ENVELOPE_FIELD: str = "related_rows"
 
 ENVELOPE_FIELDS: Tuple[str, ...] = EAGER_ENVELOPE_FIELDS + (LAZY_ENVELOPE_FIELD,)
 
-#: The exact `meta` key set each LIVE read emits on `ok`. A drifted service
-#: shape must fail against this, in the model's own contract test, rather than
-#: in a renderer. `tests/test_discovery_panel_model.py` parses the producing
-#: functions and asserts this table equals what they actually build.
-LIVE_OK_META_KEYS: Mapping[str, frozenset] = {
-    "claims": frozenset({"page_id", "include_review"}),
-    "page_ids": frozenset({"sys_id", "resolved", "truncated", "volume_ie"}),
-    "manuscript_works": frozenset({"page_scope_resolved", "lang"}),
-    "related_count": frozenset({"unit"}),
-    "related_rows": frozenset({"unit"}),
+#: The `meta` key sets each LIVE read emits on `ok` -- one entry per PRODUCING
+#: BRANCH, never a union of them. A drifted service shape must fail against
+#: this, in the model's own contract test, rather than in a renderer.
+#: `tests/test_discovery_panel_model.py` parses the producing functions and
+#: asserts this table equals the set of shapes they actually build.
+#:
+#: Per branch, because a union proves nothing (code review 2B, finding 5): a
+#: suite that collects keys from every successful return and compares once lets
+#: each branch violate the declared shape while their union matches. That was
+#: already happening -- `get_manuscript_works_enveloped` has TWO `ok` returns
+#: and the unresolved-page-scope one omits `lang`, because it returns before it
+#: has anything to report a language ABOUT. That is a real state distinction, so
+#: it is declared here rather than normalized away in a producer this model does
+#: not own; the model's own `_scope_state` reads exactly that branch's key.
+LIVE_OK_META_SHAPES: Mapping[str, Tuple[frozenset, ...]] = {
+    "claims": (
+        frozenset({"page_id", "include_review"}),
+    ),
+    "page_ids": (
+        frozenset({"sys_id", "resolved", "truncated", "volume_ie"}),
+    ),
+    "manuscript_works": (
+        frozenset({"page_scope_resolved", "lang"}),   # the ordinary read
+        frozenset({"page_scope_resolved"}),           # the page scope did not resolve
+    ),
+    "related_count": (
+        frozenset({"unit"}),
+    ),
+    "related_rows": (
+        frozenset({"unit"}),
+    ),
 }
 
 # ---------------------------------------------------------------------------

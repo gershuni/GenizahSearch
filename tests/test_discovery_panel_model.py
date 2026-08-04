@@ -207,7 +207,12 @@ def page_ids_envelope(items=("page-1", "page-2"), total=None, status="ok",
 
 def works_envelope(items=(), total=None, status="ok", page_scope_resolved=True, meta=None):
     if meta is None and status == "ok":
-        meta = {"page_scope_resolved": page_scope_resolved, "lang": "en"}
+        # TWO live `ok` shapes, not one with a flag: the unresolved-page-scope
+        # branch returns before it has anything to report a language ABOUT, so
+        # it carries no `lang`. A fixture that invented one would hide exactly
+        # the per-branch drift the shape table exists to catch.
+        meta = ({"page_scope_resolved": True, "lang": "en"} if page_scope_resolved
+                else {"page_scope_resolved": False})
     return envelope(status, items, total, meta)
 
 
@@ -418,7 +423,18 @@ def test_bundle_fixture_key_sets_equal_the_live_envelope_shape():
     for field_name in pm.ENVELOPE_FIELDS:
         env = getattr(made, field_name)
         assert set(env) == set(pm.ENVELOPE_KEYS) == {"status", "items", "total", "meta"}
-        assert set(env["meta"]) == set(pm.LIVE_OK_META_KEYS[field_name]), field_name
+        assert frozenset(env["meta"]) in pm.LIVE_OK_META_SHAPES[field_name], field_name
+
+
+def test_every_declared_meta_shape_is_reachable_from_a_fixture():
+    """The shape table is a claim about the producer, so an entry no fixture can
+    build is an entry nothing exercises."""
+    unresolved = works_envelope([], 0, page_scope_resolved=False)
+    assert frozenset(unresolved["meta"]) == frozenset({"page_scope_resolved"})
+    resolved = works_envelope([], 0, page_scope_resolved=True)
+    assert frozenset(resolved["meta"]) == frozenset({"page_scope_resolved", "lang"})
+    assert {frozenset(unresolved["meta"]), frozenset(resolved["meta"])} == \
+        set(pm.LIVE_OK_META_SHAPES["manuscript_works"])
 
 
 def test_make_envelope_agrees_with_the_literal_fixture_shape():
@@ -439,10 +455,14 @@ _LIVE_META_SOURCES = {
 }
 
 
-def _ok_meta_keys_from_source(rel_path, func_name):
-    """Every `meta=` key on an `ok`-status `make_envelope(...)` call inside
-    `func_name`. Parsed, never imported -- reading `web/discovery.py` must not
-    drag NiceGUI into this suite."""
+def _ok_meta_key_sets_from_source(rel_path, func_name):
+    """The `meta=` key set of EVERY `ok`-status `make_envelope(...)` call inside
+    `func_name`, as a LIST -- one entry per call site, never a union.
+
+    Unioning them is what let a branch violate the declared shape while the
+    union matched (code review 2B, finding 5). Parsed, never imported --
+    reading `web/discovery.py` must not drag NiceGUI into this suite.
+    """
     tree = ast.parse(io.open(REPO_ROOT / rel_path, encoding="utf-8").read())
     target = None
     for node in ast.walk(tree):
@@ -450,7 +470,7 @@ def _ok_meta_keys_from_source(rel_path, func_name):
             target = node
             break
     assert target is not None, "%s::%s not found" % (rel_path, func_name)
-    keys = set()
+    per_call = []
     for node in ast.walk(target):
         if not isinstance(node, ast.Call):
             continue
@@ -461,14 +481,41 @@ def _ok_meta_keys_from_source(rel_path, func_name):
             continue
         for kw in node.keywords:
             if kw.arg == "meta" and isinstance(kw.value, ast.Dict):
-                keys.update(k.value for k in kw.value.keys if isinstance(k, ast.Constant))
-    return frozenset(keys)
+                per_call.append(frozenset(
+                    k.value for k in kw.value.keys if isinstance(k, ast.Constant)))
+    return per_call
 
 
 @pytest.mark.parametrize("field_name", pm.ENVELOPE_FIELDS)
-def test_declared_meta_keys_equal_the_ones_the_live_code_emits(field_name):
+def test_every_producing_branch_matches_a_declared_meta_shape(field_name):
     rel_path, func_name = _LIVE_META_SOURCES[field_name]
-    assert _ok_meta_keys_from_source(rel_path, func_name) == set(pm.LIVE_OK_META_KEYS[field_name])
+    per_call = _ok_meta_key_sets_from_source(rel_path, func_name)
+    declared = set(pm.LIVE_OK_META_SHAPES[field_name])
+
+    assert len(per_call) > 0, "no ok-status make_envelope call found in %s" % func_name
+    for index, keys in enumerate(per_call):
+        assert keys in declared, (
+            "%s::%s success branch #%d emits %s, which is not one of the declared "
+            "shapes %s" % (rel_path, func_name, index, sorted(keys),
+                           [sorted(shape) for shape in declared]))
+    # ... and the other direction, so a shape nobody produces cannot sit in the
+    # table as cover for a branch that has drifted away from it.
+    assert set(per_call) == declared
+
+
+def test_the_declared_meta_shapes_are_per_branch_and_not_a_union():
+    """The specific regression: `manuscript_works` has TWO ok branches, and a
+    union of their keys equals the larger one -- so a union-based check passes
+    while the smaller branch matches no declared shape at all."""
+    per_call = _ok_meta_key_sets_from_source(*_LIVE_META_SOURCES["manuscript_works"])
+    assert len(per_call) == 2
+    assert len(set(per_call)) == 2, "the two branches must emit DIFFERENT shapes"
+    union = frozenset().union(*per_call)
+    assert union == max(per_call, key=len), (
+        "the union collapses onto the LARGER branch -- which is precisely why a "
+        "union-based check could not see the smaller one violating the shape")
+    assert min(per_call, key=len) != union
+    assert "lang" in union and any("lang" not in keys for keys in per_call)
 
 
 # ===========================================================================
