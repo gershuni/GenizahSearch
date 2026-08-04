@@ -72,6 +72,7 @@ from shared.discovery_display_strings import (
     service_state_message,
 )
 from shared.discovery_novelty import CANDIDATE_STATUS
+from web.components import findings_rows as rows
 from web.discovery import (
     BUCKET_MAIN,
     FACET_LEVELS,
@@ -82,7 +83,9 @@ from web.discovery import (
     FINDINGS_UNITS,
     get_findings_enveloped,
     get_findings_facets_enveloped,
+    get_launch_stats_enveloped,
 )
+from web.discovery_assets import discovery_meta
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import get_language, tr
 
@@ -129,6 +132,7 @@ CAVEAT_CLASS = "gs-findings-caveat"
 MODES_CLASS = "gs-findings-modes"
 FILTER_BAR_CLASS = "gs-findings-fbar"
 BUCKET_CONTROL_CLASS = "gs-findings-bucket"
+FACET_HEADER_CLASS = "gs-findings-facet-header"
 RESULT_BAR_CLASS = "gs-findings-rbar"
 RESULTS_CLASS = "gs-findings-results"
 ROW_CLASS = "gs-findings-row"
@@ -364,6 +368,21 @@ async def fetch_findings(state: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+async def fetch_launch_stats() -> Dict[str, Any]:
+    """One enveloped launch-statistics read. A DIRECT await on the async
+    wrapper.
+
+    `web.discovery.get_launch_stats_enveloped` is THE only supported way to
+    obtain any launch figure: every number is computed from the artifact being
+    served at request time, on the single basis ruling U fixed, and carries the
+    sidecar version and audience that produced it. Not one of those numbers may
+    appear as a literal anywhere in code or in a translation, and plan 136-22
+    ships a repo-level guard that fails naming the file, the line and this
+    accessor.
+    """
+    return await get_launch_stats_enveloped()
+
+
 async def fetch_facets(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
     """One enveloped facet-cascade read. A DIRECT await on the async wrapper."""
     if level not in FACET_LEVELS:
@@ -418,43 +437,73 @@ async def create_findings_page() -> None:
     state = read_state()
 
     with ui.column().classes(f"{ROOT_CLASS} {PAGE_CLASS} w-full max-w-5xl mx-auto p-4 gap-4"):
-        _render_head(lang)
+        headline_region = _render_head(lang)
         _render_mode_strip(lang)
         body = ui.column().classes("w-full gap-3")
 
+    if _page_is_gone(page_client):
+        return
+    await _paint_headline(headline_region, lang, page_client)
     if _page_is_gone(page_client):
         return
     with body:
         await _render_body(state, lang, page_client)
 
 
-def _render_head(lang: str) -> None:
+def _render_head(lang: str) -> Any:
     """Title, sub-line, the RESERVED launch-headline region, and the permanent
-    caveat slot -- in that order, with the caveat between header and body."""
+    caveat slot -- in that order, with the caveat between header and body.
+
+    Returns the headline region's stable empty child, which
+    `_paint_headline` fills once the artifact-backed read returns."""
     with ui.column().classes(f"phead {HEAD_CLASS} w-full gap-2"):
         ui.label(tr("Computed Identifications")).classes("text-2xl font-bold")
         ui.label(recall_disclaimer(lang)).classes("sub text-sm").style(
             "color: var(--text-secondary);"
         )
-        _render_headline_slot(lang)
+        region = _render_headline_slot(lang)
         _render_caveat(lang)
+    return region
 
 
-def _render_headline_slot(lang: str) -> None:
-    """The launch-headline region: RESERVED, never populated here.
+def _render_headline_slot(lang: str):
+    """The launch-headline region: reserved by plan 136-16, PAINTED by
+    `_paint_headline` from plan 136-22's artifact-backed reader.
 
-    Plan 136-22 (wave 8) supplies the artifact-backed, version-aware reader and
-    plan 136-18 (wave 9) fills this slot. This plan is wave 7 and cannot consume
-    either, so its whole share is a named, structurally-present container with
-    bilingual label scaffolding and NO DIGIT of any kind. A placeholder digit
-    here would survive as a hardcoded launch number, which is precisely the
-    failure ruling U was issued to prevent.
+    This function still writes NO NUMBER of any kind -- it builds the named,
+    structurally-present container and its bilingual accessible label and
+    returns the empty child. Every figure arrives later, from the envelope. A
+    placeholder digit here would survive as a hardcoded launch number, which is
+    precisely the failure ruling U was issued to prevent.
     """
     region = ui.column().classes(f"{HEADLINE_SLOT_CLASS} w-full gap-1")
     region.props(f'role=region aria-label="{copy_text("headline_slot_label", lang)}"')
     with region:
-        # An empty, stable child for 136-18 to fill. No text, hence no digit.
-        ui.element("div").classes(f"{HEADLINE_SLOT_CLASS}-value")
+        # The stable child the launch statistics are painted into.
+        value = ui.element("div").classes(f"{HEADLINE_SLOT_CLASS}-value")
+    return value
+
+
+async def _paint_headline(region: Any, lang: str, page_client: Any) -> None:
+    """Read the launch statistics and render them into the reserved slot.
+
+    Painted AFTER the shell rather than during it, so a slow or failing
+    headline read never delays or breaks the rest of the page; and re-entrant,
+    so the outage state's retry re-runs exactly this path rather than a second
+    copy of it.
+    """
+    if region is None:  # pragma: no cover -- structural
+        return
+    envelope = await fetch_launch_stats()
+    if _page_is_gone(page_client):
+        return
+
+    async def _retry(_event=None) -> None:
+        await _paint_headline(region, lang, page_client)
+
+    region.clear()
+    with region:
+        rows.render_launch_headline(envelope, lang, on_retry=_retry)
 
 
 def _render_caveat(lang: str) -> None:
@@ -530,6 +579,12 @@ def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh) -> None:
         switch.props(f'aria-pressed={"true" if state["novelty_only"] else "false"}')
         switch.tooltip(words["help"])
         ui.label(words["subline"]).classes("dnote text-xs")
+        # The help affordance, VISIBLE rather than hover-only: the checked-source
+        # list, the "candidate, not a confirmed find" sentence, and the date the
+        # sources were checked as of -- read from the artifact's own meta, and
+        # omitted entirely when the artifact records none rather than dated by
+        # guess.
+        rows.render_novelty_help(lang, as_of=discovery_meta("data_as_of"))
 
 
 def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
@@ -593,7 +648,19 @@ def _render_facet_groups(lang: str) -> None:
     """
     for level, label_key in (("domain", "Domain"), ("author", "Author"), ("work", "Work")):
         with ui.column().classes(f"fg {FILTER_BAR_CLASS}-{level} gap-1"):
-            ui.label(tr(label_key)).classes("text-xs font-bold")
+            # The DOMAIN header names its axis explicitly. Filtering on the
+            # MANUSCRIPT's catalogue domain would hide exactly the findings that
+            # disagree with the catalogue -- a manuscript catalogued as court
+            # records carries a verifiably correct commentary identification --
+            # so a header that leaves the axis to inference is a header a reader
+            # can read the wrong way.
+            header = (
+                rows.copy_text("facet_domain_header", lang)
+                if level == "domain" else tr(label_key)
+            )
+            ui.label(header).classes(
+                f"{FACET_HEADER_CLASS} {FACET_HEADER_CLASS}-{level} text-xs font-bold"
+            )
             ui.column().classes(f"{FILTER_BAR_CLASS}-{level}-items gap-1")
 
 
@@ -802,23 +869,16 @@ def _render_sort_select(state: Dict[str, Any], refresh) -> None:
 
 
 def _render_row(item: Dict[str, Any], lang: str) -> None:
-    """A MINIMAL identity row -- enough for the shell to be verifiable.
+    """One result row, in whichever of the three shipped units the service
+    produced it.
 
-    The full row anatomy (relation chip with the band label on hover, novelty
-    badge, matched-letter coverage, side actions) belongs to the row track.
+    Delegated to `web/components/findings_rows.py` (plan 136-18), which owns the
+    anatomy, the novelty badge, the coverage clause and the bucket name. The
+    same component renders BOTH buckets: a second-bucket row is a first-class
+    result, not a footnote, and giving it its own renderer here is how a
+    demotion creeps in.
     """
-    work_id = item.get("display_work_id") or item.get("canonical_work_id") or ""
-    raw_title = item.get("neutral_title") or ""
-    # Ruling R -- every work title a reader sees routes through this.
-    title = display_work_title(work_id, raw_title, lang) if raw_title else missing_title(lang)
-
-    with ui.column().classes(f"row {ROW_CLASS} w-full gap-1 p-2"):
-        ui.label(title).classes(f"{ROW_CLASS}-title font-bold")
-        shelf = " ".join(
-            part for part in (item.get("library_code"), item.get("shelfmark_display")) if part
-        )
-        if shelf:
-            ui.label(shelf).classes(f"{ROW_CLASS}-shelfmark r-sub text-xs")
+    rows.render_finding_row(item, lang)
 
 
 def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh) -> None:

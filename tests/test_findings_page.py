@@ -1154,13 +1154,25 @@ def test_zero_executor_dispatches_when_discovery_is_unavailable():
 
 def test_page_load_dispatch_total_is_the_sum_over_the_reads_the_page_issues():
     """Computed from the per-read rule, never fixed as a literal — so plan
-    136-18 adding a read does not turn this criterion red."""
+    136-18 adding a read does not turn this criterion red.
+
+    ⚠ AMENDED by plan 136-18. The rule was right and the IMPLEMENTATION did not
+    deliver it: `reads` counted only the two read kinds this function patched,
+    so ANY third read the page gained produced one dispatch nobody counted and
+    the assertion went red on a correct implementation — the exact outcome the
+    docstring promised it would not. 136-18 added the ruling-U launch-statistics
+    read, and the fix is to count it here rather than to contort the page into
+    not issuing it. The criterion is unchanged and strictly stronger: one
+    executor dispatch per enveloped read, now across all THREE read kinds the
+    page issues."""
     import web.discovery as wd
 
     ok_findings = {"status": "ok", "items": [], "total": 0,
                    "meta": {"unit": "identification", "bucket": "main",
                             "sort": "band_rank", "approximate_total": False}}
     ok_facets = {"status": "ok", "items": [], "total": 0, "meta": {"level": "domain"}}
+    ok_launch = {"status": "ok", "items": [], "total": 0,
+                 "meta": {"basis": "main_pool"}}
     reads = []
 
     async def _counting_findings(*args, **kwargs):
@@ -1170,6 +1182,10 @@ def test_page_load_dispatch_total_is_the_sum_over_the_reads_the_page_issues():
     async def _counting_facets(*args, **kwargs):
         reads.append("facets")
         return await wd.get_findings_facets_enveloped(*args, **kwargs)
+
+    async def _counting_launch(*args, **kwargs):
+        reads.append("launch")
+        return await wd.get_launch_stats_enveloped(*args, **kwargs)
 
     _ensure_sim()
     from nicegui import core, ui
@@ -1188,8 +1204,12 @@ def test_page_load_dispatch_total_is_the_sum_over_the_reads_the_page_issues():
                 stack.enter_context(patch.object(
                     wd._service, "get_findings_facets_enveloped",
                     lambda *a, **k: dict(ok_facets)))
+                stack.enter_context(patch.object(
+                    wd._service, "get_launch_stats_enveloped",
+                    lambda *a, **k: dict(ok_launch)))
                 stack.enter_context(patch.object(fp, "get_findings_enveloped", _counting_findings))
                 stack.enter_context(patch.object(fp, "get_findings_facets_enveloped", _counting_facets))
+                stack.enter_context(patch.object(fp, "get_launch_stats_enveloped", _counting_launch))
                 with Client(ui.page("/_findings_dispatch_probe")) as client:
                     with client:
                         await fp.create_findings_page()
