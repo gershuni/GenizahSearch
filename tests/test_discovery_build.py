@@ -3037,6 +3037,103 @@ def test_which_shapes_count_is_DERIVED_from_the_shipped_builders(tmp_path):
     assert not bench_discovery._is_scalar_aggregate(grouped_sql)
 
 
+def test_the_shape_reader_survives_a_cte_an_outer_wrapper_and_a_window(tmp_path):
+    """The three shapes round 15, finding 3 named — each one MEASURED, not
+    argued about.
+
+    The first derivation was `^SELECT COUNT\\(` plus "no outer GROUP BY". It got
+    all three wrong, and every one of them fails SILENTLY: a misclassified
+    aggregate records `population = 1` for a count of nothing (the round-13
+    defect restored), and a misclassified window function reads one row's cell
+    as the population of the whole query. Today's statements dodge all three by
+    luck; a CTE or an outer wrapper is one refactor away.
+
+    Each case is executed against a real (empty-predicate) SQLite database, so
+    the classification is checked against what SQLite ACTUALLY returns rather
+    than against a second reading of the same regex.
+    """
+    from scripts import bench_discovery as bd
+
+    db_path = _bench_fixture_db(tmp_path)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        # (1) A CTE prefix. One row carrying a ZERO — the F14 abort must see it.
+        cte = ("WITH scoped AS (SELECT * FROM discovery_identification WHERE 1 = 0) "
+               "SELECT COUNT(*) AS n FROM scoped")
+        assert bd.sql_result_shape(cte) == (bd.SHAPE_SCALAR, 0)
+        # (2) An outer wrapper around a scalar aggregate.
+        wrapped = ("SELECT n FROM (SELECT COUNT(*) AS n FROM "
+                   "discovery_identification WHERE 1 = 0)")
+        assert bd.sql_result_shape(wrapped) == (bd.SHAPE_SCALAR, 0)
+        aliased = ("SELECT inner_q.n FROM (SELECT COUNT(*) AS n FROM "
+                   "discovery_identification WHERE 1 = 0) inner_q")
+        assert bd.sql_result_shape(aliased) == (bd.SHAPE_SCALAR, 0)
+
+        for label, sql in (("cte", cte), ("wrapper", wrapped), ("aliased", aliased)):
+            fetched = conn.execute(sql).fetchall()
+            assert len(fetched) == 1 and fetched[0][0] == 0, (
+                f"the {label} premise moved: SQLite no longer returns one zero row")
+            measured = bd._time_sql(conn, sql, (), 1, scalar=True, value_index=0)
+            assert measured["rows"] == 1
+            assert measured["population"] == 0, (
+                f"the {label} shape recorded a population of "
+                f"{measured['population']} for a count of nothing — the vacuous "
+                "assertion is back")
+            # ...and the naive reading is the false green, which is what makes
+            # these controls rather than restatements of the fix.
+            naive = bd._time_sql(conn, sql, (), 1)
+            assert naive["population"] == 1
+
+        # (3) A WINDOW function is NOT scalar: it produces one value per row.
+        windowed = ("SELECT COUNT(*) OVER () AS n FROM discovery_identification "
+                    "LIMIT 3")
+        assert bd.sql_result_shape(windowed) == (bd.SHAPE_ROWS, 0)
+        fetched = conn.execute(windowed).fetchall()
+        assert len(fetched) > 1, "the fixture is too small to show the difference"
+        assert bd._time_sql(conn, windowed, (), 1)["population"] == len(fetched)
+
+        # (4) The aggregate is not always column 0.
+        offset = "SELECT 1, COUNT(*) AS n FROM discovery_identification WHERE 1 = 0"
+        assert bd.sql_result_shape(offset) == (bd.SHAPE_SCALAR, 1)
+        assert bd._time_sql(conn, offset, (), 1, scalar=True, value_index=1)[
+            "population"] == 0
+        assert bd._time_sql(conn, offset, (), 1, scalar=True, value_index=0)[
+            "population"] == 1, (
+            "reading cell 0 of this shape gives the literal, not the count — "
+            "which is why the shape reader returns an INDEX and not a boolean")
+    finally:
+        conn.close()
+
+
+def test_a_statement_the_shape_reader_cannot_classify_ABORTS_the_benchmark(tmp_path, monkeypatch):
+    """`unknown` is the fail-closed third state, and it must reach the caller.
+
+    A two-state classifier has to guess on a shape it does not know, and the
+    guess that keeps the suite green is "row set" — which records a population
+    of 1 for a one-row aggregate and reports a passing measurement over
+    nothing. The benchmark now refuses to record a timing whose population it
+    cannot name, and says which statement it choked on."""
+    from scripts import bench_discovery as bd
+
+    compound = ("SELECT COUNT(*) FROM discovery_identification "
+                "UNION ALL SELECT COUNT(*) FROM discovery_identification")
+    assert bd.sql_result_shape(compound) == (bd.SHAPE_UNKNOWN, 0)
+    assert bd.sql_result_shape("PRAGMA integrity_check") == (bd.SHAPE_UNKNOWN, 0)
+
+    db_path = _bench_fixture_db(tmp_path)
+
+    def _one_unreadable(conn, **kwargs):
+        return [{
+            "label": "findings_probe_control_unreadable_shape",
+            "kind": "count", "cap_ms": bd.FINDINGS_COUNT_CAP_MS,
+            "sql": compound, "params": (), "skip": None,
+        }]
+
+    monkeypatch.setattr(bd, "_findings_combination_specs", _one_unreadable)
+    with pytest.raises(AssertionError, match="cannot tell what shape"):
+        bd.bench_findings_page(str(db_path), page_size=2, repeats=1, deep_page=2)
+
+
 def test_the_work_unit_novelty_skip_is_unreachable_THROUGH_THE_PAGE(tmp_path):
     """A skip that says "the surface cannot issue this" must be TRUE of the
     surface.

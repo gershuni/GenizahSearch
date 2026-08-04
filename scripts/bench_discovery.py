@@ -398,7 +398,7 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
 
 
 def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int,
-              *, scalar: bool = False) -> Dict[str, Any]:
+              *, scalar: bool = False, value_index: int = 0) -> Dict[str, Any]:
     """Time ``sql`` and record the population it actually measured.
 
     ``rows`` is the number of RESULT ROWS. For an aggregate that returns one row
@@ -407,8 +407,13 @@ def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int,
     measurement through it: ``SELECT COUNT(*) FROM empty_table`` records
     ``rows = 1`` and a count predicate matching nothing is documented as a
     passing measurement (code review round 13, finding 3). ``scalar=True`` says
-    the shape's population is the VALUE of the first column of the first row,
-    and ``population`` -- never ``rows`` -- is what the caller must assert on.
+    the shape's population is the VALUE of the aggregate column, and
+    ``population`` -- never ``rows`` -- is what the caller must assert on.
+
+    ``value_index`` is WHICH column carries it. Not always the first:
+    ``SELECT 1, COUNT(*) FROM t`` returns one row whose first cell is a literal,
+    and reading cell 0 there would record a population of 1 for an empty count
+    -- the round-13 defect restored through a different door.
     """
     latencies_ms: List[float] = []
     rows = 0
@@ -419,9 +424,9 @@ def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int,
         latencies_ms.append((time.perf_counter() - t0) * 1000.0)
         rows = len(fetched)
         value = None
-        if scalar and rows:
-            cell = fetched[0][0]
-            # A non-numeric first cell means the shape was mis-declared scalar;
+        if scalar and rows and value_index < len(fetched[0]):
+            cell = fetched[0][value_index]
+            # A non-numeric cell means the shape was mis-classified scalar;
             # leaving `value` at None makes `population` 0 below, which ABORTS
             # rather than passing -- the fail-closed direction.
             if isinstance(cell, int) and not isinstance(cell, bool):
@@ -436,42 +441,233 @@ def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int,
     }
 
 
-_PAREN_GROUP_RE = re.compile(r"\([^()]*\)")
+# ---------------------------------------------------------------------------
+# WHAT SHAPE DOES THIS STATEMENT RETURN?
+#
+# The benchmark's one substantive assertion is that a timing was taken over a
+# NON-EMPTY population. For a row query that is the row count; for an aggregate
+# it is the VALUE, because `SELECT COUNT(*) FROM empty_table` returns one row
+# whatever it counts and a row-count assertion therefore passes on nothing
+# (round 13, finding 3).
+#
+# The first derivation was a two-line regex -- "the statement starts with
+# SELECT COUNT(" and has no outer GROUP BY. Round 15, finding 3 showed it wrong
+# in three ways at once, each of which SILENTLY records `population == 1` (or a
+# per-row window value) instead of aborting:
+#
+#   * `WITH x AS (...) SELECT COUNT(*) ...` -- the statement does not start with
+#     SELECT, so a CTE demoted a scalar aggregate to a row set;
+#   * `SELECT n FROM (SELECT COUNT(*) AS n ...)` -- an outer wrapper did the
+#     same;
+#   * `SELECT COUNT(*) OVER () ...` -- a WINDOW function was called scalar
+#     though it produces one value PER ROW.
+#
+# Today's statements happen to dodge all three. "Happens to pass" is what this
+# phase keeps having to fix, so the classification is now a small, explicit,
+# THREE-STATE shape reader:
+#
+#   `row_set`         -- population is the row count;
+#   `scalar_aggregate` -- population is the value of column `value_index`;
+#   `unknown`          -- the benchmark ABORTS by name rather than guessing.
+#
+# Note on what is NOT used as the authority: `spec['kind']`. It is a BUDGET
+# class, not a shape -- `findings_launch_contribution_*` is `kind='count'` and
+# returns one row per shade -- so agreeing with it would be agreeing with the
+# wrong thing.
+# ---------------------------------------------------------------------------
+
+SHAPE_ROWS = "row_set"
+SHAPE_SCALAR = "scalar_aggregate"
+SHAPE_UNKNOWN = "unknown"
+
+#: SQLite's aggregate functions that yield a NUMBER. `group_concat` is
+#: deliberately absent: it aggregates to text, and a text population is not a
+#: count of anything.
+_AGGREGATE_CALL_RE = re.compile(
+    r"^(count|sum|total|avg|min|max)\s*\(", re.IGNORECASE)
+
+#: A bare column reference, optionally qualified -- the only outer select list
+#: an outer-wrapper statement may carry for this reader to look through it.
+_BARE_COLUMN_RE = re.compile(
+    r"^[A-Za-z_][A-Za-z_0-9$]*(\s*\.\s*[A-Za-z_][A-Za-z_0-9$]*)?$")
 
 
-def _outer_level(sql: str) -> str:
-    """``sql`` with every parenthesised group removed, innermost first, so a
-    keyword inside a subquery cannot be mistaken for an outer-level one."""
-    previous = None
-    text = sql
-    while previous != text:
-        previous = text
-        text = _PAREN_GROUP_RE.sub(" ", text)
-    return text
+def _sql_depths(sql: str) -> List[int]:
+    """Parenthesis depth per character, with anything inside a string literal
+    or a comment marked -1 so no scan can mistake it for syntax."""
+    depths: List[int] = []
+    depth = 0
+    index = 0
+    length = len(sql)
+    while index < length:
+        char = sql[index]
+        if char == "'":                     # a single-quoted literal
+            depths.append(-1)
+            index += 1
+            while index < length:
+                depths.append(-1)
+                if sql[index] == "'":
+                    # '' is an escaped quote INSIDE the literal.
+                    if index + 1 < length and sql[index + 1] == "'":
+                        index += 1
+                        depths.append(-1)
+                    else:
+                        index += 1
+                        break
+                index += 1
+            continue
+        if char == "-" and sql[index:index + 2] == "--":
+            while index < length and sql[index] != "\n":
+                depths.append(-1)
+                index += 1
+            continue
+        if char == "/" and sql[index:index + 2] == "/*":
+            end = sql.find("*/", index + 2)
+            end = length if end == -1 else end + 2
+            depths.extend([-1] * (end - index))
+            index = end
+            continue
+        if char == "(":
+            depth += 1
+            depths.append(depth)
+        elif char == ")":
+            depths.append(depth)
+            depth = max(0, depth - 1)
+        else:
+            depths.append(depth)
+        index += 1
+    return depths
+
+
+def _top_level(sql: str, pattern: str, depths: Optional[List[int]] = None):
+    """The first match of `pattern` at parenthesis depth 0, outside literals."""
+    if depths is None:
+        depths = _sql_depths(sql)
+    for match in re.finditer(pattern, sql, re.IGNORECASE):
+        start = match.start()
+        if start < len(depths) and depths[start] == 0:
+            return match
+    return None
+
+
+def _split_top_level_commas(text: str) -> List[str]:
+    depths = _sql_depths(text)
+    parts: List[str] = []
+    start = 0
+    for index, char in enumerate(text):
+        if char == "," and depths[index] == 0:
+            parts.append(text[start:index])
+            start = index + 1
+    parts.append(text[start:])
+    return parts
+
+
+def _sole_parenthesised_subquery(tail: str) -> Optional[str]:
+    """The inner statement of `( ... ) [AS] alias` when `tail` is EXACTLY that.
+
+    Anything else -- a join, a WHERE, a second table -- returns None, so the
+    reader looks through an outer wrapper only when the wrapper provably passes
+    the subquery's row count straight out.
+    """
+    text = tail.strip()
+    if not text.startswith("("):
+        return None
+    depths = _sql_depths(text)
+    close = next((i for i, char in enumerate(text)
+                  if char == ")" and depths[i] == 1), None)
+    if close is None:
+        return None
+    remainder = text[close + 1:].strip()
+    remainder = re.sub(r"^(AS\s+)?[A-Za-z_][A-Za-z_0-9$]*\s*$", "", remainder,
+                       flags=re.IGNORECASE).strip()
+    if remainder:
+        return None
+    return text[1:close]
+
+
+def sql_result_shape(sql: str) -> Tuple[str, int]:
+    """`(shape, value_index)` for one statement, DERIVED from the statement.
+
+    Never declared per spec: a spec that has to remember a `scalar=True` flag is
+    a spec whose next sibling forgets it, and forgetting it restores the vacuous
+    assertion this replaces. `value_index` is which column of the single result
+    row carries the aggregate; it is 0 for a row set and is meaningless there.
+
+    SCALAR requires POSITIVE evidence -- a top-level select expression that is a
+    bare aggregate CALL (never a window function, which produces a value per
+    row) with no outer-level GROUP BY. Everything else that parses is a row set.
+    A statement this reader cannot take apart is `unknown`, and the caller
+    aborts on it: guessing is how the assertion went vacuous the first time.
+    """
+    text = sql.strip().rstrip(";").strip()
+    if not text:
+        return SHAPE_UNKNOWN, 0
+    depths = _sql_depths(text)
+
+    select = _top_level(text, r"\bSELECT\b", depths)
+    if select is None:
+        return SHAPE_UNKNOWN, 0
+    head = text[:select.start()].strip()
+    if head and not re.match(r"^WITH\b", head, re.IGNORECASE):
+        # Something other than a CTE prefix precedes the outer SELECT.
+        return SHAPE_UNKNOWN, 0
+
+    outer = text[select.start():]
+    outer_depths = _sql_depths(outer)
+    if _top_level(outer, r"\b(UNION|EXCEPT|INTERSECT)\b", outer_depths):
+        # A compound statement's shape is the compound's, not the first arm's.
+        return SHAPE_UNKNOWN, 0
+
+    grouped = _top_level(outer, r"\bGROUP\s+BY\b", outer_depths) is not None
+    from_clause = _top_level(outer, r"\bFROM\b", outer_depths)
+    list_end = from_clause.start() if from_clause else len(outer)
+    select_list = outer[len("SELECT"):list_end]
+    select_list = re.sub(r"^\s*(DISTINCT|ALL)\b", "", select_list, flags=re.IGNORECASE)
+    expressions = [part.strip() for part in _split_top_level_commas(select_list)]
+    if not expressions or not expressions[0]:
+        return SHAPE_UNKNOWN, 0
+
+    if not grouped:
+        for index, expression in enumerate(expressions):
+            if not _AGGREGATE_CALL_RE.match(expression):
+                continue
+            if _top_level(expression, r"\bOVER\b"):
+                # `COUNT(*) OVER ()` is a WINDOW function: one value per row,
+                # so the statement is a row set however it starts.
+                continue
+            return SHAPE_SCALAR, index
+
+    # An outer wrapper passes its subquery's row count straight through, so a
+    # scalar aggregate hidden one level down is still a scalar aggregate --
+    # `SELECT n FROM (SELECT COUNT(*) AS n ...)`.
+    if from_clause and not grouped and len(expressions) == 1 \
+            and _BARE_COLUMN_RE.match(expressions[0]):
+        inner = _sole_parenthesised_subquery(outer[from_clause.end():])
+        if inner is not None:
+            inner_shape, _inner_index = sql_result_shape(inner)
+            if inner_shape == SHAPE_SCALAR:
+                return SHAPE_SCALAR, 0
+            if inner_shape == SHAPE_UNKNOWN:
+                return SHAPE_UNKNOWN, 0
+
+    return SHAPE_ROWS, 0
 
 
 def _is_scalar_aggregate(sql: str) -> bool:
-    """True when the statement returns exactly ONE row carrying a number.
+    """Back-compatible boolean over `sql_result_shape`.
 
-    DERIVED from the statement, never declared per spec: a spec that had to
-    remember a ``scalar=True`` flag is a spec whose next sibling forgets it, and
-    forgetting it restores exactly the vacuous assertion this replaces (round
-    13, finding 3). The rule is narrow and stated: the outermost SELECT list
-    begins with ``COUNT(`` and there is no outer-level ``GROUP BY``.
-
-    - ``_build_findings_query(count_only=True)`` -> ``SELECT COUNT(*) AS n FROM
-      (SELECT 1 ... GROUP BY ...)``: the GROUP BY is inside the subquery, so the
-      statement is scalar. TRUE.
-    - ``_build_launch_manuscript_sql`` -> ``SELECT COUNT(DISTINCT sys_id) ...``
-      with no grouping. TRUE.
-    - ``_build_launch_contribution_sql`` -> ``SELECT novelty_status, COUNT(*)
-      ... GROUP BY novelty_status``: many rows, and an empty population really
-      does return zero of them. FALSE on both clauses.
-    - Any ordering query -> its SELECT list starts with a column. FALSE.
+    `unknown` is NOT folded into False here -- a caller that only wants a
+    boolean would then record a row count for a statement nobody could classify,
+    which is the silent direction. `bench_findings_page` reads the three-state
+    shape and aborts on `unknown`; this helper exists for the assertions that
+    only ask "is this one an aggregate".
     """
-    if not re.match(r"\s*SELECT\s+COUNT\s*\(", sql, re.IGNORECASE):
-        return False
-    return "GROUP BY" not in _outer_level(sql).upper()
+    shape, _index = sql_result_shape(sql)
+    if shape == SHAPE_UNKNOWN:
+        raise ValueError(
+            "sql_result_shape could not classify this statement, so its "
+            "measured population cannot be trusted:\n" + sql.strip()[:400])
+    return shape == SHAPE_SCALAR
 
 
 def _query_plan(conn: sqlite3.Connection, sql: str, params) -> str:
@@ -909,9 +1105,22 @@ def bench_findings_page(
             if spec["skip"]:
                 skipped_shapes.append({"label": spec["label"], "reason": spec["skip"]})
                 continue
-            scalar = _is_scalar_aggregate(spec["sql"])
+            shape, value_index = sql_result_shape(spec["sql"])
+            if shape == SHAPE_UNKNOWN:
+                # NOT a skip and NOT a default to row counting: a statement
+                # whose shape is unreadable has an unreadable population, and
+                # recording a timing beside one is the F14 failure this whole
+                # mechanism exists to prevent.
+                raise AssertionError(
+                    f"{spec['label']}: the benchmark cannot tell what shape this "
+                    "statement returns, so it cannot say what population its "
+                    "timing was taken over. Teach `sql_result_shape` the shape "
+                    "(and add it to the shape tests) rather than assuming one:\n"
+                    + spec["sql"].strip()[:400]
+                )
+            scalar = shape == SHAPE_SCALAR
             measured = _time_sql(conn, spec["sql"], spec["params"], repeats,
-                                 scalar=scalar)
+                                 scalar=scalar, value_index=value_index)
             if measured["population"] == 0:
                 # `population` and NOT `rows`: an aggregate returns exactly one
                 # row whatever its value, so a row-count assertion passes for
