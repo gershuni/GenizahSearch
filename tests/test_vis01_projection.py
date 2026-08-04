@@ -258,12 +258,40 @@ def _open_ro(path) -> sqlite3.Connection:
 # environment, per the plan's own portability discipline.
 # ---------------------------------------------------------------------------
 
+# A synthetic marker that is ALWAYS available. The two leak controls below
+# exercise identical code paths with it, so their logic runs in every
+# environment including CI -- see the note on `real_masking_pattern`.
+PORTABLE_MASKING_PATTERN = "SYNTHETIC-LEAK-MARKER-3ZP77"
+
+
 @pytest.fixture
-def real_masking_pattern(monkeypatch):
-    monkeypatch.setenv("MASKING_SCAN_PATTERNS_FILE", "C:/Genizahsearch/.masking_patterns")
+def portable_masking_pattern():
+    return PORTABLE_MASKING_PATTERN
+
+
+@pytest.fixture
+def real_masking_pattern():
+    """A REAL restricted pattern, sourced from the configured, gitignored
+    MASKING_SCAN_PATTERNS_FILE at run time -- never hardcoded, never printed.
+
+    Honours whatever the environment configures. It previously OVERRODE the env
+    with a hardcoded workstation path (`C:/Genizahsearch/.masking_patterns`),
+    which meant that on any other machine -- CI included -- both leak controls
+    skipped and never executed at all (Codex code review 2026-08-03, finding 9).
+    A security control that silently does not run is the failure mode this whole
+    phase keeps producing.
+
+    Skipping here is now safe rather than silent, because each control has a
+    `_portable` twin that runs unconditionally on PORTABLE_MASKING_PATTERN and
+    covers the same code path. This fixture adds the extra assurance that the
+    machinery also works against a genuine restricted string, on machines that
+    have one."""
     patterns = masking.load_patterns()
     if not patterns:
-        pytest.skip("no local MASKING_SCAN_PATTERNS_FILE pattern available in this environment")
+        pytest.skip(
+            "no MASKING_SCAN_PATTERNS_FILE configured in this environment -- the "
+            "same code path is covered unconditionally by the *_portable twin"
+        )
     return patterns[0]
 
 
@@ -363,11 +391,11 @@ def test_control1_structural_absence_of_private_rows(tmp_path):
 # into a projected (surviving) work's title fails the masking gate.
 # ---------------------------------------------------------------------------
 
-def test_control2_cell_level_leak_fails_the_gate(tmp_path, real_masking_pattern):
+def _assert_cell_level_leak_fails_the_gate(tmp_path, marker):
     path, conn = _new_private_conn(tmp_path)
     # The marker is embedded in a work that WILL survive projection.
     _add_work(conn, "W_OPEN", identity_visibility="public",
-              title=f"Some title containing {real_masking_pattern} inline")
+              title=f"Some title containing {marker} inline")
     _add_claim_with_evidence(
         conn, claim_id="C1", page_id="P1", work_id="W_OPEN", evidence_id="E1", sys_id="SYS1",
         assertion_visibility="public",
@@ -377,7 +405,7 @@ def test_control2_cell_level_leak_fails_the_gate(tmp_path, real_masking_pattern)
 
     out_path = tmp_path / "public.db"
     with pytest.raises(proj.ProjectionError) as excinfo:
-        proj.project(str(path), str(out_path), masking_patterns=[real_masking_pattern])
+        proj.project(str(path), str(out_path), masking_patterns=[marker])
 
     assert not out_path.exists(), "a masking-dirty artifact must be REMOVED, never left on disk"
     match = re.search(r"issue_count=(\d+)", str(excinfo.value))
@@ -386,27 +414,48 @@ def test_control2_cell_level_leak_fails_the_gate(tmp_path, real_masking_pattern)
     assert issue_count >= 1
 
 
+def test_control2_cell_level_leak_fails_the_gate_portable(tmp_path, portable_masking_pattern):
+    """Runs everywhere, CI included."""
+    _assert_cell_level_leak_fails_the_gate(tmp_path, portable_masking_pattern)
+
+
+def test_control2_cell_level_leak_fails_the_gate(tmp_path, real_masking_pattern):
+    """Same path, against a genuine restricted string where one is configured."""
+    _assert_cell_level_leak_fails_the_gate(tmp_path, real_masking_pattern)
+
+
 # ---------------------------------------------------------------------------
 # Control 2b: leak control, SCHEMA level -- a marker seeded into a COLUMN
 # NAME is caught by --scan-sqlite, demonstrating schema-level coverage
 # distinct from cell-level content scanning.
 # ---------------------------------------------------------------------------
 
-def test_control2b_schema_level_leak_caught_by_scan_sqlite(tmp_path, real_masking_pattern):
+def _assert_schema_level_leak_caught(tmp_path, marker):
     db_path = tmp_path / "schema_leak.db"
     conn = sqlite3.connect(str(db_path))
-    quoted_marker = real_masking_pattern.replace('"', '""')
+    quoted_marker = marker.replace('"', '""')
     conn.execute(f'CREATE TABLE t (id INTEGER, "{quoted_marker}" TEXT)')
     conn.execute("INSERT INTO t (id) VALUES (1)")
     conn.commit()
     conn.close()
 
-    issues = masking.scan_sqlite(str(db_path), [real_masking_pattern])
+    issues = masking.scan_sqlite(str(db_path), [marker])
     assert len(issues) >= 1
     assert any("::schema" in issue.path for issue in issues), (
         "a marker embedded ONLY in a column name must be caught via the "
         "schema (sqlite_master.sql) surface"
     )
+
+
+def test_control2b_schema_level_leak_caught_by_scan_sqlite_portable(
+        tmp_path, portable_masking_pattern):
+    """Runs everywhere, CI included."""
+    _assert_schema_level_leak_caught(tmp_path, portable_masking_pattern)
+
+
+def test_control2b_schema_level_leak_caught_by_scan_sqlite(tmp_path, real_masking_pattern):
+    """Same path, against a genuine restricted string where one is configured."""
+    _assert_schema_level_leak_caught(tmp_path, real_masking_pattern)
 
 
 def test_masking_gate_argv_always_includes_both_scan_flags():
