@@ -607,7 +607,23 @@ def _build_manuscript_works_sql(n_page_ids: int) -> str:
 # bind parameter) by both the paginated projection query and the
 # member-sys_ids follow-up query below, so the two queries can never drift
 # out of sync with each other.
-_WORK_WITNESSES_RANKED_CTE_SQL = f"""
+#
+# 136-21: `manuscript_display` is LEFT-joined here (mirroring `_FINDINGS_FROM`)
+# so every expansion row can NAME the manuscript it points at. LEFT, not inner:
+# a carrier absent from `manuscript_display` must still appear -- flagged --
+# rather than vanishing from a list whose whole purpose is completeness. Joining
+# it once inside the SHARED CTE is what keeps the row query, the member query
+# and the count query consistent. `adjudication_status` comes through for the
+# same reason `_present_claim_row` needs it: `serialize_banded_claim` REFUSES to
+# emit a bandless presentation without it (SC#1), and the expansion's
+# `band_label` is produced by that serializer rather than formatted locally.
+def _build_work_witnesses_ranked_cte_sql(*, restrict_work_id: bool = True) -> str:
+    """The ranked CTE body. `restrict_work_id=False` builds the CORPUS-WIDE
+    form (no `dc.work_id = ?` bind), used ONLY by the cardinality probe that
+    has to rank every work at this exact grain through this exact fragment --
+    the service itself always builds the per-work form."""
+    work_clause = "dc.work_id = ?\n    AND " if restrict_work_id else ""
+    return f"""
   SELECT
     COALESCE(wum.unit_id, 'sys:' || de.sys_id) AS unit_key,
     wum.unit_id AS unit_id,
@@ -618,13 +634,219 @@ _WORK_WITNESSES_RANKED_CTE_SQL = f"""
     de.sys_id AS sys_id,
     de.evidence_source AS evidence_source,
     de.confidence_band AS confidence_band,
+    de.adjudication_status AS adjudication_status,
+    md.library_code AS library_code,
+    md.shelfmark_display AS shelfmark_display,
     {_BAND_RANK_CASE_SQL} AS band_rank
   FROM discovery_claim dc
   JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
   LEFT JOIN witness_unit_members wum ON wum.sys_id = de.sys_id
-  WHERE dc.work_id = ?
-    AND dc.claim_type IN ('direct_witness', 'quotes_this_work')
+  LEFT JOIN manuscript_display md ON md.sys_id = de.sys_id
+  WHERE {work_clause}dc.claim_type IN ('direct_witness', 'quotes_this_work')
 """
+
+
+_WORK_WITNESSES_RANKED_CTE_SQL = _build_work_witnesses_ranked_cte_sql()
+
+
+# ---------------------------------------------------------------------------
+# 136-21 / PANEL-02: the anchor side of the expansion.
+#
+# The anchor's identity is ALL THREE OR NONE. With three independent optionals,
+# "anchor arguments were supplied" is ambiguous for the six partial
+# combinations, and a partial call could rank against a defaulted side or emit
+# `relations_differ` computed from a missing relation -- both silently wrong
+# rather than loudly broken. Ranking needs BOTH `(evidence_source,
+# confidence_band)` because that is what `_band_rank` takes; a band alone cannot
+# produce a rank.
+# ---------------------------------------------------------------------------
+
+_ANCHOR_IDENTITY_FIELDS: Tuple[str, ...] = (
+    "anchor_claim_type", "anchor_evidence_source", "anchor_confidence_band",
+)
+
+
+def _validate_anchor_identity(
+    anchor_claim_type: Optional[str],
+    anchor_evidence_source: Optional[str],
+    anchor_confidence_band: Optional[str],
+) -> bool:
+    """Enforce the all-or-none invariant; return True when the anchor is
+    supplied. Raises ValueError naming which fields were PRESENT and which were
+    MISSING on any of the six partial combinations."""
+    supplied = {
+        "anchor_claim_type": anchor_claim_type,
+        "anchor_evidence_source": anchor_evidence_source,
+        "anchor_confidence_band": anchor_confidence_band,
+    }
+    present = [f for f in _ANCHOR_IDENTITY_FIELDS if supplied[f] is not None]
+    missing = [f for f in _ANCHOR_IDENTITY_FIELDS if supplied[f] is None]
+    if present and missing:
+        raise ValueError(
+            "the anchor identity is all-three-or-none: present "
+            f"{present}, missing {missing} -- ranking the anchor side needs BOTH "
+            "its evidence_source and its confidence_band, and `relations_differ` "
+            "needs its claim_type (PANEL-02 / DATA-01)"
+        )
+    return bool(present)
+
+
+def _resolve_displayed_band(
+    evidence_source: Optional[str],
+    confidence_band: Optional[str],
+    anchor_evidence_source: Optional[str],
+    anchor_confidence_band: Optional[str],
+) -> Tuple[Optional[str], Optional[str], int]:
+    """DATA-01: the WEAKER of the two claims' bands -- `(evidence_source,
+    confidence_band, band_rank)` of whichever side ranks weaker.
+
+    `_band_rank` is the ONLY comparator (lower is stronger, so the weaker side
+    is the higher rank); a second local ordering over band strings would drift
+    from the frozen lattice. On a tie the carrier's own pair wins, which mirrors
+    the SQL's strict `anchor_rank > band_rank` test exactly.
+    """
+    carrier_rank = _band_rank(evidence_source, confidence_band)
+    if anchor_evidence_source is None or anchor_confidence_band is None:
+        return evidence_source, confidence_band, carrier_rank
+    anchor_rank = _band_rank(anchor_evidence_source, anchor_confidence_band)
+    if anchor_rank > carrier_rank:
+        return anchor_evidence_source, anchor_confidence_band, anchor_rank
+    return evidence_source, confidence_band, carrier_rank
+
+
+# ---------------------------------------------------------------------------
+# 136-21: the ONE `ranked -> unit_best -> filtered` pipeline. BOTH the row
+# query and the count query are built from this single fragment.
+#
+# Sharing only the raw CTE would not be enough: unit-best selection and band
+# filtering are separate SQL BELOW it, and under this plan the FILTERING stage
+# itself changes shape depending on whether an anchor was supplied. A
+# separately-written count is exactly how a total drifts from the list it
+# labels, and that drift is invisible until someone counts by hand.
+# ---------------------------------------------------------------------------
+
+#: The deterministic ordering, unchanged from the pre-136-21 query: band_rank
+#: (the CARRIER's own, never the resolved one -- ordering is not part of this
+#: plan's change) plus stable secondary tie-breakers.
+_WORK_EXPANSION_ORDER_BY = "band_rank ASC, sys_id ASC, page_id ASC, claim_id ASC"
+
+#: Every column the row query returns. Named explicitly so a new CTE column
+#: cannot silently reach a caller.
+_WORK_EXPANSION_ROW_COLUMNS = """unit_key, unit_id, page_id, work_id, claim_id, claim_type,
+               sys_id, evidence_source, confidence_band, adjudication_status,
+               library_code, shelfmark_display,
+               displayed_evidence_source, displayed_confidence_band, displayed_band_rank"""
+
+
+def _build_work_expansion_pipeline(
+    *,
+    work_id: Optional[str],
+    anchor_unit_key: Optional[str] = None,
+    anchor_evidence_source: Optional[str] = None,
+    anchor_confidence_band: Optional[str] = None,
+    enabled_bands: Optional[Iterable[str]] = None,
+) -> Tuple[str, List[Any]]:
+    """Build the shared `WITH ranked ... unit_best ... filtered` prefix and its
+    bind parameters. Callers append their own terminal SELECT.
+
+    THE FILTER CONTRACT (deliberately split, and stated because the two obvious
+    readings contradict each other):
+
+      * anchor supplied -> the enabled-band filter acts on the RESOLVED,
+        DISPLAYED band, because that is the band the reader actually sees.
+        Filtering on the other carrier's band while displaying the weaker one
+        would put a screening-band row above the disclosure line whenever the
+        anchor happened to be the weak side.
+      * anchor absent -> the pre-136-21 behaviour, unchanged: the filter acts
+        on the other carrier's own band.
+
+    The `PARTITION BY work_id, unit_key` is behaviour-identical to the
+    pre-136-21 `PARTITION BY unit_key` on the per-work form (work_id is a
+    constant there); naming it makes the SAME fragment correct for the
+    corpus-wide probe form, where a unit_key can legitimately recur across
+    works.
+    """
+    params: List[Any] = []
+    if work_id is not None:
+        params.append(work_id)
+
+    anchored = anchor_evidence_source is not None and anchor_confidence_band is not None
+    if anchored:
+        anchor_rank = _band_rank(anchor_evidence_source, anchor_confidence_band)
+        displayed_sql = (
+            "CASE WHEN ? > band_rank THEN ? ELSE evidence_source END "
+            "AS displayed_evidence_source,\n"
+            "                   CASE WHEN ? > band_rank THEN ? ELSE confidence_band END "
+            "AS displayed_confidence_band,\n"
+            "                   CASE WHEN ? > band_rank THEN ? ELSE band_rank END "
+            "AS displayed_band_rank,"
+        )
+        params.extend([
+            anchor_rank, anchor_evidence_source,
+            anchor_rank, anchor_confidence_band,
+            anchor_rank, anchor_rank,
+        ])
+        band_filter_column = "displayed_confidence_band"
+    else:
+        displayed_sql = (
+            "evidence_source AS displayed_evidence_source,\n"
+            "                   confidence_band AS displayed_confidence_band,\n"
+            "                   band_rank AS displayed_band_rank,"
+        )
+        band_filter_column = "confidence_band"
+
+    extra_clauses: List[str] = []
+    if anchor_unit_key is not None:
+        extra_clauses.append("unit_key != ?")
+        params.append(anchor_unit_key)
+    bands = list(enabled_bands) if enabled_bands else []
+    if bands:
+        placeholders = ",".join("?" for _ in bands)
+        extra_clauses.append(f"{band_filter_column} IN ({placeholders})")
+        params.extend(bands)
+    where_extra = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
+
+    cte = _build_work_witnesses_ranked_cte_sql(restrict_work_id=work_id is not None)
+    pipeline = f"""
+                WITH ranked AS ({cte}),
+                unit_best AS (
+                    SELECT *,
+                           {displayed_sql}
+                           ROW_NUMBER() OVER (
+                               PARTITION BY work_id, unit_key
+                               ORDER BY {_WORK_EXPANSION_ORDER_BY}
+                           ) AS rn
+                    FROM ranked
+                ),
+                filtered AS (
+                    SELECT * FROM unit_best WHERE rn = 1{where_extra}
+                )
+    """
+    return pipeline, params
+
+
+def build_work_expansion_rows_sql(
+    *, page_size: int, offset: int, **pipeline_kwargs: Any
+) -> Tuple[str, List[Any]]:
+    """The paginated expansion row query. Built from the shared pipeline, so it
+    cannot diverge from the count below."""
+    pipeline, params = _build_work_expansion_pipeline(**pipeline_kwargs)
+    sql = f"""{pipeline}
+                SELECT {_WORK_EXPANSION_ROW_COLUMNS}
+                FROM filtered
+                ORDER BY {_WORK_EXPANSION_ORDER_BY}
+                LIMIT ? OFFSET ?
+    """
+    return sql, [*params, page_size, offset]
+
+
+def build_work_expansion_count_sql(**pipeline_kwargs: Any) -> Tuple[str, List[Any]]:
+    """The EXACT count of distinct witness UNITS the row query would return
+    across all pages -- the same `ranked -> unit-best -> filtered` fragment,
+    counted instead of paginated. Never a claim-row count, never bounded by a
+    LIMIT, never approximated."""
+    pipeline, params = _build_work_expansion_pipeline(**pipeline_kwargs)
+    return f"{pipeline}\n                SELECT COUNT(*) AS n FROM filtered\n", params
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +865,9 @@ def _project_work_witnesses(
     *,
     enabled_bands: Optional[Iterable[str]] = None,
     anchor_sys_id: Optional[str] = None,
+    anchor_claim_type: Optional[str] = None,
+    anchor_evidence_source: Optional[str] = None,
+    anchor_confidence_band: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
 ) -> List[Dict[str, Any]]:
@@ -667,6 +892,13 @@ def _project_work_witnesses(
             set are kept. None/empty = no filtering (every band shown).
         anchor_sys_id: when given, the unit containing this sys_id
             (merged or singleton) is excluded entirely from the result.
+        anchor_claim_type, anchor_evidence_source, anchor_confidence_band:
+            the ANCHOR side's own identity (136-21) -- ALL THREE OR NONE
+            (see ``_validate_anchor_identity``). When supplied, the displayed
+            band becomes the WEAKER of the pair (DATA-01) and the
+            ``enabled_bands`` filter acts on THAT resolved band rather than
+            on the other carrier's; when absent, the pre-136-21 behaviour is
+            unchanged.
         page, page_size: 1-indexed pagination applied AFTER filtering.
 
     Returns:
@@ -679,8 +911,20 @@ def _project_work_witnesses(
         the unit -- the surface a caller uses to retrieve suppressed
         member claims on expansion, via ``get_claims_for_page`` +
         ``witness_unit_members``; there is no ``supporting_page_ids``
-        column, G4/R5).
+        column, G4/R5), plus the 136-21 fields: both sides' relation kinds
+        (``anchor_claim_type`` / ``relations_differ``), the resolved displayed
+        pair (``displayed_evidence_source`` / ``displayed_confidence_band`` /
+        ``band_rank``) and the carrier's name (``library_code`` /
+        ``shelfmark_display`` / ``display_missing``, READ OFF the input rows --
+        this helper has no DB to join them from and never invents them).
+
+        ``band_label`` is the ONE field the SQL path produces that this helper
+        does not: it needs the sidecar's cached band-measurement read and a UI
+        language, neither of which exists here. Every other field is computed
+        identically, and a test asserts the two agree over all of them.
     """
+    _validate_anchor_identity(
+        anchor_claim_type, anchor_evidence_source, anchor_confidence_band)
     rows = list(claim_rows)
     if not rows:
         return []
@@ -725,20 +969,40 @@ def _project_work_witnesses(
             ),
         )
         displayed_band = best_row["confidence_band"]
-        if enabled_bands_set is not None and displayed_band not in enabled_bands_set:
+        resolved_source, resolved_band, resolved_rank = _resolve_displayed_band(
+            best_row["evidence_source"], displayed_band,
+            anchor_evidence_source, anchor_confidence_band)
+        # The band the FILTER acts on is the band the reader SEES -- the
+        # resolved one when an anchor was supplied, the carrier's own when it
+        # was not (see _build_work_expansion_pipeline's filter contract).
+        if enabled_bands_set is not None and resolved_band not in enabled_bands_set:
             continue
 
         member_sys_ids = sorted({m["sys_id"] for m in members})
+        library_code = best_row.get("library_code") or None
+        shelfmark_display = best_row.get("shelfmark_display") or None
+        claim_type = best_row["claim_type"]
         items.append({
             "work_id": best_row["work_id"],
             "unit_id": unit_key[1] if unit_key[0] == "unit" else None,
             "representative_sys_id": best_row["sys_id"],
             "representative_page_id": best_row["page_id"],
             "representative_claim_id": best_row["claim_id"],
-            "claim_type": best_row["claim_type"],
+            "claim_type": claim_type,
             "evidence_source": best_row["evidence_source"],
             "confidence_band": displayed_band,
             "member_sys_ids": member_sys_ids,
+            "anchor_claim_type": anchor_claim_type,
+            "anchor_evidence_source": anchor_evidence_source,
+            "anchor_confidence_band": anchor_confidence_band,
+            "relations_differ": bool(
+                anchor_claim_type is not None and claim_type != anchor_claim_type),
+            "displayed_evidence_source": resolved_source,
+            "displayed_confidence_band": resolved_band,
+            "band_rank": resolved_rank,
+            "library_code": library_code,
+            "shelfmark_display": shelfmark_display,
+            "display_missing": library_code is None or shelfmark_display is None,
         })
 
     items.sort(
@@ -754,6 +1018,74 @@ def _project_work_witnesses(
     page_size = page_size if isinstance(page_size, int) and page_size > 0 else 1
     offset = (page - 1) * page_size
     return items[offset: offset + page_size]
+
+
+def _present_expansion_row(
+    row: Mapping[str, Any],
+    members_by_key: Mapping[str, Any],
+    measurements: Mapping[Tuple[str, str], Tuple[Optional[str], Optional[float]]],
+    lang: str,
+    *,
+    anchor_claim_type: Optional[str],
+    anchor_evidence_source: Optional[str],
+    anchor_confidence_band: Optional[str],
+) -> Dict[str, Any]:
+    """One raw expansion query row -> the INTERNAL expansion row.
+
+    `band_label` is produced exactly the way the page query produces its own:
+    `_band_measurements()` supplies `measurement_status`/`ci_low`,
+    `serialize_banded_claim` composes the presentation over the RESOLVED
+    displayed pair, and only `band_label` is taken off the result --
+    `review_overlay` and the measurement inputs are dropped here and dropped
+    again by `surface_safe_expansion`. `band_precision` is deliberately NOT
+    joined into the query: its `precision`/`ci_low`/`ci_high` columns would then
+    sit on every returned row, one careless caller away from a D-06 violation.
+
+    `adjudication_status` is the CARRIER's own, and is passed only because the
+    serializer REFUSES to emit a bandless presentation without it (SC#1) -- that
+    refusal is the property this call is here for. Nothing derived from it
+    (`review_overlay`, `default_eligible`) leaves this function.
+    """
+    displayed_source = row["displayed_evidence_source"]
+    displayed_band = row["displayed_confidence_band"]
+    measurement_status, ci_low = measurements.get(
+        (displayed_source, displayed_band), (None, None))
+    banded = serialize_banded_claim({
+        "evidence_source": displayed_source,
+        "confidence_band": displayed_band,
+        "adjudication_status": row["adjudication_status"],
+        "measurement_status": measurement_status,
+        "ci_low": ci_low,
+    }, lang)
+
+    # An absent `manuscript_display` row surfaces as explicit NULLs plus a
+    # marker -- never an empty string, and never a silently dropped row.
+    library_code = row["library_code"] or None
+    shelfmark_display = row["shelfmark_display"] or None
+    claim_type = row["claim_type"]
+    return {
+        "work_id": row["work_id"],
+        "unit_id": row["unit_id"],
+        "representative_sys_id": row["sys_id"],
+        "representative_page_id": row["page_id"],
+        "representative_claim_id": row["claim_id"],
+        "claim_type": claim_type,
+        "evidence_source": row["evidence_source"],
+        "confidence_band": row["confidence_band"],
+        "member_sys_ids": sorted(members_by_key.get(row["unit_key"], {row["sys_id"]})),
+        "anchor_claim_type": anchor_claim_type,
+        "anchor_evidence_source": anchor_evidence_source,
+        "anchor_confidence_band": anchor_confidence_band,
+        "relations_differ": bool(
+            anchor_claim_type is not None and claim_type != anchor_claim_type),
+        "displayed_evidence_source": displayed_source,
+        "displayed_confidence_band": displayed_band,
+        "band_rank": row["displayed_band_rank"],
+        "band_label": banded["band_label"],
+        "library_code": library_code,
+        "shelfmark_display": shelfmark_display,
+        "display_missing": library_code is None or shelfmark_display is None,
+    }
 
 
 class DiscoveryService:
@@ -1703,33 +2035,108 @@ class DiscoveryService:
         page: int = 1,
         page_size: Optional[int] = None,
         anchor_sys_id: Optional[str] = None,
+        *,
+        anchor_claim_type: Optional[str] = None,
+        anchor_evidence_source: Optional[str] = None,
+        anchor_confidence_band: Optional[str] = None,
+        lang: str = "en",
     ) -> List[Dict[str, Any]]:
         """DATA-10 unit x work projection: witnesses of ``work_id``, one row
         per physical-MS witness_unit at its highest member band, the
-        enabled-band filter applied on that displayed band BEFORE
-        pagination, the anchor's own unit excluded, same-unit members
-        suppressed.
+        enabled-band filter applied on the DISPLAYED band BEFORE pagination,
+        the anchor's own unit excluded, same-unit members suppressed.
 
-        H1 fix: the grouping / highest-member-band selection / anchor
-        exclusion / enabled-band filtering / deterministic ordering ALL run
-        IN SQL (a ``ROW_NUMBER() OVER (PARTITION BY unit_key ...)`` window
-        query over ``_WORK_WITNESSES_RANKED_CTE_SQL``), so ``LIMIT``/
-        ``OFFSET`` paginate over UNITS post-grouping -- never over a
-        pre-grouping raw-claim cap. There is no cap on the number of raw
-        claims scanned for this ONE work_id (an indexed, work_id-bounded
-        scan); ``witness_unit_members`` is never loaded wholesale into a
-        Python dict -- only the sys_ids that actually have a witness claim
-        on THIS work are ever looked up, via the LEFT JOIN inside the CTE.
-        A second, small follow-up query (bounded to this page's unit
-        count, <= page_size) fetches each returned unit's member sys_ids
-        for on-demand expansion. ``_project_work_witnesses`` remains the
-        pure-Python reference implementation of these SAME rules for
-        callers that already hold an in-memory row set."""
-        if not self.is_available():
+        LEGACY LIST CONTRACT, UNCHANGED: a list of dicts, ``[]`` on EVERY
+        failure path, never an exception (except the all-or-none anchor
+        ValueError below, which is a programming error rather than a service
+        state). Published, and callers depend on it -- which is exactly why the
+        queries now live in ``_query_work_expansion``, which RAISES, and why the
+        ENVELOPED shape maps that raise to a named outage instead of an
+        ok-with-zero.
+
+        136-21 additions, all opt-in through the anchor triple:
+          * ``anchor_claim_type`` / ``anchor_evidence_source`` /
+            ``anchor_confidence_band`` -- ALL THREE OR NONE. Every existing call
+            site keeps working unchanged (all three default to None).
+          * every row carries both sides' relation kind, ``relations_differ``,
+            the RESOLVED weaker ``displayed_*`` pair with its ``band_label``,
+            and the carrier's ``library_code`` / ``shelfmark_display`` /
+            ``display_missing``.
+
+        THE ONE DELIBERATE BEHAVIOUR CHANGE, stated because it is silent under
+        the old call shape: when the anchor triple IS supplied, ``enabled_bands``
+        filters on the RESOLVED displayed band -- the band the reader actually
+        sees -- rather than on the other carrier's. When it is absent, filtering
+        is exactly as before. See ``_build_work_expansion_pipeline``.
+
+        H1 (unchanged): the grouping / highest-member-band selection / anchor
+        exclusion / band filtering / deterministic ordering ALL run IN SQL, so
+        ``LIMIT``/``OFFSET`` paginate over UNITS post-grouping, never over a
+        pre-grouping raw-claim cap. ``_project_work_witnesses`` remains the
+        pure-Python reference implementation of these SAME rules.
+        """
+        # Validated OUTSIDE the try: a partial anchor set is a caller bug, and
+        # swallowing it into `[]` is precisely the silence this plan removes.
+        _validate_anchor_identity(
+            anchor_claim_type, anchor_evidence_source, anchor_confidence_band)
+        try:
+            rows, _total = self._query_work_expansion(
+                work_id, enabled_bands=enabled_bands, page=page, page_size=page_size,
+                anchor_sys_id=anchor_sys_id, anchor_claim_type=anchor_claim_type,
+                anchor_evidence_source=anchor_evidence_source,
+                anchor_confidence_band=anchor_confidence_band, lang=lang,
+            )
+        except Exception as e:
+            # Log the exception TYPE only. This module reads an artifact that
+            # may carry restricted content, and a driver message can quote its
+            # input; the established pattern (web/discovery_assets.py) is to log
+            # anything not written from our own constants by type name alone.
+            logger.error(
+                "DiscoveryService.get_work_witnesses query failed (%s)",
+                type(e).__name__)
             return []
+        return rows
+
+    def _query_work_expansion(
+        self,
+        work_id: str,
+        *,
+        enabled_bands: Optional[Iterable[str]] = None,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        anchor_sys_id: Optional[str] = None,
+        anchor_claim_type: Optional[str] = None,
+        anchor_evidence_source: Optional[str] = None,
+        anchor_confidence_band: Optional[str] = None,
+        lang: str = "en",
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """The expansion's rows AND its EXACT total -- ``(rows, total)``.
+
+        RAISES on a query failure rather than swallowing it into an empty
+        result. That distinction is load-bearing and is the whole reason this
+        helper was factored out: the legacy list method above turns a raise back
+        into ``[]`` (its published contract), while the enveloped method turns
+        it into `unavailable` with a named reason. Swallowing it produced a real
+        false zero on the page query against a real pre-rebuild asset -- `ok`
+        with a total of 0, i.e. "this work has no other carriers" -- and EVERY
+        fixture in the suite carries the tables these queries read, so no
+        ordinary unit test can reach that class of bug. The three forced-failure
+        tests are the only thing that can.
+
+        ``total`` is the count query's EXACT result. There is no approximate,
+        estimated, sampled or capped alternative anywhere on this path: a count
+        that cannot be produced inside its budget degrades to the `timeout`
+        status, never to a softened number. A bounded page cannot supply a
+        total, and a number a reader cannot reproduce is worse than an honest
+        temporary failure.
+        """
+        _validate_anchor_identity(
+            anchor_claim_type, anchor_evidence_source, anchor_confidence_band)
+        if not self.is_available():
+            return [], 0
         conn = self._get_conn()
         if conn is None:
-            return []
+            return [], 0
         page = self._clamp_page(page)
         page_size = self._clamp_page_size(page_size)
         offset = (page - 1) * page_size
@@ -1739,61 +2146,35 @@ class DiscoveryService:
         # "no filter" -- short-circuit before building an invalid `IN ()`.
         enabled_bands_list = list(enabled_bands) if enabled_bands else None
         if enabled_bands_list is not None and len(enabled_bands_list) == 0:
-            return []
+            return [], 0
 
-        try:
-            anchor_unit_key = None
-            if anchor_sys_id:
-                arow = conn.execute(
-                    "SELECT unit_id FROM witness_unit_members WHERE sys_id = ?",
-                    (anchor_sys_id,),
-                ).fetchone()
-                anchor_unit_id = arow["unit_id"] if arow else None
-                anchor_unit_key = anchor_unit_id if anchor_unit_id is not None else f"sys:{anchor_sys_id}"
+        anchor_unit_key = None
+        if anchor_sys_id:
+            arow = conn.execute(
+                "SELECT unit_id FROM witness_unit_members WHERE sys_id = ?",
+                (anchor_sys_id,),
+            ).fetchone()
+            anchor_unit_id = arow["unit_id"] if arow else None
+            anchor_unit_key = (
+                anchor_unit_id if anchor_unit_id is not None else f"sys:{anchor_sys_id}")
 
-            extra_clauses: List[str] = []
-            extra_params: List[Any] = []
-            if anchor_unit_key is not None:
-                extra_clauses.append("unit_key != ?")
-                extra_params.append(anchor_unit_key)
-            if enabled_bands_list is not None:
-                placeholders = ",".join("?" for _ in enabled_bands_list)
-                extra_clauses.append(f"confidence_band IN ({placeholders})")
-                extra_params.extend(enabled_bands_list)
-            where_extra = (" AND " + " AND ".join(extra_clauses)) if extra_clauses else ""
+        pipeline_kwargs = {
+            "work_id": work_id,
+            "anchor_unit_key": anchor_unit_key,
+            "anchor_evidence_source": anchor_evidence_source,
+            "anchor_confidence_band": anchor_confidence_band,
+            "enabled_bands": enabled_bands_list,
+        }
+        count_sql, count_params = build_work_expansion_count_sql(**pipeline_kwargs)
+        count_row = conn.execute(count_sql, count_params).fetchone()
+        total = count_row[0]
 
-            # MED (Codex R2): band_rank + sys_id ASC alone is not a TOTAL
-            # order -- a unit/sys_id can carry >=2 same-band page claims,
-            # leaving the ROW_NUMBER()-selected representative dependent on
-            # unspecified scan/insertion order. page_id, claim_id are
-            # appended as stable secondary tie-breakers (both the window
-            # PARTITION's ORDER BY and the outer pagination ORDER BY) --
-            # MIRRORED exactly by _project_work_witnesses's `best_row`
-            # selection above, so SQL and the pure-Python reference
-            # implementation can never disagree on which row wins a tie.
-            page_sql = f"""
-                WITH ranked AS ({_WORK_WITNESSES_RANKED_CTE_SQL}),
-                unit_best AS (
-                    SELECT *,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY unit_key
-                               ORDER BY band_rank ASC, sys_id ASC, page_id ASC, claim_id ASC
-                           ) AS rn
-                    FROM ranked
-                )
-                SELECT unit_key, unit_id, page_id, work_id, claim_id, claim_type,
-                       sys_id, evidence_source, confidence_band
-                FROM unit_best
-                WHERE rn = 1{where_extra}
-                ORDER BY band_rank ASC, sys_id ASC, page_id ASC, claim_id ASC
-                LIMIT ? OFFSET ?
-            """
-            page_params = [work_id, *extra_params, page_size, offset]
-            cur = conn.execute(page_sql, page_params)
-            page_rows = [dict(row) for row in cur.fetchall()]
-            if not page_rows:
-                return []
+        rows_sql, rows_params = build_work_expansion_rows_sql(
+            page_size=page_size, offset=offset, **pipeline_kwargs)
+        page_rows = [dict(row) for row in conn.execute(rows_sql, rows_params).fetchall()]
 
+        items: List[Dict[str, Any]] = []
+        if page_rows:
             unit_keys = [r["unit_key"] for r in page_rows]
             member_placeholders = ",".join("?" for _ in unit_keys)
             member_sql = f"""
@@ -1804,24 +2185,17 @@ class DiscoveryService:
             members_by_key: Dict[str, set] = {}
             for row in member_cur.fetchall():
                 members_by_key.setdefault(row["unit_key"], set()).add(row["sys_id"])
-
-            return [
-                {
-                    "work_id": r["work_id"],
-                    "unit_id": r["unit_id"],
-                    "representative_sys_id": r["sys_id"],
-                    "representative_page_id": r["page_id"],
-                    "representative_claim_id": r["claim_id"],
-                    "claim_type": r["claim_type"],
-                    "evidence_source": r["evidence_source"],
-                    "confidence_band": r["confidence_band"],
-                    "member_sys_ids": sorted(members_by_key.get(r["unit_key"], {r["sys_id"]})),
-                }
+            measurements = self._band_measurements()
+            items = [
+                _present_expansion_row(
+                    r, members_by_key, measurements, lang,
+                    anchor_claim_type=anchor_claim_type,
+                    anchor_evidence_source=anchor_evidence_source,
+                    anchor_confidence_band=anchor_confidence_band,
+                )
                 for r in page_rows
             ]
-        except Exception as e:
-            logger.error("DiscoveryService.get_work_witnesses error for %s: %s", work_id, e)
-            return []
+        return items, total
 
     # ------------------------------------------------------------------
     # Heavy-query bounded concurrency (mirrors web/search_api.py's
