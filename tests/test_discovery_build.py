@@ -2981,157 +2981,304 @@ def test_a_count_query_over_nothing_is_ONE_ROW_and_a_population_of_ZERO(tmp_path
     try:
         empty = bench_discovery._time_sql(
             conn, "SELECT COUNT(*) FROM discovery_identification WHERE 1 = 0",
-            (), 1, scalar=True)
+            (), 1, shape=bench_discovery.SHAPE_SCALAR)
         assert empty["rows"] == 1, (
             "the premise moved: an aggregate no longer returns one row, so the "
             "row-count assertion was not vacuous after all")
         assert empty["population"] == 0
         assert empty["value"] == 0
 
-        # ...and the same call WITHOUT the scalar derivation reproduces the
-        # false green exactly, which is what makes this a control and not a
+        # ...and reading the SAME statement as a row set reproduces the false
+        # green exactly, which is what makes this a control and not a
         # restatement of the fix.
         naive = bench_discovery._time_sql(
             conn, "SELECT COUNT(*) FROM discovery_identification WHERE 1 = 0",
-            (), 1)
+            (), 1, shape=bench_discovery.SHAPE_ROWS, expected_rows=1)
         assert naive["population"] == 1, (
             "a row-count population would have passed the F14 assertion")
 
         full = bench_discovery._time_sql(
             conn, "SELECT COUNT(*) FROM discovery_identification", (), 1,
-            scalar=True)
+            shape=bench_discovery.SHAPE_SCALAR)
         assert full["rows"] == 1 and full["population"] > 0
     finally:
         conn.close()
 
 
-def test_which_shapes_count_is_DERIVED_from_the_shipped_builders(tmp_path):
-    """Which shapes are scalar aggregates is derived from the STATEMENT, never
-    declared per spec -- a flag a spec has to remember is a flag its next
-    sibling forgets, and forgetting it restores the vacuous assertion.
+def test_every_measured_spec_DECLARES_a_shape_and_SQLITE_CONFIRMS_IT(tmp_path):
+    """The declaration and the executed result must agree, spec by spec.
 
-    Asserted over the statements the SHIPPED builders emit, so a builder that
-    changes shape moves this test rather than leaving a stale literal behind."""
-    from scripts import bench_discovery
-    from shared.discovery_service import (
-        BUCKET_MAIN, FINDINGS_UNITS, _build_findings_query,
-        _build_launch_contribution_sql, _build_launch_manuscript_sql,
-    )
+    Which statements are scalar aggregates is no longer DERIVED from the SQL
+    text. Two derivations tried: a regex (round 15, finding 3 broke it with a
+    CTE, an outer wrapper and a window function) and a paren-depth walker
+    (round 16 broke it with `CASE WHEN`, a leading comment and a scalar
+    subquery). Both defaulted to "row set" for every grammar they had not
+    enumerated, and "row set" is the reading that keeps the benchmark green on
+    a count of nothing.
 
-    for unit in sorted(FINDINGS_UNITS):
-        count_sql, _ = _build_findings_query(
-            unit=unit, bucket=BUCKET_MAIN, count_only=True)
-        assert bench_discovery._is_scalar_aggregate(count_sql), (
-            f"the {unit} visible-total count is an aggregate returning one row; "
-            "measuring its ROW count asserts nothing")
-        rows_sql, _ = _build_findings_query(unit=unit, bucket=BUCKET_MAIN)
-        assert not bench_discovery._is_scalar_aggregate(rows_sql), (
-            f"the {unit} ordering query returns real rows; treating it as an "
-            "aggregate would read a page's first cell as its population")
-
-    ms_sql, _ = _build_launch_manuscript_sql(main_pool_only=True)
-    assert bench_discovery._is_scalar_aggregate(ms_sql)
-    # The GROUPED contribution statement is NOT scalar: it returns one row per
-    # shade, and an empty population really does return zero of them.
-    grouped_sql, _ = _build_launch_contribution_sql(main_pool_only=True)
-    assert not bench_discovery._is_scalar_aggregate(grouped_sql)
-
-
-def test_the_shape_reader_survives_a_cte_an_outer_wrapper_and_a_window(tmp_path):
-    """The three shapes round 15, finding 3 named — each one MEASURED, not
-    argued about.
-
-    The first derivation was `^SELECT COUNT\\(` plus "no outer GROUP BY". It got
-    all three wrong, and every one of them fails SILENTLY: a misclassified
-    aggregate records `population = 1` for a count of nothing (the round-13
-    defect restored), and a misclassified window function reads one row's cell
-    as the population of the whole query. Today's statements dodge all three by
-    luck; a CTE or an outer wrapper is one refactor away.
-
-    Each case is executed against a real (empty-predicate) SQLite database, so
-    the classification is checked against what SQLite ACTUALLY returns rather
-    than against a second reading of the same regex.
-    """
+    So the shape is DECLARED by the call site that chose it -- the same
+    statement that passes `count_only=True` says `SHAPE_SCALAR` -- and this test
+    holds every declaration against what SQLite actually returns for that exact
+    statement. A builder that changes shape fails here rather than quietly
+    recording a population of 1."""
     from scripts import bench_discovery as bd
 
     db_path = _bench_fixture_db(tmp_path)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        # (1) A CTE prefix. One row carrying a ZERO — the F14 abort must see it.
-        cte = ("WITH scoped AS (SELECT * FROM discovery_identification WHERE 1 = 0) "
-               "SELECT COUNT(*) AS n FROM scoped")
-        assert bd.sql_result_shape(cte) == (bd.SHAPE_SCALAR, 0)
-        # (2) An outer wrapper around a scalar aggregate.
-        wrapped = ("SELECT n FROM (SELECT COUNT(*) AS n FROM "
-                   "discovery_identification WHERE 1 = 0)")
-        assert bd.sql_result_shape(wrapped) == (bd.SHAPE_SCALAR, 0)
-        aliased = ("SELECT inner_q.n FROM (SELECT COUNT(*) AS n FROM "
-                   "discovery_identification WHERE 1 = 0) inner_q")
-        assert bd.sql_result_shape(aliased) == (bd.SHAPE_SCALAR, 0)
+        (total,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification").fetchone()
+        specs = bd._findings_combination_specs(
+            conn, page_size=2, deep_page=2,
+            filters=bd.pick_findings_filters(conn), total_rows=total)
 
-        for label, sql in (("cte", cte), ("wrapper", wrapped), ("aliased", aliased)):
-            fetched = conn.execute(sql).fetchall()
-            assert len(fetched) == 1 and fetched[0][0] == 0, (
-                f"the {label} premise moved: SQLite no longer returns one zero row")
-            measured = bd._time_sql(conn, sql, (), 1, scalar=True, value_index=0)
-            assert measured["rows"] == 1
-            assert measured["population"] == 0, (
-                f"the {label} shape recorded a population of "
-                f"{measured['population']} for a count of nothing — the vacuous "
-                "assertion is back")
-            # ...and the naive reading is the false green, which is what makes
-            # these controls rather than restatements of the fix.
-            naive = bd._time_sql(conn, sql, (), 1)
-            assert naive["population"] == 1
+        scalars, row_sets = [], []
+        for spec in specs:
+            if spec["skip"]:
+                # A skipped spec is never executed, so its shape stays
+                # `unknown` -- removing the skip without declaring one must
+                # abort, not silently start counting rows.
+                assert spec["shape"] == bd.SHAPE_UNKNOWN, spec["label"]
+                continue
+            assert spec["shape"] in (bd.SHAPE_SCALAR, bd.SHAPE_ROWS), spec["label"]
+            cursor = conn.execute(spec["sql"], spec["params"])
+            fetched = cursor.fetchall()
+            # The verifier accepts the declaration against the REAL result...
+            population = bd.population_of_result(
+                spec["label"], shape=spec["shape"], description=cursor.description,
+                fetched=fetched, value_index=spec.get("value_index"),
+                expected_rows=spec.get("expected_rows"),
+                expected_value=spec.get("expected_value"))
+            if spec["shape"] == bd.SHAPE_SCALAR:
+                scalars.append((spec, fetched, cursor.description))
+                assert len(fetched) == 1, spec["label"]
+                assert population == fetched[0][spec.get("value_index") or 0]
+            else:
+                row_sets.append((spec, fetched, cursor.description))
+                assert population == len(fetched) == spec["expected_rows"], (
+                    f"{spec['label']}: the row count the state's own count "
+                    "predicted is not the row count SQLite returned")
 
-        # (3) A WINDOW function is NOT scalar: it produces one value per row.
-        windowed = ("SELECT COUNT(*) OVER () AS n FROM discovery_identification "
-                    "LIMIT 3")
-        assert bd.sql_result_shape(windowed) == (bd.SHAPE_ROWS, 0)
-        fetched = conn.execute(windowed).fetchall()
-        assert len(fetched) > 1, "the fixture is too small to show the difference"
-        assert bd._time_sql(conn, windowed, (), 1)["population"] == len(fetched)
+        assert scalars and row_sets, (
+            "a suite that meets no spec of one shape proves nothing about it")
 
-        # (4) The aggregate is not always column 0.
-        offset = "SELECT 1, COUNT(*) AS n FROM discovery_identification WHERE 1 = 0"
-        assert bd.sql_result_shape(offset) == (bd.SHAPE_SCALAR, 1)
-        assert bd._time_sql(conn, offset, (), 1, scalar=True, value_index=1)[
-            "population"] == 0
-        assert bd._time_sql(conn, offset, (), 1, scalar=True, value_index=0)[
-            "population"] == 1, (
-            "reading cell 0 of this shape gives the literal, not the count — "
-            "which is why the shape reader returns an INDEX and not a boolean")
+        # ...and REFUSES the opposite declaration wherever the result can see
+        # the difference. This is the half no parser could give: the evidence is
+        # what SQLite returned, so no syntax can dodge it.
+        spec, fetched, description = scalars[0]
+        with pytest.raises(bd.ShapeContradiction, match="expected row count"):
+            bd.population_of_result(spec["label"], shape=bd.SHAPE_ROWS,
+                                    description=description, fetched=fetched)
+        multi = next(((s, f, d) for s, f, d in row_sets if len(f) != 1), None)
+        assert multi is not None, "the fixture has no multi-row page to contrast"
+        spec, fetched, description = multi
+        with pytest.raises(bd.ShapeContradiction, match="EXACTLY one row"):
+            bd.population_of_result(spec["label"], shape=bd.SHAPE_SCALAR,
+                                    description=description, fetched=fetched)
+
+        # `kind` is a BUDGET class and never the shape authority: ruling U's
+        # contribution statement is `kind='count'` and GROUPs BY shade, so it
+        # returns one row per shade PRESENT -- which on this fixture is none at
+        # all. A scalar aggregate cannot return zero rows, so the executed
+        # result settles it without reading a character of the SQL. Pinned so a
+        # future "just use spec['kind']" has to delete this.
+        from shared.discovery_service import (
+            LAUNCH_CONTRIBUTION_SHADES, _build_launch_contribution_sql)
+
+        contribution = next(
+            s for s in specs if s["label"] == "findings_launch_contribution_main_pool")
+        assert contribution["kind"] == "count"
+        sql, params = _build_launch_contribution_sql(main_pool_only=True)
+        cursor = conn.execute(sql, params)
+        grouped = cursor.fetchall()
+        (distinct_shades,) = conn.execute(
+            "SELECT COUNT(DISTINCT novelty_status) FROM discovery_identification "
+            "WHERE main_pool = 1 AND novelty_status IN (%s)"
+            % ",".join("?" * len(LAUNCH_CONTRIBUTION_SHADES)),
+            LAUNCH_CONTRIBUTION_SHADES).fetchone()
+        assert bd.population_of_result(
+            contribution["label"], shape=bd.SHAPE_ROWS,
+            description=cursor.description, fetched=grouped,
+            expected_rows=distinct_shades) == len(grouped) == distinct_shades
+        with pytest.raises(bd.ShapeContradiction, match="EXACTLY one row"):
+            bd.population_of_result(contribution["label"], shape=bd.SHAPE_SCALAR,
+                                    description=cursor.description, fetched=grouped)
+        assert contribution["skip"] and contribution["shape"] == bd.SHAPE_UNKNOWN, (
+            "this fixture carries no ruling-U contribution shade, so the spec "
+            "must be a NAMED skip that declares no shape")
     finally:
         conn.close()
 
 
-def test_a_statement_the_shape_reader_cannot_classify_ABORTS_the_benchmark(tmp_path, monkeypatch):
-    """`unknown` is the fail-closed third state, and it must reach the caller.
+def _syntax_control_db(tmp_path):
+    """Three rows, so a row set and a one-row aggregate are distinguishable."""
+    path = tmp_path / "syntax-controls.db"
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.executescript(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, label TEXT);"
+            "INSERT INTO t (id, label) VALUES (1, 'a'), (2, 'b'), (3, 'c');"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
 
-    A two-state classifier has to guess on a shape it does not know, and the
-    guess that keeps the suite green is "row set" — which records a population
-    of 1 for a one-row aggregate and reports a passing measurement over
-    nothing. The benchmark now refuses to record a timing whose population it
-    cannot name, and says which statement it choked on."""
+
+def test_the_syntaxes_that_defeated_TWO_text_readers_are_now_read_off_the_RESULT(tmp_path):
+    """Every syntax the two deleted parsers got wrong, EXECUTED.
+
+    The regex fell to a CTE prefix, an outer wrapper and `COUNT(*) OVER ()`
+    (round 15, finding 3). The paren-depth walker that replaced it fell to
+    `CASE WHEN`, a comment and a scalar subquery (round 16). Run against SQLite
+    before it was deleted, the walker filed `CASE WHEN 1 THEN COUNT(*) ELSE 9
+    END`, `SELECT -- comment\\n COUNT(*)` and `SELECT (SELECT COUNT(*) ...)` as
+    ROW SETS -- one scalar row carrying ZERO recorded as a population of 1 --
+    and a LEADING `/*comment*/` as `unknown`, aborting a legitimate statement.
+    `COUNT(*) FILTER (WHERE ...)` and a nested CTE it happened to get right;
+    both are kept here anyway, because a control set chosen from the syntaxes a
+    reader failed is a control set that moves with the next reader.
+
+    None of them is parsed now. Each case below is run against real SQLite and
+    the population is asserted to be the VALUE for a scalar and the ROW COUNT
+    for a row set -- and for every scalar the row-set reading is shown to be the
+    false green, so these are controls rather than restatements of the fix."""
     from scripts import bench_discovery as bd
 
-    compound = ("SELECT COUNT(*) FROM discovery_identification "
-                "UNION ALL SELECT COUNT(*) FROM discovery_identification")
-    assert bd.sql_result_shape(compound) == (bd.SHAPE_UNKNOWN, 0)
-    assert bd.sql_result_shape("PRAGMA integrity_check") == (bd.SHAPE_UNKNOWN, 0)
+    if sqlite3.sqlite_version_info < (3, 30, 0):     # pragma: no cover
+        pytest.skip(f"FILTER (WHERE ...) needs SQLite >= 3.30 (have "
+                    f"{sqlite3.sqlite_version})")
+
+    db_path = _syntax_control_db(tmp_path)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        # (shape, sql, expected population, value_index, expected_rows)
+        scalar_over_nothing = [
+            ("case_when",
+             "SELECT CASE WHEN 1 THEN COUNT(*) ELSE 9 END AS n FROM t WHERE 1 = 0"),
+            ("leading_block_comment",
+             "/* which page? */ SELECT /* the total */ COUNT(*) AS n FROM t WHERE 1 = 0"),
+            ("interleaved_line_comment",
+             "SELECT -- the total\n COUNT(*) AS n FROM t WHERE 1 = 0"),
+            ("scalar_subquery",
+             "SELECT (SELECT COUNT(*) FROM t WHERE 1 = 0) AS n"),
+            ("filter_clause",
+             "SELECT COUNT(*) FILTER (WHERE id > 100) AS n FROM t"),
+            ("nested_ctes",
+             "WITH a AS (SELECT * FROM t WHERE 1 = 0), b AS (SELECT * FROM a) "
+             "SELECT COUNT(*) AS n FROM b"),
+            ("cte_prefix",
+             "WITH scoped AS (SELECT * FROM t WHERE 1 = 0) "
+             "SELECT COUNT(*) AS n FROM scoped"),
+            ("outer_wrapper",
+             "SELECT n FROM (SELECT COUNT(*) AS n FROM t WHERE 1 = 0)"),
+        ]
+        for name, sql in scalar_over_nothing:
+            fetched = conn.execute(sql).fetchall()
+            assert len(fetched) == 1 and fetched[0][0] == 0, (
+                f"{name}: the premise moved -- SQLite no longer returns one "
+                f"zero row for {sql!r}")
+            measured = bd._time_sql(conn, sql, (), 1, shape=bd.SHAPE_SCALAR,
+                                    label=name)
+            assert measured["population"] == 0, (
+                f"{name} recorded a population of {measured['population']} for "
+                "a count of nothing -- the vacuous assertion is back")
+            # The false green both deleted parsers produced for this exact SQL.
+            naive = bd._time_sql(conn, sql, (), 1, shape=bd.SHAPE_ROWS,
+                                 expected_rows=1, label=name)
+            assert naive["population"] == 1, (
+                f"{name}: reading this as a row set no longer reproduces the "
+                "defect, so it is not a control")
+
+        # An aggregate spelled inside a STRING LITERAL is not an aggregate, and
+        # the real one is not in column 0 -- the round-13 door.
+        literal = ("SELECT 'COUNT(*) FROM t' AS s, COUNT(*) AS n "
+                   "FROM t WHERE 1 = 0")
+        assert bd._time_sql(conn, literal, (), 1, shape=bd.SHAPE_SCALAR,
+                            value_index=1, label="literal")["population"] == 0
+        with pytest.raises(bd.ShapeContradiction, match="not a countable number"):
+            bd._time_sql(conn, literal, (), 1, shape=bd.SHAPE_SCALAR,
+                         value_index=0, label="literal")
+        with pytest.raises(bd.ShapeContradiction, match="which one carries it"):
+            # No index stated over 2 columns: the defaulted 0 is refused
+            # outright rather than silently reading whatever sits there.
+            bd._time_sql(conn, literal, (), 1, shape=bd.SHAPE_SCALAR,
+                         label="literal")
+
+        # Row sets: the population is the ROW COUNT, and a scalar declaration
+        # over them is REFUTED by the result (they do not return one row).
+        row_sets = [
+            ("count_over_window", "SELECT id, COUNT(*) OVER () AS n FROM t", 3),
+            ("union", "SELECT COUNT(*) FROM t WHERE 1 = 0 "
+                      "UNION ALL SELECT COUNT(*) FROM t", 2),
+            ("literal_in_projection",
+             "SELECT id, 'COUNT(*) FROM t' AS s FROM t", 3),
+        ]
+        for name, sql, expected in row_sets:
+            measured = bd._time_sql(conn, sql, (), 1, shape=bd.SHAPE_ROWS,
+                                    expected_rows=expected, label=name)
+            assert measured["population"] == expected == measured["rows"]
+            with pytest.raises(bd.ShapeContradiction, match="EXACTLY one row"):
+                bd._time_sql(conn, sql, (), 1, shape=bd.SHAPE_SCALAR, label=name)
+
+        # THE GENUINE AMBIGUITY, handled honestly: a row query returning one
+        # single-column integer row is character-for-character what a scalar
+        # aggregate returns. No result-based rule can tell them apart, so the
+        # DECLARATION settles it -- and the population is the ROW COUNT.
+        single = "SELECT id FROM t WHERE id = 1"
+        measured = bd._time_sql(conn, single, (), 1, shape=bd.SHAPE_ROWS,
+                                expected_rows=1, label="single_int_row")
+        assert measured["population"] == 1 == measured["rows"]
+        assert measured["columns"] == 1
+        # ...and the scalar reading of the SAME result is accepted too, because
+        # nothing in the result refutes it -- which is exactly why a row set
+        # must carry an independently-computed expectation.
+        assert bd._time_sql(conn, single, (), 1, shape=bd.SHAPE_SCALAR,
+                            label="single_int_row")["population"] == 1
+    finally:
+        conn.close()
+
+
+def test_a_spec_that_DECLARES_NO_SHAPE_ABORTS_the_benchmark(tmp_path, monkeypatch):
+    """`unknown` is the fail-closed state, and it must reach the caller.
+
+    A classifier that has to guess picks the guess that keeps the suite green --
+    "row set" -- which records a population of 1 for a one-row aggregate and
+    reports a passing measurement over nothing. That default is what produced
+    the same finding three times, so there is no default: a spec built without
+    `_row_spec` / `_scalar_spec` carries no shape and the benchmark refuses to
+    record a timing beside it, naming the statement it choked on."""
+    from scripts import bench_discovery as bd
 
     db_path = _bench_fixture_db(tmp_path)
 
-    def _one_unreadable(conn, **kwargs):
+    def _undeclared(conn, **kwargs):
         return [{
-            "label": "findings_probe_control_unreadable_shape",
+            "label": "findings_probe_control_undeclared_shape",
             "kind": "count", "cap_ms": bd.FINDINGS_COUNT_CAP_MS,
-            "sql": compound, "params": (), "skip": None,
+            "sql": "SELECT COUNT(*) FROM discovery_identification",
+            "params": (), "skip": None,       # <- no "shape" key at all
         }]
 
-    monkeypatch.setattr(bd, "_findings_combination_specs", _one_unreadable)
+    monkeypatch.setattr(bd, "_findings_combination_specs", _undeclared)
     with pytest.raises(AssertionError, match="cannot tell what shape"):
         bd.bench_findings_page(str(db_path), page_size=2, repeats=1, deep_page=2)
+
+    # The same refusal one layer down, plus the row-set half of the contract:
+    # a row set with no independently-computed expectation is not measurable,
+    # because the RESULT alone can never confirm a row-set declaration.
+    with pytest.raises(bd.ShapeContradiction, match="declares no result shape"):
+        bd.population_of_result("control", shape=bd.SHAPE_UNKNOWN,
+                                description=(("n",),), fetched=[(0,)])
+    with pytest.raises(bd.ShapeContradiction, match="expected row count"):
+        bd.population_of_result("control", shape=bd.SHAPE_ROWS,
+                                description=(("n",),), fetched=[(0,)])
+    # An expectation that the result contradicts aborts too -- the teeth in the
+    # direction the result cannot see on its own.
+    with pytest.raises(bd.ShapeContradiction, match="but SQLite returned 1"):
+        bd.population_of_result("control", shape=bd.SHAPE_ROWS,
+                                description=(("n",),), fetched=[(0,)],
+                                expected_rows=50)
 
 
 def test_the_work_unit_novelty_skip_is_unreachable_THROUGH_THE_PAGE(tmp_path):
@@ -3254,14 +3401,11 @@ def test_bench_findings_page_aborts_when_a_COUNT_shape_counts_zero(tmp_path, mon
     db_path = _bench_fixture_db(tmp_path)
 
     def _one_empty_count(conn, **kwargs):
-        return [{
-            "label": "findings_probe_control_empty_count",
-            "kind": "count",
-            "cap_ms": bench_discovery.FINDINGS_COUNT_CAP_MS,
-            "sql": "SELECT COUNT(*) AS n FROM discovery_identification WHERE 1 = 0",
-            "params": (),
-            "skip": None,
-        }]
+        return [bench_discovery._scalar_spec(
+            "findings_probe_control_empty_count", kind="count",
+            cap_ms=bench_discovery.FINDINGS_COUNT_CAP_MS,
+            sql="SELECT COUNT(*) AS n FROM discovery_identification WHERE 1 = 0",
+            params=())]
 
     monkeypatch.setattr(bench_discovery, "_findings_combination_specs", _one_empty_count)
     with pytest.raises(AssertionError, match="counted ZERO"):

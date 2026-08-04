@@ -397,52 +397,8 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
     return out
 
 
-def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int,
-              *, scalar: bool = False, value_index: int = 0) -> Dict[str, Any]:
-    """Time ``sql`` and record the population it actually measured.
-
-    ``rows`` is the number of RESULT ROWS. For an aggregate that returns one row
-    carrying a number -- ``SELECT COUNT(*) ...`` -- that figure is 1 no matter
-    what the count is, so the F14 nonzero-result assertion cannot see an empty
-    measurement through it: ``SELECT COUNT(*) FROM empty_table`` records
-    ``rows = 1`` and a count predicate matching nothing is documented as a
-    passing measurement (code review round 13, finding 3). ``scalar=True`` says
-    the shape's population is the VALUE of the aggregate column, and
-    ``population`` -- never ``rows`` -- is what the caller must assert on.
-
-    ``value_index`` is WHICH column carries it. Not always the first:
-    ``SELECT 1, COUNT(*) FROM t`` returns one row whose first cell is a literal,
-    and reading cell 0 there would record a population of 1 for an empty count
-    -- the round-13 defect restored through a different door.
-    """
-    latencies_ms: List[float] = []
-    rows = 0
-    value: Optional[int] = None
-    for _ in range(max(1, repeats)):
-        t0 = time.perf_counter()
-        fetched = conn.execute(sql, params).fetchall()
-        latencies_ms.append((time.perf_counter() - t0) * 1000.0)
-        rows = len(fetched)
-        value = None
-        if scalar and rows and value_index < len(fetched[0]):
-            cell = fetched[0][value_index]
-            # A non-numeric cell means the shape was mis-classified scalar;
-            # leaving `value` at None makes `population` 0 below, which ABORTS
-            # rather than passing -- the fail-closed direction.
-            if isinstance(cell, int) and not isinstance(cell, bool):
-                value = int(cell)
-    return {
-        "rows": rows,
-        "value": value,
-        "population": (value or 0) if scalar else rows,
-        "p50_ms": _pct(latencies_ms, 50),
-        "p95_ms": _pct(latencies_ms, 95),
-        "max_ms": max(latencies_ms),
-    }
-
-
 # ---------------------------------------------------------------------------
-# WHAT SHAPE DOES THIS STATEMENT RETURN?
+# WHAT POPULATION DID THIS TIMING MEASURE?
 #
 # The benchmark's one substantive assertion is that a timing was taken over a
 # NON-EMPTY population. For a row query that is the row count; for an aggregate
@@ -450,224 +406,268 @@ def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int,
 # whatever it counts and a row-count assertion therefore passes on nothing
 # (round 13, finding 3).
 #
-# The first derivation was a two-line regex -- "the statement starts with
-# SELECT COUNT(" and has no outer GROUP BY. Round 15, finding 3 showed it wrong
-# in three ways at once, each of which SILENTLY records `population == 1` (or a
-# per-row window value) instead of aborting:
+# THE AUTHORITY IS NO LONGER THE STATEMENT TEXT. Two derivations tried to read
+# the shape out of the SQL and each closed only the syntaxes its review had
+# named:
 #
-#   * `WITH x AS (...) SELECT COUNT(*) ...` -- the statement does not start with
-#     SELECT, so a CTE demoted a scalar aggregate to a row set;
-#   * `SELECT n FROM (SELECT COUNT(*) AS n ...)` -- an outer wrapper did the
-#     same;
-#   * `SELECT COUNT(*) OVER () ...` -- a WINDOW function was called scalar
-#     though it produces one value PER ROW.
+#   * a regex -- "starts with SELECT COUNT(" and has no outer GROUP BY -- which
+#     round 15, finding 3 broke with a CTE prefix, an outer wrapper and a
+#     window function;
+#   * a parenthesis-depth walker, which round 16 broke with `CASE WHEN`, a
+#     comment and a scalar subquery.
 #
-# Today's statements happen to dodge all three. "Happens to pass" is what this
-# phase keeps having to fix, so the classification is now a small, explicit,
-# THREE-STATE shape reader:
+# The walker's failures were MEASURED against SQLite before it was deleted,
+# rather than argued from the review text, and they were not all of one kind:
 #
-#   `row_set`         -- population is the row count;
-#   `scalar_aggregate` -- population is the value of column `value_index`;
-#   `unknown`          -- the benchmark ABORTS by name rather than guessing.
+#     SELECT CASE WHEN 1 THEN COUNT(*) ELSE 9 END FROM t   -> row_set, pop 1
+#     SELECT -- the total\n COUNT(*) FROM t                -> row_set, pop 1
+#     SELECT (SELECT COUNT(*) FROM t WHERE 1=0)            -> row_set, pop 1
+#     /* which page? */ SELECT COUNT(*) FROM t             -> unknown  (aborts)
 #
-# Note on what is NOT used as the authority: `spec['kind']`. It is a BUDGET
-# class, not a shape -- `findings_launch_contribution_*` is `kind='count'` and
-# returns one row per shade -- so agreeing with it would be agreeing with the
-# wrong thing.
+# The first three are the silent failure: one scalar row carrying ZERO recorded
+# as a population of 1, i.e. the round-13 defect restored. The fourth is the
+# loud one -- a legitimate statement the benchmark refuses to measure at all.
+# Two syntaxes the review predicted would break it, `COUNT(*) FILTER (WHERE ...)`
+# and a nested CTE, in fact classified correctly; that is stated here because
+# the same measurement that convicts a reader has to acquit it where it is
+# right.
+#
+# Both readers failed the same way: they defaulted to `row_set` for expression
+# grammar they had not enumerated, and `row_set` is the reading that keeps the
+# benchmark green. Writing a third parser would be asserting that SQL's
+# expression grammar has now been enumerated -- an assertion no one can check,
+# which is exactly the kind this phase keeps having to retract.
+#
+# So no SQL is parsed at all. Two independent sources settle it:
+#
+#   1. THE SPEC DECLARES the shape, at the call site that CHOSE it -- the same
+#      statement that passes `count_only=True` to the shipped builder says
+#      SHAPE_SCALAR in the same breath. Nothing is remembered later and nothing
+#      is inferred. A spec that declares NO shape is `unknown`, and the
+#      benchmark ABORTS by name: defaulting is what produced this finding three
+#      times, so there is no default to fall into.
+#
+#   2. THE EXECUTED RESULT VERIFIES it -- `cursor.description` and the fetched
+#      rows, which no syntax can fool because no syntax is read.
+#
+# What the result can and cannot decide, stated plainly rather than overclaimed:
+#
+#   * it REFUTES a declared scalar decisively. An un-grouped aggregate returns
+#     exactly ONE row carrying a NUMBER over any data; anything else -- 0 rows,
+#     2 rows, a text cell, a NULL -- is a contradiction and aborts. That covers
+#     every "this is really a row set" mis-declaration, including a window
+#     function (`COUNT(*) OVER ()` returns one row per row) and a compound
+#     `UNION` (two arms, two rows).
+#   * it CANNOT refute a declared row set from the result alone: one row of one
+#     integer column is character-for-character what a scalar aggregate returns.
+#     So a row-set spec must ALSO carry `expected_rows`, computed independently
+#     of the statement being timed (the state's own count at that unit, and the
+#     page arithmetic). Observed != expected aborts. That is what gives the
+#     row-set declaration teeth in the direction the result cannot see.
+#   * a declared scalar reading column 0 of a MULTI-column row aborts unless the
+#     spec names the column: `SELECT 1, COUNT(*)` once recorded a population of
+#     1 for an empty count by reading the literal (round 13), and a defaulted
+#     index is precisely that door.
+#
+# Note on what is NOT the authority: `spec['kind']`. It is a BUDGET class, not a
+# shape -- `findings_launch_contribution_*` is `kind='count'` and returns one
+# row per shade -- so agreeing with it would be agreeing with the wrong thing.
 # ---------------------------------------------------------------------------
 
 SHAPE_ROWS = "row_set"
 SHAPE_SCALAR = "scalar_aggregate"
 SHAPE_UNKNOWN = "unknown"
-
-#: SQLite's aggregate functions that yield a NUMBER. `group_concat` is
-#: deliberately absent: it aggregates to text, and a text population is not a
-#: count of anything.
-_AGGREGATE_CALL_RE = re.compile(
-    r"^(count|sum|total|avg|min|max)\s*\(", re.IGNORECASE)
-
-#: A bare column reference, optionally qualified -- the only outer select list
-#: an outer-wrapper statement may carry for this reader to look through it.
-_BARE_COLUMN_RE = re.compile(
-    r"^[A-Za-z_][A-Za-z_0-9$]*(\s*\.\s*[A-Za-z_][A-Za-z_0-9$]*)?$")
+_DECLARABLE_SHAPES = (SHAPE_ROWS, SHAPE_SCALAR)
 
 
-def _sql_depths(sql: str) -> List[int]:
-    """Parenthesis depth per character, with anything inside a string literal
-    or a comment marked -1 so no scan can mistake it for syntax."""
-    depths: List[int] = []
-    depth = 0
-    index = 0
-    length = len(sql)
-    while index < length:
-        char = sql[index]
-        if char == "'":                     # a single-quoted literal
-            depths.append(-1)
-            index += 1
-            while index < length:
-                depths.append(-1)
-                if sql[index] == "'":
-                    # '' is an escaped quote INSIDE the literal.
-                    if index + 1 < length and sql[index + 1] == "'":
-                        index += 1
-                        depths.append(-1)
-                    else:
-                        index += 1
-                        break
-                index += 1
-            continue
-        if char == "-" and sql[index:index + 2] == "--":
-            while index < length and sql[index] != "\n":
-                depths.append(-1)
-                index += 1
-            continue
-        if char == "/" and sql[index:index + 2] == "/*":
-            end = sql.find("*/", index + 2)
-            end = length if end == -1 else end + 2
-            depths.extend([-1] * (end - index))
-            index = end
-            continue
-        if char == "(":
-            depth += 1
-            depths.append(depth)
-        elif char == ")":
-            depths.append(depth)
-            depth = max(0, depth - 1)
+class ShapeContradiction(AssertionError):
+    """What SQLite returned refutes the shape the spec declared.
+
+    RAISED, never returned. A contradiction handed back as a string is a
+    contradiction the next caller forgets to read, and an unread contradiction
+    is the same silence this class exists to end.
+    """
+
+
+def population_of_result(
+    label: str,
+    *,
+    shape: str,
+    description: Any,
+    fetched: List[Any],
+    value_index: Optional[int] = None,
+    expected_rows: Optional[int] = None,
+    expected_value: Optional[int] = None,
+) -> int:
+    """The population a timing was taken over -- from the RESULT, not the SQL.
+
+    `shape` is what the spec DECLARED; `description` / `fetched` are what SQLite
+    actually returned. Returns the population, or raises `ShapeContradiction`
+    naming exactly which of the two is refuted by the other. There is no path
+    that returns a population it could not justify.
+    """
+    columns = len(description or ())
+    rows = len(fetched)
+
+    if shape not in _DECLARABLE_SHAPES:
+        raise ShapeContradiction(
+            f"{label}: the spec declares no result shape ({shape!r}), so the "
+            "benchmark cannot say what population its timing was taken over. "
+            f"Declare {SHAPE_SCALAR!r} (population = the aggregate's VALUE) or "
+            f"{SHAPE_ROWS!r} (population = the ROW COUNT) at the call site that "
+            "built the statement. There is deliberately no default: defaulting "
+            "to a row count is how this assertion went vacuous three times."
+        )
+
+    if shape == SHAPE_SCALAR:
+        if rows != 1:
+            raise ShapeContradiction(
+                f"{label}: declared a scalar aggregate, but SQLite returned "
+                f"{rows} rows. An un-grouped aggregate returns EXACTLY one row "
+                "over any data -- so this statement is not one (a window "
+                "function, a GROUP BY or a compound SELECT all look like this)."
+            )
+        if columns == 0:
+            raise ShapeContradiction(
+                f"{label}: declared a scalar aggregate, but the statement "
+                "returned no columns at all.")
+        if value_index is None:
+            if columns != 1:
+                raise ShapeContradiction(
+                    f"{label}: declared a scalar aggregate and returned "
+                    f"{columns} columns without saying which one carries it. "
+                    "Reading column 0 by default is how `SELECT 1, COUNT(*)` "
+                    "recorded a population of 1 for a count of nothing (round "
+                    "13) -- state `value_index` instead."
+                )
+            index = 0
         else:
-            depths.append(depth)
-        index += 1
-    return depths
+            index = int(value_index)
+            if not 0 <= index < columns:
+                raise ShapeContradiction(
+                    f"{label}: declared the aggregate in column {index}, but "
+                    f"the statement returned {columns} columns.")
+        cell = fetched[0][index]
+        if isinstance(cell, bool) or not isinstance(cell, int):
+            name = description[index][0] if description else "?"
+            raise ShapeContradiction(
+                f"{label}: declared a scalar aggregate, but column {index} "
+                f"({name!r}) holds {cell!r} ({type(cell).__name__}), which is "
+                "not a countable number. Either the shape or the column index "
+                "is wrong; a non-numeric cell can never be a population."
+            )
+        population = int(cell)
+        if expected_value is not None and population != int(expected_value):
+            raise ShapeContradiction(
+                f"{label}: the timed statement counted {population}, but the "
+                f"same population counted independently is {int(expected_value)}."
+            )
+        return population
+
+    # --- SHAPE_ROWS ---------------------------------------------------------
+    if expected_rows is None:
+        raise ShapeContradiction(
+            f"{label}: declared a row set without an independently-computed "
+            "expected row count. One row of one integer column is "
+            "character-for-character what a scalar aggregate returns, so the "
+            "RESULT alone can never confirm a row-set declaration -- the "
+            "expectation is the only thing that can."
+        )
+    if rows != int(expected_rows):
+        raise ShapeContradiction(
+            f"{label}: declared a row set returning {int(expected_rows)} rows "
+            f"(that filter state's own count at this unit, through the page "
+            f"arithmetic), but SQLite returned {rows}. Either the statement no "
+            "longer returns the rows it is credited with, or it is not a row "
+            "set at all -- a shape that silently became an aggregate returns "
+            "exactly 1 here."
+        )
+    return rows
 
 
-def _top_level(sql: str, pattern: str, depths: Optional[List[int]] = None):
-    """The first match of `pattern` at parenthesis depth 0, outside literals."""
-    if depths is None:
-        depths = _sql_depths(sql)
-    for match in re.finditer(pattern, sql, re.IGNORECASE):
-        start = match.start()
-        if start < len(depths) and depths[start] == 0:
-            return match
-    return None
+def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int,
+              *, shape: str, value_index: Optional[int] = None,
+              expected_rows: Optional[int] = None,
+              expected_value: Optional[int] = None,
+              label: str = "(unlabelled statement)") -> Dict[str, Any]:
+    """Time ``sql`` and record the population it actually measured.
 
+    ``rows`` is the number of RESULT ROWS. For an aggregate that returns one row
+    carrying a number -- ``SELECT COUNT(*) ...`` -- that figure is 1 no matter
+    what the count is, so the F14 nonzero-result assertion cannot see an empty
+    measurement through it: ``SELECT COUNT(*) FROM empty_table`` records
+    ``rows = 1`` and a count predicate matching nothing is documented as a
+    passing measurement (code review round 13, finding 3). ``population`` --
+    never ``rows`` -- is what the caller must assert on.
 
-def _split_top_level_commas(text: str) -> List[str]:
-    depths = _sql_depths(text)
-    parts: List[str] = []
-    start = 0
-    for index, char in enumerate(text):
-        if char == "," and depths[index] == 0:
-            parts.append(text[start:index])
-            start = index + 1
-    parts.append(text[start:])
-    return parts
-
-
-def _sole_parenthesised_subquery(tail: str) -> Optional[str]:
-    """The inner statement of `( ... ) [AS] alias` when `tail` is EXACTLY that.
-
-    Anything else -- a join, a WHERE, a second table -- returns None, so the
-    reader looks through an outer wrapper only when the wrapper provably passes
-    the subquery's row count straight out.
+    ``shape`` is the spec's DECLARATION and is checked against what SQLite
+    returned by `population_of_result`, which raises rather than guessing. No
+    SQL text is inspected anywhere on this path.
     """
-    text = tail.strip()
-    if not text.startswith("("):
-        return None
-    depths = _sql_depths(text)
-    close = next((i for i, char in enumerate(text)
-                  if char == ")" and depths[i] == 1), None)
-    if close is None:
-        return None
-    remainder = text[close + 1:].strip()
-    remainder = re.sub(r"^(AS\s+)?[A-Za-z_][A-Za-z_0-9$]*\s*$", "", remainder,
-                       flags=re.IGNORECASE).strip()
-    if remainder:
-        return None
-    return text[1:close]
+    latencies_ms: List[float] = []
+    fetched: List[Any] = []
+    description: Any = None
+    for _ in range(max(1, repeats)):
+        t0 = time.perf_counter()
+        cursor = conn.execute(sql, params)
+        fetched = cursor.fetchall()
+        latencies_ms.append((time.perf_counter() - t0) * 1000.0)
+        description = cursor.description
+    population = population_of_result(
+        label, shape=shape, description=description, fetched=fetched,
+        value_index=value_index, expected_rows=expected_rows,
+        expected_value=expected_value)
+    return {
+        "shape": shape,
+        "rows": len(fetched),
+        "columns": len(description or ()),
+        "value": population if shape == SHAPE_SCALAR else None,
+        "expected_rows": expected_rows,
+        "population": population,
+        "p50_ms": _pct(latencies_ms, 50),
+        "p95_ms": _pct(latencies_ms, 95),
+        "max_ms": max(latencies_ms),
+    }
 
 
-def sql_result_shape(sql: str) -> Tuple[str, int]:
-    """`(shape, value_index)` for one statement, DERIVED from the statement.
+# ---------------------------------------------------------------------------
+# Spec constructors. The ONLY places a shape is declared, each one adjacent to
+# the builder call whose arguments determined it -- so the declaration cannot
+# drift from the statement the way a remembered flag drifts from its sibling.
+# ---------------------------------------------------------------------------
 
-    Never declared per spec: a spec that has to remember a `scalar=True` flag is
-    a spec whose next sibling forgets it, and forgetting it restores the vacuous
-    assertion this replaces. `value_index` is which column of the single result
-    row carries the aggregate; it is 0 for a row set and is meaningless there.
+def _row_spec(label: str, *, kind: str, cap_ms: float, sql: str, params,
+              expected_rows: int) -> Dict[str, Any]:
+    """A statement whose population is its ROW COUNT.
 
-    SCALAR requires POSITIVE evidence -- a top-level select expression that is a
-    bare aggregate CALL (never a window function, which produces a value per
-    row) with no outer-level GROUP BY. Everything else that parses is a row set.
-    A statement this reader cannot take apart is `unknown`, and the caller
-    aborts on it: guessing is how the assertion went vacuous the first time.
+    `expected_rows` is mandatory and must be computed WITHOUT executing `sql`:
+    it is the only evidence that can contradict this declaration (see
+    `population_of_result`).
     """
-    text = sql.strip().rstrip(";").strip()
-    if not text:
-        return SHAPE_UNKNOWN, 0
-    depths = _sql_depths(text)
-
-    select = _top_level(text, r"\bSELECT\b", depths)
-    if select is None:
-        return SHAPE_UNKNOWN, 0
-    head = text[:select.start()].strip()
-    if head and not re.match(r"^WITH\b", head, re.IGNORECASE):
-        # Something other than a CTE prefix precedes the outer SELECT.
-        return SHAPE_UNKNOWN, 0
-
-    outer = text[select.start():]
-    outer_depths = _sql_depths(outer)
-    if _top_level(outer, r"\b(UNION|EXCEPT|INTERSECT)\b", outer_depths):
-        # A compound statement's shape is the compound's, not the first arm's.
-        return SHAPE_UNKNOWN, 0
-
-    grouped = _top_level(outer, r"\bGROUP\s+BY\b", outer_depths) is not None
-    from_clause = _top_level(outer, r"\bFROM\b", outer_depths)
-    list_end = from_clause.start() if from_clause else len(outer)
-    select_list = outer[len("SELECT"):list_end]
-    select_list = re.sub(r"^\s*(DISTINCT|ALL)\b", "", select_list, flags=re.IGNORECASE)
-    expressions = [part.strip() for part in _split_top_level_commas(select_list)]
-    if not expressions or not expressions[0]:
-        return SHAPE_UNKNOWN, 0
-
-    if not grouped:
-        for index, expression in enumerate(expressions):
-            if not _AGGREGATE_CALL_RE.match(expression):
-                continue
-            if _top_level(expression, r"\bOVER\b"):
-                # `COUNT(*) OVER ()` is a WINDOW function: one value per row,
-                # so the statement is a row set however it starts.
-                continue
-            return SHAPE_SCALAR, index
-
-    # An outer wrapper passes its subquery's row count straight through, so a
-    # scalar aggregate hidden one level down is still a scalar aggregate --
-    # `SELECT n FROM (SELECT COUNT(*) AS n ...)`.
-    if from_clause and not grouped and len(expressions) == 1 \
-            and _BARE_COLUMN_RE.match(expressions[0]):
-        inner = _sole_parenthesised_subquery(outer[from_clause.end():])
-        if inner is not None:
-            inner_shape, _inner_index = sql_result_shape(inner)
-            if inner_shape == SHAPE_SCALAR:
-                return SHAPE_SCALAR, 0
-            if inner_shape == SHAPE_UNKNOWN:
-                return SHAPE_UNKNOWN, 0
-
-    return SHAPE_ROWS, 0
+    return {"label": label, "kind": kind, "cap_ms": cap_ms, "sql": sql,
+            "params": params, "skip": None, "shape": SHAPE_ROWS,
+            "expected_rows": int(expected_rows)}
 
 
-def _is_scalar_aggregate(sql: str) -> bool:
-    """Back-compatible boolean over `sql_result_shape`.
+def _scalar_spec(label: str, *, kind: str, cap_ms: float, sql: str, params,
+                 value_index: Optional[int] = None,
+                 expected_value: Optional[int] = None) -> Dict[str, Any]:
+    """A statement whose population is the VALUE of its aggregate column."""
+    return {"label": label, "kind": kind, "cap_ms": cap_ms, "sql": sql,
+            "params": params, "skip": None, "shape": SHAPE_SCALAR,
+            "value_index": value_index, "expected_value": expected_value}
 
-    `unknown` is NOT folded into False here -- a caller that only wants a
-    boolean would then record a row count for a statement nobody could classify,
-    which is the silent direction. `bench_findings_page` reads the three-state
-    shape and aborts on `unknown`; this helper exists for the assertions that
-    only ask "is this one an aggregate".
+
+def _skipped_spec(label: str, *, kind: str, cap_ms: float,
+                  reason: str) -> Dict[str, Any]:
+    """A combination that is NOT measured, carrying the reason it was not.
+
+    Its shape stays `unknown` on purpose: if a future edit removes the skip
+    without declaring a shape, the benchmark aborts by name instead of quietly
+    counting rows.
     """
-    shape, _index = sql_result_shape(sql)
-    if shape == SHAPE_UNKNOWN:
-        raise ValueError(
-            "sql_result_shape could not classify this statement, so its "
-            "measured population cannot be trusted:\n" + sql.strip()[:400])
-    return shape == SHAPE_SCALAR
+    return {"label": label, "kind": kind, "cap_ms": cap_ms, "sql": "",
+            "params": (), "skip": reason, "shape": SHAPE_UNKNOWN}
 
 
 def _query_plan(conn: sqlite3.Connection, sql: str, params) -> str:
@@ -921,12 +921,15 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
 
     specs: List[Dict[str, Any]] = []
     for unit in units:
-        # The count AT THIS UNIT for each filter state: it decides both the
-        # visible-total spec and whether that state has a deep page at all. One
-        # query, two uses -- the depth bound is never taken from a different
-        # grain (the per-work unit groups ~1,000x fewer rows, so a bound from
-        # the identification grain claims deep paging is measurable for a unit
-        # whose whole result set fits on page 13).
+        # The count AT THIS UNIT for each filter state: it decides the
+        # visible-total spec, whether that state has a deep page at all, AND how
+        # many rows each paged query is expected to return -- the independent
+        # expectation that gives every row-set declaration its teeth
+        # (`population_of_result`). One query, three uses -- and the depth bound
+        # is never taken from a different grain (the per-work unit groups
+        # ~1,000x fewer rows, so a bound from the identification grain claims
+        # deep paging is measurable for a unit whose whole result set fits on
+        # page 13).
         unit_rows: Dict[str, int] = {}
         for _stem, label, kwargs, on in filter_states:
             if state_skips[label] or _novelty_unreachable(unit, on):
@@ -938,28 +941,40 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
             except sqlite3.Error:                            # pragma: no cover
                 unit_rows[label] = 0
 
+        def _page_rows(label: str, page: int) -> int:
+            """How many rows page `page` of this state returns AT THIS UNIT.
+
+            Derived from the state's own count and the builder's own
+            `LIMIT ? OFFSET ?` -- never from executing the statement being
+            timed, which is the whole point: an expectation read off the thing
+            it is meant to check cannot contradict it.
+            """
+            offset = (page - 1) * page_size
+            return max(0, min(page_size, unit_rows.get(label, 0) - offset))
+
         for sort in sorts:
             for _stem, label, kwargs, on in filter_states:
                 spec_label = f"findings_{unit}_{sort}_{label}"
                 if _novelty_unreachable(unit, on):
-                    specs.append({
-                        "label": spec_label, "kind": "ordering",
-                        "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "", "params": (),
-                        "skip": _WORK_UNIT_NOVELTY_SKIP,
-                    })
+                    specs.append(_skipped_spec(
+                        spec_label, kind="ordering",
+                        cap_ms=FINDINGS_ORDERING_CAP_MS,
+                        reason=_WORK_UNIT_NOVELTY_SKIP))
                     continue
                 if state_skips[label]:
-                    specs.append({"label": spec_label, "kind": "ordering",
-                                  "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "",
-                                  "params": (), "skip": state_skips[label]})
+                    specs.append(_skipped_spec(
+                        spec_label, kind="ordering",
+                        cap_ms=FINDINGS_ORDERING_CAP_MS,
+                        reason=state_skips[label]))
                     continue
                 sql, params = _build_findings_query(
                     unit=unit, sort=sort, page=1, page_size=page_size, **kwargs)
-                specs.append({
-                    "label": spec_label, "kind": "ordering",
-                    "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": sql, "params": params,
-                    "skip": None,
-                })
+                # `count_only` was NOT passed, so this returns page rows: the
+                # shape is declared here, beside the argument that chose it.
+                specs.append(_row_spec(
+                    spec_label, kind="ordering", cap_ms=FINDINGS_ORDERING_CAP_MS,
+                    sql=sql, params=params,
+                    expected_rows=_page_rows(label, 1)))
 
         # Deep paging -- where an ordering index earns its keep, and the shape a
         # spot check at page 1 will never expose. Enumerated for EVERY filter
@@ -967,26 +982,30 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         for _stem, label, kwargs, on in filter_states:
             spec_label = f"findings_{unit}_deep_page_{deep_page}_{label}"
             if _novelty_unreachable(unit, on):
-                specs.append({"label": spec_label, "kind": "ordering",
-                              "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "",
-                              "params": (), "skip": _WORK_UNIT_NOVELTY_SKIP})
+                specs.append(_skipped_spec(
+                    spec_label, kind="ordering", cap_ms=FINDINGS_ORDERING_CAP_MS,
+                    reason=_WORK_UNIT_NOVELTY_SKIP))
                 continue
             if state_skips[label]:
-                specs.append({"label": spec_label, "kind": "ordering",
-                              "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "",
-                              "params": (), "skip": state_skips[label]})
+                specs.append(_skipped_spec(
+                    spec_label, kind="ordering", cap_ms=FINDINGS_ORDERING_CAP_MS,
+                    reason=state_skips[label]))
                 continue
             available = unit_rows.get(label, 0)
+            if available <= (deep_page - 1) * page_size:
+                specs.append(_skipped_spec(
+                    spec_label, kind="ordering", cap_ms=FINDINGS_ORDERING_CAP_MS,
+                    reason=(f"the {unit} unit carries only {available} rows under "
+                            f"that filter state -- fewer than the page-{deep_page} "
+                            "offset, so deep paging cannot be measured on a "
+                            "nonzero result set")))
+                continue
             sql, params = _build_findings_query(
                 unit=unit, page=deep_page, page_size=page_size, **kwargs)
-            specs.append({
-                "label": spec_label, "kind": "ordering",
-                "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": sql, "params": params,
-                "skip": None if available > (deep_page - 1) * page_size else (
-                    f"the {unit} unit carries only {available} rows under that "
-                    f"filter state -- fewer than the page-{deep_page} offset, so "
-                    "deep paging cannot be measured on a nonzero result set"),
-            })
+            specs.append(_row_spec(
+                spec_label, kind="ordering", cap_ms=FINDINGS_ORDERING_CAP_MS,
+                sql=sql, params=params,
+                expected_rows=_page_rows(label, deep_page)))
 
         # The visible COUNT, against its own SEPARATE cap (§5), for every filter
         # state -- the page issues it for whichever state is active. Measured in
@@ -996,21 +1015,22 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         for _stem, label, kwargs, on in filter_states:
             spec_label = f"findings_{unit}_visible_total_{label}"
             if _novelty_unreachable(unit, on):
-                specs.append({"label": spec_label, "kind": "count",
-                              "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": "",
-                              "params": (), "skip": _WORK_UNIT_NOVELTY_SKIP})
+                specs.append(_skipped_spec(
+                    spec_label, kind="count", cap_ms=FINDINGS_COUNT_CAP_MS,
+                    reason=_WORK_UNIT_NOVELTY_SKIP))
                 continue
             if state_skips[label]:
-                specs.append({"label": spec_label, "kind": "count",
-                              "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": "",
-                              "params": (), "skip": state_skips[label]})
+                specs.append(_skipped_spec(
+                    spec_label, kind="count", cap_ms=FINDINGS_COUNT_CAP_MS,
+                    reason=state_skips[label]))
                 continue
             sql, params = _build_findings_query(unit=unit, count_only=True, **kwargs)
-            specs.append({
-                "label": spec_label, "kind": "count",
-                "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": sql, "params": params,
-                "skip": None,
-            })
+            # `count_only=True` -- one row carrying the total. Declared HERE,
+            # in the same statement that asked for it.
+            specs.append(_scalar_spec(
+                spec_label, kind="count", cap_ms=FINDINGS_COUNT_CAP_MS,
+                sql=sql, params=params,
+                expected_value=unit_rows.get(label)))
 
     # Ruling U's launch statistics -- both halves of the one grouped statement,
     # plus the distinct-manuscript count that is NOT derivable by summing them.
@@ -1025,25 +1045,56 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
             f"di.novelty_status IN ({shade_placeholders})",
             tuple(LAUNCH_CONTRIBUTION_SHADES)),
     }
+
+    def _distinct_shades(where: str) -> int:
+        """How many of ruling U's shades this asset actually carries.
+
+        The contribution statement GROUPs by shade, so this -- not the
+        identification total above -- is how many rows it returns, and it is the
+        independent expectation that verifies its row-set declaration.
+        """
+        try:
+            return int(conn.execute(
+                "SELECT COUNT(DISTINCT di.novelty_status) FROM "
+                f"discovery_identification di WHERE {where}",
+                tuple(LAUNCH_CONTRIBUTION_SHADES)).fetchone()[0])
+        except sqlite3.Error:                                # pragma: no cover
+            return 0
+
+    shade_groups = {
+        "main_pool": _distinct_shades(
+            f"di.main_pool = 1 AND di.novelty_status IN ({shade_placeholders})"),
+        "all_bucket": _distinct_shades(
+            f"di.novelty_status IN ({shade_placeholders})"),
+    }
     for main_pool_only in (True, False):
         basis = "main_pool" if main_pool_only else "all_bucket"
+        label = f"findings_launch_contribution_{basis}"
+        if not shade_population[basis]:
+            specs.append(_skipped_spec(
+                label, kind="count", cap_ms=FINDINGS_COUNT_CAP_MS,
+                reason=("this asset carries no identification in any ruling-U "
+                        f"contribution shade on the {basis} basis")))
+            continue
         sql, params = _build_launch_contribution_sql(main_pool_only=main_pool_only)
-        specs.append({
-            "label": f"findings_launch_contribution_{basis}",
-            "kind": "count", "cap_ms": FINDINGS_COUNT_CAP_MS,
-            "sql": sql, "params": params,
-            "skip": None if shade_population[basis] else (
-                "this asset carries no identification in any ruling-U "
-                f"contribution shade on the {basis} basis"),
-        })
-    sql, params = _build_launch_manuscript_sql(main_pool_only=True)
-    specs.append({
-        "label": "findings_launch_manuscripts_main_pool", "kind": "count",
-        "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": sql, "params": params,
-        "skip": None if shade_population["main_pool"] else (
-            "this asset carries no identification in any ruling-U contribution "
-            "shade in the main pool"),
-    })
+        # `kind='count'` but SHAPE_ROWS: this statement GROUPs BY shade and
+        # returns one row per shade. It is exactly why `spec['kind']` is a
+        # budget class and never the shape authority.
+        specs.append(_row_spec(
+            label, kind="count", cap_ms=FINDINGS_COUNT_CAP_MS,
+            sql=sql, params=params, expected_rows=shade_groups[basis]))
+
+    if shade_population["main_pool"]:
+        sql, params = _build_launch_manuscript_sql(main_pool_only=True)
+        specs.append(_scalar_spec(
+            "findings_launch_manuscripts_main_pool", kind="count",
+            cap_ms=FINDINGS_COUNT_CAP_MS, sql=sql, params=params))
+    else:
+        specs.append(_skipped_spec(
+            "findings_launch_manuscripts_main_pool", kind="count",
+            cap_ms=FINDINGS_COUNT_CAP_MS,
+            reason=("this asset carries no identification in any ruling-U "
+                    "contribution shade in the main pool")))
     return specs
 
 
@@ -1105,22 +1156,26 @@ def bench_findings_page(
             if spec["skip"]:
                 skipped_shapes.append({"label": spec["label"], "reason": spec["skip"]})
                 continue
-            shape, value_index = sql_result_shape(spec["sql"])
-            if shape == SHAPE_UNKNOWN:
+            shape = spec.get("shape", SHAPE_UNKNOWN)
+            if shape not in _DECLARABLE_SHAPES:
                 # NOT a skip and NOT a default to row counting: a statement
-                # whose shape is unreadable has an unreadable population, and
+                # whose shape nobody declared has an unreadable population, and
                 # recording a timing beside one is the F14 failure this whole
                 # mechanism exists to prevent.
                 raise AssertionError(
                     f"{spec['label']}: the benchmark cannot tell what shape this "
                     "statement returns, so it cannot say what population its "
-                    "timing was taken over. Teach `sql_result_shape` the shape "
-                    "(and add it to the shape tests) rather than assuming one:\n"
-                    + spec["sql"].strip()[:400]
+                    "timing was taken over. Build it with `_row_spec` or "
+                    "`_scalar_spec` -- whichever the builder arguments chose -- "
+                    "rather than assuming one:\n" + spec["sql"].strip()[:400]
                 )
             scalar = shape == SHAPE_SCALAR
-            measured = _time_sql(conn, spec["sql"], spec["params"], repeats,
-                                 scalar=scalar, value_index=value_index)
+            measured = _time_sql(
+                conn, spec["sql"], spec["params"], repeats, shape=shape,
+                value_index=spec.get("value_index"),
+                expected_rows=spec.get("expected_rows"),
+                expected_value=spec.get("expected_value"),
+                label=spec["label"])
             if measured["population"] == 0:
                 # `population` and NOT `rows`: an aggregate returns exactly one
                 # row whatever its value, so a row-count assertion passes for
