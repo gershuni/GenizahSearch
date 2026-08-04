@@ -2907,7 +2907,10 @@ def test_bench_findings_page_measures_the_full_combination_space(tmp_path):
         "the probe measured NOTHING -- a suite whose per-shape loop is vacuous "
         "proves only that the enumeration ran")
     for r in result["shapes"]:
-        assert r["rows"] > 0, f"{r['label']} recorded a timing on an EMPTY result"
+        # `population`, not `rows`: an aggregate returns exactly one row
+        # whatever it counts, so `rows > 0` is satisfied by every count shape
+        # regardless of the value (round 13, finding 3).
+        assert r["population"] > 0, f"{r['label']} recorded a timing on an EMPTY result"
         for key in ("p50_ms", "p95_ms", "max_ms"):
             assert key in r
         assert r["p50_ms"] <= r["max_ms"] and r["p95_ms"] <= r["max_ms"]
@@ -2938,6 +2941,103 @@ def test_bench_findings_page_never_records_a_timing_on_an_empty_result(tmp_path,
                       "relation_kind": "direct_witness", "domain": None},
     )
     with pytest.raises(AssertionError, match="ZERO rows"):
+        bench_discovery.bench_findings_page(str(db_path), page_size=2, repeats=1, deep_page=2)
+
+
+def test_a_count_query_over_nothing_is_ONE_ROW_and_a_population_of_ZERO(tmp_path):
+    """The defect itself, in one assertion (round 13, finding 3).
+
+    `SELECT COUNT(*)` returns exactly ONE row whatever it counts, so a
+    nonzero-ROW-COUNT assertion passes for every count shape regardless of the
+    value -- `SELECT COUNT(*) FROM empty_table` recorded `rows = 1` and a count
+    predicate matching nothing was documented as a passing measurement. The
+    recorded `population` is the VALUE for an aggregate, and only that quantity
+    can tell the two apart."""
+    from scripts import bench_discovery
+
+    db_path = _bench_fixture_db(tmp_path)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        empty = bench_discovery._time_sql(
+            conn, "SELECT COUNT(*) FROM discovery_identification WHERE 1 = 0",
+            (), 1, scalar=True)
+        assert empty["rows"] == 1, (
+            "the premise moved: an aggregate no longer returns one row, so the "
+            "row-count assertion was not vacuous after all")
+        assert empty["population"] == 0
+        assert empty["value"] == 0
+
+        # ...and the same call WITHOUT the scalar derivation reproduces the
+        # false green exactly, which is what makes this a control and not a
+        # restatement of the fix.
+        naive = bench_discovery._time_sql(
+            conn, "SELECT COUNT(*) FROM discovery_identification WHERE 1 = 0",
+            (), 1)
+        assert naive["population"] == 1, (
+            "a row-count population would have passed the F14 assertion")
+
+        full = bench_discovery._time_sql(
+            conn, "SELECT COUNT(*) FROM discovery_identification", (), 1,
+            scalar=True)
+        assert full["rows"] == 1 and full["population"] > 0
+    finally:
+        conn.close()
+
+
+def test_which_shapes_count_is_DERIVED_from_the_shipped_builders(tmp_path):
+    """Which shapes are scalar aggregates is derived from the STATEMENT, never
+    declared per spec -- a flag a spec has to remember is a flag its next
+    sibling forgets, and forgetting it restores the vacuous assertion.
+
+    Asserted over the statements the SHIPPED builders emit, so a builder that
+    changes shape moves this test rather than leaving a stale literal behind."""
+    from scripts import bench_discovery
+    from shared.discovery_service import (
+        BUCKET_MAIN, FINDINGS_UNITS, _build_findings_query,
+        _build_launch_contribution_sql, _build_launch_manuscript_sql,
+    )
+
+    for unit in sorted(FINDINGS_UNITS):
+        count_sql, _ = _build_findings_query(
+            unit=unit, bucket=BUCKET_MAIN, count_only=True)
+        assert bench_discovery._is_scalar_aggregate(count_sql), (
+            f"the {unit} visible-total count is an aggregate returning one row; "
+            "measuring its ROW count asserts nothing")
+        rows_sql, _ = _build_findings_query(unit=unit, bucket=BUCKET_MAIN)
+        assert not bench_discovery._is_scalar_aggregate(rows_sql), (
+            f"the {unit} ordering query returns real rows; treating it as an "
+            "aggregate would read a page's first cell as its population")
+
+    ms_sql, _ = _build_launch_manuscript_sql(main_pool_only=True)
+    assert bench_discovery._is_scalar_aggregate(ms_sql)
+    # The GROUPED contribution statement is NOT scalar: it returns one row per
+    # shade, and an empty population really does return zero of them.
+    grouped_sql, _ = _build_launch_contribution_sql(main_pool_only=True)
+    assert not bench_discovery._is_scalar_aggregate(grouped_sql)
+
+
+def test_bench_findings_page_aborts_when_a_COUNT_shape_counts_zero(tmp_path, monkeypatch):
+    """The measured-population assertion, end to end.
+
+    The row-query half of F14 is covered above. This drives the COUNT half: a
+    spec whose aggregate counts nothing must abort, where before the fix it was
+    recorded as a fast, passing measurement with `rows = 1`."""
+    from scripts import bench_discovery
+
+    db_path = _bench_fixture_db(tmp_path)
+
+    def _one_empty_count(conn, **kwargs):
+        return [{
+            "label": "findings_probe_control_empty_count",
+            "kind": "count",
+            "cap_ms": bench_discovery.FINDINGS_COUNT_CAP_MS,
+            "sql": "SELECT COUNT(*) AS n FROM discovery_identification WHERE 1 = 0",
+            "params": (),
+            "skip": None,
+        }]
+
+    monkeypatch.setattr(bench_discovery, "_findings_combination_specs", _one_empty_count)
+    with pytest.raises(AssertionError, match="counted ZERO"):
         bench_discovery.bench_findings_page(str(db_path), page_size=2, repeats=1, deep_page=2)
 
 

@@ -326,20 +326,81 @@ def pick_findings_filters(conn: sqlite3.Connection) -> Dict[str, Any]:
     return out
 
 
-def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int) -> Dict[str, Any]:
+def _time_sql(conn: sqlite3.Connection, sql: str, params, repeats: int,
+              *, scalar: bool = False) -> Dict[str, Any]:
+    """Time ``sql`` and record the population it actually measured.
+
+    ``rows`` is the number of RESULT ROWS. For an aggregate that returns one row
+    carrying a number -- ``SELECT COUNT(*) ...`` -- that figure is 1 no matter
+    what the count is, so the F14 nonzero-result assertion cannot see an empty
+    measurement through it: ``SELECT COUNT(*) FROM empty_table`` records
+    ``rows = 1`` and a count predicate matching nothing is documented as a
+    passing measurement (code review round 13, finding 3). ``scalar=True`` says
+    the shape's population is the VALUE of the first column of the first row,
+    and ``population`` -- never ``rows`` -- is what the caller must assert on.
+    """
     latencies_ms: List[float] = []
     rows = 0
+    value: Optional[int] = None
     for _ in range(max(1, repeats)):
         t0 = time.perf_counter()
         fetched = conn.execute(sql, params).fetchall()
         latencies_ms.append((time.perf_counter() - t0) * 1000.0)
         rows = len(fetched)
+        value = None
+        if scalar and rows:
+            cell = fetched[0][0]
+            # A non-numeric first cell means the shape was mis-declared scalar;
+            # leaving `value` at None makes `population` 0 below, which ABORTS
+            # rather than passing -- the fail-closed direction.
+            if isinstance(cell, int) and not isinstance(cell, bool):
+                value = int(cell)
     return {
         "rows": rows,
+        "value": value,
+        "population": (value or 0) if scalar else rows,
         "p50_ms": _pct(latencies_ms, 50),
         "p95_ms": _pct(latencies_ms, 95),
         "max_ms": max(latencies_ms),
     }
+
+
+_PAREN_GROUP_RE = re.compile(r"\([^()]*\)")
+
+
+def _outer_level(sql: str) -> str:
+    """``sql`` with every parenthesised group removed, innermost first, so a
+    keyword inside a subquery cannot be mistaken for an outer-level one."""
+    previous = None
+    text = sql
+    while previous != text:
+        previous = text
+        text = _PAREN_GROUP_RE.sub(" ", text)
+    return text
+
+
+def _is_scalar_aggregate(sql: str) -> bool:
+    """True when the statement returns exactly ONE row carrying a number.
+
+    DERIVED from the statement, never declared per spec: a spec that had to
+    remember a ``scalar=True`` flag is a spec whose next sibling forgets it, and
+    forgetting it restores exactly the vacuous assertion this replaces (round
+    13, finding 3). The rule is narrow and stated: the outermost SELECT list
+    begins with ``COUNT(`` and there is no outer-level ``GROUP BY``.
+
+    - ``_build_findings_query(count_only=True)`` -> ``SELECT COUNT(*) AS n FROM
+      (SELECT 1 ... GROUP BY ...)``: the GROUP BY is inside the subquery, so the
+      statement is scalar. TRUE.
+    - ``_build_launch_manuscript_sql`` -> ``SELECT COUNT(DISTINCT sys_id) ...``
+      with no grouping. TRUE.
+    - ``_build_launch_contribution_sql`` -> ``SELECT novelty_status, COUNT(*)
+      ... GROUP BY novelty_status``: many rows, and an empty population really
+      does return zero of them. FALSE on both clauses.
+    - Any ordering query -> its SELECT list starts with a column. FALSE.
+    """
+    if not re.match(r"\s*SELECT\s+COUNT\s*\(", sql, re.IGNORECASE):
+        return False
+    return "GROUP BY" not in _outer_level(sql).upper()
 
 
 def _query_plan(conn: sqlite3.Connection, sql: str, params) -> str:
@@ -524,7 +585,16 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         specs.append({
             "label": f"findings_{unit}_visible_total", "kind": "count",
             "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": sql, "params": params,
-            "skip": None if total_rows else "the asset carries no identifications",
+            # The MAIN-POOL population, not the identification total: this shape
+            # counts the main bucket, so an asset with rows only in the second
+            # bucket makes it count zero. It used to be measured anyway and
+            # recorded as a pass, because a COUNT returns one row whatever it
+            # counts -- the same asset fact the ordering states above already
+            # treat as a named skip (round 13, finding 3).
+            "skip": None if (total_rows and bucket_population["main"]) else (
+                "the asset carries no identifications" if not total_rows else
+                "this asset carries no main-pool identifications, so the visible "
+                "total of the main bucket has nothing to count"),
         })
 
     # Ruling U's launch statistics -- both halves of the one grouped statement,
@@ -615,10 +685,18 @@ def bench_findings_page(
             if spec["skip"]:
                 skipped_shapes.append({"label": spec["label"], "reason": spec["skip"]})
                 continue
-            measured = _time_sql(conn, spec["sql"], spec["params"], repeats)
-            if measured["rows"] == 0:
+            scalar = _is_scalar_aggregate(spec["sql"])
+            measured = _time_sql(conn, spec["sql"], spec["params"], repeats,
+                                 scalar=scalar)
+            if measured["population"] == 0:
+                # `population` and NOT `rows`: an aggregate returns exactly one
+                # row whatever its value, so a row-count assertion passes for
+                # every count shape regardless of what was counted (round 13,
+                # finding 3). The message says WHICH quantity was zero so the
+                # two cases are never confused again.
+                measured_what = "counted ZERO" if scalar else "returned ZERO rows"
                 raise AssertionError(
-                    f"{spec['label']}: the measured query returned ZERO rows "
+                    f"{spec['label']}: the measured query {measured_what} "
                     "(the benchmark must never silently measure an empty no-op -- "
                     "F14). Fix the live filter selection rather than recording "
                     "the timing."
@@ -678,12 +756,15 @@ def report_findings_page(result: Dict[str, Any]) -> None:
           f"{len(result['shapes'])} measured, "
           f"{len(result['skipped_shapes'])} skipped, "
           f"{len(result.get('out_of_scope') or ())} out of scope")
-    print(f"{'combination':<46}{'rows':>6}{'p50 ms':>9}{'p95 ms':>9}"
+    # `pop.` is the population the nonzero-result assertion actually tested:
+    # result rows for a row query, the COUNTED VALUE for an aggregate. Printing
+    # the row count for an aggregate reads as "1 row, fine" for a count of zero.
+    print(f"{'combination':<46}{'pop.':>8}{'p50 ms':>9}{'p95 ms':>9}"
           f"{'max ms':>9}{'cap ms':>8}  result")
     for r in result["shapes"]:
         verdict = "FAIL" if r in result["failures"] else "PASS"
         print(
-            f"{r['label']:<46}{r['rows']:>6}{r['p50_ms']:>9.2f}{r['p95_ms']:>9.2f}"
+            f"{r['label']:<46}{r['population']:>8}{r['p50_ms']:>9.2f}{r['p95_ms']:>9.2f}"
             f"{r['max_ms']:>9.2f}{r['cap_ms']:>8.0f}  {verdict}"
         )
     for s in result["skipped_shapes"]:
@@ -1029,14 +1110,19 @@ def _findings_actuals_block(findings: Optional[Dict[str, Any]]) -> str:
         f"measurement was {_PRIOR_ORDERING_MEASUREMENT}, and "
         f"{_PRIOR_COUNT_MEASUREMENT}.",
         "",
-        "| Combination | Cap | p50 | p95 | max | Rows | Result |",
+        "The **Population** column is the quantity the nonzero-result assertion "
+        "tested: result ROWS for a row query, the COUNTED VALUE for an aggregate. "
+        "A count query returns one row whatever it counts, so recording its row "
+        "count would document a count of zero as a passing measurement.",
+        "",
+        "| Combination | Cap | p50 | p95 | max | Population | Result |",
         "|---|---|---|---|---|---|---|",
     ]
     for r in findings["shapes"]:
         verdict = "PASS ✓" if r["p95_ms"] <= r["cap_ms"] else "FAIL ✗"
         lines.append(
             f"| `{r['label']}` | p95 ≤ {r['cap_ms']:.0f} ms | {r['p50_ms']:.2f} ms | "
-            f"**{r['p95_ms']:.2f} ms** | {r['max_ms']:.2f} ms | {r['rows']} | {verdict} |"
+            f"**{r['p95_ms']:.2f} ms** | {r['max_ms']:.2f} ms | {r['population']} | {verdict} |"
         )
     if findings["skipped_shapes"]:
         lines.append("")
