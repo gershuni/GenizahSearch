@@ -48,6 +48,25 @@ from shared.discovery_band_labels import (
 # appears elsewhere in the Help page (the Joins-Lab "confirmed join" copy).
 _CONFIDENCE_SECTION_CLASS = 'discovery-methods-section'
 
+# The limitations PARAGRAPH's own marker class (Phase 136, plan 136-17).
+# A MARKUP HOOK ONLY: the wording of _LIMITATIONS_TEXT, its heading and the
+# enclosing methods card are untouched.
+#
+# What it is for: the shared honesty gate's accuracy/rate detector fires on
+# qualitative error-rate language ("a small minority ... a low single-digit
+# share ... is misattributed"), and that wording is the D-06a rewrite the owner
+# approved and plan 136-02 shipped. The exception is therefore bound to ONE
+# registered ELEMENT rather than carved out of the lexicon -- so the same words
+# on a findings row, on an error path, inside an envelope, or in a NEIGHBOURING
+# subsection of this same card remain a violation.
+#
+# _CONFIDENCE_SECTION_CLASS above is NOT a limitations selector: it is applied
+# to the whole methods CARD and therefore covers the bucket-rule and
+# novelty-check subsections too. That is why this class exists.
+# `tests/render_smoke/discovery_honesty_gate.py::D06A_QUALITATIVE_SCOPES` holds
+# exactly this string and is pinned to it by a lazy-import equality assertion.
+_LIMITATIONS_PARAGRAPH_CLASS = 'discovery-methods-limitations'
+
 _CONFIDENCE_TOC_TITLE = {
     'en': 'Confidence Bands and Methods',
     'he': 'דרגות ודאות ושיטות',
@@ -249,7 +268,10 @@ def _render_known_limitations_subsection(lk, text_style):
         classes='text-lg font-semibold mt-3 mb-1',
         style='color: var(--text-primary);',
     )
-    ui.label(_LIMITATIONS_TEXT[lk]).style(text_style)
+    # The marker class goes on THIS label and nothing else -- not the heading,
+    # not the subsection, not the card. The D-06a exception must cover the
+    # approved SENTENCE and nothing adjacent to it.
+    ui.label(_LIMITATIONS_TEXT[lk]).classes(_LIMITATIONS_PARAGRAPH_CLASS).style(text_style)
 
 
 def _render_novelty_check_subsection(lk, text_style):
