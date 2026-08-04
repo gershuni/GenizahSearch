@@ -261,6 +261,28 @@ SURFACE_EXPANSION_FIELDS: Tuple[str, ...] = (
     "band_rank",
 )
 
+#: Ruling U (plan 136-22): ONE contribution-shade row of the launch statistics.
+#:
+#: Three fields and no fourth. What it deliberately does NOT name, and why:
+#:   * a PERCENTAGE, a SHARE or a RATIO of any kind. "The finding aids did not
+#:     already have it" is a claim about the AIDS, not about the match. A single
+#:     ratio here would turn a provenance statement into a quality statement,
+#:     which is exactly what ruling U constraint 3 forbids -- and the forbidden
+#:     substrings below would not catch `contribution_share` on their own.
+#:   * a `precision` or a `rank`. The shades are not ordered by quality; their
+#:     frozen order is the order the ruling itself lists them in.
+#:
+#: `shade` is the STORED novelty vocabulary value (`fills_gap` /
+#: `refines_granularity` / `container_predicts`) and is NEVER rendered raw --
+#: the reader-facing, match-framed label lives in
+#: `shared/discovery_display_strings.py`, exactly as `relation_kind` is treated
+#: on `SURFACE_CLAIM_FIELDS`.
+SURFACE_LAUNCH_SHADE_FIELDS: Tuple[str, ...] = (
+    "shade",
+    "identification_count",
+    "manuscript_count",
+)
+
 #: The facet-cascade row (domain / author / work), mirroring the catalogue
 #: page's accessor SHAPE but sourced from the IDENTIFIED WORK.
 SURFACE_FACET_FIELDS: Tuple[str, ...] = (
@@ -278,22 +300,36 @@ _ALL_ALLOWLISTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("SURFACE_RELATED_PAGE_FIELDS", SURFACE_RELATED_PAGE_FIELDS),
     ("SURFACE_FINDING_FIELDS", SURFACE_FINDING_FIELDS),
     ("SURFACE_EXPANSION_FIELDS", SURFACE_EXPANSION_FIELDS),
+    ("SURFACE_LAUNCH_SHADE_FIELDS", SURFACE_LAUNCH_SHADE_FIELDS),
     ("SURFACE_FACET_FIELDS", SURFACE_FACET_FIELDS),
 )
+
+
+def _assert_allowlist_safe(name: str, fields: Sequence[str]) -> None:
+    """Raise if `fields` names a forbidden field or repeats one.
+
+    A FUNCTION rather than an inline loop body so a test can run the guard
+    itself over a seeded copy of an allowlist. A test that re-implemented the
+    check, or that exercised `is_forbidden_surface_field` directly, would pass
+    happily while the registration loop below skipped the allowlist under test
+    -- which is the failure the registration exists to prevent.
+    """
+    leaks = sorted(f for f in fields if is_forbidden_surface_field(f))
+    if leaks:
+        raise RuntimeError(
+            f"{name} names forbidden surface field(s) {leaks} -- a precision "
+            "value, a confidence interval or the review overlay may never be "
+            "allowlisted (D-06 / D-13f)"
+        )
+    if len(set(fields)) != len(fields):
+        raise RuntimeError(f"{name} contains a duplicate field name")
+
 
 # Import-time guard: an allowlist that names a forbidden field would defeat the
 # whole mechanism silently. Fail at import, never at render time.
 for _name, _fields in _ALL_ALLOWLISTS:
-    _leaks = sorted(f for f in _fields if is_forbidden_surface_field(f))
-    if _leaks:  # pragma: no cover -- structurally unreachable unless edited wrong
-        raise RuntimeError(
-            f"{_name} names forbidden surface field(s) {_leaks} -- a precision "
-            "value, a confidence interval or the review overlay may never be "
-            "allowlisted (D-06 / D-13f)"
-        )
-    if len(set(_fields)) != len(_fields):  # pragma: no cover -- defensive
-        raise RuntimeError(f"{_name} contains a duplicate field name")
-del _name, _fields, _leaks
+    _assert_allowlist_safe(_name, _fields)
+del _name, _fields
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +369,11 @@ def surface_safe_finding(row: Mapping[str, Any]) -> Dict[str, Any]:
 def surface_safe_expansion(row: Mapping[str, Any]) -> Dict[str, Any]:
     """One "Other manuscripts matching <work>" expansion row (PANEL-02)."""
     return _project(row, SURFACE_EXPANSION_FIELDS)
+
+
+def surface_safe_launch_shade(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One launch contribution-shade row (ruling U, plan 136-22)."""
+    return _project(row, SURFACE_LAUNCH_SHADE_FIELDS)
 
 
 def surface_safe_facet(row: Mapping[str, Any]) -> Dict[str, Any]:

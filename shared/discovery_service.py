@@ -45,6 +45,62 @@ All timeout/concurrency/LRU/page-size defaults are read from
 ``docs/specs/discovery-budgets.md``'s ``DISCOVERY_*`` env-var convention,
 re-read PER CALL (never baked in at import time) so they can be tuned in
 production without a restart.
+
+THE LAUNCH STATISTICS (owner ruling U, plan 136-22) -- EVERY BASIS, IN SQL
+------------------------------------------------------------------------
+``get_launch_stats_enveloped`` returns the release's headline contribution
+figure and its three shades. "Fragments" and "pages" are ambiguous across at
+least four plausible populations in this schema, and that ambiguity is exactly
+how an earlier draft produced a total by adding a main-pool count to two
+unfiltered ones. So every key is named after its basis, and every basis is
+stated here in SQL terms, so a later reader can VERIFY a number rather than
+trust it. ``<shades>`` is ``LAUNCH_CONTRIBUTION_SHADES``.
+
+===============================  =========================================
+envelope key                     the query it is
+===============================  =========================================
+``total``                        the SUM of the three ``items`` rows below
+                                 (never a separately-counted number)
+``items[i].identification_count``  ``SELECT COUNT(*) FROM
+                                 discovery_identification WHERE main_pool = 1
+                                 AND novelty_status = <shade>``
+``items[i].manuscript_count``    ``SELECT COUNT(DISTINCT sys_id)`` over the
+                                 same rows
+``meta.main_pool_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id) FROM
+                                 discovery_identification WHERE main_pool = 1
+                                 AND novelty_status IN <shades>``. NOT the sum
+                                 of the per-shade manuscript counts: a
+                                 manuscript contributing under two shades is
+                                 counted once here and twice there.
+``meta.all_bucket_total``        the same as ``total`` with the ``main_pool``
+                                 predicate DROPPED. Ruling U constraint 1
+                                 permits a page to show this only if it says
+                                 so in words -- so it lives under its own
+                                 named key and is NEVER merged into ``total``.
+``meta.all_bucket_manuscript_count``  ditto for the manuscript count
+``meta.corpus_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id) FROM
+                                 discovery_identification`` -- every bucket,
+                                 every shade. The figure ruling U renders as
+                                 "out of N fragments"; the key says
+                                 "manuscript" because ``sys_id`` IS the
+                                 manuscript-record grain.
+``meta.corpus_page_count``       ``SELECT COUNT(DISTINCT page_id) FROM
+                                 discovery_claim`` -- every page any claim
+                                 touches. Ruling U's "across N pages".
+===============================  =========================================
+
+``meta.basis`` states the single basis (``main_pool``) explicitly, so no
+consumer has to infer it and no consumer can mix bases silently.
+``meta.sidecar_version`` and ``meta.audience`` come from the ARTIFACT's own
+``meta`` table, not from an injected provider: the same query against the
+public projection and the private rebuild returns two different, both-correct
+answers, so a number without the provenance of the artifact that produced it
+is not interpretable.
+
+NOTHING this reader emits is a precision, an accuracy rate, a confidence
+interval, a review badge or a percentage. "The finding aids did not already
+have it" is a claim about the AIDS, not about the match, and that distinction
+is the whole basis on which these numbers may be published at all.
 """
 
 from __future__ import annotations
@@ -61,6 +117,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from shared.discovery_band_labels import serialize_banded_claim
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
+from shared.discovery_novelty import NOVELTY_STATUSES
 from shared.discovery_surface_projection import (
     STATUS_OK,
     busy_envelope,
@@ -69,6 +126,7 @@ from shared.discovery_surface_projection import (
     surface_safe_expansion,
     surface_safe_facet,
     surface_safe_finding,
+    surface_safe_launch_shade,
     surface_safe_related_page,
     surface_safe_work_summary,
     timeout_envelope,
@@ -418,6 +476,93 @@ _FINDINGS_FROM = """
     JOIN works w ON w.work_id = di.display_work_id
     LEFT JOIN manuscript_display md ON md.sys_id = di.sys_id
 """
+
+# ---------------------------------------------------------------------------
+# Ruling U (plan 136-22): the launch statistics.
+# ---------------------------------------------------------------------------
+
+#: The THREE contribution shades, in the frozen order ruling U lists them.
+#:
+#: Defined ONCE, here, and never retyped at a call site: a shade added to the
+#: novelty vocabulary later must not silently join the contribution total, and a
+#: shade retired from it must not silently leave a smaller one behind.
+LAUNCH_CONTRIBUTION_SHADES: Tuple[str, ...] = (
+    "fills_gap",
+    "refines_granularity",
+    "container_predicts",
+)
+
+#: The single basis every launch figure is computed on (ruling U constraint 1).
+LAUNCH_BASIS: str = "main_pool"
+
+
+def _validate_contribution_shades(shades: Tuple[str, ...]) -> None:
+    """Raise unless every contribution shade is in the novelty vocabulary.
+
+    Called at IMPORT time below. A typo or a retired shade must fail loudly at
+    import rather than producing a quietly smaller headline at request time --
+    the shade simply matches no row, the total shrinks, and nothing raises.
+    """
+    unknown = sorted(set(shades) - NOVELTY_STATUSES)
+    if unknown:
+        raise RuntimeError(
+            f"LAUNCH_CONTRIBUTION_SHADES names {unknown}, which is not in "
+            "shared.discovery_novelty.NOVELTY_STATUSES -- a contribution shade "
+            "outside the vocabulary matches no row and silently shrinks the "
+            "launch total (ruling U constraint 2)"
+        )
+    if len(set(shades)) != len(shades):
+        raise RuntimeError(
+            "LAUNCH_CONTRIBUTION_SHADES repeats a shade -- a repeated shade "
+            "would be double-counted into the total"
+        )
+
+
+_validate_contribution_shades(LAUNCH_CONTRIBUTION_SHADES)
+
+
+def _build_launch_contribution_sql(*, main_pool_only: bool) -> Tuple[str, List[Any]]:
+    """The ONE grouped statement both contribution figures are computed with.
+
+    `main_pool_only=False` is the SAME statement with the `main_pool` predicate
+    dropped -- one shape, not two separately-written queries, so the main-pool
+    and all-bucket figures cannot drift apart through an edit to one of them.
+
+    Returns per shade the identification count AND the distinct-manuscript
+    count; the TOTAL is then the sum of the returned rows in Python, which is
+    what makes the decomposition identity structural rather than asserted.
+    """
+    placeholders = ",".join("?" * len(LAUNCH_CONTRIBUTION_SHADES))
+    where = [f"novelty_status IN ({placeholders})"]
+    if main_pool_only:
+        where.insert(0, "main_pool = 1")
+    return (
+        "SELECT novelty_status, COUNT(*) AS identification_count, "
+        "COUNT(DISTINCT sys_id) AS manuscript_count "
+        "FROM discovery_identification "
+        "WHERE " + " AND ".join(where) + " "
+        "GROUP BY novelty_status",
+        list(LAUNCH_CONTRIBUTION_SHADES),
+    )
+
+
+def _build_launch_manuscript_sql(*, main_pool_only: bool) -> Tuple[str, List[Any]]:
+    """Distinct CONTRIBUTING manuscripts, on the same basis as the total above.
+
+    Not derivable by summing the per-shade manuscript counts: one manuscript can
+    contribute under two shades, so the sum over-counts. Ruling U's "over 6,755
+    manuscripts" is this number, never that sum.
+    """
+    placeholders = ",".join("?" * len(LAUNCH_CONTRIBUTION_SHADES))
+    where = [f"novelty_status IN ({placeholders})"]
+    if main_pool_only:
+        where.insert(0, "main_pool = 1")
+    return (
+        "SELECT COUNT(DISTINCT sys_id) AS n FROM discovery_identification "
+        "WHERE " + " AND ".join(where),
+        list(LAUNCH_CONTRIBUTION_SHADES),
+    )
+
 
 _LIKE_ESCAPE_RE = re.compile(r"([\\%_])")
 
@@ -1121,6 +1266,14 @@ class DiscoveryService:
         # 136-14: the `scope='band'` measurement lookup, cached per
         # (path, version) -- see _band_measurements().
         self._band_measurement_cache: Optional[Tuple[tuple, Dict]] = None
+
+        # 136-22 / ruling U: the launch statistics, cached per (path, version).
+        # The PATH is in the key on purpose and this is not hypothetical -- the
+        # pre-rebuild asset, the private rebuild and the public projection ALL
+        # THREE report `sidecar_version = 'discovery-v1-real'` while the two
+        # rebuilds answer this query differently, so a version-only key would
+        # serve one artifact's headline for the other.
+        self._launch_stats_cache: Optional[Tuple[tuple, Dict[str, Any]]] = None
 
         # Heavy-query bounded concurrency (mirrors web/search_api.py's
         # _HeavySemaphoreState, kept per-instance since this class -- unlike
@@ -1952,6 +2105,125 @@ class DiscoveryService:
         return _get_positive_float_env(
             "DISCOVERY_QUERY_TIMEOUT_FINDINGS", _DEFAULT_QUERY_TIMEOUT_FINDINGS)
 
+    # ------------------------------------------------------------------
+    # Ruling U (plan 136-22): the launch statistics, read from the ARTIFACT.
+    # ------------------------------------------------------------------
+
+    def _query_launch_contribution(self, conn, *, main_pool_only: bool):
+        """`(rows_by_shade, total, manuscript_count)` on ONE basis.
+
+        The total is the SUM of the returned shade rows -- deliberately not a
+        separately-counted number, so the surface can never be handed a total
+        its shades do not reproduce.
+        """
+        sql, params = _build_launch_contribution_sql(main_pool_only=main_pool_only)
+        by_shade = {
+            row["novelty_status"]: (
+                int(row["identification_count"]), int(row["manuscript_count"]))
+            for row in conn.execute(sql, params).fetchall()
+        }
+        total = sum(counts[0] for counts in by_shade.values())
+        ms_sql, ms_params = _build_launch_manuscript_sql(main_pool_only=main_pool_only)
+        manuscripts = int(conn.execute(ms_sql, ms_params).fetchone()["n"])
+        return by_shade, total, manuscripts
+
+    @staticmethod
+    def _copy_launch_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
+        """A DEFENSIVE COPY of a cached launch envelope.
+
+        Every other cached enveloped read gets this for free from
+        `_enveloped_off_loop`'s `cache_name` branch. This read deliberately does
+        NOT go through that branch -- its LRU key carries no path and would
+        cancel the path-aware cache below outright -- so the protection has to
+        live here instead. A cache that hands the same mutable list to every
+        caller produces a WRONG HEADLINE for the next reader and raises nothing.
+        """
+        return {
+            **envelope,
+            "items": [dict(row) for row in envelope.get("items") or ()],
+            "meta": dict(envelope.get("meta") or {}),
+        }
+
+    def get_launch_stats_enveloped(self) -> Dict[str, Any]:
+        """Ruling U's launch statistics, computed from the LOADED artifact.
+
+        `items` is one row per contribution shade in the frozen ruling order,
+        each carrying its identification count and its distinct-manuscript
+        count; `total` is their sum; `meta` carries the basis, the provenance
+        and the context figures. See the module docstring for every basis in SQL
+        terms.
+
+        A failed or unavailable read is an OUTAGE, never `ok` with a zero
+        contribution: a release headline reading "0" during a sidecar failure is
+        the exact defect the envelope exists to prevent.
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        # Resolve the connection FIRST, then key on the path IT resolved.
+        # `_band_measurements` has the right key SHAPE and the wrong ORDER: it
+        # reads `self._last_path` before `_get_conn()` refreshes it, so on the
+        # first call after the artifact moves it keys on the PREVIOUS artifact
+        # and returns the previous artifact's answer. All three local artifacts
+        # report the identical `sidecar_version`, so a version-only key -- and a
+        # stale path read -- both serve one artifact's headline for another.
+        conn = self._get_conn()
+        if conn is None:
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        key = (self._last_path, self._last_version)
+
+        cached = self._launch_stats_cache
+        if cached is not None and cached[0] == key:
+            return self._copy_launch_envelope(cached[1])
+
+        try:
+            main_by_shade, total, main_manuscripts = self._query_launch_contribution(
+                conn, main_pool_only=True)
+            _all_by_shade, all_total, all_manuscripts = self._query_launch_contribution(
+                conn, main_pool_only=False)
+            corpus_manuscripts = int(conn.execute(
+                "SELECT COUNT(DISTINCT sys_id) AS n FROM discovery_identification"
+            ).fetchone()["n"])
+            corpus_pages = int(conn.execute(
+                "SELECT COUNT(DISTINCT page_id) AS n FROM discovery_claim"
+            ).fetchone()["n"])
+            provenance = {
+                row["key"]: row["value"] for row in conn.execute(
+                    "SELECT key, value FROM meta WHERE key IN "
+                    "('sidecar_version', 'audience')").fetchall()
+            }
+        except Exception as e:
+            # Log the exception TYPE only: an artifact-derived value must never
+            # be interpolated into a log line or an exception message.
+            logger.error(
+                "DiscoveryService.get_launch_stats_enveloped failed: %s",
+                type(e).__name__)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+
+        items = [
+            surface_safe_launch_shade({
+                "shade": shade,
+                # A shade the artifact has none of is emitted as a ZERO row, not
+                # omitted: a missing row and a zero row read identically to a
+                # renderer, and only one of them is a fact.
+                "identification_count": main_by_shade.get(shade, (0, 0))[0],
+                "manuscript_count": main_by_shade.get(shade, (0, 0))[1],
+            })
+            for shade in LAUNCH_CONTRIBUTION_SHADES
+        ]
+        envelope = make_envelope(STATUS_OK, items, total, meta={
+            "basis": LAUNCH_BASIS,
+            "sidecar_version": provenance.get("sidecar_version") or self._last_version,
+            "audience": provenance.get("audience"),
+            "main_pool_manuscript_count": main_manuscripts,
+            "all_bucket_total": all_total,
+            "all_bucket_manuscript_count": all_manuscripts,
+            "corpus_manuscript_count": corpus_manuscripts,
+            "corpus_page_count": corpus_pages,
+        })
+        self._launch_stats_cache = (key, envelope)
+        return self._copy_launch_envelope(envelope)
+
     def get_pages_related_to_page(
         self, page_id: str, page: int = 1, page_size: Optional[int] = None,
         include_review: bool = False,
@@ -2544,6 +2816,34 @@ class DiscoveryService:
             self.get_findings_enveloped,
             (unit, bucket, tuple(novelty or ()) or None, domain, author, work_id,
              sort, page, page_size),
+            timeout=self._findings_timeout(), heavy=True,
+        )
+
+    async def get_launch_stats_enveloped_async(self) -> Dict[str, Any]:
+        """The async shape of `get_launch_stats_enveloped` (ruling U).
+
+        Deliberately passes NO `cache_name`, and passes `_findings_timeout()`
+        EXPLICITLY. Both matter, and both read like free optimisations foregone:
+
+        * `_enveloped_off_loop`'s `cache_name` branch delegates to
+          `_browse_cached_call`, whose key is `(cache_name,) + args + (version,)`
+          -- with NO path component -- and which returns the cached envelope
+          BEFORE the wrapped sync callable runs. Layering it above the reader's
+          own `(path, version)` cache would CANCEL that cache outright: after a
+          path switch at a constant `sidecar_version` (the live situation) the
+          outer LRU hits and serves the previous artifact's headline, while the
+          path-aware reader never gets the chance to miss. Every reader-level
+          test still passes, because they exercise the reader directly.
+        * `_browse_cached_call` also ignores the timeout it is handed and
+          applies `self._browse_timeout()` unconditionally, so routing a
+          corpus-scale count through it would silently put it on the browse
+          budget.
+
+        The reader's own cache already makes the repeat call cheap; the outer
+        layer would add only the defect.
+        """
+        return await self._enveloped_off_loop(
+            self.get_launch_stats_enveloped, (),
             timeout=self._findings_timeout(), heavy=True,
         )
 

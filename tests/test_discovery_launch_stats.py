@@ -107,11 +107,15 @@ def _build_launch_db(db_path, rows, *, sidecar_version="test-launch",
             ],
         )
         for i, page_id in enumerate(pages):
+            # Cycle the work so a REPEATED page_id is a distinct
+            # (page_id, work_id) pair -- the repeat is deliberate, and it is
+            # what proves the corpus page figure counts DISTINCT pages rather
+            # than claim rows.
             cur.execute(
                 "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, "
                 "display_evidence_id, source_corpus, sidecar_version) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (page_id, work_ids[0], f"c{i:06d}", "direct_witness",
+                (page_id, work_ids[i % len(work_ids)], f"c{i:06d}", "direct_witness",
                  f"e{i:06d}", "sefaria", sidecar_version),
             )
         meta_rows = [("schema_version", "discovery-v1"),
@@ -353,6 +357,19 @@ def test_switching_the_artifact_path_at_a_constant_version_changes_the_answer(tm
         availability_callable=lambda: True,
         sidecar_version_provider=lambda: "same-version",
     )
+    service.get_launch_stats_enveloped()
+    # WARM THE CACHE UNDER ARTIFACT A'S OWN KEY BEFORE SWITCHING, and do not
+    # remove this second call -- it is what gives this test its power, and that
+    # was established by running the mutation rather than by reasoning about it.
+    #
+    # Under the `_band_measurements` ordering (the cached path attribute read
+    # for BOTH the lookup and the store, before anything refreshes it), the
+    # very first call keys on `(None, None)`, because `self._last_path` has not
+    # been resolved yet. So a single pre-switch call leaves A's answer stored
+    # under a key the post-switch call never asks for, the lookup misses, the
+    # connection refreshes on the way past, and the stale implementation
+    # returns the RIGHT answer. Measured: with one pre-switch call that
+    # mutation PASSES; with two it FAILS on the first post-switch call.
     first = service.get_launch_stats_enveloped()
     assert first["total"] == _EXPECTED_TOTAL
 
@@ -387,7 +404,9 @@ def test_flipping_the_version_at_a_constant_path_recomputes_the_answer(tmp_path)
     assert calls["n"] == 0, "a repeat call at the same (path, version) must hit the cache"
     version["v"] = "v-two"
     service.get_launch_stats_enveloped()
-    assert calls["n"] == 1, "a version flip must MISS the cache"
+    # TWO, not one: a recompute issues the main-pool query and the all-bucket
+    # query, which is the one grouped statement in both of its shapes.
+    assert calls["n"] == 2, "a version flip must MISS the cache"
     assert first["total"] == _EXPECTED_TOTAL
 
 
