@@ -840,3 +840,80 @@ def test_author_key_coverage_is_enforced_against_the_asset():
         assert "1 distinct works.author" in str(exc.value)
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Author-key coverage: the REACHABLE scope, not the shipped scope
+# (Codex code review 2026-08-03, finding 6 -- MEDIUM)
+# ---------------------------------------------------------------------------
+#
+# The check was scoped to works with SHIPPED evidence. Under D-13g a work also
+# reaches a public surface via HUMAN-CONFIRMED evidence, and review-opt-in
+# surfaces return non-shipped works. Those happened to be covered on the live
+# artifacts -- accidentally, never enforced. The test above cannot express the
+# gap: it gives its only work shipped evidence, so the omitted population is
+# unreachable by construction.
+
+def _seed_work_with_evidence(conn, *, work_id, author, routing_status,
+                             adjudication_status, suffix):
+    conn.execute(
+        "INSERT INTO works (work_id, canonical_work_id, neutral_title, author, genre, "
+        "source_corpus, identity_visibility) VALUES "
+        f"('{work_id}','{work_id}','T',?,NULL,'sefaria','public')", (author,))
+    conn.execute(
+        "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, "
+        "display_evidence_id, source_corpus, sidecar_version) VALUES "
+        f"('p{suffix}','{work_id}','c{suffix}','direct_witness','e{suffix}',"
+        "'sefaria','fixture-v1')")
+    conn.execute(
+        "INSERT INTO discovery_evidence (evidence_id, claim_id, evidence_kind, "
+        "evidence_source, confidence_band, adjudication_status, audit_status, "
+        "routing_status, routing_reason, is_new, a_page_id, sys_id, span_start, "
+        "span_end, novelty_status, assertion_visibility) VALUES "
+        f"('e{suffix}','c{suffix}','witness','track1_direct','tier_a',"
+        f"'{adjudication_status}','n/a','{routing_status}','none',0,"
+        f"'p{suffix}','s{suffix}',0,10,'not_checked','public')")
+
+
+def test_human_confirmed_only_work_is_inside_the_coverage_scope():
+    """The case the shipped-only scope could not see: a work whose ONLY evidence
+    is review_only but human_confirmed. D-13g puts it on a public surface, so an
+    author the artifact has never seen must fail -- not pass by luck."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        _seed_work_with_evidence(
+            conn, work_id="w000002", author="Synthetic Author HC",
+            routing_status="review_only", adjudication_status="human_confirmed",
+            suffix="hc")
+        with pytest.raises(sidecar_build.CuratedArtifactError) as exc:
+            sidecar_build.assert_author_key_coverage(conn, {})
+        assert "Synthetic Author HC" not in str(exc.value), "authors must stay withheld"
+        assert "REACHABLE" in str(exc.value)
+
+        stats = sidecar_build.assert_author_key_coverage(
+            conn, {"Synthetic Author HC": {"author": "Synthetic Author HC"}})
+        assert stats["works_author_strings_covered"] == 1
+    finally:
+        conn.close()
+
+
+def test_review_only_unreviewed_work_stays_outside_the_coverage_scope():
+    """The other half of the boundary, so widening the scope did not become
+    'every work in the table'. A review_only + unreviewed work reaches no public
+    surface, so demanding coverage for it would recreate the original scope error
+    -- 12 author strings on the private artifact live only on such works."""
+    conn = sqlite3.connect(":memory:")
+    sidecar_build.create_schema(conn)
+    try:
+        _seed_work_with_evidence(
+            conn, work_id="w000003", author="Synthetic Author RO",
+            routing_status="review_only", adjudication_status="unreviewed",
+            suffix="ro")
+        stats = sidecar_build.assert_author_key_coverage(conn, {})
+        assert stats["works_author_strings_covered"] == 0, (
+            "an unreachable work was pulled into the coverage scope -- this is the "
+            "over-broad direction the 136-13 correction removed"
+        )
+    finally:
+        conn.close()

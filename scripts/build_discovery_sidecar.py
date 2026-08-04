@@ -5123,33 +5123,60 @@ def assert_author_key_coverage(conn: sqlite3.Connection, alias_index: Dict[str, 
 
     The violation message names the COUNT, never the author strings.
 
-    Scope (2026-08-03, 136-13): the check runs over the works the artifact was
-    BUILT from -- `curate_work_domains.load_worklist` is documented as "every
-    CANONICAL work carrying at least one shipped claim", and the artifact's own
-    `counts.canonical_works` records that scope. Scanning ALL of `works`
-    demanded coverage the artifact never claimed to provide (12 author strings
-    live only on works with zero shipped claims), which is a scope error in the
-    CHECK, not drift in the asset. The drift-detection purpose is unchanged and
-    still strict: any author on a SHIPPED work that the artifact has not seen
-    still fails.
+    Scope, in two corrections.
+
+    (2026-08-03, 136-13) The check originally scanned ALL of `works`, demanding
+    coverage the artifact never claimed to provide -- 12 author strings live
+    only on works with zero shipped claims. `curate_work_domains.load_worklist`
+    is documented as "every CANONICAL work carrying at least one shipped claim",
+    so that was a scope error in the CHECK, not drift in the asset.
+
+    (2026-08-04, Codex code review finding 6) But "shipped" was then too narrow
+    in the other direction. Under D-13g a work reaches a public surface if it has
+    shipped evidence **OR** human-confirmed evidence, and review-opt-in surfaces
+    can return non-shipped works. The human-confirmed-only works happened to be
+    covered -- accidentally, not by enforcement.
+
+    The scope is now REACHABILITY, matching `check_works_genre_vocabulary` in the
+    verifier: present in `discovery_identification`, or carrying shipped or
+    human-confirmed evidence. The predicate is mirrored there rather than shared,
+    per the standing independence rule for checks.
+
+    Measured when the scope was widened: reachable and shipped resolve to the
+    SAME author set on both live artifacts (47 public, 96 private), so this
+    costs nothing today. It is the enforcement that changes, not the outcome --
+    a human-confirmed-only work with an uncovered author now fails instead of
+    passing by luck.
     """
+    has_identification = bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_identification'"
+    ).fetchone())
+    reachable_clause = (
+        """EXISTS (SELECT 1 FROM discovery_identification di
+                    WHERE di.canonical_work_id = w.canonical_work_id)
+           OR """ if has_identification else ""
+    )
     authors = {
         r[0] for r in conn.execute(
-            """
+            f"""
             SELECT DISTINCT w.author
               FROM works w
-              JOIN discovery_claim dc ON dc.work_id = w.work_id
-              JOIN discovery_evidence e ON e.claim_id = dc.claim_id
-             WHERE e.routing_status = 'shipped'
-               AND w.author IS NOT NULL AND w.author != ''
+             WHERE w.author IS NOT NULL AND w.author != ''
+               AND ({reachable_clause}
+                    EXISTS (SELECT 1 FROM discovery_claim dc
+                              JOIN discovery_evidence e ON e.claim_id = dc.claim_id
+                             WHERE dc.work_id = w.work_id
+                               AND (e.routing_status = 'shipped'
+                                    OR e.adjudication_status = 'human_confirmed')))
             """)
     }
     uncovered = sorted(a for a in authors if a not in alias_index)
     if uncovered:
         raise CuratedArtifactError(
-            f"{len(uncovered)} distinct works.author value(s) on SHIPPED works are absent "
-            "from the pinned author-alias artifact -- the artifact and the asset were built "
-            "from different work sets (author strings withheld -- masking)"
+            f"{len(uncovered)} distinct works.author value(s) on works REACHABLE from a "
+            "public surface are absent from the pinned author-alias artifact -- the "
+            "artifact and the asset were built from different work sets (author strings "
+            "withheld -- masking)"
         )
     return {"works_author_strings": len(authors), "works_author_strings_covered": len(authors)}
 
