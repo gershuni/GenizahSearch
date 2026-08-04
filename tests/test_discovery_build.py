@@ -2864,13 +2864,18 @@ def test_bench_findings_page_skips_cleanly_against_a_pre_rebuild_asset(tmp_path)
 
 
 def test_bench_findings_page_measures_the_full_combination_space(tmp_path):
-    """AMENDED by plan 136-18: the probe enumerates every ROW UNIT x every SORT
-    MODE x every meaningful FILTER STATE (main pool, the SECOND BUCKET, novelty
-    on, a domain leaf), plus a bounded COUNT per unit against its own separate
-    cap, plus a deep page per unit, plus ruling U's launch-statistics queries --
-    built through the SHIPPED `_build_findings_query`, not a hand-written mirror
-    of it. The six-shape contract this replaces measured one representative
-    query and a relation filter the surface does not offer."""
+    """AMENDED by round 13, finding 4: the FILTER-STATE space is the CARTESIAN
+    PRODUCT the shipped page can put into the shipped builder -- both buckets x
+    every subset of {novelty, domain, author, work} -- not four hand-chosen
+    states. The four-state enumeration left `author`, `work`, every
+    AND-composition and every filtered SECOND-BUCKET combination unmeasured
+    while the report said "the FULL combination space", so a slow reachable
+    query could blow the budget with the gate green.
+
+    The expected label set is DERIVED here from the page's own axis tuple and
+    the service's own unit/sort vocabularies -- never listed -- so an axis added
+    to either side fails this test rather than quietly shrinking the space."""
+    from itertools import combinations
     from shared.discovery_service import FINDINGS_SORTS, FINDINGS_UNITS
     from scripts import bench_discovery
 
@@ -2886,17 +2891,33 @@ def test_bench_findings_page_measures_the_full_combination_space(tmp_path):
     assert result["combinations"] == len(every), (
         "the probe must report the combination count it enumerated")
 
-    # Every unit x every sort is present, in both buckets.
+    # The filter states, derived from the axis tuple rather than listed.
+    axes = bench_discovery._FINDINGS_FILTER_AXES
+    states = [
+        "+".join((stem,) + on)
+        for stem in ("main", "more")
+        for size in range(len(axes) + 1)
+        for on in combinations(axes, size)
+    ]
+    assert len(states) == 2 * (1 << len(axes)) == 32, states
+    assert result["filter_space"]["states"] == len(states)
+    assert tuple(result["filter_space"]["optional_axes"]) == tuple(axes)
+
     for unit in FINDINGS_UNITS:
-        for sort in FINDINGS_SORTS:
-            for state in ("main", "more"):
-                assert f"findings_{unit}_{sort}_{state}" in every
-        assert f"findings_{unit}_visible_total" in every
-        assert f"findings_{unit}_deep_page_2" in every
-    # The SECOND BUCKET and the launch query are both enumerated -- ruling T
-    # makes the former a surface a reader is expected to use, and ruling U makes
-    # the latter the release's headline.
-    assert any(label.endswith("_more") for label in every)
+        for state in states:
+            for sort in FINDINGS_SORTS:
+                assert f"findings_{unit}_{sort}_{state}" in every, (
+                    f"the {unit}/{sort}/{state} combination is not enumerated")
+            assert f"findings_{unit}_visible_total_{state}" in every
+            assert f"findings_{unit}_deep_page_2_{state}" in every
+
+    # The axes the four-state enumeration never reached, named explicitly so a
+    # future narrowing has to delete an assertion that says what it is deleting.
+    for gap in ("main+author", "main+work", "main+novelty+domain",
+                "more+novelty", "more+domain", "more+author", "more+work",
+                "more+novelty+domain+author+work"):
+        assert any(label.endswith("_" + gap) for label in every), gap
+
     assert "findings_launch_contribution_main_pool" in every
     assert "findings_launch_manuscripts_main_pool" in every
     # Combinations the SURFACE cannot issue are NAMED with their reason.
@@ -2922,7 +2943,7 @@ def test_bench_findings_page_measures_the_full_combination_space(tmp_path):
     # The visible TOTAL count carries its OWN, tighter cap -- §5 gives the count
     # and the row fetch separate budgets.
     by_label = {r["label"]: r for r in result["shapes"]}
-    assert (by_label["findings_identification_visible_total"]["cap_ms"]
+    assert (by_label["findings_identification_visible_total_main"]["cap_ms"]
             == bench_discovery.FINDINGS_COUNT_CAP_MS)
     assert (by_label["findings_identification_band_rank_main"]["cap_ms"]
             == bench_discovery.FINDINGS_ORDERING_CAP_MS)
@@ -3016,6 +3037,46 @@ def test_which_shapes_count_is_DERIVED_from_the_shipped_builders(tmp_path):
     assert not bench_discovery._is_scalar_aggregate(grouped_sql)
 
 
+def test_the_probes_filter_axes_are_PINNED_to_the_shipped_predicate_builder():
+    """The one enumeration the probe still owns, pinned to its authority.
+
+    `_FINDINGS_FILTER_AXES` is a tuple in `scripts/bench_discovery.py`; the
+    authority is `shared/discovery_service.py::_build_findings_filter`, whose
+    keyword parameters ARE the page's filter axes. If a filter is added there
+    (a library filter is the one D-16 leaves open) and the probe's tuple is not
+    updated, the combination space silently narrows again while the report still
+    says "the FULL combination space" -- which is round 13's finding 4 verbatim.
+
+    `unit` and `bucket` are excluded because neither is optional: `unit` is a
+    grain the probe crosses separately, and `bucket` is the state's stem."""
+    import inspect
+    from scripts import bench_discovery
+    from shared.discovery_service import _build_findings_filter
+
+    authority = tuple(
+        name for name in inspect.signature(_build_findings_filter).parameters
+        if name not in ("unit", "bucket")
+    )
+    probe = tuple(
+        "work_id" if axis == "work" else axis
+        for axis in bench_discovery._FINDINGS_FILTER_AXES
+    )
+    assert probe == authority, (
+        f"the probe enumerates {probe} while `_build_findings_filter` accepts "
+        f"{authority}. Add the axis to `_FINDINGS_FILTER_AXES` (and to the "
+        "coherent per-bucket pick) rather than leaving the benchmark measuring "
+        "a smaller space than the page can reach.")
+
+    # ...and the page really does hand every one of them to the builder.
+    page_src = Path("web/pages/findings.py").read_text(encoding="utf-8")
+    call = page_src[page_src.index("async def fetch_findings"):]
+    call = call[: call.index("\n\n")]
+    for axis in authority:
+        assert f"{axis}=" in call, (
+            f"web/pages/findings.py::fetch_findings does not pass {axis!r}; the "
+            "probe's claim about which axes the page can set has gone stale")
+
+
 def test_bench_findings_page_aborts_when_a_COUNT_shape_counts_zero(tmp_path, monkeypatch):
     """The measured-population assertion, end to end.
 
@@ -3081,11 +3142,18 @@ def _fake_findings_result():
         "artifact": {"basename": "discovery-v1-synthetic.db", "audience": "public",
                      "sidecar_version": "discovery-v1-real", "data_as_of": "2026-08-03",
                      "size_mb": 375.5},
+        "filter_space": {"buckets": ("main", "more"),
+                         "optional_axes": ("novelty", "domain", "author", "work"),
+                         "states": 32},
         "shapes": [
             {"label": "findings_default_ordering", "kind": "ordering",
-             "cap_ms": 1500.0, "rows": 50, "p50_ms": 41.2, "p95_ms": 58.9, "max_ms": 61.0},
+             "cap_ms": 1500.0, "rows": 50, "population": 50,
+             "p50_ms": 41.2, "p95_ms": 58.9, "max_ms": 61.0},
+            # A count shape: ONE result row, a population of 64,522. Recording
+            # the row count here is the round-13 finding-3 defect.
             {"label": "findings_visible_total", "kind": "count",
-             "cap_ms": 500.0, "rows": 1, "p50_ms": 3.1, "p95_ms": 4.4, "max_ms": 4.9},
+             "cap_ms": 500.0, "rows": 1, "population": 64522,
+             "p50_ms": 3.1, "p95_ms": 4.4, "max_ms": 4.9},
         ],
         "skipped_shapes": [{"label": "findings_domain_filter", "reason": "works.genre is NULL"}],
         "out_of_scope": [],
@@ -3107,7 +3175,12 @@ def test_write_budgets_records_findings_actuals_and_never_edits_a_cap():
     block = bench_discovery._findings_actuals_block(_fake_findings_result())
     updated = bench_discovery._upsert_findings_block(original, block)
 
-    assert "| Combination | Cap | p50 | p95 | max | Rows | Result |" in updated
+    assert "| Combination | Cap | p50 | p95 | max | Population | Result |" in updated
+    # The recorded figure for a COUNT shape is what it COUNTED, never the one
+    # row an aggregate always returns (round 13, finding 3).
+    assert "| 64522 | PASS" in updated and "| 1 | PASS" not in updated
+    # ...and the block says what "full" means rather than claiming it.
+    assert "32 filter states" in updated
     assert "`findings_default_ordering`" in updated and "58.90 ms" in updated
     # Plan 136-18: every recorded number names the ARTIFACT and AUDIENCE it came
     # from -- the public projection and the private rebuild are different

@@ -323,6 +323,77 @@ def pick_findings_filters(conn: sqlite3.Connection) -> Dict[str, Any]:
         "WHERE w.genre IS NOT NULL AND w.genre != '' AND {predicate} "
         "GROUP BY w.genre ORDER BY n DESC",
     )
+    out["buckets"] = {
+        bucket: _coherent_bucket_pick(
+            conn, main_pool=(bucket == "main"), prefer_novelty=out["novelty_status"])
+        for bucket in ("main", "more")
+    }
+    return out
+
+
+def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
+                          prefer_novelty: Optional[str]) -> Dict[str, Any]:
+    """One representative identification per bucket -- domain, author and work
+    taken from the SAME row, plus a novelty status present in that bucket.
+
+    Picked together rather than axis by axis on purpose. A globally-frequent
+    genre, a globally-frequent author and a heavy work chosen INDEPENDENTLY need
+    not co-occur on any identification, and their AND-composition then measures
+    nothing while looking measured -- the same class of defect as recording a
+    count of zero as a pass. The work chosen is the HEAVIEST one satisfying the
+    other preferences, so a work-filtered timing is a worst case rather than a
+    lucky singleton.
+
+    The preference order is stated in the ORDER BY: a work carrying rows in the
+    candidate novelty status first (that switch is the page's headline), then
+    one with a domain, then one with an author, then the heaviest.
+
+    EVERY returned value is present in THIS bucket, which is what lets a
+    single-axis filter state keep F14's loud abort: if such a state measures
+    nothing, the probe picked a value the asset does not have, and that is a
+    probe bug rather than an asset fact. Only the CO-OCCURRENCE of two or more
+    axes is an asset fact, and only that is settled by an EXISTS probe.
+    """
+    bucket_sql = "di.main_pool = 1" if main_pool else "di.main_pool = 0"
+    out: Dict[str, Any] = {"work_id": None, "domain": None, "author": None,
+                           "novelty_status": None}
+    try:
+        row = conn.execute(
+            f"""
+            SELECT di.display_work_id AS work_id,
+                   w.genre            AS genre,
+                   w.author           AS author,
+                   SUM(CASE WHEN di.novelty_status = ? THEN 1 ELSE 0 END) AS candidates,
+                   COUNT(*)           AS n
+            FROM discovery_identification di
+            JOIN works w ON w.work_id = di.display_work_id
+            WHERE {bucket_sql}
+            GROUP BY di.display_work_id
+            ORDER BY (candidates > 0) DESC,
+                     (w.genre IS NOT NULL AND w.genre != '') DESC,
+                     (w.author IS NOT NULL AND w.author != '') DESC,
+                     n DESC
+            LIMIT 1
+            """,
+            (prefer_novelty,),
+        ).fetchone()
+        # The novelty status is picked for the BUCKET, not globally: the
+        # candidate status the page's headline switch selects may be absent from
+        # one bucket while present in the other, and a globally-picked value
+        # would make every novelty state in that bucket measure nothing.
+        statuses = conn.execute(
+            f"SELECT di.novelty_status, COUNT(*) n FROM discovery_identification di "
+            f"WHERE {bucket_sql} AND di.novelty_status IS NOT NULL "
+            f"AND di.novelty_status != '' GROUP BY di.novelty_status ORDER BY n DESC"
+        ).fetchall()
+    except sqlite3.Error:                                    # pragma: no cover
+        return out
+    if row is not None:
+        out.update({"work_id": row[0], "domain": row[1] or None,
+                    "author": row[2] or None})
+    preferred = [s for s in statuses if s[0] == prefer_novelty]
+    if preferred or statuses:
+        out["novelty_status"] = (preferred or statuses)[0][0]
     return out
 
 
@@ -451,6 +522,51 @@ _FINDINGS_OUT_OF_SCOPE: Tuple[Tuple[str, str], ...] = (
 )
 
 
+#: The page's own filter axes, in the order a label spells them. The BUCKET is
+#: the fifth and is spelled as the label's stem because it is the one axis with
+#: no "off" -- a reader is always in one bucket or the other.
+#:
+#: This tuple IS the space. `web/pages/findings.py::fetch_findings` hands
+#: `_build_findings_query` exactly `bucket`, `novelty`, `domain`, `author` and
+#: `work_id` out of the persisted page state, each independently settable, and
+#: `_build_findings_filter` composes them as AND. Enumerating four hand-chosen
+#: states out of that (main / more / novelty-on-main / domain-on-main) left
+#: `author`, `work`, every AND-composition and every filtered SECOND-BUCKET
+#: combination unmeasured, while the report said "the FULL combination space"
+#: (code review round 13, finding 4).
+_FINDINGS_FILTER_AXES: Tuple[str, ...] = ("novelty", "domain", "author", "work")
+
+
+def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
+                            ) -> List[Tuple[str, str, Dict[str, Any], Tuple[str, ...]]]:
+    """`(bucket stem, label, builder kwargs, axes on)` for the WHOLE space.
+
+    Both buckets x every subset of the four optional axes = 2 x 2**4 = 32
+    states. Nothing is chosen here; the cartesian product is generated, and
+    whether a given state has rows in THIS asset is settled afterwards.
+    """
+    from shared.discovery_service import BUCKET_MAIN, BUCKET_MORE
+
+    states: List[Tuple[str, str, Dict[str, Any], Tuple[str, ...]]] = []
+    for stem, bucket in (("main", BUCKET_MAIN), ("more", BUCKET_MORE)):
+        pick = picks.get(stem) or {}
+        novelty_value = pick.get("novelty_status")
+        for mask in range(1 << len(_FINDINGS_FILTER_AXES)):
+            on = tuple(axis for i, axis in enumerate(_FINDINGS_FILTER_AXES)
+                       if mask & (1 << i))
+            kwargs: Dict[str, Any] = {"bucket": bucket}
+            if "novelty" in on:
+                kwargs["novelty"] = [novelty_value] if novelty_value else None
+            if "domain" in on:
+                kwargs["domain"] = pick.get("domain")
+            if "author" in on:
+                kwargs["author"] = pick.get("author")
+            if "work" in on:
+                kwargs["work_id"] = pick.get("work_id")
+            states.append((stem, "+".join((stem,) + on), kwargs, on))
+    return states
+
+
 def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
                                 filters: Dict[str, Any], total_rows: int
                                 ) -> List[Dict[str, Any]]:
@@ -461,17 +577,29 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
     `DiscoveryService.get_findings_enveloped` calls, so the two can no longer
     diverge -- which is what a benchmark measuring a near-copy cannot promise.
 
-    Enumerated: every ROW UNIT x every SORT MODE x every meaningful FILTER STATE
-    (main pool, the SECOND BUCKET, novelty on, a domain leaf selected), plus the
-    bounded COUNT query per unit against its own separate cap, plus a deep page
-    per unit, plus ruling U's launch-statistics queries.
+    Enumerated:
+
+    * every ROW UNIT x every SORT MODE x every FILTER STATE, where the filter
+      state space is the cartesian product `_findings_filter_states` generates
+      -- BOTH buckets x every subset of {novelty, domain, author, work}, 32
+      states, AND-composed exactly as the page composes them;
+    * the bounded COUNT per unit x filter state, against its own separate cap;
+    * a DEEP PAGE per unit x filter state, measured wherever that state really
+      carries enough rows to have one (decided by the state's own count, never
+      by an assertion that a filtered set "must be smaller");
+    * ruling U's launch-statistics queries.
+
+    A state that this asset has no rows for is a NAMED SKIP carrying the exact
+    combination it lacked. A state that HAS rows and measures zero stays the
+    loud F14 abort -- that one is a probe bug, not an asset fact.
     """
     from shared.discovery_service import (
-        BUCKET_MAIN,
-        BUCKET_MORE,
         FINDINGS_SORTS,
+        FINDINGS_UNIT_IDENTIFICATION,
         FINDINGS_UNIT_WORK,
         FINDINGS_UNITS,
+        _FINDINGS_FROM,
+        _build_findings_filter,
         _build_findings_query,
         _build_launch_contribution_sql,
         _build_launch_manuscript_sql,
@@ -479,14 +607,21 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
 
     units = sorted(FINDINGS_UNITS)
     sorts = sorted(FINDINGS_SORTS)
-    novelty = [filters["novelty_status"]] if filters["novelty_status"] else None
-    domain = filters["domain"]
+    # Backward compatibility with a caller (or a test) that supplies only the
+    # flat pre-round-13 filter dict: fall back to the single global domain and
+    # novelty status with no author/work pick, so those axes become named skips
+    # rather than crashing -- and so a deliberately bogus flat value still
+    # reaches the F14 abort through a single-axis state.
+    picks = filters.get("buckets") or {
+        stem: {"domain": filters.get("domain"), "author": None, "work_id": None,
+               "novelty_status": filters.get("novelty_status")}
+        for stem in ("main", "more")
+    }
 
     def _population(where: str, params: Tuple[Any, ...] = ()) -> int:
         """How many identifications this asset carries for a POPULATION.
 
-        Used only for populations that are properties of the ASSET (which
-        buckets it has rows in; whether it carries any contribution shade), so a
+        Used only for populations that are properties of the ASSET, so a
         combination that cannot exist here is a NAMED SKIP. A zero row count on
         a combination whose filter value was PICKED from this same asset stays
         the loud abort F14 requires -- that one is a probe bug, not an asset
@@ -504,98 +639,161 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         "more": _population("di.main_pool = 0"),
     }
 
-    filter_states: List[Tuple[str, Dict[str, Any], Optional[str]]] = [
-        ("main", {"bucket": BUCKET_MAIN},
-         None if bucket_population["main"] else
-         "this asset carries no main-pool identifications"),
-        # Ruling T: the second bucket is a FIRST-CLASS benchmarked state, not an
-        # afterthought. It is roughly the same order of magnitude as the main
-        # pool and a reader is expected to use it.
-        ("more", {"bucket": BUCKET_MORE},
-         None if bucket_population["more"] else
-         "this asset carries no second-bucket identifications"),
-        ("novelty", {"bucket": BUCKET_MAIN, "novelty": novelty},
-         None if (novelty and bucket_population["main"])
-         else "no novelty_status value present in this asset's main pool"),
-        ("domain", {"bucket": BUCKET_MAIN, "domain": domain},
-         None if (domain and bucket_population["main"]) else (
-             "works.genre carries no value in this asset's main pool, so the "
-             "domain facet has nothing to filter on")),
-    ]
+    def _state_skip(stem: str, kwargs: Dict[str, Any],
+                    on: Tuple[str, ...]) -> Optional[str]:
+        """Why this filter state cannot be measured on THIS asset, or None.
+
+        Four questions, in order, and the LAST one is where F14's teeth stay.
+
+        1. Does the asset carry identifications at all?
+        2. Does this BUCKET carry any? (Ruling T makes the second bucket a
+           first-class surface, but an asset may still have none.)
+        3. Does every axis the state turns on have a VALUE in this bucket -- a
+           novelty status, a curated `works.genre`, an author?
+        4. For TWO OR MORE axes, do those values CO-OCCUR on some row?
+
+        Question 4 is answered by an EXISTS probe built from the SHIPPED
+        predicate rather than reasoned about. It is asked ONLY of multi-axis
+        states, deliberately: every value comes from `_coherent_bucket_pick`,
+        which draws it from THIS bucket, so a single-axis state that matches
+        nothing means the probe picked a value the asset does not have. That is
+        a PROBE BUG and must stay the loud F14 abort -- turning it into a quiet
+        skip is exactly how a benchmark comes to measure less than it claims.
+        Only co-occurrence is an asset fact.
+        """
+        if not total_rows:
+            return "the asset carries no identifications"
+        if not bucket_population.get(stem):
+            return ("this asset carries no main-pool identifications"
+                    if stem == "main" else
+                    "this asset carries no second-bucket identifications")
+        keys = {"novelty": "novelty", "domain": "domain",
+                "author": "author", "work": "work_id"}
+        missing = [axis for axis in on if not kwargs.get(keys[axis])]
+        if missing:
+            return (f"this asset offers no value for the {', '.join(missing)} "
+                    f"filter in the {stem} bucket, so that combination cannot be "
+                    "issued against it")
+        if len(on) <= 1:
+            return None
+        # The identification grain, deliberately: the predicate is the same at
+        # every unit (the units differ only in grouping, and grouping >=1 row
+        # never yields zero groups), and `novelty` is rejected outright on the
+        # per-work unit by the builder.
+        where_sql, params = _build_findings_filter(
+            unit=FINDINGS_UNIT_IDENTIFICATION, **kwargs)
+        try:
+            found = conn.execute(
+                f"SELECT 1 {_FINDINGS_FROM} {where_sql} LIMIT 1", params).fetchone()
+        except sqlite3.Error:                                # pragma: no cover
+            found = None
+        if found is None:
+            return (f"each of {', '.join(on)} has a value in the {stem} bucket, "
+                    "but this asset carries no identification where they hold "
+                    "TOGETHER")
+        return None
+
+    filter_states = _findings_filter_states(picks)
+    state_skips = {label: _state_skip(stem, kwargs, on)
+                   for stem, label, kwargs, on in filter_states}
+
+    _WORK_UNIT_NOVELTY_SKIP = (
+        "novelty is not offered on the per-work unit -- a work spanning many "
+        "manuscripts has no single verdict, and the service RAISES rather than "
+        "returning an envelope")
 
     specs: List[Dict[str, Any]] = []
     for unit in units:
+        # The count AT THIS UNIT for each filter state: it decides both the
+        # visible-total spec and whether that state has a deep page at all. One
+        # query, two uses -- the depth bound is never taken from a different
+        # grain (the per-work unit groups ~1,000x fewer rows, so a bound from
+        # the identification grain claims deep paging is measurable for a unit
+        # whose whole result set fits on page 13).
+        unit_rows: Dict[str, int] = {}
+        for _stem, label, kwargs, on in filter_states:
+            if state_skips[label] or (unit == FINDINGS_UNIT_WORK and "novelty" in on):
+                continue
+            count_sql, count_params = _build_findings_query(
+                unit=unit, count_only=True, **kwargs)
+            try:
+                unit_rows[label] = int(conn.execute(count_sql, count_params).fetchone()[0])
+            except sqlite3.Error:                            # pragma: no cover
+                unit_rows[label] = 0
+
         for sort in sorts:
-            for state, kwargs, skip in filter_states:
-                label = f"findings_{unit}_{sort}_{state}"
-                if state == "novelty" and unit == FINDINGS_UNIT_WORK:
+            for _stem, label, kwargs, on in filter_states:
+                spec_label = f"findings_{unit}_{sort}_{label}"
+                if unit == FINDINGS_UNIT_WORK and "novelty" in on:
                     specs.append({
-                        "label": label, "kind": "ordering",
+                        "label": spec_label, "kind": "ordering",
                         "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "", "params": (),
-                        "skip": "novelty is not offered on the per-work unit -- a "
-                                "work spanning many manuscripts has no single "
-                                "verdict, and the service RAISES rather than "
-                                "returning an envelope",
+                        "skip": _WORK_UNIT_NOVELTY_SKIP,
                     })
                     continue
-                if skip:
-                    specs.append({"label": label, "kind": "ordering",
+                if state_skips[label]:
+                    specs.append({"label": spec_label, "kind": "ordering",
                                   "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "",
-                                  "params": (), "skip": skip})
+                                  "params": (), "skip": state_skips[label]})
                     continue
                 sql, params = _build_findings_query(
                     unit=unit, sort=sort, page=1, page_size=page_size, **kwargs)
                 specs.append({
-                    "label": label, "kind": "ordering",
+                    "label": spec_label, "kind": "ordering",
                     "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": sql, "params": params,
-                    "skip": None if total_rows else "the asset carries no identifications",
+                    "skip": None,
                 })
 
         # Deep paging -- where an ordering index earns its keep, and the shape a
-        # spot check at page 1 will never expose.
-        #
-        # The depth bound is the count AT THIS UNIT, not the identification
-        # count: the per-work unit groups ~1,000x fewer rows, so a bound taken
-        # from the identification grain says "deep paging is measurable" for a
-        # unit whose whole result set fits on page 13. The nonzero-result
-        # discipline caught exactly that.
-        count_sql, count_params = _build_findings_query(
-            unit=unit, bucket=BUCKET_MAIN, count_only=True)
-        try:
-            unit_rows = int(conn.execute(count_sql, count_params).fetchone()[0])
-        except sqlite3.Error:                                # pragma: no cover
-            unit_rows = 0
-        sql, params = _build_findings_query(
-            unit=unit, bucket=BUCKET_MAIN, page=deep_page, page_size=page_size)
-        specs.append({
-            "label": f"findings_{unit}_deep_page_{deep_page}", "kind": "ordering",
-            "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": sql, "params": params,
-            "skip": None if unit_rows > (deep_page - 1) * page_size else (
-                f"the {unit} unit carries only {unit_rows} rows in the main pool "
-                f"-- fewer than the page-{deep_page} offset, so deep paging cannot "
-                "be measured on a nonzero result set"),
-        })
+        # spot check at page 1 will never expose. Enumerated for EVERY filter
+        # state; whether a state is deep enough is read off its own count.
+        for _stem, label, kwargs, on in filter_states:
+            spec_label = f"findings_{unit}_deep_page_{deep_page}_{label}"
+            if unit == FINDINGS_UNIT_WORK and "novelty" in on:
+                specs.append({"label": spec_label, "kind": "ordering",
+                              "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "",
+                              "params": (), "skip": _WORK_UNIT_NOVELTY_SKIP})
+                continue
+            if state_skips[label]:
+                specs.append({"label": spec_label, "kind": "ordering",
+                              "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "",
+                              "params": (), "skip": state_skips[label]})
+                continue
+            available = unit_rows.get(label, 0)
+            sql, params = _build_findings_query(
+                unit=unit, page=deep_page, page_size=page_size, **kwargs)
+            specs.append({
+                "label": spec_label, "kind": "ordering",
+                "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": sql, "params": params,
+                "skip": None if available > (deep_page - 1) * page_size else (
+                    f"the {unit} unit carries only {available} rows under that "
+                    f"filter state -- fewer than the page-{deep_page} offset, so "
+                    "deep paging cannot be measured on a nonzero result set"),
+            })
 
-        # The visible COUNT, against its own SEPARATE cap (§5). Measured in the
-        # bounded form the surface issues when DISCOVERY_FINDINGS_COUNT_MAX is
+        # The visible COUNT, against its own SEPARATE cap (§5), for every filter
+        # state -- the page issues it for whichever state is active. Measured in
+        # the bounded form the surface uses when DISCOVERY_FINDINGS_COUNT_MAX is
         # set; with the knob off the total rides on COUNT(*) OVER () inside the
         # ordering query above and costs no second statement.
-        sql, params = _build_findings_query(
-            unit=unit, bucket=BUCKET_MAIN, count_only=True)
-        specs.append({
-            "label": f"findings_{unit}_visible_total", "kind": "count",
-            "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": sql, "params": params,
-            # The MAIN-POOL population, not the identification total: this shape
-            # counts the main bucket, so an asset with rows only in the second
-            # bucket makes it count zero. It used to be measured anyway and
-            # recorded as a pass, because a COUNT returns one row whatever it
-            # counts -- the same asset fact the ordering states above already
-            # treat as a named skip (round 13, finding 3).
-            "skip": None if (total_rows and bucket_population["main"]) else (
-                "the asset carries no identifications" if not total_rows else
-                "this asset carries no main-pool identifications, so the visible "
-                "total of the main bucket has nothing to count"),
-        })
+        for _stem, label, kwargs, on in filter_states:
+            spec_label = f"findings_{unit}_visible_total_{label}"
+            if unit == FINDINGS_UNIT_WORK and "novelty" in on:
+                specs.append({"label": spec_label, "kind": "count",
+                              "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": "",
+                              "params": (), "skip": _WORK_UNIT_NOVELTY_SKIP})
+                continue
+            if state_skips[label]:
+                specs.append({"label": spec_label, "kind": "count",
+                              "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": "",
+                              "params": (), "skip": state_skips[label]})
+                continue
+            sql, params = _build_findings_query(unit=unit, count_only=True, **kwargs)
+            specs.append({
+                "label": spec_label, "kind": "count",
+                "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": sql, "params": params,
+                "skip": None,
+            })
 
     # Ruling U's launch statistics -- both halves of the one grouped statement,
     # plus the distinct-manuscript count that is NOT derivable by summing them.
@@ -637,16 +835,21 @@ def bench_findings_page(
 ) -> Dict[str, Any]:
     """Measure the FULL corpus-wide findings combination space.
 
-    Every ROW UNIT x every SORT MODE x every meaningful FILTER STATE (main pool,
-    the SECOND BUCKET, novelty on, a domain leaf), plus the bounded count query
-    per unit against its own separate cap, plus a deep page per unit, plus
-    ruling U's launch-statistics queries -- all built through the SHIPPED
-    `_build_findings_query`, never a hand-written mirror of it.
+    The space is the cartesian product the SHIPPED page can put into the SHIPPED
+    builder: every ROW UNIT x every SORT MODE x every FILTER STATE, where a
+    filter state is BOTH buckets x every subset of {novelty, domain, author,
+    work} -- `web/pages/findings.py::fetch_findings` hands all five to
+    `_build_findings_query` out of the persisted page state and
+    `_build_findings_filter` composes them as AND. Plus the bounded COUNT and a
+    DEEP PAGE for each of those states, plus ruling U's launch-statistics
+    queries. Everything is built through `_build_findings_query`, never a
+    hand-written mirror of it.
 
-    Every combination asserts a NONZERO row count before its timing is recorded,
-    and a combination whose live filter value or page depth does not exist in
-    this asset is SKIPPED with a stated reason rather than measured as an empty
-    no-op. Combinations the SURFACE cannot issue are named with their reason too.
+    Every combination asserts a nonzero measured POPULATION before its timing is
+    recorded (result rows for a row query, the counted VALUE for an aggregate),
+    and a combination this asset has no rows for is SKIPPED with the exact
+    combination it lacked rather than measured as an empty no-op. Combinations
+    the SURFACE cannot issue are named with their reason too.
 
     Returns a structured result; the caller decides the exit code. Caps are READ
     from docs/specs/discovery-budgets.md §5 and never rewritten here."""
@@ -721,6 +924,13 @@ def bench_findings_page(
             "filters": filters,
             "page_size": page_size,
             "deep_page": deep_page,
+            # WHAT "full" means here, recorded rather than claimed in prose: the
+            # axes the shipped page can set and the size of their product.
+            "filter_space": {
+                "buckets": ("main", "more"),
+                "optional_axes": _FINDINGS_FILTER_AXES,
+                "states": 2 * (1 << len(_FINDINGS_FILTER_AXES)),
+            },
             "combinations": len(specs),
             "shapes": shapes,
             "skipped_shapes": skipped_shapes,
@@ -752,6 +962,11 @@ def report_findings_page(result: Dict[str, Any]) -> None:
 
     print(f"identifications  : {result['identifications']}")
     print(f"filters in use   : {result['filters']}")
+    space = result.get("filter_space") or {}
+    if space:
+        print(f"filter space     : {len(space['buckets'])} buckets x every subset "
+              f"of {list(space['optional_axes'])} = {space['states']} states, "
+              "AND-composed as the page composes them")
     print(f"combinations     : {result['combinations']} enumerated, "
           f"{len(result['shapes'])} measured, "
           f"{len(result['skipped_shapes'])} skipped, "
@@ -759,12 +974,12 @@ def report_findings_page(result: Dict[str, Any]) -> None:
     # `pop.` is the population the nonzero-result assertion actually tested:
     # result rows for a row query, the COUNTED VALUE for an aggregate. Printing
     # the row count for an aggregate reads as "1 row, fine" for a count of zero.
-    print(f"{'combination':<46}{'pop.':>8}{'p50 ms':>9}{'p95 ms':>9}"
+    print(f"{'combination':<70}{'pop.':>8}{'p50 ms':>9}{'p95 ms':>9}"
           f"{'max ms':>9}{'cap ms':>8}  result")
     for r in result["shapes"]:
         verdict = "FAIL" if r in result["failures"] else "PASS"
         print(
-            f"{r['label']:<46}{r['population']:>8}{r['p50_ms']:>9.2f}{r['p95_ms']:>9.2f}"
+            f"{r['label']:<70}{r['population']:>8}{r['p50_ms']:>9.2f}{r['p95_ms']:>9.2f}"
             f"{r['max_ms']:>9.2f}{r['cap_ms']:>8.0f}  {verdict}"
         )
     for s in result["skipped_shapes"]:
@@ -1073,6 +1288,7 @@ def _findings_actuals_block(findings: Optional[Dict[str, Any]]) -> str:
         )
 
     artifact = findings.get("artifact") or {}
+    space = findings.get("filter_space") or {}
     lines = [
         "### 4.4 Corpus-wide findings page (§5 caps) — the FULL combination space, measured\n",
         "",
@@ -1082,7 +1298,25 @@ def _findings_actuals_block(findings: Optional[Dict[str, Any]]) -> str:
         f"deep page {findings['deep_page']}. "
         f"**{findings.get('combinations', 0)} combinations enumerated, "
         f"{len(findings['shapes'])} measured.** Every combination asserted a "
-        "NONZERO row count before its timing was recorded.",
+        "NONZERO measured population before its timing was recorded.",
+        "",
+        "**What \"full\" means, stated rather than claimed.** The filter space is "
+        "the cartesian product the shipped page can put into the shipped builder: "
+        + " × ".join([
+            f"{len(space['buckets'])} buckets ({', '.join(space['buckets'])})",
+            "every subset of {" + ", ".join(space["optional_axes"]) + "}",
+        ])
+        + f" = **{space['states']} filter states**, AND-composed. "
+        "`web/pages/findings.py::fetch_findings` hands `bucket`, `novelty`, "
+        "`domain`, `author` and `work_id` to `_build_findings_query` out of the "
+        "persisted page state, each independently settable, and "
+        "`_build_findings_filter` composes them with `AND`. Each state is crossed "
+        "with every ROW UNIT and every SORT MODE for the ordering query, and with "
+        "every ROW UNIT for the bounded COUNT and for a deep page. A state this "
+        "asset has no rows for is a named skip carrying the combination it "
+        "lacked — decided by an `EXISTS` probe against the shipped predicate, "
+        "never by an argument that some combination \"must\" be unreachable."
+        if space else "",
         "",
         "**Artifact, audience and host** — a timing without its artifact is not "
         "comparable to the next one, because the public projection and the "
