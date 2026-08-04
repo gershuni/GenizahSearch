@@ -7,8 +7,10 @@ Modeled on the established ``shared/*_service.py`` sidecar-service shape
 reads + a ``meta`` version accessor) composed with the off-event-loop async
 pattern already proven in ``web/search_api.py`` (``run_in_executor`` +
 ``asyncio.wait`` -- NEVER ``asyncio.wait_for`` over ``run_in_executor``,
-since executor threads are not cancellable -- plus a non-blocking bounded
-concurrency semaphore for heavy queries).
+since executor threads are not cancellable -- plus non-blocking bounded
+concurrency semaphores: one budget for heavy corpus-wide queries and a
+separate, larger one for the per-page browse path. EVERY executor crossing
+takes one of the two; there is no unbounded dispatch.
 
 Key invariants (134-06 must_haves):
   - ``__init__`` takes INJECTED LAZY providers (``path_provider``,
@@ -26,10 +28,13 @@ Key invariants (134-06 must_haves):
     ``loop.run_in_executor(...)`` wrapped in ``asyncio.wait({fut},
     timeout=...)`` (never ``wait_for``); a timeout raises
     ``DiscoveryUnavailable`` WITHOUT awaiting the abandoned future.
-  - Heavy reads (``get_work_witnesses``) acquire a non-blocking bounded
-    semaphore; the slot is released from the future's ``add_done_callback``
-    (never a bare ``finally``) so a timed-out thread cannot re-admit new
-    heavy work until it truly finishes (DC6).
+  - EVERY read acquires a non-blocking bounded semaphore before its executor
+    crossing -- the HEAVY budget for corpus-wide reads
+    (``get_work_witnesses``, findings, facets, launch stats, the per-work
+    expansion), the BROWSE budget for everything else. The slot is released
+    from the future's ``add_done_callback`` (never a bare ``finally``) so a
+    timed-out thread cannot re-admit new work until it truly finishes (DC6).
+    A cache HIT takes no slot, because it runs no query.
   - The browse-enrichment reads (``get_claims_for_page`` /
     ``get_pages_related_to_page``) are wrapped in a small bounded LRU keyed
     INCLUDING the sidecar version, so a version swap never serves stale
@@ -145,6 +150,19 @@ logger = logging.getLogger(__name__)
 _DEFAULT_QUERY_TIMEOUT_BROWSE = 2.0
 _DEFAULT_QUERY_TIMEOUT_WORK = 5.0
 _DEFAULT_MAX_CONCURRENT_QUERIES = 4
+#: The BROWSE-path bound, separate from the heavy one and deliberately larger.
+#:
+#: Both are the same non-blocking fast-fail shape; only the number differs, and
+#: the number has to differ. The heavy cap of 4 is sized for corpus-wide
+#: queries that a caller issues ONE of. A cold connections-panel load issues
+#: THREE reads concurrently and then a fourth, so a cap of 4 would put the
+#: SECOND simultaneous browse visitor into `busy` -- a self-inflicted outage on
+#: an already-shipped page, which is not what "bounded" is for. 24 admits eight
+#: concurrent cold panel loads while still standing between a retry burst and
+#: the process-wide `run_in_executor` threadpool (~32 workers, shared with
+#: Supabase, NLI and the browse page's own four enrichment fetches). Warm loads
+#: cost NO slot at all: the version-keyed LRU returns before any dispatch.
+_DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES = 24
 _DEFAULT_BROWSE_LRU_MAX_ENTRIES = 5000
 _DEFAULT_PAGE_SIZE_DEFAULT = 50
 _DEFAULT_PAGE_SIZE_MAX = 200
@@ -1284,6 +1302,15 @@ class DiscoveryService:
         )
         self._heavy_sem = asyncio.Semaphore(capacity)
         self._heavy_capacity = capacity
+
+        # The BROWSE-path bound. EVERY executor crossing takes one of these two
+        # slots -- there is no unbounded dispatch left (see `_run_off_loop`).
+        browse_capacity = _get_positive_int_env(
+            "DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES",
+            _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES,
+        )
+        self._browse_sem = asyncio.Semaphore(browse_capacity)
+        self._browse_capacity = browse_capacity
 
     # ------------------------------------------------------------------
     # Lazy connection management (F15 / R8)
@@ -2536,26 +2563,53 @@ class DiscoveryService:
         )
 
     # ------------------------------------------------------------------
-    # Heavy-query bounded concurrency (mirrors web/search_api.py's
-    # _acquire_heavy_slot exactly -- non-blocking; raises DiscoveryOverload
-    # immediately when full; release is the caller's responsibility, always
-    # wired to a future's add_done_callback, never a bare finally).
+    # Bounded concurrency (mirrors web/search_api.py's _acquire_heavy_slot
+    # exactly -- non-blocking; raises DiscoveryOverload immediately when full;
+    # release is the caller's responsibility, always wired to a future's
+    # add_done_callback, never a bare finally).
+    #
+    # TWO budgets, and EVERY executor crossing takes one of them:
+    #
+    #   heavy  -- corpus-wide queries (findings, facets, launch stats, work
+    #             witnesses, the per-work expansion). `DISCOVERY_MAX_CONCURRENT_QUERIES`,
+    #             default 4, the figure docs/specs/discovery-budgets.md SS2 fixes.
+    #   browse -- everything else, which is the per-page connections-panel path.
+    #             `DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES`, default 24.
+    #
+    # Until code review round 12 the browse path took NO slot: `heavy` defaults
+    # to False and no browse caller passed it, so "bounded concurrency" was a
+    # documented property the code did not have. The consequence was not merely
+    # cosmetic -- `run_in_executor` threads are NOT cancellable, so a timed-out
+    # read keeps its threadpool worker until the query itself finishes, and an
+    # unbounded retry burst could sustain a backlog on a single-uvicorn-worker
+    # server instead of failing fast as `busy`.
     # ------------------------------------------------------------------
 
-    async def _acquire_heavy_slot(self) -> Callable[[], None]:
-        desired = _get_positive_int_env(
-            "DISCOVERY_MAX_CONCURRENT_QUERIES", _DEFAULT_MAX_CONCURRENT_QUERIES
-        )
-        if desired != self._heavy_capacity:
+    _SLOT_HEAVY = "heavy"
+    _SLOT_BROWSE = "browse"
+
+    _SLOT_SPECS = {
+        _SLOT_HEAVY: ("_heavy_sem", "_heavy_capacity",
+                      "DISCOVERY_MAX_CONCURRENT_QUERIES",
+                      _DEFAULT_MAX_CONCURRENT_QUERIES),
+        _SLOT_BROWSE: ("_browse_sem", "_browse_capacity",
+                       "DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES",
+                       _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES),
+    }
+
+    async def _acquire_slot(self, kind: str) -> Callable[[], None]:
+        sem_attr, cap_attr, env_name, default = self._SLOT_SPECS[kind]
+        desired = _get_positive_int_env(env_name, default)
+        if desired != getattr(self, cap_attr):
             # Only safe to rebuild when fully idle (no held slots) -- mirrors
             # web/search_api.py's _HeavySemaphoreState rebuild guard exactly,
             # so a live rebuild never strands a held slot.
-            current_value = getattr(self._heavy_sem, "_value", None)
-            if current_value == self._heavy_capacity:
-                self._heavy_sem = asyncio.Semaphore(desired)
-                self._heavy_capacity = desired
+            current_value = getattr(getattr(self, sem_attr), "_value", None)
+            if current_value == getattr(self, cap_attr):
+                setattr(self, sem_attr, asyncio.Semaphore(desired))
+                setattr(self, cap_attr, desired)
 
-        sem = self._heavy_sem
+        sem = getattr(self, sem_attr)
         if sem.locked():
             raise DiscoveryOverload("temporarily unavailable")
         await sem.acquire()
@@ -2564,6 +2618,11 @@ class DiscoveryService:
             sem.release()
 
         return _release
+
+    async def _acquire_heavy_slot(self) -> Callable[[], None]:
+        """The heavy budget, by its original name (kept: it is what the
+        DC6 slot-recycling tests and the review brief both refer to)."""
+        return await self._acquire_slot(self._SLOT_HEAVY)
 
     # ------------------------------------------------------------------
     # Off-event-loop async dispatch (asyncio.wait, NEVER wait_for, over
@@ -2590,9 +2649,12 @@ class DiscoveryService:
         # discovery reads to a loop that is not serving the request. It is not
         # the explanation for that failure, which is still open.
         loop = asyncio.get_running_loop()
-        _release: Optional[Callable[[], None]] = None
-        if heavy:
-            _release = await self._acquire_heavy_slot()
+        # EVERY crossing takes a slot; only WHICH budget depends on `heavy`.
+        # There is no third branch and no `bounded=False` escape, deliberately:
+        # an opt-in bound is a bound whose next caller forgets it, which is
+        # exactly how the browse path came to have none (round 12, finding 4).
+        _release: Optional[Callable[[], None]] = await self._acquire_slot(
+            self._SLOT_HEAVY if heavy else self._SLOT_BROWSE)
         try:
             fut = loop.run_in_executor(None, sync_fn, *args)
             if _release is not None:
@@ -2742,6 +2804,12 @@ class DiscoveryService:
         returning False is `unavailable` (handled inside the sync callable),
         `DiscoveryUnavailable` from the timeout path is `timeout`, and the
         bounded-concurrency rejection is `busy`.
+
+        `busy` is reachable on EVERY read, `cache_name` ones included: the
+        cached path still dispatches through `_run_off_loop` on a MISS, and
+        `_run_off_loop` now takes a slot unconditionally. Before round 12 the
+        `heavy` flag was the only thing that took one, so `busy` was a status
+        this branch could classify but no browse read could ever produce.
 
         Blocking work goes through `_run_off_loop` (`run_in_executor` +
         `asyncio.wait`, NEVER `asyncio.wait_for`, since executor threads are

@@ -513,6 +513,189 @@ def test_timed_out_heavy_slot_not_recycled_until_thread_finishes(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# THE BROWSE BUDGET (code review round 12, finding 4).
+#
+# `_acquire_heavy_slot` was entered ONLY when `heavy=True`, and no browse
+# caller passed it -- so "bounded concurrency" was a property
+# docs/specs/discovery-budgets.md documents and the connections-panel path did
+# not have. Every executor crossing now takes one of two budgets.
+# ---------------------------------------------------------------------------
+
+def test_a_browse_read_takes_a_slot_at_all(monkeypatch):
+    """The finding, as a test: with the browse budget exhausted, a browse read
+    must fail fast rather than dispatch. Before the fix it dispatched happily,
+    because it asked for no slot."""
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", "1")
+    service = _make_service()
+
+    async def _run():
+        await service._browse_sem.acquire()
+        try:
+            start = time.monotonic()
+            with pytest.raises(DiscoveryOverload):
+                await service.get_claims_for_page_async("p001")
+            assert time.monotonic() - start < 1.0, "the bound must fail fast, never wait"
+        finally:
+            service._browse_sem.release()
+
+    asyncio.run(_run())
+
+
+def test_a_browse_read_takes_the_BROWSE_budget_and_not_the_heavy_one(monkeypatch):
+    """Which budget, not merely that there is one. Two budgets that behave as
+    one are a rename, and this is the assertion that tells them apart."""
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_QUERIES", "1")
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", "1")
+    service = _make_service()
+
+    async def _run():
+        # The HEAVY budget is fully held; a BROWSE read must still go through.
+        await service._heavy_sem.acquire()
+        try:
+            assert await service.get_claims_for_page_async("p001") is not None
+        finally:
+            service._heavy_sem.release()
+
+        # ...and the reverse: the browse budget held, a HEAVY read still runs
+        # its query (it returns rows rather than raising the overload).
+        await service._browse_sem.acquire()
+        try:
+            assert isinstance(await service.get_work_witnesses_async("w000001"), list)
+        finally:
+            service._browse_sem.release()
+
+    asyncio.run(_run())
+
+
+def test_an_enveloped_browse_read_reports_busy_THROUGH_THE_LIVE_GATE(monkeypatch):
+    """`busy` stops being a status only an injection could produce.
+
+    Every `busy` assertion in this phase's panel suites injects
+    `DiscoveryOverload` at the point the gate would raise, because the gate
+    could not raise on this path at all. This drives the REAL gate.
+    """
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", "1")
+    service = _make_service()
+
+    async def _run():
+        await service._browse_sem.acquire()
+        try:
+            for envelope in (
+                await service.get_claims_for_page_enveloped_async("p001"),
+                await service.get_manuscript_works_enveloped_async(("p001",)),
+                await service.get_related_page_count_enveloped_async("p001"),
+                await service.get_related_pages_enveloped_async("p001"),
+            ):
+                assert envelope["status"] == "busy", envelope
+                assert envelope["meta"]["reason"] == "bounded_concurrency"
+        finally:
+            service._browse_sem.release()
+
+    asyncio.run(_run())
+
+
+def test_a_cache_HIT_takes_no_slot_because_it_runs_no_query():
+    """The bound is on DISPATCH, not on calls. A warm folio turn -- the case
+    the measured 0.1 ms p95 describes -- must not be able to overload."""
+    service = _make_service()
+
+    async def _run():
+        first = await service.get_claims_for_page_enveloped_async("p001")
+        assert first["status"] == "ok"
+        # Now hold EVERY browse slot and repeat the identical call.
+        held = []
+        try:
+            while not service._browse_sem.locked():
+                await service._browse_sem.acquire()
+                held.append(True)
+            again = await service.get_claims_for_page_enveloped_async("p001")
+            assert again["status"] == "ok", "a cache hit was refused by the bound"
+        finally:
+            for _ in held:
+                service._browse_sem.release()
+
+    asyncio.run(_run())
+
+
+def test_a_timed_out_browse_slot_is_not_recycled_until_the_thread_finishes(monkeypatch):
+    """DC6 for the browse budget. This is the mechanism the finding named: a
+    `run_in_executor` thread is not cancellable, so a timed-out read keeps its
+    worker; the slot must stay held until the thread ACTUALLY finishes or the
+    bound re-admits work past its own budget."""
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", "1")
+    monkeypatch.setenv("DISCOVERY_QUERY_TIMEOUT_BROWSE", "0.05")
+    service = _make_service()
+    block_event = threading.Event()
+    calls = {"n": 0}
+
+    def _slow(page_id, page, page_size):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            block_event.wait(timeout=5)
+        return []
+
+    service.get_claims_for_page = _slow
+
+    async def _run():
+        with pytest.raises(DiscoveryUnavailable):
+            await service.get_claims_for_page_async("p001")
+        assert calls["n"] == 1
+        with pytest.raises(DiscoveryOverload):
+            await service.get_claims_for_page_async("p002")
+        assert calls["n"] == 1, "a still-held slot admitted a second concurrent call"
+        block_event.set()
+        for _ in range(50):
+            if not service._browse_sem.locked():
+                break
+            await asyncio.sleep(0.05)
+        assert not service._browse_sem.locked(), (
+            "the browse slot was never released after the stuck thread finished")
+        assert await service.get_claims_for_page_async("p003") == []
+        assert calls["n"] == 2
+
+    asyncio.run(_run())
+
+
+def test_the_browse_budget_is_larger_than_the_heavy_one_by_construction():
+    """Not a taste call. A cold connections-panel load issues THREE reads
+    concurrently and then a fourth, so the heavy cap of 4 would put the SECOND
+    simultaneous browse visitor into `busy` -- shipping an outage on an
+    already-live page in the name of bounding it. The browse budget has to
+    admit several whole page loads at once."""
+    from shared.discovery_service import (
+        _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES, _DEFAULT_MAX_CONCURRENT_QUERIES,
+    )
+    concurrent_reads_per_cold_panel_load = 3
+    assert _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES >= (
+        _DEFAULT_MAX_CONCURRENT_QUERIES + concurrent_reads_per_cold_panel_load), (
+        'the browse budget cannot admit even one more page load than the heavy one')
+    assert _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES % concurrent_reads_per_cold_panel_load == 0
+
+
+def test_no_executor_crossing_can_opt_out_of_a_slot():
+    """A source guard, because the defect was an OPT-IN bound whose next caller
+    forgot it. `_run_off_loop` is the ONE place a crossing happens; it must take
+    a slot unconditionally, with the only choice being WHICH budget."""
+    import inspect
+    from shared.discovery_service import DiscoveryService as _DS
+    source = inspect.getsource(_DS._run_off_loop)
+    assert "await self._acquire_slot(" in source
+    dispatch = source.index("run_in_executor")
+    acquire = source.index("await self._acquire_slot(")
+    assert acquire < dispatch, "a crossing happens before the slot is taken"
+    for escape in ("if heavy:", "if bounded", "if not heavy:"):
+        assert escape not in source, (
+            f"{escape!r} makes the bound conditional again")
+
+
+def test_browse_concurrency_env_non_positive_falls_back_to_the_default(monkeypatch):
+    for value in ("-3", "0", "not-a-number"):
+        monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", value)
+        service = _make_service()
+        assert service._browse_capacity >= 1
+
+
+# ---------------------------------------------------------------------------
 # Version-keyed browse-enrichment LRU (F15)
 # ---------------------------------------------------------------------------
 

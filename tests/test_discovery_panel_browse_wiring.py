@@ -17,11 +17,19 @@ Four things this suite proves that no existing suite can:
    "the render looks right".
 4. **The staleness and liveness obligations** of the enrichment seam.
 
-The `busy` rows are INJECTED: the panel's reads are `heavy=False`, so
-`_acquire_heavy_slot` is never called and `DiscoveryOverload` is unreachable
-through the live gate. The injection happens at the point the live gate would
-raise -- BEFORE the executor dispatch -- or the counts would not describe what
-is being tested.
+The `busy` rows in the DISPATCH-COUNT table are injected, at the point the live
+gate raises -- BEFORE the executor dispatch -- because that table is about
+crossing counts and an injection is the only way to hold the other three reads
+still. It is no longer the only evidence that `busy` exists:
+`test_busy_reaches_the_panel_THROUGH_THE_LIVE_GATE` below exhausts the real
+browse-concurrency budget and drives the real
+`DiscoveryService._acquire_slot`.
+
+That test could not have been written before code review round 12: the panel's
+reads passed `heavy=False`, the semaphore was entered only when `heavy=True`,
+and so `DiscoveryOverload` was genuinely unreachable on this path -- a state
+three suites rendered, arbitrated and asserted over, that production could not
+produce. Every executor crossing now takes a slot from one of two budgets.
 """
 
 from __future__ import annotations
@@ -246,7 +254,7 @@ class _Spy:
         # positional argument really is the sync callable.
         name = getattr(sync_fn, '__name__', repr(sync_fn))
         if name in self.refuse_before_dispatch:
-            # The live `busy` gate (`_acquire_heavy_slot`) raises BEFORE
+            # The live `busy` gate (`_acquire_slot`) raises BEFORE
             # `run_in_executor`, so a refused read costs no crossing.
             raise self.refuse_before_dispatch[name]
         self.calls.append(name)
@@ -386,6 +394,64 @@ def test_dispatch_busy_on_a_downstream_read_is_three(spy):
     bundle = _fetch()
     assert spy.count == 3, spy.calls
     assert bundle.claims['status'] == STATUS_BUSY
+
+
+# ===========================================================================
+# (2b) `busy` THROUGH THE LIVE GATE -- no injection anywhere.
+# ===========================================================================
+
+def test_busy_reaches_the_panel_THROUGH_THE_LIVE_GATE(monkeypatch):
+    """The whole seam, over the REAL bounded-concurrency gate.
+
+    Nothing here is monkeypatched onto `_run_off_loop`: the browse budget is
+    genuinely exhausted, so `DiscoveryService._acquire_slot` raises
+    `DiscoveryOverload` before any executor dispatch, `web/discovery.py` maps it
+    to the `busy` envelope, and the model renders the outage.
+
+    Before round 12 this test could not exist: the panel's reads asked for no
+    slot, so the live gate never ran for them and every `busy` assertion on this
+    surface was an injection describing a state production could not reach
+    (code review round 12, finding 4).
+    """
+    import web.discovery as wd
+    import web.services as web_services
+
+    monkeypatch.setattr(wd, 'discovery_available', lambda: True)
+    monkeypatch.setenv('DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES', '1')
+
+    class _Svc:
+        def get_manuscript_page_ids(self, *a, **k):  # pragma: no cover -- refused first
+            raise AssertionError('the read dispatched despite an exhausted budget')
+
+    monkeypatch.setattr(web_services, 'get_service', lambda: _Svc())
+    with wd._service._browse_lru_lock:
+        wd._service._browse_lru.clear()
+
+    async def _run():
+        # Force the capacity rebuild through the live path, then hold the slot.
+        release = await wd._service._acquire_slot(wd._service._SLOT_BROWSE)
+        try:
+            return await be.fetch_discovery_panel_bundle(_FakePage(), 'en')
+        finally:
+            release()
+
+    try:
+        bundle = asyncio.run(_run())
+    finally:
+        with wd._service._browse_lru_lock:
+            wd._service._browse_lru.clear()
+
+    assert bundle is not None
+    for name, envelope in (('claims', bundle.claims),
+                           ('page_ids', bundle.page_ids),
+                           ('related_count', bundle.related_count)):
+        assert envelope['status'] == STATUS_BUSY, (name, envelope)
+        assert envelope['meta']['reason'] == 'bounded_concurrency', (name, envelope)
+
+    model = build_panel_rows(bundle)
+    assert model.panel_status == STATUS_BUSY
+    assert model.entry_control['hidden'] is False
+    assert model.service_state['retry']
 
 
 # ===========================================================================
