@@ -293,26 +293,90 @@ def surface_safe_facet(row: Mapping[str, Any]) -> Dict[str, Any]:
 # The envelope
 # ---------------------------------------------------------------------------
 
+#: The review badge, in BOTH languages, mirrored as literals rather than
+#: imported from `shared.discovery_band_labels`. Mirroring is deliberate and
+#: matches the standing independence rule for checks: a check that imports the
+#: thing it is checking passes automatically when that thing changes.
+_BADGE_VALUE_MARKERS: tuple = (
+    "Expert-reviewed",
+    "נבדק בידי מומחה",
+)
+
+
+def _walk_nodes(node: Any, path: str = ""):
+    """Yield `(path, key, value)` for EVERY key/value pair reachable in `node`.
+
+    `key` is the mapping key, or None for sequence elements. Every pair is
+    yielded regardless of the value's type, then recursed into.
+
+    The type-independence is load-bearing and was got wrong first time round: an
+    earlier version yielded only pairs whose VALUE was a string, so a forbidden
+    key with a numeric value -- `{"ci_low": 0.5}`, exactly the shape this guards
+    against -- was never surfaced at all. Its own positive control caught it."""
+    if isinstance(node, Mapping):
+        for k, v in node.items():
+            child = f"{path}.{k}" if path else str(k)
+            yield child, k, v
+            yield from _walk_nodes(v, child)
+    elif isinstance(node, (list, tuple)) and not isinstance(node, (str, bytes)):
+        for i, v in enumerate(node):
+            child = f"{path}[{i}]"
+            yield child, None, v
+            yield from _walk_nodes(v, child)
+
+
 def _assert_surface_safe(items: Iterable[Any], meta: Mapping[str, Any]) -> None:
     """Re-check what the projection already guarantees.
 
-    Cheap (keys only, over <= one page of rows) and deliberately redundant: an
-    envelope hand-built by a future caller that skipped `surface_safe_*` still
-    cannot carry the badge, a precision value or an interval.
+    Deliberately redundant: an envelope hand-built by a future caller that
+    skipped `surface_safe_*` still cannot carry the badge, a precision value or
+    an interval.
+
+    Two passes, and the distinction between them is the point:
+
+    * **Forbidden KEYS, recursively.** The original check looked only at
+      top-level keys, so a forbidden field one level down inside a nested
+      mapping or a list of sub-rows was invisible while the docstring claimed
+      hand-built envelopes "cannot carry" it (Codex code review 2026-08-03,
+      finding 7).
+
+    * **Badge VALUES, in both languages.** A review badge under an *allowed*
+      key -- `{"label": "Expert-reviewed ✓"}` -- passed every key-based check
+      ever written here.
+
+    What this deliberately does NOT do is scan every string against a general
+    prohibited vocabulary. The projection intentionally carries machine values
+    like `direct_witness`, and a naive value scan would reject correct
+    envelopes; a gate that fails on valid output costs as much as one that
+    passes on invalid output. The badge markers below are a closed two-item
+    list of *rendered* strings, not a vocabulary.
     """
     for item in items:
-        if isinstance(item, Mapping):
-            leaks = sorted(k for k in item.keys() if is_forbidden_surface_field(k))
-            if leaks:
+        for path, key, value in _walk_nodes(item, "item"):
+            if key is not None and is_forbidden_surface_field(key):
                 raise ValueError(
-                    f"envelope item carries forbidden surface field(s) {leaks} -- "
+                    f"envelope item carries forbidden surface field at {path!r} -- "
                     "project it through surface_safe_* first (T-136-14-09)"
                 )
-    leaks = sorted(k for k in meta.keys() if is_forbidden_surface_field(k))
-    if leaks:
-        raise ValueError(
-            f"envelope meta carries forbidden surface field(s) {leaks} (T-136-14-09)"
-        )
+            if isinstance(value, str) and any(
+                    marker in value for marker in _BADGE_VALUE_MARKERS):
+                raise ValueError(
+                    f"envelope item carries the human-review badge as a VALUE at "
+                    f"{path!r} -- the badge may never reach a surface, under any key "
+                    "(T-136-14-09)"
+                )
+    for path, key, value in _walk_nodes(meta, "meta"):
+        if key is not None and is_forbidden_surface_field(key):
+            raise ValueError(
+                f"envelope meta carries forbidden surface field at {path!r} "
+                "(T-136-14-09)"
+            )
+        if isinstance(value, str) and any(
+                marker in value for marker in _BADGE_VALUE_MARKERS):
+            raise ValueError(
+                f"envelope meta carries the human-review badge as a VALUE at "
+                f"{path!r} (T-136-14-09)"
+            )
 
 
 def make_envelope(

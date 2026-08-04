@@ -1942,3 +1942,77 @@ def test_manuscript_scope_and_related_page_wrappers_exist_and_honour_the_browse_
         assert env["status"] == STATUS_OK
 
     assert [t for _n, t in seen] == [1.75, 1.75, 1.75]
+
+
+# ---------------------------------------------------------------------------
+# Envelope safety, BELOW the top level
+# (Codex code review 2026-08-03, finding 7 -- MEDIUM)
+# ---------------------------------------------------------------------------
+#
+# `_assert_surface_safe` checked only TOP-LEVEL keys while its docstring claimed
+# a hand-built envelope "cannot carry the badge, a precision value or an
+# interval". Two shapes walked straight through: a forbidden key one level down
+# inside a nested mapping or a list of sub-rows, and the review badge as a VALUE
+# under an allowed key.
+#
+# The tests above assert on envelopes the service produced. These build the
+# envelope by hand, which is the case the redundant check exists for -- a future
+# caller that skipped surface_safe_*.
+
+def test_nested_forbidden_key_is_rejected():
+    from shared.discovery_surface_projection import make_envelope
+
+    with pytest.raises(ValueError) as exc:
+        make_envelope("ok", items=[{"work_id": "w1", "nested": {"review_overlay": "x"}}], total=1)
+    assert "forbidden surface field" in str(exc.value)
+    assert "nested" in str(exc.value), "the error must name where it found it"
+
+
+def test_forbidden_key_inside_a_list_of_subrows_is_rejected():
+    from shared.discovery_surface_projection import make_envelope
+
+    with pytest.raises(ValueError):
+        make_envelope(
+            "ok",
+            items=[{"work_id": "w1", "carriers": [{"ok": 1}, {"ci_low": 0.5}]}],
+            total=1,
+        )
+
+
+@pytest.mark.parametrize("badge", ["Expert-reviewed ✓", "נבדק בידי מומחה ✓"])
+def test_review_badge_as_a_value_under_an_allowed_key_is_rejected(badge):
+    """The shape no key-based check could ever have caught, in both languages."""
+    from shared.discovery_surface_projection import make_envelope
+
+    with pytest.raises(ValueError) as exc:
+        make_envelope("ok", items=[{"work_id": "w1", "band_label": badge}], total=1)
+    assert "badge as a VALUE" in str(exc.value)
+
+
+def test_badge_in_meta_is_rejected():
+    from shared.discovery_surface_projection import make_envelope
+
+    with pytest.raises(ValueError):
+        make_envelope("ok", items=[], total=0, meta={"note": "Expert-reviewed ✓"})
+
+
+def test_machine_vocabulary_in_values_is_NOT_rejected():
+    """The counter-control, and the reason this check scans a closed two-item
+    badge list rather than a general prohibited vocabulary.
+
+    The projection intentionally carries machine values like `direct_witness`.
+    A naive value scan would reject every correct envelope -- a gate that fails
+    on valid output costs as much as one that passes on invalid output. If this
+    test ever starts failing, the check has been over-broadened and will begin
+    rejecting real service output."""
+    from shared.discovery_surface_projection import make_envelope
+
+    env = make_envelope(
+        "ok",
+        items=[{"work_id": "w1", "relation": "direct_witness",
+                "novelty_status": "refines_granularity",
+                "bucket": "more", "band_label": "Strong match"}],
+        total=1,
+        meta={"basis": "main_pool", "audience": "public"},
+    )
+    assert env["status"] == "ok"
