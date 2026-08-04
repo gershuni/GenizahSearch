@@ -47,8 +47,17 @@ WHAT THIS MODULE MAY NOT DO, stated as prohibitions because each one has a test:
 * **No CSS.** Every visual class here (`row`, `side`, `rel`, `nov`,
   `nov unknown`, `chip`, `dnote`) is one plan 136-10 landed in
   `web/static/common.css` under `.gs-discovery`; the page root carries that
-  class or none of it applies. Every directional property in that block is
-  logical, and this module adds no style of its own.
+  class or none of it applies. `web/static/common.css` is not modified by this
+  module and two tests assert so.
+
+  ONE exception, added 2026-08-04 with the owner's layout verdict: the launch
+  headline's own container carries an inline rule + tint so it reads as one
+  designed block rather than as loose prose lines. It is INLINE (no stylesheet
+  rule, no new class to keep in sync) and every directional property in it is
+  LOGICAL (`border-inline-start`), because this surface renders in both
+  directions and a physical `border-left` would put the rule on the wrong side
+  in Hebrew. `test_no_row_level_accent_rule_is_keyed_on_novelty` fails on any
+  physical directional property in this file.
 
 WHERE THE STRINGS COME FROM
 ---------------------------
@@ -313,9 +322,22 @@ def render_launch_headline(
     release contributes nothing, which is the exact false-zero the envelope
     exists to prevent; that is why this branches on the status rather than on
     whether `items` happens to be empty.
+
+    LAYOUT (2026-08-04, owner verdict): the same figures, the same wording and
+    the same elements -- read as four stacked prose lines followed by three more
+    stacked lines. They now sit in one bounded block: the total leads at display
+    size, the two basis lines and the context line share a wrapping row of small
+    notes beneath it, and the three contribution shades wrap as inline units
+    instead of stacking. Nothing was dropped to achieve that, and no number was
+    moved out of the envelope: every figure below is still read from `envelope`
+    at request time, which is what the sentinel fixture in this plan's suite
+    proves.
     """
     lang = _lang_key(lang)
-    with ui.column().classes(f"{LAUNCH_CLASS} w-full gap-1"):
+    with ui.column().classes(f"{LAUNCH_CLASS} w-full gap-1 p-3").style(
+        "border-inline-start: 3px solid var(--primary-600); "
+        "background: var(--bg-secondary); border-radius: 6px;"
+    ):
         if not isinstance(envelope, Mapping) or is_outage(envelope):
             _render_launch_outage(envelope, lang, on_retry)
             return
@@ -326,33 +348,37 @@ def render_launch_headline(
 
         ui.label(
             copy_text("launch_total", lang).format(count=_count(total))
-        ).classes(f"{LAUNCH_TOTAL_CLASS} text-lg font-bold")
+        ).classes(f"{LAUNCH_TOTAL_CLASS} text-xl font-bold")
 
         # The basis, in words (ruling U constraint 1). `bucket_name` delegates
         # to `shared.discovery_main_pool.bucket_label`, so the headline and the
         # result bar can never name the same pool two ways.
         main_pool_name = ds.bucket_name(True, lang)
-        ui.label(
-            copy_text("launch_basis", lang).format(bucket=main_pool_name)
-        ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
-
-        manuscripts = meta.get("main_pool_manuscript_count")
-        if manuscripts is not None:
+        with ui.row().classes("items-baseline gap-x-3 gap-y-1 flex-wrap"):
             ui.label(
-                copy_text("launch_manuscripts", lang).format(
-                    count=_count(manuscripts), bucket=main_pool_name)
+                copy_text("launch_basis", lang).format(bucket=main_pool_name)
             ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
 
-        for item in items:
-            _render_launch_shade(item, lang)
+            manuscripts = meta.get("main_pool_manuscript_count")
+            if manuscripts is not None:
+                ui.label(
+                    copy_text("launch_manuscripts", lang).format(
+                        count=_count(manuscripts), bucket=main_pool_name)
+                ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
 
-        fragments = meta.get("corpus_manuscript_count")
-        pages = meta.get("corpus_page_count")
-        if fragments is not None and pages is not None:
-            ui.label(
-                copy_text("launch_context", lang).format(
-                    fragments=_count(fragments), pages=_count(pages))
-            ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
+            fragments = meta.get("corpus_manuscript_count")
+            pages = meta.get("corpus_page_count")
+            if fragments is not None and pages is not None:
+                ui.label(
+                    copy_text("launch_context", lang).format(
+                        fragments=_count(fragments), pages=_count(pages))
+                ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
+
+        # The three shades on ONE wrapping line. Each keeps its own count, its
+        # match-framed label and its fragment span; only the stacking is gone.
+        with ui.row().classes("items-baseline gap-x-4 gap-y-1 flex-wrap"):
+            for item in items:
+                _render_launch_shade(item, lang)
 
 
 def _render_launch_shade(item: Mapping[str, Any], lang: str) -> None:
