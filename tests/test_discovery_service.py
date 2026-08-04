@@ -2070,6 +2070,51 @@ def test_enveloped_reads_execute_off_the_event_loop_thread():
     )
 
 
+# ---------------------------------------------------------------------------
+# Code review 2A, finding 7: a rate under an INNOCUOUS key.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("value,shape", [
+    ("matches 91% of the time", "a percentage"),
+    ("[0.88, 0.94]", "a confidence interval"),
+    ("accuracy 0.91", "an accuracy rate"),
+])
+@pytest.mark.parametrize("holder", ["label", "note", "band_label"])
+def test_a_rate_under_an_allowed_key_never_reaches_a_surface(value, shape, holder):
+    """Recursive KEY checking and the two badge strings both passed these.
+
+    The forbidden-field set catches `ci_low`; the badge markers catch
+    "Expert-reviewed". Neither sees a percentage written into `label`, which is
+    precisely what the no-precision rule exists to stop reaching a reader."""
+    with pytest.raises(ValueError) as exc:
+        make_envelope("ok", items=[{holder: value}], total=1)
+    assert shape in str(exc.value), (
+        f"refused for the wrong reason -- expected {shape!r}: {exc.value}"
+    )
+    # and the same value in meta, which is a separate walk
+    with pytest.raises(ValueError):
+        make_envelope("ok", items=[], total=0, meta={holder: value})
+
+
+@pytest.mark.parametrize("value", [
+    "direct_witness", "quotes_this_work", "low_coverage", "fills_gap",
+    "Talmud / Bavli", "T-S 12.123", "V0.8", "version 2.1", "1.25 seconds",
+    "1,329 matched letters", "5,684 units",
+])
+def test_the_rate_check_does_not_reject_valid_envelope_values(value):
+    """The false-positive half, and the reason this is a SHAPE rule rather than
+    a vocabulary scan.
+
+    The projection legitimately carries machine enums, shelfmarks, genre paths
+    and version markers. A general prohibited-word sweep over every string would
+    reject correct envelopes -- a gate that fails on valid output costs as much
+    as one that passes on invalid output, which is the defect class this phase
+    produced most often."""
+    env = make_envelope("ok", items=[{"label": value}], total=1,
+                        meta={"note": value})
+    assert env["status"] == "ok"
+
+
 def test_thread_identity_control_would_catch_an_on_loop_read():
     """Positive control: the assertion above is only meaningful if calling the
     sync path directly on the loop would FAIL it. Proven by doing exactly that,

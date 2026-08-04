@@ -34,6 +34,7 @@ never exists in the asset at all.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # ---------------------------------------------------------------------------
@@ -353,6 +354,44 @@ _BADGE_VALUE_MARKERS: tuple = (
 )
 
 
+#: Rendered rate/interval shapes, which may not reach a reader under ANY key.
+#:
+#: Codex code review 2A finding 7 kept this open: recursive KEY checking plus the
+#: two badge strings still let a percentage or an accuracy value ride under an
+#: innocuous key -- `{"label": "matches 91% of the time"}`, `{"note": "[0.88,
+#: 0.94]"}`. Those are exactly the surfaces the no-precision rule exists for.
+#:
+#: Deliberately SHAPE rules, not a vocabulary. A general prohibited-word scan
+#: over every string would reject correct envelopes, because the projection
+#: legitimately carries machine values like `direct_witness` -- that is why the
+#: badge markers stayed a closed two-item list, and the reasoning holds here.
+#: These three match how a number is WRITTEN, so a machine enum cannot trip them.
+_PERCENT_RE = re.compile(r"\d\s*%")
+_INTERVAL_RE = re.compile(r"[\[(]\s*\d*\.\d+\s*[,–-]\s*\d*\.\d+\s*[\])]")
+#: A rate word within a short distance of a decimal. The distance bound is what
+#: keeps `1.25 seconds` and a `v0.8`-style marker out of it.
+_RATE_WORD_RE = re.compile(
+    r"(precision|accuracy|recall|confidence|f1|ci)\b[^.]{0,24}?\d*\.\d+"
+    r"|\d*\.\d+[^.]{0,24}?\b(precision|accuracy|recall|confidence|f1)",
+    re.IGNORECASE,
+)
+#: Version-shaped tokens are not rates. Bounded to explicit `v`/`version`
+#: syntax at a word boundary -- a wider rule would also excuse `accuracy 0.9`.
+_VERSION_RE = re.compile(r"\b(v|version\s*)\d+(\.\d+)*\b", re.IGNORECASE)
+
+
+def _rate_or_interval_violation(value: str) -> Optional[str]:
+    """The reason `value` is a rendered rate/interval, or None."""
+    stripped = _VERSION_RE.sub(" ", value)
+    if _PERCENT_RE.search(stripped):
+        return "a percentage"
+    if _INTERVAL_RE.search(stripped):
+        return "a confidence interval"
+    if _RATE_WORD_RE.search(stripped):
+        return "an accuracy rate"
+    return None
+
+
 def _walk_nodes(node: Any, path: str = ""):
     """Yield `(path, key, value)` for EVERY key/value pair reachable in `node`.
 
@@ -415,6 +454,14 @@ def _assert_surface_safe(items: Iterable[Any], meta: Mapping[str, Any]) -> None:
                     f"{path!r} -- the badge may never reach a surface, under any key "
                     "(T-136-14-09)"
                 )
+            if isinstance(value, str):
+                reason = _rate_or_interval_violation(value)
+                if reason:
+                    raise ValueError(
+                        f"envelope item carries {reason} as a VALUE at {path!r} -- "
+                        "no precision figure, interval or accuracy rate may reach a "
+                        "reader under any key (T-136-14-09)"
+                    )
     for path, key, value in _walk_nodes(meta, "meta"):
         if key is not None and is_forbidden_surface_field(key):
             raise ValueError(
@@ -427,6 +474,13 @@ def _assert_surface_safe(items: Iterable[Any], meta: Mapping[str, Any]) -> None:
                 f"envelope meta carries the human-review badge as a VALUE at "
                 f"{path!r} (T-136-14-09)"
             )
+        if isinstance(value, str):
+            reason = _rate_or_interval_violation(value)
+            if reason:
+                raise ValueError(
+                    f"envelope meta carries {reason} as a VALUE at {path!r} "
+                    "(T-136-14-09)"
+                )
 
 
 def make_envelope(
