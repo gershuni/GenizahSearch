@@ -107,8 +107,8 @@ Commits claimed, verified in `git log --oneline --all`: `164d1d8b` — FOUND; `d
 | (b) DOM-ancestry supplement | **MET** (and declared insufficient alone in the test's own docstring) | `test_more_matches_control_sits_in_no_overflow_or_disclosure_ancestor` |
 | (c) INTERACTION through the NiceGUI `User` simulation, no preceding disclosure action, clicked THROUGH the simulated user, RENDERED result region REPLACED | **MET** | `test_more_matches_click_replaces_the_rendered_result_set[en/he]` — asserts main-pool rows gone and second-bucket rows present, not that a service call changed. **Watched failing**: with `on_click` removed the test failed with `expected to see at least one element with content=MORE-MATCHES-ROW-SENTINEL` |
 | (d) Control's subtree carries no digit and no count element | **MET** | `test_more_matches_control_subtree_carries_no_digit_and_no_count` |
-| **(e) REAL-BROWSER actionability at 375px and desktop, both languages** | **NOT MET — wired into CI, awaiting first green run** | see below |
-| **(f) Positive control for (e), watched failing on a collapsed ancestor** | **NOT MET — wired into CI, awaiting first green run** | see below |
+| **(e) REAL-BROWSER actionability at 375px and desktop, both languages** | **MET 2026-08-04 — CI run 30931268195, first green run** | see below |
+| **(f) Positive control for (e), watched failing on a collapsed ancestor** | **MET 2026-08-04 — CI run 30931268195, first green run** | see below |
 | Mode strip: three modes, two inert and phase-tagged, not clickable | **MET** | `test_mode_strip_renders_three_modes_with_two_inert_and_phase_tagged` |
 | Novelty switch first in the filter bar, both directions | **MET** | `test_novelty_switch_renders_first_in_the_filter_bar` — asserts `fg novgrp` on the group AND the `order: -1` rule in the shared CSS |
 | No grade/tier filter | **MET** | `test_no_grade_filter_control_exists` (whole-word scan; `\bStrong\b` deliberately does not match the legitimate "Strongest first" sort label) |
@@ -136,7 +136,19 @@ Commits claimed, verified in `git log --oneline --all`: `164d1d8b` — FOUND; `d
 | Pager honours the budgeted default and cap; cap enforced SERVER-side | `test_pager_paginates_over_the_full_filtered_set`, `test_page_size_cap_is_enforced_server_side_not_only_in_the_control` (asserts the service clamps 10^6 → 200, that the page does NOT pre-clamp, and that the module restates no ceiling) |
 | Per-user state through the chokepoint | `test_selections_persist_through_the_storage_chokepoint`, `test_out_of_vocabulary_persisted_values_fall_back_instead_of_reaching_the_service`, `tests/test_no_raw_storage_access.py` |
 
-## ⚠ NOT MET — criteria (e) and (f), the real-browser actionability check
+## ✅ NOW MET — criteria (e) and (f), the real-browser actionability check
+
+> **Record corrected 2026-08-04 by the orchestrator, not by this plan's executor.**
+> This section was written when the job was wired but had never run, and it was right to
+> refuse to call a wired gate a met criterion. The job has since passed: **CI run
+> 30931268195**, and again on every run after it, at both viewports in both languages.
+> It took four runs and caught THREE real defects on the way — a citation dialog covering
+> the page, the mobile nav drawer never closing at all, and the Quasar reveal header hiding
+> the language toggle. Two of those were product defects, not test defects.
+>
+> The original text is kept below unchanged, because the reasoning in it is still correct.
+
+### Original text, as written when the criteria were NOT MET
 
 **Status: NOT MET. Not a skip, not a pass.**
 

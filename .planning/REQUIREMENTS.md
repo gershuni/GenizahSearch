@@ -423,12 +423,12 @@ Every v9.0.0 requirement maps to exactly one phase. Phases continue from the pre
 | BAND-05 | Phase 135 | Pending |
 | CERT-01 | Phase 135 | Pending |
 | CERT-02 | Phase 135 | Pending |
-| VIS-01 | Phase 136 | Pending |
+| VIS-01 | Phase 136 | Complete (136-19) — structural exclusion proved by the cross-surface sweep |
 | VIS-02 | Phase 139 | Pending |
 | NOVEL-01 | Phase 136 (moved IN, owner 2026-07-30) | Pending |
-| NOVEL-02 | Phase 136 (moved IN, owner 2026-07-30) | Pending |
-| PANEL-01 | Phase 136 | Code LIVE on prod (2026-08-04, `2065290c`) but flag OFF ⇒ invisible. NOT shipped until flag-on |
-| PANEL-02 | Phase 136 | Code LIVE on prod (2026-08-04, `2065290c`) but flag OFF ⇒ invisible. NOT shipped until flag-on |
+| NOVEL-02 | Phase 136 (moved IN, owner 2026-07-30) | Complete (136-19) — verdict cache proved absent from all six manifest-named databases |
+| PANEL-01 | Phase 136 | Built, swept, deployed behind an OFF flag ⇒ invisible. NOT shipped until flag-on (six items gate it) |
+| PANEL-02 | Phase 136 | Built, swept, deployed behind an OFF flag ⇒ invisible. NOT shipped until flag-on (six items gate it) |
 | PANEL-03 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
 | WORK-01 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
 | WORK-02 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |

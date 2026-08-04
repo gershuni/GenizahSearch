@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 136-18 (wave 10, findings rows + launch headline); next executable 136-19 (wave 11)
+stopped_at: Phase 136 COMPLETE (22 of 22 plans). Flag-on is an owner decision; six items still gate it.
 last_updated: "2026-08-04T00:00:00.000Z"
 last_activity: 2026-08-04
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 46
-  completed_plans: 38
+  completed_plans: 39
   percent: 13
 ---
 
@@ -25,9 +25,60 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 
 ## Current Position
 
-Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 21 of **22** complete (136-01..136-18 + 136-20 + 136-21 + 136-22); next executable: 136-19 (wave 11)
-Status: Ready to execute
+Phase: 136 (read-surfaces-connections-panel-work-witnesses) — **ALL PLANS EXECUTED**
+Plan: **22 of 22 complete** — every plan in the phase has executed.
+Status: Code complete and deployed behind an OFF flag. Flag-on is an owner decision and is
+**gated on six items that are NOT done** — see "WAVE 11" below. Do not read "22 of 22" as "ready".
+
+**WAVE 11 CLOSED 2026-08-05 — `136-19`, the cross-surface masking sweep + flag-on attestation.**
+15 mutations, each watched red by name. An unset `MASKING_SCAN_PATTERNS_FILE` yields a RED suite
+(26 passed, 5 errors), never a skip. Coverage is derived from what code CALLS (`ui.*`, transitively)
+and checked at LINE granularity against Python's own compiler; the database scope derives from every
+`manifest*.json` on disk and the payload scope from parsing every `web/` module importing
+`web.discovery`. **Both derivations failed on their first run, which is the point.** Four classes
+swept: 2,213,790 / 23,063 / 470 / 27,566 chars; all 48 findings state combinations, 9 enveloped
+reads, 1 link target, 15 error modes. Six manifest-named databases clean under
+`--strict --scan-repo --scan-asset --scan-sqlite`. Non-vacuity proved by feeding values read OUT of
+the deployed artifact back in as the pattern set: 11 / 26,480 / 1 hits. `--scan-asset` alone proved
+INSUFFICIENT by construction — at offsets 515/522/529 the byte scan reports 0 where the cell scan
+reports 1.
+
+**Three real gaps it closed in already-"finished" work:** the findings page had NO automated masking
+gate at all (136-18 wrote the capture helper and ran the scan by hand; nothing called it); neither
+surface's click-painted output had ever been scanned (and closing that needed a CHANGE-handler
+driver as well as a click driver, because the unit/sort selects register value-change handlers);
+and three of six manifest-named databases had never been scanned.
+
+⚠ **THE SEVENTH INSTANCE OF THIS PHASE'S CHARACTERISTIC DEFECT — and it was in the sweep itself.**
+Mutation M4 turned a control red and the failure output **printed the restricted pattern in clear
+text**: `assert needle in text` is rewritten by pytest to display both operands. A D-25 leak
+introduced BY the tool built to detect D-25 leaks, found by the mutation battery rather than by
+review. Fixed structurally (`_contains()` returns a bool) and pinned by an AST check that refuses
+any assertion able to echo it again. Repo re-verified clean afterwards, with the fail-closed control
+confirming exit 1 when the pattern file is unset.
+
+**THE PHASE'S CHARACTERISTIC DEFECT, for whoever plans 137+.** Seven instances, all failing in the
+same direction — toward false confidence: (1) a masking test that SKIPPED when its pattern file was
+absent; (2) the atlas browser-DOM capture exiting 0 having run none of its interactions; (3) an
+executor-dispatch assertion measuring ZERO and passing; (4) a benchmark whose non-empty assertion
+counted the ROWS of a `COUNT(*)`; (5) a skip list calling a reachable state "unreachable", which hid
+a real user-facing crash; (6) a masking capture whose "derived" coverage was a NAMING CONVENTION,
+missing 78 executable lines including every surface painted by a click; (7) the M4 leak above.
+Three were found by the external reviewer, four by CI or direct measurement. **None was found by
+reading the code and thinking it looked right.**
+
+### The six items that gate the public flag-on (NOT done)
+From `136-FLAG-ON-READINESS.md` §3: **D-06b**; the tier-A-with-its-number clause; the
+correction/retraction policy; VIS-02's reconciliation; the browser-check record; and the **58
+NULL-genre works the release verifier fails on**. Additionally, and largest: **no public read path
+has ever been exercised against a flag-ON production box**, because the flag has never been on —
+that cannot be closed before Phase 139. The production LLM novelty run (ruling K) never happened, so
+the **false-novel rate is untested**.
+
+⚠ `ROADMAP` criterion 5 is **PARTIALLY met**: `/catalog-browse` integration and neutral-title search
+moved to 136.1 on 2026-08-02 and the criterion text was never updated. Recorded, not counted as met.
+
+⚠ Do **NOT** run `gsd-sdk roadmap update-plan-progress 136` blindly — it ticks the halted 136-09.
 
 **WAVE 10 CLOSED 2026-08-04 — `136-18`, the findings rows + ruling-U headline.** Renders from
 136-22's artifact-backed reader, four numbers on the single `main_pool = 1` basis, shades summing
