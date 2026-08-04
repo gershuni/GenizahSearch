@@ -819,3 +819,68 @@ earlier.
 9. **CONFIRM — all plans — wave and dependency integrity is valid.** Independent frontmatter parsing found 22 plans, 11 waves, every dependency strictly earlier, and no same-wave `files_modified` collision. Wave 9 contains only 136-17; `web/pages/help.py` is otherwise owned only by closed wave-1 plan 136-02. The stable control identifiers and 136-18’s stale exception-count replacement are present. No correct implementation is rejected by the active revised controls; the broken-pass cases are findings 1 and 3. The masking scanner could not run because `MASKING_SCAN_PATTERNS_FILE` is unset. **Change:** none.
 
 VERDICT: rework — BLOCKER 0 · HIGH 1 · MEDIUM 2 · LOW 2 · CONFIRM 4
+
+
+---
+
+# Round 12 — SIGN-OFF (2026-08-04)
+
+**Brief:** `_tmp/136-codex-preflight-r12-brief.md`. **Baseline:** § Round 11. Revision `a1e2bf2e`.
+
+> ## VERDICT: approve — 0 BLOCKER · 0 HIGH · 0 MEDIUM · 0 LOW · 6 CONFIRM
+
+**Full trajectory across 8 rounds and 7 revisions:**
+**1 BLOCKER / 8 HIGH → 5 → 5 → 4 → 5 → 4 → 1 → APPROVE.**
+
+## What actually broke the plateau
+
+Rounds 6–10 sat at 4–5 HIGH while each revision closed every finding it was given. Patching
+findings individually was reproducing them in new clothes. Round 10's analysis named the shared
+cause — **the plans kept proving GLOBAL properties by sampling or set arithmetic, and a sampled
+proof is leaky by construction** — and round 11's instruction was to replace sampling with
+structure rather than fix four symptoms. That single change took 4 HIGH → 1, and round 12 to zero.
+
+## The property this phase kept losing, now held twice running
+
+> Round 11: *"No correct implementation is rejected by the active revised controls."*
+> Round 12: *"The changed criteria all have concrete failure paths, and no correct implementation
+> was found that they reject."*
+
+Both directions, confirmed independently: every criterion can fail on a broken implementation, and
+none fires on a correct one.
+
+## The near-miss was adjudicated in the author's favour
+
+Revision 7's self-review found four `KNOWN_CARRIER_FLOOR` members outside `ALLOWLIST_FIELD_UNION`
+on today's tree — two existing nowhere in the codebase — which reads like an unsatisfiable pair. It
+declined to delete them and added a provenance note plus a subset assertion instead. **CONFIRM 6
+verifies that independently:** the four are supplied by 136-21's registered
+`SURFACE_EXPANSION_FIELDS`; 136-21 is wave 7 and an explicit dependency of wave-9 136-17, so
+`KNOWN_CARRIER_FLOOR <= ALLOWLIST_FIELD_UNION` is satisfiable. Deleting them would have dropped
+four live carriers and exempted them from the strict scan.
+
+## Structural state at sign-off
+
+22 plans, 11 waves, every dependency strictly earlier, no same-wave `files_modified` collision.
+Waves 8–11 are 136-22 → 136-17 → 136-18 → 136-19, one plan each. The D-06a wording pin is
+independent (hardcoded per-language digests against normalised live rendered text, not derived from
+the mutable authority), and `web/pages/help.py` is **byte-for-byte unchanged** — the owner-approved
+sentence was never touched across any revision.
+
+**Wave 7's `136-21` is released for execution on this sign-off.**
+
+## Findings
+
+1. **CONFIRM — 136-17 — faithful-cell repair is closed.** Assertion (h) rejects both empty and unrelated vocabularies, while control 13 exercises each clause independently. Across 136-17 and 136-18, every registered allowlist is consumed, so membership is not vacuous at phase completion. `None` and `''` remain valid absences. **File:** `136-17-PLAN.md:900`, `136-17-PLAN.md:1204`, `136-17-PLAN.md:1270`; `136-18-PLAN.md:436`. **Change:** none.
+
+2. **CONFIRM — 136-17 — the false mechanism is corrected.** Live `_project` is total and backfills absent keys with `None`. The plan now accurately assigns detection of corpus-wide omission to non-null coverage and limits pre-projection assertions to genuine producer contracts supported by a query or dataclass. No invented requirement was added. **File:** `shared/discovery_surface_projection.py:257`; `136-17-PLAN.md:753`, `136-17-PLAN.md:763`, `136-17-PLAN.md:1365`. **Change:** none.
+
+3. **CONFIRM — 136-18 — the coverage hatch is closed.** The reason-based alternative is gone. The imported derived-`CONSUMED_ALLOWLISTS` check must pass; an uncovered field requires a fixture or becomes a blocking finding. **File:** `136-18-PLAN.md:436`, `136-18-PLAN.md:531`. **Change:** none.
+
+4. **CONFIRM — 136-17 — the wording pin is independent.** The expected per-language SHA-256 values must be hardcoded literals and are compared with normalized live rendered text, not derived from `_LIMITATIONS_TEXT` at test time. Commit `a1e2bf2e` did not alter `web/pages/help.py`, and the limitations text remains byte-for-byte unchanged. **File:** `136-17-PLAN.md:1063`, `136-17-PLAN.md:1073`, `136-17-PLAN.md:1376`; `web/pages/help.py:178`. **Change:** none.
+
+5. **CONFIRM — 136-17 — the threat-register wording is repaired.** Completeness is now attributed to the exact `ALLOWLIST_FIELD_UNION` partition; projected values are described only as misclassification and coverage controls. **File:** `136-17-PLAN.md:1407`, `136-17-PLAN.md:1410`. **Change:** none.
+
+6. **CONFIRM — 136-17/136-18/all plans — no regression found.** Git confirms `a1e2bf2e` changed exactly plans 136-17 and 136-18; their frontmatter and structure were not altered. The four disputed floor fields are supplied by 136-21’s registered `SURFACE_EXPANSION_FIELDS`; 136-21 is wave 7 and an explicit dependency of wave-9 plan 136-17, so `KNOWN_CARRIER_FLOOR <= ALLOWLIST_FIELD_UNION` is satisfiable by a correct implementation. Independent parsing found 22 plans, 11 waves, every dependency strictly earlier, and no same-wave file collision. The changed criteria all have concrete failure paths, and no correct implementation was found that they reject. The prior D-06a and conditional-cap structural controls remain intact on spot-check. **File:** `136-21-PLAN.md:5`, `136-21-PLAN.md:353`; `136-17-PLAN.md:5`, `136-17-PLAN.md:787`; `136-18-PLAN.md:5`. **Change:** none.
+
+VERDICT: approve — BLOCKER 0 · HIGH 0 · MEDIUM 0 · LOW 0 · CONFIRM 6
