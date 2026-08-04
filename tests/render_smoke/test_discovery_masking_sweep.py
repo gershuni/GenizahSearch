@@ -1891,6 +1891,76 @@ def test_every_discovery_database_present_on_this_machine_is_in_the_record():
         "appear in no recorded scan: " + repr(unscanned))
 
 
+ATTESTATION_PATH = (".planning/phases/136-read-surfaces-connections-panel-"
+                    "work-witnesses/136-FLAG-ON-READINESS.md")
+
+#: The figure ruling U retired. It was wrong -- built by adding main-pool
+#: `fills_gap` to UNFILTERED `refines_granularity` and `container_predicts` --
+#: and it is scanned for because a retired number is the one most likely to be
+#: copied forward from an old draft.
+_RETIRED_LAUNCH_FIGURE = "13,285"
+
+
+def _recorded_launch_figures() -> FrozenSet[str]:
+    """Every launch figure the attestation records, read OUT of the attestation.
+
+    Derived rather than listed here so a rebake that moves the numbers moves
+    this check with it: the attestation is where they are recorded WITH their
+    artifact and audience, so it is the right authority.
+    """
+    import re
+    text = _read(ATTESTATION_PATH)
+    heading = "### The launch figures"
+    assert heading in text, (
+        f"{ATTESTATION_PATH} no longer carries a {heading!r} section, so the "
+        "forbidden set cannot be derived. Do NOT fall back to a list written "
+        "here: the attestation is the authority precisely because it records "
+        "each figure WITH its artifact and audience.")
+    start = text.index(heading)
+    end = text.index("## 5.", start)
+    figures = set(re.findall(r"\*\*([\d,]{4,})\*\*", text[start:end]))
+    return frozenset(figures | {_RETIRED_LAUNCH_FIGURE})
+
+
+def test_no_launch_figure_reaches_the_CHANGELOG():
+    """A number written into a changelog outlives the artifact that produced it,
+    exactly as one written into a translation would -- and 136-22's no-literals
+    guard scans source and translations, not `CHANGELOG.md`.
+
+    The forbidden set is DERIVED from the attestation's own recorded table, and
+    the derivation is asserted non-empty: a parse that silently found nothing
+    would report a clean changelog it never inspected, which is this phase's
+    signature defect.
+    """
+    figures = _recorded_launch_figures()
+    assert len(figures) >= 5, (
+        "the launch-figure table could not be parsed out of the attestation "
+        f"(found {sorted(figures)}) -- this check would pass vacuously")
+    changelog = _read("CHANGELOG.md")
+    found = sorted(figure for figure in figures if figure in changelog)
+    assert not found, (
+        "these launch figures appear in CHANGELOG.md: " + repr(found)
+        + ". They are properties of one artifact and will move on the next "
+          "rebuild; record them in the attestation, with their sidecar version "
+          "and audience, and nowhere else.")
+
+
+def test_the_changelog_says_flag_gated_and_claims_no_launch():
+    """The release note must not read as a user-facing launch. Deployed and
+    gated are different claims, and the difference is the posture of the whole
+    milestone."""
+    changelog = _read("CHANGELOG.md")
+    section_start = changelog.index("### Built and deployed, NOT public")
+    section = changelog[section_start:changelog.index("### New Features", section_start)]
+    for phrase in ("DISCOVERY_ENABLED", "hide", "not live"):
+        assert phrase.lower() in section.lower(), (
+            f"the changelog entry does not say {phrase!r}")
+    ASSERTED_PROHIBITED = ("now available to", "is now live", "launched", "public beta")
+    for phrase in ASSERTED_PROHIBITED:
+        assert phrase not in section.lower(), (
+            f"the changelog entry claims a launch: {phrase!r}")
+
+
 def test_zz_report_what_this_sweep_scanned(clean_capture, capsys):
     """Last by name. Prints what each class covered, because a sweep that cannot
     say what it looked at is a sweep nobody can check."""

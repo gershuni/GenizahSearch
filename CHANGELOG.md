@@ -6,6 +6,32 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased] — Connections Atlas (beta, web)
 
+### Built and deployed, NOT public — discovery read surfaces (web, flag-gated)
+
+- **Two discovery surfaces are deployed to production behind `DISCOVERY_ENABLED`, which is unset,
+  so they hide completely.** Nothing discovery-related is visible to any visitor: the flag is
+  necessary but not sufficient (`web/discovery_assets.py::discovery_available()` also requires a
+  startup-validated, content-hash-matched sidecar of the right audience), the nav entry is gated on
+  the same predicate, and `/computed-identifications` returns 404 while the flag is off. **Deployed
+  and gated is not live**; this entry records what exists, not a launch.
+  - A **connections panel** on the browse page, opened by a "Computed identifications / זיהויים
+    מחושבים" control, listing a manuscript's computed same-work matches in two buckets — a main pool
+    and a "more matches" bucket — with the relation stated on each row, matched-letter coverage
+    labelled as such, and match framing throughout. No precision percentage, no confidence scale and
+    no human-review badge appear anywhere.
+  - A corpus-wide **findings page** at `/computed-identifications` with its own nav entry: three
+    selectable row units, a domain/author/work facet cascade computed on the *identified work* rather
+    than the manuscript's catalogue domain, a candidacy filter, server-side pagination, and a
+    permanently visible caveat. Bilingual EN/HE with RTL.
+  - The **methods page** (`/help`) was rewritten qualitatively: the tiers are explained in words
+    together with the non-percentage facts about how they were graded. Every precision percentage,
+    confidence interval, weighted estimate and strata table was removed, in both languages.
+  - Reader-facing honesty is enforced by a shared six-detector gate rather than by review, and a
+    cross-surface masking sweep scans rendered output, JSON payloads, copy paths and error paths for
+    restricted-corpus strings, with a positive control per class and a fail-closed pattern set.
+  - The public artifact is a projected, audience-gated sidecar; a public loader can only ever resolve
+    a public artifact, and a private, partial, corrupt or absent one fails closed identically.
+
 ### New Features
 - **Connections Atlas (beta, web).** A new claim-free preview page at `/atlas` that renders
   an interactive, algorithmically laid-out overview map of the textual connections across the
