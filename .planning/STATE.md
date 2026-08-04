@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 136-14-PLAN.md; plans 136-15..136-19/21 revised + 136-22 created (Codex round 5)
+stopped_at: Completed 136-17 (wave 9, connections panel); next executable 136-18 (wave 10)
 last_updated: "2026-08-04T00:00:00.000Z"
 last_activity: 2026-08-04
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 46
-  completed_plans: 36
+  completed_plans: 37
   percent: 13
 ---
 
@@ -26,8 +26,29 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 19 of **22** complete (136-01..136-16 + 136-20 + 136-21 + 136-22); next executable: 136-17 (wave 9)
+Plan: 20 of **22** complete (136-01..136-17 + 136-20 + 136-21 + 136-22); next executable: 136-18 (wave 10)
 Status: Ready to execute
+
+**WAVE 9 CLOSED 2026-08-04 — `136-17`, the connections panel.** Panel body renderer + browse seam
+with four service states, flag-off by default and browse byte-for-byte unchanged. Measured on the
+real artifact over the 20 heaviest pages: cold p95 **4.2 ms**, warm p95 **0.1 ms** against the
+150 ms browse cap. 313 passed / 1 skipped; `pytest -k discovery` 1,494 passed after the gate
+widening, no shipped surface red. Two tests that could not fail were found by running the mutations
+(a deleted outage branch left 29 renderer tests green) and fixed.
+
+⚠ **Two things a later plan must not re-derive.** (1) `assert_discovery_honesty` keeps its
+five-detector contract; **`assert_surface_honesty` is the six-detector entry point — 136-18 must
+call that name**, because the D-06a card boundary requires the live limitations sentence to fail a
+flattened, html-escaped fragment where no marker class can survive. (2) The accuracy detector's
+decimal needs an explicit integer part and no lookbehind: without the first, `MS Heb c.57` is
+rejected as the rate `.57`; without the second, `accuracy score0.9` escapes.
+
+**Deploy is OUTSTANDING and deliberately deferred** — `deploy.sh` hard-resets production to the
+pushed branch, and this tree had concurrent commits landing throughout. `PANEL-01` / `PANEL-02` are
+built and gated; they are NOT shipped until that deploy lands.
+
+**Owed follow-up:** export `COVERAGE_STATUSES` / `ELIGIBILITY_BASES` to `shared/` (declared locally
+in the gate with test-time authority pins; `shared/` and `scripts/` were outside 136-17's file list).
 
 **WAVE 8 CLOSED 2026-08-04 — `136-22`, the ruling-U launch-statistics reader.** Measured through the
 shipped reader against `discovery-v1-e9365edc…` (`audience=public`): **4,152 + 3,873 + 1,498 =

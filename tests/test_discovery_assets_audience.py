@@ -42,11 +42,11 @@ value from the refused artifact reaches the log.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import json
 import logging
 import sqlite3
-import sys
 
 import pytest
 
@@ -69,7 +69,12 @@ _AUDIENCE_MARKER = "SYNTHETIC-AUDIENCE-MARKER-9Q7"
 @pytest.fixture(autouse=True)
 def _restore_state():
     """Every test ends with a bare load_discovery_state() restore call so
-    module state never leaks across tests (the atlas/discovery test idiom)."""
+    module state never leaks across tests (the atlas/discovery test idiom).
+
+    Module IDENTITY needs no restore here: `_reimport_web_discovery` reloads
+    in place rather than popping `sys.modules`, so only one `web.discovery`
+    object ever exists. See that helper for why the difference matters.
+    """
     yield
     da.load_discovery_state()
 
@@ -518,11 +523,35 @@ def _is_empty_read_result(result) -> bool:
 def _reimport_web_discovery():
     """Force a FRESH import of web.discovery so its module-level
     DiscoveryService re-resolves against the currently loaded state (the
-    tests/test_discovery_composition.py idiom)."""
-    sys.modules.pop("web.discovery", None)
-    import web.discovery as disc  # noqa: PLC0415 -- deliberate controlled re-import
+    tests/test_discovery_composition.py idiom).
 
-    return disc
+    RELOAD, never `sys.modules.pop()` + re-import. Popping and re-importing
+    builds a SECOND module object, and restoring `sys.modules` afterwards does
+    not undo it: the import machinery also rebinds the submodule as an
+    ATTRIBUTE of the parent package, and `import web.discovery as x` reads that
+    package attribute. So the popper leaves `sys.modules["web.discovery"]` and
+    `web.discovery` pointing at different objects.
+
+    That was a real cross-suite failure. `web/pages/findings.py` from-imports
+    `get_findings_enveloped`, whose `__globals__` IS the dict of whichever
+    object was live when the page was first imported. With two objects around,
+    tests/test_findings_page.py patched `discovery_available` on one while the
+    page read the other -- so the page took the unavailable branch and issued
+    ZERO executor dispatches, and the second module-level execution of
+    web/discovery.py cascaded `Event loop is closed` into unrelated suites.
+
+    `importlib.reload` re-executes the module in its EXISTING namespace, so
+    exactly one object stays live in `sys.modules`, on the package, and as the
+    page's `__globals__`, while module-level state (notably the
+    `DiscoveryService` construction this helper exists to re-run) is rebuilt.
+    Note the conftest.py precedent at the `shared.local_indexer` fixture: a
+    reload does NOT rebind names another module already from-imported, so a
+    caller that needs the new FUNCTION OBJECT (rather than fresh module state)
+    must rebind it itself.
+    """
+    import web.discovery as disc  # noqa: PLC0415 -- reloaded deliberately below
+
+    return importlib.reload(disc)
 
 
 def _public_async_read_paths(disc):

@@ -16,8 +16,8 @@ tests in this file or others.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
-import sys
 
 import pytest
 
@@ -31,7 +31,11 @@ FIXTURE_VERSION = "discovery-v1-synthetic-fixture"
 def _restore_state():
     """Every test in this module ends with a bare load_discovery_state()
     restore call so module state never leaks across tests (atlas/discovery
-    test idiom)."""
+    test idiom).
+
+    Module identity needs no restore: `_reimport_web_discovery` reloads in
+    place rather than popping `sys.modules`, so only one object ever exists.
+    """
     yield
     da.load_discovery_state()
 
@@ -40,10 +44,19 @@ def _reimport_web_discovery():
     """Force a FRESH import of web.discovery -- needed so the
     import-before-load test can control precisely WHEN the module (and its
     module-level DiscoveryService construction) first runs, relative to
-    load_discovery_state()."""
-    sys.modules.pop("web.discovery", None)
-    import web.discovery as disc  # noqa: PLC0415 -- deliberate controlled re-import
-    return disc
+    load_discovery_state().
+
+    RELOAD, never `sys.modules.pop()` + re-import: popping builds a SECOND
+    module object, and restoring `sys.modules` does not undo it because the
+    import machinery also rebinds the submodule as an attribute of the parent
+    package, which is what `import web.discovery as x` actually reads. Two live
+    objects split from-imported references (notably `web/pages/findings.py`)
+    from the object a test patches. See the same helper in
+    tests/test_discovery_assets_audience.py for the concrete failure.
+    """
+    import web.discovery as disc  # noqa: PLC0415 -- reloaded deliberately below
+
+    return importlib.reload(disc)
 
 
 def test_import_before_load_then_load_then_query_resolves_and_version_correct(monkeypatch, tmp_path):

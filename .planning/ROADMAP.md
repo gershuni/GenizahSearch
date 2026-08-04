@@ -214,8 +214,8 @@ Plans:
 - [ ] 136-13-PLAN.md — The rebuild, the gate battery, the owner authorization and the one production redeploy · wave 5 · **checkpoint**
 - [x] 136-14-PLAN.md — Service layer, once: envelope, panel paths, findings query, facet cascade · wave 6
 - [ ] 136-15-PLAN.md — Panel display model (pure) · wave 7
-- [ ] 136-16-PLAN.md — Findings page shell: route, nav, caveat, modes, filter bar, result bar, pager · wave 7
-- [ ] 136-17-PLAN.md — Panel: browse attachment, body render, render-smoke, **panel deploy** · wave 8
+- [x] 136-16-PLAN.md — Findings page shell: route, nav, caveat, modes, filter bar, result bar, pager · wave 7
+- [x] 136-17-PLAN.md — Panel: browse attachment, body render, render-smoke, **panel deploy** · wave 8 (built + gated; **deploy outstanding**)
 - [ ] 136-18-PLAN.md — Findings rows, novelty switch, combination benchmark, render-smoke, **findings deploy** · wave 9
 - [ ] 136-19-PLAN.md — Cross-surface masking sweep + flag-on readiness attestation + closeout · wave 10
 - [x] 136-20-PLAN.md — **Public/private loader boundary + readiness contract** (audience gate; the two new tables and their row counts in startup validation; rollback + partial-asset tests) · wave 3
