@@ -762,7 +762,12 @@ def _envelope_for(status: str, items, total=None, meta=None):
 
 
 def bundle_for(profile: Mapping[str, Any], lang: str, status: str,
-               seed_row: Optional[Mapping[str, Any]] = None) -> PanelServiceBundle:
+               seed_row: Optional[Mapping[str, Any]] = None,
+               seed_title: Optional[str] = None) -> PanelServiceBundle:
+    """`seed_title` replaces the recorded work title on EVERY claim and work
+    summary. It is how the masking positive control gets its needle into the
+    render through DATA -- the route a restricted name arriving from the sidecar
+    would actually take -- instead of being appended to the capture file."""
     claims = [surface_safe_claim(_claim_source(
         claim_id=f'{i:064d}', work_id=f'w{i:06d}', canonical_work_id=f'w{i:06d}',
         display_work_id=f'w{i:06d}', span_start=i * 10, span_end=i * 10 + 90,
@@ -770,12 +775,13 @@ def bundle_for(profile: Mapping[str, Any], lang: str, status: str,
         adjudication_status=(ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED
                              if profile.get('confirmed') else
                              ids.ADJUDICATION_STATUS_UNREVIEWED),
+        **({'neutral_title': seed_title} if seed_title else {}),
     )) for i in range(1, int(profile['claims']) + 1)]
     if seed_row is not None:
         claims = [dict(claims[0], **seed_row)] + claims[1:]
     works = [surface_safe_work_summary(_work_summary_source(
         canonical_work_id=f'w{i:06d}', display_work_id=f'w{i:06d}',
-        neutral_title=f'Work {i}', page_count=i,
+        neutral_title=seed_title or f'Work {i}', page_count=i,
         gated=bool(profile.get('gated')) and i % 2 == 0,
     )) for i in range(1, int(profile['works']) + 1)]
     return PanelServiceBundle(
@@ -928,13 +934,19 @@ def test_work_titles_are_not_links():
 # THE ENVELOPE SCAN.
 # ===========================================================================
 
-def panel_envelopes() -> List[Tuple[str, Mapping[str, Any]]]:
+def panel_envelopes(seed: Optional[str] = None) -> List[Tuple[str, Mapping[str, Any]]]:
     """Every envelope this surface consumes: the four eager reads, the lazy
-    related-pages read and the expansion."""
-    claims = [surface_safe_claim(_claim_source())]
-    works = [surface_safe_work_summary(_work_summary_source())]
+    related-pages read and the expansion.
+
+    `seed` plants a value in the fields that carry FREE TEXT out of the sidecar
+    -- the recorded work title and the shelfmark -- for the masking positive
+    control."""
+    titled = {'neutral_title': seed} if seed else {}
+    claims = [surface_safe_claim(_claim_source(**titled))]
+    works = [surface_safe_work_summary(_work_summary_source(**titled))]
     related = [surface_safe_related_page(_related_page_source())]
-    expansion = [surface_safe_expansion(_expansion_source())]
+    expansion = [surface_safe_expansion(_expansion_source(
+        **({'shelfmark_display': seed} if seed else {})))]
     return [
         ('claims', make_envelope(STATUS_OK, claims, 1, meta={
             'page_id': '990000000000000944_IE1_P000002_FL3', 'include_review': False})),
@@ -1548,6 +1560,7 @@ def test_the_owner_approved_wording_is_pinned_by_a_hardcoded_digest(lang):
 # ===========================================================================
 
 MASKING_SCRIPT = 'scripts/check_atlas_masking.py'
+PANEL_MODULE_PATH = 'web/components/discovery_panel.py'
 
 #: A FABRICATED needle. The real restricted patterns live only in the gitignored
 #: file `MASKING_SCAN_PATTERNS_FILE` points at; nothing in this repository may
@@ -1556,32 +1569,215 @@ MASKING_SCRIPT = 'scripts/check_atlas_masking.py'
 _FABRICATED_NEEDLE = 'ZZQQ-FABRICATED-MASKING-NEEDLE-ZZQQ'
 
 
-def _panel_surface_capture() -> str:
-    """Everything this surface can EMIT, as one text blob.
+def _panel_render_entry_points() -> frozenset:
+    """Every render function the panel module defines, DERIVED from the module.
 
-    Not the repository -- the OUTPUT. Three egress classes, the same three the
-    honesty gate scans: the RENDERED panel (seven manuscript profiles x two
-    languages x four service states, entry control included), the EXACT
-    envelopes it consumes, and the forced error-path messages.
-
-    A repository scan cannot see any of these: a restricted name arriving from
-    the sidecar, or assembled at render time, is in none of the repo's bytes.
+    Not a list. A list is how the capture came to hold the panel BODY and not
+    the ENTRY CONTROL, which the live seam renders separately
+    (`web/pages/browse_enrichment.py`) and a reader sees first: a surface can be
+    added to the renderer and omitted from the capture with every masking test
+    still green, and a restricted string then escapes on the omitted surface.
+    The naming rule is the module's own -- a function whose name (private prefix
+    stripped) begins with `render_` paints something.
     """
+    import ast
+    tree = ast.parse(_read(PANEL_MODULE_PATH))
+    return frozenset(
+        node.name for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.lstrip('_').startswith('render_')
+    )
+
+
+def _own_texts(node) -> List[str]:
+    """Every string this ONE element carries -- text and props alike.
+
+    Deliberately unfiltered by class. The previous capture skipped any element
+    with no CSS class, which is a rule about styling and not about what a reader
+    can read.
+    """
+    out = []
+    for attr in ('text', '_text', 'content'):
+        value = getattr(node, attr, None)
+        if isinstance(value, str) and value.strip():
+            out.append(value)
+    for value in (getattr(node, '_props', None) or {}).values():
+        if isinstance(value, str) and value.strip():
+            out.append(value)
+    return out
+
+
+def _render_capture(paint) -> str:
+    """Run `paint()` in a real client and return every rendered string."""
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+    holder: Dict[str, Any] = {}
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page('/_panel_masking_capture')) as client:
+            with client:
+                paint()
+        holder['client'] = client
+
+    asyncio.run(_run())
     parts: List[str] = []
+    for element in holder['client'].elements.values():
+        parts.extend(_own_texts(element))
+    return '\n'.join(parts)
+
+
+def _generic_group_bundle(lang: str, seed_title: Optional[str] = None
+                          ) -> PanelServiceBundle:
+    """Two DIFFERENT works on a BYTE-IDENTICAL span (D-13d).
+
+    The only input that produces a generic-shared-text group, and therefore the
+    only way `_render_generic_group` is ever painted. Different authors, so
+    `works_related_by_title` cannot collapse them as one work at two
+    granularities.
+    """
+    base = _claim_source(span_start=0, span_end=555, matched_letters=555)
+    rows = [
+        surface_safe_claim(dict(
+            base, claim_id='a' * 64, work_id='w000101',
+            canonical_work_id='w000101', display_work_id='w000101',
+            neutral_title=seed_title or 'Tur Orach Chaim',
+            author='Jacob ben Asher')),
+        surface_safe_claim(dict(
+            base, claim_id='b' * 64, work_id='w000102',
+            canonical_work_id='w000102', display_work_id='w000102',
+            neutral_title='Yalkut Shimoni on Nevi\'im',
+            author='Shimon ha-Darshan')),
+    ]
+    return PanelServiceBundle(
+        claims=make_envelope(STATUS_OK, rows, len(rows), meta={
+            'page_id': '990000000000000944_IE1_P000002_FL3', 'include_review': False}),
+        page_ids=make_envelope(STATUS_OK, ['990000000000000944_IE1_P000002_FL3'], 1,
+                               meta={'sys_id': '990000000000000944', 'resolved': True,
+                                     'truncated': False, 'volume_ie': 'IE1'}),
+        manuscript_works=make_envelope(STATUS_OK, [], 0, meta={
+            'page_scope_resolved': True, 'lang': lang}),
+        related_count=make_envelope(STATUS_OK, [], 3, meta={
+            'unit': 'distinct_opposite_pages'}),
+        related_rows=None,
+        lang=lang,
+    )
+
+
+def _render_every_panel_surface(seed: Optional[str] = None) -> str:
+    """Every surface a READER can see on this panel, as text.
+
+    The panel BODY is not the surface. The live seam renders the ENTRY CONTROL
+    through a second entry point, and three more surfaces are painted only after
+    a reader opens something -- the per-work expansion body, the related-page
+    rows, and the generic-shared-text group behind the second disclosure level.
+    Capturing the body alone established that the scanner can read a file.
+
+    Coverage of this claim is not asserted in prose: `_capture_panel_surface`
+    instruments every render function the module defines and
+    `test_the_capture_paints_every_render_entry_point_the_panel_has` fails,
+    naming the function, if one of them was never reached.
+    """
+    title = f'Commentary on {seed}' if seed else None
+    parts: List[str] = []
+
+    def _noop_retry():                                       # pragma: no cover
+        return None
+
+    def _noop_toggle():                                      # pragma: no cover
+        return None
+
+    async def _noop_reload():                                # pragma: no cover
+        return None
+
     for _name, profile in MANUSCRIPT_PROFILES:
         for lang in LANGS:
             for status in SERVICE_STATES:
-                model = build_panel_rows(bundle_for(profile, lang, status))
-                client = render_panel(model)
-                for element in client.elements.values():
-                    if not (getattr(element, '_classes', None) or []):
-                        continue
-                    parts.extend(_subtree_texts(element))
-    for name, envelope in panel_envelopes():
-        parts.append(f'{name}: {json.dumps(envelope, ensure_ascii=False, default=str)}')
-    for mode, message in forced_error_paths():
-        parts.append(f'{mode}: {message}')
+                model = build_panel_rows(
+                    bundle_for(profile, lang, status, seed_title=title))
+                parts.append(_render_capture(lambda m=model: (
+                    dp.render_discovery_panel_body(
+                        m, on_retry=_noop_retry,
+                        page_id='990000000000000944_IE1_P000002_FL3'),
+                    # The LIVE entry control, rendered by the same second entry
+                    # point `update_discovery_panel_section` uses. A reader sees
+                    # this one BEFORE the body.
+                    dp.render_discovery_entry_control(m, on_toggle=_noop_toggle),
+                )))
+
+    for lang in LANGS:
+        # The generic-shared-text group and the populated related-page rows,
+        # both behind the second disclosure level.
+        model = build_panel_rows(_generic_group_bundle(lang, seed_title=title))
+        parts.append(_render_capture(lambda m=model: dp.render_discovery_panel_body(
+            m, on_retry=_noop_retry,
+            page_id='990000000000000944_IE1_P000002_FL3')))
+
+        with_rows = bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), lang, STATUS_OK,
+                               seed_title=title).with_related_rows(
+            make_envelope(STATUS_OK, [surface_safe_related_page(
+                _related_page_source())], 1,
+                meta={'unit': 'distinct_opposite_pages'}))
+        model = build_panel_rows(with_rows)
+        parts.append(_render_capture(lambda m=model: dp.render_discovery_panel_body(
+            m, on_retry=_noop_retry,
+            page_id='990000000000000944_IE1_P000002_FL3')))
+
+        # The per-work expansion body. It is painted by the LAZY loader, so it
+        # is driven with the envelope that loader would hand it -- both the
+        # populated form and its own outage form.
+        ok_expansion = make_envelope(
+            STATUS_OK,
+            [surface_safe_expansion(_expansion_source(
+                **({'shelfmark_display': seed} if seed else {})))],
+            5684, meta={'work_id': 'w000001', 'anchor_mode': 'anchored',
+                        'filter_basis': 'displayed_band', 'anchor_excluded': True})
+        for envelope in (ok_expansion,
+                         unavailable_envelope(meta={'reason': 'query_failed'})):
+            state: Dict[str, Any] = {'open': True, 'page': 1, 'loaded': True}
+            parts.append(_render_capture(lambda e=envelope, s=state, ln=lang: (
+                dp._render_expansion_envelope(e, ln, s, _noop_reload, page_size=25))))
+
     return '\n'.join(parts)
+
+
+def _capture_panel_surface(seed: Optional[str] = None) -> Dict[str, Any]:
+    """The whole capture, plus WHICH render functions producing it were reached.
+
+    The instrumentation is the honest part. Without it "the capture includes
+    every surface" is a claim in a docstring, and this suite's characteristic
+    failure has been exactly such a claim being wrong in a new place.
+    """
+    exercised = set()
+    originals = {name: getattr(dp, name) for name in _panel_render_entry_points()}
+
+    def _wrap(name, fn):
+        def _recorder(*args, **kwargs):
+            exercised.add(name)
+            return fn(*args, **kwargs)
+        return _recorder
+
+    for name, fn in originals.items():
+        setattr(dp, name, _wrap(name, fn))
+    try:
+        rendered = _render_every_panel_surface(seed)
+    finally:
+        for name, fn in originals.items():
+            setattr(dp, name, fn)
+
+    envelopes = '\n'.join(
+        f'{name}: {json.dumps(envelope, ensure_ascii=False, default=str)}'
+        for name, envelope in panel_envelopes(seed=seed))
+    error_paths = '\n'.join(f'{mode}: {message}'
+                            for mode, message in forced_error_paths())
+    return {
+        'rendered': rendered,
+        'envelopes': envelopes,
+        'error_paths': error_paths,
+        'exercised': frozenset(exercised),
+        'text': '\n'.join((rendered, envelopes, error_paths)),
+    }
 
 
 @pytest.fixture(scope='module')
@@ -1593,65 +1789,151 @@ def masking_capture(tmp_path_factory):
     would make this gate report its own artifact as a leak.
     """
     directory = tmp_path_factory.mktemp('discovery-panel-masking')
-    text = _panel_surface_capture()
-    capture = directory / 'panel_surface_capture.txt'
-    capture.write_text(text, encoding='utf-8')
-    return capture
+    capture = _capture_panel_surface()
+    path = directory / 'panel_surface_capture.txt'
+    path.write_text(capture['text'], encoding='utf-8')
+    return {**capture, 'path': path}
+
+
+def test_the_capture_paints_every_render_entry_point_the_panel_has(masking_capture):
+    """The gap the round-13 BLOCKER named, closed structurally.
+
+    The capture drove `render_discovery_panel_body` and nothing else, while the
+    live seam ALSO renders `render_discovery_entry_control` -- a control every
+    reader sees before the body and which the masking scan therefore never
+    looked at. An enumeration of surfaces cannot notice its own omissions, so
+    the expected set is DERIVED from the panel module and the exercised set is
+    RECORDED by instrumenting those same functions during the capture.
+
+    If a surface genuinely cannot be captured, this test FAILS naming it. It
+    does not quietly cover less than the suite claims.
+    """
+    expected = _panel_render_entry_points()
+    assert len(expected) >= 8, (
+        f'only {len(expected)} render functions found in {PANEL_MODULE_PATH} -- '
+        'the derivation is scanning the wrong tree')
+    missing = sorted(expected - masking_capture['exercised'])
+    assert not missing, (
+        'these render functions were never painted into the masking capture, so '
+        'nothing scanned covers what they emit: ' + ', '.join(missing)
+        + '. Drive them in `_render_every_panel_surface`, or -- if a surface '
+        'genuinely cannot be captured -- say so here by name rather than '
+        'letting the capture cover less than this suite claims.')
+    unknown = sorted(masking_capture['exercised'] - expected)
+    assert not unknown, f'the instrumentation recorded non-render functions: {unknown}'
 
 
 def test_the_capture_really_holds_the_rendered_surface(masking_capture):
-    """Guards the OTHER two tests. A clean scan over an empty (or trivially
-    small) capture is the purest false green available here, and both scans
-    below would report exactly that."""
-    text = masking_capture.read_text(encoding='utf-8')
+    """Guards the OTHER tests. A clean scan over an empty (or trivially small)
+    capture is the purest false green available here, and both scans below would
+    report exactly that."""
+    text = masking_capture['text']
     assert len(text) > 5000, f'the capture is {len(text)} chars -- it captured nothing'
     # Text from each of the three egress classes, so a capture that silently
     # lost one is caught by name rather than by a byte count.
-    assert dp._MANUSCRIPT_PANE_SCOPE_NOTE['en'] in text, (
+    assert dp._MANUSCRIPT_PANE_SCOPE_NOTE['en'] in masking_capture['rendered'], (
         'no RENDERED panel text in the capture')
-    assert 'distinct_opposite_pages' in text, 'no ENVELOPE in the capture'
-    assert 'temporarily unavailable' in text, 'no ERROR PATH in the capture'
+    assert 'distinct_opposite_pages' in masking_capture['envelopes'], (
+        'no ENVELOPE in the capture')
+    assert 'temporarily unavailable' in masking_capture['error_paths'], (
+        'no ERROR PATH in the capture')
     for lang in LANGS:
-        assert ds.retry_label(lang) in text, f'{lang}: the outage renders are missing'
+        assert ds.retry_label(lang) in masking_capture['rendered'], (
+            f'{lang}: the outage renders are missing')
+    # The ENTRY CONTROL specifically -- the surface the BLOCKER named. Its label
+    # is read from the shipped renderer's own translation call, so a wording
+    # change moves this with it.
+    from web.translations import tr
+    assert tr('Computed identifications') in masking_capture['rendered'], (
+        'the entry control is not in the capture')
 
 
-def test_the_masking_scanner_can_actually_fail_on_this_capture(masking_capture, tmp_path):
+def test_the_masking_scanner_can_actually_fail_on_this_capture(tmp_path):
     """The POSITIVE CONTROL, and it needs no secret -- which is the point.
 
-    A fabricated needle is planted in a COPY of the capture and the real scanner
-    is pointed at both copies with that needle as its only pattern. The planted
-    copy must be reported; the untouched capture must not. Together those two
-    assertions prove the pipeline this suite claims -- render -> capture -> scan
-    -- is wired end to end and is capable of returning non-zero.
+    The needle enters through DATA and comes out through the RENDER. A whole
+    second capture is built with a fabricated title planted on every claim and
+    work summary, exactly where a restricted name arriving from the sidecar
+    would sit; the needle is then required to be present in the RENDERED half
+    before anything is scanned. Appending it to the finished capture file --
+    what this test used to do -- proves only that the scanner can read a file,
+    which was the second half of the round-13 BLOCKER.
+
+    The planted capture must be reported and the clean one must not. Together
+    those prove the pipeline this suite claims -- render -> capture -> scan --
+    is wired end to end and is capable of returning non-zero.
 
     This test can NEVER skip. It is what stops
     `test_the_rendered_panel_and_repo_pass_the_real_masking_scan` from being the
     only evidence, and it is why a missing pattern file is a gap in COVERAGE
     (which patterns are searched for) rather than a gap in the MECHANISM.
     """
+    planted = _capture_panel_surface(seed=_FABRICATED_NEEDLE)
+    assert _FABRICATED_NEEDLE in planted['rendered'], (
+        'the planted title did not survive the render, so scanning the capture '
+        'would prove nothing about the render. Seed a field the panel actually '
+        'draws.')
+    assert _FABRICATED_NEEDLE in planted['envelopes'], (
+        'the planted title is absent from the envelope egress class')
+    clean = _capture_panel_surface()
+    assert _FABRICATED_NEEDLE not in clean['text'], (
+        'the unseeded capture already carries the needle -- the control is inert')
+
     patterns_file = tmp_path / 'fabricated_patterns'
     patterns_file.write_text(_FABRICATED_NEEDLE + '\n', encoding='utf-8')
-    planted = tmp_path / 'planted_capture.txt'
-    planted.write_text(
-        masking_capture.read_text(encoding='utf-8') + '\n' + _FABRICATED_NEEDLE,
-        encoding='utf-8')
+    planted_path = tmp_path / 'planted_capture.txt'
+    planted_path.write_text(planted['text'], encoding='utf-8')
+    clean_path = tmp_path / 'clean_capture.txt'
+    clean_path.write_text(clean['text'], encoding='utf-8')
 
     env = dict(os.environ, MASKING_SCAN_PATTERNS_FILE=str(patterns_file))
     planted_run = subprocess.run(
-        [sys.executable, MASKING_SCRIPT, '--scan-asset', str(planted)],
+        [sys.executable, MASKING_SCRIPT, '--scan-asset', str(planted_path)],
         capture_output=True, text=True, env=env)
     assert planted_run.returncode != 0, (
-        'the scanner passed a capture with a planted needle in it -- it cannot '
-        f'fail, so its clean runs prove nothing:\n{planted_run.stdout[-2000:]}')
+        'the scanner passed a RENDERED surface with the needle in it -- it '
+        f'cannot fail, so its clean runs prove nothing:\n{planted_run.stdout[-2000:]}')
     assert _FABRICATED_NEEDLE not in (planted_run.stdout + planted_run.stderr), (
         'the scanner ECHOED the matched pattern; a real one would leak into CI logs')
 
     clean_run = subprocess.run(
-        [sys.executable, MASKING_SCRIPT, '--scan-asset', str(masking_capture)],
+        [sys.executable, MASKING_SCRIPT, '--scan-asset', str(clean_path)],
         capture_output=True, text=True, env=env)
     assert clean_run.returncode == 0, (
         'the unplanted capture was reported -- the scan fires on correct output:'
         f'\n{clean_run.stdout[-2000:]}\n{clean_run.stderr[-2000:]}')
+
+
+def test_the_error_paths_carry_no_artifact_VALUE_to_plant_a_needle_in():
+    """Why the positive control seeds two egress classes and not three.
+
+    The model refuses a malformed claim by CODE and FIELD NAME and never
+    interpolates a value -- `_validate_claim_row`'s own contract, so that a
+    refusal cannot put restricted text one `logger.exception` away from a log
+    file. That is a real property and it is asserted here rather than assumed,
+    because "the needle could not be routed here" and "nobody tried" look
+    identical in a passing suite.
+    """
+    from shared.discovery_panel_model import PanelContractError
+    try:
+        build_panel_rows(PanelServiceBundle(
+            claims=make_envelope(STATUS_OK, [surface_safe_claim(_claim_source(
+                routing_status=_FABRICATED_NEEDLE,
+                neutral_title=_FABRICATED_NEEDLE))], 1,
+                meta={'page_id': 'p', 'include_review': False}),
+            page_ids=make_envelope(STATUS_OK, ['p'], 1, meta={
+                'sys_id': 's', 'resolved': True, 'truncated': False, 'volume_ie': None}),
+            manuscript_works=make_envelope(STATUS_OK, [], 0, meta={
+                'page_scope_resolved': True, 'lang': 'en'}),
+            related_count=make_envelope(STATUS_OK, [], 0, meta={
+                'unit': 'distinct_opposite_pages'})))
+    except PanelContractError as exc:
+        assert _FABRICATED_NEEDLE not in str(exc), (
+            'a refusal interpolated a row VALUE -- restricted artifact text can '
+            'now reach a log line, and the error-path egress class needs its own '
+            'planted-needle control')
+    else:                                                    # pragma: no cover
+        raise AssertionError('the malformed row was accepted')
 
 
 def test_the_rendered_panel_and_repo_pass_the_real_masking_scan(masking_capture):
@@ -1698,7 +1980,7 @@ def test_the_rendered_panel_and_repo_pass_the_real_masking_scan(masking_capture)
     env = dict(os.environ, MASKING_SCAN_PATTERNS_FILE=os.path.abspath(patterns))
     result = subprocess.run(
         [sys.executable, MASKING_SCRIPT,
-         '--scan-repo', '--scan-asset', str(masking_capture)],
+         '--scan-repo', '--scan-asset', str(masking_capture['path'])],
         capture_output=True, text=True, env=env)
     assert result.returncode == 0, (
         'the masking scan reported a restricted string on the rendered panel '
