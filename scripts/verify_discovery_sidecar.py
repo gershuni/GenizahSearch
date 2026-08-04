@@ -1612,17 +1612,41 @@ def check_works_genre_vocabulary(conn: sqlite3.Connection, meta: dict) -> List[s
     # partially-populated column passed silently. The deployed public artifact
     # carries 58 such rows and the private source 181.
     #
-    # Scoped to REACHABLE works rather than all of them. Measured on both
-    # artifacts before choosing the rule: of those 58 and 181, exactly ZERO are
-    # reachable through `discovery_identification`, ZERO carry shipped evidence,
-    # and ZERO carry human-confirmed evidence -- so no reader can ever meet one.
-    # A blanket rule would fail the deployed artifact over rows nothing can
-    # surface, which buys no safety and blocks the next deploy. The inert rows
-    # are still reported below, non-fatally, so they do not stay invisible.
+    # Scoped to REACHABLE works. The first version of this scoping was WRONG and
+    # is worth recording, because the error was in the measurement, not the idea
+    # (Codex code review 2A, finding 3).
+    #
+    # It defined reachable as "has an identification, or shipped, or
+    # human-confirmed evidence" -- the DEFAULT population -- measured zero of the
+    # 58 public / 181 private NULL-genre works reachable, and concluded they were
+    # inert. But `get_claims_for_page` takes `include_review=True`, which drops
+    # the routing clause ENTIRELY (`shared/discovery_service.py`:
+    # `routing_clause = "" if include_review else ...`) and returns review-only
+    # and unreviewed claims, `works.genre` among their columns. Re-measured on
+    # that surface: **58 of 58 public and 181 of 181 private are reachable.** Not
+    # a few more -- every single one.
+    #
+    # So reachability here is "referenced by ANY surviving claim", which is the
+    # population the opt-in panel can actually return. Do not narrow it back to
+    # the shipped/confirmed set without re-checking `include_review`; that is the
+    # exact mistake this comment exists to stop being repeated.
+    #
+    # NOTE FOR WHOEVER HITS THIS: on the artifacts as built today this check
+    # FAILS, because the builder writes `works.genre` only for works matched in
+    # the curated 136-09 artifact and leaves the rest NULL. That is a real gap
+    # against the frozen contract ("an explicit Unassigned bucket, never
+    # NULL-as-absent"), not a false alarm. Closing it is a decision, not a
+    # one-liner: backfilling `Unassigned` is honest but `Unassigned` carries
+    # display semantics (ruling Q declined it for one work precisely because it
+    # would hide the row), so the choice between curating the remainder and
+    # accepting the bucket belongs to the owner. Tracked in docs/OPEN_ISSUES.md.
     if not _has_table(conn, "discovery_identification"):
         # check_gate_bearing_tables_present makes this unreachable on a current
         # asset; kept so this check degrades rather than raising on a legacy one.
         return violations
+    # ANY surviving claim -- not just shipped/human-confirmed. The review opt-in
+    # read drops the routing predicate, so every work referenced by a claim is
+    # selectable, and `works.genre` travels with it.
     unassigned_reachable = conn.execute(
         """
         SELECT COUNT(DISTINCT w.work_id) FROM works w
@@ -1631,19 +1655,18 @@ def check_works_genre_vocabulary(conn: sqlite3.Connection, meta: dict) -> List[s
              EXISTS (SELECT 1 FROM discovery_identification di
                       WHERE di.canonical_work_id = w.canonical_work_id)
              OR EXISTS (SELECT 1 FROM discovery_claim dc
-                          JOIN discovery_evidence e ON e.claim_id = dc.claim_id
-                         WHERE dc.work_id = w.work_id
-                           AND (e.routing_status = ?
-                                OR e.adjudication_status = ?))
+                         WHERE dc.work_id = w.work_id)
            )
-        """,
-        (ids.ROUTING_STATUS_SHIPPED, ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED),
+        """
     ).fetchone()[0]
     if unassigned_reachable:
         violations.append(
             f"works.genre: {unassigned_reachable} work(s) reachable from a public "
             f"surface have a NULL/empty genre on a populated column -- the contract "
-            f"is an explicit {_GENRE_UNASSIGNED!r} bucket, never NULL-as-absent"
+            f"is an explicit {_GENRE_UNASSIGNED!r} bucket, never NULL-as-absent. "
+            f"Reachability here includes the REVIEW OPT-IN read (include_review=True "
+            f"drops the routing predicate), which is the population the earlier "
+            f"shipped-or-confirmed scoping missed entirely"
         )
     malformed = 0
     for value in values:

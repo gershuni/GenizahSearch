@@ -600,6 +600,93 @@ def test_null_genre_on_a_reachable_work_is_a_violation(tmp_path, capsys):
     )
 
 
+def test_null_genre_reachable_only_through_the_review_opt_in_is_a_violation(tmp_path, capsys):
+    """The surface the first version of this check missed entirely (Codex code
+    review 2A, finding 3).
+
+    That version scoped reachability to the DEFAULT population -- an
+    identification, or shipped, or human-confirmed evidence. But
+    `get_claims_for_page(include_review=True)` sets `routing_clause = ""`,
+    dropping the routing predicate and returning review-only and unreviewed
+    claims with `works.genre` among their columns. Re-measured against that
+    surface, 58 of 58 public and 181 of 181 private NULL-genre works are
+    reachable -- every one, not a handful.
+
+    The sibling control above cannot express this: `_reachable_work_id` joins
+    through `discovery_identification`, so its work is reachable by the OLD rule
+    too and passes either way.
+
+    Here the work has NO identification row and NO shipped or human-confirmed
+    evidence -- only a review-only claim. Under the old scoping it is invisible;
+    under the correct one it is a violation.
+    """
+    db = _copy_fixture(tmp_path, "null_genre_review_only.db")
+    conn = _connect_rw(db)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    row = conn.execute(
+        """SELECT w.work_id FROM works w
+            JOIN discovery_claim dc ON dc.work_id = w.work_id
+           WHERE NOT EXISTS (SELECT 1 FROM discovery_identification di
+                              WHERE di.canonical_work_id = w.canonical_work_id)
+           LIMIT 1"""
+    ).fetchone()
+    if row is None:
+        # Make one: strip the fixture work's identification rows so it is
+        # reachable ONLY through the opt-in read.
+        work_id = _reachable_work_id(conn)
+        assert work_id is not None, "fixture has no claim-bearing work at all"
+        canonical = conn.execute(
+            "SELECT canonical_work_id FROM works WHERE work_id = ?", (work_id,)
+        ).fetchone()[0]
+        conn.execute(
+            "DELETE FROM discovery_identification WHERE canonical_work_id = ?", (canonical,))
+    else:
+        work_id = row[0]
+
+    # Neither eligibility limb, so the OLD rule cannot see this work.
+    conn.execute(
+        """UPDATE discovery_evidence SET routing_status = 'review_only',
+                                         adjudication_status = 'unreviewed'
+            WHERE claim_id IN (SELECT claim_id FROM discovery_claim WHERE work_id = ?)""",
+        (work_id,),
+    )
+    conn.execute("UPDATE works SET genre = NULL WHERE work_id = ?", (work_id,))
+    conn.commit()
+
+    # The control is only meaningful if the row really is invisible to the old
+    # rule -- otherwise it would pass for the wrong reason.
+    still_default_reachable = conn.execute(
+        """SELECT COUNT(*) FROM works w
+            WHERE w.work_id = ?
+              AND (EXISTS (SELECT 1 FROM discovery_identification di
+                            WHERE di.canonical_work_id = w.canonical_work_id)
+                OR EXISTS (SELECT 1 FROM discovery_claim dc
+                             JOIN discovery_evidence e ON e.claim_id = dc.claim_id
+                            WHERE dc.work_id = w.work_id
+                              AND (e.routing_status = 'shipped'
+                                   OR e.adjudication_status = 'human_confirmed')))""",
+        (work_id,),
+    ).fetchone()[0]
+    conn.close()
+    assert still_default_reachable == 0, (
+        "the seeded work is STILL reachable by the old shipped-or-confirmed rule, "
+        "so this control would pass without the widened scoping and proves nothing"
+    )
+
+    rc = verify_mod.verify(str(db), EXPECTED_FRAME_HASH)
+    captured = capsys.readouterr()
+    out = captured.err + captured.out
+
+    assert rc != 0, (
+        "a NULL genre on a work reachable ONLY through the review opt-in left the "
+        "verifier green -- the scoping is back to the default population"
+    )
+    assert "reachable from a public surface have a NULL/empty genre" in out, (
+        f"the run failed for another reason, so this proves nothing about the "
+        f"genre check. Output:\n{out}"
+    )
+
+
 def test_entirely_unpopulated_genre_column_is_the_pre_rebuild_state_not_a_violation(tmp_path):
     """The state the fixture used to represent with a single stray NULL, now
     exercised where it belongs: blank the WHOLE column on a copy.
