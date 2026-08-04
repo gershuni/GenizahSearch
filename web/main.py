@@ -1667,33 +1667,36 @@ def create_layout():
                 render_header_right()
 
     # Sidebar (Drawer)
-    # Use stored state, default to True (open) on desktop
-    # On mobile (< 768px), we will close it after page load via JavaScript
+    #
+    # The initial state is decided CLIENT-SIDE by Quasar's own layout, never by
+    # a round-trip to the browser and back.
+    #
+    # It used to mount OPEN and retract afterwards: the old code slept 500ms,
+    # then asked the client for `window.innerWidth`, then closed the drawer if
+    # that came back under 768. So every mobile page load put a full-screen
+    # `q-drawer__backdrop` over the content and swallowed taps underneath it
+    # until the answer arrived. Worse, that ran under `asyncio.ensure_future`,
+    # which empties NiceGUI's slot stack, so the `ui.run_javascript` call could
+    # raise and be swallowed by the bare `except` — leaving the drawer open
+    # indefinitely rather than for half a second.
+    #
+    # `show-if-above` is Quasar's answer to exactly this: mount CLOSED and let
+    # the layout open it when the viewport is wider than `breakpoint`. No
+    # sleep, no round-trip, and nothing covering the page below the breakpoint.
     drawer_open = safe_user_get('drawer_open', True)
 
     # Set drawer side based on RTL mode - Quasar will handle page padding correctly
     drawer_side = 'right' if rtl_mode else 'left'
-    main_drawer = ui.drawer(side=drawer_side, value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
-
-    # Close drawer on mobile by default (screen width < 768px)
-    # This runs once on page load to ensure mobile users don't see the drawer overlay
-    async def close_drawer_on_mobile():
-        """Close drawer if screen width indicates mobile device."""
-        try:
-            screen_width = await ui.run_javascript('window.innerWidth')
-            if screen_width and screen_width < 768:
-                main_drawer.set_value(False)
-        except Exception:
-            pass  # Silently ignore if JavaScript fails
-
-    # Run after page is fully loaded (asyncio to avoid parent_slot error)
-    async def _deferred_close_drawer():
-        await asyncio.sleep(0.5)
-        try:
-            await close_drawer_on_mobile()
-        except Exception:
-            pass  # Drawer close failed; non-fatal UI glitch
-    asyncio.ensure_future(_deferred_close_drawer())
+    main_drawer = (
+        ui.drawer(side=drawer_side, value=False, bordered=True)
+        .classes('shadow-xl')
+        .props('width=280 breakpoint=768')
+    )
+    if drawer_open:
+        # Only when the reader has not explicitly closed it. An explicit close
+        # is a preference and must survive on desktop too, so `show-if-above`
+        # is withheld in that case rather than overriding them every load.
+        main_drawer.props('show-if-above')
 
     # Content Area
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
