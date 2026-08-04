@@ -1969,7 +1969,23 @@ def resolve_author_alias(
         heb = normalize_title(p.get("heb_desc"))
         if not heb:
             continue
-        if heb == key:
+        # EXACT on the catalogue's English name too. The corpus norm is Hebrew
+        # with the acronym in parentheses, but 2 of 610 authored works (both
+        # `source_corpus='ja'`) carry the LATIN form -- and in at least one case
+        # that string is verbatim the `eng_desc` of the very person it should
+        # resolve to: `Moses b. Maimon, Rambam` is person 660, whose Hebrew form
+        # carries 29 works and 17,867 claims. Matching Hebrew only left it
+        # `unmatched`, so the findings-page author facet rendered Maimonides
+        # twice -- the real entry and a singleton (2026-08-04).
+        #
+        # EXACT only, deliberately. Containment is safe on Hebrew descriptors
+        # but not on short Latin names, where a bare given name would swallow
+        # unrelated people; the existing longest-first rule exists precisely
+        # because the catalogue carries both bare and full forms. A false MERGE
+        # of two scholars is worse than an unmatched author, which this function
+        # already retains rather than forcing onto a near-neighbour.
+        eng = normalize_title(p.get("eng_desc"))
+        if heb == key or (eng and eng == key):
             exact.append(p)
         elif key and (heb in key or key in heb):
             contains.append(p)

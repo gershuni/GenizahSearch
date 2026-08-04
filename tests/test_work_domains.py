@@ -799,3 +799,54 @@ def test_author_key_coverage_still_fails_on_genuine_drift():
             bds.assert_author_key_coverage(conn, index)
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# The catalogue's ENGLISH name is also an exact-match key (2026-08-04).
+# ---------------------------------------------------------------------------
+
+
+def test_alias_matches_the_catalogue_english_name_exactly():
+    """The corpus norm is Hebrew-with-acronym, but 2 of 610 authored works (both
+    `source_corpus='ja'`) carry the LATIN form -- and that string is verbatim the
+    `eng_desc` of the person it should resolve to.
+
+    Matching Hebrew only left it `unmatched`, so the findings-page author facet
+    rendered Maimonides twice: the real entry (29 works, 17,867 claims) and a
+    singleton. Both forms must land on ONE person id."""
+    heb = cwd.resolve_author_alias("שרירא גאון", PERSONS)
+    eng = cwd.resolve_author_alias("Sherira Gaon", PERSONS)
+    assert eng["match"] == "exact", (
+        "the catalogue's own English name did not resolve -- the facet will "
+        f"split this person into two entries: {eng}"
+    )
+    assert eng["person_id"] == heb["person_id"] == 165, (
+        "the two spellings of one person resolved to different ids, which is the "
+        "facet split this fix exists to close"
+    )
+
+
+def test_alias_english_matching_is_exact_only_never_containment():
+    """EXACT only, deliberately.
+
+    Containment is safe on Hebrew descriptors but not on short Latin names,
+    where a bare given name would swallow unrelated people. An unmatched author
+    is retained rather than forced onto a near-neighbour, so a false MERGE of two
+    scholars is the worse outcome and the one this guards against."""
+    r = cwd.resolve_author_alias("Solomon", PERSONS)
+    assert r["match"] == "unmatched", (
+        "a bare Latin given name resolved by containment -- 'Solomon' must not "
+        f"swallow 'Solomon b. Isaac'. Got: {r}"
+    )
+    assert r["person_id"] is None
+
+
+def test_alias_english_match_does_not_steal_from_a_hebrew_match():
+    """Regression bound. Verified against the live corpus when the English key
+    was added: of 108 distinct author strings, exactly 2 changed -- both from
+    unmatched to resolved -- and ZERO moved to a different person id."""
+    r = cwd.resolve_author_alias('שלמה בן יצחק (רש"י)', PERSONS)
+    assert r["match"] == "containment"
+    assert r["person_id"] == 12, (
+        "adding the English exact key changed an existing Hebrew resolution"
+    )
