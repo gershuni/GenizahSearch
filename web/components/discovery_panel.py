@@ -185,7 +185,9 @@ def _render_expansion(row: Mapping[str, Any], lang: str) -> None:
             return
         state['loaded'] = True
         with body:
-            _render_expansion_envelope(envelope, lang, state, _load_page)
+            _render_expansion_envelope(
+                envelope, lang, state, _load_page,
+                page_size=int(descriptor.get('page_size') or 0))
 
     async def _toggle() -> None:
         state['open'] = not state['open']
@@ -214,7 +216,8 @@ def _expansion_work_title(item: Mapping[str, Any], lang: str) -> Optional[str]:
 
 
 def _render_expansion_envelope(
-    envelope: Mapping[str, Any], lang: str, state: Dict[str, Any], reload_cb
+    envelope: Mapping[str, Any], lang: str, state: Dict[str, Any], reload_cb,
+    *, page_size: int = 0,
 ) -> None:
     if is_outage(envelope):
         _service_state_block({
@@ -225,9 +228,13 @@ def _render_expansion_envelope(
 
     items = list(envelope.get('items') or ())
     # The REAL total, from 136-21's count query. Never `len(items)`: a page
-    # length where a count belongs is a number nobody measured.
-    total = envelope.get('total')
-    ui.label(ds.related_pages_count_line(int(total or 0), lang)).classes('dnote')
+    # length where a count belongs is a number nobody measured. Rendered as a
+    # bare figure beside the match-framed heading rather than wrapped in a
+    # borrowed sentence -- no display string in the shared vocabulary says
+    # "N other manuscripts", and inventing one here would put claim wording in
+    # a renderer.
+    total = int(envelope.get('total') or 0)
+    ui.label(str(total)).classes('chip')
 
     for item in items:
         with ui.row().classes('items-center gap-2 row'):
@@ -250,8 +257,7 @@ def _render_expansion_envelope(
                 _neutral_chip(
                     ds.relation_chip(item.get('anchor_claim_type'), lang), band_label)
 
-    page_size = int(envelope.get('meta', {}).get('page_size') or 0) or len(items) or 1
-    if int(total or 0) > page_size:
+    if page_size > 0 and total > page_size:
         with ui.row().classes('items-center gap-2'):
             async def _next() -> None:
                 state['page'] = int(state['page']) + 1
