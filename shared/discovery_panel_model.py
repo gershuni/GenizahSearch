@@ -701,6 +701,16 @@ def _validate_claim_row(row: Mapping[str, Any], *, include_review: bool) -> None
     refusal that quotes it puts restricted text one `logger.exception` away
     from a log file.
     """
+    # The anchor's ALL-OR-NONE contract speaks first, and it speaks about EVERY
+    # input claim (code review 2B, finding 2). Called only from
+    # `_identification_row`, it ran for the eventual LEAD identification and for
+    # nothing else -- so a partial anchor on a generic-group member reached a
+    # display-string lookup before any contract saw it, a partial anchor on a
+    # nested granularity row was never validated at all, and a partial anchor on
+    # a row the canonical collapse discards was never even reached. Validating
+    # only what survives grouping is not a contract; it is a sample.
+    _anchor_identity(row)
+
     for field_name, vocabulary in _REQUIRED_CLAIM_VOCABULARIES:
         if row.get(field_name) not in vocabulary:
             raise PanelContractError(
@@ -802,7 +812,13 @@ def _disclosure_level_for(row: Mapping[str, Any]) -> str:
 def _anchor_identity(row: Mapping[str, Any]) -> Dict[str, Any]:
     """The four anchor-identity fields the work expansion needs, ALL-OR-NONE.
 
-    Checked BEFORE any display string is composed, so this contract is the one
+    Called TWICE by design, and the first call is the load-bearing one:
+    `_validate_claim_row` runs it over every input claim in STEP 0, and
+    `_identification_row` runs it again on the lead to build the descriptor. It
+    is a pure read, so the second call costs a dict and buys the descriptor its
+    values from the same contract that admitted the row.
+
+    Checked before any display string is composed, so this contract is the one
     that speaks when a row is short of it -- otherwise a missing band or source
     surfaces as a label-lookup error and the all-or-none rule never runs. The
     ranking the expansion wrapper does needs the anchor's source AND its band

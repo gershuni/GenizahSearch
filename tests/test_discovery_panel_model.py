@@ -1313,6 +1313,73 @@ def test_a_partial_anchor_identity_raises_naming_present_and_missing_fields(drop
     assert "missing" in message.lower() and "present" in message.lower()
 
 
+# --- ... and on every row that is NOT the eventual lead --------------------
+#
+# The standalone case above is the ONLY one an anchor checked inside
+# `_identification_row` ever reaches. Each control below first asserts, on the
+# INTACT fixture, that the row it is about to break really does take the path
+# it claims -- otherwise a passing test proves nothing about that path.
+
+
+@pytest.mark.parametrize("dropped", [
+    "sys_id", "relation_kind", "evidence_source", "confidence_band",
+])
+def test_a_partial_anchor_inside_a_generic_group_is_refused(
+        dropped, verse_chain_generic_group):
+    """A generic group's members leave the identifications bucket entirely, so
+    NONE of them is ever composed as an identification row -- but every one of
+    them reaches a display-string lookup inside `_generic_group`."""
+    intact = pm.build_panel_rows(bundle(verse_chain_generic_group))
+    assert len(intact.generic_groups) == 1
+    assert list(pm.iter_rows(intact)) == []
+
+    rows = [dict(row) for row in verse_chain_generic_group]
+    rows[-1][dropped] = None
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle(rows))
+    assert "claim_anchor_identity_partial" in str(exc.value)
+
+
+@pytest.mark.parametrize("dropped", [
+    "sys_id", "relation_kind", "evidence_source", "confidence_band",
+])
+def test_a_partial_anchor_on_a_nested_granularity_row_is_refused(
+        dropped, two_granularity_rashi):
+    """The nested row is emitted as a work id, a title and a subline -- it never
+    passes through `_identification_row`, so an anchor checked only there is an
+    anchor never checked on it."""
+    intact = pm.build_panel_rows(bundle(two_granularity_rashi))
+    lead = [row for row in pm.iter_rows(intact) if row["span_start"] == 0][0]
+    assert len(lead["nested"]) == 1
+    nested_work_id = lead["nested"][0]["work_id"]
+
+    rows = [dict(row) for row in two_granularity_rashi]
+    target = [row for row in rows if row["display_work_id"] == nested_work_id][0]
+    target[dropped] = None
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle(rows))
+    assert "claim_anchor_identity_partial" in str(exc.value)
+
+
+@pytest.mark.parametrize("dropped", [
+    "sys_id", "relation_kind", "evidence_source", "confidence_band",
+])
+def test_a_partial_anchor_on_a_row_the_collapse_discards_is_refused(
+        dropped, two_titles_duplicate):
+    """The furthest case: D-13a's collapse DROPS the losing duplicate from view,
+    so a validation that runs after it never sees that row at all."""
+    intact = pm.build_panel_rows(bundle(two_titles_duplicate))
+    assert len(list(pm.iter_rows(intact))) == 1
+
+    rows = [dict(row) for row in two_titles_duplicate]
+    discarded = [row for row in rows
+                 if row["work_id"] != row["canonical_work_id"]][0]
+    discarded[dropped] = None
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle(rows))
+    assert "claim_anchor_identity_partial" in str(exc.value)
+
+
 # ===========================================================================
 # Error paths never quote what they refused (code review 2B, finding 1).
 #
