@@ -39,7 +39,24 @@ the shipped `_build_findings_query` (136-14's owed follow-up now closed; no cap 
 359 gate calls, ALL through `assert_surface_honesty`. 16 mutations watched failing by name.
 Masking clean over 48 captured states with the pattern file explicitly set.
 
-**Deploy NOT done** (orchestrator sequencing; wave 9's panel deploy is also still outstanding).
+**DEPLOYED 2026-08-04 by the owner** (to ship the mobile drawer fix). `deploy.sh` hard-resets the
+box to `origin/master-main`, so this carried the wave-9 panel AND the wave-10 findings surface to
+production as a side effect — the two deploys the plans had sequenced separately are now, in code
+terms, both done. Verified read-only on the box:
+
+* prod HEAD = **`2065290c`**; the commits after it are tests/docs only, so no functional gap.
+* **No `DISCOVERY*` line in `.env`** ⇒ `DISCOVERY_ENABLED` defaults False ⇒ `discovery_available()`
+  is False ⇒ the panel and `/computed-identifications` **clean-hide, and the nav entry is gated on
+  the same predicate**. Nothing discovery-related is publicly visible.
+* the sidecar IS staged (`discovery-v1-e9365edc…`, 2026-08-03), so the surfaces will serve the
+  instant the flag flips.
+* `/` 1.1 s, `/browse` 0.31 s, both 200.
+
+**The flag must NOT be flipped yet.** Outstanding before flag-on: 136-19 (cross-surface masking
+sweep + readiness attestation) and the open Codex code-review findings — including a **BLOCKER**
+that the D-25 masking test SKIPS when its pattern file is absent (a skip is the silent green that
+rule exists to forbid) and two holes in the honesty gate (`accuracy is 91 percent` and
+`{"quality": 0.9}` both pass). Codex verdict on `2cd520e0..bda0a203` was **changes-requested**.
 
 **Ruling T's `more matches` browser check is now MET — first green run 2026-08-04, CI run
 30931268195**, after being carried as NOT MET since 136-16. It took four runs and caught THREE real
