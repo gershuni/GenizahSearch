@@ -28,6 +28,7 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import subprocess
@@ -1569,24 +1570,140 @@ PANEL_MODULE_PATH = 'web/components/discovery_panel.py'
 _FABRICATED_NEEDLE = 'ZZQQ-FABRICATED-MASKING-NEEDLE-ZZQQ'
 
 
-def _panel_render_entry_points() -> frozenset:
-    """Every render function the panel module defines, DERIVED from the module.
+def _panel_ui_emitting_functions() -> Dict[str, Any]:
+    """Every function in the panel module that can put something on a screen,
+    DERIVED from what it CALLS -- never from what it is named.
 
-    Not a list. A list is how the capture came to hold the panel BODY and not
-    the ENTRY CONTROL, which the live seam renders separately
-    (`web/pages/browse_enrichment.py`) and a reader sees first: a surface can be
-    added to the renderer and omitted from the capture with every masking test
-    still green, and a restricted string then escapes on the omitted surface.
-    The naming rule is the module's own -- a function whose name (private prefix
-    stripped) begins with `render_` paints something.
+    THE NAMING RULE WAS NOT A DERIVATION. The previous version collected
+    top-level functions whose name (private prefix stripped) began with
+    `render_`, and called that "derived". It is a convention, and this module
+    already broke it twice: `_neutral_chip` draws the relation chip and
+    `_service_state_block` draws every outage state, and neither was collected.
+    A new data-bearing renderer with a different name could therefore put a
+    restricted corpus name on a surface while `expected == exercised` stayed
+    equal and the masking scan stayed green (code review round 15, finding 2).
+
+    The rule here is a property of the CODE: a function emits UI if its body
+    calls `ui.<anything>`, or if it calls another function that does. That
+    closure is what makes it drift-proof -- rename every function in the module
+    and the set is identical.
+
+    Returns `{name: ast node}` so a caller can report a miss by NAME and LINE.
     """
     import ast
     tree = ast.parse(_read(PANEL_MODULE_PATH))
-    return frozenset(
-        node.name for node in tree.body
+    by_name: Dict[str, Any] = {
+        node.name: node for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name.lstrip('_').startswith('render_')
-    )
+    }
+
+    def _calls_ui(node) -> bool:
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+                base = child.func.value
+                if isinstance(base, ast.Name) and base.id == 'ui':
+                    return True
+        return False
+
+    emitting = {name for name, node in by_name.items() if _calls_ui(node)}
+    # ...and the transitive closure: a function that only delegates still puts
+    # its arguments on a screen through the one it delegates to.
+    changed = True
+    while changed:
+        changed = False
+        for name, node in by_name.items():
+            if name in emitting:
+                continue
+            for child in ast.walk(node):
+                if isinstance(child, ast.Call) and isinstance(child.func, ast.Name) \
+                        and child.func.id in emitting:
+                    emitting.add(name)
+                    changed = True
+                    break
+    return {name: by_name[name] for name in sorted(emitting)}
+
+
+def _panel_render_entry_points() -> frozenset:
+    """The UI-emitting function NAMES. Kept as a thin alias so the capture's
+    instrumentation and the coverage assertions read from one derivation."""
+    return frozenset(_panel_ui_emitting_functions())
+
+
+def _module_executable_lines(path: str, source: str) -> frozenset:
+    """Every line the COMPILER emitted bytecode for, including nested function
+    bodies, comprehensions and lambdas.
+
+    Asking Python's own compiler is the point: an AST walk has to decide for
+    itself what counts as a statement, and every such decision is a place where
+    "the line was not required" and "the line was never run" become
+    indistinguishable.
+    """
+    import types
+    code = compile(source, path, 'exec')
+    lines: set = set()
+    stack = [code]
+    while stack:
+        current = stack.pop()
+        for _start, _end, lineno in current.co_lines():
+            if lineno:
+                lines.add(lineno)
+        stack.extend(const for const in current.co_consts
+                     if isinstance(const, types.CodeType))
+    return frozenset(lines)
+
+
+def _panel_required_lines() -> Dict[str, frozenset]:
+    """`{function name: the lines its body must execute}`.
+
+    The signature lines are excluded -- a `def` runs at IMPORT, so requiring it
+    would assert nothing about the capture. Everything from the first body
+    statement to the end of the function is required, INCLUDING nested handler
+    bodies: a click handler that paints artifact text is a surface a reader
+    reaches, and a capture that never takes it is a capture that never looked.
+    """
+    source = _read(PANEL_MODULE_PATH)
+    executable = _module_executable_lines(PANEL_MODULE_PATH, source)
+    required: Dict[str, frozenset] = {}
+    for name, node in _panel_ui_emitting_functions().items():
+        body = getattr(node, 'body', None)
+        if not body:                                         # pragma: no cover
+            continue
+        first = body[0].lineno
+        last = node.end_lineno or first
+        required[name] = frozenset(
+            line for line in executable if first <= line <= last)
+    return required
+
+
+class _PanelLineTracer:
+    """Records which lines of the panel module actually ran.
+
+    `sys.settrace` rather than a coverage dependency: `coverage` is not in any
+    requirements file, and a masking gate that only runs where an optional
+    package happens to be installed is a gate that reports success without
+    performing its check -- the exact defect this suite keeps closing.
+    """
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.executed: set = set()
+        self._previous = None
+
+    def _trace(self, frame, event, _arg):
+        if frame.f_code.co_filename != self.path:
+            return None
+        if event == 'line':
+            self.executed.add(frame.f_lineno)
+        return self._trace
+
+    def __enter__(self):
+        self._previous = sys.gettrace()
+        sys.settrace(self._trace)
+        return self
+
+    def __exit__(self, *_exc):
+        sys.settrace(self._previous)
+        return False
 
 
 def _own_texts(node) -> List[str]:
@@ -1607,8 +1724,54 @@ def _own_texts(node) -> List[str]:
     return out
 
 
-def _render_capture(paint) -> str:
-    """Run `paint()` in a real client and return every rendered string."""
+async def _drive_click_handlers(client, rounds: int = 2) -> None:
+    """Click EVERY control the render produced, twice, and paint what comes back.
+
+    Generic on purpose. Half this panel's surface is behind a disclosure: the
+    per-work expansion, the related-page rows and the manuscript pane's overflow
+    are all painted by a handler, from artifact data, only after a reader clicks.
+    A capture that renders and stops has therefore never looked at the surfaces
+    where a restricted corpus name is MOST likely to arrive.
+
+    Nothing here enumerates a control. The sweep walks whatever was rendered, so
+    a disclosure added tomorrow is driven without this function being edited --
+    which is the difference between a capture that keeps up with the renderer
+    and a list that goes stale.
+
+    Twice, because these handlers TOGGLE: the second pass takes the closing
+    branch, and a lazily-loaded body is only painted on the pass that opens it.
+    """
+    import inspect
+
+    for _ in range(max(1, rounds)):
+        listeners = []
+        for element in list(client.elements.values()):
+            for listener in list(
+                    getattr(element, '_event_listeners', {}).values()):
+                if getattr(listener, 'type', None) == 'click':
+                    listeners.append((element, listener.handler))
+        for element, handler in listeners:
+            if handler is None:
+                continue
+            slot = getattr(element, 'parent_slot', None)
+            try:
+                with slot if slot is not None else client:
+                    result = (handler()
+                              if not inspect.signature(handler).parameters
+                              else handler(None))
+                    if inspect.isawaitable(result):
+                        await result
+            except Exception:                                # noqa: BLE001
+                # A handler that fails is a finding for another test, not a
+                # reason to abandon the capture: the surfaces already painted
+                # still have to be scanned.
+                logging.getLogger(__name__).debug(
+                    'capture: click handler raised', exc_info=True)
+
+
+def _render_capture(paint, *, drive: bool = True) -> str:
+    """Run `paint()` in a real client, DRIVE its controls, and return every
+    rendered string."""
     _ensure_sim()
     from nicegui import core, ui
     from nicegui.client import Client
@@ -1619,6 +1782,8 @@ def _render_capture(paint) -> str:
         with Client(ui.page('/_panel_masking_capture')) as client:
             with client:
                 paint()
+                if drive:
+                    await _drive_click_handlers(client)
         holder['client'] = client
 
     asyncio.run(_run())
@@ -1665,81 +1830,293 @@ def _generic_group_bundle(lang: str, seed_title: Optional[str] = None
     )
 
 
+def _scope_variant_bundle(lang: str, variant: str,
+                          seed_title: Optional[str] = None) -> PanelServiceBundle:
+    """A bundle whose PAGE-SCOPE read varies, so the manuscript pane's three
+    non-happy states are each reachable.
+
+    Every fixture in this suite used to resolve the page scope, which made the
+    unresolved, truncated and outage panes structurally unrenderable -- and a
+    state nothing can render is a state nothing scans.
+    """
+    base = bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), lang, STATUS_OK,
+                      seed_title=seed_title)
+    page_ids = {
+        # OUR plumbing failed: recoverable, so the model supplies a retry.
+        'outage': unavailable_envelope(meta={'reason': 'sidecar_not_serving'}),
+        # A fact about the manuscript: no retry can change it.
+        'unresolved': make_envelope(STATUS_OK, [], 0, meta={
+            'sys_id': '990000000000000944', 'resolved': False,
+            'truncated': False, 'volume_ie': None}),
+        # Resolved, but only in part -- the pane must say its total covers the
+        # resolved pages only.
+        'truncated': make_envelope(
+            STATUS_OK, ['990000000000000944_IE1_P000002_FL3'], 1, meta={
+                'sys_id': '990000000000000944', 'resolved': True,
+                'truncated': True, 'volume_ie': 'IE1'}),
+    }[variant]
+    return PanelServiceBundle(
+        claims=base.claims, page_ids=page_ids,
+        manuscript_works=base.manuscript_works,
+        related_count=base.related_count, related_rows=base.related_rows,
+        lang=lang,
+    )
+
+
+def _annotated_row_bundle(lang: str, seed_title: Optional[str] = None
+                          ) -> PanelServiceBundle:
+    """A claim carrying the row's TWO optional sub-lines.
+
+    `granularity_subline` needs a second work RELATED BY TITLE on the same span
+    (the D-13d nested entry), and `low_coverage_note` needs the coverage marker.
+    Both are model-emitted TEXT on a shipped row, and neither was in the capture
+    -- so the masking scan had never looked at either.
+    """
+    base = _claim_source(span_start=0, span_end=555, matched_letters=555,
+                         low_coverage_marker=True)
+    title = seed_title or 'Commentary on Song of Songs'
+    rows = [
+        surface_safe_claim(dict(
+            base, claim_id='c' * 64, work_id='w000201',
+            canonical_work_id='w000201', display_work_id='w000201',
+            neutral_title=title, author='Rashi')),
+        # Same author, title one granularity finer: the model folds it in as a
+        # nested entry rather than as a separate generic group.
+        surface_safe_claim(dict(
+            base, claim_id='d' * 64, work_id='w000202',
+            canonical_work_id='w000202', display_work_id='w000202',
+            neutral_title=f'{title}, part two', author='Rashi')),
+    ]
+    return PanelServiceBundle(
+        claims=make_envelope(STATUS_OK, rows, len(rows), meta={
+            'page_id': '990000000000000944_IE1_P000002_FL3', 'include_review': False}),
+        page_ids=make_envelope(STATUS_OK, ['990000000000000944_IE1_P000002_FL3'], 1,
+                               meta={'sys_id': '990000000000000944', 'resolved': True,
+                                     'truncated': False, 'volume_ie': 'IE1'}),
+        manuscript_works=make_envelope(STATUS_OK, [], 0, meta={
+            'page_scope_resolved': True, 'lang': lang}),
+        related_count=make_envelope(STATUS_OK, [], 3, meta={
+            'unit': 'distinct_opposite_pages'}),
+        related_rows=None,
+        lang=lang,
+    )
+
+
+def _gated_rows_bundle(lang: str, seed_title: Optional[str] = None
+                       ) -> PanelServiceBundle:
+    """A row behind the "more matches" disclosure, WITH the disclosure open.
+
+    `show_more` is what opens the collapsed level, and a gated row is the only
+    thing inside it. Every fixture in this suite left `show_more` at its default
+    and put every row in the default-visible level, so the collapsed level's own
+    row loop and its `open` attribute had never been rendered -- a whole
+    reader-reachable half of `_render_level`, with claim text on it.
+    """
+    base = _claim_source(main_pool=False, main_pool_reason='low_coverage',
+                         low_coverage_marker=True)
+    rows = [surface_safe_claim(dict(
+        base, claim_id='e' * 64, work_id='w000301',
+        canonical_work_id='w000301', display_work_id='w000301',
+        neutral_title=seed_title or 'Commentary on Song of Songs'))]
+    return PanelServiceBundle(
+        claims=make_envelope(STATUS_OK, rows, len(rows), meta={
+            'page_id': '990000000000000944_IE1_P000002_FL3', 'include_review': False}),
+        page_ids=make_envelope(STATUS_OK, ['990000000000000944_IE1_P000002_FL3'], 1,
+                               meta={'sys_id': '990000000000000944', 'resolved': True,
+                                     'truncated': False, 'volume_ie': 'IE1'}),
+        manuscript_works=make_envelope(STATUS_OK, [], 0, meta={
+            'page_scope_resolved': True, 'lang': lang}),
+        related_count=make_envelope(STATUS_OK, [], 2, meta={
+            'unit': 'distinct_opposite_pages'}),
+        related_rows=None,
+        lang=lang,
+        show_more=True,
+    )
+
+
+def _lazy_read_envelopes(seed: Optional[str], lang: str) -> Dict[str, Any]:
+    """What the two LAZY reads hand their painters, in each regime the capture
+    drives: a populated answer, an outage, and a raise."""
+    expansion_items = [
+        surface_safe_expansion(_expansion_source(
+            **({'shelfmark_display': seed} if seed else {}))),
+        # An absent manuscript_display row is FLAGGED, never blanked -- and the
+        # flag is rendered text, so it belongs in the capture.
+        surface_safe_expansion(_expansion_source(
+            unit_id='unit-3', display_missing=True, relations_differ=True,
+            anchor_claim_type=ids.CLAIM_TYPE_SHARED_TEXT)),
+    ]
+    del lang
+    return {
+        'expansion_ok': make_envelope(
+            STATUS_OK, expansion_items, 5684,
+            meta={'work_id': 'w000001', 'anchor_mode': 'anchored',
+                  'filter_basis': 'displayed_band', 'anchor_excluded': True}),
+        'related_ok': make_envelope(
+            STATUS_OK,
+            [surface_safe_related_page(_related_page_source())], 1,
+            meta={'unit': 'distinct_opposite_pages'}),
+        'outage': unavailable_envelope(meta={'reason': 'query_failed'}),
+    }
+
+
 def _render_every_panel_surface(seed: Optional[str] = None) -> str:
     """Every surface a READER can see on this panel, as text.
 
-    The panel BODY is not the surface. The live seam renders the ENTRY CONTROL
-    through a second entry point, and three more surfaces are painted only after
-    a reader opens something -- the per-work expansion body, the related-page
-    rows, and the generic-shared-text group behind the second disclosure level.
-    Capturing the body alone established that the scanner can read a file.
+    The panel BODY is not the surface, and neither is the first paint. The live
+    seam renders the ENTRY CONTROL through a second entry point; the per-work
+    expansion, the related-page rows and the manuscript pane's overflow are
+    painted from artifact data only after a reader CLICKS; and three of the
+    manuscript pane's states need a page-scope read that did not simply succeed.
+    Capturing the body's first paint alone established that the scanner can read
+    a file.
 
-    Coverage of this claim is not asserted in prose: `_capture_panel_surface`
-    instruments every render function the module defines and
-    `test_the_capture_paints_every_render_entry_point_the_panel_has` fails,
-    naming the function, if one of them was never reached.
+    Coverage of this claim is not asserted in prose. `_capture_panel_surface`
+    traces the panel module while this runs, and
+    `test_the_capture_executes_every_line_of_every_ui_emitting_function` fails
+    -- naming the function, the line and the source -- for anything that did not
+    run. Every control the render produced is CLICKED (`_drive_click_handlers`),
+    under three lazy-read regimes, so a disclosure added later is driven without
+    this function being edited.
     """
     title = f'Commentary on {seed}' if seed else None
     parts: List[str] = []
 
-    def _noop_retry():                                       # pragma: no cover
+    def _noop_retry():
         return None
 
-    def _noop_toggle():                                      # pragma: no cover
+    def _noop_toggle():
         return None
 
-    async def _noop_reload():                                # pragma: no cover
+    async def _noop_reload():
         return None
+
+    def _paint_body(model, entry: bool = False):
+        def _paint():
+            dp.render_discovery_panel_body(
+                model, on_retry=_noop_retry,
+                page_id='990000000000000944_IE1_P000002_FL3')
+            if entry:
+                # The LIVE entry control, rendered by the same second entry
+                # point `update_discovery_panel_section` uses. A reader sees
+                # this one BEFORE the body.
+                dp.render_discovery_entry_control(model, on_toggle=_noop_toggle)
+        return _paint
 
     for _name, profile in MANUSCRIPT_PROFILES:
         for lang in LANGS:
             for status in SERVICE_STATES:
                 model = build_panel_rows(
                     bundle_for(profile, lang, status, seed_title=title))
-                parts.append(_render_capture(lambda m=model: (
-                    dp.render_discovery_panel_body(
-                        m, on_retry=_noop_retry,
-                        page_id='990000000000000944_IE1_P000002_FL3'),
-                    # The LIVE entry control, rendered by the same second entry
-                    # point `update_discovery_panel_section` uses. A reader sees
-                    # this one BEFORE the body.
-                    dp.render_discovery_entry_control(m, on_toggle=_noop_toggle),
-                )))
+                parts.append(_render_capture(_paint_body(model, entry=True)))
 
     for lang in LANGS:
-        # The generic-shared-text group and the populated related-page rows,
-        # both behind the second disclosure level.
-        model = build_panel_rows(_generic_group_bundle(lang, seed_title=title))
-        parts.append(_render_capture(lambda m=model: dp.render_discovery_panel_body(
-            m, on_retry=_noop_retry,
-            page_id='990000000000000944_IE1_P000002_FL3')))
+        # The generic-shared-text group, the row's two optional sub-lines, and
+        # the three non-happy page-scope states.
+        for bundle in (
+            _generic_group_bundle(lang, seed_title=title),
+            _annotated_row_bundle(lang, seed_title=title),
+            _scope_variant_bundle(lang, 'outage', seed_title=title),
+            _scope_variant_bundle(lang, 'unresolved', seed_title=title),
+            _scope_variant_bundle(lang, 'truncated', seed_title=title),
+            _gated_rows_bundle(lang, seed_title=title),
+        ):
+            parts.append(_render_capture(_paint_body(build_panel_rows(bundle))))
+
+        # ...and once with NO page id, the shape the seam produces when the
+        # page scope never resolved: the lazy related-pages read must decline
+        # rather than query for nothing.
+        no_page_id = build_panel_rows(
+            bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), lang, STATUS_OK,
+                       seed_title=title))
+        parts.append(_render_capture(
+            lambda m=no_page_id: dp.render_discovery_panel_body(
+                m, on_retry=_noop_retry, page_id=None)))
+
+        # A model whose entry control is HIDDEN -- the ONE branch of the entry
+        # point that renders nothing, and the one a reader sees most often.
+        empty = PanelServiceBundle(
+            claims=make_envelope(STATUS_OK, [], 0, meta={
+                'page_id': '990000000000000944_IE1_P000002_FL3',
+                'include_review': False}),
+            page_ids=make_envelope(
+                STATUS_OK, ['990000000000000944_IE1_P000002_FL3'], 1, meta={
+                    'sys_id': '990000000000000944', 'resolved': True,
+                    'truncated': False, 'volume_ie': 'IE1'}),
+            manuscript_works=make_envelope(STATUS_OK, [], 0, meta={
+                'page_scope_resolved': True, 'lang': lang}),
+            related_count=make_envelope(STATUS_OK, [], 0, meta={
+                'unit': 'distinct_opposite_pages'}),
+            related_rows=None, lang=lang)
+        empty_model = build_panel_rows(empty)
+        parts.append(_render_capture(
+            lambda m=empty_model: dp.render_discovery_entry_control(
+                m, on_toggle=_noop_toggle)))
 
         with_rows = bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), lang, STATUS_OK,
                                seed_title=title).with_related_rows(
             make_envelope(STATUS_OK, [surface_safe_related_page(
                 _related_page_source())], 1,
                 meta={'unit': 'distinct_opposite_pages'}))
-        model = build_panel_rows(with_rows)
-        parts.append(_render_capture(lambda m=model: dp.render_discovery_panel_body(
-            m, on_retry=_noop_retry,
-            page_id='990000000000000944_IE1_P000002_FL3')))
+        parts.append(_render_capture(_paint_body(build_panel_rows(with_rows))))
 
-        # The per-work expansion body. It is painted by the LAZY loader, so it
-        # is driven with the envelope that loader would hand it -- both the
-        # populated form and its own outage form.
-        ok_expansion = make_envelope(
-            STATUS_OK,
-            [surface_safe_expansion(_expansion_source(
-                **({'shelfmark_display': seed} if seed else {})))],
-            5684, meta={'work_id': 'w000001', 'anchor_mode': 'anchored',
-                        'filter_basis': 'displayed_band', 'anchor_excluded': True})
-        for envelope in (ok_expansion,
-                         unavailable_envelope(meta={'reason': 'query_failed'})):
+        # The per-work expansion body, driven DIRECTLY as well as through its
+        # loader: the pager appears only above a page's worth of rows, and the
+        # outage form is what a failed lazy read paints.
+        envelopes = _lazy_read_envelopes(seed, lang)
+        for envelope in (envelopes['expansion_ok'], envelopes['outage']):
             state: Dict[str, Any] = {'open': True, 'page': 1, 'loaded': True}
             parts.append(_render_capture(lambda e=envelope, s=state, ln=lang: (
                 dp._render_expansion_envelope(e, ln, s, _noop_reload, page_size=25))))
 
+    # ...and the SAME surfaces again with the lazy reads answering, so the
+    # loaders, their painters and their failure branches all run. Three regimes:
+    # a populated answer, a named outage, and a raise (the branch that must
+    # never take the panel down with it).
+    parts.extend(_capture_under_lazy_read_regimes(seed, title, _paint_body))
+
     return '\n'.join(parts)
+
+
+def _capture_under_lazy_read_regimes(seed: Optional[str], title: Optional[str],
+                                     paint_body) -> List[str]:
+    """Re-render the panel with `web.discovery`'s two LAZY reads stubbed, so the
+    disclosure handlers the click sweep drives have something to paint."""
+    from unittest.mock import patch
+
+    from web import discovery as _discovery
+
+    parts: List[str] = []
+    for lang in LANGS:
+        envelopes = _lazy_read_envelopes(seed, lang)
+
+        async def _ok_expansion(*_a, **_k):
+            return envelopes['expansion_ok']
+
+        async def _ok_related(*_a, **_k):
+            return envelopes['related_ok']
+
+        async def _outage(*_a, **_k):
+            return envelopes['outage']
+
+        async def _raises(*_a, **_k):
+            raise DiscoveryUnavailable('capture regime: the lazy read failed')
+
+        regimes = (
+            (_ok_expansion, _ok_related),
+            (_outage, _outage),
+            (_raises, _raises),
+        )
+        for expansion_read, related_read in regimes:
+            model = build_panel_rows(
+                bundle_for(dict(MANUSCRIPT_PROFILES[6][1]), lang, STATUS_OK,
+                           seed_title=title))
+            with patch.object(_discovery, 'get_work_expansion_enveloped',
+                              expansion_read), \
+                 patch.object(_discovery, 'get_related_pages_enveloped',
+                              related_read):
+                parts.append(_render_capture(paint_body(model)))
+    return parts
 
 
 def _capture_panel_surface(seed: Optional[str] = None) -> Dict[str, Any]:
@@ -1760,8 +2137,10 @@ def _capture_panel_surface(seed: Optional[str] = None) -> Dict[str, Any]:
 
     for name, fn in originals.items():
         setattr(dp, name, _wrap(name, fn))
+    tracer = _PanelLineTracer(dp.__file__)
     try:
-        rendered = _render_every_panel_surface(seed)
+        with tracer:
+            rendered = _render_every_panel_surface(seed)
     finally:
         for name, fn in originals.items():
             setattr(dp, name, fn)
@@ -1776,6 +2155,7 @@ def _capture_panel_surface(seed: Optional[str] = None) -> Dict[str, Any]:
         'envelopes': envelopes,
         'error_paths': error_paths,
         'exercised': frozenset(exercised),
+        'executed_lines': frozenset(tracer.executed),
         'text': '\n'.join((rendered, envelopes, error_paths)),
     }
 
@@ -1795,32 +2175,120 @@ def masking_capture(tmp_path_factory):
     return {**capture, 'path': path}
 
 
+#: Lines of a UI-emitting function that the capture CANNOT execute, each with
+#: the reason it cannot. Keyed by `(function, exact source text)` rather than by
+#: line number, so an edit above moves the anchor with the code instead of
+#: silently exempting whatever slid into that line.
+#:
+#: THIS LIST IS THE HONEST PART. Round 15's finding 2 was that instrumentation
+#: recorded a function being ENTERED and called that coverage, so an unexercised
+#: BRANCH inside a captured function could still put a restricted corpus name on
+#: a surface with the scan green. Requiring every line closes that -- but only if
+#: the escape hatch cannot be widened quietly, which is what
+#: `test_the_capture_exemption_list_has_not_grown` is for.
+_CAPTURE_EXEMPT: Dict[Tuple[str, str], str] = {
+    ('_render_expansion_envelope', 'ui.label(title)'):
+        'unreachable BY CONTRACT, not by omission: `_expansion_work_title` reads '
+        '`neutral_title`, and `SURFACE_EXPANSION_FIELDS` deliberately carries no '
+        'title, so the projection can never deliver one. The branch exists so '
+        'that a title added to the projection later routes through ruling R '
+        'instead of being formatted inline. If that field is ever added, this '
+        'exemption must be deleted and the capture must seed it.',
+}
+
+
 def test_the_capture_paints_every_render_entry_point_the_panel_has(masking_capture):
-    """The gap the round-13 BLOCKER named, closed structurally.
+    """The gap the round-13 BLOCKER named, at function granularity.
 
     The capture drove `render_discovery_panel_body` and nothing else, while the
-    live seam ALSO renders `render_discovery_entry_control` -- a control every
-    reader sees before the body and which the masking scan therefore never
-    looked at. An enumeration of surfaces cannot notice its own omissions, so
-    the expected set is DERIVED from the panel module and the exercised set is
-    RECORDED by instrumenting those same functions during the capture.
+    live seam ALSO renders `render_discovery_entry_control`. The expected set is
+    DERIVED from the panel module -- by what each function CALLS, never by what
+    it is NAMED (round 15, finding 2: the naming rule missed `_neutral_chip` and
+    `_service_state_block`, both of which draw reader-visible text) -- and the
+    exercised set is RECORDED by instrumenting those same functions.
 
-    If a surface genuinely cannot be captured, this test FAILS naming it. It
-    does not quietly cover less than the suite claims.
+    Entering a function is necessary and NOT sufficient; the line-level test
+    below is the one that can see an unexercised branch.
     """
     expected = _panel_render_entry_points()
-    assert len(expected) >= 8, (
-        f'only {len(expected)} render functions found in {PANEL_MODULE_PATH} -- '
-        'the derivation is scanning the wrong tree')
+    assert len(expected) >= 12, (
+        f'only {len(expected)} UI-emitting functions found in {PANEL_MODULE_PATH} '
+        '-- the derivation is scanning the wrong tree')
+    # The two the NAMING rule missed, named here so a regression to a
+    # name-based derivation fails on the specific functions that motivated it.
+    for name in ('_neutral_chip', '_service_state_block'):
+        assert name in expected, (
+            f'{name} draws reader-visible text but is not in the derived set -- '
+            'the derivation has gone back to matching function NAMES')
     missing = sorted(expected - masking_capture['exercised'])
     assert not missing, (
-        'these render functions were never painted into the masking capture, so '
-        'nothing scanned covers what they emit: ' + ', '.join(missing)
+        'these UI-emitting functions were never painted into the masking '
+        'capture, so nothing scanned covers what they emit: ' + ', '.join(missing)
         + '. Drive them in `_render_every_panel_surface`, or -- if a surface '
         'genuinely cannot be captured -- say so here by name rather than '
         'letting the capture cover less than this suite claims.')
     unknown = sorted(masking_capture['exercised'] - expected)
-    assert not unknown, f'the instrumentation recorded non-render functions: {unknown}'
+    assert not unknown, f'the instrumentation recorded non-emitting functions: {unknown}'
+
+
+def test_the_capture_executes_every_line_of_every_ui_emitting_function(masking_capture):
+    """Coverage by LINE, not by function entry — round 15, finding 2.
+
+    "The capture entered this renderer" says nothing about the branch inside it
+    that prints `granularity_subline`, or the disclosure handler that paints
+    artifact rows only after a click. Both of those were unexercised while the
+    previous test was green, and both put projection text on a screen. A
+    restricted corpus name arriving on either would have passed the scan.
+
+    So the requirement is every executable line of every UI-emitting function,
+    with the executed set RECORDED by a tracer over the real capture and the
+    required set taken from Python's own compiler. A line that genuinely cannot
+    run is named in `_CAPTURE_EXEMPT` WITH ITS REASON, and the sibling test
+    fails if that list grows.
+    """
+    source_lines = _read(PANEL_MODULE_PATH).splitlines()
+    executed = masking_capture['executed_lines']
+    assert executed, 'the tracer recorded nothing — it is watching the wrong file'
+
+    exempt_texts = {(fn, text) for fn, text in _CAPTURE_EXEMPT}
+    unexercised: List[str] = []
+    for name, lines in sorted(_panel_required_lines().items()):
+        for line in sorted(lines - executed):
+            text = source_lines[line - 1].strip()
+            if (name, text) in exempt_texts:
+                continue
+            unexercised.append(f'{name} (line {line}): {text}')
+    assert not unexercised, (
+        'these lines of the panel\'s UI-emitting functions never ran during the '
+        'masking capture, so nothing scanned covers what they can emit:\n  '
+        + '\n  '.join(unexercised)
+        + '\n\nDrive them in `_render_every_panel_surface` (the click sweep '
+        'already drives every rendered control, so a new disclosure usually '
+        'needs only a fixture that produces it), or -- if a line genuinely '
+        'cannot be executed -- add it to `_CAPTURE_EXEMPT` with the reason and '
+        'update the pinned count.')
+
+
+def test_the_capture_exemption_list_has_not_grown():
+    """The escape hatch, pinned.
+
+    An exemption list nobody counts is a list that absorbs every inconvenient
+    line until the coverage assertion means nothing. Each entry must name a
+    reason, and adding one is a deliberate edit to this number in the same
+    commit — not a quiet widening.
+    """
+    assert len(_CAPTURE_EXEMPT) == 1, (
+        'the masking capture\'s exemption list changed size: '
+        + repr(sorted(_CAPTURE_EXEMPT)))
+    for key, reason in _CAPTURE_EXEMPT.items():
+        assert len(reason) > 60, f'{key} is exempted without a stated reason'
+    # Every exempted anchor must still EXIST in the module, or it is exempting
+    # nothing while reading as though it covers something.
+    source = _read(PANEL_MODULE_PATH)
+    for function_name, text in _CAPTURE_EXEMPT:
+        assert function_name in source and text in source, (
+            f'the exemption for {function_name}/{text!r} no longer matches any '
+            'line in the panel — delete it rather than leaving a dead excuse')
 
 
 def test_the_capture_really_holds_the_rendered_surface(masking_capture):
@@ -1840,12 +2308,32 @@ def test_the_capture_really_holds_the_rendered_surface(masking_capture):
     for lang in LANGS:
         assert ds.retry_label(lang) in masking_capture['rendered'], (
             f'{lang}: the outage renders are missing')
-    # The ENTRY CONTROL specifically -- the surface the BLOCKER named. Its label
-    # is read from the shipped renderer's own translation call, so a wording
-    # change moves this with it.
+    # The ENTRY CONTROL specifically -- the surface the round-13 BLOCKER named.
+    # Its label is read from the shipped renderer's own translation call, so a
+    # wording change moves this with it.
     from web.translations import tr
     assert tr('Computed identifications') in masking_capture['rendered'], (
         'the entry control is not in the capture')
+
+    # The surfaces round 15's finding 2 named: rendered text behind a BRANCH or
+    # behind a CLICK. Each one is model- or projection-derived, i.e. exactly
+    # where a restricted corpus name arrives, and none of them was in the
+    # capture while the function-entry test was green. Asserted by their own
+    # shipped wording, so a rewording moves these with it.
+    rendered = masking_capture['rendered']
+    for lang in LANGS:
+        assert ds.low_coverage_note(lang) in rendered, (
+            f'{lang}: the row\'s low-coverage note is not in the capture')
+        subline_shape = ds.granularity_subline('', lang).replace('{}', '').strip()
+        assert subline_shape and subline_shape.split()[0] in rendered, (
+            f'{lang}: the row\'s granularity sub-line is not in the capture')
+        # Painted ONLY by the expansion loader's own painter, which only runs
+        # when a control is clicked.
+        assert ds.missing_title(lang) in rendered, (
+            f'{lang}: the expansion body is not in the capture, so the click '
+            'sweep is not reaching the lazily-painted surfaces')
+        assert ds.disclosure_toggle(ds.TOGGLE_MORE_MATCHES, lang) in rendered, (
+            f'{lang}: the gated disclosure level is not in the capture')
 
 
 def test_the_masking_scanner_can_actually_fail_on_this_capture(tmp_path):
