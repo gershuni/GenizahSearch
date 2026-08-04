@@ -1412,16 +1412,49 @@ def test_the_surface_never_lets_a_vocabulary_enumerating_message_reach_an_egress
     ASSERTION_COUNT["n"] += 1
 
 
+def _broken_service(tmp_path) -> DiscoveryService:
+    """A sidecar whose findings query RAISES, so the service's own `logger.error`
+    fires and there is a REAL log line to scan.
+
+    The tables the probe checks for are present; `works` -- which
+    `_FINDINGS_FROM` joins -- is not, so the failure happens inside the query
+    rather than at the availability gate."""
+    import sqlite3
+
+    db_path = tmp_path / "broken.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(
+            "CREATE TABLE discovery_identification (identification_id TEXT);"
+            "CREATE TABLE manuscript_display (sys_id TEXT);")
+        conn.commit()
+    finally:
+        conn.close()
+    return DiscoveryService(path_provider=lambda: str(db_path),
+                            availability_callable=lambda: True,
+                            sidecar_version_provider=lambda: "broken")
+
+
 @pytest.mark.parametrize("lang", LANGS)
-def test_every_forced_error_path_is_honest(fixture_service, lang, caplog):
+def test_every_forced_error_path_is_honest(fixture_service, tmp_path, lang, caplog):
     caplog.set_level(logging.DEBUG)
     modes = _error_modes(fixture_service)
     assert len(modes) >= 6, f"only {len(modes)} failure modes driven"
+
+    # A REAL log line, forced. Without this the log loop below is vacuous, and a
+    # vacuous loop proves the scan ran, not that it saw anything.
+    envelope = _broken_service(tmp_path).get_findings_enveloped()
+    assert envelope["status"] == STATUS_UNAVAILABLE
+    assert envelope["meta"]["reason"] == "query_failed"
+    logged = [r for r in caplog.records if "get_findings" in r.getMessage()]
+    assert logged, "the forced query failure produced no log line to scan"
+
     for mode, message in modes:
         assert_error_path_honesty(message, lang=lang, where=f"error path/{mode}")
         ASSERTION_COUNT["n"] += 1
     for record in caplog.records:
         assert_error_path_honesty(record.getMessage(), lang=lang, where="log line")
+        ASSERTION_COUNT["n"] += 1
 
 
 @pytest.mark.parametrize("lang", LANGS)
