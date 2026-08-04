@@ -2574,7 +2574,22 @@ class DiscoveryService:
     # ------------------------------------------------------------------
 
     async def _run_off_loop(self, sync_fn: Callable, *args, timeout: float, heavy: bool = False):
-        loop = asyncio.get_event_loop()
+        # get_RUNNING_loop, never get_event_loop.
+        #
+        # `get_event_loop()` returns whatever loop is SET for the thread, which
+        # inside a coroutine is usually -- but not necessarily -- the running
+        # one; the call is deprecated in this context for exactly that reason.
+        # `tests/conftest.py`'s autouse fixture does set a thread loop when it
+        # finds the current one closed, so the divergence is reachable here.
+        #
+        # HONEST SCOPE: this was changed while chasing an off-loop dispatch
+        # assertion that measures ZERO dispatches under a multi-file run and
+        # passes alone, and it did NOT fix that. It is kept because it is
+        # correct on its own merits -- in production, anything calling
+        # `asyncio.set_event_loop` in the serving thread would otherwise send
+        # discovery reads to a loop that is not serving the request. It is not
+        # the explanation for that failure, which is still open.
+        loop = asyncio.get_running_loop()
         _release: Optional[Callable[[], None]] = None
         if heavy:
             _release = await self._acquire_heavy_slot()
