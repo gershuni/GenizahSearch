@@ -68,7 +68,19 @@ def _module_level_aliases_of(tree, target_name):
     the containment it claimed to prove (Codex finding 8). Resolved to a fixed
     point so a chain of aliases is caught too."""
     aliases = {target_name}
-    for _ in range(10):  # a fixed point; 10 is far past any real alias chain
+    # A REAL fixed point -- iterate until nothing new is found, with no pass cap.
+    #
+    # This was `for _ in range(10)`, described in its own comment as "a fixed
+    # point". It was not: a chain longer than ten hops, or one written in reverse
+    # source order (which resolves one hop per pass), silently stopped early and
+    # reported containment it had not proven. The forward-ordered three-hop
+    # fixture below could not detect that, because it resolves in a single pass
+    # (Codex code review 2A, finding 8).
+    #
+    # Unbounded is safe here: `aliases` only ever grows, and it is bounded above
+    # by the number of module-level assignment targets in one file, so the loop
+    # terminates.
+    while True:
         grew = False
         for node in ast.iter_child_nodes(tree):
             if not isinstance(node, ast.Assign):
@@ -80,8 +92,7 @@ def _module_level_aliases_of(tree, target_name):
                     aliases.add(target.id)
                     grew = True
         if not grew:
-            break
-    return aliases
+            return aliases
 
 
 def _enclosing_function_names_of_calls(tree, callee_names):
@@ -208,4 +219,62 @@ def test_alias_resolution_is_real_not_asserted(tmp_path):
     direct_only = _enclosing_function_names_of_calls(tree, {SHORTCUT_NAME})
     assert "_project_works" not in direct_only, (
         "this control no longer demonstrates the gap it exists to demonstrate"
+    )
+
+
+def test_alias_resolution_survives_reverse_order_and_a_long_chain():
+    """The bound the previous control could not reach (Codex 2A, finding 8).
+
+    `test_alias_resolution_is_real_not_asserted` writes its chain in FORWARD
+    source order, so the whole thing resolves in a single pass -- it passes
+    identically whether the resolver iterates once, ten times, or to a fixed
+    point. It therefore proved alias-following but said nothing about the
+    `range(10)` cap sitting in the same function.
+
+    Two shapes it could not express:
+
+      * REVERSE order -- each pass resolves exactly one hop, so N hops need N
+        passes. This is the realistic bad case: nothing requires a module to
+        define its aliases in dependency order.
+      * A chain LONGER than the old cap.
+
+    Both together, so a resolver that silently stops early is caught by name.
+    """
+    hops = 25  # comfortably past the old range(10)
+    # Reverse order: `_a25 = _a24` appears FIRST, `_a1 = _vis01_shortcut` LAST.
+    lines = ["def _vis01_shortcut(a, b):", "    return True", ""]
+    for i in range(hops, 1, -1):
+        lines.append(f"_a{i} = _a{i - 1}")
+    lines.append(f"_a1 = {SHORTCUT_NAME}")
+    lines.append("")
+    lines.append("def _project_rows(ctx):")
+    lines.append(f"    return _a{hops}(1, 2)")
+    tree = ast.parse("\n".join(lines))
+
+    aliases = _module_level_aliases_of(tree, SHORTCUT_NAME)
+    missing = {f"_a{i}" for i in range(1, hops + 1)} - aliases
+    assert not missing, (
+        f"alias resolution stopped early -- {len(missing)} of {hops} hops "
+        f"unresolved: {sorted(missing)[:5]}... A capped loop reports containment "
+        f"it has not proven."
+    )
+
+    callers = _enclosing_function_names_of_calls(tree, aliases)
+    assert "_project_rows" in callers, (
+        "a projection rule reaching the stale predicate through a 25-hop "
+        "reverse-ordered chain was invisible"
+    )
+
+    # And the control is only meaningful if this shape really does need many
+    # passes -- otherwise it would pass against a capped resolver too.
+    one_pass = {SHORTCUT_NAME}
+    for node in ast.iter_child_nodes(tree):
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Name)
+                and node.value.id in one_pass):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    one_pass.add(target.id)
+    assert len(one_pass) < hops, (
+        "this fixture resolves in a single pass, so it does not exercise the "
+        "iteration bound and proves nothing the forward-ordered control did not"
     )
