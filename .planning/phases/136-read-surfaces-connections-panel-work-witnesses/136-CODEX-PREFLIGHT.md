@@ -384,3 +384,93 @@ vocabulary. A gate that fails on correct output is as costly as one that passes 
 15. **CONFIRM — 136-19 — masking readiness remains fail-closed and executable.** The plan requires strict repository, byte-level asset, and read-only cell-by-cell SQLite scans, and an unavailable pattern file blocks readiness ([136-19:119](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:119), [136-19:125](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:125)). The live scanner rejects empty pattern sets and performs both asset and SQLite modes ([check_atlas_masking.py:206](C:/Genizahsearch/scripts/check_atlas_masking.py:206), [check_atlas_masking.py:1367](C:/Genizahsearch/scripts/check_atlas_masking.py:1367), [check_atlas_masking.py:1384](C:/Genizahsearch/scripts/check_atlas_masking.py:1384)). Its four positive controls are separated and require specific failures. Change: none.
 
 VERDICT: rework — BLOCKER 0, HIGH 5, MEDIUM 2, LOW 0, CONFIRM 8
+
+---
+
+# Round 7 — the twice-revised plans (2026-08-04)
+
+**Brief:** `_tmp/136-codex-preflight-r7-brief.md` (masking-scanned clean before the run).
+**Log:** `_tmp/136-codex-preflight-r7.log` (gitignored).
+
+> **VERDICT: rework** — 0 BLOCKER · 5 HIGH · 2 MEDIUM · 0 LOW · 8 CONFIRM.
+> Trajectory: **1 BLOCKER / 8 HIGH → 0 / 5 HIGH → 0 / 5 HIGH.**
+
+**The tally is flat, and that is worth reading correctly.** These are not the round-6 findings
+restated. Round 6 closed all seven; rounds 6 and 7 both confirm that. What round 7 does is drill a
+finer layer under two of them and expose two consequences of the round-6 fixes:
+
+* Findings 2 and 5 are the same *areas* as round 6, now with concrete counterexamples the earlier
+  wording could not have caught: `ui.label(str(9523))` is a numeric AST constant that passes a
+  string-literal scan, and `min(exact_total, 1000)` contains no forbidden word and no SQL `LIMIT`,
+  so it passes a "high-cardinality" fixture chosen at four pages — while a real work in the public
+  artifact carries **4,796** identification rows.
+* Findings 3 and 4 are consequences of round 6's own fix. Scoping the raw-vocabulary detector to
+  reader-facing fields (correct, and confirmed) left its vocabulary incomplete, and revealed that
+  **no detector catches a plain-language accuracy rate at all**: `accuracy 0.91` produces no
+  violation through any field, exempt or not, against a standing rule that prohibits exactly that.
+
+All three deliberate deviations were examined and upheld as technically justified rather than
+rationalisation (CONFIRM 12/13/14).
+
+**On `_band_measurements`** (CONFIRM 15): the ordering defect is real and WORSE than reported — a
+direct call can stay stale indefinitely, not for one call, because a cache hit returns before
+`_get_conn()`. But its only live caller runs `is_available()` and the page query first, both of which
+refresh the connection, and production's manifest-change-plus-restart flow recreates the service
+outright. Real-world impact is effectively none. **No Phase 136 change required**; a later
+maintenance fix should resolve the connection before computing the key.
+
+## Verbatim findings
+
+1. **HIGH — 136-22 — the public async cache defeats the new path-aware cache.**  
+   Task 1 requires `(current path, version)` invalidation, but Task 2 still directs the wrapper through `_enveloped_off_loop(..., cache_name=...)` ([136-22-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:300)). The live outer LRU key is only `(cache_name, args, version)` and returns before executing the path-aware synchronous reader ([discovery_service.py](C:/Genizahsearch/shared/discovery_service.py:1921)). It also uses `_browse_timeout()` when caching, ignoring the requested findings timeout ([discovery_service.py](C:/Genizahsearch/shared/discovery_service.py:1934)). Thus the sync path-switch test can pass while `web.discovery.get_launch_stats_enveloped()` serves the first artifact after a constant-version path switch.  
+   **Change:** either omit the outer `cache_name` and rely on the inner path-aware cache, or make `_browse_cached_call` resolve and include the current path and accept the caller’s timeout. Run the first-post-switch mutation test through the public async wrapper.
+
+2. **HIGH — 136-22 — the no-literals guard remains passable.**  
+   The guard is limited to Python string and f-string literals ([136-22-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:322)); a hardcoded integer such as `ui.label(str(9523))` is a numeric AST constant and can pass. Completeness is also not acceptance-gated: the tests require only that both committed halves are non-empty ([136-22-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:373)), although the envelope carries per-shade identification and distinct-manuscript counts plus numeric metadata ([136-22-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:196)). A fixture containing only one current value can satisfy the stated freshness test if the recomputation is equally incomplete.  
+   **Change:** scan integer AST constants and formatted expressions, assert an exact required key set covering every numeric `items`, `total`, and `meta` value the launch envelope exposes, and parameterize controls over every figure and literal form.
+
+3. **HIGH — 136-17/136-18 — the “strict” raw-vocabulary scan uses an incomplete vocabulary.**  
+   The live prohibited set includes claim, band, adjudication, routing, evidence, and measurement enums only ([discovery_honesty_gate.py](C:/Genizahsearch/tests/render_smoke/discovery_honesty_gate.py:232)). It omits `NOVELTY_STATUSES` ([discovery_novelty.py](C:/Genizahsearch/shared/discovery_novelty.py:166)) and `MAIN_POOL_REASONS` ([discovery_main_pool.py](C:/Genizahsearch/shared/discovery_main_pool.py:81)). Read-only SQL found underscore-bearing `main_pool_reason` values on all 53,581 public rows and underscore-bearing novelty values on 33,862. Consequently, `fills_gap` or `main_full_coverage` seeded into `band_label` passes, although `direct_witness` fails. Plan 136-18 explicitly expects live `novelty_status` and `main_pool_reason` values to scan clean ([136-18-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:329)).  
+   **Change:** include every closed stored vocabulary in the prohibited-value set, classify their legitimate carrier fields explicitly as machine fields, and add one reader-facing-field mutation control per vocabulary.
+
+4. **HIGH — 136-17/136-18 — accuracy rates are not detected.**  
+   The standing rule prohibits accuracy rates, but these plans enumerate percentage, bracketed-interval, badge, phrase, and raw-vocabulary detectors only ([136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:469)). Against the live detector functions, `accuracy 0.91` produces no violation, while a percent-formatted rate, bracketed interval, and exact badge do fail. Therefore an accuracy rate can pass through any field, exempt or not.  
+   **Change:** add an accuracy/rate/ratio detector with markup, envelope, and error-path positive controls. Keep qualified matched-letter coverage as the explicit exception.
+
+5. **HIGH — 136-21 — a quiet large-input cap can still pass.**  
+   The high-cardinality fixture is specified only as “more units than several pages” ([136-21-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:344)). An implementation using `min(exact_total, 1000)` contains none of the forbidden words and no SQL `LIMIT`-bounded count; it passes if the executor chooses a four-page fixture. Read-only SQL over the public artifact found a work with 4,796 identification rows, so that example can be wrong in live data while satisfying the criterion.  
+   **Change:** assert independently computed exact totals for the real artifact’s highest-cardinality case, pin a fixture cardinality above a named threshold, and add an observed mutation control that inserts a Python-side cap.
+
+6. **MEDIUM — 136-17 — the timeout dispatch row is unreachable as written.**  
+   Page-ID resolution precedes the manuscript-works read ([136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:135)), and unresolved scope must suppress that read ([136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:294)). Therefore “timeout on all four reads, cold = 4” ([136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:296)) is impossible when the page-ID accessor times out: only the three independent reads cross. Four crossings apply when page IDs resolve and a downstream read times out.  
+   **Change:** split timeout and injected-busy rows by failure location: page-ID failure versus claims/count/work failure.
+
+7. **MEDIUM — 136-16 — its own dispatch assertion is still unscoped.**  
+   The plan says exactly one internal executor dispatch “per findings request” ([136-16-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-16-PLAN.md:292)). The live wrapper correctly short-circuits with zero dispatches when discovery is unavailable ([web/discovery.py](C:/Genizahsearch/web/discovery.py:229)), and the route itself has an unavailable early return.  
+   **Change:** scope “one” to an available, cold, successful request and explicitly require zero on the unavailable route.
+
+8. **CONFIRM — 136-15/136-17 — the fifth-envelope correction is substantive.**  
+   `None`, populated, successful-empty, and outage are required to emit four pairwise-distinct states ([136-15-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-15-PLAN.md:330)); the integration also asserts no pre-toggle read and a populated post-toggle render ([136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:408)). Fabricating an eager `ok/0` cannot satisfy both model and integration criteria. No change.
+
+9. **CONFIRM — 136-16/136-18 — ruling T actionability is now fail-closed.**  
+   The simulated-user test requires DOM replacement, the real-browser check covers both widths and languages, and the collapsed-ancestor control must be observed failing ([136-16-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-16-PLAN.md:281)). Unavailable browser tooling is explicitly NOT MET ([136-16-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-16-PLAN.md:285)), and 136-18 blocks deployment on that result ([136-18-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:390)). An inert-but-present control fails. No change.
+
+10. **CONFIRM — all plans — wave and dependency integrity holds.**  
+    Independent parsing found 22 plans, 10 waves, no dependency placed in the same or a later wave, and no same-wave `files_modified` collision. The added honesty-gate file in 136-17 does not overlap 136-22’s wave-8 files. No change.
+
+11. **CONFIRM — Round 6’s other confirmations still hold on spot-check.**  
+    Read-only SQL reproduced the public `4,152 + 3,873 + 1,498 = 9,523` main-pool decomposition and the private total of 10,432; all three artifacts report `discovery-v1-real`. Title routing, expansion projection/failure handling, four-key envelopes, matched-coverage replacement, and masking fail-closed text remain acceptance-gated. The masking secret is currently unset, so an execution now would correctly be NOT MET rather than skipped ([136-19-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-19-PLAN.md:119)). No change beyond findings above.
+
+12. **CONFIRM — deliberate deviation 1 is technically justified, not rationalization.**  
+    The live projections deliberately carry relation, band, routing, and measurement enums used before or during label/chip mapping ([discovery_surface_projection.py](C:/Genizahsearch/shared/discovery_surface_projection.py:113)). Stripping them from the model input would move or duplicate interpretation at the surface boundary. Schema-aware scanning is the right approach; its vocabulary completeness must still be fixed per findings 3–4.
+
+13. **CONFIRM — deliberate deviation 2 holds.**  
+    The two measured current totals occur in 136-22’s historical/objective explanation, not in 136-16 or 136-18 acceptance text. Live sidecars confirm those totals are artifact-specific. Keeping them in the plan that owns the historical forbidden list is reasonable.
+
+14. **CONFIRM — deliberate deviation 3 holds in principle, not rationalization.**  
+    The repository manifest selects the pre-rebuild artifact, which lacks the two required tables and an audience, so the public loader correctly rejects it ([manifest.json](C:/Genizahsearch/discovery_data/manifest.json:2), [discovery_assets.py](C:/Genizahsearch/web/discovery_assets.py:395)). A committed structural guard plus an explicitly run release-time freshness check is preferable to a CI test that can only be excluded. The structural guard itself still needs finding 2’s fixes.
+
+15. **CONFIRM — `_band_measurements` has the reported ordering defect, but not the claimed production impact.**  
+    It builds its key from `_last_path` before calling `_get_conn()` ([discovery_service.py](C:/Genizahsearch/shared/discovery_service.py:1154)). More precisely, a direct call can remain stale indefinitely—not merely for one call—because a cache hit returns before `_get_conn()`. Its only live caller, however, first runs `is_available()` and the page query, both of which refresh the connection/path before `_band_measurements` ([discovery_service.py](C:/Genizahsearch/shared/discovery_service.py:1236)). Production’s manifest-change-plus-restart flow also recreates the service and clears the cache. Real-world production impact is therefore effectively none under the stated deployment procedure. No Phase 136 change is required; a later maintenance fix should resolve the connection before computing this key.
+
+VERDICT: rework — BLOCKER 0 · HIGH 5 · MEDIUM 2 · LOW 0 · CONFIRM 8
