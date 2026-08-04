@@ -2851,14 +2851,27 @@ def test_bench_findings_page_skips_cleanly_against_a_pre_rebuild_asset(tmp_path)
     assert result["shapes"] == [] and result["failures"] == []
     assert "discovery_identification" in result["reason"]
     assert "PRE-REBUILD" in result["reason"]
-    # Every shape is named as skipped, so a reader can never mistake "not
-    # measured" for "measured and fine".
-    assert len(result["skipped_shapes"]) == 6
+    # The combination space is named as skipped, so a reader can never mistake
+    # "not measured" for "measured and fine". (Plan 136-18 replaced the six
+    # named shapes with the full combination space, which cannot be enumerated
+    # at all against an asset with no identification grain -- the specs are
+    # built from the live filter values that asset does not have.)
+    assert result["skipped_shapes"], "nothing was named as unmeasured"
+    assert any("combination" in s["label"] for s in result["skipped_shapes"])
+    assert all(result["reason"] in s["reason"] for s in result["skipped_shapes"])
     # ...and the reporter renders it without raising.
     bench_discovery.report_findings_page(result)
 
 
-def test_bench_findings_page_measures_six_named_shapes(tmp_path):
+def test_bench_findings_page_measures_the_full_combination_space(tmp_path):
+    """AMENDED by plan 136-18: the probe enumerates every ROW UNIT x every SORT
+    MODE x every meaningful FILTER STATE (main pool, the SECOND BUCKET, novelty
+    on, a domain leaf), plus a bounded COUNT per unit against its own separate
+    cap, plus a deep page per unit, plus ruling U's launch-statistics queries --
+    built through the SHIPPED `_build_findings_query`, not a hand-written mirror
+    of it. The six-shape contract this replaces measured one representative
+    query and a relation filter the surface does not offer."""
+    from shared.discovery_service import FINDINGS_SORTS, FINDINGS_UNITS
     from scripts import bench_discovery
 
     db_path = _bench_fixture_db(tmp_path)
@@ -2869,23 +2882,47 @@ def test_bench_findings_page_measures_six_named_shapes(tmp_path):
 
     measured = {r["label"] for r in result["shapes"]}
     skipped = {s["label"] for s in result["skipped_shapes"]}
-    assert len(measured | skipped) == 6
-    for expected in ("findings_default_ordering", "findings_novelty_filter",
-                     "findings_relation_filter", "findings_domain_filter",
-                     "findings_visible_total", "findings_deep_page_2"):
-        assert expected in (measured | skipped), expected
+    every = measured | skipped
+    assert result["combinations"] == len(every), (
+        "the probe must report the combination count it enumerated")
 
+    # Every unit x every sort is present, in both buckets.
+    for unit in FINDINGS_UNITS:
+        for sort in FINDINGS_SORTS:
+            for state in ("main", "more"):
+                assert f"findings_{unit}_{sort}_{state}" in every
+        assert f"findings_{unit}_visible_total" in every
+        assert f"findings_{unit}_deep_page_2" in every
+    # The SECOND BUCKET and the launch query are both enumerated -- ruling T
+    # makes the former a surface a reader is expected to use, and ruling U makes
+    # the latter the release's headline.
+    assert any(label.endswith("_more") for label in every)
+    assert "findings_launch_contribution_main_pool" in every
+    assert "findings_launch_manuscripts_main_pool" in every
+    # Combinations the SURFACE cannot issue are NAMED with their reason.
+    out_of_scope = {s["label"] for s in result["out_of_scope"]}
+    assert {"findings_coverage_filter", "findings_relation_filter"} == out_of_scope
+
+    assert result["shapes"], (
+        "the probe measured NOTHING -- a suite whose per-shape loop is vacuous "
+        "proves only that the enumeration ran")
     for r in result["shapes"]:
         assert r["rows"] > 0, f"{r['label']} recorded a timing on an EMPTY result"
         for key in ("p50_ms", "p95_ms", "max_ms"):
             assert key in r
         assert r["p50_ms"] <= r["max_ms"] and r["p95_ms"] <= r["max_ms"]
 
+    # Every recorded number names the artifact and audience it came from.
+    assert result["artifact"]["basename"].endswith(".db")
+    assert "audience" in result["artifact"] and "sidecar_version" in result["artifact"]
+
     # The visible TOTAL count carries its OWN, tighter cap -- §5 gives the count
     # and the row fetch separate budgets.
     by_label = {r["label"]: r for r in result["shapes"]}
-    assert by_label["findings_visible_total"]["cap_ms"] == bench_discovery.FINDINGS_COUNT_CAP_MS
-    assert by_label["findings_default_ordering"]["cap_ms"] == bench_discovery.FINDINGS_ORDERING_CAP_MS
+    assert (by_label["findings_identification_visible_total"]["cap_ms"]
+            == bench_discovery.FINDINGS_COUNT_CAP_MS)
+    assert (by_label["findings_identification_band_rank_main"]["cap_ms"]
+            == bench_discovery.FINDINGS_ORDERING_CAP_MS)
     assert bench_discovery.FINDINGS_COUNT_CAP_MS < bench_discovery.FINDINGS_ORDERING_CAP_MS
 
 
@@ -2940,6 +2977,10 @@ def _fake_findings_result():
         "identifications": 64522, "page_size": 50, "deep_page": 20,
         "filters": {"novelty_status": "fills_gap", "relation_kind": "direct_witness",
                     "domain": "Synthetic Domain"},
+        "combinations": 3,
+        "artifact": {"basename": "discovery-v1-synthetic.db", "audience": "public",
+                     "sidecar_version": "discovery-v1-real", "data_as_of": "2026-08-03",
+                     "size_mb": 375.5},
         "shapes": [
             {"label": "findings_default_ordering", "kind": "ordering",
              "cap_ms": 1500.0, "rows": 50, "p50_ms": 41.2, "p95_ms": 58.9, "max_ms": 61.0},
@@ -2947,6 +2988,7 @@ def _fake_findings_result():
              "cap_ms": 500.0, "rows": 1, "p50_ms": 3.1, "p95_ms": 4.4, "max_ms": 4.9},
         ],
         "skipped_shapes": [{"label": "findings_domain_filter", "reason": "works.genre is NULL"}],
+        "out_of_scope": [],
         "failures": [],
     }
 
@@ -2965,8 +3007,12 @@ def test_write_budgets_records_findings_actuals_and_never_edits_a_cap():
     block = bench_discovery._findings_actuals_block(_fake_findings_result())
     updated = bench_discovery._upsert_findings_block(original, block)
 
-    assert "| Shape | Cap | p50 | p95 | max | Rows |" in updated
+    assert "| Combination | Cap | p50 | p95 | max | Rows | Result |" in updated
     assert "`findings_default_ordering`" in updated and "58.90 ms" in updated
+    # Plan 136-18: every recorded number names the ARTIFACT and AUDIENCE it came
+    # from -- the public projection and the private rebuild are different
+    # databases reporting the identical `sidecar_version` string.
+    assert "discovery-v1-synthetic.db" in updated and "`public`" in updated
     # The count query is recorded SEPARATELY, with its own tighter cap.
     assert "`findings_visible_total`" in updated and "p95 ≤ 500 ms" in updated
     assert "p95 ≤ 1500 ms" in updated

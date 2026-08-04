@@ -39,11 +39,12 @@ import argparse
 import asyncio
 import math
 import os
+import platform
 import re
 import sqlite3
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # NOTE: web/ and shared/ imports are deferred INTO functions (never at module
 # top) so this file imports with zero heavy side effects -- the plan's
@@ -284,35 +285,44 @@ def pick_findings_filters(conn: sqlite3.Connection) -> Dict[str, Any]:
     Novelty prefers ``fills_gap`` -- the value the public "Candidates for new
     finds" toggle actually selects -- and otherwise falls back to the most
     frequent status present, so the shape is still measured on a pre-novelty
-    asset instead of being skipped."""
+    asset instead of being skipped.
+
+    **Every value is drawn from the MAIN POOL where one exists there.** A value
+    picked globally can be empty inside the bucket the combination filters on,
+    which turns a legitimate measurement into a zero-row abort -- observed
+    against the synthetic build fixture, whose most frequent genre carries no
+    main-pool rows at all. The global count is kept as the fallback so a
+    main-pool-empty asset still measures something rather than skipping."""
     out: Dict[str, Any] = {"novelty_status": None, "relation_kind": None, "domain": None}
 
-    novelty_counts = conn.execute(
-        "SELECT novelty_status, COUNT(*) n FROM discovery_identification "
-        "GROUP BY novelty_status ORDER BY n DESC"
-    ).fetchall()
-    if novelty_counts:
-        preferred = [r for r in novelty_counts if r[0] == "fills_gap"]
-        out["novelty_status"] = (preferred or novelty_counts)[0][0]
+    def _pick(sql_body: str, prefer: Optional[str] = None) -> Any:
+        for predicate in ("di.main_pool = 1", "1 = 1"):
+            rows = conn.execute(sql_body.format(predicate=predicate)).fetchall()
+            rows = [r for r in rows if r[0] is not None and r[0] != ""]
+            if not rows:
+                continue
+            preferred = [r for r in rows if r[0] == prefer] if prefer else []
+            return (preferred or rows)[0][0]
+        return None
 
-    relation_counts = conn.execute(
-        "SELECT relation_kind, COUNT(*) n FROM discovery_identification "
-        "GROUP BY relation_kind ORDER BY n DESC LIMIT 1"
-    ).fetchall()
-    if relation_counts:
-        out["relation_kind"] = relation_counts[0][0]
-
+    out["novelty_status"] = _pick(
+        "SELECT di.novelty_status, COUNT(*) n FROM discovery_identification di "
+        "WHERE {predicate} GROUP BY di.novelty_status ORDER BY n DESC",
+        prefer="fills_gap",
+    )
+    out["relation_kind"] = _pick(
+        "SELECT di.relation_kind, COUNT(*) n FROM discovery_identification di "
+        "WHERE {predicate} GROUP BY di.relation_kind ORDER BY n DESC",
+    )
     # D-19/A-6: the domain facet cascades on the IDENTIFIED WORK's domain, never
     # the manuscript's catalogue domain. `works.genre` is NULL corpus-wide until
     # the 136-09 curation pass lands, so this shape skips cleanly until then.
-    domain_counts = conn.execute(
+    out["domain"] = _pick(
         "SELECT w.genre, COUNT(*) n FROM discovery_identification di "
         "JOIN works w ON w.work_id = di.display_work_id "
-        "WHERE w.genre IS NOT NULL AND w.genre != '' "
-        "GROUP BY w.genre ORDER BY n DESC LIMIT 1"
-    ).fetchall()
-    if domain_counts:
-        out["domain"] = domain_counts[0][0]
+        "WHERE w.genre IS NOT NULL AND w.genre != '' AND {predicate} "
+        "GROUP BY w.genre ORDER BY n DESC",
+    )
     return out
 
 
@@ -340,20 +350,233 @@ def _query_plan(conn: sqlite3.Connection, sql: str, params) -> str:
     return "\n".join("  " + " ".join(str(c) for c in row) for row in plan)
 
 
+def artifact_provenance(db_path: str) -> Dict[str, Any]:
+    """The artifact a number was measured on, and its AUDIENCE.
+
+    The public projection and the private rebuild are different databases with
+    different row counts that report the IDENTICAL ``sidecar_version`` string, so
+    a timing without its artifact is not comparable to the next one (ruling U's
+    basis correction is the same defect one layer up)."""
+    out = {"basename": os.path.basename(db_path), "audience": None,
+           "sidecar_version": None, "data_as_of": None,
+           "size_mb": round(_mb(os.path.getsize(db_path)), 1)}
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        rows = conn.execute("SELECT key, value FROM meta").fetchall()
+    except sqlite3.Error:                                # pragma: no cover
+        rows = []
+    finally:
+        conn.close()
+    meta = {k: v for k, v in rows}
+    for key in ("audience", "sidecar_version", "data_as_of"):
+        out[key] = meta.get(key)
+    return out
+
+
+#: Combinations the SURFACE cannot issue, named with the reason rather than
+#: silently omitted. Both were in the plan's enumeration; neither is reachable.
+_FINDINGS_OUT_OF_SCOPE: Tuple[Tuple[str, str], ...] = (
+    ("findings_coverage_filter",
+     "the findings service exposes NO coverage predicate -- `get_findings_enveloped` "
+     "takes unit/bucket/novelty/domain/author/work_id/sort/page only, and the page "
+     "renders the coverage control visibly disabled and tagged for exactly that "
+     "reason. Measuring a coverage filter here would time a query the surface "
+     "cannot issue"),
+    ("findings_relation_filter",
+     "D-16 was ratified 2026-08-02: the findings page ships WITHOUT a relation "
+     "filter, and `_build_findings_query` carries no relation predicate. The "
+     "pre-136-14 probe measured one against hand-written SQL that mirrored a "
+     "surface which does not exist"),
+)
+
+
+def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
+                                filters: Dict[str, Any], total_rows: int
+                                ) -> List[Dict[str, Any]]:
+    """The FULL combination space, built through the SHIPPED query builder.
+
+    Closes 136-14's owed follow-up: the probe no longer mirrors the findings
+    service in hand-written SQL. `_build_findings_query` is the exact builder
+    `DiscoveryService.get_findings_enveloped` calls, so the two can no longer
+    diverge -- which is what a benchmark measuring a near-copy cannot promise.
+
+    Enumerated: every ROW UNIT x every SORT MODE x every meaningful FILTER STATE
+    (main pool, the SECOND BUCKET, novelty on, a domain leaf selected), plus the
+    bounded COUNT query per unit against its own separate cap, plus a deep page
+    per unit, plus ruling U's launch-statistics queries.
+    """
+    from shared.discovery_service import (
+        BUCKET_MAIN,
+        BUCKET_MORE,
+        FINDINGS_SORTS,
+        FINDINGS_UNIT_WORK,
+        FINDINGS_UNITS,
+        _build_findings_query,
+        _build_launch_contribution_sql,
+        _build_launch_manuscript_sql,
+    )
+
+    units = sorted(FINDINGS_UNITS)
+    sorts = sorted(FINDINGS_SORTS)
+    novelty = [filters["novelty_status"]] if filters["novelty_status"] else None
+    domain = filters["domain"]
+
+    def _population(where: str, params: Tuple[Any, ...] = ()) -> int:
+        """How many identifications this asset carries for a POPULATION.
+
+        Used only for populations that are properties of the ASSET (which
+        buckets it has rows in; whether it carries any contribution shade), so a
+        combination that cannot exist here is a NAMED SKIP. A zero row count on
+        a combination whose filter value was PICKED from this same asset stays
+        the loud abort F14 requires -- that one is a probe bug, not an asset
+        fact, and the distinction is the whole point.
+        """
+        try:
+            return int(conn.execute(
+                f"SELECT COUNT(*) FROM discovery_identification di WHERE {where}",
+                params).fetchone()[0])
+        except sqlite3.Error:                                # pragma: no cover
+            return 0
+
+    bucket_population = {
+        "main": _population("di.main_pool = 1"),
+        "more": _population("di.main_pool = 0"),
+    }
+
+    filter_states: List[Tuple[str, Dict[str, Any], Optional[str]]] = [
+        ("main", {"bucket": BUCKET_MAIN},
+         None if bucket_population["main"] else
+         "this asset carries no main-pool identifications"),
+        # Ruling T: the second bucket is a FIRST-CLASS benchmarked state, not an
+        # afterthought. It is roughly the same order of magnitude as the main
+        # pool and a reader is expected to use it.
+        ("more", {"bucket": BUCKET_MORE},
+         None if bucket_population["more"] else
+         "this asset carries no second-bucket identifications"),
+        ("novelty", {"bucket": BUCKET_MAIN, "novelty": novelty},
+         None if (novelty and bucket_population["main"])
+         else "no novelty_status value present in this asset's main pool"),
+        ("domain", {"bucket": BUCKET_MAIN, "domain": domain},
+         None if (domain and bucket_population["main"]) else (
+             "works.genre carries no value in this asset's main pool, so the "
+             "domain facet has nothing to filter on")),
+    ]
+
+    specs: List[Dict[str, Any]] = []
+    for unit in units:
+        for sort in sorts:
+            for state, kwargs, skip in filter_states:
+                label = f"findings_{unit}_{sort}_{state}"
+                if state == "novelty" and unit == FINDINGS_UNIT_WORK:
+                    specs.append({
+                        "label": label, "kind": "ordering",
+                        "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "", "params": (),
+                        "skip": "novelty is not offered on the per-work unit -- a "
+                                "work spanning many manuscripts has no single "
+                                "verdict, and the service RAISES rather than "
+                                "returning an envelope",
+                    })
+                    continue
+                if skip:
+                    specs.append({"label": label, "kind": "ordering",
+                                  "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "",
+                                  "params": (), "skip": skip})
+                    continue
+                sql, params = _build_findings_query(
+                    unit=unit, sort=sort, page=1, page_size=page_size, **kwargs)
+                specs.append({
+                    "label": label, "kind": "ordering",
+                    "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": sql, "params": params,
+                    "skip": None if total_rows else "the asset carries no identifications",
+                })
+
+        # Deep paging -- where an ordering index earns its keep, and the shape a
+        # spot check at page 1 will never expose.
+        #
+        # The depth bound is the count AT THIS UNIT, not the identification
+        # count: the per-work unit groups ~1,000x fewer rows, so a bound taken
+        # from the identification grain says "deep paging is measurable" for a
+        # unit whose whole result set fits on page 13. The nonzero-result
+        # discipline caught exactly that.
+        count_sql, count_params = _build_findings_query(
+            unit=unit, bucket=BUCKET_MAIN, count_only=True)
+        try:
+            unit_rows = int(conn.execute(count_sql, count_params).fetchone()[0])
+        except sqlite3.Error:                                # pragma: no cover
+            unit_rows = 0
+        sql, params = _build_findings_query(
+            unit=unit, bucket=BUCKET_MAIN, page=deep_page, page_size=page_size)
+        specs.append({
+            "label": f"findings_{unit}_deep_page_{deep_page}", "kind": "ordering",
+            "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": sql, "params": params,
+            "skip": None if unit_rows > (deep_page - 1) * page_size else (
+                f"the {unit} unit carries only {unit_rows} rows in the main pool "
+                f"-- fewer than the page-{deep_page} offset, so deep paging cannot "
+                "be measured on a nonzero result set"),
+        })
+
+        # The visible COUNT, against its own SEPARATE cap (§5). Measured in the
+        # bounded form the surface issues when DISCOVERY_FINDINGS_COUNT_MAX is
+        # set; with the knob off the total rides on COUNT(*) OVER () inside the
+        # ordering query above and costs no second statement.
+        sql, params = _build_findings_query(
+            unit=unit, bucket=BUCKET_MAIN, count_only=True)
+        specs.append({
+            "label": f"findings_{unit}_visible_total", "kind": "count",
+            "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": sql, "params": params,
+            "skip": None if total_rows else "the asset carries no identifications",
+        })
+
+    # Ruling U's launch statistics -- both halves of the one grouped statement,
+    # plus the distinct-manuscript count that is NOT derivable by summing them.
+    from shared.discovery_service import LAUNCH_CONTRIBUTION_SHADES
+
+    shade_placeholders = ",".join("?" * len(LAUNCH_CONTRIBUTION_SHADES))
+    shade_population = {
+        "main_pool": _population(
+            f"di.main_pool = 1 AND di.novelty_status IN ({shade_placeholders})",
+            tuple(LAUNCH_CONTRIBUTION_SHADES)),
+        "all_bucket": _population(
+            f"di.novelty_status IN ({shade_placeholders})",
+            tuple(LAUNCH_CONTRIBUTION_SHADES)),
+    }
+    for main_pool_only in (True, False):
+        basis = "main_pool" if main_pool_only else "all_bucket"
+        sql, params = _build_launch_contribution_sql(main_pool_only=main_pool_only)
+        specs.append({
+            "label": f"findings_launch_contribution_{basis}",
+            "kind": "count", "cap_ms": FINDINGS_COUNT_CAP_MS,
+            "sql": sql, "params": params,
+            "skip": None if shade_population[basis] else (
+                "this asset carries no identification in any ruling-U "
+                f"contribution shade on the {basis} basis"),
+        })
+    sql, params = _build_launch_manuscript_sql(main_pool_only=True)
+    specs.append({
+        "label": "findings_launch_manuscripts_main_pool", "kind": "count",
+        "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": sql, "params": params,
+        "skip": None if shade_population["main_pool"] else (
+            "this asset carries no identification in any ruling-U contribution "
+            "shade in the main pool"),
+    })
+    return specs
+
+
 def bench_findings_page(
     db_path: str, *, page_size: int = 50, repeats: int = 5, deep_page: int = 20
 ) -> Dict[str, Any]:
-    """Measure the representative corpus-wide findings shapes.
+    """Measure the FULL corpus-wide findings combination space.
 
-    Six named shapes: the default ordering at the default page size; the same
-    with a novelty filter; with a relation filter; with a domain filter; the
-    visible TOTAL count; and page 20 of the pager -- deep paging is where an
-    ordering index earns its keep, and it is the shape a spot check at page 1
-    will never expose.
+    Every ROW UNIT x every SORT MODE x every meaningful FILTER STATE (main pool,
+    the SECOND BUCKET, novelty on, a domain leaf), plus the bounded count query
+    per unit against its own separate cap, plus a deep page per unit, plus
+    ruling U's launch-statistics queries -- all built through the SHIPPED
+    `_build_findings_query`, never a hand-written mirror of it.
 
-    Every shape asserts a NONZERO row count before its timing is recorded, and a
-    shape whose live filter value or page depth does not exist in this asset is
-    SKIPPED with a stated reason rather than measured as an empty no-op.
+    Every combination asserts a NONZERO row count before its timing is recorded,
+    and a combination whose live filter value or page depth does not exist in
+    this asset is SKIPPED with a stated reason rather than measured as an empty
+    no-op. Combinations the SURFACE cannot issue are named with their reason too.
 
     Returns a structured result; the caller decides the exit code. Caps are READ
     from docs/specs/discovery-budgets.md §5 and never rewritten here."""
@@ -363,15 +586,15 @@ def bench_findings_page(
             "skipped": True,
             "reason": readiness["reason"],
             "missing_tables": readiness["missing_tables"],
+            "artifact": artifact_provenance(db_path),
+            "combinations": 0,
             "shapes": [],
             "skipped_shapes": [
                 {"label": label, "reason": readiness["reason"]}
-                for label in (
-                    "findings_default_ordering", "findings_novelty_filter",
-                    "findings_relation_filter", "findings_domain_filter",
-                    "findings_visible_total", "findings_deep_page",
-                )
+                for label in ("findings_combination_space",)
             ],
+            "out_of_scope": [{"label": label, "reason": reason}
+                             for label, reason in _FINDINGS_OUT_OF_SCOPE],
             "failures": [],
         }
 
@@ -381,70 +604,9 @@ def bench_findings_page(
             "SELECT COUNT(*) FROM discovery_identification"
         ).fetchone()
         filters = pick_findings_filters(conn)
-
-        specs: List[Dict[str, Any]] = [
-            {
-                "label": "findings_default_ordering",
-                "cap_ms": FINDINGS_ORDERING_CAP_MS,
-                "kind": "ordering",
-                "sql": f"{_FINDINGS_SELECT} {_FINDINGS_ORDER_BY} LIMIT ? OFFSET 0",
-                "params": (page_size,),
-                "skip": None if total_rows else "the asset carries no identifications",
-            },
-            {
-                "label": "findings_novelty_filter",
-                "cap_ms": FINDINGS_ORDERING_CAP_MS,
-                "kind": "ordering",
-                "sql": f"{_FINDINGS_SELECT} WHERE di.novelty_status = ? "
-                       f"{_FINDINGS_ORDER_BY} LIMIT ? OFFSET 0",
-                "params": (filters["novelty_status"], page_size),
-                "skip": None if filters["novelty_status"]
-                        else "no novelty_status value present in this asset",
-            },
-            {
-                "label": "findings_relation_filter",
-                "cap_ms": FINDINGS_ORDERING_CAP_MS,
-                "kind": "ordering",
-                "sql": f"{_FINDINGS_SELECT} WHERE di.relation_kind = ? "
-                       f"{_FINDINGS_ORDER_BY} LIMIT ? OFFSET 0",
-                "params": (filters["relation_kind"], page_size),
-                "skip": None if filters["relation_kind"]
-                        else "no relation_kind value present in this asset",
-            },
-            {
-                "label": "findings_domain_filter",
-                "cap_ms": FINDINGS_ORDERING_CAP_MS,
-                "kind": "ordering",
-                "sql": f"{_FINDINGS_SELECT} JOIN works w ON w.work_id = di.display_work_id "
-                       f"WHERE w.genre = ? {_FINDINGS_ORDER_BY} LIMIT ? OFFSET 0",
-                "params": (filters["domain"], page_size),
-                "skip": None if filters["domain"] else (
-                    "works.genre is NULL corpus-wide until the domain-curation "
-                    "pass lands -- the findings domain facet cascades on the "
-                    "IDENTIFIED WORK's domain, so there is nothing to filter on yet"
-                ),
-            },
-            {
-                "label": "findings_visible_total",
-                "cap_ms": FINDINGS_COUNT_CAP_MS,
-                "kind": "count",
-                "sql": "SELECT COUNT(*) FROM discovery_identification di",
-                "params": (),
-                "skip": None if total_rows else "the asset carries no identifications",
-            },
-            {
-                "label": f"findings_deep_page_{deep_page}",
-                "cap_ms": FINDINGS_ORDERING_CAP_MS,
-                "kind": "ordering",
-                "sql": f"{_FINDINGS_SELECT} {_FINDINGS_ORDER_BY} LIMIT ? OFFSET ?",
-                "params": (page_size, (deep_page - 1) * page_size),
-                "skip": None if total_rows > (deep_page - 1) * page_size else (
-                    f"the asset carries only {total_rows} identifications -- fewer "
-                    f"than the page-{deep_page} offset, so deep paging cannot be "
-                    "measured on a nonzero result set"
-                ),
-            },
-        ]
+        specs = _findings_combination_specs(
+            conn, page_size=page_size, deep_page=deep_page, filters=filters,
+            total_rows=total_rows)
 
         shapes: List[Dict[str, Any]] = []
         skipped_shapes: List[Dict[str, Any]] = []
@@ -476,12 +638,16 @@ def bench_findings_page(
             "skipped": False,
             "reason": "",
             "missing_tables": [],
+            "artifact": artifact_provenance(db_path),
             "identifications": total_rows,
             "filters": filters,
             "page_size": page_size,
             "deep_page": deep_page,
+            "combinations": len(specs),
             "shapes": shapes,
             "skipped_shapes": skipped_shapes,
+            "out_of_scope": [{"label": label, "reason": reason}
+                             for label, reason in _FINDINGS_OUT_OF_SCOPE],
             "failures": failures,
         }
     finally:
@@ -489,11 +655,17 @@ def bench_findings_page(
 
 
 def report_findings_page(result: Dict[str, Any]) -> None:
-    """Print the findings probe result, including a NAMED reason for every shape
-    that was not measured."""
-    print("-" * 72)
-    print("Findings page (Computed Identifications) -- corpus-wide shapes")
-    print("-" * 72)
+    """Print the findings probe result, including a NAMED reason for every
+    combination that was not measured."""
+    artifact = result.get("artifact") or {}
+    print("-" * 78)
+    print("Findings page (Computed Identifications) -- the FULL combination space")
+    print("-" * 78)
+    print(f"artifact         : {artifact.get('basename')} "
+          f"({artifact.get('size_mb')} MB)")
+    print(f"audience         : {artifact.get('audience')!r}   "
+          f"sidecar_version: {artifact.get('sidecar_version')!r}   "
+          f"data_as_of: {artifact.get('data_as_of')!r}")
     if result["skipped"]:
         print(f"SKIPPED: {result['reason']}")
         for s in result["skipped_shapes"]:
@@ -502,15 +674,22 @@ def report_findings_page(result: Dict[str, Any]) -> None:
 
     print(f"identifications  : {result['identifications']}")
     print(f"filters in use   : {result['filters']}")
-    print(f"{'shape':<34}{'rows':>6}{'p50 ms':>10}{'p95 ms':>10}{'max ms':>10}{'cap ms':>9}")
+    print(f"combinations     : {result['combinations']} enumerated, "
+          f"{len(result['shapes'])} measured, "
+          f"{len(result['skipped_shapes'])} skipped, "
+          f"{len(result.get('out_of_scope') or ())} out of scope")
+    print(f"{'combination':<46}{'rows':>6}{'p50 ms':>9}{'p95 ms':>9}"
+          f"{'max ms':>9}{'cap ms':>8}  result")
     for r in result["shapes"]:
-        flag = "  FAIL" if r in result["failures"] else ""
+        verdict = "FAIL" if r in result["failures"] else "PASS"
         print(
-            f"{r['label']:<34}{r['rows']:>6}{r['p50_ms']:>10.2f}{r['p95_ms']:>10.2f}"
-            f"{r['max_ms']:>10.2f}{r['cap_ms']:>9.0f}{flag}"
+            f"{r['label']:<46}{r['rows']:>6}{r['p50_ms']:>9.2f}{r['p95_ms']:>9.2f}"
+            f"{r['max_ms']:>9.2f}{r['cap_ms']:>8.0f}  {verdict}"
         )
     for s in result["skipped_shapes"]:
         print(f"  - {s['label']}: SKIPPED -- {s['reason']}")
+    for s in result.get("out_of_scope") or ():
+        print(f"  - {s['label']}: OUT OF SCOPE -- {s['reason']}")
 
     for r in result["failures"]:
         print()
@@ -629,7 +808,47 @@ def main() -> int:
         "--findings-deep-page", type=int, default=20,
         help="which pager page to measure for deep paging (default 20)",
     )
+    parser.add_argument(
+        "--findings-db", default=None,
+        help="measure the findings combination space against THIS artifact "
+             "instead of the manifest-resolved one. The findings probe opens "
+             "SQLite read-only and needs no loader, while the service-level "
+             "benchmark does -- and the loader is fail-closed, so it refuses an "
+             "artifact the repository manifest does not select. Every recorded "
+             "number carries the artifact and audience it came from.",
+    )
+    parser.add_argument(
+        "--findings-only", action="store_true",
+        help="run ONLY the findings combination space (skip the service-level "
+             "browse/work benchmark, which requires a manifest-resolved sidecar)",
+    )
     args = parser.parse_args()
+
+    # The repo root goes on sys.path BEFORE any branch: the findings probe
+    # imports the SHIPPED query builder from `shared/`, and it must be able to
+    # do so on the `--findings-only` path too.
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+    if args.findings_only:
+        db_path = args.findings_db
+        if not db_path or not os.path.exists(db_path):
+            print(f"FAIL: --findings-only needs --findings-db <path>; got {db_path!r}",
+                  file=sys.stderr)
+            return 1
+        findings = bench_findings_page(
+            db_path,
+            page_size=args.findings_page_size,
+            repeats=args.findings_repeats,
+            deep_page=args.findings_deep_page,
+        )
+        report_findings_page(findings)
+        if args.write_budgets:
+            write_findings_budgets(findings)
+            print("\nWrote the findings-page MEASURED ACTUALS into "
+                  "docs/specs/discovery-budgets.md (caps untouched)")
+        return 1 if findings["failures"] else 0
 
     # RSS baseline sampled BEFORE the sidecar load (the delta then attributes
     # the sidecar + service + populated caches; importing the lightweight
@@ -726,7 +945,7 @@ def main() -> int:
     #     the asset; skips CLEANLY (never a bare exception) on a pre-rebuild
     #     asset that has no materialized identification grain.
     findings = bench_findings_page(
-        db_path,
+        args.findings_db or db_path,
         page_size=args.findings_page_size,
         repeats=args.findings_repeats,
         deep_page=args.findings_deep_page,
@@ -772,37 +991,86 @@ def _findings_actuals_block(findings: Optional[Dict[str, Any]]) -> str:
             f"**{_PRIOR_ORDERING_MEASUREMENT}**, and **{_PRIOR_COUNT_MEASUREMENT}**.\n\n"
         )
 
+    artifact = findings.get("artifact") or {}
     lines = [
-        "### 4.4 Corpus-wide findings page (§5 caps) — measured\n",
+        "### 4.4 Corpus-wide findings page (§5 caps) — the FULL combination space, measured\n",
         "",
         f"Measured by `scripts/bench_discovery.py::bench_findings_page()` over "
         f"{findings['identifications']} materialized identifications "
         f"(`discovery_identification`), page size {findings['page_size']}, "
-        f"deep page {findings['deep_page']}. Every shape asserted a NONZERO row "
-        "count before its timing was recorded.",
+        f"deep page {findings['deep_page']}. "
+        f"**{findings.get('combinations', 0)} combinations enumerated, "
+        f"{len(findings['shapes'])} measured.** Every combination asserted a "
+        "NONZERO row count before its timing was recorded.",
+        "",
+        "**Artifact, audience and host** — a timing without its artifact is not "
+        "comparable to the next one, because the public projection and the "
+        "private rebuild are different databases with different row counts that "
+        "report the identical `sidecar_version` string; and a laptop measurement "
+        "is not a server measurement, which is where a slow query does its "
+        "damage on a single-worker box:",
+        "",
+        f"- artifact: `{artifact.get('basename')}` ({artifact.get('size_mb')} MB)",
+        f"- audience: `{artifact.get('audience')}` · sidecar_version: "
+        f"`{artifact.get('sidecar_version')}` · data_as_of: "
+        f"`{artifact.get('data_as_of')}`",
+        f"- host: `{platform.system()} {platform.machine()}` "
+        f"({'prod-box class' if platform.system() == 'Linux' else 'dev-box'})",
+        "",
+        "Every combination is built through the SHIPPED "
+        "`shared/discovery_service.py::_build_findings_query` — the exact builder "
+        "`get_findings_enveloped` calls — so the probe and the service can no "
+        "longer diverge (136-14's owed follow-up, closed). The launch-statistics "
+        "rows come from `_build_launch_contribution_sql` / "
+        "`_build_launch_manuscript_sql` for the same reason.",
         "",
         "The ordering and the visible-count numbers are recorded SEPARATELY "
         "because §5 gives them separate caps. The prior, PRE-materialization "
         f"measurement was {_PRIOR_ORDERING_MEASUREMENT}, and "
         f"{_PRIOR_COUNT_MEASUREMENT}.",
         "",
-        "| Shape | Cap | p50 | p95 | max | Rows |",
-        "|---|---|---|---|---|---|",
+        "| Combination | Cap | p50 | p95 | max | Rows | Result |",
+        "|---|---|---|---|---|---|---|",
     ]
     for r in findings["shapes"]:
-        verdict = " ✓" if r["p95_ms"] <= r["cap_ms"] else " ✗"
+        verdict = "PASS ✓" if r["p95_ms"] <= r["cap_ms"] else "FAIL ✗"
         lines.append(
             f"| `{r['label']}` | p95 ≤ {r['cap_ms']:.0f} ms | {r['p50_ms']:.2f} ms | "
-            f"**{r['p95_ms']:.2f} ms**{verdict} | {r['max_ms']:.2f} ms | {r['rows']} |"
+            f"**{r['p95_ms']:.2f} ms** | {r['max_ms']:.2f} ms | {r['rows']} | {verdict} |"
         )
     if findings["skipped_shapes"]:
         lines.append("")
-        lines.append("Shapes NOT measured, and why:")
+        lines.append("Combinations NOT measured, and why:")
         lines.append("")
         for s in findings["skipped_shapes"]:
             lines.append(f"- `{s['label']}` — {s['reason']}")
+    if findings.get("out_of_scope"):
+        lines.append("")
+        lines.append("Combinations the SURFACE cannot issue, named rather than omitted:")
+        lines.append("")
+        for s in findings["out_of_scope"]:
+            lines.append(f"- `{s['label']}` — {s['reason']}")
     lines.append("")
     return "\n".join(lines)
+
+
+def write_findings_budgets(findings: Dict[str, Any]) -> None:
+    """Record the findings actuals ALONE, leaving every other section of the
+    budget document byte-identical.
+
+    A separate entry point from `_write_budgets` because the findings probe can
+    run against an explicitly-named artifact while the service-level benchmark
+    cannot: the loader is fail-closed and refuses an artifact the repository
+    manifest does not select. Rewriting §4.1 from a run that never measured it
+    would destroy a real measurement."""
+    path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "docs", "specs", "discovery-budgets.md",
+    )
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(_upsert_findings_block(text, _findings_actuals_block(findings)))
 
 
 def _write_budgets(

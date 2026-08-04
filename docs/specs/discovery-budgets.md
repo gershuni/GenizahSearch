@@ -175,21 +175,76 @@ DB-side cost only and well inside the ≤ 1.5 s request budget.
 These later-surface caps and defaults exist now so those plans have a stable
 contract to implement against, not because they are measured yet.
 
-### 4.4 Corpus-wide findings page (§5 caps) — measured
+### 4.4 Corpus-wide findings page (§5 caps) — the FULL combination space, measured
 
 
-Measured by `scripts/bench_discovery.py::bench_findings_page()` over 53581 materialized identifications (`discovery_identification`), page size 50, deep page 20. Every shape asserted a NONZERO row count before its timing was recorded.
+Measured by `scripts/bench_discovery.py::bench_findings_page()` over 53581 materialized identifications (`discovery_identification`), page size 50, deep page 20. **45 combinations enumerated, 41 measured.** Every combination asserted a NONZERO row count before its timing was recorded.
+
+**Artifact, audience and host** — a timing without its artifact is not comparable to the next one, because the public projection and the private rebuild are different databases with different row counts that report the identical `sidecar_version` string; and a laptop measurement is not a server measurement, which is where a slow query does its damage on a single-worker box:
+
+- artifact: `discovery-v1-e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181.db` (375.5 MB)
+- audience: `public` · sidecar_version: `discovery-v1-real` · data_as_of: `2026-08-03`
+- host: `Windows AMD64` (dev-box)
+
+Every combination is built through the SHIPPED `shared/discovery_service.py::_build_findings_query` — the exact builder `get_findings_enveloped` calls — so the probe and the service can no longer diverge (136-14's owed follow-up, closed). The launch-statistics rows come from `_build_launch_contribution_sql` / `_build_launch_manuscript_sql` for the same reason.
 
 The ordering and the visible-count numbers are recorded SEPARATELY because §5 gives them separate caps. The prior, PRE-materialization measurement was 3.41-3.55 s across four runs (D-10a), against the 1.5 s cap, when the same ordering was computed over display CLAIMS with no materialized band_rank / coverage_ppm and no identification grain, and 16 s for the deduped identification COUNT alone (main-pool-rule.md finding 13, "PERF-01 confirmed twice").
 
-| Shape | Cap | p50 | p95 | max | Rows |
-|---|---|---|---|---|---|
-| `findings_default_ordering` | p95 ≤ 1500 ms | 146.17 ms | **159.38 ms** ✓ | 159.38 ms | 50 |
-| `findings_novelty_filter` | p95 ≤ 1500 ms | 16.07 ms | **17.09 ms** ✓ | 17.09 ms | 50 |
-| `findings_relation_filter` | p95 ≤ 1500 ms | 26.87 ms | **36.06 ms** ✓ | 36.06 ms | 50 |
-| `findings_domain_filter` | p95 ≤ 1500 ms | 128.84 ms | **133.66 ms** ✓ | 133.66 ms | 50 |
-| `findings_visible_total` | p95 ≤ 500 ms | 0.04 ms | **1.16 ms** ✓ | 1.16 ms | 1 |
-| `findings_deep_page_20` | p95 ≤ 1500 ms | 145.79 ms | **148.80 ms** ✓ | 148.80 ms | 50 |
+| Combination | Cap | p50 | p95 | max | Rows | Result |
+|---|---|---|---|---|---|---|
+| `findings_identification_band_rank_main` | p95 ≤ 1500 ms | 272.75 ms | **290.32 ms** | 290.32 ms | 50 | PASS ✓ |
+| `findings_identification_band_rank_more` | p95 ≤ 1500 ms | 328.69 ms | **334.06 ms** | 334.06 ms | 50 | PASS ✓ |
+| `findings_identification_band_rank_novelty` | p95 ≤ 1500 ms | 94.50 ms | **105.21 ms** | 105.21 ms | 50 | PASS ✓ |
+| `findings_identification_band_rank_domain` | p95 ≤ 1500 ms | 216.34 ms | **233.24 ms** | 233.24 ms | 50 | PASS ✓ |
+| `findings_identification_matched_text_main` | p95 ≤ 1500 ms | 273.15 ms | **282.62 ms** | 282.62 ms | 50 | PASS ✓ |
+| `findings_identification_matched_text_more` | p95 ≤ 1500 ms | 312.05 ms | **340.91 ms** | 340.91 ms | 50 | PASS ✓ |
+| `findings_identification_matched_text_novelty` | p95 ≤ 1500 ms | 95.99 ms | **124.05 ms** | 124.05 ms | 50 | PASS ✓ |
+| `findings_identification_matched_text_domain` | p95 ≤ 1500 ms | 224.93 ms | **234.69 ms** | 234.69 ms | 50 | PASS ✓ |
+| `findings_identification_page_count_main` | p95 ≤ 1500 ms | 241.98 ms | **262.16 ms** | 262.16 ms | 50 | PASS ✓ |
+| `findings_identification_page_count_more` | p95 ≤ 1500 ms | 287.30 ms | **294.29 ms** | 294.29 ms | 50 | PASS ✓ |
+| `findings_identification_page_count_novelty` | p95 ≤ 1500 ms | 78.28 ms | **83.26 ms** | 83.26 ms | 50 | PASS ✓ |
+| `findings_identification_page_count_domain` | p95 ≤ 1500 ms | 190.44 ms | **202.74 ms** | 202.74 ms | 50 | PASS ✓ |
+| `findings_identification_deep_page_20` | p95 ≤ 1500 ms | 270.56 ms | **285.69 ms** | 285.69 ms | 50 | PASS ✓ |
+| `findings_identification_visible_total` | p95 ≤ 500 ms | 89.13 ms | **103.55 ms** | 103.55 ms | 1 | PASS ✓ |
+| `findings_manuscript_band_rank_main` | p95 ≤ 1500 ms | 251.36 ms | **276.76 ms** | 276.76 ms | 50 | PASS ✓ |
+| `findings_manuscript_band_rank_more` | p95 ≤ 1500 ms | 265.11 ms | **275.69 ms** | 275.69 ms | 50 | PASS ✓ |
+| `findings_manuscript_band_rank_novelty` | p95 ≤ 1500 ms | 85.53 ms | **90.99 ms** | 90.99 ms | 50 | PASS ✓ |
+| `findings_manuscript_band_rank_domain` | p95 ≤ 1500 ms | 179.49 ms | **187.23 ms** | 187.23 ms | 50 | PASS ✓ |
+| `findings_manuscript_matched_text_main` | p95 ≤ 1500 ms | 273.14 ms | **306.05 ms** | 306.05 ms | 50 | PASS ✓ |
+| `findings_manuscript_matched_text_more` | p95 ≤ 1500 ms | 284.75 ms | **314.43 ms** | 314.43 ms | 50 | PASS ✓ |
+| `findings_manuscript_matched_text_novelty` | p95 ≤ 1500 ms | 90.84 ms | **103.26 ms** | 103.26 ms | 50 | PASS ✓ |
+| `findings_manuscript_matched_text_domain` | p95 ≤ 1500 ms | 199.56 ms | **201.81 ms** | 201.81 ms | 50 | PASS ✓ |
+| `findings_manuscript_page_count_main` | p95 ≤ 1500 ms | 277.86 ms | **283.21 ms** | 283.21 ms | 50 | PASS ✓ |
+| `findings_manuscript_page_count_more` | p95 ≤ 1500 ms | 296.22 ms | **318.29 ms** | 318.29 ms | 50 | PASS ✓ |
+| `findings_manuscript_page_count_novelty` | p95 ≤ 1500 ms | 101.97 ms | **107.19 ms** | 107.19 ms | 50 | PASS ✓ |
+| `findings_manuscript_page_count_domain` | p95 ≤ 1500 ms | 195.61 ms | **208.00 ms** | 208.00 ms | 50 | PASS ✓ |
+| `findings_manuscript_deep_page_20` | p95 ≤ 1500 ms | 263.67 ms | **289.98 ms** | 289.98 ms | 50 | PASS ✓ |
+| `findings_manuscript_visible_total` | p95 ≤ 500 ms | 113.94 ms | **129.40 ms** | 129.40 ms | 1 | PASS ✓ |
+| `findings_work_band_rank_main` | p95 ≤ 1500 ms | 158.30 ms | **166.80 ms** | 166.80 ms | 50 | PASS ✓ |
+| `findings_work_band_rank_more` | p95 ≤ 1500 ms | 188.39 ms | **190.00 ms** | 190.00 ms | 50 | PASS ✓ |
+| `findings_work_band_rank_domain` | p95 ≤ 1500 ms | 130.66 ms | **135.19 ms** | 135.19 ms | 39 | PASS ✓ |
+| `findings_work_matched_text_main` | p95 ≤ 1500 ms | 139.93 ms | **148.17 ms** | 148.17 ms | 50 | PASS ✓ |
+| `findings_work_matched_text_more` | p95 ≤ 1500 ms | 159.52 ms | **178.51 ms** | 178.51 ms | 50 | PASS ✓ |
+| `findings_work_matched_text_domain` | p95 ≤ 1500 ms | 112.70 ms | **126.48 ms** | 126.48 ms | 39 | PASS ✓ |
+| `findings_work_page_count_main` | p95 ≤ 1500 ms | 142.61 ms | **149.46 ms** | 149.46 ms | 50 | PASS ✓ |
+| `findings_work_page_count_more` | p95 ≤ 1500 ms | 172.14 ms | **175.79 ms** | 175.79 ms | 50 | PASS ✓ |
+| `findings_work_page_count_domain` | p95 ≤ 1500 ms | 121.96 ms | **130.01 ms** | 130.01 ms | 39 | PASS ✓ |
+| `findings_work_visible_total` | p95 ≤ 500 ms | 103.52 ms | **113.85 ms** | 113.85 ms | 1 | PASS ✓ |
+| `findings_launch_contribution_main_pool` | p95 ≤ 500 ms | 63.59 ms | **67.28 ms** | 67.28 ms | 3 | PASS ✓ |
+| `findings_launch_contribution_all_bucket` | p95 ≤ 500 ms | 18.71 ms | **20.08 ms** | 20.08 ms | 3 | PASS ✓ |
+| `findings_launch_manuscripts_main_pool` | p95 ≤ 500 ms | 63.55 ms | **72.75 ms** | 72.75 ms | 1 | PASS ✓ |
+
+Combinations NOT measured, and why:
+
+- `findings_work_band_rank_novelty` — novelty is not offered on the per-work unit -- a work spanning many manuscripts has no single verdict, and the service RAISES rather than returning an envelope
+- `findings_work_matched_text_novelty` — novelty is not offered on the per-work unit -- a work spanning many manuscripts has no single verdict, and the service RAISES rather than returning an envelope
+- `findings_work_page_count_novelty` — novelty is not offered on the per-work unit -- a work spanning many manuscripts has no single verdict, and the service RAISES rather than returning an envelope
+- `findings_work_deep_page_20` — the work unit carries only 478 rows in the main pool -- fewer than the page-20 offset, so deep paging cannot be measured on a nonzero result set
+
+Combinations the SURFACE cannot issue, named rather than omitted:
+
+- `findings_coverage_filter` — the findings service exposes NO coverage predicate -- `get_findings_enveloped` takes unit/bucket/novelty/domain/author/work_id/sort/page only, and the page renders the coverage control visibly disabled and tagged for exactly that reason. Measuring a coverage filter here would time a query the surface cannot issue
+- `findings_relation_filter` — D-16 was ratified 2026-08-02: the findings page ships WITHOUT a relation filter, and `_build_findings_query` carries no relation predicate. The pre-136-14 probe measured one against hand-written SQL that mirrored a surface which does not exist
 ## 5. Amendment 2026-08-02 (Phase 136) — Corpus-wide findings page (Computed Identifications)
 
 The Phase-136 corpus-wide findings page ("Computed Identifications" / "זיהויים מחושבים" nav entry)
