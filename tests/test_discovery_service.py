@@ -2016,3 +2016,78 @@ def test_machine_vocabulary_in_values_is_NOT_rejected():
         meta={"basis": "main_pool", "audience": "public"},
     )
     assert env["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# The offload boundary, proven by THREAD IDENTITY
+# (Codex code review 2026-08-03, finding 10 -- LOW)
+# ---------------------------------------------------------------------------
+#
+# `tests/test_no_await_sync_function.py` detects exactly one shape: `await
+# name()` where `name` is a synchronous function defined in the SAME module. It
+# cannot see a direct blocking call, an imported function, or a synchronous
+# method invoked inside an async handler -- and one of its own tests explicitly
+# blesses the direct-call shape. So the repo-wide AST guard is narrower than the
+# property everyone relies on: that no discovery read runs on the event loop.
+#
+# This app runs ONE uvicorn worker, so a blocking read on the loop stalls every
+# concurrent request while burning no CPU -- invisible in load average, which is
+# how it went undiagnosed for weeks in 2026-07. Thread identity is the property
+# that actually matters, and unlike an AST pattern it cannot be satisfied by
+# accident.
+
+def test_enveloped_reads_execute_off_the_event_loop_thread():
+    """Behavioural counterpart to the AST guard: the query body must run on a
+    DIFFERENT thread from the event loop."""
+    import threading
+
+    service = _make_service()
+    seen = {}
+    original = service.get_claims_for_page_enveloped
+
+    def _recording(*args, **kwargs):
+        seen["thread_id"] = threading.get_ident()
+        return original(*args, **kwargs)
+
+    service.get_claims_for_page_enveloped = _recording
+
+    async def _run():
+        seen["loop_thread_id"] = threading.get_ident()
+        return await service.get_claims_for_page_enveloped_async("p001")
+
+    env = asyncio.run(_run())
+    loop_thread_id = seen["loop_thread_id"]
+
+    assert env["status"] in ("ok", "unavailable", "timeout", "busy")
+    assert "thread_id" in seen, (
+        "the enveloped wrapper never called the sync query at all -- this test "
+        "would pass vacuously; re-point it at a wrapper that does"
+    )
+    assert seen["thread_id"] != loop_thread_id, (
+        "a discovery read executed on the event-loop thread. One uvicorn worker "
+        "means this stalls every concurrent request while burning no CPU, so it "
+        "is invisible in load average -- exactly the 2026-07 failure mode."
+    )
+
+
+def test_thread_identity_control_would_catch_an_on_loop_read():
+    """Positive control: the assertion above is only meaningful if calling the
+    sync path directly on the loop would FAIL it. Proven by doing exactly that,
+    rather than asserting the detector's shape."""
+    import threading
+
+    service = _make_service()
+    observed = {}
+
+    async def _run():
+        observed["loop_thread_id"] = threading.get_ident()
+        # deliberately NOT offloaded -- the shape the guard exists to reject
+        service.get_claims_for_page_enveloped("p001")
+        observed["call_thread_id"] = threading.get_ident()
+
+    asyncio.run(_run())
+
+    assert observed["call_thread_id"] == observed["loop_thread_id"], (
+        "a direct synchronous call somehow left the loop thread -- this control "
+        "no longer demonstrates the failure it exists to demonstrate"
+    )
