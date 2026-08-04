@@ -18,6 +18,7 @@ import pytest
 
 import scripts.check_atlas_masking as masking
 import scripts.project_discovery_public as proj
+import scripts.verify_discovery_sidecar as verify
 
 # A throwaway, disposable pattern for tests that only exercise the masking
 # gate's WIRING (argv shape, pass/fail plumbing) and do not need to prove
@@ -951,3 +952,58 @@ def test_page_with_two_demotions_does_not_vouch_for_the_wrong_work(tmp_path):
     finally:
         out_conn.close()
     assert report["pruned_unreplayable_evidence"] == 1
+
+
+def test_verifier_closure_keys_on_the_claim_page_and_the_canonical_work(tmp_path):
+    """The VERIFIER half of the same closure, which the sibling test above does
+    not reach (Codex code review 2A, finding 2).
+
+    That test exercises `project()` only, and builds its rows with equal page
+    fields and self-canonical work IDs -- so it passes whether the verifier keys
+    on `dc.page_id` or `de.a_page_id`, and whether it resolves canonical identity
+    or not. It could not detect a revert.
+
+    This one separates all three:
+      * `de.a_page_id` deliberately DIFFERS from `dc.page_id`, so reading the
+        evidence's page finds no audit row and the check fires spuriously;
+      * `work_id != canonical_work_id`, so skipping the canonical resolution
+        finds no audit row either;
+      * the audit row is keyed on the CLAIM page + the CANONICAL work, which is
+        what the projection uses.
+
+    A correct verifier reports nothing here. Either half of the bug reports a
+    violation on a well-formed artifact.
+    """
+    path, conn = _new_private_conn(tmp_path)
+    # W_ALIAS collapses into W_CANON -- the 15 such works in the live artifact
+    # are why this mapping is load-bearing rather than decorative.
+    _add_work(conn, "W_CANON")
+    _add_work(conn, "W_ALIAS", canonical_work_id="W_CANON")
+    _add_claim_with_evidence(
+        conn, claim_id="C_X", page_id="P_CLAIM", work_id="W_ALIAS",
+        evidence_id="E_X", sys_id="SYS_X",
+    )
+    conn.execute(
+        "UPDATE discovery_evidence SET routing_reason='later_shared_text', "
+        "a_page_id='P_EVIDENCE_DIFFERENT' WHERE evidence_id='E_X'"
+    )
+    _insert(
+        conn, "discovery_routing_audit",
+        page_id="P_CLAIM", kept_work_id="W_CANON", demoted_work_id="W_CANON",
+        kept_year=900, demoted_year=1400, delta_years=500, decision="demoted",
+    )
+    _add_meta(conn, audience="private", schema_version="discovery-v1")
+    _finalize(conn)  # commits, materializes identifications, and CLOSES
+
+    check_conn = sqlite3.connect(str(path))
+    try:
+        violations = verify.check_unknown_date_never_demoted(check_conn)
+    finally:
+        check_conn.close()
+
+    assert violations == [], (
+        "the verifier disagreed with the projection on a well-formed artifact. "
+        "It must key on the CLAIM's page (dc.page_id) and the work's CANONICAL "
+        "id -- reading de.a_page_id, or skipping the canonical resolution, makes "
+        f"the two sides non-equivalent. Violations:\n{violations}"
+    )

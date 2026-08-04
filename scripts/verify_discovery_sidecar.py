@@ -851,8 +851,21 @@ def check_unknown_date_never_demoted(conn: sqlite3.Connection) -> List[str]:
         ).fetchall()
         if ky is not None and dy is not None and demoted_work_id is not None
     }
+    # `dc.page_id`, NOT `de.a_page_id`. The projection this check mirrors keys
+    # its closure on the CLAIM's page (scripts/project_discovery_public.py --
+    # `page_id = claim["page_id"]`), so reading the EVIDENCE's page here made the
+    # two sides non-equivalent: the verifier could pass an artifact the
+    # projection would prune, or vice versa, the moment those columns diverge
+    # (Codex code review 2A, finding 2).
+    #
+    # They do not diverge today -- measured on the deployed public artifact,
+    # zero of the joined rows have `de.a_page_id IS NOT dc.page_id`, and zero
+    # among `later_shared_text` rows specifically. That is exactly why this was
+    # latent rather than a live miss, and exactly why it is worth pinning: two
+    # independently-written queries that agree only by coincidence will stop
+    # agreeing without anything failing.
     rows = cur.execute(
-        "SELECT de.evidence_id, de.a_page_id, w.canonical_work_id "
+        "SELECT de.evidence_id, dc.page_id, w.canonical_work_id "
         "FROM discovery_evidence de "
         "JOIN discovery_claim dc ON dc.claim_id = de.claim_id "
         "JOIN works w ON w.work_id = dc.work_id "
