@@ -1694,8 +1694,19 @@ _PHYSICAL_JOIN = ids.MERGE_BASIS_PHYSICAL_JOIN
 # node), because this dataset's whole discipline is that nothing in it derives
 # from real data; only the SHAPE is contractual. `w000005`/`w000006` carry
 # `Unassigned` so the golden fixture proves the sentinel survives into an asset
-# as a real, queryable value rather than disappearing; `w000007` keeps a NULL
-# genre so the pre-rebuild "not populated" state stays exercised too.
+# as a real, queryable value rather than disappearing.
+#
+# `w000007` previously kept a NULL genre "so the pre-rebuild not-populated state
+# stays exercised". That conflated two different states: the pre-rebuild state is
+# an ENTIRELY unpopulated column, which check_works_genre_vocabulary already
+# early-returns on, whereas one NULL among seven populated rows is PARTIAL
+# population -- and on a work reachable from a public surface that is exactly the
+# NULL-as-absent the contract forbids (Codex code review 2026-08-03, finding 3).
+# The real artifacts satisfy the rule: 0 of their 58 public / 181 private
+# NULL-genre works are reachable. This fixture did not, because everything in a
+# 8-work fixture is reachable. The genuinely-unpopulated state is now exercised
+# where it belongs -- by blanking the whole column on a COPY, in
+# tests/test_discovery_release_contract.py.
 _WORKS = [
     ("w000001", "sefaria", "Synthetic Neutral Title Alpha", "Synthetic Author A",
      "Synthetic Parent A / Synthetic Leaf A"),
@@ -1709,7 +1720,7 @@ _WORKS = [
      "Unassigned"),
     ("w000006", "msource", "Synthetic Neutral Title Zeta", "Synthetic Author E",
      "Unassigned"),
-    ("w000007", "sefaria", "Synthetic Neutral Title Eta", None, None),
+    ("w000007", "sefaria", "Synthetic Neutral Title Eta", None, "Unassigned"),
     ("w000008", "ja", "Synthetic Neutral Title Theta", "Synthetic Author F",
      "Synthetic Parent B / Synthetic Leaf B"),
 ]

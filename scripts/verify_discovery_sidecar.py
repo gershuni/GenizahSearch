@@ -1149,6 +1149,18 @@ def check_coverage_gap_report(conn: sqlite3.Connection) -> List[str]:
     if counts:
         print(f"coverage-gap report (non-fatal): routing_audit decision counts = {counts}",
               file=sys.stderr)
+    # Inert NULL-genre works: present in the artifact but reachable from no
+    # public surface, so not a release violation (see
+    # check_works_genre_vocabulary for the measurement that set that scope).
+    # Reported so the curation gap does not stay invisible between rebuilds.
+    (inert,) = conn.execute(
+        "SELECT COUNT(*) FROM works WHERE genre IS NULL OR genre = ''").fetchone()
+    if inert:
+        print(
+            f"genre-curation report (non-fatal): {inert} work(s) carry no genre and "
+            "are reachable from no public surface -- widen the curated domain "
+            "population at the next rebuild",
+            file=sys.stderr)
     return []
 
 
@@ -1580,6 +1592,46 @@ def check_works_genre_vocabulary(conn: sqlite3.Connection, meta: dict) -> List[s
     ]
     if not values:
         return violations  # an unpopulated column is the pre-rebuild state, not a violation
+
+    # NULL-as-absent, on a column that IS populated (Codex code review
+    # 2026-08-03, finding 3). The docstring above promises "never silently
+    # NULL-as-absent", but every query in this check filtered NULLs out, so a
+    # partially-populated column passed silently. The deployed public artifact
+    # carries 58 such rows and the private source 181.
+    #
+    # Scoped to REACHABLE works rather than all of them. Measured on both
+    # artifacts before choosing the rule: of those 58 and 181, exactly ZERO are
+    # reachable through `discovery_identification`, ZERO carry shipped evidence,
+    # and ZERO carry human-confirmed evidence -- so no reader can ever meet one.
+    # A blanket rule would fail the deployed artifact over rows nothing can
+    # surface, which buys no safety and blocks the next deploy. The inert rows
+    # are still reported below, non-fatally, so they do not stay invisible.
+    if not _has_table(conn, "discovery_identification"):
+        # check_gate_bearing_tables_present makes this unreachable on a current
+        # asset; kept so this check degrades rather than raising on a legacy one.
+        return violations
+    unassigned_reachable = conn.execute(
+        """
+        SELECT COUNT(DISTINCT w.work_id) FROM works w
+         WHERE (w.genre IS NULL OR w.genre = '')
+           AND (
+             EXISTS (SELECT 1 FROM discovery_identification di
+                      WHERE di.canonical_work_id = w.canonical_work_id)
+             OR EXISTS (SELECT 1 FROM discovery_claim dc
+                          JOIN discovery_evidence e ON e.claim_id = dc.claim_id
+                         WHERE dc.work_id = w.work_id
+                           AND (e.routing_status = ?
+                                OR e.adjudication_status = ?))
+           )
+        """,
+        (ids.ROUTING_STATUS_SHIPPED, ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED),
+    ).fetchone()[0]
+    if unassigned_reachable:
+        violations.append(
+            f"works.genre: {unassigned_reachable} work(s) reachable from a public "
+            f"surface have a NULL/empty genre on a populated column -- the contract "
+            f"is an explicit {_GENRE_UNASSIGNED!r} bucket, never NULL-as-absent"
+        )
     malformed = 0
     for value in values:
         if value == _GENRE_UNASSIGNED:

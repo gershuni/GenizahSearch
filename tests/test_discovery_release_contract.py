@@ -555,3 +555,86 @@ def test_gate_bearing_control_is_not_vacuous():
         "the clean fixture is missing a gate-bearing table, so the drop controls "
         "prove nothing"
     )
+
+
+# ---------------------------------------------------------------------------
+# NULL-as-absent genre (Codex code review 2026-08-03, finding 3)
+# ---------------------------------------------------------------------------
+#
+# `check_works_genre_vocabulary` promised "never silently NULL-as-absent" while
+# every query in it filtered NULLs out. The rule is scoped to REACHABLE works:
+# measured on both real artifacts, ZERO of the 58 public / 181 private
+# NULL-genre rows are reachable through discovery_identification, shipped
+# evidence, or human-confirmed evidence. A blanket rule would fail the deployed
+# artifact over rows no reader can meet.
+#
+# The control therefore has to make the work reachable, which is also what makes
+# it a real test rather than a restatement of the query.
+
+def _reachable_work_id(conn):
+    """A work_id that IS reachable from a public surface in the fixture."""
+    row = conn.execute(
+        "SELECT w.work_id FROM works w "
+        "JOIN discovery_identification di ON di.canonical_work_id = w.canonical_work_id "
+        "LIMIT 1").fetchone()
+    return row[0] if row else None
+
+
+def test_null_genre_on_a_reachable_work_is_a_violation(tmp_path, capsys):
+    db = _copy_fixture(tmp_path, "null_genre_reachable.db")
+    conn = _connect_rw(db)
+    work_id = _reachable_work_id(conn)
+    assert work_id is not None, "fixture has no reachable work -- control is vacuous"
+    conn.execute("UPDATE works SET genre = NULL WHERE work_id = ?", (work_id,))
+    conn.commit()
+    conn.close()
+
+    rc = verify_mod.verify(str(db), EXPECTED_FRAME_HASH)
+    captured = capsys.readouterr()
+    out = captured.err + captured.out
+
+    assert rc != 0, "a NULL genre on a reachable work left the verifier green"
+    assert "reachable from a public surface have a NULL/empty genre" in out, (
+        f"the run failed for some other reason, so this control proves nothing "
+        f"about the genre check. Output:\n{out}"
+    )
+
+
+def test_entirely_unpopulated_genre_column_is_the_pre_rebuild_state_not_a_violation(tmp_path):
+    """The state the fixture used to represent with a single stray NULL, now
+    exercised where it belongs: blank the WHOLE column on a copy.
+
+    A fully unpopulated genre column is the legitimate pre-rebuild state and must
+    pass. One NULL among populated rows is partial population, which is a
+    different thing entirely -- and on a reachable work it is the NULL-as-absent
+    the contract forbids (see the test above)."""
+    db = _copy_fixture(tmp_path, "genre_unpopulated.db")
+    conn = _connect_rw(db)
+    conn.execute("UPDATE works SET genre = NULL")
+    conn.commit()
+    conn.close()
+
+    assert verify_mod.verify(str(db), EXPECTED_FRAME_HASH) == 0, (
+        "an entirely unpopulated genre column must remain the pre-rebuild state, "
+        "not a release violation"
+    )
+
+
+def test_partially_populated_genre_column_is_not_confused_with_unpopulated(tmp_path, capsys):
+    """Guards the distinction directly: the clean fixture is fully populated, so
+    blanking exactly one reachable row must fail while blanking all of them
+    passes. If someone widens the early-return to `any NULL present`, this fails."""
+    db = _copy_fixture(tmp_path, "genre_partial.db")
+    conn = _connect_rw(db)
+    work_id = _reachable_work_id(conn)
+    conn.execute("UPDATE works SET genre = NULL WHERE work_id = ?", (work_id,))
+    conn.commit()
+    conn.close()
+
+    rc = verify_mod.verify(str(db), EXPECTED_FRAME_HASH)
+    captured = capsys.readouterr()
+    assert rc != 0, (
+        "partial population was treated as the pre-rebuild state -- a single "
+        "NULL now hides behind the unpopulated-column early return. Output:\n"
+        + captured.err + captured.out
+    )
