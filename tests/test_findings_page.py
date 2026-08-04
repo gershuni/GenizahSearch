@@ -1375,6 +1375,301 @@ def test_more_matches_click_replaces_the_rendered_result_set(lang):
 
 
 # ---------------------------------------------------------------------------
+# The candidacy switch x row unit interaction (code review round 15, finding 1).
+#
+# These two axes are NOT independent, and the page used to pretend they were:
+# the novelty switch stayed live and the "Show as" control changed the unit
+# underneath it, so a reader who turned candidates on and then chose "one row
+# per work" made `fetch_findings` hand the shipped builder a combination it
+# REFUSES. The `ValueError` escaped into a background task, the refresh died
+# half-way, and the page silently stopped updating.
+#
+# The test below drives that exact reader sequence through the simulated user.
+# A test that called the builder directly would NOT have caught this: the bug
+# was never in the builder, it was in the page's state handling.
+# ---------------------------------------------------------------------------
+
+#: Row titles keyed by (unit, whether the candidacy filter was applied). Every
+#: one is a sentinel, so "which query answered" is legible in the RENDER.
+_INTERACTION_ROW_TITLES = {
+    ("identification", False): "SEQ-IDENTIFICATION-ALL",
+    ("identification", True): "SEQ-IDENTIFICATION-CANDIDATES",
+    ("manuscript", False): "SEQ-MANUSCRIPT-ALL",
+    ("manuscript", True): "SEQ-MANUSCRIPT-CANDIDATES",
+    ("work", False): "SEQ-WORK-ALL",
+}
+
+
+def _contract_bound_findings(recorder=None):
+    """A findings stub that REFUSES exactly what the shipped service refuses.
+
+    The request is validated by `_build_findings_query` itself — the same
+    builder `DiscoveryService.get_findings_enveloped` calls — so this stub
+    cannot drift from the rule it stands in for. A stub that merely re-stated
+    "work plus novelty is illegal" would keep passing after the service changed
+    its mind, which is the whole failure mode this test exists to catch.
+    """
+    from shared.discovery_service import _build_findings_query
+
+    async def _call(unit="identification", *, bucket="main", novelty=None,
+                    domain=None, author=None, work_id=None, sort="band_rank",
+                    page=1, page_size=50):
+        # Raises for an unreachable-by-contract combination, exactly as shipped.
+        _build_findings_query(
+            unit=unit, sort=sort, bucket=bucket, novelty=novelty, domain=domain,
+            author=author, work_id=work_id, page=page, page_size=page_size)
+        if recorder is not None:
+            recorder.append({"unit": unit, "novelty": novelty, "bucket": bucket})
+        title = _INTERACTION_ROW_TITLES[(unit, bool(novelty))]
+        row = dict(_finding_row("w000001", title, "T-S 12.111"), unit=unit)
+        return {
+            "status": "ok", "items": [row], "total": 1,
+            "meta": {"unit": unit, "bucket": bucket, "sort": sort,
+                     "sort_basis": "best_band_rank",
+                     "novelty_offered": unit != "work",
+                     "approximate_total": False},
+        }
+
+    return _call
+
+
+@pytest.mark.render_smoke
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_turning_candidates_on_then_switching_to_one_row_per_work_does_not_break_the_page(lang):
+    """THE READER SEQUENCE, end to end, through the simulated user.
+
+    Turn the candidacy switch on; then change "Show as" to one row per work.
+    Both are first-class controls a reader reaches for, and neither warns about
+    the other.
+
+    Three things must hold afterwards, and the first is the one the round-15
+    finding was about:
+
+      1. NOTHING RAISED. `handle_event` routes an exception from an async
+         handler into `core.app.handle_exception`, where it becomes a log line
+         and nothing else — so a raising page looks, from the outside, exactly
+         like a page that did not respond. The recorder makes that difference
+         visible.
+      2. THE PAGE RENDERED THE NEW UNIT. Not "did not crash": the work-unit row
+         must actually be on screen and the previous result set gone, which
+         proves the refresh ran to completion rather than dying half-way.
+      3. THE CONTROL AGREES WITH THE QUERY. The switch is off and disabled, it
+         carries `aria-pressed=false`, its card is dimmed and the reason is
+         rendered in words. A filter that silently stopped filtering while still
+         showing itself as on would be a worse bug than the crash.
+    """
+    import httpx
+    from nicegui import core, ui
+    from nicegui.context import context as _nicegui_context
+    from nicegui.testing.general import prepare_simulation
+    from nicegui.testing.user import User
+    from nicegui.ui_run import set_storage_secret
+
+    from shared.discovery_display_strings import novelty_strings
+    from web.translations import tr
+
+    saved_slot_stack = list(_nicegui_context.slot_stack)
+    saved_handlers = list(core.app._startup_handlers)
+    core.app._startup_handlers.clear()
+    raised: list = []
+    issued: list = []
+
+    #: Scoped to THIS page's own code. Entering the app lifespan starts
+    #: NiceGUI's storage-pruning timer, which raises `Request is not set`
+    #: against a simulated client on every run; recording that would make the
+    #: assertion below unconditionally red and it would then be deleted. The
+    #: filter is on the TRACEBACK, so anything the page or the service it calls
+    #: raises is still recorded — including the ValueError this test exists for.
+    _OWN_CODE = ("web\\pages\\findings.py", "web/pages/findings.py",
+                 "web\\components\\findings_rows.py", "web/components/findings_rows.py",
+                 "shared\\discovery_service.py", "shared/discovery_service.py")
+
+    def _record(exception: Exception) -> None:
+        import traceback as _traceback
+
+        frames = "".join(_traceback.format_exception(
+            type(exception), exception, exception.__traceback__))
+        if any(marker in frames for marker in _OWN_CODE):
+            raised.append(exception)
+
+    core.app._exception_handlers.append(_record)
+
+    async def _run():
+        prepare_simulation()
+        set_storage_secret("findings-page-unit-novelty-secret", {})
+        with ExitStack() as stack:
+            stack.enter_context(patch("web.main.discovery_available", return_value=True))
+            stack.enter_context(patch.object(
+                fp, "get_findings_enveloped", _contract_bound_findings(issued)))
+            stack.enter_context(patch.object(fp, "get_findings_facets_enveloped", _fake_facets()))
+            stack.enter_context(patch("web.main._resolve_ui_language", return_value=lang))
+            _os.environ["NICEGUI_USER_SIMULATION"] = "true"
+            set_language(lang)
+            words = novelty_strings(lang)
+            try:
+                async with core.app.router.lifespan_context(core.app):
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(core.app), base_url="http://test"
+                    ) as http_client:
+                        user = User(http_client)
+                        await user.open(FINDINGS_ROUTE)
+                        await user.should_see(_INTERACTION_ROW_TITLES[("identification", False)])
+                        # The reason is not shown while the axis applies.
+                        await user.should_not_see(fp.copy_text("novelty_unit_note", lang))
+
+                        # (1) The reader turns candidates on.
+                        user.find(words["toggle"]).click()
+                        await user.should_see(_INTERACTION_ROW_TITLES[("identification", True)])
+                        await user.should_not_see(_INTERACTION_ROW_TITLES[("identification", False)])
+
+                        # (2) ...and then changes the row unit to one row per
+                        # work, through the select's own popup.
+                        unit_label = tr("One row per work")
+                        user.find(tr("Show as")).click()
+                        user.find(unit_label).click()
+
+                        # (2a) The new unit is RENDERED and the old set is gone.
+                        await user.should_see(_INTERACTION_ROW_TITLES[("work", False)])
+                        await user.should_not_see(
+                            _INTERACTION_ROW_TITLES[("identification", True)])
+                        # (2b) ...and the reason the switch went quiet is on the page.
+                        await user.should_see(fp.copy_text("novelty_unit_note", lang))
+
+                        switches = [
+                            element for element in user.client.elements.values()
+                            if isinstance(element, ui.button)
+                            and getattr(element, "text", None) == words["toggle"]
+                        ]
+                        assert len(switches) == 1, (
+                            f"expected exactly one candidacy switch, found {len(switches)}")
+                        switch = switches[0]
+                        assert switch.enabled is False, (
+                            "the candidacy switch is still clickable on the per-work "
+                            "unit — one more click puts the page back in the state "
+                            "the service refuses")
+                        assert switch.props.get("aria-pressed") == "false", (
+                            "the switch still announces itself as pressed while the "
+                            "query no longer applies it")
+                        cards = [
+                            element for element in user.client.elements.values()
+                            if f"{fp.FILTER_BAR_CLASS}-novelty" in (element._classes or [])
+                        ]
+                        assert cards and "blocked" in (cards[0]._classes or []), (
+                            "the inactionable filter card is not dimmed — it looks "
+                            "exactly like the ones that still work")
+
+                        # (3) A further click on the disabled switch is inert:
+                        # the simulated user skips disabled elements, and the
+                        # handler refuses the state anyway.
+                        user.find(words["toggle"]).click()
+                        await user.should_see(_INTERACTION_ROW_TITLES[("work", False)])
+            finally:
+                _os.environ.pop("NICEGUI_USER_SIMULATION", None)
+
+    try:
+        asyncio.run(_run())
+    finally:
+        core.app._startup_handlers.clear()
+        core.app._startup_handlers.extend(saved_handlers)
+        if _record in core.app._exception_handlers:
+            core.app._exception_handlers.remove(_record)
+        _nicegui_context.slot_stack.clear()
+        _nicegui_context.slot_stack.extend(saved_slot_stack)
+        set_language("he")
+
+    assert not raised, (
+        "the page raised while a reader drove it: "
+        + "; ".join(f"{type(e).__name__}: {e}" for e in raised))
+    # The work-unit read really was issued, and it carried NO novelty selection.
+    work_reads = [call for call in issued if call["unit"] == "work"]
+    assert work_reads, "the page never issued a per-work read"
+    assert all(call["novelty"] is None for call in work_reads), (
+        f"a per-work read carried a novelty selection: {work_reads!r}")
+
+
+def test_the_axis_rule_is_the_services_own_predicate_and_is_not_restated(monkeypatch):
+    """One authority for "does this unit offer novelty", used by three callers.
+
+    `shared.discovery_service.findings_novelty_offered` is what the BUILDER
+    raises on, what the ENVELOPE reports as `meta['novelty_offered']`, and what
+    the PAGE disables its switch on. Flipping the predicate must move all three
+    together — a page that hard-codes `unit != "work"` is a page that keeps its
+    switch live the day the service changes its mind."""
+    import shared.discovery_service as svc
+
+    assert fp.findings_novelty_offered is svc.findings_novelty_offered, (
+        "the page imported something other than the service's own predicate")
+    assert svc.findings_novelty_offered("identification") is True
+    assert svc.findings_novelty_offered("manuscript") is True
+    assert svc.findings_novelty_offered("work") is False
+
+    # The page must not restate the rule as a literal comparison of its own.
+    # Scoped to comparisons whose LEFT side is about the unit, so the facet
+    # cascade's own legitimate `level == "work"` is untouched.
+    tree = ast.parse(FINDINGS_SRC)
+    restated = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare):
+            continue
+        if not any(isinstance(c, ast.Constant) and c.value == "work"
+                   for c in node.comparators):
+            continue
+        left = ast.get_source_segment(FINDINGS_SRC, node.left) or ""
+        if "unit" in left:
+            restated.append(ast.get_source_segment(FINDINGS_SRC, node) or left)
+    assert not restated, (
+        "web/pages/findings.py compares the row unit against the literal 'work': "
+        f"{restated!r}. Use findings_novelty_offered() so the rule cannot drift "
+        "from the service that enforces it")
+
+    # ...and with the predicate flipped, the page's own normalisation follows.
+    monkeypatch.setattr(fp, "findings_novelty_offered", lambda unit: unit == "work")
+    assert fp.normalise_state(_state(unit="work", novelty_only=True))["novelty_only"] is True
+    assert (fp.normalise_state(_state(unit="identification", novelty_only=True))
+            ["novelty_only"] is False)
+
+
+def test_normalise_state_drops_a_persisted_pair_the_service_would_refuse(monkeypatch):
+    """The stored pair, not just the live one. A cookie written before this fix
+    (or edited by hand) carries `unit=work` AND `novelty_only=True`, and
+    `read_state` must settle it before it reaches a query."""
+    store = {
+        "discovery_findings_unit": "work",
+        "discovery_findings_novelty_only": True,
+    }
+    monkeypatch.setattr(fp, "safe_user_get", lambda k, d=None: store.get(k, d))
+    monkeypatch.setattr(fp, "safe_user_set", lambda k, v: None)
+
+    restored = fp.read_state()
+    assert restored["unit"] == "work"
+    assert restored["novelty_only"] is False, (
+        "a persisted work+candidates pair survived read_state — it reaches "
+        "fetch_findings and the shipped builder raises on it")
+    assert fp._novelty_selection(restored) is None
+
+
+def test_the_facet_cascade_never_carries_a_selection_the_result_set_dropped(monkeypatch):
+    """Facet counts and the result set must agree.
+
+    The cascade always queries at the identification grain, so novelty is legal
+    there whatever unit the reader picked — which is exactly the trap: applying
+    it while the RESULT SET cannot would put counts beside rows they do not
+    describe."""
+    captured = {}
+
+    async def _capture(level, **kwargs):
+        captured[level] = kwargs
+        return {"status": "ok", "items": [], "total": 0, "meta": {"level": level}}
+
+    monkeypatch.setattr(fp, "get_findings_facets_enveloped", _capture)
+    state = _state(unit="work", novelty_only=True)
+    asyncio.run(fp.fetch_facets("domain", state))
+    assert captured["domain"]["novelty"] is None, (
+        "the facet cascade applied a candidacy filter the per-work result set "
+        "could not — the counts would not describe the rows beside them")
+
+
+# ---------------------------------------------------------------------------
 # (e) + (f) The REAL-BROWSER actionability check and its positive control.
 #
 # STATUS AS SHIPPED BY PLAN 136-16: **NOT MET.** Playwright was not installed in

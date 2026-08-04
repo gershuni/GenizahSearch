@@ -400,6 +400,28 @@ FINDINGS_SORTS: frozenset = frozenset({
     FINDINGS_SORT_BAND_RANK, FINDINGS_SORT_PAGE_COUNT, FINDINGS_SORT_MATCHED_TEXT,
 })
 
+
+def findings_novelty_offered(unit: str) -> bool:
+    """Whether the candidacy axis applies to `unit`. THE authority on that rule.
+
+    Novelty is a verdict about ONE work on ONE fragment: no finding aid we
+    checked records this work there. The per-work row unit collapses many
+    manuscripts into a single line, and those lines carry no single verdict --
+    so the filter is not offered there, `_build_findings_filter` REFUSES the
+    combination, and `get_findings_enveloped` reports it as
+    `meta['novelty_offered']`.
+
+    It is a function and not a comparison spelled out at each site because a
+    SURFACE has to know the same rule BEFORE it calls: `web/pages/findings.py`
+    disables the switch and drops the selection on this predicate. When the rule
+    lived only inside the raiser, the page left the switch live while the "Show
+    as" control changed the unit underneath it, and a reader who turned novelty
+    on and then chose one row per work drove the shipped builder into its own
+    `ValueError` -- an unhandled failure on a live page (code review round 15,
+    finding 1). One predicate, three callers, no restatement.
+    """
+    return unit != FINDINGS_UNIT_WORK
+
 BUCKET_MAIN = "main"
 BUCKET_MORE = "more"
 BUCKET_ALL = "all"
@@ -658,7 +680,7 @@ def _build_findings_filter(
 
     novelty_list = list(novelty) if novelty else []
     if novelty_list:
-        if unit == FINDINGS_UNIT_WORK:
+        if not findings_novelty_offered(unit):
             raise ValueError(
                 "novelty is not offered on the per-work unit -- a work spanning "
                 "many manuscripts has no single novelty verdict"
@@ -2032,7 +2054,7 @@ class DiscoveryService:
         if conn is None:
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
 
-        novelty_offered = unit != FINDINGS_UNIT_WORK
+        novelty_offered = findings_novelty_offered(unit)
         count_cap = _get_int_env("DISCOVERY_FINDINGS_COUNT_MAX", 0)
         try:
             rows = [dict(row) for row in conn.execute(sql, params).fetchall()]

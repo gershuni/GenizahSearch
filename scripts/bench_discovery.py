@@ -596,13 +596,13 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
     from shared.discovery_service import (
         FINDINGS_SORTS,
         FINDINGS_UNIT_IDENTIFICATION,
-        FINDINGS_UNIT_WORK,
         FINDINGS_UNITS,
         _FINDINGS_FROM,
         _build_findings_filter,
         _build_findings_query,
         _build_launch_contribution_sql,
         _build_launch_manuscript_sql,
+        findings_novelty_offered,
     )
 
     units = sorted(FINDINGS_UNITS)
@@ -698,9 +698,30 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
                    for stem, label, kwargs, on in filter_states}
 
     _WORK_UNIT_NOVELTY_SKIP = (
-        "novelty is not offered on the per-work unit -- a work spanning many "
-        "manuscripts has no single verdict, and the service RAISES rather than "
+        "the SURFACE cannot issue this: `shared.discovery_service."
+        "findings_novelty_offered` says the candidacy axis does not apply to the "
+        "per-work unit (a work spanning many manuscripts has no single verdict), "
+        "so `web/pages/findings.py::normalise_state` drops the selection the "
+        "moment the unit changes and the switch is disabled there -- and if one "
+        "ever did get through, `_build_findings_filter` RAISES rather than "
         "returning an envelope")
+
+    def _novelty_unreachable(unit: str, on: Tuple[str, ...]) -> bool:
+        """Whether this (unit, axes-on) pair is one the SURFACE cannot produce.
+
+        Derived from the SERVICE's own predicate, never restated as
+        `unit == 'work'`. It was restated once, and the restatement was not the
+        problem: the problem was that the sentence it stood for -- "unreachable"
+        -- was FALSE. The page left the candidacy switch live while a separate
+        control changed the row unit, so a reader really could reach all 80 of
+        these states, and reaching one raised on a live page (code review round
+        15, finding 1). They are unreachable NOW because the page settles the
+        pair; `tests/test_discovery_build.py::
+        test_the_work_unit_novelty_skip_is_unreachable_THROUGH_THE_PAGE` holds
+        that claim against `web/pages/findings.py` rather than against this
+        docstring.
+        """
+        return "novelty" in on and not findings_novelty_offered(unit)
 
     specs: List[Dict[str, Any]] = []
     for unit in units:
@@ -712,7 +733,7 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # whose whole result set fits on page 13).
         unit_rows: Dict[str, int] = {}
         for _stem, label, kwargs, on in filter_states:
-            if state_skips[label] or (unit == FINDINGS_UNIT_WORK and "novelty" in on):
+            if state_skips[label] or _novelty_unreachable(unit, on):
                 continue
             count_sql, count_params = _build_findings_query(
                 unit=unit, count_only=True, **kwargs)
@@ -724,7 +745,7 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         for sort in sorts:
             for _stem, label, kwargs, on in filter_states:
                 spec_label = f"findings_{unit}_{sort}_{label}"
-                if unit == FINDINGS_UNIT_WORK and "novelty" in on:
+                if _novelty_unreachable(unit, on):
                     specs.append({
                         "label": spec_label, "kind": "ordering",
                         "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "", "params": (),
@@ -749,7 +770,7 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # state; whether a state is deep enough is read off its own count.
         for _stem, label, kwargs, on in filter_states:
             spec_label = f"findings_{unit}_deep_page_{deep_page}_{label}"
-            if unit == FINDINGS_UNIT_WORK and "novelty" in on:
+            if _novelty_unreachable(unit, on):
                 specs.append({"label": spec_label, "kind": "ordering",
                               "cap_ms": FINDINGS_ORDERING_CAP_MS, "sql": "",
                               "params": (), "skip": _WORK_UNIT_NOVELTY_SKIP})
@@ -778,7 +799,7 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # ordering query above and costs no second statement.
         for _stem, label, kwargs, on in filter_states:
             spec_label = f"findings_{unit}_visible_total_{label}"
-            if unit == FINDINGS_UNIT_WORK and "novelty" in on:
+            if _novelty_unreachable(unit, on):
                 specs.append({"label": spec_label, "kind": "count",
                               "cap_ms": FINDINGS_COUNT_CAP_MS, "sql": "",
                               "params": (), "skip": _WORK_UNIT_NOVELTY_SKIP})

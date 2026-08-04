@@ -32,6 +32,7 @@ from shared.discovery_service import (
     FINDINGS_UNIT_IDENTIFICATION,
     FINDINGS_UNITS,  # noqa: F401 -- exported for surfaces to validate against
     DiscoveryService,
+    findings_novelty_offered,  # noqa: F401 -- the axis rule a surface needs BEFORE it calls
 )
 from shared.discovery_surface_projection import (
     STATUS_OK,

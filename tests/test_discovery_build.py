@@ -3037,6 +3037,75 @@ def test_which_shapes_count_is_DERIVED_from_the_shipped_builders(tmp_path):
     assert not bench_discovery._is_scalar_aggregate(grouped_sql)
 
 
+def test_the_work_unit_novelty_skip_is_unreachable_THROUGH_THE_PAGE(tmp_path):
+    """A skip that says "the surface cannot issue this" must be TRUE of the
+    surface.
+
+    It was not. The probe skipped 80 work-unit x candidacy states as
+    unreachable while `web/pages/findings.py` left the switch live and changed
+    the row unit underneath it — so a reader reached every one of them, and
+    reaching one raised on a live page (code review round 15, finding 1). The
+    skip was a gate reporting success without performing its check: this phase's
+    characteristic defect, wearing a reason string.
+
+    So the claim is held against the PAGE, in both directions:
+
+      * every state the probe calls surface-unreachable really is one the page
+        cannot produce after `normalise_state`, and
+      * a state the page CAN produce is never skipped for that reason — which is
+        what stops the skip from being quietly widened until the probe measures
+        nothing.
+    """
+    from scripts import bench_discovery
+    import web.pages.findings as fp
+    from shared.discovery_service import FINDINGS_UNITS, findings_novelty_offered
+
+    db_path = _bench_fixture_db(tmp_path)
+    result = bench_discovery.bench_findings_page(
+        str(db_path), page_size=2, repeats=1, deep_page=2)
+    assert result["skipped"] is False
+
+    marker = "the SURFACE cannot issue this"
+    unreachable = {s["label"] for s in result["skipped_shapes"] if marker in s["reason"]}
+    assert unreachable, (
+        "no shape is skipped as surface-unreachable — either the reason wording "
+        "moved (update this marker in the same commit) or the enumeration lost "
+        "the work-unit x candidacy states entirely")
+
+    # Direction 1: everything skipped for that reason is a work-unit state whose
+    # axes include novelty...
+    for label in sorted(unreachable):
+        assert label.startswith("findings_work_"), label
+        assert "novelty" in label, label
+    # ...and the page cannot produce any of them.
+    for unit in sorted(FINDINGS_UNITS):
+        state = {"unit": unit, "bucket": "main", "sort": "band_rank",
+                 "novelty_only": True, "domain": None, "author": None,
+                 "work_id": None, "page": 1}
+        fp.normalise_state(state)
+        page_can_filter = fp._novelty_selection(state) is not None
+        assert page_can_filter is findings_novelty_offered(unit), (
+            f"the page and the service disagree about the {unit!r} unit: the page "
+            f"{'would' if page_can_filter else 'would not'} send a candidacy "
+            f"selection, the service says the axis "
+            f"{'applies' if findings_novelty_offered(unit) else 'does not apply'}")
+        if page_can_filter:
+            assert not any(label.startswith(f"findings_{unit}_") for label in unreachable), (
+                f"the {unit} unit CAN carry a candidacy selection, yet the probe "
+                "skips some of its states as surface-unreachable — the probe is "
+                "measuring less than the page can reach")
+
+    # Direction 2: a reachable novelty state at a reachable unit is enumerated
+    # (measured, or skipped for an ASSET reason — never for this one).
+    reachable_units = [u for u in sorted(FINDINGS_UNITS) if findings_novelty_offered(u)]
+    assert reachable_units, "no unit offers the candidacy axis at all"
+    every = ({r["label"] for r in result["shapes"]}
+             | {s["label"] for s in result["skipped_shapes"]})
+    for unit in reachable_units:
+        assert f"findings_{unit}_band_rank_main+novelty" in every, (
+            f"the {unit}/band_rank/main+novelty combination is not enumerated")
+
+
 def test_the_probes_filter_axes_are_PINNED_to_the_shipped_predicate_builder():
     """The one enumeration the probe still owns, pinned to its authority.
 

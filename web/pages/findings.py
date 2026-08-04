@@ -106,6 +106,7 @@ from web.discovery import (
     FINDINGS_SORTS,
     FINDINGS_UNIT_IDENTIFICATION,
     FINDINGS_UNITS,
+    findings_novelty_offered,
     get_findings_enveloped,
     get_findings_facets_enveloped,
     get_launch_stats_enveloped,
@@ -200,9 +201,10 @@ _KEY_PAGE = _STORAGE_PREFIX + "page"
 
 
 # ---------------------------------------------------------------------------
-# The five strings that had no home in `tr()` or in the shared claim
+# The page-local strings that had no home in `tr()` or in the shared claim
 # vocabulary. Bilingual, digit-free where the criteria require it, and swept
-# through the shared honesty gate by this plan's suite.
+# through the shared honesty gate by this plan's suite (which iterates
+# `copy_keys()`, so an entry added here is swept without editing the test).
 # ---------------------------------------------------------------------------
 
 _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
@@ -259,6 +261,20 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
         "en": "How to read this page",
         "he": "איך לקרוא את הדף הזה",
     },
+    # Why the candidacy switch is inert while the row unit is a work. The axis
+    # asks about ONE work on ONE fragment; a work row covers many, so the
+    # service does not offer the combination at all -- and a control that
+    # silently stopped filtering would be worse than one that says it cannot.
+    "novelty_unit_note": {
+        "en": (
+            "Not offered while each row is a work: this asks about one work on "
+            "one fragment, and a work row covers many fragments."
+        ),
+        "he": (
+            "לא מוצע כאשר כל שורה היא חיבור: השאלה נוגעת לחיבור אחד בקטע אחד, "
+            "ושורת חיבור מאגדת קטעים רבים."
+        ),
+    },
 }
 
 
@@ -267,7 +283,7 @@ def _lang_key(lang: str) -> str:
 
 
 def copy_text(key: str, lang: str = "en") -> str:
-    """One of the five page-local bilingual strings. Raises on an unknown key
+    """One of the page-local bilingual strings. Raises on an unknown key
     rather than rendering an empty element for a string nobody designed."""
     entry = _FINDINGS_COPY.get(key)
     if entry is None:
@@ -375,7 +391,7 @@ def read_state() -> Dict[str, Any]:
         value = safe_user_get(key, None)
         return value if isinstance(value, str) and value else None
 
-    return {
+    state = {
         "unit": unit,
         "bucket": bucket,
         "sort": sort,
@@ -385,6 +401,28 @@ def read_state() -> Dict[str, Any]:
         "work_id": _opt(_KEY_WORK),
         "page": page if page >= 1 else 1,
     }
+    return normalise_state(state)
+
+
+def normalise_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Settle the axes that are not independent, IN PLACE, and return `state`.
+
+    Exactly one such pair ships: the candidacy switch and the row unit. Novelty
+    is a verdict about one work on one fragment, so the service does not offer
+    it on the per-work unit and its builder RAISES on the combination -- which
+    means a page that lets a reader hold both is a page that can be driven into
+    an unhandled failure. It could, and it did: the switch stayed live and the
+    "Show as" control changed the unit underneath it (code review round 15,
+    finding 1).
+
+    Called from `read_state` (so a persisted or hand-edited pair cannot arrive
+    already inconsistent) and from the ONE refresh path (so no control can leave
+    it inconsistent). The predicate is the SERVICE's own
+    `findings_novelty_offered`, never a comparison restated here.
+    """
+    if not findings_novelty_offered(state.get("unit")):
+        state["novelty_only"] = False
+    return state
 
 
 def write_state(state: Dict[str, Any]) -> None:
@@ -404,8 +442,19 @@ def _novelty_selection(state: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
 
     `None` (the empty selection) means ALL -- the phase-wide convention that
     filters compose as AND and an empty set is not a filter.
+
+    The unit test is the LAST line of defence, not the first: `normalise_state`
+    has already cleared the flag on a unit that does not offer the axis, and the
+    switch is disabled there. Repeating it here costs one comparison and makes
+    the illegal argument unreachable from this module even if a future control
+    forgets to normalise -- the failure it prevents is an unhandled `ValueError`
+    on a live page, not a wrong number.
     """
-    return (CANDIDATE_STATUS,) if state.get("novelty_only") else None
+    if not state.get("novelty_only"):
+        return None
+    if not findings_novelty_offered(state.get("unit")):
+        return None
+    return (CANDIDATE_STATUS,)
 
 
 async def fetch_findings(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -664,7 +713,19 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> No
     with main_column:
         results_region = ui.column().classes(f"{RESULTS_CLASS} w-full gap-2")
 
+    # Controls whose PRESENTATION depends on state another control owns. Only
+    # the filter bar has them, and it is built once and never re-rendered (the
+    # facet lists are filled after the first paint and re-rendering the bar
+    # would drop them), so each such control hands back a callable that
+    # re-reads the state it depends on. The ONE refresh path runs them all
+    # BEFORE the state is persisted or queried, so what a control shows and
+    # what the query does can never disagree.
+    control_sync: List[Any] = []
+
     async def refresh() -> None:
+        normalise_state(state)
+        for sync in control_sync:
+            sync()
         write_state(state)
         if _page_is_gone(page_client):
             return
@@ -676,7 +737,7 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> No
             _render_results(envelope, state, lang, refresh)
 
     with filter_bar:
-        _render_filter_bar(state, lang, refresh)
+        control_sync.extend(_render_filter_bar(state, lang, refresh))
 
     await refresh()
     await _populate_facets(filter_bar, state, lang, refresh)
@@ -687,11 +748,13 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> No
 # regardless of DOM order, which is what keeps it first in BOTH directions.
 # ---------------------------------------------------------------------------
 
-def _render_filter_bar(state: Dict[str, Any], lang: str, refresh) -> None:
-    _render_novelty_switch(state, lang, refresh)
+def _render_filter_bar(state: Dict[str, Any], lang: str, refresh) -> List[Any]:
+    """Build the sidebar cards; return the state-dependent re-sync callables."""
+    syncs = [_render_novelty_switch(state, lang, refresh)]
     _render_bucket_control(state, lang, refresh)
     _render_facet_groups(lang)
     _render_coverage_filter(lang)
+    return syncs
 
 
 def _filter_card(*extra_classes: str) -> Any:
@@ -717,7 +780,7 @@ def _card_header(text: str, *extra_classes: str) -> Any:
     return label.style("color: var(--text-secondary);")
 
 
-def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh) -> None:
+def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh):
     """The candidacy switch, first in the filter bar by CSS order.
 
     Its three explanatory lines moved to `_render_howto`; the switch keeps the
@@ -729,20 +792,57 @@ def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh) -> None:
     already on the control. A header would either repeat that name twice in one
     card or invent a second name for the same axis -- and a second name for an
     axis is how a vocabulary starts drifting.
+
+    THE SWITCH IS NOT ALWAYS ACTIONABLE, and it says so (code review round 15,
+    finding 1). The row unit is a SEPARATE control in the result bar, and the
+    service does not offer this axis on the per-work unit -- its builder raises
+    rather than returning an envelope. A reader who turned the switch on and
+    then chose "one row per work" therefore drove the page into an unhandled
+    `ValueError`, and the results simply stopped updating. The card now takes
+    the SAME treatment `_render_coverage_filter` already uses for a filter with
+    nothing to act on -- dimmed, disabled and tagged with the reason -- and the
+    stored selection is dropped rather than kept and silently ignored, so what
+    the control shows is what the query does.
+
+    Returns a re-sync callable the one refresh path runs, because the filter
+    bar is built once while the unit can change at any time.
     """
     words = novelty_strings(lang)
-    with _filter_card("novgrp", f"{FILTER_BAR_CLASS}-novelty"):
+    with _filter_card("novgrp", f"{FILTER_BAR_CLASS}-novelty") as card:
 
         async def _toggle(_event=None) -> None:
+            # A disabled button is not clickable, and a stale client cannot make
+            # it one: the state it would produce is refused here as well.
+            if not findings_novelty_offered(state.get("unit")):
+                return
             state["novelty_only"] = not state["novelty_only"]
             state["page"] = 1
-            switch.props(f'aria-pressed={"true" if state["novelty_only"] else "false"}')
             await refresh()
 
         switch = ui.button(words["toggle"], on_click=_toggle).props("flat dense no-caps")
         switch.classes("fchip")
-        switch.props(f'aria-pressed={"true" if state["novelty_only"] else "false"}')
         switch.tooltip(words["help"])
+        note = ui.label(copy_text("novelty_unit_note", lang)).classes(
+            f"needs {FILTER_BAR_CLASS}-novelty-note"
+        )
+
+    def _sync() -> None:
+        offered = findings_novelty_offered(state.get("unit"))
+        if not offered:
+            state["novelty_only"] = False
+        switch.props(f'aria-pressed={"true" if state["novelty_only"] else "false"}')
+        if offered:
+            switch.enable()
+        else:
+            switch.disable()
+        note.set_visibility(not offered)
+        if offered:
+            card.classes(remove="blocked")
+        else:
+            card.classes(add="blocked")
+
+    _sync()
+    return _sync
 
 
 def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
@@ -1157,7 +1257,16 @@ def _render_result_bar(
 def _render_unit_select(state: Dict[str, Any], refresh) -> None:
     """The row unit is a READER choice, not a design pick. The option set is the
     exported closed vocabulary itself, so a unit the service gains cannot be
-    silently withheld and a unit it loses cannot be silently offered."""
+    silently withheld and a unit it loses cannot be silently offered.
+
+    EVERY unit stays offered, including while the candidacy switch is on. The
+    two axes are not independent -- the service does not offer novelty on the
+    per-work unit -- and the settlement is that the UNIT wins and the switch
+    turns visibly off, never that a row unit disappears from this list. A reader
+    reaching for a different row shape must not have to guess which other
+    control is withholding it; `_render_novelty_switch` says what happened, in
+    words, on the control that changed.
+    """
     options = {unit: tr(_UNIT_LABEL_KEYS[unit]) for unit in sorted(FINDINGS_UNITS)}
 
     async def _change(event) -> None:
