@@ -282,6 +282,29 @@ _state = _DiscoveryState()
 _lock = threading.Lock()
 
 
+class _LoaderRefusal(Exception):
+    """A refusal this loader composed ITSELF, and whose text is therefore safe to log.
+
+    The loader validates an artifact it may have just decided not to trust, so
+    any string that came OUT of that artifact -- a meta value, an enum, a
+    filename, a SQLite error -- may carry restricted (M-source / R-source)
+    content. The standing rule is that such content must never reach a log.
+
+    Patching the individual interpolations was not enough: Codex code review
+    round 2A found the class still open through two paths nobody had listed --
+    ``int(expected)`` raising ``invalid literal for int() with base 10: '<raw
+    artifact value>'``, and ``FileNotFoundError`` naming a path built from the
+    manifest's own ``asset_basename``. Neither is an interpolation, so neither
+    was visible to a review that looked for f-strings.
+
+    Hence the type distinction rather than a message audit. Every deliberate
+    refusal below raises THIS class with a message the loader wrote from its own
+    constants and counts. The fail-closed handler logs those verbatim and logs
+    only the *type name* of anything else, so a future raise site -- ours or a
+    library's -- is safe by default instead of safe only if someone remembered.
+    """
+
+
 def _sha256_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -305,7 +328,7 @@ def _resolve_versioned_db() -> Tuple[str, dict]:
 
     asset_basename = manifest.get("asset_basename")
     if not asset_basename or not isinstance(asset_basename, str):
-        raise ValueError("manifest missing a string asset_basename")
+        raise _LoaderRefusal("manifest missing a string asset_basename")
     # Defensive: the basename must be a bare filename stem -- never a path
     # (mirrors web/atlas_assets.py's identical guard) -- fails closed rather
     # than ever composing a traversal-shaped path.
@@ -315,7 +338,7 @@ def _resolve_versioned_db() -> Tuple[str, dict]:
         or os.path.isabs(asset_basename)
         or asset_basename in (".", "..")
     ):
-        raise ValueError("asset_basename must be a bare filename stem")
+        raise _LoaderRefusal("asset_basename must be a bare filename stem")
 
     db_path = os.path.join(DISCOVERY_DATA_DIR, f"{asset_basename}.db")
     return db_path, manifest
@@ -345,10 +368,21 @@ def load_discovery_state() -> bool:
 
         content_hash = manifest.get("content_hash")
         if not content_hash or not isinstance(content_hash, str):
-            raise ValueError("manifest missing a string content_hash")
-        actual_hash = _sha256_file(db_path)  # raises FileNotFoundError if the named file is absent
+            raise _LoaderRefusal("manifest missing a string content_hash")
+        # The named file being absent is the ordinary rollback case, but the
+        # path embeds the manifest's own `asset_basename` -- untrusted content --
+        # so letting OSError name it would put artifact-supplied text in a log
+        # without a single interpolation appearing in this file (code review 2A,
+        # finding 1). Report the condition, never the name.
+        try:
+            actual_hash = _sha256_file(db_path)
+        except OSError:
+            raise _LoaderRefusal(
+                "the manifest-named sidecar file could not be read (name withheld) -- "
+                "absent, unreadable, or a stale sibling left by a rollback"
+            ) from None
         if actual_hash != content_hash:
-            raise ValueError("content_hash mismatch (manifest vs actual sidecar bytes)")
+            raise _LoaderRefusal("content_hash mismatch (manifest vs actual sidecar bytes)")
 
         uri = f"file:{db_path}?mode=ro"
         conn = sqlite3.connect(uri, uri=True)
@@ -360,7 +394,7 @@ def load_discovery_state() -> bool:
             # this loader has just decided not to trust. Report that it failed
             # and how much it said, never what it said (see the audience check
             # below for the same discipline, and the module note on why).
-            raise ValueError(
+            raise _LoaderRefusal(
                 "PRAGMA integrity_check failed "
                 f"(detail withheld, {len(str(integrity_result))} chars) -- "
                 "run scripts/verify_discovery_sidecar.py against the artifact for detail"
@@ -371,13 +405,13 @@ def load_discovery_state() -> bool:
 
         missing_meta_keys = _REQUIRED_META_KEYS - meta.keys()
         if missing_meta_keys:
-            raise ValueError(f"meta missing required key(s): {sorted(missing_meta_keys)}")
+            raise _LoaderRefusal(f"meta missing required key(s): {sorted(missing_meta_keys)}")
 
         schema_version = meta.get("schema_version")
         if schema_version != _EXPECTED_SCHEMA_VERSION:
             # Only OUR expected value is safe to name; the found value is
             # untrusted artifact content.
-            raise ValueError(
+            raise _LoaderRefusal(
                 f"incompatible schema_version (expected {_EXPECTED_SCHEMA_VERSION!r}, "
                 "found value withheld) -- reject-incompatible"
             )
@@ -395,11 +429,11 @@ def load_discovery_state() -> bool:
         audience = meta.get("audience")
         if audience != _PUBLIC_LOADER_AUDIENCE:
             if audience in _AUDIENCES:
-                raise ValueError(
+                raise _LoaderRefusal(
                     "refusing a private-audience artifact: this public loader may only "
                     f"serve meta.audience={_PUBLIC_LOADER_AUDIENCE!r} -- reject-incompatible"
                 )
-            raise ValueError(
+            raise _LoaderRefusal(
                 "meta.audience is missing, empty or outside the closed {public, private} "
                 "enum -- fail-closed default, never treated as public"
             )
@@ -410,7 +444,7 @@ def load_discovery_state() -> bool:
         actual_tables = {row["name"] for row in table_rows}
         missing_tables = _REQUIRED_TABLES - actual_tables
         if missing_tables:
-            raise ValueError(f"missing required table(s): {sorted(missing_tables)}")
+            raise _LoaderRefusal(f"missing required table(s): {sorted(missing_tables)}")
 
         # Required COLUMNS (Amendment 2026-08-02). A SUBSET check per table via
         # PRAGMA table_info -- an unexpected extra column is NOT a failure. The
@@ -421,17 +455,29 @@ def load_discovery_state() -> bool:
             actual_columns = {row["name"] for row in column_rows}
             missing_columns = _REQUIRED_COLUMNS[table] - actual_columns
             if missing_columns:
-                raise ValueError(
+                raise _LoaderRefusal(
                     f"table {table!r} missing required column(s): {sorted(missing_columns)}"
                 )
 
         for meta_key, table in _RELEASE_CONTRACT_COUNTS:
             expected = meta.get(meta_key)
             (actual,) = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()  # noqa: S608 -- table is one of the fixed allowlisted names above, never user input
-            if expected is None or int(expected) != actual:
-                raise ValueError(
-                    f"release-contract row-count mismatch: meta.{meta_key}={expected!r}, "
-                    f"actual {table} count={actual}"
+            # `meta_key`, `table` and `actual` are ours (fixed allowlist, and a
+            # COUNT). `expected` is raw artifact content and is NEVER named --
+            # not by interpolation, and not by letting int() name it for us in
+            # "invalid literal for int() with base 10: '<value>'", which is how
+            # this path leaked past the first fix (code review 2A, finding 1).
+            try:
+                expected_int = int(expected)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                raise _LoaderRefusal(
+                    f"release-contract meta.{meta_key} is missing or not an integer "
+                    f"(value withheld); actual {table} count={actual}"
+                ) from None
+            if expected_int != actual:
+                raise _LoaderRefusal(
+                    f"release-contract row-count mismatch on meta.{meta_key}: "
+                    f"actual {table} count={actual} (expected value withheld)"
                 )
 
         # Frozen enum vocab spot-check (defense-in-depth). The full
@@ -443,7 +489,7 @@ def load_discovery_state() -> bool:
         if invalid_claim_types:
             # Count, never the values: an out-of-vocabulary claim_type is by
             # definition a string this loader did not put there.
-            raise ValueError(
+            raise _LoaderRefusal(
                 f"discovery_claim.claim_type: {len(invalid_claim_types)} distinct "
                 "value(s) outside the frozen vocabulary (values withheld) -- "
                 "run scripts/verify_discovery_sidecar.py against the artifact for detail"
@@ -458,7 +504,7 @@ def load_discovery_state() -> bool:
             if valid_bands is None or confidence_band not in valid_bands:
                 invalid_band_pairs += 1
         if invalid_band_pairs:
-            raise ValueError(
+            raise _LoaderRefusal(
                 f"discovery_evidence: {invalid_band_pairs} distinct "
                 "(evidence_source, confidence_band) combination(s) outside the frozen "
                 "vocabulary (values withheld) -- run scripts/verify_discovery_sidecar.py "
@@ -472,8 +518,22 @@ def load_discovery_state() -> bool:
             audience=audience,
             meta=meta,
         )
-    except Exception as exc:  # fail-closed: never raise out of startup load
+    except _LoaderRefusal as exc:  # fail-closed: never raise out of startup load
+        # Composed by THIS module from its own constants and counts -- safe to
+        # log verbatim, and the only branch that logs a message at all.
         logger.info("Discovery sidecar not loaded (fail-closed): %s", exc)
+        new_state = _DiscoveryState(ready=False)
+    except Exception as exc:  # fail-closed: never raise out of startup load
+        # Anything else -- sqlite3 errors, decode errors, a future raise site
+        # nobody remembered to audit -- may carry artifact content in its
+        # message. Log the TYPE only. This is the difference between a rule that
+        # holds and a rule that holds until the next person adds a raise: the
+        # default here is withheld, so being safe costs no vigilance.
+        logger.info(
+            "Discovery sidecar not loaded (fail-closed): %s (detail withheld -- "
+            "run scripts/verify_discovery_sidecar.py against the artifact)",
+            type(exc).__name__,
+        )
         new_state = _DiscoveryState(ready=False)
     finally:
         if conn is not None:

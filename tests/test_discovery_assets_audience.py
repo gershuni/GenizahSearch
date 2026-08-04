@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import sqlite3
 import sys
@@ -728,6 +729,28 @@ def _drop_constraints(conn, table):
         "UPDATE discovery_evidence SET confidence_band = ?",
         "outside the frozen vocabulary",
     ),
+    # The band check keys on the PAIR, so a sentinel in evidence_source reaches
+    # the same refusal by the other half of the lookup. Code review 2A found the
+    # original three cases never touched this side.
+    (
+        "discovery_evidence.evidence_source",
+        "UPDATE discovery_evidence SET evidence_source = ?",
+        "outside the frozen vocabulary",
+    ),
+    # meta values reached by the release-contract count loop. `int(expected)`
+    # used to name the raw value for us inside "invalid literal for int() with
+    # base 10: '<value>'" -- no interpolation anywhere, so an f-string audit
+    # could not see it (code review 2A, finding 1).
+    (
+        "meta.expected_rows_claims",
+        "UPDATE meta SET value = ? WHERE key = 'expected_rows_claims'",
+        "is missing or not an integer",
+    ),
+    (
+        "meta.expected_rows_discovery_identification",
+        "UPDATE meta SET value = ? WHERE key = 'expected_rows_discovery_identification'",
+        "is missing or not an integer",
+    ),
 ])
 def test_rejected_field_value_never_reaches_the_log(
     tmp_path, monkeypatch, caplog, field, sql, expected_reason
@@ -769,3 +792,91 @@ def test_public_audience_control_reaches_past_the_audience_gate(tmp_path, monkey
     materialize_sidecar(tmp_path, audience="public")
     _point_loader_at(monkeypatch, tmp_path)
     assert da.load_discovery_state() is True
+
+
+def test_manifest_asset_basename_never_reaches_the_log(tmp_path, monkeypatch, caplog):
+    """The basename is manifest-supplied, and the loader builds a filesystem path
+    out of it. Nothing interpolates it -- `OSError` names it for us, which is why
+    an audit for f-strings missed this (code review 2A, finding 1)."""
+    db_path = materialize_sidecar(tmp_path, audience="public")
+    manifest_path = tmp_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    # A well-formed bare stem that simply does not exist: it must clear the
+    # traversal guard so the refusal comes from the READ, not from the shape
+    # check, which would prove nothing about the OSError path.
+    manifest["asset_basename"] = _FIELD_MARKER
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    _point_loader_at(monkeypatch, tmp_path)
+    assert db_path.exists()  # the real asset is still there; only the name moved
+
+    with caplog.at_level(logging.INFO):
+        ready = da.load_discovery_state()
+
+    text = caplog.text
+    assert ready is False
+    assert "name withheld" in text, (
+        "the refusal did not come from the file-read branch, so this control "
+        f"proves nothing about it. Log:\n{text}"
+    )
+    assert _FIELD_MARKER not in text, (
+        "the manifest's asset_basename was echoed into the log. A restricted "
+        f"name in that field would be written to disk. Log:\n{text}"
+    )
+
+
+def test_release_count_mismatch_withholds_the_expected_value(tmp_path, monkeypatch, caplog):
+    """The numeric-but-wrong case takes a DIFFERENT branch from the
+    not-an-integer case above, and used to interpolate `expected!r` directly."""
+    db_path = materialize_sidecar(tmp_path, audience="public")
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # A real integer, so int() succeeds and the comparison is what refuses.
+        conn.execute(
+            "UPDATE meta SET value = '424242' WHERE key = 'expected_rows_claims'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _rehash(tmp_path, db_path)
+    _point_loader_at(monkeypatch, tmp_path)
+
+    with caplog.at_level(logging.INFO):
+        ready = da.load_discovery_state()
+
+    text = caplog.text
+    assert ready is False
+    assert "row-count mismatch" in text, f"wrong branch refused it. Log:\n{text}"
+    assert "424242" not in text, (
+        "the expected row count came from the artifact and was echoed. A count "
+        f"is harmless; the interpolation that carried it is not. Log:\n{text}"
+    )
+
+
+def test_an_unexpected_exception_type_logs_no_message_text(tmp_path, monkeypatch, caplog):
+    """The load-bearing half of the fix: the rule must hold for raise sites
+    nobody audited, including a library's.
+
+    Without this, `_LoaderRefusal` is just a rename -- the catch-all would still
+    log whatever text an sqlite3 error or a future `raise` carried out of an
+    untrusted artifact."""
+    materialize_sidecar(tmp_path, audience="public")
+    _point_loader_at(monkeypatch, tmp_path)
+
+    def _explode(_path):
+        raise RuntimeError(f"library detail carrying {_FIELD_MARKER}")
+
+    monkeypatch.setattr(da, "_sha256_file", _explode)
+
+    with caplog.at_level(logging.INFO):
+        ready = da.load_discovery_state()
+
+    text = caplog.text
+    assert ready is False
+    assert "RuntimeError" in text, (
+        f"the exception type is the whole diagnostic; it must be logged. Log:\n{text}"
+    )
+    assert "detail withheld" in text, f"the withheld-detail branch did not run. Log:\n{text}"
+    assert _FIELD_MARKER not in text, (
+        "an unaudited exception's message text reached the log. That is the "
+        f"class this fix exists to close, not the individual sites. Log:\n{text}"
+    )
