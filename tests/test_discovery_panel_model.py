@@ -2125,27 +2125,62 @@ def assert_emitted_schema(model):
             "panel model emitted shape: " + "; ".join(violations))
 
 
-def _iter_bucket_bearing(model):
-    """`(path, row)` for every emitted object that names a bucket."""
-    for index, row in enumerate(pm.iter_rows(model)):
-        yield "model.rows[%d]" % index, row
-    for index, chip in enumerate(model.manuscript_pane.get("works", ())):
-        yield "model.manuscript_pane.works[%d]" % index, chip
+def _iter_bucket_bearing(made, model):
+    """`(path, emitted object, the SOURCE row it came from)`.
 
-
-def assert_bucket_membership(model):
-    """Every emitted bucket equals what `shared.discovery_main_pool` says.
-
-    A comparison, never a re-derivation: a future local reimplementation then
-    fails the suite instead of silently diverging -- which is exactly what the
-    retired hand-picked band set was.
+    The source lookup is what makes this a membership check rather than a
+    self-consistency check: an emitted row is matched back to the claim it was
+    built from by `claim_id`, and a pane chip to its work summary by the
+    display work id.
     """
-    for path, row in _iter_bucket_bearing(model):
-        expected = bucket_label(bool(row["in_main_pool"]), model.lang)
-        if row["bucket"] != expected:
+    source_claims = {row["claim_id"]: row for row in made.claims["items"]}
+    source_works = {
+        (row.get("display_work_id") or row.get("canonical_work_id")): row
+        for row in made.manuscript_works["items"]
+    }
+    for index, row in enumerate(pm.iter_rows(model)):
+        source = source_claims.get(row["claim_id"])
+        assert source is not None, (
+            "model.rows[%d] has no source claim -- the emitted claim_id is not "
+            "in the envelope it was built from" % index)
+        yield "model.rows[%d]" % index, row, source
+    for index, chip in enumerate(model.manuscript_pane.get("works", ())):
+        source = source_works.get(chip["work_id"])
+        assert source is not None, (
+            "model.manuscript_pane.works[%d] has no source work summary" % index)
+        yield "model.manuscript_pane.works[%d]" % index, chip, source
+
+
+def assert_bucket_membership(made, model):
+    """Every emitted MEMBERSHIP equals the source envelope's own materialized
+    `main_pool` decision, and every emitted label equals what
+    `shared.discovery_main_pool` says about that membership.
+
+    Both halves, and the first one is the one that was missing: deriving the
+    expected label from the emitted `in_main_pool` only ever proved the row
+    agreed with itself, so an implementation that computed membership wrongly
+    and labelled it consistently passed (code review 2B, finding 8). The
+    materialized decision is A-1's -- taken at build time, never recomputed on
+    a surface -- so the surface's only correct behaviour is to carry it.
+    """
+    for path, row, source in _iter_bucket_bearing(made, model):
+        # The producer coerces this column to a real bool or None
+        # (`_present_claim_row`, `get_manuscript_works_enveloped`), which is
+        # what makes an identity test against True safe on a SQLite 1/0 column.
+        assert source["main_pool"] is None or isinstance(source["main_pool"], bool), (
+            "%s: the source main_pool is neither a bool nor None, so no identity "
+            "test on it can be trusted" % path)
+        expected_membership = source["main_pool"] is True
+        if row["in_main_pool"] is not expected_membership:
+            raise AssertionError(
+                "%s.in_main_pool: %r disagrees with the source envelope's "
+                "materialized main_pool, which says %r"
+                % (path, row["in_main_pool"], expected_membership))
+        expected_label = bucket_label(expected_membership, model.lang)
+        if row["bucket"] != expected_label:
             raise AssertionError(
                 "%s.bucket: %r disagrees with the shared rule, which says %r"
-                % (path, row["bucket"], expected))
+                % (path, row["bucket"], expected_label))
 
 
 def kitchen_sink_bundle(lang="en", **overrides):
@@ -2223,44 +2258,55 @@ def kitchen_sink_bundle(lang="en", **overrides):
     return bundle(**kwargs)
 
 
-def _honesty_models(lang):
+def _honesty_cases(lang):
     """The kitchen sink plus every service-state branch, so the sweep sees the
-    outage copy, the unresolved pane and all four related-row states too."""
-    return {
-        "kitchen_sink": pm.build_panel_rows(kitchen_sink_bundle(lang)),
-        "claims_outage": pm.build_panel_rows(kitchen_sink_bundle(
-            lang, claims=claims_envelope(status="timeout"))),
-        "works_outage": pm.build_panel_rows(kitchen_sink_bundle(
-            lang, manuscript_works=works_envelope(status="unavailable"))),
-        "unresolved_scope": pm.build_panel_rows(kitchen_sink_bundle(
-            lang, page_ids=page_ids_envelope(items=(), total=0, resolved=False))),
-        "related_not_requested": pm.build_panel_rows(kitchen_sink_bundle(
-            lang, related_rows=None)),
-        "related_empty": pm.build_panel_rows(kitchen_sink_bundle(
-            lang, related_rows=related_rows_envelope([], 0))),
-        "related_outage": pm.build_panel_rows(kitchen_sink_bundle(
-            lang, related_rows=related_rows_envelope(status="busy"))),
-        "count_outage": pm.build_panel_rows(kitchen_sink_bundle(
-            lang, related_count=related_count_envelope(status="unavailable"))),
+    outage copy, the unresolved pane and all four related-row states too.
+
+    `(bundle, model)` pairs, not bare models: the bucket check compares what was
+    EMITTED against what the SOURCE envelope decided, and a model alone cannot
+    answer the second half.
+    """
+    bundles = {
+        "kitchen_sink": kitchen_sink_bundle(lang),
+        "claims_outage": kitchen_sink_bundle(
+            lang, claims=claims_envelope(status="timeout")),
+        "works_outage": kitchen_sink_bundle(
+            lang, manuscript_works=works_envelope(status="unavailable")),
+        "unresolved_scope": kitchen_sink_bundle(
+            lang, page_ids=page_ids_envelope(items=(), total=0, resolved=False)),
+        "related_not_requested": kitchen_sink_bundle(lang, related_rows=None),
+        "related_empty": kitchen_sink_bundle(
+            lang, related_rows=related_rows_envelope([], 0)),
+        "related_outage": kitchen_sink_bundle(
+            lang, related_rows=related_rows_envelope(status="busy")),
+        "count_outage": kitchen_sink_bundle(
+            lang, related_count=related_count_envelope(status="unavailable")),
     }
+    return {name: (made, pm.build_panel_rows(made)) for name, made in bundles.items()}
+
+
+_HONESTY_CASE_NAMES = sorted(_honesty_cases("en"))
 
 
 @pytest.mark.parametrize("lang", LANGS)
-@pytest.mark.parametrize("case", sorted(_honesty_models("en")))
+@pytest.mark.parametrize("case", _HONESTY_CASE_NAMES)
 def test_the_emitted_model_carries_no_dishonest_field_in_either_language(case, lang):
-    assert_model_honesty(_honesty_models(lang)[case])
+    _made, model = _honesty_cases(lang)[case]
+    assert_model_honesty(model)
 
 
 @pytest.mark.parametrize("lang", LANGS)
-@pytest.mark.parametrize("case", sorted(_honesty_models("en")))
-def test_every_emitted_bucket_equals_the_shared_rule(case, lang):
-    assert_bucket_membership(_honesty_models(lang)[case])
+@pytest.mark.parametrize("case", _HONESTY_CASE_NAMES)
+def test_every_emitted_bucket_equals_the_source_envelope_decision(case, lang):
+    made, model = _honesty_cases(lang)[case]
+    assert_bucket_membership(made, model)
 
 
 @pytest.mark.parametrize("lang", LANGS)
-@pytest.mark.parametrize("case", sorted(_honesty_models("en")))
+@pytest.mark.parametrize("case", _HONESTY_CASE_NAMES)
 def test_the_emitted_shape_is_closed_in_either_language(case, lang):
-    assert_emitted_schema(_honesty_models(lang)[case])
+    _made, model = _honesty_cases(lang)[case]
+    assert_emitted_schema(model)
 
 
 @pytest.mark.parametrize("lang", LANGS)
@@ -2387,15 +2433,46 @@ def test_positive_control_a_required_row_key_disappears():
     assert "required key(s) ['bucket'] absent" in str(exc.value)
 
 
-def test_positive_control_a_row_whose_bucket_disagrees_with_the_shared_rule():
-    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+def test_positive_control_a_row_whose_bucket_label_disagrees_with_its_membership():
+    made = kitchen_sink_bundle("en")
+    model = pm.build_panel_rows(made)
     row = list(pm.iter_rows(model))[0]
     row["bucket"] = bucket_label(not row["in_main_pool"], "en")
     with pytest.raises(AssertionError) as exc:
-        assert_bucket_membership(model)
+        assert_bucket_membership(made, model)
     message = str(exc.value)
     assert "disagrees with the shared rule" in message
     assert "model.rows[0].bucket" in message
+
+
+def test_positive_control_a_row_whose_membership_disagrees_with_the_source():
+    """The control the old guard could not have. This row is INTERNALLY
+    CONSISTENT -- its label matches its own flag exactly as `bucket_label`
+    would produce it -- and it is still wrong, because the source envelope
+    decided otherwise."""
+    made = kitchen_sink_bundle("en")
+    model = pm.build_panel_rows(made)
+    row = list(pm.iter_rows(model))[0]
+    row["in_main_pool"] = not row["in_main_pool"]
+    row["bucket"] = bucket_label(row["in_main_pool"], "en")
+    assert row["bucket"] == bucket_label(row["in_main_pool"], "en")   # consistent
+
+    with pytest.raises(AssertionError) as exc:
+        assert_bucket_membership(made, model)
+    message = str(exc.value)
+    assert "in_main_pool" in message
+    assert "materialized main_pool" in message
+
+
+def test_positive_control_a_pane_chip_whose_membership_disagrees_with_the_source():
+    made = kitchen_sink_bundle("en")
+    model = pm.build_panel_rows(made)
+    chip = model.manuscript_pane["works"][0]
+    chip["in_main_pool"] = not chip["in_main_pool"]
+    chip["bucket"] = bucket_label(chip["in_main_pool"], "en")
+    with pytest.raises(AssertionError) as exc:
+        assert_bucket_membership(made, model)
+    assert "manuscript_pane.works[0].in_main_pool" in str(exc.value)
 
 
 # --- two ADDITIONAL controls, for the two detectors the four above do not
