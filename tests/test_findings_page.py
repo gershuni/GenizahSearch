@@ -1422,6 +1422,23 @@ def _switch_ui_language(page, from_lang: str) -> str:
     from shared.discovery_display_strings import bucket_name
 
     target = "en" if from_lang == "he" else "he"
+
+    # Bring the header back before reaching for its toggle.
+    #
+    # The app header is a Quasar `reveal` header: it slides out of view on
+    # scroll-down and returns on scroll-up. The probe and its positive control
+    # both scroll the control into view, so by the time we get here the header
+    # — and the language button inside it — can be off-screen. Playwright then
+    # resolves `.lang-btn-header` and waits forever for an element that exists
+    # but will never be "visible, enabled and stable".
+    #
+    # Scrolling to the top is not the forbidden preceding action: it is how a
+    # reader reaches the site's own language control between the two passes,
+    # and it reveals nothing about the "more matches" control under test.
+    page.evaluate("window.scrollTo(0, 0)")
+    page.locator(_LANG_TOGGLE_SELECTOR).first.wait_for(
+        state="visible", timeout=_CONTROL_TIMEOUT_MS
+    )
     page.locator(_LANG_TOGGLE_SELECTOR).first.click(timeout=_CONTROL_TIMEOUT_MS)
     # The toggle persists the choice and calls ui.navigate.reload(), so waiting
     # on the TARGET language's control (rather than on any control) is what
