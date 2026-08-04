@@ -42,9 +42,13 @@ plan summary for why they are not in ``genizah_translations.py``.
 NO GRADE FILTER
 ---------------
 D-16 was ratified on 2026-08-02: this page ships WITHOUT a relation or
-quality-grade filter control. Within the main pool the relation split is 94% one
-kind, so such a filter would restate the bucket rather than narrow it. Quality is
-the bucket; kind is the panel's own filter.
+quality-grade filter control. Within the main pool one relation kind dominates
+heavily, so such a filter would restate the bucket rather than narrow it.
+Quality is the bucket; kind is the panel's own filter. (The measured split is
+recorded in `136-GATE1-DECISIONS.md` D-16 and is deliberately not quoted here:
+no figure of any kind belongs in a discovery surface module, not even in a
+docstring, because a figure in a docstring is one careless copy away from a
+surface.)
 """
 
 from __future__ import annotations
