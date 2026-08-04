@@ -106,11 +106,15 @@ def _service_state_block(state: Mapping[str, Any], on_retry=None) -> None:
     An empty section reads as an authoritative zero, which is the exact
     false-zero class the envelope exists to prevent.
 
-    EVERY caller on a RECOVERABLE outage passes `on_retry`. `on_retry=None` is
-    reserved for a condition a retry cannot change; the round-12 defect was that
-    three of the four outage paths took the default and left the reader an
-    outage message with no way out. `test_every_outage_a_reader_can_reach_offers_a_retry`
-    walks the four EAGER reads independently and pins it.
+    EVERY call site passes `on_retry` -- pinned as an AST guard by
+    `test_no_service_state_block_can_be_rendered_without_a_retry_handler`, so a
+    new outage branch cannot silently take the default. The round-12 defect was
+    exactly that: three of the four outage paths took it and left the reader an
+    outage message with no way out.
+
+    Whether a retry is OFFERED is still a decision, but it belongs to the MODEL,
+    which supplies a `service_state` only where re-running the reads can help.
+    This function's job is to forward the handler it was given.
     """
     with ui.row().classes(f'{PANEL_SERVICE_STATE_CLASS} items-center gap-2 dnote'):
         ui.label(state.get('message') or '')

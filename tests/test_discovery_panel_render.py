@@ -927,6 +927,50 @@ def test_the_retry_offered_on_a_mixed_outage_actually_invokes_the_handler(failin
     assert fired['n'] == 1, f'{failing}/{status}: the retry button fired nothing'
 
 
+def test_no_service_state_block_can_be_rendered_without_a_retry_handler():
+    """The property STRUCTURALLY, not by enumerating today's four reads.
+
+    The test above walks `_EAGER_READS`, and an enumeration goes stale the day a
+    fifth read is added -- which is how three of the four came to be missing a
+    retry with every test green. This walks the AST instead: EVERY
+    `_service_state_block(...)` call site in the renderer must supply an
+    `on_retry`, so a new outage branch cannot silently take the default.
+
+    Whether a retry is OFFERED is still a decision, but it is the MODEL's: it
+    supplies a `service_state` only where re-running the reads can help. The
+    renderer's job is only to forward the handler it was given.
+    """
+    tree = ast.parse(_read(PANEL_PATH))
+    sites = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, 'attr', None)
+        if name != '_service_state_block':
+            continue
+        sites.append(node)
+        assert any(kw.arg == 'on_retry' for kw in node.keywords), (
+            f'{PANEL_PATH}:{node.lineno} renders a service-state block without an '
+            'on_retry handler -- an outage the reader cannot leave')
+    assert len(sites) >= 5, (
+        f'only {len(sites)} service-state call sites found; the guard is scanning '
+        'the wrong tree')
+
+
+def test_the_no_retry_guard_can_fail():
+    """The positive control on the guard above: the same AST walk over a source
+    that takes the default must report it."""
+    tree = ast.parse('_service_state_block(state)\n_service_state_block(s, on_retry=cb)\n')
+    defaulted = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, 'id', None) == '_service_state_block'
+        and not any(kw.arg == 'on_retry' for kw in node.keywords)
+    ]
+    assert len(defaulted) == 1
+
+
 @pytest.mark.parametrize('failing', _EAGER_READS)
 def test_the_mixed_fixture_really_does_vary_the_four_reads_independently(failing):
     """The control on the parametrisation above. If `mixed_bundle` degraded the
