@@ -748,3 +748,74 @@ attribute to `web/pages/help.py` and putting that file in 136-17's `files_modifi
 No file or database was written.
 
 VERDICT: rework — BLOCKER 0 · HIGH 4 · MEDIUM 1 · LOW 2 · CONFIRM 4
+
+
+---
+
+# Round 11 — the six-times-revised plans (2026-08-04)
+
+**Brief:** `_tmp/136-codex-preflight-r11-brief.md`. **Baseline:** § Round 10. Revision `d2d66c29`.
+
+**Trajectory: 8 → 5 → 5 → 4 → 5 → 4 → 1 HIGH.** The plateau broke when the instruction changed from
+"fix these four" to "stop proving global properties by sampling; assert them structurally."
+
+## The line that matters most
+
+> **CONFIRM 9: "No correct implementation is rejected by the active revised controls."**
+
+That is the defect class this phase kept producing — an assertion a CORRECT implementation would
+fail — reported clean for the first time in seven rounds.
+
+Also confirmed structural: D-06a's scope fix (class on the limitations label only, scoped subtree
+must EQUAL the approved text, card selector must fail, envelopes and errors get no scope, and the
+lazy equality pin prevents selector drift without importing `web.` into a dependency-light gate
+module); the conditional-cap repair (two walks confined and deterministically anchored); and wave
+integrity (22 plans, 11 waves, wave 9 = 136-17 alone, `web/pages/help.py` otherwise owned only by
+closed wave-1 136-02).
+
+## Finding 2 corrects a justification I repeated three times
+
+The revision claimed the omit-a-field evasion "fails at the row that omitted it". **It does not.**
+Codex checked live code: `_project` is total (`shared/discovery_surface_projection.py:257`) — it
+inserts every allowlisted key with `None` when absent, so a source row omitting `routing_reason`
+still has the exact allowlist key set after projection.
+
+The CONCLUSION survives — deleting `NEVER_POPULATED` is still sound, because the aggregate non-null
+coverage check catches omission from the whole corpus. Only the stated mechanism was wrong. Worth
+recording because the brief asked precisely this ("is that dependency real against live code?") and
+the answer was no.
+
+## Finding 1 is a genuinely new attack on the new structure
+
+The exact partition can be satisfied *dishonestly*: mark an unfloored reader field such as `genre`
+as a machine carrier mapped to `frozenset()`. The partition holds, the vocabulary-prohibition
+assertion goes vacuous, and the field is exempted from strict scanning. Structural checks are
+stronger than sampled ones, but a partition still needs its cells to be non-empty and faithful.
+
+## Finding 3 is a regression this revision introduced
+
+136-18's acceptance criterion re-admits "…or name the uncovered ones with a reason" — the exact
+escape hatch 136-17 deleted, contradicting 136-18's own blocking instruction two hundred lines
+earlier.
+
+## Findings
+
+1. **HIGH — 136-17 — the exact partition can still be satisfied by a dishonest machine classification.** `MACHINE_VOCABULARY_FIELDS` is never required to be non-empty or to contain the values actually observed under its field. Marking an unfloored reader field such as `genre` as a machine carrier mapped to `frozenset()` satisfies the partition, makes the vocabulary-prohibition assertion vacuous, and exempts that field from strict scanning. This is a broken implementation that passes the stated gate. **File:** `136-17-PLAN.md:1074`, `136-17-PLAN.md:1233`. **Change:** require every machine mapping to be non-empty and every observed non-null string under that field to belong to its mapped vocabulary; add a mutation moving a non-floored reader field to the machine side with an empty or unrelated vocabulary and require failure.
+
+2. **MEDIUM — 136-17 — the claimed per-row omit-field failure cannot fire.** Live `_project` is total: it inserts every allowlisted key with `None` when absent. Consequently, a source row omitting `routing_reason` still has the exact allowlist key set after projection. The aggregate non-null coverage check does catch omission from the entire corpus, so deleting `NEVER_POPULATED` remains sound, but it does not fail “at the row that omitted it” as repeatedly claimed. **File:** `136-17-PLAN.md:682`, `136-17-PLAN.md:691`, `136-17-PLAN.md:1234`; `shared/discovery_surface_projection.py:257`. **Change:** describe this as a derived-allowlist coverage failure, not a row-key failure. Only add a pre-projection key assertion for fields genuinely required on every producer row.
+
+3. **MEDIUM — 136-18 — a reason-based coverage escape was accidentally reintroduced.** Its acceptance criterion allows the surface corpus to cover every findings/facet field “or name the uncovered ones with a reason,” contradicting both its own blocking instruction and 136-17’s deletion of the escape hatch. A broken surface corpus can satisfy this criterion without exercising a field. **File:** `136-18-PLAN.md:517` (contradicted by `136-18-PLAN.md:422` and `136-18-PLAN.md:432`). **Change:** delete the parenthetical alternative and require the imported derived-`CONSUMED_ALLOWLISTS` non-null coverage check to pass.
+
+4. **LOW — 136-17 — the plan overstates the existing wording pin.** Commit `d2d66c29` did not change `web/pages/help.py`, so the approved wording is currently unchanged. However, the sibling render test checks several substrings, not exact sentence equality; the new equality compares rendered text to the same mutable `_LIMITATIONS_TEXT` authority. Thus it does not independently detect a wording edit preserving those substrings. **File:** `136-17-PLAN.md:234`, `136-17-PLAN.md:961`, `136-17-PLAN.md:1244`; `tests/render_smoke/test_help_methods_render_smoke.py:365`. **Change:** describe the existing test accurately, or add an independent exact-content snapshot/hash in a plan-owned test if exact wording must be executable rather than verified through the required diff review.
+
+5. **LOW — 136-17 — one threat-register description is stale.** It still says completeness is derived from live projected values, although the revised mechanism derives classification completeness from `_ALL_ALLOWLISTS`. **File:** `136-17-PLAN.md:1275`. **Change:** replace that sentence with the exact allowlist-partition mechanism and describe projected values only as misclassification/coverage controls.
+
+6. **CONFIRM — 136-17 — D-06a’s scope fix is otherwise structural.** The planned class is applied only to the limitations label; the scoped subtree must equal `_LIMITATIONS_TEXT[lang]`; the card selector must fail; envelopes and errors receive no scope; and 136-18 now carries its own findings-markup control. The lazy equality pin prevents one-sided selector drift without importing `web.` at gate-module import time. **File:** `136-17-PLAN.md:951`, `136-17-PLAN.md:971`, `136-17-PLAN.md:989`, `136-17-PLAN.md:1183`, `136-18-PLAN.md:370`. **Change:** none beyond finding 4.
+
+7. **CONFIRM — 136-21 — the conditional-cap repair is genuinely structural and deterministically anchored.** The two walks are confined to `_query_work_expansion` and the enveloped caller, anchored by the literal `(rows, total)` contract; a non-literal return shape fails rather than triggering a search. Unconditional, anchor-conditional, and band-conditional mutations are named, and the runtime pair uses an anchored, explicitly band-filtered call with more than 10,000 survivors. **File:** `136-21-PLAN.md:401`, `136-21-PLAN.md:405`, `136-21-PLAN.md:473`, `136-21-PLAN.md:474`. **Change:** none.
+
+8. **CONFIRM — 136-22 — both Round-10 repairs break the prior circularity.** The test owns a separate literal glob list, independently expands and normalizes it, asserts exact equality, and monkeypatches only the scanner’s list. Each forbidden-list sentinel must traverse its own loader, appear in the union, and produce a named file-and-line violation, proving consumption rather than presence. **File:** `136-22-PLAN.md:454`, `136-22-PLAN.md:462`, `136-22-PLAN.md:466`, `136-22-PLAN.md:581`, `136-22-PLAN.md:589`, `136-22-PLAN.md:642`. **Change:** none.
+
+9. **CONFIRM — all plans — wave and dependency integrity is valid.** Independent frontmatter parsing found 22 plans, 11 waves, every dependency strictly earlier, and no same-wave `files_modified` collision. Wave 9 contains only 136-17; `web/pages/help.py` is otherwise owned only by closed wave-1 plan 136-02. The stable control identifiers and 136-18’s stale exception-count replacement are present. No correct implementation is rejected by the active revised controls; the broken-pass cases are findings 1 and 3. The masking scanner could not run because `MASKING_SCAN_PATTERNS_FILE` is unset. **Change:** none.
+
+VERDICT: rework — BLOCKER 0 · HIGH 1 · MEDIUM 2 · LOW 2 · CONFIRM 4
