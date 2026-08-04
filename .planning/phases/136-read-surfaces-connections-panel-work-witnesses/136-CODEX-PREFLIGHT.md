@@ -474,3 +474,105 @@ maintenance fix should resolve the connection before computing the key.
     It builds its key from `_last_path` before calling `_get_conn()` ([discovery_service.py](C:/Genizahsearch/shared/discovery_service.py:1154)). More precisely, a direct call can remain stale indefinitely—not merely for one call—because a cache hit returns before `_get_conn()`. Its only live caller, however, first runs `is_available()` and the page query, both of which refresh the connection/path before `_band_measurements` ([discovery_service.py](C:/Genizahsearch/shared/discovery_service.py:1236)). Production’s manifest-change-plus-restart flow also recreates the service and clears the cache. Real-world production impact is therefore effectively none under the stated deployment procedure. No Phase 136 change is required; a later maintenance fix should resolve the connection before computing this key.
 
 VERDICT: rework — BLOCKER 0 · HIGH 5 · MEDIUM 2 · LOW 0 · CONFIRM 8
+
+---
+
+# Round 8 — the thrice-revised plans (2026-08-04)
+
+**Brief:** `_tmp/136-codex-preflight-r8-brief.md` (masking-scanned clean before the run).
+**Log:** `_tmp/136-codex-preflight-r8.log` (gitignored).
+
+> **VERDICT: rework** — 0 BLOCKER · 4 HIGH · 1 MEDIUM · 0 LOW · 5 CONFIRM.
+> Trajectory: **1 BLOCKER / 8 HIGH → 0/5 → 0/5 → 0/4.**
+
+Round 7's H1, M6 and M7 are closed and confirmed. Wave/dependency integrity re-parsed independently
+across all 22 plans (10 waves, every dependency earlier, no same-wave file collision), and the launch
+arithmetic reproduced from the sidecar a third time.
+
+The four survivors are all *incompleteness* of a correct fix, not a wrong fix:
+`f"{9_000 + 523:,}"` is a computed constant neither operand of which equals a launch figure; the
+field→vocabulary mapping enumerates twelve carriers where the live projection already has more
+(92,546 evidence rows carry an underscore-bearing `routing_reason`); and 136-21's real-cardinality
+control uses the wrong GRAIN — the live expansion grain is the distinct `unit_key` from the CTE
+(max **5,684**), not identification rows per canonical work (max **4,796**), so `min(total, 5000)`
+would not fail the real case as specified.
+
+## Owner-decision note on finding 3 — resolved AGAINST the finding
+
+Codex reports that the accuracy detector "misses an already-shipped plain-language accuracy rate" on
+the methods page (`web/pages/help.py:178`). The wording is:
+
+> "a small minority of the main pool, a low single-digit share, is misattributed for this reason"
+
+That is the **deliberate D-06a qualitative rewrite** delivered by 136-02, and its own render test
+pins the wording. It carries no number, no percentage and no interval. It is therefore **compliant,
+and the detector must NOT fire on it** — widening the detector to catch it would fail a page the
+owner approved and a test that requires it.
+
+The correct action is not to widen the detector but to make the boundary EXPLICIT: qualitative
+error-rate language sanctioned by D-06a is a named exception, recorded alongside qualified
+matched-letter coverage, precisely so a future widening cannot break the methods page. Finding 3's
+observation is valuable; its prescription is not.
+
+## Verbatim findings
+
+The Round 8 pre-flight does not converge. Four Round 7 areas remain incomplete.
+
+1. HIGH — 136-22’s no-literals guard remains bypassable.
+
+   The scanner handles direct numeric constants and formatting operands, but not computed constants. For example, `ui.label(f"{9_000 + 523:,}")` renders the current headline while neither operand equals a forbidden figure. It would pass the guard and the fixture-based headline equality test in [136-18-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:236), then become stale after a rebuild.
+
+   The exemption boundary is also too narrow: [136-22-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:398) says exemptions may exist only in non-rendering code, but the acceptance test merely excludes `web/pages/` and `web/components/`. It would accept an exemption in `web/discovery.py` or `shared/discovery_display_strings.py`, both capable of carrying a figure to a page.
+
+   The exact-key-set completeness check itself is sound for every numeric value the envelope exposes, and the direct figure × form controls are substantive. They do not close these two paths.
+
+2. HIGH — 136-17’s field→vocabulary restructuring is not structurally complete.
+
+   The plan enumerates twelve machine carriers in [136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:555), but the live projection already contains additional machine-valued fields: `coverage_status`, `eligibility_basis`, and `routing_reason` in [discovery_surface_projection.py](C:/Genizahsearch/shared/discovery_surface_projection.py:135). `routing_reason` has a closed vocabulary in [discovery_ids.py](C:/Genizahsearch/scripts/discovery_ids.py:117).
+
+   Read-only aggregation over the public sidecar found:
+
+   - 92,546 evidence rows with underscore-bearing `routing_reason` values.
+   - 29,854 rows with `coverage_status='not_applicable'`.
+   - 11 identifications with `eligibility_basis='human_confirmed'`.
+
+   The collection assertions in [136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:665) validate fields already placed in the mapping, but never assert the inverse—that every projected machine carrier is mapped. A mapping that omits these live fields still satisfies the structural criterion. Correct envelopes can consequently false-positive, while omitted vocabularies remain structurally untracked.
+
+   The withdrawal in 136-18 is correct for `novelty_status` and `main_pool_reason`, but it is not fully propagated to the complete live carrier set.
+
+3. HIGH — the accuracy detector misses an already-shipped plain-language accuracy rate.
+
+   The methods page states that “a low single-digit share” is “misattributed” in [help.py](C:/Genizahsearch/web/pages/help.py:178), and its render test explicitly requires that wording in [test_help_methods_render_smoke.py](C:/Genizahsearch/tests/render_smoke/test_help_methods_render_smoke.py:369). That is an error/accuracy rate under the standing rule.
+
+   The proposed lexicon and rate-shaped quantities in [136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:508) contain neither “share” nor “misattributed,” so the widened full render suite remains green over this live rate.
+
+   The exact `accuracy 0.91` cases are covered correctly in markup, envelope strings, and envelope floats. Qualified matched-letter coverage is also preserved.
+
+4. HIGH — 136-21’s real-cardinality mutation expectation uses the wrong grain.
+
+   The live expansion grain is the distinct `unit_key` produced by the CTE in [discovery_service.py](C:/Genizahsearch/shared/discovery_service.py:610), not identification rows per canonical work.
+
+   Read-only queries over the public sidecar found:
+
+   - Maximum `discovery_identification` rows per canonical work: 4,796.
+   - Maximum expansion witness units for a work, using the live CTE’s claim-type filter and `COALESCE(unit_id, 'sys:' || sys_id)` grain: 5,684.
+
+   Therefore `min(total, 5000)` must fail on both the synthetic fixture and the true highest-cardinality real expansion. But [136-21-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:375) requires it to fail only synthetically because it assumes 5,000 exceeds every real work. If the probe selects the 4,796 identification case to make that expectation pass, it is not probing the expansion’s highest-cardinality work.
+
+5. MEDIUM — the accuracy detector’s negative/control contract is incomplete.
+
+   The proximity rule treats any decimal fraction in `[0,1]` as rate-shaped, while the following bare-decimal rule claims its two-place minimum avoids `V0.8`. Thus copy such as “precision handling changed in V0.8” can false-positive despite the stated intent. Neither `V0.8` nor `1.25 seconds` has an explicit control in [136-17-PLAN.md](C:/Genizahsearch/.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:667).
+
+   Also, the ten named mutations contain a percentage error-path control but no accuracy-rate error-path control. A wiring defect applying the sixth detector to markup and envelopes but not error messages can satisfy the listed mutations.
+
+Confirmed:
+
+- H1 is closed: no outer `cache_name`, explicit findings timeout, public-wrapper path switch, and the cache-isolation criterion mutates `items`, rows, and `meta`.
+- M6’s 3/4/2/3 dispatch counts follow the live pre-dispatch busy gate, post-dispatch timeout, and suppressed manuscript-work read.
+- M7 correctly defines one dispatch per available, cold enveloped read—not per page load.
+- Independent parsing found 22 plans, 10 waves, every dependency in an earlier wave, and no same-wave file collision.
+- No `wave`, `depends_on`, `files_modified`, `requirements`, or `autonomous` header changed since the Round 7 baseline.
+- Read-only sidecar queries reproduced the public `4,152 + 3,873 + 1,498 = 9,523`, private `10,432`, and common `discovery-v1-real` version.
+- The working tree remains clean; no file or database was written.
+
+VERDICT: rework — BLOCKER 0 · HIGH 4 · MEDIUM 1 · LOW 0 · CONFIRM 5
