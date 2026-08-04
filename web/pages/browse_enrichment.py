@@ -22,7 +22,7 @@ from typing import Any, Dict
 
 from nicegui import ui, run
 
-from web.translations import tr
+from web.translations import tr, get_language
 from web.document_service import get_document_for_fragment, get_section_for_page, get_all_sources_for_fragment
 from web.feature_flags import web_fgp_enabled
 from shared.fgp_service import (
@@ -33,6 +33,127 @@ from web.pages.browse_state import BrowseState, _crossref_cache
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = logging.getLogger(__name__)
+
+
+# ===========================================================================
+# The discovery connections panel (Phase 136, plan 136-17, PANEL-01/PANEL-02).
+#
+# THE OFFLOAD CONTRACT, stated where the code is rather than only in the plan:
+#
+#   Every discovery read on this path is a DIRECT `await` on a `web.discovery`
+#   async wrapper. This path adds NO `run.io_bound`, makes no synchronous
+#   service call, and never touches `web.discovery._service`.
+#
+#   The wrappers already dispatch off the loop internally
+#   (`DiscoveryService._enveloped_off_loop` -> `_run_off_loop` ->
+#   `run_in_executor` + `asyncio.wait`, never `wait_for`, because executor
+#   threads are not cancellable). Handing an async wrapper to `run.io_bound`
+#   returns a coroutine object to a sync worker and never executes the query;
+#   calling one from INSIDE a `run.io_bound` worker is a NESTED offload that
+#   burns two threadpool slots per panel load on a single-worker server.
+#
+#   Four EAGER reads (three gathered, then the manuscript-works read once the
+#   page ids resolve) = FOUR executor crossings on a cold panel load, not one.
+#   That is the accepted design: three of the four are served by
+#   `_enveloped_off_loop(..., cache_name=...)`, a per-argument
+#   sidecar-version-keyed LRU. A single composite callable would be keyed on
+#   the whole argument tuple -- `page_id` included -- so it would invalidate
+#   the manuscript-scope entry on every folio turn and re-run all four
+#   queries each time.
+#
+#   The related-page ROWS read is LAZY and is NOT part of the page load; it is
+#   issued by the panel's own toggle (see web/components/discovery_panel.py).
+#   The bundle's `related_rows` field stays None here, which the model reads as
+#   NOT REQUESTED -- a state distinct from an `ok` zero and from an outage.
+# ===========================================================================
+
+
+def discovery_panel_enabled() -> bool:
+    """Whether the connections panel exists on this page AT ALL.
+
+    Read LAZILY (never captured at import) so a test can flip it, and kept
+    SEPARATE from `web.discovery_assets.discovery_available()`, which ANDs the
+    same flag with sidecar readiness:
+
+    * flag OFF  -> no placeholder, no entry control, no read. The browse page
+      is byte-for-byte what it was before this plan, which is what "deployed
+      with the flag off for the public" has to mean.
+    * flag ON, sidecar absent/corrupt -> `discovery_available()` is False, every
+      wrapper short-circuits to an `unavailable` envelope, and the panel renders
+      a visible temporary-unavailable state with a retry. An outage must never
+      look like a manuscript with nothing on it (D-13).
+    """
+    from web.feature_flags import DISCOVERY_ENABLED
+    return bool(DISCOVERY_ENABLED)
+
+
+async def fetch_discovery_panel_bundle(page, lang: str, is_stale=None):
+    """The four EAGER discovery reads for one folio, as a `PanelServiceBundle`.
+
+    Module-level (not a closure) for three reasons: the AST offload guard can
+    find it by name, the retry handler re-runs exactly the same code the page
+    load ran, and it is testable without a browser.
+
+    `is_stale` is called after EVERY await. A fast page navigation otherwise
+    paints a stale panel over the wrong folio -- and, worse, issues a second
+    query for a folio the reader has already left.
+
+    Returns None when the panel does not apply (flag off, no resolvable
+    `page_id`, or the load went stale). Never raises.
+    """
+    from shared.discovery_panel_model import PanelServiceBundle
+    from shared.discovery_surface_projection import STATUS_OK, make_envelope
+    from web import discovery as _discovery
+    from web.services import discovery_page_id_from_header
+
+    # Per-page values into PLAIN LOCALS before any await (the page object is
+    # mutated in place by the enrichment phase).
+    _sys_id = getattr(page, 'sys_id', None)
+    _volume_ie = getattr(page, 'volume_ie', None)
+    _page_id = discovery_page_id_from_header(getattr(page, 'full_header', '') or '')
+    if not _sys_id or not _page_id:
+        return None
+
+    # The three INDEPENDENT eager reads, in one round.
+    page_ids_env, claims_env, related_count_env = await asyncio.gather(
+        _discovery.get_manuscript_page_ids(_sys_id, volume_ie=_volume_ie),
+        _discovery.get_claims_for_page_enveloped(_page_id, lang=lang),
+        _discovery.get_related_page_count_enveloped(_page_id),
+    )
+    if is_stale is not None and is_stale():
+        return None
+
+    # The manuscript-works read is issued ONLY over a RESOLVED page scope.
+    # `meta['resolved']` is read explicitly and compared to True: an outage
+    # envelope carries no `resolved` key at all, and a branch that treated the
+    # missing key as falsy-but-present -- or defaulted it to True -- would query
+    # the empty page set and render "nothing elsewhere in this manuscript"
+    # during an outage (T-136-17-10).
+    scope_resolved = (
+        page_ids_env.get('status') == STATUS_OK
+        and (page_ids_env.get('meta') or {}).get('resolved') is True
+    )
+    if scope_resolved:
+        works_env = await _discovery.get_manuscript_works_enveloped(
+            list(page_ids_env.get('items') or ()), lang=lang)
+        if is_stale is not None and is_stale():
+            return None
+    else:
+        # NOT the works query's answer -- the query was never issued. This is
+        # the SAME shape the service itself returns when the page scope does not
+        # resolve (`page_scope_resolved: False`), and the model's `_scope_state`
+        # reads the page-ID envelope FIRST, so the pane reports no fact about
+        # the manuscript on this branch.
+        works_env = make_envelope(STATUS_OK, [], 0, meta={'page_scope_resolved': False})
+
+    return PanelServiceBundle(
+        claims=claims_env,
+        page_ids=page_ids_env,
+        manuscript_works=works_env,
+        related_count=related_count_env,
+        related_rows=None,          # NOT REQUESTED -- the toggle owns this read
+        lang=lang,
+    )
 
 
 @dataclass
@@ -305,9 +426,37 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             logger.error(f"Failed to fetch browse enrichment: {e}")
             return {}
 
+    async def fetch_discovery_panel():
+        """The FIFTH enrichment read (plan 136-17) -- the connections panel.
+
+        Shaped exactly like the four `fetch_*` closures above: it wraps its work
+        in try/except and returns a safe default, so a discovery failure can
+        never take the rest of the enrichment phase down with it.
+
+        Unlike them it adds NO `run.io_bound` -- see the offload contract at the
+        top of this module.
+        """
+        if not discovery_panel_enabled():
+            return None
+        # Per-user state into a plain local BEFORE any await: `run.io_bound`
+        # silently degrades `safe_user_*` to `{}` and `ensure_future` empties the
+        # slot stack, so the UI context raises. This project has been bitten by
+        # both (memory `reference_io_bound_safe_storage_trap`).
+        _lang = get_language()
+
+        def _stale() -> bool:
+            return generation != refs.load_generation['value']
+
+        try:
+            return await fetch_discovery_panel_bundle(page, _lang, is_stale=_stale)
+        except Exception as e:
+            logger.error("Failed to fetch discovery panel data: %s", e)
+            return None
+
     try:
-        (all_sources, pgp_doc, full_htr_text), fjms_data, crossref_data, browse_enrich = await asyncio.gather(
-            fetch_pgp(), fetch_fjms(), fetch_crossref(), fetch_browse_enrichment()
+        (all_sources, pgp_doc, full_htr_text), fjms_data, crossref_data, browse_enrich, discovery_bundle = await asyncio.gather(
+            fetch_pgp(), fetch_fjms(), fetch_crossref(), fetch_browse_enrichment(),
+            fetch_discovery_panel()
         )
     except Exception as e:
         logger.error(f"Enrichment fetch failed: {e}")
@@ -318,6 +467,10 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
     # Stale check
     if generation != refs.load_generation['value']:
         return
+
+    # The panel's bundle rides in enrichment_refs, beside the four existing
+    # placeholder handles, so no per-user state is introduced anywhere else.
+    refs.enrichment_refs['discovery_bundle'] = discovery_bundle
 
     # Process PGP + FGP sources — centralized per-page filter (FGP-04.4). Preserves
     # the prior PGP behavior exactly; FGP rows are aligned to the displayed image
@@ -555,6 +708,95 @@ def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
     bib_catalog_container = refs.enrichment_refs.get('bib_catalog_container')
     if bib_catalog_container:
         populate_bib_catalog_buttons(bib_catalog_container, state, state.current_page)
+
+    # The discovery connections panel (plan 136-17) -- the FIFTH placeholder,
+    # filled on the same staleness-guarded path as the four above.
+    update_discovery_panel_section(state, refs)
+
+
+def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
+    """Fill the entry-control and panel-body placeholders from the bundle.
+
+    Separate from `update_enrichment_sections` so the retry handler can re-run
+    exactly this, and so the AST offload guard has one named panel-path
+    function to walk.
+    """
+    entry_container = refs.enrichment_refs.get('discovery_entry_container')
+    panel_container = refs.enrichment_refs.get('discovery_panel_container')
+    if entry_container is None and panel_container is None:
+        return
+
+    bundle = refs.enrichment_refs.get('discovery_bundle')
+    if entry_container is not None:
+        entry_container.clear()
+    if panel_container is not None:
+        panel_container.clear()
+    if bundle is None:
+        # Flag off, no resolvable page_id, or a stale load. Nothing is claimed
+        # about the manuscript -- the control is simply absent.
+        return
+
+    from shared.discovery_panel_model import build_panel_rows
+    from web.components.discovery_panel import (
+        render_discovery_entry_control, render_discovery_panel_body,
+    )
+
+    try:
+        model = build_panel_rows(bundle)
+    except Exception as e:
+        logger.error("Discovery panel model refused the bundle: %s", type(e).__name__)
+        return
+
+    open_state = refs.enrichment_refs.setdefault('discovery_panel_open', {'value': False})
+
+    async def _retry():
+        """Re-issue the four eager reads and re-render. The retry offered on an
+        outage has to actually re-query; a retry that only re-renders the same
+        envelope is a button that cannot work."""
+        page = state.current_page
+        if page is None:
+            return
+        generation = refs.load_generation['value']
+
+        def _stale() -> bool:
+            return generation != refs.load_generation['value']
+
+        try:
+            fresh = await fetch_discovery_panel_bundle(page, model.lang, is_stale=_stale)
+        except Exception as e:
+            logger.error("Discovery panel retry failed: %s", e)
+            return
+        if fresh is None or _stale():
+            return
+        _cc = refs.content_container
+        if _cc is not None:
+            try:
+                if _cc.is_deleted or getattr(_cc.client, '_deleted', False):
+                    return
+            except (RuntimeError, AttributeError):
+                return
+        refs.enrichment_refs['discovery_bundle'] = fresh
+        update_discovery_panel_section(state, refs)
+
+    def _toggle_panel():
+        open_state['value'] = not open_state['value']
+        if panel_container is not None:
+            panel_container.style(
+                'display: block;' if open_state['value'] else 'display: none;')
+
+    # The claims envelope's own `meta['page_id']` -- the panel never re-derives
+    # an id the service already told it.
+    _page_id = (bundle.claims.get('meta') or {}).get('page_id')
+
+    if panel_container is not None:
+        panel_container.style(
+            'display: block;' if open_state['value'] else 'display: none;')
+        with panel_container:
+            render_discovery_panel_body(model, on_retry=_retry, page_id=_page_id)
+
+    if entry_container is not None:
+        with entry_container:
+            render_discovery_entry_control(model, on_toggle=_toggle_panel)
 
 
 def populate_bib_catalog_buttons(container, state: BrowseState, page):

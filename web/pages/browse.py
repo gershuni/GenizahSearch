@@ -86,6 +86,7 @@ from web.pages.browse_state import (
 from web.browse_bootstrap import resolve_browse_bootstrap
 from web.pages.browse_enrichment import (
     BrowsePageRefs,
+    discovery_panel_enabled,
     load_enrichment as _load_enrichment_fn,
     update_enrichment_sections as _update_enrichment_sections_fn,
     populate_bib_catalog_buttons,
@@ -3948,6 +3949,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 find_joins_url=_joins_lab_url,
                                             )
 
+                            # Computed-identifications entry control placeholder
+                            # (Phase 136, plan 136-17, PANEL-01) -- the FIFTH
+                            # enrichment placeholder, beside Joins in this same
+                            # second toolbar row, filled by
+                            # update_enrichment_sections() once Phase B
+                            # completes. Created ONLY when the discovery flag is
+                            # on, so a flag-off browse page is byte-for-byte
+                            # what it was before this plan.
+                            if discovery_panel_enabled():
+                                discovery_entry_el = ui.element('span')
+                                enrichment_refs['discovery_entry_container'] = discovery_entry_el
+
                             # "Add to View" button -- start or extend reading desk with current manuscript
                             ui.button(
                                 icon='library_add',
@@ -4257,6 +4270,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Initial render
                             render_text_content(page.text if page.text else None)
+
+                # Discovery connections panel body (Phase 136, plan 136-17).
+                # FULL WIDTH BENEATH the two panes: at `flex: 0 0 50%` x 60vh
+                # neither pane has room for it, and this is the only place the
+                # even-pane layout fits. Empty until the enrichment phase fills
+                # it; hidden until the reader opens the toolbar entry control.
+                if discovery_panel_enabled():
+                    discovery_panel_el = ui.element('div').classes('w-full').style('display: none;')
+                    enrichment_refs['discovery_panel_container'] = discovery_panel_el
 
                 # Comments section - below panels
                 from web.components import create_notes_panel
