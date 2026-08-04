@@ -1451,3 +1451,179 @@ def test_the_exact_count_reaches_the_envelope_untransformed():
         f"{ast.unparse(handed)!r}, not a bare name on the count chain")
     _assert_untransformed(env_fn, env_chain, source_lines,
                           "walk 2: get_work_expansion_enveloped")
+
+
+# ===========================================================================
+# Task 3: lock the contract against the failure that produced this plan.
+#
+# Three key sets are pinned SEPARATELY, because they are genuinely different
+# and conflating them is how a field leaks: what the query builds, what a
+# surface receives, and what the envelope wraps them in.
+# ===========================================================================
+
+#: The INTERNAL expansion row, before projection. Twenty keys.
+_INTERNAL_EXPANSION_KEYS = frozenset({
+    # the pre-plan nine
+    "work_id", "unit_id", "representative_sys_id", "representative_page_id",
+    "representative_claim_id", "claim_type", "evidence_source", "confidence_band",
+    "member_sys_ids",
+    # the anchor side (136-21)
+    "anchor_claim_type", "anchor_evidence_source", "anchor_confidence_band",
+    "relations_differ",
+    # the resolved band presentation
+    "displayed_evidence_source", "displayed_confidence_band", "band_rank",
+    "band_label",
+    # what NAMES the carrier
+    "library_code", "shelfmark_display", "display_missing",
+})
+
+#: Keys that exist INTERNALLY and are deliberately stripped by the projection.
+#: The two raw band pairs are here on purpose: DATA-01 says the surface shows
+#: the WEAKER band, so giving a renderer both raw pairs invites it to re-derive
+#: the comparison -- and a second comparator is how the displayed band drifts
+#: from the filtered one.
+_INTERNAL_ONLY_KEYS = frozenset({
+    "evidence_source", "confidence_band",
+    "anchor_evidence_source", "anchor_confidence_band",
+})
+
+#: Keys that must NEVER reach a surface, named individually because a generic
+#: "no forbidden fields" assertion does not say WHICH.
+_NEVER_ON_A_SURFACE = (
+    "review_overlay", "measurement_status", "ci_low",
+    "unit_key", "rn", "_total_rows",
+)
+
+#: The fields a renderer cannot draw the section without. Named EXPLICITLY
+#: rather than implied by the allowlist -- a control that deleted one from the
+#: allowlist would otherwise still satisfy "the key set equals the allowlist".
+_PUBLIC_MUST_CONTAIN = (
+    "relations_differ", "anchor_claim_type", "claim_type",
+    "library_code", "shelfmark_display", "display_missing",
+    "displayed_evidence_source", "displayed_confidence_band",
+    "band_label", "band_rank",
+)
+
+
+def _one_of_each(tmp_path, name):
+    db = _build_expansion_db(tmp_path / name, [
+        _carrier("990000000000000001", "p001", claim_type="quotes_this_work",
+                 confidence_band="screening_rb"),
+    ])
+    return _service_for(db)
+
+
+def _rejects_missing_and_extra(actual, expected):
+    """A set comparison that fails BOTH ways -- proved, not asserted.
+
+    Returns True when `actual == expected` AND the same comparison rejects a
+    copy with one key removed AND a copy with one key added."""
+    if set(actual) != set(expected):
+        return False
+    missing = set(actual) - {sorted(actual)[0]}
+    extra = set(actual) | {"an_unexpected_key"}
+    return missing != set(expected) and extra != set(expected)
+
+
+def test_internal_row_key_set_is_pinned(tmp_path):
+    service = _one_of_each(tmp_path, "contract-internal.db")
+    rows, total = service._query_work_expansion("wEXP001", **_ANCHOR_STRONG)
+    assert total == 1
+    assert len(rows) == 1
+    assert set(rows[0]) == _INTERNAL_EXPANSION_KEYS, (
+        "the INTERNAL expansion row shape changed; missing "
+        f"{sorted(_INTERNAL_EXPANSION_KEYS - set(rows[0]))}, unexpected "
+        f"{sorted(set(rows[0]) - _INTERNAL_EXPANSION_KEYS)}")
+    assert _rejects_missing_and_extra(rows[0], _INTERNAL_EXPANSION_KEYS), (
+        "the internal key-set assertion does not fail on BOTH a missing and an "
+        "unexpected key")
+    # No internal query discriminator survives into the row at all.
+    for key in ("unit_key", "rn", "_total_rows", "adjudication_status",
+                "displayed_band_rank"):
+        assert key not in rows[0], f"internal query column {key!r} reached the row"
+
+
+def test_public_row_key_set_equals_the_expansion_allowlist(tmp_path):
+    service = _one_of_each(tmp_path, "contract-public.db")
+    envelope = service.get_work_expansion_enveloped("wEXP001", **_ANCHOR_STRONG)
+    item = envelope["items"][0]
+    assert set(item) == set(SURFACE_EXPANSION_FIELDS), (
+        "the PUBLIC expansion row is not exactly SURFACE_EXPANSION_FIELDS; missing "
+        f"{sorted(set(SURFACE_EXPANSION_FIELDS) - set(item))}, unexpected "
+        f"{sorted(set(item) - set(SURFACE_EXPANSION_FIELDS))}")
+    assert _rejects_missing_and_extra(item, SURFACE_EXPANSION_FIELDS), (
+        "the public key-set assertion does not fail on BOTH a missing and an "
+        "unexpected key")
+    for key in _PUBLIC_MUST_CONTAIN:
+        assert key in item, (
+            f"the public expansion row no longer carries {key!r} -- the panel "
+            "cannot render the section without it")
+    for key in _NEVER_ON_A_SURFACE:
+        assert key not in item, f"{key!r} reached a surface"
+    for key in _INTERNAL_ONLY_KEYS:
+        assert key not in item, (
+            f"{key!r} is INTERNAL-ONLY by design and reached a surface -- the "
+            "surface displays the RESOLVED weaker band, never a raw pair it "
+            "could re-compare")
+
+
+def test_envelope_key_set_is_pinned_on_ok_and_on_an_outage(tmp_path):
+    db = _build_expansion_db(tmp_path / "contract-envelope.db", [
+        _carrier("990000000000000001", "p001"),
+    ])
+    ok = _service_for(db).get_work_expansion_enveloped("wEXP001")
+    outage = _service_failing_at(db, _COUNT_MARKER).get_work_expansion_enveloped("wEXP001")
+    assert ok["status"] == "ok" and outage["status"] == "unavailable"
+    expected = {"status", "items", "total", "meta"}
+    for label, envelope in (("ok", ok), ("outage", outage)):
+        assert set(envelope) == expected, (
+            f"the {label} envelope is not the four-key shape; missing "
+            f"{sorted(expected - set(envelope))}, unexpected "
+            f"{sorted(set(envelope) - expected)}")
+        assert _rejects_missing_and_extra(envelope, expected), (
+            f"the {label} envelope key-set assertion does not fail on BOTH a "
+            "missing and an unexpected key")
+
+
+def test_the_surface_safe_projection_strips_the_internal_only_keys():
+    """Named individually, so a future edit that lets one through fails HERE
+    rather than surfacing as a panel quietly showing the wrong band."""
+    from shared.discovery_surface_projection import surface_safe_expansion
+
+    poisoned = {key: "leaked" for key in _INTERNAL_EXPANSION_KEYS}
+    poisoned.update({key: "leaked" for key in _NEVER_ON_A_SURFACE})
+    poisoned["precision"] = 0.93
+    poisoned["ci_high"] = 0.99
+    projected = surface_safe_expansion(poisoned)
+    assert set(projected) == set(SURFACE_EXPANSION_FIELDS)
+    for key in (*_NEVER_ON_A_SURFACE, *_INTERNAL_ONLY_KEYS, "precision", "ci_high"):
+        assert key not in projected, f"{key!r} survived the projection"
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_no_expansion_row_carries_a_review_badge_precision_or_interval(tmp_path, lang):
+    # A `human_confirmed` carrier is the case that matters: it is exactly the
+    # row for which `serialize_banded_claim` emits the "Expert-reviewed" badge
+    # D-13f has decided never to show.
+    confirmed = dict(_carrier("990000000000000001", "p001"),
+                     adjudication_status="human_confirmed")
+    db = _build_expansion_db(tmp_path / f"honesty-{lang}.db", [
+        confirmed,
+        _carrier("990000000000000002", "p002", confidence_band="weak",
+                 evidence_source=_PROPAGATED),
+    ])
+    envelope = _service_for(db).get_work_expansion_enveloped(
+        "wEXP001", lang=lang, **_ANCHOR_STRONG)
+    assert envelope["status"] == "ok" and envelope["items"]
+    badges = ("Expert-reviewed", "נבדק בידי מומחה")
+    for item in envelope["items"]:
+        for key, value in item.items():
+            assert not is_forbidden_surface_field(key), (
+                f"forbidden field {key!r} on an expansion row ({lang})")
+            if isinstance(value, str):
+                for badge in badges:
+                    assert badge not in value, (
+                        f"the human-review badge reached a surface as a VALUE "
+                        f"under {key!r} ({lang})")
+    for key in envelope["meta"]:
+        assert not is_forbidden_surface_field(key), f"forbidden meta key {key!r}"
