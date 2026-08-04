@@ -122,6 +122,30 @@ SECTION_ROW_STATES: frozenset = frozenset({
     ROWS_NOT_REQUESTED, ROWS_POPULATED, ROWS_EMPTY, ROWS_OUTAGE,
 })
 
+#: The manuscript pane's own state. `PANE_UNRESOLVED` is deliberately NOT
+#: `PANE_EMPTY`: an unresolved page scope is a statement about OUR plumbing,
+#: and rendering it as "this manuscript has nothing elsewhere" attributes our
+#: failure to the manuscript.
+PANE_POPULATED = ROWS_POPULATED
+PANE_EMPTY = ROWS_EMPTY
+PANE_OUTAGE = ROWS_OUTAGE
+PANE_UNRESOLVED = "unresolved_scope"
+
+#: The page scope's own state -- four values, and `resolved` / `truncated` are
+#: facts SEPARATE from an empty result (`ManuscriptPageIds`' own contract).
+SCOPE_RESOLVED = "resolved"
+SCOPE_TRUNCATED = "truncated"
+SCOPE_UNRESOLVED = "unresolved"
+SCOPE_OUTAGE = "scope_outage"
+
+SCOPE_STATES: Tuple[str, ...] = (
+    SCOPE_RESOLVED, SCOPE_TRUNCATED, SCOPE_UNRESOLVED, SCOPE_OUTAGE,
+)
+
+#: The closed status vocabulary as an ORDERED tuple, so the arbitration table
+#: below and the suite that reads it enumerate it identically.
+SURFACE_STATUSES_ORDERED: Tuple[str, ...] = tuple(sorted(SURFACE_STATUSES))
+
 #: The three disclosure levels D-13e ratified -- no more, no fewer. Level 2
 #: holds the generic identical-span groups and the related-pages section and is
 #: explicitly NOT identifications.
@@ -165,6 +189,82 @@ MACHINE_VOCABULARY_FIELDS: frozenset = frozenset({
 
 #: A (source, band) pair outside the frozen lattice sorts last, never first.
 _UNRANKED_BAND_RANK = 10 ** 6
+
+#: Paging appears above six named works: one sampled manuscript carries 61
+#: works elsewhere, and a chip list that long stops being a reader aid.
+MANUSCRIPT_PANE_PAGE_THRESHOLD = 6
+
+#: The page size the renderer asks the work-expansion wrapper for. The
+#: expansion is a DESCRIPTOR, never loaded rows: the heaviest work has
+#: thousands of claim rows while the median manuscript carries one work, so
+#: eager loading pays the worst case to serve the common one.
+EXPANSION_PAGE_SIZE = 20
+
+
+# ---------------------------------------------------------------------------
+# Status arbitration -- explicit and TOTAL.
+#
+# One row per (claims status, page-scope state) combination the panel can
+# receive. The failure this prevents is the one plan 136-14 found on the real
+# pre-rebuild asset: a failing query reporting `ok` with a total of zero, on a
+# surface whose rule is to hide itself on a zero. The envelope now NAMES the
+# failure; this table is where naming it turns into behaviour, and the suite
+# reads the table rather than restating it.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ArbitrationOutcome:
+    """What one (claims status, page-scope state) combination decides.
+
+    `panel_status` is the claims envelope's own status -- the PANEL's status is
+    never invented from a section's. `panel_hidden_on_zero` says whether the
+    entry-control's hide rule may apply at all (it may only on `ok`, and then
+    only when the total is genuinely zero). `pane_reports_manuscript_facts` is
+    False whenever the page scope did not resolve: the pane may then report
+    nothing ABOUT the manuscript, because anything it said would be our own
+    plumbing failure wearing the manuscript's name.
+    """
+
+    panel_status: str
+    panel_hidden_on_zero: bool
+    scope_state: str
+    pane_reports_manuscript_facts: bool
+
+
+ARBITRATION_TABLE: Mapping[Tuple[str, str], ArbitrationOutcome] = {
+    # claims `ok` -- the panel renders; the entry control may hide on a TRUE zero
+    ("ok", SCOPE_RESOLVED): ArbitrationOutcome("ok", True, SCOPE_RESOLVED, True),
+    ("ok", SCOPE_TRUNCATED): ArbitrationOutcome("ok", True, SCOPE_TRUNCATED, True),
+    ("ok", SCOPE_UNRESOLVED): ArbitrationOutcome("ok", True, SCOPE_UNRESOLVED, False),
+    ("ok", SCOPE_OUTAGE): ArbitrationOutcome("ok", True, SCOPE_OUTAGE, False),
+    # claims `unavailable` -- an outage is NEVER a zero; the control stays visible
+    ("unavailable", SCOPE_RESOLVED): ArbitrationOutcome("unavailable", False, SCOPE_RESOLVED, True),
+    ("unavailable", SCOPE_TRUNCATED): ArbitrationOutcome("unavailable", False, SCOPE_TRUNCATED, True),
+    ("unavailable", SCOPE_UNRESOLVED): ArbitrationOutcome("unavailable", False, SCOPE_UNRESOLVED, False),
+    ("unavailable", SCOPE_OUTAGE): ArbitrationOutcome("unavailable", False, SCOPE_OUTAGE, False),
+    # claims `timeout`
+    ("timeout", SCOPE_RESOLVED): ArbitrationOutcome("timeout", False, SCOPE_RESOLVED, True),
+    ("timeout", SCOPE_TRUNCATED): ArbitrationOutcome("timeout", False, SCOPE_TRUNCATED, True),
+    ("timeout", SCOPE_UNRESOLVED): ArbitrationOutcome("timeout", False, SCOPE_UNRESOLVED, False),
+    ("timeout", SCOPE_OUTAGE): ArbitrationOutcome("timeout", False, SCOPE_OUTAGE, False),
+    # claims `busy`
+    ("busy", SCOPE_RESOLVED): ArbitrationOutcome("busy", False, SCOPE_RESOLVED, True),
+    ("busy", SCOPE_TRUNCATED): ArbitrationOutcome("busy", False, SCOPE_TRUNCATED, True),
+    ("busy", SCOPE_UNRESOLVED): ArbitrationOutcome("busy", False, SCOPE_UNRESOLVED, False),
+    ("busy", SCOPE_OUTAGE): ArbitrationOutcome("busy", False, SCOPE_OUTAGE, False),
+}
+
+# Import-time totality guard: a combination missing from the table is a state
+# nobody decided on, and those are exactly the ones that ship wrong.
+_EXPECTED_ARBITRATION_KEYS = {
+    (status, scope) for status in SURFACE_STATUSES_ORDERED for scope in SCOPE_STATES
+}
+if set(ARBITRATION_TABLE) != _EXPECTED_ARBITRATION_KEYS:  # pragma: no cover -- structural
+    raise RuntimeError(
+        "ARBITRATION_TABLE is not total over (status x page-scope state); missing "
+        "%s" % sorted(_EXPECTED_ARBITRATION_KEYS - set(ARBITRATION_TABLE))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +370,28 @@ def _service_state(envelope: Mapping[str, Any], lang: str) -> Dict[str, Any]:
     return state
 
 
+def _scope_state(page_ids: Mapping[str, Any], works: Mapping[str, Any]) -> str:
+    """Which of the four page-scope states the bundle describes.
+
+    `resolved` and `truncated` are facts SEPARATE from an empty page list, and
+    an `ok` manuscript-works envelope carrying `page_scope_resolved: False` is
+    an `ok` envelope that is NOT a fact about the manuscript. A missing
+    `resolved` key fails CLOSED to unresolved -- the broken implementation this
+    guards against is one that finds the key absent on an outage envelope,
+    treats it as present-but-falsy or defaults it to True, and then reports
+    "nothing elsewhere in this manuscript" during an outage.
+    """
+    if is_outage(page_ids):
+        return SCOPE_OUTAGE
+    if (page_ids.get("meta") or {}).get("resolved") is not True:
+        return SCOPE_UNRESOLVED
+    if _is_ok(works) and (works.get("meta") or {}).get("page_scope_resolved") is False:
+        return SCOPE_UNRESOLVED
+    if (page_ids.get("meta") or {}).get("truncated") is True:
+        return SCOPE_TRUNCATED
+    return SCOPE_RESOLVED
+
+
 # ---------------------------------------------------------------------------
 # Ruling R: THE one site that reads a raw recorded title.
 # ---------------------------------------------------------------------------
@@ -294,8 +416,9 @@ def _display_work_id(row: Mapping[str, Any]) -> Any:
     return row.get("display_work_id") or row.get("work_id")
 
 
-def _band_rank(row: Mapping[str, Any]) -> int:
-    rank = row.get("band_rank")
+def _band_rank(row: Mapping[str, Any], key: str = "band_rank") -> int:
+    """The row's band rank, with an out-of-lattice/absent rank sorting LAST."""
+    rank = row.get(key)
     return _UNRANKED_BAND_RANK if rank is None else int(rank)
 
 
@@ -429,6 +552,49 @@ def _disclosure_level_for(row: Mapping[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _anchor_identity(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """The four anchor-identity fields the work expansion needs, ALL-OR-NONE.
+
+    Checked BEFORE any display string is composed, so this contract is the one
+    that speaks when a row is short of it -- otherwise a missing band or source
+    surfaces as a label-lookup error and the all-or-none rule never runs. The
+    ranking the expansion wrapper does needs the anchor's source AND its band
+    (a band alone cannot produce a rank and would silently compare against a
+    default), so a partial set raises rather than reaching a query that would
+    quietly answer the wrong question.
+    """
+    anchor = {
+        "anchor_sys_id": row.get("sys_id"),
+        "anchor_claim_type": row.get("relation_kind"),
+        "anchor_evidence_source": row.get("evidence_source"),
+        "anchor_confidence_band": row.get("confidence_band"),
+    }
+    missing = sorted(name for name, value in anchor.items() if value is None)
+    if len(missing) > 0:
+        present = sorted(name for name, value in anchor.items() if value is not None)
+        raise ValueError(
+            "expansion descriptor for claim %r: the anchor identity is "
+            "all-or-none -- present %s, missing %s"
+            % (row.get("claim_id"), present, missing)
+        )
+    return anchor
+
+
+def _expansion_descriptor(
+    row: Mapping[str, Any], work_title: str, lang: str, anchor: Mapping[str, Any]
+) -> Dict[str, Any]:
+    """The "other manuscripts matching this work" expansion, as a DESCRIPTOR the
+    renderer can request lazily -- never as loaded rows."""
+    descriptor: Dict[str, Any] = {
+        "work_id": _display_work_id(row),
+        "heading": ds.section_header(ds.SECTION_OTHER_MANUSCRIPTS, lang, work_title),
+        "page_size": EXPANSION_PAGE_SIZE,
+        "loaded": False,
+    }
+    descriptor.update(anchor)
+    return descriptor
+
+
 def _nested_entry(row: Mapping[str, Any], lang: str) -> Dict[str, Any]:
     title, missing = _routed_title(row, lang)
     return {
@@ -449,6 +615,7 @@ def _identification_row(
     DIRECT-family measurement and a null there is one careless renderer away
     from reading as zero coverage.
     """
+    anchor = _anchor_identity(row)
     title, missing = _routed_title(row, lang)
     relation_kind = row.get("relation_kind")
     evidence_source = row.get("evidence_source")
@@ -479,6 +646,7 @@ def _identification_row(
         "span_end": row.get("span_end"),
         "matched_letters": row.get("matched_letters"),
         "nested": tuple(_nested_entry(other, lang) for other in nested),
+        "expansion": _expansion_descriptor(row, title, lang, anchor),
     }
 
     # D-08a: the ONE permitted percentage, direct family only, always with its
@@ -541,20 +709,21 @@ def _compose_rows(
         generic_groups.append(_generic_group(key, [lead] + remainder, lang))
 
     # STEP 4 -- gate short-evidence rows (inside `_identification_row`, whose
-    # level assignment is the gate).
+    # level assignment IS the gate).
+    leads.sort(key=lambda pair: _lead_sort_key(pair[0]))
     rows = [_identification_row(row, nested, lang) for row, nested in leads]
-    rows.sort(key=_row_sort_key)
     generic_groups.sort(key=lambda group: (group["span_start"], group["span_end"]))
     return rows, generic_groups
 
 
-def _row_sort_key(row: Mapping[str, Any]):
-    """Deterministic emission order: strongest band first, then the display work
-    id, then the claim id -- never input order, which a caller could vary."""
+def _lead_sort_key(row: Mapping[str, Any]):
+    """Deterministic emission order: strongest band first, then the passage's
+    offsets, then the display work id, then the claim id -- never input order,
+    which a caller could vary."""
     return (
-        0 if row["disclosure_level"] == LEVEL_IDENTIFICATIONS else 1,
+        _band_rank(row),
         str(row.get("span_start")),
-        str(row.get("work_id")),
+        str(_display_work_id(row)),
         str(row.get("claim_id")),
     )
 
@@ -567,7 +736,27 @@ def _row_sort_key(row: Mapping[str, Any]):
 
 def _related_pages(bundle: PanelServiceBundle) -> Dict[str, Any]:
     lang = bundle.lang
-    section: Dict[str, Any] = {}
+    count_envelope = bundle.related_count
+    section: Dict[str, Any] = {
+        "header": ds.section_header(ds.SECTION_PAGES_MATCHING_THIS_PAGE, lang),
+        "label": ds.related_pages_label(lang),
+    }
+
+    # The header count is fetched EAGERLY and is what the default view renders,
+    # so the section still has a real number without the rows. D-11a: the unit
+    # is DISTINCT OPPOSITE PAGES -- never evidence rows and never directed
+    # pairs, three genuinely different populations an earlier figure conflated.
+    if is_outage(count_envelope):
+        section["count"] = None
+        section["count_state"] = ROWS_OUTAGE
+        section["count_service_state"] = _service_state(count_envelope, lang)
+    else:
+        count = int(count_envelope.get("total") or 0)
+        section["count"] = count
+        section["count_state"] = ROWS_EMPTY if count == 0 else ROWS_POPULATED
+        section["count_unit"] = (count_envelope.get("meta") or {}).get("unit")
+        section["count_line"] = ds.related_pages_count_line(count, lang)
+
     rows_envelope = getattr(bundle, LAZY_ENVELOPE_FIELD)
 
     if rows_envelope is None:
@@ -593,6 +782,110 @@ def _related_pages(bundle: PanelServiceBundle) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# The manuscript pane (D-13h). NAMED works, never a bare count: manuscript-level
+# coherence is the context that makes a single claim judgeable -- a page-23
+# Esther identification looks arbitrary alone and obviously right once the
+# reader sees the neighbouring folios carry the same commentator on adjacent
+# books.
+#
+# READER AID ONLY. It must NEVER feed band assignment or routing, which would
+# be circular: the pane is built FROM the claims it would then be scoring.
+# ---------------------------------------------------------------------------
+
+
+def _work_chip(row: Mapping[str, Any], lang: str) -> Dict[str, Any]:
+    title, missing = _routed_title(row, lang)
+    in_main_pool = row.get("main_pool") is True
+    chip: Dict[str, Any] = {
+        "work_id": _display_work_id(row),
+        "work_title": title,
+        "title_missing": missing,
+        "page_count": row.get("page_count"),
+        "gated": bool(row.get("gated")),
+        "in_main_pool": in_main_pool,
+        "bucket": bucket_label(in_main_pool, lang),
+    }
+    relation_kind = row.get("relation_kind")
+    if relation_kind in ids.CLAIM_TYPES:
+        chip["relation_chip"] = ds.relation_chip(relation_kind, lang)
+    return chip
+
+
+def _work_chip_sort_key(chip: Mapping[str, Any], row: Mapping[str, Any]):
+    """Strongest band first, then the widest page span, then the work id -- a
+    total order, so the chip list never depends on the query's row order."""
+    return (
+        _band_rank(row, "best_band_rank"),
+        -int(row.get("page_count") or 0),
+        str(chip["work_id"]),
+    )
+
+
+def _manuscript_pane(
+    bundle: PanelServiceBundle, outcome: ArbitrationOutcome
+) -> Dict[str, Any]:
+    lang = bundle.lang
+    works_envelope = bundle.manuscript_works
+    pane: Dict[str, Any] = {
+        "header": ds.section_header(ds.SECTION_ELSEWHERE_IN_MANUSCRIPT, lang),
+        "scope_state": outcome.scope_state,
+        "partial_scope": outcome.scope_state == SCOPE_TRUNCATED,
+        "reader_aid_only": True,
+    }
+
+    # The scope decides FIRST. When it did not resolve, the pane reports nothing
+    # about the manuscript at all -- not a total, not an empty marker, not a
+    # zero. 136-17 does not even issue the works query in that case, so
+    # whatever envelope reaches here says nothing either.
+    if not outcome.pane_reports_manuscript_facts:
+        pane["state"] = PANE_UNRESOLVED
+        return pane
+
+    if is_outage(works_envelope):
+        pane["state"] = PANE_OUTAGE
+        pane["service_state"] = _service_state(works_envelope, lang)
+        return pane
+
+    total = int(works_envelope.get("total") or 0)
+    pane["total"] = total
+    # A truncated scope's total covers the RESOLVED pages only; labelling it as
+    # the manuscript's total would state a number we did not measure.
+    pane["total_covers_resolved_pages_only"] = pane["partial_scope"]
+    pane["page_threshold"] = MANUSCRIPT_PANE_PAGE_THRESHOLD
+    pane["paginated"] = total > MANUSCRIPT_PANE_PAGE_THRESHOLD
+
+    if _is_ok_zero(works_envelope):
+        pane["state"] = PANE_EMPTY
+        pane["works"] = ()
+        return pane
+
+    decorated = [(_work_chip(row, lang), row) for row in _items(works_envelope)]
+    decorated.sort(key=lambda pair: _work_chip_sort_key(pair[0], pair[1]))
+    pane["state"] = PANE_POPULATED
+    pane["works"] = tuple(chip for chip, _row in decorated)
+    return pane
+
+
+# ---------------------------------------------------------------------------
+# The entry control (D-13).
+# ---------------------------------------------------------------------------
+
+
+def _entry_control(
+    claims: Mapping[str, Any], outcome: ArbitrationOutcome
+) -> Dict[str, Any]:
+    """Visibility is a FIELD on the model, not a render-time expression.
+
+    Hidden ONLY on a status of `ok` with a total of zero. An outage must never
+    look like a manuscript with nothing on it.
+    """
+    hidden = outcome.panel_hidden_on_zero and _is_ok_zero(claims)
+    control: Dict[str, Any] = {"hidden": hidden, "status": claims.get("status")}
+    control["count"] = int(claims.get("total") or 0) if _is_ok(claims) else None
+    return control
+
+
+# ---------------------------------------------------------------------------
 # The model.
 # ---------------------------------------------------------------------------
 
@@ -604,6 +897,11 @@ class PanelModel:
     lang: str
     show_more: bool
     panel_status: str
+    entry_control: Dict[str, Any]
+    service_state: Dict[str, Any]
+    caveat: str
+    bucket_rule_sentence: str
+    manuscript_pane: Dict[str, Any]
     disclosure_levels: Tuple[Dict[str, Any], ...]
 
     # -- convenience accessors; deliberately NOT part of `as_dict`, so nothing
@@ -643,6 +941,8 @@ def build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
     `shared.discovery_display_strings`.
     """
     lang = bundle.lang
+    outcome = ARBITRATION_TABLE[(bundle.claims.get("status"),
+                                 _scope_state(bundle.page_ids, bundle.manuscript_works))]
     rows, generic_groups = _compose_rows(_items(bundle.claims), lang)
 
     default_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_IDENTIFICATIONS)
@@ -680,6 +980,11 @@ def build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
     return PanelModel(
         lang=lang,
         show_more=bool(bundle.show_more),
-        panel_status=bundle.claims.get("status"),
+        panel_status=outcome.panel_status,
+        entry_control=_entry_control(bundle.claims, outcome),
+        service_state=_service_state(bundle.claims, lang),
+        caveat=ds.recall_disclaimer(lang),
+        bucket_rule_sentence=ds.rule_sentence(lang),
+        manuscript_pane=_manuscript_pane(bundle, outcome),
         disclosure_levels=levels,
     )
