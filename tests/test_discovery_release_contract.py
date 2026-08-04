@@ -493,3 +493,65 @@ def test_m4_committed_synthetic_fixture_never_triggers_strict_checks():
     finally:
         conn.close()
     assert not any("(M4)" in v for v in violations)
+
+
+# ---------------------------------------------------------------------------
+# Gate-bearing tables (Codex code review 2026-08-03, finding 4)
+# ---------------------------------------------------------------------------
+#
+# Five registered checks read `discovery_routing_audit` behind
+# `if not _has_table(...): return []`. That compat gate exists so a pre-v2 asset
+# still verifies -- but nothing insisted the table be present on a CURRENT one,
+# so deleting it turned all five green at once. `discovery_identification` and
+# `manuscript_display` carried the same hazard.
+#
+# These are whole-verifier controls: each drops one table from a copy of the
+# clean fixture and asserts `verify()` reports the specific inventory violation.
+# Asserting on the message, not merely on a nonzero return, matters here --
+# dropping a referenced table also trips the FK check, so a bare "it went red"
+# assertion would pass even with the inventory check deleted.
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("table", [
+    "discovery_routing_audit",
+    "discovery_identification",
+    "manuscript_display",
+])
+def test_dropping_a_gate_bearing_table_is_a_violation(tmp_path, capsys, table):
+    db = _copy_fixture(tmp_path, f"no_{table}.db")
+    conn = _connect_rw(db)
+    conn.execute(f'DROP TABLE "{table}"')
+    conn.commit()
+    conn.close()
+
+    rc = verify_mod.verify(str(db), EXPECTED_FRAME_HASH)
+    captured = capsys.readouterr()
+    out = captured.err + captured.out  # violations go to stderr
+
+    assert rc != 0, f"dropping {table} left the verifier green"
+    assert "gate-bearing table(s) absent" in out, (
+        f"dropping {table} did not produce the inventory violation; the run failed "
+        f"for some other reason, which means the inventory check is not what caught "
+        f"it. Output:\n{out}"
+    )
+    assert table in out, f"the violation did not name {table}. Output:\n{out}"
+
+
+def test_gate_bearing_control_is_not_vacuous():
+    """The clean fixture carries all three tables, so the parametrized controls
+    above are testing a state the fixture can actually leave -- not asserting on
+    something already absent."""
+    conn = sqlite3.connect(f"file:{FIXTURE_DB}?mode=ro", uri=True)
+    try:
+        present = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+    assert verify_mod._GATE_BEARING_TABLES <= present, (
+        "the clean fixture is missing a gate-bearing table, so the drop controls "
+        "prove nothing"
+    )

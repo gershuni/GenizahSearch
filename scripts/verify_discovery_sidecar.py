@@ -1627,6 +1627,51 @@ def check_meta_audience(
     return []
 
 
+# Tables whose ABSENCE silently converts a registered gate into a no-op.
+#
+# Each check that reads one of these is compat-gated (`if not _has_table(...):
+# return []`) so a pre-v2 asset still verifies. That compatibility is only safe
+# while SOMETHING insists the table exists on a current asset. It did not:
+# removing `discovery_routing_audit` from a current artifact turned FIVE gates
+# green simultaneously -- replayability, kept-tie pairing, demotion-reference
+# shipping, unknown-date demotion, and the coverage report -- with no violation
+# anywhere (Codex code review 2026-08-03, finding 4).
+#
+# `discovery_identification` and `manuscript_display` are compat-gated the same
+# way and carry the same hazard.
+_GATE_BEARING_TABLES = frozenset({
+    "discovery_routing_audit",
+    "discovery_identification",
+    "manuscript_display",
+})
+
+
+def check_gate_bearing_tables_present(conn: sqlite3.Connection) -> List[str]:
+    """Every gate-bearing table MUST be present. Unconditionally.
+
+    There is deliberately no legacy profile here. `meta.schema_version` cannot
+    discriminate -- it reads `discovery-v1` on both pre-v2 and current assets,
+    because the v2 changes shipped as amendments inside that version. The signal
+    that DOES discriminate is `meta.audience`, which `check_meta_audience`
+    already requires of every artifact without a compat gate. So any asset that
+    reaches this point is a current one, and a "legacy profile" would be
+    fiction: it would never be entered, while reading as though absence were
+    sometimes tolerated.
+
+    The per-check `_has_table` early returns are left in place. They are now
+    unreachable-in-practice belt-and-braces rather than the thing standing
+    between a missing table and a green run."""
+    missing = sorted(t for t in _GATE_BEARING_TABLES if not _has_table(conn, t))
+    if missing:
+        return [
+            f"sqlite_master: gate-bearing table(s) absent from a current-schema "
+            f"artifact: {missing} -- each one silently no-ops at least one "
+            f"registered check, so their absence must be a violation rather than "
+            f"a quiet pass"
+        ]
+    return []
+
+
 def check_authorized_index_set(conn: sqlite3.Connection) -> List[str]:
     """Amendment (D): the authorized index set is PRESENT. These are not
     performance hints -- `ux_discovery_claim_display_evidence_id` is a real
@@ -1737,6 +1782,7 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         violations += check_manuscript_display_carries_no_reference_content(conn)
         violations += check_works_genre_vocabulary(conn, meta)
         violations += check_meta_audience(conn, meta, audience)
+        violations += check_gate_bearing_tables_present(conn)
         violations += check_authorized_index_set(conn)
         violations += check_kept_tie_names_its_pair(conn)
         violations += check_coverage_gap_report(conn)  # non-fatal report
