@@ -1509,10 +1509,46 @@ def run_browser_actionability_check(base_url: str) -> None:
         try:
             for width, height in _BROWSER_VIEWPORTS:
                 context = browser.new_context(viewport={"width": width, "height": height})
+                # Arrive as a RETURNING visitor, not a first-time one.
+                #
+                # `web/main.py::_show_citation_reminder` opens a `persistent`
+                # Quasar dialog on every page unless localStorage says it has
+                # been seen. A fresh Playwright context has empty localStorage,
+                # so the dialog opened and its full-screen backdrop intercepted
+                # every click at the "more matches" control -- Playwright
+                # reported the control itself "visible, enabled and stable" and
+                # then timed out on `q-dialog__backdrop fixed-full ... intercepts
+                # pointer events`. That was this job's first real finding.
+                #
+                # THIS IS NOT THE FORBIDDEN PRECEDING ACTION. Criterion (e)
+                # forbids a preceding DISCLOSURE action -- opening an accordion,
+                # expanding a section, anything that reveals the control under
+                # test. Seeding an unrelated one-time site-wide modal as already
+                # dismissed reveals nothing: the control's own visibility,
+                # enabledness and hit-testability are still what the probe
+                # measures, and a real reader dismisses this dialog once and
+                # never sees it again. If a future edit makes this line click
+                # something on the findings page itself, that IS a disclosure
+                # action and the criterion is broken.
+                context.add_init_script(
+                    "try { localStorage.setItem('citation_reminder_seen', 'true'); }"
+                    " catch (e) {}"
+                )
                 try:
                     page = context.new_page()
                     page.goto(f"{base_url}{FINDINGS_ROUTE}", wait_until="domcontentloaded")
                     _wait_for_findings_page(page)
+                    # Fail loudly if a modal is over the page anyway: a silent
+                    # retry-until-timeout reads as "the control is broken" when
+                    # the real cause is something covering it.
+                    blockers = page.locator(".q-dialog__backdrop").count()
+                    assert blockers == 0, (
+                        f"{blockers} modal backdrop(s) cover the findings page at "
+                        f"{width}x{height}. The probe below would time out on the "
+                        "control while reporting it visible and enabled, which is "
+                        "a misleading failure. Identify the dialog and decide "
+                        "whether a reader meets it too."
+                    )
 
                     covered = []
                     # Both languages in ONE context, because reaching the second
