@@ -728,3 +728,430 @@ def _walk_strings(node, path="model"):
             yield from _walk_strings(value, "%s[%d]" % (path, index))
     elif isinstance(node, str):
         yield path, node
+
+
+# ===========================================================================
+# Task 2 -- status arbitration
+# ===========================================================================
+
+_PAGE_ID_ENVELOPE_STATES = {
+    "ok_resolved": lambda: page_ids_envelope(resolved=True, truncated=False),
+    "ok_unresolved": lambda: page_ids_envelope(items=(), total=0, resolved=False),
+    "ok_truncated": lambda: page_ids_envelope(resolved=True, truncated=True),
+    "outage": lambda: page_ids_envelope(status="unavailable"),
+}
+
+_EXPECTED_SCOPE_STATE = {
+    "ok_resolved": pm.SCOPE_RESOLVED,
+    "ok_unresolved": pm.SCOPE_UNRESOLVED,
+    "ok_truncated": pm.SCOPE_TRUNCATED,
+    "outage": pm.SCOPE_OUTAGE,
+}
+
+
+@pytest.mark.parametrize("claims_status", sorted(pm.SURFACE_STATUSES_ORDERED))
+@pytest.mark.parametrize("page_id_state", sorted(_PAGE_ID_ENVELOPE_STATES))
+def test_arbitration_cross_product_of_claim_status_and_page_scope(claims_status, page_id_state):
+    """All SIXTEEN combinations, read out of the model's own arbitration table.
+
+    Not a spot check: the states that were never enumerated are exactly the
+    ones that shipped wrong.
+    """
+    claims = claims_envelope([claim_row()]) if claims_status == "ok" \
+        else claims_envelope(status=claims_status)
+    made = bundle(claims=claims, page_ids=_PAGE_ID_ENVELOPE_STATES[page_id_state]())
+    model = pm.build_panel_rows(made)
+
+    expected_scope = _EXPECTED_SCOPE_STATE[page_id_state]
+    outcome = pm.ARBITRATION_TABLE[(claims_status, expected_scope)]
+
+    assert model.panel_status == claims_status == outcome.panel_status
+    assert model.manuscript_pane["scope_state"] == expected_scope == outcome.scope_state
+    if not outcome.pane_reports_manuscript_facts:
+        assert model.manuscript_pane["state"] == pm.PANE_UNRESOLVED
+
+
+def test_the_arbitration_table_is_total_over_the_cross_product():
+    expected = {(status, scope)
+                for status in pm.SURFACE_STATUSES_ORDERED
+                for scope in pm.SCOPE_STATES}
+    assert set(pm.ARBITRATION_TABLE) == expected
+    assert len(expected) == 16
+
+
+@pytest.mark.parametrize("status,total,hidden", [
+    ("ok", 0, True),
+    ("ok", 3, False),
+    ("unavailable", 0, False),
+    ("timeout", 0, False),
+    ("busy", 0, False),
+])
+def test_entry_control_is_hidden_only_on_a_successful_zero(status, total, hidden):
+    """Only ~17% of manuscripts carry shipped claims, so hiding on a TRUE zero
+    is right -- which is precisely why the zero has to be a true zero."""
+    claims = claims_envelope([claim_row()] * total if status == "ok" else (), total,
+                             status=status)
+    model = pm.build_panel_rows(bundle(claims=claims))
+    assert model.entry_control["hidden"] is hidden
+
+
+def test_a_works_outage_leaves_the_panel_visible_and_the_pane_unavailable():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(status="timeout"),
+    ))
+    assert model.entry_control["hidden"] is False
+    assert model.panel_status == "ok"
+    pane = model.manuscript_pane
+    assert pane["state"] == pm.PANE_OUTAGE
+    assert pane["service_state"]["message"] == ds.service_state_message("timeout", "en")
+    assert pane["service_state"]["retry"] == ds.retry_label("en")
+    assert "total" not in pane and "works" not in pane
+
+
+def test_page_scope_not_resolved_is_its_own_state_and_never_an_empty_result():
+    """An unresolved scope is a statement about OUR plumbing; rendering it as
+    "this manuscript has nothing elsewhere" attributes our failure to the
+    manuscript."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope([], 0, page_scope_resolved=False),
+    ))
+    pane = model.manuscript_pane
+    assert pane["scope_state"] == pm.SCOPE_UNRESOLVED
+    assert pane["state"] == pm.PANE_UNRESOLVED
+    assert pane["state"] != pm.PANE_EMPTY
+    assert "total" not in pane
+    assert "works" not in pane
+    assert pm.PANE_EMPTY not in [value for _, value in _walk_strings(pane, "pane")]
+
+
+def test_a_truncated_page_scope_is_flagged_and_its_total_is_labelled():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        page_ids=page_ids_envelope(resolved=True, truncated=True),
+        manuscript_works=works_envelope([work_summary_row()], 1),
+    ))
+    pane = model.manuscript_pane
+    assert pane["scope_state"] == pm.SCOPE_TRUNCATED
+    assert pane["partial_scope"] is True
+    assert pane["total_covers_resolved_pages_only"] is True
+
+
+def test_an_untruncated_scope_is_not_flagged_as_partial():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope([work_summary_row()], 1),
+    ))
+    assert model.manuscript_pane["partial_scope"] is False
+    assert model.manuscript_pane["total_covers_resolved_pages_only"] is False
+
+
+def test_no_truthiness_test_on_an_envelope_item_list_survives_in_the_module():
+    """`if not items:` cannot tell an outage from a zero -- which is the exact
+    failure the envelope exists to name."""
+    source = _model_source()
+    forbidden = (
+        r"if\s+not\s+items\b",
+        r"if\s+not\s+rows\b",
+        r"if\s+items\s*:",
+        r"if\s+rows\s*:",
+        r"if\s+not\s+\w*\[[\"']items[\"']\]",
+        r"if\s+\w*\[[\"']items[\"']\]\s*:",
+    )
+    for pattern in forbidden:
+        assert not re.search(pattern, source), pattern
+    assert "is_outage(" in source
+    assert 'status") == STATUS_OK' in source or "status\") == STATUS_OK" in source
+
+
+# ===========================================================================
+# Task 2 -- the disclosure model
+# ===========================================================================
+
+
+def _ratified_disclosure_level_count():
+    """Read the ratified number out of the decision record, never a literal."""
+    text = io.open(GATE1_DECISIONS, encoding="utf-8").read()
+    match = re.search(r"the panel implements \*\*(\w+)\*\* disclosure levels", text)
+    assert match is not None, "D-13e's code-consequence sentence is not where it was"
+    return {"two": 2, "three": 3, "four": 4}[match.group(1).lower()]
+
+
+def test_the_emitted_disclosure_level_count_equals_the_ratified_number():
+    model = pm.build_panel_rows(bundle([claim_row()]))
+    assert len(model.disclosure_levels) == _ratified_disclosure_level_count()
+    assert len(pm.DISCLOSURE_LEVEL_KEYS) == _ratified_disclosure_level_count()
+    assert [lvl["key"] for lvl in model.disclosure_levels] == list(pm.DISCLOSURE_LEVEL_KEYS)
+
+
+def test_the_middle_level_is_explicitly_not_identifications():
+    model = pm.build_panel_rows(bundle([claim_row()]))
+    middle = [lvl for lvl in model.disclosure_levels
+              if lvl["key"] == pm.LEVEL_ALSO_SHARES_TEXT][0]
+    assert middle["is_identifications"] is False
+    assert middle["note"] == ds.not_an_identification_note("en")
+    assert middle["default_visible"] is False
+
+
+def test_the_default_level_holds_only_main_pool_identifications_and_nothing_is_deleted():
+    rows = [
+        claim_row(claim_id="claim-main", evidence_id="ev-main", span_start=0, span_end=500),
+        claim_row(claim_id="claim-more", evidence_id="ev-more", work_id="w000002",
+                  canonical_work_id="w000002", display_work_id="w000002",
+                  span_start=800, span_end=900, main_pool=False,
+                  main_pool_reason=REASON_INSUFFICIENT_LENGTH, matched_letters=90),
+    ]
+    model = pm.build_panel_rows(bundle(rows))
+    default_level = model.disclosure_levels[0]
+    gated_level = [lvl for lvl in model.disclosure_levels
+                   if lvl["key"] == pm.LEVEL_MORE_MATCHES][0]
+
+    assert [r["claim_id"] for r in default_level["rows"]] == ["claim-main"]
+    assert all(r["in_main_pool"] is True for r in default_level["rows"])
+    assert [r["claim_id"] for r in gated_level["rows"]] == ["claim-more"]
+    assert len(list(pm.iter_rows(model))) == 2
+
+
+# ===========================================================================
+# Task 2 -- the manuscript pane
+# ===========================================================================
+
+
+def test_manuscript_pane_names_its_works_with_page_counts_in_a_deterministic_order():
+    """A bare count was rejected for a measured reason: manuscript-level
+    coherence is what makes a single claim judgeable."""
+    works = [
+        work_summary_row(canonical_work_id="w000801", display_work_id="w000801",
+                         neutral_title="Rashi on Lamentations", page_count=1,
+                         best_band_rank=1),
+        work_summary_row(canonical_work_id="w000800", display_work_id="w000800",
+                         neutral_title="Rashi on Song of Songs", page_count=5,
+                         best_band_rank=0),
+    ]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 2),
+    ))
+    pane = model.manuscript_pane
+    assert pane["state"] == pm.PANE_POPULATED
+    assert pane["header"] == ds.section_header(ds.SECTION_ELSEWHERE_IN_MANUSCRIPT, "en")
+    assert [w["work_id"] for w in pane["works"]] == ["w000800", "w000801"]
+    assert [w["page_count"] for w in pane["works"]] == [5, 1]
+    # Deterministic over input order: the reversed input emits the same order.
+    reversed_model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(list(reversed(works)), 2),
+    ))
+    assert [w["work_id"] for w in reversed_model.manuscript_pane["works"]] == \
+        ["w000800", "w000801"]
+    # Reader aid ONLY: it must never feed band assignment or routing.
+    assert pane["reader_aid_only"] is True
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_every_manuscript_pane_chip_title_routes_through_display_work_title(lang):
+    works = [
+        work_summary_row(canonical_work_id="w000176", display_work_id="w000176",
+                         neutral_title=W000176_RAW_TITLE, page_count=3),
+        work_summary_row(canonical_work_id="w000900", display_work_id="w000900",
+                         neutral_title="An Uncurated Work", page_count=1,
+                         best_band_rank=1),
+    ]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 2), lang=lang,
+    ))
+    titles = {w["work_id"]: w["work_title"] for w in model.manuscript_pane["works"]}
+    assert titles["w000176"] == ds.display_work_title("w000176", W000176_RAW_TITLE, lang)
+    assert titles["w000176"] != W000176_RAW_TITLE
+    assert titles["w000900"] == "An Uncurated Work"
+
+
+def test_a_gated_work_is_emitted_with_its_flag_rather_than_omitted():
+    """On the mockup's teaching case the five folios that made the anchor
+    judgeable were ALL behind the screening gate; filtering them out removes
+    exactly the context this pane exists to supply."""
+    works = [
+        work_summary_row(canonical_work_id="w000801", display_work_id="w000801",
+                         neutral_title="Reachable only behind the gate",
+                         gated=True, main_pool=False, page_count=5),
+    ]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 1),
+    ))
+    emitted = model.manuscript_pane["works"]
+    assert len(emitted) == 1
+    assert emitted[0]["gated"] is True
+    assert emitted[0]["in_main_pool"] is False
+
+
+def test_a_work_with_no_title_carries_the_explicit_missing_title_marker():
+    works = [work_summary_row(neutral_title=None, title_missing=True)]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 1),
+    ))
+    emitted = model.manuscript_pane["works"][0]
+    assert emitted["title_missing"] is True
+    assert emitted["work_title"] == ds.missing_title("en")
+
+
+def test_manuscript_pane_paginates_on_the_envelope_total_never_on_the_item_count():
+    """One sampled manuscript has 61 works elsewhere; the page carries six."""
+    works = [work_summary_row(canonical_work_id="w0009%02d" % i,
+                              display_work_id="w0009%02d" % i,
+                              neutral_title="Work %d" % i, page_count=1,
+                              best_band_rank=i)
+             for i in range(6)]
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works, 61),
+    ))
+    pane = model.manuscript_pane
+    assert pane["total"] == 61
+    assert pane["total"] != len(works)
+    assert pane["paginated"] is True
+    assert pane["page_threshold"] == pm.MANUSCRIPT_PANE_PAGE_THRESHOLD
+
+    small = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope(works[:2], 2),
+    ))
+    assert small.manuscript_pane["paginated"] is False
+
+
+def test_a_resolved_scope_with_no_works_is_a_genuine_empty_not_an_unresolved_one():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        manuscript_works=works_envelope([], 0, page_scope_resolved=True),
+    ))
+    assert model.manuscript_pane["state"] == pm.PANE_EMPTY
+    assert model.manuscript_pane["total"] == 0
+
+
+# ===========================================================================
+# Task 2 -- the related-pages section
+# ===========================================================================
+
+
+def test_related_pages_shows_a_distinct_opposite_page_count_and_no_rows_by_default():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        related_count=related_count_envelope(total=37),
+    ))
+    section = model.related_pages
+    assert section["header"] == ds.section_header(ds.SECTION_PAGES_MATCHING_THIS_PAGE, "en")
+    assert section["count"] == 37
+    assert section["count_unit"] == "distinct_opposite_pages"
+    assert section["label"] == ds.related_pages_label("en")
+    assert section["count_line"] == ds.related_pages_count_line(37, "en")
+    assert section["rows_state"] == pm.ROWS_NOT_REQUESTED
+    assert "rows" not in section
+
+
+def test_the_header_count_survives_when_the_rows_read_fails():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        related_count=related_count_envelope(total=37),
+        related_rows=related_rows_envelope(status="busy"),
+    ))
+    section = model.related_pages
+    assert section["count"] == 37
+    assert section["rows_state"] == pm.ROWS_OUTAGE
+    assert section["service_state"]["retry"] == ds.retry_label("en")
+
+
+def test_a_count_outage_never_fabricates_a_zero():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope([claim_row()]),
+        related_count=related_count_envelope(status="unavailable"),
+    ))
+    section = model.related_pages
+    assert section["count"] is None
+    assert section["count_state"] == pm.ROWS_OUTAGE
+    assert "count_line" not in section
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("not_requested", pm.ROWS_NOT_REQUESTED),
+    ("populated", pm.ROWS_POPULATED),
+    ("empty", pm.ROWS_EMPTY),
+    ("outage", pm.ROWS_OUTAGE),
+])
+def test_the_four_related_row_states_are_distinct(case, expected):
+    """The failure this catches is the one that would let the panel tell a
+    reader "no related pages" about a query that was never issued."""
+    inputs = {
+        "not_requested": None,
+        "populated": related_rows_envelope([related_page_row()], 1),
+        "empty": related_rows_envelope([], 0),
+        "outage": related_rows_envelope(status="unavailable"),
+    }
+    made = bundle([claim_row()], related_rows=inputs[case])
+    section = pm.build_panel_rows(made).related_pages
+    assert section["rows_state"] == expected
+
+    emitted = {}
+    for name, value in inputs.items():
+        emitted[name] = pm.build_panel_rows(
+            bundle([claim_row()], related_rows=value)).related_pages
+    names = sorted(emitted)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            assert emitted[a] != emitted[b], (a, b)
+    assert len({e["rows_state"] for e in emitted.values()}) == 4
+
+
+def test_opening_the_toggle_installs_the_rows_without_touching_the_other_envelopes():
+    base = bundle([claim_row()], related_count=related_count_envelope(total=2))
+    opened = base.with_related_rows(related_rows_envelope([related_page_row()], 2))
+    section = pm.build_panel_rows(opened).related_pages
+    assert section["rows_state"] == pm.ROWS_POPULATED
+    assert section["rows"][0]["related_page_id"] == "page-99"
+    assert section["count"] == 2
+    for field_name in pm.EAGER_ENVELOPE_FIELDS:
+        assert getattr(opened, field_name) == getattr(base, field_name)
+
+
+# ===========================================================================
+# Task 2 -- the per-work expansion descriptor
+# ===========================================================================
+
+
+def test_every_identification_row_carries_a_lazy_expansion_descriptor():
+    model = pm.build_panel_rows(bundle([claim_row()]))
+    row = list(pm.iter_rows(model))[0]
+    descriptor = row["expansion"]
+    assert descriptor["work_id"] == "w000001"
+    assert descriptor["anchor_sys_id"] == "990051079570205171"
+    assert descriptor["anchor_claim_type"] == ids.CLAIM_TYPE_DIRECT_WITNESS
+    assert descriptor["anchor_evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
+    assert descriptor["anchor_confidence_band"] == \
+        ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC
+    assert descriptor["page_size"] == pm.EXPANSION_PAGE_SIZE
+    assert descriptor["loaded"] is False
+    # Nothing is fetched with the panel: the heaviest work has thousands of
+    # claim rows and the median manuscript carries one work.
+    assert "rows" not in descriptor and "items" not in descriptor
+
+
+@pytest.mark.parametrize("dropped", [
+    "sys_id", "relation_kind", "evidence_source", "confidence_band",
+])
+def test_a_partial_anchor_identity_raises_naming_present_and_missing_fields(dropped):
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([claim_row(**{dropped: None})]))
+    message = str(exc.value)
+    assert "anchor" in message
+    assert "missing" in message.lower() and "present" in message.lower()
+
+
+def test_no_literal_bucket_name_is_defined_in_the_module():
+    """Bucket names come from `bucket_label`; a second spelling here is how the
+    three surfaces start disagreeing."""
+    source = _model_source().lower()
+    for label in ("main pool", "more matches", "מאגר עיקרי", "התאמות נוספות"):
+        assert label.lower() not in source, label
+    assert "bucket_label" in _model_source()
