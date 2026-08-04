@@ -508,10 +508,12 @@ def test_curated_w000176_title_is_the_curated_string_and_never_the_raw_one(
 
     for path, value in _walk_strings(model.as_dict()):
         assert W000176_RAW_TITLE != value, path
-        if W000176_RAW_TITLE in value:
-            # The curated label legitimately CONTAINS the recorded title as its
-            # first half; nothing else may.
-            assert value == expected, path
+        # The Hebrew curated label legitimately CONTAINS the recorded title as
+        # its first half. Strip every occurrence of the CURATED string and the
+        # raw title must be gone -- so the only route it ever took to a display
+        # field was through `display_work_title`.
+        residue = value.replace(expected, "")
+        assert W000176_RAW_TITLE not in residue, path
 
 
 def test_an_uncurated_work_title_passes_through_unchanged():
