@@ -279,6 +279,76 @@ if set(ARBITRATION_TABLE) != _EXPECTED_ARBITRATION_KEYS:  # pragma: no cover -- 
 
 
 # ---------------------------------------------------------------------------
+# Error paths. A TYPE distinction, not a list of audited message sites.
+# ---------------------------------------------------------------------------
+
+
+class PanelContractError(ValueError):
+    """A refusal this module composed ITSELF, and whose text is therefore safe
+    to log.
+
+    Everything this model reads -- an envelope, a claim row, a work summary, a
+    title -- is artifact content, and the artifact may carry restricted
+    (M-source / R-source) text. The standing rule is that such content never
+    reaches a log; a caller that does `logger.exception(...)` around
+    `build_panel_rows` must not thereby publish a row it was handed.
+
+    Patching the interpolations Codex cited is NOT enough, and the loader next
+    door (`web/discovery_assets.py`, code review 2A finding 1) is why we know:
+    two paths there carried artifact text into a log without a single f-string
+    appearing in the file -- `int(x)` raising ``invalid literal for int() with
+    base 10: '<raw value>'``, and `OSError` naming a path built from the
+    manifest's own basename. An audit that greps for f-strings cannot find
+    either.
+
+    So the rule here is a type, not a habit. Every deliberate refusal below
+    raises THIS class with a message composed from fixed error CODES, this
+    module's own constants, FIELD NAMES and COUNTS -- never a value. Anything
+    else that escapes -- a `KeyError` naming its key, a library `ValueError`
+    naming its input, a future raise site nobody audits -- is caught at the two
+    public boundaries (`PanelServiceBundle.__post_init__` and
+    `build_panel_rows`) and re-raised as THIS class carrying only the offending
+    exception's TYPE NAME, with the chain severed (`from None`) so the original
+    message cannot reappear in a formatted traceback.
+
+    It subclasses `ValueError` because that is the contract callers already
+    have, and because a refusal IS a statement about a bad value -- just never
+    a quotation of one.
+    """
+
+
+#: The residue a reduced exception is allowed to carry. A Python type's name is
+#: CODE, never artifact content -- the same residue `web/discovery_assets.py`
+#: settled on for its fail-closed handler.
+_CODE_UNAUDITED_RAISE = "model_internal_refusal"
+
+
+def _reduce_to_type(exc: BaseException, where: str) -> "PanelContractError":
+    """Re-raise material for an exception this module did not compose."""
+    return PanelContractError(
+        "%s: %s raised %s while %s -- detail withheld, because the message may "
+        "quote artifact content this model was handed"
+        % (_CODE_UNAUDITED_RAISE, type(exc).__module__, type(exc).__name__, where)
+    )
+
+
+def _int_or_refuse(value: Any, field_name: str) -> int:
+    """`int(value)`, with the conversion's own error message suppressed.
+
+    `int('<raw value>')` names its input in the exception it raises. That is
+    the exact path that survived the first fix on the sidecar loader, and there
+    is no f-string here for an auditor to find.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise PanelContractError(
+            "field_not_an_integer: field %r is not convertible to an integer "
+            "(value withheld)" % (field_name,)
+        ) from None
+
+
+# ---------------------------------------------------------------------------
 # The input bundle.
 # ---------------------------------------------------------------------------
 
@@ -290,31 +360,40 @@ def _validate_envelope(field_name: str, value: Any, *, optional: bool) -> None:
     `None` is a meaningful value. Everywhere else `None` raises: a bundle that
     accepted `None` on an eager field would let a real outage be dropped on the
     floor as "nobody asked for this".
+
+    The KEYS and the STATUS a caller supplies are untrusted content and are
+    never named -- only counted, and only against this module's own expected
+    set (see `PanelContractError`).
     """
     if value is None:
         if optional:
             return
-        raise ValueError(
-            "PanelServiceBundle.%s: None is not accepted -- this envelope is "
-            "fetched eagerly, so its absence would hide a real outage behind "
-            "'not requested' (only %s may be None)" % (field_name, LAZY_ENVELOPE_FIELD)
+        raise PanelContractError(
+            "envelope_none_on_eager_field: PanelServiceBundle.%s is fetched "
+            "eagerly, so accepting None would hide a real outage behind 'not "
+            "requested' (only %s may be None)" % (field_name, LAZY_ENVELOPE_FIELD)
         )
     if not isinstance(value, Mapping):
-        raise ValueError(
-            "PanelServiceBundle.%s: expected a four-key envelope %s, got %s -- a "
-            "bare list cannot say whether it is empty because the manuscript is "
-            "empty or because the service failed"
+        raise PanelContractError(
+            "envelope_not_a_mapping: PanelServiceBundle.%s expected the four-key "
+            "envelope %s, got a %s -- a bare list cannot say whether it is empty "
+            "because the manuscript is empty or because the service failed"
             % (field_name, sorted(ENVELOPE_KEYS), type(value).__name__)
         )
-    if set(value) != ENVELOPE_KEYS:
-        raise ValueError(
-            "PanelServiceBundle.%s: envelope keys %s != the live shape %s"
-            % (field_name, sorted(value), sorted(ENVELOPE_KEYS))
+    supplied = set(value)
+    if supplied != ENVELOPE_KEYS:
+        raise PanelContractError(
+            "envelope_key_set_mismatch: PanelServiceBundle.%s does not carry "
+            "exactly the live shape %s -- missing %s, plus %d unexpected key(s) "
+            "(their names are caller content and are withheld)"
+            % (field_name, sorted(ENVELOPE_KEYS),
+               sorted(ENVELOPE_KEYS - supplied), len(supplied - ENVELOPE_KEYS))
         )
     if value["status"] not in SURFACE_STATUSES:
-        raise ValueError(
-            "PanelServiceBundle.%s: status %r is outside the closed vocabulary %s"
-            % (field_name, value["status"], sorted(SURFACE_STATUSES))
+        raise PanelContractError(
+            "envelope_status_outside_vocabulary: PanelServiceBundle.%s carries a "
+            "status outside the closed vocabulary %s (found value withheld)"
+            % (field_name, sorted(SURFACE_STATUSES))
         )
 
 
@@ -336,10 +415,19 @@ class PanelServiceBundle:
     show_more: bool = False
 
     def __post_init__(self) -> None:
-        for field_name in EAGER_ENVELOPE_FIELDS:
-            _validate_envelope(field_name, getattr(self, field_name), optional=False)
-        _validate_envelope(
-            LAZY_ENVELOPE_FIELD, getattr(self, LAZY_ENVELOPE_FIELD), optional=True)
+        # One of the two public boundaries. Our own refusals pass through
+        # verbatim; anything else -- a Mapping whose __iter__ raises, a future
+        # check nobody audits -- is reduced to its type name so it cannot carry
+        # a caller-supplied value into a log. See `PanelContractError`.
+        try:
+            for field_name in EAGER_ENVELOPE_FIELDS:
+                _validate_envelope(field_name, getattr(self, field_name), optional=False)
+            _validate_envelope(
+                LAZY_ENVELOPE_FIELD, getattr(self, LAZY_ENVELOPE_FIELD), optional=True)
+        except PanelContractError:
+            raise
+        except Exception as exc:
+            raise _reduce_to_type(exc, "validating the envelope set") from None
 
     def with_related_rows(self, envelope: Mapping[str, Any]) -> "PanelServiceBundle":
         """A copy carrying the lazily-fetched related-page rows -- what a
@@ -356,9 +444,16 @@ def _is_ok(envelope: Mapping[str, Any]) -> bool:
     return envelope.get("status") == STATUS_OK
 
 
+def _envelope_total(envelope: Mapping[str, Any]) -> int:
+    """The envelope's own total. `total` is artifact content, so the
+    conversion goes through `_int_or_refuse` rather than letting `int()` name
+    the value it choked on."""
+    return _int_or_refuse(envelope.get("total") or 0, "total")
+
+
 def _is_ok_zero(envelope: Mapping[str, Any]) -> bool:
     """A SUCCESSFUL zero -- the only state the entry control hides on."""
-    return _is_ok(envelope) and int(envelope.get("total") or 0) == 0
+    return _is_ok(envelope) and _envelope_total(envelope) == 0
 
 
 def _items(envelope: Mapping[str, Any]) -> List[Mapping[str, Any]]:
@@ -430,7 +525,7 @@ def _display_work_id(row: Mapping[str, Any]) -> Any:
 def _band_rank(row: Mapping[str, Any], key: str = "band_rank") -> int:
     """The row's band rank, with an out-of-lattice/absent rank sorting LAST."""
     rank = row.get(key)
-    return _UNRANKED_BAND_RANK if rank is None else int(rank)
+    return _UNRANKED_BAND_RANK if rank is None else _int_or_refuse(rank, key)
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +556,7 @@ def _span_key(row: Mapping[str, Any]) -> Optional[Tuple[int, int]]:
     start, end = row.get("span_start"), row.get("span_end")
     if start is None or end is None:
         return None
-    return (int(start), int(end))
+    return (_int_or_refuse(start, "span_start"), _int_or_refuse(end, "span_end"))
 
 
 def _group_by_span(
@@ -558,13 +653,34 @@ def _is_default_surface_eligible(row: Mapping[str, Any]) -> bool:
 
 
 #: Closed stored vocabularies every input claim is checked against BEFORE any
-#: predicate reads them. Without this the two-limb eligibility test is not
-#: total: a row carrying a routing status outside the frozen enum satisfies
-#: neither limb and neither its negation, and the four-value truth table has
-#: five values.
-_CLOSED_CLAIM_VOCABULARIES: Tuple[Tuple[str, frozenset], ...] = (
+#: predicate reads them, and before any of them is handed to a display-string
+#: lookup. TWO reasons, and the second is the one Codex found:
+#:
+#: 1. Without it the two-limb eligibility test is not total -- a row carrying a
+#:    routing status outside the frozen enum satisfies neither limb and neither
+#:    its negation, and the four-value truth table has five values.
+#: 2. `relation_chip`, `filter_code`, `row_headline` and `band_label` all raise
+#:    with the offending value formatted into the message (`{!r}`). Those
+#:    modules are right to do that -- their input domain is OUR vocabulary, not
+#:    artifact content -- which makes it THIS module's job not to hand them a
+#:    raw row value it has not checked. Checking here means the lookup cannot
+#:    raise, and the refusal a caller sees is one we composed.
+#:
+#: The two groups differ in how they treat ABSENCE. A missing routing or
+#: adjudication status is itself a refusal (reason 1). A missing anchor field is
+#: the ALL-OR-NONE contract's business (`_anchor_identity`), which must speak
+#: first so a short row is reported as a short row rather than as a vocabulary
+#: failure -- so those are checked only for a value that is PRESENT and outside
+#: the frozen set, which is exactly the case a display lookup would otherwise
+#: raise on while quoting it.
+_REQUIRED_CLAIM_VOCABULARIES: Tuple[Tuple[str, frozenset], ...] = (
     ("routing_status", ids.ROUTING_STATUSES),
     ("adjudication_status", ids.ADJUDICATION_STATUSES),
+)
+
+_ANCHOR_CLAIM_VOCABULARIES: Tuple[Tuple[str, frozenset], ...] = (
+    ("relation_kind", ids.CLAIM_TYPES),
+    ("evidence_source", ids.EVIDENCE_SOURCES),
 )
 
 
@@ -585,16 +701,36 @@ def _validate_claim_row(row: Mapping[str, Any], *, include_review: bool) -> None
     refusal that quotes it puts restricted text one `logger.exception` away
     from a log file.
     """
-    for field_name, vocabulary in _CLOSED_CLAIM_VOCABULARIES:
+    for field_name, vocabulary in _REQUIRED_CLAIM_VOCABULARIES:
         if row.get(field_name) not in vocabulary:
-            raise ValueError(
+            raise PanelContractError(
                 "claim_vocabulary_outside_closed_set: field %r is missing or "
                 "outside its frozen vocabulary (value withheld); the closed set "
                 "has %d members" % (field_name, len(vocabulary))
             )
+    for field_name, vocabulary in _ANCHOR_CLAIM_VOCABULARIES:
+        value = row.get(field_name)
+        if value is not None and value not in vocabulary:
+            raise PanelContractError(
+                "claim_vocabulary_outside_closed_set: field %r carries a value "
+                "outside its frozen vocabulary (value withheld); the closed set "
+                "has %d members" % (field_name, len(vocabulary))
+            )
+    # The band is only meaningful WITH its source (`band_label` is keyed on the
+    # pair), so the pair is what gets checked -- a band alone cannot produce a
+    # rank and would silently compare against a default. Absence stays the
+    # all-or-none contract's business, as above.
+    if row.get("evidence_source") is not None and row.get("confidence_band") is not None \
+            and row.get("confidence_band") not in ids.CONFIDENCE_BANDS_BY_SOURCE.get(
+                row.get("evidence_source"), frozenset()):
+        raise PanelContractError(
+            "claim_vocabulary_outside_closed_set: fields 'evidence_source' and "
+            "'confidence_band' are not a pair in the frozen band lattice "
+            "(values withheld)"
+        )
 
     if not include_review and not _is_default_surface_eligible(row):
-        raise ValueError(
+        raise PanelContractError(
             "claim_ineligible_for_default_surface: this claim satisfies neither "
             "limb of D-13g (routing_status == 'shipped' OR adjudication_status "
             "== 'human_confirmed') and the claims envelope's meta.include_review "
@@ -610,14 +746,14 @@ def _validate_claim_row(row: Mapping[str, Any], *, include_review: bool) -> None
     if bool(row.get("restored_by_human_confirmation")) != (
         _is_human_confirmed(row) and not _is_shipped(row)
     ):
-        raise ValueError(
+        raise PanelContractError(
             "claim_derived_confirmation_inconsistent: field "
             "'restored_by_human_confirmation' disagrees with its own definition "
             "over 'adjudication_status' and 'routing_status' (values withheld)"
         )
     if row.get("main_pool_reason") == REASON_MAIN_HUMAN_CONFIRMED \
             and not _is_human_confirmed(row):
-        raise ValueError(
+        raise PanelContractError(
             "claim_derived_confirmation_inconsistent: field 'main_pool_reason' "
             "asserts human confirmation that field 'adjudication_status' does "
             "not record (values withheld)"
@@ -646,7 +782,7 @@ def _disclosure_level_for(row: Mapping[str, Any]) -> str:
     matched = row.get("matched_letters")
     if (
         matched is not None
-        and int(matched) < SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS
+        and _int_or_refuse(matched, "matched_letters") < SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS
         and row.get("main_pool_reason") != REASON_MAIN_MULTIFOLIO
     ):
         # D-13c, with its ratified carve-out: the short-evidence floor never
@@ -683,10 +819,13 @@ def _anchor_identity(row: Mapping[str, Any]) -> Dict[str, Any]:
     missing = sorted(name for name, value in anchor.items() if value is None)
     if len(missing) > 0:
         present = sorted(name for name, value in anchor.items() if value is not None)
-        raise ValueError(
-            "expansion descriptor for claim %r: the anchor identity is "
-            "all-or-none -- present %s, missing %s"
-            % (row.get("claim_id"), present, missing)
+        # The FIELD NAMES are ours; the claim id is artifact content and is not
+        # named, so this refusal identifies the contract that failed without
+        # quoting the row that failed it.
+        raise PanelContractError(
+            "claim_anchor_identity_partial: the anchor identity is all-or-none "
+            "-- present %s, missing %s (the claim's own id is withheld)"
+            % (present, missing)
         )
     return anchor
 
@@ -868,7 +1007,7 @@ def _related_pages(bundle: PanelServiceBundle) -> Dict[str, Any]:
         section["count_state"] = ROWS_OUTAGE
         section["count_service_state"] = _service_state(count_envelope, lang)
     else:
-        count = int(count_envelope.get("total") or 0)
+        count = _envelope_total(count_envelope)
         section["count"] = count
         section["count_state"] = ROWS_EMPTY if count == 0 else ROWS_POPULATED
         section["count_unit"] = (count_envelope.get("meta") or {}).get("unit")
@@ -933,7 +1072,7 @@ def _work_chip_sort_key(chip: Mapping[str, Any], row: Mapping[str, Any]):
     total order, so the chip list never depends on the query's row order."""
     return (
         _band_rank(row, "best_band_rank"),
-        -int(row.get("page_count") or 0),
+        -_int_or_refuse(row.get("page_count") or 0, "page_count"),
         str(chip["work_id"]),
     )
 
@@ -963,7 +1102,7 @@ def _manuscript_pane(
         pane["service_state"] = _service_state(works_envelope, lang)
         return pane
 
-    total = int(works_envelope.get("total") or 0)
+    total = _envelope_total(works_envelope)
     pane["total"] = total
     # A truncated scope's total covers the RESOLVED pages only; labelling it as
     # the manuscript's total would state a number we did not measure.
@@ -998,7 +1137,7 @@ def _entry_control(
     """
     hidden = outcome.panel_hidden_on_zero and _is_ok_zero(claims)
     control: Dict[str, Any] = {"hidden": hidden, "status": claims.get("status")}
-    control["count"] = int(claims.get("total") or 0) if _is_ok(claims) else None
+    control["count"] = _envelope_total(claims) if _is_ok(claims) else None
     return control
 
 
@@ -1056,7 +1195,22 @@ def build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
     Makes no query, touches no UI object, and takes no decision that is already
     taken by `shared.discovery_grouping`, `shared.discovery_main_pool` or
     `shared.discovery_display_strings`.
+
+    The SECOND of the two public boundaries, and the reason log-safety here is
+    a property of the module rather than of whoever last edited it: our own
+    refusals leave verbatim, and anything else -- an exception from a shared
+    module, from the standard library, or from a raise site added next year --
+    leaves carrying only its type name. See `PanelContractError`.
     """
+    try:
+        return _build_panel_rows(bundle)
+    except PanelContractError:
+        raise
+    except Exception as exc:
+        raise _reduce_to_type(exc, "building the panel model") from None
+
+
+def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
     lang = bundle.lang
     outcome = ARBITRATION_TABLE[(bundle.claims.get("status"),
                                  _scope_state(bundle.page_ids, bundle.manuscript_works))]

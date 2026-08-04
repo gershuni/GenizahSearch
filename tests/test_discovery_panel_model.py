@@ -29,6 +29,7 @@ import ast
 import io
 import pathlib
 import re
+import traceback
 
 import pytest
 
@@ -1310,6 +1311,188 @@ def test_a_partial_anchor_identity_raises_naming_present_and_missing_fields(drop
     message = str(exc.value)
     assert "anchor" in message
     assert "missing" in message.lower() and "present" in message.lower()
+
+
+# ===========================================================================
+# Error paths never quote what they refused (code review 2B, finding 1).
+#
+# The threat is not that a refusal is unhelpful -- it is that a caller doing
+# `logger.exception(...)` around this model publishes a row the model was
+# handed, and a discovery row may carry restricted (M-source / R-source) text.
+#
+# Every control below seeds the SAME sentinel into the value the branch is
+# refusing, and asserts three things: the refusal arrived, it came from ITS OWN
+# branch (so it cannot pass by failing earlier), and the sentinel appears
+# nowhere a caller could publish -- including the CHAINED traceback, which is
+# where a `raise ... from` would put the original message complete with the
+# value that `int()` or a library lookup quoted.
+# ===========================================================================
+
+#: Stands in for restricted corpus content. Distinctive enough that a substring
+#: search cannot miss it, and it is not a real corpus name (D-25).
+RESTRICTED_SENTINEL = "M-SOURCE-SENTINEL-9f2c-NEVER-LOG-THIS"
+
+
+def _publishable_text(exc):
+    """Everything a caller could reasonably print about `exc`.
+
+    `traceback.format_exception` is what `logger.exception` calls, and it
+    follows `__cause__` / `__context__` -- so this catches the leak that
+    survives a message edit: a value-quoting library exception re-raised
+    WITHOUT severing the chain.
+    """
+    return "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__)
+    ) + repr(exc) + str(exc)
+
+
+def assert_refusal_withholds(code, call):
+    """`call()` must refuse from the `code` branch without quoting the sentinel."""
+    try:
+        call()
+    except Exception as exc:  # noqa: BLE001 -- the point is to inspect whatever escaped
+        published = _publishable_text(exc)
+        assert RESTRICTED_SENTINEL not in published, (
+            "the refusal published the very content it refused (%s)" % code)
+        assert code in str(exc), (
+            "expected the %r branch, got: %s" % (code, exc))
+        if exc.__context__ is not None:
+            assert exc.__suppress_context__ is True, (
+                "the chain was not severed, so a formatted traceback can still "
+                "reach the original message")
+        assert exc.__cause__ is None
+        return exc
+    raise AssertionError("expected a refusal from %r, nothing was raised" % code)
+
+
+def _sentinel_envelope(**overrides):
+    envelope_dict = {"status": "ok", "items": [], "total": 0, "meta": {}}
+    envelope_dict.update(overrides)
+    return envelope_dict
+
+
+def test_a_caller_supplied_envelope_key_is_counted_never_named():
+    assert_refusal_withholds(
+        "envelope_key_set_mismatch",
+        lambda: bundle(claims=_sentinel_envelope(**{RESTRICTED_SENTINEL: 1})),
+    )
+
+
+def test_a_caller_supplied_status_is_withheld():
+    assert_refusal_withholds(
+        "envelope_status_outside_vocabulary",
+        lambda: bundle(claims=_sentinel_envelope(status=RESTRICTED_SENTINEL)),
+    )
+
+
+@pytest.mark.parametrize("field_name", [
+    "routing_status", "adjudication_status", "relation_kind",
+    "evidence_source", "confidence_band",
+])
+def test_an_out_of_vocabulary_claim_value_is_withheld(field_name):
+    """`relation_chip`, `filter_code`, `row_headline` and `band_label` all
+    format the offending value into their own refusals. They are right to --
+    their input domain is our vocabulary, not artifact content -- which makes
+    it this model's job never to hand them a value it has not checked."""
+    assert_refusal_withholds(
+        "claim_vocabulary_outside_closed_set",
+        lambda: pm.build_panel_rows(bundle([claim_row(**{field_name: RESTRICTED_SENTINEL})])),
+    )
+
+
+def test_an_ineligible_claim_is_refused_without_quoting_the_row():
+    row = _eligibility_row(_REVIEW_ONLY, _UNREVIEWED, neutral_title=RESTRICTED_SENTINEL)
+    assert_refusal_withholds(
+        "claim_ineligible_for_default_surface",
+        lambda: pm.build_panel_rows(bundle([row])),
+    )
+
+
+def test_an_inconsistent_derived_marker_is_refused_without_quoting_the_row():
+    row = _eligibility_row(_SHIPPED, _UNREVIEWED, neutral_title=RESTRICTED_SENTINEL,
+                           restored_by_human_confirmation=True)
+    assert_refusal_withholds(
+        "claim_derived_confirmation_inconsistent",
+        lambda: pm.build_panel_rows(bundle([row])),
+    )
+
+
+def test_a_partial_anchor_does_not_name_the_claim_it_came_from():
+    row = claim_row(sys_id=None, claim_id=RESTRICTED_SENTINEL)
+    assert_refusal_withholds(
+        "claim_anchor_identity_partial",
+        lambda: pm.build_panel_rows(bundle([row])),
+    )
+
+
+@pytest.mark.parametrize("case", [
+    "matched_letters", "span_start", "band_rank", "claims_total",
+    "related_count_total", "works_total", "page_count",
+])
+def test_a_non_numeric_field_is_refused_without_letting_int_quote_it(case):
+    """`int('<raw value>')` names its input, and there is no f-string here for
+    an auditor to find. This is the path that survived the first fix on the
+    sidecar loader (code review 2A, finding 1)."""
+    made = {
+        "matched_letters": lambda: bundle([claim_row(matched_letters=RESTRICTED_SENTINEL)]),
+        "span_start": lambda: bundle([claim_row(span_start=RESTRICTED_SENTINEL)]),
+        "band_rank": lambda: bundle([claim_row(band_rank=RESTRICTED_SENTINEL)]),
+        "claims_total": lambda: bundle(claims=_sentinel_envelope(
+            items=[claim_row()], total=RESTRICTED_SENTINEL,
+            meta={"page_id": "page-1", "include_review": False})),
+        "related_count_total": lambda: bundle(
+            [claim_row()], related_count=_sentinel_envelope(
+                total=RESTRICTED_SENTINEL, meta={"unit": "distinct_opposite_pages"})),
+        "works_total": lambda: bundle(
+            [claim_row()], manuscript_works=_sentinel_envelope(
+                items=[work_summary_row()], total=RESTRICTED_SENTINEL,
+                meta={"page_scope_resolved": True, "lang": "en"})),
+        "page_count": lambda: bundle(
+            [claim_row()], manuscript_works=works_envelope(
+                [work_summary_row(page_count=RESTRICTED_SENTINEL),
+                 work_summary_row(canonical_work_id="w000999",
+                                  display_work_id="w000999")], 2)),
+    }[case]
+    assert_refusal_withholds(
+        "field_not_an_integer", lambda: pm.build_panel_rows(made()))
+
+
+def test_an_unaudited_raise_leaves_carrying_only_its_type_name(monkeypatch):
+    """The control that makes this a TYPE contract rather than a list of
+    audited sites: a raise nobody here wrote, from a module nobody here
+    audited, must still not publish what it was looking at."""
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("relation_chip exploded on " + RESTRICTED_SENTINEL)
+
+    monkeypatch.setattr(pm.ds, "relation_chip", _boom)
+    exc = assert_refusal_withholds(
+        "model_internal_refusal",
+        lambda: pm.build_panel_rows(bundle([claim_row()])),
+    )
+    assert "RuntimeError" in str(exc)
+
+
+def test_the_module_raises_only_its_own_refusal_type():
+    """A `raise ValueError(...)` added later would be caught by the boundary and
+    reduced -- but reduced means its message is LOST, and a refusal this module
+    wrote deserves to be read. The tree walk keeps the two honest."""
+    tree = ast.parse(_model_source())
+    raised = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            name = getattr(node.exc.func, "id", None) or getattr(node.exc.func, "attr", None)
+            raised.add(name)
+    assert raised <= {
+        "PanelContractError",   # every deliberate refusal
+        "_reduce_to_type",      # ... which is what this factory returns, too
+        "RuntimeError",         # the import-time arbitration totality guard
+        "KeyError",             # `_level`, on one of THIS module's constants
+    }, sorted(raised)
+    assert "ValueError" not in raised
+    # And the factory really does produce the refusal type -- otherwise the
+    # allowance above would be a hole rather than an exemption.
+    assert isinstance(pm._reduce_to_type(RuntimeError("x"), "testing"),
+                      pm.PanelContractError)
 
 
 def test_no_literal_bucket_name_is_defined_in_the_module():
