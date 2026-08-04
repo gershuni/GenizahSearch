@@ -62,6 +62,26 @@ jobs:
       # dedicated `atlas-bake-tests` job below.
       - run: pytest tests/ -m "not gui and not render_smoke and not atlas_bake"
 
+  # THE D-25 MASKING PATTERN SET IS PROVISIONED HERE, and this job is where the
+  # discovery surfaces' masking scan runs (tests/render_smoke/
+  # test_panel_render_smoke.py). Until this step existed there was no tracked
+  # provisioning at all: a clean checkout had no pattern file, so the required
+  # masking test skipped, and a restricted corpus name could have reached a
+  # committed surface while the gate reported a pass.
+  #
+  # The restricted names are NEVER committed (that is the rule the scan
+  # enforces). They come from the `MASKING_SCAN_PATTERNS` repository secret,
+  # are written to a gitignored path for the length of the job, and are deleted
+  # in an `if: always()` step.
+  #
+  # IF THE SECRET IS NOT SET, this job goes RED, deliberately: the scan then has
+  # zero patterns, and `scripts/check_atlas_masking.py` exits 1 on a
+  # zero-pattern run rather than reporting a clean surface it never inspected.
+  # Do not "fix" that by removing this step or restoring the test's skip -- add
+  # the secret. The scan MECHANISM is proved separately and unconditionally by
+  # `test_the_masking_scanner_can_actually_fail_on_this_capture`, which uses a
+  # fabricated needle and needs no secret, so a red run here means exactly one
+  # thing: this environment has no pattern set.
   render-smoke-tests:
     needs: lint-and-docs
     strategy:
@@ -72,6 +92,8 @@ jobs:
           - os: windows-latest
             python-version: '3.11'
     runs-on: ${{ matrix.os }}
+    env:
+      MASKING_SCAN_PATTERNS_FILE: ${{ github.workspace }}/.masking_patterns
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -82,10 +104,34 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1
       - run: pip install -r requirements-lock.txt
       - run: pip install pytest
+      # Written with Python rather than a shell redirect so the same step works
+      # on both matrix legs, and so the secret never appears in an echoed
+      # command line. `/.masking_patterns` is already gitignored, so the file
+      # cannot be picked up as an untracked candidate by the scan's own repo
+      # surface.
+      - name: Provision the D-25 masking pattern set
+        env:
+          MASKING_SCAN_PATTERNS: ${{ secrets.MASKING_SCAN_PATTERNS }}
+        shell: python
+        run: |
+          import os, pathlib
+          target = pathlib.Path(os.environ['MASKING_SCAN_PATTERNS_FILE'])
+          target.write_text(os.environ.get('MASKING_SCAN_PATTERNS', ''), encoding='utf-8')
+          try:
+              os.chmod(target, 0o600)   # no-op on Windows; harmless
+          except OSError:
+              pass
+          print(f'wrote {sum(1 for line in target.read_text(encoding="utf-8").splitlines() if line.strip() and not line.strip().startswith("#"))} pattern(s)')
       # Fresh process, only the render-smoke tests. They drive a NiceGUI User through
       # the app lifespan and are safe to run together (each restores slot_stack for
       # its siblings) but must NOT share a process with the broader suite.
       - run: pytest tests/ -m render_smoke
+      - name: Remove the masking pattern set
+        if: always()
+        shell: python
+        run: |
+          import os, pathlib
+          pathlib.Path(os.environ['MASKING_SCAN_PATTERNS_FILE']).unlink(missing_ok=True)
 
   # The real-browser actionability gate for the findings page's "more matches"
   # control (Phase 136, plan 136-16 criteria (e) and (f)). It drives Chromium at

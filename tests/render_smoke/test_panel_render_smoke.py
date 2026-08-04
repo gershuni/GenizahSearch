@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import os
 import re
 import subprocess
@@ -1546,21 +1547,161 @@ def test_the_owner_approved_wording_is_pinned_by_a_hardcoded_digest(lang):
 # The masking sweep.
 # ===========================================================================
 
-def test_the_masking_scan_is_recorded_and_fails_closed_when_unconfigured():
-    """`scripts/check_atlas_masking.py` fails CLOSED when
-    `MASKING_SCAN_PATTERNS_FILE` is unset -- an explicit skip is recorded, never
-    worked around. The capture path is outside the working tree."""
-    script = 'scripts/check_atlas_masking.py'
-    assert os.path.exists(script), script
-    patterns = os.environ.get('MASKING_SCAN_PATTERNS_FILE') or '.masking_patterns'
+MASKING_SCRIPT = 'scripts/check_atlas_masking.py'
+
+#: A FABRICATED needle. The real restricted patterns live only in the gitignored
+#: file `MASKING_SCAN_PATTERNS_FILE` points at; nothing in this repository may
+#: ever carry one, which is the whole rule (D-25). This token exists so the
+#: capture-and-scan PIPELINE can be proved able to fail without a secret.
+_FABRICATED_NEEDLE = 'ZZQQ-FABRICATED-MASKING-NEEDLE-ZZQQ'
+
+
+def _panel_surface_capture() -> str:
+    """Everything this surface can EMIT, as one text blob.
+
+    Not the repository -- the OUTPUT. Three egress classes, the same three the
+    honesty gate scans: the RENDERED panel (seven manuscript profiles x two
+    languages x four service states, entry control included), the EXACT
+    envelopes it consumes, and the forced error-path messages.
+
+    A repository scan cannot see any of these: a restricted name arriving from
+    the sidecar, or assembled at render time, is in none of the repo's bytes.
+    """
+    parts: List[str] = []
+    for _name, profile in MANUSCRIPT_PROFILES:
+        for lang in LANGS:
+            for status in SERVICE_STATES:
+                model = build_panel_rows(bundle_for(profile, lang, status))
+                client = render_panel(model)
+                for element in client.elements.values():
+                    if not (getattr(element, '_classes', None) or []):
+                        continue
+                    parts.extend(_subtree_texts(element))
+    for name, envelope in panel_envelopes():
+        parts.append(f'{name}: {json.dumps(envelope, ensure_ascii=False, default=str)}')
+    for mode, message in forced_error_paths():
+        parts.append(f'{mode}: {message}')
+    return '\n'.join(parts)
+
+
+@pytest.fixture(scope='module')
+def masking_capture(tmp_path_factory):
+    """The capture, written OUTSIDE the working tree.
+
+    `tmp_path_factory` roots under pytest's basetemp, never the repo, so a
+    stray capture can never itself trip `--scan-repo` -- the failure mode that
+    would make this gate report its own artifact as a leak.
+    """
+    directory = tmp_path_factory.mktemp('discovery-panel-masking')
+    text = _panel_surface_capture()
+    capture = directory / 'panel_surface_capture.txt'
+    capture.write_text(text, encoding='utf-8')
+    return capture
+
+
+def test_the_capture_really_holds_the_rendered_surface(masking_capture):
+    """Guards the OTHER two tests. A clean scan over an empty (or trivially
+    small) capture is the purest false green available here, and both scans
+    below would report exactly that."""
+    text = masking_capture.read_text(encoding='utf-8')
+    assert len(text) > 5000, f'the capture is {len(text)} chars -- it captured nothing'
+    # Text from each of the three egress classes, so a capture that silently
+    # lost one is caught by name rather than by a byte count.
+    assert dp._MANUSCRIPT_PANE_SCOPE_NOTE['en'] in text, (
+        'no RENDERED panel text in the capture')
+    assert 'distinct_opposite_pages' in text, 'no ENVELOPE in the capture'
+    assert 'temporarily unavailable' in text, 'no ERROR PATH in the capture'
+    for lang in LANGS:
+        assert ds.retry_label(lang) in text, f'{lang}: the outage renders are missing'
+
+
+def test_the_masking_scanner_can_actually_fail_on_this_capture(masking_capture, tmp_path):
+    """The POSITIVE CONTROL, and it needs no secret -- which is the point.
+
+    A fabricated needle is planted in a COPY of the capture and the real scanner
+    is pointed at both copies with that needle as its only pattern. The planted
+    copy must be reported; the untouched capture must not. Together those two
+    assertions prove the pipeline this suite claims -- render -> capture -> scan
+    -- is wired end to end and is capable of returning non-zero.
+
+    This test can NEVER skip. It is what stops
+    `test_the_rendered_panel_and_repo_pass_the_real_masking_scan` from being the
+    only evidence, and it is why a missing pattern file is a gap in COVERAGE
+    (which patterns are searched for) rather than a gap in the MECHANISM.
+    """
+    patterns_file = tmp_path / 'fabricated_patterns'
+    patterns_file.write_text(_FABRICATED_NEEDLE + '\n', encoding='utf-8')
+    planted = tmp_path / 'planted_capture.txt'
+    planted.write_text(
+        masking_capture.read_text(encoding='utf-8') + '\n' + _FABRICATED_NEEDLE,
+        encoding='utf-8')
+
+    env = dict(os.environ, MASKING_SCAN_PATTERNS_FILE=str(patterns_file))
+    planted_run = subprocess.run(
+        [sys.executable, MASKING_SCRIPT, '--scan-asset', str(planted)],
+        capture_output=True, text=True, env=env)
+    assert planted_run.returncode != 0, (
+        'the scanner passed a capture with a planted needle in it -- it cannot '
+        f'fail, so its clean runs prove nothing:\n{planted_run.stdout[-2000:]}')
+    assert _FABRICATED_NEEDLE not in (planted_run.stdout + planted_run.stderr), (
+        'the scanner ECHOED the matched pattern; a real one would leak into CI logs')
+
+    clean_run = subprocess.run(
+        [sys.executable, MASKING_SCRIPT, '--scan-asset', str(masking_capture)],
+        capture_output=True, text=True, env=env)
+    assert clean_run.returncode == 0, (
+        'the unplanted capture was reported -- the scan fires on correct output:'
+        f'\n{clean_run.stdout[-2000:]}\n{clean_run.stderr[-2000:]}')
+
+
+def test_the_rendered_panel_and_repo_pass_the_real_masking_scan(masking_capture):
+    """The D-25 scan, over the RENDERED OUTPUT and the repository.
+
+    WHAT THIS DOES WHEN THE PATTERN FILE IS ABSENT: it FAILS, with the
+    provisioning step named. It does not skip.
+
+    Why that is the right behaviour and a skip is not: the real patterns are the
+    only thing that makes this a check for RESTRICTED CORPUS NAMES rather than a
+    check for nothing. Without them the assertion this test's name makes is
+    unverified, and a required check that reports "unverified" as a pass is
+    exactly the silent green the standing rule forbids -- the same rule that
+    makes `scripts/check_atlas_masking.py` itself exit 1 on an unset
+    `MASKING_SCAN_PATTERNS_FILE` instead of exiting 0 with zero patterns.
+
+    Why a red run here is not a dead end: the MECHANISM is proved independently
+    and unconditionally by
+    `test_the_masking_scanner_can_actually_fail_on_this_capture`, which needs no
+    secret. So a failure here means precisely one thing -- this environment has
+    no pattern set -- and it has precisely one remedy, which the message states.
+    Do not "fix" a red run by restoring the skip.
+
+    Two surfaces, because they are blind to different leaks: `--scan-asset` over
+    the capture sees a name that arrives from the sidecar or is assembled at
+    render time (invisible to any repo scan), and `--scan-repo` sees a name
+    hardcoded in a committed or staged file (invisible to any render).
+    """
+    assert os.path.exists(MASKING_SCRIPT), MASKING_SCRIPT
+    configured = os.environ.get('MASKING_SCAN_PATTERNS_FILE')
+    patterns = configured or '.masking_patterns'
     if not os.path.exists(patterns):
-        pytest.skip(
-            'MASKING_SCAN_PATTERNS_FILE is unset and .masking_patterns is absent; '
-            'the scan FAILS CLOSED and the skip is recorded in the summary rather '
-            'than worked around')
+        pytest.fail(
+            'the D-25 masking scan cannot run: MASKING_SCAN_PATTERNS_FILE is '
+            f'{"set to a missing path" if configured else "unset"} and '
+            '.masking_patterns is absent.\n'
+            'This is a FAILURE and not a skip on purpose -- a masking check that '
+            'searches for no patterns reports a clean surface it never inspected.\n'
+            'To fix: write the restricted name/alias list to a gitignored file '
+            '(one pattern per non-comment line) and point '
+            'MASKING_SCAN_PATTERNS_FILE at it. In CI, inject it from a repository '
+            'secret and delete it in an `if: always()` step; never commit it.')
+
     env = dict(os.environ, MASKING_SCAN_PATTERNS_FILE=os.path.abspath(patterns))
     result = subprocess.run(
-        [sys.executable, script, '--scan-repo'],
+        [sys.executable, MASKING_SCRIPT,
+         '--scan-repo', '--scan-asset', str(masking_capture)],
         capture_output=True, text=True, env=env)
     assert result.returncode == 0, (
-        f'the repo masking scan failed:\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}')
+        'the masking scan reported a restricted string on the rendered panel '
+        'surface or in the repository. The report names a path, an offset and a '
+        'pattern INDEX and never the pattern text:\n'
+        f'{result.stdout[-2000:]}\n{result.stderr[-2000:]}')
