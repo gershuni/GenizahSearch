@@ -20,6 +20,7 @@ import os
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -693,6 +694,155 @@ def test_browse_concurrency_env_non_positive_falls_back_to_the_default(monkeypat
         monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", value)
         service = _make_service()
         assert service._browse_capacity >= 1
+
+
+# ---------------------------------------------------------------------------
+# THE ISOLATION IS REAL, NOT NOMINAL (code review round 13, finding 2).
+#
+# Two semaphores over ONE threadpool are two names for one budget: 24 browse
+# jobs can occupy or queue ahead of every worker in the default
+# `run_in_executor` pool -- which this repository never configures and whose
+# width is not guaranteed -- and a heavy read then times out while its OWN
+# semaphore still has capacity. Each class now has its own executor, sized to
+# its own capacity, so a slot guarantees a worker.
+# ---------------------------------------------------------------------------
+
+def test_a_HEAVY_read_gets_through_while_blocked_BROWSE_reads_hold_the_default_pool(
+        monkeypatch):
+    """The reproduction, as a test.
+
+    The event loop's DEFAULT executor is shrunk to ONE worker and two browse
+    reads are blocked in it. Before the per-class executors, the heavy read
+    queued behind them in that same pool and timed out with its own semaphore
+    at full capacity -- a `busy`/`unavailable` panel produced by an unrelated
+    path's back-pressure. It must now run.
+    """
+    monkeypatch.setenv("DISCOVERY_QUERY_TIMEOUT_WORK", "1.0")
+    monkeypatch.setenv("DISCOVERY_QUERY_TIMEOUT_BROWSE", "10.0")
+    monkeypatch.setenv("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", "0")
+    service = _make_service()
+
+    release_browse = threading.Event()
+    browse_started = threading.Event()
+    heavy_ran = {"n": 0}
+
+    def _blocking_browse(page_id, page, page_size):
+        browse_started.set()
+        release_browse.wait(timeout=10)
+        return []
+
+    def _heavy(work_id, enabled_bands, page, page_size, anchor_sys_id):
+        heavy_ran["n"] += 1
+        return []
+
+    service.get_claims_for_page = _blocking_browse
+    service.get_work_witnesses = _heavy
+
+    async def _run():
+        # A ONE-worker default pool: the narrowest honest statement of "the
+        # width of the shared pool is not something this code may assume".
+        tiny = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tiny-default")
+        asyncio.get_running_loop().set_default_executor(tiny)
+        try:
+            blocked = [
+                asyncio.ensure_future(service.get_claims_for_page_async("p001")),
+                asyncio.ensure_future(service.get_claims_for_page_async("p002")),
+            ]
+            for _ in range(200):
+                if browse_started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert browse_started.is_set(), "no browse read ever reached a worker"
+
+            # The heavy read, with both browse reads still occupying/queued.
+            result = await service.get_work_witnesses_async("w000001")
+            assert result == [], result
+            assert heavy_ran["n"] == 1, (
+                "the heavy read never reached a worker -- it is queued behind "
+                "browse work, so the two budgets share one execution resource "
+                "and the split is nominal")
+        finally:
+            release_browse.set()
+            await asyncio.gather(*blocked, return_exceptions=True)
+            tiny.shutdown(wait=False)
+
+    asyncio.run(_run())
+
+
+def test_each_budget_dispatches_into_its_OWN_executor_sized_to_its_own_capacity(
+        monkeypatch):
+    """The mechanism the test above depends on, asserted directly: two distinct
+    executors, each `max_workers` equal to its class's semaphore capacity. A
+    slot that does not guarantee a worker is not a budget."""
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_QUERIES", "2")
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", "7")
+    monkeypatch.setenv("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", "0")
+    service = _make_service()
+
+    # Lazy: nothing is built until a read dispatches, so a flag-OFF process
+    # pays no threads at all.
+    assert service._executors == {}
+
+    async def _run():
+        await service.get_claims_for_page_async("p001")
+        await service.get_work_witnesses_async("w000001")
+
+    asyncio.run(_run())
+
+    assert set(service._executors) == {"browse", "heavy"}
+    assert service._executors["browse"] is not service._executors["heavy"]
+    assert service._executors["browse"]._max_workers == service._browse_capacity == 7
+    assert service._executors["heavy"]._max_workers == service._heavy_capacity == 2
+
+
+def test_a_capacity_change_rebuilds_the_executor_WITH_the_semaphore(monkeypatch):
+    """If the semaphore is resized and the executor is not, the slot stops
+    guaranteeing a worker and the isolation quietly reverts to the defect."""
+    monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", "3")
+    monkeypatch.setenv("DISCOVERY_BROWSE_LRU_MAX_ENTRIES", "0")
+    service = _make_service()
+
+    async def _run():
+        await service.get_claims_for_page_async("p001")
+        first = service._executors["browse"]
+        assert first._max_workers == 3
+        monkeypatch.setenv("DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES", "9")
+        await service.get_claims_for_page_async("p002")
+        second = service._executors["browse"]
+        assert second is not first, "the executor survived a capacity change"
+        assert second._max_workers == service._browse_capacity == 9
+
+    asyncio.run(_run())
+
+
+def test_the_executors_are_retired_when_the_service_is_collected():
+    """A per-instance threadpool that outlives its service is a thread leak,
+    and the tests build a great many services."""
+    import gc
+
+    service = _make_service()
+    asyncio.run(service.get_claims_for_page_async("p001"))
+    executors = service._executors
+    assert executors, "nothing was built, so nothing is being proved"
+    pool = executors["browse"]
+
+    del service
+    gc.collect()
+    assert executors == {}, "the finalizer did not run"
+    assert getattr(pool, "_shutdown", False), "the threadpool was never shut down"
+
+
+def test_no_executor_crossing_uses_the_SHARED_default_pool():
+    """A source guard beside the behavioural ones. `run_in_executor(None, ...)`
+    means "the default pool", which is the shared resource the two budgets were
+    silently competing over."""
+    import inspect
+    from shared.discovery_service import DiscoveryService as _DS
+    source = inspect.getsource(_DS._run_off_loop)
+    assert "run_in_executor(None" not in source, (
+        "a crossing dispatches into the SHARED default executor, so the two "
+        "budgets are two names for one budget again")
+    assert "self._executor_for(" in source
 
 
 # ---------------------------------------------------------------------------

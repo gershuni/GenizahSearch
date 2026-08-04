@@ -35,6 +35,14 @@ Key invariants (134-06 must_haves):
     from the future's ``add_done_callback`` (never a bare ``finally``) so a
     timed-out thread cannot re-admit new work until it truly finishes (DC6).
     A cache HIT takes no slot, because it runs no query.
+  - Each budget class dispatches into its OWN ``ThreadPoolExecutor`` whose
+    ``max_workers`` EQUALS that class's capacity, never the shared default
+    ``run_in_executor`` pool. Over one shared pool the two budgets are two
+    names for one budget: browse work can occupy or queue ahead of every
+    worker in a pool this repository does not configure, and a heavy read
+    then times out while its own semaphore still has capacity. The executors
+    are built lazily (a flag-OFF process pays nothing) and shut down by a
+    ``weakref.finalize`` that closes over the dict, never over ``self``.
   - The browse-enrichment reads (``get_claims_for_page`` /
     ``get_pages_related_to_page``) are wrapped in a small bounded LRU keyed
     INCLUDING the sidecar version, so a version swap never serves stale
@@ -117,7 +125,9 @@ import os
 import re
 import sqlite3
 import threading
+import weakref
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from shared.discovery_band_labels import serialize_banded_claim
@@ -158,10 +168,17 @@ _DEFAULT_MAX_CONCURRENT_QUERIES = 4
 #: THREE reads concurrently and then a fourth, so a cap of 4 would put the
 #: SECOND simultaneous browse visitor into `busy` -- a self-inflicted outage on
 #: an already-shipped page, which is not what "bounded" is for. 24 admits eight
-#: concurrent cold panel loads while still standing between a retry burst and
-#: the process-wide `run_in_executor` threadpool (~32 workers, shared with
-#: Supabase, NLI and the browse page's own four enrichment fetches). Warm loads
-#: cost NO slot at all: the version-keyed LRU returns before any dispatch.
+#: concurrent cold panel loads. Warm loads cost NO slot at all: the
+#: version-keyed LRU returns before any dispatch.
+#:
+#: The two budgets are only really separate because each has its OWN executor
+#: (see `_executor_for`). Sized against the shared default `run_in_executor`
+#: pool the split was nominal: 24 browse jobs could occupy or queue ahead of
+#: every worker in a pool this repository never configures and whose width is
+#: not guaranteed, so a heavy read could time out while its own semaphore still
+#: had capacity -- reproducible with a two-worker default executor. A budget is
+#: only a budget when a slot guarantees a worker, so each class's semaphore
+#: capacity IS its executor's `max_workers` (code review round 13, finding 2).
 _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES = 24
 _DEFAULT_BROWSE_LRU_MAX_ENTRIES = 5000
 _DEFAULT_PAGE_SIZE_DEFAULT = 50
@@ -217,6 +234,22 @@ def _get_positive_float_env(name: str, default: float) -> float:
     env var; falls back to ``default`` instead."""
     value = _get_float_env(name, default)
     return value if value > 0 else default
+
+
+def _shutdown_executors(executors: Dict[str, "ThreadPoolExecutor"]) -> None:
+    """Retire a collected service's per-budget threadpools.
+
+    Registered through ``weakref.finalize`` over the DICT and never over the
+    service, because a finalizer holding ``self`` would keep the very object it
+    is meant to clean up alive. ``wait=False``: an in-flight query is left to
+    finish on its own thread, exactly as a timed-out read already is.
+    """
+    for executor in list(executors.values()):
+        try:
+            executor.shutdown(wait=False)
+        except Exception:                                    # pragma: no cover
+            pass
+    executors.clear()
 
 
 def _parse_json_field(value: Optional[str]) -> Any:
@@ -1311,6 +1344,27 @@ class DiscoveryService:
         )
         self._browse_sem = asyncio.Semaphore(browse_capacity)
         self._browse_capacity = browse_capacity
+
+        # One executor PER BUDGET CLASS, sized to that class's capacity.
+        #
+        # Without them the split was nominal: both budgets dispatched into the
+        # SAME default `run_in_executor` pool, which this repository never
+        # configures and whose width is not guaranteed, so 24 browse jobs could
+        # occupy or queue ahead of every worker and a heavy read could time out
+        # while its own semaphore still had capacity (round 13, finding 2).
+        # Because `max_workers` EQUALS the semaphore capacity, holding a slot
+        # now guarantees a worker for that class -- and the timed-out-thread
+        # case stays consistent, since the slot is held until the future
+        # completes, which is exactly as long as the worker is busy.
+        #
+        # Built lazily and per class: `ThreadPoolExecutor` spawns a thread only
+        # when it has work, so a process with the discovery flag OFF pays
+        # nothing. Shut down when the service is collected -- the finalizer
+        # closes over the DICT, never over `self`, or it would keep the service
+        # alive forever.
+        self._executors: Dict[str, ThreadPoolExecutor] = {}
+        self._executor_finalizer = weakref.finalize(
+            self, _shutdown_executors, self._executors)
 
     # ------------------------------------------------------------------
     # Lazy connection management (F15 / R8)
@@ -2608,6 +2662,14 @@ class DiscoveryService:
             if current_value == getattr(self, cap_attr):
                 setattr(self, sem_attr, asyncio.Semaphore(desired))
                 setattr(self, cap_attr, desired)
+                # The executor is rebuilt WITH the semaphore or the two sizes
+                # drift apart and the slot stops guaranteeing a worker. Safe
+                # here precisely because the guard above fires only when no
+                # slot is held, and a slot is held for the whole life of the
+                # future -- so this class has nothing in flight.
+                retired = self._executors.pop(kind, None)
+                if retired is not None:
+                    retired.shutdown(wait=False)
 
         sem = getattr(self, sem_attr)
         if sem.locked():
@@ -2618,6 +2680,22 @@ class DiscoveryService:
             sem.release()
 
         return _release
+
+    def _executor_for(self, kind: str) -> ThreadPoolExecutor:
+        """This budget class's OWN threadpool, `max_workers` == its capacity.
+
+        Called between `_acquire_slot` and `run_in_executor`, with no `await`
+        between the three, so a rebuild cannot interleave.
+        """
+        executor = self._executors.get(kind)
+        if executor is None:
+            _sem_attr, cap_attr, _env, _default = self._SLOT_SPECS[kind]
+            executor = ThreadPoolExecutor(
+                max_workers=max(1, int(getattr(self, cap_attr))),
+                thread_name_prefix=f"discovery-{kind}",
+            )
+            self._executors[kind] = executor
+        return executor
 
     async def _acquire_heavy_slot(self) -> Callable[[], None]:
         """The heavy budget, by its original name (kept: it is what the
@@ -2653,10 +2731,14 @@ class DiscoveryService:
         # There is no third branch and no `bounded=False` escape, deliberately:
         # an opt-in bound is a bound whose next caller forgets it, which is
         # exactly how the browse path came to have none (round 12, finding 4).
-        _release: Optional[Callable[[], None]] = await self._acquire_slot(
-            self._SLOT_HEAVY if heavy else self._SLOT_BROWSE)
+        kind = self._SLOT_HEAVY if heavy else self._SLOT_BROWSE
+        _release: Optional[Callable[[], None]] = await self._acquire_slot(kind)
         try:
-            fut = loop.run_in_executor(None, sync_fn, *args)
+            # This class's OWN executor, never the shared default one. Two
+            # budgets over one pool are two names for one budget: browse work
+            # could occupy or queue ahead of every worker and starve a heavy
+            # read that still held capacity (round 13, finding 2).
+            fut = loop.run_in_executor(self._executor_for(kind), sync_fn, *args)
             if _release is not None:
                 # Ownership of the release callable transfers to the
                 # done-callback -- a timed-out thread keeps occupying the
