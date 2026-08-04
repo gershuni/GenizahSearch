@@ -4836,8 +4836,10 @@ TRANSLATIONS.update({
     "All findings": "כל הממצאים",
     "Screening leads": "כיווני סינון",
     "My saved": "השמורים שלי",
-    "Phase 137": "שלב 137",
-    "Phase 138": "שלב 138",
+    # The inert mode tabs are badged "Coming soon", never with a plan number:
+    # "Phase 137"/"Phase 138" was internal planning vocabulary on a reader-facing
+    # surface. Those two keys are deliberately gone rather than left orphaned.
+    "Coming soon": "בקרוב",
     # --- "Show as": the row unit is a reader choice, not a design pick ---
     "Show as": "הצג כ",
     "One row per identification": "שורה לכל זיהוי",

@@ -819,7 +819,7 @@ def test_more_matches_control_uses_the_shared_bucket_vocabulary_not_a_local_stri
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("lang", ["en", "he"])
-def test_mode_strip_renders_three_modes_with_two_inert_and_phase_tagged(monkeypatch, lang):
+def test_mode_strip_renders_three_modes_with_two_inert_and_badged(monkeypatch, lang):
     from web.translations import tr as _tr
 
     client = _render_page(monkeypatch, lang=lang)
@@ -845,8 +845,14 @@ def test_mode_strip_renders_three_modes_with_two_inert_and_phase_tagged(monkeypa
             )
         tags = [t for el in _elements_with_class(client, f"{fp.MODES_CLASS}-phase")
                 for t in _subtree_strings(el)]
-        assert _tr("Phase 137") in tags and _tr("Phase 138") in tags, (
-            f"the future modes must be phase-tagged; got {tags!r}"
+        assert tags and all(t == _tr("Coming soon") for t in tags), (
+            f"an inert mode must be badged for a READER; got {tags!r}"
+        )
+        # The badge must never carry internal planning vocabulary again. A plan
+        # number tells a reader nothing about what the tab is or when it lands.
+        blob = " ".join(tags)
+        assert "Phase" not in blob and "שלב" not in blob, (
+            f"internal phase vocabulary is showing on a reader-facing badge: {tags!r}"
         )
     finally:
         set_language("he")

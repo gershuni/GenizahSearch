@@ -264,12 +264,17 @@ _OFFERED_BUCKETS: Tuple[str, ...] = (BUCKET_MAIN, BUCKET_MORE)
 #: which must never be confused with any of these.
 _OUTAGE_STATUSES: Tuple[str, ...] = ("unavailable", "timeout", "busy")
 
-#: The mode strip. "All findings" is live; the other two ship visible, inert and
-#: phase-tagged, so plans 137/138 add a tab rather than a page.
+#: The mode strip. "All findings" is live; the other two ship visible and inert
+#: so plans 137/138 add a tab rather than a page.
+#:
+#: The badge says "Coming soon", NOT the plan number. It previously read
+#: "Phase 138" / "Phase 137" — internal planning vocabulary rendered to readers,
+#: who have no way to know what a phase is or when one lands. The tab stays
+#: inert either way; only the word a reader sees changes.
 _MODES: Tuple[Tuple[str, Optional[str]], ...] = (
     ("All findings", None),
-    ("Screening leads", "Phase 138"),
-    ("My saved", "Phase 137"),
+    ("Screening leads", "Coming soon"),
+    ("My saved", "Coming soon"),
 )
 
 
