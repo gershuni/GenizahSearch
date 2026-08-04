@@ -77,9 +77,34 @@ logger = logging.getLogger(__name__)
 # Repo-root discovery_data/ -- deliberately OUTSIDE web/static/ (mirrors atlas
 # HIGH-1). Computed as the parent of this file's directory (web/) -> repo
 # root -> discovery_data/.
-DISCOVERY_DATA_DIR = os.path.join(
+_DEFAULT_DISCOVERY_DATA_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "discovery_data",
+)
+
+# DEV/CI-ONLY directory override (Phase 136, findings browser-actionability CI
+# gate). The repo's real `discovery_data/` is gitignored, so a CI runner has no
+# sidecar and every discovery surface hides cleanly -- which is correct, and
+# also makes it impossible to drive the findings page in a real browser on CI.
+# The `findings-browser-check` job therefore materializes the SYNTHETIC fixture
+# sidecar (tests/fixtures/discovery_v2_fixture.py) into a temp directory and
+# points this at it.
+#
+# Why an env override rather than repointing the repo's manifest.json: that
+# manifest is how tests/test_cert01_grading_validator.py resolves the REAL
+# artifact, so mutating it in place would silently redirect an unrelated gate.
+#
+# This widens no trust boundary. It selects WHICH directory is read; it does
+# not skip a single validation -- the loader below still enforces the exact
+# manifest asset_basename, the content hash, PRAGMA integrity_check, the schema
+# marker, the `public` audience gate, required tables/columns/meta keys, the
+# release-contract row counts and the frozen enum vocab, fail-closed, on
+# whatever it finds there. Read ONCE at import (never per request), so the
+# startup load stays authoritative and the existing monkeypatch-the-attribute
+# test idiom keeps working unchanged.
+_DISCOVERY_DATA_DIR_ENV = "GENIZAH_DISCOVERY_DATA_DIR"
+DISCOVERY_DATA_DIR = (
+    os.environ.get(_DISCOVERY_DATA_DIR_ENV, "").strip() or _DEFAULT_DISCOVERY_DATA_DIR
 )
 MANIFEST_FILENAME = "manifest.json"
 

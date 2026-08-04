@@ -1302,19 +1302,33 @@ def test_more_matches_click_replaces_the_rendered_result_set(lang):
 # ---------------------------------------------------------------------------
 # (e) + (f) The REAL-BROWSER actionability check and its positive control.
 #
-# STATUS AS SHIPPED BY PLAN 136-16: **NOT MET.** Playwright is not installed in
-# the execution environment (`scripts/capture_atlas_html.py` documents it as an
+# STATUS AS SHIPPED BY PLAN 136-16: **NOT MET.** Playwright was not installed in
+# that executor's environment (`scripts/capture_atlas_html.py` documents it as an
 # ad-hoc dev/ops tool, deliberately absent from every requirements file), and a
-# package install is outside what an executor may do unattended. The criterion
-# is therefore recorded NOT MET in 136-16-SUMMARY.md — never as a pass, and the
-# skip below is a CI-hygiene mechanism, not a claim about the criterion.
+# package install is outside what an executor may do unattended.
 #
-# The check itself is written and runnable: set GENIZAH_FINDINGS_BROWSER_CHECK=1
-# with Playwright + Chromium installed and a server reachable at
-# GENIZAH_FINDINGS_BROWSER_BASE_URL, and it exercises BOTH viewport widths in
-# BOTH languages, then runs its own positive control. With the env var SET and
-# the tooling ABSENT it FAILS — it never degrades to a silent green, which is
-# the same fail-closed posture this phase applies to the masking scan.
+# STATUS NOW: **WIRED INTO CI, awaiting its first green run.** The
+# `findings-browser-check` job in .github/workflows/ci.yml installs Playwright +
+# Chromium, materializes the SYNTHETIC fixture sidecar into a temp directory
+# (CI has no real `discovery_data/` — it is gitignored), serves the app against
+# it with DISCOVERY_ENABLED=1, waits for the origin to actually answer, and runs
+# this check with both env vars set. The criterion is upgraded from NOT MET only
+# when that job has actually passed — a wired gate is not yet a met criterion.
+#
+# The check exercises BOTH viewport widths in BOTH languages, then runs its own
+# positive control. With GENIZAH_FINDINGS_BROWSER_CHECK SET and the tooling
+# ABSENT (or the base URL empty) it FAILS — it never degrades to a silent green,
+# which is the same fail-closed posture this phase applies to the masking scan.
+# That property is load-bearing: a gate that can silently not run is worse than
+# no gate, because it is trusted anyway.
+#
+# LANGUAGE (fixed while wiring the job): the check used to navigate to
+# `?lang=en`. Nothing in the app reads that parameter — `web/main.py::
+# _resolve_ui_language` resolves the UI language from PER-USER STORAGE and
+# defaults to Hebrew — so a fresh browser context rendered Hebrew and the "EN"
+# pass looked for an English control that was never on the page. The check now
+# reads the language off the rendered control and reaches English the only way a
+# reader can: by clicking the header's own language toggle.
 # ---------------------------------------------------------------------------
 
 _BROWSER_CHECK_ENV = "GENIZAH_FINDINGS_BROWSER_CHECK"
@@ -1322,6 +1336,21 @@ _BROWSER_BASE_URL_ENV = "GENIZAH_FINDINGS_BROWSER_BASE_URL"
 
 #: Criterion (e) names both widths explicitly: a phone and a desktop.
 _BROWSER_VIEWPORTS = ((375, 812), (1440, 900))
+
+#: The header's own language toggle (`web/main.py::create_layout`). The app has
+#: no `?lang=` parameter — the UI language comes from per-user storage and
+#: defaults to Hebrew — so this control is the ONLY route a real reader has to
+#: English, and therefore the only honest way for this check to reach it.
+_LANG_TOGGLE_SELECTOR = ".lang-btn-header"
+
+#: NiceGUI paints its body over the websocket AFTER `load` fires, so every
+#: navigation here waits for the CONTROL, never for a network-idle heuristic.
+_CONTROL_TIMEOUT_MS = 30000
+
+#: The click's own budget. Deliberately short: this is the window in which the
+#: browser's actionability conditions must already hold, and it is what makes
+#: the positive control fail fast instead of hanging.
+_CLICK_TIMEOUT_MS = 5000
 
 
 def _playwright_available() -> bool:
@@ -1332,33 +1361,145 @@ def _playwright_available() -> bool:
     return True
 
 
-def _browser_actionability_probe(page, control_name: str) -> None:
+def _wait_for_findings_page(page) -> None:
+    """Block until the bucket control is actually painted, with a message that
+    names the likeliest cause when it never is."""
+    try:
+        page.wait_for_selector(
+            f".{fp.BUCKET_CONTROL_CLASS}", state="visible", timeout=_CONTROL_TIMEOUT_MS
+        )
+    except Exception as exc:  # noqa: BLE001 -- re-raised as a diagnosable assertion
+        raise AssertionError(
+            f"the findings page never painted its .{fp.BUCKET_CONTROL_CLASS} control at "
+            f"{FINDINGS_ROUTE}. The likeliest cause is NOT the control: the page "
+            "clean-hides behind discovery_available(), so the server needs "
+            "DISCOVERY_ENABLED=1 AND a sidecar that passes web/discovery_assets.py's "
+            "readiness contract. Check the server log before suspecting the control."
+        ) from exc
+
+
+def _rendered_language(page) -> str:
+    """The language the page ACTUALLY rendered in, read off the control itself.
+
+    Asking the page rather than asserting from the URL is the point: the app
+    resolves its language from per-user storage, so any assumption made outside
+    the browser is a guess.
+    """
+    from shared.discovery_display_strings import bucket_name
+
+    for lang in ("he", "en"):
+        if page.get_by_role("button", name=bucket_name(False, lang), exact=True).count():
+            return lang
+    raise AssertionError(
+        "the rendered page carries neither the Hebrew nor the English name of the "
+        "'more matches' control — the shared vocabulary and the page have diverged"
+    )
+
+
+def _switch_ui_language(page, from_lang: str) -> str:
+    """Click the header's language toggle and wait for the OTHER language's
+    control to be the one on the page."""
+    from shared.discovery_display_strings import bucket_name
+
+    target = "en" if from_lang == "he" else "he"
+    page.locator(_LANG_TOGGLE_SELECTOR).first.click(timeout=_CONTROL_TIMEOUT_MS)
+    # The toggle persists the choice and calls ui.navigate.reload(), so waiting
+    # on the TARGET language's control (rather than on any control) is what
+    # distinguishes "the new page painted" from "the old page is still up".
+    page.get_by_role("button", name=bucket_name(False, target), exact=True).first.wait_for(
+        state="visible", timeout=_CONTROL_TIMEOUT_MS
+    )
+    actual = _rendered_language(page)
+    assert actual == target, (
+        f"the language toggle did not switch {from_lang!r} -> {target!r} (still {actual!r}); "
+        "this check cannot claim to cover both languages"
+    )
+    return actual
+
+
+def _reset_to_main_bucket(page, lang: str) -> None:
+    """Put the page back in the MAIN bucket before probing.
+
+    Criterion (e) is about switching INTO the second bucket, and the choice
+    persists in per-user storage across a reload — so without this the second
+    pass would 'switch' from `more` to `more` and prove nothing.
+    """
+    from shared.discovery_display_strings import bucket_name
+
+    chip = page.get_by_role("button", name=bucket_name(True, lang), exact=True).first
+    chip.wait_for(state="visible", timeout=_CONTROL_TIMEOUT_MS)
+    if chip.get_attribute("aria-pressed") != "true":
+        chip.click(timeout=_CLICK_TIMEOUT_MS)
+        page.wait_for_timeout(750)
+
+
+def _browser_actionability_probe(page, control_name: str, lang=None) -> None:
     """Assert the browser's OWN actionability conditions hold at the control's
     locator (visible, stable, enabled, receiving pointer events at its hit
     point), then perform a real click, then assert the results region changed.
 
     This is the only check that can see a collapsed ancestor, a zero-height box,
-    a clip or an overlay — none of which a DOM-ancestry assertion can."""
+    a clip or an overlay — none of which a DOM-ancestry assertion can.
+
+    When `lang` is given the probe additionally asserts WHAT it changed to: the
+    result bar must now name the second bucket. A bare "the HTML differs" check
+    is satisfied by any re-render at all (NiceGUI re-mints element ids on every
+    paint), so on its own it would pass for a click that changed nothing.
+    """
+    from shared.discovery_display_strings import bucket_name
+
     locator = page.get_by_role("button", name=control_name, exact=True).first
-    before = page.locator(f".{fp.RESULTS_CLASS}").inner_html()
+    region = page.locator(f".{fp.RESULTS_CLASS}").first
+    before = region.inner_html()
     # No preceding disclosure action: click straight away. Playwright's own
     # actionability checks run inside click() and raise on failure.
-    locator.click(timeout=5000)
+    locator.click(timeout=_CLICK_TIMEOUT_MS)
     page.wait_for_timeout(750)
-    after = page.locator(f".{fp.RESULTS_CLASS}").inner_html()
+    after = region.inner_html()
     assert after != before, (
         "the results region did not change after a real browser click on "
         f"{control_name!r}"
+    )
+    if lang is not None:
+        text = region.inner_text()
+        assert bucket_name(False, lang) in text, (
+            "the results region changed but does not name the second bucket — the "
+            f"click on {control_name!r} re-rendered without switching bucket"
+        )
+
+
+def _positive_control(page, lang: str, width: int) -> None:
+    """(f) Same page, same locator, one ancestor collapsed: the SAME probe must
+    now fail. Without this, (e) is a check nobody has watched fail."""
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+    from shared.discovery_display_strings import bucket_name
+
+    page.eval_on_selector(
+        f".{fp.BUCKET_CONTROL_CLASS}",
+        "el => el.parentElement.style.display = 'none'",
+    )
+    failed = False
+    try:
+        _browser_actionability_probe(page, bucket_name(False, lang))
+    except (PlaywrightTimeout, PlaywrightError, AssertionError):
+        failed = True
+    finally:
+        page.eval_on_selector(
+            f".{fp.BUCKET_CONTROL_CLASS}",
+            "el => el.parentElement.style.display = ''",
+        )
+    assert failed, (
+        "POSITIVE CONTROL DID NOT FIRE: the browser actionability check passed at "
+        f"{width}px in {lang} with an ancestor of the control collapsed. The check "
+        "is not watching what it claims to watch."
     )
 
 
 def run_browser_actionability_check(base_url: str) -> None:
     """(e) at 375px and desktop, in both languages, plus (f) its positive
-    control — a deliberately collapsed ancestor that must make the SAME check
-    fail with an actionability error. Without (f), (e) is a check nobody has
-    watched fail."""
-    from playwright.sync_api import Error as PlaywrightError
-    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+    control at each of the four combinations."""
     from playwright.sync_api import sync_playwright
 
     from shared.discovery_display_strings import bucket_name
@@ -1366,35 +1507,33 @@ def run_browser_actionability_check(base_url: str) -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         try:
-            for lang in ("en", "he"):
-                for width, height in _BROWSER_VIEWPORTS:
-                    context = browser.new_context(viewport={"width": width, "height": height})
+            for width, height in _BROWSER_VIEWPORTS:
+                context = browser.new_context(viewport={"width": width, "height": height})
+                try:
                     page = context.new_page()
-                    page.goto(f"{base_url}{FINDINGS_ROUTE}?lang={lang}", wait_until="networkidle")
-                    _browser_actionability_probe(page, bucket_name(False, lang))
+                    page.goto(f"{base_url}{FINDINGS_ROUTE}", wait_until="domcontentloaded")
+                    _wait_for_findings_page(page)
 
-                    # (f) POSITIVE CONTROL, same page, same locator: collapse an
-                    # ancestor and confirm the check FAILS with an actionability
-                    # error rather than passing anyway.
-                    page.eval_on_selector(
-                        f".{fp.BUCKET_CONTROL_CLASS}",
-                        "el => el.parentElement.style.display = 'none'",
+                    covered = []
+                    # Both languages in ONE context, because reaching the second
+                    # one means clicking the app's own toggle, which persists in
+                    # that context's storage.
+                    for _pass in (1, 2):
+                        lang = _rendered_language(page)
+                        _reset_to_main_bucket(page, lang)
+                        _browser_actionability_probe(page, bucket_name(False, lang), lang)
+                        _positive_control(page, lang, width)
+                        covered.append(lang)
+                        if _pass == 1:
+                            _switch_ui_language(page, from_lang=lang)
+                            _wait_for_findings_page(page)
+
+                    assert set(covered) == {"en", "he"}, (
+                        f"at {width}px the check covered {covered!r}, not both languages — "
+                        "the RTL pass is the one that can see a mirrored-layout clip, so a "
+                        "run that silently covered Hebrew twice proves less than it claims"
                     )
-                    failed = False
-                    try:
-                        _browser_actionability_probe(page, bucket_name(False, lang))
-                    except (PlaywrightTimeout, PlaywrightError, AssertionError):
-                        failed = True
-                    page.eval_on_selector(
-                        f".{fp.BUCKET_CONTROL_CLASS}",
-                        "el => el.parentElement.style.display = ''",
-                    )
-                    assert failed, (
-                        "POSITIVE CONTROL DID NOT FIRE: the browser actionability "
-                        f"check passed at {width}px in {lang} with an ancestor of "
-                        "the control collapsed. The check is not watching what it "
-                        "claims to watch."
-                    )
+                finally:
                     context.close()
         finally:
             browser.close()

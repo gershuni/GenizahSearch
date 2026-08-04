@@ -291,3 +291,78 @@ def test_every_defect_mode_never_raises(tmp_path, monkeypatch):
     # No manifest.json at all.
     result = da.load_discovery_state()
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# GENIZAH_DISCOVERY_DATA_DIR -- the dev/CI directory override (Phase 136)
+#
+# Exercised in a SUBPROCESS on purpose. The override is resolved ONCE at import
+# (so the startup load stays authoritative and no per-request os.path.exists
+# creeps in), which means an in-process test would have to reload the module --
+# resetting `_state` under every other test in the session. A fresh interpreter
+# is both a truer test of "read at import" and free of that blast radius.
+# ---------------------------------------------------------------------------
+
+_READ_DATA_DIR = (
+    "import web.discovery_assets as da; print(da.DISCOVERY_DATA_DIR)"
+)
+
+
+def _data_dir_in_subprocess(env_value):
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env.pop("GENIZAH_DISCOVERY_DATA_DIR", None)
+    if env_value is not None:
+        env["GENIZAH_DISCOVERY_DATA_DIR"] = env_value
+    result = subprocess.run(
+        [sys.executable, "-c", _READ_DATA_DIR],
+        capture_output=True, text=True, env=env,
+        cwd=str(Path(__file__).resolve().parents[1]),
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def test_data_dir_defaults_to_repo_root_discovery_data():
+    resolved = _data_dir_in_subprocess(None)
+    expected = Path(__file__).resolve().parents[1] / "discovery_data"
+    assert Path(resolved) == expected, (
+        "with no override the loader must read the repo's own discovery_data/ -- "
+        "the production path must never depend on an environment variable being unset"
+    )
+
+
+def test_data_dir_env_override_is_honoured(tmp_path):
+    resolved = _data_dir_in_subprocess(str(tmp_path))
+    assert Path(resolved) == tmp_path
+
+
+def test_blank_data_dir_env_override_falls_back_to_the_default():
+    """An empty/whitespace value is NOT a directory. Treating it as one would
+    point the loader at the process CWD, where a manifest.json could plausibly
+    exist for some other reason."""
+    resolved = _data_dir_in_subprocess("   ")
+    expected = Path(__file__).resolve().parents[1] / "discovery_data"
+    assert Path(resolved) == expected
+
+
+def test_override_selects_the_directory_but_skips_no_validation(tmp_path, monkeypatch):
+    """The override chooses WHICH directory is read; it must not be a way to get
+    an unvalidated sidecar accepted.
+
+    Proven against the one defect the override could plausibly be thought to
+    excuse -- a directory with nothing in it -- plus a genuinely present but
+    private-audience asset, which the public loader must still refuse.
+    """
+    monkeypatch.setenv("GENIZAH_DISCOVERY_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(da, "DISCOVERY_DATA_DIR", str(tmp_path))
+    assert da.load_discovery_state() is False
+
+    materialize_sidecar(tmp_path, audience="private")
+    assert da.load_discovery_state() is False, (
+        "a private-audience artifact must fail closed no matter which directory "
+        "selected it"
+    )

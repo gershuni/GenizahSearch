@@ -87,6 +87,102 @@ jobs:
       # its siblings) but must NOT share a process with the broader suite.
       - run: pytest tests/ -m render_smoke
 
+  # The real-browser actionability gate for the findings page's "more matches"
+  # control (Phase 136, plan 136-16 criteria (e) and (f)). It drives Chromium at
+  # 375x812 and 1440x900, in both languages, clicks the control with NO preceding
+  # disclosure action, and then runs its own positive control by collapsing the
+  # control's parent and requiring the same probe to fail.
+  #
+  # UBUNTU ONLY, deliberately. Every other job here runs the ubuntu+windows
+  # matrix; this one does not, because a Chromium download plus `--with-deps` on
+  # a second OS roughly doubles the job's wall time to re-test a property that is
+  # not platform-dependent: this is a check about DOM actionability (is the
+  # control visible, enabled, unobstructed and hit-testable without any
+  # disclosure step), not about platform rendering. Both viewport widths and both
+  # languages -- including the RTL pass, which is the one that can see a
+  # mirrored-layout clip -- are already covered inside this single browser.
+  #
+  # WHY IT NEEDS A FIXTURE SIDECAR: the findings page is gated on
+  # web/discovery_assets.py::discovery_available() = DISCOVERY_ENABLED AND a
+  # startup-validated sidecar. discovery_data/ is gitignored, so on a bare runner
+  # the route clean-hides and this check would fail for a reason that has nothing
+  # to do with the control. The job therefore materializes the SYNTHETIC fixture
+  # sidecar into a temp directory and points the app at it with
+  # GENIZAH_DISCOVERY_DATA_DIR. The repo's real discovery_data/manifest.json is
+  # deliberately NOT repointed -- tests/test_cert01_grading_validator.py resolves
+  # the real artifact through it.
+  #
+  # THE CHECK FAILS RATHER THAN SKIPS once GENIZAH_FINDINGS_BROWSER_CHECK is set:
+  # missing Playwright or an empty base URL are failures, not skips. Do not
+  # "fix" a red run here by unsetting that variable -- a gate that can silently
+  # not run is worse than no gate, because it is trusted anyway.
+  findings-browser-check:
+    needs: lint-and-docs
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: '1'
+      # A port of this job's own, so it can never collide with a default the
+      # app might already be using elsewhere on the runner.
+      GENIZAH_PORT: '8099'
+      FINDINGS_BASE_URL: 'http://127.0.0.1:8099'
+      FIXTURE_DIR: 'discovery-ci-fixture'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Qt runtime deps
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      # pytest and playwright are CI-only dev tools, NOT runtime deps -- neither
+      # belongs in requirements.txt/requirements-lock.txt, which describe what
+      # the web process itself needs. scripts/capture_atlas_html.py already
+      # documents Playwright as an ad-hoc dev/ops tool for the same reason.
+      - run: pip install pytest playwright
+      - run: playwright install --with-deps chromium
+
+      # Build the synthetic sidecar and PROVE it reaches the page before a
+      # browser is ever launched: the script fails loudly if the loader refuses
+      # it, or if either bucket comes back empty. Those are fixture/projection
+      # problems, and diagnosing them here beats diagnosing them as a browser
+      # timeout later.
+      - name: Materialize the fixture discovery sidecar
+        run: python scripts/ci_materialize_discovery_fixture.py --dest "$RUNNER_TEMP/$FIXTURE_DIR"
+
+      - name: Start the web app against the fixture sidecar
+        env:
+          DISCOVERY_ENABLED: '1'
+          NICEGUI_RELOAD: 'false'
+          NICEGUI_SHOW: 'false'
+        run: |
+          export GENIZAH_DISCOVERY_DATA_DIR="$RUNNER_TEMP/$FIXTURE_DIR"
+          python -m web.main > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+
+      # Poll, never sleep-and-hope: a fixed sleep flakes when the app is slow and
+      # wastes time when it is fast, and when the app fails to boot it hands the
+      # browser check a dead port, which then fails with a message about the
+      # browser instead of about the server.
+      - name: Wait for the origin to actually serve
+        run: python scripts/wait_for_http.py "$FINDINGS_BASE_URL/computed-identifications" --timeout 240
+
+      - name: Real-browser actionability of the "more matches" control
+        env:
+          GENIZAH_FINDINGS_BROWSER_CHECK: '1'
+          GENIZAH_FINDINGS_BROWSER_BASE_URL: 'http://127.0.0.1:8099'
+        run: pytest tests/test_findings_page.py::test_real_browser_actionability_of_the_more_matches_control -v
+
+      - name: Server log (on failure)
+        if: failure()
+        run: cat "$RUNNER_TEMP/server.log" || true
+
+      - name: Stop the web app
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/server.pid")" 2>/dev/null || true
+          fi
+
   gui-tests:
     needs: lint-and-docs
     env:
