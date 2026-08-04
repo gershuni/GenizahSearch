@@ -169,7 +169,10 @@ jobs:
       - name: Real-browser actionability of the "more matches" control
         env:
           GENIZAH_FINDINGS_BROWSER_CHECK: '1'
-          GENIZAH_FINDINGS_BROWSER_BASE_URL: 'http://127.0.0.1:8099'
+          # From the job env, so the port lives in exactly one place: a browser
+          # pointed at a different port than the server would fail as a dead
+          # port, which reads as "the control broke".
+          GENIZAH_FINDINGS_BROWSER_BASE_URL: ${{ env.FINDINGS_BASE_URL }}
         run: pytest tests/test_findings_page.py::test_real_browser_actionability_of_the_more_matches_control -v
 
       - name: Server log (on failure)
