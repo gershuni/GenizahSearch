@@ -448,15 +448,35 @@ def test_a_caller_that_mutates_what_it_was_given_cannot_poison_the_next_reader(
         populated_service):
     first = populated_service.get_launch_stats_enveloped()
     baseline = copy.deepcopy(first)
-    first["items"].append({"shade": "injected", "identification_count": 10 ** 6,
-                           "manuscript_count": 0})
-    first["meta"]["injected"] = True
-    first["items"][0]["identification_count"] = -1
-    second = populated_service.get_launch_stats_enveloped()
+
+    def vandalise(envelope):
+        envelope["items"].append({"shade": "injected",
+                                  "identification_count": 10 ** 6,
+                                  "manuscript_count": 0})
+        envelope["meta"]["injected"] = True
+        envelope["items"][0]["identification_count"] = -1
+
+    # BOTH paths must hand out a copy, and the CACHE-HIT path is the one that
+    # matters. Vandalising only the first result proves nothing: that call
+    # MISSED the cache, so whatever it returned was built fresh and a broken
+    # implementation that returns its stored envelope by reference on a HIT
+    # still passes. Measured -- with only the first mutation, returning
+    # `cached[1]` directly is not detected at all.
+    vandalise(first)
+    second = populated_service.get_launch_stats_enveloped()   # the cache HIT
     assert second["items"] == baseline["items"]
     assert second["meta"] == baseline["meta"]
     assert second["total"] == baseline["total"]
     assert second["items"] is not first["items"]
+
+    vandalise(second)
+    third = populated_service.get_launch_stats_enveloped()
+    assert third["items"] == baseline["items"], (
+        "a caller that mutated a CACHE-HIT result poisoned the next reader's "
+        "headline -- the hit path handed out its stored envelope by reference")
+    assert third["meta"] == baseline["meta"]
+    assert third["items"] is not second["items"]
+    assert third["meta"] is not second["meta"]
 
 
 # ===========================================================================
