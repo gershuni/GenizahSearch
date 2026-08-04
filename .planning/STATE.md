@@ -39,11 +39,21 @@ the shipped `_build_findings_query` (136-14's owed follow-up now closed; no cap 
 359 gate calls, ALL through `assert_surface_honesty`. 16 mutations watched failing by name.
 Masking clean over 48 captured states with the pattern file explicitly set.
 
-**Deploy NOT done** (orchestrator sequencing; wave 9's panel deploy is also still outstanding), and
-ruling T's `more matches` browser check is still **NOT MET** — the CI job is wired but has never
-been green. It has now caught THREE real defects in three runs: a citation dialog covering the
-page, the mobile nav drawer never closing at all, and the reveal header hiding the language
-toggle. The first two were product defects, not test defects.
+**Deploy NOT done** (orchestrator sequencing; wave 9's panel deploy is also still outstanding).
+
+**Ruling T's `more matches` browser check is now MET — first green run 2026-08-04, CI run
+30931268195**, after being carried as NOT MET since 136-16. It took four runs and caught THREE real
+defects on the way, TWO of them product defects rather than test defects:
+1. a `persistent` citation dialog covered the page for every first-time visitor;
+2. **the mobile nav drawer never closed at all** — it mounted open and its retraction ran under
+   `asyncio.ensure_future`, which empties NiceGUI's slot stack, so `ui.run_javascript` raised and a
+   bare `except` swallowed it; the backdrop was still intercepting taps FIVE SECONDS after load.
+   Fixed in `web/main.py` with Quasar's `show-if-above` (`2065290c`). Long-standing owner-reported
+   annoyance, on a surface already known to be ~68% mobile;
+3. the Quasar `reveal` header hid the language toggle after the probe scrolled.
+
+Do not relax that check on the assumption a timeout means it is being fussy. Three times running,
+it was not.
 
 **Reported by the executor, NOT fixed (outside its file set) — a real egress:**
 `shared/discovery_display_strings.py::relation_chip` puts STORED VOCABULARY on an exception

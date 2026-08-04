@@ -1327,13 +1327,33 @@ def test_more_matches_click_replaces_the_rendered_result_set(lang):
 # ad-hoc dev/ops tool, deliberately absent from every requirements file), and a
 # package install is outside what an executor may do unattended.
 #
-# STATUS NOW: **WIRED INTO CI, awaiting its first green run.** The
+# STATUS NOW: **MET — first green run 2026-08-04 (CI run 30931268195).** The
 # `findings-browser-check` job in .github/workflows/ci.yml installs Playwright +
 # Chromium, materializes the SYNTHETIC fixture sidecar into a temp directory
 # (CI has no real `discovery_data/` — it is gitignored), serves the app against
 # it with DISCOVERY_ENABLED=1, waits for the origin to actually answer, and runs
-# this check with both env vars set. The criterion is upgraded from NOT MET only
-# when that job has actually passed — a wired gate is not yet a met criterion.
+# this check with both env vars set. The criterion was held at NOT MET until the
+# job had actually passed — a wired gate is not yet a met criterion.
+#
+# It took four runs to go green, and it earned them: it caught THREE real
+# defects, two of which were PRODUCT defects rather than test defects.
+#   1. A `persistent` citation dialog covered the page for every first-time
+#      visitor, so its backdrop swallowed the click. (Test-side: the check now
+#      arrives as a returning visitor.)
+#   2. The mobile nav drawer NEVER CLOSED. It mounted open and a deferred
+#      handler was meant to retract it, but that ran under
+#      `asyncio.ensure_future`, which empties NiceGUI's slot stack, so
+#      `ui.run_javascript` raised and a bare `except` swallowed it. The backdrop
+#      was still intercepting taps FIVE SECONDS after load — ten times the sleep
+#      it was supposed to wait out. Fixed in `web/main.py` with Quasar's
+#      `show-if-above`: mount closed, let the layout open it above the
+#      breakpoint. A long-standing owner-reported annoyance.
+#   3. The Quasar `reveal` header slides out of view on scroll-down, so after
+#      the probe scrolled, the language toggle existed but was permanently
+#      invisible. (Test-side: scroll to top before reaching for it.)
+#
+# Keep that history in mind before relaxing anything here on the assumption that
+# a timeout means the check is being fussy. Three times running, it was not.
 #
 # The check exercises BOTH viewport widths in BOTH languages, then runs its own
 # positive control. With GENIZAH_FINDINGS_BROWSER_CHECK SET and the tooling
