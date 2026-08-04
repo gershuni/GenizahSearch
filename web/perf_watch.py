@@ -184,10 +184,22 @@ class SlowRequestTimingMiddleware:
         if elapsed_ms < slow_request_threshold_ms():
             return
         _stats.slow_requests += 1
+        # Only offer the loop-blocked explanation when the numbers can actually
+        # support it. The old text asserted it unconditionally, so a 12,849 ms
+        # request was advertised as "the loop was blocked elsewhere" on the same
+        # line that reported ONE 313 ms breach — three orders of magnitude short
+        # of explaining it, and a real cause (sequential upstream fetches, each
+        # with its own read timeout) went unnamed while the reader was pointed
+        # at the loop. A diagnostic that misattributes is worse than a quiet one.
+        if _stats.max_lag_ms >= elapsed_ms * 0.5:
+            hint = ("-- loop lag is comparable to this request, so suspect the loop "
+                    "was blocked elsewhere rather than this route being expensive")
+        else:
+            hint = ("-- loop lag is far too small to explain this, so this route "
+                    "really did spend the time (suspect upstream I/O or its retries)")
         logger.warning(
             "[perf] slow request %.0f ms  %s %s  status=%s%s  (loop-lag breaches so far: %d, "
-            "max %.0f ms) -- a slow CHEAP path usually means the event loop was blocked "
-            "elsewhere, not that this route is expensive",
+            "max %.0f ms) %s",
             elapsed_ms,
             scope.get('method', '?'),
             path,
@@ -195,6 +207,7 @@ class SlowRequestTimingMiddleware:
             '' if finished else ' (incomplete)',
             _stats.lag_breaches,
             _stats.max_lag_ms,
+            hint,
         )
 
 
