@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Completed 136-17 (wave 9, connections panel); next executable 136-18 (wave 10)
+stopped_at: Completed 136-18 (wave 10, findings rows + launch headline); next executable 136-19 (wave 11)
 last_updated: "2026-08-04T00:00:00.000Z"
 last_activity: 2026-08-04
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 46
-  completed_plans: 37
+  completed_plans: 38
   percent: 13
 ---
 
@@ -26,8 +26,31 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 20 of **22** complete (136-01..136-17 + 136-20 + 136-21 + 136-22); next executable: 136-18 (wave 10)
+Plan: 21 of **22** complete (136-01..136-18 + 136-20 + 136-21 + 136-22); next executable: 136-19 (wave 11)
 Status: Ready to execute
+
+**WAVE 10 CLOSED 2026-08-04 — `136-18`, the findings rows + ruling-U headline.** Renders from
+136-22's artifact-backed reader, four numbers on the single `main_pool = 1` basis, shades summing
+exactly: **9,523 = 4,152 + 3,873 + 1,498** over 6,755 manuscripts (`audience=public`,
+`sidecar_version=discovery-v1-real`, `data_as_of=2026-08-03`, content hash matching
+`manifest.deploy.json`). Benchmark: 45 combinations enumerated, 41 measured, all PASS — worst
+ordering p95 **334 ms** against 1,500 ms, worst count p95 **105 ms** against 500 ms, built through
+the shipped `_build_findings_query` (136-14's owed follow-up now closed; no cap edited). 155 tests,
+359 gate calls, ALL through `assert_surface_honesty`. 16 mutations watched failing by name.
+Masking clean over 48 captured states with the pattern file explicitly set.
+
+**Deploy NOT done** (orchestrator sequencing; wave 9's panel deploy is also still outstanding), and
+ruling T's `more matches` browser check is still **NOT MET** — the CI job is wired but has never
+been green. It has now caught THREE real defects in three runs: a citation dialog covering the
+page, the mobile nav drawer never closing at all, and the reveal header hiding the language
+toggle. The first two were product defects, not test defects.
+
+**Reported by the executor, NOT fixed (outside its file set) — a real egress:**
+`shared/discovery_display_strings.py::relation_chip` puts STORED VOCABULARY on an exception
+message (`expected one of ['direct_witness', 'quotes_this_work', 'shared_text']`), which reaches a
+log without passing the markup or envelope scan. The findings surface catches it;
+`web/components/discovery_panel.py::_render_expansion_envelope` does NOT. Same shape in
+`filter_code`, `filter_label`, `section_header`, `disclosure_toggle`, `service_state_message`.
 
 **WAVE 9 CLOSED 2026-08-04 — `136-17`, the connections panel.** Panel body renderer + browse seam
 with four service states, flag-off by default and browse byte-for-byte unchanged. Measured on the

@@ -216,7 +216,7 @@ Plans:
 - [ ] 136-15-PLAN.md — Panel display model (pure) · wave 7
 - [x] 136-16-PLAN.md — Findings page shell: route, nav, caveat, modes, filter bar, result bar, pager · wave 7
 - [x] 136-17-PLAN.md — Panel: browse attachment, body render, render-smoke, **panel deploy** · wave 8 (built + gated; **deploy outstanding**)
-- [ ] 136-18-PLAN.md — Findings rows, novelty switch, combination benchmark, render-smoke, **findings deploy** · wave 9
+- [x] 136-18-PLAN.md — Findings rows, novelty switch, combination benchmark, render-smoke, **findings deploy** · wave 9
 - [ ] 136-19-PLAN.md — Cross-surface masking sweep + flag-on readiness attestation + closeout · wave 10
 - [x] 136-20-PLAN.md — **Public/private loader boundary + readiness contract** (audience gate; the two new tables and their row counts in startup validation; rollback + partial-asset tests) · wave 3
 - [ ] 136-21-PLAN.md — **Work-expansion service work** (anchor-side relation + band, weaker-band rule, carrier library/shelfmark + band label, count query for a real total, raising query helper) · wave 7
