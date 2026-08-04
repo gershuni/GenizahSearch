@@ -1026,8 +1026,20 @@ def derived_mutation_caps():
     """
     real_max = _measured_real_expansion_maximum()
     if real_max is None:
-        pytest.fail(_PROBE_UNRESOLVED_MESSAGE)
+        _require_probe_or_explain()
     return real_max, real_max - 1, real_max + 1
+
+
+def _require_probe_or_explain():
+    """Skip on ABSENT, fail on NONCONFORMING.
+
+    Collapsing these was F1: the two probe tests failed on every box without an
+    artifact, which is all of CI, because `discovery_data/` is gitignored. A
+    permanently red lane is not a stricter gate -- it is an ignored one."""
+    reason = _PROBE_CACHE.get("reason")
+    if reason == _PROBE_NONCONFORMING:
+        pytest.fail(_PROBE_UNRESOLVED_MESSAGE)
+    pytest.skip(_PROBE_ABSENT_MESSAGE)
 
 
 def test_synthetic_floor_strictly_exceeds_the_measured_real_maximum():
@@ -1116,14 +1128,57 @@ _PROBE_REQUIRED_TABLES = frozenset({
 })
 
 
+#: Why the probe has no artifact. The distinction is load-bearing, not cosmetic.
+#:
+#: `NONCONFORMING` means a file IS there and is wrong -- stale, private-audience,
+#: missing a required table. That is fail-closed territory: something was
+#: deployed or left behind that this check must refuse loudly.
+#:
+#: `ABSENT` means there is no artifact at all. `discovery_data/` is gitignored,
+#: so that is the NORMAL state of CI, of a fresh clone, and of every worktree.
+#: Failing there does not protect anything -- it just makes the lane
+#: permanently red, and a permanently red lane is one nobody reads, which loses
+#: the signal the hard failure was meant to preserve.
+#:
+#: Same shape the findings-page browser check already uses: not-requested skips
+#: with a loud NOT-RUN message; requested-but-broken fails.
+_PROBE_ABSENT = "absent"
+_PROBE_NONCONFORMING = "nonconforming"
+
+_PROBE_ABSENT_MESSAGE = (
+    "NOT RUN -- the real-artifact expansion probe found NO discovery sidecar. "
+    "discovery_data/ is gitignored, so this is the normal state on CI and in a "
+    "fresh clone. What is NOT verified without it: that the synthetic cardinality "
+    "floor still exceeds the real corpus maximum, and that the exact total "
+    "survives exhaustive pagination on the largest REAL expansion. The structural "
+    "guarantees still ran (the AST no-transformation walk and the >10,000-unit "
+    f"synthetic exhaustion). To run it: set {_PROBE_ENV_VAR} to a conforming "
+    "public sidecar."
+)
+
+
 def _resolve_probe_artifact():
-    """`(path, audience)` for the artifact to probe, or None.
+    """`((path, audience), None)` on success, or `(None, reason)`.
 
     `DISCOVERY_EXPANSION_PROBE_DB` if set; otherwise the repository manifest's
     OWN selection -- and only if it passes the SAME `meta.audience == 'public'`
     and required-table checks the public loader applies, so a stale pre-rebuild
-    asset is refused rather than silently probed."""
+    asset is refused rather than silently probed.
+
+    The reason distinguishes "nothing is there" from "something is there and it
+    is wrong". The first version collapsed both into None, which made the two
+    probe tests fail on every box without an artifact -- i.e. all of CI (found
+    by the 136-21 executor, reported as F1)."""
     override = os.environ.get(_PROBE_ENV_VAR)
+    # EXPLICITLY REQUESTED vs merely available. If someone set the env var, they
+    # asked for this probe and a bad target is their error -- fail. If we are
+    # only falling back to whatever the repo manifest happens to name, an
+    # unusable artifact is not an error at all: the manifest deliberately still
+    # points at the PRE-REBUILD asset because tests/test_cert01_grading_validator.py
+    # resolves the real artifact through it, so it must not be repointed. Failing
+    # on that would make two tests permanently red on the maintainer's own box
+    # for a state that is intentional.
+    requested = bool(override)
     candidates = []
     if override:
         candidates.append(override)
@@ -1134,10 +1189,11 @@ def _resolve_probe_artifact():
             path, _manifest = da._resolve_versioned_db()
             candidates.append(path)
         except Exception:
-            return None
-    for path in candidates:
-        if not path or not os.path.exists(path):
-            continue
+            return None, _PROBE_ABSENT
+    existing = [p for p in candidates if p and os.path.exists(p)]
+    if not existing:
+        return None, _PROBE_ABSENT
+    for path in existing:
         try:
             conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         except Exception:
@@ -1155,8 +1211,11 @@ def _resolve_probe_artifact():
             continue
         if not _PROBE_REQUIRED_TABLES.issubset(tables):
             continue
-        return path, audience
-    return None
+        return (path, audience), None
+    # A file IS present and did not qualify -- stale, private, or incomplete.
+    # Fail ONLY if it was explicitly requested; otherwise this is the fallback
+    # finding the intentionally-stale manifest, which is not an error.
+    return None, (_PROBE_NONCONFORMING if requested else _PROBE_ABSENT)
 
 
 _PROBE_CACHE = {}
@@ -1183,9 +1242,10 @@ def _probe_largest_expansion():
     """
     if "result" in _PROBE_CACHE:
         return _PROBE_CACHE["result"]
-    resolved = _resolve_probe_artifact()
+    resolved, reason = _resolve_probe_artifact()
     if resolved is None:
         _PROBE_CACHE["result"] = None
+        _PROBE_CACHE["reason"] = reason
         return None
     path, audience = resolved
     pipeline, params = _build_work_expansion_pipeline(
@@ -1212,7 +1272,7 @@ def _measured_real_expansion_maximum():
 def test_total_survives_exhaustive_pagination_on_the_real_largest_expansion():
     probed = _probe_largest_expansion()
     if probed is None:
-        pytest.fail(_PROBE_UNRESOLVED_MESSAGE)
+        _require_probe_or_explain()
     path, audience, work_id, ranked_units = probed
     assert audience == "public"
     service = DiscoveryService(
