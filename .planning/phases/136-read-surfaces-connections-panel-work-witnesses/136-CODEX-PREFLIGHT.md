@@ -662,3 +662,89 @@ before this round reported. Findings 1–8 are all against `136-17`, `136-18`, `
 No file or database was written by this review. During the audit, HEAD advanced by two unrelated documentation commits and user-owned changes appeared in `web/main.py` and `web/pages/findings.py`; they were not touched.
 
 VERDICT: rework — BLOCKER 0 · HIGH 5 · MEDIUM 2 · LOW 1 · CONFIRM 5
+
+
+---
+
+# Round 10 — the five-times-revised plans (2026-08-04)
+
+**Brief:** `_tmp/136-codex-preflight-r10-brief.md`. **Baseline:** § Round 9. Revision commit `dc1f9fcd`.
+
+**Trajectory: 8 → 5 → 5 → 4 → 5 → 4 HIGH.** A plateau in COUNT, but not in kind: **all eight
+round-9 findings are closed**, and round 10's are new, narrower, and in two cases (6, 7) merely
+stale cross-references.
+
+## What round 10 confirmed closed
+
+- **The 11-wave restructure is valid** (CONFIRM 8). 22 plans, 11 waves, every dependency earlier,
+  no same-wave overlap; waves 8–11 are 136-22 → 136-17 → 136-18 → 136-19. The new edge does let
+  136-17 import the frozen shade tuple, the local-declaration justification is now durable, and
+  **the rejected alternative really would leave the suite red across a wave boundary** — that
+  reasoning holds.
+- **The 136-21 wrapper contract gap is REFUTED** (CONFIRM 10). The revision's own self-review
+  flagged that the unanchored/unrestricted probe might not be callable. It is: the live async
+  wrapper accepts `enabled_bands=None` and defaults the anchor to absent
+  (`shared/discovery_service.py:2150`). Rejecting O(all works) enveloped calls is called
+  "reasonable, not rationalisation".
+- **The twelve single-word registry members exactly match live registries**; the version boundary
+  and `accuracy score0.9` rejection are correctly specified; control counts now derive from lists
+  (CONFIRM 9). The current-figure exemption relaxation is real and still rejects
+  `total = <figure>` (CONFIRM 11).
+
+## The pattern under findings 1, 3, 4 and 5 — this is the instruction for round 11
+
+Four of the seven share one shape: **the plan tries to prove a GLOBAL property by sampling or set
+arithmetic, and a sampled proof is leaky by construction.**
+
+- (1) completeness proved by a corpus + an escape hatch (`NEVER_POPULATED` with an unvalidated
+  reason) → a known carrier can be parked there and never classified.
+- (3) "no cap anywhere" proved by one unanchored maximum → a cap applied ONLY on the
+  anchored/band-filtered branch survives every stated test.
+- (4) "the globs are load-bearing" proved by `derived_set - floor` being non-empty → a broken
+  implementation hardcoding `floor + {one arbitrary module}` passes. **Circular**, and it is the
+  exact bad case round 9 named.
+- (5) "both forbidden-list halves reach the scanner" proved by emptying each half → each empty
+  triggers its own standalone non-empty assertion, so a union that IGNORES one half still passes.
+  **Provenance establishes source validity, not consumption.**
+
+Codex prescribes the same remedy each time, and it is structural rather than statistical: an AST
+prohibition, an exact set equality against independently expanded globs, a sentinel injected through
+each loader and required to surface. Round 11 should apply that principle rather than patch four
+symptoms.
+
+## Finding 2 deserves separate note — the fix needs a code change, not a plan edit
+
+D-06a is bound to "the same selector the existing help render test scopes to" — but that selector is
+`_CONFIDENCE_SECTION_CLASS`, which covers the **entire methods card**, not the limitations
+paragraph. Two consequences: equivalent qualitative wording anywhere in that card can claim the
+exception, and **a correct limitations-only implementation cannot follow the stated instruction**,
+because no limitations-specific element exists. Closing it requires adding a stable class or data
+attribute to `web/pages/help.py` and putting that file in 136-17's `files_modified`.
+
+## Findings
+
+1. **HIGH — 136-17 — derived completeness still has two escape hatches.** Shape ∪ known-registry membership misses a new single-word vocabulary exported nowhere, such as an unmapped `meta` key carrying a one-word enum. Separately, an executor can omit known carriers from the corpus, put them in `NEVER_POPULATED` with an unvalidated reason, and satisfy fixture coverage while leaving them unclassified. The explicit floor still names the original twelve fields plus `shade`, but not the already-known `routing_reason`, `coverage_status`, and `eligibility_basis`. `136-17-PLAN.md:584`, `136-17-PLAN.md:625`, `136-17-PLAN.md:678`, `136-17-PLAN.md:1008`. **Change:** require every string-valued `meta` key to be either vocabulary-mapped or explicitly classified as text/identity, regardless of value shape; bound `NEVER_POPULATED` to an exact, authority-checked set—or seed the launch row—and explicitly floor all currently known carriers.
+
+2. **HIGH — 136-17 — D-06a is page-section-bound only in prose, not in executable scope.** The plan registers “the same selector the existing help render test scopes to,” but that selector is `_CONFIDENCE_SECTION_CLASS`, covering the entire methods card. The limitations paragraph has no dedicated element/class. Equivalent qualitative wording elsewhere inside the methods section can therefore claim the exception. A genuinely correct limitations-only implementation cannot follow the stated selector instruction. `136-17-PLAN.md:787`, `136-17-PLAN.md:796`; `web/pages/help.py:244`; `tests/render_smoke/test_help_methods_render_smoke.py:508`. **Change:** add a stable limitations-specific class/data attribute, include the necessary help files in `files_modified`, and register exactly that selector. Keep the exception unavailable to envelopes and error paths.
+
+3. **HIGH — 136-21 — the unanchored maximum does not catch a cap confined to the filtered/anchored path.** The plan infers that one shared factored count fragment leaves “no anchored-only count path for a cap to hide in.” A post-query branch such as a cap applied only when anchor arguments or enabled bands are present disproves that: the small filter tests, the >10,000 unfiltered fixture, and the real unanchored maximum can all pass. `136-21-PLAN.md:407`, `136-21-PLAN.md:411`, `136-21-PLAN.md:413`. **Change:** run the large synthetic exhaustive-pagination test and cap mutations through anchored and band-filtered shapes with more than the derived cap surviving the filters, or add an AST assertion prohibiting any transformation of the exact count before envelope construction.
+
+4. **HIGH — 136-22 — the glob control remains circular.** Selecting from `derived_set - floor` proves the selected extra module is scanned, but not that `derived_set` came from the required globs. A broken implementation hardcoding `floor + {one arbitrary module}` passes the “strictly larger,” dynamic-selection, and seeded-violation controls—the exact bad case Round 9 named. `136-22-PLAN.md:412`, `136-22-PLAN.md:558`, `136-22-PLAN.md:564`. **Change:** independently expand the four filesystem globs in the test and assert exact equality with the scanner’s derived set, then select the placement control from that independently computed difference.
+
+5. **MEDIUM — 136-22 — empty-half mutations do not prove either forbidden-list half reaches the scanner.** A scanner union that ignores the artifact half still passes because emptying that source triggers its standalone non-empty assertion; the same is true in reverse. Provenance checks establish source validity, not consumption. `136-22-PLAN.md:565`. **Change:** inject a test-only tagged/sentinel value through each loader independently and require the resulting union and scanner violation to contain it. This remains valid when current and historical values overlap.
+
+6. **LOW — 136-17 — stale control reference.** The final shipped-surface criterion says the D-06a carve-out is guarded by false-positive control `(v)`, but `(v)` is the version boundary; D-06a is `(vi)`. A checklist or symbol-based test can verify the wrong control. `136-17-PLAN.md:1016`. **Change:** replace both `(v)` references there with `(vi)`.
+
+7. **LOW — 136-18 — stale cross-plan exception count.** It still tells the executor that 136-17 has “two permitted exceptions,” although 136-17 now defines three, with the third help-markup-only. `136-18-PLAN.md:342`. **Change:** say three and explicitly note that D-06a is unavailable to findings markup, envelopes, and errors.
+
+8. **CONFIRM — all plans — structural ordering is valid.** Independent parsing found 22 plans, eleven waves, every declared dependency in an earlier wave, and no same-wave `files_modified` overlap. Waves 8–11 are 136-22 → 136-17 → 136-18 → 136-19. The new edge lets 136-17 import the frozen shade tuple. A seeded launch row or `NEVER_POPULATED` entry can avoid an immediate fixture failure, although finding 1 explains why the latter needs stronger bounds. The local-declaration justification is now durable. The rejected later-gate alternative really would leave the suite red across a wave boundary; that reasoning holds.
+
+9. **CONFIRM — 136-17 — the narrower Round 9 fixes mostly hold.** The twelve stated single-word registry members exactly match the live registries. `REGISTRY_MATCH_EXCLUSIONS` affects discovery only; the strict scan still runs, including the `meta['reason'] = 'direct_witness'` control. The version boundary and `accuracy score0.9` rejection are correctly specified, and the control counts now derive from their lists. `136-17-PLAN.md:602`, `136-17-PLAN.md:613`, `136-17-PLAN.md:643`, `136-17-PLAN.md:962`.
+
+10. **CONFIRM — 136-21 — the highlighted wrapper contract gap is refuted.** The live service async wrapper accepts `enabled_bands=None` and defaults the anchor to absent, so the unanchored/unrestricted shape is callable; the planned enveloped wrapper is required to preserve it. `shared/discovery_service.py:2150`. Ranking the same unfiltered shape and validating returned `total` against its ranked count fixes the sampled-candidate defect itself. Rejecting O(all works) enveloped calls is reasonable, not rationalisation; it simply does not cover the conditional-cap regression in finding 3.
+
+11. **CONFIRM — 136-22 and standing constraints.** The current-figure exemption now passes for a legitimate non-display-reachable constant and still rejects `total = <figure>`; that relaxation is real. Constant folding, sentinel pairing, live carrier/ID spot-checks, and expansion-grain cardinality remain intact. The masking scan was clean, and no new ruling-U basis or user-facing accuracy-rate regression was found. `136-22-PLAN.md:479`, `136-22-PLAN.md:568`.
+
+No file or database was written.
+
+VERDICT: rework — BLOCKER 0 · HIGH 4 · MEDIUM 1 · LOW 2 · CONFIRM 4
