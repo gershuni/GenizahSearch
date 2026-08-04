@@ -26,8 +26,24 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 18 of **22** complete (136-01..136-16 + 136-20 + 136-21); next executable: 136-22 (wave 8)
+Plan: 19 of **22** complete (136-01..136-16 + 136-20 + 136-21 + 136-22); next executable: 136-17 (wave 9)
 Status: Ready to execute
+
+**WAVE 8 CLOSED 2026-08-04 — `136-22`, the ruling-U launch-statistics reader.** Measured through the
+shipped reader against `discovery-v1-e9365edc…` (`audience=public`): **4,152 + 3,873 + 1,498 =
+9,523** over 6,755 manuscripts; all-bucket 17,536 over 10,959; from 38,431 fragments across 177,402
+pages. Reproduces ruling U exactly. 324 ms cold against the 1,500 ms findings budget, 0.019 ms warm.
+20 mutations run, all failed as predicted. **NOVEL-01 and NOVEL-02 satisfied.**
+
+Two results from its mutation run are worth keeping. Re-adding `cache_name` fired FOUR detectors
+including an independent timeout spy. And each forbidden-list-half-ignoring mutation was caught
+**only** by that half's sentinel while the empty-half control stayed green — Codex round 10's
+finding 5 confirmed empirically, i.e. provenance really does not prove consumption.
+
+⚠ **A mutation a reviewer will get wrong.** The stale-path mutation is a **no-op** if sited adjacent
+to the cache lookup, because `is_available()` already calls `_get_conn()`. Re-run the obvious way it
+PASSES, and the obvious conclusion — that the control is inert — is false. The faithful shape is
+documented in `136-22-SUMMARY.md`; read it before re-deriving.
 
 **WAVE 7 CLOSED 2026-08-04.** `136-15`, `136-16`, `136-21` all complete. **Codex plan pre-flight
 reached `VERDICT: approve` at ROUND 12** (0 BLOCKER / 0 HIGH / 0 MEDIUM / 0 LOW / 6 CONFIRM) after
