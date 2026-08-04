@@ -160,94 +160,95 @@ def create_page():
                     ui.icon(icon_name).classes('text-sm').style('color: var(--primary-600);')
                     ui.label(label).classes('text-xs').style('color: var(--text-secondary);')
 
-        # === Genizah Atlas Launch Announcement (#7, 2026-07-21) — prominent, claim-free ===
-        # A loud, above-the-fold banner announcing the new beta feature. Kept
-        # separate from — and more prominent than — the subtle teaser card lower
-        # on the page (the long-run home for the link). Same atlas_preview_available()
-        # gate as the /atlas route + nav + data routes, so a flag-ON/asset-missing
-        # window never advertises a broken link. Claim-free: no counts, no
-        # "identifications" — just names the interactive map.
-        if atlas_preview_available():
-            _adir = 'rtl' if is_rtl() else 'ltr'
-            with ui.element('div').classes(
-                'w-full mt-2 rounded-xl overflow-hidden cursor-pointer hover:shadow-2xl transition-all'
-            ).props('role=button tabindex=0').style(
-                'background: linear-gradient(120deg, #0f766e 0%, #14b8a6 45%, #6366f1 100%); '
-                'box-shadow: 0 6px 24px rgba(20,184,166,0.28);'
-            ).on('click', lambda: ui.navigate.to('/atlas')
-                 ).on('keydown.enter', lambda: ui.navigate.to('/atlas')
-                      ).on('keydown.space', lambda: ui.navigate.to('/atlas')).mark('atlas-announcement'):
-                with ui.row().classes('w-full items-center gap-4 px-6 py-4 flex-wrap').style(
-                    f'direction: {_adir};'
-                ):
-                    ui.icon('hub').classes('text-4xl text-white')
-                    with ui.column().classes('gap-1 flex-1 min-w-0'):
-                        with ui.row().classes('items-center gap-2 flex-wrap'):
-                            ui.label(tr('New')).classes('px-2 py-0.5 rounded-full text-xs font-bold').style(
-                                'background: rgba(255,255,255,0.92); color: #0f766e; letter-spacing: 0.05em;'
-                            )
-                            h2(tr('The Visual Genizah Atlas'), classes='text-xl font-bold text-white',
-                               style='margin: 0;')
-                            ui.label(tr('Beta')).classes('px-2 py-0.5 rounded-full text-xs font-semibold').style(
-                                'background: rgba(255,255,255,0.20); color: white;'
-                            )
-                        ui.label(
-                            tr('A new interactive map of textual connections across the Cairo Genizah.')
-                        ).classes('text-sm text-white/90')
-                    ui.button(tr('Explore the Genizah Atlas'), icon='travel_explore').props(
-                        'unelevated color=white text-color=teal-9'
-                    ).classes('font-bold')
+        # === Beta announcements — the two banners SIDE BY SIDE (owner, 2026-08-04) ===
+        # Computed Identifications first, then the atlas. Each keeps its OWN
+        # availability gate, so when only one is live it simply fills the row —
+        # which is why the gates stay inside rather than around the row.
+        #
+        # `items-stretch` + `flex-1` makes both cards the same height whatever
+        # the text length, and `min-w` forces a clean stack on a phone instead of
+        # two unreadable columns. The inner layout is a COLUMN (not the earlier
+        # icon-beside-text row) because at half width the button was wrapping
+        # under the text anyway.
+        _ann_dir = 'rtl' if is_rtl() else 'ltr'
 
-        # === Computed Identifications Announcement (Phase 136) — beside the atlas ===
-        # Sits directly under the atlas banner and is styled as its sibling, not a
-        # louder rival: the atlas keeps the warm teal→indigo gradient, this takes a
-        # cooler indigo→violet, so the two read as one family.
-        #
-        # Gated on discovery_available() — the SAME predicate as the
-        # /computed-identifications route and the nav entry — so a flag-OFF or
-        # sidecar-missing window can never advertise a link that clean-hides.
-        #
-        # DELIBERATELY CLAIM-FREE, and this is a hard constraint rather than a
-        # style choice: no precision percentage, no interval, no accuracy rate,
-        # no count. The wording is MATCH-framing ("may be the same work as"),
-        # never assertion-framing ("is"), because the surface it links to shows
-        # candidate identifications for a reader to judge, not settled facts.
-        if discovery_available():
-            _ddir = 'rtl' if is_rtl() else 'ltr'
+        def _announcement_card(*, mark, route, gradient, shadow, chip_color,
+                               icon, title, blurb, cta, cta_text_color):
             with ui.element('div').classes(
-                'w-full mt-2 rounded-xl overflow-hidden cursor-pointer hover:shadow-2xl transition-all'
+                'flex-1 min-w-[280px] rounded-xl overflow-hidden cursor-pointer '
+                'hover:shadow-2xl transition-all'
             ).props('role=button tabindex=0').style(
-                'background: linear-gradient(120deg, #4338ca 0%, #6366f1 45%, #8b5cf6 100%); '
-                'box-shadow: 0 6px 24px rgba(99,102,241,0.28);'
-            ).on('click', lambda: ui.navigate.to('/computed-identifications')
-                 ).on('keydown.enter', lambda: ui.navigate.to('/computed-identifications')
-                      ).on('keydown.space', lambda: ui.navigate.to('/computed-identifications')
-                           ).mark('discovery-announcement'):
-                with ui.row().classes('w-full items-center gap-4 px-6 py-4 flex-wrap').style(
-                    f'direction: {_ddir};'
+                f'background: {gradient}; box-shadow: {shadow};'
+            ).on('click', lambda: ui.navigate.to(route)
+                 ).on('keydown.enter', lambda: ui.navigate.to(route)
+                      ).on('keydown.space', lambda: ui.navigate.to(route)).mark(mark):
+                with ui.column().classes('w-full gap-2 px-5 py-4 h-full').style(
+                    f'direction: {_ann_dir};'
                 ):
-                    ui.icon('travel_explore').classes('text-4xl text-white')
-                    with ui.column().classes('gap-1 flex-1 min-w-0'):
-                        with ui.row().classes('items-center gap-2 flex-wrap'):
-                            ui.label(tr('New')).classes(
-                                'px-2 py-0.5 rounded-full text-xs font-bold'
-                            ).style(
-                                'background: rgba(255,255,255,0.92); color: #4338ca; '
-                                'letter-spacing: 0.05em;'
-                            )
-                            h2(tr('Computed Identifications'),
-                               classes='text-xl font-bold text-white', style='margin: 0;')
-                            ui.label(tr('Beta')).classes(
-                                'px-2 py-0.5 rounded-full text-xs font-semibold'
-                            ).style('background: rgba(255,255,255,0.20); color: white;')
-                        ui.label(
-                            tr('Fragments that may be the same work as another '
-                               'manuscript in the corpus — computed, and open for '
-                               'your judgement.')
-                        ).classes('text-sm text-white/90')
-                    ui.button(tr('Browse Computed Identifications'), icon='hub').props(
-                        'unelevated color=white text-color=indigo-9'
-                    ).classes('font-bold')
+                    with ui.row().classes('items-center gap-2 flex-wrap'):
+                        ui.icon(icon).classes('text-3xl text-white')
+                        ui.label(tr('New')).classes(
+                            'px-2 py-0.5 rounded-full text-xs font-bold'
+                        ).style(
+                            f'background: rgba(255,255,255,0.92); color: {chip_color}; '
+                            'letter-spacing: 0.05em;'
+                        )
+                        ui.label(tr('Beta')).classes(
+                            'px-2 py-0.5 rounded-full text-xs font-semibold'
+                        ).style('background: rgba(255,255,255,0.20); color: white;')
+                    h2(tr(title), classes='text-xl font-bold text-white', style='margin: 0;')
+                    ui.label(tr(blurb)).classes('text-sm text-white/90 flex-grow')
+                    ui.button(tr(cta), icon=icon).props(
+                        f'unelevated color=white text-color={cta_text_color}'
+                    ).classes('font-bold self-start')
+
+        if discovery_available() or atlas_preview_available():
+            with ui.row().classes('w-full mt-2 gap-3 flex-wrap items-stretch'):
+                # Computed Identifications (Phase 136).
+                #
+                # Gated on discovery_available() — the SAME predicate as the
+                # /computed-identifications route and the nav entry — so a
+                # flag-OFF or sidecar-missing window can never advertise a link
+                # that clean-hides.
+                #
+                # DELIBERATELY CLAIM-FREE, a hard constraint rather than a style
+                # choice: no precision percentage, no interval, no accuracy rate,
+                # no count. MATCH-framing ("may be the same work as"), never
+                # assertion-framing ("is") — the surface shows candidates for a
+                # reader to judge, not settled facts.
+                if discovery_available():
+                    _announcement_card(
+                        mark='discovery-announcement',
+                        route='/computed-identifications',
+                        gradient=('linear-gradient(120deg, #4338ca 0%, #6366f1 45%, '
+                                  '#8b5cf6 100%)'),
+                        shadow='0 6px 24px rgba(99,102,241,0.28)',
+                        chip_color='#4338ca',
+                        icon='travel_explore',
+                        title='Computed Identifications',
+                        blurb=('Discover fragments that may belong to the same work '
+                               'as other manuscripts in the Genizah — and judge the '
+                               'matches for yourself.'),
+                        cta='Explore Computed Identifications',
+                        cta_text_color='indigo-9',
+                    )
+                # The Visual Genizah Atlas (#7, 2026-07-21). Claim-free: no
+                # counts, no "identifications" — it just names the map.
+                if atlas_preview_available():
+                    _announcement_card(
+                        mark='atlas-announcement',
+                        route='/atlas',
+                        gradient=('linear-gradient(120deg, #0f766e 0%, #14b8a6 45%, '
+                                  '#6366f1 100%)'),
+                        shadow='0 6px 24px rgba(20,184,166,0.28)',
+                        chip_color='#0f766e',
+                        icon='hub',
+                        title='The Visual Genizah Atlas',
+                        blurb=('A new interactive map of textual connections across '
+                               'the Cairo Genizah.'),
+                        cta='Explore the Genizah Atlas',
+                        cta_text_color='teal-9',
+                    )
 
         # === Corpus Stats Band (SEED-023) — advertises the scale of the corpus ===
         # Five HARDCODED headline numbers (web/stats_service.CORPUS_STATS). Rendered
