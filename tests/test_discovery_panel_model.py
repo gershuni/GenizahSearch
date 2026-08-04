@@ -47,9 +47,11 @@ from shared.discovery_main_pool import (
     bucket_label,
 )
 from shared.discovery_surface_projection import (
+    FORBIDDEN_SURFACE_FIELDS,
     SURFACE_CLAIM_FIELDS,
     SURFACE_RELATED_PAGE_FIELDS,
     SURFACE_WORK_SUMMARY_FIELDS,
+    is_forbidden_surface_field,
     make_envelope,
 )
 # The FIVE independent detectors of the ONE shared discovery-surface honesty
@@ -672,8 +674,11 @@ def test_two_human_confirmed_rows_both_show_by_default_with_a_coverage_note(
     assert demoted["bucket"] is not None
     assert demoted["main_pool_reason"] is not None
 
-    for row in rows:
-        assert not any("badge" in key for key in row)
+    # D-13f: no review marker of ANY shape on the two rows most likely to grow
+    # one. Checked against the closed emitted schema, not by looking for the
+    # substring "badge" in the top-level keys -- which an `expert_reviewed=True`
+    # boolean passes without noticing.
+    assert_emitted_schema(model)
 
 
 # ---------------------------------------------------------------------------
@@ -1062,10 +1067,38 @@ def test_module_imports_nothing_from_nicegui_and_executes_no_query():
 
 
 def test_module_defines_no_human_review_badge_field():
+    """The source half of D-13f, using the SHARED forbidden vocabulary rather
+    than a few spellings typed here -- so a key the projection layer already
+    knows is forbidden cannot appear in this module just because nobody thought
+    to add it to a local list."""
     source = _model_source()
-    assert "review_overlay" not in source
-    assert "Expert-reviewed" not in source
-    assert "נבדק בידי מומחה" not in source
+    # NAMES, not prose: every identifier and every identifier-shaped string
+    # constant the module contains, run through the shared predicate. A
+    # substring scan over the whole file cannot do this -- "ci" is inside
+    # "reader-facing" -- and a hand-typed list of three spellings is what let
+    # `expert_reviewed` be a live possibility.
+    tree = ast.parse(source)
+    identifiers = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", node.value):
+                identifiers.add(node.value)
+        elif isinstance(node, ast.Name):
+            identifiers.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            identifiers.add(node.attr)
+        elif isinstance(node, ast.arg):
+            identifiers.add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            identifiers.add(node.name)
+    assert sorted(name for name in identifiers if is_forbidden_surface_field(name)) == []
+    assert "review_overlay" in FORBIDDEN_SURFACE_FIELDS   # the predicate is the real one
+
+    for label in ("Expert-reviewed", "נבדק בידי מומחה", "review_badge"):
+        assert label not in source, label
+    # ... and the emitted-shape half is `assert_emitted_schema`, which is what
+    # catches a marker that is neither a known key nor a known string.
+    assert is_forbidden_surface_field("estimated_precision")
 
 
 def test_raw_recorded_title_is_read_at_exactly_one_call_site():
@@ -1831,6 +1864,173 @@ def assert_model_honesty(model):
             "panel model (lang=%r): " % lang + "; ".join(violations))
 
 
+# ---------------------------------------------------------------------------
+# The CLOSED emitted schema (code review 2B, finding 6).
+#
+# The honesty walker above visits STRING LEAVES. An emitted `expert_reviewed`
+# boolean, or a key named after a review state, is invisible to it -- and D-13f
+# says no human-review marker may be emitted AT ALL, which is a statement about
+# the shape of the object, not about its prose.
+#
+# So this table is hand-written from the ratified display contract, not derived
+# from the model: every object the model emits, by its path, with the keys it
+# may carry and the TYPES those keys may hold. A field added to the model
+# without a decision behind it fails here, which is the point -- the previous
+# guard looked for the substring "badge" in top-level row keys and would have
+# passed `expert_reviewed=True` without noticing.
+# ---------------------------------------------------------------------------
+
+_STR = (str,)
+_BOOL = (bool,)
+_OPT_STR = (str, type(None))
+_OPT_INT = (int, type(None))
+
+_EMITTED_SCHEMA = {
+    "model": {
+        "lang": _STR, "show_more": _BOOL, "panel_status": _STR, "caveat": _STR,
+        "bucket_rule_sentence": _STR, "entry_control": (dict,),
+        "service_state": (dict,), "manuscript_pane": (dict,),
+        "disclosure_levels": (tuple,),
+    },
+    "model.entry_control": {
+        "hidden": _BOOL, "status": _OPT_STR, "count": _OPT_INT,
+    },
+    "model.service_state": {
+        "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
+    },
+    "model.manuscript_pane": {
+        "header": _STR, "scope_state": _STR, "partial_scope": _BOOL,
+        "reader_aid_only": _BOOL, "state": _STR, "service_state": (dict,),
+        "total": _OPT_INT, "total_covers_resolved_pages_only": _BOOL,
+        "page_threshold": (int,), "paginated": _BOOL, "works": (tuple,),
+    },
+    "model.manuscript_pane.service_state": {
+        "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
+    },
+    "model.manuscript_pane.works[]": {
+        "work_id": _OPT_STR, "work_title": _STR, "title_missing": _BOOL,
+        "page_count": _OPT_INT, "gated": _BOOL, "in_main_pool": _BOOL,
+        "bucket": _STR, "relation_chip": _STR,
+    },
+    "model.disclosure_levels[]": {
+        "key": _STR, "label": _STR, "is_identifications": _BOOL,
+        "default_visible": _BOOL, "visible": _BOOL, "note": _STR,
+        "rows": (tuple,), "generic_groups": (tuple,), "related_pages": (dict,),
+    },
+    "model.disclosure_levels[].rows[]": {
+        "kind": _STR, "claim_id": _OPT_STR, "page_id": _OPT_STR,
+        "sys_id": _OPT_STR, "work_id": _OPT_STR, "work_title": _STR,
+        "title_missing": _BOOL, "headline": _STR, "relation_chip": _STR,
+        "relation_code": _STR, "band_tooltip": _STR, "in_main_pool": _BOOL,
+        "bucket": _STR, "main_pool_reason": _OPT_STR, "disclosure_level": _STR,
+        "gated": _BOOL, "span_start": _OPT_INT, "span_end": _OPT_INT,
+        "matched_letters": _OPT_INT, "nested": (tuple,), "expansion": (dict,),
+        "coverage_ppm": _OPT_INT, "coverage_label": _STR,
+        "low_coverage_note": _STR, "granularity_subline": _STR,
+    },
+    "model.disclosure_levels[].rows[].nested[]": {
+        "work_id": _OPT_STR, "work_title": _STR, "title_missing": _BOOL,
+        "subline": _STR,
+    },
+    "model.disclosure_levels[].rows[].expansion": {
+        "work_id": _OPT_STR, "heading": _STR, "page_size": (int,),
+        "loaded": _BOOL, "anchor_sys_id": _STR, "anchor_claim_type": _STR,
+        "anchor_evidence_source": _STR, "anchor_confidence_band": _STR,
+    },
+    "model.disclosure_levels[].generic_groups[]": {
+        "kind": _STR, "span_start": (int,), "span_end": (int,),
+        "matched_letters": _OPT_INT, "work_count": (int,), "works": (tuple,),
+        "note": _STR,
+    },
+    "model.disclosure_levels[].generic_groups[].works[]": {
+        "work_id": _OPT_STR, "work_title": _STR, "title_missing": _BOOL,
+        "relation_chip": _STR,
+    },
+    "model.disclosure_levels[].related_pages": {
+        "header": _STR, "label": _STR, "count": _OPT_INT, "count_state": _STR,
+        "count_unit": _OPT_STR, "count_line": _STR,
+        "count_service_state": (dict,), "rows_state": _STR, "rows": (tuple,),
+        "service_state": (dict,),
+    },
+    "model.disclosure_levels[].related_pages.count_service_state": {
+        "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
+    },
+    "model.disclosure_levels[].related_pages.service_state": {
+        "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
+    },
+    "model.disclosure_levels[].related_pages.rows[]": {
+        "related_page_id": _OPT_STR, "evidence_row_count": _OPT_INT,
+    },
+}
+
+#: Keys that must be present on every identification row -- the object a reader
+#: acts on, and the one whose silent shrinkage would be hardest to notice.
+_REQUIRED_ROW_KEYS = frozenset({
+    "kind", "claim_id", "work_id", "work_title", "headline", "relation_chip",
+    "band_tooltip", "in_main_pool", "bucket", "disclosure_level", "gated",
+    "nested", "expansion",
+})
+
+#: A key NAME that asserts human review, in any spelling anyone has reached for.
+#: The closed schema above already refuses an unknown key; this exists so the
+#: FAILURE names the property, and so the rule is visibly checked rather than
+#: incidentally enforced.
+_REVIEW_MARKER_KEY_RE = re.compile(
+    r"review|verified|badge|expert|adjudicat|confirmed", re.IGNORECASE)
+
+
+def _normalize_path(path):
+    """`model.disclosure_levels[2].rows[0]` -> `model.disclosure_levels[].rows[]`."""
+    return re.sub(r"\[\d+\]", "[]", path)
+
+
+def _walk_objects(node, path="model"):
+    """`(normalized path, mapping)` for every dict reachable in `node`."""
+    if isinstance(node, dict):
+        yield _normalize_path(path), node
+        for key, value in node.items():
+            yield from _walk_objects(value, "%s.%s" % (path, key))
+    elif isinstance(node, (list, tuple)):
+        for index, value in enumerate(node):
+            yield from _walk_objects(value, "%s[%d]" % (path, index))
+
+
+def assert_emitted_schema(model):
+    """Every emitted object, against the closed schema -- keys AND value types.
+
+    Recursive on purpose: a review marker does not have to be a string, and it
+    does not have to be at the top level of a row.
+    """
+    violations = []
+    for path, obj in _walk_objects(model.as_dict()):
+        allowed = _EMITTED_SCHEMA.get(path)
+        if allowed is None:
+            violations.append("%s: no declared shape for this object" % path)
+            continue
+        for key, value in obj.items():
+            if _REVIEW_MARKER_KEY_RE.search(str(key)):
+                violations.append(
+                    "%s.%s: key asserts a review state, which D-13f forbids "
+                    "emitting at all" % (path, key))
+                continue
+            if key not in allowed:
+                violations.append("%s.%s: key is outside the closed schema" % (path, key))
+                continue
+            if not isinstance(value, allowed[key]):
+                violations.append(
+                    "%s.%s: %s is not one of the declared types %s"
+                    % (path, key, type(value).__name__,
+                       [t.__name__ for t in allowed[key]]))
+        if path == "model.disclosure_levels[].rows[]":
+            missing = _REQUIRED_ROW_KEYS - set(obj)
+            if missing:
+                violations.append(
+                    "%s: required key(s) %s absent" % (path, sorted(missing)))
+    if violations:
+        raise DiscoveryHonestyViolation(
+            "panel model emitted shape: " + "; ".join(violations))
+
+
 def _iter_bucket_bearing(model):
     """`(path, row)` for every emitted object that names a bucket."""
     for index, row in enumerate(pm.iter_rows(model)):
@@ -1964,6 +2164,12 @@ def test_every_emitted_bucket_equals_the_shared_rule(case, lang):
 
 
 @pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("case", sorted(_honesty_models("en")))
+def test_the_emitted_shape_is_closed_in_either_language(case, lang):
+    assert_emitted_schema(_honesty_models(lang)[case])
+
+
+@pytest.mark.parametrize("lang", LANGS)
 def test_the_qualified_coverage_passes_and_a_bare_percentage_fails(lang):
     """The ONE permitted percentage, and the reason it is permitted: the
     matched-letter qualifier travels with it."""
@@ -2026,6 +2232,65 @@ def test_positive_control_a_human_review_marker_in_a_row_field():
     assert fired == ["review-marker"], fired
     assert "human-review badge" in message
     assert ".low_coverage_note:" in message
+
+
+def test_positive_control_a_boolean_review_marker_on_a_row():
+    """The control the previous guard could not have: no string, no "badge" in
+    the key, nothing for a substring search on prose to find."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = list(pm.iter_rows(model))[0]
+    row["expert_reviewed"] = True
+    assert_model_honesty(model)   # the STRING sweep sees nothing -- correctly
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    message = str(exc.value)
+    assert "expert_reviewed" in message
+    assert "D-13f" in message
+
+
+def test_positive_control_a_review_marker_nested_below_the_top_level_of_a_row():
+    """Recursion is the property under test: the previous behavioural check
+    looked at top-level row KEYS only."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    row = [r for r in pm.iter_rows(model) if len(r["nested"]) > 0][0]
+    row["nested"][0]["reviewed_by"] = "someone"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "rows[].nested[].reviewed_by" in str(exc.value)
+
+
+def test_positive_control_an_undeclared_field_appears_on_a_row():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["provenance_score"] = 3
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "provenance_score: key is outside the closed schema" in str(exc.value)
+
+
+def test_positive_control_a_declared_field_holding_the_wrong_type():
+    """Types are half the schema: `in_main_pool` carrying a string would make
+    every truthiness test downstream agree with itself and with nothing else."""
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["in_main_pool"] = "yes"
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "in_main_pool: str is not one of the declared types" in str(exc.value)
+
+
+def test_positive_control_a_whole_object_the_schema_does_not_declare():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    list(pm.iter_rows(model))[0]["provenance"] = {"reviewer": "x"}
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "no declared shape for this object" in str(exc.value)
+
+
+def test_positive_control_a_required_row_key_disappears():
+    model = pm.build_panel_rows(kitchen_sink_bundle("en"))
+    del list(pm.iter_rows(model))[0]["bucket"]
+    with pytest.raises(DiscoveryHonestyViolation) as exc:
+        assert_emitted_schema(model)
+    assert "required key(s) ['bucket'] absent" in str(exc.value)
 
 
 def test_positive_control_a_row_whose_bucket_disagrees_with_the_shared_rule():
