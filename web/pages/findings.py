@@ -851,23 +851,3 @@ def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh) -> None
         following.props("flat dense no-caps").classes(f"{PAGER_CLASS}-next")
         if page >= pages:
             following.disable()
-
-
-def _render_row(item: Dict[str, Any], lang: str) -> None:
-    """A MINIMAL identity row -- enough for the shell to be verifiable.
-
-    The full row anatomy (relation chip with the band label on hover, novelty
-    badge, matched-letter coverage, side actions) belongs to the row track.
-    """
-    work_id = item.get("display_work_id") or item.get("canonical_work_id") or ""
-    raw_title = item.get("neutral_title") or ""
-    # Ruling R -- every work title a reader sees routes through this.
-    title = display_work_title(work_id, raw_title, lang) if raw_title else missing_title(lang)
-
-    with ui.column().classes(f"row {ROW_CLASS} w-full gap-1 p-2"):
-        ui.label(title).classes(f"{ROW_CLASS}-title font-bold")
-        shelf = " ".join(
-            part for part in (item.get("library_code"), item.get("shelfmark_display")) if part
-        )
-        if shelf:
-            ui.label(shelf).classes(f"{ROW_CLASS}-shelfmark r-sub text-xs")
