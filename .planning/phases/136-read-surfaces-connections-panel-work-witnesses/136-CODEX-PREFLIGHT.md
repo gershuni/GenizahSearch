@@ -576,3 +576,89 @@ Confirmed:
 - The working tree remains clean; no file or database was written.
 
 VERDICT: rework — BLOCKER 0 · HIGH 4 · MEDIUM 1 · LOW 0 · CONFIRM 5
+
+
+---
+
+# Round 9 — the four-times-revised plans (2026-08-04)
+
+**Brief:** `_tmp/136-codex-preflight-r9-brief.md`. **Baseline:** § Round 8.
+**Scope:** verify round 8's five findings are genuinely closed; hunt regressions.
+
+**Trajectory: 1 BLOCKER / 8 HIGH → 5 → 5 → 4 → 5 HIGH.** The HIGH count did NOT fall this round.
+That is not oscillation: findings 1, 2 and 5 are *deeper* than anything earlier rounds reached
+(finding 1 is a semantic dependency defect that frontmatter parsing structurally cannot see, and
+finding 13 says so explicitly), while findings 3, 4 and 8 are defects **this revision introduced**.
+
+**Self-inflicted rate is the signal worth acting on.** Revision 4 introduced at least three of the
+eight findings below, on top of the five its own self-review caught before Codex ran. The revisions
+are being made too broadly and too fast. Round 10's instruction is to fix finding 1 structurally and
+be surgical everywhere else.
+
+## What round 9 confirmed closed
+
+- **Round 8 finding 1 (constant folding + exemption boundary)** — CONFIRM 9. The folded value is
+  compared, unsafe exponentiation excluded, every figure gets independent-operand controls, and the
+  stated scanner limit does not swallow 136-18's sentinel data-path test.
+- **Round 8 finding 2 (derived carriers)** — CONFIRM 10. The three round-8 carriers match the shape
+  rule and **no live `page_id`, work ID, manuscript ID, claim/evidence digest or unit digest does** —
+  the ID-collision risk flagged in the brief was checked against live values and is absent.
+- **Round 8 finding 3 (D-06a)** — CONFIRM 11. The control genuinely renders the live page and takes
+  its text from the render. **The adjudication against Codex was correct; the follow-through was
+  not** — see finding 3 below.
+- **Round 8 finding 4 (cardinality grain)** — CONFIRM 12. 5,684 reproduced at the expansion grain.
+  `136-RESEARCH.md:120`'s third figure (4,637) is a genuinely different table, population and
+  surface contract, not a contradiction.
+- **Structural graph integrity** — CONFIRM 13. 22 plans, ten waves, every declared dependency
+  earlier, no same-wave `files_modified` overlap, no header drift.
+
+## Note on finding 1 — the deviation the author defended in the round-9 brief
+
+Deviation 1 (declaring `coverage_status` / `eligibility_basis` locally rather than exporting to
+`shared/`) was defended on the grounds that wave 8 runs 136-17 in parallel with 136-22 over
+`shared/`, so an out-of-list edit is an invisible collision. Codex's ruling: **"Deviation 1's
+collision concern is real, but the present parallelization is not sound."** The collision reasoning
+holds; the wave assignment it was protecting does not. `items[*].shade` — added by 136-22 — is
+discovered by 136-17's inverse assertion but cannot be classified by it, so a **correct** launch
+envelope fails the gate.
+
+Preferred remedy: **136-17 depends on 136-22** (136-17 → wave 9, 136-18 → wave 10, 136-19 → wave 11).
+The alternative — letting 136-18 own the gate-file edit — leaves the suite RED between wave 8 and
+wave 10, which is the failure mode these plans already refuse elsewhere.
+
+## Not affected
+
+Wave 7's `136-15` and `136-16` draw no finding in rounds 8 or 9 and were released to execution
+before this round reported. Findings 1–8 are all against `136-17`, `136-18`, `136-21`, `136-22`.
+
+## Findings
+
+1. **HIGH — 136-17/136-18/136-22 — a correct launch envelope fails the derived carrier gate.** Plan 136-22 adds `items[*].shade` with three snake-case vocabulary values ([136-22-PLAN.md:247](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:247), [136-22-PLAN.md:304](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:304)). The inverse assertion therefore discovers `shade`, but 136-17 cannot classify it while running parallel with 136-22, and 136-18 is expressly told to import the mapping rather than edit it ([136-17-PLAN.md:735](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:735), [136-18-PLAN.md:387](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:387)). Thus the strict raw-vocabulary scan rejects correct launch rows. This is semantic `depends_on` drift despite valid frontmatter. **Change:** make 136-17 depend on 136-22 and move the downstream waves, or let a later plan add `shade → contribution-vocabulary` to the central mapping and own that gate-file edit. Deviation 1’s collision concern is real, but the present parallelization is not sound.
+
+2. **HIGH — 136-17 — the derived completeness split is not airtight.** The shape derivation excludes `meta` while the “strict” fallback only rejects values already present in the known prohibited union ([136-17-PLAN.md:551](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:551), [136-17-PLAN.md:558](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:558)). A later `meta` value such as an unknown snake-case stored enum passes. The shape rule also cannot discover a later carrier whose vocabulary consists solely of single-word tokens. A registry alone would indeed miss the two locally sourced vocabularies, but rejecting registry-backed discovery altogether is rationalization: shape and authority/registry checks are complementary. **Change:** add a separate bounded `meta` carrier/value mapping and combine shape discovery with available exported registries and pinned local authorities.
+
+3. **HIGH — 136-17 — the D-06a exception is global, not surface-bound.** The plan globally excludes `share`, `minority`, `misattributed`, and `single-digit` from detection and defines the exception as any words-only qualitative frequency statement ([136-17-PLAN.md:633](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:633), [136-17-PLAN.md:664](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:664)). Consequently equivalent wording on a findings row, error path, or unrelated page can claim the exception. The live-page control protects the sanctioned sentence from false-positive changes but does not constrain where the exception applies. **Change:** bind the exception to the exact live help limitations element/context; detect the vocabulary elsewhere.
+
+4. **HIGH — 136-22 — the claimed glob-only placement control is actually in the floor.** `web/pages/browse_enrichment.py` is explicitly part of the named floor ([136-22-PLAN.md:390](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:390)), but criterion (ii) calls it absent from the floor and uses it to prove the glob is load-bearing ([136-22-PLAN.md:527](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:527)). A hand-written floor plus one arbitrary extra module can satisfy every stated scope assertion. **Change:** select the control dynamically from `derived_set - floor`, assert that difference, and seed the figure in that actual module.
+
+5. **HIGH — 136-21 — top N raw candidates do not prove the highest post-filter expansion.** The criterion acknowledges that filtering and anchor rules can reorder candidates, but samples only N ≥ 5 work IDs selected before those rules ([136-21-PLAN.md:398](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-21-PLAN.md:398)). A work outside the raw top five can retain more rows after filtering than every sampled work; a cap between the observed and missed totals can pass. This becomes especially reachable after a future bake where the cap also exceeds the synthetic floor. **Change:** either test the unanchored, unfiltered call—where raw top one is provably the global maximum—or run the real filtered call for every candidate / derive candidates through the identical filtered pipeline.
+
+6. **MEDIUM — 136-17 — the version exclusion is wider than version syntax.** It excludes a fraction when its integer part is preceded by any word character ([136-17-PLAN.md:638](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:638)). Therefore copy such as `accuracy score0.9` is excluded from both rules, despite being a real rate. The three named controls do not cover this glued-token case ([136-17-PLAN.md:844](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:844)). **Change:** restrict exclusion to explicit `V`/`version` syntax and add a non-version alphanumeric-prefix rejection control.
+
+7. **MEDIUM — 136-22 — two assertions can fail on correct data/code.** The plan offers exemptions for coincidental legitimate numeric uses ([136-22-PLAN.md:441](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:441)) but then forbids exempting any current figure ([136-22-PLAN.md:453](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:453)). A future launch count equal to a legitimate page-size or timeout constant blocks correct code with no valid exemption. Separately, requiring each forbidden-list half to contain a value absent from the other fails if a correct rebuild reproduces historical counts ([136-22-PLAN.md:528](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:528)). **Change:** prove both halves are independently loaded and provenance-pinned without requiring value-set uniqueness; permit a current-value exemption only with a derived non-egress proof and end-to-end control.
+
+8. **LOW — 136-17 — the false-positive-control count is stale again.** The action says five controls but contains six bullets, including both the version boundary and live methods-page render ([136-17-PLAN.md:776](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:776), [136-17-PLAN.md:804](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:804)). Acceptance and verification count five by treating the version triplet separately ([136-17-PLAN.md:845](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:845)). **Change:** explicitly move the version triplet outside that list or change all counts to six.
+
+9. **CONFIRM — 136-22/136-18 — constant folding and the sentinel pairing are substantive.** The folded value is compared, unsafe exponentiation is excluded, arithmetic failures are skipped, every figure gets independent-operand controls, and the renderer mutation assembled across names must fail only the sentinel test ([136-22-PLAN.md:411](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:411), [136-22-PLAN.md:524](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-22-PLAN.md:524), [136-18-PLAN.md:257](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-18-PLAN.md:257)). The stated scanner limit does not swallow the renderer data-path test. Change only finding 4’s scope proof and finding 7’s false-positive assertions.
+
+10. **CONFIRM — 136-17 — the three Round-8 carriers match the shape rule, and live IDs do not.** The live fields are present at [discovery_surface_projection.py:138](shared/discovery_surface_projection.py:138), [discovery_surface_projection.py:153](shared/discovery_surface_projection.py:153), and [discovery_surface_projection.py:159](shared/discovery_surface_projection.py:159); their multiword stored values match the regex. Read-only inspection found no live `page_id`, work ID, manuscript ID, claim/evidence digest, or unit digest matching it. The plan correctly requires recording flagged fields before classification ([136-17-PLAN.md:562](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:562)). Change only findings 1–2.
+
+11. **CONFIRM — 136-17 — the D-06a control really renders the live page.** It reuses the existing help-page rendering harness, scopes the limitations section, and takes text from the render rather than a copied string ([136-17-PLAN.md:804](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-17-PLAN.md:804)). The live page and its existing pin remain untouched ([help.py:178](web/pages/help.py:178), [test_help_methods_render_smoke.py:369](tests/render_smoke/test_help_methods_render_smoke.py:369)). Change the exception’s scope per finding 3, not the control’s provenance.
+
+12. **CONFIRM — 136-21 — the cardinality grain is corrected, and the third figure is a different definition.** The live CTE counts distinct `COALESCE(unit_id, 'sys:' || sys_id)` for qualifying claim types ([discovery_service.py:610](shared/discovery_service.py:610), [discovery_service.py:626](shared/discovery_service.py:626)); read-only SQL reproduced 5,684 at that expansion grain. The 4,637 figure in [136-RESEARCH.md:120](.planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-RESEARCH.md:120) counts distinct witness units only among the 4,796 `discovery_identification` manuscripts for the canonical work. It is a different table, population, and surface contract. Change only finding 5’s candidate-selection proof.
+
+13. **CONFIRM — all plans — structural graph integrity and Round-7 spot-checks hold.** Independent parsing found 22 plans, ten waves, every declared dependency earlier, no same-wave `files_modified` overlap, and no structural header changes since the Round-8 baseline. The cache-wrapper/path-switch and dispatch-count criteria remain intact. The failure in finding 1 is semantic dependency drift that frontmatter-only parsing cannot see.
+
+No file or database was written by this review. During the audit, HEAD advanced by two unrelated documentation commits and user-owned changes appeared in `web/main.py` and `web/pages/findings.py`; they were not touched.
+
+VERDICT: rework — BLOCKER 0 · HIGH 5 · MEDIUM 2 · LOW 1 · CONFIRM 5
