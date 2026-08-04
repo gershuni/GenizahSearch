@@ -216,6 +216,50 @@ SURFACE_FINDING_FIELDS: Tuple[str, ...] = (
     "multi_work_annotation",
 )
 
+#: PANEL-02 (plan 136-21): ONE row of the "Other manuscripts matching <work>"
+#: expansion. A PAIR row, not a claim row -- it describes the relationship
+#: between the ANCHOR the reader is looking at and ANOTHER carrier they are not.
+#:
+#: What it deliberately does NOT name, and why:
+#:   * `review_overlay` -- `serialize_banded_claim` always emits it, and the
+#:     import-time guard below would reject it anyway (D-13f).
+#:   * `measurement_status` / `ci_low` -- the band-label inputs; they exist only
+#:     inside the service (D-06).
+#:   * `unit_key` / `rn` / `_total_rows` -- internal query discriminators.
+#:   * the CARRIER's RAW `evidence_source` / `confidence_band`, and the ANCHOR's.
+#:     DATA-01 says the surface displays the WEAKER of the two bands; handing it
+#:     both raw pairs would invite a renderer to re-derive that comparison, and a
+#:     second comparator is exactly how the displayed band drifts from the
+#:     filtered one. The RESOLVED pair (plus its rank and its label) is the only
+#:     band vocabulary a surface ever sees here.
+#:
+#: Relation kinds DO stay on the row -- they are stored vocabulary the surface
+#: maps through `relation_chip()`, never renders raw, exactly as
+#: `SURFACE_CLAIM_FIELDS` already treats `relation_kind`.
+SURFACE_EXPANSION_FIELDS: Tuple[str, ...] = (
+    # the other carrier's identity
+    "work_id",
+    "unit_id",
+    "representative_sys_id",
+    "representative_page_id",
+    "representative_claim_id",
+    "member_sys_ids",
+    # what NAMES it (an absent manuscript_display row is FLAGGED, not blanked)
+    "library_code",
+    "shelfmark_display",
+    "display_missing",
+    # both sides' relation kinds (PANEL-02: "shows each side's own relation type
+    # when they differ")
+    "claim_type",
+    "anchor_claim_type",
+    "relations_differ",
+    # the RESOLVED band presentation (DATA-01: the WEAKER of the pair)
+    "displayed_evidence_source",
+    "displayed_confidence_band",
+    "band_label",
+    "band_rank",
+)
+
 #: The facet-cascade row (domain / author / work), mirroring the catalogue
 #: page's accessor SHAPE but sourced from the IDENTIFIED WORK.
 SURFACE_FACET_FIELDS: Tuple[str, ...] = (
@@ -232,6 +276,7 @@ _ALL_ALLOWLISTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("SURFACE_WORK_SUMMARY_FIELDS", SURFACE_WORK_SUMMARY_FIELDS),
     ("SURFACE_RELATED_PAGE_FIELDS", SURFACE_RELATED_PAGE_FIELDS),
     ("SURFACE_FINDING_FIELDS", SURFACE_FINDING_FIELDS),
+    ("SURFACE_EXPANSION_FIELDS", SURFACE_EXPANSION_FIELDS),
     ("SURFACE_FACET_FIELDS", SURFACE_FACET_FIELDS),
 )
 
@@ -282,6 +327,11 @@ def surface_safe_related_page(row: Mapping[str, Any]) -> Dict[str, Any]:
 def surface_safe_finding(row: Mapping[str, Any]) -> Dict[str, Any]:
     """One corpus-wide findings row, in any of the three offered units (A-6)."""
     return _project(row, SURFACE_FINDING_FIELDS)
+
+
+def surface_safe_expansion(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One "Other manuscripts matching <work>" expansion row (PANEL-02)."""
+    return _project(row, SURFACE_EXPANSION_FIELDS)
 
 
 def surface_safe_facet(row: Mapping[str, Any]) -> Dict[str, Any]:

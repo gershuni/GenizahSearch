@@ -314,6 +314,56 @@ async def get_work_witnesses(
         return []
 
 
+async def get_work_expansion_enveloped(
+    work_id: str,
+    enabled_bands: Optional[Iterable[str]] = None,
+    *,
+    page: int = 1,
+    page_size: Optional[int] = None,
+    anchor_sys_id: Optional[str] = None,
+    anchor_claim_type: Optional[str] = None,
+    anchor_evidence_source: Optional[str] = None,
+    anchor_confidence_band: Optional[str] = None,
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """PANEL-02 "Other manuscripts matching <work>", the ENVELOPED shape
+    (D-13, plan 136-21) -- `{status, items, total, meta}`.
+
+    Prefer this over `get_work_witnesses` above on any surface that decides
+    whether to RENDER, and on any surface that shows a COUNT. The list-returning
+    wrapper collapses a timeout, an overload, an absent sidecar and a genuine
+    zero all into `[]`, and carries no total at all -- so the section would hide
+    itself during an outage exactly as though the work had no other carriers,
+    and a page length would be the only number available where a real count
+    belongs.
+
+    `total` is the count query's exact result. A count that cannot be produced
+    inside its budget surfaces as `timeout`; it is never softened into an
+    approximate or capped figure.
+
+    The anchor identity is ALL THREE OR NONE (`anchor_claim_type`,
+    `anchor_evidence_source`, `anchor_confidence_band`); a partial set raises
+    `ValueError` and is NOT converted into an envelope, because it is a caller
+    bug rather than a service state -- the same posture `get_findings_enveloped`
+    takes for an out-of-vocabulary unit.
+    """
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_work_expansion_enveloped_async(
+            work_id, enabled_bands, page=page, page_size=page_size,
+            anchor_sys_id=anchor_sys_id, anchor_claim_type=anchor_claim_type,
+            anchor_evidence_source=anchor_evidence_source,
+            anchor_confidence_band=anchor_confidence_band, lang=lang,
+        )
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        logger.info(
+            "discovery.get_work_expansion_enveloped: timeout for work_id=%s", work_id)
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
 # ---------------------------------------------------------------------------
 # BAND-05 methods-page readers (Phase 135, plan 135-02). The SUPPORTED public
 # wrappers the /help "Confidence Bands & Methods" section reads its per-band

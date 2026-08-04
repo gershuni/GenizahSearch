@@ -66,6 +66,7 @@ from shared.discovery_surface_projection import (
     busy_envelope,
     make_envelope,
     surface_safe_claim,
+    surface_safe_expansion,
     surface_safe_facet,
     surface_safe_finding,
     surface_safe_related_page,
@@ -2197,6 +2198,71 @@ class DiscoveryService:
             ]
         return items, total
 
+    def get_work_expansion_enveloped(
+        self,
+        work_id: str,
+        enabled_bands: Optional[Iterable[str]] = None,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        anchor_sys_id: Optional[str] = None,
+        anchor_claim_type: Optional[str] = None,
+        anchor_evidence_source: Optional[str] = None,
+        anchor_confidence_band: Optional[str] = None,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """PANEL-02's expansion in the CLOSED four-key envelope (D-13):
+        `{status, items, total, meta}`.
+
+        A failed query returns `unavailable` with a named reason, NEVER `ok`
+        with zero items -- an outage that renders as "no other manuscript
+        carries this work" is the exact false-zero class 136-14 found on a real
+        asset.
+
+        `total` is the COUNT QUERY's exact result, never `len(items)`: a bounded
+        page cannot supply a total, and a page length rendered as a corpus fact
+        is a number the reader will believe. There is no approximate, estimated,
+        sampled or capped alternative anywhere on this path -- a count that
+        cannot be produced inside its budget degrades to the `timeout` status,
+        which is a temporary failure a reader can retry rather than a figure
+        they cannot check.
+
+        `meta` names WHICH of the two documented filter contracts produced the
+        result, so a reader of the envelope never has to guess:
+          * `anchor_mode` -- whether the anchor IDENTITY triple was supplied.
+            That is the axis that decides what the reader sees; `anchor_sys_id`
+            (unit EXCLUSION) is an independent axis and is reported separately
+            as `anchor_excluded`.
+          * `filter_basis` -- `displayed_band` (the resolved weaker band) when
+            anchored, `other_carrier_band` when not.
+        """
+        anchored = _validate_anchor_identity(
+            anchor_claim_type, anchor_evidence_source, anchor_confidence_band)
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        try:
+            rows, total = self._query_work_expansion(
+                work_id, enabled_bands=enabled_bands, page=page, page_size=page_size,
+                anchor_sys_id=anchor_sys_id, anchor_claim_type=anchor_claim_type,
+                anchor_evidence_source=anchor_evidence_source,
+                anchor_confidence_band=anchor_confidence_band, lang=lang,
+            )
+            items = [surface_safe_expansion(row) for row in rows]
+        except Exception as e:
+            # Type name only -- see get_work_witnesses.
+            logger.error(
+                "DiscoveryService.get_work_expansion_enveloped query failed (%s)",
+                type(e).__name__)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        return make_envelope(
+            STATUS_OK, items, total=total,
+            meta={
+                "work_id": work_id,
+                "anchor_mode": "anchored" if anchored else "unanchored",
+                "filter_basis": "displayed_band" if anchored else "other_carrier_band",
+                "anchor_excluded": anchor_sys_id is not None,
+            },
+        )
+
     # ------------------------------------------------------------------
     # Heavy-query bounded concurrency (mirrors web/search_api.py's
     # _acquire_heavy_slot exactly -- non-blocking; raises DiscoveryOverload
@@ -2533,4 +2599,37 @@ class DiscoveryService:
             self.get_work_witnesses,
             work_id, enabled_bands, page, page_size, anchor_sys_id,
             timeout=self._work_timeout(), heavy=True,
+        )
+
+    async def get_work_expansion_enveloped_async(
+        self,
+        work_id: str,
+        enabled_bands: Optional[Iterable[str]] = None,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        anchor_sys_id: Optional[str] = None,
+        anchor_claim_type: Optional[str] = None,
+        anchor_evidence_source: Optional[str] = None,
+        anchor_confidence_band: Optional[str] = None,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """The async shape of `get_work_expansion_enveloped` -- a thin wrapper
+        over the SAME sync implementation, never a second query path.
+
+        Heavy: the expansion issues a count, a page and a member lookup over a
+        window query, so a burst degrades to an explicit `busy` rather than
+        queueing behind the browse path. Deliberately NOT LRU-cached: the cache
+        hands one envelope object to every caller, and the forced-failure and
+        exhaustive-pagination contracts here must each see a real query.
+
+        `enabled_bands` is passed through UNCHANGED (an empty iterable keeps its
+        pre-existing meaning); it is only made hashable for the executor call.
+        """
+        return await self._enveloped_off_loop(
+            self.get_work_expansion_enveloped,
+            (work_id,
+             None if enabled_bands is None else tuple(enabled_bands),
+             page, page_size, anchor_sys_id, anchor_claim_type,
+             anchor_evidence_source, anchor_confidence_band, lang),
+            timeout=self._browse_timeout(), heavy=True,
         )
