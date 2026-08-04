@@ -50,6 +50,17 @@ rule that already exists:
 * outage detection is `is_outage(envelope)` and zero detection is an explicit
   `status == ok and total == 0`; a truthiness test on an item list is a defect.
 
+The ONE rule it does restate is D-13g's eligibility predicate (`routing_status
+== 'shipped' OR adjudication_status == 'human_confirmed'`), and the reason is
+the bug in the fourth bullet above: that row was dropped one layer down from
+the predicate meant to protect it, because each layer assumed the other had
+decided. This model is a pure function over envelopes a CALLER supplies, so
+"the query already filtered" is an assumption here, not a fact. It checks the
+predicate itself and refuses a row that satisfies neither limb -- unless the
+claims envelope's own `meta.include_review` says the reader opted into the
+review population, in which case such a row is admitted and can never reach
+the default disclosure level.
+
 There is deliberately NO human-review-marker field on any object this module
 emits (D-13f): the badge is dropped until the provenance of those rows is
 established, and the safest implementation of "no marker" is that the field does
@@ -507,15 +518,110 @@ def _generic_group(
 # ---------------------------------------------------------------------------
 
 
+def _is_shipped(row: Mapping[str, Any]) -> bool:
+    """D-13g limb 1, read from the row's OWN routing status."""
+    return row.get("routing_status") == ids.ROUTING_STATUS_SHIPPED
+
+
 def _is_human_confirmed(row: Mapping[str, Any]) -> bool:
-    """D-13g: a human-confirmed row is present in the DEFAULT set even when
-    routing demoted it. The identification grain materializes it under
-    `shipped OR human_confirmed`, and the row itself records which."""
-    return bool(row.get("restored_by_human_confirmation")) or (
-        row.get("main_pool_reason") == REASON_MAIN_HUMAN_CONFIRMED
-    ) or (
-        row.get("adjudication_status") == ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED
-    )
+    """D-13g limb 2, and ONLY the explicit adjudication limb.
+
+    The earlier version of this predicate also accepted
+    `restored_by_human_confirmation` and a `main_pool_reason` of
+    `REASON_MAIN_HUMAN_CONFIRMED` as substitutes. Both are DERIVED from this
+    limb -- the query computes `restored_by_human_confirmation` as
+    `routing_status <> 'shipped' AND adjudication_status = 'human_confirmed'`,
+    and the reason is materialized by the build from the same fact -- so
+    accepting them let a row assert human confirmation that no human record
+    backs, and promoted it into the DEFAULT level on that assertion. A derived
+    field is evidence that the fact was recorded, never the record itself;
+    `_validate_claim_row` fails loudly when the two disagree rather than
+    quietly picking one.
+    """
+    return row.get("adjudication_status") == ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED
+
+
+def _is_default_surface_eligible(row: Mapping[str, Any]) -> bool:
+    """D-13g's eligibility predicate, EXACTLY: `routing_status == 'shipped'`
+    OR `adjudication_status == 'human_confirmed'`.
+
+    This is the same two-limb rule the page query materializes
+    (`shared/discovery_service.py::_CLAIMS_DEFAULT_ROUTING_CLAUSE`) and the
+    same one the build writes into `discovery_identification`. Restating it
+    here is not duplication for its own sake: the model is a PURE function over
+    envelopes a caller supplies, so "the query already filtered" is an
+    assumption, and an assumption is precisely what let one manuscript's
+    human-confirmed row be dropped one layer down from the predicate meant to
+    protect it.
+    """
+    return _is_shipped(row) or _is_human_confirmed(row)
+
+
+#: Closed stored vocabularies every input claim is checked against BEFORE any
+#: predicate reads them. Without this the two-limb eligibility test is not
+#: total: a row carrying a routing status outside the frozen enum satisfies
+#: neither limb and neither its negation, and the four-value truth table has
+#: five values.
+_CLOSED_CLAIM_VOCABULARIES: Tuple[Tuple[str, frozenset], ...] = (
+    ("routing_status", ids.ROUTING_STATUSES),
+    ("adjudication_status", ids.ADJUDICATION_STATUSES),
+)
+
+
+def _validate_claim_row(row: Mapping[str, Any], *, include_review: bool) -> None:
+    """The D-13g contract on ONE input claim, checked at the model boundary.
+
+    `include_review` comes from the claims envelope's own `meta` -- the
+    producer's record of WHICH population it returned. On the default surface
+    (`include_review` false) a row failing both eligibility limbs is a producer
+    -contract violation and is REFUSED, not silently dropped: dropping it would
+    reproduce, in the display layer, exactly the class of bug D-13g exists to
+    fix -- a row disappearing between two layers that each assumed the other
+    had decided. Under `include_review` such a row is the requested population;
+    it is admitted and can never reach the default level.
+
+    Every message below names a fixed CODE and FIELD NAMES only. No value read
+    out of a row is ever interpolated: a claim row is artifact content, and a
+    refusal that quotes it puts restricted text one `logger.exception` away
+    from a log file.
+    """
+    for field_name, vocabulary in _CLOSED_CLAIM_VOCABULARIES:
+        if row.get(field_name) not in vocabulary:
+            raise ValueError(
+                "claim_vocabulary_outside_closed_set: field %r is missing or "
+                "outside its frozen vocabulary (value withheld); the closed set "
+                "has %d members" % (field_name, len(vocabulary))
+            )
+
+    if not include_review and not _is_default_surface_eligible(row):
+        raise ValueError(
+            "claim_ineligible_for_default_surface: this claim satisfies neither "
+            "limb of D-13g (routing_status == 'shipped' OR adjudication_status "
+            "== 'human_confirmed') and the claims envelope's meta.include_review "
+            "is false, so the producer should never have returned it (values "
+            "withheld)"
+        )
+
+    # The derived confirmation markers must AGREE with the explicit limb.
+    # `restored_by_human_confirmation` is exactly derivable, so both directions
+    # are checked; `main_pool_reason` is an identification-level fact that may
+    # legitimately be something else for a confirmed row, so only the direction
+    # that would let it stand IN for the limb is.
+    if bool(row.get("restored_by_human_confirmation")) != (
+        _is_human_confirmed(row) and not _is_shipped(row)
+    ):
+        raise ValueError(
+            "claim_derived_confirmation_inconsistent: field "
+            "'restored_by_human_confirmation' disagrees with its own definition "
+            "over 'adjudication_status' and 'routing_status' (values withheld)"
+        )
+    if row.get("main_pool_reason") == REASON_MAIN_HUMAN_CONFIRMED \
+            and not _is_human_confirmed(row):
+        raise ValueError(
+            "claim_derived_confirmation_inconsistent: field 'main_pool_reason' "
+            "asserts human confirmation that field 'adjudication_status' does "
+            "not record (values withheld)"
+        )
 
 
 def _disclosure_level_for(row: Mapping[str, Any]) -> str:
@@ -526,6 +632,11 @@ def _disclosure_level_for(row: Mapping[str, Any]) -> str:
     materialized shared-rule decision on the row (`main_pool`), never
     recomputed.
     """
+    if not _is_default_surface_eligible(row):
+        # Only reachable under `include_review`. Stated explicitly rather than
+        # left to fall through the `main_pool` test below, which would be the
+        # same substitution of a derived field for the eligibility rule.
+        return LEVEL_MORE_MATCHES
     if _is_human_confirmed(row):
         return LEVEL_IDENTIFICATIONS
     if row.get("main_pool") is not True:
@@ -671,12 +782,18 @@ def _identification_row(
 
 
 def _compose_rows(
-    service_rows: Sequence[Mapping[str, Any]], lang: str
+    service_rows: Sequence[Mapping[str, Any]], lang: str, *, include_review: bool
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """The pipeline, in the ONE order that is correct.
 
     Applying these in a different order changes what a reader sees.
     """
+    # STEP 0 -- the input contract, on EVERY claim, before any step below reads
+    # one. A validation that runs only on the rows that survive grouping is not
+    # a contract: it is a sample of one.
+    for row in service_rows:
+        _validate_claim_row(row, include_review=include_review)
+
     # STEP 1 -- collapse duplicate canonical works
     collapsed = _collapse_duplicates(service_rows)
     standalone, span_groups = _group_by_span(collapsed)
@@ -943,7 +1060,13 @@ def build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
     lang = bundle.lang
     outcome = ARBITRATION_TABLE[(bundle.claims.get("status"),
                                  _scope_state(bundle.page_ids, bundle.manuscript_works))]
-    rows, generic_groups = _compose_rows(_items(bundle.claims), lang)
+    # WHICH population the producer says it returned (D-13g). Read from the
+    # envelope's own meta, never assumed: the default surface and the
+    # review-opt-in surface admit different rows, and a model that guessed
+    # would either refuse a legitimate opt-in read or admit an ineligible row.
+    include_review = bool((bundle.claims.get("meta") or {}).get("include_review"))
+    rows, generic_groups = _compose_rows(
+        _items(bundle.claims), lang, include_review=include_review)
 
     default_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_IDENTIFICATIONS)
     gated_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_MORE_MATCHES)

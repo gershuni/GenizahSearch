@@ -628,6 +628,157 @@ def test_two_human_confirmed_rows_both_show_by_default_with_a_coverage_note(
         assert not any("badge" in key for key in row)
 
 
+# ---------------------------------------------------------------------------
+# D-13g eligibility -- the four-value truth table, written out INDEPENDENTLY of
+# the predicate under test. Reading the expectation out of
+# `_is_default_surface_eligible` (or out of the row's own derived fields) would
+# make the table agree with any implementation, including a wrong one.
+# ---------------------------------------------------------------------------
+
+_SHIPPED = ids.ROUTING_STATUS_SHIPPED
+_REVIEW_ONLY = ids.ROUTING_STATUS_REVIEW_ONLY
+_CONFIRMED = ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED
+_UNREVIEWED = ids.ADJUDICATION_STATUS_UNREVIEWED
+
+#: `(routing_status, adjudication_status) -> eligible on the DEFAULT surface`.
+#: Hand-written from D-13g's sentence, not derived from the module.
+_D13G_TRUTH_TABLE = {
+    (_SHIPPED, _CONFIRMED): True,
+    (_SHIPPED, _UNREVIEWED): True,
+    (_REVIEW_ONLY, _CONFIRMED): True,
+    (_REVIEW_ONLY, _UNREVIEWED): False,
+}
+
+
+def _eligibility_row(routing_status, adjudication_status, **overrides):
+    """One claim whose derived confirmation fields are CONSISTENT with the two
+    limbs -- so the truth table tests eligibility and nothing else."""
+    restored = adjudication_status == _CONFIRMED and routing_status != _SHIPPED
+    fields = {
+        "routing_status": routing_status,
+        "adjudication_status": adjudication_status,
+        "restored_by_human_confirmation": restored,
+        "main_pool_reason": (REASON_MAIN_HUMAN_CONFIRMED if restored
+                             else REASON_MAIN_FULL_COVERAGE),
+    }
+    fields.update(overrides)
+    return claim_row(**fields)
+
+
+@pytest.mark.parametrize("routing_status,adjudication_status", sorted(_D13G_TRUTH_TABLE))
+def test_d13g_eligibility_truth_table_on_the_default_surface(
+        routing_status, adjudication_status):
+    """All FOUR combinations. The one that fails both limbs is REFUSED, never
+    silently dropped: a row disappearing between two layers that each assumed
+    the other had decided is the exact bug D-13g exists to fix."""
+    eligible = _D13G_TRUTH_TABLE[(routing_status, adjudication_status)]
+    rows = [_eligibility_row(routing_status, adjudication_status)]
+
+    if not eligible:
+        with pytest.raises(ValueError) as exc:
+            pm.build_panel_rows(bundle(rows))
+        assert "claim_ineligible_for_default_surface" in str(exc.value)
+        return
+
+    model = pm.build_panel_rows(bundle(rows))
+    emitted = list(pm.iter_rows(model))
+    assert len(emitted) == 1
+    assert emitted[0]["claim_id"] == "claim-1"
+
+
+@pytest.mark.parametrize("routing_status,adjudication_status", sorted(_D13G_TRUTH_TABLE))
+def test_d13g_only_the_explicit_confirmation_limb_reaches_the_default_level(
+        routing_status, adjudication_status):
+    """The DEFAULT level, again from the table rather than from the model: a
+    row is unconditionally in it when a human confirmed it, and otherwise only
+    when it earns its way there."""
+    if not _D13G_TRUTH_TABLE[(routing_status, adjudication_status)]:
+        pytest.skip("refused by the eligibility gate -- covered by the table test above")
+    # Short evidence + outside the main pool: everything EXCEPT confirmation
+    # says "gate this row".
+    rows = [_eligibility_row(routing_status, adjudication_status,
+                             matched_letters=66, coverage_ppm=20000,
+                             main_pool=False, default_eligible=False)]
+    if adjudication_status != _CONFIRMED:
+        rows[0]["main_pool_reason"] = REASON_INSUFFICIENT_LENGTH
+    emitted = list(pm.iter_rows(pm.build_panel_rows(bundle(rows))))[0]
+    expected = pm.LEVEL_IDENTIFICATIONS if adjudication_status == _CONFIRMED \
+        else pm.LEVEL_MORE_MATCHES
+    assert emitted["disclosure_level"] == expected
+
+
+@pytest.mark.parametrize("marker_field,marker_value", [
+    ("restored_by_human_confirmation", True),
+    ("main_pool_reason", REASON_MAIN_HUMAN_CONFIRMED),
+])
+def test_a_derived_confirmation_marker_is_never_a_substitute_for_the_limb(
+        marker_field, marker_value):
+    """Both markers are DERIVED from `adjudication_status`. A row that carries
+    one without it is asserting a human record that does not exist -- which
+    used to promote it into the default level."""
+    row = _eligibility_row(_REVIEW_ONLY, _UNREVIEWED, **{marker_field: marker_value})
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([row]))
+    message = str(exc.value)
+    # The eligibility gate speaks first here, which is correct -- but the
+    # inconsistency must be refused on its OWN even when the row IS eligible.
+    assert "claim_ineligible_for_default_surface" in message
+
+    eligible_but_inconsistent = _eligibility_row(
+        _SHIPPED, _UNREVIEWED, **{marker_field: marker_value})
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([eligible_but_inconsistent]))
+    assert "claim_derived_confirmation_inconsistent" in str(exc.value)
+    assert marker_field in str(exc.value)
+
+
+def test_a_confirmed_row_whose_restored_flag_is_missing_is_refused():
+    """The other direction of the same equality: the query derives
+    `restored_by_human_confirmation` as `not shipped AND human_confirmed`, so a
+    demoted confirmed row that does NOT carry it is a producer that has drifted
+    from its own definition -- and it is the row that would silently lose its
+    coverage note."""
+    row = _eligibility_row(_REVIEW_ONLY, _CONFIRMED, restored_by_human_confirmation=False)
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([row]))
+    assert "claim_derived_confirmation_inconsistent" in str(exc.value)
+
+
+def test_the_review_opt_in_population_is_admitted_but_never_defaults():
+    """`meta.include_review` is the producer's record of WHICH population it
+    returned. Under the opt-in read a row failing both limbs is legitimate --
+    and it still may not reach the default level."""
+    ineligible = _eligibility_row(_REVIEW_ONLY, _UNREVIEWED,
+                                  main_pool_reason=REASON_INSUFFICIENT_LENGTH)
+    opted_in = claims_envelope([ineligible],
+                               meta={"page_id": "page-1", "include_review": True})
+    model = pm.build_panel_rows(bundle(claims=opted_in))
+    emitted = list(pm.iter_rows(model))
+    assert len(emitted) == 1
+    assert emitted[0]["disclosure_level"] == pm.LEVEL_MORE_MATCHES
+    assert emitted[0]["gated"] is True
+
+    # Even a row the OTHER signals would promote stays gated: eligibility is
+    # decided before any of them is read.
+    promoted_looking = _eligibility_row(
+        _REVIEW_ONLY, _UNREVIEWED, main_pool=True,
+        main_pool_reason=REASON_MAIN_FULL_COVERAGE, default_eligible=True)
+    model = pm.build_panel_rows(bundle(claims=claims_envelope(
+        [promoted_looking], meta={"page_id": "page-1", "include_review": True})))
+    assert list(pm.iter_rows(model))[0]["disclosure_level"] == pm.LEVEL_MORE_MATCHES
+
+
+@pytest.mark.parametrize("field_name", ["routing_status", "adjudication_status"])
+def test_a_status_outside_the_frozen_vocabulary_is_refused_not_silently_ineligible(
+        field_name):
+    """Without this the two-limb test is not total: an out-of-vocabulary status
+    satisfies neither limb and neither its negation."""
+    with pytest.raises(ValueError) as exc:
+        pm.build_panel_rows(bundle([claim_row(**{field_name: None})]))
+    assert "claim_vocabulary_outside_closed_set" in str(exc.value)
+    assert field_name in str(exc.value)
+
+
 def test_direct_family_row_carries_coverage_and_a_propagated_row_carries_none():
     direct = pm.build_panel_rows(bundle([claim_row()]))
     propagated = pm.build_panel_rows(bundle([
