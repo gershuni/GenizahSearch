@@ -2065,7 +2065,10 @@ _EMITTED_SCHEMA = {
         "disclosure_levels": (tuple,),
     },
     "model.entry_control": {
+        # `degraded` is separate from `status` on purpose: `status` is the
+        # CLAIMS envelope's, and a page-scope outage leaves it `ok`.
         "hidden": _BOOL, "status": _OPT_STR, "count": _OPT_INT,
+        "degraded_status": _OPT_STR,
     },
     "model.service_state": {
         "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,

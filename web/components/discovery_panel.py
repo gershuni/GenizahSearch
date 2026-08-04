@@ -142,12 +142,17 @@ def render_discovery_entry_control(model: PanelModel, *, on_toggle=None) -> None
     with ui.element('span').classes(f'gs-discovery {PANEL_ENTRY_CLASS}'):
         button = ui.button(label, icon='hub', on_click=on_toggle).props(
             'flat dense size=sm no-caps')
-        if entry.get('status') != STATUS_OK:
-            # An outage keeps the control VISIBLE and says so. Hiding it here
-            # would tell the reader this manuscript has nothing, on the strength
-            # of a query that failed.
+        degraded_status = entry.get('degraded_status')
+        if degraded_status:
+            # An outage ANYWHERE behind this control keeps it VISIBLE and says
+            # so. Hiding it would tell the reader this manuscript has nothing on
+            # the strength of a query that failed; saying nothing would leave a
+            # bare "(0)" standing beside an unknown until the panel is opened.
+            # The MODEL names which read failed and how -- the renderer never
+            # recombines the claims status with the scope state to decide this,
+            # and never substitutes a status of its own.
             button.props('disable=false')
-            _neutral_chip(ds.service_state_message(entry.get('status'), lang))
+            _neutral_chip(ds.service_state_message(degraded_status, lang))
 
 
 # ---------------------------------------------------------------------------

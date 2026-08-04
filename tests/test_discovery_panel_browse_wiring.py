@@ -643,7 +643,8 @@ def test_a_page_with_no_resolvable_page_id_yields_no_bundle(spy):
 def test_entry_control_hidden_on_a_true_zero(spy):
     bundle = _fetch()
     model = build_panel_rows(bundle)
-    assert model.entry_control == {'hidden': True, 'status': STATUS_OK, 'count': 0}
+    assert model.entry_control == {
+        'hidden': True, 'status': STATUS_OK, 'count': 0, 'degraded_status': None}
 
 
 @pytest.mark.parametrize('status,inject', [

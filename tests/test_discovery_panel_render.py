@@ -927,6 +927,65 @@ def test_the_retry_offered_on_a_mixed_outage_actually_invokes_the_handler(failin
     assert fired['n'] == 1, f'{failing}/{status}: the retry button fired nothing'
 
 
+def _entry_control_client(model):
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+    holder: Dict[str, Any] = {}
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page('/_discovery_entry_probe')) as client:
+            with client:
+                dp.render_discovery_entry_control(model, on_toggle=lambda: None)
+        holder['client'] = client
+
+    asyncio.run(_run())
+    return holder['client']
+
+
+@pytest.mark.parametrize('lang', ('en', 'he'))
+@pytest.mark.parametrize('status', _OUTAGE_STATUSES)
+def test_the_entry_control_says_so_when_the_scope_read_failed(status, lang):
+    """The consequence of unhiding the control on a page-scope outage.
+
+    `entry_control['status']` is the CLAIMS status, so on that combination it is
+    `ok` and the count is a true zero FOR THIS PAGE -- while the pane that would
+    have spoken for the whole manuscript is an outage the reader cannot see
+    until the panel is opened. A bare "(0)" standing beside an unknown reads as
+    "this manuscript has nothing", which is the claim the unhiding was meant to
+    stop making.
+
+    Parametrised over all three outage statuses because the control reports the
+    FAILED READ'S OWN status: a scope `timeout` must say "this took longer than
+    expected", not "temporarily unavailable". A constant substituted by the
+    renderer would pass a single-status check and be wrong on the other two.
+    """
+    model = build_panel_rows(mixed_bundle('page_ids', status, lang=lang))
+    assert model.entry_control['hidden'] is False
+    assert model.entry_control['status'] == STATUS_OK, (
+        'the fixture no longer isolates the page-ID read')
+    assert model.entry_control['degraded_status'] == status
+    text = '\n'.join(_subtree_texts(
+        _elements_with_class(_entry_control_client(model), dp.PANEL_ENTRY_CLASS)[0]))
+    assert ds.service_state_message(status, lang) in text, text
+    for other in set(_OUTAGE_STATUSES) - {status}:
+        assert ds.service_state_message(other, lang) not in text, (
+            f'the control reported {other!r} for a {status!r} scope read')
+
+
+@pytest.mark.parametrize('lang', ('en', 'he'))
+def test_a_healthy_entry_control_carries_no_outage_chip(lang):
+    """The other half: the chip must not fire on a healthy panel, or it becomes
+    decoration everyone learns to ignore."""
+    model = build_panel_rows(mixed_bundle(None, 'timeout', lang=lang))
+    assert model.entry_control['degraded_status'] is None
+    text = '\n'.join(_subtree_texts(
+        _elements_with_class(_entry_control_client(model), dp.PANEL_ENTRY_CLASS)[0]))
+    for status in _OUTAGE_STATUSES:
+        assert ds.service_state_message(status, lang) not in text, text
+
+
 def test_no_service_state_block_can_be_rendered_without_a_retry_handler():
     """The property STRUCTURALLY, not by enumerating today's four reads.
 

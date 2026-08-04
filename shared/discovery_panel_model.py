@@ -1289,16 +1289,36 @@ def _manuscript_pane(
 
 
 def _entry_control(
-    claims: Mapping[str, Any], outcome: ArbitrationOutcome
+    claims: Mapping[str, Any], page_ids: Mapping[str, Any],
+    outcome: ArbitrationOutcome,
 ) -> Dict[str, Any]:
     """Visibility is a FIELD on the model, not a render-time expression.
 
     Hidden ONLY on a status of `ok` with a total of zero. An outage must never
     look like a manuscript with nothing on it.
+
+    `degraded_status` is a SECOND field, and it exists because of what unhiding
+    the control on a page-scope outage exposed: `status` is the CLAIMS status,
+    so on `("ok", SCOPE_OUTAGE)` it is `ok` and `count` is a true zero for this
+    page -- while the pane that would have spoken for the whole manuscript is an
+    outage the reader cannot see until the panel is opened. A bare "(0)" beside
+    an unknown reads as "this manuscript has nothing".
+
+    It carries the FAILED READ'S OWN status rather than a boolean, so the
+    control names what actually happened: a page-scope `timeout` says "this took
+    longer than expected", not "temporarily unavailable". Deciding that here
+    rather than in the renderer is what keeps the renderer from recombining the
+    claims status with the scope state on its own.
     """
     hidden = outcome.panel_hidden_on_zero and _is_ok_zero(claims)
     control: Dict[str, Any] = {"hidden": hidden, "status": claims.get("status")}
     control["count"] = _envelope_total(claims) if _is_ok(claims) else None
+    if not _is_ok(claims):
+        control["degraded_status"] = claims.get("status")
+    elif outcome.scope_state == SCOPE_OUTAGE:
+        control["degraded_status"] = page_ids.get("status")
+    else:
+        control["degraded_status"] = None
     return control
 
 
@@ -1419,7 +1439,7 @@ def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
         lang=lang,
         show_more=bool(bundle.show_more),
         panel_status=outcome.panel_status,
-        entry_control=_entry_control(bundle.claims, outcome),
+        entry_control=_entry_control(bundle.claims, bundle.page_ids, outcome),
         service_state=_service_state(bundle.claims, lang),
         caveat=ds.recall_disclaimer(lang),
         bucket_rule_sentence=ds.rule_sentence(lang),
