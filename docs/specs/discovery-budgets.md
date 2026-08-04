@@ -228,7 +228,25 @@ rebuild, then version`; no number is invented here, and no committed doc records
 DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT=50   # rows/page default for the findings page; the existing
                                            # DISCOVERY_PAGE_SIZE_MAX=200 ceiling is unchanged and shared
 DISCOVERY_QUERY_TIMEOUT_FINDINGS=5.0      # seconds, per-request timeout for the findings-page query
+DISCOVERY_FINDINGS_COUNT_MAX=0            # 0 (default) = OFF: report the exact total. Above 0, the
+                                           # findings COUNT stops at the cap and the envelope reports
+                                           # total=cap with meta.approximate_total=True. Findings-page
+                                           # ONLY -- the work-expansion total is exact by contract and
+                                           # has no equivalent escape (see below).
 ```
+
+**`DISCOVERY_FINDINGS_COUNT_MAX` is not a general approximation switch, and must not become one.**
+It caps the counting query on the corpus-wide findings page, where a reader is paging a large,
+filtered list and a bounded count is an honest trade. Two boundaries hold it there:
+
+- It is **off by default** (`0`), so an exact total is what ships unless someone opts out.
+- When it fires, the envelope must carry `meta.approximate_total=True`. A capped total reported as
+  exact is a correctness defect, not a performance tuning choice.
+
+The **work-expansion** total on the connections panel is deliberately exact and has **no** cap knob.
+An earlier design gave it an approximate-total escape; that was withdrawn during Phase 136 pre-flight
+because it was a hole underneath a contract that promises a real count — the honest degradation there
+is `timeout`, not a silently truncated number. Do not add a `*_COUNT_MAX` for that path.
 
 No pre-existing numeric cap in §1-§4 above is loosened, tightened, or otherwise modified by this
 amendment.
