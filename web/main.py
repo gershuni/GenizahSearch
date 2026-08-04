@@ -1786,6 +1786,24 @@ def create_layout():
                 # (Pitfall #8: the existing /discoveries nav item is unrelated).
                 if atlas_preview_available():
                     nav_items.append(('/atlas', 'hub', tr('The Genizah Atlas'), tr('Beta')))
+                # Phase 136 (NOVEL-01/PANEL-02, plan 136-16): the corpus-wide
+                # "Computed Identifications" findings page. Gated on the SAME
+                # discovery_available() predicate as its route (the flag ANDed
+                # with the sidecar's startup-loaded readiness, never the flag
+                # alone) so a flag-ON/sidecar-missing window never advertises a
+                # link to a page that clean-hides. In the unavailable state the
+                # entry is NOT RENDERED AT ALL — never rendered-and-disabled.
+                # NOTE: the '/discoveries' entry above is the PRE-EXISTING
+                # Supabase Community page and is unrelated to this work; the nav
+                # label here survived a three-way naming constraint (see the
+                # tr() block in genizah_translations.py).
+                if discovery_available():
+                    nav_items.append((
+                        '/computed-identifications',
+                        'travel_explore',
+                        tr('Computed Identifications'),
+                        tr('Beta'),
+                    ))
 
                 for path, icon, label, badge in nav_items:
                     is_active = current_page == path
@@ -2647,6 +2665,64 @@ def atlas_page_route():
             return
         from web.pages.atlas import create_atlas_page
         create_atlas_page()
+
+@ui.page('/computed-identifications', title='Computed Identifications | זיהויים מחושבים — Dicta Genizah Search')
+async def findings_page_route():
+    """Phase 136 (NOVEL-01/PANEL-02, plan 136-16): the corpus-wide findings page.
+
+    Gated on the single authoritative discovery_available() predicate — the
+    DISCOVERY_ENABLED flag ANDed with the sidecar's startup-loaded, fail-closed
+    readiness. When unavailable — flag OFF (default) OR the sidecar is absent,
+    corrupt, incompatible or private-audience — the page clean-hides with an
+    availability card and NEVER delegates to create_findings_page; the heavy
+    page module is not even IMPORTED on that path (the import is deferred into
+    the available branch).
+
+    noindex until the Phase-139 REL-01 release gate: the pre-release surface
+    must not be crawled (T-136-16-02).
+
+    The nav entry is gated on the SAME predicate in create_layout(), so the link
+    and the page can never disagree.
+    """
+    safe_user_set('current_page', '/computed-identifications')
+    ui.add_head_html(page_meta(
+        '/computed-identifications',
+        title='Computed Identifications | זיהויים מחושבים — Dicta Genizah Search',
+        description=tr(
+            'Computed identifications across the Cairo Genizah corpus, produced by text matching. '
+            'Every row is an algorithmic match, not a reviewed identification.'
+        ),
+        noindex=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        # Clean-hide gate. Early return means create_findings_page is
+        # unreachable — and web.pages.findings is never imported — whenever the
+        # availability predicate is False.
+        if not discovery_available():
+            is_hebrew = get_language() == 'he'
+            with ui.column().classes('w-full max-w-3xl mx-auto p-6'):
+                with ui.card().classes('w-full p-8'):
+                    ui.icon('construction').classes('text-4xl text-amber-600 mb-3')
+                    ui.label(
+                        tr('Computed Identifications is not available right now')
+                    ).classes('text-2xl font-bold mb-2')
+                    ui.label(
+                        tr('This page will return as soon as the data is ready.')
+                    ).classes('text-base').style('color: var(--text-secondary);')
+                    with ui.row().classes('gap-2 mt-4'):
+                        ui.button(
+                            'עמוד הבית' if is_hebrew else 'Home',
+                            on_click=lambda: ui.navigate.to('/'),
+                        ).props('flat')
+            return
+        from web.pages.findings import create_findings_page
+        await create_findings_page()
 
 @ui.page('/privacy-extension', title='GenizahSearch Image Helper — Privacy Policy')
 def privacy_extension_route():
