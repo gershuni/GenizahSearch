@@ -443,7 +443,19 @@ def _find_second_bucket_membership_predicates(roots):
     resolving to one, per `_resolve_named_literal_string_sets` -- containing
     >= 2 confidence-band-name strings. That is a local reimplementation of
     the bucket rule, never routed through `is_default_eligible` or
-    `main_pool_decision`. Returns a list of `(path, lineno)` violations."""
+    `main_pool_decision`. Returns a list of `(path, lineno)` violations.
+
+    KNOWN LIMITATION, stated so this guard is not over-trusted. It detects ONE
+    shape: a membership test against band-name literals. It does NOT detect an
+    alternate implementation that re-derives bucket membership through its own
+    gate logic without ever listing bands -- which is exactly the shape of the
+    historical `scripts/discovery_gate1_evidence.py` duplicate, and why that
+    duplicate went unnoticed until an external review found it (Codex code
+    review 2026-08-03, finding 5). Adding `scripts/` to the scanned roots closes
+    the SCOPE gap; it does not close this DETECTION gap. The compensating
+    control for the known duplicate is
+    `test_historical_classifier_predates_d13c` below.
+    """
     violations = []
     for root in roots:
         root = pathlib.Path(root)
@@ -473,7 +485,8 @@ def _find_second_bucket_membership_predicates(roots):
 
 
 def test_second_implementation_guard_finds_none_on_the_real_tree():
-    """The standing guard: scanning `shared/` and `web/` today finds no
+    """The standing guard: scanning `shared/`, `web/` and `scripts/` today
+    finds no
     second, locally-defined bucket-membership predicate -- gate 2 delegates
     to `is_default_eligible` and no other module re-derives a band
     allowlist. Names what it scanned: every `.py` file under `shared/` and
@@ -482,7 +495,7 @@ def test_second_implementation_guard_finds_none_on_the_real_tree():
     separately proven band-literal-free); the pattern is a membership test
     against >= 2 confidence-band-name string literals."""
     violations = _find_second_bucket_membership_predicates(
-        [REPO_ROOT / "shared", REPO_ROOT / "web"]
+        [REPO_ROOT / "shared", REPO_ROOT / "web", REPO_ROOT / "scripts"]
     )
     assert violations == [], (
         f"found a candidate second bucket-membership predicate: {violations} -- "
@@ -517,3 +530,43 @@ def test_second_implementation_guard_catches_a_seeded_duplicate(tmp_path):
         )
     finally:
         scratch_file.unlink()
+
+
+def test_historical_classifier_predates_d13c():
+    """Compensating control for the one known second implementation.
+
+    `scripts/discovery_gate1_evidence.py` classifies identifications with the
+    PRE-D-13c rule: it was written in 136-03 to measure the short-evidence
+    threshold so the owner could decide D-13c, and this module was written
+    afterwards in 136-07 to implement that decision. Against the current asset
+    it would call ~608 public identifications `main` that production holds back
+    as `insufficient_length`.
+
+    The structural guard above cannot see it -- it lists no bands. So pin the
+    concrete, checkable fact instead: the historical script does not implement
+    D-13c's threshold at all, and its function name says so. If someone ever
+    unifies the two, this test fails and forces that to be a deliberate act
+    with a look at the archived 136-GATE1-EVIDENCE.md numbers.
+    """
+    script = REPO_ROOT / "scripts" / "discovery_gate1_evidence.py"
+    source = script.read_text(encoding="utf-8")
+
+    tree = ast.parse(source)
+    fn_names = {
+        n.name for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef)
+    }
+    assert "classify_identifications_pre_d13c" in fn_names, (
+        "the historical classifier was renamed or removed. If it now routes "
+        "through main_pool_decision, delete this test in the same commit and "
+        "re-check the archived 136-GATE1-EVIDENCE.md counts."
+    )
+    assert "classify_identifications" not in fn_names, (
+        "an unqualified `classify_identifications` is back -- the name must "
+        "carry the fact that it is not the production rule"
+    )
+    assert "SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS" not in source, (
+        "the historical script now references D-13c's threshold constant, so it "
+        "is no longer purely pre-D-13c. Either it should call main_pool_decision "
+        "outright, or this control needs rewriting -- do not leave it ambiguous."
+    )

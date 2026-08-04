@@ -686,7 +686,7 @@ def build_near_tie_competition(
 # four (or a human_confirmed override) -> "main".
 # ---------------------------------------------------------------------------
 
-def classify_identifications(
+def classify_identifications_pre_d13c(
     claims: List[Dict[str, Any]],
     works: Dict[str, Dict[str, Any]],
     human_confirmed_claim_ids: set,
@@ -694,7 +694,23 @@ def classify_identifications(
     near_tie_pages: set,
     page_norm_letters: Dict[str, int],
 ) -> Tuple[Dict[Tuple[str, str], List[Dict[str, Any]]], Dict[Tuple[str, str], Tuple[str, str]]]:
-    """Returns (identifications, classification) where ``identifications``
+    """HISTORICAL -- implements the PRE-D-13c rule. Not the production rule.
+
+    This script was written in 136-03 to MEASURE the short-evidence threshold
+    so the owner could decide D-13c; `shared/discovery_main_pool.py` was written
+    afterwards, in 136-07, to implement that decision. So this classifier has no
+    short-evidence gate, and against the current asset it would call ~608 public
+    identifications `main` that the production rule holds back as
+    `insufficient_length` (Codex code review 2026-08-03, finding 5).
+
+    Its archived output in `136-GATE1-EVIDENCE.md` is CORRECT for the question it
+    was asked, and the rulings built on it stand. It is deliberately NOT rewritten
+    to call `main_pool_decision`: doing so would make a re-run contradict its own
+    archived report and make the archive look wrong. Anything needing current
+    bucket membership must call `shared.discovery_main_pool.main_pool_decision`,
+    which is the one production rule.
+
+    Returns (identifications, classification) where ``identifications``
     maps (sys_id, canonical_work_id) -> its usable claims, and
     ``classification`` maps the same key -> (bucket, reason).
 
@@ -760,7 +776,7 @@ def pages_needing_coverage(
     kept_tie_pages: set,
     near_tie_pages: set,
 ) -> List[str]:
-    """Pre-pass identical to the gate1-3 portion of classify_identifications,
+    """Pre-pass identical to the gate1-3 portion of classify_identifications_pre_d13c,
     used ONLY to determine which single pages need a page_norm_letters
     lookup before the real classification runs (so we query fullcorpus.db
     for exactly the pages needed, never the whole 667K-row table)."""
@@ -3987,13 +4003,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         page_norm_letters = load_page_norm_letters(args.research_db, needed_pages)
         ledger.check("page_norm_letters_resolved", len(page_norm_letters))
 
-        identifications, classification = classify_identifications(
+        print(
+            "\n*** HISTORICAL REPLAY -- bucket membership below uses the PRE-D-13c\n"
+            "*** rule this script was written to measure, NOT the production rule in\n"
+            "*** shared/discovery_main_pool.py. It has no short-evidence gate, so it\n"
+            "*** calls `main` some identifications production holds back. Do not\n"
+            "*** present these bucket counts as current.\n",
+            file=sys.stderr,
+        )
+        identifications, classification = classify_identifications_pre_d13c(
             claims, works, human_confirmed_claim_ids, kept_tie_pages, near_tie_pages, page_norm_letters
         )
         ledger.check("identifications", len(identifications))
 
         # Fold canonical_work_id back onto each claim dict for the D-16/D-13c
-        # main-pool lookups below (classify_identifications built its own
+        # main-pool lookups below (classify_identifications_pre_d13c built its own
         # copies internally; re-derive here once, cheaply, via `works`).
         for c in claims:
             w = works.get(c["work_id"])
