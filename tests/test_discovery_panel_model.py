@@ -780,6 +780,162 @@ def test_a_status_outside_the_frozen_vocabulary_is_refused_not_silently_ineligib
     assert field_name in str(exc.value)
 
 
+# ---------------------------------------------------------------------------
+# D-13g x the LOSSY grouping steps (code review 2B, finding 4).
+#
+# Each control is a PAIR: the same shape with the confirmation removed, to
+# establish that the row really does take the lossy path being tested, then the
+# confirmed variant. Without the pair, a test asserting "the confirmed row is
+# emitted" can pass on a fixture that was never grouped at all.
+# ---------------------------------------------------------------------------
+
+
+def _confirmed(**overrides):
+    """A row a human confirmed AND routing demoted -- the D-13g case, with the
+    derived fields consistent."""
+    fields = {
+        "adjudication_status": _CONFIRMED,
+        "routing_status": _REVIEW_ONLY,
+        "routing_reason": ids.ROUTING_REASON_LOW_COVERAGE,
+        "restored_by_human_confirmation": True,
+        "low_coverage_marker": True,
+        "main_pool": True,
+        "main_pool_reason": REASON_MAIN_HUMAN_CONFIRMED,
+    }
+    fields.update(overrides)
+    return claim_row(**fields)
+
+
+def _confirmed_plus_duplicate(confirm=True):
+    """The SAME canonical work claimed twice; the confirmed one is NOT the
+    anchor, so D-13a's own winner rule would discard it."""
+    maker = _confirmed if confirm else claim_row
+    return [
+        claim_row(claim_id="claim-anchor", evidence_id="ev-anchor",
+                  work_id="w000700", canonical_work_id="w000700",
+                  display_work_id="w000700", neutral_title="The canonical title",
+                  span_start=0, span_end=500),
+        maker(claim_id="claim-confirmed", evidence_id="ev-confirmed",
+              work_id="w000701", canonical_work_id="w000700",
+              display_work_id="w000700", neutral_title="The canonical title",
+              span_start=0, span_end=500, matched_letters=90, coverage_ppm=40000),
+    ]
+
+
+def test_a_confirmed_row_wins_the_canonical_collapse_it_would_have_lost():
+    unconfirmed = pm.build_panel_rows(bundle(_confirmed_plus_duplicate(confirm=False)))
+    survivor = list(pm.iter_rows(unconfirmed))
+    assert len(survivor) == 1
+    assert survivor[0]["claim_id"] == "claim-anchor", (
+        "the fixture must be one D-13a's rule resolves AGAINST the second row")
+
+    model = pm.build_panel_rows(bundle(_confirmed_plus_duplicate()))
+    rows = list(pm.iter_rows(model))
+    assert len(rows) == 1, "still ONE row per canonical work -- D-13a is intact"
+    assert rows[0]["claim_id"] == "claim-confirmed"
+    assert rows[0]["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS
+    # its claim identity AND its coverage note travelled with it
+    assert rows[0]["low_coverage_note"] == ds.low_coverage_note("en")
+
+
+def _confirmed_plus_granularity(confirm=True):
+    """The same commentary at two catalogued granularities on one span, with the
+    weaker-banded member confirmed -- so lead attribution would nest it."""
+    author = "שלמה בן יצחק (רש\"י)"
+    maker = _confirmed if confirm else claim_row
+    return [
+        claim_row(claim_id="claim-torah", evidence_id="ev-a", work_id="w000171",
+                  canonical_work_id="w000171", display_work_id="w000171",
+                  neutral_title="רש\"י על התורה", author=author,
+                  span_start=0, span_end=962, matched_letters=800),
+        maker(claim_id="claim-genesis", evidence_id="ev-b", work_id="w001281",
+              canonical_work_id="w001281", display_work_id="w001281",
+              neutral_title="רש\"י על בראשית", author=author,
+              span_start=0, span_end=962, matched_letters=90, coverage_ppm=40000,
+              confidence_band=ids.CONFIDENCE_BAND_SCREENING_RB, band_rank=4),
+    ]
+
+
+def test_a_confirmed_row_leads_its_granularity_group_instead_of_nesting():
+    unconfirmed = pm.build_panel_rows(bundle(_confirmed_plus_granularity(confirm=False)))
+    rows = list(pm.iter_rows(unconfirmed))
+    assert len(rows) == 1 and len(rows[0]["nested"]) == 1
+    assert rows[0]["nested"][0]["work_id"] == "w001281", (
+        "the fixture must be one where the row to be confirmed NESTS")
+
+    model = pm.build_panel_rows(bundle(_confirmed_plus_granularity()))
+    rows = list(pm.iter_rows(model))
+    assert len(rows) == 1, "the ratified nesting survives -- one row, not two"
+    assert rows[0]["claim_id"] == "claim-genesis"
+    assert rows[0]["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS
+    assert rows[0]["low_coverage_note"] == ds.low_coverage_note("en")
+    assert [n["work_id"] for n in rows[0]["nested"]] == ["w000171"]
+    assert rows[0]["granularity_subline"]
+
+
+def test_two_confirmed_rows_in_one_granularity_group_are_both_emitted():
+    """A nested row is emitted as a work id, a title and a subline. That is not
+    "emitted in the default set", so the second confirmation is lifted out."""
+    rows = _confirmed_plus_granularity()
+    rows[0] = _confirmed(**{k: v for k, v in rows[0].items()
+                            if k not in {"adjudication_status", "routing_status",
+                                         "routing_reason",
+                                         "restored_by_human_confirmation",
+                                         "low_coverage_marker", "main_pool",
+                                         "main_pool_reason"}})
+    model = pm.build_panel_rows(bundle(rows))
+    emitted = list(pm.iter_rows(model))
+    assert sorted(r["claim_id"] for r in emitted) == ["claim-genesis", "claim-torah"]
+    assert all(r["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS for r in emitted)
+    assert all(len(r["nested"]) == 0 for r in emitted)
+
+
+def _confirmed_plus_generic(confirm=True, members=3):
+    """Genuinely different works on one byte-identical span (no shared author,
+    so D-13d's predicate says generic shared text), one of them confirmed."""
+    maker = _confirmed if confirm else claim_row
+    rows = [
+        claim_row(claim_id="claim-generic-%d" % i, evidence_id="ev-generic-%d" % i,
+                  work_id="w0003%02d" % i, canonical_work_id="w0003%02d" % i,
+                  display_work_id="w0003%02d" % i, neutral_title="Work %d" % i,
+                  author="מחבר %d" % i, span_start=0, span_end=555,
+                  matched_letters=420)
+        for i in range(1, members)
+    ]
+    rows.append(maker(
+        claim_id="claim-confirmed", evidence_id="ev-confirmed", work_id="w000399",
+        canonical_work_id="w000399", display_work_id="w000399",
+        neutral_title="A confirmed work", author="מחבר אחר",
+        span_start=0, span_end=555, matched_letters=90, coverage_ppm=40000))
+    return rows
+
+
+def test_a_confirmed_row_is_lifted_out_of_a_generic_group_and_the_rest_stay():
+    unconfirmed = pm.build_panel_rows(bundle(_confirmed_plus_generic(confirm=False)))
+    assert list(pm.iter_rows(unconfirmed)) == []
+    assert len(unconfirmed.generic_groups) == 1
+    assert unconfirmed.generic_groups[0]["work_count"] == 3, (
+        "the fixture must be one where the row to be confirmed DISAPPEARS")
+
+    model = pm.build_panel_rows(bundle(_confirmed_plus_generic()))
+    rows = list(pm.iter_rows(model))
+    assert [r["claim_id"] for r in rows] == ["claim-confirmed"]
+    assert rows[0]["disclosure_level"] == pm.LEVEL_IDENTIFICATIONS
+    assert rows[0]["low_coverage_note"] == ds.low_coverage_note("en")
+    # the passage is still generic for everyone else
+    assert len(model.generic_groups) == 1
+    assert model.generic_groups[0]["work_count"] == 2
+    assert "w000399" not in [w["work_id"] for w in model.generic_groups[0]["works"]]
+
+
+def test_a_generic_group_left_with_one_member_stops_being_a_group():
+    """D-13d's own precondition is >=2 works on one span."""
+    model = pm.build_panel_rows(bundle(_confirmed_plus_generic(members=2)))
+    assert model.generic_groups == ()
+    assert sorted(r["claim_id"] for r in pm.iter_rows(model)) == [
+        "claim-confirmed", "claim-generic-1"]
+
+
 def test_direct_family_row_carries_coverage_and_a_propagated_row_carries_none():
     direct = pm.build_panel_rows(bundle([claim_row()]))
     propagated = pm.build_panel_rows(bundle([

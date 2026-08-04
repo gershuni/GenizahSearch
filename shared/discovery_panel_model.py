@@ -533,6 +533,32 @@ def _band_rank(row: Mapping[str, Any], key: str = "band_rank") -> int:
 # ---------------------------------------------------------------------------
 
 
+def _split_confirmed(
+    members: Sequence[Mapping[str, Any]]
+) -> Tuple[List[Mapping[str, Any]], List[Mapping[str, Any]]]:
+    """`(confirmed, rest)`, order preserved.
+
+    Every lossy step below asks this question BEFORE it discards anything, so
+    that "a human-confirmed row is emitted in the DEFAULT set" is a property of
+    the pipeline rather than a repair applied to whatever survived it.
+    """
+    confirmed = [m for m in members if _is_human_confirmed(m)]
+    rest = [m for m in members if not _is_human_confirmed(m)]
+    return confirmed, rest
+
+
+def _in_ratified_order(
+    members: Sequence[Mapping[str, Any]]
+) -> List[Mapping[str, Any]]:
+    """`members` in `lead_attribution`'s total order -- the ratified order, over
+    whatever subset the caller is entitled to choose from. Never a fresh
+    tie-break."""
+    if len(members) == 0:
+        return []
+    lead, remainder = grouping.lead_attribution(members)
+    return [lead] + list(remainder)
+
+
 def _collapse_duplicates(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     """`grouping.collapse_canonical`, applied only to rows that HAVE a canonical
     work id.
@@ -540,10 +566,29 @@ def _collapse_duplicates(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, An
     Rows whose `canonical_work_id` is absent pass through untouched: grouping
     them would key every one of them on the same missing value and collapse
     unrelated works into one row, which is the opposite of what D-13a asks for.
+
+    CONFIRMATION PRECEDENCE (D-13g x D-13a). The collapse is lossy by design --
+    the losing member is dropped from view entirely, "never merged, never
+    averaged" -- so applied blind it can drop the one member a human confirmed
+    in favour of a member nobody looked at, taking that row's claim identity and
+    its coverage note with it. When a canonical group carries confirmed members,
+    only those are offered to the collapse. The RATIFIED rule still picks the
+    winner; this decides only what it picks from, so no tie-break is restated
+    here. Between two confirmed members D-13a's own deterministic rule decides,
+    and the survivor is confirmed either way.
     """
     with_canon = [row for row in rows if row.get("canonical_work_id")]
     without_canon = [dict(row) for row in rows if not row.get("canonical_work_id")]
-    collapsed = grouping.collapse_canonical(with_canon) if len(with_canon) > 0 else []
+
+    by_canon: Dict[Any, List[Mapping[str, Any]]] = {}
+    for row in with_canon:
+        by_canon.setdefault(row["canonical_work_id"], []).append(row)
+    candidates: List[Mapping[str, Any]] = []
+    for members in by_canon.values():
+        confirmed, _rest = _split_confirmed(members)
+        candidates.extend(confirmed if len(confirmed) > 0 else members)
+
+    collapsed = grouping.collapse_canonical(candidates) if len(candidates) > 0 else []
     return list(collapsed) + without_canon
 
 
@@ -942,6 +987,34 @@ def _compose_rows(
     """The pipeline, in the ONE order that is correct.
 
     Applying these in a different order changes what a reader sees.
+
+    CONFIRMATION PRECEDENCE runs INSIDE the lossy steps, not after them (code
+    review 2B, finding 4). D-13g's contract -- "a human-confirmed row is
+    emitted in the default set" -- is unconditional, but preservation used to be
+    a property of `_disclosure_level_for`, which sees only the rows that already
+    survived the collapse and the generic separation. Both of those discard
+    rows. So a confirmed row could lose the collapse to a member nobody looked
+    at, or vanish into a generic group, and the predicate meant to protect it
+    never ran -- the same shape as the query bug D-13g was written for, one
+    layer further in. Three places ask the question first:
+
+    * STEP 1 offers the collapse only the confirmed members of a canonical
+      group (`_collapse_duplicates`);
+    * a GENERIC group's confirmed members are lifted out and emitted as
+      identification rows, and the group keeps the rest;
+    * a GRANULARITY group's lead is chosen from among its confirmed members
+      when there are any, so the confirmed row keeps its claim identity, its
+      bucket and its coverage note while the ratified nesting survives -- and
+      any FURTHER confirmed member is lifted out rather than nested, because a
+      nested row is emitted as a title and a subline, which is not "emitted in
+      the default set".
+
+    The GENERIC verdict itself is taken over the group's FULL membership,
+    before any lift: whether a passage is generic shared text is a fact about
+    the passage, and letting one confirmation change the verdict for the others
+    would make a display rule depend on who happened to have been reviewed. A
+    group left with a single member after the lift stops being a group, exactly
+    as a single-member span already does in `_group_by_span`.
     """
     # STEP 0 -- the input contract, on EVERY claim, before any step below reads
     # one. A validation that runs only on the rows that survive grouping is not
@@ -965,20 +1038,35 @@ def _compose_rows(
         else:
             generic_keys.append(key)
 
-    # STEP 3 -- lead attribution over what remains. The generic groups have
-    # already left; the same deterministic total order also fixes the order in
-    # which a generic group's own works are listed.
+    # STEP 3 -- lead attribution over what remains, with confirmation
+    # precedence. The same deterministic total order fixes the nesting order and
+    # the order in which a generic group's own works are listed.
     leads: List[Tuple[Dict[str, Any], List[Dict[str, Any]]]] = [
         (row, []) for row in standalone
     ]
     for key in granularity_keys:
-        lead, remainder = grouping.lead_attribution(span_groups[key])
-        leads.append((lead, remainder))
+        confirmed, rest = _split_confirmed(span_groups[key])
+        if len(confirmed) > 0:
+            # The lead is chosen from the confirmed members, by the SAME
+            # ratified order applied to that subset -- no new tie-break.
+            lead, *further_confirmed = _in_ratified_order(confirmed)
+            leads.append((lead, _in_ratified_order(rest)))
+            leads.extend((row, []) for row in further_confirmed)
+        else:
+            lead, *nested = _in_ratified_order(rest)
+            leads.append((lead, nested))
 
     generic_groups = []
     for key in generic_keys:
-        lead, remainder = grouping.lead_attribution(span_groups[key])
-        generic_groups.append(_generic_group(key, [lead] + remainder, lang))
+        confirmed, rest = _split_confirmed(span_groups[key])
+        leads.extend((row, []) for row in confirmed)
+        if len(rest) >= 2:
+            generic_groups.append(_generic_group(key, _in_ratified_order(rest), lang))
+        else:
+            # Not a group any more. D-13d's own precondition is >=2 works on
+            # one span; a single row falls back to the standalone path, where
+            # STEP 4's gate still applies to it.
+            leads.extend((row, []) for row in rest)
 
     # STEP 4 -- gate short-evidence rows (inside `_identification_row`, whose
     # level assignment IS the gate).
