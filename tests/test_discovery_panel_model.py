@@ -1198,8 +1198,14 @@ _EXPECTED_SCOPE_STATE = {
 #:
 #:   * the PANEL's status is the claims envelope's own status, never invented
 #:     from a section's;
-#:   * the entry control's hide-on-zero rule may apply only on `ok` -- an
-#:     outage is never a zero;
+#:   * the entry control's hide-on-zero rule may apply only when NOTHING the
+#:     panel would show came back as an outage -- an outage is never a zero,
+#:     and that binds the PAGE-SCOPE read too. A claims zero is a fact about
+#:     this page; the panel's other pane is about the whole MANUSCRIPT, so
+#:     hiding on `("ok", SCOPE_OUTAGE)` says "this manuscript has nothing" on
+#:     the strength of a query that failed -- and takes the only retry with it
+#:     (code review round 12, finding 2). SCOPE_UNRESOLVED is NOT an outage: it
+#:     is a fact about the manuscript, so the hide rule still applies there;
 #:   * the pane may report facts ABOUT the manuscript only when the page scope
 #:     resolved (or resolved and truncated); otherwise anything it said would
 #:     be our own plumbing failure wearing the manuscript's name.
@@ -1207,7 +1213,7 @@ _INDEPENDENT_ARBITRATION_MATRIX = {
     ("ok", pm.SCOPE_RESOLVED): ("ok", True, True),
     ("ok", pm.SCOPE_TRUNCATED): ("ok", True, True),
     ("ok", pm.SCOPE_UNRESOLVED): ("ok", True, False),
-    ("ok", pm.SCOPE_OUTAGE): ("ok", True, False),
+    ("ok", pm.SCOPE_OUTAGE): ("ok", False, False),
     ("unavailable", pm.SCOPE_RESOLVED): ("unavailable", False, True),
     ("unavailable", pm.SCOPE_TRUNCATED): ("unavailable", False, True),
     ("unavailable", pm.SCOPE_UNRESOLVED): ("unavailable", False, False),
@@ -1324,6 +1330,42 @@ def test_entry_control_is_hidden_only_on_a_successful_zero(status, total, hidden
                              status=status)
     model = pm.build_panel_rows(bundle(claims=claims))
     assert model.entry_control["hidden"] is hidden
+
+
+def test_a_true_page_zero_plus_a_page_scope_OUTAGE_keeps_the_control_visible():
+    """The state above with the SCOPE read failing instead of the claims read.
+
+    The claims zero is honest about THIS PAGE. The panel's other pane is about
+    the whole manuscript and its scope read did not come back, so hiding here
+    says "this manuscript has nothing" on the strength of a query that failed --
+    and, because the entry control is the only way to open the panel, it takes
+    the only retry with it (code review round 12, finding 2).
+    """
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        page_ids=page_ids_envelope(status="timeout"),
+    ))
+    assert model.manuscript_pane["scope_state"] == pm.SCOPE_OUTAGE
+    assert model.entry_control["hidden"] is False
+    pane = model.manuscript_pane
+    assert pane["state"] == pm.PANE_UNRESOLVED
+    # ...and the failure is RECOVERABLE, so it carries the retry copy.
+    assert pane["service_state"]["message"] == ds.service_state_message("timeout", "en")
+    assert pane["service_state"]["retry"] == ds.retry_label("en")
+
+
+def test_an_UNRESOLVABLE_scope_carries_no_retry_because_a_retry_cannot_help():
+    """The other half of the pair. An unresolved page scope is a FACT about the
+    manuscript, not a failed query -- offering a retry there is a control that
+    cannot work, and a true page zero may still hide the panel."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        page_ids=page_ids_envelope(items=(), total=0, resolved=False),
+    ))
+    assert model.manuscript_pane["scope_state"] == pm.SCOPE_UNRESOLVED
+    assert model.manuscript_pane["state"] == pm.PANE_UNRESOLVED
+    assert "service_state" not in model.manuscript_pane
+    assert model.entry_control["hidden"] is True
 
 
 def test_a_works_outage_leaves_the_panel_visible_and_the_pane_unavailable():

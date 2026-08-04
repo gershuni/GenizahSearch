@@ -105,6 +105,12 @@ def _service_state_block(state: Mapping[str, Any], on_retry=None) -> None:
 
     An empty section reads as an authoritative zero, which is the exact
     false-zero class the envelope exists to prevent.
+
+    EVERY caller on a RECOVERABLE outage passes `on_retry`. `on_retry=None` is
+    reserved for a condition a retry cannot change; the round-12 defect was that
+    three of the four outage paths took the default and left the reader an
+    outage message with no way out. `test_every_outage_a_reader_can_reach_offers_a_retry`
+    walks the four EAGER reads independently and pins it.
     """
     with ui.row().classes(f'{PANEL_SERVICE_STATE_CLASS} items-center gap-2 dnote'):
         ui.label(state.get('message') or '')
@@ -305,14 +311,19 @@ def _render_identification_row(row: Mapping[str, Any], lang: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _render_related_pages(section: Mapping[str, Any], lang: str, page_id: Optional[str]) -> None:
+def _render_related_pages(section: Mapping[str, Any], lang: str, page_id: Optional[str],
+                          on_retry=None) -> None:
     with ui.element('div').classes(f'{PANEL_RELATED_CLASS} dbody'):
         ui.label(section.get('header') or '').classes('font-semibold')
         # Labelled as UNEVALUATED candidate alignments, always.
         ui.label(section.get('label') or '').classes('dnote')
 
         if section.get('count_state') == ROWS_OUTAGE:
-            _service_state_block(section.get('count_service_state') or {})
+            # The count is an EAGER read, so its recovery is the seam's retry --
+            # the same handler the claims-level outage gets. An outage with no
+            # retry is a dead end the reader cannot leave.
+            _service_state_block(section.get('count_service_state') or {},
+                                 on_retry=on_retry)
         elif section.get('count_line'):
             ui.label(section['count_line']).classes('dnote')
 
@@ -364,7 +375,7 @@ def _render_related_pages(section: Mapping[str, Any], lang: str, page_id: Option
 # ---------------------------------------------------------------------------
 
 
-def _render_manuscript_pane(pane: Mapping[str, Any], lang: str) -> None:
+def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -> None:
     with ui.element('div').classes(PANEL_MANUSCRIPT_PANE_CLASS):
         ui.label(pane.get('header') or '').classes('font-semibold')
         ui.label(_MANUSCRIPT_PANE_SCOPE_NOTE['he' if lang == 'he' else 'en']).classes('dnote')
@@ -372,11 +383,20 @@ def _render_manuscript_pane(pane: Mapping[str, Any], lang: str) -> None:
         state = pane.get('state')
         if state == PANE_UNRESOLVED:
             # OUR plumbing failed. The pane reports nothing about the manuscript
-            # -- not a total, not an empty marker, not a zero.
-            ui.label(ds.service_state_message('unavailable', lang)).classes('dnote')
+            # -- not a total, not an empty marker, not a zero. The MODEL decides
+            # whether that failure is recoverable: it supplies a `service_state`
+            # only for a page-scope OUTAGE, never for a manuscript that has no
+            # resolvable page scope, so a retry is offered exactly where it can
+            # work.
+            unresolved_state = pane.get('service_state')
+            if unresolved_state:
+                _service_state_block(unresolved_state, on_retry=on_retry)
+            else:
+                ui.label(ds.service_state_message('unavailable', lang)).classes('dnote')
             return
         if state == PANE_OUTAGE:
-            _service_state_block(pane.get('service_state') or {})
+            # An EAGER read, so the seam's retry re-issues it.
+            _service_state_block(pane.get('service_state') or {}, on_retry=on_retry)
             return
         if pane.get('partial_scope'):
             ui.label(ds.related_pages_label(lang)).classes('dnote')
@@ -450,11 +470,12 @@ def render_discovery_panel_body(
         with ui.element('div').classes('dpanes'):
             with ui.element('div'):
                 for level in model.disclosure_levels:
-                    _render_level(level, lang, page_id)
-            _render_manuscript_pane(model.manuscript_pane, lang)
+                    _render_level(level, lang, page_id, on_retry=on_retry)
+            _render_manuscript_pane(model.manuscript_pane, lang, on_retry=on_retry)
 
 
-def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str]) -> None:
+def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
+                  on_retry=None) -> None:
     """Exactly the disclosure levels the model emits -- no more, no fewer."""
     if level.get('default_visible'):
         ui.label(level.get('label') or '').classes('font-semibold')
@@ -481,7 +502,7 @@ def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str]) -
                 _render_identification_row(row, lang)
             related = level.get('related_pages')
             if related is not None:
-                _render_related_pages(related, lang, page_id)
+                _render_related_pages(related, lang, page_id, on_retry=on_retry)
 
 
 def _render_generic_group(group: Mapping[str, Any], lang: str) -> None:

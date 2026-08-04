@@ -251,11 +251,12 @@ class ArbitrationOutcome:
 
     `panel_status` is the claims envelope's own status -- the PANEL's status is
     never invented from a section's. `panel_hidden_on_zero` says whether the
-    entry-control's hide rule may apply at all (it may only on `ok`, and then
-    only when the total is genuinely zero). `pane_reports_manuscript_facts` is
-    False whenever the page scope did not resolve: the pane may then report
-    nothing ABOUT the manuscript, because anything it said would be our own
-    plumbing failure wearing the manuscript's name.
+    entry-control's hide rule may apply at all (it may only when NOTHING the
+    panel would show came back as an outage, and then only when the claims
+    total is genuinely zero). `pane_reports_manuscript_facts` is False whenever
+    the page scope did not resolve: the pane may then report nothing ABOUT the
+    manuscript, because anything it said would be our own plumbing failure
+    wearing the manuscript's name.
     """
 
     panel_status: str
@@ -268,8 +269,17 @@ ARBITRATION_TABLE: Mapping[Tuple[str, str], ArbitrationOutcome] = {
     # claims `ok` -- the panel renders; the entry control may hide on a TRUE zero
     ("ok", SCOPE_RESOLVED): ArbitrationOutcome("ok", True, SCOPE_RESOLVED, True),
     ("ok", SCOPE_TRUNCATED): ArbitrationOutcome("ok", True, SCOPE_TRUNCATED, True),
+    # SCOPE_UNRESOLVED is a FACT about the manuscript (no resolvable page
+    # scope), not a failure, so a claims-level true zero may still hide.
     ("ok", SCOPE_UNRESOLVED): ArbitrationOutcome("ok", True, SCOPE_UNRESOLVED, False),
-    ("ok", SCOPE_OUTAGE): ArbitrationOutcome("ok", True, SCOPE_OUTAGE, False),
+    # SCOPE_OUTAGE is a FAILURE. The claims zero is true of THIS PAGE, but the
+    # panel's other pane is about the whole MANUSCRIPT and its read did not come
+    # back -- so hiding here says "this manuscript has nothing" on the strength
+    # of a query that failed. That is F-14's false zero relocated to the page-ID
+    # read, and it also puts the only retry out of the reader's reach: with the
+    # control hidden there is no way to open the panel that carries it
+    # (code review round 12, finding 2).
+    ("ok", SCOPE_OUTAGE): ArbitrationOutcome("ok", False, SCOPE_OUTAGE, False),
     # claims `unavailable` -- an outage is NEVER a zero; the control stays visible
     ("unavailable", SCOPE_RESOLVED): ArbitrationOutcome("unavailable", False, SCOPE_RESOLVED, True),
     ("unavailable", SCOPE_TRUNCATED): ArbitrationOutcome("unavailable", False, SCOPE_TRUNCATED, True),
@@ -1239,6 +1249,13 @@ def _manuscript_pane(
     # whatever envelope reaches here says nothing either.
     if not outcome.pane_reports_manuscript_facts:
         pane["state"] = PANE_UNRESOLVED
+        if outcome.scope_state == SCOPE_OUTAGE:
+            # A FAILED page-scope read, distinguished from an unresolvable one:
+            # the first is temporary and re-running the reads can fix it, the
+            # second is a fact about the manuscript that a retry cannot change.
+            # Only the first gets a retry, because a retry button on a permanent
+            # condition is a control that cannot work (round 12, finding 2).
+            pane["service_state"] = _service_state(bundle.page_ids, lang)
         return pane
 
     if is_outage(works_envelope):

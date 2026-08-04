@@ -804,3 +804,151 @@ def test_hebrew_renders_rtl_and_bilingual():
     text = _scoped_text(client, dp.PANEL_ROOT_CLASS)
     assert ds.relation_chip(row['relation_kind'], 'he') in text
     assert ds.recall_disclaimer('he') in text
+
+
+# ===========================================================================
+# THE FOUR EAGER READS, FAILING INDEPENDENTLY (code review round 12, finding 2).
+#
+# Every fixture in this phase's suites assigned ONE status to claims, works and
+# the related count together, so a MIXED state was structurally unreachable and
+# three of the four outage paths were rendering without a retry with every test
+# green. The parametrisation below is the fix, and the fixture that makes mixed
+# states reachable is the point of it -- not the extra assertions.
+# ===========================================================================
+
+_EAGER_READS = ('claims', 'page_ids', 'manuscript_works', 'related_count')
+_OUTAGE_STATUSES = ('unavailable', 'timeout', 'busy')
+
+
+def _outage(status: str, meta_reason: str = 'forced'):
+    from shared.discovery_surface_projection import (
+        busy_envelope, timeout_envelope, unavailable_envelope,
+    )
+    return {'unavailable': unavailable_envelope,
+            'timeout': timeout_envelope,
+            'busy': busy_envelope}[status](meta={'reason': meta_reason})
+
+
+def mixed_bundle(failing: Optional[str], status: str, lang: str = 'en'):
+    """A bundle in which EXACTLY ONE of the four eager reads is an outage.
+
+    `failing=None` builds the all-`ok` control, which is what proves the other
+    three envelopes really were healthy in each mixed case rather than the whole
+    bundle having quietly degraded together.
+    """
+    envelopes = {
+        'claims': make_envelope(STATUS_OK, [claim_row()], 1,
+                                meta={'page_id': 'page-1', 'include_review': False}),
+        'page_ids': make_envelope(STATUS_OK, ['page-1'], 1, meta={
+            'sys_id': '990051079570205171', 'resolved': True,
+            'truncated': False, 'volume_ie': None}),
+        'manuscript_works': make_envelope(STATUS_OK, [work_summary_row()], 1,
+                                          meta={'page_scope_resolved': True, 'lang': lang}),
+        'related_count': make_envelope(STATUS_OK, [], 4,
+                                       meta={'unit': 'distinct_opposite_pages'}),
+    }
+    if failing is not None:
+        envelopes[failing] = _outage(status)
+    return PanelServiceBundle(related_rows=None, lang=lang, **envelopes)
+
+
+def _render_with_retry(model, page_id: Optional[str] = 'page-1', driver=None):
+    """The panel exactly as the LIVE seam renders it: with a retry handler.
+
+    `_render` above deliberately passes none, which is why it could not have
+    caught this -- the renderer draws a retry only when it is given one.
+    `driver(client)` runs INSIDE the same loop and client context, so a click
+    handler reaches NiceGUI's `handle_event` with a live slot stack.
+    """
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+
+    holder: Dict[str, Any] = {}
+    fired = {'n': 0}
+
+    async def _retry():
+        fired['n'] += 1
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page('/_discovery_panel_retry_probe')) as client:
+            with client:
+                dp.render_discovery_panel_body(model, on_retry=_retry, page_id=page_id)
+                if driver is not None:
+                    await driver(client)
+        holder['client'] = client
+
+    asyncio.run(_run())
+    return holder['client'], fired
+
+
+def _retry_buttons(client, lang: str = 'en') -> list:
+    return [b for b in _buttons(client) if ds.retry_label(lang) in (b.text or '')]
+
+
+@pytest.mark.parametrize('lang', ('en', 'he'))
+@pytest.mark.parametrize('status', _OUTAGE_STATUSES)
+@pytest.mark.parametrize('failing', _EAGER_READS)
+def test_every_outage_a_reader_can_reach_offers_a_retry(failing, status, lang):
+    """One eager read fails; the other three succeed. In EVERY such state the
+    reader must be able to reach the panel and must find a retry in it.
+
+    Codex reproduced three mixed states that failed this: successful claims plus
+    a timed-out works or related-count read rendered an outage with no way to
+    retry, and a claims-level zero plus a page-scope timeout hid the entry
+    control entirely -- which removes the panel that carries the only retry.
+    """
+    model = build_panel_rows(mixed_bundle(failing, status, lang=lang))
+    assert model.entry_control['hidden'] is False, (
+        f'{failing}/{status}: the entry control hid on an outage, so the panel '
+        'and its retry are unreachable')
+    client, _fired = _render_with_retry(model)
+    text = _scoped_text(client, dp.PANEL_ROOT_CLASS)
+    assert ds.service_state_message(status, lang) in text, (
+        f'{failing}/{status}: no outage state rendered\n{text}')
+    assert _retry_buttons(client, lang), (
+        f'{failing}/{status}: an outage rendered without a retry')
+
+
+@pytest.mark.parametrize('status', _OUTAGE_STATUSES)
+@pytest.mark.parametrize('failing', _EAGER_READS)
+def test_the_retry_offered_on_a_mixed_outage_actually_invokes_the_handler(failing, status):
+    """A rendered button proves markup, not wiring. Clicking it must reach the
+    seam's handler -- the one that re-issues all four eager reads."""
+    model = build_panel_rows(mixed_bundle(failing, status))
+
+    async def driver(client):
+        buttons = _retry_buttons(client)
+        assert buttons, f'{failing}/{status}: no retry button to click'
+        await _click(buttons[0])
+
+    _client, fired = _render_with_retry(model, driver=driver)
+    assert fired['n'] == 1, f'{failing}/{status}: the retry button fired nothing'
+
+
+@pytest.mark.parametrize('failing', _EAGER_READS)
+def test_the_mixed_fixture_really_does_vary_the_four_reads_independently(failing):
+    """The control on the parametrisation above. If `mixed_bundle` degraded the
+    whole bundle together -- the defect in the fixture it replaces -- every case
+    would render the same outage and the parametrisation would be inert."""
+    healthy = build_panel_rows(mixed_bundle(None, 'timeout'))
+    assert healthy.panel_status == STATUS_OK
+    assert healthy.manuscript_pane['state'] not in {'outage', 'unresolved_scope'}
+
+    model = build_panel_rows(mixed_bundle(failing, 'timeout'))
+    # Exactly the sections downstream of the FAILING read degrade; the rest keep
+    # reporting real facts.
+    claims_ok = model.panel_status == STATUS_OK
+    pane_ok = model.manuscript_pane['state'] not in {'outage', 'unresolved_scope'}
+    count_ok = _related_section(model).get('count') is not None
+    observed = (claims_ok, pane_ok, count_ok)
+    expected = {
+        'claims': (False, True, True),
+        # the page-ID read is what RESOLVES the scope, so the pane is the
+        # section it degrades -- the claims and the count are untouched
+        'page_ids': (True, False, True),
+        'manuscript_works': (True, False, True),
+        'related_count': (True, True, False),
+    }[failing]
+    assert observed == expected, f'{failing}: {observed} != {expected}'
