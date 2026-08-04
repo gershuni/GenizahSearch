@@ -26,8 +26,24 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 17 of **22** complete (136-01..136-16 + 136-20); next executable: 136-21 (wave 7, held for Codex pre-flight round 10)
+Plan: 18 of **22** complete (136-01..136-16 + 136-20 + 136-21); next executable: 136-22 (wave 8)
 Status: Ready to execute
+
+**WAVE 7 CLOSED 2026-08-04.** `136-15`, `136-16`, `136-21` all complete. **Codex plan pre-flight
+reached `VERDICT: approve` at ROUND 12** (0 BLOCKER / 0 HIGH / 0 MEDIUM / 0 LOW / 6 CONFIRM) after
+7 revisions — trajectory 1B+8H → 5 → 5 → 4 → 5 → 4 → 1 → approve. **The remaining four plans run one
+per wave: 136-22 → 136-17 → 136-18 → 136-19. No parallelism is left in this phase.**
+
+`136-21` measured the expansion on the real artifact: largest is `w000112` at **5,684 distinct
+witness units**, reproducing the grain Codex derived independently; count latency p50 1.8 ms / p95
+39 ms / worst 594 ms against a 150 ms cap and a 2 s timeout — the exact-total contract fits, and the
+withdrawn approximate-total escape was never needed. Its mutation run demonstrated round 10's
+finding 3 live: caps applied ONLY on the anchored or band-filtered branch left both unanchored runs
+green and were caught solely by the AST no-transformation walk and the anchored exhaustion.
+
+**Requirements: `PANEL-02` (expansion half only — rendering is 136-17's), `DATA-01`, `NOVEL-01`,
+`PANEL-01` are all CONTRIBUTED TO, not complete.** Do not mark any of them complete until
+136-17/18/19 land.
 
 **WAVE GRAPH RESTRUCTURED 2026-08-04 (Codex pre-flight round 9, finding 1) — 10 waves -> 11.**
 `136-22` adds `items[*].shade`, which `136-17`'s inverse carrier assertion discovers but could not
