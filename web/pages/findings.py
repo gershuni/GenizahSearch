@@ -14,18 +14,42 @@ row, the pager, and the four service states. The full row anatomy -- relation
 chip, novelty badge, coverage clause, side actions -- belongs to the row track
 (plans 136-17 / 136-18) and is deliberately NOT built here.
 
+LAYOUT (2026-08-04, owner verdict)
+----------------------------------
+The page was one long column: a wall of prose, then a flat unstyled stack of
+domain links, then the rest. The owner read it as a draft and pointed at
+``/catalog-browse`` as the shape it should have. It now uses that page's own
+structure -- centred title, ONE visible line, then a LEFT COLUMN OF WHITE CARDS
+(each with the same uppercase small-caps header) beside the results region --
+and the explanatory prose that used to sit above the first control lives in a
+collapsed "how to read this page" panel. Not one word of that prose was deleted
+or reworded: every line of it is honesty-critical text under D-06a and the
+match-framing rule, so MOVING it was the task and REWRITING it was not.
+
+No stylesheet rule was added for any of it (``web/static/common.css`` is
+untouched, and two tests assert so): the cards are ``ui.card``, the columns are
+flex-basis on a wrapping row, and every existing ``.gs-discovery`` class the
+page already relied on is still on the element it was written for.
+
 OFF-LOOP DISCIPLINE (T-136-16-05)
 ---------------------------------
-Every read on this page is a direct ``await`` on an async wrapper imported from
-``web.discovery``. Those wrappers ALREADY dispatch to an executor internally
-(``run_in_executor`` + ``asyncio.wait``, never ``wait_for``), so this module adds
-NO second offload wrapper around them, makes no synchronous service call, and
-never reaches for the composition module's private singleton. Wrapping an
-already-async, already-offloading wrapper is a NESTED offload that burns two
-threadpool slots per request on a server that runs ONE uvicorn worker.
-``tests/test_no_await_sync_function.py`` cannot see any of that -- it detects
-only an ``await`` on a LOCALLY defined synchronous ``def`` -- which is why
-``tests/test_findings_page.py`` carries its own AST guard and an executor
+Every read on this page is a direct ``await`` on an async wrapper that offloads
+EXACTLY ONCE internally. Two modules provide those wrappers:
+
+* ``web.discovery`` -- every discovery-sidecar read (``run_in_executor`` +
+  ``asyncio.wait``, never ``wait_for``);
+* ``web.discovery_genre_labels`` -- the one FJMS read this page needs, the
+  bilingual domain vocabulary, primed at most once per process through
+  ``web.bounded_io.bounded_io_bound``.
+
+This module therefore adds NO second offload wrapper around either, makes no
+synchronous service call, and never reaches for the composition module's
+private singleton. Wrapping an already-async, already-offloading wrapper is a
+NESTED offload that burns two threadpool slots per request on a server that runs
+ONE uvicorn worker. ``tests/test_no_await_sync_function.py`` cannot see any of
+that -- it detects only an ``await`` on a LOCALLY defined synchronous ``def`` --
+which is why ``tests/test_findings_page.py`` carries its own AST guard (whose
+allowlist is those two modules, named there and nowhere else) and an executor
 dispatch spy.
 
 WHERE EVERY STRING COMES FROM
@@ -73,6 +97,7 @@ from shared.discovery_display_strings import (
 )
 from shared.discovery_novelty import CANDIDATE_STATUS
 from web.components import findings_rows as rows
+from web.components.typography import h1
 from web.discovery import (
     BUCKET_MAIN,
     FACET_LEVELS,
@@ -86,6 +111,11 @@ from web.discovery import (
     get_launch_stats_enveloped,
 )
 from web.discovery_assets import discovery_meta
+from web.discovery_genre_labels import (
+    GENRE_PART_SEPARATOR,
+    genre_display_label,
+    prime_domain_translations,
+)
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import get_language, tr
 
@@ -129,7 +159,19 @@ HEAD_CLASS = "gs-findings-head"
 #: `_render_headline_slot`.
 HEADLINE_SLOT_CLASS = "gs-findings-headline"
 CAVEAT_CLASS = "gs-findings-caveat"
+#: The collapsed panel the demoted prose lives in. NOTHING is deleted or
+#: reworded on its way in there -- see `_render_howto`.
+HOWTO_CLASS = "gs-findings-howto"
 MODES_CLASS = "gs-findings-modes"
+#: The two-column body: the filter bar is the LEFT COLUMN OF CARDS and the
+#: results sit beside it, the shape `/catalog-browse` already ships.
+BODY_CLASS = "gs-findings-body"
+MAIN_CLASS = "gs-findings-main"
+#: One filter card. `CARD_HEADER_CLASS` carries the same small-caps header
+#: treatment `web/pages/catalog_browse.py` uses on DOMAIN / FILTER BY
+#: AVAILABILITY / FILTER BY LIBRARY, so the two pages read as one product.
+CARD_CLASS = "gs-findings-card"
+CARD_HEADER_CLASS = "gs-findings-card-header"
 FILTER_BAR_CLASS = "gs-findings-fbar"
 BUCKET_CONTROL_CLASS = "gs-findings-bucket"
 FACET_HEADER_CLASS = "gs-findings-facet-header"
@@ -208,6 +250,14 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     "needs_tag": {
         "en": "not available yet",
         "he": "עדיין לא זמין",
+    },
+    # The collapsed panel that now carries the page's explanatory prose. The
+    # prose itself is UNCHANGED and comes from the same shared vocabulary it
+    # always did; this title is the only new string, and it names an
+    # affordance rather than making any claim about the data.
+    "howto_title": {
+        "en": "How to read this page",
+        "he": "איך לקרוא את הדף הזה",
     },
 }
 
@@ -441,7 +491,7 @@ async def create_findings_page() -> None:
 
     state = read_state()
 
-    with ui.column().classes(f"{ROOT_CLASS} {PAGE_CLASS} w-full max-w-5xl mx-auto p-4 gap-4"):
+    with ui.column().classes(f"{ROOT_CLASS} {PAGE_CLASS} w-full max-w-7xl mx-auto p-4 gap-4"):
         headline_region = _render_head(lang)
         _render_mode_strip(lang)
         body = ui.column().classes("w-full gap-3")
@@ -456,19 +506,69 @@ async def create_findings_page() -> None:
 
 
 def _render_head(lang: str) -> Any:
-    """Title, sub-line, the RESERVED launch-headline region, and the permanent
-    caveat slot -- in that order, with the caveat between header and body.
+    """Centred title, the ONE permanent caveat, the RESERVED launch-headline
+    region, and the collapsed "how to read this page" panel -- in that order.
 
-    Returns the headline region's stable empty child, which
-    `_paint_headline` fills once the artifact-backed read returns."""
+    THE HEAD IS DELIBERATELY SHORT. It previously opened with a wall of prose:
+    a caveat line, a four-line headline, a bordered disclaimer, a heading with
+    three explanatory lines under it, a sources-checked line and a bucket
+    explanation, all before the first control. The owner read that as a draft
+    rather than a page. Everything except the caveat and the headline now lives
+    one click away in `_render_howto`; NOTHING is deleted and NOTHING is
+    reworded, because every line of it is honesty-critical text under D-06a and
+    the match-framing rule. Moving it was the task. Rewriting it was not.
+
+    Returns the headline region's stable empty child, which `_paint_headline`
+    fills once the artifact-backed read returns."""
     with ui.column().classes(f"phead {HEAD_CLASS} w-full gap-2"):
-        ui.label(tr("Computed Identifications")).classes("text-2xl font-bold")
-        ui.label(recall_disclaimer(lang)).classes("sub text-sm").style(
-            "color: var(--text-secondary);"
+        h1(
+            tr("Computed Identifications"),
+            classes="text-3xl font-bold text-center w-full",
+            style="color: var(--primary-700);",
         )
-        region = _render_headline_slot(lang)
+        # The caveat IS this page's one line of description: it says what a row
+        # is and what it is not, which is exactly what a reader needs before
+        # anything else on the page.
         _render_caveat(lang)
+        region = _render_headline_slot(lang)
+        _render_howto(lang)
     return region
+
+
+def _render_howto(lang: str) -> None:
+    """The demoted prose, collapsed by default and complete.
+
+    Four pieces of copy live here, every one of them VERBATIM from the shared
+    vocabulary that owns it:
+
+    * `recall_disclaimer` -- the "not exhaustive" note;
+    * the candidacy sub-line, which says what the novelty switch selects;
+    * `rows.render_novelty_help` -- the checked-source list, the "candidate,
+      not a confirmed find" sentence and the date the sources were checked as
+      of (read from the artifact's own meta, omitted rather than guessed);
+    * `rule_sentence` -- the two-bucket rule, in the one place it is worded.
+
+    Collapsed is not hidden: the panel is always rendered, always in the page's
+    own head, and its title names what it holds. The alternative the owner
+    rejected was leaving all of it stacked above the first control, where -- by
+    his own account -- it read as a draft and therefore got read by nobody.
+    """
+    panel = ui.expansion(copy_text("howto_title", lang), value=False)
+    panel.classes(f"{HOWTO_CLASS} w-full").props("dense expand-separator")
+    with panel:
+        with ui.column().classes("w-full gap-2 p-1"):
+            ui.label(recall_disclaimer(lang)).classes(
+                f"{HOWTO_CLASS}-recall dnote text-xs"
+            )
+            ui.label(novelty_strings(lang)["subline"]).classes(
+                f"{HOWTO_CLASS}-novelty dnote text-xs"
+            )
+            # The help affordance, VERBATIM: the checked-source list, the
+            # "candidate, not a confirmed find" sentence, and the as-of date
+            # read from the artifact's own meta -- omitted entirely when the
+            # artifact records none rather than dated by guess.
+            rows.render_novelty_help(lang, as_of=discovery_meta("data_as_of"))
+            ui.label(rule_sentence(lang)).classes(f"{HOWTO_CLASS}-rule dnote text-xs")
 
 
 def _render_headline_slot(lang: str):
@@ -532,12 +632,37 @@ def _render_mode_strip(lang: str) -> None:
 
 
 async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> None:
-    """Filter bar and results, with ONE refresh path shared by every control --
-    so a filter change and a bucket change take exactly the same route."""
-    filter_bar = ui.row().classes(
-        f"fbar {FILTER_BAR_CLASS} w-full gap-4 items-start flex-wrap"
-    )
-    results_region = ui.column().classes(f"{RESULTS_CLASS} w-full gap-2")
+    """The two-column body -- a sidebar of filter CARDS and the results beside
+    it -- with ONE refresh path shared by every control, so a filter change and
+    a bucket change take exactly the same route.
+
+    THE COLUMNS ARE FLEX RATIOS, NOT A MEDIA QUERY -- because this work adds no
+    CSS at all, and a media query would need a stylesheet rule. The wrapper is a
+    plain flex `div` rather than `ui.row()` ON PURPOSE: `ui.row()` carries
+    Quasar's `row` class, and the shared block's phone rule
+    (`.gs-discovery .row {flex-direction: column}`) would then stack these two
+    columns while leaving the sidebar at its 280px basis -- a narrow strip on a
+    phone. Wrapping does the same job better: the sidebar's grow factor is tiny
+    beside the results column's, so while they share a line the sidebar keeps
+    ~280px, and once the results wrap below it the sidebar is alone on its line
+    and grows to the full width. Phone-first, with no breakpoint to maintain.
+
+    Direction is not set here either. The app puts `dir` on the document
+    (Quasar's RTL activation in `web/main.py`), so a plain flex row mirrors
+    itself in Hebrew: the sidebar sits on the right and the results on the
+    left, with no `flex-row-reverse` and no physical margin anywhere.
+    """
+    with ui.element("div").classes(
+        f"{BODY_CLASS} w-full flex flex-wrap gap-4 items-start"
+    ):
+        filter_bar = ui.column().classes(
+            f"fbar {FILTER_BAR_CLASS} gap-3 items-stretch"
+        ).style("flex: 1 1 280px; min-width: 240px;")
+        main_column = ui.column().classes(f"{MAIN_CLASS} gap-3").style(
+            "flex: 999 1 420px; min-width: 0;"
+        )
+    with main_column:
+        results_region = ui.column().classes(f"{RESULTS_CLASS} w-full gap-2")
 
     async def refresh() -> None:
         write_state(state)
@@ -565,14 +690,49 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> No
 def _render_filter_bar(state: Dict[str, Any], lang: str, refresh) -> None:
     _render_novelty_switch(state, lang, refresh)
     _render_bucket_control(state, lang, refresh)
-    _render_coverage_filter(lang)
     _render_facet_groups(lang)
+    _render_coverage_filter(lang)
+
+
+def _filter_card(*extra_classes: str) -> Any:
+    """One filter card, in `/catalog-browse`'s shape.
+
+    `fg` is what the shared CSS block styles (`.fg.novgrp {order:-1}`,
+    `.fg.blocked {opacity:.55}`), so it stays on the CARD rather than on some
+    inner wrapper -- otherwise the novelty card would lose its first position
+    and a blocked card its dimming.
+    """
+    return ui.card().classes(
+        " ".join(("fg", CARD_CLASS, "w-full p-4 gap-2") + tuple(extra_classes))
+    )
+
+
+def _card_header(text: str, *extra_classes: str) -> Any:
+    """The uppercase small-caps card header `/catalog-browse` uses verbatim
+    (`text-sm font-bold uppercase tracking-wide` on `--text-secondary`)."""
+    label = ui.label(text).classes(
+        " ".join((CARD_HEADER_CLASS, "text-sm font-bold uppercase tracking-wide")
+                 + tuple(extra_classes))
+    )
+    return label.style("color: var(--text-secondary);")
 
 
 def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh) -> None:
-    """The candidacy switch, first in the filter bar by CSS order."""
+    """The candidacy switch, first in the filter bar by CSS order.
+
+    Its three explanatory lines moved to `_render_howto`; the switch keeps the
+    full help text on its own tooltip, so the wording is still one hover away
+    from the control it describes as well as one click away in the panel.
+
+    NO CARD HEADER, deliberately. Every other card is titled from vocabulary
+    that already exists; this axis has exactly one ratified name, and it is
+    already on the control. A header would either repeat that name twice in one
+    card or invent a second name for the same axis -- and a second name for an
+    axis is how a vocabulary starts drifting.
+    """
     words = novelty_strings(lang)
-    with ui.column().classes(f"fg novgrp {FILTER_BAR_CLASS}-novelty gap-1"):
+    with _filter_card("novgrp", f"{FILTER_BAR_CLASS}-novelty"):
+
         async def _toggle(_event=None) -> None:
             state["novelty_only"] = not state["novelty_only"]
             state["page"] = 1
@@ -583,13 +743,6 @@ def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh) -> None:
         switch.classes("fchip")
         switch.props(f'aria-pressed={"true" if state["novelty_only"] else "false"}')
         switch.tooltip(words["help"])
-        ui.label(words["subline"]).classes("dnote text-xs")
-        # The help affordance, VISIBLE rather than hover-only: the checked-source
-        # list, the "candidate, not a confirmed find" sentence, and the date the
-        # sources were checked as of -- read from the artifact's own meta, and
-        # omitted entirely when the artifact records none rather than dated by
-        # guess.
-        rows.render_novelty_help(lang, as_of=discovery_meta("data_as_of"))
 
 
 def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
@@ -606,9 +759,16 @@ def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
     else. The bucket names come from the shared vocabulary, in match framing:
     the second bucket means there was not enough evidence for the main-pool
     rule, never that those identifications are probably wrong.
+
+    The card is a plain `q-card` and stays one: putting this control inside an
+    expansion, a menu or any other disclosure container would break ruling T,
+    and `tests/test_findings_page.py` fails on the ancestor.
+
+    The rule sentence that used to sit under it moved to `_render_howto`. The
+    CONTROL did not move, and cannot.
     """
-    with ui.column().classes(f"fg {BUCKET_CONTROL_CLASS}-group gap-1"):
-        with ui.row().classes(f"{BUCKET_CONTROL_CLASS} gap-2 items-center"):
+    with _filter_card(f"{BUCKET_CONTROL_CLASS}-group"):
+        with ui.row().classes(f"{BUCKET_CONTROL_CLASS} gap-2 items-center flex-wrap"):
             for in_main in (True, False):
                 target = BUCKET_MAIN if in_main else BUCKET_MORE
                 label = bucket_name(in_main, lang)
@@ -622,10 +782,6 @@ def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
                 chip = ui.button(label, on_click=_select).props("flat dense no-caps")
                 chip.classes("fchip here" if selected else "fchip")
                 chip.props(f'aria-pressed={"true" if selected else "false"}')
-        # The rule, in the one place it is worded. Deliberately a SIBLING of the
-        # control row, never a child: the control's own subtree must stay
-        # digit-free and count-free.
-        ui.label(rule_sentence(lang)).classes("dnote text-xs")
 
 
 def _render_coverage_filter(lang: str) -> None:
@@ -636,9 +792,9 @@ def _render_coverage_filter(lang: str) -> None:
     filter that never existed, so the treatment stays even though the state
     should not occur once the axis is wired.
     """
-    with ui.column().classes(f"fg blocked {FILTER_BAR_CLASS}-coverage gap-1"):
-        with ui.row().classes("gap-2 items-center"):
-            ui.label(coverage_label(lang)).classes("text-xs font-bold")
+    with _filter_card("blocked", f"{FILTER_BAR_CLASS}-coverage"):
+        with ui.row().classes("gap-2 items-center flex-wrap"):
+            _card_header(coverage_label(lang))
             ui.label(copy_text("needs_tag", lang)).classes("needs")
         chip = ui.button(coverage_label(lang)).props("flat dense no-caps")
         chip.classes("fchip")
@@ -646,13 +802,13 @@ def _render_coverage_filter(lang: str) -> None:
 
 
 def _render_facet_groups(lang: str) -> None:
-    """The domain / author / work cascade's containers.
+    """One titled CARD per facet, in the sidebar column.
 
     Populated after the first paint by `_populate_facets`, so the filter bar's
     structure exists before any facet read returns.
     """
     for level, label_key in (("domain", "Domain"), ("author", "Author"), ("work", "Work")):
-        with ui.column().classes(f"fg {FILTER_BAR_CLASS}-{level} gap-1"):
+        with _filter_card(f"{FILTER_BAR_CLASS}-{level}"):
             # The DOMAIN header names its axis explicitly. Filtering on the
             # MANUSCRIPT's catalogue domain would hide exactly the findings that
             # disagree with the catalogue -- a manuscript catalogued as court
@@ -663,10 +819,14 @@ def _render_facet_groups(lang: str) -> None:
                 rows.copy_text("facet_domain_header", lang)
                 if level == "domain" else tr(label_key)
             )
-            ui.label(header).classes(
-                f"{FACET_HEADER_CLASS} {FACET_HEADER_CLASS}-{level} text-xs font-bold"
-            )
-            ui.column().classes(f"{FILTER_BAR_CLASS}-{level}-items gap-1")
+            _card_header(header, FACET_HEADER_CLASS, f"{FACET_HEADER_CLASS}-{level}")
+            # A long list scrolls INSIDE its card rather than pushing every
+            # card below it off the screen. The cap is generous enough that
+            # the domain tree's parents are all reachable without scrolling on
+            # a desktop viewport.
+            ui.column().classes(
+                f"{FILTER_BAR_CLASS}-{level}-items w-full gap-1"
+            ).style("max-height: 340px; overflow-y: auto;")
 
 
 def _facet_containers(filter_bar: Any) -> Dict[str, Any]:
@@ -679,6 +839,25 @@ def _facet_containers(filter_bar: Any) -> Dict[str, Any]:
     return containers
 
 
+async def _prime_domain_labels(lang: str) -> None:
+    """Load the bilingual domain vocabulary OFF the event loop, once.
+
+    `works.genre` is stored entirely in ENGLISH, and it is this page's main
+    facet -- so without this a Hebrew reader gets a Hebrew page with an English
+    filter list. FJMS already holds the authority (`DomainHeb` /
+    `ParentDomainHeb`), and `web/discovery_genre_labels.py` maps one to the
+    other at DISPLAY time: the stored value the service filters on never
+    changes, so a domain chosen in Hebrew narrows exactly what the same domain
+    chosen in English narrows.
+
+    Only in Hebrew, and only until the map is built: `prime_domain_translations`
+    is a no-op (and issues NO executor dispatch) once the process has it.
+    """
+    if lang != "he":
+        return
+    await prime_domain_translations()
+
+
 async def _populate_facets(
     filter_bar: Any, state: Dict[str, Any], lang: str, refresh
 ) -> None:
@@ -689,6 +868,7 @@ async def _populate_facets(
     that prints it directly opts out of the curation in the very control a
     reader uses to find that work.
     """
+    await _prime_domain_labels(lang)
     containers = _facet_containers(filter_bar)
     for level in ("domain", "author", "work"):
         container = containers.get(level)
@@ -700,6 +880,159 @@ async def _populate_facets(
             _render_facet_items(level, envelope, state, lang, refresh)
 
 
+def facet_display_label(level: str, item: Dict[str, Any], lang: str) -> str:
+    """The reader-facing label for ONE facet node -- and nothing else.
+
+    The node's VALUE is never touched: it is the key the service filters and
+    persists on, so it stays the stored English string in both languages. Only
+    what a reader sees is language-dependent.
+
+    * `work` -- ruling R's curated display title, never the raw recorded one.
+    * `domain` -- the FJMS Hebrew name for a Hebrew reader, the stored English
+      string otherwise, and the stored English string for any part the
+      vocabulary cannot place (never a blank).
+    * `author` -- the recorded name, which is not ours to translate.
+    """
+    value = item.get("value")
+    raw_label = item.get("label") or value or ""
+    if level == "work":
+        return display_work_title(value, raw_label, lang) or missing_title(lang)
+    if level == "domain":
+        return genre_display_label(raw_label, lang)
+    return raw_label
+
+
+def _leaf_display_label(full_label: str) -> str:
+    """A leaf's own name, without its parent's -- the parent is already the
+    heading it sits under, and repeating it makes every child row long enough
+    to truncate. The full path stays on the node's tooltip."""
+    parts = full_label.split(GENRE_PART_SEPARATOR)
+    tail = parts[-1].strip() if parts else ""
+    return tail or full_label
+
+
+def _node_text(label: str, count: Any) -> str:
+    """`Label (1,234)` -- `/catalog-browse`'s own facet-row shape.
+
+    The count is the facet envelope's own, so a number beside a domain always
+    agrees with the result set that domain produces. (This is a FACET count,
+    not a claim about anything: the ruling-T prohibition is on attaching a
+    number to the BUCKET control, and that control still carries none.)
+    """
+    try:
+        return "{} ({:,})".format(label, int(count))
+    except (TypeError, ValueError):
+        return label
+
+
+def _facet_node(
+    level: str, item: Dict[str, Any], state: Dict[str, Any], refresh,
+    *, text: str, tooltip: Optional[str] = None, leaf: bool = False,
+) -> Any:
+    """One selectable facet node, with the classes the shared CSS block
+    styles (`.dnode`, `.dnode.leaf`, `.here`)."""
+    value = item.get("value")
+    state_key = "work_id" if level == "work" else level
+    selected = state.get(state_key) == value
+
+    async def _pick(_event=None, value=value, state_key=state_key) -> None:
+        state[state_key] = None if state.get(state_key) == value else value
+        state["page"] = 1
+        await refresh()
+
+    node = ui.button(text, on_click=_pick).props("flat dense no-caps align=left")
+    node.classes(
+        " ".join(
+            part for part in (
+                "dnode", "w-full",
+                "leaf" if leaf else "",
+                "here" if selected else "",
+            ) if part
+        )
+    )
+    node.props(f'aria-pressed={"true" if selected else "false"}')
+    if tooltip:
+        node.tooltip(tooltip)
+    return node
+
+
+def _render_domain_tree(
+    items: List[Dict[str, Any]], state: Dict[str, Any], lang: str, refresh
+) -> None:
+    """The domain facet as a two-level TREE with counts, not a flat stack.
+
+    The service already emits both levels -- each parent as its own selectable
+    node carrying the sum of its leaves, each leaf carrying its parent's key --
+    so the tree is a grouping of what the envelope says, never a hierarchy this
+    page invents.
+
+    Collapse is a plain visibility toggle rather than a framework expansion
+    container, for one reason worth stating: a `q-expansion-item` swallows the
+    clicks of everything inside it, so a leaf click would bubble to the parent
+    and select the parent instead. `/catalog-browse` hangs its domain-select
+    handler on the expansion itself and has exactly that hazard. The chevron
+    here is a SEPARATE control from the selectable parent node, and it is a
+    VERTICAL one (`expand_more` / `expand_less`), so nothing about it needs to
+    flip for RTL.
+    """
+    # A leaf is only nested when its parent node is ACTUALLY in the envelope.
+    # The service builds a parent node for every leaf that names one, so this
+    # cannot normally differ -- but an orphaned leaf silently disappearing
+    # would delete a domain a reader can otherwise select, which is the one
+    # failure a facet list must never have.
+    present = {item.get("value") for item in items if not item.get("is_leaf")}
+    children: Dict[str, List[Dict[str, Any]]] = {}
+    for item in items:
+        parent = item.get("parent")
+        if item.get("is_leaf") and parent and parent in present:
+            children.setdefault(parent, []).append(item)
+
+    for item in items:
+        if item.get("is_leaf") and item.get("parent") in present:
+            continue  # rendered under its parent, below
+        label = facet_display_label("domain", item, lang)
+        kids = children.get(item.get("value")) or []
+        if not kids:
+            _facet_node("domain", item, state, refresh,
+                        text=_node_text(label, item.get("count")),
+                        leaf=bool(item.get("is_leaf")))
+            continue
+
+        # A parent WITH leaves: its own selectable node, a chevron beside it,
+        # and its leaves in a container that starts collapsed -- unless
+        # something inside it (or the parent itself) is the current selection,
+        # in which case a reader must be able to see what is selected.
+        selected_inside = state.get("domain") in (
+            {item.get("value")} | {kid.get("value") for kid in kids}
+        )
+        with ui.column().classes(f"{FILTER_BAR_CLASS}-domain-branch w-full gap-1"):
+            with ui.row().classes("w-full gap-1 items-center flex-nowrap"):
+                _facet_node("domain", item, state, refresh,
+                            text=_node_text(label, item.get("count")))
+                toggle = ui.button().props("flat dense round size=sm")
+                toggle.classes(f"{FILTER_BAR_CLASS}-domain-toggle shrink-0")
+            kids_box = ui.column().classes(
+                f"{FILTER_BAR_CLASS}-domain-children w-full gap-1"
+            )
+            with kids_box:
+                for kid in kids:
+                    kid_label = facet_display_label("domain", kid, lang)
+                    _facet_node("domain", kid, state, refresh,
+                                text=_node_text(_leaf_display_label(kid_label),
+                                                kid.get("count")),
+                                tooltip=kid_label, leaf=True)
+
+        kids_box.set_visibility(selected_inside)
+        toggle.props(f'icon={"expand_less" if selected_inside else "expand_more"}')
+
+        def _toggle_kids(_event=None, box=kids_box, button=toggle) -> None:
+            opened = not box.visible
+            box.set_visibility(opened)
+            button.props(f'icon={"expand_less" if opened else "expand_more"}')
+
+        toggle.on("click", _toggle_kids)
+
+
 def _render_facet_items(
     level: str, envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh
 ) -> None:
@@ -709,32 +1042,19 @@ def _render_facet_items(
             ui.label(copy_text("needs_tag", lang)).classes("needs")
         return
 
-    state_key = "work_id" if level == "work" else level
-    for item in envelope.get("items") or []:
-        value = item.get("value")
-        raw_label = item.get("label") or value or ""
-        if level == "work":
-            # Ruling R -- the curated display title, never the raw recorded one.
-            label = display_work_title(value, raw_label, lang) or missing_title(lang)
-        else:
-            label = raw_label
-        selected = state.get(state_key) == value
+    items = list(envelope.get("items") or [])
+    if level == "domain":
+        _render_domain_tree(items, state, lang, refresh)
+        return
 
-        async def _pick(_event=None, value=value, state_key=state_key) -> None:
-            state[state_key] = None if state.get(state_key) == value else value
-            state["page"] = 1
-            await refresh()
-
-        node = ui.button(label, on_click=_pick).props("flat dense no-caps align=left")
-        node.classes(
-            " ".join(
-                part for part in (
-                    "dnode",
-                    "leaf" if item.get("is_leaf") else "",
-                    "here" if selected else "",
-                ) if part
-            )
-        )
+    # Author and work nodes carry their name and nothing else. The owner asked
+    # for counts on the DOMAIN facet, which is the one that reads as a
+    # navigable tree; a work title is already long, and a count after it is the
+    # first thing to truncate.
+    for item in items:
+        _facet_node(level, item, state, refresh,
+                    text=facet_display_label(level, item, lang),
+                    leaf=bool(item.get("is_leaf")))
 
 
 # ---------------------------------------------------------------------------

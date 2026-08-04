@@ -1075,6 +1075,57 @@ def test_the_domain_facet_header_describes_the_IDENTIFIED_WORKS_domain(monkeypat
     ASSERTION_COUNT["n"] += 1
 
 
+@pytest.fixture(autouse=True)
+def _domain_label_cache_is_deterministic():
+    """Start every render with the Hebrew domain-label cache BUILT AND EMPTY.
+
+    A Hebrew render primes it for real otherwise: 1.5 GB of FJMS opened inside
+    the test process, and rendered labels that depend on whether the machine
+    happens to carry a sidecar. Built-and-empty is a state production genuinely
+    reaches (FJMS absent) and is the one the English-label assertions here are
+    about; the test below injects a map explicitly for the Hebrew case.
+    """
+    import web.discovery_genre_labels as gl
+
+    gl.reset_for_tests()
+    gl._STATE["map"] = {}
+    yield
+    gl.reset_for_tests()
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_a_hebrew_domain_label_is_honest_and_hides_no_english(monkeypatch, lang):
+    """`works.genre` is stored in ENGLISH and is this page's main facet, so a
+    Hebrew reader used to get an English filter list. The Hebrew names come from
+    FJMS (`DomainHeb` / `ParentDomainHeb`) at DISPLAY time -- no re-bake, no
+    invented translation -- and the translated surface must still pass the SIX
+    detector gate, in the language it is rendered in."""
+    import web.discovery_genre_labels as gl
+
+    english = "Liturgy and Brakhot / Common Prayers"
+    hebrew_parent, hebrew_leaf = "תפילה וברכות", "תפילות שכיחות"
+    monkeypatch.setitem(gl._STATE, "map", {
+        "Liturgy and Brakhot": hebrew_parent, "Common Prayers": hebrew_leaf})
+
+    offered = [facet_row(level="domain", value="Liturgy and Brakhot",
+                         label="Liturgy and Brakhot", parent=None, is_leaf=False),
+               facet_row(level="domain", value=english, label=english,
+                         parent="Liturgy and Brakhot", is_leaf=True)]
+    client = render_page(monkeypatch, lang=lang,
+                         facets={"domain": facets_envelope("domain", items=offered)})
+    marker = f"{fp.FILTER_BAR_CLASS}-domain-items"
+    rendered = scoped_text(client, marker)
+    if lang == "he":
+        assert hebrew_parent in rendered and hebrew_leaf in rendered, (
+            f"the Hebrew reader still sees English domain names: {rendered!r}")
+    else:
+        assert "Liturgy and Brakhot" in rendered
+        assert hebrew_parent not in rendered
+    assert_surface_honesty(scoped_fragment(client, marker),
+                           scope_selector=marker, lang=lang)
+    ASSERTION_COUNT["n"] += 1
+
+
 @pytest.mark.parametrize("lang", LANGS)
 def test_every_rendered_domain_came_from_the_facet_envelope(monkeypatch, lang):
     """Structural half of the closed-vocabulary property, and it runs in every
