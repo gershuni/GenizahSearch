@@ -26,8 +26,35 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 ## Current Position
 
 Phase: 136 (read-surfaces-connections-panel-work-witnesses) — EXECUTING
-Plan: 15 of **22** complete (136-01..136-14 + 136-20); next executable: 136-15 / 136-16 / 136-21 (wave 7)
+Plan: 17 of **22** complete (136-01..136-16 + 136-20); next executable: 136-21 (wave 7, held for Codex pre-flight round 10)
 Status: Ready to execute
+
+**WAVE GRAPH RESTRUCTURED 2026-08-04 (Codex pre-flight round 9, finding 1) — 10 waves -> 11.**
+`136-22` adds `items[*].shade`, which `136-17`'s inverse carrier assertion discovers but could not
+classify while the two shared wave 8 — so a **correct** launch envelope would have failed the gate.
+`136-17` now `depends_on` `136-22`: **136-17 -> wave 9, 136-18 -> wave 10, 136-19 -> wave 11.**
+Waves 8-11 are now one plan each. Codex's cheaper alternative (a later plan owns the gate-file edit)
+was rejected: it leaves the suite RED across a wave boundary. Graph re-verified independently —
+22 plans, 11 waves, every dependency in an earlier wave, no same-wave `files_modified` overlap.
+
+**Wave 7 was split.** `136-15` and `136-16` executed 2026-08-04 while `136-21` was held: every HIGH
+in Codex pre-flight rounds 8 and 9 landed on 136-17/18/21/22, and 136-15/136-16 had been stable for
+two rounds and one round respectively. Both are complete and their tests are green (157 + 72).
+
+⚠ **`136-16` reports acceptance criteria (e) and (f) NOT MET** — the real-browser actionability check
+for the "more matches" control. Playwright is not installed and is in no requirements file; the check
+is written and runnable (`run_browser_actionability_check`, 375x812 + 1440x900, EN + HE, with its own
+collapsed-parent positive control) and **fails rather than greening** when the tooling is absent.
+Ruling T makes this control the reachability of roughly half the non-Bible discovery value, so it is
+a **launch blocker**, not a nicety. It cannot be run from an unattended agent here: it needs both a
+package install and a live server, and launching the web server from a shell on this machine leaves
+unkillable Windows processes. Run it manually or in a CI lane before flag-on.
+
+⚠ **Bookkeeping ticked by hand.** Both executors deliberately left `STATE.md` / `ROADMAP.md` /
+`REQUIREMENTS.md` alone and said so: `state advance-plan` would write an untrustworthy counter from
+an out-of-sequence parallel wave, and `roadmap update-plan-progress 136` ticks the halted `136-09` as
+a side effect. NOVEL-01 / PANEL-01 / PANEL-02 are **contributed to, not completed** — do not mark
+them complete until 136-17/18/19 land.
 
 **PLANS REVISED 2026-08-04 — Codex pre-flight ROUND 5 folded in; plan count 21 -> 22.**
 Round 5 (2026-08-03, audited HEAD `5ef9b45e`) re-ran the pre-flight over the six then-unexecuted
