@@ -667,3 +667,105 @@ def test_registered_read_path_arguments_resolve_to_real_fixture_rows(tmp_path, m
         assert len(await disc.get_work_witnesses(_READ_PATH_ARGS["work_id"])) > 0
 
     asyncio.run(_run())
+
+
+# ===========================================================================
+# Untrusted artifact values must never reach the log
+# (Codex code review 2026-08-03, finding 1 -- BLOCKER)
+# ===========================================================================
+#
+# The audience check was written never to interpolate its raw value, and said so
+# in a comment. The checks immediately above and below it did interpolate:
+# schema_version, claim_type, and the (evidence_source, confidence_band) pair
+# were all echoed into a ValueError that the fail-closed handler then logs in
+# full. A restricted name sitting in any of those fields would land in a log.
+#
+# `test_refusal_is_logged_with_reason_and_no_row_content` above cannot catch
+# this: it seeds an AUDIENCE marker, so the loader refuses at the audience gate
+# and returns before any of these branches execute. These controls therefore use
+# a **public** audience so the loader gets past that gate, and each asserts three
+# things -- the load failed, the log names THIS branch's reason (proving the
+# branch was actually reached, not short-circuited earlier), and the sentinel is
+# absent.
+
+_FIELD_MARKER = "SYNTHETIC-FIELD-MARKER-4KJ81"
+
+
+def _rehash(tmp_path, db_path):
+    """Re-write the manifest so the content-hash gate does not refuse the
+    artifact before the check under test runs."""
+    write_manifest(tmp_path, db_path)
+
+
+def _drop_constraints(conn, table):
+    """CREATE TABLE ... AS SELECT copies data but not CHECK/NOT NULL/PK, letting
+    a control reach a state the frozen DDL rejects outright.
+
+    The DDL blocking the mutation is defense in depth and a GOOD thing -- an
+    out-of-vocabulary `claim_type` cannot be written through the real schema.
+    But it also means the loader's OWN runtime re-check can only be exercised
+    against a table recreated without those constraints, i.e. a non-conforming
+    producer. Same idiom as tests/test_discovery_release_contract.py.
+    """
+    conn.execute(f'ALTER TABLE "{table}" RENAME TO "{table}__bak"')
+    conn.execute(f'CREATE TABLE "{table}" AS SELECT * FROM "{table}__bak"')
+    conn.execute(f'DROP TABLE "{table}__bak"')
+
+
+@pytest.mark.parametrize("field,sql,expected_reason", [
+    (
+        "meta.schema_version",
+        "UPDATE meta SET value = ? WHERE key = 'schema_version'",
+        "incompatible schema_version",
+    ),
+    (
+        "discovery_claim.claim_type",
+        "UPDATE discovery_claim SET claim_type = ?",
+        "outside the frozen vocabulary",
+    ),
+    (
+        "discovery_evidence.confidence_band",
+        "UPDATE discovery_evidence SET confidence_band = ?",
+        "outside the frozen vocabulary",
+    ),
+])
+def test_rejected_field_value_never_reaches_the_log(
+    tmp_path, monkeypatch, caplog, field, sql, expected_reason
+):
+    db_path = materialize_sidecar(tmp_path, audience="public")
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        table = field.split(".")[0]
+        if table != "meta":
+            _drop_constraints(conn, table)
+        conn.execute(sql, (_FIELD_MARKER,))
+        conn.commit()
+    finally:
+        conn.close()
+    _rehash(tmp_path, db_path)
+    _point_loader_at(monkeypatch, tmp_path)
+
+    with caplog.at_level(logging.INFO):
+        ready = da.load_discovery_state()
+
+    text = caplog.text
+    assert ready is False, f"a sentinel in {field} did not refuse the artifact"
+    assert expected_reason in text, (
+        f"the refusal of {field} did not come from its own check -- the loader "
+        f"failed earlier, so this control proves nothing about that branch. "
+        f"Log:\n{text}"
+    )
+    assert _FIELD_MARKER not in text, (
+        f"the raw value of {field} was echoed into the log. Any restricted name "
+        f"sitting in that field would be written to disk. Log:\n{text}"
+    )
+
+
+def test_public_audience_control_reaches_past_the_audience_gate(tmp_path, monkeypatch):
+    """Proves the parametrized controls above are not silently refused at the
+    audience gate (which is what made the older marker test unable to reach
+    these branches): the same fixture, unmutated, loads successfully."""
+    materialize_sidecar(tmp_path, audience="public")
+    _point_loader_at(monkeypatch, tmp_path)
+    assert da.load_discovery_state() is True

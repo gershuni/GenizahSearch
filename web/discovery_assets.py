@@ -356,7 +356,15 @@ def load_discovery_state() -> bool:
 
         (integrity_result,) = conn.execute("PRAGMA integrity_check").fetchone()
         if integrity_result != "ok":
-            raise ValueError(f"PRAGMA integrity_check failed: {integrity_result!r}")
+            # The result string is SQLite's, but it is derived from an artifact
+            # this loader has just decided not to trust. Report that it failed
+            # and how much it said, never what it said (see the audience check
+            # below for the same discipline, and the module note on why).
+            raise ValueError(
+                "PRAGMA integrity_check failed "
+                f"(detail withheld, {len(str(integrity_result))} chars) -- "
+                "run scripts/verify_discovery_sidecar.py against the artifact for detail"
+            )
 
         meta_rows = conn.execute("SELECT key, value FROM meta").fetchall()
         meta = {row["key"]: row["value"] for row in meta_rows}
@@ -367,9 +375,11 @@ def load_discovery_state() -> bool:
 
         schema_version = meta.get("schema_version")
         if schema_version != _EXPECTED_SCHEMA_VERSION:
+            # Only OUR expected value is safe to name; the found value is
+            # untrusted artifact content.
             raise ValueError(
-                f"incompatible schema_version {schema_version!r} "
-                f"(expected {_EXPECTED_SCHEMA_VERSION!r}) -- reject-incompatible"
+                f"incompatible schema_version (expected {_EXPECTED_SCHEMA_VERSION!r}, "
+                "found value withheld) -- reject-incompatible"
             )
 
         # The VIS-01 audience boundary (plan 136-20). Same reject-incompatible
@@ -431,18 +441,29 @@ def load_discovery_state() -> bool:
         claim_type_rows = conn.execute("SELECT DISTINCT claim_type FROM discovery_claim").fetchall()
         invalid_claim_types = {row[0] for row in claim_type_rows} - _CLAIM_TYPES
         if invalid_claim_types:
-            raise ValueError(f"invalid claim_type value(s): {sorted(invalid_claim_types)}")
+            # Count, never the values: an out-of-vocabulary claim_type is by
+            # definition a string this loader did not put there.
+            raise ValueError(
+                f"discovery_claim.claim_type: {len(invalid_claim_types)} distinct "
+                "value(s) outside the frozen vocabulary (values withheld) -- "
+                "run scripts/verify_discovery_sidecar.py against the artifact for detail"
+            )
 
         band_rows = conn.execute(
             "SELECT DISTINCT evidence_source, confidence_band FROM discovery_evidence"
         ).fetchall()
+        invalid_band_pairs = 0
         for evidence_source, confidence_band in band_rows:
             valid_bands = _CONFIDENCE_BANDS_BY_SOURCE.get(evidence_source)
             if valid_bands is None or confidence_band not in valid_bands:
-                raise ValueError(
-                    "invalid (evidence_source, confidence_band) combination: "
-                    f"({evidence_source!r}, {confidence_band!r})"
-                )
+                invalid_band_pairs += 1
+        if invalid_band_pairs:
+            raise ValueError(
+                f"discovery_evidence: {invalid_band_pairs} distinct "
+                "(evidence_source, confidence_band) combination(s) outside the frozen "
+                "vocabulary (values withheld) -- run scripts/verify_discovery_sidecar.py "
+                "against the artifact for detail"
+            )
 
         new_state = _DiscoveryState(
             ready=True,
