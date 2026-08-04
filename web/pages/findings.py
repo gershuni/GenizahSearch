@@ -50,6 +50,7 @@ the bucket; kind is the panel's own filter.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -62,7 +63,9 @@ from shared.discovery_display_strings import (
     missing_title,
     novelty_strings,
     recall_disclaimer,
+    retry_label,
     rule_sentence,
+    service_state_message,
 )
 from shared.discovery_novelty import CANDIDATE_STATUS
 from web.discovery import (
@@ -241,6 +244,18 @@ _SORT_LABEL_KEYS: Dict[str, str] = {
     "matched_text": "Matched text",
 }
 
+#: The two buckets this page OFFERS, in display order. A subset of the exported
+#: closed vocabulary: the all-bucket sentinel is deliberately not a reader
+#: choice, because ruling U constraint 1 requires ONE stated basis and a control
+#: that silently unions the two pools would produce a figure the page could not
+#: name.
+_OFFERED_BUCKETS: Tuple[str, ...] = (BUCKET_MAIN, BUCKET_MORE)
+
+#: The three outage statuses, each rendered distinctly and each with a retry.
+#: `ok` is not here: an `ok` envelope with zero rows is an honest empty state,
+#: which must never be confused with any of these.
+_OUTAGE_STATUSES: Tuple[str, ...] = ("unavailable", "timeout", "busy")
+
 #: The mode strip. "All findings" is live; the other two ship visible, inert and
 #: phase-tagged, so plans 137/138 add a tab rather than a page.
 _MODES: Tuple[Tuple[str, Optional[str]], ...] = (
@@ -278,7 +293,10 @@ def read_state() -> Dict[str, Any]:
         unit = FINDINGS_UNIT_IDENTIFICATION
 
     bucket = safe_user_get(_KEY_BUCKET, BUCKET_MAIN)
-    if bucket not in FINDINGS_BUCKETS:
+    # Validated against the EXPORTED closed set first (an out-of-vocabulary
+    # value raises in the service rather than becoming an envelope), then
+    # narrowed to the two buckets this page actually offers.
+    if bucket not in FINDINGS_BUCKETS or bucket not in _OFFERED_BUCKETS:
         bucket = BUCKET_MAIN
 
     sort = safe_user_get(_KEY_SORT, FINDINGS_SORT_BAND_RANK)
@@ -644,19 +662,191 @@ def _render_facet_items(
 
 
 # ---------------------------------------------------------------------------
-# Results. Task 3 of plan 136-16 wraps these rows in the result bar, the pager
-# and the four service states.
+# Result bar, rows, pager, and the four service states.
 # ---------------------------------------------------------------------------
 
 def _render_results(
     envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh
 ) -> None:
-    items: List[Dict[str, Any]] = list((envelope or {}).get("items") or [])
+    status = (envelope or {}).get("status")
+    if status != "ok":
+        _render_outage_state(status, lang, refresh)
+        return
+
+    items: List[Dict[str, Any]] = list(envelope.get("items") or [])
+    total = int(envelope.get("total") or 0)
+    meta = dict(envelope.get("meta") or {})
+
+    _render_result_bar(items, total, meta, state, lang, refresh)
+
     with ui.column().classes(f"rows {RESULTS_CLASS}-rows w-full gap-2"):
         if not items:
+            # An HONEST empty state: `ok` with zero rows. Visually and
+            # structurally distinct from the three outage states below, which is
+            # the whole point -- an outage that reads as "no findings" silently
+            # under-reports the corpus.
             ui.label(tr("No results found")).classes(f"{RESULTS_CLASS}-empty")
         for item in items:
             _render_row(item, lang)
+
+    _render_pager(total, state, lang, refresh)
+
+
+def _render_outage_state(status: Optional[str], lang: str, refresh) -> None:
+    """`unavailable` / `timeout` / `busy` -- each a VISIBLE temporary condition
+    with a retry affordance, never an empty result (T-136-16-04).
+
+    `busy` is genuinely reachable here rather than theoretical: the corpus-wide
+    query is heavy and takes a bounded-concurrency slot, so a burst degrades to
+    an explicit busy rather than queueing behind itself.
+    """
+    key = status if status in _OUTAGE_STATUSES else _OUTAGE_STATUSES[0]
+    with ui.column().classes(
+        f"{STATE_CLASS} {STATE_CLASS}-{key} w-full gap-2 p-3"
+    ):
+        ui.label(service_state_message(key, lang)).classes(f"{STATE_CLASS}-message")
+
+        async def _retry(_event=None) -> None:
+            await refresh()
+
+        ui.button(retry_label(lang), on_click=_retry).props(
+            "flat dense no-caps"
+        ).classes(f"{STATE_CLASS}-retry")
+
+
+def _render_result_bar(
+    items: List[Dict[str, Any]],
+    total: int,
+    meta: Dict[str, Any],
+    state: Dict[str, Any],
+    lang: str,
+    refresh,
+) -> None:
+    """The count, WHICH BUCKET it covers, the "Show as" row unit, and the sort.
+
+    The count is the envelope's real pre-`LIMIT` total, never `len(items)`; the
+    bar names its bucket in words in BOTH bucket states (ruling U constraint 1 --
+    one basis, stated, never a main-pool figure and an all-bucket figure summed
+    into one number); and an approximate total says so, because a silently
+    approximate number presented as exact is worse than no number.
+    """
+    with ui.column().classes(f"rbar {RESULT_BAR_CLASS} w-full gap-2"):
+        with ui.row().classes("w-full gap-3 items-center flex-wrap"):
+            ui.label(
+                tr("Showing {shown} of {total} findings").format(
+                    shown=len(items), total=total
+                )
+            ).classes(f"{RESULT_BAR_CLASS}-count")
+
+            if state["bucket"] == BUCKET_MAIN:
+                bucket_line = tr("Showing the {bucket} by default.").format(
+                    bucket=bucket_name(True, lang)
+                )
+            else:
+                bucket_line = copy_text("showing_bucket", lang).format(
+                    bucket=bucket_name(False, lang)
+                )
+            ui.label(bucket_line).classes(f"{RESULT_BAR_CLASS}-bucket dnote text-xs")
+
+            if meta.get("approximate_total"):
+                ui.label(copy_text("approximate_note", lang)).classes(
+                    f"{RESULT_BAR_CLASS}-approx dnote text-xs"
+                )
+
+        with ui.row().classes("w-full gap-3 items-center flex-wrap"):
+            _render_unit_select(state, refresh)
+            _render_sort_select(state, refresh)
+
+
+def _render_unit_select(state: Dict[str, Any], refresh) -> None:
+    """The row unit is a READER choice, not a design pick. The option set is the
+    exported closed vocabulary itself, so a unit the service gains cannot be
+    silently withheld and a unit it loses cannot be silently offered."""
+    options = {unit: tr(_UNIT_LABEL_KEYS[unit]) for unit in sorted(FINDINGS_UNITS)}
+
+    async def _change(event) -> None:
+        value = getattr(event, "value", None)
+        if value in FINDINGS_UNITS:
+            state["unit"] = value
+            state["page"] = 1
+            await refresh()
+
+    ui.select(
+        options, value=state["unit"], label=tr("Show as"), on_change=_change
+    ).props("dense outlined").classes(f"{RESULT_BAR_CLASS}-unit")
+
+
+def _render_sort_select(state: Dict[str, Any], refresh) -> None:
+    """Sort offers exactly the exported orderings.
+
+    Novelty is deliberately NOT among them: absence from a finding aid is not
+    evidence a match is correct, and offering it as an ordering would imply
+    otherwise (D-15a / D-24).
+    """
+    options = {sort: tr(_SORT_LABEL_KEYS[sort]) for sort in sorted(FINDINGS_SORTS)}
+
+    async def _change(event) -> None:
+        value = getattr(event, "value", None)
+        if value in FINDINGS_SORTS:
+            state["sort"] = value
+            state["page"] = 1
+            await refresh()
+
+    ui.select(
+        options, value=state["sort"], label=tr("Sort by"), on_change=_change
+    ).props("dense outlined").classes(f"{RESULT_BAR_CLASS}-sort")
+
+
+def _render_row(item: Dict[str, Any], lang: str) -> None:
+    """A MINIMAL identity row -- enough for the shell to be verifiable.
+
+    The full row anatomy (relation chip with the band label on hover, novelty
+    badge, matched-letter coverage, side actions) belongs to the row track.
+    """
+    work_id = item.get("display_work_id") or item.get("canonical_work_id") or ""
+    raw_title = item.get("neutral_title") or ""
+    # Ruling R -- every work title a reader sees routes through this.
+    title = display_work_title(work_id, raw_title, lang) if raw_title else missing_title(lang)
+
+    with ui.column().classes(f"row {ROW_CLASS} w-full gap-1 p-2"):
+        ui.label(title).classes(f"{ROW_CLASS}-title font-bold")
+        shelf = " ".join(
+            part for part in (item.get("library_code"), item.get("shelfmark_display")) if part
+        )
+        if shelf:
+            ui.label(shelf).classes(f"{ROW_CLASS}-shelfmark r-sub text-xs")
+
+
+def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh) -> None:
+    """Pagination over the FULL filtered set.
+
+    The service supplies a real pre-`LIMIT` total, so the page count is derived
+    from that and never from the length of the current page. The page-size
+    CEILING is enforced server-side (the service clamps whatever it is handed
+    against the shared maximum); this module names only the budgeted default.
+    """
+    size = _default_page_size()
+    pages = max(1, math.ceil(total / size)) if total > 0 else 1
+    page = min(max(1, state["page"]), pages)
+
+    with ui.row().classes(f"pager {PAGER_CLASS} w-full gap-2 items-center"):
+        async def _go(delta: int) -> None:
+            state["page"] = max(1, min(pages, state["page"] + delta))
+            await refresh()
+
+        previous = ui.button(tr("Previous"), on_click=lambda _e=None: _go(-1))
+        previous.props("flat dense no-caps").classes(f"{PAGER_CLASS}-prev")
+        if page <= 1:
+            previous.disable()
+
+        ui.label(f"{tr('Page')} {page} / {pages}").classes(
+            f"{PAGER_CLASS}-position text-xs"
+        )
+
+        following = ui.button(tr("Next"), on_click=lambda _e=None: _go(1))
+        following.props("flat dense no-caps").classes(f"{PAGER_CLASS}-next")
+        if page >= pages:
+            following.disable()
 
 
 def _render_row(item: Dict[str, Any], lang: str) -> None:

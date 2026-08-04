@@ -1428,3 +1428,369 @@ def test_real_browser_actionability_of_the_more_matches_control():
             "empty — the check needs a reachable origin serving the findings page."
         )
     run_browser_actionability_check(base_url)
+
+
+# ===========================================================================
+# TASK 3 — result bar, pager, and the four service states
+# ===========================================================================
+
+def _state(**overrides) -> dict:
+    base = {
+        "unit": "identification", "bucket": "main", "sort": "band_rank",
+        "novelty_only": False, "domain": None, "author": None, "work_id": None,
+        "page": 1,
+    }
+    base.update(overrides)
+    return base
+
+
+def _select_elements(client, marker: str) -> list:
+    return _elements_with_class(client, marker)
+
+
+# ---------------------------------------------------------------------------
+# "Show as" and sort — the option sets ARE the exported vocabularies
+# ---------------------------------------------------------------------------
+
+def test_show_as_offers_exactly_the_three_shipped_row_units_and_defaults_to_identification(monkeypatch):
+    from web.discovery import FINDINGS_UNITS, FINDINGS_UNIT_IDENTIFICATION
+
+    client = _render_page(monkeypatch, lang="en")
+    selects = _select_elements(client, f"{fp.RESULT_BAR_CLASS}-unit")
+    assert len(selects) == 1, "the 'Show as' control did not render"
+    control = selects[0]
+
+    assert set(control.options) == set(FINDINGS_UNITS), (
+        f"the row-unit option set {set(control.options)!r} is not the exported "
+        f"FINDINGS_UNITS {set(FINDINGS_UNITS)!r} — a unit the service gains must "
+        "not be silently withheld, and one it loses must not be silently offered"
+    )
+    assert control.value == FINDINGS_UNIT_IDENTIFICATION, (
+        "the default row unit must be one row per identification — the only unit "
+        "where the axes attach to exactly the thing on the line"
+    )
+    # The per-claim unit is deliberately NOT offered.
+    assert "claim" not in set(control.options)
+
+
+def test_sort_offers_exactly_the_exported_orderings_and_novelty_is_not_one(monkeypatch):
+    from web.discovery import FINDINGS_SORTS
+
+    client = _render_page(monkeypatch, lang="en")
+    selects = _select_elements(client, f"{fp.RESULT_BAR_CLASS}-sort")
+    assert len(selects) == 1, "the sort control did not render"
+    control = selects[0]
+
+    assert set(control.options) == set(FINDINGS_SORTS), (
+        f"the sort option set {set(control.options)!r} is not the exported "
+        f"FINDINGS_SORTS {set(FINDINGS_SORTS)!r}"
+    )
+    for forbidden in ("novelty", "novelty_status", "fills_gap"):
+        assert forbidden not in set(control.options), (
+            "novelty must never be a sort key: absence from a finding aid is not "
+            "evidence a match is correct, and offering it as an ordering implies "
+            "otherwise (D-15a / D-24)"
+        )
+    labels = {str(v) for v in (control.options.values() if isinstance(control.options, dict) else [])}
+    for forbidden_label in ("Candidates for new finds", "מועמדים לממצאים חדשים"):
+        assert forbidden_label not in labels
+
+
+# ---------------------------------------------------------------------------
+# The result bar names its bucket, in BOTH bucket states, in BOTH languages
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+@pytest.mark.parametrize("bucket,in_main", [("main", True), ("more", False)])
+def test_result_bar_states_which_bucket_the_count_covers(monkeypatch, lang, bucket, in_main):
+    """Ruling U constraint 1: one basis, STATED. A bar that names only one of
+    the two bucket states fails."""
+    from shared.discovery_display_strings import bucket_name
+
+    client = _render_page(monkeypatch, lang=lang, state=_state(bucket=bucket))
+    bars = _elements_with_class(client, f"{fp.RESULT_BAR_CLASS}-bucket")
+    assert len(bars) == 1, f"the bucket line did not render for bucket={bucket!r}"
+    text = "\n".join(_subtree_strings(bars[0]))
+    assert bucket_name(in_main, lang) in text, (
+        f"the result bar does not name the {bucket!r} bucket in {lang}: {text!r}"
+    )
+    # And it never names the OTHER bucket in the same line — that would be two
+    # bases in one statement.
+    assert bucket_name(not in_main, lang) not in text
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_approximate_total_is_labelled_and_an_exact_one_is_not(monkeypatch, lang):
+    exact = _render_page(monkeypatch, lang=lang)
+    assert not _elements_with_class(exact, f"{fp.RESULT_BAR_CLASS}-approx"), (
+        "an EXACT total must not be labelled approximate"
+    )
+
+    approximate = _render_page(
+        monkeypatch, lang=lang,
+        findings=_fake_findings(meta_extra={"approximate_total": True}),
+    )
+    marked = _elements_with_class(approximate, f"{fp.RESULT_BAR_CLASS}-approx")
+    assert marked, (
+        "an approximate total must SAY SO — a silently approximate number "
+        "presented as exact is worse than no number"
+    )
+    assert fp.copy_text("approximate_note", lang) in "\n".join(_subtree_strings(marked[0]))
+
+
+def test_rendered_count_is_the_envelope_total_not_the_page_length(monkeypatch):
+    """On a fixture whose `total` EXCEEDS `len(items)` — a page that rendered the
+    page length would pass any assertion that only checks 'a number is shown'."""
+    client = _render_page(
+        monkeypatch, lang="en",
+        findings=_fake_findings(total=4321),   # one item in the fixture
+    )
+    counts = _elements_with_class(client, f"{fp.RESULT_BAR_CLASS}-count")
+    assert len(counts) == 1
+    text = "\n".join(_subtree_strings(counts[0]))
+    assert "4321" in text or "4,321" in text, (
+        f"the rendered count is not the envelope's real pre-LIMIT total: {text!r}"
+    )
+    assert text.strip() != "1", "the page rendered len(items) instead of total"
+
+
+# ---------------------------------------------------------------------------
+# The four service states
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("status", ["unavailable", "timeout", "busy"])
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_each_outage_state_renders_distinctly_with_a_retry(monkeypatch, status, lang):
+    """T-136-16-04: an outage must never read as 'no findings'. An empty section
+    is indistinguishable from an authoritative zero, which would silently
+    under-report the corpus."""
+    from shared.discovery_display_strings import retry_label, service_state_message
+
+    client = _render_page(monkeypatch, lang=lang, findings=_fake_findings(status=status))
+
+    marked = _elements_with_class(client, f"{fp.STATE_CLASS}-{status}")
+    assert marked, f"the {status!r} state has no distinct rendered marker"
+
+    text = "\n".join(_subtree_strings(marked[0]))
+    assert service_state_message(status, lang) in text, (
+        f"the {status!r} state does not render its own copy: {text!r}"
+    )
+    retries = _elements_with_class(client, f"{fp.STATE_CLASS}-retry")
+    assert retries, f"the {status!r} state offers no retry affordance"
+    assert retry_label(lang) in "\n".join(_subtree_strings(retries[0]))
+
+    # It must NOT read as an empty result set.
+    set_language(lang)
+    try:
+        empty_marker = tr_for_test("No results found")
+    finally:
+        set_language("he")
+    page_text = "\n".join(_collect_texts(client))
+    assert empty_marker not in page_text, (
+        f"the {status!r} outage rendered the empty-result copy — an outage must "
+        "never read as 'this corpus has no findings'"
+    )
+    # And no result bar / pager, which would imply a real (zero) result set.
+    assert not _elements_with_class(client, f"{fp.RESULT_BAR_CLASS}-count")
+
+
+def tr_for_test(key: str) -> str:
+    from web.translations import tr as _tr
+
+    return _tr(key)
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_ok_with_zero_rows_renders_an_honest_empty_state(monkeypatch, lang):
+    """The FOURTH state, distinct from the three outages above."""
+    client = _render_page(
+        monkeypatch, lang=lang,
+        findings=_fake_findings({"main": [], "more": []}),
+    )
+    assert _elements_with_class(client, f"{fp.RESULTS_CLASS}-empty"), (
+        "an ok-with-zero-rows envelope must render an honest empty state"
+    )
+    for status in ("unavailable", "timeout", "busy"):
+        assert not _elements_with_class(client, f"{fp.STATE_CLASS}-{status}"), (
+            f"an ok envelope rendered the {status!r} outage state"
+        )
+    # An honest empty state still shows the count bar, so the reader can see
+    # WHICH bucket produced the zero.
+    assert _elements_with_class(client, f"{fp.RESULT_BAR_CLASS}-bucket")
+
+
+def test_the_three_outage_states_are_mutually_distinct(monkeypatch):
+    """Each renders its OWN marker — not one generic 'error' box relabelled."""
+    seen = {}
+    for status in ("unavailable", "timeout", "busy"):
+        client = _render_page(
+            monkeypatch, lang="en", findings=_fake_findings(status=status)
+        )
+        marked = _elements_with_class(client, f"{fp.STATE_CLASS}-{status}")
+        assert marked
+        seen[status] = "\n".join(_subtree_strings(marked[0]))
+    assert len(set(seen.values())) == 3, (
+        f"the three outage states are not distinguishable to a reader: {seen!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pager
+# ---------------------------------------------------------------------------
+
+def test_pager_paginates_over_the_full_filtered_set(monkeypatch):
+    """The count and pagination apply to the FULL filtered set, never to the
+    current page: the envelope carries a real pre-LIMIT total."""
+    size = fp._default_page_size()
+    client = _render_page(
+        monkeypatch, lang="en", findings=_fake_findings(total=size * 3 + 1)
+    )
+    position = _elements_with_class(client, f"{fp.PAGER_CLASS}-position")
+    assert position, "the pager did not render"
+    text = "\n".join(_subtree_strings(position[0]))
+    assert "/ 4" in text, (
+        f"expected 4 pages for a total of {size * 3 + 1} at page size {size}; got {text!r}"
+    )
+    previous = _elements_with_class(client, f"{fp.PAGER_CLASS}-prev")
+    following = _elements_with_class(client, f"{fp.PAGER_CLASS}-next")
+    assert previous and following
+    assert previous[0].enabled is False, "Previous must be disabled on page 1"
+    assert following[0].enabled is True, "Next must be enabled when more pages exist"
+
+
+def test_pager_disables_next_on_the_last_page(monkeypatch):
+    client = _render_page(monkeypatch, lang="en", findings=_fake_findings(total=1))
+    following = _elements_with_class(client, f"{fp.PAGER_CLASS}-next")
+    assert following and following[0].enabled is False
+
+
+def test_page_size_cap_is_enforced_server_side_not_only_in_the_control(monkeypatch):
+    """The page names only the BUDGETED DEFAULT; the ceiling lives in the
+    service, so no control (and no environment variable) can widen a page beyond
+    the budget."""
+    from shared.discovery_service import DiscoveryService
+
+    # 1. The service clamps whatever it is handed.
+    assert DiscoveryService._clamp_findings_page_size(10 ** 6) == 200, (
+        "the shared DISCOVERY_PAGE_SIZE_MAX ceiling is not enforced server-side"
+    )
+    assert DiscoveryService._clamp_findings_page_size(-5) >= 1
+
+    # 2. Even an absurd environment default reaches the service unclamped by the
+    #    page — the page must not silently pre-clamp and thereby hide the fact
+    #    that the ceiling is the service's job.
+    monkeypatch.setenv("DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT", "999999")
+    assert fp._default_page_size() == 999999
+
+    captured = {}
+
+    async def _capture(unit="identification", **kwargs):
+        captured.update(kwargs)
+        return {"status": "ok", "items": [], "total": 0,
+                "meta": {"unit": unit, "bucket": kwargs.get("bucket"),
+                         "sort": kwargs.get("sort"), "approximate_total": False}}
+
+    monkeypatch.setattr(fp, "get_findings_enveloped", _capture)
+    asyncio.run(fp.fetch_findings(_state()))
+    assert captured["page_size"] == 999999, (
+        "the page pre-clamped the page size locally — the cap must be enforced "
+        "server-side so there is exactly one ceiling"
+    )
+
+    # 3. And the module restates no ceiling of its OWN. Scoped to non-docstring
+    #    literals: `_default_page_size`'s docstring legitimately explains that
+    #    the ceiling is the service's job, and a raw substring scan would fail
+    #    on that explanation rather than on a restated cap.
+    tree = ast.parse(FINDINGS_SRC)
+    skip = _docstring_nodes(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or id(node) in skip:
+            continue
+        if isinstance(node.value, str) and "DISCOVERY_PAGE_SIZE_MAX" in node.value:
+            pytest.fail(
+                "web/pages/findings.py reads the shared page-size ceiling itself "
+                "— it belongs to the service"
+            )
+        if isinstance(node.value, int) and not isinstance(node.value, bool):
+            assert node.value != 200, (
+                "web/pages/findings.py restates the page-size ceiling as a literal"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Persistence through the chokepoint
+# ---------------------------------------------------------------------------
+
+def test_selections_persist_through_the_storage_chokepoint(monkeypatch):
+    """Filter, unit, bucket and sort all go through safe_storage — never the raw
+    per-user store (T-136-16-07)."""
+    store = {}
+    monkeypatch.setattr(fp, "safe_user_get", lambda k, d=None: store.get(k, d))
+    monkeypatch.setattr(fp, "safe_user_set", lambda k, v: store.__setitem__(k, v))
+
+    fp.write_state(_state(bucket="more", sort="page_count", unit="manuscript",
+                          novelty_only=True, domain="Liturgy", page=3))
+    assert store["discovery_findings_bucket"] == "more"
+    assert store["discovery_findings_sort"] == "page_count"
+    assert store["discovery_findings_unit"] == "manuscript"
+    assert store["discovery_findings_novelty_only"] is True
+    assert store["discovery_findings_domain"] == "Liturgy"
+    assert store["discovery_findings_page"] == 3
+
+    restored = fp.read_state()
+    assert restored["bucket"] == "more"
+    assert restored["sort"] == "page_count"
+    assert restored["unit"] == "manuscript"
+    assert restored["novelty_only"] is True
+    assert restored["domain"] == "Liturgy"
+    assert restored["page"] == 3
+
+
+def test_out_of_vocabulary_persisted_values_fall_back_instead_of_reaching_the_service(monkeypatch):
+    """An out-of-vocabulary unit/sort/bucket RAISES in the service rather than
+    becoming an envelope, so a hand-edited value must never get that far."""
+    store = {
+        "discovery_findings_unit": "claim",          # deliberately not offered
+        "discovery_findings_sort": "novelty",        # never a sort key
+        "discovery_findings_bucket": "all",          # in the vocabulary, not offered
+        "discovery_findings_page": "not-a-number",
+    }
+    monkeypatch.setattr(fp, "safe_user_get", lambda k, d=None: store.get(k, d))
+    monkeypatch.setattr(fp, "safe_user_set", lambda k, v: None)
+
+    restored = fp.read_state()
+    assert restored["unit"] == "identification"
+    assert restored["sort"] == "band_rank"
+    assert restored["bucket"] == "main"
+    assert restored["page"] == 1
+
+
+def test_empty_filter_selection_means_all(monkeypatch):
+    """Filters compose as AND and an empty set is not a filter — a reader who
+    has selected nothing is never shown nothing."""
+    captured = {}
+
+    async def _capture(unit="identification", **kwargs):
+        captured.update(kwargs)
+        return {"status": "ok", "items": [], "total": 0, "meta": {}}
+
+    monkeypatch.setattr(fp, "get_findings_enveloped", _capture)
+    asyncio.run(fp.fetch_findings(_state()))
+    assert captured["novelty"] is None
+    assert captured["domain"] is None
+    assert captured["author"] is None
+    assert captured["work_id"] is None
+
+
+def test_novelty_switch_selects_only_the_candidacy_shade(monkeypatch):
+    from shared.discovery_novelty import CANDIDATE_STATUS
+
+    captured = {}
+
+    async def _capture(unit="identification", **kwargs):
+        captured.update(kwargs)
+        return {"status": "ok", "items": [], "total": 0, "meta": {}}
+
+    monkeypatch.setattr(fp, "get_findings_enveloped", _capture)
+    asyncio.run(fp.fetch_findings(_state(novelty_only=True)))
+    assert captured["novelty"] == (CANDIDATE_STATUS,)
