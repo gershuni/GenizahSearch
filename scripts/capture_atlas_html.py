@@ -54,6 +54,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import List, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -189,23 +190,57 @@ def run_asgi_capture(out_dir: Path) -> int:
 # The renderer sets window.__atlasRenderer after its first successful draw
 # (web/static/js/atlas_decode.js). That is the documented readiness signal.
 _READY_JS = "() => !!window.__atlasRenderer"
-_SEARCH_SELECTOR = "#atlas-search"
+# The shipped control carries CLASS `atlas-search`, not an id. It was written
+# here as `#atlas-search` and silently stopped matching, so the one interaction
+# that materializes catalogue-derived DOM skipped on every run while the tool
+# still exited 0. Accept either form, and see `_exercise_and_dump` for why a
+# skip is now fatal rather than a warning.
+_SEARCH_SELECTOR = ".atlas-search, #atlas-search"
 _CANVAS_SELECTOR = "#atlas-canvas"
 # A broad, non-restricted probe query that materializes catalogue-derived search
 # result rows without ever typing a restricted term.
 _SEARCH_PROBE = "a"
 
 
-def _exercise_and_dump(page, lang_tag: str, out_dir: Path) -> Path:
+def _rendered_lang(page) -> str:
+    """The language the page ACTUALLY rendered in, read from the document.
+
+    NiceGUI stamps `lang` on <html>; `dir="rtl"` is the fallback signal. Used
+    instead of assuming the site default, which is Hebrew — the assumption that
+    it was English is what made this tool dump Hebrew twice while reporting
+    "EN + HE".
+    """
+    try:
+        return page.evaluate(
+            "() => { const h = document.documentElement;"
+            " const l = (h.getAttribute('lang') || '').slice(0, 2).toLowerCase();"
+            " if (l) return l;"
+            " return h.getAttribute('dir') === 'rtl' ? 'he' : 'en'; }"
+        ) or ""
+    except Exception:
+        return ""
+
+
+def _exercise_and_dump(page, lang_tag: str, out_dir: Path) -> Tuple[Path, List[str]]:
     """On an already-loaded /atlas page: exercise the interactions that create
     catalogue DOM (search / hover-tooltip / click-focus), then dump the full
-    client DOM. Returns the written path."""
+    client DOM. Returns (written path, list of interactions that FAILED).
+
+    A failed interaction is returned rather than merely printed, because this
+    capture exists to be scanned for a restricted-corpus leak: a dump taken
+    WITHOUT the catalogue DOM scans clean no matter what the surface would have
+    shown. A clean scan over an unexercised capture is a false assurance about
+    the exact thing the gate is for, so the caller turns any failure here into a
+    non-zero exit.
+    """
+    failures: List[str] = []
     # Type into the search box -> materializes the search filter + any result DOM.
     try:
         page.fill(_SEARCH_SELECTOR, _SEARCH_PROBE, timeout=5000)
         page.wait_for_timeout(400)
-    except Exception as exc:  # search box is best-effort
-        print(f"  [warn] search interaction skipped ({lang_tag}): {exc}")
+    except Exception as exc:
+        failures.append(f"search ({lang_tag}): {exc}")
+        print(f"  [FAIL] search interaction did not run ({lang_tag}): {exc}")
     # Hover the canvas centre -> fires the star tooltip (atlas-tip).
     try:
         box = page.locator(_CANVAS_SELECTOR).bounding_box()
@@ -217,14 +252,15 @@ def _exercise_and_dump(page, lang_tag: str, out_dir: Path) -> Path:
             # Click the centre -> builds the focus-constellation panel rows.
             page.mouse.click(cx, cy)
             page.wait_for_timeout(400)
-    except Exception as exc:  # hover/click is best-effort
-        print(f"  [warn] hover/click interaction skipped ({lang_tag}): {exc}")
+    except Exception as exc:
+        failures.append(f"hover/click ({lang_tag}): {exc}")
+        print(f"  [FAIL] hover/click interaction did not run ({lang_tag}): {exc}")
 
     html = page.content()  # document.documentElement.outerHTML equivalent
     dump_path = out_dir / f"browser_atlas_{lang_tag}.html"
     dump_path.write_text(html, encoding="utf-8")
     print(f"  wrote {dump_path}")
-    return dump_path
+    return dump_path, failures
 
 
 def run_browser_dom_capture(base_url: str, out_dir: Path) -> int:
@@ -244,6 +280,7 @@ def run_browser_dom_capture(base_url: str, out_dir: Path) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     base_url = base_url.rstrip("/")
     written: list[Path] = []
+    interaction_failures: List[str] = []
     try:
         with sync_playwright() as pw:
             try:
@@ -258,30 +295,81 @@ def run_browser_dom_capture(base_url: str, out_dir: Path) -> int:
             try:
                 for lang in _LANGS:
                     context = browser.new_context(locale=("he-IL" if lang == "he" else "en-US"))
+                    # Arrive as a RETURNING visitor. The site opens a persistent
+                    # citation dialog on a first visit; earlier captures were
+                    # taken with `nicegui-dialog-open` on <html>, i.e. with a
+                    # modal over the surface being scanned.
+                    context.add_init_script(
+                        "try { localStorage.setItem('citation_reminder_seen', 'true'); }"
+                        " catch (e) {}"
+                    )
                     page = context.new_page()
                     page.goto(f"{base_url}/atlas", wait_until="domcontentloaded", timeout=30000)
-                    # If a HE capture is wanted, click the header language toggle
-                    # so the atlas re-renders in Hebrew (best-effort -- the live
-                    # smoke does the authoritative EN/HE toggle).
-                    if lang == "he":
+
+                    # Reach the wanted language by MEASURING what rendered, not by
+                    # assuming the default. The site default is Hebrew, so the old
+                    # "toggle only for HE" logic produced two HEBREW dumps while
+                    # reporting "EN + HE" -- an English-only leak would have been
+                    # invisible to the scan.
+                    for _attempt in (1, 2, 3):
+                        if _rendered_lang(page) == lang:
+                            break
                         try:
-                            page.click(".lang-btn-header", timeout=4000)
-                            page.wait_for_load_state("domcontentloaded", timeout=15000)
-                            page.goto(
-                                f"{base_url}/atlas",
-                                wait_until="domcontentloaded",
-                                timeout=30000,
-                            )
+                            page.evaluate("window.scrollTo(0, 0)")  # reveal header
+                            page.click(".lang-btn-header", timeout=5000)
+                            # WAIT for the switch to land before navigating.
+                            # `toggle_lang` persists the choice over the websocket
+                            # and then calls ui.navigate.reload(); the old code
+                            # issued its own goto immediately, which raced that
+                            # write. The click "succeeded" every time and the
+                            # language never changed.
+                            try:
+                                page.wait_for_function(
+                                    "(want) => ((document.documentElement"
+                                    ".getAttribute('lang') || '')"
+                                    ".slice(0, 2).toLowerCase() === want)",
+                                    arg=lang,
+                                    timeout=20000,
+                                )
+                            except Exception:
+                                page.goto(
+                                    f"{base_url}/atlas",
+                                    wait_until="domcontentloaded",
+                                    timeout=30000,
+                                )
                         except Exception as exc:
-                            print(f"  [warn] HE language toggle skipped: {exc}")
+                            print(f"  [FAIL] language toggle to {lang!r} failed: {exc}")
+                            break
+                    got = _rendered_lang(page)
+                    if got != lang:
+                        interaction_failures.append(
+                            f"language: wanted {lang!r}, captured {got!r}"
+                        )
+                        print(
+                            f"  [FAIL] wanted {lang!r} but the page rendered {got!r} -- "
+                            "this dump does NOT cover the language it is named for"
+                        )
+
+                    # Land on a FRESH /atlas in the settled language before
+                    # measuring readiness. The language toggle reloads the page
+                    # itself, so without this the readiness probe can pass
+                    # against the pre-reload document and the interactions then
+                    # look for a canvas that the new document has not built yet.
+                    page.goto(
+                        f"{base_url}/atlas", wait_until="domcontentloaded", timeout=30000
+                    )
+
                     try:
                         page.wait_for_function(_READY_JS, timeout=20000)
                     except Exception as exc:
+                        interaction_failures.append(f"renderer readiness ({lang}): {exc}")
                         print(
-                            f"  [warn] renderer readiness ({lang}) not observed "
-                            f"within timeout ({exc}); dumping current DOM anyway."
+                            f"  [FAIL] renderer readiness ({lang}) not observed "
+                            f"within timeout ({exc}); the dump below may predate the draw."
                         )
-                    written.append(_exercise_and_dump(page, lang, out_dir))
+                    dump_path, failures = _exercise_and_dump(page, lang, out_dir)
+                    written.append(dump_path)
+                    interaction_failures.extend(failures)
                     context.close()
             finally:
                 browser.close()
@@ -289,7 +377,24 @@ def run_browser_dom_capture(base_url: str, out_dir: Path) -> int:
         print(f"ERROR: browser-dom capture failed: {exc}", file=sys.stderr)
         return 1
 
-    print(f"\nbrowser-dom capture: dumped client DOM (EN + HE) -> {out_dir}")
+    print(f"\nbrowser-dom capture: dumped client DOM -> {out_dir}")
+
+    if interaction_failures:
+        # FAIL CLOSED. This capture exists solely to be scanned for a
+        # restricted-corpus leak, and the catalogue strings live ONLY in the
+        # client DOM these interactions materialize. A dump taken without them
+        # scans clean regardless of what the surface would have shown, so
+        # exiting 0 here would hand the caller a false all-clear about the one
+        # thing the gate is for. Previously every one of these was a warning.
+        print(
+            "\nERROR: browser-dom capture is INCOMPLETE — do NOT treat a clean "
+            "scan of it as a masking pass:",
+            file=sys.stderr,
+        )
+        for failure in interaction_failures:
+            print(f"  - {failure}", file=sys.stderr)
+        return 1
+
     print(
         "Now scan the captured client DOM:\n"
         f"  python scripts/check_atlas_masking.py --scan-asset {out_dir}"
