@@ -25,6 +25,7 @@ import asyncio
 import ast
 import inspect
 import io
+import sys
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -852,13 +853,18 @@ def mixed_bundle(failing: Optional[str], status: str, lang: str = 'en'):
     return PanelServiceBundle(related_rows=None, lang=lang, **envelopes)
 
 
-def _render_with_retry(model, page_id: Optional[str] = 'page-1', driver=None):
+def _render_with_retry(model, page_id: Optional[str] = 'page-1', driver=None,
+                       on_retry=None):
     """The panel exactly as the LIVE seam renders it: with a retry handler.
 
     `_render` above deliberately passes none, which is why it could not have
     caught this -- the renderer draws a retry only when it is given one.
     `driver(client)` runs INSIDE the same loop and client context, so a click
     handler reaches NiceGUI's `handle_event` with a live slot stack.
+
+    `on_retry` overrides the built-in async recorder with a caller-supplied one
+    (the behavioural coverage test needs a SYNC handler so a click is observable
+    without draining the loop). `fired` still counts the built-in one.
     """
     _ensure_sim()
     from nicegui import core, ui
@@ -870,11 +876,13 @@ def _render_with_retry(model, page_id: Optional[str] = 'page-1', driver=None):
     async def _retry():
         fired['n'] += 1
 
+    handler = on_retry if on_retry is not None else _retry
+
     async def _run():
         core.loop = asyncio.get_running_loop()
         with Client(ui.page('/_discovery_panel_retry_probe')) as client:
             with client:
-                dp.render_discovery_panel_body(model, on_retry=_retry, page_id=page_id)
+                dp.render_discovery_panel_body(model, on_retry=handler, page_id=page_id)
                 if driver is not None:
                     await driver(client)
         holder['client'] = client
@@ -986,19 +994,8 @@ def test_a_healthy_entry_control_carries_no_outage_chip(lang):
         assert ds.service_state_message(status, lang) not in text, text
 
 
-def test_no_service_state_block_can_be_rendered_without_a_retry_handler():
-    """The property STRUCTURALLY, not by enumerating today's four reads.
-
-    The test above walks `_EAGER_READS`, and an enumeration goes stale the day a
-    fifth read is added -- which is how three of the four came to be missing a
-    retry with every test green. This walks the AST instead: EVERY
-    `_service_state_block(...)` call site in the renderer must supply an
-    `on_retry`, so a new outage branch cannot silently take the default.
-
-    Whether a retry is OFFERED is still a decision, but it is the MODEL's: it
-    supplies a `service_state` only where re-running the reads can help. The
-    renderer's job is only to forward the handler it was given.
-    """
+def _service_state_call_sites() -> List[Any]:
+    """Every `_service_state_block(...)` call in the renderer, as AST nodes."""
     tree = ast.parse(_read(PANEL_PATH))
     sites = []
     for node in ast.walk(tree):
@@ -1006,28 +1003,185 @@ def test_no_service_state_block_can_be_rendered_without_a_retry_handler():
             continue
         func = node.func
         name = func.id if isinstance(func, ast.Name) else getattr(func, 'attr', None)
-        if name != '_service_state_block':
-            continue
-        sites.append(node)
-        assert any(kw.arg == 'on_retry' for kw in node.keywords), (
-            f'{PANEL_PATH}:{node.lineno} renders a service-state block without an '
-            'on_retry handler -- an outage the reader cannot leave')
+        if name == '_service_state_block':
+            sites.append(node)
+    return sorted(sites, key=lambda n: n.lineno)
+
+
+def test_no_service_state_block_call_site_takes_the_DEFAULT_handler():
+    """A cheap STRUCTURAL backstop, and it is honest about what it proves.
+
+    The AST can see that a keyword is written and that it is not the literal
+    `None`. It cannot see what the forwarded name is worth at run time --
+    `_service_state_block(state, on_retry=on_retry)` inside a function whose own
+    `on_retry` defaults to `None` satisfies every syntactic check and still
+    renders an outage with no way out. That is exactly what round 13's finding 5
+    named, and the BEHAVIOURAL test below is what actually enforces the
+    property. This one survives because it is the check that runs without
+    rendering anything, and it names the line.
+    """
+    sites = _service_state_call_sites()
     assert len(sites) >= 5, (
         f'only {len(sites)} service-state call sites found; the guard is scanning '
         'the wrong tree')
+    for node in sites:
+        keywords = {kw.arg: kw.value for kw in node.keywords}
+        assert 'on_retry' in keywords, (
+            f'{PANEL_PATH}:{node.lineno} renders a service-state block without an '
+            'on_retry handler -- an outage the reader cannot leave')
+        value = keywords['on_retry']
+        assert not (isinstance(value, ast.Constant) and value.value is None), (
+            f'{PANEL_PATH}:{node.lineno} passes on_retry=None explicitly, which '
+            'renders the outage message with no retry button at all')
 
 
 def test_the_no_retry_guard_can_fail():
-    """The positive control on the guard above: the same AST walk over a source
-    that takes the default must report it."""
-    tree = ast.parse('_service_state_block(state)\n_service_state_block(s, on_retry=cb)\n')
-    defaulted = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and getattr(node.func, 'id', None) == '_service_state_block'
-        and not any(kw.arg == 'on_retry' for kw in node.keywords)
-    ]
-    assert len(defaulted) == 1
+    """The positive control on the guard above, in BOTH of its clauses: an
+    omitted keyword and an explicit `None` must each be reported, and a real
+    handler must not be."""
+    tree = ast.parse('_service_state_block(state)\n'
+                     '_service_state_block(s, on_retry=None)\n'
+                     '_service_state_block(s, on_retry=cb)\n')
+    calls = [node for node in ast.walk(tree)
+             if isinstance(node, ast.Call)
+             and getattr(node.func, 'id', None) == '_service_state_block']
+    keywords = [{kw.arg: kw.value for kw in node.keywords} for node in calls]
+    defaulted = [kw for kw in keywords if 'on_retry' not in kw]
+    explicit_none = [kw for kw in keywords
+                     if isinstance(kw.get('on_retry'), ast.Constant)
+                     and kw['on_retry'].value is None]
+    assert len(defaulted) == 1 and len(explicit_none) == 1
+    assert len(calls) == 3
+
+
+class _ServiceStateProbe:
+    """Records WHICH `_service_state_block` call site fired and with what.
+
+    The site is identified by the caller frame's line number mapped into the
+    AST node's own `[lineno, end_lineno]` range, so the identification survives
+    a multi-line call and does not depend on which line CPython attributes the
+    CALL instruction to.
+    """
+
+    def __init__(self, sites):
+        self.sites = sites
+        self.seen: Dict[int, List[Any]] = {}
+
+    def install(self, monkeypatch):
+        real = dp._service_state_block
+
+        def _recorder(state, on_retry=None):
+            index = self._site_for(sys._getframe(1).f_lineno)
+            self.seen.setdefault(index, []).append(on_retry)
+            return real(state, on_retry=on_retry)
+
+        monkeypatch.setattr(dp, '_service_state_block', _recorder)
+
+    def _site_for(self, lineno: int) -> Optional[int]:
+        for i, node in enumerate(self.sites):
+            if node.lineno <= lineno <= (node.end_lineno or node.lineno):
+                return i
+        return None                                          # pragma: no cover
+
+
+def test_every_service_state_block_the_renderer_can_draw_gets_a_WORKING_retry(
+        spy, monkeypatch):
+    """The property the guard above only NAMES, enforced by rendering it.
+
+    Round 13, finding 5: asserting that an `on_retry` KEYWORD is present is not
+    asserting that a retry exists. `_service_state_block(state, on_retry=None)`
+    passes the keyword check while rendering no button, and so does forwarding a
+    parameter that defaulted to `None` two frames up -- which is the shape four
+    of the six call sites actually have.
+
+    So this drives EVERY call site the renderer contains, mapped back to the AST
+    by line range rather than enumerated, and asserts three things about each:
+    it was reached at all, it was handed a CALLABLE, and the element it drew
+    carries a retry BUTTON with a bound click listener. Then it clicks one and
+    checks the handler really runs.
+    """
+    sites = _service_state_call_sites()
+    probe = _ServiceStateProbe(sites)
+    probe.install(monkeypatch)
+
+    clicked: List[bool] = []
+
+    def _retry():
+        clicked.append(True)
+
+    clients = []
+    # The four EAGER reads, each degrading a different section: the panel-level
+    # outage, the manuscript pane's OUTAGE, its UNRESOLVED-scope outage (a
+    # FAILED page-scope read, which does get a retry -- unlike an unresolvable
+    # scope, which the model gives no service_state at all), and the
+    # related-pages COUNT.
+    for failing in _EAGER_READS:
+        client, _fired = _render_with_retry(
+            build_panel_rows(mixed_bundle(failing, 'timeout')), on_retry=_retry)
+        clients.append(client)
+
+    # The two LAZY reads, each with its own outage branch inside its own
+    # renderer -- neither reachable from an eager-read fixture.
+    spy.fail['get_related_pages_enveloped'] = DiscoveryUnavailable('t')
+    spy.fail['get_work_expansion_enveloped'] = DiscoveryUnavailable('t')
+
+    async def _open_related(client):
+        toggle = [b for b in _buttons(client)
+                  if ds.disclosure_toggle(ds.TOGGLE_ALSO_SHARES_TEXT, 'en') in (b.text or '')]
+        assert toggle, 'no related-pages toggle to drive'
+        await _click(toggle[0])
+
+    client, _fired = _render_with_retry(
+        model_for(claim_items=[claim_row()], related_total=4),
+        driver=_open_related, on_retry=_retry)
+    clients.append(client)
+    client, _fired = _render_with_retry(
+        model_for(claim_items=[claim_row()]), driver=_open_expansion, on_retry=_retry)
+    clients.append(client)
+
+    # (a) COVERAGE -- every call site the renderer contains was actually driven.
+    #     A new outage branch nobody drives fails here by line number, which an
+    #     enumeration of today's reads cannot do.
+    undriven = [f'{PANEL_PATH}:{node.lineno}'
+                for i, node in enumerate(sites) if i not in probe.seen]
+    assert not undriven, (
+        'these service-state call sites were never rendered by this test, so '
+        'nothing here proves they offer a retry: ' + ', '.join(undriven))
+    assert None not in probe.seen, (
+        'a service-state block fired from a line outside every known call site '
+        '-- the AST mapping is stale')
+
+    # (b) Every driven site was handed a CALLABLE, never the silent default.
+    for index, handlers in probe.seen.items():
+        for handler in handlers:
+            assert callable(handler), (
+                f'{PANEL_PATH}:{sites[index].lineno} rendered a service-state '
+                'block with on_retry=None -- an outage the reader cannot leave')
+
+    # (c) Every service-state element RENDERED carries a retry button with a
+    #     bound click listener. This is the assertion the keyword check could
+    #     never make.
+    rendered = 0
+    for client in clients:
+        for element in _elements_with_class(client, dp.PANEL_SERVICE_STATE_CLASS):
+            buttons = [d for d in element.descendants(include_self=True)
+                       if type(d).__name__ == 'Button']
+            assert buttons, 'a service-state block rendered with no retry button'
+            assert any(
+                listener.type == 'click' and listener.handler is not None
+                for button in buttons
+                for listener in button._event_listeners.values()), (
+                'the retry button carries no click handler')
+            rendered += 1
+    assert rendered >= len(sites), (
+        f'{rendered} service-state elements rendered for {len(sites)} call sites')
+
+    # (d) ...and clicking one really reaches the handler the seam supplied.
+    retry_buttons = [b for b in _buttons(clients[0])
+                     if ds.retry_label('en') in (b.text or '')]
+    assert retry_buttons, 'no retry button on the panel-level outage'
+    asyncio.run(_click(retry_buttons[0]))
+    assert clicked, 'the retry button rendered but its click reached nothing'
 
 
 @pytest.mark.parametrize('failing', _EAGER_READS)
