@@ -226,9 +226,9 @@ def create_page():
                         chip_color='#4338ca',
                         icon='travel_explore',
                         title='Computed Identifications',
-                        blurb=('Discover fragments that may belong to the same work '
-                               'as other manuscripts in the Genizah — and judge the '
-                               'matches for yourself.'),
+                        blurb=('Software has matched Genizah fragments to works we '
+                               'already know. Use it to look for new witnesses to a '
+                               'text you study — and judge each match yourself.'),
                         cta='Explore Computed Identifications',
                         cta_text_color='indigo-9',
                     )
