@@ -5335,3 +5335,312 @@ def test_one_levels_failure_does_not_evict_another_levels_good_answer(monkeypatc
     assert by_label["nothing changed"] == ["author"], (
         "the unchanged round re-read a level whose answer was good, or skipped "
         f"the one whose answer failed: {by_label['nothing changed']}")
+
+
+# ---------------------------------------------------------------------------
+# §3.4 -- TWO OVERLAPPING REFRESHES COULD MIX POOLS.
+#
+# Every control's handler is a separate task on the one event loop, and every
+# one of them mutates the SHARED `state` dict and then awaits. `refresh()` had
+# no revision token, so the read that RETURNED last painted last regardless of
+# which was ISSUED last -- and the state it labelled its rows with belonged to
+# the newer handler. One pool's rows under the other pool's name and count.
+#
+# THE TESTS BELOW ARE INTERLEAVINGS, not source scans, and they drive the REAL
+# `refresh` closure: the page's own controls are wired through a NiceGUI
+# `on_click` lambda that returns None and schedules the coroutine itself, so a
+# test cannot await one and cannot control which of two finishes first. The
+# closure is captured off `_render_results` -- the same object every control
+# calls -- and the two passes then mutate the same state dict and await the same
+# gated read, which is the defect's own mechanism.
+# ---------------------------------------------------------------------------
+
+def _gated_findings():
+    """`(stub, gates)`. Each call parks on its own event; the FIRST call (the
+    page's initial paint) is released immediately so the page can build."""
+    gates: list = []
+
+    async def _call(unit="identification", **kwargs):
+        bucket = kwargs.get("bucket", "main")
+        gate = asyncio.Event()
+        gates.append((bucket, gate))
+        if len(gates) == 1:
+            gate.set()
+        await gate.wait()
+        items = list(_ROWS_BY_BUCKET.get(bucket, []))
+        return {
+            "status": "ok", "items": items, "total": len(items),
+            "meta": {"unit": unit, "bucket": bucket, "sort": "band_rank",
+                     "sort_basis": "best_band_rank", "novelty_offered": True,
+                     "include_divergent": False, "page": 1,
+                     "approximate_total": False},
+        }
+
+    return _call, gates
+
+
+def _capture_refresh(monkeypatch):
+    """A handle on the page's own `refresh` closure.
+
+    Taken off `_render_results`, which every control's handler ultimately calls
+    with it -- so this is the SAME callable the bucket chips, the facet nodes
+    and the pager all invoke, not a reconstruction of it.
+    """
+    captured: dict = {}
+    original = fp._render_results
+
+    def _spy(envelope, state, lang, refresh, **kwargs):
+        captured["refresh"] = refresh
+        captured["state"] = state
+        return original(envelope, state, lang, refresh, **kwargs)
+
+    monkeypatch.setattr(fp, "_render_results", _spy)
+    return captured
+
+
+def test_the_older_of_two_overlapping_refreshes_never_paints(monkeypatch):
+    """The load-bearing one. Issue the 'more' pass, then the 'main' pass, then
+    release them in REVERSE -- so the stale read returns last, which is the only
+    order in which the defect is visible."""
+    findings, gates = _gated_findings()
+    captured = _capture_refresh(monkeypatch)
+
+    async def _drive(client):
+        refresh, state = captured["refresh"], captured["state"]
+        assert len(gates) == 1, "fixture error: the initial paint read more than once"
+
+        state["bucket"] = fp.BUCKET_MORE
+        older = asyncio.ensure_future(refresh())
+        await asyncio.sleep(0)
+        state["bucket"] = "main"
+        newer = asyncio.ensure_future(refresh())
+        await asyncio.sleep(0)
+
+        assert [bucket for bucket, _gate in gates] == ["main", "more", "main"], (
+            f"fixture error: reads issued in an unexpected order {gates!r}")
+
+        # REVERSE ORDER: the newer read answers first, the stale one second.
+        gates[2][1].set()
+        await newer
+        gates[1][1].set()
+        await older
+
+    client = _render_page(monkeypatch, lang="en", findings=findings,
+                          driver=_drive)
+
+    rendered = _scoped_text(client, fp.RESULTS_CLASS)
+    assert MAIN_ROW_TITLE in rendered, (
+        "the newer read's rows are not on screen at all")
+    assert MORE_ROW_TITLE not in rendered, (
+        "the STALE read painted last: the reader is shown one pool's rows while "
+        "the page's own state, its result bar and its pool control all say the "
+        "other")
+
+
+def test_a_superseded_pass_abandons_its_paint_the_moment_it_returns(monkeypatch):
+    """The same interleaving, released in the order it was issued, with the
+    assertion made BETWEEN the two releases -- so it is about the stale pass's
+    own behaviour rather than about who happened to finish last."""
+    findings, gates = _gated_findings()
+    captured = _capture_refresh(monkeypatch)
+    seen: dict = {}
+
+    async def _drive(client):
+        refresh, state = captured["refresh"], captured["state"]
+        state["bucket"] = fp.BUCKET_MORE
+        older = asyncio.ensure_future(refresh())
+        await asyncio.sleep(0)
+        state["bucket"] = "main"
+        newer = asyncio.ensure_future(refresh())
+        await asyncio.sleep(0)
+
+        # The STALE pass answers first and must paint nothing at all.
+        gates[1][1].set()
+        await older
+        seen["after_stale"] = _scoped_text(client, fp.RESULTS_CLASS)
+
+        gates[2][1].set()
+        await newer
+
+    client = _render_page(monkeypatch, lang="en", findings=findings,
+                          driver=_drive)
+
+    assert MORE_ROW_TITLE not in seen["after_stale"], (
+        "the superseded pass repainted the results region before the newer one "
+        "had a chance to answer -- a reader sees the wrong pool flash in, and "
+        "would keep it if the newer read then failed")
+    rendered = _scoped_text(client, fp.RESULTS_CLASS)
+    assert MAIN_ROW_TITLE in rendered and MORE_ROW_TITLE not in rendered
+
+
+def test_a_lone_refresh_is_never_treated_as_stale(monkeypatch):
+    """The other direction: the guard must not suppress the ordinary path. A
+    token comparison written the wrong way round would make every refresh stale,
+    and the page would never paint at all."""
+    client = _render_page(monkeypatch, lang="en")
+    assert MAIN_ROW_TITLE in _scoped_text(client, fp.RESULTS_CLASS)
+    for level in ("domain", "author", "work"):
+        assert _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-{level}-items")
+
+
+def test_the_facet_cascade_stops_reading_when_the_token_moves(monkeypatch):
+    """The cascade issues THREE reads and each one is a chance for a newer
+    refresh to have taken over. A superseded pass that kept filling containers
+    would paint one request's counts beside another request's rows -- the same
+    defect as the results region, in the control a reader uses to trust the
+    number."""
+    calls: list = []
+
+    async def _facets(level, **_kwargs):
+        calls.append(level)
+        return {"status": "ok", "items": list(_FACET_ITEMS.get(level, [])),
+                "total": 0, "meta": {"level": level}}
+
+    async def _noop() -> None:
+        return None
+
+    # False once (the check after the domain-label prime), then True (the check
+    # after the FIRST facet read), so exactly one level is read.
+    checks = {"n": 0}
+
+    def _is_stale() -> bool:
+        checks["n"] += 1
+        return checks["n"] > 1
+
+    async def _run(client):
+        bar = _elements_with_class(client, fp.FILTER_BAR_CLASS)[0]
+        del calls[:]
+        checks["n"] = 0
+        await fp._populate_facets(bar, _state(), "en", _noop, cache=None,
+                                  is_stale=_is_stale)
+
+    _render_page(monkeypatch, lang="en", facets=_facets, driver=_run)
+
+    assert calls == ["domain"], (
+        f"a superseded cascade read {calls} -- the token is not checked between "
+        "the levels, so two of the three lists are filled from a request the "
+        "reader has already moved off")
+
+
+def test_the_cascade_bails_before_any_read_when_it_is_already_superseded(monkeypatch):
+    """The earliest check: a pass superseded before it reaches its first read
+    must spend no slot on the heavy bounded-concurrency budget at all."""
+    calls: list = []
+
+    async def _facets(level, **_kwargs):
+        calls.append(level)
+        return {"status": "ok", "items": [], "total": 0, "meta": {"level": level}}
+
+    async def _noop() -> None:
+        return None
+
+    async def _run(client):
+        bar = _elements_with_class(client, fp.FILTER_BAR_CLASS)[0]
+        del calls[:]
+        await fp._populate_facets(bar, _state(), "en", _noop, cache=None,
+                                  is_stale=lambda: True)
+
+    _render_page(monkeypatch, lang="en", facets=_facets, driver=_run)
+    assert calls == [], f"a superseded cascade still issued reads: {calls}"
+
+
+def _gated_facets():
+    """`(stub, gates)`. Each read parks on its own event and returns items
+    LABELLED with the bucket it was asked for, so a rendered facet list says
+    which request produced it. The initial paint's three reads are released
+    immediately so the page can build."""
+    gates: list = []
+
+    async def _call(level, **kwargs):
+        bucket = kwargs.get("bucket", "main")
+        gate = asyncio.Event()
+        gates.append((level, bucket, gate))
+        if len(gates) <= 3:
+            gate.set()
+        await gate.wait()
+        return {
+            "status": "ok",
+            # The LABEL is deliberately distinct from the VALUE: the work
+            # level's `facet_display_label` treats a label equal to its value as
+            # a missing title (a `w`-prefixed key must never print as one), so a
+            # fixture that made them equal would render "Title unavailable" and
+            # the assertion below would be about the wrong string entirely.
+            "items": [{"level": level, "value": f"{bucket}-{level}",
+                       "label": f"{bucket}-{level}-name", "parent": None,
+                       "is_leaf": True, "count": 1}],
+            "total": 1, "meta": {"level": level},
+        }
+
+    return _call, gates
+
+
+async def _drain(gates, task, bucket, *, budget=60):
+    """Release every parked read belonging to `bucket`, letting the task walk
+    its sequential cascade one level at a time, until it finishes."""
+    for _ in range(budget):
+        if task.done():
+            break
+        for _level, asked, gate in list(gates):
+            if asked == bucket and not gate.is_set():
+                gate.set()
+        await asyncio.sleep(0)
+    assert task.done(), "the refresh pass never finished within its budget"
+    await task
+
+
+def test_the_page_hands_the_revision_token_to_the_facet_cascade(monkeypatch):
+    """The WIRING, not the cascade's own honouring of the token.
+
+    `_populate_facets` takes `is_stale`, and its own tests pass one directly --
+    so dropping the argument at the ONE call site in `refresh` left every one of
+    them green while the live page went back to painting a stale request's facet
+    counts beside a newer request's rows.
+
+    Driven as an interleaving: the older pass's cascade is released AFTER the
+    newer pass has already filled the lists.
+    """
+    findings = _fake_findings()
+    facets, gates = _gated_facets()
+    captured = _capture_refresh(monkeypatch)
+
+    async def _drive(client):
+        refresh, state = captured["refresh"], captured["state"]
+        assert len(gates) == 3, f"fixture error: initial cascade read {gates!r}"
+
+        state["bucket"] = fp.BUCKET_MORE
+        older = asyncio.ensure_future(refresh())
+        await asyncio.sleep(0)
+        state["bucket"] = "main"
+        newer = asyncio.ensure_future(refresh())
+        await asyncio.sleep(0)
+
+        # The NEWER pass fills the lists first...
+        await _drain(gates, newer, "main")
+        # ...and the stale one is released afterwards, which is the order that
+        # makes the defect visible.
+        await _drain(gates, older, "more")
+
+    client = _render_page(monkeypatch, lang="en", findings=findings,
+                          facets=facets, driver=_drive)
+
+    def _offered(level: str) -> str:
+        """What a reader can pick at `level`, however that level renders it.
+
+        The domain facet is a tree of buttons whose text is in the subtree; the
+        author and work facets are searchable selects whose option labels live
+        in `_props['options']` and appear in NO element text -- an assertion
+        that scoped the subtree for those two would be asserting about an empty
+        string and would pass for the wrong reason."""
+        if level == "domain":
+            return _scoped_text(client, f"{fp.FILTER_BAR_CLASS}-{level}-items")
+        return " | ".join(_facet_option_names(client, level))
+
+    for level in ("domain", "author", "work"):
+        rendered = _offered(level)
+        assert f"main-{level}" in rendered, (
+            f"the {level!r} list does not hold the newer request's answer: "
+            f"{rendered!r}")
+        assert f"more-{level}" not in rendered, (
+            f"the {level!r} list was refilled by the SUPERSEDED pass -- the "
+            "counts beside the filters describe a request the reader has "
+            "already moved off, which is what the token exists to prevent")

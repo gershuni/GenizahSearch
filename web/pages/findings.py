@@ -1003,6 +1003,17 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
     #: and re-renders all three regardless. See `refresh` below.
     facet_cache: Dict[str, Tuple[Any, Dict[str, Any]]] = {}
 
+    #: THE REVISION TOKEN. Every control's handler is a separate task on the one
+    #: event loop and every one of them mutates the SHARED `state` dict and then
+    #: awaits -- so two overlapping handlers interleave, and without a token the
+    #: read that RETURNS LAST paints last regardless of which was issued last.
+    #: A reader who switches pool twice quickly, or picks a domain while a slow
+    #: bucket read is in flight, could be shown one pool's rows under the other
+    #: pool's labels and count. Every other async path on this surface already
+    #: carries a guard of this shape (the browse panel's staleness check, the
+    #: headline's client check); this one had none.
+    generation = {"n": 0}
+
     async def refresh() -> None:
         """THE one refresh path -- results first, then the facet lists.
 
@@ -1036,15 +1047,28 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         arguments changed: a sort change or a page turn re-reads nothing, a
         domain pick re-reads author and work only, and only a bucket or
         candidacy change re-reads all three.
+
+        REVISION SAFETY. The token is taken BEFORE the first await and re-checked
+        after every one of them, including inside the facet cascade. A superseded
+        pass abandons its own paint entirely rather than trying to merge -- there
+        is nothing to merge, because a later handler has already changed the
+        state its rows would be labelled with.
         """
+        generation["n"] += 1
+        mine = generation["n"]
+
+        def _stale() -> bool:
+            """Superseded by a newer refresh, or the reader has left."""
+            return generation["n"] != mine or _page_is_gone(page_client)
+
         normalise_state(state)
         for sync in control_sync:
             sync()
         write_state(state)
-        if _page_is_gone(page_client):
+        if _stale():
             return
         envelope = await fetch_findings(state)
-        if _page_is_gone(page_client):
+        if _stale():
             return
         # A PERSISTED PAGE PAST THE END. The clamp moves the STATE (never a
         # display-only local) and the refetch is what makes the move real --
@@ -1054,17 +1078,17 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         if clamp_page_to_total(state, envelope):
             write_state(state)
             envelope = await fetch_findings(state)
-            if _page_is_gone(page_client):
+            if _stale():
                 return
         results_region.clear()
         with results_region:
             _render_results(envelope, state, lang, refresh,
                             more_pool_total=more_pool_total)
-        if _page_is_gone(page_client):
+        if _stale():
             return
         await _populate_facets(
             filter_bar, state, lang, refresh,
-            cache=facet_cache, page_client=page_client,
+            cache=facet_cache, page_client=page_client, is_stale=_stale,
         )
 
     with filter_bar:
@@ -1442,6 +1466,7 @@ async def _populate_facets(
     *,
     cache: Optional[Dict[str, Tuple[Any, Dict[str, Any]]]] = None,
     page_client: Any = None,
+    is_stale: Optional[Any] = None,
 ) -> None:
     """Fill the three facet lists from the cascade -- on EVERY refresh.
 
@@ -1461,8 +1486,27 @@ async def _populate_facets(
     The cards themselves are never rebuilt: this clears and refills the
     `-items` containers only, so the filter bar's structure (and the ruling-T
     bucket control living beside it) is built exactly once per page.
+
+    `is_stale()` is the caller's REVISION TOKEN, checked after every await here
+    as well. Three reads happen in this loop and each one is a chance for a
+    newer refresh to have taken over; a superseded pass that kept filling
+    containers would paint one request's facet counts beside another request's
+    rows, which is the same defect the results region has and in the control a
+    reader uses to trust the number.
     """
+    def _stale() -> bool:
+        # ONE expression, deliberately. Written as two branches it grew a
+        # `return True` line that no capture can drive -- reaching it needs a
+        # client deleted mid-cascade -- and a line that reads as coverage
+        # nobody has is the defect this suite's line gate exists to find. The
+        # short circuit is the same behaviour: a departed reader needs no
+        # revision comparison.
+        return _page_is_gone(page_client) or (
+            bool(is_stale()) if is_stale is not None else False)
+
     await _prime_domain_labels(lang)
+    if _stale():
+        return
     containers = _facet_containers(filter_bar)
     for level in ("domain", "author", "work"):
         container = containers.get(level)
@@ -1474,8 +1518,6 @@ async def _populate_facets(
             envelope = cached[1]
         else:
             envelope = await fetch_facets(level, state)
-            if _page_is_gone(page_client):
-                return
             # ONLY AN `ok` ENVELOPE IS CACHED. A `timeout` or a `busy` is a
             # statement about the SERVICE at one instant, not an answer to the
             # question this key asks -- and the key is derived from the request,
@@ -1486,8 +1528,17 @@ async def _populate_facets(
             #
             # Not caching a failure costs one re-read on the next refresh, on a
             # cascade that was already re-read whenever an input moved.
+            #
+            # CACHED BEFORE the staleness check, deliberately: `key` was
+            # computed from the state this read was ISSUED against, so the entry
+            # is a correct answer to a question that was really asked, and a
+            # newer refresh taking over does not make it wrong. Discarding it
+            # would cost the newer pass a re-read of a level it may not have
+            # changed.
             if cache is not None and (envelope or {}).get("status") == "ok":
                 cache[level] = (key, envelope)
+            if _stale():
+                return
         container.clear()
         with container:
             _render_facet_items(level, envelope, state, lang, refresh)
