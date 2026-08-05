@@ -253,6 +253,16 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
         "en": "not available yet",
         "he": "עדיין לא זמין",
     },
+    # The pool card's header -- it NAMES THE AXIS, not the selection on it.
+    # "main pool" and "more matches" are the two values; this is the question
+    # they answer, and it is a question rather than a claim about either. It
+    # deliberately does not retype either bucket name: those have exactly one
+    # definition (`shared.discovery_main_pool.bucket_label`) and a test fails
+    # on a literal of either anywhere in this module.
+    "pool_card_header": {
+        "en": "Which pool",
+        "he": "באיזה מאגר",
+    },
     # An `ok` facet envelope carrying NO items. Deliberately a different
     # statement from `needs_tag` above, because it is a different fact: that
     # one says the data to filter on is absent, this one says the data is
@@ -930,6 +940,20 @@ def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh):
     return _sync
 
 
+#: The two halves of the pool segment. `.fchip` has NO base rule in the shared
+#: CSS block and `.fchip.here` has none at all -- only `.chip.here` does, which
+#: is a different class on a different element -- so before this the active
+#: bucket was announced through `aria-pressed` and through nothing a sighted
+#: reader could see. These are the ratified `.chip.here` values, applied
+#: INLINE: this work adds no stylesheet rule, and every property here is
+#: side-neutral, so neither needs to flip for RTL.
+_SEGMENT_OFF = "border-radius: 4px; margin: 0;"
+_SEGMENT_ON = (
+    "border-radius: 4px; margin: 0; background: var(--bg-active); "
+    "color: var(--text-primary); font-weight: 700;"
+)
+
+
 def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
     """THE "more matches" control (ruling T).
 
@@ -949,11 +973,39 @@ def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
     expansion, a menu or any other disclosure container would break ruling T,
     and `tests/test_findings_page.py` fails on the ancestor.
 
-    The rule sentence that used to sit under it moved to `_render_howto`. The
-    CONTROL did not move, and cannot.
+    NAMED AND EXPLAINED (2026-08-05). Of the five sidebar cards, the two
+    carrying the page's AXES were the only two with no header, while the three
+    that merely NARROW all carried the loud uppercase one -- so the page shouted
+    its narrowing tools and whispered its axes, and this axis in particular was
+    two unlabelled grey pills in a header-less box. Three things changed, all of
+    them things ruling T explicitly permits: the card takes a HEADER naming the
+    axis, the two chips are joined into ONE VISUAL SEGMENT so they read as one
+    control with two states rather than two unrelated buttons, and
+    `rule_sentence` -- the one worded statement of what decides between the two
+    buckets -- sits under them as card prose.
+
+    THE RULE SENTENCE IS COPIED, NOT MOVED. It stays in `_render_howto` as well;
+    a test pins it in both places. Nothing was demoted to make room here.
+
+    STILL NO COUNT, anywhere in this subtree, and no quality language: the
+    owner's assessment of the second bucket is an impression over a rendered
+    sample with no draw protocol and no blind grading. The bucket names come
+    from the shared vocabulary, in match framing -- the second bucket means
+    there was not enough evidence for the main-pool rule, never that those
+    identifications are probably wrong.
     """
     with _filter_card(f"{BUCKET_CONTROL_CLASS}-group"):
-        with ui.row().classes(f"{BUCKET_CONTROL_CLASS} gap-2 items-center flex-wrap"):
+        _card_header(copy_text("pool_card_header", lang))
+        # ONE SEGMENT. The enclosing rule and the zero gap are what turn two
+        # loose pills into one control; `border` and `border-radius` are
+        # side-neutral, so nothing here needs to flip for RTL. Inline, because
+        # this work adds no stylesheet rule (a test diffs `common.css`).
+        with ui.row().classes(
+            f"{BUCKET_CONTROL_CLASS} items-center flex-wrap"
+        ).style(
+            "gap: 0; border: 1px solid var(--border-light); border-radius: 6px; "
+            "padding: 2px; width: fit-content; max-width: 100%;"
+        ):
             for in_main in (True, False):
                 target = BUCKET_MAIN if in_main else BUCKET_MORE
                 label = bucket_name(in_main, lang)
@@ -967,6 +1019,10 @@ def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
                 chip = ui.button(label, on_click=_select).props("flat dense no-caps")
                 chip.classes("fchip here" if selected else "fchip")
                 chip.props(f'aria-pressed={"true" if selected else "false"}')
+                chip.style(_SEGMENT_ON if selected else _SEGMENT_OFF)
+        ui.label(rule_sentence(lang)).classes(
+            f"{BUCKET_CONTROL_CLASS}-rule dnote text-xs"
+        )
 
 
 def _render_coverage_filter(lang: str) -> None:

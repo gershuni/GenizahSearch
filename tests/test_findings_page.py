@@ -3144,6 +3144,92 @@ def test_the_facet_cards_are_built_once_and_only_their_items_refill(monkeypatch)
         assert len(boxes) == 1
 
 
+# ---------------------------------------------------------------------------
+# TASK 6 (2026-08-05) — the pool card is NAMED and EXPLAINED.
+#
+# Of the sidebar's five cards, the two carrying the page's AXES (candidacy,
+# pool) were the only two with no header, while the three that merely NARROW
+# all carried the loud uppercase one. The pool card was therefore two
+# unlabelled grey pills in a header-less box — 25,872 identifications reachable
+# only by noticing that one of them was not selected.
+#
+# Ruling T is unaffected and is what bounds the fix: a header, a name and
+# explanatory prose are explicitly permitted; a COUNT on the control, or moving
+# it into any disclosure, is not. The existing ruling-T tests above still run.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_pool_card_names_its_axis_and_carries_the_rule_that_decides_it(
+        monkeypatch, lang):
+    client = _render_page(monkeypatch, lang=lang)
+    cards = _elements_with_class(client, f"{fp.BUCKET_CONTROL_CLASS}-group")
+    assert len(cards) == 1
+    card = cards[0]
+    assert card.tag == "q-card", "ruling T: the control's card stays a plain card"
+
+    said = "\n".join(_subtree_strings(card))
+    assert fp.copy_text("pool_card_header", lang) in said, (
+        "the pool card is still the only narrowing-free axis card with no header "
+        "— the page shouts its narrowing tools and whispers its axes")
+    assert rule_sentence(lang) in said, (
+        "the pool card offers two buckets and never says what decides between "
+        "them; the sentence that does is buried in a collapsed panel")
+
+    headers = [element for element in card.descendants()
+               if fp.CARD_HEADER_CLASS in (element._classes or [])]
+    assert len(headers) == 1, (
+        f"expected exactly one card header in the pool card, got {len(headers)}")
+
+
+def test_the_rule_sentence_is_COPIED_into_the_pool_card_and_not_moved(monkeypatch):
+    """It must be in BOTH places. `test_the_demoted_prose_is_present_verbatim_
+    inside_the_collapsible` pins the panel copy, and this pins that the card did
+    not take it away from there."""
+    client = _render_page(monkeypatch, lang="en")
+    panel = _elements_with_class(client, fp.HOWTO_CLASS)[0]
+    card = _elements_with_class(client, f"{fp.BUCKET_CONTROL_CLASS}-group")[0]
+    assert rule_sentence("en") in "\n".join(_subtree_strings(panel))
+    assert rule_sentence("en") in "\n".join(_subtree_strings(card))
+    assert fp.HOWTO_CLASS not in {c for a in _ancestors(card) for c in (a._classes or [])}
+
+
+def test_the_two_bucket_chips_read_as_one_segment_with_a_visible_selection(monkeypatch):
+    """Two loose pills at `gap-2` read as two unrelated buttons; one bordered
+    box holding both reads as one control with two states.
+
+    The SELECTED half must also be visible as such. `.fchip` has no base rule in
+    the shared CSS block and `.fchip.here` has none at all — only `.chip.here`
+    does, which is a different class on a different element — so before this the
+    selection was carried by `aria-pressed` and by nothing a sighted reader could
+    see. No stylesheet rule is added: the treatment is inline, and every
+    directional property in it is logical or side-neutral."""
+    client = _render_page(monkeypatch, lang="en")
+    segments = _elements_with_class(client, fp.BUCKET_CONTROL_CLASS)
+    assert len(segments) == 1
+    segment = segments[0]
+
+    chips = [element for element in segment.descendants()
+             if "fchip" in (element._classes or [])]
+    assert len(chips) == 2, f"both buckets must be named on the control, got {len(chips)}"
+    assert {chip.parent_slot.parent for chip in chips} == {segment}, (
+        "the two chips do not share one parent — they cannot read as one segment")
+    assert (segment._style or {}).get("border"), (
+        "the segment carries no enclosing rule, so the two chips still read as "
+        "two unrelated buttons")
+
+    selected = [chip for chip in chips
+                if (chip._props or {}).get("aria-pressed") == "true"]
+    assert len(selected) == 1, "exactly one bucket is active at a time"
+    other = [chip for chip in chips if chip not in selected][0]
+    assert dict(selected[0]._style or {}) != dict(other._style or {}), (
+        "the selected bucket looks exactly like the unselected one — the "
+        "selection is announced to a screen reader and to nobody else")
+
+    # Ruling T still holds over the whole card, header and prose included.
+    text = "\n".join(_subtree_strings(segment))
+    assert not _DIGIT_RE.findall(text), f"a number reached the bucket control: {text!r}"
+
+
 _EMPTY_FACETS = {"domain": [], "author": [], "work": []}
 
 
