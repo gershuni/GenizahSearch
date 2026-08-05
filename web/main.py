@@ -1889,6 +1889,40 @@ def create_layout():
                 # Creator Credit
                 ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
 
+    # The citation footer's state is applied to <html> by a BLOCKING head script,
+    # before first paint, rather than by a handler that runs after hydration.
+    #
+    # It used to be the latter, and the cost was visible: the server rendered the
+    # footer expanded on every page, then JavaScript read localStorage and set
+    # `display:none` a moment later, so a reader who had ever dismissed it saw the
+    # citation flash and vanish on EVERY page load. Reported by the owner as
+    # "appears for a split second and then disappears".
+    #
+    # A dismissal now COLLAPSES to the one-line compact form instead of removing
+    # the footer, because dismissal was previously a lifetime opt-out with no way
+    # back: the copy button went with it, and this footer is the only handy place
+    # to copy the citation from. The reminder and the copy source are the whole
+    # point of it, so the control that tidies it away must not also delete it.
+    # The storage key is REUSED deliberately -- everyone who dismissed it before
+    # gets the compact line back rather than staying dark.
+    ui.add_head_html('''<style>
+html.cite-compact .citation-full { display: none !important; }
+html.cite-compact .citation-compact { display: flex !important; }
+html.cite-off .citation-footer { display: none !important; }
+</style>
+<script>
+(function() {
+    var d = document.documentElement;
+    try {
+        if (sessionStorage.getItem("citation_footer_off") === "true") {
+            d.classList.add("cite-off");
+        } else if (localStorage.getItem("citation_footer_dismissed") === "true") {
+            d.classList.add("cite-compact");
+        }
+    } catch (e) { /* storage blocked: show the citation, never hide it on error */ }
+})();
+</script>''')
+
     # Global Footer with Citation Note (dismissible, auto-collapse to compact line)
     full_citation = 'Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473'
     footer = ui.footer().classes('citation-footer')
@@ -1898,7 +1932,8 @@ def create_layout():
             ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props(f'flat dense size=xs aria-label="{tr("Copy citation")}"').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
             ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80 citation-hebrew-label')
             ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium citation-link').style('direction: ltr; text-decoration: none;')
-            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props(f'flat dense size=xs aria-label="{tr("Dismiss")}"').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
+            # Collapses to the compact line; does NOT remove the footer.
+            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.documentElement.classList.add("cite-compact");')).props(f'flat dense size=xs aria-label="{tr("Dismiss")}"').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
 
         # Compact citation (shown after auto-collapse — full text, truncated with ellipsis on narrow screens)
         with ui.row().classes('w-full items-center justify-center gap-2 py-1 px-4 citation-compact').style('flex-wrap: nowrap;'):
@@ -1906,27 +1941,23 @@ def create_layout():
                 'direction: ltr; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;'
             )
             ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props(f'flat dense size=xs aria-label="{tr("Copy citation")}"').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy full citation'))
-            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props(f'flat dense size=xs aria-label="{tr("Dismiss")}"').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
+            # SESSION-only hide -- the citation returns on the reader's next visit.
+            # A permanent hide here would recreate the lifetime opt-out this change
+            # exists to remove.
+            ui.button(icon='close', on_click=lambda: ui.run_javascript('sessionStorage.setItem("citation_footer_off", "true"); document.documentElement.classList.add("cite-off");')).props(f'flat dense size=xs aria-label="{tr("Dismiss")}"').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
 
-    # Dismiss check + auto-collapse after 10 seconds
+    # Auto-collapse after 10 seconds. The dismissed/hidden states are ALREADY
+    # applied by the head script above, before first paint -- this handler must
+    # never re-decide them, or the flash it replaced comes straight back.
     ui.run_javascript('''
         (function() {
-            if (localStorage.getItem("citation_footer_dismissed") === "true") {
-                document.querySelector(".citation-footer").style.display = "none";
-                return;
-            }
+            var d = document.documentElement;
+            if (d.classList.contains("cite-compact") || d.classList.contains("cite-off")) return;
             setTimeout(function() {
                 var full = document.querySelector(".citation-full");
-                var compact = document.querySelector(".citation-compact");
-                if (full && compact) {
-                    full.style.opacity = "0";
-                    setTimeout(function() {
-                        full.style.display = "none";
-                        compact.style.display = "flex";
-                        compact.style.opacity = "0";
-                        setTimeout(function() { compact.style.opacity = "1"; }, 50);
-                    }, 300);
-                }
+                if (!full) return;
+                full.style.opacity = "0";
+                setTimeout(function() { d.classList.add("cite-compact"); }, 300);
             }, 10000);
         })();
     ''')
