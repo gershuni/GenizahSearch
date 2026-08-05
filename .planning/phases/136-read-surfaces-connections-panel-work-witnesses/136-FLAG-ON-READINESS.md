@@ -115,12 +115,45 @@ all.
 |---|---|---|
 | G1 | **D-06b — whether the public projection may inherit the all-source measurement, or needs its own pre-registered estimand.** CERT-01 measured the all-source population; the public projection is a structurally different one, and `135-09-CERT01-MEASUREMENT.md` records the Sefaria-only figure as descriptive, not pre-registered. Either pre-register and measure a public estimand before the public bake, or formally amend REL-01. | **Phase 139** (`136-CONTEXT.md` D-06b) |
 | G2 | **REL-01 / CERT-02's "tier A goes public WITH its measured number" clause, which conflicts with D-06's no-numbers posture.** Must be amended or satisfied at the release gate. Phase 136 publishes nothing, so nothing is violated today. | **Phase 139** (`136-CONTEXT.md` D-06a "Still owed at 139") |
-| G3 | **The correction and retraction policy**, which lost its home when the curated-surface exception was declined. | **Phase 139** (`136-CONTEXT.md` § Deferred) |
+| G3 | **The correction and retraction policy**, which lost its home when the curated-surface exception was declined. — **RESOLVED by owner ruling 2026-08-05; no longer gates the flag. See the note below this table.** | ~~Phase 139~~ → owner, 2026-08-05 |
 | G4 | **VIS-02's positive control and the public/private row-count reconciliation as a release-gate check.** | **Phase 139** (`136-CONTEXT.md` § Deferred) |
 | G5 | **The ruling-T "more matches" browser check is recorded NOT MET in `136-16-SUMMARY.md`, while CI reports it green.** The `findings-browser-check` job passed for the first time on 2026-08-04 (CI run 30931268195) after four runs and three real defects, two of them product defects. The phase's own record was not updated, and `test_the_findings_deploy_is_blocked_until_the_browser_check_is_recorded_MET` reads that record — so the findings deploy gate currently reads BLOCKED on a criterion that is met. **This is a records correction, and it is deliberately not made here**: it should be made by whoever can verify the CI run, not by an executor quoting a dispatch. Until then the gate reads stale in the safe direction. | **Release gate / owner** |
 | G6 | **`works.genre` is NULL on 58 public (181 private) works reachable through the review opt-in, and the release verifier FAILS on it today.** Owner decided 2026-08-04 to CURATE rather than backfill `Unassigned`. Worklists generated. | **A curation pass before the next bake** (`docs/OPEN_ISSUES.md`) |
 
-None of G1–G6 is resolved by this attestation, and none should be read as resolved by the phase
+### G3 — resolved by owner ruling, 2026-08-05
+
+**A per-item retraction mechanism was the wrong tool, because the premise behind it was wrong.**
+The policy was scoped as "a reader finds *an* error" — incidental, rare, worth taking down one row
+at a time. The owner corrected this: wrong attributions are **systematic, not incidental**. The
+measurement agrees — CERT-01's weighted precision is 0.9382 overall but the per-stratum spread runs
+**1.000 down to 0.471**, so in the weakest stratum roughly half are wrong. Add the 12,664 rows that
+contradict the catalogue (23.6% of the corpus) and the 25,872-row second pool, which by definition
+did not meet the evidence rule. Being frequently wrong is not a failure mode on this surface; it is
+the **stated premise**, and the tiering, the pools and the permanent caveat are what make it honest.
+
+A withdrawal list against a systematic error rate would mean thousands of manual takedowns fighting
+a problem that a better bake fixes wholesale. **The correction mechanism at scale is the next bake,
+not a takedown list.** The ruling therefore splits what the old framing conflated:
+
+* **Reports feed the next bake.** A reader who spots an error is supplying validation signal, worth
+  far more aimed at the next artifact than at one row. `mailto` is sufficient — **owner ruling: "email
+  us is enough"** — with the finding's id and the sidecar version prefilled, so a report is
+  reproducible against the exact artifact that produced it. No schema, no moderation queue, no
+  retraction path.
+* **Withdrawal is reserved for a different class entirely** — harmful, defamatory, or a disclosure
+  that should not have shipped. That list is short and its policy is not this one. "This match is
+  wrong" is expected and must never route here.
+* **The surface already carries most of the burden.** The permanent caveat says every row is a text
+  match found by software and not a reviewed identification; the pools and tiers say where the
+  evidence was thin. A reader who finds a wrong match in the second pool has found the system
+  working exactly as described.
+
+**Consequence for the flag:** G3 no longer gates it. What remains is a sentence saying what to do on
+finding an error and where reports go, plus the prefilled `mailto` — an hour of work, not a phase.
+
+---
+
+None of G1, G2, G4, G5 or G6 is resolved by this attestation, and none should be read as resolved by the phase
 being otherwise complete.
 
 ---
