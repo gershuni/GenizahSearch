@@ -286,6 +286,50 @@ is an owner decision because they differ in kind, not degree:
    *work titles already ship and already render* (the masked thing is the corpus codename and excerpt-level
    reference text, not the works' existence — v2 bake plan, §"M-source: store, do not display the locus"). So
    these are displayable findings, not internal-only rows.
+### 🛑 RETRACTION 2026-08-05 — the 2,738 are POLICY EXCLUSIONS, not an accidental gap
+
+**The owner's "we add them" was given on a premise I got wrong, so it does not cover what the code actually
+does. This needs re-deciding before the bake.**
+
+I explained the missing ids as bookkeeping — "only works whose claims survived into v2's published set ever
+earned a `w######`". That is **false**. `select_shown_works` (the builder's own curation policy, D-05/D-06)
+derives each work's corpus from its `cat` column and then **deliberately drops** M-source works whose `genre`
+is outside a literary keep-set (Geonic · Talmud & Midrash · Karaite · rabbinic · belles-lettres · science ·
+philology · translations-from-Arabic). Piyyut, documentary, modern-other and unrecognised genres are excluded
+**by design, with the owner as the final gate.**
+
+Running the 2,738 through that exact policy:
+
+| bucket | works | evidence rows | shipped claims |
+|---|---|---|---|
+| **dropped by the D-06 genre policy** | **2,686** | **63,230 (12.58%)** | 42,258 |
+| policy would KEEP (msource) | 44 | 114 (0.02%) | **0** |
+| policy would KEEP (sefaria) | 8 | 27 (0.01%) | **0** |
+
+**Two conclusions, both reversing what I told the owner:**
+
+1. **Nothing is being "lost".** The 12.58% I warned about is material v2 *declined on purpose*. Honouring
+   D-06, the **real gap is 52 works / 141 evidence rows / 0.03% of the corpus — and zero shipped claims**, i.e.
+   inert. Those 52 are worth a look as genuine omissions; they are not a decision.
+2. **"Adding them" would reverse D-06** — folding ~2,686 piyyut/documentary/unclassified works and 42,258
+   shipped claims into the discovery corpus. That is a substantive product decision about what the corpus is
+   *for*, not a gap fix, and it is precisely the call D-06 reserves to the owner.
+
+**Also corrected: my "the genre debt is 99.8% already answered" finding was true but misleading.** Those works
+do carry genres — and those genres are *the reason they are excluded*. Reading their presence as "curation is
+nearly done" inverted their meaning.
+
+**What survives from the earlier analysis:** the corpus did not expand (gen-2's 4,160 works ⊂ the v2-era 4,509;
+the 349 difference is **R-source**, correctly absent from gen-2 and to be kept out of v3). So CERT-01 still
+needs no re-registration on corpus-expansion grounds. Only the *explanation* for the missing ids was wrong.
+
+**Recommended default: honour D-06** — take the 52, leave the 2,686. It costs 0.03% of evidence and no shipped
+claims, keeps v3 comparable to v2, and leaves the "should discovery cover piyyut and documentary material?"
+question to be asked on its own terms rather than smuggled in through a bake.
+
+<details>
+<summary>The superseded decision block, kept because the owner acted on it</summary>
+
 ### ✅ OWNER DECISION 2026-08-05: **mint them, and M-source stays private for now**
 
 Option 1. Both halves measured before proceeding, and both make this much cheaper than the plan feared:
@@ -317,7 +361,14 @@ It does.
 worklist stay on this machine — never committed, never pasted into a shared channel — and the genre *values*
 must not be quoted in tracked files.
 
-#### RESOLVED 2026-08-05 — there is NO corpus expansion. It was bookkeeping.
+</details>
+
+#### RESOLVED 2026-08-05 — there is NO corpus expansion (but the *reason* below is wrong; see the retraction above)
+
+> **⚠ The "it was bookkeeping" explanation in this subsection is RETRACTED** — the missing ids are the D-06
+> genre policy, not claim survival. **The conclusion still holds**: gen-2's work set is a strict subset of the
+> v2-era matcher's, so there is no corpus expansion and CERT-01 needs no re-registration on that ground. Only
+> the causal story was wrong. The 349-work difference is **R-source**, correctly absent from gen-2.
 
 I raised this as possibly outranking the mint/drop decision: if v3 matched a *wider* M-source corpus than v2,
 CERT-01 would be pre-registered on a different population. **Checked directly against the two match tables in
@@ -574,20 +625,25 @@ scope becomes ~110k → **≈$68**.
 
 **With cache reuse (§1.4a), measured against the real 65,200-entry cache — this is the operative table:**
 
-| scope | reuse | pay for | **cost** | without reuse |
+| scope | reuse | pay for | **cost, honouring D-06** | if the 2,686 were added |
 |---|---|---|---|---|
-| **headline (`same_work`)** | **87.6%** (45,070 of 51,476) | 20,124 | **$12.38** | $40.10 |
-| **shipped** | 57.1% (49,145 of 86,073) | 60,823 | **$37.41** | $67.64 |
+| **headline (`same_work`)** | **87.6%** (45,070 of 51,476) | 6,406 | **$3.94** | $12.38 |
+| **shipped** | 57.1% (49,145 of 86,073) | 36,928 | **$22.71** | $37.41 |
 
-Both figures include every pair on the 2,738 newly minted works (13,718 / 23,895), which have no cache entry
-and are paid in full. The headline surface reuses far better because it is the stable, high-coverage population
-v2 already asked about; the shipped scope reaches further into pairs v2 never assessed.
+**The D-06 retraction cuts this again.** The higher right-hand column paid in full for every pair on the 2,738
+unmapped works (13,718 headline / 23,895 shipped). Honouring D-06 removes almost all of them — the 52 works the
+policy *would* keep carry **zero shipped claims**, so they add ~nothing — leaving only genuine cache misses on
+existing works. **Headline novelty becomes ≈$4.**
+
+The headline surface reuses far better because it is the stable, high-coverage population v2 already asked
+about; the shipped scope reaches further into pairs v2 never assessed.
 
 The intersection is computed on the raw `w######` id, while the real key is the **alias-group representative** —
 alias collapsing can only merge keys, so **actual reuse is ≥ these figures and the costs are upper bounds.**
 
-**Recommend: headline scope first at ≈$12**, then extend to shipped only if the wider surface proves wanted —
-that sequencing spends $12 to learn whether the extra $25 is worth it. Keep the $150 ceiling as the backstop.
+**Recommend: headline scope first at ≈$4**, then extend to shipped only if the wider surface proves wanted —
+that sequencing spends four dollars to learn whether the extra ~$19 is worth it. Keep the $150 ceiling as the
+backstop; at these figures it is a formality rather than a constraint.
 
 **Do not touch model, effort or prompt to save money.** Not for the brief's stated reason (they are not in the
 key), but for a better one: the $0.000727 unit cost and the 78.3%-agreement re-measurement are both *of that
