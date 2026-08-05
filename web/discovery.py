@@ -25,6 +25,10 @@ import scripts.discovery_ids as _ids
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
 from shared.discovery_service import (
     BUCKET_MAIN,
+    DIVERGENCE_HIDDEN,
+    DIVERGENCE_MODES,  # noqa: F401 -- the closed axis vocabulary a surface maps
+    DIVERGENCE_ONLY,  # noqa: F401 -- exported for surfaces to validate against
+    DIVERGENCE_SHOWN,  # noqa: F401 -- exported for surfaces to validate against
     FACET_LEVELS,  # noqa: F401 -- exported for surfaces to validate against
     FINDINGS_BUCKETS,  # noqa: F401 -- exported for surfaces to validate against
     FINDINGS_SORT_BAND_RANK,
@@ -32,6 +36,7 @@ from shared.discovery_service import (
     FINDINGS_UNIT_IDENTIFICATION,
     FINDINGS_UNITS,  # noqa: F401 -- exported for surfaces to validate against
     DiscoveryService,
+    findings_divergence_offered,  # noqa: F401 -- the second axis rule, ditto
     findings_novelty_offered,  # noqa: F401 -- the axis rule a surface needs BEFORE it calls
 )
 from shared.discovery_surface_projection import (
@@ -211,7 +216,7 @@ async def get_findings_enveloped(
     *,
     bucket: str = BUCKET_MAIN,
     novelty: Optional[Iterable[str]] = None,
-    include_divergent: bool = False,
+    divergence: str = DIVERGENCE_HIDDEN,
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
@@ -228,17 +233,18 @@ async def get_findings_enveloped(
     not a service state to render. Validate the request against those sets
     before calling.
 
-    `include_divergent` defaults to `False` HERE as well as in the service, so
-    a caller that has never heard of ruling F gets the ruling's posture rather
-    than its opposite. A surface that wants the divergent rows must ask for
-    them, in words, on every call.
+    `divergence` defaults to `DIVERGENCE_HIDDEN` HERE as well as in the service,
+    so a caller that has never heard of ruling F gets the ruling's posture rather
+    than its opposite. A surface that wants the divergent rows must ask for them,
+    by name, on every call -- and the three modes are exclude / no-filter / only,
+    because the axis is a FILTER and a boolean could only ever widen.
     """
     if not discovery_available():
         return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
     try:
         return await _service.get_findings_enveloped_async(
             unit, bucket=bucket, novelty=novelty,
-            include_divergent=include_divergent, domain=domain, author=author,
+            divergence=divergence, domain=domain, author=author,
             work_id=work_id, sort=sort, page=page, page_size=page_size)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
@@ -285,7 +291,7 @@ async def get_findings_facets_enveloped(
     *,
     bucket: str = BUCKET_MAIN,
     novelty: Optional[Iterable[str]] = None,
-    include_divergent: bool = False,
+    divergence: str = DIVERGENCE_HIDDEN,
     domain: Optional[str] = None,
     author: Optional[str] = None,
     unit: str = FINDINGS_UNIT_IDENTIFICATION,
@@ -293,8 +299,8 @@ async def get_findings_facets_enveloped(
     """The domain / author / work cascade -- on the IDENTIFIED WORK's domain,
     never the manuscript's catalogue domain.
 
-    Takes `include_divergent` AND `unit` for the same reason the row query does:
-    a count beside an option has to describe the set that option produces. The
+    Takes `divergence` AND `unit` for the same reason the row query does: a
+    count beside an option has to describe the set that option produces. The
     default result set excludes ruling F's divergent rows, and the reader's row
     unit decides whether a "row" is an identification, a manuscript or a work --
     so a cascade fixed at one grain reports a population the result bar beside it
@@ -304,7 +310,7 @@ async def get_findings_facets_enveloped(
     try:
         return await _service.get_findings_facets_enveloped_async(
             level, bucket=bucket, novelty=novelty,
-            include_divergent=include_divergent, domain=domain, author=author,
+            divergence=divergence, domain=domain, author=author,
             unit=unit)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})

@@ -86,7 +86,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from nicegui import ui
 
 from shared.discovery_display_strings import (
-    TOGGLE_DIVERGENCE,
     TOGGLE_MORE_MATCHES,
     bucket_name,
     coverage_label,
@@ -105,12 +104,17 @@ from web.components import findings_rows as rows
 from web.components.typography import h1
 from web.discovery import (
     BUCKET_MAIN,
+    DIVERGENCE_HIDDEN,
+    DIVERGENCE_MODES,
+    DIVERGENCE_ONLY,
+    DIVERGENCE_SHOWN,
     FACET_LEVELS,
     FINDINGS_BUCKETS,
     FINDINGS_SORT_BAND_RANK,
     FINDINGS_SORTS,
     FINDINGS_UNIT_IDENTIFICATION,
     FINDINGS_UNITS,
+    findings_divergence_offered,
     findings_novelty_offered,
     get_findings_enveloped,
     get_findings_facets_enveloped,
@@ -316,6 +320,53 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
         "en": "Counted here: findings that disagree with the catalogue.",
         "he": "נכללים כאן: ממצאים החולקים על הקטלוג.",
     },
+    "divergence_alone": {
+        "en": "Counted here: only findings that disagree with the catalogue.",
+        "he": "נכללים כאן: רק ממצאים החולקים על הקטלוג.",
+    },
+    # THE THREE STATE LABELS (owner, 2026-08-05). Each one names WHAT THIS STATE
+    # DOES, which is the whole correction: the control shipped with the panel's
+    # ratified `TOGGLE_DIVERGENCE` wording -- "Show findings that disagree with
+    # the catalogue" -- on a mechanic that is purely ADDITIVE here. On the panel
+    # that string labels a disclosure that opens onto a divergent-ONLY section
+    # and is exactly accurate; on this page it widened 24,480 main-pool rows to
+    # 27,709 and kept every non-divergent one, so the reader who asked to see
+    # the disagreements got a mixed list in which they were 12% of the rows and
+    # the top of the page did not change at all.
+    #
+    # The panel keeps the ratified string. This page names its states.
+    #
+    # None of the three asserts which side is right: they say only whether the
+    # disagreements are out, in, or the whole of what is counted. The ratified
+    # warning still sits beside them as card prose.
+    "divergence_state_hidden": {
+        "en": "Catalogue disagreements hidden",
+        "he": "מחלוקות עם הקטלוג מוסתרות",
+    },
+    "divergence_state_shown": {
+        "en": "Catalogue disagreements included",
+        "he": "מחלוקות עם הקטלוג כלולות",
+    },
+    "divergence_state_only": {
+        "en": "Catalogue disagreements only",
+        "he": "מחלוקות עם הקטלוג בלבד",
+    },
+    # G4. Both controls select on ONE column, and `fills_gap` and the two
+    # divergence shades are mutually exclusive values of it -- so with the
+    # candidacy filter on, this axis cannot change anything. Saying so is the
+    # same treatment `novelty_unit_note` already gives the other inert pair.
+    # `{candidates}` is the candidacy control's own ratified name, substituted
+    # rather than retyped.
+    "divergence_candidacy_note": {
+        "en": (
+            "Not offered while '{candidates}' is on: a candidate is a finding "
+            "no aid records, so it cannot also disagree with one."
+        ),
+        "he": (
+            "לא מוצע כאשר '{candidates}' מסומן: מועמד הוא ממצא ששום כלי עזר "
+            "אינו מתעד, ולכן אינו יכול גם לחלוק על כלי עזר."
+        ),
+    },
     # The amber tag on a filter whose backing data is missing. A filter that
     # silently vanishes is indistinguishable from a filter that never existed.
     "needs_tag": {
@@ -331,17 +382,6 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     "pool_card_header": {
         "en": "Which pool",
         "he": "באיזה מאגר",
-    },
-    # The divergence card's header -- it NAMES THE AXIS, exactly as the pool
-    # card's does, and leaves the ACTION to the ratified toggle wording on the
-    # control below it. It names a relationship between two records ("the
-    # catalogue says something else here") and takes no side: ruling F's whole
-    # posture is that the SYSTEM never treats the catalogue's disagreement as a
-    # verdict, so a header reading "catalogue conflicts" or anything with a
-    # direction in it would concede the point the toggle exists to refuse.
-    "divergence_card_header": {
-        "en": "Catalogue disagreements",
-        "he": "מחלוקות עם הקטלוג",
     },
     # THE SECOND-POOL INVITATION, rendered beside the results in BOTH bucket
     # states. The sidebar control works, is one click, and switches the whole
@@ -469,6 +509,29 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
 }
 
 
+#: Divergence mode -> the state label its control carries, and -> the result
+#: bar's basis line. ONE mapping each, so a mode added to the closed vocabulary
+#: fails loudly here rather than rendering a blank chip or a silent bar.
+_DIVERGENCE_STATE_KEY: Dict[str, str] = {
+    DIVERGENCE_HIDDEN: "divergence_state_hidden",
+    DIVERGENCE_SHOWN: "divergence_state_shown",
+    DIVERGENCE_ONLY: "divergence_state_only",
+}
+
+_DIVERGENCE_BASIS_KEY: Dict[str, str] = {
+    DIVERGENCE_HIDDEN: "divergence_excluded",
+    DIVERGENCE_SHOWN: "divergence_included",
+    DIVERGENCE_ONLY: "divergence_alone",
+}
+
+if set(_DIVERGENCE_STATE_KEY) != set(DIVERGENCE_MODES) or         set(_DIVERGENCE_BASIS_KEY) != set(DIVERGENCE_MODES):
+    raise RuntimeError(
+        "web/pages/findings.py: the divergence mode vocabulary moved and this "
+        "module's label tables did not -- a mode with no label renders a blank "
+        "control, and one with no basis line leaves the count unexplained"
+    )
+
+
 def _lang_key(lang: str) -> str:
     return "he" if lang == "he" else "en"
 
@@ -550,6 +613,24 @@ def _default_page_size() -> int:
     return value if value > 0 else 50
 
 
+def _stored_divergence() -> str:
+    """The reader's divergence mode, validated against the closed vocabulary.
+
+    MIGRATES the boolean this axis shipped as earlier today: a stored `True`
+    means the reader had asked for the divergent rows to be included, which is
+    exactly `SHOWN`; anything else -- `False`, absent, a hand-edited cookie, a
+    mode that has since left the vocabulary -- resolves to ruling F's default.
+    Without the migration a stored `True` would fail the vocabulary check and
+    silently drop a reader's own selection.
+    """
+    stored = safe_user_get(_KEY_DIVERGENCE, DIVERGENCE_HIDDEN)
+    if stored is True:
+        return DIVERGENCE_SHOWN
+    if isinstance(stored, str) and stored in DIVERGENCE_MODES:
+        return stored
+    return DIVERGENCE_HIDDEN
+
+
 def read_state() -> Dict[str, Any]:
     """The reader's persisted selections, read through the storage chokepoint
     and VALIDATED against the exported closed vocabularies.
@@ -587,7 +668,7 @@ def read_state() -> Dict[str, Any]:
         "bucket": bucket,
         "sort": sort,
         "novelty_only": bool(safe_user_get(_KEY_NOVELTY, False)),
-        "divergence": bool(safe_user_get(_KEY_DIVERGENCE, False)),
+        "divergence": _stored_divergence(),
         "domain": _opt(_KEY_DOMAIN),
         "author": _opt(_KEY_AUTHOR),
         "work_id": _opt(_KEY_WORK),
@@ -612,9 +693,23 @@ def normalise_state(state: Dict[str, Any]) -> Dict[str, Any]:
     already inconsistent) and from the ONE refresh path (so no control can leave
     it inconsistent). The predicate is the SERVICE's own
     `findings_novelty_offered`, never a comparison restated here.
+
+    A SECOND SUCH PAIR ships with the divergence axis (owner, 2026-08-05), and
+    it is the same failure in a new place. The candidacy switch and the
+    divergence control select on ONE column, and `fills_gap` and the two
+    divergence shades are mutually exclusive values of it -- so with candidacy
+    on, "included" adds rows the candidacy predicate has already excluded and
+    "only" intersects two disjoint sets and returns nothing. Either way the
+    control looks live and does nothing. The candidacy axis WINS (it is the
+    ratified headline axis), the divergence selection is dropped rather than
+    kept and silently ignored, and `_render_divergence_control` says why in
+    words on the control that changed. The predicate is again the SERVICE's own
+    -- `findings_divergence_offered`, derived from the hidden-by-default shades.
     """
     if not findings_novelty_offered(state.get("unit")):
         state["novelty_only"] = False
+    if not findings_divergence_offered(_novelty_selection(state)):
+        state["divergence"] = DIVERGENCE_HIDDEN
     return state
 
 
@@ -624,7 +719,7 @@ def write_state(state: Dict[str, Any]) -> None:
     safe_user_set(_KEY_BUCKET, state["bucket"])
     safe_user_set(_KEY_SORT, state["sort"])
     safe_user_set(_KEY_NOVELTY, bool(state["novelty_only"]))
-    safe_user_set(_KEY_DIVERGENCE, bool(state["divergence"]))
+    safe_user_set(_KEY_DIVERGENCE, state["divergence"])
     safe_user_set(_KEY_DOMAIN, state["domain"])
     safe_user_set(_KEY_AUTHOR, state["author"])
     safe_user_set(_KEY_WORK, state["work_id"])
@@ -658,7 +753,7 @@ async def fetch_findings(state: Dict[str, Any]) -> Dict[str, Any]:
         state["unit"],
         bucket=state["bucket"],
         novelty=_novelty_selection(state),
-        include_divergent=bool(state.get("divergence")),
+        divergence=state["divergence"],
         domain=state.get("domain"),
         author=state.get("author"),
         work_id=state.get("work_id"),
@@ -706,7 +801,7 @@ def _facet_request(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "bucket": state["bucket"],
         "novelty": _novelty_selection(state),
-        "include_divergent": bool(state.get("divergence")),
+        "divergence": state["divergence"],
         # THE ROW UNIT (§3.6). The cascade's counts are counts of ROWS, and the
         # unit decides what a row is -- so a cascade that did not carry it put a
         # number beside an option describing a population the result bar beside
@@ -1225,11 +1320,10 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
 
 def _render_filter_bar(state: Dict[str, Any], lang: str, refresh) -> List[Any]:
     """Build the sidebar cards; return the state-dependent re-sync callables."""
-    syncs = [_render_novelty_switch(state, lang, refresh)]
+    syncs = list(_render_novelty_switch(state, lang, refresh))
     # The bucket control is state-dependent too, and was not collected -- see
     # `_render_bucket_control`'s "IT WENT STALE".
     syncs.append(_render_bucket_control(state, lang, refresh))
-    syncs.append(_render_divergence_switch(state, lang, refresh))
     _render_facet_groups(lang)
     _render_coverage_filter(lang)
     return syncs
@@ -1286,7 +1380,8 @@ def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh):
     bar is built once while the unit can change at any time.
     """
     words = novelty_strings(lang)
-    with _filter_card("novgrp", f"{FILTER_BAR_CLASS}-novelty") as card:
+    with _filter_card("novgrp", f"{FILTER_BAR_CLASS}-novelty",
+                      f"{FILTER_BAR_CLASS}-divergence") as card:
 
         async def _toggle(_event=None) -> None:
             # A disabled button is not clickable, and a stale client cannot make
@@ -1303,6 +1398,12 @@ def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh):
         note = ui.label(copy_text("novelty_unit_note", lang)).classes(
             f"needs {FILTER_BAR_CLASS}-novelty-note"
         )
+        # ONE CARD, TWO CONTROLS (owner, 2026-08-05). Both select on the SAME
+        # column, `novelty_status`, so two separate cards read as independent
+        # filters and are not -- turning one on can make the other inert (see
+        # `normalise_state`). Rendered here rather than in its own
+        # `_filter_card`, so the merge is structural rather than visual.
+        divergence_sync = _render_divergence_control(state, lang, refresh)
 
     def _sync() -> None:
         offered = findings_novelty_offered(state.get("unit"))
@@ -1314,13 +1415,20 @@ def _render_novelty_switch(state: Dict[str, Any], lang: str, refresh):
         else:
             switch.disable()
         note.set_visibility(not offered)
-        if offered:
-            card.classes(remove="blocked")
-        else:
-            card.classes(add="blocked")
+        # THE CARD IS SHARED NOW, so it never takes `.fg.blocked`. That class
+        # dims the WHOLE card, and the two controls are never unavailable
+        # together: the candidacy axis is withdrawn only on the per-work unit,
+        # and `normalise_state` clears the candidacy selection there -- which is
+        # exactly what makes the divergence axis available again. Dimming the
+        # card would therefore always be dimming a control that still works, and
+        # a `both_blocked` branch would be a state nothing can reach.
+        #
+        # The unavailable CONTROL is still disabled and still says why; that is
+        # where the treatment belongs now that the card is not its own.
+        card.classes(remove="blocked")
 
     _sync()
-    return _sync
+    return _sync, divergence_sync
 
 
 #: The two halves of the pool segment. `.fchip` has NO base rule in the shared
@@ -1445,64 +1553,114 @@ def _render_bucket_control(state: Dict[str, Any], lang: str, refresh):
     return _sync
 
 
-def _render_divergence_switch(state: Dict[str, Any], lang: str, refresh):
-    """RULING F'S AXIS -- the third one, and the only one that is off by
-    default because of what the rows ARE rather than what a reader picked.
+def _render_divergence_control(state: Dict[str, Any], lang: str, refresh):
+    """RULING F'S AXIS, as a THREE-STATE FILTER (owner, 2026-08-05).
 
     12,664 of 53,581 identifications (23.6%) contradict a catalogue
-    identification. Until this card existed they rendered exactly like the ones
-    that confirm it: no toggle, no label, no warning. The policy had been in the
-    code since plan 136-04 as `HIDDEN_BY_DEFAULT_SHADES` and
-    `is_hidden_by_default`, and nothing outside `tests/` had ever called either.
+    identification. The policy had been in the code since plan 136-04 as
+    `HIDDEN_BY_DEFAULT_SHADES` and `is_hidden_by_default`, and nothing outside
+    `tests/` had ever called either.
 
-    A CARD IN THE SIDEBAR, in the pool card's own shape -- header, control,
-    prose -- rather than a footnote or a disclosure. The owner's framing is that
-    this pool contains many false identifications AND real findings, so the
-    toggle is not only a safety measure: it is the ACCESS PATH to the 3,229
-    main-pool divergent rows, which is where a scholar would go looking. It is
-    designed as a place worth visiting.
+    WHY IT IS NOT A TOGGLE. It shipped as one, carrying the panel's ratified
+    `TOGGLE_DIVERGENCE` wording -- "Show findings that disagree with the
+    catalogue" -- and the owner read it as broken: "clicking on it today does
+    not seem to make real difference", then, precisely, "so why 'show that
+    disagree' shows also those who do not disagree?". He is right. On this page
+    the ON state was purely ADDITIVE: it widened the main pool from 24,480 rows
+    to 27,709 and kept every non-divergent one, so a list sorted by pages
+    matched was byte-identical at the top and the disagreements were 12% of
+    what the reader got. The string was ratified for the PANEL, where it labels
+    D-13e's fourth disclosure -- a section that opens onto divergent rows ONLY
+    -- and there it is exactly accurate. Reusing it here put an accurate label
+    on a different mechanic, which made it untrue. The panel keeps the string;
+    this page names its states.
 
-    WHAT THE COPY MAY NOT DO (ruling F, and each has a test): it must state THAT
-    the catalogue and the computed identification disagree, say explicitly that
-    neither side has been adjudicated, and never assert which side is right.
-    `divergence_correctness` is HUMAN-ONLY (ruling L) and is NULL on every
-    shipped row, so there is no adjudication anywhere to imply. The toggle's
-    label is the RATIFIED `TOGGLE_DIVERGENCE` wording and the prose is the
-    ratified `divergence_warning`; neither is composed here.
+    THE THREE STATES, each labelled with what it DOES:
 
-    Returns a re-sync callable for the same reason the two cards above it do:
-    the bar is built once, and a control that announces a state it no longer has
-    is the defect two external reviewers found on the bucket chip.
+    * `HIDDEN` (default, ruling F) -- the disagreements are filtered OUT. The
+      exclusion is now stated on the control instead of being silent.
+    * `SHOWN` -- no filter on this axis: the complete pool. It is kept rather
+      than dropped because ruling F's own posture is that the SYSTEM never
+      adjudicates and the READER decides, and a reader who cannot obtain the
+      complete pool has had the exclusion ENFORCED rather than offered. Its
+      label says "included", so the addition is explicit and it can no longer
+      be read as a selection.
+    * `ONLY` -- the access path the owner asked for, and the answer to "we may
+      find there gold": the 3,229 main-pool divergent rows, alone.
+
+    The shape is this project's own three-state PGP filter (Phase 93, mirroring
+    `printed_filter`), not a new idiom.
+
+    A BADGE, not a link. The control is an `.fchip` carrying the same inline
+    `.chip.here` values the pool segment uses, so a selected state is visible
+    rather than announced only through `aria-pressed`, and the label is short
+    enough not to wrap into something that reads as a hyperlink. No CSS is
+    added.
+
+    WHAT THE COPY MAY NOT DO (ruling F, and each has a test): it must state
+    THAT the catalogue and the computed identification disagree, say explicitly
+    that neither side has been adjudicated, and never assert which side is
+    right. `divergence_correctness` is HUMAN-ONLY (ruling L) and NULL on every
+    shipped row, so there is no adjudication anywhere to imply. The ratified
+    `divergence_warning` is still rendered verbatim as card prose.
+
+    G4 -- IT IS NOT ALWAYS ACTIONABLE, and it says so. With the candidacy
+    filter on, this axis is inert: both controls select on one column, and
+    `fills_gap` and the two divergence shades are mutually exclusive values of
+    it. That is the novelty/per-work-unit failure in a new place, and it takes
+    the same treatment -- dimmed, disabled, the stored selection dropped by
+    `normalise_state`, and the reason given in words.
+
+    Returns a re-sync callable for the same reason the cards above it do: the
+    bar is built once, and a control that announces a state it no longer has is
+    the defect two external reviewers found on the bucket chip.
     """
-    with _filter_card(f"{FILTER_BAR_CLASS}-divergence"):
-        _card_header(copy_text("divergence_card_header", lang))
+    async def _cycle(_event=None) -> None:
+        # A disabled button is not clickable, and a stale client cannot make it
+        # one: the state it would produce is refused here as well.
+        if not findings_divergence_offered(_novelty_selection(state)):
+            return
+        current = state.get("divergence")
+        index = (DIVERGENCE_MODES.index(current)
+                 if current in DIVERGENCE_MODES else 0)
+        state["divergence"] = DIVERGENCE_MODES[(index + 1) % len(DIVERGENCE_MODES)]
+        state["page"] = 1
+        await refresh()
 
-        async def _toggle(_event=None) -> None:
-            state["divergence"] = not state.get("divergence")
-            state["page"] = 1
-            await refresh()
-
-        switch = ui.button(
-            disclosure_toggle(TOGGLE_DIVERGENCE, lang), on_click=_toggle
-        ).props("flat dense no-caps")
-        switch.classes("fchip")
-        # THE WARNING IS CARD PROSE, not a tooltip. Ruling F's toggle is an
-        # "explicitly warned" one, and a warning a reader has to hover to find
-        # is not one they were given before they chose.
-        ui.label(divergence_warning(lang)).classes(
-            f"{FILTER_BAR_CLASS}-divergence-warning dnote text-xs")
+    chip = ui.button(on_click=_cycle).props("flat dense no-caps")
+    chip.classes(f"fchip {FILTER_BAR_CLASS}-divergence-chip")
+    note = ui.label().classes(f"needs {FILTER_BAR_CLASS}-divergence-note")
+    # THE WARNING IS CARD PROSE, not a tooltip. Ruling F's toggle is an
+    # "explicitly warned" one, and a warning a reader has to hover to find is
+    # not one they were given before they chose.
+    ui.label(divergence_warning(lang)).classes(
+        f"{FILTER_BAR_CLASS}-divergence-warning dnote text-xs")
 
     def _sync() -> None:
-        on = bool(state.get("divergence"))
-        switch.classes(add="fchip here" if on else "fchip",
-                       remove="" if on else "here")
-        switch.props(f'aria-pressed={"true" if on else "false"}')
+        offered = findings_divergence_offered(_novelty_selection(state))
+        if not offered:
+            state["divergence"] = DIVERGENCE_HIDDEN
+        mode = state.get("divergence")
+        if mode not in _DIVERGENCE_STATE_KEY:  # pragma: no cover -- normalised
+            mode = DIVERGENCE_HIDDEN
+        chip.set_text(copy_text(_DIVERGENCE_STATE_KEY[mode], lang))
+        selected = mode != DIVERGENCE_HIDDEN
+        chip.classes(add="fchip here" if selected else "fchip",
+                     remove="" if selected else "here")
+        chip.props(f'aria-pressed={"true" if selected else "false"}')
         # `.fchip.here` has no rule in the shared CSS block -- only `.chip.here`
         # does, on a different element -- so without this the state would be
         # announced to a screen reader and to nobody else. The same two ratified
         # `.chip.here` values the bucket segment uses, applied inline (this work
         # adds no stylesheet rule) and side-neutral in both directions.
-        switch.style(replace=_SEGMENT_ON if on else _SEGMENT_OFF)
+        chip.style(replace=_SEGMENT_ON if selected else _SEGMENT_OFF)
+        if offered:
+            chip.enable()
+        else:
+            chip.disable()
+        note.set_text(copy_text("divergence_candidacy_note", lang).format(
+            candidates=novelty_strings(lang)["toggle"]))
+        note.set_visibility(not offered)
 
     _sync()
     return _sync
@@ -2068,21 +2226,22 @@ def _render_divergence_basis(meta: Dict[str, Any], lang: str) -> None:
     default view of that pool is smaller for exactly this reason. One statement,
     rendered in both bucket states, covers both figures.
 
-    READ FROM THE ENVELOPE, never from `state`. `meta['include_divergent']` is
-    the SERVICE's own report of the query it actually ran; the page's state is
-    only what the page intended. If those two ever disagree -- a control that
-    failed to persist, a request that lost an argument in a wrapper -- this line
-    follows the ROWS, which is the half a reader is counting.
+    READ FROM THE ENVELOPE, never from `state`. `meta['divergence']` is the
+    SERVICE's own report of the query it actually ran; the page's state is only
+    what the page intended. If those two ever disagree -- a control that failed
+    to persist, a request that lost an argument in a wrapper -- this line follows
+    the ROWS, which is the half a reader is counting.
 
-    A `meta` with no such key states NOTHING. An envelope that does not say what
-    it did is not evidence of either answer, and asserting the default here
-    would be this module claiming to know something it was not told. The shipped
-    reader always supplies it, and a test pins that.
+    A `meta` with no such key, or one outside the closed vocabulary, states
+    NOTHING. An envelope that does not say what it did is not evidence of any
+    answer, and asserting a default here would be this module claiming to know
+    something it was not told. The shipped reader always supplies it, and a test
+    pins that.
     """
-    if "include_divergent" not in meta:
+    mode = meta.get("divergence")
+    if mode not in _DIVERGENCE_BASIS_KEY:
         return
-    key = "divergence_included" if meta.get("include_divergent") else "divergence_excluded"
-    ui.label(copy_text(key, lang)).classes(
+    ui.label(copy_text(_DIVERGENCE_BASIS_KEY[mode], lang)).classes(
         f"{RESULT_BAR_CLASS}-divergence dnote text-xs")
 
 
@@ -2156,8 +2315,14 @@ def _render_result_bar(
 _CHIP_AXES: Tuple[str, ...] = (
     "novelty_only", "divergence", "domain", "author", "work_id")
 
-#: The chip axes whose neutral value is `False` rather than `None`.
-_BOOLEAN_CHIP_AXES: Tuple[str, ...] = ("novelty_only", "divergence")
+#: Chip axis -> the value clearing it returns to, for the axes whose neutral
+#: value is not `None`. `divergence` clears to ruling F's default MODE, not to
+#: `False`: a boolean there would be a truthy-or-falsey value in a closed
+#: string vocabulary, and `_build_findings_filter` refuses anything outside it.
+_CHIP_AXIS_NEUTRAL: Dict[str, Any] = {
+    "novelty_only": False,
+    "divergence": DIVERGENCE_HIDDEN,
+}
 
 
 def _clear_filter_axis(state: Dict[str, Any], axis: Optional[str]) -> None:
@@ -2175,7 +2340,7 @@ def _clear_filter_axis(state: Dict[str, Any], axis: Optional[str]) -> None:
     for key in _CHIP_AXES:
         if axis is not None and key != axis:
             continue
-        state[key] = False if key in _BOOLEAN_CHIP_AXES else None
+        state[key] = _CHIP_AXIS_NEUTRAL.get(key)
         if key == "work_id":
             state["work_label"] = None
     state["page"] = 1
@@ -2198,14 +2363,17 @@ def _active_filter_chips(state: Dict[str, Any], lang: str) -> List[Tuple[str, st
     chips: List[Tuple[str, str]] = []
     if state.get("novelty_only") and findings_novelty_offered(state.get("unit")):
         chips.append(("novelty_only", novelty_strings(lang)["toggle"]))
-    if state.get("divergence"):
-        # The RATIFIED toggle wording, the same string the sidebar control
-        # carries. A shorter chip label would be a second name for the axis,
-        # and this is the axis where a second name is most expensive: every
-        # abbreviation of "findings that disagree with the catalogue" that fits
-        # a chip loses either the disagreement or the fact that it is the
-        # catalogue that disagrees.
-        chips.append(("divergence", disclosure_toggle(TOGGLE_DIVERGENCE, lang)))
+    divergence = state.get("divergence")
+    # COMPARED TO THE DEFAULT, never tested for truthiness: every mode is a
+    # non-empty string, so `if state.get("divergence")` put a chip on the page
+    # in the DEFAULT state -- a chip bar announcing a filter nobody applied.
+    if divergence in _DIVERGENCE_STATE_KEY and divergence != DIVERGENCE_HIDDEN:
+        # The chip carries the control's own STATE label, so the two say the
+        # same thing about the same axis. It is not the panel's ratified
+        # disclosure wording: that string promises a divergent-only section,
+        # which is what only ONE of these states does.
+        chips.append(("divergence",
+                      copy_text(_DIVERGENCE_STATE_KEY[divergence], lang)))
     for level, axis_key in (("domain", "Domain"), ("author", "Author")):
         value = state.get(level)
         if value:

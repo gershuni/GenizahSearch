@@ -731,7 +731,7 @@ _FINDINGS_OUT_OF_SCOPE: Tuple[Tuple[str, str], ...] = (
 #: combination unmeasured, while the report said "the FULL combination space"
 #: (code review round 13, finding 4).
 _FINDINGS_FILTER_AXES: Tuple[str, ...] = (
-    "novelty", "include_divergent", "domain", "author", "work")
+    "novelty", "divergence", "domain", "author", "work")
 
 
 def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
@@ -749,7 +749,11 @@ def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
     row counts (~23.6% of the grain), and a probe that measured only the
     default one would report a narrower page than the reader can reach.
     """
-    from shared.discovery_service import BUCKET_MAIN, BUCKET_MORE
+    from shared.discovery_service import (
+        BUCKET_MAIN,
+        BUCKET_MORE,
+        DIVERGENCE_ONLY,
+    )
 
     states: List[Tuple[str, str, Dict[str, Any], Tuple[str, ...]]] = []
     for stem, bucket in (("main", BUCKET_MAIN), ("more", BUCKET_MORE)):
@@ -761,8 +765,20 @@ def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
             kwargs: Dict[str, Any] = {"bucket": bucket}
             if "novelty" in on:
                 kwargs["novelty"] = [novelty_value] if novelty_value else None
-            if "include_divergent" in on:
-                kwargs["include_divergent"] = True
+            if "divergence" in on:
+                # THE `ONLY` MODE, deliberately, and not `SHOWN`.
+                #
+                # The axis has THREE modes and this mask has one slot, so the
+                # choice has to be argued rather than defaulted. `HIDDEN` (the
+                # `NOT IN` predicate) is already measured in every state where
+                # this axis is OFF. `SHOWN` adds NO predicate at all, so its
+                # cost is bounded above by `HIDDEN`'s over the identical filter
+                # set -- it cannot be the shape that misses a budget. `ONLY` is
+                # the third and last shape (`IN` rather than `NOT IN`), it
+                # selects ~6% of the grain rather than ~76%, and it is the only
+                # mode that can make a multi-axis combination genuinely empty --
+                # which is what the co-occurrence probe below exists to detect.
+                kwargs["divergence"] = DIVERGENCE_ONLY
             if "domain" in on:
                 kwargs["domain"] = pick.get("domain")
             if "author" in on:
@@ -874,13 +890,13 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
             return ("this asset carries no main-pool identifications"
                     if stem == "main" else
                     "this asset carries no second-bucket identifications")
-        # `include_divergent` is deliberately absent: it is a BOOLEAN axis, not
-        # a value the asset either offers or does not, so "this asset has no
-        # value for it" is not a question that can be asked of it. Turning it on
-        # WIDENS the predicate (it drops a `NOT IN`), so the state it produces
-        # always has at least as many rows as the same state without it --
-        # meaning it can never be the reason a combination is unissuable, and a
-        # skip attributed to it would be a skip for a reason that cannot exist.
+        # `divergence` is deliberately absent from this table: it is a MODE the
+        # caller selects, not a value the asset either offers or does not, so
+        # "this asset has no value for it" is not a question that can be asked
+        # of it. It is NOT absent from the co-occurrence probe below, which is
+        # where it matters: `ONLY` selects ~6% of the grain, so a combination
+        # that pairs it with a domain or an author really can be empty in this
+        # asset, and that is a genuine asset fact rather than a probe bug.
         keys = {"novelty": "novelty", "domain": "domain",
                 "author": "author", "work": "work_id"}
         missing = [axis for axis in on
@@ -889,7 +905,17 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
             return (f"this asset offers no value for the {', '.join(missing)} "
                     f"filter in the {stem} bucket, so that combination cannot be "
                     "issued against it")
-        if len(on) <= 1:
+        # A SINGLE VALUE AXIS never reaches the probe below: every value comes
+        # from `_coherent_bucket_pick`, drawn from THIS bucket, so an empty
+        # single-axis state means the probe picked something the asset does not
+        # have -- a PROBE BUG, and the loud F14 abort is correct for it.
+        #
+        # `divergence` is the exception, and it is one BECAUSE it is a mode
+        # rather than a picked value. `ONLY` selects the two hidden-by-default
+        # shades, and an asset may legitimately carry none of them (the
+        # synthetic fixture carries none at all). That is an ASSET FACT, so it
+        # is probed and named like one, even on its own.
+        if len(on) <= 1 and "divergence" not in on:
             return None
         # The identification grain, deliberately: the predicate is the same at
         # every unit (the units differ only in grouping, and grouping >=1 row
@@ -903,6 +929,10 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         except sqlite3.Error:                                # pragma: no cover
             found = None
         if found is None:
+            if len(on) == 1:
+                return (f"this asset carries no identification in the {stem} "
+                        f"bucket that the {on[0]} selection matches, so that "
+                        "state cannot be issued against it")
             return (f"each of {', '.join(on)} has a value in the {stem} bucket, "
                     "but this asset carries no identification where they hold "
                     "TOGETHER")

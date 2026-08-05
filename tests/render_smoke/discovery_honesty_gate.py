@@ -59,6 +59,7 @@ from shared.discovery_band_labels import MEASUREMENT_STATUSES
 from shared.discovery_main_pool import MAIN_POOL_REASONS
 from shared.discovery_novelty import NOVELTY_STATUSES
 from shared.discovery_service import (
+    DIVERGENCE_MODES,
     FACET_LEVELS,
     FINDINGS_BUCKETS,
     FINDINGS_SORTS,
@@ -769,7 +770,7 @@ META_VOCABULARY_FIELDS: Mapping[str, frozenset] = {
     "anchor_mode": frozenset({"anchored", "unanchored"}),
     "level": frozenset(FACET_LEVELS),
     "lang": frozenset({"en", "he"}),
-    "include_divergent": frozenset({True, False}),
+    "divergence": frozenset(DIVERGENCE_MODES),
 }
 
 #: KEY -> a written reason. `audience` and `sidecar_version` have NO authority to

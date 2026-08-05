@@ -2906,7 +2906,7 @@ def test_bench_findings_page_measures_the_full_combination_space(tmp_path):
     # set -- so a hardcoded total is a number to edit whenever the space grows,
     # which is indistinguishable from a number edited when it SHRINKS. Naming
     # the axes makes a removal fail and an addition pass.
-    assert set(axes) >= {"novelty", "include_divergent", "domain", "author",
+    assert set(axes) >= {"novelty", "divergence", "domain", "author",
                          "work"}, (
         f"the probe's filter-axis set shrank to {axes} -- the benchmark now "
         "measures a smaller space than the page can reach, which is round 13's "
@@ -3335,7 +3335,7 @@ def test_the_work_unit_novelty_skip_is_unreachable_THROUGH_THE_PAGE(tmp_path):
     # ...and the page cannot produce any of them.
     for unit in sorted(FINDINGS_UNITS):
         state = {"unit": unit, "bucket": "main", "sort": "band_rank",
-                 "novelty_only": True, "divergence": False, "domain": None, "author": None,
+                 "novelty_only": True, "divergence": "hidden", "domain": None, "author": None,
                  "work_id": None, "page": 1}
         fp.normalise_state(state)
         page_can_filter = fp._novelty_selection(state) is not None

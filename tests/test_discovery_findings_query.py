@@ -39,6 +39,9 @@ import pytest
 from scripts import build_discovery_sidecar as sidecar_build
 from shared.discovery_service import (
     BUCKET_ALL,
+    DIVERGENCE_HIDDEN,
+    DIVERGENCE_ONLY,
+    DIVERGENCE_SHOWN,
     BUCKET_MAIN,
     BUCKET_MORE,
     DOMAIN_UNASSIGNED,
@@ -631,7 +634,7 @@ def test_divergent_rows_are_absent_from_the_default_result_set_and_from_its_tota
     # The TOTAL, not only the page: a filter applied after the fetch would
     # leave this number describing rows the reader is not being shown.
     assert env["total"] == len(_IDENTIFICATIONS) + 1, "everything but s7/s8"
-    assert env["meta"]["include_divergent"] is False
+    assert env["meta"]["divergence"] == DIVERGENCE_HIDDEN
 
     # And on the MAIN pool specifically, which is where the divergent fixture
     # rows live -- the bucket a reader lands on.
@@ -642,10 +645,81 @@ def test_divergent_rows_are_absent_from_the_default_result_set_and_from_its_tota
 def test_the_divergence_opt_in_returns_them_and_the_envelope_says_which_it_did(
         divergence_service):
     opted_in = divergence_service.get_findings_enveloped(
-        bucket=BUCKET_ALL, include_divergent=True)
-    assert opted_in["meta"]["include_divergent"] is True
+        bucket=BUCKET_ALL, divergence=DIVERGENCE_SHOWN)
+    assert opted_in["meta"]["divergence"] == DIVERGENCE_SHOWN
     assert opted_in["total"] == len(_IDENTIFICATIONS) + len(_DIVERGENT_IDENTIFICATIONS)
     assert _HIDDEN_SYS_IDS <= {row["sys_id"] for row in opted_in["items"]}
+
+
+def test_the_ONLY_mode_selects_the_divergent_rows_rather_than_adding_them(
+        divergence_service):
+    """The state the owner asked for, and the correction to a boolean axis.
+
+    `SHOWN` is purely ADDITIVE -- it keeps every non-divergent row -- which is
+    why a control labelled as though it selected the disagreements showed a
+    mixed list and read as broken. `ONLY` is the predicate that selects them."""
+    hidden = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, divergence=DIVERGENCE_HIDDEN)
+    shown = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, divergence=DIVERGENCE_SHOWN)
+    only = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, divergence=DIVERGENCE_ONLY)
+
+    assert only["meta"]["divergence"] == DIVERGENCE_ONLY
+    assert {row["sys_id"] for row in only["items"]} == _HIDDEN_SYS_IDS, (
+        "the ONLY mode returned something other than exactly the divergent rows")
+    assert only["total"] == len(_HIDDEN_SYS_IDS)
+
+    # The three states really are three populations, and the two that are not
+    # the default partition the third.
+    assert hidden["total"] + only["total"] == shown["total"], (
+        "hidden and only do not partition the unfiltered set, so one of the "
+        "three predicates is not the complement of the other")
+    assert len({hidden["total"], shown["total"], only["total"]}) == 3
+
+
+def test_an_unknown_divergence_mode_is_refused(divergence_service):
+    """A closed vocabulary: an unknown mode is a programming error, not a
+    service state, exactly as an unknown unit or bucket is."""
+    for rejected in ("include", "", "true", True, None):
+        with pytest.raises(ValueError):
+            divergence_service.get_findings_enveloped(divergence=rejected)
+
+
+def test_the_candidacy_and_divergence_axes_are_known_to_be_disjoint():
+    """G4's authority. Both controls select on ONE column, and the predicate a
+    surface asks BEFORE it renders is derived from the hidden-by-default shades
+    rather than restated."""
+    from shared.discovery_novelty import CANDIDATE_STATUS
+    from shared.discovery_service import (
+        DIVERGENCE_SHADE_ORDER,
+        findings_divergence_offered,
+    )
+
+    assert CANDIDATE_STATUS not in DIVERGENCE_SHADE_ORDER, (
+        "the candidacy shade joined the divergence set -- the two controls are "
+        "no longer disjoint and G4's rule needs revisiting, not patching")
+    assert findings_divergence_offered(None) is True
+    assert findings_divergence_offered(()) is True
+    assert findings_divergence_offered((CANDIDATE_STATUS,)) is False
+    assert findings_divergence_offered(DIVERGENCE_SHADE_ORDER) is True
+
+
+def test_the_inert_combination_really_returns_nothing(divergence_service):
+    """The measurement behind G4: the combination a reader could hold is not
+    merely redundant, it is empty. A control that produces an empty set while
+    looking live is the defect."""
+    inert = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, novelty=["fills_gap"], divergence=DIVERGENCE_ONLY)
+    assert inert["total"] == 0
+
+    # ...and the OTHER inert direction: with candidacy on, adding the divergent
+    # rows changes nothing at all.
+    candidates_only = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, novelty=["fills_gap"], divergence=DIVERGENCE_HIDDEN)
+    candidates_shown = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, novelty=["fills_gap"], divergence=DIVERGENCE_SHOWN)
+    assert candidates_only["total"] == candidates_shown["total"] > 0
 
 
 def test_an_unchecked_row_is_not_treated_as_a_divergence(divergence_service):
@@ -686,7 +760,7 @@ def test_the_facet_counts_follow_the_divergence_opt_in(divergence_service):
         return {row["value"]: row["count"] for row in env["items"]}
 
     default = _counts()
-    opted_in = _counts(include_divergent=True)
+    opted_in = _counts(divergence=DIVERGENCE_SHOWN)
     assert opted_in[_LEAF_A1] == default[_LEAF_A1] + 1, "wA gained diverges_work"
     assert opted_in[_LEAF_B1] == default[_LEAF_B1] + 1, "wD gained diverges_part"
     assert default != opted_in
@@ -721,7 +795,7 @@ def test_the_divergence_filter_is_applied_in_sql_never_by_post_filtering():
         "the bounded-count form selects `1`, so only the WHERE binding is there")
 
     opted_in_sql, opted_in_params = _build_findings_query(
-        bucket=BUCKET_ALL, include_divergent=True)
+        bucket=BUCKET_ALL, divergence=DIVERGENCE_SHOWN)
     assert "novelty_status NOT IN" not in opted_in_sql
     assert [p for p in opted_in_params if p in DIVERGENCE_SHADE_ORDER] == shades, (
         "the opt-in drops the FILTER and keeps the per-row FLAG -- the rows are "
@@ -736,7 +810,7 @@ def test_every_row_carries_its_own_divergence_flag_on_every_unit(divergence_serv
     work row without exception -- would render as an ordinary finding."""
     by_unit = {
         unit: divergence_service.get_findings_enveloped(
-            unit=unit, bucket=BUCKET_ALL, include_divergent=True)
+            unit=unit, bucket=BUCKET_ALL, divergence=DIVERGENCE_SHOWN)
         for unit in sorted(FINDINGS_UNITS)
     }
     for unit, env in by_unit.items():
@@ -771,7 +845,7 @@ def test_the_divergence_flag_survives_the_other_filters(divergence_service):
     WHERE clause, so this is what a mis-ordered positional parameter list would
     break: same rows, wrong flags."""
     env = divergence_service.get_findings_enveloped(
-        bucket=BUCKET_ALL, domain=_PARENT_A, include_divergent=True)
+        bucket=BUCKET_ALL, domain=_PARENT_A, divergence=DIVERGENCE_SHOWN)
     flags = {(row["sys_id"], row["display_work_id"]): row["divergent"]
              for row in env["items"]}
     assert set(flags) == {
@@ -834,16 +908,16 @@ def test_the_web_wrappers_thread_the_divergence_opt_in_through(monkeypatch):
     monkeypatch.setattr(wd, "discovery_available", lambda: True)
     monkeypatch.setattr(wd, "_service", _Spy())
 
-    asyncio.run(wd.get_findings_enveloped(include_divergent=True))
-    assert seen["findings"]["include_divergent"] is True
-    asyncio.run(wd.get_findings_facets_enveloped("domain", include_divergent=True))
-    assert seen["facets"]["include_divergent"] is True
+    asyncio.run(wd.get_findings_enveloped(divergence=DIVERGENCE_SHOWN))
+    assert seen["findings"]["divergence"] == DIVERGENCE_SHOWN
+    asyncio.run(wd.get_findings_facets_enveloped("domain", divergence=DIVERGENCE_SHOWN))
+    assert seen["facets"]["divergence"] == DIVERGENCE_SHOWN
 
     asyncio.run(wd.get_findings_enveloped())
-    assert seen["findings"]["include_divergent"] is False, (
+    assert seen["findings"]["divergence"] == DIVERGENCE_HIDDEN, (
         "the default must be ruling F's posture, not its opposite")
     asyncio.run(wd.get_findings_facets_enveloped("domain"))
-    assert seen["facets"]["include_divergent"] is False
+    assert seen["facets"]["divergence"] == DIVERGENCE_HIDDEN
 
 
 # ---------------------------------------------------------------------------
