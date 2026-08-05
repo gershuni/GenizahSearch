@@ -1360,10 +1360,19 @@ def test_the_mobile_rule_is_scoped_to_findings_row_anatomy():
     # documents for its own source scans. Prose about a defect is not the defect.
     css = _re.sub(r"/\*.*?\*/", "", raw, flags=_re.S)
 
-    # The generic descendant form, composed so this assertion does not contain
-    # the literal it forbids.
-    generic = ".gs-discovery " + ".row"
-    assert generic not in css, (
+    # The generic descendant form, matched as a WHOLE CLASS NAME rather than as
+    # a prefix. A plain substring test would also fire on the correctly-scoped
+    # `.gs-discovery .gs-findings-row-meta`, which merely happens to start
+    # differently today -- and every rule in this block must be page-scoped
+    # (`tests/test_discovery_display_strings.py`), so the scoped forms and the
+    # forbidden form share a prefix by DESIGN, not by accident. The trailing
+    # boundary is what distinguishes them.
+    #
+    # The pattern is composed so this assertion does not contain the literal it
+    # forbids.
+    generic = _re.compile(
+        _re.escape(".gs-discovery " + ".row") + r"(?![\w-])")
+    assert not generic.search(css), (
         "the unscoped mobile row rule is back: it matches every NiceGUI row "
         "element on the page rather than the result rows, and stacks the filter "
         "controls on every phone")

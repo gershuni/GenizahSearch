@@ -1860,16 +1860,25 @@ body {
    What a narrow screen actually needs is for the row's META LINE -- relation
    chip, page count, coverage, pool name, actions -- to wrap instead of
    overflowing, which `flex-wrap` does without destroying any horizontal group.
-   `gap` is set in logical terms so it needs no RTL mirror. */
+   `gap` is set in logical terms so it needs no RTL mirror.
+
+   EVERY SELECTOR STAYS UNDER `.gs-discovery`, even though the `gs-findings-*`
+   class names are already unique enough not to collide. That is a standing rule
+   for this whole block (`tests/test_discovery_display_strings.py::
+   test_discovery_css_block_is_scoped_and_carries_the_required_treatments`), and
+   the reason is that this file is a GLOBAL stylesheet loaded beside Quasar: the
+   guard cannot tell a specific-looking name from a generic one, so it requires
+   the page scope on all of them rather than adjudicating per selector. Ignoring
+   it here would also mean the rule applied on a page that never opted in. */
 @media (max-width: 700px) {
-    .gs-findings-row-meta {
+    .gs-discovery .gs-findings-row-meta {
         flex-wrap: wrap;
         row-gap: 4px;
     }
     /* The two grouped-row affordances get a full-width target, which is the
        phone-sized fix the owner asked for on the preview. */
-    .gs-findings-row-expander,
-    .gs-findings-row-preview-toggle {
+    .gs-discovery .gs-findings-row-expander,
+    .gs-discovery .gs-findings-row-preview-toggle {
         width: 100%;
         justify-content: flex-start;
     }

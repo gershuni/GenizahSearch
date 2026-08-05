@@ -205,7 +205,27 @@ def _render_expansion(row: Mapping[str, Any], lang: str) -> None:
                 lang=lang,
             )
         except Exception as e:  # never let an expansion take the panel down
+            # NAMED, not blank. The body has already been CLEARED and the
+            # disclosure is OPEN, so returning here leaves the reader looking at
+            # an empty expansion -- which reads as "no other manuscript carries
+            # this work". That is a research claim, and an outage is not
+            # entitled to make it; it is the same false-zero the enveloped path
+            # below already refuses.
+            #
+            # Routed through the SAME `_render_expansion_envelope` the enveloped
+            # failures use, by synthesising the envelope shape it expects, so
+            # the two failure routes render one treatment with one retry rather
+            # than two that can drift. The exception TYPE is logged and its
+            # value never is (an artifact-derived id on an error path is the
+            # D-25 egress class).
             logger.error('discovery expansion failed: %s', type(e).__name__)
+            state['loaded'] = False
+            with body:
+                _render_expansion_envelope(
+                    {'status': 'unavailable', 'items': [], 'total': 0,
+                     'meta': {'reason': 'query_failed'}},
+                    lang, state, _load_page,
+                    page_size=int(descriptor.get('page_size') or 0))
             return
         state['loaded'] = True
         with body:
