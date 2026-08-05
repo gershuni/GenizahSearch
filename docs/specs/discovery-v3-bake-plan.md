@@ -21,6 +21,8 @@ paid** by the input artifact.
 | **One debt already paid** | `w_start`/`w_end` — the item Phase 136.1 actually waits on — is **already persisted, 100% populated, on all 502,498 gen-2 evidence rows** as `ref_start`/`ref_end`. The expensive half of that debt does not need doing. |
 | **Not as cheap as briefed** | The verdict cache is keyed on grain alone (`sys_id::work_key`) with a whole-file hash pin. It has **no mechanism to notice that a question changed**, so reusing it across a membership change is a correctness hazard, not a saving. Recommend computing fresh. |
 | **No second heavy run** | The MAPV2-8/-9 debts that "MUST ride any gen-2 heavy re-run" were scoped (§3.5): MAPV2-9's mechanism does not exist in the gen-2 lineage, and MAPV2-8 is a 301-claim ingest-time exclusion. **Neither forces a fresh Track-1 run** — this keeps the bake at roughly a week. |
+| **No corpus expansion** | gen-2's 4,160 works are a strict **subset** of the v2-era matcher's 4,509, and all 2,738 works missing a `w######` id were already in it. The reference corpus did not grow, so **CERT-01 needs no re-registration on that ground** (§3.1). |
+| **Owner decisions in** | **Mint the 2,738; M-source stays private** (2026-08-05). Measured: zero M-source works are public today, so the mint cannot block the public release; and 2,733 of 2,738 already carry a genre, so that debt is a 34-row vocabulary mapping, not 2,738 curations. |
 
 Everything below is measured against the real artifacts on this machine, with the measurement named. Where
 I could not measure, I say so rather than estimating quietly.
@@ -227,36 +229,66 @@ is an owner decision because they differ in kind, not degree:
    *work titles already ship and already render* (the masked thing is the corpus codename and excerpt-level
    reference text, not the works' existence — v2 bake plan, §"M-source: store, do not display the locus"). So
    these are displayable findings, not internal-only rows.
-4. **Mint, with `Unassigned` genre for the new works only** — **RECOMMENDED**, and not previously on the table
-   at this scale. The owner's 2026-08-04 ruling chose curation over `Unassigned` for **58** works, a tractable
-   number; at **2,738** masked-title works the calculus is different, and `Unassigned` is what the frozen
-   contract actually sanctions (*"an explicit `Unassigned` bucket, never NULL-as-absent"*). It keeps all 63,371
-   evidence rows, satisfies the release gate, and defers curation without lying — we genuinely have not
-   classified them. **Caveat the owner must weigh:** `Unassigned` carries display semantics (it was declined
-   for `זיכרונות מימי נעוריי` precisely because it would hide the row), so this trades *visibility* of a
-   long-tail M-source work for *inclusion* of its evidence. Curate later, in batches, against real usage.
+### ✅ OWNER DECISION 2026-08-05: **mint them, and M-source stays private for now**
 
-#### What the failed map-up test actually revealed — this is a corpus-expansion question, not a grain question
+Option 1. Both halves measured before proceeding, and both make this much cheaper than the plan feared:
 
-Because no parent exists, the 2,738 are **works the v2 works table does not contain at all**. So v3 is not
-only recomputing v2's membership; **it is matching against a materially wider M-source reference corpus** —
-roughly 1,003 mapped M-source works against 2,738 unmapped ones.
+**(i) The mint cannot affect the public release gate.** Measured on the currently-serving public artifact: its
+`works` table is **507 Sefaria + 106 JA = 613, and ZERO M-source**. M-source is entirely withheld by the
+visibility axes, which is the "stays private" posture already implemented. So 2,738 new M-source works land in
+the **private** artifact only; the public genre gate still sees exactly the 58 already curated
+(56 Sefaria + 2 JA). **Public release is not blocked by this decision at all.**
 
-**This contradicts the handoff's own scope claim.** HANDOFF-TO-135 §1 says gen-2 is *"Same launch3 scope
-(Sefaria + JA + M-source + REF2 — the corpus v2 already covers)"*. The id ranges say otherwise. Two readings,
-and they have different consequences:
+**(ii) The genre debt is ~99.8% already answered, not 47× the work.** `track1_matches` carries `title`,
+`author` and `genre` columns per work, and for the 2,738:
 
-- **(a) Bookkeeping.** The crosswalk only ever mapped M-source works that produced *surviving* v2 claims, so
-  these were in the corpus but never reached the works table. Then minting is just catching up.
-- **(b) Real expansion.** The gen-2 run matched against more M-source material than v2 did. Then v3's
-  population is not comparable to v2's, and **CERT-01's pre-registration is measured on a different corpus** —
-  which is precisely the "population change → re-registration" cascade the coordination doc warned about.
+| | coverage |
+|---|---|
+| title | **2,738 / 2,738 (100%)** |
+| author | 2,735 (99.9%) |
+| **genre** | **2,733 (99.8%)** |
 
-**Evidence leans (b), weakly.** If (a) held, the unresolved works should be concentrated in thin/review-only
-claims; measured, they carry shipped claims at a similar rate to resolved works (23,895 unresolved pairs against
-86,073 resolved at the shipped scope, 21.7% — versus 20.1% across all evidence). Not decisive, and it should be
-settled against the gen-2 reference-build inputs rather than inferred from ratios. **Until it is settled, do not
-treat v3 as a like-for-like replacement of v2's population.**
+Only **5 works** lack a genre. And the source vocabulary is **34 distinct values**, so the task is a one-time
+**34-row mapping** from source-genre → the curated `Parent / Leaf` taxonomy, not 2,738 individual curations.
+`Unassigned` is then needed for **5 works**, comfortably inside what the frozen contract sanctions.
+
+**Retired by this measurement:** my recommendation to mint with blanket `Unassigned`, and the warning that this
+was "~47× the 58 just curated". Both were written before checking whether the source metadata carried genres.
+It does.
+
+**Still true and worth stating:** these are masked-corpus catalogue strings. The 34-value mapping and any
+worklist stay on this machine — never committed, never pasted into a shared channel — and the genre *values*
+must not be quoted in tracked files.
+
+#### RESOLVED 2026-08-05 — there is NO corpus expansion. It was bookkeeping.
+
+I raised this as possibly outranking the mint/drop decision: if v3 matched a *wider* M-source corpus than v2,
+CERT-01 would be pre-registered on a different population. **Checked directly against the two match tables in
+`fullcorpus_gen2.db`, and the answer is clean:**
+
+| | distinct `work_id` |
+|---|---|
+| v2-era matcher (`track1_matches`) | **4,509** |
+| gen-2 (`track1_matches_pilot_glaunch3_live`) | **4,160** |
+| in gen-2 but **not** in the v2-era table | **0** |
+| in the v2-era table but not in gen-2 | 349 |
+
+**gen-2's work set is a strict SUBSET of v2's.** And of the 2,738 works with no crosswalk entry, **2,738
+(100%) were already in the v2-era match table** — zero are new. So v3 matches a slightly *narrower* reference
+corpus, not a wider one. **HANDOFF-TO-135's "same launch3 scope" claim is correct**; my inference from the
+disjoint id ranges was wrong.
+
+The real explanation is reading **(a), bookkeeping**: the crosswalk and the works table only ever received
+`w######` ids for works whose claims *survived* into v2's published set. The other 2,738 were in the reference
+corpus all along and simply never earned an id. **Minting them is catch-up, not expansion.**
+
+**Consequence for CERT-01:** the corpus-expansion ground for re-registration is **withdrawn**. The population
+still shifts because the engine and routing changed — an already-anticipated cascade — but not because the
+corpus grew. §3.7's recommendation to defer stands, and is now better supported.
+
+*(My earlier "evidence leans (b), weakly" read — unresolved works carrying shipped claims at 21.7% vs 20.1%
+— was a red herring. It measures how often those works match, not whether they were in scope. The ratio was
+never able to answer the question, which is why it needed the match tables.)*
 
 Gate accordingly (§6, gate 2): the build must **HALT** on an unresolved id rather than skip it.
 
@@ -396,13 +428,14 @@ use.** Do not regenerate; feed it through the 136-09 curated-artifact path (`app
   blank template (123 rows, empty `genre_to_assign`). 58 public + 123 restricted = the 181 private. So the
   **public** release gate can pass while the **private** artifact still fails. Both need an answer.
 - **`apply_work_genres` writes only works matched in the curated artifact** — that omission is the root cause
-  of this bug. **CONFIRMED AND SIZED 2026-08-05:** §3.1 measured 2,738 gen-2 works with no `w######` id at all.
-  If they are minted rather than dropped, **every one arrives with a NULL genre**, and the verifier fails on
-  each — so this debt is not merely "bigger at v3", it is **up to 2,738 works against the 58 just curated,
-  ~47× the work**, and 2,733 of them are M-source (masked titles, so the worklist can never leave the
-  machine). **This is the strongest argument for §3.1 option 2 (map up) over option 1 (mint)**, and the two
-  decisions must be taken together rather than separately. Verify coverage against every claim-bearing work in
-  the v3 asset rather than assuming it. This is the one item where v3 makes an existing problem worse.
+  of this bug, and it still has to be closed for the newly minted works. **But the scare in the first draft is
+  retired (2026-08-05):** I wrote that minting the 2,738 would arrive with 2,738 NULL genres, "~47× the work",
+  and called it the strongest argument against minting. Measured, **2,733 of the 2,738 already carry a genre**
+  in `track1_matches`, from a **34-value** source vocabulary — so the job is one 34-row mapping into the curated
+  taxonomy plus **5** works needing `Unassigned` (§3.1). It is hours, not weeks. Two things nonetheless hold:
+  **verify coverage against every claim-bearing work in the v3 asset rather than assuming it** (that assumption
+  is what caused this bug), and remember the newly minted works are **private-only**, so they gate the private
+  verifier and never the public release.
 
 ### 3.7 `band_precision` (debt 7) — defer, and say why
 
@@ -543,26 +576,24 @@ how it gets broken again.
 
 ## 8. Owner questions
 
-Two questions I had listed here on the first pass are **withdrawn — they were measurable, and I measured them
-instead of asking**: the MAPV2-8 severity cut (§3.5 — the 152 is not reproducible from the persisted file; use
-the 595) and the novelty population (§4 — P is 51,476 / 86,073 / 153,606 by scope, not a build output).
+**Nothing is blocking any more. Four questions were closed by measurement rather than by asking**, which is the
+posture this file should have started in:
 
-**Blocking — one real decision, and it is the shape of v3**
+- **§3.5** the MAPV2-8 severity cut — the 152 is not reproducible from the persisted file; use the 595.
+- **§4** the novelty population — P is measured, not a build output.
+- **§3.1** mint vs drop — **owner decided 2026-08-05: mint, M-source stays private.** Measured consequences:
+  the public release gate is untouched (zero M-source works are public) and the genre debt is 99.8% already
+  answered from source metadata.
+- **§3.1** the corpus-expansion worry — **withdrawn.** gen-2's work set is a strict subset of v2's; all 2,738
+  were already in the v2-era matcher. No CERT-01 re-registration on that ground.
 
-1. **§3.1 + §3.6 together: what happens to the 2,738 unmapped M-source works** carrying 12.6% of the evidence?
-   The middle option is gone — map-up was tested and finds a parent for **0 of 2,738**, because these are works
-   the v2 table does not contain rather than finer grain on known ones. So: **mint** (works table 1,269 →
-   ~4,000, and up to 2,738 new NULL genres — ~47× the 58 just curated, all masked titles) or **drop** (lose
-   63,371 evidence rows). §3.1 and §3.6 are one question; answering the first alone silently commits the second.
+**The one item still owed by someone other than me**
 
-   **Sub-question that may outrank it:** the failed map-up implies v3 matches a **wider** M-source corpus than
-   v2, contradicting the handoff's "same scope" claim. If that holds, **CERT-01 is pre-registered on a different
-   population** and re-registration is in scope after all (§3.7 assumes it is not). This should be settled
-   against the gen-2 reference-build inputs before the bake, not after.
-
-2. **§1.3 authorization discrepancy.** Was the 2026-08-03 novelty production run authorized at
+1. **§1.3 authorization discrepancy.** Was the 2026-08-03 novelty production run authorized at
    `batch_size=10`? Its output is what the serving asset pins, and the record says the run was unauthorized.
-   Then authorize v3's fresh run — now **≈$68** at the shipped scope, ceiling $150.
+   Then authorize v3's fresh run — **≈$68** at the shipped scope, ceiling $150. *(This is a records question,
+   not a technical blocker: the bake can be built and every non-novelty gate run without it, and unverified
+   rows land honestly as `not_checked`.)*
 
 **Non-blocking — needed before the corresponding step**
 
