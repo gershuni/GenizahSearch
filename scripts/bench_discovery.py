@@ -730,16 +730,24 @@ _FINDINGS_OUT_OF_SCOPE: Tuple[Tuple[str, str], ...] = (
 #: `author`, `work`, every AND-composition and every filtered SECOND-BUCKET
 #: combination unmeasured, while the report said "the FULL combination space"
 #: (code review round 13, finding 4).
-_FINDINGS_FILTER_AXES: Tuple[str, ...] = ("novelty", "domain", "author", "work")
+_FINDINGS_FILTER_AXES: Tuple[str, ...] = (
+    "novelty", "include_divergent", "domain", "author", "work")
 
 
 def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
                             ) -> List[Tuple[str, str, Dict[str, Any], Tuple[str, ...]]]:
     """`(bucket stem, label, builder kwargs, axes on)` for the WHOLE space.
 
-    Both buckets x every subset of the four optional axes = 2 x 2**4 = 32
-    states. Nothing is chosen here; the cartesian product is generated, and
-    whether a given state has rows in THIS asset is settled afterwards.
+    Both buckets x every subset of the optional axes. Nothing is chosen here;
+    the cartesian product is generated, and whether a given state has rows in
+    THIS asset is settled afterwards.
+
+    `include_divergent` is a BOOLEAN axis rather than a value pick, and it
+    belongs in this space for the same reason the others do: turning it on
+    drops a `novelty_status NOT IN (...)` predicate from the WHERE clause, so
+    the two settings are genuinely different queries over genuinely different
+    row counts (~23.6% of the grain), and a probe that measured only the
+    default one would report a narrower page than the reader can reach.
     """
     from shared.discovery_service import BUCKET_MAIN, BUCKET_MORE
 
@@ -753,6 +761,8 @@ def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
             kwargs: Dict[str, Any] = {"bucket": bucket}
             if "novelty" in on:
                 kwargs["novelty"] = [novelty_value] if novelty_value else None
+            if "include_divergent" in on:
+                kwargs["include_divergent"] = True
             if "domain" in on:
                 kwargs["domain"] = pick.get("domain")
             if "author" in on:
@@ -777,8 +787,9 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
 
     * every ROW UNIT x every SORT MODE x every FILTER STATE, where the filter
       state space is the cartesian product `_findings_filter_states` generates
-      -- BOTH buckets x every subset of {novelty, domain, author, work}, 32
-      states, AND-composed exactly as the page composes them;
+      -- BOTH buckets x every subset of the optional axes
+      (`_FINDINGS_FILTER_AXES`), AND-composed exactly as the page composes
+      them;
     * the bounded COUNT per unit x filter state, against its own separate cap;
     * a DEEP PAGE per unit x filter state, measured wherever that state really
       carries enough rows to have one (decided by the state's own count, never
@@ -863,9 +874,17 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
             return ("this asset carries no main-pool identifications"
                     if stem == "main" else
                     "this asset carries no second-bucket identifications")
+        # `include_divergent` is deliberately absent: it is a BOOLEAN axis, not
+        # a value the asset either offers or does not, so "this asset has no
+        # value for it" is not a question that can be asked of it. Turning it on
+        # WIDENS the predicate (it drops a `NOT IN`), so the state it produces
+        # always has at least as many rows as the same state without it --
+        # meaning it can never be the reason a combination is unissuable, and a
+        # skip attributed to it would be a skip for a reason that cannot exist.
         keys = {"novelty": "novelty", "domain": "domain",
                 "author": "author", "work": "work_id"}
-        missing = [axis for axis in on if not kwargs.get(keys[axis])]
+        missing = [axis for axis in on
+                   if axis in keys and not kwargs.get(keys[axis])]
         if missing:
             return (f"this asset offers no value for the {', '.join(missing)} "
                     f"filter in the {stem} bucket, so that combination cannot be "

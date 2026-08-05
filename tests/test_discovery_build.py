@@ -2866,7 +2866,7 @@ def test_bench_findings_page_skips_cleanly_against_a_pre_rebuild_asset(tmp_path)
 def test_bench_findings_page_measures_the_full_combination_space(tmp_path):
     """AMENDED by round 13, finding 4: the FILTER-STATE space is the CARTESIAN
     PRODUCT the shipped page can put into the shipped builder -- both buckets x
-    every subset of {novelty, domain, author, work} -- not four hand-chosen
+    every subset of `_FINDINGS_FILTER_AXES` -- not four hand-chosen
     states. The four-state enumeration left `author`, `work`, every
     AND-composition and every filtered SECOND-BUCKET combination unmeasured
     while the report said "the FULL combination space", so a slow reachable
@@ -2899,7 +2899,18 @@ def test_bench_findings_page_measures_the_full_combination_space(tmp_path):
         for size in range(len(axes) + 1)
         for on in combinations(axes, size)
     ]
-    assert len(states) == 2 * (1 << len(axes)) == 32, states
+    assert len(states) == 2 * (1 << len(axes)), states
+    # A FLOOR on the axis set, not a count. The total moved once already (round
+    # 13 widened it from four hand-chosen states to the cartesian product) and
+    # moved again when ruling F's divergence opt-in became a filter the page can
+    # set -- so a hardcoded total is a number to edit whenever the space grows,
+    # which is indistinguishable from a number edited when it SHRINKS. Naming
+    # the axes makes a removal fail and an addition pass.
+    assert set(axes) >= {"novelty", "include_divergent", "domain", "author",
+                         "work"}, (
+        f"the probe's filter-axis set shrank to {axes} -- the benchmark now "
+        "measures a smaller space than the page can reach, which is round 13's "
+        "finding 4 verbatim")
     assert result["filter_space"]["states"] == len(states)
     assert tuple(result["filter_space"]["optional_axes"]) == tuple(axes)
 
@@ -3324,7 +3335,7 @@ def test_the_work_unit_novelty_skip_is_unreachable_THROUGH_THE_PAGE(tmp_path):
     # ...and the page cannot produce any of them.
     for unit in sorted(FINDINGS_UNITS):
         state = {"unit": unit, "bucket": "main", "sort": "band_rank",
-                 "novelty_only": True, "domain": None, "author": None,
+                 "novelty_only": True, "divergence": False, "domain": None, "author": None,
                  "work_id": None, "page": 1}
         fp.normalise_state(state)
         page_can_filter = fp._novelty_selection(state) is not None

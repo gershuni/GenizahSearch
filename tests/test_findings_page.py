@@ -1168,7 +1168,7 @@ def _spy_executor(loop):
 
 _PROBE_STATE = {
     "unit": "identification", "bucket": "main", "sort": "band_rank",
-    "novelty_only": False, "domain": None, "author": None, "work_id": None,
+    "novelty_only": False, "divergence": False, "domain": None, "author": None, "work_id": None,
     "page": 1,
 }
 
@@ -1474,14 +1474,16 @@ def _contract_bound_findings(recorder=None):
     from shared.discovery_service import _build_findings_query
 
     async def _call(unit="identification", *, bucket="main", novelty=None,
-                    domain=None, author=None, work_id=None, sort="band_rank",
-                    page=1, page_size=50):
+                    include_divergent=False, domain=None, author=None,
+                    work_id=None, sort="band_rank", page=1, page_size=50):
         # Raises for an unreachable-by-contract combination, exactly as shipped.
         _build_findings_query(
-            unit=unit, sort=sort, bucket=bucket, novelty=novelty, domain=domain,
+            unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+            include_divergent=include_divergent, domain=domain,
             author=author, work_id=work_id, page=page, page_size=page_size)
         if recorder is not None:
-            recorder.append({"unit": unit, "novelty": novelty, "bucket": bucket})
+            recorder.append({"unit": unit, "novelty": novelty, "bucket": bucket,
+                             "include_divergent": include_divergent})
         title = _INTERACTION_ROW_TITLES[(unit, bool(novelty))]
         row = dict(_finding_row("w000001", title, "T-S 12.111"), unit=unit)
         return {
@@ -1489,6 +1491,7 @@ def _contract_bound_findings(recorder=None):
             "meta": {"unit": unit, "bucket": bucket, "sort": sort,
                      "sort_basis": "best_band_rank",
                      "novelty_offered": unit != "work",
+                     "include_divergent": include_divergent,
                      "approximate_total": False},
         }
 
@@ -2113,7 +2116,7 @@ def test_real_browser_actionability_of_the_more_matches_control():
 def _state(**overrides) -> dict:
     base = {
         "unit": "identification", "bucket": "main", "sort": "band_rank",
-        "novelty_only": False, "domain": None, "author": None, "work_id": None,
+        "novelty_only": False, "divergence": False, "domain": None, "author": None, "work_id": None,
         "page": 1,
     }
     base.update(overrides)
@@ -4679,3 +4682,300 @@ def test_a_chip_removes_its_own_filter_and_clear_all_removes_every_filter():
         _nicegui_context.slot_stack.clear()
         _nicegui_context.slot_stack.extend(saved_slot_stack)
         set_language("he")
+
+
+# ---------------------------------------------------------------------------
+# RULING F — THE DIVERGENCE AXIS (136-GATE1-DECISIONS.md section F).
+#
+# 12,664 of 53,581 identifications (23.6%) contradict a catalogue
+# identification, 3,229 of them in the main pool. The policy that hides them by
+# default has existed since plan 136-04 as `HIDDEN_BY_DEFAULT_SHADES` and
+# `is_hidden_by_default`, and until this axis shipped NOTHING outside `tests/`
+# called either -- so the constant had tests and the behaviour had none.
+#
+# EVERY TEST BELOW ASSERTS A PROPERTY OF THE PAGE, never the value of a
+# constant. That distinction is this phase's signature defect: a test reading
+# `HIDDEN_BY_DEFAULT_SHADES == {...}` passed for the whole period during which
+# no surface honoured it.
+# ---------------------------------------------------------------------------
+
+def _recording_findings(recorder):
+    """A findings stub that records the full request each call carried."""
+    async def _call(unit="identification", **kwargs):
+        recorder.append({"unit": unit, **kwargs})
+        bucket = kwargs.get("bucket", "main")
+        return {
+            "status": "ok", "items": list(_ROWS_BY_BUCKET.get(bucket, [])),
+            "total": 1,
+            "meta": {"unit": unit, "bucket": bucket,
+                     "sort": kwargs.get("sort", "band_rank"),
+                     "sort_basis": "best_band_rank", "novelty_offered": True,
+                     "include_divergent": bool(kwargs.get("include_divergent")),
+                     "approximate_total": False},
+        }
+    return _call
+
+
+def _recording_facets(recorder):
+    async def _call(level, **kwargs):
+        recorder.append({"level": level, **kwargs})
+        return {"status": "ok", "items": list(_FACET_ITEMS.get(level, [])),
+                "total": 0, "meta": {"level": level}}
+    return _call
+
+
+def _divergence_card(client):
+    cards = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-divergence")
+    assert len(cards) == 1, f"expected one divergence card, got {len(cards)}"
+    return cards[0]
+
+
+def _divergence_switch(client):
+    card = _divergence_card(client)
+    chips = [element for element in card.descendants()
+             if "fchip" in (element._classes or [])]
+    assert len(chips) == 1, "the divergence card has no single toggle"
+    return chips[0]
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_divergence_axis_is_off_by_default_and_the_query_is_told_so(monkeypatch, lang):
+    """The LOAD-BEARING one for ruling F on this surface.
+
+    Not "the constant says hidden" -- what the page actually asks the service
+    for on a cold, unconfigured load. Remove the argument from `fetch_findings`
+    and this fails; leave the control unwired and the interaction test below
+    fails.
+    """
+    findings, facets = [], []
+    client = _render_page(monkeypatch, lang=lang,
+                          findings=_recording_findings(findings),
+                          facets=_recording_facets(facets))
+    assert findings, "the page issued no findings read"
+    assert all(call.get("include_divergent") is False for call in findings), (
+        "the default view asked the service for the catalogue-divergent rows")
+    assert facets, "the page issued no facet read"
+    assert all(call.get("include_divergent") is False for call in facets), (
+        "a facet count described a population the result set excludes")
+
+    switch = _divergence_switch(client)
+    assert (switch._props or {}).get("aria-pressed") == "false"
+    assert "here" not in (switch._classes or [])
+    assert not _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-chip"), (
+        "the default view is not a filtered one and must open with no chip bar")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_divergence_card_is_a_first_class_card_in_the_sidebar(monkeypatch, lang):
+    """The same shape as the pool card, and in the same column: a real
+    `q-card`, carrying `fg`, inside the filter bar -- never an overflow menu, a
+    disclosure or a footnote."""
+    client = _render_page(monkeypatch, lang=lang)
+    card = _divergence_card(client)
+    assert card.tag == "q-card"
+    assert "fg" in (card._classes or [])
+    assert fp.CARD_CLASS in (card._classes or [])
+    ancestors = {c for a in _ancestors(card) for c in (a._classes or [])}
+    assert fp.FILTER_BAR_CLASS in ancestors
+    assert fp.RESULTS_CLASS not in ancestors
+
+    tags = {(getattr(a, "tag", "") or "").lower() for a in _ancestors(card)}
+    assert "nicegui-expansion" not in tags and "q-expansion-item" not in tags
+    assert "details" not in tags
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_divergence_card_uses_the_ratified_wording_and_carries_the_warning(
+        monkeypatch, lang):
+    """Ruling F's toggle is an EXPLICITLY WARNED one. The label is the ratified
+    `TOGGLE_DIVERGENCE` string and the warning is the ratified
+    `divergence_warning` -- neither is invented here, and the warning is card
+    PROSE rather than a tooltip, because a warning a reader must hover to find
+    is not one they were given before they chose."""
+    from shared.discovery_display_strings import (
+        TOGGLE_DIVERGENCE,
+        disclosure_toggle,
+        divergence_warning,
+    )
+
+    client = _render_page(monkeypatch, lang=lang)
+    switch = _divergence_switch(client)
+    assert (switch._props or {}).get("label") == disclosure_toggle(
+        TOGGLE_DIVERGENCE, lang)
+
+    card_text = "\n".join(_subtree_strings(_divergence_card(client)))
+    assert divergence_warning(lang) in card_text
+
+    warnings = _elements_with_class(
+        client, f"{fp.FILTER_BAR_CLASS}-divergence-warning")
+    assert len(warnings) == 1, "the warning is not a rendered element of the card"
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_divergence_copy_never_says_which_side_is_right(monkeypatch, lang):
+    """Ruling F: the system never treats the catalogue's disagreement as a
+    verdict, and ruling L leaves `divergence_correctness` NULL on every shipped
+    row -- so no adjudication exists anywhere for this card to imply."""
+    client = _render_page(monkeypatch, lang=lang)
+    text = "\n".join(_subtree_strings(_divergence_card(client))).lower()
+    forbidden = {
+        "en": ("wrong", "incorrect", "mistaken", "error", "probably", "likely",
+               "false positive", "unreliable"),
+        "he": ("שגוי", "טעות", "מוטעה", "כנראה", "לא אמין"),
+    }[lang]
+    for word in forbidden:
+        assert word not in text, f"the divergence card adjudicates: {word!r}"
+    assert not _DIGIT_RE.search(text), (
+        "the divergence card carries a figure -- this axis names a category, "
+        "and a count on it is a claim about that pool nobody ruled it may make")
+
+
+def test_adding_the_divergence_card_left_ruling_t_and_the_candidacy_order_intact(
+        monkeypatch):
+    """Ruling T's control must stay a first-class, always-rendered card that
+    switches the set in ONE interaction, and `.fg.novgrp {order:-1}` must still
+    put the candidacy card first."""
+    client = _render_page(monkeypatch, lang="en")
+
+    control = _find_bucket_control(client, "en")
+    assert control is not None
+    ancestor_classes = {c for a in _ancestors(control) for c in (a._classes or [])}
+    assert fp.FILTER_BAR_CLASS in ancestor_classes
+    assert fp.RESULTS_CLASS not in ancestor_classes
+    tags = {(getattr(a, "tag", "") or "").lower() for a in _ancestors(control)}
+    assert "nicegui-expansion" not in tags and "q-expansion-item" not in tags
+
+    novelty = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-novelty")
+    assert len(novelty) == 1
+    assert "novgrp" in (novelty[0]._classes or []), (
+        "the candidacy card lost the class the `order:-1` rule is keyed on")
+    assert "novgrp" not in (_divergence_card(client)._classes or []), (
+        "the divergence card claimed the candidacy card's first position")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_clicking_the_toggle_opens_the_axis_and_the_next_query_carries_it(
+        monkeypatch, lang):
+    """Wired, not decorative: the click runs through the element's OWN
+    registered listener and the following read carries the opt-in."""
+    findings, facets = [], []
+    seen = {}
+
+    async def _drive(client):
+        switch = _divergence_switch(client)
+        listeners = [listener for listener in switch._event_listeners.values()
+                     if listener.type == "click"]
+        assert listeners, "the divergence toggle is wired to nothing"
+        del findings[:]
+        del facets[:]
+        result = listeners[0].handler(None)
+        if asyncio.iscoroutine(result):
+            await result
+        seen["switch"] = switch
+
+    _render_page(monkeypatch, lang=lang,
+                 findings=_recording_findings(findings),
+                 facets=_recording_facets(facets), driver=_drive)
+
+    assert findings, "clicking the toggle issued no findings read"
+    assert all(call.get("include_divergent") is True for call in findings)
+    assert facets, "clicking the toggle did not re-read the facet cascade"
+    assert all(call.get("include_divergent") is True for call in facets), (
+        "the counts beside the filters still describe the narrower set")
+    assert all(call.get("page") == 1 for call in findings), (
+        "opening the axis kept the reader's page -- page 4 of the old set is "
+        "not page 4 of the wider one")
+
+    switch = seen["switch"]
+    assert (switch._props or {}).get("aria-pressed") == "true"
+    assert "here" in (switch._classes or []), (
+        "the control announced its new state to a screen reader and to nobody "
+        "else -- `.fchip.here` has no rule in the shared CSS block")
+    assert "background" in dict(switch._style or {})
+
+
+def test_the_divergence_axis_composes_as_an_and_with_every_other_axis(monkeypatch):
+    """Like every other axis on this page, and the composition is the point: a
+    reader who has narrowed to a domain and an author must be able to ask
+    'and show me the ones that disagree' rather than being returned to the
+    whole corpus."""
+    from shared.discovery_novelty import CANDIDATE_STATUS
+
+    findings, facets = [], []
+    _render_page(monkeypatch, lang="en",
+                 findings=_recording_findings(findings),
+                 facets=_recording_facets(facets),
+                 state=_state(divergence=True, bucket="more", novelty_only=True,
+                              domain="Liturgy", author="Maimonides",
+                              work_id=_CURATED_WORK_ID,
+                              work_label=_CURATED_RAW_TITLE))
+    assert findings
+    call = findings[-1]
+    assert call["include_divergent"] is True
+    assert call["bucket"] == "more"
+    assert call["novelty"] == (CANDIDATE_STATUS,)
+    assert call["domain"] == "Liturgy"
+    assert call["author"] == "Maimonides"
+    assert call["work_id"] == _CURATED_WORK_ID
+    # The cascade carries it too, or the counts describe another population.
+    assert facets and all(c["include_divergent"] is True for c in facets)
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_open_divergence_axis_appears_in_the_active_filter_chip_bar(
+        monkeypatch, lang):
+    """It changes ~23.6% of the corpus; leaving it out of "why am I looking at
+    these rows" would make it the one selection with no answer there."""
+    from shared.discovery_display_strings import TOGGLE_DIVERGENCE, disclosure_toggle
+
+    client = _render_page(monkeypatch, lang=lang, state=_state(divergence=True))
+    chips = _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-chip")
+    assert len(chips) == 1, f"expected one chip, got {len(chips)}"
+    texts = [text for chip in chips for text in _subtree_strings(chip)]
+    assert disclosure_toggle(TOGGLE_DIVERGENCE, lang) in texts, (
+        f"the divergence chip does not use the ratified wording: {texts!r}")
+
+    removes = [element for element in chips[0].descendants()
+               if f"{fp.ACTIVE_FILTERS_CLASS}-remove" in (element._classes or [])]
+    assert len(removes) == 1
+    assert [listener for listener in removes[0]._event_listeners.values()
+            if listener.type == "click"], "the chip's remove control is inert"
+
+
+def test_removing_the_chip_and_clearing_all_both_return_the_axis_to_hidden():
+    """PURE, over the shared axis-clearing rule. The neutral value this axis
+    returns to is ruling F's default -- OFF -- which is exactly why it may be a
+    removable chip while the pool may not."""
+    state = _state(divergence=True, domain="Liturgy")
+    fp._clear_filter_axis(state, "divergence")
+    assert state["divergence"] is False
+    assert state["domain"] == "Liturgy", "clearing one axis cleared another"
+    assert state["page"] == 1
+
+    state = _state(divergence=True, domain="Liturgy", novelty_only=True)
+    fp._clear_filter_axis(state, None)
+    assert state["divergence"] is False
+    assert state["domain"] is None and state["novelty_only"] is False
+    assert "divergence" in fp._CHIP_AXES
+
+
+def test_the_divergence_selection_persists_through_the_storage_chokepoint(monkeypatch):
+    """Through `web/safe_storage.py` like every other selection (Phase 87), and
+    DEFAULT FALSE at every read: nothing but a recorded, truthy stored value can
+    turn the axis on."""
+    store = {}
+    monkeypatch.setattr(fp, "safe_user_set",
+                        lambda key, value: store.__setitem__(key, value))
+    monkeypatch.setattr(fp, "safe_user_get",
+                        lambda key, default=None: store.get(key, default))
+
+    fp.write_state(_state(divergence=True))
+    assert store[fp._KEY_DIVERGENCE] is True
+    assert fp.read_state()["divergence"] is True
+
+    store.clear()
+    assert fp.read_state()["divergence"] is False, "an absent key must read as OFF"
+    store[fp._KEY_DIVERGENCE] = 0
+    assert fp.read_state()["divergence"] is False
+    store[fp._KEY_DIVERGENCE] = None
+    assert fp.read_state()["divergence"] is False

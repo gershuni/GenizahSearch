@@ -1063,7 +1063,7 @@ def test_second_bucket_rows_render_on_a_populated_fixture(monkeypatch, lang):
         monkeypatch, lang=lang,
         findings=findings_envelope(items, bucket=BUCKET_MORE),
         state={"unit": FINDINGS_UNIT_IDENTIFICATION, "bucket": BUCKET_MORE,
-               "sort": "band_rank", "novelty_only": False, "domain": None,
+               "sort": "band_rank", "novelty_only": False, "divergence": False, "domain": None,
                "author": None, "work_id": None, "page": 1})
     rows = _elements_with_class(client, fr.ROW_CLASS)
     assert len(rows) == len(items) and rows, (
@@ -1192,7 +1192,7 @@ def test_the_rendered_findings_page_is_honest(monkeypatch, status, lang, unit, b
         monkeypatch, lang=lang,
         findings=findings_envelope(items, status=status, unit=unit, bucket=bucket),
         state={"unit": unit, "bucket": bucket, "sort": "band_rank",
-               "novelty_only": False, "domain": None, "author": None,
+               "novelty_only": False, "divergence": False, "domain": None, "author": None,
                "work_id": None, "page": 1})
 
     for marker in (fp.PAGE_CLASS, fp.FILTER_BAR_CLASS, fp.RESULTS_CLASS,
@@ -2088,7 +2088,7 @@ def capture_rendered_output(destination: str) -> str:
                             findings=findings_envelope(items, status=status,
                                                        unit=unit, bucket=bucket),
                             state={"unit": unit, "bucket": bucket,
-                                   "sort": "band_rank", "novelty_only": False,
+                                   "sort": "band_rank", "novelty_only": False, "divergence": False,
                                    "domain": None, "author": None,
                                    "work_id": None, "page": 1})
                     finally:
@@ -2134,7 +2134,7 @@ def capture_rendered_output(destination: str) -> str:
             #     value assignment from looping through `refresh`.
             ("selected-facets", {"state": {
                 "unit": "identification", "bucket": BUCKET_MAIN,
-                "sort": "band_rank", "novelty_only": False, "domain": None,
+                "sort": "band_rank", "novelty_only": False, "divergence": False, "domain": None,
                 "author": "AN AUTHOR THE CASCADE DOES NOT OFFER",
                 "work_id": "w000404", "work_label": None, "page": 1}}),
         ):

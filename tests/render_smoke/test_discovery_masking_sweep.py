@@ -731,7 +731,7 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
             facets=rich_facets,
             state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
                    "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
-                   "novelty_only": False,
+                   "novelty_only": False, "divergence": False,
                    "domain": "Synthetic Parent A / Synthetic Leaf A",
                    "author": None, "work_id": None, "page": 2}))
         # 2. the same cascade with NOTHING selected, so the branch renders
@@ -787,7 +787,7 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
                                 neutral_title=title)],
                 unit=tf.FINDINGS_UNIT_WORK),
             state={"unit": tf.FINDINGS_UNIT_WORK, "bucket": tf.BUCKET_MAIN,
-                   "sort": "band_rank", "novelty_only": True, "domain": None,
+                   "sort": "band_rank", "novelty_only": True, "divergence": False, "domain": None,
                    "author": None, "work_id": None, "page": 1}))
         # 8. the novelty help, with and without an as-of date.
         for as_of in ("2026-08-03", None):
