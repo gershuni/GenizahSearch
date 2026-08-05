@@ -474,7 +474,33 @@ def _fake_facets(items_by_level=None, *, status="ok"):
     return _call
 
 
-def _render_page(monkeypatch, *, lang="en", findings=None, facets=None, state=None):
+#: The second pool's size as a SENTINEL -- a figure that appears in no artifact
+#: and in no committed file, so a rendered occurrence of it can only have come
+#: through `meta.more_pool_total`. A real figure here would prove nothing: it
+#: could equally have been hardcoded, which is the defect ruling U forbids.
+SENTINEL_MORE_POOL_TOTAL = 818_181
+
+
+def _fake_launch(*, status="ok", meta_extra=None):
+    """The launch envelope the page reads ONCE and two surfaces consume.
+
+    NOT stubbed by default -- most tests here let the real (unavailable) read
+    run, which is exactly the degraded path the pool invitation has to survive.
+    """
+    async def _call(*_args, **_kwargs):
+        return {
+            "status": status,
+            "items": [],
+            "total": 0,
+            "meta": {"basis": "main_pool", **(meta_extra or {})} if status == "ok"
+            else {"reason": "sidecar_not_serving"},
+        }
+
+    return _call
+
+
+def _render_page(monkeypatch, *, lang="en", findings=None, facets=None, state=None,
+                 launch=None):
     """Render the REAL create_findings_page() in a bare client context.
 
     Returns the NiceGUI Client; tests walk `client.elements` directly."""
@@ -484,6 +510,8 @@ def _render_page(monkeypatch, *, lang="en", findings=None, facets=None, state=No
 
     monkeypatch.setattr(fp, "get_findings_enveloped", findings or _fake_findings())
     monkeypatch.setattr(fp, "get_findings_facets_enveloped", facets or _fake_facets())
+    if launch is not None:
+        monkeypatch.setattr(fp, "get_launch_stats_enveloped", launch)
     if state is not None:
         monkeypatch.setattr(fp, "read_state", lambda: dict(state))
     set_language(lang)
@@ -3616,10 +3644,167 @@ def test_the_pool_invitation_speaks_in_both_bucket_states(monkeypatch, lang, buc
             main_bucket=bucket_name(True, lang)) in said
         assert bucket_name(True, lang) in blob, "there is no way back"
 
-    # Neither state may carry a figure. A count on the second pool would be a
-    # lure the owner has not ruled on, and the ruling-T prohibition on numbers
-    # beside this axis is what this strip has to stay clear of to exist at all.
+    # ⚠ AMENDED 2026-08-05, and the harness is what keeps it meaningful: this
+    # test does NOT stub the launch read, so `meta.more_pool_total` is absent
+    # and the DEGRADED (digit-free) sentence is what renders. That is the state
+    # asserted here -- an older sidecar, or a launch read that failed -- and it
+    # must never print `0`, `None` or a gap where the figure would be. The
+    # SIZED state is asserted separately, from a sentinel envelope.
     assert not _DIGIT_RE.findall(blob), f"a number reached the invitation: {blob!r}"
+    assert "None" not in blob, f"a missing figure printed as None: {blob!r}"
+
+
+# ---------------------------------------------------------------------------
+# TASK B (2026-08-05) — THE SECOND POOL'S SIZE BECOMES VISIBLE (owner ruling).
+#
+# The pool carried no number anywhere; the design deliberately did not need one
+# and said a figure should be an owner ruling rather than a designer's choice.
+# The owner has now ruled: show it. What the ruling does NOT overturn:
+#
+#   * ruling T — the bucket CONTROL still carries no count
+#     (`test_the_two_pool_chips_read_as_one_segment...` still asserts no digit
+#     anywhere in that card);
+#   * the prohibition on the owner's QUALITY assessment of that pool ever
+#     becoming a percentage, a rate, an interval or a score. A SIZE is a
+#     different kind of fact;
+#   * match framing — never "probably wrong", never "leftovers", never
+#     "findings you are missing".
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_invitation_carries_the_second_pools_size_from_the_envelope(
+        monkeypatch, lang):
+    """A SENTINEL, not a real figure: 818,181 appears in no artifact and in no
+    committed file, so its presence in the rendered strip can only mean it
+    travelled `meta.more_pool_total` -> render. A real figure asserted here
+    would pass equally against a hardcode, which is the defect ruling U
+    forbids."""
+    from shared.discovery_display_strings import bucket_name
+
+    client = _render_page(
+        monkeypatch, lang=lang,
+        launch=_fake_launch(meta_extra={"more_pool_total": SENTINEL_MORE_POOL_TOTAL}))
+    strip = _elements_with_class(client, fp.POOL_INVITE_CLASS)[0]
+    blob = "\n".join(_subtree_strings(strip))
+
+    assert f"{SENTINEL_MORE_POOL_TOTAL:,}" in blob, (
+        f"the second pool's size did not reach the invitation: {blob!r}")
+    assert fp.copy_text("pool_invite_body_counted", lang).format(
+        count=f"{SENTINEL_MORE_POOL_TOTAL:,}", bucket=bucket_name(False, lang)) in blob
+
+    # A SIZE, and nothing that could read as a quality figure.
+    for shape in ("%", "percent", "accuracy", "precision", "confidence",
+                  "אחוז", "דיוק"):
+        assert shape not in blob.lower(), (
+            f"the sized invitation carries {shape!r} -- a size is the only "
+            "figure this pool may ever show")
+
+
+def test_the_size_never_reaches_the_bucket_control(monkeypatch):
+    """Ruling T, re-asserted WITH the figure available. The digit ban on the
+    control is what this whole change had to stay clear of, and the only state
+    that could break it is the one where a figure exists to leak."""
+    client = _render_page(
+        monkeypatch, lang="en",
+        launch=_fake_launch(meta_extra={"more_pool_total": SENTINEL_MORE_POOL_TOTAL}))
+    segment = _elements_with_class(client, fp.BUCKET_CONTROL_CLASS)[0]
+    text = "\n".join(_subtree_strings(segment))
+    assert not _DIGIT_RE.findall(text), (
+        f"the second pool's size reached the bucket control: {text!r}")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_second_bucket_state_shows_no_figure_even_when_one_is_available(
+        monkeypatch, lang):
+    """A reader already inside that pool reads its total off the result bar, on
+    the same basis as the rows beside it. A second number a few pixels away, on
+    a different basis, is how two figures on one screen start disagreeing."""
+    client = _render_page(
+        monkeypatch, lang=lang, state=_state(bucket="more"),
+        launch=_fake_launch(meta_extra={"more_pool_total": SENTINEL_MORE_POOL_TOTAL}))
+    blob = "\n".join(_subtree_strings(
+        _elements_with_class(client, fp.POOL_INVITE_CLASS)[0]))
+    assert f"{SENTINEL_MORE_POOL_TOTAL:,}" not in blob
+    assert not _DIGIT_RE.findall(blob), f"a number reached the invitation: {blob!r}"
+
+
+@pytest.mark.parametrize("launch_kwargs", [
+    {"status": "unavailable"},                       # the launch read failed
+    {},                                              # an OLDER sidecar: no key
+    {"meta_extra": {"more_pool_total": None}},       # present, unmeasured
+    {"meta_extra": {"more_pool_total": 0}},          # present, and a zero
+    {"meta_extra": {"more_pool_total": "many"}},     # present, and not a number
+])
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_a_missing_size_degrades_to_the_digit_free_sentence(
+        monkeypatch, lang, launch_kwargs):
+    """Five ways for the figure to be absent, one rendering. `int(None)` raises,
+    `str(None)` prints "None" and `int(x) or 0` prints a zero -- three ways for
+    a missing number to become a visible wrong one."""
+    from shared.discovery_display_strings import bucket_name
+
+    client = _render_page(monkeypatch, lang=lang, launch=_fake_launch(**launch_kwargs))
+    blob = "\n".join(_subtree_strings(
+        _elements_with_class(client, fp.POOL_INVITE_CLASS)[0]))
+
+    assert fp.copy_text("pool_invite_body", lang).format(
+        bucket=bucket_name(False, lang)) in blob, (
+        f"the degraded invitation lost its sentence: {blob!r}")
+    assert not _DIGIT_RE.findall(blob), f"a figure was invented: {blob!r}"
+    assert "None" not in blob and "many" not in blob
+
+
+def test_the_rendered_size_equals_the_more_bucket_total_the_findings_query_returns(
+        tmp_path):
+    """The cross-check the figure has to survive to be an invitation at all: a
+    reader who follows it must land on the number it advertised.
+
+    The two sides are TWO SEPARATELY-WRITTEN QUERIES against one artifact: the
+    launch reader's `COUNT(*) ... WHERE main_pool = 0`, and the total the
+    corpus-wide FINDINGS query reports for `bucket='more'` -- the very query
+    that produces the rows the reader lands on, with its own unit, routing and
+    visibility clauses. Comparing the advertised figure against a re-run of its
+    own SQL would compare a number with itself.
+
+    Runs on a SYNTHETIC artifact first, so it holds in every environment, and
+    then on the real one when it resolves -- an assertion that only ever skips
+    is not a check.
+    """
+    from shared.discovery_service import DiscoveryService
+    from tests.test_discovery_launch_stats import (
+        _EXPECTED_PAGES,
+        _POPULATED_ROWS,
+        _build_launch_db,
+        resolve_guard_artifact,
+    )
+
+    def _agree(path, version):
+        service = DiscoveryService(
+            path_provider=lambda: path,
+            availability_callable=lambda: True,
+            sidecar_version_provider=lambda: version,
+        )
+        envelope = service.get_launch_stats_enveloped()
+        assert envelope["status"] == "ok"
+        advertised = envelope["meta"]["more_pool_total"]
+        landed = service.get_findings_enveloped(bucket="more")
+        assert landed["status"] == "ok"
+        assert advertised == landed["total"], (
+            f"{path}: the invitation would advertise {advertised} and the "
+            f"reader would land on {landed['total']}")
+        return advertised
+
+    synthetic = _build_launch_db(
+        tmp_path / "invite-cross-check.db", _POPULATED_ROWS, pages=_EXPECTED_PAGES)
+    assert _agree(synthetic, "synthetic") > 0
+
+    path, reason = resolve_guard_artifact()
+    if path is None:
+        pytest.skip(
+            (reason or "no resolvable discovery artifact") +
+            " -- the synthetic half of this check ran; set "
+            "DISCOVERY_LAUNCH_GUARD_DB to run it against the served artifact")
+    assert _agree(path, "real") > 0
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])

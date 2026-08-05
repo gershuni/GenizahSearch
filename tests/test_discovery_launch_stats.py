@@ -388,6 +388,60 @@ def test_meta_carries_the_unconditional_main_pool_figures(populated_service):
         "the unconditional count swept in the `main_pool = 0` rows")
 
 
+# ===========================================================================
+# Task 1, behaviour 6c (2026-08-05): the SECOND POOL'S SIZE.
+#
+# Owner ruling: the second pool's size may be shown. It is a SIZE and never a
+# quality figure -- the prohibition on the owner's assessment of that pool
+# becoming a percentage, a score or an interval is untouched -- and ruling T's
+# rule that the bucket CONTROL carries no count is untouched too.
+# ===========================================================================
+
+def test_meta_carries_the_second_pools_size(populated_service):
+    """`_POPULATED_ROWS` holds exactly two `main_pool = 0` rows, under two
+    DIFFERENT novelty shades, so a count that is shade-filtered in either
+    direction cannot produce this number."""
+    env = populated_service.get_launch_stats_enveloped()
+    meta = env["meta"]
+
+    assert meta["more_pool_total"] == 2
+    assert meta["more_pool_total"] != meta["main_pool_total"], (
+        "the second pool's size equals the main pool's -- one of them is not "
+        "being computed")
+    # It is the COMPLEMENT of the main pool on one basis, and the two are never
+    # summed onto a surface: their sum is COUNT(*) over the table, a third
+    # population nothing reports.
+    assert meta["more_pool_total"] + meta["main_pool_total"] == len(_POPULATED_ROWS)
+
+
+def test_the_second_pools_size_carries_no_shade_predicate(tmp_path):
+    """A second-pool row under a NON-contribution shade must still be counted --
+    otherwise the figure silently under-reports the pool it advertises."""
+    baseline = _service_for(_build_launch_db(
+        tmp_path / "more-baseline.db", _POPULATED_ROWS, pages=_EXPECTED_PAGES,
+    )).get_launch_stats_enveloped()
+    extended = _service_for(_build_launch_db(
+        tmp_path / "more-extended.db",
+        _POPULATED_ROWS + (("s098", "A", 0, "aid_more_specific"),),
+        pages=_EXPECTED_PAGES,
+    )).get_launch_stats_enveloped()
+
+    assert extended["meta"]["more_pool_total"] == baseline["meta"]["more_pool_total"] + 1
+    # ...and nothing on the main-pool basis moved.
+    assert extended["total"] == baseline["total"]
+    assert extended["meta"]["main_pool_total"] == baseline["meta"]["main_pool_total"]
+
+
+def test_the_second_pools_size_is_an_outage_not_a_zero(populated_db):
+    """A failed read must not report an empty second pool, for the same reason
+    the contribution total must not report a zero."""
+    env = _service_for(populated_db, available=False).get_launch_stats_enveloped()
+    assert env["status"] == "unavailable"
+    assert "more_pool_total" not in env["meta"], (
+        "an outage envelope carries a second-pool size -- a number nobody "
+        "measured, on a surface that would print it as a fact")
+
+
 def test_the_unconditional_figures_carry_no_shade_predicate(tmp_path):
     """Directly: add a main-pool row under a shade that is NOT a contribution
     shade, and only the unconditional pair may move."""

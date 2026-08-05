@@ -150,6 +150,11 @@ SENTINEL_CORPUS_PAGES = 92888
 #: they are in neither half of 136-22's forbidden list.
 SENTINEL_POOL_TOTAL = 64111
 SENTINEL_POOL_MANUSCRIPTS = 52111
+#: The SECOND pool's size (owner ruling, 2026-08-05). A sentinel like the rest,
+#: and swept by the same assertion that it is in neither half of 136-22's
+#: forbidden list -- the figure the invitation shows is read from the artifact
+#: at request time and may be a literal nowhere.
+SENTINEL_MORE_POOL_TOTAL = 46111
 
 SENTINEL_VALUES: Tuple[int, ...] = (
     SENTINEL_TOTAL,
@@ -160,6 +165,7 @@ SENTINEL_VALUES: Tuple[int, ...] = (
     SENTINEL_CORPUS_PAGES,
     SENTINEL_POOL_TOTAL,
     SENTINEL_POOL_MANUSCRIPTS,
+    SENTINEL_MORE_POOL_TOTAL,
 )
 
 
@@ -197,6 +203,19 @@ def sentinel_launch_envelope_with_lede() -> Dict[str, Any]:
     envelope = sentinel_launch_envelope()
     envelope["meta"]["main_pool_total"] = SENTINEL_POOL_TOTAL
     envelope["meta"]["main_pool_total_manuscript_count"] = SENTINEL_POOL_MANUSCRIPTS
+    return envelope
+
+
+def sentinel_launch_envelope_with_pool_size() -> Dict[str, Any]:
+    """The same envelope PLUS the SECOND pool's size (owner ruling, 2026-08-05).
+
+    Kept separate for the same reason as the lede pair above:
+    `sentinel_launch_envelope` is what proves the pool invitation still
+    DEGRADES to its digit-free sentence when the artifact supplies no size, and
+    folding this key into it would delete that proof.
+    """
+    envelope = sentinel_launch_envelope()
+    envelope["meta"]["more_pool_total"] = SENTINEL_MORE_POOL_TOTAL
     return envelope
 
 
@@ -1929,11 +1948,17 @@ def capture_rendered_output(destination: str) -> str:
         # (2) an `ok` facet cascade with NO items, which paints the "no matches
         #     under the current filters" line. The matrix's facet fixture always
         #     has a row.
+        # (3) the SIZED pool invitation. The matrix's launch envelope carries no
+        #     `more_pool_total` -- that is what proves the invitation degrades --
+        #     so the counted sentence is painted only here, and a scan that never
+        #     saw it would never have looked at it.
         for label, kwargs in (
             ("lede-headline", {"launch": sentinel_launch_envelope_with_lede()}),
             ("empty-facets", {"facets": {
                 level: facets_envelope(level, items=[])
                 for level in ("domain", "author", "work")}}),
+            ("sized-pool-invite",
+             {"launch": sentinel_launch_envelope_with_pool_size()}),
         ):
             patch = _Patch()
             try:

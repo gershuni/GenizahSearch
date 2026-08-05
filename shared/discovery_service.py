@@ -91,6 +91,15 @@ envelope key                     the query it is
 ``meta.main_pool_total_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id)``
                                  over the same rows, again with no shade
                                  predicate.
+``meta.more_pool_total``         ``SELECT COUNT(*) FROM
+                                 discovery_identification WHERE main_pool = 0``
+                                 -- the SECOND pool's SIZE, again with no
+                                 ``novelty_status`` predicate. It is the exact
+                                 complement of ``main_pool_total`` on one
+                                 stated basis, and the two are never summed:
+                                 their sum is ``COUNT(*)`` over the table,
+                                 which is a third population nothing here
+                                 reports.
 ``meta.all_bucket_total``        the same as ``total`` with the ``main_pool``
                                  predicate DROPPED. Ruling U constraint 1
                                  permits a page to show this only if it says
@@ -119,10 +128,16 @@ a figure built by adding counts taken on different bases. The same applies to
 the pair ``main_pool_total`` / ``main_pool_total_manuscript_count``, which is
 internally consistent and must be used together.
 
-If the SECOND pool's size is ever wanted, the matching key is
-``meta.more_pool_total`` (``WHERE main_pool = 0``) -- it is deliberately NOT
-added speculatively, because a number advertising that pool is an owner ruling
-rather than a reader's convenience.
+``meta.more_pool_total`` exists because the OWNER RULED (2026-08-05) that the
+second pool's size may be shown. It was deliberately withheld until then: a
+number advertising that pool is an owner ruling rather than a reader's
+convenience. What the ruling does NOT touch is the prohibition it sits beside
+-- the owner's QUALITY assessment of that pool must never become a percentage,
+a score, an interval or any number at all, on this surface or any other. A
+count of what is IN a pool is a different kind of fact from a judgement about
+it, and this key is only ever the first. Ruling T is likewise untouched: the
+BUCKET CONTROL still carries no count, and a test asserts no digit appears in
+its subtree.
 
 ``meta.basis`` states the single basis (``main_pool``) explicitly, so no
 consumer has to infer it and no consumer can mix bases silently.
@@ -2293,6 +2308,13 @@ class DiscoveryService:
         for the other, summing them, or pairing a figure from one basis with a
         figure from the other reproduces exactly the mixed-basis defect ruling U
         was issued over.
+
+        `meta['more_pool_total']` is the SECOND pool's size -- `COUNT(*) WHERE
+        main_pool = 0`, no shade predicate -- added on the owner's 2026-08-05
+        ruling that the pool's size may be shown. It is a SIZE and never a
+        quality figure: the prohibition on the second pool's assessment ever
+        becoming a percentage, a score or an interval is untouched, and so is
+        ruling T's rule that the bucket CONTROL carries no count.
         """
         if not self.is_available():
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
@@ -2330,6 +2352,16 @@ class DiscoveryService:
             ).fetchone()
             main_pool_total = int(unconditional["identifications"])
             main_pool_total_manuscripts = int(unconditional["manuscripts"])
+            # The SECOND pool's size (owner ruling, 2026-08-05). Its own
+            # statement on its own stated basis -- `main_pool = 0`, no shade
+            # predicate -- rather than a subtraction from a corpus total: a
+            # figure derived by arithmetic over two other figures is exactly the
+            # mixed-basis shape ruling U was issued over, and it would be wrong
+            # the moment either operand's basis moved.
+            more_pool_total = int(conn.execute(
+                "SELECT COUNT(*) AS n FROM discovery_identification "
+                "WHERE main_pool = 0"
+            ).fetchone()["n"])
             corpus_manuscripts = int(conn.execute(
                 "SELECT COUNT(DISTINCT sys_id) AS n FROM discovery_identification"
             ).fetchone()["n"])
@@ -2367,6 +2399,7 @@ class DiscoveryService:
             "main_pool_manuscript_count": main_manuscripts,
             "main_pool_total": main_pool_total,
             "main_pool_total_manuscript_count": main_pool_total_manuscripts,
+            "more_pool_total": more_pool_total,
             "all_bucket_total": all_total,
             "all_bucket_manuscript_count": all_manuscripts,
             "corpus_manuscript_count": corpus_manuscripts,

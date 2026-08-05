@@ -312,6 +312,39 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
             "שם הראיות לא עמדו בכלל המאגר העיקרי."
         ),
     },
+    # THE SIZED VARIANT (owner ruling, 2026-08-05). The pool carried no number
+    # anywhere, deliberately: this design did not need one, and a figure was an
+    # owner ruling rather than a designer's choice. The owner has now ruled that
+    # it may be shown, so it is shown HERE -- on the invitation, where a reader
+    # decides whether to go and look -- and NOT on the bucket control, which
+    # ruling T keeps digit-free.
+    #
+    # `{count}` IS A SIZE. What it may never become is a quality figure: the
+    # owner's assessment of that pool must not turn into a percentage, a rate,
+    # an interval or a score anywhere, and a count of what is in a pool is a
+    # different kind of fact from a judgement about it. The sentence is
+    # otherwise the digit-free one, verbatim, so nothing about the framing
+    # moved: the second pool is where the EVIDENCE did not meet the rule, never
+    # "findings you are missing" and never a lure.
+    #
+    # The figure is read from the artifact at request time
+    # (`meta.more_pool_total`) and is a LITERAL nowhere -- ruling U, enforced by
+    # a repository-wide scan that fails on any committed launch figure.
+    "pool_invite_body_counted": {
+        "en": (
+            "{count} more identifications appear under '{bucket}', where the "
+            "evidence did not meet the main-pool rule. They are the same works "
+            "and the same kinds of match."
+        ),
+        # The Hebrew deliberately does NOT open with the figure. A Latin-digit
+        # run at the start of an RTL sentence reorders unpredictably at the
+        # boundary with the word after it; leading with `עוד` puts the number
+        # inside the sentence, where the paragraph direction settles it.
+        "he": (
+            "עוד {count} זיהויים מופיעים תחת '{bucket}', שם הראיות לא עמדו "
+            "בכלל המאגר העיקרי. אלה אותם חיבורים ואותם סוגי התאמה."
+        ),
+    },
     "pool_here_heading": {
         "en": "You are in '{bucket}'",
         "he": "אתם ב'{bucket}'",
@@ -665,11 +698,22 @@ async def create_findings_page() -> None:
 
     if _page_is_gone(page_client):
         return
-    await _paint_headline(headline_region, lang, page_client)
+    # ONE launch read, TWO consumers: the headline paints from the envelope and
+    # the pool invitation takes the second pool's size out of its `meta`. Read
+    # here rather than twice, because a second read is a second executor
+    # crossing on the heavy budget for a figure the page already has -- and
+    # rather than inside `refresh`, which would pay that crossing on every
+    # filter change for a number that cannot move while the page is open.
+    launch = await fetch_launch_stats()
+    if _page_is_gone(page_client):
+        return
+    await _paint_headline(headline_region, lang, page_client, envelope=launch)
     if _page_is_gone(page_client):
         return
     with body:
-        await _render_body(state, lang, page_client)
+        await _render_body(
+            state, lang, page_client,
+            more_pool_total=(launch.get("meta") or {}).get("more_pool_total"))
 
 
 def _render_head(lang: str) -> Any:
@@ -756,17 +800,24 @@ def _render_headline_slot(lang: str):
     return value
 
 
-async def _paint_headline(region: Any, lang: str, page_client: Any) -> None:
-    """Read the launch statistics and render them into the reserved slot.
+async def _paint_headline(region: Any, lang: str, page_client: Any,
+                          envelope: Optional[Dict[str, Any]] = None) -> None:
+    """Render the launch statistics into the reserved slot.
 
     Painted AFTER the shell rather than during it, so a slow or failing
     headline read never delays or breaks the rest of the page; and re-entrant,
     so the outage state's retry re-runs exactly this path rather than a second
     copy of it.
+
+    `envelope` is the read the CALLER already made -- the page issues one launch
+    read and two surfaces consume it. The RETRY passes none and re-reads, which
+    is the point of a retry: a retry that re-rendered the same failed envelope
+    would be a button that cannot work.
     """
     if region is None:  # pragma: no cover -- structural
         return
-    envelope = await fetch_launch_stats()
+    if envelope is None:
+        envelope = await fetch_launch_stats()
     if _page_is_gone(page_client):
         return
 
@@ -798,7 +849,8 @@ def _render_mode_strip(lang: str) -> None:
                 ui.label(tr(phase_key)).classes(f"needs {MODES_CLASS}-phase")
 
 
-async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> None:
+async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
+                       more_pool_total: Any = None) -> None:
     """The two-column body -- a sidebar of filter CARDS and the results beside
     it -- with ONE refresh path shared by every control, so a filter change and
     a bucket change take exactly the same route.
@@ -890,7 +942,8 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> No
             return
         results_region.clear()
         with results_region:
-            _render_results(envelope, state, lang, refresh)
+            _render_results(envelope, state, lang, refresh,
+                            more_pool_total=more_pool_total)
         if _page_is_gone(page_client):
             return
         await _populate_facets(
@@ -1413,7 +1466,8 @@ def _render_facet_items(
 # ---------------------------------------------------------------------------
 
 def _render_results(
-    envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh
+    envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh,
+    more_pool_total: Any = None,
 ) -> None:
     status = (envelope or {}).get("status")
     if status != "ok":
@@ -1433,18 +1487,19 @@ def _render_results(
     # identical buttons a few pixels apart and make the control ambiguous to
     # locate, for a reader and for a test.
     if items:
-        _render_pool_invite(state, lang, refresh)
+        _render_pool_invite(state, lang, refresh, more_pool_total)
 
     with ui.column().classes(f"rows {RESULTS_CLASS}-rows w-full gap-2"):
         if not items:
-            _render_empty_state(state, lang, refresh)
+            _render_empty_state(state, lang, refresh, more_pool_total)
         for item in items:
             _render_row(item, lang)
 
     _render_pager(total, state, lang, refresh)
 
 
-def _render_empty_state(state: Dict[str, Any], lang: str, refresh) -> None:
+def _render_empty_state(state: Dict[str, Any], lang: str, refresh,
+                        more_pool_total: Any = None) -> None:
     """`ok` with ZERO rows -- the fourth state, and the only honest zero.
 
     It used to be four grey words in an otherwise empty column. An empty result
@@ -1473,7 +1528,7 @@ def _render_empty_state(state: Dict[str, Any], lang: str, refresh) -> None:
         ui.label(tr("No results found")).classes(
             f"{RESULTS_CLASS}-empty-message text-lg font-bold"
         )
-        _render_pool_invite(state, lang, refresh)
+        _render_pool_invite(state, lang, refresh, more_pool_total)
 
 
 def _render_outage_state(status: Optional[str], lang: str, refresh) -> None:
@@ -1663,7 +1718,31 @@ def _render_active_filters(state: Dict[str, Any], lang: str, refresh) -> None:
         clear.classes(f"{ACTIVE_FILTERS_CLASS}-clear")
 
 
-def _render_pool_invite(state: Dict[str, Any], lang: str, refresh) -> None:
+def _pool_invite_body(more_pool_total: Any, lang: str) -> str:
+    """The invitation's main-pool sentence, WITH the second pool's size when the
+    artifact supplied one and without it when it did not.
+
+    The degradation is the whole reason this is a function. `int(None)` raises,
+    `str(None)` prints "None", and `int(x) or 0` prints a zero -- three ways for
+    a missing figure to become a visible wrong one. A value that is not a
+    POSITIVE INTEGER is treated as absent and the digit-free sentence is
+    returned unchanged: a size of zero is not a thing to advertise either, and
+    on this artifact it would mean the read is wrong rather than that the pool
+    is empty.
+    """
+    try:
+        count = int(more_pool_total)
+    except (TypeError, ValueError):
+        count = 0
+    if count <= 0:
+        return copy_text("pool_invite_body", lang).format(
+            bucket=bucket_name(False, lang))
+    return copy_text("pool_invite_body_counted", lang).format(
+        count=f"{count:,}", bucket=bucket_name(False, lang))
+
+
+def _render_pool_invite(state: Dict[str, Any], lang: str, refresh,
+                        more_pool_total: Any = None) -> None:
     """The second pool, introduced WHERE THE READER IS LOOKING.
 
     A body of identifications comparable in size to the one on display was
@@ -1688,16 +1767,36 @@ def _render_pool_invite(state: Dict[str, Any], lang: str, refresh) -> None:
     assertions at an element in the results region -- where `RESULTS_CLASS` in
     the ancestor set is exactly what one of them fails on.
 
-    NO COUNT, in either state, and no lure figure: adding one would be an owner
-    ruling, not a designer's choice, and this design deliberately does not need
-    one. No quality word, no correctness verdict, and no percentage -- the whole
-    strip is digit-free.
+    THE SECOND POOL'S SIZE (owner ruling, 2026-08-05). It carried no number
+    anywhere and this design deliberately did not need one; the owner has now
+    ruled that the size may be shown, and this strip -- where a reader decides
+    whether to go and look -- is where it goes. THREE things that ruling does
+    NOT move, each with a test:
+
+    * the BUCKET CONTROL stays digit-free (ruling T). The figure lives here and
+      never there;
+    * it is a SIZE, not a quality figure. The prohibition on the owner's
+      assessment of that pool becoming a percentage, a rate, an interval or a
+      score is untouched and absolute; a count of what is IN a pool is a
+      different kind of fact from a judgement about it;
+    * the FRAMING is unchanged. The second pool means the evidence did not meet
+      the main-pool rule -- never "probably wrong", never "leftovers", and never
+      "findings you are missing".
+
+    `more_pool_total` arrives from the artifact through `meta.more_pool_total`
+    (ruling U: read at request time, never a literal). When it is ABSENT -- an
+    older sidecar, a launch read that failed, the render-smoke sentinel envelope
+    -- this renders exactly the digit-free sentence it always did. A missing
+    figure must never print as `0`, as `None`, or as a gap in a sentence.
+
+    The SECOND-BUCKET state carries no figure at all: a reader already inside
+    that pool is looking at its own result bar, which states the total on the
+    same basis as the rows beside it.
     """
     in_main = state["bucket"] == BUCKET_MAIN
     if in_main:
         heading = copy_text("pool_invite_heading", lang)
-        body = copy_text("pool_invite_body", lang).format(
-            bucket=bucket_name(False, lang))
+        body = _pool_invite_body(more_pool_total, lang)
         action = disclosure_toggle(TOGGLE_MORE_MATCHES, lang)
         target = BUCKET_MORE
     else:
