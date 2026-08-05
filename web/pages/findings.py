@@ -531,18 +531,36 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
         "en": "How to read this page",
         "he": "איך לקרוא את הדף הזה",
     },
-    # Why the candidacy switch is inert while the row unit is a work. The axis
-    # asks about ONE work on ONE fragment; a work row covers many, so the
-    # service does not offer the combination at all -- and a control that
-    # silently stopped filtering would be worse than one that says it cannot.
+    # Why the candidacy switch is inert while the row unit is a work -- and,
+    # crucially, WHAT STILL WORKS THERE.
+    #
+    # Owner, 2026-08-05: "in each work we can show only those mss we want, i.e.
+    # only divergent". He was right, and the previous wording was over-broad in a
+    # way that mattered. It said only "Not offered while each row is a work",
+    # sitting on a card that holds TWO controls -- so it read as if the whole
+    # card were dead, when in fact only ONE axis is withdrawn.
+    #
+    # Measured against the served artifact: `divergence=only` on the per-work
+    # unit builds a real predicate (`novelty_status IN (...)` before the GROUP
+    # BY), 302 of 478 main-pool works carry at least one divergent
+    # identification, and 275 of them carry BOTH kinds -- so on the majority of
+    # works, narrowing to the disagreements genuinely changes what the reader
+    # sees. That is not a hypothetical the note was entitled to write off.
+    #
+    # Only CANDIDACY is inert, and for a reason specific to it: it is a verdict
+    # about one work on one fragment, and `novelty_status` is NULL on a mixed
+    # group by construction, so there is nothing for it to test. The divergence
+    # flag is `MAX(...)` over the group, which is exactly why it survives
+    # grouping. The note now says both halves.
     "novelty_unit_note": {
         "en": (
-            "Not offered while each row is a work: this asks about one work on "
-            "one fragment, and a work row covers many fragments."
+            "Candidacy asks about one work on one fragment, so it is not "
+            "offered while each row is a work. The catalogue-disagreement "
+            "filter beside it still applies."
         ),
         "he": (
-            "לא מוצע כאשר כל שורה היא חיבור: השאלה נוגעת לחיבור אחד בקטע אחד, "
-            "ושורת חיבור מאגדת קטעים רבים."
+            "מועמדות נוגעת לחיבור אחד בקטע אחד, ולכן היא אינה מוצעת כאשר כל "
+            "שורה היא חיבור. הסינון של מחלוקות עם הקטלוג שלצידה עדיין פעיל."
         ),
     },
 }
@@ -2691,7 +2709,8 @@ def _child_state(state: Dict[str, Any], axis: str, value: str) -> Dict[str, Any]
     return child
 
 
-async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any]) -> Dict[str, Any]:
+async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any],
+                          page: int = 1) -> Dict[str, Any]:
     """One grouped row's children, through the SHIPPED findings read.
 
     No new query and no new service entry point -- `_build_findings_filter`
@@ -2718,6 +2737,9 @@ async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any]) -> Dic
             item.get("unit"), axis)
         return unavailable_envelope_shape()
     child = _child_state(state, axis, value)
+    # The CHILD list's own page, not the reader's page through the parent list.
+    # Clamped at 1 so a caller cannot ask for page 0 or a negative offset.
+    child["page"] = max(1, int(page or 1))
     return await get_findings_enveloped(
         child["unit"],
         bucket=child["bucket"],
@@ -2780,8 +2802,8 @@ def _render_row(item: Dict[str, Any], lang: str,
     """
     loader = None
     if state is not None:
-        async def loader(row, _state=dict(state)):          # noqa: F811
-            return await _fetch_children(_state, row)
+        async def loader(row, page=1, _state=dict(state)):   # noqa: F811
+            return await _fetch_children(_state, row, page)
 
     rows.render_finding_row(item, lang, sidecar_version=sidecar_version,
                             load_children=loader, preview_url=preview_url)

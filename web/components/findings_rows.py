@@ -401,6 +401,13 @@ _COPY: Dict[str, Dict[str, str]] = {
         "en": "Showing {shown} of {count}",
         "he": "מוצגות {shown} מתוך {count}",
     },
+    # The route to the rest of the group. Named as an ACTION on the same
+    # population the line beside it just counted, so the pair reads as one
+    # statement: this much of that many, and here is how to see more.
+    "expand_more": {
+        "en": "Show more",
+        "he": "הצגת עוד",
+    },
     # -- THE PREVIEW, on the identification leaf only. "Preview" rather than
     #    "open": it does not leave the page, and a reader who expects to leave
     #    and does not is a reader who lost their filters.
@@ -1288,14 +1295,47 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
     """
     body = ui.column().classes(f"{ROW_CHILDREN_CLASS} w-full gap-1")
     body.style("display: none;")
-    state: Dict[str, Any] = {"open": False, "loaded": False}
+    #: `page` is the child list's OWN page, independent of the reader's page
+    #: through the parent list. `shown` accumulates across pages so the extent
+    #: line can say how much of the group is on screen after "show more".
+    state: Dict[str, Any] = {"open": False, "loaded": False, "page": 1,
+                             "shown": 0}
+    #: Holds the CURRENT extent line so a later page can replace it rather than
+    #: add a second one -- two extent lines would be two different claims about
+    #: the same group. Declared before the closures that rebind it.
+    extent: Dict[str, Any] = {"holder": None}
     button = ui.button(copy_text("expand_open", lang)).props(
         "flat dense size=sm no-caps").classes(f"{ROW_EXPANDER_CLASS} dnote")
 
-    async def _load() -> None:
-        body.clear()
+    async def _load(_event=None, *, append: bool = False) -> None:
+        """One page of children. `append` keeps what is already on screen.
+
+        `_event` is accepted and ignored so this can be bound directly to the
+        retry button: NiceGUI's `on_click=` passes the click arguments
+        POSITIONALLY, and a keyword-only signature would raise `TypeError` the
+        first time a reader pressed Retry -- a retry affordance that cannot
+        retry, on the failure path, which is where it is the only way forward.
+
+        The heaviest work in the served artifact carries 2,981 identifications
+        against a 25-row child page, so WITHOUT a route to the rest, "Showing 25
+        of 2,981" is a dead end that names its own incompleteness -- which is
+        worse than a bounded list, because the reader can see what they are
+        being denied and cannot act on it.
+        """
+        if not append:
+            # `body.clear()` DESTROYS the extent element, so the handle kept for
+            # replacing it must be FORGOTTEN here -- `.delete()` on an
+            # already-removed element raises `ValueError` out of NiceGUI's own
+            # child list. Found by a control that made show-more reload with
+            # `append=False`; I could not then construct a shipped sequence that
+            # reaches it, so this is invariant maintenance (clearing a container
+            # invalidates handles into it) rather than a fix for a reachable bug.
+            # Recorded that way because the two are different claims.
+            body.clear()
+            extent["holder"] = None
+            state["shown"] = 0
         try:
-            envelope = await load_children(item)
+            envelope = await load_children(item, state["page"])
         except Exception:
             # The value is never echoed -- an artifact-derived id in a reader's
             # error line is the D-25 egress class error paths are scanned for.
@@ -1320,6 +1360,13 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
             # the default is for a hand-built mapping in a probe, never for a
             # real read.
             total = int((envelope or {}).get("total") or 0)
+            state["shown"] = state["shown"] + len(children)
+            if extent["holder"] is not None:
+                # The previous page's extent line and its "show more" are
+                # replaced rather than accumulated -- two of them would be two
+                # different claims about the same group.
+                extent["holder"].delete()
+                extent["holder"] = None
             for child in children:
                 with ui.column().classes(f"{ROW_CHILD_CLASS} w-full"):
                     # The child is a LEAF row, rendered by this same renderer --
@@ -1330,7 +1377,24 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
                     render_finding_row(child, lang,
                                        sidecar_version=sidecar_version,
                                        preview_url=preview_url)
-            _render_expansion_extent(len(children), total, lang)
+            extent["holder"] = _render_expansion_extent(
+                state["shown"], total, lang, on_more=_more)
+
+    async def _more(_event=None) -> None:
+        """The next page of children, appended in place.
+
+        Appended rather than paged-in-place because a reader who opened a work to
+        read its witnesses is building up a view of the group; replacing the list
+        under them would lose the one they were looking at.
+
+        `_event` is accepted and ignored: NiceGUI's `on_click=` passes the click
+        arguments positionally, so a zero-argument handler raises `TypeError` on
+        the FIRST press -- i.e. the button would have looked right and done
+        nothing. `_toggle` below is bound with `.on("click", ...)`, which does
+        not, and that asymmetry is exactly the kind a reviewer's eye slides over.
+        """
+        state["page"] = int(state["page"]) + 1
+        await _load(append=True)
 
     async def _toggle() -> None:
         state["open"] = not state["open"]
@@ -1343,8 +1407,12 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
     button.on("click", _toggle)
 
 
-def _render_expansion_extent(shown: int, total: int, lang: str) -> None:
-    """"Showing N of M" -- and ONLY when the two really differ.
+def _render_expansion_extent(shown: int, total: int, lang: str,
+                             on_more=None) -> Any:
+    """"Showing N of M", with a route to the rest -- and ONLY when the two differ.
+
+    Returns the element holding the line (so a later page can replace it), or
+    `None` when nothing was rendered.
 
     A bounded page rendered with no extent line reads as the whole group, which
     is a number the reader will believe. Written from the envelope's own `total`
@@ -1362,10 +1430,20 @@ def _render_expansion_extent(shown: int, total: int, lang: str) -> None:
     function to believe the guarantee is weaker than it is.
     """
     if total <= shown:
-        return
-    ui.label(copy_text("expand_partial", lang).format(
-        shown=_count(shown), count=_count(total))).classes(
-        f"{ROW_CHILDREN_STATE_CLASS} dnote text-xs")
+        return None
+    holder = ui.row().classes(
+        f"{ROW_CHILDREN_STATE_CLASS} items-center gap-2 flex-wrap")
+    with holder:
+        ui.label(copy_text("expand_partial", lang).format(
+            shown=_count(shown), count=_count(total))).classes("dnote text-xs")
+        # THE ROUTE TO THE REST. Without it the line names its own
+        # incompleteness and offers nothing -- and on the heaviest work in the
+        # served artifact that is 25 rows shown out of 2,981.
+        if on_more is not None:
+            ui.button(copy_text("expand_more", lang), on_click=on_more).props(
+                "flat dense size=sm no-caps").classes(
+                f"{ROW_CHILDREN_STATE_CLASS}-more")
+    return holder
 
 
 def _render_preview(item: Mapping[str, Any], lang: str, preview_url) -> None:

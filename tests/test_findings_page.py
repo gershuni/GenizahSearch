@@ -371,7 +371,6 @@ def test_per_user_state_goes_through_the_storage_chokepoint():
 
 import os as _os  # noqa: E402
 import re as _re  # noqa: E402
-import subprocess as _subprocess  # noqa: E402
 from contextlib import ExitStack  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
@@ -1331,16 +1330,60 @@ def test_page_load_dispatch_total_is_the_sum_over_the_reads_the_page_issues():
     )
 
 
-def test_this_plan_adds_no_css():
-    """The discovery CSS block was landed once, in plan 136-10."""
-    result = _subprocess.run(
-        ["git", "diff", "--stat", "HEAD", "--", "web/static/common.css"],
-        capture_output=True, text=True,
-        cwd=str(pathlib.Path(__file__).resolve().parents[1]),
-    )
-    assert result.stdout.strip() == "", (
-        f"web/static/common.css was modified by this plan: {result.stdout!r}"
-    )
+def test_the_mobile_rule_is_scoped_to_findings_row_anatomy():
+    """The discovery CSS block was landed once, in plan 136-10, and this test
+    used to assert the file was untouched thereafter.
+
+    THAT ASSERTION WAS RETIRED FOR A MEASURED DEFECT, not for convenience. The
+    landed block contained `.gs-discovery .row { flex-direction: column }` under
+    a 700px media query -- a DESCENDANT selector matching every NiceGUI
+    `ui.row()` inside the page (24 of them: the pool segment, the result
+    toolbar, the active-filter chips, the launch figures, the pager), turning
+    each into a vertical stack on any phone. It could not even have been doing
+    its stated job: the one element carrying `row` is `ROW_CLASS`, a
+    `ui.column()` that is already vertical, and nothing on either surface
+    carries `.side`. So the rule stacked everything except its own target.
+
+    A guard whose only effect is to freeze a bug in place is not protecting
+    anything. What the guard was FOR -- CSS not drifting quietly, and never
+    growing physical-direction properties that break RTL -- is now asserted
+    directly, over the file's content, which is a stronger statement than "no
+    diff" and cannot be satisfied by simply not touching a broken rule.
+    """
+    raw = (pathlib.Path(__file__).resolve().parents[1]
+           / "web" / "static" / "common.css").read_text(encoding="utf-8")
+
+    # COMMENTS ARE STRIPPED FIRST, and that is not a detail. A previous revision
+    # of this test scanned the raw file for the forbidden selector, and it went
+    # red on the CSS comment that EXPLAINS why the selector was removed -- the
+    # same trap `tests/render_smoke/test_findings_render_smoke.py` already
+    # documents for its own source scans. Prose about a defect is not the defect.
+    css = _re.sub(r"/\*.*?\*/", "", raw, flags=_re.S)
+
+    # The generic descendant form, composed so this assertion does not contain
+    # the literal it forbids.
+    generic = ".gs-discovery " + ".row"
+    assert generic not in css, (
+        "the unscoped mobile row rule is back: it matches every NiceGUI row "
+        "element on the page rather than the result rows, and stacks the filter "
+        "controls on every phone")
+
+    # The replacement targets the row's own meta line by CLASS.
+    assert ".gs-findings-row-meta" in css, (
+        "the findings mobile rule no longer targets the row meta line")
+
+    # ...and every property in the discovery block stays direction-neutral, so
+    # the page still mirrors in Hebrew. This is the half of the original guard's
+    # purpose that actually protects a reader.
+    start = css.find(".gs-findings-row-meta")
+    block = css[start:] if start >= 0 else ""
+    for physical in ("margin-left", "margin-right", "padding-left",
+                     "padding-right", "border-left", "border-right",
+                     "text-align: left", "text-align: right"):
+        assert physical not in block, (
+            f"the findings mobile block gained the physical property "
+            f"{physical!r} -- logical properties only, or the page stops "
+            "mirroring in RTL")
 
 
 # ---------------------------------------------------------------------------

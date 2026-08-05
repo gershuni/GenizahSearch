@@ -925,6 +925,22 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         ):
             _take(_render_component(driver) if marker is None
                   else tf.render_and_click(driver, marker))
+        # 12. SHOW MORE, pressed. The second page's rows, and the REPLACED extent
+        #     line, are behind a second click -- so opening alone leaves the
+        #     append path and the extent replacement unpainted, and the
+        #     line-granular gate says so by name. A child row on page 2 is
+        #     reader-facing text like any other, and it carries the seed.
+        client, _presses = tf._render_and_press(
+            lambda ln=lang, v=(f"discovery-v1-{seed}" if seed
+                               else "discovery-v1-capture"): fr.render_finding_row(
+                tf.finding_row(unit=tf.FINDINGS_UNIT_WORK, neutral_title=title),
+                ln, sidecar_version=v,
+                load_children=_children_loader(seed=seed, total=97),
+                preview_url=lambda _i: _seeded_preview_url(seed)),
+            [fr.ROW_EXPANDER_CLASS,
+             fr.ROW_CHILDREN_STATE_CLASS + "-more",
+             fr.ROW_CHILDREN_STATE_CLASS + "-more"])
+        _take(client)
     return texts, hrefs
 
 
@@ -932,7 +948,7 @@ def _children_loader(*, seed: Optional[str], total: Any):
     """A loader returning ONE child row, carrying the seed where a restricted
     value would be. The child is a real projected row, so the scan sees exactly
     what a reader sees inside an opened expansion."""
-    async def _load(_row):
+    async def _load(_row, _page=1):
         return tf.findings_envelope(
             [tf.finding_row(sys_id=seed) if seed else tf.finding_row()],
             total=total)
@@ -942,7 +958,7 @@ def _children_loader(*, seed: Optional[str], total: Any):
 def _failing_loader(*, raising: bool):
     """The two failure shapes an expansion can meet: a loader that RAISES and a
     loader returning a non-`ok` envelope. Both must paint the named failure."""
-    async def _load(_row):
+    async def _load(_row, _page=1):
         if raising:
             # Carries the sentinel a D-25 leak would look like, so a message
             # that echoed its cause would be caught by the scan rather than by

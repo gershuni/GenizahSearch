@@ -46,7 +46,6 @@ import io
 import logging
 import pathlib
 import re
-import subprocess
 from typing import Any, Dict, List, Mapping, Tuple
 
 import pytest
@@ -497,6 +496,80 @@ def _click_handlers(element) -> List[Any]:
     return out
 
 
+def _fire_click(handler):
+    """Invoke a click handler the way the SHIPPED click path does.
+
+    NiceGUI's `ui.button(on_click=fn)` registers `lambda _: handle_event(fn, ...)`
+    -- a one-argument wrapper -- while `element.on('click', fn)` registers `fn`
+    itself. So the two binding styles need to be called differently, and a helper
+    that always called with zero arguments could only ever drive one of them:
+    against the other it raises `TypeError`, which in a test reads as a broken
+    test rather than as the untested button it really is.
+
+    The arity is read from the signature rather than guessed, and a `TypeError`
+    is NOT swallowed -- a click that could not be delivered must fail loudly, or
+    a driven test degenerates into one that renders the closed state and asserts
+    against it.
+    """
+    import inspect as _inspect
+
+    try:
+        parameters = _inspect.signature(handler).parameters.values()
+        required = len([p for p in parameters
+                        if p.default is _inspect.Parameter.empty
+                        and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)])
+    except (TypeError, ValueError):                          # pragma: no cover
+        required = 0
+    return handler(None) if required else handler()
+
+
+def _render_and_press(paint, markers, *, index: int = 0):
+    """Paint, then press each marker in `markers` IN ORDER, all inside ONE
+    client and ONE running loop. Returns `(client, presses_delivered)`.
+
+    A sequence rather than a single click because the later affordances only
+    EXIST once an earlier one has been pressed -- show-more is rendered by the
+    expansion's own load -- so it has to be resolved after the press before it,
+    not up front.
+
+    Every step ABORTS BY NAME if its marker is absent or carries no handler, and
+    the delivered-press count is returned so a caller can assert presses actually
+    happened. A driven test that silently delivered nothing is the failure this
+    whole helper exists to prevent.
+    """
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+    holder: Dict[str, Any] = {"presses": 0}
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page("/_findings_smoke_probe")) as client:
+            with client:
+                result = paint()
+                if asyncio.iscoroutine(result):
+                    await result
+                for step, marker in enumerate(markers):
+                    targets = _elements_with_class(client, marker)
+                    assert targets, (
+                        f"_render_and_press: step {step} found no element with "
+                        f"{marker!r} -- the interaction stopped here, so nothing "
+                        "after it is measured")
+                    handlers = _click_handlers(targets[index])
+                    assert handlers, (
+                        f"_render_and_press: step {step}'s {marker!r} element "
+                        "has no click handler")
+                    for handler in handlers:
+                        outcome = _fire_click(handler)
+                        if asyncio.iscoroutine(outcome):
+                            await outcome
+                        holder["presses"] += 1
+        holder["client"] = client
+
+    asyncio.run(_run())
+    return holder["client"], holder["presses"]
+
+
 def render_and_click(paint, marker: str, *, index: int = 0):
     """Paint, then fire the click on the `marker` element INSIDE the same client
     and the same running loop, and return the client.
@@ -531,7 +604,7 @@ def render_and_click(paint, marker: str, *, index: int = 0):
                     "handler -- a click that fires nothing renders the closed "
                     "state and asserts against it")
                 for handler in handlers:
-                    outcome = handler()
+                    outcome = _fire_click(handler)
                     if asyncio.iscoroutine(outcome):
                         await outcome
         holder["client"] = client
@@ -1067,12 +1140,31 @@ def test_no_row_level_accent_rule_is_keyed_on_novelty():
     ASSERTION_COUNT["n"] += 1
 
 
-def test_the_component_adds_no_css():
-    result = subprocess.run(
-        ["git", "diff", "--stat", "HEAD", "--", "web/static/common.css"],
-        capture_output=True, text=True, cwd=str(REPO_ROOT))
-    assert result.stdout.strip() == "", (
-        f"web/static/common.css was modified by this plan: {result.stdout!r}")
+def test_the_component_styles_through_ratified_classes_not_new_rules():
+    """The COMPONENT adds no stylesheet rule of its own -- it paints ratified
+    classes and, where a state has no class, inline side-neutral values.
+
+    This replaced a `git diff --stat HEAD -- common.css` assertion, and the swap
+    was forced by a real defect rather than chosen: the landed block's
+    `.gs-discovery .row` mobile rule matched every `ui.row()` on the page and
+    stacked the filter controls on every phone, so the only thing the no-diff
+    guard could still do was hold that bug in place. `tests/test_findings_page.py`
+    now asserts the rule's SHAPE, which is what the guard was for.
+
+    What this test keeps is the component-side half: the module must not carry a
+    `<style>` block or an `ui.add_css`/`add_head_html` of its own, because a
+    second place styling this surface is how the two drift.
+    """
+    # CODE LINES ONLY -- the same discipline this file's other source scans use.
+    # A docstring that NAMES a forbidden construct in order to say it is
+    # forbidden is not an instance of it, and a raw-file scan fails on the
+    # explanation rather than on a defect.
+    code = _code_lines(COMPONENT_PATH)
+    for forbidden in ("add_css", "add_sass", "add_scss", "add_style",
+                      "add_head_html", "<" + "style"):
+        assert forbidden not in code, (
+            f"the row component injects styling via {forbidden!r} -- this "
+            "surface is styled in one place")
     ASSERTION_COUNT["n"] += 1
 
 
@@ -2531,7 +2623,7 @@ def test_a_grouped_row_expands_and_a_leaf_row_does_not():
     """The affordance appears on the unit where it has a meaning, and nowhere
     else. A leaf has no children; offering it an expander would open onto
     nothing."""
-    async def _load(_row):
+    async def _load(_row, _page=1):
         return findings_envelope([finding_row()])
 
     client = _client_render(lambda: fr.render_finding_row(
@@ -2551,7 +2643,7 @@ def test_the_children_are_the_SAME_row_anatomy_as_a_top_level_row():
     A child is given NO loader: a leaf has nothing under it, and passing one
     would build a tree out of a list.
     """
-    async def _load(_row):
+    async def _load(_row, _page=1):
         return findings_envelope([finding_row()], total=1)
 
     client = render_and_click(
@@ -2580,10 +2672,10 @@ def test_a_FAILED_expansion_says_so_and_never_renders_an_empty_body(shape):
     """An empty body after a failed read is indistinguishable from "this row has
     no matches underneath it", and one of those is an outage. The panel's own
     expansion returns silently on an exception -- this one must not."""
-    async def _raise(_row):
+    async def _raise(_row, _page=1):
         raise RuntimeError("probe")
 
-    async def _bad(_row):
+    async def _bad(_row, _page=1):
         return findings_envelope([], status=STATUS_UNAVAILABLE)
 
     loader = _raise if shape == "raised" else _bad
@@ -2603,7 +2695,7 @@ def test_a_BOUNDED_expansion_says_how_many_it_withheld():
     which is a number the reader will believe. Written from the envelope's own
     `total`, never from `len(items)` -- which cannot know what it was a page OF.
     """
-    async def _load(_row):
+    async def _load(_row, _page=1):
         return findings_envelope([finding_row()], total=97)
 
     client = render_and_click(
@@ -2613,7 +2705,7 @@ def test_a_BOUNDED_expansion_says_how_many_it_withheld():
     assert "97" in scoped_text(client, fr.ROW_CHILDREN_STATE_CLASS)
 
     # ...and NOT when the page IS the whole group, where the line would be noise.
-    async def _all(_row):
+    async def _all(_row, _page=1):
         return findings_envelope([finding_row()], total=1)
 
     whole = render_and_click(
@@ -2733,4 +2825,146 @@ def test_an_UNSUPPORTED_axis_never_reaches_the_service_as_a_dropped_keyword():
         "-- the expansion would have returned an UNPINNED page")
     assert envelope.get("status") != "ok", (
         "an expansion that cannot pin its group reported success")
+    ASSERTION_COUNT["n"] += 1
+
+
+# ---------------------------------------------------------------------------
+# "SHOW MORE" inside an expansion, and the two click-binding shapes.
+# ---------------------------------------------------------------------------
+
+def _multi_page_loader(record: list):
+    """A loader recording which child PAGE it was asked for, one row per page."""
+    async def _load(_row, page=1):
+        record.append(page)
+        return findings_envelope(
+            [finding_row(identification_id="child-page-%d" % page)], total=97)
+    return _load
+
+
+def test_show_more_appends_the_next_page_and_keeps_ONE_extent_line():
+    """The heaviest work in the served artifact carries 2,981 identifications
+    against a 25-row child page, so "Showing 25 of 2,981" with no route to the
+    rest is a dead end that names its own incompleteness -- worse than a bounded
+    list, because the reader can see what they are denied and cannot act.
+
+    APPENDS rather than replaces: a reader who opened a work is building up a
+    view of the group, and swapping the list under them loses the row they were
+    reading. And exactly ONE extent line survives each page -- two would be two
+    different claims about the same group.
+    """
+    pages: list = []
+    # ONE loop and ONE client for the whole interaction. An earlier revision of
+    # this test called `render_and_click` and then opened a SECOND event loop to
+    # press show-more; the first client was already closed, so the presses landed
+    # nowhere and `pages` stayed `[1]` -- the test failed loudly, which is the
+    # only reason it is written this way rather than looking correct and
+    # measuring one page.
+    client, pressed = _render_and_press(
+        lambda: fr.render_finding_row(
+            finding_row(unit=FINDINGS_UNIT_WORK), "en",
+            load_children=_multi_page_loader(pages)),
+        [fr.ROW_EXPANDER_CLASS,
+         fr.ROW_CHILDREN_STATE_CLASS + "-more",
+         fr.ROW_CHILDREN_STATE_CLASS + "-more"])
+
+    assert pressed == 3, f"only {pressed} of 3 presses were delivered"
+    assert pages == [1, 2, 3], f"show-more requested {pages}"
+    assert len(_elements_with_class(client, fr.ROW_CHILD_CLASS)) == 3, (
+        "the next page REPLACED the rows already on screen instead of appending")
+    assert len(_elements_with_class(client, fr.ROW_CHILDREN_STATE_CLASS)) == 1, (
+        "each page added its own extent line -- two claims about one group")
+    assert "3" in scoped_text(client, fr.ROW_CHILDREN_STATE_CLASS)
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_every_click_handler_this_surface_binds_can_actually_BE_clicked():
+    """Two binding styles, two arities, and the mismatch is invisible by reading.
+
+    `ui.button(on_click=fn)` registers `lambda _: ...` -- ONE argument -- while
+    `element.on("click", fn)` registers `fn` itself. A handler written
+    zero-argument and bound with `on_click=` raises `TypeError` on the FIRST
+    press: the button renders, looks right, and does nothing.
+
+    Both of this expansion's `on_click=` handlers had exactly that defect when
+    written (the retry button and show-more), and neither was caught by rendering
+    or by reading -- only by pressing. So this drives EVERY click handler on a
+    fully-opened row and asserts none raises.
+    """
+    pages: list = []
+
+    async def _drive():
+        from nicegui import core, ui
+        from nicegui.client import Client
+        core.loop = asyncio.get_running_loop()
+        _ensure_sim()
+        with Client(ui.page("/_findings_click_probe")) as client:
+            with client:
+                fr.render_finding_row(
+                    finding_row(unit=FINDINGS_UNIT_WORK), "en",
+                    sidecar_version="discovery-v1-SENTINEL",
+                    load_children=_multi_page_loader(pages),
+                    preview_url=lambda _i: "/browse?sys_id=X&embed=1")
+                pressed = 0
+                # Every clickable this row exposes, opened state included.
+                for marker in (fr.ROW_EXPANDER_CLASS,
+                               fr.ROW_CHILDREN_STATE_CLASS + "-more",
+                               fr.ROW_PREVIEW_CLASS + "-toggle"):
+                    for element in _elements_with_class(client, marker):
+                        for handler in _click_handlers(element):
+                            outcome = _fire_click(handler)
+                            if asyncio.iscoroutine(outcome):
+                                await outcome
+                            pressed += 1
+                return pressed
+
+    pressed = asyncio.run(_drive())
+    # The expander, its show-more (which only exists once opened) and the child
+    # leaf's preview toggle -- so a real press count, not zero dressed as a pass.
+    assert pressed >= 3, (
+        f"only {pressed} click handler(s) were driven; this test cannot show "
+        "that the surface's buttons work")
+    assert pages, "the expansion never issued a child read"
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_an_outage_AFTER_a_good_page_shows_the_failure_instead_of_raising():
+    """A good page then an outage: the reader gets the NAMED failure.
+
+    A note on what this test does and does not establish, because the first
+    version of this docstring overclaimed and the measurement contradicted it.
+
+    A control that made show-more reload with `append=False` raised `ValueError`
+    out of NiceGUI's child list: `body.clear()` destroys the extent element, so
+    the handle kept for replacing it was stale and `.delete()` failed. The fix is
+    to forget the handle whenever the body is cleared, and it is right on its own
+    terms -- clearing a container invalidates handles into it.
+
+    But I could NOT construct a shipped sequence that reaches it: `_load` is
+    re-entered only by retry and by show-more, and neither leaves a stale handle
+    once the clear-path forgets it. So this is a REGRESSION test for the
+    behaviour a reader depends on (an outage after a successful page is reported,
+    not raised), not proof that the stale handle was reachable in production.
+    Stated plainly rather than left implied, because "found by a control" and
+    "reachable by a reader" are different claims and only the first is measured.
+    """
+    calls = {"n": 0}
+
+    async def _load(_row, page=1):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return findings_envelope([finding_row()], total=97)
+        return findings_envelope([], status=STATUS_UNAVAILABLE)
+
+    # Open (good page, renders an extent line), then press show-more, whose load
+    # fails -- the sequence that used to raise.
+    client, pressed = _render_and_press(
+        lambda: fr.render_finding_row(finding_row(unit=FINDINGS_UNIT_WORK), "en",
+                                      load_children=_load),
+        [fr.ROW_EXPANDER_CLASS, fr.ROW_CHILDREN_STATE_CLASS + "-more"])
+
+    assert pressed == 2, f"only {pressed} of 2 presses were delivered"
+    assert calls["n"] == 2, "the second load never ran"
+    assert fr.copy_text("expand_failed", "en") in scoped_text(
+        client, fr.ROW_CHILDREN_STATE_CLASS), (
+        "the outage after a good page rendered no named failure")
     ASSERTION_COUNT["n"] += 1
