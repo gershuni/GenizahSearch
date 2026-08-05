@@ -323,6 +323,59 @@ nearly done" inverted their meaning.
 the 349 difference is **R-source**, correctly absent from gen-2 and to be kept out of v3). So CERT-01 still
 needs no re-registration on corpus-expansion grounds. Only the *explanation* for the missing ids was wrong.
 
+#### What is actually in the 2,686, and why each part is dropped
+
+Measured per genre (work counts match `134-RESEARCH.md` §"Genre signal" exactly — 2,208 piyyut / 446
+documentary / 32 modern, so this reproduces the figure the policy was written against):
+
+| genre | works | shipped claims | headline |
+|---|---|---|---|
+| piyyut & prayer | 1,617 | 36,753 | 22,186 |
+| Andalusian Hebrew poetry | 590 | 4,076 | 2,940 |
+| letters | 426 | 818 | 636 |
+| essays / journalism / publicistic | 32 | 464 | 316 |
+| Judean-Desert documents | 6 | 99 | 56 |
+| deeds · epigraphy | 14 | 24 | 19 |
+
+**Overwhelmingly liturgy and poetry: 82% of the works, 87% of the shipped claims.** "Piyyut/documentary" as a
+label undersells what is being excluded.
+
+**Three different reasons, not one policy:**
+
+1. **Liturgy/piyyut — a MEASURED precision failure, not a taste judgement.** CERT-01 measured that **one
+   liturgical work caused 45% of all error, and the top three 68%** (`135-09-CERT01-MEASUREMENT.md` §4). The
+   mechanism, owner-identified during grading: a later halakhic code *embeds the full liturgy*, so a Genizah
+   page carrying a common prayer matches **the code rather than the prayer-book** — "containment, not
+   coincidence", hence systematic. And the existing safeguard cannot catch it: D-17 demotes the chronologically
+   later work, but here the code **postdates the liturgy it quotes**, so demoting it is backwards. A
+   containment-aware rule is the real fix and is already logged as a v3 candidate. **Note the error above was
+   measured on liturgical works that ARE included — so admitting 1,617 more would amplify the system's
+   single worst known failure mode.**
+2. **Documentary (letters, deeds, epigraphy, Judean-Desert) — the machinery does not apply.** Discovery asks
+   "which manuscripts witness this work"; a letter or a deed is a *unique document*, not a text copied across
+   witnesses. *(This is the evident rationale rather than a documented one — `134-RESEARCH.md` records the
+   exclusion without arguing it, so treat it as weaker-sourced than reason 1.)*
+3. **Modern (32 works) — post-Genizah.** Study/journalism/publicistic material. `134-RESEARCH.md` marks these
+   "owner call — likely exclude as post-Genizah", and `docs/OPEN_ISSUES.md` already flags a 19th-century
+   maskilic memoir carrying 6 shipped claims as possibly not belonging in the reference corpus at all. Closer
+   to a reference-corpus data-quality issue than a scope choice.
+
+**What is genuinely lost by excluding them:** piyyut is one of the largest and most celebrated bodies of Cairo
+Genizah material, so this is a real coverage gap — 22,186 headline claims is not a rounding error. The
+exclusion is defensible *because the system currently gets this class wrong in a specific, measured way*, not
+because the material is uninteresting.
+
+**And gen-2's two-surface router does NOT solve it.** The obvious hope — let the coverage router send
+quotations to the weaker "parallel" surface and keep the headline clean — fails on measurement: **61% of
+liturgical shipped claims (22,186 of 36,753) are routed to `same_work`, i.e. the headline.** So admitting
+liturgy would need an explicit liturgy/containment gate, which is the handoff's "conservative headline option"
+(§5) rather than something the router gives free.
+
+**Three real options, in increasing cost:**
+- **(a) keep excluded** until containment-aware routing exists — recommended for this bake;
+- **(b) admit to the parallel surface only**, behind an explicit liturgy gate (not the router);
+- **(c) build the containment fix in v3, then admit** — the honest full solution, and a phase of work.
+
 **Recommended default: honour D-06** — take the 52, leave the 2,686. It costs 0.03% of evidence and no shipped
 claims, keeps v3 comparable to v2, and leaves the "should discovery cover piyyut and documentary material?"
 question to be asked on its own terms rather than smuggled in through a bake.
