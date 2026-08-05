@@ -214,6 +214,15 @@ def _work_summary_source(**overrides) -> Dict[str, Any]:
 def _related_page_source(**overrides) -> Dict[str, Any]:
     row = {
         'related_page_id': '990000000000000945_IE1_P000001_FL9',
+        # The manuscript this page belongs to, as the joined query resolves it
+        # (2026-08-05). Non-null here so the allowlist-coverage assertion sees
+        # every field, and so the capture paints a real shelfmark -- which is
+        # projection text, i.e. exactly where a restricted corpus name arrives.
+        'sys_id': '990000000000000945',
+        'library_code': 'CUL',
+        'shelfmark_display': 'T-S 12.945',
+        'page_number': 1,
+        'display_missing': False,
         'evidence_id': 'd' * 64,
         'evidence_source': ids.EVIDENCE_SOURCE_PROPAGATED,
         'confidence_band': ids.CONFIDENCE_BAND_NOT_EVALUATED,
@@ -1955,8 +1964,17 @@ def _lazy_read_envelopes(seed: Optional[str], lang: str) -> Dict[str, Any]:
                   'filter_basis': 'displayed_band', 'anchor_excluded': True}),
         'related_ok': make_envelope(
             STATUS_OK,
-            [surface_safe_related_page(_related_page_source())], 1,
-            meta={'unit': 'distinct_opposite_pages'}),
+            [surface_safe_related_page(_related_page_source(
+                **({'shelfmark_display': seed} if seed else {}))),
+             # A related page whose manuscript is NOT in the display index. The
+             # row then renders a NAMED state -- never the composite page id --
+             # and that named state is rendered text, so it belongs in the
+             # capture beside the shelfmark it replaces.
+             surface_safe_related_page(_related_page_source(
+                 related_page_id='990000000000000946_IE1_P000002_FL11',
+                 sys_id=None, library_code=None, shelfmark_display=None,
+                 page_number=None, display_missing=True))],
+            2, meta={'unit': 'distinct_opposite_pages'}),
         'outage': unavailable_envelope(meta={'reason': 'query_failed'}),
     }
 

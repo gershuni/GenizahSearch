@@ -141,10 +141,23 @@ def work_summary_row(**overrides):
     return row
 
 
+#: The related-page row's NAME, as the joined query supplies it. The composite
+#: `related_page_id` stays in the fixture because the projection carries it --
+#: what changed is that nothing downstream may render it.
+RELATED_SHELFMARK = 'T-S 12.999'
+RELATED_SYS_ID = '990051079570205172'
+RELATED_PAGE_ID = f'{RELATED_SYS_ID}_IE1_P000003_FL7'
+
+
 def related_page_row(**overrides):
     row = {field: None for field in SURFACE_RELATED_PAGE_FIELDS}
     row.update({
-        'related_page_id': 'page-99',
+        'related_page_id': RELATED_PAGE_ID,
+        'sys_id': RELATED_SYS_ID,
+        'library_code': 'CUL',
+        'shelfmark_display': RELATED_SHELFMARK,
+        'page_number': 3,
+        'display_missing': False,
         'evidence_id': 'ev-99',
         'evidence_source': ids.EVIDENCE_SOURCE_PROPAGATED,
         'confidence_band': ids.CONFIDENCE_BAND_NOT_EVALUATED,
@@ -562,7 +575,8 @@ def test_related_pages_default_is_not_requested_never_an_empty_result(spy):
     text = _scoped_text(client, dp.PANEL_RELATED_CLASS)
     assert ds.related_pages_count_line(4, 'en') in text, text
     assert ds.related_pages_label('en') in text
-    assert 'page-99' not in text, 'rows rendered without the toggle'
+    assert RELATED_SHELFMARK not in text, 'rows rendered without the toggle'
+    assert RELATED_PAGE_ID not in text
     assert spy.calls == [], 'the lazy read was issued with the panel'
 
 
@@ -586,7 +600,99 @@ def test_opening_the_related_toggle_issues_the_lazy_read_once_and_renders(spy):
     assert seen['after_reopen'] == ['get_related_pages_enveloped'], (
         'a second open issued another read')
     text = _scoped_text(client, dp.PANEL_RELATED_CLASS)
-    assert 'page-99' in text, 'the lazily-loaded rows never rendered'
+    assert RELATED_SHELFMARK in text, 'the lazily-loaded rows never rendered'
+    # ...and the COMPOSITE PAGE ID is not what the reader was shown.
+    assert RELATED_PAGE_ID not in text, (
+        'the panel rendered the internal page id to a reader')
+
+
+# ===========================================================================
+# TASK F (2026-08-05) -- a candidate alignment NAMES ITS MANUSCRIPT.
+#
+# The section rendered `990051620920205171_IE167198813_P000003_FL167198817` --
+# a raw internal composite identifier, to a scholarly audience. The owner
+# reported it. The fix resolves the name in the SERVICE (one joined query) and
+# renders it in the findings page's own row anatomy: the library chip IS the
+# badge, and the shelfmark is the link.
+# ===========================================================================
+
+@pytest.mark.parametrize('lang', ('en', 'he'))
+def test_a_related_page_row_shows_a_library_chip_and_a_linked_shelfmark(spy, lang):
+    """The whole defect, in one assertion pair: a shelfmark a reader can act on,
+    and NO composite id anywhere in the section."""
+    spy.results['get_related_pages_enveloped'] = make_envelope(
+        STATUS_OK, [related_page_row()], 1,
+        meta={'unit': 'distinct_opposite_pages'})
+    model = model_for(claim_items=[claim_row()], related_total=1, lang=lang)
+
+    async def driver(client):
+        toggle = [b for b in _buttons(client)
+                  if ds.disclosure_toggle(ds.TOGGLE_ALSO_SHARES_TEXT, lang) in (b.text or '')]
+        assert toggle, 'no related-pages toggle'
+        await _click(toggle[0])
+
+    client = _render(model, driver=driver)
+    section = _elements_with_class(client, dp.PANEL_RELATED_CLASS)[0]
+    text = '\n'.join(_subtree_texts(section))
+
+    assert RELATED_PAGE_ID not in text, (
+        f'the internal page id reached a reader: {text!r}')
+    assert RELATED_SHELFMARK in text, f'no shelfmark in the row: {text!r}'
+
+    chips = [el for el in section.descendants()
+             if 'chip' in (el._classes or []) and (el.text or '') == 'CUL']
+    assert chips, 'the library chip -- the badge the owner asked for -- is absent'
+
+    links = [el for el in section.descendants() if type(el).__name__ == 'Link']
+    assert len(links) == 1, f'the shelfmark is not a link ({len(links)} links)'
+    assert links[0].text == RELATED_SHELFMARK
+    # The FOLIO, not just the manuscript: `/browse` takes `page` as an int, and
+    # an alignment is about one page of the other manuscript.
+    assert (links[0]._props or {}).get('href') == (
+        f'/browse?sys_id={RELATED_SYS_ID}&page=3'), (
+        'the shelfmark does not link to the folio the alignment is about')
+
+
+@pytest.mark.parametrize('lang', ('en', 'he'))
+def test_a_manuscript_missing_from_the_display_index_is_named_not_raw(spy, lang):
+    """The degraded path is where a raw-id fallback would live, so it is
+    asserted directly: an unresolvable manuscript gets a NAMED state and the
+    composite id still does not reach the reader."""
+    spy.results['get_related_pages_enveloped'] = make_envelope(
+        STATUS_OK, [related_page_row(
+            sys_id=None, library_code=None, shelfmark_display=None,
+            display_missing=True)], 1,
+        meta={'unit': 'distinct_opposite_pages'})
+    model = model_for(claim_items=[claim_row()], related_total=1, lang=lang)
+
+    async def driver(client):
+        toggle = [b for b in _buttons(client)
+                  if ds.disclosure_toggle(ds.TOGGLE_ALSO_SHARES_TEXT, lang) in (b.text or '')]
+        await _click(toggle[0])
+
+    client = _render(model, driver=driver)
+    section = _elements_with_class(client, dp.PANEL_RELATED_CLASS)[0]
+    text = '\n'.join(_subtree_texts(section))
+
+    assert RELATED_PAGE_ID not in text, (
+        'the composite id was printed as a fallback -- exactly how this defect '
+        'comes back')
+    assert dp._RELATED_ROW_COPY['display_missing'][lang] in text, text
+    assert not [el for el in section.descendants() if type(el).__name__ == 'Link'], (
+        'a row with no shelfmark rendered a link to nowhere')
+
+
+def test_the_renderer_cannot_print_the_composite_page_id_at_all():
+    """A SOURCE-level guarantee beside the behavioural ones: the panel module
+    never reads `related_page_id`, and the model never emits it, so there is
+    nothing to fall back to on any path anybody adds later."""
+    import shared.discovery_panel_model as pm
+
+    assert 'related_page_id' not in _read(PANEL_PATH), (
+        'the panel reads the composite page id again')
+    row = pm.related_page_row(related_page_row())
+    assert 'related_page_id' not in row, (
+        'the model emits the composite page id to the renderer')
 
 
 def test_a_repeat_lazy_read_with_identical_arguments_costs_no_crossing(spy):

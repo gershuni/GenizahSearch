@@ -699,6 +699,7 @@ READER_TEXT_FIELDS: Mapping[str, str] = {
     "page_count": "numeric: COUNT(DISTINCT page_id), DiscoveryService",
     "identification_page_count": "numeric: discovery_identification.page_count",
     "evidence_row_count": "numeric: COUNT(*) over discovery_evidence",
+    "page_number": "numeric: the folio number parsed out of the page id's own shape, shared/discovery_service.py::_page_number_from_page_id",
     "count": "numeric: the facet count, DiscoveryService._project_facets",
     "work_count": "numeric: COUNT(DISTINCT work_id), DiscoveryService findings query",
     "manuscript_count": "numeric: COUNT(DISTINCT sys_id), DiscoveryService",

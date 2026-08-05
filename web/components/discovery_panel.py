@@ -57,6 +57,7 @@ from shared.discovery_panel_model import (
     ROWS_OUTAGE,
     ROWS_POPULATED,
     PanelModel,
+    related_page_row,
 )
 from shared.discovery_surface_projection import STATUS_OK, is_outage
 from web.translations import tr
@@ -328,6 +329,70 @@ def _render_identification_row(row: Mapping[str, Any], lang: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: The related-page row's own bilingual copy. TWO strings, and both are about
+#: what the row could not resolve rather than about the match itself -- the
+#: match framing ("unevaluated candidate alignments") stays on the section
+#: label, unchanged.
+_RELATED_ROW_COPY = {
+    # A manuscript with no `manuscript_display` row. Named, never blanked, and
+    # never the composite id: printing the internal identifier as a fallback is
+    # exactly how this defect would come back.
+    'display_missing': {
+        'en': 'Manuscript not in the display index',
+        'he': 'כתב היד אינו במפתח התצוגה',
+    },
+    # The folio, when the id carried one. A bare number beside a shelfmark
+    # reads as part of the shelfmark, so the word is not optional.
+    'page_number': {
+        'en': 'page {number}',
+        'he': 'דף {number}',
+    },
+}
+
+
+def _render_related_page_row(row: Mapping[str, Any], lang: str) -> None:
+    """ONE candidate alignment, in the findings page's own row anatomy: the
+    library chip, then the shelfmark as a LINK, then quiet metadata.
+
+    Reusing that anatomy is the point -- it is the vocabulary the corpus-wide
+    surface already established (`web/components/findings_rows.py::
+    _render_shelfmark`), the `chip` class IS the badge, and a second anatomy for
+    the same object is how two surfaces stop looking like one product.
+
+    THE COMPOSITE PAGE ID CANNOT REACH THIS FUNCTION. `related_page_row` does
+    not emit it, on either path, so there is nothing here to fall back to and
+    nothing to forget: an unresolvable manuscript renders a NAMED state.
+
+    The shelfmark is Latin script inside a Hebrew line. It is its own element in
+    a flex row rather than concatenated into a sentence, which is how the
+    findings rows already solve the boundary reorder -- not re-solved here.
+    """
+    with ui.row().classes('items-center gap-2 row flex-wrap'):
+        if row.get('display_missing'):
+            ui.label(_RELATED_ROW_COPY['display_missing'][lang]).classes('dnote')
+        else:
+            ui.label(str(row.get('library_code') or '')).classes('chip')
+            shelfmark = str(row.get('shelfmark_display') or '')
+            sys_id = row.get('sys_id')
+            page_number = row.get('page_number')
+            # The SAME target the findings row links to, built the same way
+            # (`web/components/findings_rows.py::_render_shelfmark`; there is no
+            # shared builder to call, and this is not the place to invent a
+            # second one). `page` is added when the id carried a folio number --
+            # `/browse` takes it as `page: int` (`web/main.py::
+            # browse_page_route`), so the link lands on the FOLIO the alignment
+            # is about rather than on the manuscript's first page.
+            target = f'/browse?sys_id={sys_id}'
+            if isinstance(page_number, int):
+                target = f'{target}&page={page_number}'
+            ui.link(shelfmark, target)
+        page_number = row.get('page_number')
+        if isinstance(page_number, int):
+            ui.label(
+                _RELATED_ROW_COPY['page_number'][lang].format(number=page_number)
+            ).classes('dnote')
+
+
 def _render_related_pages(section: Mapping[str, Any], lang: str, page_id: Optional[str],
                           on_retry=None) -> None:
     with ui.element('div').classes(f'{PANEL_RELATED_CLASS} dbody'):
@@ -357,9 +422,18 @@ def _render_related_pages(section: Mapping[str, Any], lang: str, page_id: Option
                         'retry': ds.retry_label(lang),
                     }, on_retry=_load)
                     return
-                items = list((envelope or {}).get('items') or section.get('rows') or ())
-                for item in items:
-                    ui.label(str(item.get('related_page_id') or '')).classes('dnote')
+                # BOTH paths project through the model's own row function: the
+                # section's rows were built by it, and a freshly-loaded envelope
+                # goes through it here. That is what keeps the eager and the
+                # lazy path from drifting -- and what means neither of them ever
+                # holds the composite page id.
+                if envelope is not None:
+                    rows = [related_page_row(item)
+                            for item in (envelope.get('items') or ())]
+                else:
+                    rows = list(section.get('rows') or ())
+                for row in rows:
+                    _render_related_page_row(row, lang)
 
         async def _load() -> None:
             from web import discovery as _discovery

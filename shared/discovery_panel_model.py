@@ -1144,6 +1144,34 @@ def _lead_sort_key(row: Mapping[str, Any]):
 # ---------------------------------------------------------------------------
 
 
+def related_page_row(item: Mapping[str, Any]) -> Dict[str, Any]:
+    """ONE related-page row as the panel may render it -- and the composite
+    `related_page_id` is deliberately NOT in it.
+
+    The row used to carry that id and the panel printed it, so a scholarly
+    surface showed `990051620920205171_IE167198813_P000003_FL167198817` where a
+    shelfmark belongs. Leaving the id out of the emitted row is what makes the
+    fix structural rather than a habit: a renderer cannot print a field it was
+    never given, on the happy path or on the degraded one.
+
+    PUBLIC because the renderer needs it on the LAZY path too -- the toggle
+    fetches an envelope and paints it without rebuilding the whole model, so
+    both paths have to project through this one function or they will drift.
+    """
+    return {
+        "sys_id": item.get("sys_id"),
+        "library_code": item.get("library_code"),
+        "shelfmark_display": item.get("shelfmark_display"),
+        "page_number": item.get("page_number"),
+        # Trust the service's own flag when it sent one; fall back to the
+        # fields themselves, so a row from an older envelope still resolves to
+        # a named state rather than to a half-blank line.
+        "display_missing": bool(item.get("display_missing")) or not (
+            item.get("library_code") and item.get("shelfmark_display")),
+        "evidence_row_count": item.get("evidence_row_count"),
+    }
+
+
 def _related_pages(bundle: PanelServiceBundle) -> Dict[str, Any]:
     lang = bundle.lang
     count_envelope = bundle.related_count
@@ -1182,12 +1210,7 @@ def _related_pages(bundle: PanelServiceBundle) -> Dict[str, Any]:
     else:
         section["rows_state"] = ROWS_POPULATED
         section["rows"] = tuple(
-            {
-                "related_page_id": item.get("related_page_id"),
-                "evidence_row_count": item.get("evidence_row_count"),
-            }
-            for item in _items(rows_envelope)
-        )
+            related_page_row(item) for item in _items(rows_envelope))
     return section
 
 

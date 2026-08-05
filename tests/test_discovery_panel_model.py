@@ -168,6 +168,12 @@ def related_page_row(**overrides):
     row = {field: None for field in SURFACE_RELATED_PAGE_FIELDS}
     row.update({
         "related_page_id": "page-99",
+        # The manuscript this page belongs to, as the joined query supplies it.
+        "sys_id": "990051079570205172",
+        "library_code": "CUL",
+        "shelfmark_display": "T-S 12.999",
+        "page_number": 3,
+        "display_missing": False,
         "evidence_id": "ev-99",
         "evidence_source": ids.EVIDENCE_SOURCE_PROPAGATED,
         "confidence_band": ids.CONFIDENCE_BAND_NOT_EVALUATED,
@@ -1810,7 +1816,11 @@ def test_opening_the_toggle_installs_the_rows_without_touching_the_other_envelop
     opened = base.with_related_rows(related_rows_envelope([related_page_row()], 2))
     section = pm.build_panel_rows(opened).related_pages
     assert section["rows_state"] == pm.ROWS_POPULATED
-    assert section["rows"][0]["related_page_id"] == "page-99"
+    # The row NAMES ITS MANUSCRIPT and does not carry the composite page id at
+    # all -- a renderer cannot print a field it was never given.
+    assert section["rows"][0]["shelfmark_display"] == "T-S 12.999"
+    assert section["rows"][0]["library_code"] == "CUL"
+    assert "related_page_id" not in section["rows"][0]
     assert section["count"] == 2
     for field_name in pm.EAGER_ENVELOPE_FIELDS:
         assert getattr(opened, field_name) == getattr(base, field_name)
@@ -2264,8 +2274,16 @@ _EMITTED_SCHEMA = {
     "model.disclosure_levels[].related_pages.service_state": {
         "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,
     },
+    # THE COMPOSITE `related_page_id` IS DELIBERATELY ABSENT (2026-08-05). The
+    # row carried it and the panel printed it, so a scholarly surface showed an
+    # internal identifier where a shelfmark belongs. Leaving it out of the
+    # emitted row is what makes the fix structural: a renderer cannot print a
+    # field it was never given, and this table is where that would be noticed
+    # if it were added back.
     "model.disclosure_levels[].related_pages.rows[]": {
-        "related_page_id": _OPT_STR, "evidence_row_count": _OPT_INT,
+        "sys_id": _OPT_STR, "library_code": _OPT_STR,
+        "shelfmark_display": _OPT_STR, "page_number": _OPT_INT,
+        "display_missing": _BOOL, "evidence_row_count": _OPT_INT,
     },
 }
 

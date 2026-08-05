@@ -182,6 +182,16 @@ SURFACE_WORK_SUMMARY_FIELDS: Tuple[str, ...] = (
 #: opposite page -- never one per evidence row and never one per directed pair.
 SURFACE_RELATED_PAGE_FIELDS: Tuple[str, ...] = (
     "related_page_id",
+    # The manuscript this page belongs to, NAMED (2026-08-05). The row used to
+    # carry the composite `related_page_id` alone, and the panel rendered it, so
+    # a scholarly surface showed an internal identifier where a shelfmark
+    # belongs. `display_missing` is what lets the surface say the name could not
+    # be resolved instead of falling back to the id it still has.
+    "sys_id",
+    "library_code",
+    "shelfmark_display",
+    "page_number",
+    "display_missing",
     "evidence_id",
     "evidence_source",
     "confidence_band",

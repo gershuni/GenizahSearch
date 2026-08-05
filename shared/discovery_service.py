@@ -376,6 +376,30 @@ def _band_rank(evidence_source: Optional[str], confidence_band: Optional[str]) -
     return _BAND_RANK_INDEX.get((evidence_source, confidence_band), _UNRANKED_BAND)
 
 
+#: The page component of a corpus page id, `{sys_id}_{ie_id}_P{n:06d}_{fl_id}`.
+_PAGE_ID_PAGE_NUMBER_RE = re.compile(r"_P(\d+)_")
+
+
+def _page_number_from_page_id(page_id: Any) -> Optional[int]:
+    """The folio number carried INSIDE a page id, or None.
+
+    Parsed in the SERVICE so no surface has to know the id's shape to show a
+    page number -- and so that no surface has a reason to hold the composite id
+    at all. Returns None rather than raising on any id that does not carry one:
+    a missing page number is a row that says less, while an exception here
+    would take down a section that has already been fetched.
+    """
+    if not isinstance(page_id, str):
+        return None
+    match = _PAGE_ID_PAGE_NUMBER_RE.search(page_id)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:                                       # pragma: no cover
+        return None
+
+
 def _build_band_rank_case_sql() -> str:
     """Build the frozen band-rank lattice as a SQL CASE expression (H1) --
     ``_BAND_RANK_ORDER`` is a frozen module-level constant (never user
@@ -2032,7 +2056,24 @@ class DiscoveryService:
         """The rows behind the toggle: ONE row per DISTINCT opposite page,
         carrying how many evidence rows collapsed into it. The total agrees
         with `get_related_page_count_enveloped` by construction (same
-        grouping)."""
+        grouping).
+
+        EACH ROW NAMES ITS MANUSCRIPT. The rows used to carry the composite
+        `related_page_id` and nothing else, and the panel rendered it -- so a
+        scholarly surface showed readers
+        `990051620920205171_IE167198813_P000003_FL167198817` where a shelfmark
+        belongs. The name is resolved HERE, in ONE joined query against
+        `manuscript_display`, and never per row in the UI layer: this app runs a
+        single uvicorn worker, so a per-row lookup on the event loop stalls
+        every concurrent request.
+
+        The FOLIO number comes out of the id's own shape
+        (`{sys_id}_{ie_id}_P{n:06d}_{fl_id}`), parsed here rather than in a
+        renderer, so no surface has to know that shape to show a page number.
+        `display_missing` is True when the join found no display row -- the
+        surface then says so rather than falling back to the raw id, which is
+        how the defect would come back.
+        """
         if not self.is_available():
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
         conn = self._get_conn()
@@ -2045,25 +2086,37 @@ class DiscoveryService:
         try:
             cur = conn.execute(
                 f"""
-                SELECT related_page_id,
-                       MIN(evidence_id) AS evidence_id,
-                       MIN(evidence_source) AS evidence_source,
-                       MIN(confidence_band) AS confidence_band,
-                       MIN(COALESCE(band_rank, {_UNRANKED_BAND})) AS band_rank,
+                SELECT r.related_page_id AS related_page_id,
+                       r.sys_id AS sys_id,
+                       MIN(md.library_code) AS library_code,
+                       MIN(md.shelfmark_display) AS shelfmark_display,
+                       MIN(r.evidence_id) AS evidence_id,
+                       MIN(r.evidence_source) AS evidence_source,
+                       MIN(r.confidence_band) AS confidence_band,
+                       MIN(COALESCE(r.band_rank, {_UNRANKED_BAND})) AS band_rank,
                        COUNT(*) AS evidence_row_count,
                        COUNT(*) OVER () AS _total_rows
                 FROM (
-                    SELECT CASE WHEN a_page_id = ? THEN other_page_id ELSE a_page_id END
-                               AS related_page_id,
+                    SELECT related_page_id,
+                           -- The sys_id is the id's own first component; the
+                           -- shape is `{{sys_id}}_{{ie_id}}_P{{n}}_{{fl_id}}`.
+                           substr(related_page_id, 1,
+                                  instr(related_page_id, '_') - 1) AS sys_id,
                            evidence_id, evidence_source, confidence_band, band_rank
-                    FROM discovery_evidence
-                    WHERE evidence_kind = 'shared_text'
-                      AND (a_page_id = ? OR other_page_id = ?)
-                      {routing_clause}
-                )
-                WHERE related_page_id IS NOT NULL
-                GROUP BY related_page_id
-                ORDER BY band_rank ASC, related_page_id ASC
+                    FROM (
+                        SELECT CASE WHEN a_page_id = ? THEN other_page_id
+                                    ELSE a_page_id END AS related_page_id,
+                               evidence_id, evidence_source, confidence_band, band_rank
+                        FROM discovery_evidence
+                        WHERE evidence_kind = 'shared_text'
+                          AND (a_page_id = ? OR other_page_id = ?)
+                          {routing_clause}
+                    )
+                    WHERE related_page_id IS NOT NULL
+                ) AS r
+                LEFT JOIN manuscript_display md ON md.sys_id = r.sys_id
+                GROUP BY r.related_page_id, r.sys_id
+                ORDER BY band_rank ASC, r.related_page_id ASC
                 LIMIT ? OFFSET ?
                 """,
                 (page_id, page_id, page_id, page_size, offset),
@@ -2074,7 +2127,18 @@ class DiscoveryService:
                 "DiscoveryService.get_related_pages error for %s: %s", page_id, e)
             return unavailable_envelope(meta={"reason": "query_failed"})
         total = int(rows[0]["_total_rows"]) if rows else 0
-        items = [surface_safe_related_page(row) for row in rows]
+        items = [
+            surface_safe_related_page({
+                **row,
+                "page_number": _page_number_from_page_id(row.get("related_page_id")),
+                # A LEFT JOIN that found nothing is a NAMED state, never a
+                # blank: the surface says the manuscript is not in the display
+                # index rather than printing the composite id it does have.
+                "display_missing": (row.get("library_code") is None
+                                    or row.get("shelfmark_display") is None),
+            })
+            for row in rows
+        ]
         return make_envelope(STATUS_OK, items, total,
                              meta={"unit": "distinct_opposite_pages"})
 
