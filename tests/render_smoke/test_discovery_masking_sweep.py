@@ -1273,6 +1273,11 @@ NON_PAINTING_EXEMPT: Dict[Tuple[str, str, str], str] = {
         "container the page did not build. `_facet_containers` builds all three, "
         "so the branch is defensive against a future level with no container. "
         "Reaching it would require breaking the page's own layout.",
+    ("web/pages/findings.py", "_populate_facets", "return"):
+        "the page-gone guard between two facet reads. It RETURNS -- it paints "
+        "nothing -- and it is taken only when the reader's client disconnected "
+        "while a cascade read was in flight, which a synchronous capture cannot "
+        "produce without faking the client's own liveness.",
     ("web/pages/findings.py", "_render_body", "return"):
         "the page-gone guards inside `refresh`. They RETURN -- they put nothing "
         "on a screen -- and they are taken only when the reader's client has "

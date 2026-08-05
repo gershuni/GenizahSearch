@@ -144,6 +144,12 @@ SENTINEL_TOTAL = sum(count for _s, count, _m in SENTINEL_SHADES)
 SENTINEL_MAIN_POOL_MANUSCRIPTS = 3777
 SENTINEL_CORPUS_MANUSCRIPTS = 81777
 SENTINEL_CORPUS_PAGES = 92888
+#: The LEDE pair (2026-08-05): the UNCONDITIONAL main-pool population, which is
+#: a different population from `total` and from the shade-filtered manuscript
+#: count above. Sentinels like the rest, and swept by the same assertion that
+#: they are in neither half of 136-22's forbidden list.
+SENTINEL_POOL_TOTAL = 64111
+SENTINEL_POOL_MANUSCRIPTS = 52111
 
 SENTINEL_VALUES: Tuple[int, ...] = (
     SENTINEL_TOTAL,
@@ -152,6 +158,8 @@ SENTINEL_VALUES: Tuple[int, ...] = (
     SENTINEL_MAIN_POOL_MANUSCRIPTS,
     SENTINEL_CORPUS_MANUSCRIPTS,
     SENTINEL_CORPUS_PAGES,
+    SENTINEL_POOL_TOTAL,
+    SENTINEL_POOL_MANUSCRIPTS,
 )
 
 
@@ -176,6 +184,20 @@ def sentinel_launch_envelope() -> Dict[str, Any]:
         "corpus_manuscript_count": SENTINEL_CORPUS_MANUSCRIPTS,
         "corpus_page_count": SENTINEL_CORPUS_PAGES,
     })
+
+
+def sentinel_launch_envelope_with_lede() -> Dict[str, Any]:
+    """The same envelope PLUS the two unconditional main-pool keys.
+
+    Kept separate from `sentinel_launch_envelope` deliberately: that one is what
+    proves the headline still DEGRADES to the previous block when an older
+    sidecar supplies no lede figure, and folding the new keys into it would
+    delete that proof while looking like an improvement.
+    """
+    envelope = sentinel_launch_envelope()
+    envelope["meta"]["main_pool_total"] = SENTINEL_POOL_TOTAL
+    envelope["meta"]["main_pool_total_manuscript_count"] = SENTINEL_POOL_MANUSCRIPTS
+    return envelope
 
 
 def _launch_guard():
@@ -1894,6 +1916,34 @@ def capture_rendered_output(destination: str) -> str:
                     chunks.append(f"--- {lang}/{status}/{unit}/{bucket} ---")
                     for element in client.elements.values():
                         chunks.extend(_subtree_texts(element))
+
+        # TWO STATES THE MATRIX ABOVE CANNOT REACH, each one a branch that
+        # PAINTS. A capture that never enters a painting branch is a masking
+        # scan that has never looked at what that branch puts on a screen, and
+        # the line-coverage gate fails by name when one is missed.
+        #
+        # (1) the four-level headline. The matrix drives the DEGRADED block --
+        #     `sentinel_launch_envelope` deliberately carries no lede figure --
+        #     so the lede, its fragment span and the separator are painted only
+        #     here.
+        # (2) an `ok` facet cascade with NO items, which paints the "no matches
+        #     under the current filters" line. The matrix's facet fixture always
+        #     has a row.
+        for label, kwargs in (
+            ("lede-headline", {"launch": sentinel_launch_envelope_with_lede()}),
+            ("empty-facets", {"facets": {
+                level: facets_envelope(level, items=[])
+                for level in ("domain", "author", "work")}}),
+        ):
+            patch = _Patch()
+            try:
+                client = render_page(patch, lang=lang, **kwargs)
+            finally:
+                patch.undo()
+            chunks.append(f"--- {lang}/{label} ---")
+            for element in client.elements.values():
+                chunks.extend(_subtree_texts(element))
+
     with contextlib.closing(io.open(destination, "w", encoding="utf-8")) as fh:
         fh.write("\n".join(chunks))
     return destination
