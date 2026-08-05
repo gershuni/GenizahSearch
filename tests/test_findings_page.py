@@ -3459,7 +3459,8 @@ def _bucket_keyed_facets():
     return _call
 
 
-def _drive_facet_rounds(monkeypatch, rounds, *, lang="en", state=None):
+def _drive_facet_rounds(monkeypatch, rounds, *, lang="en", state=None,
+                        status_for=None):
     """Build a REAL filter bar, then run `_populate_facets` once per round.
 
     Returns `[(label, [levels read]), ...]` plus the client, so an assertion can
@@ -3468,15 +3469,24 @@ def _drive_facet_rounds(monkeypatch, rounds, *, lang="en", state=None):
     `rounds` is a list of `(label, mutation)`; each mutation is applied to the
     shared state dict before that round runs, so the rounds compose exactly the
     way a reader's successive interactions do.
+
+    `status_for(round_label, level)` -> an envelope status, so a round can be
+    made to fail. Defaults to `ok` everywhere.
     """
     _ensure_sim()
     from nicegui import core, ui
     from nicegui.client import Client
 
     reads: list = []
+    current = {"label": None}
 
     async def _recording(level, **_kwargs):
         reads.append(level)
+        status = ("ok" if status_for is None
+                  else status_for(current["label"], level))
+        if status != "ok":
+            return {"status": status, "items": [], "total": 0,
+                    "meta": {"reason": "query_timeout"}}
         return {"status": "ok", "items": list(_FACET_ITEMS.get(level, [])),
                 "total": 0, "meta": {"level": level}}
 
@@ -3499,6 +3509,7 @@ def _drive_facet_rounds(monkeypatch, rounds, *, lang="en", state=None):
                 with bar:
                     fp._render_facet_groups(lang)
                 for label, mutation in rounds:
+                    current["label"] = label
                     live_state.update(mutation)
                     del reads[:]
                     await fp._populate_facets(
@@ -5253,3 +5264,74 @@ def test_the_pager_and_the_clamp_share_one_page_arithmetic():
         "the page count is computed in more than one place")
     assert "_page_count(" in inspect.getsource(fp._render_pager)
     assert "_page_count(" in inspect.getsource(fp.clamp_page_to_total)
+
+
+# ---------------------------------------------------------------------------
+# §3.2 -- A TRANSIENT FACET OUTAGE WAS CACHED FOREVER.
+#
+# `_populate_facets` wrote `cache[level] = (key, envelope)` unconditionally, and
+# the key is derived from the REQUEST -- so a `timeout` or a `busy` was served
+# for every later refresh whose request was unchanged. The filter read "not
+# available yet" beside a working result set until some OTHER control happened
+# to move one of that level's own inputs, and no retry a reader could reach
+# cleared it.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("status", ["timeout", "busy", "unavailable"])
+def test_a_failed_facet_read_is_not_cached_and_the_next_refresh_recovers(
+        monkeypatch, status):
+    """The load-bearing one. Round 2 changes NOTHING -- the cache-skip round --
+    so a cached failure would make it read nothing and keep the amber tag."""
+    def _status_for(label, _level):
+        return status if label == "the read fails" else "ok"
+
+    observed, client = _drive_facet_rounds(monkeypatch, [
+        ("the read fails", {}),
+        ("nothing changed", {}),
+    ], status_for=_status_for)
+    by_label = dict(observed)
+
+    assert by_label["the read fails"] == ["domain", "author", "work"]
+    assert by_label["nothing changed"] == ["domain", "author", "work"], (
+        f"a {status!r} envelope was cached under its request key -- the filter "
+        "stays 'not available yet' until some other control moves one of its "
+        "inputs, and no retry a reader can reach clears it")
+
+    # ...and the recovery really reached the reader, not just the cache.
+    for level in ("domain", "author", "work"):
+        assert not _elements_with_class(
+            client, f"{fp.FILTER_BAR_CLASS}-{level}-blocked"), (
+            f"the {level!r} facet still renders as unavailable after recovery")
+
+
+def test_a_successful_facet_read_is_still_cached(monkeypatch):
+    """The other direction. Not caching successes would triple this page's draw
+    on the smaller of the two bounded-concurrency budgets on every interaction,
+    which is what the cache exists to prevent."""
+    observed, _client = _drive_facet_rounds(monkeypatch, [
+        ("first paint", {}),
+        ("nothing changed", {}),
+        ("page turn", {"page": 4}),
+    ])
+    by_label = dict(observed)
+    assert by_label["first paint"] == ["domain", "author", "work"]
+    assert by_label["nothing changed"] == []
+    assert by_label["page turn"] == []
+
+
+def test_one_levels_failure_does_not_evict_another_levels_good_answer(monkeypatch):
+    """The failure is per level, so the cache must be too: a reader whose author
+    list timed out should not lose the domain counts they already had."""
+    def _status_for(label, level):
+        return "timeout" if (label == "author fails" and level == "author") else "ok"
+
+    observed, _client = _drive_facet_rounds(monkeypatch, [
+        ("first paint", {}),
+        ("author fails", {"bucket": "more"}),
+        ("nothing changed", {}),
+    ], status_for=_status_for)
+    by_label = dict(observed)
+    assert by_label["author fails"] == ["domain", "author", "work"]
+    assert by_label["nothing changed"] == ["author"], (
+        "the unchanged round re-read a level whose answer was good, or skipped "
+        f"the one whose answer failed: {by_label['nothing changed']}")

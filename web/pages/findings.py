@@ -1476,7 +1476,17 @@ async def _populate_facets(
             envelope = await fetch_facets(level, state)
             if _page_is_gone(page_client):
                 return
-            if cache is not None:
+            # ONLY AN `ok` ENVELOPE IS CACHED. A `timeout` or a `busy` is a
+            # statement about the SERVICE at one instant, not an answer to the
+            # question this key asks -- and the key is derived from the request,
+            # so a cached failure is served for every later refresh whose
+            # request is unchanged. The reader then sees "not available yet"
+            # beside a working result set until some OTHER control happens to
+            # move an input, and no retry they can reach clears it.
+            #
+            # Not caching a failure costs one re-read on the next refresh, on a
+            # cascade that was already re-read whenever an input moved.
+            if cache is not None and (envelope or {}).get("status") == "ok":
                 cache[level] = (key, envelope)
         container.clear()
         with container:
