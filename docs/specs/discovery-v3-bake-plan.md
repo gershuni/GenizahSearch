@@ -22,8 +22,40 @@ demonstration, and the masking self-test uses a *synthetic* pattern so it cannot
 complete or current.
 
 **Net effect on the estimate:** the ~2-day figure assumed an adapter. Blockers 1 and 2 make it a build with
-real decisions in it. **The routing question (blocker 2) is the one that needs an owner answer** — ingest
-gen-2's router, or re-decide routing and stop citing the handoff's measured quality.
+real decisions in it.
+
+### ✅ OWNER DECISION 2026-08-05 — blocker 2: ingest gen-2's router
+
+*"yes of course"* — **the builder learns gen-2's sorting.** The two-surface split (`same_work` witness vs
+`parallel` quotation) is the improvement the whole refresh exists to deliver, and it is what the 400-card
+grading actually measured; shipping v2 routing over gen-2 evidence would be effort spent to lose the gain.
+So: **ingest `coverage_route` with a declared mapping and parity checks**, per Codex's first option — do NOT
+recompute coverage and do NOT inherit the v2 Lever-1 → D-17 order by assertion; re-derive that order against
+the ingested router.
+
+### Owner access to the PRIVATE (M-source) items — verified 2026-08-05
+
+**On the website: no, and there is no switch.** `web/discovery_assets.py` hard-rejects any artifact whose
+`meta.audience` is not `public` — `_PUBLIC_LOADER_AUDIENCE = "public"` is a module constant, not a setting, and
+a missing/empty audience is rejected too ("reject-incompatible"). The only environment variable in that module
+selects the data *directory*, so even a local instance pointed at the private file refuses to load it. There is
+no per-user unlock and no admin view, by design: an owner-visible web surface would put the private artifact on
+the web box, which is the thing the masking posture exists to prevent.
+
+**Locally: yes — and this is already the established pattern.** The private artifact (all 1,269 works incl.
+every M-source work) lives on this machine, and owner review has always run through local `*.PRIVATE.*`
+artifacts rather than a web surface — currently ten of them, including full HTML decks
+(`discovery-v2-REVIEW`, `PREDEPLOY-candidates-by-work`, `novelty-FILLSGAP-by-work`), a local review server
+(`discovery-v2-review-server.PRIVATE.py`) and `msource-owner-title-map.PRIVATE.csv`.
+
+**v3 therefore owes a private review deck**, generated locally and never deployed, covering the M-source items.
+Added to §5 as a DO item.
+
+**Worth noting, since it is nearly free:** the 2,686 D-06-excluded works (§3.1) will be in *neither* artifact
+under the recommended scope — but a **local review deck over the excluded set** would let the owner see the
+liturgy findings and judge whether the coverage justifies building the containment fix. Precedent exists in
+exactly that shape: `EXCLUDED-STRONG-nonbible.PRIVATE.html`. It touches no masking posture, because it never
+leaves the machine.
 
 **Companion:** `discovery-v3-naming.md` (why this is v3 and not v2.1). **Predecessor:**
 `discovery-v2-bake-plan.md` (the pipeline this reuses). **Input spec:**
