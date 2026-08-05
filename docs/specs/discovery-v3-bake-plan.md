@@ -176,7 +176,7 @@ level is present in the raw ids today. Chapter/folio level is not. This material
 
 | # | debt | cost | blocks | droppable? |
 |---|---|---|---|---|
-| 1 | gen-2 evidence ingest (the bake itself) | **L** — the irreducible core | everything | no — it *is* the bake |
+| 1 | gen-2 evidence ingest (the bake itself) | ~~**L**~~ → **S**, re-measured 2026-08-05 (§3.1a) | everything | no — it *is* the bake |
 | 2 | `w_start`/`w_end` **persistence** | **XS** — already in the input | Phase 136.1 PANEL-03 | no, and no reason to |
 | 2b | Sefaria versemap resolution + `body↔norm_stream` map | **M** — the hardest remaining work | PANEL-03's *reference locus* only | **yes** — stage it |
 | 3 | novelty recompute at v3 grain | **S** — ~$40–110 measured | findings-page candidacy filter | partially — `not_checked` is honest |
@@ -299,6 +299,39 @@ corpus grew. §3.7's recommendation to defer stands, and is now better supported
 never able to answer the question, which is why it needed the match tables.)*
 
 Gate accordingly (§6, gate 2): the build must **HALT** on an unresolved id rather than skip it.
+
+### 3.1a Re-measured: the ingest is **S**, not **L** — and "roughly a week" was wrong
+
+I sized debt 1 as **L (≥ a week)** and called it "the irreducible core" before looking at what the builder
+actually reads. Challenged on the estimate, I measured it. Four findings, each cutting the same way:
+
+1. **The bake takes ~5 minutes.** The last comparable rebuild ran 17:13→17:17 for 268,361 claims / 297,415
+   evidence rows (`discovery_data/136_rebuild.log` + artifact mtimes). Compute was never the cost.
+2. **The builder does NOT consume the probe's `discovery_claim`/`discovery_evidence` schema.** Its entire
+   research-DB surface is **two tables**: `track1_matches` (via `select_shown_works`, `_count_tier_a_rows`)
+   and `pages` (via `PageTextIndex`, `_compute_htr_snapshot_hash`). HANDOFF-TO-135 §5's framing — *"the
+   schemas differ (probe `discovery_claim` vs milestone `discovery.db`) — this is a mapping/ingest, not a
+   file swap"* — points at tables the builder never opens.
+3. **Gen-2 already writes a `track1_matches`-shaped table, in the same file as `pages`.**
+   `track1_matches_pilot_glaunch3_live` shares **12 of 14 columns** with `track1_matches`, and
+   `fullcorpus_gen2.db` holds `pages` (667,411 rows) alongside it. Missing exactly two, both cheap:
+   - `shadowed_by` — join it from `g_launch3.db::discovery_evidence.shadowed_by`;
+   - `source_corpus` — derive from the `work_id` prefix (`M:` / `REF2:` / `J:`), the mapping §3.1 already uses.
+
+   It also *adds* `ref_spans_json`, the match-level work-side spans that complement `ref_start`/`ref_end`.
+4. **Minting rides along.** The works table is built **from `track1_matches`**, whose rows already carry
+   `title` / `author` / `genre` / `cat` — which is why §3.1's genre coverage came out at 99.8%. The 2,738 new
+   works arrive through the same path as the existing ones rather than needing a separate pipeline.
+
+**So the ingest is a translation layer — a `track1_matches`-shaped view with two derived columns — not a
+rewrite.** Revised: **~1 day of engineering, one unattended overnight for the novelty run, a few hours of
+gates. ~2 days end to end.**
+
+**Where an overrun would actually come from,** stated so it is not a surprise: the verifier and the release
+contract are strict and fail-closed by design, so expect rejections, and each one is a round trip. That is a
+schedule risk in the *gates*, not in the bake. The one substantive unknown left is whether the two derived
+columns reproduce v2's shadowing semantics exactly — gate 1 (row-count preservation) is what would catch a
+divergence.
 
 ### 3.2 `w_start`/`w_end` and the locus (debts 2 / 2b) — split them
 
