@@ -3144,6 +3144,63 @@ def test_the_facet_cards_are_built_once_and_only_their_items_refill(monkeypatch)
         assert len(boxes) == 1
 
 
+_EMPTY_FACETS = {"domain": [], "author": [], "work": []}
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_an_ok_facet_envelope_with_no_items_says_so_instead_of_rendering_nothing(
+        monkeypatch, lang):
+    """`_render_facet_items` looped over `items` and, on an empty list, emitted
+    ABSOLUTELY NOTHING -- a blank card under a loud uppercase header, which a
+    reader cannot tell from a bug. (Reported symptom: an empty WORK card.)
+
+    An empty list is a FACT about the current filters and has to look like one.
+    """
+    client = _render_page(monkeypatch, lang=lang, facets=_fake_facets(_EMPTY_FACETS))
+    for level in ("domain", "author", "work"):
+        marks = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-{level}-empty")
+        assert marks, (
+            f"the {level!r} facet card rendered an empty items container with no "
+            "explanation at all")
+        assert fp.copy_text("facet_empty", lang) in "\n".join(_subtree_strings(marks[0]))
+        box = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-{level}-items")[0]
+        assert "".join(_subtree_strings(box)).strip(), (
+            f"the {level!r} items container is still visually blank")
+
+
+def test_the_empty_facet_line_is_not_the_missing_backing_data_treatment(monkeypatch):
+    """The two states mean different things and must not borrow each other's
+    clothes: `needs_tag` says the DATA to filter on is absent, and the empty
+    line says the data is there and the current filters select none of it.
+
+    The amber tag additionally sits on `fg blocked`, which dims the whole card
+    and marks the control unusable -- exactly wrong for a card whose control is
+    working and simply has nothing to offer right now.
+    """
+    empty = _render_page(monkeypatch, lang="en", facets=_fake_facets(_EMPTY_FACETS))
+    outage = _render_page(monkeypatch, lang="en", facets=_fake_facets(status="unavailable"))
+
+    for level in ("domain", "author", "work"):
+        card = _elements_with_class(empty, f"{fp.FILTER_BAR_CLASS}-{level}")[0]
+        said = "\n".join(_subtree_strings(card))
+        assert fp.copy_text("facet_empty", "en") in said
+        assert fp.copy_text("needs_tag", "en") not in said, (
+            f"the empty {level!r} list is wearing the 'no backing data' tag")
+        classes = {c for el in card.descendants(include_self=True)
+                   for c in (el._classes or [])}
+        assert "blocked" not in classes, (
+            f"the empty {level!r} card is dimmed as unusable — its control works")
+        assert not _elements_with_class(
+            empty, f"{fp.FILTER_BAR_CLASS}-{level}-blocked")
+
+        # ...and the converse, so neither treatment has swallowed the other.
+        assert not _elements_with_class(
+            outage, f"{fp.FILTER_BAR_CLASS}-{level}-empty"), (
+            f"an OUTAGE on the {level!r} facet read as 'no matches under the "
+            "current filters' — it is not a fact about the filters at all")
+        assert _elements_with_class(outage, f"{fp.FILTER_BAR_CLASS}-{level}-blocked")
+
+
 @pytest.mark.render_smoke
 def test_switching_bucket_replaces_the_facet_lists_as_well_as_the_rows():
     """End to end, through the simulated user: the cascade is part of the ONE

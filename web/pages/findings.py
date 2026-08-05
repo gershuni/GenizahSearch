@@ -253,6 +253,16 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
         "en": "not available yet",
         "he": "עדיין לא זמין",
     },
+    # An `ok` facet envelope carrying NO items. Deliberately a different
+    # statement from `needs_tag` above, because it is a different fact: that
+    # one says the data to filter on is absent, this one says the data is
+    # there and the current filters select none of it. A card that said
+    # nothing at all -- which is what an empty loop produces -- reads as a
+    # broken card under a loud header, and was reported as exactly that.
+    "facet_empty": {
+        "en": "No matches under the current filters.",
+        "he": "אין התאמות בסינון הנוכחי.",
+    },
     # The collapsed panel that now carries the page's explanatory prose. The
     # prose itself is UNCHANGED and comes from the same shared vocabulary it
     # always did; this title is the only new string, and it names an
@@ -1242,6 +1252,18 @@ def _render_facet_items(
         return
 
     items = list(envelope.get("items") or [])
+    if not items:
+        # AN EMPTY LIST IS A FACT, and it has to look like one. The loops below
+        # emit nothing at all for an empty `items`, which leaves a blank box
+        # under a loud uppercase header -- indistinguishable from a card that
+        # failed to load. QUIET, not amber: the `.needs` treatment beside it
+        # means the backing data is missing and dims its whole card as
+        # unusable, and this control is neither.
+        ui.label(copy_text("facet_empty", lang)).classes(
+            f"{FILTER_BAR_CLASS}-{level}-empty dnote text-xs"
+        )
+        return
+
     if level == "domain":
         _render_domain_tree(items, state, lang, refresh)
         return
