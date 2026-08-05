@@ -5966,3 +5966,128 @@ def test_the_count_promise_is_made_on_all_three_controls_or_on_none():
     for function in (fp._render_domain_tree, fp._render_facet_select):
         assert "_node_text(" in inspect.getsource(function), (
             f"{function.__name__} stopped routing its count through _node_text")
+
+
+# ---------------------------------------------------------------------------
+# §3.7 -- THE HEADLINE READ NO LONGER RUNS BEFORE THE BODY IN SERIES.
+#
+# `_paint_headline`'s docstring claimed a slow headline read "never delays" the
+# rest of the page, and the caller awaited that read before rendering the body
+# at all -- so the rows waited for a corpus-scale count and the docstring
+# asserted the opposite of the code.
+#
+# The read is now DISPATCHED before the body and AWAITED after it, so the two
+# heavy reads overlap. That is an improvement rather than isolation: the pool
+# invitation shows the second pool's size from the SAME envelope, so the body
+# has a real data dependency on it -- and the corrected docstring says exactly
+# that instead of promising something it cannot deliver.
+# ---------------------------------------------------------------------------
+
+def test_the_launch_read_and_the_row_read_OVERLAP(monkeypatch):
+    """The load-bearing one. The findings read must be ISSUED while the launch
+    read is still parked -- which is impossible if the launch read is awaited
+    first."""
+    order: list = []
+
+    async def _launch(*_args, **_kwargs):
+        order.append("launch:start")
+        # ONE yield, so the read cannot complete without the loop handing
+        # control back. Deliberately NOT an Event released by the row read: that
+        # would DEADLOCK against the serialized order instead of failing, and a
+        # test that hangs on the defect is not a test that reports it.
+        await asyncio.sleep(0)
+        order.append("launch:done")
+        return {"status": "ok", "items": [], "total": 0,
+                "meta": {"basis": "main_pool",
+                         "more_pool_total": SENTINEL_MORE_POOL_TOTAL}}
+
+    async def _findings(unit="identification", **kwargs):
+        order.append("findings:start")
+        return {
+            "status": "ok", "items": list(_ROWS_BY_BUCKET["main"]), "total": 1,
+            "meta": {"unit": unit, "bucket": kwargs.get("bucket", "main"),
+                     "sort": "band_rank", "sort_basis": "best_band_rank",
+                     "novelty_offered": True, "include_divergent": False,
+                     "page": 1, "page_size": fp._default_page_size(),
+                     "approximate_total": False},
+        }
+
+    client = _render_page(monkeypatch, lang="en", findings=_findings,
+                          launch=_launch)
+
+    assert {"launch:start", "launch:done", "findings:start"} <= set(order), (
+        f"fixture error: not every read ran: {order}")
+    assert order.index("findings:start") < order.index("launch:done"), (
+        f"the row read was issued only AFTER the launch read completed ({order}) "
+        "-- the rows wait for a corpus-scale count in series, which is exactly "
+        "what the docstring claimed they do not")
+
+    # ...and both consumers still got their envelope.
+    assert MAIN_ROW_TITLE in _scoped_text(client, fp.RESULTS_CLASS)
+    assert f"{SENTINEL_MORE_POOL_TOTAL:,}" in _scoped_text(
+        client, fp.POOL_INVITE_CLASS), (
+        "the pool invitation lost the size the launch envelope carries")
+    assert _scoped_text(client, rows.LAUNCH_CLASS), (
+        "the headline was never painted")
+
+
+def test_the_launch_read_is_issued_exactly_once_for_its_two_consumers(monkeypatch):
+    """A task, not a bare coroutine: two places await it, and a second READ
+    would be a second crossing on the heavy budget for a figure the page has."""
+    calls: list = []
+
+    async def _launch(*_args, **_kwargs):
+        calls.append(1)
+        return {"status": "ok", "items": [], "total": 0,
+                "meta": {"basis": "main_pool",
+                         "more_pool_total": SENTINEL_MORE_POOL_TOTAL}}
+
+    client = _render_page(monkeypatch, lang="en", launch=_launch)
+    assert len(calls) == 1, f"the launch statistics were read {len(calls)} times"
+    assert f"{SENTINEL_MORE_POOL_TOTAL:,}" in _scoped_text(
+        client, fp.POOL_INVITE_CLASS)
+    assert _scoped_text(client, rows.LAUNCH_CLASS)
+
+
+def test_three_refreshes_still_issue_exactly_one_launch_read(monkeypatch):
+    """The body awaits the launch TASK on every refresh, and that must stay free.
+
+    Asserted as a count of READS, not as the presence of a memo: awaiting a
+    completed task is already free, so a memo would be unfalsifiable. What this
+    can and does catch is the body re-CALLING the launch reader per refresh --
+    a heavy-budget crossing behind every filter change for a figure that cannot
+    move while the page is open."""
+    calls: list = []
+
+    async def _launch(*_args, **_kwargs):
+        calls.append(1)
+        return {"status": "ok", "items": [], "total": 0,
+                "meta": {"basis": "main_pool",
+                         "more_pool_total": SENTINEL_MORE_POOL_TOTAL}}
+
+    captured = _capture_refresh(monkeypatch)
+
+    async def _drive(_client):
+        for _ in range(3):
+            await captured["refresh"]()
+
+    _render_page(monkeypatch, lang="en", launch=_launch, driver=_drive)
+    assert len(calls) == 1, (
+        f"three refreshes issued {len(calls)} launch reads")
+
+
+def test_the_headline_docstring_does_not_promise_isolation_it_cannot_give():
+    """A docstring asserting the opposite of the code is worse than none. The
+    body genuinely depends on this read -- the pool invitation shows the second
+    pool's size from the same envelope -- so the claim that had to go is the one
+    about DELAY, and what replaced it names the dependency."""
+    import inspect
+
+    doc = inspect.getdoc(fp._paint_headline) or ""
+    assert "never delays" not in doc, (
+        "the docstring still promises the rows are not delayed by this read")
+    assert "never breaks" in doc, (
+        "the surviving claim -- a failing headline read does not break the rest "
+        "of the page -- was dropped along with the false one")
+    assert "dependency" in doc, (
+        "the docstring does not say WHY the body waits for part of this read")

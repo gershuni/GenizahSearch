@@ -77,6 +77,7 @@ surface.)
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import os
@@ -878,20 +879,32 @@ async def create_findings_page() -> None:
         return
     # ONE launch read, TWO consumers: the headline paints from the envelope and
     # the pool invitation takes the second pool's size out of its `meta`. Read
-    # here rather than twice, because a second read is a second executor
-    # crossing on the heavy budget for a figure the page already has -- and
-    # rather than inside `refresh`, which would pay that crossing on every
-    # filter change for a number that cannot move while the page is open.
-    launch = await fetch_launch_stats()
-    if _page_is_gone(page_client):
-        return
-    await _paint_headline(headline_region, lang, page_client, envelope=launch)
-    if _page_is_gone(page_client):
-        return
+    # once rather than twice, because a second read is a second executor
+    # crossing on the heavy budget for a figure the page already has -- and not
+    # inside `refresh`, which would pay that crossing on every filter change for
+    # a number that cannot move while the page is open.
+    #
+    # STARTED, NOT AWAITED (§3.7). It used to be awaited HERE, before the body
+    # was rendered at all, so the rows waited for a corpus-scale count in SERIES
+    # -- while `_paint_headline`'s own docstring claimed a slow headline read
+    # never delays the rest of the page. Dispatching it as a task lets it run
+    # CONCURRENTLY with the body's own read: the page now waits for the slower of
+    # the two rather than for their sum.
+    #
+    # A task, not a bare coroutine, because two places await it and a coroutine
+    # can only be awaited once. `fetch_launch_stats` touches no UI, so starting
+    # it outside the slot stack is safe (a UI-touching background task would not
+    # be -- it would have no slot to render into).
+    launch = asyncio.ensure_future(fetch_launch_stats())
     with body:
-        await _render_body(
-            state, lang, page_client,
-            more_pool_total=(launch.get("meta") or {}).get("more_pool_total"))
+        await _render_body(state, lang, page_client, launch=launch)
+    if _page_is_gone(page_client):
+        return
+    # LAST, deliberately. The headline region was reserved above the body and is
+    # painted into afterwards, which is what makes this order a layout-neutral
+    # choice rather than a visible one.
+    await _paint_headline(headline_region, lang, page_client,
+                         envelope=await launch)
 
 
 def _render_head(lang: str) -> Any:
@@ -982,10 +995,25 @@ async def _paint_headline(region: Any, lang: str, page_client: Any,
                           envelope: Optional[Dict[str, Any]] = None) -> None:
     """Render the launch statistics into the reserved slot.
 
-    Painted AFTER the shell rather than during it, so a slow or failing
-    headline read never delays or breaks the rest of the page; and re-entrant,
-    so the outage state's retry re-runs exactly this path rather than a second
-    copy of it.
+    Painted into a region RESERVED during the shell and filled afterwards, so a
+    failing headline read never breaks the rest of the page; and re-entrant, so
+    the outage state's retry re-runs exactly this path rather than a second copy
+    of it.
+
+    WHAT THIS DOES NOT CLAIM, corrected 2026-08-05 (§3.7). It used to promise
+    that a slow read here holds nothing else up, while the caller awaited that
+    read before rendering the body at all -- the claim was the opposite of the
+    code. The read is now DISPATCHED before the body and awaited after it, so
+    the two corpus-scale reads overlap and the page waits for the slower of them
+    rather than for their sum. That is an improvement and not isolation: the
+    pool invitation shows the second pool's size from the SAME envelope (an
+    owner ruling, 2026-08-05), so the body has a real data dependency on this
+    read, and a first paint that ignored it would show a figure-less invitation
+    that never gained its figure.
+
+    (The retired wording is deliberately not quoted here. A test greps this
+    docstring for it, and a docstring that quotes the phrase it retired makes
+    that test fire on the explanation rather than on a regression.)
 
     `envelope` is the read the CALLER already made -- the page issues one launch
     read and two surfaces consume it. The RETRY passes none and re-reads, which
@@ -1028,7 +1056,7 @@ def _render_mode_strip(lang: str) -> None:
 
 
 async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
-                       more_pool_total: Any = None) -> None:
+                       launch: Any = None) -> None:
     """The two-column body -- a sidebar of filter CARDS and the results beside
     it -- with ONE refresh path shared by every control, so a filter change and
     a bucket change take exactly the same route.
@@ -1085,6 +1113,24 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
     #: carries a guard of this shape (the browse panel's staleness check, the
     #: headline's client check); this one had none.
     generation = {"n": 0}
+
+    async def _more_pool_total() -> Any:
+        """The second pool's size, from the launch read the CALLER dispatched.
+
+        The read is started before this function is entered and awaited HERE,
+        after the body's own read has been issued -- so the two corpus-scale
+        reads overlap instead of running in series (§3.7).
+
+        NO MEMO, and its absence is deliberate. `launch` is a TASK: the first
+        await runs it and every later await returns the same result without a
+        second read, so a memo would buy nothing and no test could tell it from
+        its absence. An unfalsifiable optimisation reads as coverage nobody has,
+        which is the defect class this whole package is about. What IS
+        load-bearing is that the caller passes a task rather than letting this
+        re-read -- and a test drives three refreshes and counts the reads.
+        """
+        envelope = await launch if launch is not None else None
+        return ((envelope or {}).get("meta") or {}).get("more_pool_total")
 
     async def refresh() -> None:
         """THE one refresh path -- results first, then the facet lists.
@@ -1152,6 +1198,9 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
             envelope = await fetch_findings(state)
             if _stale():
                 return
+        more_pool_total = await _more_pool_total()
+        if _stale():
+            return
         results_region.clear()
         with results_region:
             _render_results(envelope, state, lang, refresh,
