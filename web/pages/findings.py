@@ -487,21 +487,53 @@ async def fetch_launch_stats() -> Dict[str, Any]:
     return await get_launch_stats_enveloped()
 
 
-async def fetch_facets(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
-    """One enveloped facet-cascade read. A DIRECT await on the async wrapper."""
+def _facet_request(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
+    """The EXACT arguments ONE facet-cascade read takes at `level`.
+
+    Written ONCE and used by two callers -- the read itself and the re-fetch
+    skip key below. That is the whole point: the skip is only sound if the key
+    varies on everything the query varies on, and a key derived from a second,
+    hand-written list of inputs is one edit away from omitting one. Omitting one
+    means a facet list kept beside a result set it no longer describes, which is
+    the precise defect the re-fetch exists to fix.
+
+    The cascade narrows DOWNWARDS only: `domain` is offered unfiltered, `author`
+    within the chosen domain, `work` within the chosen domain and author. A
+    level never filters on itself, or picking a value would empty its own list.
+    """
     if level not in FACET_LEVELS:
         raise ValueError(
-            "fetch_facets: unknown facet level {!r} (expected one of {})".format(
+            "_facet_request: unknown facet level {!r} (expected one of {})".format(
                 level, sorted(FACET_LEVELS)
             )
         )
-    return await get_findings_facets_enveloped(
-        level,
-        bucket=state["bucket"],
-        novelty=_novelty_selection(state),
-        domain=state.get("domain") if level != "domain" else None,
-        author=state.get("author") if level == "work" else None,
-    )
+    return {
+        "bucket": state["bucket"],
+        "novelty": _novelty_selection(state),
+        "domain": state.get("domain") if level != "domain" else None,
+        "author": state.get("author") if level == "work" else None,
+    }
+
+
+def _facet_cache_key(level: str, state: Dict[str, Any]) -> Tuple[Any, ...]:
+    """A hashable rendering of `_facet_request` -- the request tuple itself, in
+    a fixed order, and nothing else.
+
+    Two reads with the same arguments against the same artifact return the same
+    envelope, so an unchanged key is a provably unchanged answer rather than an
+    assumption about which control the reader touched. The bound worth stating
+    is the ARTIFACT: this key carries no sidecar version, so a swap under a page
+    that stays open keeps the facet counts it already had. That window is one
+    open page (the cache is a local of ONE `_render_body` call, never a module
+    singleton) and it is strictly narrower than the behaviour it replaces, which
+    never re-read the cascade at all.
+    """
+    return (level,) + tuple(sorted(_facet_request(level, state).items()))
+
+
+async def fetch_facets(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
+    """One enveloped facet-cascade read. A DIRECT await on the async wrapper."""
+    return await get_findings_facets_enveloped(level, **_facet_request(level, state))
 
 
 # ---------------------------------------------------------------------------
@@ -722,7 +754,45 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> No
     # what the query does can never disagree.
     control_sync: List[Any] = []
 
+    #: THE FACET RE-FETCH CACHE, per page render. `level -> (request key,
+    #: envelope)`, so a refresh re-reads exactly the levels whose inputs moved
+    #: and re-renders all three regardless. See `refresh` below.
+    facet_cache: Dict[str, Tuple[Any, Dict[str, Any]]] = {}
+
     async def refresh() -> None:
+        """THE one refresh path -- results first, then the facet lists.
+
+        THE FACETS ARE PART OF THIS PATH NOW, and they were not. They were
+        filled ONCE, after the first paint, and never again; `refresh` re-rendered
+        only the results region. Two things followed, and both were correctness
+        failures rather than polish:
+
+        * a count beside a domain described whichever bucket happened to be
+          active at first paint. Switch bucket and `_node_text`'s promise -- "a
+          number beside a domain always agrees with the result set that domain
+          produces" -- stopped being true, silently.
+        * THE CASCADE NEVER RAN. `_facet_request` narrows author by domain and
+          work by domain+author, but it was only ever evaluated against the state
+          as it stood at page load, so picking a domain shortened nothing.
+
+        A third, quieter one: a facet node's `.here` treatment is decided when
+        the node is BUILT, so a reader's own selection was never marked either.
+
+        ORDER IS DELIBERATE. The rows paint first and the facet reads follow, so
+        a slow (or busy, or timed-out) cascade delays no result the reader came
+        for; and `_page_is_gone` is re-checked between the two, because the reads
+        below are the ones most likely to still be in flight when a reader
+        navigates away.
+
+        BUDGET. Every facet read takes a slot in the HEAVY bounded-concurrency
+        budget (`DISCOVERY_MAX_CONCURRENT_QUERIES`, default 4 -- see
+        `docs/specs/discovery-budgets.md`), so re-reading all three on every
+        interaction would triple this page's draw on the smaller of the two
+        budgets. `facet_cache` keeps that at the levels whose OWN request
+        arguments changed: a sort change or a page turn re-reads nothing, a
+        domain pick re-reads author and work only, and only a bucket or
+        candidacy change re-reads all three.
+        """
         normalise_state(state)
         for sync in control_sync:
             sync()
@@ -735,12 +805,17 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any) -> No
         results_region.clear()
         with results_region:
             _render_results(envelope, state, lang, refresh)
+        if _page_is_gone(page_client):
+            return
+        await _populate_facets(
+            filter_bar, state, lang, refresh,
+            cache=facet_cache, page_client=page_client,
+        )
 
     with filter_bar:
         control_sync.extend(_render_filter_bar(state, lang, refresh))
 
     await refresh()
-    await _populate_facets(filter_bar, state, lang, refresh)
 
 
 # ---------------------------------------------------------------------------
@@ -959,14 +1034,29 @@ async def _prime_domain_labels(lang: str) -> None:
 
 
 async def _populate_facets(
-    filter_bar: Any, state: Dict[str, Any], lang: str, refresh
+    filter_bar: Any, state: Dict[str, Any], lang: str, refresh,
+    *,
+    cache: Optional[Dict[str, Tuple[Any, Dict[str, Any]]]] = None,
+    page_client: Any = None,
 ) -> None:
-    """Fill the three facet lists from the cascade.
+    """Fill the three facet lists from the cascade -- on EVERY refresh.
 
     Every work-level label routes through `display_work_title` (ruling R): the
     cascade selects the RAW recorded title at the work level, and a facet list
     that prints it directly opts out of the curation in the very control a
     reader uses to find that work.
+
+    RE-READ AND RE-RENDER ARE SEPARATE DECISIONS, and keeping them separate is
+    what makes this both correct and affordable. Every level is RE-RENDERED
+    every time, because what a node LOOKS like depends on the reader's current
+    selection (`.here`, `aria-pressed`, and the domain branch that must open
+    around a selected leaf) and that is not part of the query at all. Only the
+    READ is skipped, and only when `_facet_cache_key` -- the request tuple
+    itself -- is unchanged.
+
+    The cards themselves are never rebuilt: this clears and refills the
+    `-items` containers only, so the filter bar's structure (and the ruling-T
+    bucket control living beside it) is built exactly once per page.
     """
     await _prime_domain_labels(lang)
     containers = _facet_containers(filter_bar)
@@ -974,7 +1064,16 @@ async def _populate_facets(
         container = containers.get(level)
         if container is None:  # pragma: no cover -- structural
             continue
-        envelope = await fetch_facets(level, state)
+        key = _facet_cache_key(level, state)
+        cached = cache.get(level) if cache is not None else None
+        if cached is not None and cached[0] == key:
+            envelope = cached[1]
+        else:
+            envelope = await fetch_facets(level, state)
+            if _page_is_gone(page_client):
+                return
+            if cache is not None:
+                cache[level] = (key, envelope)
         container.clear()
         with container:
             _render_facet_items(level, envelope, state, lang, refresh)

@@ -2960,3 +2960,246 @@ def test_the_work_facet_is_not_translated_through_the_domain_vocabulary(monkeypa
     blob = "\n".join(_node_texts(client, f"{fp.FILTER_BAR_CLASS}-work-items"))
     assert _UNCURATED_RAW_TITLE in blob
     assert "לא נכון" not in blob
+
+
+# ===========================================================================
+# TASK 5 (2026-08-05) — THE FACET LISTS ARE PART OF THE ONE REFRESH PATH.
+#
+# They were filled once, after the first paint, and never again. Three live
+# consequences, all of them correctness rather than polish:
+#
+#   1. a count beside a domain described whichever BUCKET was active at first
+#      paint, while `_node_text`'s docstring promises the count "always agrees
+#      with the result set that domain produces";
+#   2. the domain -> author -> work CASCADE never ran, because `_facet_request`
+#      was only ever evaluated against the state as it stood at page load;
+#   3. a facet node's `.here` treatment is decided when the node is BUILT, so
+#      the reader's own selection was never marked.
+#
+# Re-reading all three levels on every interaction would triple this page's
+# draw on the HEAVY bounded-concurrency budget, so the read (not the render) is
+# skipped when a level's own request arguments are unchanged. Both directions
+# are asserted below: a skip that never happens is a budget regression, and a
+# skip that happens too often is defect 1 and 2 back again.
+# ===========================================================================
+
+_FACET_MAIN_SENTINEL = "FACET-MAIN-POOL-SENTINEL"
+_FACET_MORE_SENTINEL = "FACET-MORE-MATCHES-SENTINEL"
+
+
+def _bucket_keyed_facets():
+    """A cascade whose DOMAIN list differs by bucket, so "which bucket answered"
+    is legible in the render rather than only in the outgoing call."""
+    per_bucket = {
+        "main": _FACET_MAIN_SENTINEL,
+        "more": _FACET_MORE_SENTINEL,
+    }
+
+    async def _call(level, *, bucket="main", **_kw):
+        if level == "domain":
+            items = [{"level": "domain", "value": per_bucket[bucket],
+                      "label": per_bucket[bucket], "parent": None,
+                      "is_leaf": True, "count": 7}]
+        else:
+            items = list(_FACET_ITEMS.get(level, []))
+        return {"status": "ok", "items": items, "total": len(items),
+                "meta": {"level": level, "bucket": bucket}}
+
+    return _call
+
+
+def _drive_facet_rounds(monkeypatch, rounds, *, lang="en", state=None):
+    """Build a REAL filter bar, then run `_populate_facets` once per round.
+
+    Returns `[(label, [levels read]), ...]` plus the client, so an assertion can
+    be about which levels issued a READ and about what the containers now hold.
+
+    `rounds` is a list of `(label, mutation)`; each mutation is applied to the
+    shared state dict before that round runs, so the rounds compose exactly the
+    way a reader's successive interactions do.
+    """
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+
+    reads: list = []
+
+    async def _recording(level, **_kwargs):
+        reads.append(level)
+        return {"status": "ok", "items": list(_FACET_ITEMS.get(level, [])),
+                "total": 0, "meta": {"level": level}}
+
+    monkeypatch.setattr(fp, "get_findings_facets_enveloped", _recording)
+    set_language(lang)
+
+    live_state = _state() if state is None else dict(state)
+    cache: dict = {}
+    observed: list = []
+    holder: dict = {}
+
+    async def _noop_refresh() -> None:
+        return None
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page("/_facet_cascade_probe")) as client:
+            with client:
+                bar = ui.column().classes(f"fbar {fp.FILTER_BAR_CLASS}")
+                with bar:
+                    fp._render_facet_groups(lang)
+                for label, mutation in rounds:
+                    live_state.update(mutation)
+                    del reads[:]
+                    await fp._populate_facets(
+                        bar, live_state, lang, _noop_refresh, cache=cache)
+                    observed.append((label, list(reads)))
+        holder["client"] = client
+
+    try:
+        asyncio.run(_run())
+    finally:
+        set_language("he")
+    return observed, holder["client"]
+
+
+def test_a_facet_level_is_re_read_only_when_its_own_request_changes(monkeypatch):
+    """The skip rule, in both directions, over one reader's sequence.
+
+    A level is re-read when ITS OWN request arguments move and not otherwise:
+    the domain list is offered unfiltered (bucket + candidacy), author narrows
+    by domain, work narrows by domain and author. A page turn and a sort change
+    move none of them.
+    """
+    observed, _client = _drive_facet_rounds(monkeypatch, [
+        ("first paint", {}),
+        ("nothing changed", {}),
+        ("page turn", {"page": 3}),
+        ("sort change", {"sort": "page_count"}),
+        ("domain pick", {"domain": "Liturgy"}),
+        ("author pick", {"author": "Maimonides"}),
+        ("bucket switch", {"bucket": "more"}),
+        ("candidacy on", {"novelty_only": True}),
+    ])
+    by_label = dict(observed)
+
+    assert by_label["first paint"] == ["domain", "author", "work"], (
+        "a cold page must read every level once")
+    assert by_label["nothing changed"] == [], (
+        "an identical request re-read the cascade — three heavy-budget slots "
+        "spent to recompute an answer that provably cannot have changed")
+    assert by_label["page turn"] == [], "a page turn re-read the cascade"
+    assert by_label["sort change"] == [], "a sort change re-read the cascade"
+
+    assert by_label["domain pick"] == ["author", "work"], (
+        "picking a domain must narrow author and work — and must NOT re-read "
+        "the domain list, whose own request does not carry the domain")
+    assert by_label["author pick"] == ["work"], (
+        "picking an author must narrow work, and nothing above it")
+    assert by_label["bucket switch"] == ["domain", "author", "work"], (
+        "a bucket switch left a facet count describing the OTHER bucket")
+    assert by_label["candidacy on"] == ["domain", "author", "work"], (
+        "the candidacy filter applies to every level of the cascade")
+
+
+def test_the_reader_selection_is_marked_even_when_the_read_is_skipped(monkeypatch):
+    """The third defect: a node's `.here` treatment is decided when the node is
+    BUILT, and picking a domain does not change the domain level's request — so
+    a skip that also skipped the RENDER would leave the reader's own selection
+    unmarked forever."""
+    observed, client = _drive_facet_rounds(monkeypatch, [
+        ("first paint", {}),
+        ("domain pick", {"domain": "Liturgy"}),
+    ])
+    assert dict(observed)["domain pick"] == ["author", "work"], (
+        "fixture error: the domain level must be SKIPPED here, or this test "
+        "cannot be about the render")
+
+    pressed = [
+        element for element in _elements_with_class(client, "dnode")
+        if (element._props or {}).get("aria-pressed") == "true"
+    ]
+    assert len(pressed) == 1, (
+        "the reader's own domain selection is not marked on any facet node "
+        f"({len(pressed)} marked) — the level was re-rendered from the cached "
+        "envelope, or it was not re-rendered at all")
+    assert "Liturgy" in ((pressed[0]._props or {}).get("label") or "")
+    assert "here" in (pressed[0]._classes or [])
+
+
+def test_the_facet_cards_are_built_once_and_only_their_items_refill(monkeypatch):
+    """Re-rendering the CARDS would rebuild the filter bar around the ruling-T
+    bucket control, and would drop every card header with it."""
+    observed, client = _drive_facet_rounds(monkeypatch, [
+        ("first paint", {}),
+        ("bucket switch", {"bucket": "more"}),
+        ("domain pick", {"domain": "Liturgy"}),
+    ])
+    assert dict(observed)["bucket switch"], "fixture error: no round re-read"
+    for level in ("domain", "author", "work"):
+        cards = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-{level}")
+        assert len(cards) == 1, (
+            f"the {level!r} facet CARD was rebuilt ({len(cards)} present) — only "
+            "the items container may refill")
+        boxes = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-{level}-items")
+        assert len(boxes) == 1
+
+
+@pytest.mark.render_smoke
+def test_switching_bucket_replaces_the_facet_lists_as_well_as_the_rows():
+    """End to end, through the simulated user: the cascade is part of the ONE
+    refresh path, not a one-shot fill after the first paint.
+
+    The domain fixture differs by bucket, so a facet list left over from the
+    previous bucket is visible as a stale sentinel rather than only as a missing
+    outgoing argument."""
+    import httpx
+    from nicegui import core, ui
+    from nicegui.context import context as _nicegui_context
+    from nicegui.testing.general import prepare_simulation
+    from nicegui.testing.user import User
+    from nicegui.ui_run import set_storage_secret
+
+    from shared.discovery_display_strings import bucket_name
+
+    lang = "en"
+    saved_slot_stack = list(_nicegui_context.slot_stack)
+    saved_handlers = list(core.app._startup_handlers)
+    core.app._startup_handlers.clear()
+
+    async def _run():
+        prepare_simulation()
+        set_storage_secret("findings-facet-refetch-secret", {})
+        with ExitStack() as stack:
+            stack.enter_context(patch("web.main.discovery_available", return_value=True))
+            stack.enter_context(patch.object(fp, "get_findings_enveloped", _fake_findings()))
+            stack.enter_context(patch.object(
+                fp, "get_findings_facets_enveloped", _bucket_keyed_facets()))
+            stack.enter_context(patch("web.main._resolve_ui_language", return_value=lang))
+            _os.environ["NICEGUI_USER_SIMULATION"] = "true"
+            set_language(lang)
+            try:
+                async with core.app.router.lifespan_context(core.app):
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(core.app), base_url="http://test"
+                    ) as http_client:
+                        user = User(http_client)
+                        await user.open(FINDINGS_ROUTE)
+                        await user.should_see(_FACET_MAIN_SENTINEL)
+                        await user.should_not_see(_FACET_MORE_SENTINEL)
+
+                        user.find(kind=ui.button,
+                                  content=bucket_name(False, lang)).click()
+
+                        await user.should_see(_FACET_MORE_SENTINEL)
+                        await user.should_not_see(_FACET_MAIN_SENTINEL)
+            finally:
+                _os.environ.pop("NICEGUI_USER_SIMULATION", None)
+
+    try:
+        asyncio.run(_run())
+    finally:
+        core.app._startup_handlers.clear()
+        core.app._startup_handlers.extend(saved_handlers)
+        _nicegui_context.slot_stack.clear()
+        _nicegui_context.slot_stack.extend(saved_slot_stack)
+        set_language("he")
