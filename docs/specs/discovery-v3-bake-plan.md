@@ -89,7 +89,15 @@ summing the real per-call `cost` field — never an estimate):
 **This reconciles the `~$27` and `~$301` figures in the record.** `~$301` was the per-case unbatched
 re-derivation; batching ten cases per call brings it to $40. Neither figure was wrong about its own contract.
 
-> **⚠ An authorization discrepancy I cannot resolve and am not going to paper over.**
+> **✅ RESOLVED 2026-08-05 — the owner confirms the run happened.** So `136-NOVELTY-RUN.md`'s "remains
+> UNAUTHORIZED / was NOT executed" is a true statement about *that session*, superseded by events, and the
+> re-scope-to-`batch_size=10` reading below was correct. The trail corroborates it independently:
+> `136-REBUILD-GATES.md` records the cache `eb6fc4f8…` as a hash-pinned gated PASS, and that is the hash the
+> live asset pins. **`.planning/ROADMAP.md` SC-6 corrected the same day** on both stale claims (the run's
+> status and the `~$301` figure). Nothing is owed here; the paragraph below is kept as the record of how the
+> discrepancy was found and what it looked like before it was answered.
+>
+> **⚠ The original discrepancy, as written before the owner confirmed it.**
 > `136-NOVELTY-RUN.md` states plainly: *"The ~$301 production run remains UNAUTHORIZED. It was NOT executed
 > by this session."* Yet a production run **did** complete — `novelty_production_manifest.json` (started
 > 2026-08-03T12:57), a 55,184-entry checkpoint, a $40.12 cost log, and the resulting cache
@@ -587,13 +595,11 @@ posture this file should have started in:
 - **§3.1** the corpus-expansion worry — **withdrawn.** gen-2's work set is a strict subset of v2's; all 2,738
   were already in the v2-era matcher. No CERT-01 re-registration on that ground.
 
-**The one item still owed by someone other than me**
+- **§1.3** the authorization discrepancy — **resolved 2026-08-05: the owner confirms the run happened.** The
+  stale claims in `.planning/ROADMAP.md` SC-6 (run "UNAUTHORIZED", cost `~$301`) are corrected in place.
 
-1. **§1.3 authorization discrepancy.** Was the 2026-08-03 novelty production run authorized at
-   `batch_size=10`? Its output is what the serving asset pins, and the record says the run was unauthorized.
-   Then authorize v3's fresh run — **≈$68** at the shipped scope, ceiling $150. *(This is a records question,
-   not a technical blocker: the bake can be built and every non-novelty gate run without it, and unverified
-   rows land honestly as `not_checked`.)*
+**Nothing is owed.** One courtesy confirmation before money moves: v3's fresh novelty run at **≈$68** (shipped
+scope, $150 self-enforced ceiling) — same model/prompt/effort, so the validated configuration is unchanged.
 
 **Non-blocking — needed before the corresponding step**
 
