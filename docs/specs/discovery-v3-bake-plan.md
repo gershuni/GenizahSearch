@@ -1,7 +1,29 @@
 # discovery-v3 bake plan — the gen-2 evidence refresh
 
-**Status: DRAFT FOR REVIEW, 2026-08-05. No heavy run has started.** Written by the gen-2 bake session
-before touching the pipeline, per the standing rule that a plan naming its costs is reviewed before spend.
+**Status: 🛑 CHANGES-REQUIRED — do NOT execute. Codex review 2026-08-05 returned 3 BLOCKERs + 5 HIGH**
+(`discovery-v3-bake-plan.CODEX-REVIEW.md`). Written by the gen-2 bake session before touching the pipeline,
+per the standing rule that a plan naming its costs is reviewed before spend. **No heavy run has started, and
+must not until the blockers below are closed.**
+
+| Codex finding | what it refutes | my assessment |
+|---|---|---|
+| **BLOCKER 1** — the adapter cannot deliver `w_start`/`w_end` | §1.2's "one debt already paid" | **Conceded.** The offsets exist in gen-2's evidence, but `_ingest_tier_a` reads `spans_json` and emits only the **largest page-side span**; it never reads `ref_spans_json`/`ref_start`/`ref_end`. Gen-2 stores *multiple dual-side spans per match row*, so a scalar join has **no defined choice**. The data is free; carrying it is not. Needs a declared page-span→reference-span projection + a multi-span parity gate. |
+| **BLOCKER 2** — the bake drops gen-2's coverage-router semantics | §3.1a's "translation layer", §3.4's inherited D-17 order, and every quality figure borrowed from the handoff | **Conceded, and it is the most consequential.** The v3 two-surface split lives in gen-2's `coverage_route` table (own grain, own threshold t=0.2984). **The builder never reads it** — it recomputes coverage from `pages.text` + `matched_letters` and applies v2's Lever-1 rule. So feeding gen-2 rows through this builder yields **v2 routing**, and the handoff's validated ~0.89 headline precision would **not** transfer. This is a real decision, not an adapter detail. |
+| **BLOCKER 3** — cache reuse does not prove an unchanged question | §1.4a's reversal | **Partly conceded.** Codex **confirms** my core point: band, coverage, routing, matched-letters, competing works and span text are *not* in the prompt, so the engine change genuinely cannot move the answer. But `render_case` also sends the **claimed title and author**, read from the baked `works` row — which `sys_id::w######` does not pin — and neither the alias-group artifact nor the finding-aid DBs are pinned. Reuse survives, but only behind a **per-pair input fingerprint**, which is what my brief's spec described and the artifact does not implement. |
+
+**Five HIGH findings, all accepted:** the read surface needs more columns than §3.1a lists and `source_corpus`
+is **never read** (so that derived column was pointless); the "52-work gap" is a *current-policy classification*,
+not a demonstrated cause of the missing crosswalk entries; **MAPV2-8 is internally inconsistent across §3.5 / §5
+/ §8** (the DO list says 152 while carrying the 595 blast radius); `shadowed_by` must be derived at the
+producer's `(claim_id, ref_work)` grain with a **halt on any mixed group** rather than resting on this run's
+observation; and R-source needs a **fail-closed input gate on the slim table** (gate 2 checks mapping
+completeness, not absence, so a stray row would resolve and pass). Plus MEDIUM: gates 6/7 carry no failure
+demonstration, and the masking self-test uses a *synthetic* pattern so it cannot attest the real pattern set is
+complete or current.
+
+**Net effect on the estimate:** the ~2-day figure assumed an adapter. Blockers 1 and 2 make it a build with
+real decisions in it. **The routing question (blocker 2) is the one that needs an owner answer** — ingest
+gen-2's router, or re-decide routing and stop citing the handoff's measured quality.
 
 **Companion:** `discovery-v3-naming.md` (why this is v3 and not v2.1). **Predecessor:**
 `discovery-v2-bake-plan.md` (the pipeline this reuses). **Input spec:**
