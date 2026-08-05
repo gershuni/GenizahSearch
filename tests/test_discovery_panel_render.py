@@ -994,6 +994,79 @@ def test_a_healthy_entry_control_carries_no_outage_chip(lang):
         assert ds.service_state_message(status, lang) not in text, text
 
 
+# ===========================================================================
+# A claim-less folio of a claim-rich manuscript. The measured case is RNL
+# Ms. Evr. Antonin A 1: 483 claims across 396 of its 492 pages, none on page 1,
+# and -- under the bare hide-on-zero rule -- no control there at all.
+# ===========================================================================
+
+@pytest.mark.parametrize('lang', ('en', 'he'))
+def test_a_claim_less_folio_renders_a_control_that_names_its_scope(lang):
+    from web.translations import tr
+
+    model = model_for(claim_items=[], works=[work_summary_row()], lang=lang)
+    assert model.entry_control['manuscript_elsewhere_only'] is True, (
+        'the fixture no longer produces the state under test')
+
+    client = _entry_control_client(model)
+    controls = _elements_with_class(client, dp.PANEL_ENTRY_CLASS)
+    assert controls, 'the control is absent on a folio whose manuscript has rows'
+    text = '\n'.join(_subtree_texts(controls[0]))
+
+    assert tr('Computed identifications elsewhere in this manuscript') in text, text
+    # NOT the page-scoped wording, and NOT a page count of any kind. "(0)" is
+    # the specific rendering this state exists to prevent; the general rule is
+    # that the control carries no digit at all here.
+    assert '(0)' not in text
+    assert not any(ch.isdigit() for ch in text), text
+    assert tr('Computed identifications') + ' (' not in text, text
+
+
+def test_a_claim_less_folio_opens_onto_the_manuscript_pane():
+    """"Works" is not enough: the reader was told there are identifications
+    elsewhere in this manuscript, so the pane carrying them must be what the
+    opened panel leads with -- not an empty claims list."""
+    model = model_for(claim_items=[], works=[work_summary_row(
+        display_work_id='w1', neutral_title='Alpha', page_count=5)])
+    assert model.lead_with_manuscript_pane is True
+    client = _render(model)
+    panes = _elements_with_class(client, 'dpanes')
+    assert len(panes) == 1
+    children = list(panes[0])
+    assert len(children) == 2, 'the panel is not two panes'
+    manuscript = _elements_with_class(client, dp.PANEL_MANUSCRIPT_PANE_CLASS)
+    assert manuscript and manuscript[0] is children[0], (
+        'the empty page pane is still first, so opening the panel from this '
+        'state lands the reader on nothing')
+    assert 'Alpha (5)' in _scoped_text(client, dp.PANEL_MANUSCRIPT_PANE_CLASS)
+
+
+def test_a_folio_with_claims_is_unchanged_by_the_new_branch():
+    """The normal path: the page count is still the label's number and the page
+    pane still leads."""
+    from web.translations import tr
+
+    model = model_for(claim_items=[claim_row()], works=[work_summary_row()])
+    assert model.entry_control['manuscript_elsewhere_only'] is False
+    assert model.lead_with_manuscript_pane is False
+    text = '\n'.join(_subtree_texts(_elements_with_class(
+        _entry_control_client(model), dp.PANEL_ENTRY_CLASS)[0]))
+    assert f"{tr('Computed identifications')} (1)" in text, text
+
+    client = _render(model)
+    children = list(_elements_with_class(client, 'dpanes')[0])
+    manuscript = _elements_with_class(client, dp.PANEL_MANUSCRIPT_PANE_CLASS)
+    assert manuscript[0] is children[1], 'the page pane is no longer first'
+
+
+def test_a_folio_whose_manuscript_is_also_empty_still_renders_nothing():
+    """The common case, and the one the hide rule is right about."""
+    model = model_for(claim_items=[], works=[])
+    assert model.entry_control['hidden'] is True
+    assert _elements_with_class(
+        _entry_control_client(model), dp.PANEL_ENTRY_CLASS) == []
+
+
 def _service_state_call_sites() -> List[Any]:
     """Every `_service_state_block(...)` call in the renderer, as AST nodes."""
     tree = ast.parse(_read(PANEL_PATH))

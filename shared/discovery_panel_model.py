@@ -1288,14 +1288,41 @@ def _manuscript_pane(
 # ---------------------------------------------------------------------------
 
 
+def _manuscript_reports_identifications(
+    works: Mapping[str, Any], outcome: ArbitrationOutcome
+) -> bool:
+    """Whether the WHOLE-MANUSCRIPT read is evidence of anything at all.
+
+    Three conjuncts, and each one is refusing to invent a fact:
+
+    * `pane_reports_manuscript_facts` -- the SAME predicate the pane itself
+      obeys, reused rather than restated. Where the page scope did not resolve,
+      anything said about the manuscript is our own plumbing failure wearing
+      the manuscript's name, so this must read False there;
+    * an `ok` works envelope -- an outage, a timeout or a `busy` is not
+      evidence of a manuscript with content any more than it is evidence of a
+      manuscript without it;
+    * a total ABOVE zero -- an `ok` zero is a true "nothing elsewhere either".
+    """
+    return (outcome.pane_reports_manuscript_facts
+            and _is_ok(works)
+            and _envelope_total(works) > 0)
+
+
 def _entry_control(
     claims: Mapping[str, Any], page_ids: Mapping[str, Any],
-    outcome: ArbitrationOutcome,
+    works: Mapping[str, Any], outcome: ArbitrationOutcome,
 ) -> Dict[str, Any]:
     """Visibility is a FIELD on the model, not a render-time expression.
 
-    Hidden ONLY on a status of `ok` with a total of zero. An outage must never
-    look like a manuscript with nothing on it.
+    Hidden ONLY on a status of `ok` with a total of zero -- AND only when the
+    whole-manuscript read has nothing to add. An outage must never look like a
+    manuscript with nothing on it, and neither must a claim-less FOLIO of a
+    claim-rich manuscript: RNL Ms. Evr. Antonin A 1 carries 483 claims across
+    396 of its 492 pages and none at all on page 1, where the hide rule made
+    the control byte-identical to a manuscript the corpus knows nothing about.
+    `manuscript_elsewhere_only` names that state so the renderer can SAY it
+    rather than infer it; the hide rule itself is untouched everywhere else.
 
     `degraded_status` is a SECOND field, and it exists because of what unhiding
     the control on a page-scope outage exposed: `status` is the CLAIMS status,
@@ -1310,9 +1337,23 @@ def _entry_control(
     rather than in the renderer is what keeps the renderer from recombining the
     claims status with the scope state on its own.
     """
-    hidden = outcome.panel_hidden_on_zero and _is_ok_zero(claims)
-    control: Dict[str, Any] = {"hidden": hidden, "status": claims.get("status")}
-    control["count"] = _envelope_total(claims) if _is_ok(claims) else None
+    true_page_zero = outcome.panel_hidden_on_zero and _is_ok_zero(claims)
+    elsewhere_only = true_page_zero and _manuscript_reports_identifications(works, outcome)
+    control: Dict[str, Any] = {
+        "hidden": true_page_zero and not elsewhere_only,
+        "status": claims.get("status"),
+        "manuscript_elsewhere_only": elsewhere_only,
+    }
+    if elsewhere_only:
+        # THIS PAGE's total is zero, and it is the only count the control could
+        # carry. A bare "(0)" beside a manuscript with identifications on 396 of
+        # its pages states the page's fact where the reader reads the
+        # manuscript's, so the control reports the SCOPE in words and no number
+        # at all. Declining to count is not the same as `None` for an outage --
+        # `manuscript_elsewhere_only` is what tells the two apart.
+        control["count"] = None
+    else:
+        control["count"] = _envelope_total(claims) if _is_ok(claims) else None
     if not _is_ok(claims):
         control["degraded_status"] = claims.get("status")
     elif outcome.scope_state == SCOPE_OUTAGE:
@@ -1340,6 +1381,12 @@ class PanelModel:
     bucket_rule_sentence: str
     manuscript_pane: Dict[str, Any]
     disclosure_levels: Tuple[Dict[str, Any], ...]
+    #: Pane ORDER is a display decision, so the model takes it. True only in the
+    #: `manuscript_elsewhere_only` state, where the page pane is an empty list
+    #: and the manuscript pane holds everything the reader opened the panel for;
+    #: leading with the empty one is how a reader who was told "there are
+    #: identifications elsewhere" arrives at nothing.
+    lead_with_manuscript_pane: bool = False
 
     # -- convenience accessors; deliberately NOT part of `as_dict`, so nothing
     # -- below is walked twice by the honesty sweep.
@@ -1435,14 +1482,21 @@ def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
         },
     )
 
+    entry_control = _entry_control(
+        bundle.claims, bundle.page_ids, bundle.manuscript_works, outcome)
+
     return PanelModel(
         lang=lang,
         show_more=bool(bundle.show_more),
         panel_status=outcome.panel_status,
-        entry_control=_entry_control(bundle.claims, bundle.page_ids, outcome),
+        entry_control=entry_control,
         service_state=_service_state(bundle.claims, lang),
         caveat=ds.recall_disclaimer(lang),
         bucket_rule_sentence=ds.rule_sentence(lang),
         manuscript_pane=_manuscript_pane(bundle, outcome),
         disclosure_levels=levels,
+        # ONE predicate, read back from the control that already decided it --
+        # a second evaluation here is how the label and the pane order drift
+        # apart and the reader is told one thing and shown another.
+        lead_with_manuscript_pane=bool(entry_control["manuscript_elsewhere_only"]),
     )

@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+import scripts.discovery_ids as ids
 import web.pages.browse_enrichment as be
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
 from shared.discovery_service import DiscoveryService
@@ -55,6 +56,7 @@ from shared.discovery_surface_projection import (
     STATUS_TIMEOUT,
     STATUS_UNAVAILABLE,
     make_envelope,
+    surface_safe_work_summary,
 )
 
 _ENRICHMENT_SRC = 'web/pages/browse_enrichment.py'
@@ -641,10 +643,32 @@ def test_a_page_with_no_resolvable_page_id_yields_no_bundle(spy):
 # ===========================================================================
 
 def test_entry_control_hidden_on_a_true_zero(spy):
+    """A true page zero whose MANUSCRIPT read is an `ok` zero too -- the state
+    the hide rule is right about, and the one the seam produces here."""
     bundle = _fetch()
     model = build_panel_rows(bundle)
     assert model.entry_control == {
-        'hidden': True, 'status': STATUS_OK, 'count': 0, 'degraded_status': None}
+        'hidden': True, 'status': STATUS_OK, 'count': 0, 'degraded_status': None,
+        'manuscript_elsewhere_only': False}
+
+
+def test_entry_control_visible_when_the_manuscript_has_rows_elsewhere(spy):
+    """The same folio through the LIVE seam, with the whole-manuscript read
+    answering non-empty: the control appears, carries no page count, and the
+    panel leads with the pane that holds the rows."""
+    spy.results['get_manuscript_works_enveloped'] = _works_envelope([
+        surface_safe_work_summary({
+            'canonical_work_id': 'w000001', 'display_work_id': 'w000001',
+            'neutral_title': 'Some Recorded Work', 'author': None, 'genre': None,
+            'title_missing': False, 'page_count': 12, 'best_band_rank': 0,
+            'gated': False, 'main_pool': True,
+            'relation_kind': ids.CLAIM_TYPE_DIRECT_WITNESS,
+        })])
+    model = build_panel_rows(_fetch())
+    assert model.entry_control == {
+        'hidden': False, 'status': STATUS_OK, 'count': None,
+        'degraded_status': None, 'manuscript_elsewhere_only': True}
+    assert model.lead_with_manuscript_pane is True
 
 
 @pytest.mark.parametrize('status,inject', [

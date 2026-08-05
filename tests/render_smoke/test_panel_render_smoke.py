@@ -25,6 +25,7 @@ equality is the mechanism; the value rules are controls on it.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import io
 import json
@@ -2052,6 +2053,22 @@ def _render_every_panel_surface(seed: Optional[str] = None) -> str:
         parts.append(_render_capture(
             lambda m=empty_model: dp.render_discovery_entry_control(
                 m, on_toggle=_noop_toggle)))
+
+        # ...and the SAME true page zero with a NON-EMPTY manuscript read: a
+        # claim-less folio of a claim-rich manuscript (the measured case is RNL
+        # Ms. Evr. Antonin A 1, 483 claims across 396 of 492 pages and none on
+        # page 1). The control is visible there and the panel leads with the
+        # manuscript pane, so BOTH branches of the entry label and BOTH pane
+        # orders reach the scanner -- the manuscript pane draws artifact titles.
+        elsewhere = dataclasses.replace(
+            empty,
+            manuscript_works=make_envelope(STATUS_OK, [
+                surface_safe_work_summary(_work_summary_source(
+                    canonical_work_id='w000001', display_work_id='w000001',
+                    neutral_title=title or 'Work 1', page_count=12))], 1,
+                meta={'page_scope_resolved': True, 'lang': lang}))
+        parts.append(_render_capture(
+            _paint_body(build_panel_rows(elsewhere), entry=True)))
 
         with_rows = bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), lang, STATUS_OK,
                                seed_title=title).with_related_rows(

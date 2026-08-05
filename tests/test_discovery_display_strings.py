@@ -548,6 +548,7 @@ def test_no_display_string_contains_a_prohibited_relation_word():
 DISCOVERY_TR_KEYS = (
     "Computed Identifications",
     "Computed identifications",
+    "Computed identifications elsewhere in this manuscript",
     "Computed identifications across the Cairo Genizah corpus, produced by text matching. "
     "Every row is an algorithmic match, not a reviewed identification.",
     "All findings",

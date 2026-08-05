@@ -1368,6 +1368,134 @@ def test_an_UNRESOLVABLE_scope_carries_no_retry_because_a_retry_cannot_help():
     assert model.entry_control["hidden"] is True
 
 
+# ---------------------------------------------------------------------------
+# A CLAIM-LESS FOLIO OF A CLAIM-RICH MANUSCRIPT.
+#
+# The measured case: RNL Ms. Evr. Antonin A 1 (990000895680205171) carries 483
+# claims across 396 of its 492 pages and none at all on page 1. Under the bare
+# hide-on-zero rule its page 1 rendered no control, no chip and no hint --
+# byte-identical to a manuscript the corpus knows nothing about.
+#
+# The four tests below are the four cells that decide it, and only the first
+# changes behaviour: the manuscript read must be BOTH permitted to speak
+# (`pane_reports_manuscript_facts`) and actually `ok` and non-empty.
+# ---------------------------------------------------------------------------
+
+def test_a_claim_less_folio_of_a_claim_rich_manuscript_keeps_the_control_visible():
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        manuscript_works=works_envelope([work_summary_row()], 1),
+    ))
+    entry = model.entry_control
+    assert entry["hidden"] is False, (
+        "a folio with a true zero hid the control while the manuscript-level "
+        "read reported identifications elsewhere -- the reader is shown the "
+        "same surface as a manuscript the corpus knows nothing about")
+    assert entry["manuscript_elsewhere_only"] is True
+    # ...and NOT as a page count. The only number available here is this page's
+    # zero, and the control must never carry it.
+    assert entry["count"] is None
+    # The status is still the CLAIMS envelope's own -- nothing was invented.
+    assert entry["status"] == "ok"
+    assert entry["degraded_status"] is None
+    # Opening the panel lands on the pane that carries the rows.
+    assert model.lead_with_manuscript_pane is True
+    assert model.manuscript_pane["state"] == pm.PANE_POPULATED
+
+
+def test_a_true_zero_with_a_manuscript_level_ZERO_still_hides():
+    """The common case, and the one the hide rule is right about: most folios
+    genuinely have nothing, and so does their manuscript."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        manuscript_works=works_envelope((), 0),
+    ))
+    assert model.entry_control["hidden"] is True
+    assert model.entry_control["manuscript_elsewhere_only"] is False
+    assert model.entry_control["count"] == 0
+    assert model.lead_with_manuscript_pane is False
+
+
+@pytest.mark.parametrize("status", ["unavailable", "timeout", "busy"])
+def test_a_true_zero_with_a_manuscript_level_OUTAGE_follows_the_OLD_rule(status):
+    """An outage is not evidence of a manuscript with content, any more than it
+    is evidence of one without. The new branch must not fire on it -- today's
+    behaviour, unchanged."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        manuscript_works=works_envelope(status=status),
+    ))
+    assert model.entry_control["manuscript_elsewhere_only"] is False
+    assert model.entry_control["hidden"] is True
+    assert model.manuscript_pane["state"] == pm.PANE_OUTAGE
+
+
+@pytest.mark.parametrize("page_ids_kwargs,works_kwargs", [
+    ({"items": (), "total": 0, "resolved": False}, {}),
+    ({}, {"page_scope_resolved": False}),
+])
+def test_an_UNRESOLVED_page_scope_never_triggers_the_new_branch(
+        page_ids_kwargs, works_kwargs):
+    """`pane_reports_manuscript_facts` is the single predicate for "the pane may
+    report facts about the manuscript", and the new branch REUSES it rather than
+    inventing a second rule. Where the scope did not resolve, a non-empty works
+    envelope is our own plumbing wearing the manuscript's name."""
+    model = pm.build_panel_rows(bundle(
+        claims=claims_envelope((), 0),
+        page_ids=page_ids_envelope(**page_ids_kwargs),
+        manuscript_works=works_envelope([work_summary_row()], 1, **works_kwargs),
+    ))
+    assert model.manuscript_pane["scope_state"] == pm.SCOPE_UNRESOLVED
+    assert model.entry_control["manuscript_elsewhere_only"] is False
+    assert model.entry_control["hidden"] is True
+    assert model.lead_with_manuscript_pane is False
+
+
+@pytest.mark.parametrize("claims_status", sorted(pm.SURFACE_STATUSES_ORDERED))
+@pytest.mark.parametrize("page_id_state", sorted(_PAGE_ID_ENVELOPE_STATES))
+@pytest.mark.parametrize("works_total", [0, 2])
+@pytest.mark.parametrize("claims_total", [0, 1])
+def test_no_other_arbitration_row_changed(
+        claims_status, page_id_state, works_total, claims_total):
+    """The whole cross-product against the rule as it stood BEFORE this change,
+    with the ONE named exception written out.
+
+    Restating the old formula here is deliberate: an assertion that re-derived
+    the hide rule from the shipped code would agree with it by construction and
+    could never catch a row that moved. `claims_total` is parametrised because
+    the hide rule only ever engages on a ZERO -- a fixture pinned to one claim
+    would assert sixty-four cells and exercise the rule in none of them.
+    """
+    claims = claims_envelope([claim_row()] * claims_total, claims_total) \
+        if claims_status == "ok" else claims_envelope(status=claims_status)
+    works = works_envelope([work_summary_row()] * works_total, works_total)
+    model = pm.build_panel_rows(bundle(
+        claims=claims,
+        page_ids=_PAGE_ID_ENVELOPE_STATES[page_id_state](),
+        manuscript_works=works,
+    ))
+    scope = _EXPECTED_SCOPE_STATE[page_id_state]
+    _status, hide_may_apply, reports_facts = \
+        _INDEPENDENT_ARBITRATION_MATRIX[(claims_status, scope)]
+    claims_is_a_true_zero = claims_status == "ok" and claims["total"] == 0
+    old_rule_hidden = hide_may_apply and claims_is_a_true_zero
+    # The ONE exception, stated independently of the implementation.
+    the_new_state = old_rule_hidden and reports_facts and works_total > 0
+
+    assert model.entry_control["manuscript_elsewhere_only"] is the_new_state
+    assert model.entry_control["hidden"] is (old_rule_hidden and not the_new_state)
+
+
+def test_the_zero_claims_fixture_really_is_a_zero():
+    """The control on the control: every assertion above rests on
+    `claims_envelope([claim_row()])` being non-zero and `claims_envelope((), 0)`
+    being a true `ok` zero, and a fixture that quietly stopped being either
+    would make the cross-product above pass while testing one cell."""
+    assert claims_envelope((), 0)["total"] == 0
+    assert claims_envelope((), 0)["status"] == "ok"
+    assert claims_envelope([claim_row()])["total"] == 1
+
+
 def test_a_works_outage_leaves_the_panel_visible_and_the_pane_unavailable():
     model = pm.build_panel_rows(bundle(
         claims=claims_envelope([claim_row()]),
@@ -2062,13 +2190,16 @@ _EMITTED_SCHEMA = {
         "lang": _STR, "show_more": _BOOL, "panel_status": _STR, "caveat": _STR,
         "bucket_rule_sentence": _STR, "entry_control": (dict,),
         "service_state": (dict,), "manuscript_pane": (dict,),
-        "disclosure_levels": (tuple,),
+        "disclosure_levels": (tuple,), "lead_with_manuscript_pane": _BOOL,
     },
     "model.entry_control": {
         # `degraded` is separate from `status` on purpose: `status` is the
         # CLAIMS envelope's, and a page-scope outage leaves it `ok`.
+        # `manuscript_elsewhere_only` is separate from BOTH: it is a true page
+        # zero standing beside a non-empty manuscript read, which is neither an
+        # outage nor a manuscript with nothing on it.
         "hidden": _BOOL, "status": _OPT_STR, "count": _OPT_INT,
-        "degraded_status": _OPT_STR,
+        "degraded_status": _OPT_STR, "manuscript_elsewhere_only": _BOOL,
     },
     "model.service_state": {
         "status": _OPT_STR, "message": _STR, "retry": _STR, "reason": _OPT_STR,

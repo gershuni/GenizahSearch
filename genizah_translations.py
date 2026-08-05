@@ -4835,6 +4835,13 @@ TRANSLATIONS.update({
     # --- The browse-panel entry control (sentence case — the panel title
     #     stays "Computed identifications" per D-21) ---
     "Computed identifications": "זיהויים מחושבים",
+    # The SAME control on a folio whose own total is a true zero while the
+    # manuscript-level read came back non-empty. It carries no number: the only
+    # count available there is this page's zero, and a bare "(0)" on a
+    # manuscript with identifications on hundreds of its pages is the false
+    # impression the state exists to prevent. The scope is in the words instead.
+    "Computed identifications elsewhere in this manuscript":
+        "זיהויים מחושבים במקומות אחרים בכתב־היד",
     # --- Mode strip: "All findings" is live; the other two ship visible,
     #     inert and phase-tagged, so 137/138 add a tab rather than a page ---
     "All findings": "כל הממצאים",

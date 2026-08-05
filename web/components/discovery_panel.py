@@ -135,9 +135,17 @@ def render_discovery_entry_control(model: PanelModel, *, on_toggle=None) -> None
         return
     lang = _lang_of(model)
     count = entry.get('count')
-    label = tr('Computed identifications')
-    if isinstance(count, int):
-        label = f'{label} ({count})'
+    if entry.get('manuscript_elsewhere_only'):
+        # A TRUE zero on this folio while the whole-manuscript read came back
+        # `ok` and non-empty. The two facts -- "nothing on this page" and "this
+        # page has N" -- are different facts, so they never share a rendering:
+        # this state gets its own wording, naming the scope, and no number at
+        # all. The MODEL decided the state; the renderer only speaks it.
+        label = tr('Computed identifications elsewhere in this manuscript')
+    else:
+        label = tr('Computed identifications')
+        if isinstance(count, int):
+            label = f'{label} ({count})'
 
     with ui.element('span').classes(f'gs-discovery {PANEL_ENTRY_CLASS}'):
         button = ui.button(label, icon='hub', on_click=on_toggle).props(
@@ -476,11 +484,23 @@ def render_discovery_panel_body(
         # --- the two EVEN panes. Block stack on mobile (page pane FIRST), a
         # --- `1fr 1fr` grid at 900px and above. Both carry equal weight and the
         # --- manuscript pane is NOT collapsed.
-        with ui.element('div').classes('dpanes'):
+        # ---
+        # --- ORDER is the model's decision, not one taken here: on the
+        # --- `manuscript_elsewhere_only` state the page pane is an empty list
+        # --- and the manuscript pane is the whole reason the reader opened the
+        # --- panel, so the model leads with it and the stack order follows.
+        def _page_pane() -> None:
             with ui.element('div'):
                 for level in model.disclosure_levels:
                     _render_level(level, lang, page_id, on_retry=on_retry)
-            _render_manuscript_pane(model.manuscript_pane, lang, on_retry=on_retry)
+
+        with ui.element('div').classes('dpanes'):
+            if model.lead_with_manuscript_pane:
+                _render_manuscript_pane(model.manuscript_pane, lang, on_retry=on_retry)
+                _page_pane()
+            else:
+                _page_pane()
+                _render_manuscript_pane(model.manuscript_pane, lang, on_retry=on_retry)
 
 
 def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
