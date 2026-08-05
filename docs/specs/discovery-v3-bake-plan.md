@@ -138,9 +138,58 @@ Three consequences, and they run *opposite* to the brief's reassurance:
    free text and the work grain by construction; a gen-2 row can collide with a v2 key while asking a
    materially different question, and nothing in the load path can detect it.
 
+**⚠ REVERSED 2026-08-05 — see §1.4a. The "do not reuse" recommendation below was wrong**, and it would have
+spent ~$30–55 to re-answer questions that had not changed. The cache-key *description* above is accurate; the
+conclusion I drew from it was not.
+
+<details>
+<summary>The superseded recommendation, kept because the reasoning is instructive</summary>
+
 This lands in the same place the standing rule already requires — *novelty is granularity-relative; recompute
 at the new granularity, never migrate* — but for a sharper reason than economy. **Recommend: compute v3
 novelty fresh. Do not top up or key-reuse the v2 cache.** §4 shows this is affordable.
+
+</details>
+
+### 1.4a Reuse IS valid — what actually changes between v2 and v3, input by input
+
+I argued against reuse because "gen-2 alters the input free text and the work grain by construction." **The
+free-text half of that is simply false**, and it is the half that mattered.
+
+The model is asked: *does any finding aid already record this manuscript as carrying this work, and how does
+its wording relate to our claim?* Two inputs:
+
+| input | changes v2 → v3? |
+|---|---|
+| the finding-aid evidence (FJMS `catalog.TitleHeb`/`GenizahTitleOrgTitle`, bib, FGP, PGP free text) | **No.** These are external reference sidecars. Untouched by a discovery re-bake. |
+| the `(manuscript, work)` identity | **No, for any pair reached through the same crosswalk** — same `w######`, so the same alias group, so the same `work_key`. |
+
+What v3 *does* change is **whether we assert a pair, and with what band, coverage and routing**. Novelty is
+**orthogonal to band by design** — the frozen contract says it never feeds "band assignment, ranking, precision
+copy or styling." So the engine change cannot change the novelty answer for a pair that exists in both.
+
+**Therefore a cache hit on an unchanged grain is a valid answer to an unchanged question**, and keying on grain
+— which I criticised — is exactly what makes that checkable. Pairs on the 2,738 newly minted works have no
+entry and are honest misses, which is the "recompute at the new granularity" rule enforcing itself.
+
+#### The one guardrail that makes this safe
+
+**Never re-grain an existing `w######` in place.** If a work's identity is refined — handoff §6.3's
+Bible→chapter, Talmud→folio+amud — it must receive a **new** id so the key changes and the cache misses. Keep
+the id while changing what it means and cached verdicts become silently wrong, and **the 4,052
+`aid_more_specific` verdicts would flip first**, because that shade is *precisely* a statement about relative
+granularity. Concretely: **do not run the granularity stage in the same bake as the novelty reuse** unless
+re-grained works are minted as new ids.
+
+**A second reason not to touch the model, better than the cost one.** A model/prompt/effort change would leave
+a **mixed** cache — some entries from the old configuration, some new, indistinguishable by key, with only the
+sibling manifest (which describes one configuration) to vouch for all of them. Homogeneity, not price, is the
+argument. Re-pinning the file's SHA-256 after adding entries is expected and fine; the pin exists for
+reproducibility, not immutability.
+
+**Checked:** the cached values are already the current **ten-shade** vocabulary (`confirms`, `diverges_work`,
+`refines_granularity`, `aid_more_specific`, `container_predicts`, `fills_gap`, `diverges_part`, `alias_merge`,
+`not_checked`), not the superseded five-way one — so the reused entries and any new ones are the same contract.
 
 One thing the brief gets exactly right, and it is load-bearing: unverified rows land as `not_checked`,
 **fail-closed per entry, never fatal** (`load_novelty_verdicts`) — excluded from contribution figures, shown as
@@ -523,9 +572,22 @@ work axis is `crosswalk.json` — so P was computed directly as distinct `(sys_i
 If the 2,738 unresolved M-source works are minted (§3.1 option 1), add the right-hand column: the shipped
 scope becomes ~110k → **≈$68**.
 
-**Recommend: novelty over the shipped scope, ≈$68 worst case, under a $150 self-enforced ceiling**
-(`cost_ceiling_usd`, as the $45 one did). Every figure here is a fraction of the `~$301` still in the ROADMAP,
-for a *larger* corpus — and the headline-only scope would cost $32.
+**With cache reuse (§1.4a), measured against the real 65,200-entry cache — this is the operative table:**
+
+| scope | reuse | pay for | **cost** | without reuse |
+|---|---|---|---|---|
+| **headline (`same_work`)** | **87.6%** (45,070 of 51,476) | 20,124 | **$12.38** | $40.10 |
+| **shipped** | 57.1% (49,145 of 86,073) | 60,823 | **$37.41** | $67.64 |
+
+Both figures include every pair on the 2,738 newly minted works (13,718 / 23,895), which have no cache entry
+and are paid in full. The headline surface reuses far better because it is the stable, high-coverage population
+v2 already asked about; the shipped scope reaches further into pairs v2 never assessed.
+
+The intersection is computed on the raw `w######` id, while the real key is the **alias-group representative** —
+alias collapsing can only merge keys, so **actual reuse is ≥ these figures and the costs are upper bounds.**
+
+**Recommend: headline scope first at ≈$12**, then extend to shipped only if the wider surface proves wanted —
+that sequencing spends $12 to learn whether the extra $25 is worth it. Keep the $150 ceiling as the backstop.
 
 **Do not touch model, effort or prompt to save money.** Not for the brief's stated reason (they are not in the
 key), but for a better one: the $0.000727 unit cost and the 78.3%-agreement re-measurement are both *of that
