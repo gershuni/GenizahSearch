@@ -223,7 +223,18 @@ is an owner decision because they differ in kind, not degree:
    (0 evidence rows). The id ranges are simply disjoint: the crosswalk's mapped M-source works are
    `M:Ytext#####` (5-digit, 1,003 of them) while **2,622 of the unresolved are `M:Ytext######` (6-digit)**,
    plus 67 five-digit, 37 seven-digit and 3 Sefaria stragglers. These are **not finer grain on known works.**
-3. **Drop** → lose 63,371 evidence rows (12.6%), almost all M-source.
+3. **Drop** → lose 63,371 evidence rows (12.6%), almost all M-source. **Not as cheap as it sounds:** M-source
+   *work titles already ship and already render* (the masked thing is the corpus codename and excerpt-level
+   reference text, not the works' existence — v2 bake plan, §"M-source: store, do not display the locus"). So
+   these are displayable findings, not internal-only rows.
+4. **Mint, with `Unassigned` genre for the new works only** — **RECOMMENDED**, and not previously on the table
+   at this scale. The owner's 2026-08-04 ruling chose curation over `Unassigned` for **58** works, a tractable
+   number; at **2,738** masked-title works the calculus is different, and `Unassigned` is what the frozen
+   contract actually sanctions (*"an explicit `Unassigned` bucket, never NULL-as-absent"*). It keeps all 63,371
+   evidence rows, satisfies the release gate, and defers curation without lying — we genuinely have not
+   classified them. **Caveat the owner must weigh:** `Unassigned` carries display semantics (it was declined
+   for `זיכרונות מימי נעוריי` precisely because it would hide the row), so this trades *visibility* of a
+   long-tail M-source work for *inclusion* of its evidence. Curate later, in batches, against real usage.
 
 #### What the failed map-up test actually revealed — this is a corpus-expansion question, not a grain question
 
