@@ -873,7 +873,93 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
                                    identification_id=None), ln,
                     sidecar_version=v),
             ]))
+        # 11. THE EXPANSION AND THE PREVIEW, DRIVEN -- opened, not merely
+        #     rendered. Both are closed until a reader clicks, so an undriven
+        #     render paints the button and nothing behind it; the child rows,
+        #     the extent line, the named failure and the iframe target are all
+        #     BEHIND the click. `render_and_click` fires the real handler inside
+        #     the client, which is the only way this capture can see them.
+        #
+        #     THE FAILURE PATHS ARE DRIVEN TOO, and that is the point rather than
+        #     completeness for its own sake: a failed expansion puts a sentence
+        #     and a retry on the screen, so it is reader-facing text this scan
+        #     has to have looked at, exactly like a successful one.
+        for driver, marker in (
+            # a) opened onto children, with the extent line (total > page).
+            (lambda ln=lang, v=(f"discovery-v1-{seed}" if seed
+                                else "discovery-v1-capture"): fr.render_finding_row(
+                tf.finding_row(unit=tf.FINDINGS_UNIT_WORK, neutral_title=title),
+                ln, sidecar_version=v,
+                load_children=_children_loader(seed=seed, total=97),
+                preview_url=lambda _i: _seeded_preview_url(seed)),
+             fr.ROW_EXPANDER_CLASS),
+            # b) opened onto an OUTAGE: the named failure and its retry.
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(unit=tf.FINDINGS_UNIT_WORK, neutral_title=title),
+                ln, load_children=_failing_loader(raising=False)),
+             fr.ROW_EXPANDER_CLASS),
+            # c) opened onto a RAISED loader -- the same surface by the other
+            #    route, so the except branch is executed rather than assumed.
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(unit=tf.FINDINGS_UNIT_WORK, neutral_title=title),
+                ln, load_children=_failing_loader(raising=True)),
+             fr.ROW_EXPANDER_CLASS),
+            # d) the LEAF preview, opened, so the iframe target is captured as
+            #    the link egress it is.
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                preview_url=lambda _i: _seeded_preview_url(seed)),
+             fr.ROW_PREVIEW_CLASS + "-toggle"),
+            # e) a preview whose URL BUILDER raises -- withheld, not crashed.
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                preview_url=_raising_preview_url),
+             None),
+            # f) an expansion whose page IS the whole group, so the extent line
+            #    is correctly omitted. Driven because the omission is a BRANCH,
+            #    and a branch this scan never took is a branch it never looked at.
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(unit=tf.FINDINGS_UNIT_WORK, neutral_title=title),
+                ln, load_children=_children_loader(seed=seed, total=1)),
+             fr.ROW_EXPANDER_CLASS),
+        ):
+            _take(_render_component(driver) if marker is None
+                  else tf.render_and_click(driver, marker))
     return texts, hrefs
+
+
+def _children_loader(*, seed: Optional[str], total: Any):
+    """A loader returning ONE child row, carrying the seed where a restricted
+    value would be. The child is a real projected row, so the scan sees exactly
+    what a reader sees inside an opened expansion."""
+    async def _load(_row):
+        return tf.findings_envelope(
+            [tf.finding_row(sys_id=seed) if seed else tf.finding_row()],
+            total=total)
+    return _load
+
+
+def _failing_loader(*, raising: bool):
+    """The two failure shapes an expansion can meet: a loader that RAISES and a
+    loader returning a non-`ok` envelope. Both must paint the named failure."""
+    async def _load(_row):
+        if raising:
+            # Carries the sentinel a D-25 leak would look like, so a message
+            # that echoed its cause would be caught by the scan rather than by
+            # a reviewer.
+            raise RuntimeError("m_source_expansion_probe_value_4c7a")
+        return tf.findings_envelope([], status=tf.STATUS_UNAVAILABLE)
+    return _load
+
+
+def _seeded_preview_url(seed: Optional[str]) -> str:
+    """The preview target, through the SHIPPED builder so the capture cannot
+    disagree with the page about what a preview URL is."""
+    return fp.preview_url(tf.finding_row(sys_id=seed or "990000000000000944")) or ""
+
+
+def _raising_preview_url(_item):
+    raise RuntimeError("m_source_preview_probe_value_8b13")
 
 
 def capture_rendered(seed: Optional[str] = None,

@@ -73,6 +73,7 @@ Hebrew reader's most honesty-sensitive element.
 
 from __future__ import annotations
 
+import inspect as _inspect
 from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import quote
 
@@ -85,6 +86,7 @@ from shared.discovery_service import (
     FINDINGS_UNIT_MANUSCRIPT,
     FINDINGS_UNIT_WORK,
     LAUNCH_CONTRIBUTION_SHADES,
+    _build_findings_filter,
 )
 from shared.discovery_surface_projection import is_outage
 
@@ -136,6 +138,19 @@ ROW_BUCKET_CLASS = "gs-findings-row-bucket"
 ROW_SHELFMARK_CLASS = "gs-findings-row-shelfmark"
 ROW_ANNOTATION_CLASS = "gs-findings-row-annotation"
 ROW_REPORT_CLASS = "gs-findings-row-report"
+
+#: THE EXPANSION (owner-approved, 2026-08-05): a manuscript or work row opens
+#: IN PLACE onto the identifications underneath it. Its own classes, because the
+#: children are `ROW_CLASS` rows and a scan scoped to the parent's class would
+#: otherwise be unable to tell a parent from its child.
+ROW_EXPANDER_CLASS = "gs-findings-row-expander"
+ROW_CHILDREN_CLASS = "gs-findings-row-children"
+ROW_CHILD_CLASS = "gs-findings-row-child"
+ROW_CHILDREN_STATE_CLASS = "gs-findings-row-children-state"
+#: The preview, which lives on the identification LEAF only. A work row spans
+#: manuscripts, so "preview" there would have to pick one, and picking is
+#: adjudication -- which is the one thing no surface here does.
+ROW_PREVIEW_CLASS = "gs-findings-row-preview"
 
 NOVELTY_HELP_CLASS = "gs-findings-novelty-help"
 
@@ -359,6 +374,49 @@ _COPY: Dict[str, Dict[str, str]] = {
     "multi_work": {
         "en": "Holds more than one work — a single candidacy verdict would be ambiguous.",
         "he": "כולל יותר מחיבור אחד — הכרעת מועמדות אחת תהיה דו" + _MAQAF + "משמעית.",
+    },
+    # -- THE EXPANSION. A grouped row states a count; these open it onto the
+    #    rows the count counted. The label says WHAT opens, not "more" or
+    #    "details": a reader deciding whether to spend a click is deciding
+    #    whether they want the individual matches.
+    "expand_open": {
+        "en": "Show the individual matches",
+        "he": "הצגת ההתאמות הבודדות",
+    },
+    "expand_close": {
+        "en": "Hide the individual matches",
+        "he": "הסתרת ההתאמות הבודדות",
+    },
+    # A FAILED expansion says so. An empty body after a failed read is
+    # indistinguishable from "this row has no matches underneath it", and one of
+    # those is a fact while the other is an outage -- the same false-zero class
+    # the envelope's named statuses exist to prevent.
+    "expand_failed": {
+        "en": "Could not load the individual matches. Try again.",
+        "he": "לא ניתן לטעון את ההתאמות הבודדות. נסו שוב.",
+    },
+    # An expansion showing SOME of what it counted says how many, so a reader
+    # never mistakes a bounded page for the whole group.
+    "expand_partial": {
+        "en": "Showing {shown} of {count}",
+        "he": "מוצגות {shown} מתוך {count}",
+    },
+    # -- THE PREVIEW, on the identification leaf only. "Preview" rather than
+    #    "open": it does not leave the page, and a reader who expects to leave
+    #    and does not is a reader who lost their filters.
+    "preview_open": {
+        "en": "Preview the manuscript",
+        "he": "תצוגה מקדימה של הכתב",
+    },
+    "preview_close": {
+        "en": "Close",
+        "he": "סגירה",
+    },
+    # The preview is a VIEWER, not a verdict. It shows the manuscript page; it
+    # says nothing about whether the match is right, because nothing here does.
+    "preview_note": {
+        "en": "The manuscript page, to read for yourself.",
+        "he": "דף הכתב, לקריאה עצמית.",
     },
     # -- the domain facet's header. It NAMES ITS AXIS: the domain of the
     #    IDENTIFIED WORK, never the manuscript's catalogue domain. Filtering on
@@ -1089,8 +1147,75 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
                 f"{ROW_REPORT_CLASS} dnote text-xs")
 
 
+#: UNIT -> the row field that identifies the group, and the filter axis the
+#: expansion pins it to. `None` on the leaf unit: an identification IS the leaf,
+#: so it has nothing underneath it to open.
+#:
+#: These pairs are the SAME pairs `shared/discovery_service.py::
+#: _FINDINGS_UNIT_GROUP_BY` groups by (`di.sys_id`, `di.display_work_id`), and
+#: that is the whole reason an expansion can be honest: the children come from
+#: the SHIPPED findings read at the leaf grain with this key pinned, so the
+#: reader's every active filter still applies and a parent's count cannot
+#: contradict the rows underneath it. Fetching them from a differently-filtered
+#: read -- `get_manuscript_works_enveloped` takes no bucket, novelty or
+#: divergence filter at all -- would show a reader children their own parent
+#: says do not exist.
+#: MANUSCRIPT IS DELIBERATELY ABSENT, and its absence is load-bearing rather
+#: than an oversight to fill in later. `_build_findings_filter` accepts
+#: `work_id` and has NO `sys_id` axis, so a manuscript expansion would pass a
+#: keyword the read silently ignores -- opening the row onto every
+#: identification matching the reader's filters instead of the ones in THAT
+#: manuscript. Measured, not feared: the argument reaches the service and is
+#: dropped without an error. That is worse than a crash, because the reader
+#: sees a plausible list and cannot tell it is the wrong one.
+#:
+#: Offering the affordance only where the predicate exists is what makes the
+#: absence safe. Adding the axis is a four-part change the guard at
+#: `tests/test_discovery_build.py::
+#: test_the_probes_filter_axes_are_PINNED_to_the_shipped_predicate_builder`
+#: enforces (the builder, the bench's axis tuple, its coherent per-bucket pick,
+#: and `fetch_findings`), and it belongs in its own package.
+EXPANSION_KEY_BY_UNIT: Dict[str, Optional[Tuple[str, str]]] = {
+    FINDINGS_UNIT_IDENTIFICATION: None,
+    FINDINGS_UNIT_MANUSCRIPT: None,
+    FINDINGS_UNIT_WORK: ("display_work_id", "work_id"),
+}
+
+
+#: The filter axes an expansion may legitimately pin, READ FROM the shipped
+#: predicate builder's own signature at import.
+#:
+#: Derived rather than listed because the failure mode is silence, not an error.
+#: `get_findings_enveloped` takes its filters as keywords, so an axis
+#: `_build_findings_filter` does not implement is accepted and IGNORED -- the
+#: expansion then returns every row matching the reader's filters instead of the
+#: ones under the parent that was clicked. Measured on a manuscript row before
+#: this existed: `sys_id` reached the service and vanished. A hand-written list
+#: here would be one edit away from claiming an axis the predicate lacks; a
+#: signature read cannot be.
+EXPANSION_SUPPORTED_AXES: frozenset = frozenset(
+    _inspect.signature(_build_findings_filter).parameters) - {"unit", "bucket"}
+
+
+def expansion_target(item: Mapping[str, Any]) -> Optional[Tuple[str, str]]:
+    """`(filter_axis, value)` the children of `item` are fetched with, or `None`.
+
+    `None` for the leaf unit (nothing to open) and for a grouped row whose own
+    key is missing -- an expansion that cannot name what it is expanding would
+    fetch the whole unfiltered leaf grain, which is not this row's children but
+    every row on the page.
+    """
+    pair = EXPANSION_KEY_BY_UNIT.get(item.get("unit") or FINDINGS_UNIT_IDENTIFICATION)
+    if pair is None:
+        return None
+    field, axis = pair
+    value = item.get(field)
+    return (axis, str(value)) if value else None
+
+
 def render_finding_row(item: Mapping[str, Any], lang: str = "en",
-                       sidecar_version: Any = None) -> None:
+                       sidecar_version: Any = None,
+                       load_children=None, preview_url=None) -> None:
     """One result row, in whichever unit the service produced it.
 
     The unit arrives ON the row (`unit`, part of the projection); it is
@@ -1099,6 +1224,12 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
     bucket treatment and the title routing are identical, which is what makes
     "a second-bucket row looks like a main-pool row" a property of the code
     rather than of a reviewer's care.
+
+    `load_children` (grouped units) and `preview_url` (the leaf) are INJECTED,
+    and neither is defaulted to a working implementation. This module renders;
+    it does not read, and it does not know what a URL to a manuscript looks
+    like. A component that reached for the service itself could not be swept by
+    a masking capture that drives it directly, which is how this suite scans it.
     """
     lang = _lang_key(lang)
     unit = item.get("unit") or FINDINGS_UNIT_IDENTIFICATION
@@ -1129,6 +1260,162 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
 
         _render_row_meta(item, lang, unit, sidecar_version=sidecar_version)
 
+        # THE TWO AFFORDANCES, each on the unit where it has a meaning. A
+        # grouped row opens onto its children; the leaf previews its manuscript.
+        # Neither is on both: a work row spanning manuscripts has no single page
+        # to preview, and an identification has nothing underneath it to open.
+        if load_children is not None and expansion_target(item) is not None:
+            _render_expansion(item, lang, load_children,
+                              sidecar_version=sidecar_version,
+                              preview_url=preview_url)
+        elif unit == FINDINGS_UNIT_IDENTIFICATION and preview_url is not None:
+            _render_preview(item, lang, preview_url)
+
+
+def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
+                      sidecar_version: Any = None, preview_url=None) -> None:
+    """The grouped row's children, IN PLACE, fetched when the reader asks.
+
+    Lazy for the reason the panel's expansion is: the heaviest work carries
+    hundreds of identifications while most rows carry a handful, so opening
+    every row's children with the page pays the worst case to serve the common
+    one -- on a single-uvicorn-worker server, once per row on the page.
+
+    A FAILED read renders a NAMED failure with a retry, never an empty body.
+    The panel's own expansion returns silently on an exception, which leaves a
+    reader looking at an opened, empty expander -- indistinguishable from "this
+    row has no matches underneath it", and one of those is an outage.
+    """
+    body = ui.column().classes(f"{ROW_CHILDREN_CLASS} w-full gap-1")
+    body.style("display: none;")
+    state: Dict[str, Any] = {"open": False, "loaded": False}
+    button = ui.button(copy_text("expand_open", lang)).props(
+        "flat dense size=sm no-caps").classes(f"{ROW_EXPANDER_CLASS} dnote")
+
+    async def _load() -> None:
+        body.clear()
+        try:
+            envelope = await load_children(item)
+        except Exception:
+            # The value is never echoed -- an artifact-derived id in a reader's
+            # error line is the D-25 egress class error paths are scanned for.
+            envelope = None
+        with body:
+            if not envelope or (envelope or {}).get("status") != "ok":
+                # NAMED, and retryable. `state['loaded']` stays False so the
+                # next open tries again rather than re-rendering the failure.
+                with ui.row().classes(
+                        f"{ROW_CHILDREN_STATE_CLASS} items-center gap-2"):
+                    ui.label(copy_text("expand_failed", lang)).classes(
+                        "dnote text-xs")
+                    # The SHARED retry label, not a fourth copy of the word --
+                    # `shared/discovery_display_strings.py` owns it and the
+                    # launch outage and the panel both take it from there.
+                    ui.button(ds.retry_label(lang), on_click=_load).props(
+                        "flat dense size=sm no-caps")
+                return
+            state["loaded"] = True
+            children = list((envelope or {}).get("items") or ())
+            # `make_envelope` guarantees an int here (it coerces and raises), so
+            # the default is for a hand-built mapping in a probe, never for a
+            # real read.
+            total = int((envelope or {}).get("total") or 0)
+            for child in children:
+                with ui.column().classes(f"{ROW_CHILD_CLASS} w-full"):
+                    # The child is a LEAF row, rendered by this same renderer --
+                    # so it carries its own report affordance and its own
+                    # preview, and it cannot drift from a top-level row's
+                    # anatomy. It is given NO `load_children`: a leaf has
+                    # nothing under it, and passing one would build a tree.
+                    render_finding_row(child, lang,
+                                       sidecar_version=sidecar_version,
+                                       preview_url=preview_url)
+            _render_expansion_extent(len(children), total, lang)
+
+    async def _toggle() -> None:
+        state["open"] = not state["open"]
+        body.style("display: flex;" if state["open"] else "display: none;")
+        button.text = copy_text(
+            "expand_close" if state["open"] else "expand_open", lang)
+        if state["open"] and not state["loaded"]:
+            await _load()
+
+    button.on("click", _toggle)
+
+
+def _render_expansion_extent(shown: int, total: int, lang: str) -> None:
+    """"Showing N of M" -- and ONLY when the two really differ.
+
+    A bounded page rendered with no extent line reads as the whole group, which
+    is a number the reader will believe. Written from the envelope's own `total`
+    (the count query's exact result) and never from `len(items)`, which cannot
+    know what it was a page OF.
+
+    `total` IS AN INT, guaranteed by the producer rather than re-checked here.
+    An earlier revision wrapped this in `try: int(total) except: return`, and the
+    masking sweep's line-granular gate showed that handler was never executed --
+    correctly, because `shared/discovery_surface_projection.py::make_envelope`
+    coerces `total` with `int(total)` and RAISES on anything it cannot, so a
+    non-numeric total cannot reach a renderer through an envelope at all. A
+    defensive branch against an impossible input is not free: it is a line no
+    scan can look at and no test can reach, and it invites the reader of this
+    function to believe the guarantee is weaker than it is.
+    """
+    if total <= shown:
+        return
+    ui.label(copy_text("expand_partial", lang).format(
+        shown=_count(shown), count=_count(total))).classes(
+        f"{ROW_CHILDREN_STATE_CLASS} dnote text-xs")
+
+
+def _render_preview(item: Mapping[str, Any], lang: str, preview_url) -> None:
+    """The identification leaf's preview: the manuscript page, in place.
+
+    ON THE LEAF ONLY. A work row spans manuscripts and a manuscript row spans
+    works, so a preview on either would have to CHOOSE which page to show, and
+    choosing between a row's candidates is adjudication -- the one thing no
+    surface in this phase does.
+
+    Rendered into an `iframe` pointed at the EXISTING bare browse viewer
+    (`/browse?…&embed=1`), which already disables snapshot restore and persist,
+    so previewing a manuscript here cannot overwrite the reader's own browse
+    position. That property is why the bare viewer is reused rather than a new
+    read being written against the same data.
+    """
+    try:
+        url = preview_url(item)
+    except Exception:
+        url = None
+    if not url:
+        return
+    body = ui.column().classes(f"{ROW_PREVIEW_CLASS} w-full gap-1")
+    body.style("display: none;")
+    state = {"open": False, "loaded": False}
+    button = ui.button(copy_text("preview_open", lang)).props(
+        "flat dense size=sm no-caps").classes(f"{ROW_PREVIEW_CLASS}-toggle dnote")
+
+    def _toggle() -> None:
+        state["open"] = not state["open"]
+        body.style("display: flex;" if state["open"] else "display: none;")
+        button.text = copy_text(
+            "preview_close" if state["open"] else "preview_open", lang)
+        if state["open"] and not state["loaded"]:
+            state["loaded"] = True
+            with body:
+                ui.label(copy_text("preview_note", lang)).classes(
+                    "dnote text-xs")
+                # The iframe is created on FIRST OPEN, not with the row: a page
+                # of 50 rows would otherwise issue 50 manuscript loads nobody
+                # asked for, against the image services the browse page fetches
+                # from.
+                ui.element("iframe").props(
+                    f'src="{url}" loading="lazy" '
+                    'referrerpolicy="no-referrer"').classes(
+                    f"{ROW_PREVIEW_CLASS}-frame w-full").style(
+                    "border: 0; min-height: 60vh;")
+
+    button.on("click", _toggle)
+
 
 __all__ = [
     "LAUNCH_ALL_TOTAL_CLASS",
@@ -1158,6 +1445,12 @@ __all__ = [
     "ROW_PAGES_CLASS",
     "ROW_RELATION_CLASS",
     "ROW_REPORT_CLASS",
+    "ROW_CHILDREN_CLASS",
+    "ROW_CHILDREN_STATE_CLASS",
+    "ROW_CHILD_CLASS",
+    "ROW_EXPANDER_CLASS",
+    "ROW_PREVIEW_CLASS",
+    "EXPANSION_KEY_BY_UNIT",
     "REPORT_ADDRESS",
     "ROW_SHELFMARK_CLASS",
     "ROW_SUB_CLASS",
@@ -1166,6 +1459,7 @@ __all__ = [
     "copy_text",
     "coverage_clause",
     "divergence_marker",
+    "expansion_target",
     "launch_shade_label",
     "novelty_badge",
     "report_mailto",

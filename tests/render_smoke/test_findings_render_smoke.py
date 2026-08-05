@@ -478,6 +478,68 @@ def render_rows(items, lang="en", sidecar_version=None):
     return _client_render(_paint)
 
 
+def _click_handlers(element) -> List[Any]:
+    """Every click handler bound to `element`, however NiceGUI recorded it.
+
+    Read defensively across the two shapes a version can use (`_event_listeners`
+    holding listener objects, or a `_click_handlers` list) rather than pinning
+    one: this helper exists to DRIVE the interaction, and a version bump that
+    silently found no handler would turn every driven test below into a test
+    that renders and clicks nothing -- passing while checking nothing.
+    """
+    out: List[Any] = []
+    for listener in (getattr(element, "_event_listeners", None) or {}).values():
+        if getattr(listener, "type", None) == "click":
+            handler = getattr(listener, "handler", None)
+            if handler is not None:
+                out.append(handler)
+    out.extend(getattr(element, "_click_handlers", None) or [])
+    return out
+
+
+def render_and_click(paint, marker: str, *, index: int = 0):
+    """Paint, then fire the click on the `marker` element INSIDE the same client
+    and the same running loop, and return the client.
+
+    One loop because `_client_render` closes its client on exit, so a handler
+    fired afterwards paints into a dead slot stack; one client because the
+    element only exists in it.
+
+    ABORTS BY NAME when the marker matches nothing or carries no handler. A
+    driven test whose click silently did nothing is the "gate that cannot fail"
+    shape -- it would render the closed state and assert against it forever.
+    """
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+    holder: Dict[str, Any] = {}
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page("/_findings_smoke_probe")) as client:
+            with client:
+                result = paint()
+                if asyncio.iscoroutine(result):
+                    await result
+                targets = _elements_with_class(client, marker)
+                assert targets, (
+                    f"render_and_click: no element carries {marker!r} -- the "
+                    "interaction cannot be driven, so nothing below is measured")
+                handlers = _click_handlers(targets[index])
+                assert handlers, (
+                    f"render_and_click: the {marker!r} element has no click "
+                    "handler -- a click that fires nothing renders the closed "
+                    "state and asserts against it")
+                for handler in handlers:
+                    outcome = handler()
+                    if asyncio.iscoroutine(outcome):
+                        await outcome
+        holder["client"] = client
+
+    asyncio.run(_run())
+    return holder["client"]
+
+
 def render_page(monkeypatch, *, lang="en", findings=None, facets=None,
                 launch=None, state=None, as_of="2026-08-03"):
     """Render the REAL `create_findings_page()` with all three reads stubbed."""
@@ -2412,3 +2474,263 @@ def test_the_report_link_url_quotes_every_value():
     href = fr.report_mailto(row, "en", "version with spaces")
     assert " " not in href and "\\n" not in href
     assert href.count("&") == 1, "an unquoted value introduced a second parameter"
+
+
+# ---------------------------------------------------------------------------
+# THE EXPANSION (owner-approved, 2026-08-05): a grouped row opens IN PLACE onto
+# its child identifications, and the identification LEAF previews its manuscript.
+# ---------------------------------------------------------------------------
+
+def test_the_expansion_is_offered_only_where_the_PREDICATE_can_pin_it():
+    """THE defect this table exists to prevent, measured rather than argued.
+
+    `get_findings_enveloped` takes its filters as KEYWORDS, so an axis
+    `_build_findings_filter` does not implement is accepted and silently
+    IGNORED. A manuscript expansion passing `sys_id` therefore did not raise --
+    it returned every row matching the reader's filters instead of the ones in
+    that manuscript. A reader cannot see that kind of wrongness; they see a
+    plausible list that is the wrong list.
+
+    So the offer is bounded by the predicate: `work` (the builder has
+    `work_id`), and NOT `manuscript` until the axis exists.
+    """
+    work = finding_row(unit=FINDINGS_UNIT_WORK)
+    assert fr.expansion_target(work) == ("work_id", work["display_work_id"])
+    # The leaf has nothing underneath it, and the manuscript unit has no axis.
+    assert fr.expansion_target(finding_row()) is None
+    assert fr.expansion_target(finding_row(unit=FINDINGS_UNIT_MANUSCRIPT)) is None
+
+    # ...and every axis the table DOES name is one the shipped builder accepts.
+    for unit, pair in fr.EXPANSION_KEY_BY_UNIT.items():
+        if pair is None:
+            continue
+        _field, axis = pair
+        assert axis in fr.EXPANSION_SUPPORTED_AXES, (
+            "the {!r} expansion pins {!r}, which _build_findings_filter does "
+            "not implement -- it would be passed and silently dropped".format(
+                unit, axis))
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_supported_axis_set_is_READ_FROM_the_builder_not_listed():
+    """A hand-written list is one edit away from claiming an axis the predicate
+    lacks. Compared against `inspect` over the real builder, so this fails if
+    the derivation is ever replaced by a literal."""
+    import inspect
+
+    from shared.discovery_service import _build_findings_filter
+
+    authority = frozenset(
+        inspect.signature(_build_findings_filter).parameters) - {"unit", "bucket"}
+    assert fr.EXPANSION_SUPPORTED_AXES == authority
+    assert fp._EXPANSION_SUPPORTED_AXES == authority, (
+        "the page and the component disagree about which axes are real")
+
+
+def test_a_grouped_row_expands_and_a_leaf_row_does_not():
+    """The affordance appears on the unit where it has a meaning, and nowhere
+    else. A leaf has no children; offering it an expander would open onto
+    nothing."""
+    async def _load(_row):
+        return findings_envelope([finding_row()])
+
+    client = _client_render(lambda: fr.render_finding_row(
+        finding_row(unit=FINDINGS_UNIT_WORK), "en", load_children=_load))
+    assert _elements_with_class(client, fr.ROW_EXPANDER_CLASS), (
+        "a work row offers no expander")
+
+    leaf = _client_render(lambda: fr.render_finding_row(
+        finding_row(), "en", load_children=_load))
+    assert not _elements_with_class(leaf, fr.ROW_EXPANDER_CLASS)
+
+
+def test_the_children_are_the_SAME_row_anatomy_as_a_top_level_row():
+    """A child is rendered by the SAME renderer, so it cannot drift from a
+    top-level row -- it carries its own report affordance and its own preview.
+
+    A child is given NO loader: a leaf has nothing under it, and passing one
+    would build a tree out of a list.
+    """
+    async def _load(_row):
+        return findings_envelope([finding_row()], total=1)
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(
+            finding_row(unit=FINDINGS_UNIT_WORK), "en",
+            sidecar_version="discovery-v1-SENTINEL", load_children=_load,
+            preview_url=lambda _i: "/browse?sys_id=X&embed=1"),
+        fr.ROW_EXPANDER_CLASS)
+
+    children = _elements_with_class(client, fr.ROW_CHILD_CLASS)
+    assert len(children) == 1, "expected one child row, got {}".format(len(children))
+    # The child inherited the version, so it carries the report affordance, and
+    # the preview it is entitled to as a leaf.
+    assert _elements_with_class(client, fr.ROW_REPORT_CLASS), (
+        "the child row lost the report affordance")
+    assert _elements_with_class(client, fr.ROW_PREVIEW_CLASS + "-toggle"), (
+        "the child leaf lost its preview")
+    # ...and exactly ONE expander on the whole subtree -- the parent's.
+    assert len(_elements_with_class(client, fr.ROW_EXPANDER_CLASS)) == 1, (
+        "a child was given a loader and became a tree")
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("shape", ["raised", "non-ok"])
+def test_a_FAILED_expansion_says_so_and_never_renders_an_empty_body(shape):
+    """An empty body after a failed read is indistinguishable from "this row has
+    no matches underneath it", and one of those is an outage. The panel's own
+    expansion returns silently on an exception -- this one must not."""
+    async def _raise(_row):
+        raise RuntimeError("probe")
+
+    async def _bad(_row):
+        return findings_envelope([], status=STATUS_UNAVAILABLE)
+
+    loader = _raise if shape == "raised" else _bad
+    client = render_and_click(
+        lambda: fr.render_finding_row(finding_row(unit=FINDINGS_UNIT_WORK), "en",
+                                      load_children=loader),
+        fr.ROW_EXPANDER_CLASS)
+    assert fr.copy_text("expand_failed", "en") in scoped_text(
+        client, fr.ROW_CHILDREN_STATE_CLASS), (
+        "a failed expansion rendered no named failure")
+    assert not _elements_with_class(client, fr.ROW_CHILD_CLASS)
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_a_BOUNDED_expansion_says_how_many_it_withheld():
+    """A page of children rendered with no extent line reads as the whole group,
+    which is a number the reader will believe. Written from the envelope's own
+    `total`, never from `len(items)` -- which cannot know what it was a page OF.
+    """
+    async def _load(_row):
+        return findings_envelope([finding_row()], total=97)
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(finding_row(unit=FINDINGS_UNIT_WORK), "en",
+                                      load_children=_load),
+        fr.ROW_EXPANDER_CLASS)
+    assert "97" in scoped_text(client, fr.ROW_CHILDREN_STATE_CLASS)
+
+    # ...and NOT when the page IS the whole group, where the line would be noise.
+    async def _all(_row):
+        return findings_envelope([finding_row()], total=1)
+
+    whole = render_and_click(
+        lambda: fr.render_finding_row(finding_row(unit=FINDINGS_UNIT_WORK), "en",
+                                      load_children=_all),
+        fr.ROW_EXPANDER_CLASS)
+    assert not _elements_with_class(whole, fr.ROW_CHILDREN_STATE_CLASS)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_preview_is_offered_on_the_LEAF_only(lang):
+    """A work row spans manuscripts and a manuscript row spans works, so a
+    preview on either would have to CHOOSE which page to show -- and choosing
+    between a row's candidates is adjudication, which no surface here does."""
+    def _url(_item):
+        return "/browse?sys_id=X&embed=1"
+
+    leaf = _client_render(lambda: fr.render_finding_row(
+        finding_row(), lang, preview_url=_url))
+    assert _elements_with_class(leaf, fr.ROW_PREVIEW_CLASS + "-toggle"), (
+        "the identification leaf offers no preview")
+
+    for unit in (FINDINGS_UNIT_MANUSCRIPT, FINDINGS_UNIT_WORK):
+        grouped = _client_render(lambda u=unit: fr.render_finding_row(
+            finding_row(unit=u), lang, preview_url=_url))
+        assert not _elements_with_class(
+            grouped, fr.ROW_PREVIEW_CLASS + "-toggle"), unit
+
+
+def test_the_preview_points_at_the_BARE_browse_viewer():
+    """`?embed=1` is the route that disables snapshot restore AND persist
+    (`web/pages/browse.py`, `embedded=True`), which is the property that matters:
+    previewing a manuscript from this page must not overwrite wherever the reader
+    had left `/browse`. Without `embed=1` it would."""
+    url = fp.preview_url(finding_row(sys_id="990000895680205171"))
+    assert url == "/browse?sys_id=990000895680205171&embed=1"
+    # Withheld, not pointed at a page that cannot resolve.
+    assert fp.preview_url(finding_row(sys_id=None)) is None
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_preview_iframe_is_built_on_FIRST_OPEN_not_with_the_row():
+    """A page of rows would otherwise issue one manuscript load per row against
+    the image services `/browse` fetches from, none of which anybody asked
+    for."""
+    def _paint():
+        fr.render_finding_row(finding_row(), "en",
+                              preview_url=lambda _i: "/browse?sys_id=X&embed=1")
+
+    closed = _client_render(_paint)
+    assert not _elements_with_class(closed, fr.ROW_PREVIEW_CLASS + "-frame"), (
+        "the preview iframe was created before the reader asked for it")
+
+    opened = render_and_click(_paint, fr.ROW_PREVIEW_CLASS + "-toggle")
+    frames = _elements_with_class(opened, fr.ROW_PREVIEW_CLASS + "-frame")
+    assert len(frames) == 1, "expected one iframe, got {}".format(len(frames))
+    assert "embed=1" in str(frames[0]._props), (
+        "the preview does not point at the bare viewer")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_a_childs_filter_state_is_the_READERS_state_at_the_leaf_grain():
+    """THE honesty property of the whole feature. The parent row was produced
+    under the reader's filter set, so its count and the rows underneath it must
+    come from ONE predicate -- otherwise a parent reading "3" opens onto 11 and
+    the reader cannot tell which number to believe.
+
+    Every axis carries over; only the grain and the pinned key differ."""
+    state = {"unit": FINDINGS_UNIT_WORK, "bucket": BUCKET_MORE,
+             "sort": "band_rank", "novelty_only": True, "divergence": "only",
+             "domain": "D", "author": "A", "work_id": None, "page": 7}
+    child = fp._child_state(state, "work_id", "w000404")
+
+    assert child["unit"] == FINDINGS_UNIT_IDENTIFICATION, "not the leaf grain"
+    assert child["page"] == 1, "a child list must start at its own first page"
+    assert child["work_id"] == "w000404", "the group key was not pinned"
+    for axis in ("bucket", "sort", "novelty_only", "divergence", "domain",
+                 "author"):
+        assert child[axis] == state[axis], (
+            "{} was not carried into the children".format(axis))
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_an_UNSUPPORTED_axis_never_reaches_the_service_as_a_dropped_keyword():
+    """The measured defect, pinned as a test. Before the guard, a manuscript row
+    handed `sys_id` to `get_findings_enveloped`, which accepted it and dropped
+    it -- so the expansion returned every row matching the reader's filters
+    instead of the ones under that parent.
+
+    Driven through `_fetch_children` with the table temporarily naming an axis
+    the builder does not implement, because that is the only way to reach the
+    branch now that the shipped table names none."""
+    calls = []
+
+    async def _spy(unit, **kwargs):
+        calls.append(kwargs)
+        return findings_envelope([finding_row()])
+
+    state = {"unit": FINDINGS_UNIT_MANUSCRIPT, "bucket": BUCKET_MAIN,
+             "sort": "band_rank", "novelty_only": False, "divergence": "hidden",
+             "domain": None, "author": None, "work_id": None, "page": 1}
+    row = finding_row(unit=FINDINGS_UNIT_MANUSCRIPT)
+
+    original_table = dict(fr.EXPANSION_KEY_BY_UNIT)
+    original_read = fp.get_findings_enveloped
+    try:
+        fr.EXPANSION_KEY_BY_UNIT[FINDINGS_UNIT_MANUSCRIPT] = ("sys_id", "sys_id")
+        fp.get_findings_enveloped = _spy
+        envelope = asyncio.run(fp._fetch_children(state, row))
+    finally:
+        fr.EXPANSION_KEY_BY_UNIT.clear()
+        fr.EXPANSION_KEY_BY_UNIT.update(original_table)
+        fp.get_findings_enveloped = original_read
+
+    assert not calls, (
+        "an unsupported axis reached the service, where it is silently dropped "
+        "-- the expansion would have returned an UNPINNED page")
+    assert envelope.get("status") != "ok", (
+        "an expansion that cannot pin its group reported success")
+    ASSERTION_COUNT["n"] += 1

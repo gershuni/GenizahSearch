@@ -81,7 +81,8 @@ import asyncio
 import logging
 import math
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+from urllib.parse import quote
 
 from nicegui import ui
 
@@ -2196,7 +2197,8 @@ def _render_results(
         if not items:
             _render_empty_state(state, lang, refresh, more_pool_total)
         for item in items:
-            _render_row(item, lang, sidecar_version=sidecar_version)
+            _render_row(item, lang, sidecar_version=sidecar_version,
+                        state=state)
 
     _render_pager(total, state, lang, refresh,
                   page_size=effective_page_size(envelope),
@@ -2642,8 +2644,126 @@ def _render_sort_select(state: Dict[str, Any], refresh) -> None:
     ).props("dense outlined").classes(f"{RESULT_BAR_CLASS}-sort")
 
 
+#: How many children ONE expanded row shows at a time. Bounded for the reason
+#: the page itself is: the heaviest work in the public artifact carries hundreds
+#: of identifications, and a row that renders all of them turns one click into
+#: the largest render on the page. The extent line says what was withheld, so a
+#: bounded page is never mistaken for the whole group.
+_EXPANSION_PAGE_SIZE = 25
+
+#: The filter axes an expansion may pin. DERIVED from the shipped predicate
+#: builder's own signature -- never a list written here -- and derived in the
+#: COMPONENT, beside the unit->axis table it validates, so the table and the
+#: question "is this axis real" cannot drift apart across two files.
+#:
+#: Derived THERE rather than here because this page may not name the query
+#: layer at all -- `tests/test_findings_page.py` forbids it by substring, and
+#: rightly: every read on this page goes through `web/discovery.py`, which does
+#: the offloading exactly once, and a page that could reach past it could nest a
+#: second dispatch. The row component already imports that layer's closed
+#: vocabularies, so the derivation belongs beside the table it validates.
+_EXPANSION_SUPPORTED_AXES = rows.EXPANSION_SUPPORTED_AXES
+
+
+def _child_state(state: Dict[str, Any], axis: str, value: str) -> Dict[str, Any]:
+    """The reader's OWN filter state, at the LEAF grain, pinned to one group.
+
+    Every axis is carried over unchanged -- bucket, candidacy, divergence,
+    domain, author, sort -- and only `unit` and the group key differ. That is
+    what makes an expansion honest rather than merely convenient: the parent row
+    was produced under this filter set, so its count and the rows underneath it
+    come from ONE predicate and cannot contradict each other.
+
+    The alternative was `get_manuscript_works_enveloped` / the panel's
+    `get_work_expansion_enveloped`, and both were rejected on measurement, not
+    taste: neither takes a bucket, candidacy or divergence filter at all, so a
+    parent reading "3 works" under the main pool would open onto every work in
+    the corpus for that manuscript. A reader cannot see that kind of wrongness,
+    which is what makes it worse than an error they can.
+    """
+    child = dict(state)
+    child["unit"] = FINDINGS_UNIT_IDENTIFICATION
+    child["page"] = 1
+    # Pinning the group key REPLACES any same-axis filter the reader had set: a
+    # work row inside a work-filtered page is that same work, and a manuscript
+    # row's children are that manuscript's regardless.
+    child[axis] = value
+    return child
+
+
+async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any]) -> Dict[str, Any]:
+    """One grouped row's children, through the SHIPPED findings read.
+
+    No new query and no new service entry point -- `_build_findings_filter`
+    already accepts `work_id`, and the leaf grain is one of the three units the
+    page offers. The envelope comes back in the same closed four-key shape, so
+    the renderer's failure branch works on it unchanged.
+    """
+    target = rows.expansion_target(item)
+    if target is None:
+        return unavailable_envelope_shape()
+    axis, value = target
+    # REFUSED, LOUDLY, rather than passed and dropped. `get_findings_enveloped`
+    # accepts **kwargs-shaped filters, so an axis the predicate does not
+    # implement does not raise -- it is IGNORED, and the expansion then returns
+    # every row matching the reader's filters instead of the ones under this
+    # parent. A reader cannot see that; they see a plausible list that is the
+    # wrong list. So the supported set is named here, and anything else fails
+    # closed to the renderer's named failure state.
+    if axis not in _EXPANSION_SUPPORTED_AXES:
+        logger.error(
+            "findings expansion: unit %r asks for the %r filter axis, which "
+            "_build_findings_filter does not implement -- refusing rather than "
+            "returning an unpinned page",
+            item.get("unit"), axis)
+        return unavailable_envelope_shape()
+    child = _child_state(state, axis, value)
+    return await get_findings_enveloped(
+        child["unit"],
+        bucket=child["bucket"],
+        novelty=_novelty_selection(child),
+        divergence=child["divergence"],
+        domain=child.get("domain"),
+        author=child.get("author"),
+        work_id=child.get("work_id"),
+        sort=child["sort"],
+        page=child["page"],
+        page_size=_EXPANSION_PAGE_SIZE,
+    )
+
+
+def unavailable_envelope_shape() -> Dict[str, Any]:
+    """The four-key envelope for "this row cannot name what it would expand".
+
+    A real envelope shape rather than `None`, so the renderer has exactly one
+    failure branch to handle and a caller cannot forget which of two shapes it
+    got.
+    """
+    return {"status": "unavailable", "items": [], "total": 0,
+            "meta": {"reason": "expansion_key_missing"}}
+
+
+def preview_url(item: Mapping[str, Any]) -> Optional[str]:
+    """The leaf row's manuscript, in the EXISTING bare browse viewer.
+
+    `?embed=1` is the route built for the discovery-review iframe and reused by
+    `/atlas`: it renders the viewer with no nav shell AND disables snapshot
+    restore/persist (`web/pages/browse.py`, `embedded=True`), which is the
+    property that matters here -- previewing a manuscript from this page must not
+    overwrite wherever the reader had left `/browse`.
+
+    `None` when the row carries no `sys_id`, so a preview is withheld rather
+    than pointing at a page that cannot resolve.
+    """
+    sys_id = item.get("sys_id")
+    if not sys_id:
+        return None
+    return f"/browse?sys_id={quote(str(sys_id))}&embed=1"
+
+
 def _render_row(item: Dict[str, Any], lang: str,
-                sidecar_version: Any = None) -> None:
+                sidecar_version: Any = None,
+                state: Optional[Dict[str, Any]] = None) -> None:
     """One result row, in whichever of the three shipped units the service
     produced it.
 
@@ -2652,8 +2772,19 @@ def _render_row(item: Dict[str, Any], lang: str,
     same component renders BOTH buckets: a second-bucket row is a first-class
     result, not a footnote, and giving it its own renderer here is how a
     demotion creeps in.
+
+    The two reader affordances are INJECTED from here rather than reached for
+    there: the component renders and does not read, and "where does a manuscript
+    live" is this page's decision. The loader closes over the reader's CURRENT
+    state, which is what keeps a parent's count and its children in agreement.
     """
-    rows.render_finding_row(item, lang, sidecar_version=sidecar_version)
+    loader = None
+    if state is not None:
+        async def loader(row, _state=dict(state)):          # noqa: F811
+            return await _fetch_children(_state, row)
+
+    rows.render_finding_row(item, lang, sidecar_version=sidecar_version,
+                            load_children=loader, preview_url=preview_url)
 
 
 def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh,
