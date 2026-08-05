@@ -115,7 +115,11 @@ from web.discovery import (
     get_findings_facets_enveloped,
     get_launch_stats_enveloped,
 )
-from web.discovery_assets import discovery_meta
+from web.discovery_assets import (
+    discovery_db_path,
+    discovery_meta,
+    discovery_sidecar_version,
+)
 from web.discovery_genre_labels import (
     GENRE_PART_SEPARATOR,
     genre_display_label,
@@ -707,20 +711,38 @@ def _facet_request(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _artifact_identity() -> Tuple[Any, Any]:
+    """WHICH artifact an answer came from -- its path and its version.
+
+    BOTH, not either. The version alone is not an identity: every local artifact
+    in this project reports the same `sidecar_version` string while holding
+    different data (the service's own launch-stats cache documents exactly that
+    trap and keys on the pair for the same reason). The path alone would miss a
+    rebuild written in place.
+
+    Two pure in-memory reads of state loaded at startup -- no I/O, so this is
+    safe to call from a synchronous key builder.
+    """
+    return (discovery_db_path(), discovery_sidecar_version())
+
+
 def _facet_cache_key(level: str, state: Dict[str, Any]) -> Tuple[Any, ...]:
-    """A hashable rendering of `_facet_request` -- the request tuple itself, in
-    a fixed order, and nothing else.
+    """A hashable rendering of `_facet_request`, plus WHICH ARTIFACT answered.
 
     Two reads with the same arguments against the same artifact return the same
     envelope, so an unchanged key is a provably unchanged answer rather than an
-    assumption about which control the reader touched. The bound worth stating
-    is the ARTIFACT: this key carries no sidecar version, so a swap under a page
-    that stays open keeps the facet counts it already had. That window is one
-    open page (the cache is a local of ONE `_render_body` call, never a module
-    singleton) and it is strictly narrower than the behaviour it replaces, which
-    never re-read the cascade at all.
+    assumption about which control the reader touched.
+
+    THE ARTIFACT IS PART OF THE KEY (§3.1). Without it, a rebuild swapped in
+    under a page that stays open left the cached facet COUNTS from the old
+    artifact sitting beside ROWS re-read from the new one -- a number beside an
+    option describing a population the option no longer produces, which is the
+    one promise `_node_text` makes. The window was bounded (the cache is a local
+    of ONE `_render_body` call, never a module singleton), and a bounded window
+    in which a count is wrong is still a count that is wrong.
     """
-    return (level,) + tuple(sorted(_facet_request(level, state).items()))
+    return ((level,) + tuple(sorted(_facet_request(level, state).items()))
+            + _artifact_identity())
 
 
 async def fetch_facets(level: str, state: Dict[str, Any]) -> Dict[str, Any]:

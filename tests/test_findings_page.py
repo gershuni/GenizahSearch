@@ -5818,3 +5818,102 @@ def test_paging_past_the_capped_end_is_reachable(monkeypatch):
     assert 3 in pages_read, (
         f"Next did not reach page 3, beyond what the cap could name: {pages_read}")
     assert "ROW-PAGE-3" in _scoped_text(client, fp.RESULTS_CLASS)
+
+
+# ---------------------------------------------------------------------------
+# §3.1 -- THE FACET CACHE KEY CARRIED NO ARTIFACT IDENTITY.
+#
+# The rows are re-read on every refresh, so they always come from the artifact
+# being served now. The facet COUNTS were cached under a key derived from the
+# request alone -- so a rebuild swapped in under a page that stays open left the
+# old artifact's counts sitting beside the new artifact's rows. A number beside
+# an option then described a population that option no longer produces, which is
+# the one promise `_node_text` makes.
+# ---------------------------------------------------------------------------
+
+def test_the_facet_cache_key_carries_the_artifact_identity(monkeypatch):
+    """PATH AND VERSION, both. The version alone is not an identity: every local
+    artifact in this project reports the same `sidecar_version` string while
+    holding different data, which the service's own launch-stats cache documents
+    and keys on the pair to avoid."""
+    state = _state()
+
+    monkeypatch.setattr(fp, "discovery_db_path", lambda: "/artifacts/one.db")
+    monkeypatch.setattr(fp, "discovery_sidecar_version", lambda: "v1")
+    first = fp._facet_cache_key("domain", state)
+
+    # A NEW VERSION at the same path.
+    monkeypatch.setattr(fp, "discovery_sidecar_version", lambda: "v2")
+    assert fp._facet_cache_key("domain", state) != first, (
+        "a sidecar version change did not move the key -- the cascade keeps the "
+        "previous artifact's counts beside the new artifact's rows")
+
+    # A NEW PATH at the SAME version -- the trap a version-only key falls into.
+    monkeypatch.setattr(fp, "discovery_sidecar_version", lambda: "v1")
+    monkeypatch.setattr(fp, "discovery_db_path", lambda: "/artifacts/two.db")
+    assert fp._facet_cache_key("domain", state) != first, (
+        "a different artifact reporting the SAME version shares a cache key -- "
+        "every local artifact here reports the same version string")
+
+    # ...and an unchanged artifact with an unchanged request still matches, or
+    # the cache would be a no-op and every interaction would re-read all three
+    # levels on the smaller of the two bounded-concurrency budgets.
+    monkeypatch.setattr(fp, "discovery_db_path", lambda: "/artifacts/one.db")
+    assert fp._facet_cache_key("domain", state) == first
+
+
+def test_an_artifact_swap_under_an_open_page_re_reads_the_cascade(monkeypatch):
+    """The behaviour, not the key: the cache must MISS after a swap, on a round
+    where nothing about the request moved."""
+    versions = {"n": "v1"}
+    monkeypatch.setattr(fp, "discovery_db_path", lambda: "/artifacts/one.db")
+    monkeypatch.setattr(fp, "discovery_sidecar_version", lambda: versions["n"])
+
+    def _bump(_label, _level):
+        return "ok"
+
+    observed, _client = _drive_facet_rounds(monkeypatch, [
+        ("first paint", {}),
+        ("nothing changed", {}),
+    ], status_for=_bump)
+    assert dict(observed)["nothing changed"] == [], (
+        "fixture error: the unchanged round must be the cache-skip round")
+
+    # Now swap the artifact and run an otherwise identical round.
+    versions["n"] = "v2"
+    observed, _client = _drive_facet_rounds(monkeypatch, [
+        ("first paint", {}),
+        ("artifact swapped", {}),
+    ], status_for=_swap_version_after_first_round(versions))
+    assert dict(observed)["artifact swapped"] == ["domain", "author", "work"], (
+        "the cascade was served from the previous artifact's cache after a swap")
+
+
+def _swap_version_after_first_round(versions):
+    """Flip the reported sidecar version once the first round has read."""
+    def _status_for(label, _level):
+        if label == "first paint":
+            versions["n"] = "v1"
+        else:
+            versions["n"] = "v2"
+        return "ok"
+    return _status_for
+
+
+def test_the_artifact_identity_read_is_two_pure_in_memory_lookups():
+    """It is called from a SYNCHRONOUS key builder on the one event loop, so it
+    must not be I/O. Both accessors read state loaded at startup; asserted by
+    naming them, because a blocking call added behind either would stall every
+    concurrent request on this single-worker server."""
+    import inspect
+
+    from web import discovery_assets
+
+    for name in ("discovery_db_path", "discovery_sidecar_version"):
+        body = inspect.getsource(getattr(discovery_assets, name))
+        assert "return _state." in body, (
+            f"{name} no longer reads startup-loaded state directly: {body!r}")
+        for blocking in ("open(", "connect(", "execute(", "requests.", "sleep("):
+            assert blocking not in body, (
+                f"{name} became a blocking call and is used in a synchronous "
+                f"cache-key builder on the event loop: {blocking!r}")
