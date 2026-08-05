@@ -789,6 +789,26 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
             state={"unit": tf.FINDINGS_UNIT_WORK, "bucket": tf.BUCKET_MAIN,
                    "sort": "band_rank", "novelty_only": True, "divergence": False, "domain": None,
                    "author": None, "work_id": None, "page": 1}))
+        # 7d. an envelope that does not SAY which population it counted. The
+        #     result bar's reconciliation line falls closed to SILENCE there
+        #     rather than to a default, and silence is a branch no envelope the
+        #     shipped reader produces can reach -- so nothing else in this
+        #     capture paints it.
+        silent = tf.findings_envelope([tf.finding_row(neutral_title=title)])
+        silent["meta"].pop("include_divergent", None)
+        _take(_render_findings_page(lang=lang, findings=silent))
+        # 7e. the same envelope with the axis OPEN, so the reconciliation
+        #     line's OTHER wording is painted too.
+        opened = tf.findings_envelope([tf.finding_row(neutral_title=title,
+                                                      divergent=True)])
+        opened["meta"]["include_divergent"] = True
+        _take(_render_findings_page(
+            lang=lang, findings=opened,
+            state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
+                   "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
+                   "novelty_only": False, "divergence": True, "domain": None,
+                   "author": None, "work_id": None, "work_label": None,
+                   "page": 1}))
         # 8. the novelty help, with and without an as-of date.
         for as_of in ("2026-08-03", None):
             _take(_render_component(

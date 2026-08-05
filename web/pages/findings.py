@@ -274,6 +274,31 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
         "en": "Showing {bucket}.",
         "he": "מוצגות {bucket}.",
     },
+    # THE RECONCILIATION LINE (ruling F, 2026-08-05). The headline reports what
+    # the release CONTAINS -- every identification in the artifact, on one
+    # stated basis -- and the default view shows ~23.6% fewer rows than that,
+    # because ruling F hides the catalogue-divergent ones. A reader who counts
+    # would find the gap and have nothing to attribute it to.
+    #
+    # The headline was deliberately NOT made to track the reader's filters: a
+    # corpus figure that moves when a toggle moves stops being a corpus figure,
+    # and ruling U's whole discipline is that a figure names its own basis and
+    # keeps it. So the OTHER number explains itself, here, beside the rows it
+    # describes -- and it says so in BOTH directions, because a line that
+    # appeared only while something was excluded would leave the wider view
+    # unexplained and the two figures disagreeing again.
+    #
+    # NO FIGURE of its own. A count of what is excluded would be a third number
+    # on a fourth basis, which is the mixed-basis defect ruling U was issued
+    # over; and the exclusion is a category, which words state exactly.
+    "divergence_excluded": {
+        "en": "Not counted here: findings that disagree with the catalogue.",
+        "he": "לא נכללים כאן: ממצאים החולקים על הקטלוג.",
+    },
+    "divergence_included": {
+        "en": "Counted here: findings that disagree with the catalogue.",
+        "he": "נכללים כאן: ממצאים החולקים על הקטלוג.",
+    },
     # The amber tag on a filter whose backing data is missing. A filter that
     # silently vanishes is indistinguishable from a filter that never existed.
     "needs_tag": {
@@ -1790,6 +1815,38 @@ def _render_outage_state(status: Optional[str], lang: str, refresh) -> None:
         ).classes(f"{STATE_CLASS}-retry")
 
 
+def _render_divergence_basis(meta: Dict[str, Any], lang: str) -> None:
+    """Say whether THIS count includes the catalogue-divergent rows.
+
+    THE RECONCILIATION between the headline and the result bar, and the reason
+    it lives here rather than in the headline: the headline reports what the
+    RELEASE contains, on the single basis ruling U fixed, and a corpus figure
+    that silently tracked the reader's filters would stop being a corpus figure
+    at all. So the figure that moves is the one that explains itself.
+
+    It reconciles the pool INVITATION on the same line and for the same reason:
+    that strip names the second pool's full size from the artifact, and the
+    default view of that pool is smaller for exactly this reason. One statement,
+    rendered in both bucket states, covers both figures.
+
+    READ FROM THE ENVELOPE, never from `state`. `meta['include_divergent']` is
+    the SERVICE's own report of the query it actually ran; the page's state is
+    only what the page intended. If those two ever disagree -- a control that
+    failed to persist, a request that lost an argument in a wrapper -- this line
+    follows the ROWS, which is the half a reader is counting.
+
+    A `meta` with no such key states NOTHING. An envelope that does not say what
+    it did is not evidence of either answer, and asserting the default here
+    would be this module claiming to know something it was not told. The shipped
+    reader always supplies it, and a test pins that.
+    """
+    if "include_divergent" not in meta:
+        return
+    key = "divergence_included" if meta.get("include_divergent") else "divergence_excluded"
+    ui.label(copy_text(key, lang)).classes(
+        f"{RESULT_BAR_CLASS}-divergence dnote text-xs")
+
+
 def _render_result_bar(
     items: List[Dict[str, Any]],
     total: int,
@@ -1823,6 +1880,8 @@ def _render_result_bar(
                     bucket=bucket_name(False, lang)
                 )
             ui.label(bucket_line).classes(f"{RESULT_BAR_CLASS}-bucket dnote text-xs")
+
+            _render_divergence_basis(meta, lang)
 
             if meta.get("approximate_total"):
                 ui.label(copy_text("approximate_note", lang)).classes(

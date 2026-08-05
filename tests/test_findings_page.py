@@ -452,6 +452,10 @@ def _fake_findings(rows_by_bucket=None, *, total=None, status="ok", meta_extra=N
             "meta": {
                 "unit": unit, "bucket": bucket, "sort": sort,
                 "sort_basis": "best_band_rank", "novelty_offered": True,
+                # The shipped reader always reports which population it
+                # counted; a stub that omitted it would let the result bar's
+                # reconciliation line go silent in every test that uses this.
+                "include_divergent": False,
                 "approximate_total": False, **(meta_extra or {}),
             },
         }
@@ -4979,3 +4983,145 @@ def test_the_divergence_selection_persists_through_the_storage_chokepoint(monkey
     assert fp.read_state()["divergence"] is False
     store[fp._KEY_DIVERGENCE] = None
     assert fp.read_state()["divergence"] is False
+
+
+# ---------------------------------------------------------------------------
+# THE HEADLINE / RESULT-BAR RECONCILIATION (ruling F x ruling U).
+#
+# The headline reports what the RELEASE contains -- every identification in the
+# artifact, on the single basis ruling U fixed. The default view shows ~23.6%
+# fewer rows, because ruling F hides the catalogue-divergent ones. A reader who
+# counts finds the gap.
+#
+# The headline was deliberately NOT made to track the reader's filters: a
+# corpus figure that moves when a toggle moves stops being a corpus figure.
+# The figure that MOVES is the one that explains itself, beside the rows it
+# describes -- and it is read from the ENVELOPE, so it follows the query rather
+# than the page's intent.
+# ---------------------------------------------------------------------------
+
+def _basis_texts(client) -> set:
+    """The DISTINCT strings the reconciliation element renders.
+
+    A set, because `_subtree_strings` reads both `text` and `_text` off the
+    same node and would otherwise report one label twice."""
+    return set(_node_texts(client, f"{fp.RESULT_BAR_CLASS}-divergence"))
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_result_bar_states_whether_the_count_leaves_the_divergent_rows_out(
+        monkeypatch, lang):
+    """Both directions. A line that appeared only while something was excluded
+    would leave the wider view unexplained and the two figures disagreeing
+    again."""
+    excluded = _render_page(monkeypatch, lang=lang)
+    assert _basis_texts(excluded) == {fp.copy_text("divergence_excluded", lang)}, (
+        "the default view narrows the corpus by ~23.6% and says nothing about "
+        "it beside the count")
+
+    included = _render_page(
+        monkeypatch, lang=lang, state=_state(divergence=True),
+        findings=_fake_findings(meta_extra={"include_divergent": True}))
+    assert _basis_texts(included) == {fp.copy_text("divergence_included", lang)}
+
+
+def test_the_reconciliation_line_follows_the_QUERY_not_the_pages_intent(monkeypatch):
+    """`meta['include_divergent']` is the SERVICE's report of what it ran; the
+    state is only what the page meant to ask for. If a control failed to persist
+    or a wrapper dropped an argument, the line must follow the ROWS -- the half
+    the reader is counting."""
+    client = _render_page(
+        monkeypatch, lang="en", state=_state(divergence=True),
+        findings=_fake_findings(meta_extra={"include_divergent": False}))
+    assert _basis_texts(client) == {fp.copy_text("divergence_excluded", "en")}, (
+        "the page believed the axis was open and the service said otherwise; "
+        "the line sided with the page")
+
+
+def test_an_envelope_that_does_not_say_what_it_did_states_nothing(monkeypatch):
+    """Fail closed to SILENCE, not to a default. An envelope carrying no
+    `include_divergent` is not evidence of either answer, and asserting the
+    service's default here would be this module claiming to know something it
+    was not told."""
+    async def _silent(unit="identification", **kwargs):
+        return {"status": "ok", "items": [], "total": 0,
+                "meta": {"unit": unit, "bucket": kwargs.get("bucket", "main"),
+                         "sort": "band_rank", "sort_basis": "best_band_rank",
+                         "novelty_offered": True, "approximate_total": False}}
+
+    client = _render_page(monkeypatch, lang="en", findings=_silent)
+    assert _basis_texts(client) == set()
+
+
+def test_the_shipped_envelope_always_says_which_population_it_counted():
+    """The other half of the fail-closed rule above: silence is honest only
+    because the shipped reader never produces it. Asserted against the SERVICE,
+    not a stub."""
+    from shared.discovery_service import _build_findings_query  # noqa: F401
+    import inspect
+
+    from shared.discovery_service import DiscoveryService
+
+    source = inspect.getsource(DiscoveryService.get_findings_enveloped)
+    assert '"include_divergent": bool(include_divergent)' in source, (
+        "the findings envelope no longer reports which population it counted -- "
+        "the result bar's reconciliation line goes silent and the headline's "
+        "figure and the row count disagree with nothing to say so")
+
+
+@pytest.mark.parametrize("bucket", ["main", "more"])
+def test_the_reconciliation_covers_the_pool_invitation_figure_too(monkeypatch, bucket):
+    """The invitation names the SECOND pool's full size from the artifact, and
+    the default view of that pool is smaller for exactly this reason. One
+    statement, rendered in both bucket states, covers both figures."""
+    client = _render_page(monkeypatch, lang="en", state=_state(bucket=bucket),
+                          launch=_fake_launch(meta_extra={
+                              "more_pool_total": SENTINEL_MORE_POOL_TOTAL}))
+    assert _basis_texts(client) == {fp.copy_text("divergence_excluded", "en")}, (
+        f"the {bucket!r} bucket's count is narrowed and unexplained")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_reconciliation_line_carries_no_figure_of_its_own(monkeypatch, lang):
+    """A count of what is excluded would be a third number on a fourth basis --
+    the mixed-basis defect ruling U was issued over. The exclusion is a
+    CATEGORY, and words state a category exactly."""
+    for key in ("divergence_excluded", "divergence_included"):
+        assert not _DIGIT_RE.search(fp.copy_text(key, lang)), key
+
+    client = _render_page(monkeypatch, lang=lang)
+    assert not _DIGIT_RE.search("\n".join(_basis_texts(client)))
+
+
+def test_the_headline_does_not_track_the_readers_filters(monkeypatch):
+    """The decision this reconciliation implements, asserted as a property.
+
+    The launch read is issued ONCE, before the body, and carries no filter
+    argument at all -- so no reader selection can move it. A headline that
+    silently followed the filters would stop being a corpus figure, and the
+    page would have two numbers on two undeclared bases instead of one declared
+    one plus a sentence.
+    """
+    import inspect
+
+    calls = []
+
+    async def _launch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"status": "ok", "items": [], "total": 0,
+                "meta": {"basis": "main_pool"}}
+
+    _render_page(monkeypatch, lang="en", launch=_launch,
+                 state=_state(divergence=True, domain="Liturgy",
+                              bucket="more", novelty_only=True))
+    assert len(calls) == 1, (
+        f"the launch statistics were read {len(calls)} times -- once per page "
+        "is the contract, and a per-filter read would be a headline tracking "
+        "the reader")
+    assert calls[0] == ((), {}), (
+        "the launch read carried an argument -- a filter reaching it is a "
+        "headline that moves when a toggle moves")
+
+    source = inspect.getsource(fp.fetch_launch_stats)
+    assert "state" not in source.split('"""')[-1], (
+        "the launch reader took the reader's state")
