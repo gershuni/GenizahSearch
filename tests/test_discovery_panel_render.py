@@ -196,7 +196,7 @@ def expansion_row(**overrides):
 
 
 def bundle(claim_items=(), works=(), related_total=0, related_rows=None,
-           lang='en', show_more=False):
+           lang='en', show_more=False, show_divergence=False):
     return PanelServiceBundle(
         claims=make_envelope(STATUS_OK, list(claim_items), len(claim_items),
                              meta={'page_id': 'page-1', 'include_review': False}),
@@ -210,6 +210,7 @@ def bundle(claim_items=(), works=(), related_total=0, related_rows=None,
         related_rows=related_rows,
         lang=lang,
         show_more=show_more,
+        show_divergence=show_divergence,
     )
 
 
@@ -1388,3 +1389,98 @@ def test_the_mixed_fixture_really_does_vary_the_four_reads_independently(failing
         'related_count': (True, True, False),
     }[failing]
     assert observed == expected, f'{failing}: {observed} != {expected}'
+
+
+# ---------------------------------------------------------------------------
+# RULING F -- the fourth disclosure level, RENDERED.
+#
+# The model decides which claims belong there; these assert what a reader
+# actually meets. The one thing that cannot be tested in the model is WHERE the
+# warning ends up: everything under a `<details>` except its `<summary>` is
+# hidden while the element is closed, so a warning in the body would be met
+# only AFTER the decision it exists to inform.
+# ---------------------------------------------------------------------------
+
+def _details_elements(client):
+    return [el for el in client.elements.values()
+            if (getattr(el, 'tag', '') or '') == 'details']
+
+
+def _divergence_details(client, lang='en'):
+    label = ds.disclosure_toggle(ds.TOGGLE_DIVERGENCE, lang)
+    found = [el for el in _details_elements(client)
+             if label in _subtree_texts(el)]
+    assert len(found) == 1, f'expected one divergence <details>, got {len(found)}'
+    return found[0]
+
+
+@pytest.mark.parametrize('lang', ['en', 'he'])
+def test_a_divergent_claim_renders_in_a_closed_fourth_disclosure(lang):
+    model = model_for(claim_items=[claim_row(novelty_status='diverges_work')],
+                      lang=lang)
+    client = _render(model)
+
+    details = _divergence_details(client, lang)
+    assert 'open' not in (details._props or {}), (
+        'ruling F requires the level be hidden by default; it rendered open')
+    assert 'notid' not in (details._classes or []), (
+        "the level took the 'not identifications' treatment -- the catalogue "
+        'names a DIFFERENT identification and ours is still one')
+
+    body = '\n'.join(_subtree_texts(details))
+    assert claim_row()['neutral_title'] in body, 'the claim is not reachable at all'
+
+
+@pytest.mark.parametrize('lang', ['en', 'he'])
+def test_the_warning_renders_OUTSIDE_the_collapsed_body(lang):
+    """The whole reason it is a `warning` key and not a `note`."""
+    model = model_for(claim_items=[claim_row(novelty_status='diverges_part')],
+                      lang=lang)
+    client = _render(model)
+
+    warning = ds.divergence_warning(lang)
+    details = _divergence_details(client, lang)
+    assert warning not in _subtree_texts(details), (
+        'the warning is inside the collapsed <details> -- a reader meets it '
+        'only after opening, i.e. after the decision it exists to inform')
+
+    root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
+    assert warning in _subtree_texts(root), (
+        'the warning is not on the panel at all')
+
+
+def test_an_undivergent_panel_renders_no_divergence_warning():
+    """The other direction, so the assertion above cannot pass by rendering the
+    warning unconditionally."""
+    client = _render(model_for(claim_items=[claim_row()]))
+    root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
+    assert ds.divergence_warning('en') not in _subtree_texts(root)
+
+
+def test_opening_the_axis_renders_the_fourth_disclosure_open():
+    model = model_for(claim_items=[claim_row(novelty_status='diverges_work')],
+                      show_divergence=True)
+    details = _divergence_details(_render(model))
+    assert 'open' in (details._props or {})
+
+
+def test_a_divergent_claim_is_absent_from_the_default_section_on_screen():
+    """Not merely filed elsewhere in the model -- absent from what the reader
+    sees without opening anything."""
+    client = _render(model_for(
+        claim_items=[claim_row(novelty_status='diverges_work')]))
+    root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
+    title = claim_row()['neutral_title']
+
+    inside_a_disclosure = set()
+    for details in _details_elements(client):
+        inside_a_disclosure.update(id(el) for el in details.descendants())
+    visible = [
+        text
+        for el in root.descendants(include_self=True)
+        if id(el) not in inside_a_disclosure
+        for text in _subtree_texts(el)
+    ]
+    assert title not in visible, (
+        'the divergent claim renders outside every disclosure -- it is in the '
+        'default view')

@@ -589,6 +589,15 @@ def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
     # A collapsed level. `notid` is applied only where the model says the level
     # is NOT identifications (D-13e), so the marking follows the model rather
     # than a guess made here.
+    #
+    # A `warning` -- ruling F's fourth level supplies one and nothing else does
+    # -- is rendered BESIDE the toggle rather than inside it. Everything under
+    # a `<details>` except its `<summary>` is hidden while the element is
+    # closed, so a warning placed in the body would only be met AFTER the
+    # decision it exists to inform. Driven by the model's own key, so this
+    # renderer still branches on no level identity.
+    if level.get('warning'):
+        ui.label(level['warning']).classes('dnote')
     classes = 'disc' if level.get('is_identifications') else 'disc notid'
     details = ui.element('details').classes(classes)
     if level.get('visible'):

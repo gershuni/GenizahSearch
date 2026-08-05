@@ -1578,11 +1578,36 @@ def test_no_truthiness_test_on_an_envelope_item_list_survives_in_the_module():
 
 
 def _ratified_disclosure_level_count():
-    """Read the ratified number out of the decision record, never a literal."""
+    """Read the ratified number out of the decision record, never a literal.
+
+    TWO rulings decide it, and both are read here.
+
+    D-13e's own code-consequence sentence fixes the BASE count: the default
+    identifications, "Also shares text with", and "show more possible matches".
+
+    RULING F adds ONE more, and adds it as a LEVEL rather than as a badge. Its
+    code-consequence paragraph requires that `diverges_work`/`diverges_part`
+    rows be ABSENT from the default render and surface only behind an explicit,
+    separately-labelled toggle carrying a clear warning -- which is what a
+    disclosure level IS on this panel. The axis is orthogonal to the other
+    three, so it adds to them rather than re-partitioning them.
+
+    The `+ 1` is guarded rather than asserted: ruling F's own sentence is
+    matched in the record first, so retiring the ruling fails HERE instead of
+    silently leaving a fourth level nobody ratified."""
     text = io.open(GATE1_DECISIONS, encoding="utf-8").read()
     match = re.search(r"the panel implements \*\*(\w+)\*\* disclosure levels", text)
     assert match is not None, "D-13e's code-consequence sentence is not where it was"
-    return {"two": 2, "three": 3, "four": 4}[match.group(1).lower()]
+    base = {"two": 2, "three": 3, "four": 4}[match.group(1).lower()]
+
+    ruling_f = re.search(
+        r"rows are \*\*HIDDEN BY DEFAULT\*\*[\s\S]{0,600}?surface ONLY behind\s+"
+        r"an explicit, separately-labelled toggle carrying a clear warning",
+        text)
+    assert ruling_f is not None, (
+        "ruling F's default-visibility rule is no longer in the decision record "
+        "-- the panel's fourth disclosure level is ratified by nothing")
+    return base + 1
 
 
 def test_the_emitted_disclosure_level_count_equals_the_ratified_number():
@@ -2197,7 +2222,8 @@ _OPT_INT = (int, type(None))
 
 _EMITTED_SCHEMA = {
     "model": {
-        "lang": _STR, "show_more": _BOOL, "panel_status": _STR, "caveat": _STR,
+        "lang": _STR, "show_more": _BOOL, "show_divergence": _BOOL,
+        "panel_status": _STR, "caveat": _STR,
         "bucket_rule_sentence": _STR, "entry_control": (dict,),
         "service_state": (dict,), "manuscript_pane": (dict,),
         "disclosure_levels": (tuple,), "lead_with_manuscript_pane": _BOOL,
@@ -2231,6 +2257,10 @@ _EMITTED_SCHEMA = {
     "model.disclosure_levels[]": {
         "key": _STR, "label": _STR, "is_identifications": _BOOL,
         "default_visible": _BOOL, "visible": _BOOL, "note": _STR,
+        # Ruling F's fourth level carries a WARNING as well as (and distinct
+        # from) the middle level's `note`: the note is a qualifier inside a
+        # section, the warning is what a reader must have BEFORE opening one.
+        "warning": _STR,
         "rows": (tuple,), "generic_groups": (tuple,), "related_pages": (dict,),
     },
     "model.disclosure_levels[].rows[]": {
@@ -2737,3 +2767,162 @@ def test_the_sweep_reports_the_field_it_inspected_not_the_whole_model():
     with pytest.raises(DiscoveryHonestyViolation) as exc:
         assert_model_honesty(model)
     assert re.search(r"model\.disclosure_levels\[\d+\]\.rows\[\d+\]\.headline", str(exc.value))
+
+
+# ===========================================================================
+# RULING F -- THE FOURTH DISCLOSURE LEVEL (136-GATE1-DECISIONS.md section F)
+#
+# `diverges_work` / `diverges_part` claims are ABSENT from the default render
+# and surface only behind an explicit, separately-labelled toggle carrying a
+# clear warning. The axis is ORTHOGONAL to the other three: a divergent claim
+# can be main-pool, default-eligible and long-evidence, i.e. a level-1 row by
+# every other test.
+#
+# The policy has existed as `HIDDEN_BY_DEFAULT_SHADES`/`is_hidden_by_default`
+# since plan 136-04 with tests asserting the CONSTANT'S VALUE, and nothing
+# outside `tests/` called either. Every test below asserts a property of the
+# MODEL.
+# ===========================================================================
+
+_DIVERGENCE_SHADES = ("diverges_work", "diverges_part")
+
+
+def _level_of(model, key):
+    return [lvl for lvl in model.disclosure_levels if lvl["key"] == key][0]
+
+
+@pytest.mark.parametrize("shade", _DIVERGENCE_SHADES)
+def test_a_divergent_claim_leaves_the_default_level_for_the_fourth(shade):
+    """The load-bearing one. The row below is main-pool, default-eligible and
+    long-evidence -- a level-1 row by every test except this one."""
+    model = pm.build_panel_rows(bundle([claim_row(novelty_status=shade)]))
+
+    default = _level_of(model, pm.LEVEL_IDENTIFICATIONS)
+    assert default["rows"] == (), (
+        "a claim contradicting a catalogue identification rendered in the "
+        "DEFAULT level -- ruling F requires it be absent, not merely marked")
+
+    divergence = _level_of(model, pm.LEVEL_DIVERGENCE)
+    assert len(divergence["rows"]) == 1
+    assert divergence["rows"][0]["disclosure_level"] == pm.LEVEL_DIVERGENCE
+    assert divergence["default_visible"] is False
+    assert divergence["visible"] is False, "hidden by default, and it is not"
+
+    # NOTHING IS DELETED: the claim is still reachable.
+    assert [row["claim_id"] for row in pm.iter_rows(model)] == [
+        claim_row()["claim_id"]]
+
+
+def test_an_undivergent_claim_stays_where_it_was():
+    """The other direction, so the test above cannot pass by emptying level 1
+    for every row."""
+    model = pm.build_panel_rows(bundle([claim_row()]))
+    assert len(_level_of(model, pm.LEVEL_IDENTIFICATIONS)["rows"]) == 1
+    assert _level_of(model, pm.LEVEL_DIVERGENCE)["rows"] == ()
+
+
+def test_the_fourth_level_wins_over_the_show_more_gate_too():
+    """A divergent claim that is ALSO short-evidence, or second-bucket, belongs
+    to the divergence level and not to "show more": a reader who opened "show
+    more" asked about EVIDENCE STRENGTH and was never warned about the
+    catalogue."""
+    weak_divergent = claim_row(
+        novelty_status="diverges_work", main_pool=False,
+        main_pool_reason=REASON_INSUFFICIENT_LENGTH, matched_letters=12,
+        coverage_ppm=20000)
+    model = pm.build_panel_rows(bundle([weak_divergent], show_more=True))
+    assert _level_of(model, pm.LEVEL_MORE_MATCHES)["rows"] == ()
+    assert len(_level_of(model, pm.LEVEL_DIVERGENCE)["rows"]) == 1
+
+
+def test_human_confirmation_does_not_release_a_divergent_claim():
+    """Human confirmation adjudicates the CLAIM; it does not adjudicate the
+    DISAGREEMENT. `divergence_correctness` -- the only field that could -- is
+    human-only (ruling L) and NULL on every shipped row, so reading a confirmed
+    claim as a settled divergence would be the model supplying the verdict
+    ruling F says nobody has reached."""
+    confirmed = claim_row(
+        novelty_status="diverges_part",
+        adjudication_status=ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED,
+        main_pool_reason=REASON_MAIN_HUMAN_CONFIRMED)
+    model = pm.build_panel_rows(bundle([confirmed]))
+    assert _level_of(model, pm.LEVEL_IDENTIFICATIONS)["rows"] == ()
+    assert len(_level_of(model, pm.LEVEL_DIVERGENCE)["rows"]) == 1
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_fourth_level_carries_the_ratified_label_and_the_ratified_warning(lang):
+    """Both strings come from the shared claim vocabulary; neither is composed
+    here. The WARNING is a separate key from the middle level's `note` because
+    it is a different thing: a note qualifies a section a reader is already
+    reading, a warning is what they must have BEFORE opening one."""
+    model = pm.build_panel_rows(bundle([claim_row(novelty_status="diverges_work")],
+                                       lang=lang))
+    level = _level_of(model, pm.LEVEL_DIVERGENCE)
+    assert level["label"] == ds.disclosure_toggle(ds.TOGGLE_DIVERGENCE, lang)
+    assert level["warning"] == ds.divergence_warning(lang)
+
+    # ...and it is WITHHELD when there is nothing on this folio to warn about.
+    # The sentence states a fact about THIS page ("these findings conflict with
+    # an existing catalogue identification"), and ~76% of the corpus has no
+    # such finding, so an unconditional warning would assert a conflict that
+    # does not exist. The level itself still renders.
+    quiet = pm.build_panel_rows(bundle([claim_row()], lang=lang))
+    assert _level_of(quiet, pm.LEVEL_DIVERGENCE)["warning"] == ""
+    assert _level_of(quiet, pm.LEVEL_DIVERGENCE)["rows"] == ()
+
+    assert "note" not in level, (
+        "the warning was filed as a `note`, which the renderer puts INSIDE the "
+        "collapsed body -- a reader would meet it only after opening")
+
+
+def test_the_fourth_level_is_still_identifications():
+    """The catalogue names a DIFFERENT identification; ours is still one.
+    Marking the level `is_identifications: False` would give it the renderer's
+    `notid` treatment -- "these are not identifications" -- which is a side,
+    and ruling F takes none."""
+    model = pm.build_panel_rows(bundle([claim_row(novelty_status="diverges_work")]))
+    assert _level_of(model, pm.LEVEL_DIVERGENCE)["is_identifications"] is True
+
+
+def test_the_bundle_opens_the_fourth_level_only_when_asked():
+    rows = [claim_row(novelty_status="diverges_work")]
+    closed = pm.build_panel_rows(bundle(rows))
+    opened = pm.build_panel_rows(bundle(rows, show_divergence=True))
+    assert closed.show_divergence is False
+    assert _level_of(closed, pm.LEVEL_DIVERGENCE)["visible"] is False
+    assert opened.show_divergence is True
+    assert _level_of(opened, pm.LEVEL_DIVERGENCE)["visible"] is True
+    # And the two are independent axes: opening "show more" does not open this.
+    more = pm.build_panel_rows(bundle(rows, show_more=True))
+    assert _level_of(more, pm.LEVEL_DIVERGENCE)["visible"] is False
+
+
+def test_the_divergence_test_is_the_shared_policy_and_not_a_restated_list():
+    """DERIVED. Two halves: neither shade appears as a literal in the model,
+    and the model's own routing agrees with `is_hidden_by_default` for EVERY
+    shade in the vocabulary -- so moving the policy moves the panel."""
+    from shared.discovery_novelty import NOVELTY_STATUSES, is_hidden_by_default
+
+    source = _model_source()
+    for shade in _DIVERGENCE_SHADES:
+        assert f'"{shade}"' not in source and f"'{shade}'" not in source, (
+            f"{shade!r} is a literal in shared/discovery_panel_model.py")
+
+    for shade in sorted(NOVELTY_STATUSES):
+        model = pm.build_panel_rows(bundle([claim_row(novelty_status=shade)]))
+        landed = _level_of(model, pm.LEVEL_DIVERGENCE)["rows"] != ()
+        assert landed is is_hidden_by_default(shade), shade
+
+
+def test_an_unrecognised_novelty_shade_is_refused_rather_than_shown_by_default():
+    """Fail LOUD, not quiet. The vocabulary is frozen by the schema's CHECK
+    constraint and by the release verifier, so an unrecognized value means the
+    artifact is not the one this code was written against -- and the fail-quiet
+    reading of that would put an unclassifiable row in the one place ruling F
+    says it must not be."""
+    with pytest.raises(pm.PanelContractError) as caught:
+        pm.build_panel_rows(bundle([claim_row(novelty_status="not_a_shade")]))
+    assert "novelty_status" in str(caught.value)
+    assert "not_a_shade" not in str(caught.value), (
+        "the refusal quoted the artifact's own value")

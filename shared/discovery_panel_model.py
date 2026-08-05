@@ -82,6 +82,7 @@ from shared.discovery_main_pool import (
     SHORT_EVIDENCE_THRESHOLD_MATCHED_LETTERS,
     bucket_label,
 )
+from shared.discovery_novelty import NOVELTY_STATUSES, is_hidden_by_default
 from shared.discovery_surface_projection import (
     STATUS_OK,
     SURFACE_STATUSES,
@@ -178,15 +179,26 @@ SCOPE_STATES: Tuple[str, ...] = (
 #: below and the suite that reads it enumerate it identically.
 SURFACE_STATUSES_ORDERED: Tuple[str, ...] = tuple(sorted(SURFACE_STATUSES))
 
-#: The three disclosure levels D-13e ratified -- no more, no fewer. Level 2
+#: The three disclosure levels D-13e ratified, plus ruling F's FOURTH. Level 2
 #: holds the generic identical-span groups and the related-pages section and is
 #: explicitly NOT identifications.
+#:
+#: The fourth is ORTHOGONAL to the first three rather than weaker than them
+#: (`136-GATE1-DECISIONS.md` section F): it holds the claims that contradict a
+#: catalogue identification, at whatever strength, and it is hidden by default
+#: behind an explicitly warned toggle. Ruling F names the panel plans
+#: (136-15/136-17) that must build it, and the same ruling's own rationale is
+#: why it is a LEVEL and not a badge -- the system never treats the catalogue's
+#: disagreement as a verdict, it surfaces the disagreement and lets the reader
+#: decide, which is a decision a reader can only make before opening it.
 LEVEL_IDENTIFICATIONS = "identifications"
 LEVEL_ALSO_SHARES_TEXT = ds.TOGGLE_ALSO_SHARES_TEXT
 LEVEL_MORE_MATCHES = ds.TOGGLE_MORE_MATCHES
+LEVEL_DIVERGENCE = ds.TOGGLE_DIVERGENCE
 
 DISCLOSURE_LEVEL_KEYS: Tuple[str, ...] = (
     LEVEL_IDENTIFICATIONS, LEVEL_ALSO_SHARES_TEXT, LEVEL_MORE_MATCHES,
+    LEVEL_DIVERGENCE,
 )
 
 #: The pipeline's named steps. ORDER IS LOAD-BEARING and the names exist so a
@@ -444,6 +456,10 @@ class PanelServiceBundle:
     related_rows: Optional[Mapping[str, Any]] = None
     lang: str = "en"
     show_more: bool = False
+    #: Ruling F's fourth level, opened. DEFAULT FALSE, and the default is the
+    #: ruling: a caller that has never heard of divergence gets the hidden
+    #: posture rather than its opposite.
+    show_divergence: bool = False
 
     def __post_init__(self) -> None:
         # One of the two public boundaries. Our own refusals pass through
@@ -846,14 +862,54 @@ def _validate_claim_row(row: Mapping[str, Any], *, include_review: bool) -> None
         )
 
 
+def _is_catalogue_divergent(row: Mapping[str, Any]) -> bool:
+    """Whether this claim contradicts a catalogue identification (ruling F).
+
+    DERIVED from `shared.discovery_novelty.is_hidden_by_default`, never from a
+    restated shade list -- that predicate is the policy, and a second membership
+    test here would be a second policy the first one could not move.
+
+    Refuses an out-of-vocabulary shade rather than treating it as undivergent.
+    The vocabulary is frozen by the schema's own CHECK constraint and by the
+    release verifier's frozen-enum check, so an unrecognized value here means
+    the artifact is not the one this code was written against -- and the
+    fail-quiet reading of that would silently put an unclassifiable row in the
+    DEFAULT view, which is the one place ruling F says it must not be.
+    """
+    status = row.get("novelty_status")
+    try:
+        return is_hidden_by_default(status)
+    except ValueError:
+        raise PanelContractError(
+            "claim_vocabulary_outside_closed_set: field 'novelty_status' carries "
+            "a value outside the frozen novelty vocabulary (value withheld); the "
+            "closed set has %d members" % len(NOVELTY_STATUSES)
+        ) from None
+
+
 def _disclosure_level_for(row: Mapping[str, Any]) -> str:
     """Which disclosure level one identification row belongs to.
 
     Nothing is deleted here: a row that fails every test below is GATED behind
-    the "show more" toggle and stays reachable. Bucket membership itself is the
-    materialized shared-rule decision on the row (`main_pool`), never
-    recomputed.
+    a toggle and stays reachable. Bucket membership itself is the materialized
+    shared-rule decision on the row (`main_pool`), never recomputed.
+
+    DIVERGENCE IS TESTED FIRST, and the order is the ruling. Ruling F's axis is
+    ORTHOGONAL to the other three -- a catalogue-divergent claim can be
+    main-pool, default-eligible and long-evidence, i.e. a level-1 row by every
+    other test -- so a divergence test placed anywhere but first would leave
+    exactly the strongest divergent rows in the default view, which is the one
+    place the ruling says they must not be.
+
+    It is tested BEFORE the human-confirmation carve-out too. Human
+    confirmation adjudicates the CLAIM; it does not adjudicate the
+    DISAGREEMENT, and `divergence_correctness` -- the only field that could --
+    is human-only (ruling L) and NULL on every shipped row. Reading a confirmed
+    claim as a settled divergence would be this module supplying the verdict
+    ruling F says nobody has reached.
     """
+    if _is_catalogue_divergent(row):
+        return LEVEL_DIVERGENCE
     if not _is_default_surface_eligible(row):
         # Only reachable under `include_review`. Stated explicitly rather than
         # left to fall through the `main_pool` test below, which would be the
@@ -1397,6 +1453,7 @@ class PanelModel:
 
     lang: str
     show_more: bool
+    show_divergence: bool
     panel_status: str
     entry_control: Dict[str, Any]
     service_state: Dict[str, Any]
@@ -1475,6 +1532,7 @@ def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
 
     default_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_IDENTIFICATIONS)
     gated_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_MORE_MATCHES)
+    divergent_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_DIVERGENCE)
 
     levels: Tuple[Dict[str, Any], ...] = (
         {
@@ -1503,6 +1561,32 @@ def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
             "visible": bool(bundle.show_more),
             "rows": gated_rows,
         },
+        {
+            "key": LEVEL_DIVERGENCE,
+            "label": ds.disclosure_toggle(ds.TOGGLE_DIVERGENCE, lang),
+            # These ARE identifications -- the catalogue names a different one,
+            # and ruling F is explicit that the system takes no side on which
+            # is right. Marking them `is_identifications: False` would be the
+            # renderer's `notid` treatment saying they are not identifications
+            # at all, which is a side.
+            "is_identifications": True,
+            "default_visible": False,
+            "visible": bool(bundle.show_divergence),
+            # OUTSIDE the collapsed body, unlike the middle level's `note`.
+            # Ruling F's toggle is an "explicitly warned" one, and a warning
+            # that lives inside a `<details>` is one a reader only meets AFTER
+            # opening -- i.e. after the decision it exists to inform.
+            #
+            # EMPTY WHEN THERE IS NOTHING TO WARN ABOUT. The warning states a
+            # fact about THIS folio ("these findings conflict with an existing
+            # catalogue identification"), so on a folio with no divergent claim
+            # it would be a standing assertion of a conflict that does not
+            # exist -- and ~76% of the corpus has none. The LEVEL still renders
+            # (like the empty "show more" level beside it); only the claim
+            # about the folio is withheld.
+            "warning": ds.divergence_warning(lang) if divergent_rows else "",
+            "rows": divergent_rows,
+        },
     )
 
     entry_control = _entry_control(
@@ -1511,6 +1595,7 @@ def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
     return PanelModel(
         lang=lang,
         show_more=bool(bundle.show_more),
+        show_divergence=bool(bundle.show_divergence),
         panel_status=outcome.panel_status,
         entry_control=entry_control,
         service_state=_service_state(bundle.claims, lang),

@@ -1979,6 +1979,41 @@ def _lazy_read_envelopes(seed: Optional[str], lang: str) -> Dict[str, Any]:
     }
 
 
+def _divergent_rows_bundle(lang: str, seed_title: Optional[str] = None
+                           ) -> PanelServiceBundle:
+    """A claim in ruling F's FOURTH disclosure, WITH that disclosure open.
+
+    Nothing else in this suite produces one: every other fixture carries the
+    fail-closed `not_checked` shade, so the divergence level rendered empty and
+    its warning -- the sentence a reader must have BEFORE opening the level --
+    was never painted, nor was the level's own row loop.
+
+    The row is deliberately main-pool and default-eligible: a level-1 row by
+    every test except the divergence one, which is what makes the capture cover
+    the ORTHOGONAL case rather than a weak row that would have been gated
+    anyway.
+    """
+    base = _claim_source(novelty_status='diverges_work')
+    rows = [surface_safe_claim(dict(
+        base, claim_id='f' * 64, work_id='w000302',
+        canonical_work_id='w000302', display_work_id='w000302',
+        neutral_title=seed_title or 'Commentary on Lamentations'))]
+    return PanelServiceBundle(
+        claims=make_envelope(STATUS_OK, rows, len(rows), meta={
+            'page_id': '990000000000000944_IE1_P000002_FL3', 'include_review': False}),
+        page_ids=make_envelope(STATUS_OK, ['990000000000000944_IE1_P000002_FL3'], 1,
+                               meta={'sys_id': '990000000000000944', 'resolved': True,
+                                     'truncated': False, 'volume_ie': 'IE1'}),
+        manuscript_works=make_envelope(STATUS_OK, [], 0, meta={
+            'page_scope_resolved': True, 'lang': lang}),
+        related_count=make_envelope(STATUS_OK, [], 2, meta={
+            'unit': 'distinct_opposite_pages'}),
+        related_rows=None,
+        lang=lang,
+        show_divergence=True,
+    )
+
+
 def _render_every_panel_surface(seed: Optional[str] = None) -> str:
     """Every surface a READER can see on this panel, as text.
 
@@ -2039,6 +2074,7 @@ def _render_every_panel_surface(seed: Optional[str] = None) -> str:
             _scope_variant_bundle(lang, 'unresolved', seed_title=title),
             _scope_variant_bundle(lang, 'truncated', seed_title=title),
             _gated_rows_bundle(lang, seed_title=title),
+            _divergent_rows_bundle(lang, seed_title=title),
         ):
             parts.append(_render_capture(_paint_body(build_panel_rows(bundle))))
 
