@@ -1426,19 +1426,54 @@ def _render_results(
 
     _render_result_bar(items, total, meta, state, lang, refresh)
     _render_active_filters(state, lang, refresh)
-    _render_pool_invite(state, lang, refresh)
+    # ONE invitation on the page, in the place that serves the reader who is
+    # actually there. With rows on screen it sits above them; with none, it
+    # belongs inside the empty state, which is the moment a reader is most
+    # likely to want the other pool. Rendering it in both places would put two
+    # identical buttons a few pixels apart and make the control ambiguous to
+    # locate, for a reader and for a test.
+    if items:
+        _render_pool_invite(state, lang, refresh)
 
     with ui.column().classes(f"rows {RESULTS_CLASS}-rows w-full gap-2"):
         if not items:
-            # An HONEST empty state: `ok` with zero rows. Visually and
-            # structurally distinct from the three outage states below, which is
-            # the whole point -- an outage that reads as "no findings" silently
-            # under-reports the corpus.
-            ui.label(tr("No results found")).classes(f"{RESULTS_CLASS}-empty")
+            _render_empty_state(state, lang, refresh)
         for item in items:
             _render_row(item, lang)
 
     _render_pager(total, state, lang, refresh)
+
+
+def _render_empty_state(state: Dict[str, Any], lang: str, refresh) -> None:
+    """`ok` with ZERO rows -- the fourth state, and the only honest zero.
+
+    It used to be four grey words in an otherwise empty column. An empty result
+    after three filters is the highest-intent moment on this page for meeting
+    the second pool -- the reader has just told you exactly what they were
+    looking for and been told there is none of it -- so the invitation is
+    rendered here rather than above a list that does not exist.
+
+    DISTINCT FROM THE THREE OUTAGE STATES, structurally and in what it offers.
+    `_render_outage_state` names a temporary condition and offers a RETRY;
+    this names a real (zero) result and offers the OTHER POOL, because retrying
+    a query that answered correctly is not a thing to suggest. An outage that
+    reads as "this corpus has no findings" silently under-reports the corpus
+    (T-136-16-04), and the converse misleads just as badly.
+
+    Note that no invitation is rendered on an outage at all: the other pool is
+    served by the same sidecar and is not answering either, so offering it there
+    would present an outage as a fact about this bucket.
+    """
+    with ui.column().classes(
+        f"{RESULTS_CLASS}-empty w-full items-center gap-2 p-4"
+    ):
+        ui.icon("search_off").classes(
+            f"{RESULTS_CLASS}-empty-icon text-4xl"
+        ).style("color: var(--text-secondary);")
+        ui.label(tr("No results found")).classes(
+            f"{RESULTS_CLASS}-empty-message text-lg font-bold"
+        )
+        _render_pool_invite(state, lang, refresh)
 
 
 def _render_outage_state(status: Optional[str], lang: str, refresh) -> None:

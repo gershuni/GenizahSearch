@@ -3530,6 +3530,69 @@ def test_the_invitation_introduces_no_new_button_string(monkeypatch):
             f"{(actions[0]._props or {}).get('label')!r}")
 
 
+# ---------------------------------------------------------------------------
+# TASK 9 (2026-08-05) — the FOURTH state stops being four grey words.
+#
+# An `ok` envelope with zero rows after three filters is the highest-intent
+# moment on the page for meeting the second pool, and it was answered with one
+# unstyled label. It must still be VISUALLY AND STRUCTURALLY DISTINCT from the
+# three outage states — an outage that reads as "this corpus has no findings"
+# silently under-reports the corpus, which is what T-136-16-04 is about.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_an_empty_result_set_offers_the_other_pool(monkeypatch, lang):
+    client = _render_page(monkeypatch, lang=lang,
+                          findings=_fake_findings({"main": [], "more": []}))
+    empties = _elements_with_class(client, f"{fp.RESULTS_CLASS}-empty")
+    assert len(empties) == 1, "the honest empty state did not render"
+    empty = empties[0]
+
+    set_language(lang)
+    try:
+        expected = tr_for_test("No results found")
+    finally:
+        set_language("he")
+    said = "\n".join(_subtree_strings(empty))
+    assert expected in said, f"the empty state lost its own message: {said!r}"
+    assert _elements_with_class(client, f"{fp.RESULTS_CLASS}-empty-icon"), (
+        "the empty state is still a bare line of text")
+
+    strips = _elements_with_class(client, fp.POOL_INVITE_CLASS)
+    assert len(strips) == 1, (
+        f"exactly one pool invitation belongs on the page, got {len(strips)}")
+    assert empty in _ancestors(strips[0]), (
+        "the empty result set — the moment a reader is most likely to want the "
+        "other pool — does not offer it")
+
+
+@pytest.mark.parametrize("status", ["unavailable", "timeout", "busy"])
+def test_the_empty_state_and_the_outage_states_stay_distinguishable(monkeypatch, status):
+    """Both directions. An outage dressed as an empty result under-reports the
+    corpus; an empty result dressed as an outage tells a reader to retry a query
+    that answered correctly."""
+    from shared.discovery_display_strings import retry_label, service_state_message
+
+    empty = _render_page(monkeypatch, lang="en",
+                         findings=_fake_findings({"main": [], "more": []}))
+    outage = _render_page(monkeypatch, lang="en", findings=_fake_findings(status=status))
+
+    # Scoped to the RESULTS region: the launch headline runs its own outage
+    # path in this harness (the launch read is not stubbed), so a page-wide
+    # scan for a retry label would be red for an unrelated reason.
+    empty_region = _scoped_text(empty, fp.RESULTS_CLASS)
+    assert service_state_message(status, "en") not in empty_region
+    assert retry_label("en") not in empty_region, (
+        "the empty state offers a retry — the query answered correctly")
+    assert not _elements_with_class(empty, f"{fp.STATE_CLASS}-{status}")
+
+    assert not _elements_with_class(outage, f"{fp.RESULTS_CLASS}-empty"), (
+        f"the {status!r} outage rendered the honest empty state")
+    assert not _elements_with_class(outage, fp.POOL_INVITE_CLASS), (
+        f"the {status!r} outage offered the other pool — the other pool is not "
+        "answering either, and the offer would read as a fact about this one")
+
+
 _EMPTY_FACETS = {"domain": [], "author": [], "work": []}
 
 
