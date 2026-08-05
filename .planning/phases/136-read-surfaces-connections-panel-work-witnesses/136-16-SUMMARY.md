@@ -138,6 +138,15 @@ Commits claimed, verified in `git log --oneline --all`: `164d1d8b` — FOUND; `d
 
 ## ✅ NOW MET — criteria (e) and (f), the real-browser actionability check
 
+**Status: MET** — CI run 30931268195, 2026-08-04.
+
+<!-- The verdict token sits on the line directly under the heading ON PURPOSE:
+     the release gate reads a 400-character window that STARTS at the phrase
+     "criteria (e) and (f)", so a verdict placed only in the heading (before the
+     marker) or further down the section (past the window) reads to the gate as
+     an unrecorded outcome. It did exactly that once, and the gate was right to
+     fail. Keep any new prose BELOW this line. -->
+
 > **Record corrected 2026-08-04 by the orchestrator, not by this plan's executor.**
 > This section was written when the job was wired but had never run, and it was right to
 > refuse to call a wired gate a met criterion. The job has since passed: **CI run
