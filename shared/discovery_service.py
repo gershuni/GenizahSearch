@@ -2360,6 +2360,14 @@ class DiscoveryService:
             # it asked for against the set that came back, and reading its own
             # request back for that comparison proves nothing.
             "page": page,
+            # ...and the page SIZE this envelope was actually built with, after
+            # `_clamp_findings_page_size` applied the shared ceiling. A surface
+            # computing its pager from its own requested size divides a real
+            # total by a size the service refused: with
+            # `DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT` above
+            # `DISCOVERY_PAGE_SIZE_MAX` the page count comes out too small and
+            # the tail of the set is unreachable, with nothing saying so.
+            "page_size": page_size,
             "approximate_total": approximate,
         })
 

@@ -268,6 +268,18 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
         "en": "This total is approximate.",
         "he": "המספר הזה מקורב.",
     },
+    # §3.5. `DISCOVERY_FINDINGS_COUNT_MAX` stops the counting query at a cap, so
+    # the last page the pager's arithmetic can NAME is not the last page that
+    # exists. Left alone, the pager disables `Next` there and reads as "that is
+    # all there is" -- a claim a capped count cannot support, and one that hides
+    # rows behind a tuning knob nobody on the page can see.
+    #
+    # Deliberately says MAY: the count stopped, so the page genuinely does not
+    # know how many more there are, and a figure here would be invented.
+    "pager_capped_note": {
+        "en": "There may be more pages than this count shows.",
+        "he": "ייתכן שיש עוד עמודים מכפי שהמספר הזה מראה.",
+    },
     # The second-bucket counterpart of tr('Showing the {bucket} by default.').
     # The bar must name its bucket in BOTH bucket states.
     "showing_bucket": {
@@ -739,6 +751,28 @@ def _page_count(total: Any, size: int) -> int:
     return max(1, math.ceil(rows / size))
 
 
+def effective_page_size(envelope: Dict[str, Any]) -> int:
+    """The page size the SERVICE actually used, not the one this page asked for.
+
+    `_clamp_findings_page_size` applies the shared `DISCOVERY_PAGE_SIZE_MAX`
+    ceiling server-side, so with `DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT` set
+    above it the two numbers differ -- and a pager that divides a real total by
+    the number the service REFUSED reports too few pages and leaves the tail of
+    the set unreachable, with nothing on the page saying so. The envelope
+    reports what it was built with; that is the only number the arithmetic here
+    may use.
+
+    Falls back to the budgeted default when the envelope does not say (an
+    outage, or an older reader): a fallback is unavoidable, and the budgeted
+    default is the same value the service would have clamped from.
+    """
+    size = (envelope or {}).get("meta")
+    size = (size or {}).get("page_size")
+    if isinstance(size, int) and not isinstance(size, bool) and size > 0:
+        return size
+    return _default_page_size()
+
+
 def clamp_page_to_total(state: Dict[str, Any], envelope: Dict[str, Any]) -> bool:
     """Pull a persisted page back inside the real set. Returns whether it moved.
 
@@ -753,10 +787,20 @@ def clamp_page_to_total(state: Dict[str, Any], envelope: Dict[str, Any]) -> bool
     Only ever moves DOWNWARDS, and only on an `ok` envelope: an outage carries
     no trustworthy total, and clamping against one would turn a temporary
     failure into a persisted page-1 reset.
+
+    ONLY WHEN THE PAGE CAME BACK EMPTY, and that condition is what makes this
+    safe under `DISCOVERY_FINDINGS_COUNT_MAX`. A capped total is a LOWER BOUND,
+    so a page above `total / size` can still be full of rows -- and clamping a
+    reader off a page they can see would be this fix creating the very defect
+    §3.5 is about. An empty page is the only evidence that a page is really past
+    the end; under a cap it clamps to the last page the count can vouch for,
+    which is a page that certainly has rows.
     """
     if (envelope or {}).get("status") != "ok":
         return False
-    pages = _page_count(envelope.get("total"), _default_page_size())
+    if envelope.get("items"):
+        return False
+    pages = _page_count(envelope.get("total"), effective_page_size(envelope))
     try:
         current = int(state.get("page") or 1)
     except (TypeError, ValueError):  # pragma: no cover -- read_state normalises
@@ -1873,7 +1917,9 @@ def _render_results(
         for item in items:
             _render_row(item, lang)
 
-    _render_pager(total, state, lang, refresh)
+    _render_pager(total, state, lang, refresh,
+                  page_size=effective_page_size(envelope),
+                  approximate=bool(meta.get("approximate_total")))
 
 
 def _render_empty_state(state: Dict[str, Any], lang: str, refresh,
@@ -2318,21 +2364,42 @@ def _render_row(item: Dict[str, Any], lang: str) -> None:
     rows.render_finding_row(item, lang)
 
 
-def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh) -> None:
+def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh,
+                  *, page_size: int, approximate: bool = False) -> None:
     """Pagination over the FULL filtered set.
 
     The service supplies a real pre-`LIMIT` total, so the page count is derived
-    from that and never from the length of the current page. The page-size
-    CEILING is enforced server-side (the service clamps whatever it is handed
-    against the shared maximum); this module names only the budgeted default.
+    from that and never from the length of the current page.
+
+    THE PAGE SIZE IS THE SERVICE'S, not this module's request (§3.5). The
+    ceiling is enforced server-side, so with
+    `DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT` above `DISCOVERY_PAGE_SIZE_MAX` the
+    two differ -- and dividing a real total by the size the service refused
+    reports too few pages and leaves the tail of the set unreachable.
+
+    A CAPPED TOTAL IS A LOWER BOUND, and the pager says so rather than acting as
+    though the reader has seen everything (§3.5). With
+    `DISCOVERY_FINDINGS_COUNT_MAX` set, `total` stops at the cap, so the last
+    page the arithmetic can name is not the last page that exists: `Next` stays
+    ENABLED there and a note states that more pages may follow. A silently
+    terminal pager reads as "that is all there is", which is the one thing a
+    capped count cannot support.
     """
-    size = _default_page_size()
-    pages = _page_count(total, size)
-    page = min(max(1, state["page"]), pages)
+    # REQUIRED, and taken as given. `effective_page_size` already applied the
+    # fallback for an envelope that does not report its size, so a second one
+    # here would be a branch nothing can drive -- and an unreachable defensive
+    # branch reads as coverage nobody has, which is what this plan's own line
+    # gate exists to find.
+    pages = _page_count(total, page_size)
+    page = min(max(1, state["page"]), pages) if not approximate \
+        else max(1, state["page"])
 
     with ui.row().classes(f"pager {PAGER_CLASS} w-full gap-2 items-center"):
         async def _go(delta: int) -> None:
-            state["page"] = max(1, min(pages, state["page"] + delta))
+            ceiling = None if approximate else pages
+            target = state["page"] + delta
+            state["page"] = max(1, target if ceiling is None
+                                else min(ceiling, target))
             await refresh()
 
         previous = ui.button(tr("Previous"), on_click=lambda _e=None: _go(-1))
@@ -2346,5 +2413,9 @@ def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh) -> None
 
         following = ui.button(tr("Next"), on_click=lambda _e=None: _go(1))
         following.props("flat dense no-caps").classes(f"{PAGER_CLASS}-next")
-        if page >= pages:
+        if page >= pages and not approximate:
             following.disable()
+
+        if approximate:
+            ui.label(copy_text("pager_capped_note", lang)).classes(
+                f"{PAGER_CLASS}-capped dnote text-xs")

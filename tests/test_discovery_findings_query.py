@@ -424,6 +424,25 @@ def test_an_exact_count_is_flagged_exact_and_a_capped_one_is_flagged_approximate
     )
 
 
+def test_the_envelope_reports_the_page_size_it_was_actually_BUILT_with(service):
+    """§3.5. `_clamp_findings_page_size` applies the shared ceiling server-side,
+    so a surface computing its pager from its OWN requested size divides a real
+    total by a size the service refused -- reporting too few pages and leaving
+    the tail of the set unreachable, with nothing saying so. The envelope has to
+    say which size it used, or the surface has nothing honest to divide by."""
+    from shared.discovery_service import _ABSOLUTE_PAGE_SIZE_CEILING
+
+    modest = service.get_findings_enveloped(bucket=BUCKET_ALL, page_size=2)
+    assert modest["meta"]["page_size"] == 2
+    assert len(modest["items"]) == 2
+
+    over_ceiling = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, page_size=_ABSOLUTE_PAGE_SIZE_CEILING + 500)
+    assert over_ceiling["meta"]["page_size"] == _ABSOLUTE_PAGE_SIZE_CEILING, (
+        "the envelope echoes the REQUESTED size rather than the clamped one, so "
+        "a pager dividing by it reports pages that do not exist")
+
+
 def test_a_page_past_the_end_reports_the_REAL_total_not_a_zero(service):
     """§3.3. An OFFSET past the end returns no rows, so `COUNT(*) OVER ()` has
     nothing to count and the window function's total is 0 -- for a set that

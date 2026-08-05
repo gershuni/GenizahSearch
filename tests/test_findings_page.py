@@ -5644,3 +5644,177 @@ def test_the_page_hands_the_revision_token_to_the_facet_cascade(monkeypatch):
             f"the {level!r} list was refilled by the SUPERSEDED pass -- the "
             "counts beside the filters describe a request the reader has "
             "already moved off, which is what the token exists to prevent")
+
+
+# ---------------------------------------------------------------------------
+# §3.5 -- TWO CONFIG KNOBS COULD MAKE ROWS UNREACHABLE, SILENTLY.
+#
+# (a) `DISCOVERY_FINDINGS_PAGE_SIZE_DEFAULT` above `DISCOVERY_PAGE_SIZE_MAX`:
+#     the service clamps the size it serves, the pager divided the real total by
+#     the size it had REQUESTED, and the page count came out too small -- the
+#     tail of the set unreachable, with nothing on the page saying so.
+#
+# (b) `DISCOVERY_FINDINGS_COUNT_MAX` above 0: the counting query stops at the
+#     cap, so the last page the arithmetic can NAME is not the last page that
+#     exists. The pager disabled `Next` there, which reads as "that is all
+#     there is" -- the one claim a capped count cannot support.
+# ---------------------------------------------------------------------------
+
+def _sized_findings(*, total, served_size, approximate=False):
+    """A findings stub that reports the page size the SERVICE used, which is
+    what a clamped size looks like from the page's side."""
+    async def _call(unit="identification", **kwargs):
+        page = int(kwargs.get("page") or 1)
+        start = (page - 1) * served_size
+        rows = [
+            _finding_row(f"w{index:06d}", f"ROW-{index}", f"T-S {index}")
+            for index in range(start, max(start, min(start + served_size, total)))
+        ]
+        return {
+            "status": "ok", "items": rows, "total": total,
+            "meta": {"unit": unit, "bucket": kwargs.get("bucket", "main"),
+                     "sort": "band_rank", "sort_basis": "best_band_rank",
+                     "novelty_offered": True, "include_divergent": False,
+                     "page": page, "page_size": served_size,
+                     "approximate_total": approximate},
+        }
+    return _call
+
+
+def _pager_position(client) -> str:
+    return "\n".join(_node_texts(client, f"{fp.PAGER_CLASS}-position"))
+
+
+def _pager_button(client, which: str):
+    found = _elements_with_class(client, f"{fp.PAGER_CLASS}-{which}")
+    assert len(found) == 1, f"expected one {which!r} button, got {len(found)}"
+    return found[0]
+
+
+def test_the_pager_counts_pages_at_the_size_the_service_SERVED(monkeypatch):
+    """(a). The requested size is 50; the service serves 200 (its own ceiling
+    is the authority). 1,000 rows is FIVE pages at 200, not twenty at 50 -- and
+    the wrong arithmetic in the other direction is what buried the tail."""
+    client = _render_page(
+        monkeypatch, lang="en",
+        findings=_sized_findings(total=1000, served_size=200))
+    assert "/ 5" in _pager_position(client), (
+        f"the pager divided by its own requested size: {_pager_position(client)!r}")
+
+
+def test_the_effective_page_size_comes_from_the_envelope_not_the_request():
+    """PURE, so the rule is assertable without a browser."""
+    assert fp.effective_page_size(
+        {"meta": {"page_size": 200}}) == 200
+    # Absent, non-positive or not an int -> the budgeted default, which is the
+    # value the service would itself have clamped from.
+    for bad in ({}, {"meta": {}}, {"meta": {"page_size": 0}},
+                {"meta": {"page_size": -5}}, {"meta": {"page_size": "200"}},
+                {"meta": {"page_size": True}}):
+        assert fp.effective_page_size(bad) == fp._default_page_size(), bad
+
+
+def test_the_clamp_uses_the_served_size_too(monkeypatch):
+    """The clamp and the pager must agree about which page is the last one, or
+    the clamp pulls a reader off a page the pager says exists."""
+    state = _state(page=5)
+    envelope = {"status": "ok", "items": [],
+                "total": 1000, "meta": {"page_size": 200}}
+    assert fp.clamp_page_to_total(state, envelope) is False, (
+        "page 5 of 5 was clamped -- the clamp divided by a size the service "
+        "did not use")
+
+    state = _state(page=6)
+    assert fp.clamp_page_to_total(state, envelope) is True
+    assert state["page"] == 5
+
+
+def test_a_capped_total_leaves_Next_live_and_SAYS_the_count_stopped(monkeypatch):
+    """(b). The reader is on the last page the cap can name. There ARE more
+    rows; the pager must neither pretend otherwise nor invent how many."""
+    size = fp._default_page_size()
+    client = _render_page(
+        monkeypatch, lang="en",
+        findings=_sized_findings(total=size * 2, served_size=size,
+                                 approximate=True),
+        state=_state(page=2))
+
+    assert _pager_button(client, "next").enabled is True, (
+        "the pager disabled Next on a CAPPED total -- a silently terminal pager "
+        "reads as 'that is all there is', which is the one claim a capped count "
+        "cannot support")
+    notes = _node_texts(client, f"{fp.PAGER_CLASS}-capped")
+    assert notes, "the cap truncates browsing and the page does not say so"
+    assert fp.copy_text("pager_capped_note", "en") in notes
+    assert not _DIGIT_RE.search(fp.copy_text("pager_capped_note", "en")), (
+        "the note invents a figure the stopped count cannot support")
+
+
+def test_an_exact_total_still_ends_the_pager(monkeypatch):
+    """The other direction, so the fix cannot pass by never disabling Next."""
+    size = fp._default_page_size()
+    client = _render_page(
+        monkeypatch, lang="en",
+        findings=_sized_findings(total=size * 2, served_size=size),
+        state=_state(page=2))
+    assert _pager_button(client, "next").enabled is False
+    assert not _node_texts(client, f"{fp.PAGER_CLASS}-capped"), (
+        "an exact total rendered the capped-count note")
+
+
+def test_a_capped_total_does_not_clamp_a_page_that_HAS_rows(monkeypatch):
+    """The interaction between this fix and §3.3's clamp, and the reason the
+    clamp requires an EMPTY page. A capped total is a lower bound, so a page
+    above `total / size` can still be full -- and clamping a reader off a page
+    they can see would be §3.3's fix creating §3.5's defect."""
+    size = fp._default_page_size()
+    state = _state(page=9)
+    full_page = {"status": "ok",
+                 "items": [_finding_row("w1", "ROW", "T-S 1")],
+                 "total": size, "meta": {"page_size": size,
+                                         "approximate_total": True}}
+    assert fp.clamp_page_to_total(state, full_page) is False
+    assert state["page"] == 9, "a page with rows on it was clamped away"
+
+    # ...and an EMPTY page above the cap still clamps, to the last page the
+    # count can vouch for -- a page that certainly has rows.
+    state = _state(page=9)
+    empty_page = dict(full_page, items=[])
+    assert fp.clamp_page_to_total(state, empty_page) is True
+    assert state["page"] == 1
+
+
+def test_paging_past_the_capped_end_is_reachable(monkeypatch):
+    """End to end: the note says more pages may follow, and Next really goes
+    there rather than being clamped straight back."""
+    size = fp._default_page_size()
+    pages_read = []
+
+    async def _call(unit="identification", **kwargs):
+        page = int(kwargs.get("page") or 1)
+        pages_read.append(page)
+        # The cap names two pages; the set really has three.
+        rows = [] if page > 3 else [
+            _finding_row(f"w{page}", f"ROW-PAGE-{page}", f"T-S {page}")]
+        return {
+            "status": "ok", "items": rows, "total": size * 2,
+            "meta": {"unit": unit, "bucket": "main", "sort": "band_rank",
+                     "sort_basis": "best_band_rank", "novelty_offered": True,
+                     "include_divergent": False, "page": page,
+                     "page_size": size, "approximate_total": True},
+        }
+
+    async def _drive(client):
+        button = _pager_button(client, "next")
+        listeners = [listener for listener in button._event_listeners.values()
+                     if listener.type == "click"]
+        assert listeners, "the Next button is wired to nothing"
+        result = listeners[0].handler(None)
+        if asyncio.iscoroutine(result):
+            await result
+
+    client = _render_page(monkeypatch, lang="en", findings=_call,
+                         state=_state(page=2), driver=_drive)
+    assert 3 in pages_read, (
+        f"Next did not reach page 3, beyond what the cap could name: {pages_read}")
+    assert "ROW-PAGE-3" in _scoped_text(client, fp.RESULTS_CLASS)

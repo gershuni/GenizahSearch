@@ -743,8 +743,11 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         #     refetches, and that refetch is a second painted result region no
         #     other case in this capture produces -- reachable only when the
         #     requested page is outside the real set.
+        # EMPTY items with a NON-ZERO total: that pair is what "past the end"
+        # looks like, and it is the only shape the clamp acts on -- a page that
+        # came back with rows is reachable and is deliberately left alone.
         _take(_render_findings_page(
-            lang=lang, findings=tf.findings_envelope(rows_full, total=1),
+            lang=lang, findings=tf.findings_envelope([], total=1),
             facets=rich_facets,
             state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
                    "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
