@@ -85,8 +85,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from nicegui import ui
 
 from shared.discovery_display_strings import (
+    TOGGLE_MORE_MATCHES,
     bucket_name,
     coverage_label,
+    disclosure_toggle,
     display_work_title,
     missing_title,
     novelty_strings,
@@ -181,6 +183,9 @@ RESULT_BAR_CLASS = "gs-findings-rbar"
 #: all, between the result bar and the rows it describes. NEVER a chip for the
 #: pool -- see `_active_filter_chips`.
 ACTIVE_FILTERS_CLASS = "gs-findings-active"
+#: The second-pool invitation strip -- a SECOND live entry point beside the
+#: results, never a replacement for the ruling-T control in the filter bar.
+POOL_INVITE_CLASS = "gs-findings-pool-invite"
 RESULTS_CLASS = "gs-findings-results"
 ROW_CLASS = "gs-findings-row"
 PAGER_CLASS = "gs-findings-pager"
@@ -277,6 +282,50 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     "pool_card_header": {
         "en": "Which pool",
         "he": "באיזה מאגר",
+    },
+    # THE SECOND-POOL INVITATION, rendered beside the results in BOTH bucket
+    # states. The sidebar control works, is one click, and switches the whole
+    # result set; what it never did was say that a second corpus exists, what
+    # is in it, or why a reader would look -- so a comparable body of
+    # identifications was reachable only by noticing that one of two pills was
+    # not selected.
+    #
+    # The wording carries NO count and NO quality language, which is what makes
+    # it publishable at all. "The same works and the same kinds of match" is a
+    # statement about WHAT IS THERE, and it is the measured shape of that pool
+    # (its largest single group is same-work claims); "the evidence did not
+    # meet the main-pool rule" restates `bucket_label`'s own ratified gloss and
+    # is a statement about EVIDENCE, never a verdict that those identifications
+    # are wrong. `{bucket}` / `{main_bucket}` are filled from `bucket_name`,
+    # the single definition, so neither name is retyped here.
+    "pool_invite_heading": {
+        "en": "There is a second pool",
+        "he": "יש מאגר שני",
+    },
+    "pool_invite_body": {
+        "en": (
+            "The same works and the same kinds of match also appear under "
+            "'{bucket}', where the evidence did not meet the main-pool rule."
+        ),
+        "he": (
+            "אותם חיבורים ואותם סוגי התאמה מופיעים גם תחת '{bucket}', "
+            "שם הראיות לא עמדו בכלל המאגר העיקרי."
+        ),
+    },
+    "pool_here_heading": {
+        "en": "You are in '{bucket}'",
+        "he": "אתם ב'{bucket}'",
+    },
+    "pool_here_body": {
+        "en": (
+            "These are the same kinds of match as the {main_bucket}, at less "
+            "evidence than the main-pool rule asks for. Read each one as a lead "
+            "to check."
+        ),
+        "he": (
+            "אלה אותם סוגי התאמה כמו ב{main_bucket}, בראיות מועטות מכפי שכלל "
+            "המאגר העיקרי דורש. קראו כל אחת ככיוון לבדיקה."
+        ),
     },
     # An `ok` facet envelope carrying NO items. Deliberately a different
     # statement from `needs_tag` above, because it is a different fact: that
@@ -1377,6 +1426,7 @@ def _render_results(
 
     _render_result_bar(items, total, meta, state, lang, refresh)
     _render_active_filters(state, lang, refresh)
+    _render_pool_invite(state, lang, refresh)
 
     with ui.column().classes(f"rows {RESULTS_CLASS}-rows w-full gap-2"):
         if not items:
@@ -1576,6 +1626,69 @@ def _render_active_filters(state: Dict[str, Any], lang: str, refresh) -> None:
         clear = ui.button(tr("Clear All"), on_click=lambda _event=None: _clear(None))
         clear.props("flat dense no-caps size=sm color=red")
         clear.classes(f"{ACTIVE_FILTERS_CLASS}-clear")
+
+
+def _render_pool_invite(state: Dict[str, Any], lang: str, refresh) -> None:
+    """The second pool, introduced WHERE THE READER IS LOOKING.
+
+    A body of identifications comparable in size to the one on display was
+    reachable only by noticing that one of two unlabelled pills in a header-less
+    box was not selected. Every part of that is a COMMUNICATION failure and none
+    of it is a control failure: the sidebar control works, is one interaction,
+    and switches the whole result set. What it never did was say that a second
+    pool exists, what is in it, or why anyone would look.
+
+    So this is a SECOND live entry point, not a move and not a demotion. Ruling
+    T's control stays exactly where it is, first-class in the filter bar, and
+    every ancestry and no-count assertion over it still runs. The one placement
+    ruling T names -- never below the results -- is honoured here too: this
+    strip is rendered between the result bar and the rows column, never after
+    the rows.
+
+    CREATION ORDER IS LOAD-BEARING. `_find_bucket_control` in the suite resolves
+    the FIRST element whose accessible name is the second bucket's, and the
+    ruling-T ancestry assertions are made about whatever it returns. The sidebar
+    card is built in `_render_filter_bar` BEFORE the first `refresh()` paints
+    this strip, so it wins. Reordering those two would silently re-point those
+    assertions at an element in the results region -- where `RESULTS_CLASS` in
+    the ancestor set is exactly what one of them fails on.
+
+    NO COUNT, in either state, and no lure figure: adding one would be an owner
+    ruling, not a designer's choice, and this design deliberately does not need
+    one. No quality word, no correctness verdict, and no percentage -- the whole
+    strip is digit-free.
+    """
+    in_main = state["bucket"] == BUCKET_MAIN
+    if in_main:
+        heading = copy_text("pool_invite_heading", lang)
+        body = copy_text("pool_invite_body", lang).format(
+            bucket=bucket_name(False, lang))
+        action = disclosure_toggle(TOGGLE_MORE_MATCHES, lang)
+        target = BUCKET_MORE
+    else:
+        heading = copy_text("pool_here_heading", lang).format(
+            bucket=bucket_name(False, lang))
+        body = copy_text("pool_here_body", lang).format(
+            main_bucket=bucket_name(True, lang))
+        action = bucket_name(True, lang)
+        target = BUCKET_MAIN
+
+    async def _switch(_event=None) -> None:
+        state["bucket"] = target
+        state["page"] = 1
+        await refresh()
+
+    # The same bounded, tinted treatment as the launch headline, so the two read
+    # as one family. Inline and LOGICAL (`border-inline-start`): the rule sits
+    # on the leading edge in both directions, and this work adds no stylesheet.
+    with ui.column().classes(f"{POOL_INVITE_CLASS} w-full gap-1 p-3").style(
+        "border-inline-start: 3px solid var(--primary-600); "
+        "background: var(--bg-secondary); border-radius: 6px;"
+    ):
+        ui.label(heading).classes(f"{POOL_INVITE_CLASS}-heading text-sm font-bold")
+        ui.label(body).classes(f"{POOL_INVITE_CLASS}-body dnote text-xs")
+        button = ui.button(action, on_click=_switch).props("flat dense no-caps")
+        button.classes(f"{POOL_INVITE_CLASS}-action fchip self-start")
 
 
 def _render_unit_select(state: Dict[str, Any], refresh) -> None:

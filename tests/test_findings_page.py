@@ -1320,7 +1320,7 @@ def test_more_matches_click_replaces_the_rendered_result_set(lang):
     through the element's own registered event listeners, and skips any element
     that is disabled."""
     import httpx
-    from nicegui import core
+    from nicegui import core, ui
     from nicegui.context import context as _nicegui_context
     from nicegui.testing.general import prepare_simulation
     from nicegui.testing.user import User
@@ -1356,7 +1356,27 @@ def test_more_matches_click_replaces_the_rendered_result_set(lang):
 
                         # NO preceding disclosure action of ANY kind: find the
                         # control by its accessible name and click it.
-                        user.find(bucket_name(False, lang)).click()
+                        #
+                        # NARROWED TO A BUTTON (2026-08-05). `user.find(str)`
+                        # matches text as a SUBSTRING, and the second-pool
+                        # invitation strip beside the rows now names the bucket
+                        # in its prose -- so the bare locator resolves to the
+                        # control AND to a paragraph, and this test would be
+                        # clicking a set rather than a control.
+                        #
+                        # `user.find(target, kind=...)` would NOT fix that:
+                        # nicegui's `_gather_elements` ignores `kind` entirely
+                        # whenever `target` is a string. The keyword form below
+                        # is the one that actually filters, and the uniqueness
+                        # assertion is what keeps this honest if a second
+                        # button ever takes the same name.
+                        control = user.find(kind=ui.button,
+                                            content=bucket_name(False, lang))
+                        assert len(control.elements) == 1, (
+                            "the 'more matches' control is no longer uniquely "
+                            f"locatable: {len(control.elements)} button(s) carry "
+                            "that name")
+                        control.click()
 
                         # The RENDERED result region is replaced.
                         await user.should_see(MORE_ROW_TITLE)
@@ -3391,6 +3411,123 @@ def test_clearing_one_axis_leaves_the_others_and_returns_to_page_one(monkeypatch
     assert state["bucket"] == "main"
     assert state["unit"] == "identification"
     assert state["sort"] == "band_rank"
+
+
+# ---------------------------------------------------------------------------
+# TASK 8 (2026-08-05) — THE SECOND POOL IS INTRODUCED WHERE THE READER LOOKS.
+#
+# A body of identifications comparable in size to the one on display was
+# reachable only by noticing that one of two unlabelled pills in a header-less
+# box was not selected. The control was never the problem — it works, it is one
+# interaction, and it switches the whole result set. What it never did was say
+# that a second pool exists, what is in it, or why anyone would look.
+#
+# The strip is a SECOND entry point, not a move: ruling T's control stays in the
+# filter bar and every assertion about it above still runs. Creation order is
+# now load-bearing (`_find_bucket_control` resolves the FIRST match), which is
+# why `test_the_ruling_T_control_is_still_the_first_match_by_that_name` exists.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+@pytest.mark.parametrize("bucket", ["main", "more"])
+def test_the_pool_invitation_speaks_in_both_bucket_states(monkeypatch, lang, bucket):
+    from shared.discovery_display_strings import (
+        TOGGLE_MORE_MATCHES,
+        bucket_name,
+        disclosure_toggle,
+    )
+
+    client = _render_page(monkeypatch, lang=lang, state=_state(bucket=bucket))
+    strips = _elements_with_class(client, fp.POOL_INVITE_CLASS)
+    assert len(strips) == 1, (
+        f"expected exactly one pool-invitation strip, got {len(strips)}")
+    said = _subtree_strings(strips[0])
+    blob = "\n".join(said)
+
+    if bucket == "main":
+        assert fp.copy_text("pool_invite_heading", lang) in said
+        assert fp.copy_text("pool_invite_body", lang).format(
+            bucket=bucket_name(False, lang)) in said
+        assert disclosure_toggle(TOGGLE_MORE_MATCHES, lang) in blob, (
+            "the invitation offers no way into the second pool")
+    else:
+        assert fp.copy_text("pool_here_heading", lang).format(
+            bucket=bucket_name(False, lang)) in said
+        assert fp.copy_text("pool_here_body", lang).format(
+            main_bucket=bucket_name(True, lang)) in said
+        assert bucket_name(True, lang) in blob, "there is no way back"
+
+    # Neither state may carry a figure. A count on the second pool would be a
+    # lure the owner has not ruled on, and the ruling-T prohibition on numbers
+    # beside this axis is what this strip has to stay clear of to exist at all.
+    assert not _DIGIT_RE.findall(blob), f"a number reached the invitation: {blob!r}"
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_invitation_never_calls_the_second_pool_wrong_or_low_quality(
+        monkeypatch, lang):
+    """Match framing: the second bucket means there was not enough evidence for
+    the main-pool rule. It never means the identification is probably wrong, and
+    the honesty gate cannot see a quality claim that avoids its lexicon."""
+    client = _render_page(monkeypatch, lang=lang, state=_state(bucket="more"))
+    blob = "\n".join(_subtree_strings(
+        _elements_with_class(client, fp.POOL_INVITE_CLASS)[0])).lower()
+    for forbidden in ("probably wrong", "low quality", "poor", "rejected",
+                      "leftover", "worth a look", "hidden gem",
+                      "כנראה שגוי", "איכות נמוכה", "נדחה"):
+        assert forbidden.lower() not in blob, (
+            f"the invitation frames the second pool as {forbidden!r}")
+
+
+def test_the_invitation_sits_between_the_result_bar_and_the_rows(monkeypatch):
+    """The one placement ruling T names is "never below the results", and it
+    binds this strip as well as the control it complements."""
+    client = _render_page(monkeypatch, lang="en")
+    region = _elements_with_class(client, fp.RESULTS_CLASS)[0]
+    order = list(region.descendants(include_self=True))
+    strip = _elements_with_class(client, fp.POOL_INVITE_CLASS)[0]
+    result_bar = _elements_with_class(client, fp.RESULT_BAR_CLASS)[0]
+    rows_column = _elements_with_class(client, f"{fp.RESULTS_CLASS}-rows")[0]
+    assert order.index(result_bar) < order.index(strip) < order.index(rows_column), (
+        "the invitation is not between the result bar and the rows")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_ruling_T_control_is_still_the_first_match_by_that_name(monkeypatch, lang):
+    """CREATION ORDER IS LOAD-BEARING NOW. `_find_bucket_control` resolves the
+    FIRST element carrying the second bucket's accessible name, and every
+    ruling-T ancestry assertion is made about whatever it returns. The sidebar
+    card is built before the first refresh paints the strip, so it wins — and if
+    that ever reverses, those assertions would quietly start describing an
+    element in the results region instead."""
+    client = _render_page(monkeypatch, lang=lang)
+    control = _find_bucket_control(client, lang)
+    assert control is not None
+    ancestors = {c for a in _ancestors(control) for c in (a._classes or [])}
+    assert fp.FILTER_BAR_CLASS in ancestors
+    assert fp.POOL_INVITE_CLASS not in ancestors
+    assert fp.RESULTS_CLASS not in ancestors
+
+
+def test_the_invitation_introduces_no_new_button_string(monkeypatch):
+    """Both actions come from vocabulary that already exists and was already
+    ratified — the D-11 disclosure toggle and the single bucket definition."""
+    from shared.discovery_display_strings import (
+        TOGGLE_MORE_MATCHES,
+        bucket_name,
+        disclosure_toggle,
+    )
+
+    for bucket, expected in (
+        ("main", disclosure_toggle(TOGGLE_MORE_MATCHES, "en")),
+        ("more", bucket_name(True, "en")),
+    ):
+        client = _render_page(monkeypatch, lang="en", state=_state(bucket=bucket))
+        actions = _elements_with_class(client, f"{fp.POOL_INVITE_CLASS}-action")
+        assert len(actions) == 1
+        assert (actions[0]._props or {}).get("label") == expected, (
+            f"the {bucket!r} invitation invented a button string: "
+            f"{(actions[0]._props or {}).get('label')!r}")
 
 
 _EMPTY_FACETS = {"domain": [], "author": [], "work": []}
