@@ -848,6 +848,31 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         _take(_render_component(
             lambda rows=odd_rows, ln=lang: [fr.render_finding_row(r, ln)
                                             for r in rows]))
+        # 10. THE REPORT AFFORDANCE, which paints ONLY when a sidecar version
+        #     was supplied -- so every render above this line, and the whole
+        #     matrix, leaves its `mailto:` target unpainted and unscanned. It is
+        #     an EGRESS: a link target a reader can copy, carrying a prefilled
+        #     subject and body, which is precisely path class 3's subject.
+        #
+        #     The seed goes in the VERSION rather than beside it: this capture's
+        #     job is to prove the scan would SEE a restricted value on this path,
+        #     and the version is the one field the affordance interpolates that
+        #     is not already seeded elsewhere in the row.
+        _take(_render_component(
+            lambda ln=lang, v=(f"discovery-v1-{seed}" if seed
+                               else "discovery-v1-capture"): [
+                fr.render_finding_row(tf.finding_row(neutral_title=title), ln,
+                                      sidecar_version=v),
+                # ...and the two grouped units, which must paint NO link at all.
+                fr.render_finding_row(
+                    tf.finding_row(unit=tf.FINDINGS_UNIT_MANUSCRIPT,
+                                   identification_id=None), ln,
+                    sidecar_version=v),
+                fr.render_finding_row(
+                    tf.finding_row(unit=tf.FINDINGS_UNIT_WORK,
+                                   identification_id=None), ln,
+                    sidecar_version=v),
+            ]))
     return texts, hrefs
 
 

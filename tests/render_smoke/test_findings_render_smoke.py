@@ -470,10 +470,10 @@ def render_headline(envelope, lang="en", *, with_retry=True):
             envelope, lang, on_retry=_retry if with_retry else None))
 
 
-def render_rows(items, lang="en"):
+def render_rows(items, lang="en", sidecar_version=None):
     def _paint():
         for item in items:
-            fr.render_finding_row(item, lang)
+            fr.render_finding_row(item, lang, sidecar_version=sidecar_version)
 
     return _client_render(_paint)
 
@@ -2154,11 +2154,26 @@ def capture_rendered_output(destination: str) -> str:
 
 
 def test_zz_report_the_assertion_count(capsys):
-    """Last by name, so the count reflects the whole run."""
+    """The gate-call count, reported as a FLOOR rather than as a total.
+
+    The `zz_` prefix was chosen when this was the last test in the file, on the
+    belief that the name ordered it last. IT DOES NOT: pytest collects in
+    DEFINITION order, so every test appended below this line runs AFTER it and
+    its increments are invisible here -- measured, not assumed (this test
+    collects at position 167 of 183).
+
+    Renaming or moving it would not fix that either; the next appended test
+    would silently fall outside again. So the assertion is deliberately a FLOOR
+    (`> 0`, "at least one gate call really ran"), which is what it can honestly
+    prove from where it sits, and the printed figure is labelled a floor so a
+    reader does not mistake it for a total. `test_every_gate_call_site_is_a_real
+    _assertion`-style completeness is not what this test provides.
+    """
     met, state = browser_check_outcome()
     with capsys.disabled():
         print(f"\n[136-18] element-scoped / envelope / error-path gate calls: "
-              f"{ASSERTION_COUNT['n']}")
+              f"{ASSERTION_COUNT['n']} (a FLOOR -- tests defined below this one "
+              f"run after it and are not counted)")
         print(f"[136-18] 136-16 real-browser actionability: {state} -- "
               f"findings deploy gate {'OPEN' if met else 'BLOCKED'}")
     assert ASSERTION_COUNT["n"] > 0
@@ -2227,3 +2242,173 @@ def test_no_launch_row_field_reaches_an_exception_message_verbatim():
     for value in probes.values():
         assert value not in blob, f"{value!r} reached an exception message"
     ASSERTION_COUNT["n"] += 1
+
+
+# ---------------------------------------------------------------------------
+# H1 -- THE BETA NOTE, and H2 -- THE REPORT AFFORDANCE.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_beta_note_appears_in_the_head_and_in_the_howto(monkeypatch, lang):
+    """Two placements: a SHORT line where a reader meets the page, and the
+    fuller one with the demoted prose one click away. The head must not grow
+    back into the wall of prose `_render_howto` exists to hold, so the two
+    strings are different lengths on purpose."""
+    client = render_page(monkeypatch, lang=lang)
+
+    head = scoped_text(client, f"{fp.HEAD_CLASS}-beta")
+    assert fp.copy_text("beta_head", lang) in head, "the head carries no beta line"
+
+    howto = scoped_text(client, f"{fp.HOWTO_CLASS}-beta")
+    assert fp.copy_text("beta_howto", lang) in howto
+
+    assert len(fp.copy_text("beta_howto", lang)) > len(
+        fp.copy_text("beta_head", lang)), (
+        "the head line is not the SHORT one -- the fuller note belongs behind "
+        "the disclosure")
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_beta_note_promises_no_accuracy_and_lists_no_roadmap(lang):
+    """Two owner rulings, as assertions.
+
+    "Better identifications" reads as MORE ACCURATE on this surface, which is a
+    precision claim and is prohibited even as a forward-looking promise; and
+    the general form was asked for rather than a feature list."""
+    for key in ("beta_head", "beta_howto"):
+        text = fp.copy_text(key, lang).lower()
+        for forbidden in {
+            "en": ("better", "more accurate", "improved", "accuracy",
+                   "precision", "reliable"),
+            "he": ("טוב יותר", "מדויק", "דיוק", "אמין"),
+        }[lang]:
+            assert forbidden not in text, f"{key}: {forbidden!r} is an accuracy claim"
+        for roadmap in {
+            "en": ("evidence view", "work page", "catalogue integration", "api"),
+            "he": ("תצוגת ראיות", "דף חיבור"),
+        }[lang]:
+            assert roadmap not in text, f"{key}: enumerates a roadmap item"
+
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_a_row_offers_a_report_prefilled_with_its_id_and_the_data_version(lang):
+    """H2. A report has to be reproducible against the exact artifact that
+    produced the row, so the identifier and the version are both in the body."""
+    from urllib.parse import unquote
+
+    version = "discovery-v1-SENTINEL-VERSION"
+    row = finding_row()
+    client = render_rows([row], lang, sidecar_version=version)
+
+    links = _elements_with_class(client, fr.ROW_REPORT_CLASS)
+    assert len(links) == 1, f"expected one report link, got {len(links)}"
+    href = (links[0]._props or {}).get("href") or ""
+    assert href.startswith(f"mailto:{fr.REPORT_ADDRESS}?")
+
+    body = unquote(href.split("body=", 1)[1])
+    assert row["identification_id"] in body, "the report cannot name its row"
+    assert version in body, (
+        "the report does not name the artifact that produced the row, so it "
+        "cannot be reproduced against it")
+    assert fr.copy_text("report_link", lang) in scoped_text(
+        client, fr.ROW_REPORT_CLASS)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_report_wording_promises_no_outcome(lang):
+    """It invites a report; it does not commit to a response, a correction or a
+    timeline, because the ruling created none of those -- reports feed the next
+    bake."""
+    for key in ("report_link", "report_subject", "report_body"):
+        text = fr.copy_text(key, lang).lower()
+        for promise in {
+            "en": ("we will", "we'll", "fix", "correct", "remove", "within",
+                   "soon", "reply", "respond", "guarantee"),
+            "he": ("נתקן", "נסיר", "נחזור אליכם", "בתוך", "מובטח"),
+        }[lang]:
+            assert promise not in text, f"{key}: {promise!r} promises an outcome"
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_report_TEXT_A_READER_SEES_is_what_the_honesty_gate_scans(lang):
+    """THE SCANNED SURFACE IS THE DECODED MESSAGE, not the URL.
+
+    An earlier revision of this test asserted the URL was pure ASCII, on the
+    reasoning that percent-encoded Hebrew (`%D7...`) reads as dozens of
+    percentages. Two measurements retired that reasoning:
+
+    1. The markup gate extracts TEXT and never reads an attribute, so a `mailto:`
+       target is not scanned as markup at all -- `_extract_scoped_text` over
+       `<a href="...9%0A">Report</a>` returns `Report`.
+    2. ASCII is not sufficient anyway. A sha256 digest ending in a DIGIT -- ten
+       of sixteen hex characters are digits -- puts `9%0A` in the body, and the
+       gate flags that as an unqualified percentage. So the ASCII property both
+       failed to achieve what it claimed and hid a case it did not cover.
+
+    What a human reads is the DECODED subject and body in their compose window,
+    and that is what this scans, through the SIX-detector entry point every
+    reader surface uses. Percent-encoding is transport, not prose.
+    """
+    import html as _html
+    from urllib.parse import unquote
+
+    # A digest ending in a DIGIT, deliberately: the case that made the ASCII
+    # property look sufficient when it was not.
+    row = finding_row(identification_id="a1b2c3d4e5f6" + "0" * 51 + "9")
+    href = fr.report_mailto(row, lang, "discovery-v1-SENTINEL")
+    subject = unquote(href.split("subject=", 1)[1].split("&", 1)[0])
+    body = unquote(href.split("body=", 1)[1])
+    # The REAL gate over the REAL reader-visible text -- not a second copy of
+    # the percentage rule, which would be a second definition of it.
+    assert_surface_honesty(
+        f'<div class="report-message-probe">'
+        f'{_html.escape(subject)}\n{_html.escape(body)}</div>',
+        scope_selector="report-message-probe", lang=lang)
+    ASSERTION_COUNT["n"] += 1
+    # The reader-facing half stays bilingual.
+    assert fr.copy_text("report_link", "he") != fr.copy_text("report_link", "en")
+
+
+def test_no_report_link_without_an_identifier_or_a_version():
+    """Both halves are required, and each absence is withheld rather than
+    papered over: a row with no identifier could not name what a report is
+    about, and a report naming no version is not reproducible -- which is the
+    whole point of prefilling it."""
+    version = "discovery-v1-SENTINEL-VERSION"
+
+    assert fr.report_mailto(finding_row(), "en", None) is None
+    assert fr.report_mailto(finding_row(), "en", "") is None
+
+    for unit in (FINDINGS_UNIT_MANUSCRIPT, FINDINGS_UNIT_WORK):
+        grouped = finding_row(unit=unit, identification_id=None)
+        assert fr.report_mailto(grouped, "en", version) is None, unit
+        client = render_rows([grouped], "en", sidecar_version=version)
+        assert not _elements_with_class(client, fr.ROW_REPORT_CLASS), unit
+
+    assert fr.report_mailto(finding_row(), "en", version) is not None
+
+
+def test_the_report_body_carries_nothing_but_the_id_and_the_version():
+    """D-25 binds on an email body as it does on markup: an identifier and a
+    version go in, and nothing drawn from a masked source does."""
+    from urllib.parse import unquote
+
+    version = "discovery-v1-SENTINEL-VERSION"
+    row = finding_row(neutral_title="A SENTINEL WORK TITLE",
+                      shelfmark_display="SENTINEL SHELFMARK",
+                      sys_id="SENTINEL-SYS-ID")
+    body = unquote(fr.report_mailto(row, "en", version).split("body=", 1)[1])
+    for leaked in ("A SENTINEL WORK TITLE", "SENTINEL SHELFMARK",
+                   "SENTINEL-SYS-ID"):
+        assert leaked not in body, f"{leaked!r} reached the email body"
+    assert row["identification_id"] in body and version in body
+
+
+def test_the_report_link_url_quotes_every_value():
+    """A field reaching a URL unquoted is one data change away from breaking
+    the link or smuggling a header into it."""
+    row = finding_row(identification_id="id with spaces & an ampersand")
+    href = fr.report_mailto(row, "en", "version with spaces")
+    assert " " not in href and "\\n" not in href
+    assert href.count("&") == 1, "an unquoted value introduced a second parameter"

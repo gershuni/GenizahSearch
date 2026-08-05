@@ -74,6 +74,7 @@ Hebrew reader's most honesty-sensitive element.
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional, Tuple
+from urllib.parse import quote
 
 from nicegui import ui
 
@@ -134,6 +135,7 @@ ROW_COVERAGE_CLASS = "gs-findings-row-coverage"
 ROW_BUCKET_CLASS = "gs-findings-row-bucket"
 ROW_SHELFMARK_CLASS = "gs-findings-row-shelfmark"
 ROW_ANNOTATION_CLASS = "gs-findings-row-annotation"
+ROW_REPORT_CLASS = "gs-findings-row-report"
 
 NOVELTY_HELP_CLASS = "gs-findings-novelty-help"
 
@@ -162,6 +164,52 @@ _COPY: Dict[str, Dict[str, str]] = {
     # often the identification is right. The wording carries no rate word and no
     # quantity word, so it cannot be read as an accuracy statement and cannot
     # trip the honesty gate's rate detector beside its own four numbers.
+    # H2 -- THE REPORT AFFORDANCE (owner ruling, 2026-08-05, recorded in
+    # `136-FLAG-ON-READINESS.md`). Wrong attributions are SYSTEMATIC rather than
+    # incidental -- CERT-01's per-stratum precision runs 1.000 down to 0.471 --
+    # so the correction mechanism at scale is the next data bake, NOT a
+    # per-item takedown list. Reports feed the bake. The owner's ruling on the
+    # mechanism was "email us is enough", so this is a `mailto:` and nothing
+    # else: no table, no write, no moderation queue, no retraction path.
+    #
+    # THE WORDING PROMISES NOTHING. It invites a report; it does not commit to a
+    # response, a correction or a timeline, because none of those is what the
+    # ruling created. "Report a problem" is an offer; "we will fix it" would be
+    # a commitment nobody made.
+    "report_link": {
+        "en": "Report a problem",
+        "he": "דיווח על בעיה",
+    },
+    # THE LINK TEXT IS BILINGUAL; THE PREFILLED MESSAGE IS ASCII. The reader
+    # writes their own text into the body in whichever language they please;
+    # what the link prefills is only the part they could not supply themselves,
+    # so keeping those two field labels in English costs a reader nothing.
+    #
+    # It is NOT a honesty-gate workaround, and an earlier revision of this
+    # comment claimed it was -- wrongly, on two counts that were then measured:
+    # the markup gate extracts TEXT and never reads an `href` attribute, and an
+    # ASCII URL trips the percentage detector anyway whenever the digest ends in
+    # a digit (`...9%0A`), which is most of them. Percent-encoding is transport;
+    # what a human reads is the DECODED message, and that is what the suite
+    # scans through the six-detector entry point.
+    "report_subject": {
+        "en": "Computed identification report",
+        "he": "Computed identification report",
+    },
+    # The body carries ONLY an identifier and a version -- the two things that
+    # make a report reproducible against the exact artifact that produced the
+    # row. D-25 binds here as everywhere: nothing drawn from a masked source
+    # goes into an email body, and neither of these is.
+    "report_body": {
+        "en": (
+            "Finding: {identification}\n"
+            "Data version: {version}\n\n"
+        ),
+        "he": (
+            "Finding: {identification}\n"
+            "Data version: {version}\n\n"
+        ),
+    },
     "launch_total": {
         "en": "{count} identifications the finding aids did not already have",
         "he": "{count} זיהויים שכלי העזר לא כללו",
@@ -936,7 +984,45 @@ def divergence_marker(item: Mapping[str, Any], lang: str = "en") -> Optional[Tup
     return ds.divergence_chip(lang), ds.divergence_warning(lang)
 
 
-def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str) -> None:
+#: Where a report goes. The site's own contact address, as `/about` and the
+#: homepage already publish it -- not a new channel, because the ruling created
+#: no new channel.
+REPORT_ADDRESS = "gershuni@gmail.com"
+
+
+def report_mailto(item: Mapping[str, Any], lang: str = "en",
+                  sidecar_version: Any = None) -> Optional[str]:
+    """The `mailto:` a reader reports THIS row through, or `None`.
+
+    `None` on any row with no `identification_id`: the per-manuscript and
+    per-work units group many identifications into one line, so a report from
+    one of those rows could not name what it was about, and a report that
+    cannot be traced back to a row is a report the next bake cannot act on.
+    Those units are not reportable rather than reportable-and-useless.
+
+    THE VERSION COMES FROM THE ENVELOPE the page already read, never from a
+    second source: a report has to be reproducible against the exact artifact
+    that produced the row, and an artifact swap between the read and the render
+    would make a separately-fetched version name the wrong one. Omitted (and
+    the affordance withheld) when the envelope did not supply one -- a report
+    naming no version is not reproducible, which is the whole point of
+    prefilling it.
+
+    Every value is URL-QUOTED. An identifier is a sha256 digest today, but a
+    field that reaches a URL unquoted is one data change away from breaking the
+    link or smuggling a header into it.
+    """
+    identification = item.get("identification_id")
+    if not identification or not sidecar_version:
+        return None
+    subject = quote(copy_text("report_subject", lang))
+    body = quote(copy_text("report_body", lang).format(
+        identification=identification, version=sidecar_version))
+    return f"mailto:{REPORT_ADDRESS}?subject={subject}&body={body}"
+
+
+def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
+                     sidecar_version: Any = None) -> None:
     """The meta line: relation chip, novelty chip, page count, coverage, bucket.
 
     NO band tooltip. The identification grain exposes `best_band_rank` and no
@@ -991,8 +1077,20 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str) -> None:
             ui.label(copy_text("multi_work", lang)).classes(
                 f"{ROW_ANNOTATION_CLASS} dnote text-xs")
 
+        # ON THE ROW, at the end of the meta line. A reader reporting a problem
+        # is looking at the row that has it, and a page-level affordance could
+        # not prefill WHICH row -- which is the one thing that makes a report
+        # usable by the next bake. It is the smallest element on the line and
+        # the last, so it reads as an aside rather than as an action the page
+        # is asking for.
+        target = report_mailto(item, lang, sidecar_version)
+        if target:
+            ui.link(copy_text("report_link", lang), target).classes(
+                f"{ROW_REPORT_CLASS} dnote text-xs")
 
-def render_finding_row(item: Mapping[str, Any], lang: str = "en") -> None:
+
+def render_finding_row(item: Mapping[str, Any], lang: str = "en",
+                       sidecar_version: Any = None) -> None:
     """One result row, in whichever unit the service produced it.
 
     The unit arrives ON the row (`unit`, part of the projection); it is
@@ -1029,7 +1127,7 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en") -> None:
                 if author:
                     ui.label(str(author))
 
-        _render_row_meta(item, lang, unit)
+        _render_row_meta(item, lang, unit, sidecar_version=sidecar_version)
 
 
 __all__ = [
@@ -1059,6 +1157,8 @@ __all__ = [
     "ROW_NOVELTY_CLASS",
     "ROW_PAGES_CLASS",
     "ROW_RELATION_CLASS",
+    "ROW_REPORT_CLASS",
+    "REPORT_ADDRESS",
     "ROW_SHELFMARK_CLASS",
     "ROW_SUB_CLASS",
     "ROW_TITLE_CLASS",
@@ -1068,6 +1168,7 @@ __all__ = [
     "divergence_marker",
     "launch_shade_label",
     "novelty_badge",
+    "report_mailto",
     "render_finding_row",
     "render_launch_headline",
     "render_novelty_help",

@@ -261,6 +261,44 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
             "לבדיקה, ולעולם לא כמסקנה."
         ),
     },
+    # H1 -- THE BETA NOTE (owner-approved wording, applied verbatim).
+    #
+    # Three constraints, all owner rulings, and each one is why this reads the
+    # way it does rather than the obvious way:
+    #
+    # 1. NO ENUMERATED ROADMAP. The general form was asked for explicitly; an
+    #    "evidence view / work pages / catalogue integration" list is not to be
+    #    added here later either.
+    # 2. NEVER "better identifications". On this surface that reads as MORE
+    #    ACCURATE, which is a precision claim -- prohibited even as a
+    #    forward-looking promise. Improvement attaches to the METHOD, never to
+    #    the results. "More identifications, and more ways to work with them"
+    #    is the approved form.
+    # 3. THE PERMANENT CAVEAT IS UNTOUCHED. This does not replace it, and the
+    #    head must not grow back into the wall of prose `_render_howto` exists
+    #    to hold -- so the head line is SHORT and the fuller one lives there.
+    "beta_head": {
+        "en": (
+            "This is a beta and it will grow — more identifications, and more "
+            "ways to work with them."
+        ),
+        "he": (
+            "זוהי גרסת בטא והיא תתרחב בהמשך — זיהויים נוספים ודרכים נוספות "
+            "לעבוד איתם."
+        ),
+    },
+    "beta_howto": {
+        "en": (
+            "This is a beta. Every row is a text match found by software — a "
+            "lead to check, not a settled identification. It will grow: more "
+            "identifications, and more ways to explore and judge them."
+        ),
+        "he": (
+            "זוהי גרסת בטא. כל שורה היא התאמת טקסט שנמצאה על ידי תוכנה — כיוון "
+            "לבדיקה, לא זיהוי מוכרע. המאגר יתרחב בהמשך: זיהויים נוספים ודרכים "
+            "נוספות לעיין בהם ולשפוט אותם."
+        ),
+    },
     # The reserved launch-headline region's accessible label. Ruling U's framing
     # ("what the release adds to the existing finding aids") with NO number:
     # the figures are artifact-backed and version-dependent, they are supplied
@@ -1027,6 +1065,10 @@ def _render_head(lang: str) -> Any:
         # is and what it is not, which is exactly what a reader needs before
         # anything else on the page.
         _render_caveat(lang)
+        # AFTER the caveat, never instead of it: the caveat says what a row IS
+        # and is the one thing a reader needs first. This says what the PAGE is.
+        ui.label(copy_text("beta_head", lang)).classes(
+            f"{HEAD_CLASS}-beta dnote text-xs")
         region = _render_headline_slot(lang)
         _render_howto(lang)
     return region
@@ -1054,6 +1096,9 @@ def _render_howto(lang: str) -> None:
     panel.classes(f"{HOWTO_CLASS} w-full").props("dense expand-separator")
     with panel:
         with ui.column().classes("w-full gap-2 p-1"):
+            ui.label(copy_text("beta_howto", lang)).classes(
+                f"{HOWTO_CLASS}-beta dnote text-xs"
+            )
             ui.label(recall_disclaimer(lang)).classes(
                 f"{HOWTO_CLASS}-recall dnote text-xs"
             )
@@ -1209,8 +1254,8 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
     #: headline's client check); this one had none.
     generation = {"n": 0}
 
-    async def _more_pool_total() -> Any:
-        """The second pool's size, from the launch read the CALLER dispatched.
+    async def _launch_meta() -> Dict[str, Any]:
+        """The launch envelope's `meta`, from the read the CALLER dispatched.
 
         The read is started before this function is entered and awaited HERE,
         after the body's own read has been issued -- so the two corpus-scale
@@ -1225,7 +1270,7 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         re-read -- and a test drives three refreshes and counts the reads.
         """
         envelope = await launch if launch is not None else None
-        return ((envelope or {}).get("meta") or {}).get("more_pool_total")
+        return dict((envelope or {}).get("meta") or {})
 
     async def refresh() -> None:
         """THE one refresh path -- results first, then the facet lists.
@@ -1293,13 +1338,14 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
             envelope = await fetch_findings(state)
             if _stale():
                 return
-        more_pool_total = await _more_pool_total()
+        launch_meta = await _launch_meta()
         if _stale():
             return
         results_region.clear()
         with results_region:
             _render_results(envelope, state, lang, refresh,
-                            more_pool_total=more_pool_total)
+                            more_pool_total=launch_meta.get("more_pool_total"),
+                            sidecar_version=launch_meta.get("sidecar_version"))
         if _stale():
             return
         await _populate_facets(
@@ -2124,7 +2170,7 @@ def _render_facet_items(
 
 def _render_results(
     envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh,
-    more_pool_total: Any = None,
+    more_pool_total: Any = None, sidecar_version: Any = None,
 ) -> None:
     status = (envelope or {}).get("status")
     if status != "ok":
@@ -2150,7 +2196,7 @@ def _render_results(
         if not items:
             _render_empty_state(state, lang, refresh, more_pool_total)
         for item in items:
-            _render_row(item, lang)
+            _render_row(item, lang, sidecar_version=sidecar_version)
 
     _render_pager(total, state, lang, refresh,
                   page_size=effective_page_size(envelope),
@@ -2596,7 +2642,8 @@ def _render_sort_select(state: Dict[str, Any], refresh) -> None:
     ).props("dense outlined").classes(f"{RESULT_BAR_CLASS}-sort")
 
 
-def _render_row(item: Dict[str, Any], lang: str) -> None:
+def _render_row(item: Dict[str, Any], lang: str,
+                sidecar_version: Any = None) -> None:
     """One result row, in whichever of the three shipped units the service
     produced it.
 
@@ -2606,7 +2653,7 @@ def _render_row(item: Dict[str, Any], lang: str) -> None:
     result, not a footnote, and giving it its own renderer here is how a
     demotion creeps in.
     """
-    rows.render_finding_row(item, lang)
+    rows.render_finding_row(item, lang, sidecar_version=sidecar_version)
 
 
 def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh,
