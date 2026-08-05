@@ -90,13 +90,36 @@ _IDENTIFICATIONS = [
 ]
 
 
+# Ruling F's catalogue-divergent rows, plus a row whose novelty was never
+# recorded at all. Kept OUT of `_IDENTIFICATIONS` on purpose: every assertion
+# above counts against that list, and folding these in would have quietly
+# rewritten what a dozen unrelated tests are measuring. They are loaded by
+# their own fixture instead, so the divergence behaviour is asserted on a
+# population built to show it.
+#
+# `s7`/`s8` are MAIN-pool divergent rows -- the case that matters, because a
+# divergent row in the second bucket is already one opt-in away from the
+# reader, while a main-pool one renders in the default view unless something
+# stops it. `s9` carries the fail-closed `not_checked` shade: the absence of a
+# verdict is NOT a disagreement and must survive the filter.
+_DIVERGENT_IDENTIFICATIONS = [
+    ("s7", "wA", 1, "main_full_coverage", 1, 1, 880000, "direct_witness", "diverges_work"),
+    ("s8", "wD", 1, "main_full_coverage", 2, 1, 870000, "direct_witness", "diverges_part"),
+    ("s9", "wC", 1, "main_full_coverage", 3, 1, 860000, "direct_witness", "not_checked"),
+]
+
+#: The two rows above that ruling F hides. `s9` is deliberately not one.
+_HIDDEN_SYS_IDS = frozenset({"s7", "s8"})
+
+
 def _identification_id(sys_id, canonical_work_id):
     key = f"discovery_identification_v1|{sys_id}|{canonical_work_id}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def _build_findings_db(tmp_path):
-    db_path = tmp_path / "findings.db"
+def _build_findings_db(tmp_path, identifications=None, name="findings.db"):
+    identifications = _IDENTIFICATIONS if identifications is None else identifications
+    db_path = tmp_path / name
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -111,7 +134,7 @@ def _build_findings_db(tmp_path):
             "INSERT INTO manuscript_display (sys_id, library_code, library_sort_key, "
             "shelfmark_display, shelfmark_sort_key) VALUES (?, ?, ?, ?, ?)",
             [(f"s{i}", "SYNLIB", "synlib", f"Synthetic Shelfmark {i}", f"synthetic {i:04d}")
-             for i in range(1, 7)],
+             for i in range(1, 10)],
         )
         cur.executemany(
             """
@@ -126,7 +149,7 @@ def _build_findings_db(tmp_path):
                 (_identification_id(sys_id, work), sys_id, work, work, main, reason,
                  rank, pages, cov, relation, novelty)
                 for (sys_id, work, main, reason, rank, pages, cov, relation, novelty)
-                in _IDENTIFICATIONS
+                in identifications
             ],
         )
         cur.executemany(
@@ -145,20 +168,33 @@ def _build_findings_db(tmp_path):
         (claims,) = conn.execute("SELECT COUNT(*) FROM discovery_claim").fetchone()
         assert claims == 0
         (grain,) = conn.execute("SELECT COUNT(*) FROM discovery_identification").fetchone()
-        assert grain == len(_IDENTIFICATIONS)
+        assert grain == len(identifications)
     finally:
         conn.close()
     return str(db_path)
 
 
-@pytest.fixture()
-def service(tmp_path):
-    db_path = _build_findings_db(tmp_path)
+def _service_for(db_path):
     return DiscoveryService(
         path_provider=lambda: db_path,
         availability_callable=lambda: True,
         sidecar_version_provider=lambda: _VERSION,
     )
+
+
+@pytest.fixture()
+def service(tmp_path):
+    return _service_for(_build_findings_db(tmp_path))
+
+
+@pytest.fixture()
+def divergence_service(tmp_path):
+    """The same grain PLUS ruling F's divergent rows and one NULL-shade row."""
+    return _service_for(_build_findings_db(
+        tmp_path,
+        identifications=_IDENTIFICATIONS + _DIVERGENT_IDENTIFICATIONS,
+        name="findings-divergence.db",
+    ))
 
 
 def _values(env, key):
@@ -502,6 +538,179 @@ def test_facet_level_vocabulary_is_closed(service):
     for rejected in ("manuscript_domain", "library", ""):
         with pytest.raises(ValueError):
             service.get_findings_facets_enveloped(rejected)
+
+
+# ---------------------------------------------------------------------------
+# Ruling F: the divergence axis (136-GATE1-DECISIONS.md section F)
+#
+# `diverges_work` / `diverges_part` rows are ABSENT from the default render and
+# surface only behind an explicit, separately-labelled warned opt-in. Every
+# test below asserts a PROPERTY OF THE QUERY, not the value of a constant: the
+# policy constant and its predicate already had tests, and both of them stayed
+# green for the whole period during which nothing in `web/` or `shared/` called
+# either one.
+# ---------------------------------------------------------------------------
+
+def test_divergent_rows_are_absent_from_the_default_result_set_and_from_its_total(
+        divergence_service):
+    """The load-bearing one. Delete the predicate in `_build_findings_filter`
+    and this fails on the very first assertion."""
+    env = divergence_service.get_findings_enveloped(bucket=BUCKET_ALL)
+
+    returned = {row["sys_id"] for row in env["items"]}
+    assert not (returned & _HIDDEN_SYS_IDS), (
+        "a catalogue-divergent identification rendered in the DEFAULT view -- "
+        "ruling F requires it be absent, not merely unbadged"
+    )
+    # The TOTAL, not only the page: a filter applied after the fetch would
+    # leave this number describing rows the reader is not being shown.
+    assert env["total"] == len(_IDENTIFICATIONS) + 1, "everything but s7/s8"
+    assert env["meta"]["include_divergent"] is False
+
+    # And on the MAIN pool specifically, which is where the divergent fixture
+    # rows live -- the bucket a reader lands on.
+    main = divergence_service.get_findings_enveloped(bucket=BUCKET_MAIN)
+    assert not ({row["sys_id"] for row in main["items"]} & _HIDDEN_SYS_IDS)
+
+
+def test_the_divergence_opt_in_returns_them_and_the_envelope_says_which_it_did(
+        divergence_service):
+    opted_in = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, include_divergent=True)
+    assert opted_in["meta"]["include_divergent"] is True
+    assert opted_in["total"] == len(_IDENTIFICATIONS) + len(_DIVERGENT_IDENTIFICATIONS)
+    assert _HIDDEN_SYS_IDS <= {row["sys_id"] for row in opted_in["items"]}
+
+
+def test_an_unchecked_row_is_not_treated_as_a_divergence(divergence_service):
+    """`not_checked` is the fail-closed default, not a disagreement. Hiding it
+    would under-report the corpus by exactly the rows nobody checked -- and
+    `s9` is the row that proves the filter selects on the two divergence shades
+    rather than on "anything that is not a positive verdict"."""
+    env = divergence_service.get_findings_enveloped(bucket=BUCKET_ALL)
+    assert "s9" in {row["sys_id"] for row in env["items"]}
+
+
+def test_the_divergence_filter_relies_on_a_pinned_not_null_column(divergence_service):
+    """The bare `NOT IN` in `_build_findings_filter` is only sound because
+    `novelty_status` cannot be NULL: `NULL NOT IN (...)` is NULL, so on a
+    nullable column that shape would silently drop every unrecorded row. The
+    invariant is asserted here rather than defended by an unreachable
+    `IS NULL OR` branch, which would read as coverage nobody has."""
+    conn = divergence_service._get_conn()
+    columns = {
+        row["name"]: row
+        for row in conn.execute("PRAGMA table_info(discovery_identification)")
+    }
+    assert columns["novelty_status"]["notnull"] == 1, (
+        "discovery_identification.novelty_status became nullable -- the "
+        "divergence filter's bare NOT IN now drops every NULL-shade row from "
+        "the default view; add the IS NULL branch before relaxing this"
+    )
+
+
+def test_the_facet_counts_follow_the_divergence_opt_in(divergence_service):
+    """A number beside an option has to describe the set that option produces.
+    The divergent fixture rows sit under `_PARENT_A` (wA) and `_PARENT_B` (wD),
+    so both parents move when the axis is opened."""
+    def _counts(**kwargs):
+        env = divergence_service.get_findings_facets_enveloped(
+            "domain", bucket=BUCKET_ALL, **kwargs)
+        assert env["status"] == STATUS_OK
+        return {row["value"]: row["count"] for row in env["items"]}
+
+    default = _counts()
+    opted_in = _counts(include_divergent=True)
+    assert opted_in[_LEAF_A1] == default[_LEAF_A1] + 1, "wA gained diverges_work"
+    assert opted_in[_LEAF_B1] == default[_LEAF_B1] + 1, "wD gained diverges_part"
+    assert default != opted_in
+
+    # And the count a reader sees really is the size of what selecting that
+    # option returns -- the promise `_node_text` makes on the page.
+    rows = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, domain=_LEAF_A1)
+    assert rows["total"] == default[_LEAF_A1]
+
+
+def test_the_divergence_filter_is_applied_in_sql_never_by_post_filtering():
+    """In the WHERE clause of the row query AND of the bounded-count query --
+    the two statements a pager and a total are read from."""
+    from shared.discovery_service import DIVERGENCE_SHADE_ORDER
+
+    rows_sql, rows_params = _build_findings_query(bucket=BUCKET_ALL)
+    count_sql, count_params = _build_findings_query(
+        bucket=BUCKET_ALL, count_only=True, count_cap=100)
+    for sql, params in ((rows_sql, rows_params), (count_sql, count_params)):
+        assert "novelty_status NOT IN" in sql
+        assert list(DIVERGENCE_SHADE_ORDER) == [
+            p for p in params if p in DIVERGENCE_SHADE_ORDER]
+
+    opted_in_sql, opted_in_params = _build_findings_query(
+        bucket=BUCKET_ALL, include_divergent=True)
+    assert "novelty_status NOT IN" not in opted_in_sql
+    assert not [p for p in opted_in_params if p in DIVERGENCE_SHADE_ORDER]
+
+
+def test_the_divergence_predicate_is_derived_from_the_shared_policy(monkeypatch):
+    """DERIVED, never restated. Two halves:
+
+    1. neither shade appears as a literal anywhere in the service module, so
+       there is no second list to drift;
+    2. moving the POLICY moves the query. `DIVERGENCE_SHADE_ORDER` is computed
+       at import from `is_hidden_by_default`, so this re-derives it the same
+       way and asserts the query's own bound parameters follow.
+    """
+    from shared.discovery_novelty import NOVELTY_STATUS_ORDER, is_hidden_by_default
+    from shared.discovery_service import DIVERGENCE_SHADE_ORDER
+
+    source = _service_source()
+    for shade in DIVERGENCE_SHADE_ORDER:
+        assert f'"{shade}"' not in source and f"'{shade}'" not in source, (
+            f"{shade!r} is written as a literal in shared/discovery_service.py -- "
+            "the hidden-by-default set has exactly one definition and this is "
+            "not it"
+        )
+
+    assert DIVERGENCE_SHADE_ORDER == tuple(
+        s for s in NOVELTY_STATUS_ORDER if is_hidden_by_default(s))
+    assert DIVERGENCE_SHADE_ORDER, (
+        "ruling F is in force and the derived set is empty -- the default view "
+        "would silently stop excluding anything"
+    )
+    _sql, params = _build_findings_query(bucket=BUCKET_ALL)
+    assert set(DIVERGENCE_SHADE_ORDER) <= set(params)
+
+
+def test_the_web_wrappers_thread_the_divergence_opt_in_through(monkeypatch):
+    """The page never touches the service module; it calls `web.discovery`. A
+    wrapper that accepted the argument and dropped it would leave the control
+    live and the query unchanged."""
+    import web.discovery as wd
+
+    seen = {}
+
+    class _Spy:
+        async def get_findings_enveloped_async(self, unit, **kwargs):
+            seen["findings"] = kwargs
+            return {"status": STATUS_OK, "items": [], "total": 0, "meta": {}}
+
+        async def get_findings_facets_enveloped_async(self, level, **kwargs):
+            seen["facets"] = kwargs
+            return {"status": STATUS_OK, "items": [], "total": 0, "meta": {}}
+
+    monkeypatch.setattr(wd, "discovery_available", lambda: True)
+    monkeypatch.setattr(wd, "_service", _Spy())
+
+    asyncio.run(wd.get_findings_enveloped(include_divergent=True))
+    assert seen["findings"]["include_divergent"] is True
+    asyncio.run(wd.get_findings_facets_enveloped("domain", include_divergent=True))
+    assert seen["facets"]["include_divergent"] is True
+
+    asyncio.run(wd.get_findings_enveloped())
+    assert seen["findings"]["include_divergent"] is False, (
+        "the default must be ruling F's posture, not its opposite")
+    asyncio.run(wd.get_findings_facets_enveloped("domain"))
+    assert seen["facets"]["include_divergent"] is False
 
 
 # ---------------------------------------------------------------------------

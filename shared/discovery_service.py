@@ -207,7 +207,11 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from shared.discovery_band_labels import serialize_banded_claim
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
-from shared.discovery_novelty import NOVELTY_STATUSES
+from shared.discovery_novelty import (
+    NOVELTY_STATUS_ORDER,
+    NOVELTY_STATUSES,
+    is_hidden_by_default,
+)
 from shared.discovery_surface_projection import (
     STATUS_OK,
     busy_envelope,
@@ -521,6 +525,25 @@ def findings_novelty_offered(unit: str) -> bool:
     """
     return unit != FINDINGS_UNIT_WORK
 
+#: Ruling F's hidden-by-default shades, as a DETERMINISTICALLY ORDERED tuple.
+#:
+#: DERIVED, never restated. `shared.discovery_novelty.is_hidden_by_default` is
+#: the policy; this filters the canonical shade ORDER through it, so the SQL
+#: predicate below and the predicate the rest of the project tests against
+#: cannot come to disagree -- a shade joining or leaving the policy moves this
+#: tuple with it, and a second literal list here would not move at all. The
+#: ordering comes from `NOVELTY_STATUS_ORDER` rather than from iterating the
+#: frozenset, because a set's iteration order is not stable across processes
+#: and a query's bound parameters must be reproducible.
+#:
+#: Ruling F's own rationale (`136-GATE1-DECISIONS.md` section F): these rows
+#: are neither auto-hidden by policy nor silently trusted. The SYSTEM never
+#: treats the catalogue's disagreement as a verdict; it surfaces the
+#: disagreement behind an explicit, warned opt-in and lets the reader decide.
+DIVERGENCE_SHADE_ORDER: Tuple[str, ...] = tuple(
+    shade for shade in NOVELTY_STATUS_ORDER if is_hidden_by_default(shade)
+)
+
 BUCKET_MAIN = "main"
 BUCKET_MORE = "more"
 BUCKET_ALL = "all"
@@ -750,6 +773,7 @@ def _build_findings_filter(
     *, unit: str = FINDINGS_UNIT_IDENTIFICATION,
     bucket: str = BUCKET_MAIN,
     novelty: Optional[Iterable[str]] = None,
+    include_divergent: bool = False,
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
@@ -763,6 +787,15 @@ def _build_findings_filter(
     Filters compose as AND; an empty filter set returns the whole current
     bucket. Every VALUE is bound -- the only interpolation is placeholder
     punctuation (T-136-14-04).
+
+    `include_divergent` is ruling F's opt-in, and it is applied HERE -- in SQL,
+    on the same predicate the count and the facet cascade are built from --
+    rather than by dropping rows out of a fetched page. Post-filtering a page
+    would leave `total`, the pager and every facet count describing a
+    population the reader is not being shown, which is a lie the reader cannot
+    see. The DEFAULT is `False`: divergent rows are ABSENT from the default
+    render (ruling F's "hidden by default", stronger than decision E's earlier
+    "excluded from the candidate toggle but shown normally").
     """
     if bucket not in FINDINGS_BUCKETS:
         raise ValueError(
@@ -776,6 +809,27 @@ def _build_findings_filter(
         where.append("di.main_pool = 1")
     elif bucket == BUCKET_MORE:
         where.append("di.main_pool = 0")
+
+    if not include_divergent and DIVERGENCE_SHADE_ORDER:
+        # A bare `NOT IN` is sound HERE and nowhere else in this file's reach:
+        # SQL's three-valued logic makes `NULL NOT IN (...)` evaluate to NULL
+        # (i.e. false in a WHERE clause), so on a nullable column this shape
+        # would silently drop every row whose novelty was never recorded --
+        # rows the absence of a verdict must never be conflated with a
+        # disagreement. `discovery_identification.novelty_status` is declared
+        # NOT NULL with the fail-closed `not_checked` default carrying the
+        # "never checked" case as a REAL value, which is what makes the null
+        # branch unreachable rather than merely unlikely. That schema
+        # invariant is pinned by
+        # `tests/test_discovery_findings_query.py::
+        # test_the_divergence_filter_relies_on_a_pinned_not_null_column`, so a
+        # future migration relaxing it fails a named test instead of quietly
+        # shrinking this page.
+        where.append(
+            "di.novelty_status NOT IN (%s)"
+            % ",".join("?" for _ in DIVERGENCE_SHADE_ORDER)
+        )
+        params.extend(DIVERGENCE_SHADE_ORDER)
 
     novelty_list = list(novelty) if novelty else []
     if novelty_list:
@@ -816,6 +870,7 @@ def _build_findings_query(
     sort: str = FINDINGS_SORT_BAND_RANK,
     bucket: str = BUCKET_MAIN,
     novelty: Optional[Iterable[str]] = None,
+    include_divergent: bool = False,
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
@@ -849,7 +904,8 @@ def _build_findings_query(
         )
 
     where_sql, params = _build_findings_filter(
-        unit=unit, bucket=bucket, novelty=novelty, domain=domain,
+        unit=unit, bucket=bucket, novelty=novelty,
+        include_divergent=include_divergent, domain=domain,
         author=author, work_id=work_id)
     group_by = _FINDINGS_UNIT_GROUP_BY[unit]
     group_sql = f"GROUP BY {group_by}" if group_by else ""
@@ -2160,6 +2216,7 @@ class DiscoveryService:
         self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
         bucket: str = BUCKET_MAIN,
         novelty: Optional[Iterable[str]] = None,
+        include_divergent: bool = False,
         domain: Optional[str] = None,
         author: Optional[str] = None,
         work_id: Optional[str] = None,
@@ -2170,8 +2227,10 @@ class DiscoveryService:
         """The corpus-wide findings query, in whichever of the three offered
         units the reader selected.
 
-        The default result set is the MAIN POOL, and the envelope's meta says
-        so -- the surface narrows the corpus view visibly, never silently.
+        The default result set is the MAIN POOL with ruling F's catalogue-
+        divergent rows EXCLUDED, and the envelope's meta says so on both counts
+        (`bucket`, `include_divergent`) -- the surface narrows the corpus view
+        visibly, never silently.
 
         An out-of-vocabulary `unit`, `sort` or `bucket` raises `ValueError`
         rather than returning an outage envelope: those values come from closed
@@ -2184,7 +2243,8 @@ class DiscoveryService:
         # Validate the vocabulary BEFORE the availability check, so a bad unit
         # is a loud error even while the sidecar is off.
         sql, params = _build_findings_query(
-            unit=unit, sort=sort, bucket=bucket, novelty=novelty, domain=domain,
+            unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+            include_divergent=include_divergent, domain=domain,
             author=author, work_id=work_id, page=page, page_size=page_size)
 
         if not self.is_available():
@@ -2201,6 +2261,7 @@ class DiscoveryService:
             if count_cap > 0:
                 count_sql, count_params = _build_findings_query(
                     unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+                    include_divergent=include_divergent,
                     domain=domain, author=author, work_id=work_id,
                     count_only=True, count_cap=count_cap)
                 counted = int(conn.execute(count_sql, count_params).fetchone()["n"])
@@ -2232,12 +2293,14 @@ class DiscoveryService:
             "sort": sort,
             "sort_basis": _FINDINGS_SORT_BASIS[sort],
             "novelty_offered": novelty_offered,
+            "include_divergent": bool(include_divergent),
             "approximate_total": approximate,
         })
 
     def get_findings_facets_enveloped(
         self, level: str, bucket: str = BUCKET_MAIN,
         novelty: Optional[Iterable[str]] = None,
+        include_divergent: bool = False,
         domain: Optional[str] = None,
         author: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -2248,8 +2311,12 @@ class DiscoveryService:
 
         Counts come from the materialized grain, so opening the facet tree
         costs no scan. Every level is cross-filtered by the levels above it,
-        and by the same bucket/novelty filters the result set carries, so a
-        facet count and the result set it sits beside always agree.
+        and by the same bucket/novelty/divergence filters the result set
+        carries, so a facet count and the result set it sits beside always
+        agree. `include_divergent` in particular is NOT optional to thread
+        through: a cascade built without it would count the ~23.6% of the grain
+        the default result set excludes, and every number beside every option
+        would overstate what selecting it returns.
         """
         if level not in FACET_LEVELS:
             raise ValueError(
@@ -2266,6 +2333,7 @@ class DiscoveryService:
         # facet to the single value already selected).
         where_sql, params = _build_findings_filter(
             unit=FINDINGS_UNIT_IDENTIFICATION, bucket=bucket, novelty=novelty,
+            include_divergent=include_divergent,
             domain=None if level == "domain" else domain,
             author=author if level == "work" else None,
         )
@@ -2298,6 +2366,7 @@ class DiscoveryService:
         items = self._project_facets(level, rows)
         return make_envelope(STATUS_OK, items, len(items), meta={
             "level": level, "bucket": bucket, "domain": domain, "author": author,
+            "include_divergent": bool(include_divergent),
         })
 
     @staticmethod
@@ -3209,6 +3278,7 @@ class DiscoveryService:
         self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
         bucket: str = BUCKET_MAIN,
         novelty: Optional[Iterable[str]] = None,
+        include_divergent: bool = False,
         domain: Optional[str] = None,
         author: Optional[str] = None,
         work_id: Optional[str] = None,
@@ -3221,8 +3291,8 @@ class DiscoveryService:
         rather than queueing behind each other and starving the browse path."""
         return await self._enveloped_off_loop(
             self.get_findings_enveloped,
-            (unit, bucket, tuple(novelty or ()) or None, domain, author, work_id,
-             sort, page, page_size),
+            (unit, bucket, tuple(novelty or ()) or None, bool(include_divergent),
+             domain, author, work_id, sort, page, page_size),
             timeout=self._findings_timeout(), heavy=True,
         )
 
@@ -3257,12 +3327,14 @@ class DiscoveryService:
     async def get_findings_facets_enveloped_async(
         self, level: str, bucket: str = BUCKET_MAIN,
         novelty: Optional[Iterable[str]] = None,
+        include_divergent: bool = False,
         domain: Optional[str] = None,
         author: Optional[str] = None,
     ) -> Dict[str, Any]:
         return await self._enveloped_off_loop(
             self.get_findings_facets_enveloped,
-            (level, bucket, tuple(novelty or ()) or None, domain, author),
+            (level, bucket, tuple(novelty or ()) or None,
+             bool(include_divergent), domain, author),
             timeout=self._findings_timeout(), heavy=True,
         )
 

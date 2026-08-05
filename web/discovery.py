@@ -211,6 +211,7 @@ async def get_findings_enveloped(
     *,
     bucket: str = BUCKET_MAIN,
     novelty: Optional[Iterable[str]] = None,
+    include_divergent: bool = False,
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
@@ -226,12 +227,18 @@ async def get_findings_enveloped(
     `FINDINGS_BUCKETS`, all exported here), so an unknown one is a bug to fix,
     not a service state to render. Validate the request against those sets
     before calling.
+
+    `include_divergent` defaults to `False` HERE as well as in the service, so
+    a caller that has never heard of ruling F gets the ruling's posture rather
+    than its opposite. A surface that wants the divergent rows must ask for
+    them, in words, on every call.
     """
     if not discovery_available():
         return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
     try:
         return await _service.get_findings_enveloped_async(
-            unit, bucket=bucket, novelty=novelty, domain=domain, author=author,
+            unit, bucket=bucket, novelty=novelty,
+            include_divergent=include_divergent, domain=domain, author=author,
             work_id=work_id, sort=sort, page=page, page_size=page_size)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
@@ -278,16 +285,22 @@ async def get_findings_facets_enveloped(
     *,
     bucket: str = BUCKET_MAIN,
     novelty: Optional[Iterable[str]] = None,
+    include_divergent: bool = False,
     domain: Optional[str] = None,
     author: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The domain / author / work cascade -- on the IDENTIFIED WORK's domain,
-    never the manuscript's catalogue domain."""
+    never the manuscript's catalogue domain.
+
+    Takes `include_divergent` for the same reason the row query does: a count
+    beside an option has to describe the set that option produces, and the
+    default result set excludes ruling F's divergent rows."""
     if not discovery_available():
         return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
     try:
         return await _service.get_findings_facets_enveloped_async(
-            level, bucket=bucket, novelty=novelty, domain=domain, author=author)
+            level, bucket=bucket, novelty=novelty,
+            include_divergent=include_divergent, domain=domain, author=author)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
