@@ -218,9 +218,34 @@ is an owner decision because they differ in kind, not degree:
 
 1. **Mint** new `w######` ids for the 2,738 → the works table goes from 1,269 to ~4,000. This is what a
    membership expansion *means*, but it cascades into §3.6: each new work needs a neutral title and a genre.
-2. **Map up** to a parent/canonical work where one exists — cheapest, but collapses grain, which is the axis
-   v3 is supposed to improve.
-3. **Drop** → lose 12.6% of evidence, disproportionately M-source.
+2. ~~**Map up** to a parent/canonical work where one exists~~ — **TESTED 2026-08-05 and NOT AVAILABLE.**
+   Stripping a trailing `_NN` sub-division suffix finds a crosswalked parent for **0 of the 2,738** works
+   (0 evidence rows). The id ranges are simply disjoint: the crosswalk's mapped M-source works are
+   `M:Ytext#####` (5-digit, 1,003 of them) while **2,622 of the unresolved are `M:Ytext######` (6-digit)**,
+   plus 67 five-digit, 37 seven-digit and 3 Sefaria stragglers. These are **not finer grain on known works.**
+3. **Drop** → lose 63,371 evidence rows (12.6%), almost all M-source.
+
+#### What the failed map-up test actually revealed — this is a corpus-expansion question, not a grain question
+
+Because no parent exists, the 2,738 are **works the v2 works table does not contain at all**. So v3 is not
+only recomputing v2's membership; **it is matching against a materially wider M-source reference corpus** —
+roughly 1,003 mapped M-source works against 2,738 unmapped ones.
+
+**This contradicts the handoff's own scope claim.** HANDOFF-TO-135 §1 says gen-2 is *"Same launch3 scope
+(Sefaria + JA + M-source + REF2 — the corpus v2 already covers)"*. The id ranges say otherwise. Two readings,
+and they have different consequences:
+
+- **(a) Bookkeeping.** The crosswalk only ever mapped M-source works that produced *surviving* v2 claims, so
+  these were in the corpus but never reached the works table. Then minting is just catching up.
+- **(b) Real expansion.** The gen-2 run matched against more M-source material than v2 did. Then v3's
+  population is not comparable to v2's, and **CERT-01's pre-registration is measured on a different corpus** —
+  which is precisely the "population change → re-registration" cascade the coordination doc warned about.
+
+**Evidence leans (b), weakly.** If (a) held, the unresolved works should be concentrated in thin/review-only
+claims; measured, they carry shipped claims at a similar rate to resolved works (23,895 unresolved pairs against
+86,073 resolved at the shipped scope, 21.7% — versus 20.1% across all evidence). Not decisive, and it should be
+settled against the gen-2 reference-build inputs rather than inferred from ratios. **Until it is settled, do not
+treat v3 as a like-for-like replacement of v2's population.**
 
 Gate accordingly (§6, gate 2): the build must **HALT** on an unresolved id rather than skip it.
 
@@ -514,10 +539,15 @@ the 595) and the novelty population (§4 — P is 51,476 / 86,073 / 153,606 by s
 **Blocking — one real decision, and it is the shape of v3**
 
 1. **§3.1 + §3.6 together: what happens to the 2,738 unmapped M-source works** carrying 12.6% of the evidence?
-   **Mint** them (works table 1,269 → ~4,000, and up to 2,738 new NULL genres to curate — ~47× the 58 just
-   done, all masked titles), **map up** to a parent work (cheap, but collapses the grain v3 exists to improve),
-   or **drop** (lose 12.6% of evidence, almost all M-source). These two sections must be answered as one
-   question; answering §3.1 alone silently commits §3.6.
+   The middle option is gone — map-up was tested and finds a parent for **0 of 2,738**, because these are works
+   the v2 table does not contain rather than finer grain on known ones. So: **mint** (works table 1,269 →
+   ~4,000, and up to 2,738 new NULL genres — ~47× the 58 just curated, all masked titles) or **drop** (lose
+   63,371 evidence rows). §3.1 and §3.6 are one question; answering the first alone silently commits the second.
+
+   **Sub-question that may outrank it:** the failed map-up implies v3 matches a **wider** M-source corpus than
+   v2, contradicting the handoff's "same scope" claim. If that holds, **CERT-01 is pre-registered on a different
+   population** and re-registration is in scope after all (§3.7 assumes it is not). This should be settled
+   against the gen-2 reference-build inputs before the bake, not after.
 
 2. **§1.3 authorization discrepancy.** Was the 2026-08-03 novelty production run authorized at
    `batch_size=10`? Its output is what the serving asset pins, and the record says the run was unauthorized.
