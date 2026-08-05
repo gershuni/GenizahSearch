@@ -706,6 +706,12 @@ def _facet_request(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
         "bucket": state["bucket"],
         "novelty": _novelty_selection(state),
         "include_divergent": bool(state.get("divergence")),
+        # THE ROW UNIT (§3.6). The cascade's counts are counts of ROWS, and the
+        # unit decides what a row is -- so a cascade that did not carry it put a
+        # number beside an option describing a population the result bar beside
+        # it did not report. It is part of the request, so it is part of the
+        # re-fetch key: changing the unit re-reads all three levels.
+        "unit": state["unit"],
         "domain": state.get("domain") if level != "domain" else None,
         "author": state.get("author") if level == "work" else None,
     }

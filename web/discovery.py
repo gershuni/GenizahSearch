@@ -288,19 +288,24 @@ async def get_findings_facets_enveloped(
     include_divergent: bool = False,
     domain: Optional[str] = None,
     author: Optional[str] = None,
+    unit: str = FINDINGS_UNIT_IDENTIFICATION,
 ) -> Dict[str, Any]:
     """The domain / author / work cascade -- on the IDENTIFIED WORK's domain,
     never the manuscript's catalogue domain.
 
-    Takes `include_divergent` for the same reason the row query does: a count
-    beside an option has to describe the set that option produces, and the
-    default result set excludes ruling F's divergent rows."""
+    Takes `include_divergent` AND `unit` for the same reason the row query does:
+    a count beside an option has to describe the set that option produces. The
+    default result set excludes ruling F's divergent rows, and the reader's row
+    unit decides whether a "row" is an identification, a manuscript or a work --
+    so a cascade fixed at one grain reports a population the result bar beside it
+    does not."""
     if not discovery_available():
         return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
     try:
         return await _service.get_findings_facets_enveloped_async(
             level, bucket=bucket, novelty=novelty,
-            include_divergent=include_divergent, domain=domain, author=author)
+            include_divergent=include_divergent, domain=domain, author=author,
+            unit=unit)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself

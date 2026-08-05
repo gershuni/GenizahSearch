@@ -982,3 +982,115 @@ def test_web_findings_wrapper_fails_open_when_discovery_is_off(monkeypatch):
     env = asyncio.run(web_discovery.get_findings_enveloped())
     assert env["status"] == "unavailable"
     assert env["items"] == [] and env["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# §3.6 -- THE FACET COUNTS FOLLOW THE READER'S ROW UNIT.
+#
+# The counts were fixed at the identification grain while the result set
+# honoured `unit`, so on "one row per manuscript" or "one row per work" a domain
+# reading `(7,000)` sat beside a result bar reporting a few hundred -- two
+# figures over two different populations, presented as one. `_node_text`'s
+# promise ("a number beside an option always agrees with the result set that
+# option produces") is now made on three controls, so it has to be true.
+# ---------------------------------------------------------------------------
+
+def _facet_counts(service, level, unit, **kwargs):
+    env = service.get_findings_facets_enveloped(
+        level, bucket=BUCKET_ALL, unit=unit, **kwargs)
+    assert env["status"] == STATUS_OK
+    assert env["meta"]["unit"] == unit
+    return {row["value"]: row["count"] for row in env["items"]}
+
+
+@pytest.mark.parametrize("unit", sorted(FINDINGS_UNITS))
+@pytest.mark.parametrize("level", ["domain", "author", "work"])
+def test_selecting_a_facet_returns_exactly_as_many_rows_as_its_count_said(
+        service, level, unit):
+    """THE PROMISE, checked exhaustively against the shipped row query at every
+    unit and every level. Not a shape assertion: for each option it runs the
+    real result query with that option selected and compares the row TOTAL."""
+    counts = _facet_counts(service, level, unit)
+    assert counts, f"the {level!r} cascade returned nothing to check"
+
+    key = {"domain": "domain", "author": "author", "work": "work_id"}[level]
+    for value, count in counts.items():
+        rows = service.get_findings_enveloped(
+            unit=unit, bucket=BUCKET_ALL, **{key: value})
+        assert rows["total"] == count, (
+            f"{level}={value!r} at unit={unit!r}: the facet said {count} and "
+            f"selecting it returns {rows['total']} rows")
+
+
+def test_the_counts_really_DIFFER_between_the_units(service):
+    """The positive control. If the three units happened to agree on this
+    fixture, the test above would pass against a cascade that still ignored the
+    unit entirely -- which is the defect."""
+    per_unit = {unit: _facet_counts(service, "domain", unit)
+                for unit in sorted(FINDINGS_UNITS)}
+    assert per_unit[FINDINGS_UNIT_IDENTIFICATION][_PARENT_A] == 5
+    assert per_unit[FINDINGS_UNIT_MANUSCRIPT][_PARENT_A] == 4, (
+        "s1 carries TWO works under Parent A and must be counted once")
+    assert per_unit[FINDINGS_UNIT_WORK][_PARENT_A] == 3, "wA, wB, wC"
+    assert len({tuple(sorted(counts.items())) for counts in per_unit.values()}) == 3
+
+
+def test_a_domain_PARENT_count_is_grouped_not_summed(service):
+    """The rollup, and the reason it moved into SQL.
+
+    Summing leaf counts is only correct at the identification grain, where every
+    identification belongs to exactly one leaf. At the manuscript grain the leaf
+    counts are DISTINCT counts and `s1` appears under BOTH `Leaf A1` (wA) and
+    `Leaf A2` (wB) -- so the sum double-counts it and the parent node would claim
+    more manuscripts than selecting the parent returns.
+    """
+    leaves = _facet_counts(service, "domain", FINDINGS_UNIT_MANUSCRIPT)
+    naive_sum = leaves[_LEAF_A1] + leaves[_LEAF_A2]
+    assert naive_sum > leaves[_PARENT_A], (
+        "fixture error: no manuscript spans two leaves of Parent A, so this "
+        "test cannot tell a grouped parent from a summed one")
+    rows = service.get_findings_enveloped(
+        unit=FINDINGS_UNIT_MANUSCRIPT, bucket=BUCKET_ALL, domain=_PARENT_A)
+    assert leaves[_PARENT_A] == rows["total"]
+
+
+def test_a_genre_with_no_separator_is_a_leaf_and_never_also_a_parent(service):
+    """`Unassigned` (and any single-part genre) has no ' / ', so the parent
+    grouping returns a NULL key for it. That NULL row must be dropped rather
+    than becoming a childless parent node."""
+    env = service.get_findings_facets_enveloped(
+        "domain", bucket=BUCKET_ALL, unit=FINDINGS_UNIT_IDENTIFICATION)
+    by_value = {row["value"]: row for row in env["items"]}
+    assert by_value[DOMAIN_UNASSIGNED]["is_leaf"] is True
+    assert None not in by_value, "a NULL-keyed parent node reached the surface"
+    parents = [row["value"] for row in env["items"] if not row["is_leaf"]]
+    assert sorted(parents) == [_PARENT_A, _PARENT_B]
+
+
+def test_the_facet_count_table_covers_exactly_the_offered_units():
+    """Pinned against the row query's own per-unit table, so a unit added to one
+    and not the other fails here rather than silently counting at the wrong
+    grain."""
+    from shared.discovery_service import (
+        _FINDINGS_FACET_COUNT_SQL,
+        _FINDINGS_UNIT_GROUP_BY,
+    )
+
+    assert set(_FINDINGS_FACET_COUNT_SQL) == set(FINDINGS_UNITS)
+    assert set(_FINDINGS_FACET_COUNT_SQL) == set(_FINDINGS_UNIT_GROUP_BY)
+    # Every GROUPED unit counts DISTINCT its own grouping column; the ungrouped
+    # one counts rows.
+    for unit, group_by in _FINDINGS_UNIT_GROUP_BY.items():
+        expression = _FINDINGS_FACET_COUNT_SQL[unit]
+        if group_by is None:
+            assert expression == "COUNT(*)", unit
+        else:
+            assert expression == f"COUNT(DISTINCT {group_by})", (
+                f"the {unit!r} facet count does not count what the row query "
+                f"groups by ({group_by})")
+
+
+def test_an_out_of_vocabulary_unit_is_refused_by_the_cascade(service):
+    for rejected in ("claim", "", "manuscripts"):
+        with pytest.raises(ValueError):
+            service.get_findings_facets_enveloped("domain", unit=rejected)

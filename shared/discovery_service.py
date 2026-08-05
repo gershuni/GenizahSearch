@@ -683,6 +683,36 @@ _FINDINGS_FROM = """
 """
 
 # ---------------------------------------------------------------------------
+# The facet cascade's COUNT, per row unit (§3.6).
+#
+# Each expression counts the same thing the row query's GROUP BY produces, so
+# the number beside an option is the number of ROWS selecting that option
+# returns -- which is the only promise a count beside a filter can honestly
+# make. Written as data beside `_FINDINGS_UNIT_GROUP_BY` rather than derived
+# from it, because `COUNT(*)` on the ungrouped unit has no GROUP BY column to
+# derive from; a test pins the two tables against each other.
+# ---------------------------------------------------------------------------
+
+_FINDINGS_FACET_COUNT_SQL: Dict[str, str] = {
+    FINDINGS_UNIT_IDENTIFICATION: "COUNT(*)",
+    FINDINGS_UNIT_MANUSCRIPT: "COUNT(DISTINCT di.sys_id)",
+    FINDINGS_UNIT_WORK: "COUNT(DISTINCT di.display_work_id)",
+}
+
+#: The domain facet's LEAF key -- the stored genre, with the unplaceable ones
+#: collapsed into their own selectable bucket rather than disappearing.
+_DOMAIN_KEY_SQL = f"COALESCE(NULLIF(w.genre, ''), '{DOMAIN_UNASSIGNED}')"
+
+#: The domain facet's PARENT key. The stored genre is a `Parent / Leaf` string;
+#: this is the part before the separator, or NULL for a genre that has none
+#: (such a genre is its own leaf and gets no parent node).
+_DOMAIN_PARENT_SQL = (
+    "CASE WHEN instr({key}, ' / ') > 0 "
+    "THEN substr({key}, 1, instr({key}, ' / ') - 1) "
+    "ELSE NULL END"
+).format(key=_DOMAIN_KEY_SQL)
+
+# ---------------------------------------------------------------------------
 # Ruling U (plan 136-22): the launch statistics.
 # ---------------------------------------------------------------------------
 
@@ -2377,6 +2407,7 @@ class DiscoveryService:
         include_divergent: bool = False,
         domain: Optional[str] = None,
         author: Optional[str] = None,
+        unit: str = FINDINGS_UNIT_IDENTIFICATION,
     ) -> Dict[str, Any]:
         """The domain / author / work cascade, mirroring the catalogue page's
         accessor SHAPE (`get_browse_authors(domain)` ->
@@ -2391,10 +2422,23 @@ class DiscoveryService:
         through: a cascade built without it would count the ~23.6% of the grain
         the default result set excludes, and every number beside every option
         would overstate what selecting it returns.
+
+        `unit` IS PART OF THE COUNT (§3.6), not only of the row query. The
+        counts were fixed at the identification grain while the result set
+        honoured the reader's `unit`, so on "one row per manuscript" or "one row
+        per work" a domain reading `(7,000)` sat beside a result bar reporting a
+        few hundred -- two figures over two different populations, presented as
+        one. `_FINDINGS_FACET_COUNT_SQL` maps the unit to the same DISTINCT the
+        row query groups by, so selecting an option returns exactly as many rows
+        as the number beside it said.
         """
         if level not in FACET_LEVELS:
             raise ValueError(
                 f"unknown facet level {level!r} -- offered levels are {sorted(FACET_LEVELS)}")
+        if unit not in FINDINGS_UNITS:
+            raise ValueError(
+                f"unknown findings unit {unit!r} -- offered units are "
+                f"{sorted(FINDINGS_UNITS)}")
         if not self.is_available():
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
         conn = self._get_conn()
@@ -2406,14 +2450,15 @@ class DiscoveryService:
         # author, and a level never filters by itself (that would collapse the
         # facet to the single value already selected).
         where_sql, params = _build_findings_filter(
-            unit=FINDINGS_UNIT_IDENTIFICATION, bucket=bucket, novelty=novelty,
+            unit=unit, bucket=bucket, novelty=novelty,
             include_divergent=include_divergent,
             domain=None if level == "domain" else domain,
             author=author if level == "work" else None,
         )
+        count_sql = _FINDINGS_FACET_COUNT_SQL[unit]
 
         if level == "domain":
-            key_sql = f"COALESCE(NULLIF(w.genre, ''), '{DOMAIN_UNASSIGNED}')"
+            key_sql = _DOMAIN_KEY_SQL
             label_sql = key_sql
         elif level == "author":
             key_sql = f"COALESCE(NULLIF(w.author, ''), '{DOMAIN_UNASSIGNED}')"
@@ -2422,35 +2467,50 @@ class DiscoveryService:
             key_sql = "di.display_work_id"
             label_sql = "MIN(w.neutral_title)"
 
-        try:
-            rows = conn.execute(
+        def _grouped(group_sql: str, label: str):
+            return conn.execute(
                 f"""
-                SELECT {key_sql} AS value, {label_sql} AS label, COUNT(*) AS count
+                SELECT {group_sql} AS value, {label} AS label,
+                       {count_sql} AS count
                 {_FINDINGS_FROM}
                 {where_sql}
-                GROUP BY {key_sql}
+                GROUP BY {group_sql}
                 ORDER BY count DESC, value ASC
                 """,
                 params,
             ).fetchall()
+
+        try:
+            rows = _grouped(key_sql, label_sql)
+            # THE DOMAIN PARENTS ARE GROUPED IN SQL, not summed in Python.
+            # Summing leaf counts is only correct at the identification grain,
+            # where every identification belongs to exactly one leaf. On the two
+            # grouped units the counts are DISTINCT counts, and one manuscript
+            # (or one work) can appear under two leaves of the same parent -- so
+            # the sum over-counts it, and the parent node would claim more rows
+            # than selecting the parent returns. Grouping by the parent key
+            # answers the question the reader is actually asking.
+            parent_rows = _grouped(_DOMAIN_PARENT_SQL, _DOMAIN_PARENT_SQL) \
+                if level == "domain" else None
         except Exception as e:
             logger.error("DiscoveryService.get_findings_facets error (%s): %s", level, e)
             return unavailable_envelope(meta={"reason": "query_failed"})
 
-        items = self._project_facets(level, rows)
+        items = self._project_facets(level, rows, parent_rows)
         return make_envelope(STATUS_OK, items, len(items), meta={
             "level": level, "bucket": bucket, "domain": domain, "author": author,
-            "include_divergent": bool(include_divergent),
+            "include_divergent": bool(include_divergent), "unit": unit,
         })
 
     @staticmethod
-    def _project_facets(level: str, rows) -> List[Dict[str, Any]]:
+    def _project_facets(level: str, rows, parent_rows=None) -> List[Dict[str, Any]]:
         """Shape the grouped rows into facet rows.
 
         For `domain` this rebuilds the two-level TREE: the stored genre is a
-        `Parent / Leaf` string, so each leaf's parent is emitted as its own
-        selectable node carrying the SUM of its leaves. Done in Python over at
-        most a few hundred groups rather than in a second SQL pass.
+        `Parent / Leaf` string, so each parent is emitted as its own selectable
+        node. Its count comes from `parent_rows` -- a second GROUP BY over the
+        parent key -- and is deliberately NOT the sum of its leaves: see
+        `get_findings_facets_enveloped`.
         """
         if level != "domain":
             return [
@@ -2463,17 +2523,22 @@ class DiscoveryService:
             ]
 
         leaves: List[Dict[str, Any]] = []
-        parents: "OrderedDict[str, int]" = OrderedDict()
         for row in rows:
             value = row["value"]
-            count = int(row["count"])
             parent = value.split(" / ", 1)[0] if " / " in value else None
             leaves.append({
                 "level": level, "value": value, "label": value,
-                "parent": parent, "is_leaf": True, "count": count,
+                "parent": parent, "is_leaf": True, "count": int(row["count"]),
             })
-            if parent is not None:
-                parents[parent] = parents.get(parent, 0) + count
+
+        # The parent grouping returns a NULL-keyed row for every genre that has
+        # no ' / ' in it; those genres are their OWN leaf nodes and must not also
+        # become a parent node with no children.
+        parents: "OrderedDict[str, int]" = OrderedDict()
+        for row in parent_rows or ():
+            if row["value"] is None:
+                continue
+            parents[row["value"]] = int(row["count"])
 
         items = [
             surface_safe_facet({
@@ -3404,11 +3469,12 @@ class DiscoveryService:
         include_divergent: bool = False,
         domain: Optional[str] = None,
         author: Optional[str] = None,
+        unit: str = FINDINGS_UNIT_IDENTIFICATION,
     ) -> Dict[str, Any]:
         return await self._enveloped_off_loop(
             self.get_findings_facets_enveloped,
             (level, bucket, tuple(novelty or ()) or None,
-             bool(include_divergent), domain, author),
+             bool(include_divergent), domain, author, unit),
             timeout=self._findings_timeout(), heavy=True,
         )
 

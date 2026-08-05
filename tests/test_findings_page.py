@@ -5917,3 +5917,52 @@ def test_the_artifact_identity_read_is_two_pure_in_memory_lookups():
             assert blocking not in body, (
                 f"{name} became a blocking call and is used in a synchronous "
                 f"cache-key builder on the event loop: {blocking!r}")
+
+
+# ---------------------------------------------------------------------------
+# §3.6, the PAGE side: the row unit is part of the cascade's request.
+# ---------------------------------------------------------------------------
+
+def test_the_cascade_request_carries_the_row_unit(monkeypatch):
+    """The counts are counts of ROWS and the unit decides what a row is, so a
+    cascade that did not carry it put a number beside an option describing a
+    population the result bar beside it did not report."""
+    facets = []
+    _render_page(monkeypatch, lang="en", facets=_recording_facets(facets),
+                 state=_state(unit="manuscript"))
+    assert facets, "the page issued no facet read"
+    assert all(call.get("unit") == "manuscript" for call in facets), (
+        f"the cascade was read at the wrong grain: {facets!r}")
+
+
+def test_changing_the_row_unit_re_reads_every_facet_level(monkeypatch):
+    """The unit is part of the request, so it must be part of the re-fetch key.
+    A cached cascade served across a unit change is the defect with an extra
+    step: the counts would be right for a grain the reader has left."""
+    observed, _client = _drive_facet_rounds(monkeypatch, [
+        ("first paint", {}),
+        ("nothing changed", {}),
+        ("unit change", {"unit": "manuscript"}),
+        ("back again", {"unit": "identification"}),
+    ])
+    by_label = dict(observed)
+    assert by_label["nothing changed"] == []
+    assert by_label["unit change"] == ["domain", "author", "work"], (
+        "a unit change left every facet count at the previous grain")
+    assert by_label["back again"] == ["domain", "author", "work"]
+
+
+def test_the_count_promise_is_made_on_all_three_controls_or_on_none():
+    """`_node_text` is the one place a count is attached to an option, and the
+    domain tree, the author select and the work select all route through it. The
+    promise in its docstring is therefore made three times, which is why §3.6
+    had to be fixed rather than documented away."""
+    import inspect
+
+    source = inspect.getsource(fp)
+    assert source.count("def _node_text(") == 1, (
+        "a second count formatter would make the promise somewhere this test "
+        "cannot see")
+    for function in (fp._render_domain_tree, fp._render_facet_select):
+        assert "_node_text(" in inspect.getsource(function), (
+            f"{function.__name__} stopped routing its count through _node_text")
