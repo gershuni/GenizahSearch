@@ -3230,6 +3230,169 @@ def test_the_two_bucket_chips_read_as_one_segment_with_a_visible_selection(monke
     assert not _DIGIT_RE.findall(text), f"a number reached the bucket control: {text!r}"
 
 
+# ---------------------------------------------------------------------------
+# TASK 7 (2026-08-05) — ACTIVE FILTERS ARE VISIBLE, ADJACENT AND REVERSIBLE.
+#
+# There was no "you are here" on this page at all. Click a domain and the only
+# feedback was a changed row count and one `.here` class 800px away, possibly
+# scrolled out of its own 340px box. `/catalog-browse` solves this with
+# `render_chips()` + a red `Clear All`; this page adopted that page's CARD
+# pattern and not its STATE pattern, and state is the half that produces
+# confidence.
+#
+# THE POOL IS NOT ONE OF THESE CHIPS, and that is a ruling, not an oversight: a
+# removable chip implies a neutral "no pool" state, and the service offers
+# exactly two buckets with no union between them (`_OFFERED_BUCKETS`).
+# ---------------------------------------------------------------------------
+
+_ALL_FILTERS = dict(novelty_only=True, domain="Liturgy", author="Maimonides",
+                    work_id=_CURATED_WORK_ID, work_label=_CURATED_RAW_TITLE)
+
+
+def _chip_texts(client) -> list:
+    return [
+        "\n".join(_subtree_strings(chip))
+        for chip in _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-chip")
+    ]
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_every_active_selection_gets_a_removable_chip(monkeypatch, lang):
+    from shared.discovery_display_strings import display_work_title
+
+    client = _render_page(monkeypatch, lang=lang, state=_state(**_ALL_FILTERS))
+    chips = _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-chip")
+    assert len(chips) == 4, (
+        f"four axes are selected and {len(chips)} chip(s) rendered")
+
+    blob = "\n".join(_chip_texts(client))
+    assert novelty_strings(lang)["toggle"] in blob, "the candidacy filter has no chip"
+    assert "Liturgy" in blob, "the domain filter has no chip"
+    assert "Maimonides" in blob, "the author filter has no chip"
+    # Ruling R applies here exactly as it does in the facet list: the CURATED
+    # display title, never the raw recorded one. Asserted on the WHOLE chip
+    # label rather than by substring — in Hebrew the curated title EXTENDS the
+    # raw one ("...ספר אהבה" -> "...ספר אהבה / סידור"), so a substring check
+    # would pass for the wrong reason in one language and fail in the other.
+    set_language(lang)
+    try:
+        axis = tr_for_test("Work")
+    finally:
+        set_language("he")
+    curated = display_work_title(_CURATED_WORK_ID, _CURATED_RAW_TITLE, lang)
+    assert curated != _CURATED_RAW_TITLE, "fixture error: the titles must differ"
+    exact = [
+        text
+        for chip in _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-chip")
+        for text in _subtree_strings(chip)
+    ]
+    assert f"{axis}: {curated}" in exact, (
+        f"the work chip does not use the curated title: {exact!r}")
+    assert f"{axis}: {_CURATED_RAW_TITLE}" not in exact, (
+        "the RAW recorded work title reached the active-filter chip")
+
+    # Each chip is REMOVABLE, and the removal is wired rather than decorative.
+    for chip in chips:
+        removes = [element for element in chip.descendants()
+                   if f"{fp.ACTIVE_FILTERS_CLASS}-remove" in (element._classes or [])]
+        assert len(removes) == 1, "a chip with no remove control is not removable"
+        listeners = [listener for listener in removes[0]._event_listeners.values()
+                     if listener.type == "click"]
+        assert listeners, "the chip's remove control is wired to nothing"
+
+    clears = _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-clear")
+    assert len(clears) == 1, "there is no way back to the unfiltered set"
+
+
+def test_the_chip_bar_is_absent_when_nothing_is_selected(monkeypatch):
+    """An empty chip bar is chrome that says nothing; the page starts unfiltered
+    and must not open with a bar reserved for a state nobody is in."""
+    client = _render_page(monkeypatch, lang="en")
+    assert not _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-chip")
+    assert not _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-clear")
+
+
+@pytest.mark.parametrize("bucket", ["main", "more"])
+def test_the_pool_is_never_a_removable_chip(monkeypatch, bucket):
+    """A removable chip implies a third, neutral "no pool" state. The service
+    offers two buckets and no union between them (`_OFFERED_BUCKETS`), so a chip
+    that could be dismissed would promise a view that cannot be produced."""
+    from shared.discovery_display_strings import bucket_name
+
+    client = _render_page(monkeypatch, lang="en",
+                          state=_state(bucket=bucket, **_ALL_FILTERS))
+    blob = "\n".join(_chip_texts(client))
+    for in_main in (True, False):
+        assert bucket_name(in_main, "en") not in blob, (
+            f"the {bucket!r} pool is offered as a removable chip")
+
+
+def test_the_chip_bar_sits_between_the_result_bar_and_the_rows(monkeypatch):
+    """Adjacent to the rows it explains. A chip bar in the sidebar, or below the
+    results, is the same information at the distance that made the `.here` class
+    useless."""
+    client = _render_page(monkeypatch, lang="en", state=_state(**_ALL_FILTERS))
+    bars = _elements_with_class(client, fp.ACTIVE_FILTERS_CLASS)
+    assert len(bars) == 1
+    ancestors = {c for a in _ancestors(bars[0]) for c in (a._classes or [])}
+    assert fp.RESULTS_CLASS in ancestors, "the chip bar is not in the results region"
+    assert fp.FILTER_BAR_CLASS not in ancestors, "the chip bar drifted into the sidebar"
+
+    region = _elements_with_class(client, fp.RESULTS_CLASS)[0]
+    order = [element for element in region.descendants(include_self=True)]
+    result_bar = _elements_with_class(client, fp.RESULT_BAR_CLASS)[0]
+    rows_column = _elements_with_class(client, f"{fp.RESULTS_CLASS}-rows")[0]
+    assert order.index(result_bar) < order.index(bars[0]) < order.index(rows_column), (
+        "the chip bar is not between the result bar and the rows")
+
+
+def test_the_chips_carry_no_physical_directional_property(monkeypatch):
+    """`/catalog-browse`'s `_make_chip` uses `ml-1` and `text-left`, which put
+    the close button and the label on the wrong side in Hebrew. This page copies
+    its SHAPE and not its classes."""
+    client = _render_page(monkeypatch, lang="he", state=_state(**_ALL_FILTERS))
+    for marker in (f"{fp.ACTIVE_FILTERS_CLASS}-chip",
+                   f"{fp.ACTIVE_FILTERS_CLASS}-remove"):
+        for element in _elements_with_class(client, marker):
+            classes = " ".join(element._classes or [])
+            for forbidden in ("ml-", "mr-", "pl-", "pr-", "text-left", "text-right"):
+                assert forbidden not in classes, (
+                    f"{marker} carries the physical class {forbidden!r}: {classes!r}")
+            style = " ".join(f"{k}:{v}" for k, v in (element._style or {}).items())
+            for forbidden in ("margin-left", "margin-right", "padding-left",
+                              "padding-right", "border-left", "border-right"):
+                assert forbidden not in style, (
+                    f"{marker} carries the physical property {forbidden!r}: {style!r}")
+
+
+def test_clearing_one_axis_leaves_the_others_and_returns_to_page_one(monkeypatch):
+    """The pure half of the removal, so the behaviour is asserted without a
+    browser: a chip clears ITS OWN axis and nothing else, and any filter change
+    returns to page 1 (page 4 of the old set is not page 4 of the new one)."""
+    state = _state(page=6, **_ALL_FILTERS)
+    fp._clear_filter_axis(state, "domain")
+    assert state["domain"] is None
+    assert state["author"] == "Maimonides"
+    assert state["work_id"] == _CURATED_WORK_ID
+    assert state["novelty_only"] is True
+    assert state["page"] == 1
+
+    fp._clear_filter_axis(state, "work_id")
+    assert state["work_id"] is None
+    assert state.get("work_label") is None, (
+        "the work chip's label outlived the selection it labelled")
+    assert state["author"] == "Maimonides"
+
+    fp._clear_filter_axis(state, None)          # clear all
+    assert state["author"] is None
+    assert state["novelty_only"] is False
+    assert state["page"] == 1
+    # ...and the POOL survives a clear-all: it has no neutral value.
+    assert state["bucket"] == "main"
+    assert state["unit"] == "identification"
+    assert state["sort"] == "band_rank"
+
+
 _EMPTY_FACETS = {"domain": [], "author": [], "work": []}
 
 
@@ -3335,6 +3498,112 @@ def test_switching_bucket_replaces_the_facet_lists_as_well_as_the_rows():
 
                         await user.should_see(_FACET_MORE_SENTINEL)
                         await user.should_not_see(_FACET_MAIN_SENTINEL)
+            finally:
+                _os.environ.pop("NICEGUI_USER_SIMULATION", None)
+
+    try:
+        asyncio.run(_run())
+    finally:
+        core.app._startup_handlers.clear()
+        core.app._startup_handlers.extend(saved_handlers)
+        _nicegui_context.slot_stack.clear()
+        _nicegui_context.slot_stack.extend(saved_slot_stack)
+        set_language("he")
+
+
+_ROW_FILTERED = "ROW-FILTERED-SENTINEL"
+_ROW_UNFILTERED = "ROW-UNFILTERED-SENTINEL"
+
+
+def _filter_keyed_findings():
+    """A result set that says, in the RENDER, whether a filter reached the
+    query -- so "the chip disappeared" cannot pass for "the filter was
+    cleared"."""
+
+    async def _call(unit="identification", *, bucket="main", domain=None,
+                    author=None, work_id=None, sort="band_rank", **_kw):
+        title = _ROW_FILTERED if (domain or author or work_id) else _ROW_UNFILTERED
+        row = dict(_finding_row("w000001", title, "T-S 12.111"), unit=unit)
+        return {"status": "ok", "items": [row], "total": 1,
+                "meta": {"unit": unit, "bucket": bucket, "sort": sort,
+                         "sort_basis": "best_band_rank", "novelty_offered": True,
+                         "approximate_total": False}}
+
+    return _call
+
+
+@pytest.mark.render_smoke
+def test_a_chip_removes_its_own_filter_and_clear_all_removes_every_filter():
+    """The reversibility half, end to end, through the elements' own listeners.
+
+    Asserting that the chip vanished would be satisfied by a chip wired to
+    nothing at all -- so what is asserted is the RESULT SET: the filtered
+    sentinel goes away and the unfiltered one comes back, which can only happen
+    if the cleared state reached the query."""
+    import httpx
+    from nicegui import core, ui
+    from nicegui.context import context as _nicegui_context
+    from nicegui.events import handle_event
+    from nicegui.testing.general import prepare_simulation
+    from nicegui.testing.user import User
+    from nicegui.ui_run import set_storage_secret
+
+    from web.translations import tr
+
+    lang = "en"
+    saved_slot_stack = list(_nicegui_context.slot_stack)
+    saved_handlers = list(core.app._startup_handlers)
+    core.app._startup_handlers.clear()
+
+    async def _run():
+        prepare_simulation()
+        set_storage_secret("findings-active-filter-secret", {})
+        with ExitStack() as stack:
+            stack.enter_context(patch("web.main.discovery_available", return_value=True))
+            stack.enter_context(patch.object(
+                fp, "get_findings_enveloped", _filter_keyed_findings()))
+            stack.enter_context(patch.object(
+                fp, "get_findings_facets_enveloped", _fake_facets()))
+            stack.enter_context(patch("web.main._resolve_ui_language", return_value=lang))
+            _os.environ["NICEGUI_USER_SIMULATION"] = "true"
+            set_language(lang)
+            try:
+                async with core.app.router.lifespan_context(core.app):
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(core.app), base_url="http://test"
+                    ) as http_client:
+                        user = User(http_client)
+                        await user.open(FINDINGS_ROUTE)
+                        await user.should_see(_ROW_UNFILTERED)
+
+                        # (1) pick a domain from the facet list.
+                        user.find(kind=ui.button, content="Liturgy").click()
+                        await user.should_see(_ROW_FILTERED)
+                        await user.should_not_see(_ROW_UNFILTERED)
+
+                        # (2) remove it through the CHIP's own listener.
+                        with user.client:
+                            removes = [
+                                element for element in user.client.elements.values()
+                                if f"{fp.ACTIVE_FILTERS_CLASS}-remove"
+                                in (element._classes or [])
+                            ]
+                            assert len(removes) == 1, (
+                                f"expected one active-filter chip, got {len(removes)}")
+                            listener = next(
+                                listener for listener
+                                in removes[0]._event_listeners.values()
+                                if listener.type == "click")
+                            handle_event(listener.handler, None)
+                        await user.should_see(_ROW_UNFILTERED)
+                        await user.should_not_see(_ROW_FILTERED)
+
+                        # (3) pick it again, then use Clear all.
+                        user.find(kind=ui.button, content="Liturgy").click()
+                        await user.should_see(_ROW_FILTERED)
+                        user.find(kind=ui.button, content=tr("Clear All")).click()
+                        await user.should_see(_ROW_UNFILTERED)
+                        await user.should_not_see(_ROW_FILTERED)
             finally:
                 _os.environ.pop("NICEGUI_USER_SIMULATION", None)
 

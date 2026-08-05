@@ -177,6 +177,10 @@ FILTER_BAR_CLASS = "gs-findings-fbar"
 BUCKET_CONTROL_CLASS = "gs-findings-bucket"
 FACET_HEADER_CLASS = "gs-findings-facet-header"
 RESULT_BAR_CLASS = "gs-findings-rbar"
+#: The active-filter chip bar: one removable chip per selection plus a clear
+#: all, between the result bar and the rows it describes. NEVER a chip for the
+#: pool -- see `_active_filter_chips`.
+ACTIVE_FILTERS_CLASS = "gs-findings-active"
 RESULTS_CLASS = "gs-findings-results"
 ROW_CLASS = "gs-findings-row"
 PAGER_CLASS = "gs-findings-pager"
@@ -197,6 +201,17 @@ _KEY_NOVELTY = _STORAGE_PREFIX + "novelty_only"
 _KEY_DOMAIN = _STORAGE_PREFIX + "domain"
 _KEY_AUTHOR = _STORAGE_PREFIX + "author"
 _KEY_WORK = _STORAGE_PREFIX + "work_id"
+#: The work facet is the ONE level whose stored value is not also its own name:
+#: `work_id` is a `w`-prefixed key. The active-filter chip has to name the work
+#: a reader chose, and the chip is rendered BEFORE the facet cascade returns on
+#: a cold load, so the label cannot be looked up from the list at render time.
+#: What is persisted is therefore the RAW RECORDED TITLE the facet item carried
+#: -- data, not a rendered string -- and it is routed through
+#: `facet_display_label` (i.e. through ruling R's curation, in the CURRENT
+#: language) every time it is shown. Persisting the rendered label instead
+#: would show a reader who switches language the title they picked in the
+#: other one.
+_KEY_WORK_LABEL = _STORAGE_PREFIX + "work_label"
 _KEY_PAGE = _STORAGE_PREFIX + "page"
 
 
@@ -419,6 +434,7 @@ def read_state() -> Dict[str, Any]:
         "domain": _opt(_KEY_DOMAIN),
         "author": _opt(_KEY_AUTHOR),
         "work_id": _opt(_KEY_WORK),
+        "work_label": _opt(_KEY_WORK_LABEL),
         "page": page if page >= 1 else 1,
     }
     return normalise_state(state)
@@ -454,6 +470,7 @@ def write_state(state: Dict[str, Any]) -> None:
     safe_user_set(_KEY_DOMAIN, state["domain"])
     safe_user_set(_KEY_AUTHOR, state["author"])
     safe_user_set(_KEY_WORK, state["work_id"])
+    safe_user_set(_KEY_WORK_LABEL, state.get("work_label"))
     safe_user_set(_KEY_PAGE, state["page"])
 
 
@@ -1199,9 +1216,17 @@ def _facet_node(
     value = item.get("value")
     state_key = "work_id" if level == "work" else level
     selected = state.get(state_key) == value
+    # Only the work level: its stored value is a `w`-prefixed key, so the raw
+    # recorded title travels with the selection for the active-filter chip to
+    # name it. See `_KEY_WORK_LABEL`.
+    raw_label = item.get("label") if state_key == "work_id" else None
 
-    async def _pick(_event=None, value=value, state_key=state_key) -> None:
-        state[state_key] = None if state.get(state_key) == value else value
+    async def _pick(_event=None, value=value, state_key=state_key,
+                    raw_label=raw_label) -> None:
+        picked = None if state.get(state_key) == value else value
+        state[state_key] = picked
+        if state_key == "work_id":
+            state["work_label"] = raw_label if picked is not None else None
         state["page"] = 1
         await refresh()
 
@@ -1351,6 +1376,7 @@ def _render_results(
     meta = dict(envelope.get("meta") or {})
 
     _render_result_bar(items, total, meta, state, lang, refresh)
+    _render_active_filters(state, lang, refresh)
 
     with ui.column().classes(f"rows {RESULTS_CLASS}-rows w-full gap-2"):
         if not items:
@@ -1429,6 +1455,127 @@ def _render_result_bar(
         with ui.row().classes("w-full gap-3 items-center flex-wrap"):
             _render_unit_select(state, refresh)
             _render_sort_select(state, refresh)
+
+
+#: The axes an active-filter chip may represent, in display order, each named
+#: by the state key it clears.
+#:
+#: THE POOL IS NOT HERE, and adding it would be a design error rather than a
+#: feature: a removable chip promises a neutral "no pool" state to return to,
+#: and `_OFFERED_BUCKETS` offers exactly two buckets with no union between them
+#: (ruling U constraint 1 -- a control that silently unioned the two would
+#: produce a figure the page could not name). The pool is switched on its own
+#: always-present control, never dismissed.
+#:
+#: `unit` and `sort` are absent for a different reason: both already have a live
+#: control in the result bar showing their current value, so a chip would be a
+#: second display of the same state.
+_CHIP_AXES: Tuple[str, ...] = ("novelty_only", "domain", "author", "work_id")
+
+
+def _clear_filter_axis(state: Dict[str, Any], axis: Optional[str]) -> None:
+    """Clear ONE chip axis, or -- with `axis=None` -- every one of them.
+
+    PURE: no UI, no read, no refresh, so the rule is assertable without a
+    browser. Any filter change returns to page 1, because page 4 of the old set
+    is not page 4 of the new one and a reader landing past the end of a shorter
+    set reads it as "no results".
+
+    `bucket`, `unit` and `sort` survive a clear-all: none of the three has a
+    neutral value to return to, and inventing one for the bucket is the exact
+    thing the chip bar refuses to imply.
+    """
+    for key in _CHIP_AXES:
+        if axis is not None and key != axis:
+            continue
+        state[key] = False if key == "novelty_only" else None
+        if key == "work_id":
+            state["work_label"] = None
+    state["page"] = 1
+
+
+def _active_filter_chips(state: Dict[str, Any], lang: str) -> List[Tuple[str, str]]:
+    """`(axis, reader label)` for every active selection, in display order.
+
+    Every label comes from vocabulary that already exists -- the candidacy
+    switch's own ratified name, and `facet_display_label`, which is the same
+    function the facet lists route through -- so this bar introduces no second
+    name for anything and no claim vocabulary of its own. In particular the work
+    chip goes through ruling R's curation exactly as the work facet does.
+
+    The candidacy chip is gated on the SERVICE's own axis predicate as well as
+    on the flag: on a unit that does not offer the axis the flag is already
+    cleared by `normalise_state`, and a chip for a filter the query is not
+    applying would be the same lie in a smaller box.
+    """
+    chips: List[Tuple[str, str]] = []
+    if state.get("novelty_only") and findings_novelty_offered(state.get("unit")):
+        chips.append(("novelty_only", novelty_strings(lang)["toggle"]))
+    for level, axis_key in (("domain", "Domain"), ("author", "Author")):
+        value = state.get(level)
+        if value:
+            chips.append((level, "{}: {}".format(
+                tr(axis_key),
+                facet_display_label(level, {"value": value, "label": value}, lang))))
+    work_id = state.get("work_id")
+    if work_id:
+        chips.append(("work_id", "{}: {}".format(
+            tr("Work"),
+            facet_display_label(
+                "work", {"value": work_id, "label": state.get("work_label")}, lang))))
+    return chips
+
+
+def _render_active_filters(state: Dict[str, Any], lang: str, refresh) -> None:
+    """The reader's own selections, beside the rows they produced.
+
+    There was no "you are here" on this page at all. Picking a domain changed a
+    row count and set one `.here` class in a 340px scroll box up to 800px away,
+    possibly scrolled out of view -- so a reader could not tell what was applied,
+    and had to hunt for the same node to undo it. `/catalog-browse` solves this
+    with a chip bar and a clear-all; this page took that page's CARD pattern and
+    not its STATE pattern, and state is the half that lets a reader trust what
+    they are looking at.
+
+    Rendered between the result bar and the rows, so the answer to "why am I
+    looking at these rows" sits with the rows.
+
+    THE SHAPE is `/catalog-browse`'s; the CLASSES deliberately are not. That
+    page's `_make_chip` uses `ml-1` and `text-left`, which put the close button
+    and the label on the wrong side in Hebrew. Everything here is either a
+    logical property or side-neutral, and all of it is inline -- this work adds
+    no stylesheet rule.
+    """
+    chips = _active_filter_chips(state, lang)
+    if not chips:
+        return
+
+    async def _clear(axis: Optional[str]) -> None:
+        _clear_filter_axis(state, axis)
+        await refresh()
+
+    with ui.row().classes(
+        f"{ACTIVE_FILTERS_CLASS} w-full items-center gap-2 flex-wrap"
+    ):
+        for axis, label in chips:
+            with ui.row().classes(
+                f"{ACTIVE_FILTERS_CLASS}-chip items-center flex-nowrap"
+            ).style(
+                "gap: 4px; border: 1px solid var(--border-light); "
+                "border-radius: 999px; background: var(--bg-secondary); "
+                "padding-block: 2px; padding-inline: 10px;"
+            ):
+                ui.label(label).classes("text-xs")
+                remove = ui.button(
+                    icon="close", on_click=lambda _event=None, axis=axis: _clear(axis)
+                ).props("flat round dense size=xs")
+                remove.classes(f"{ACTIVE_FILTERS_CLASS}-remove")
+                # An icon-only control needs a name a screen reader can read.
+                remove.props(f'aria-label="{tr("Remove")}"')
+
+        clear = ui.button(tr("Clear All"), on_click=lambda _event=None: _clear(None))
+        clear.props("flat dense no-caps size=sm color=red")
+        clear.classes(f"{ACTIVE_FILTERS_CLASS}-clear")
 
 
 def _render_unit_select(state: Dict[str, Any], refresh) -> None:
