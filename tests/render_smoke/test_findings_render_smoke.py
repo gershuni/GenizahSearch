@@ -2039,6 +2039,17 @@ def capture_rendered_output(destination: str) -> str:
             #     scan would never have looked at any of them.
             ("approved-headline",
              {"launch": sentinel_launch_envelope_approved()}),
+            # (5) the AUTHOR/WORK selects with a selection the cascade does not
+            #     offer. Two branches live only here: the option added back for
+            #     an applied-but-unoffered filter (without it the control would
+            #     render blank while the query still filtered), and the
+            #     no-op guard in the pick handler that stops a re-render's own
+            #     value assignment from looping through `refresh`.
+            ("selected-facets", {"state": {
+                "unit": "identification", "bucket": BUCKET_MAIN,
+                "sort": "band_rank", "novelty_only": False, "domain": None,
+                "author": "AN AUTHOR THE CASCADE DOES NOT OFFER",
+                "work_id": "w000404", "work_label": None, "page": 1}}),
         ):
             patch = _Patch()
             try:

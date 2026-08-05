@@ -360,6 +360,20 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
             "המאגר העיקרי דורש. קראו כל אחת ככיוון לבדיקה."
         ),
     },
+    # The AUTHOR and WORK selects' own placeholder (2026-08-05). `ui.select`
+    # takes its label as a plain argument and an AST check forbids a literal
+    # there, so the two strings live here beside the page's other copy rather
+    # than inline. They name the ACTION ("search"), because the card header
+    # above already names the axis -- a placeholder that repeated the axis name
+    # would be the axis stated twice and the affordance stated nowhere.
+    "facet_search_author": {
+        "en": "Search authors...",
+        "he": "חיפוש מחברים...",
+    },
+    "facet_search_work": {
+        "en": "Search works...",
+        "he": "חיפוש חיבורים...",
+    },
     # An `ok` facet envelope carrying NO items. Deliberately a different
     # statement from `needs_tag` above, because it is a different fact: that
     # one says the data to filter on is absent, this one says the data is
@@ -1319,6 +1333,14 @@ def facet_display_label(level: str, item: Dict[str, Any], lang: str) -> str:
     value = item.get("value")
     raw_label = item.get("label") or value or ""
     if level == "work":
+        # NEVER the stored key. A work's value is a `w`-prefixed id, so the
+        # `or value` fallback above would print `w000404` as a title -- which
+        # is what happened when a SELECTED work was not in the cascade's own
+        # answer and nothing had persisted its label. A reader gets the shared
+        # "title unavailable" wording instead, in the select and on the chip
+        # alike, because both route through this one function.
+        if not item.get("label") or item.get("label") == value:
+            return missing_title(lang)
         return display_work_title(value, raw_label, lang) or missing_title(lang)
     if level == "domain":
         return genre_display_label(raw_label, lang)
@@ -1348,26 +1370,35 @@ def _node_text(label: str, count: Any) -> str:
         return label
 
 
+#: The state key each facet level selects on -- ONE mapping, read by the domain
+#: tree's node and by the author/work select alike, so the two controls cannot
+#: come to disagree about which key an axis persists on. `work` selects on
+#: `work_id` because its VALUE is a `w`-prefixed key rather than a title.
+_FACET_STATE_KEY: Dict[str, str] = {"domain": "domain", "author": "author",
+                                    "work": "work_id"}
+
+
 def _facet_node(
     level: str, item: Dict[str, Any], state: Dict[str, Any], refresh,
     *, text: str, tooltip: Optional[str] = None, leaf: bool = False,
 ) -> Any:
     """One selectable facet node, with the classes the shared CSS block
-    styles (`.dnode`, `.dnode.leaf`, `.here`)."""
-    value = item.get("value")
-    state_key = "work_id" if level == "work" else level
-    selected = state.get(state_key) == value
-    # Only the work level: its stored value is a `w`-prefixed key, so the raw
-    # recorded title travels with the selection for the active-filter chip to
-    # name it. See `_KEY_WORK_LABEL`.
-    raw_label = item.get("label") if state_key == "work_id" else None
+    styles (`.dnode`, `.dnode.leaf`, `.here`).
 
-    async def _pick(_event=None, value=value, state_key=state_key,
-                    raw_label=raw_label) -> None:
+    THE DOMAIN LEVEL ONLY, since 2026-08-05: author and work are searchable
+    selects (`_render_facet_select`), and their `work_label` bookkeeping moved
+    there with them. The `level` parameter stays because the state key it
+    resolves is the shared mapping, not a domain-specific constant -- but a
+    branch here for a level that no longer arrives would be dead code that
+    reads as coverage.
+    """
+    value = item.get("value")
+    state_key = _FACET_STATE_KEY[level]
+    selected = state.get(state_key) == value
+
+    async def _pick(_event=None, value=value, state_key=state_key) -> None:
         picked = None if state.get(state_key) == value else value
         state[state_key] = picked
-        if state_key == "work_id":
-            state["work_label"] = raw_label if picked is not None else None
         state["page"] = 1
         await refresh()
 
@@ -1464,6 +1495,94 @@ def _render_domain_tree(
         toggle.on("click", _toggle_kids)
 
 
+def _render_facet_select(
+    level: str, items: List[Dict[str, Any]], state: Dict[str, Any], lang: str, refresh
+) -> Any:
+    """The AUTHOR and WORK facets as `/catalog-browse`'s searchable select.
+
+    47 authors and 478 works were 525 flat `ui.button` nodes in a 340px scroll
+    box, with no search field: finding a specific work meant scrolling 478
+    buttons. `/catalog-browse` -- the page this one was deliberately matched to
+    -- already uses the right control for exactly these two facets, and this
+    page took that page's CARD pattern without its CONTROL. The props here are
+    that page's verbatim (`dense outlined clearable use-input
+    input-debounce=300`); its physical Tailwind classes (`ml-1`, `text-left`,
+    `pl-4`) deliberately are NOT copied, because they put the label and the
+    caret on the wrong side in Hebrew.
+
+    THE DOMAIN FACET KEEPS ITS TREE. It is two levels with counts and a
+    collapse, and it reads as navigation rather than as a lookup.
+
+    LABELS route through `facet_display_label` (ruling R): the work level's raw
+    recorded title must never be printed, and this is the very control a reader
+    uses to find a work. VALUES stay the stored key the service filters and
+    persists on, so a work chosen in Hebrew narrows exactly what the same work
+    chosen in English narrows.
+
+    COUNTS ride on the option, from the facet envelope's own count -- the same
+    `_node_text` shape the domain tree uses, so the number beside an option
+    always agrees with the result set that option produces. They fit here: the
+    old buttons wrapped in a 340px column, and a count after a work title was
+    the first thing to truncate; an option line is the full card width.
+
+    A SELECTION THE CASCADE NO LONGER OFFERS IS STILL SHOWN. The facets
+    re-fetch on every refresh, so narrowing another axis can drop the selected
+    option out of the returned set -- and a select whose value is absent from
+    its own options renders BLANK while the query is still filtering on it.
+    The current selection is therefore added back to the option map (labelled
+    from the persisted raw label where there is one), so what the control shows
+    and what the query does cannot disagree, and the reader can still clear it.
+    """
+    state_key = _FACET_STATE_KEY[level]
+    selected = state.get(state_key)
+
+    options: Dict[Any, str] = {}
+    raw_labels: Dict[Any, Any] = {}
+    for item in items:
+        value = item.get("value")
+        options[value] = _node_text(facet_display_label(level, item, lang),
+                                    item.get("count"))
+        raw_labels[value] = item.get("label")
+    if selected is not None and selected not in options:
+        # Labelled from what we persisted about it, never from the value: the
+        # work level's value is a `w`-prefixed key and printing it would put a
+        # stored identifier in a reader's control.
+        options[selected] = facet_display_label(
+            level, {"value": selected,
+                    "label": state.get("work_label") if level == "work" else selected},
+            lang)
+
+    async def _pick(event) -> None:
+        value = getattr(event, "value", None)
+        # The `clearable` X emits None, and that is the axis being cleared --
+        # the SAME state change the chip bar's own remove control makes, so the
+        # two round-trip against each other.
+        picked = value if value in options else None
+        # GUARDED, and the guard is what stops a loop rather than a nicety:
+        # every refresh REBUILDS this control with its current value, and a
+        # rebuild that re-entered `refresh` would recurse. Written as a
+        # condition around the body rather than as an early `return`, so the
+        # no-op path adds no line of its own -- a line that paints nothing and
+        # that no capture can drive reads as coverage nobody has.
+        if picked != state.get(state_key):
+            state[state_key] = picked
+            if level == "work":
+                state["work_label"] = (
+                    raw_labels.get(picked) if picked is not None else None)
+            state["page"] = 1
+            await refresh()
+
+    control = ui.select(
+        options=options,
+        value=selected if selected in options else None,
+        with_input=True,
+        on_change=_pick,
+        label=copy_text(f"facet_search_{level}", lang),
+    ).props("dense outlined clearable use-input input-debounce=300")
+    control.classes(f"{FILTER_BAR_CLASS}-{level}-select w-full")
+    return control
+
+
 def _render_facet_items(
     level: str, envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh
 ) -> None:
@@ -1490,14 +1609,7 @@ def _render_facet_items(
         _render_domain_tree(items, state, lang, refresh)
         return
 
-    # Author and work nodes carry their name and nothing else. The owner asked
-    # for counts on the DOMAIN facet, which is the one that reads as a
-    # navigable tree; a work title is already long, and a count after it is the
-    # first thing to truncate.
-    for item in items:
-        _facet_node(level, item, state, refresh,
-                    text=facet_display_label(level, item, lang),
-                    leaf=bool(item.get("is_leaf")))
+    _render_facet_select(level, items, state, lang, refresh)
 
 
 # ---------------------------------------------------------------------------

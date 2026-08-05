@@ -981,9 +981,14 @@ def test_work_facet_label_routes_through_display_work_title(monkeypatch, lang):
     from shared.discovery_display_strings import display_work_title
 
     client = _render_page(monkeypatch, lang=lang)
-    items = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-work-items")
-    assert items, "the work facet list did not render"
-    labels = _subtree_strings(items[0])
+    # Read the SELECT's own option labels: the work facet is a searchable
+    # select now, so what a reader can pick lives in props rather than in
+    # element text. An assertion over the subtree would pass over an empty list.
+    # The count is stripped, so these stay EXACT comparisons: the curated
+    # Hebrew title begins with the raw one, and a prefix test would report the
+    # raw title as present on the label that proves the curation ran.
+    labels = _facet_option_names(client, "work")
+    assert labels, "the work facet list did not render"
 
     expected = display_work_title(_CURATED_WORK_ID, _CURATED_RAW_TITLE, lang)
     assert expected != _CURATED_RAW_TITLE, (
@@ -2545,6 +2550,54 @@ def _facets_with_domain_tree():
     return _fake_facets(items)
 
 
+def _facet_select(client, level: str):
+    """The AUTHOR or WORK facet's searchable select (2026-08-05).
+
+    Those two facets are `ui.select(with_input=True, clearable)` now, not flat
+    button stacks -- 478 unsearchable buttons in a 340px box was the worst
+    control on the page. Their option labels live in `_props['options']` rather
+    than in element text, so an assertion about what a reader can pick has to
+    read them from there or it is asserting about an empty subtree.
+    """
+    selects = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-{level}-select")
+    assert len(selects) <= 1, f"more than one {level} select rendered"
+    return selects[0] if selects else None
+
+
+def _facet_option_labels(client, level: str) -> list:
+    control = _facet_select(client, level)
+    if control is None:
+        return []
+    return [option["label"] for option in (control._props or {}).get("options") or []]
+
+
+_OPTION_COUNT_SUFFIX = _re.compile(r"\s+\([\d,]+\)$")
+
+
+def _facet_option_names(client, level: str) -> list:
+    """Option labels with the facet count stripped, so an assertion can compare
+    a NAME exactly.
+
+    `startswith` is not a substitute and it is a trap here: the curated Hebrew
+    title for `w000176` begins with the raw recorded one, so a prefix test
+    would report the raw title as present on the very label that proves ruling
+    R is being applied.
+    """
+    return [_OPTION_COUNT_SUFFIX.sub("", label)
+            for label in _facet_option_labels(client, level)]
+
+
+def _facet_option_values(client, level: str) -> list:
+    """The VALUES a reader's pick would set, in NiceGUI's own option order --
+    read through the element's `options` mapping, which is the stored key the
+    service filters on and never the label."""
+    control = _facet_select(client, level)
+    if control is None:
+        return []
+    options = control.options
+    return list(options) if isinstance(options, dict) else list(options)
+
+
 def _node_texts(client, marker: str) -> list:
     """Every rendered string under `marker`, as a list (not one blob), so an
     assertion can be about ONE node rather than about the page."""
@@ -3348,7 +3401,7 @@ def test_the_work_facet_is_not_translated_through_the_domain_vocabulary(monkeypa
     map that also fired on titles would be a second title vocabulary."""
     monkeypatch.setitem(gl._STATE, "map", {_UNCURATED_RAW_TITLE: "לא נכון"})
     client = _render_page(monkeypatch, lang="he")
-    blob = "\n".join(_node_texts(client, f"{fp.FILTER_BAR_CLASS}-work-items"))
+    blob = "\n".join(_facet_option_labels(client, "work"))
     assert _UNCURATED_RAW_TITLE in blob
     assert "לא נכון" not in blob
 
@@ -4235,6 +4288,230 @@ def test_the_empty_facet_line_is_not_the_missing_backing_data_treatment(monkeypa
             f"an OUTAGE on the {level!r} facet read as 'no matches under the "
             "current filters' — it is not a fact about the filters at all")
         assert _elements_with_class(outage, f"{fp.FILTER_BAR_CLASS}-{level}-blocked")
+
+
+# ---------------------------------------------------------------------------
+# TASK D (2026-08-05) — AUTHOR AND WORK BECOME SEARCHABLE.
+#
+# 47 author buttons and 478 work buttons in a 340px scroll box, with no search
+# field: finding a specific work meant scrolling 478 buttons. `/catalog-browse`
+# — the page this one was deliberately matched to — already uses
+# `ui.select(with_input=True, clearable)` for exactly these two facets. This
+# page copied that page's CARD and not its CONTROL.
+#
+# The DOMAIN facet keeps its tree: it is two levels with counts and a collapse,
+# and it reads as navigation rather than as a lookup.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("level", ["author", "work"])
+def test_the_author_and_work_facets_are_searchable_selects(monkeypatch, level):
+    client = _render_page(monkeypatch, lang="en")
+    control = _facet_select(client, level)
+    assert control is not None, f"the {level} facet is not a select"
+    assert type(control).__name__ == "Select"
+
+    props = control._props or {}
+    # `/catalog-browse`'s own props, verbatim -- the search field is
+    # `use-input`, and `clearable` is what makes the axis reversible in place.
+    assert props.get("use-input") is True, "the select has no search input"
+    assert props.get("clearable") is True, "the axis cannot be cleared in place"
+    assert props.get("dense") is True and props.get("outlined") is True
+    assert str(props.get("input-debounce")) == "300"
+    # ...but NOT that page's physical classes, which put the label and the
+    # caret on the wrong side in Hebrew.
+    classes = " ".join(control._classes or [])
+    for physical in ("ml-1", "mr-1", "pl-4", "pr-4", "text-left", "text-right"):
+        assert physical not in classes, (
+            f"the {level} select copied a PHYSICAL class ({physical}) -- it "
+            "breaks in Hebrew")
+
+
+def test_the_domain_facet_keeps_its_tree(monkeypatch):
+    """Only two of the three facets changed control."""
+    client = _render_page(monkeypatch, lang="en", facets=_facets_with_domain_tree())
+    assert _facet_select(client, "domain") is None, (
+        "the domain facet became a select -- its tree, counts and collapse are "
+        "what make it navigable")
+    assert _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-domain-branch")
+
+
+@pytest.mark.parametrize("level,state_key,expected_value", [
+    ("author", "author", "Maimonides"),
+    ("work", "work_id", _CURATED_WORK_ID),
+])
+def test_an_option_carries_the_STORED_KEY_as_its_value_and_a_count_on_its_label(
+        monkeypatch, level, state_key, expected_value):
+    """The label is for the reader and the VALUE is for the service. On the work
+    level they are not even the same kind of thing -- the value is a
+    `w`-prefixed key -- so a control that filtered on its label would filter on
+    nothing at all."""
+    client = _render_page(monkeypatch, lang="en")
+    assert expected_value in _facet_option_values(client, level), (
+        f"the {level} option does not carry the stored key the service filters "
+        f"on: {_facet_option_values(client, level)!r}")
+
+    # The count comes from the facet envelope, so the number beside an option
+    # always agrees with the result set that option produces.
+    counts = {item["value"]: item["count"] for item in _FACET_ITEMS[level]}
+    labels = _facet_option_labels(client, level)
+    assert any(f"({counts[expected_value]:,})" in label for label in labels), (
+        f"no facet count on the {level} options: {labels!r}")
+    del state_key
+
+
+@pytest.mark.parametrize("level,state_key,picked", [
+    ("author", "author", "Maimonides"),
+    ("work", "work_id", _CURATED_WORK_ID),
+])
+def test_picking_an_option_sets_the_state_resets_the_page_and_refreshes(
+        monkeypatch, level, state_key, picked):
+    """The SAME three effects the old button node had, through the one refresh
+    path -- driven through the select's own registered handler, because a
+    control wired to nothing renders identically to one that works."""
+    seen = {}
+
+    async def _drive(client):
+        control = _facet_select(client, level)
+        listeners = [listener for listener in control._event_listeners.values()
+                     if listener.type in ("update:model-value", "change")]
+        assert listeners or control._props is not None
+        # NiceGUI routes `on_change` through the value binding; set the value
+        # the way the framework does and let the handler run.
+        control.value = picked
+        await asyncio.sleep(0)
+        seen["client"] = client
+
+    state = _state(page=4)
+    captured = {}
+
+    async def _findings(unit="identification", *, bucket="main", sort="band_rank", **kw):
+        captured["kwargs"] = kw
+        return {"status": "ok", "items": list(_ROWS_BY_BUCKET.get(bucket, [])),
+                "total": 1,
+                "meta": {"unit": unit, "bucket": bucket, "sort": sort,
+                         "sort_basis": "best_band_rank", "novelty_offered": True,
+                         "approximate_total": False}}
+
+    monkeypatch.setattr(fp, "read_state", lambda: dict(state))
+    written = {}
+    monkeypatch.setattr(fp, "write_state", lambda s: written.update(s))
+    _render_page(monkeypatch, lang="en", findings=_findings, state=state,
+                 driver=_drive)
+
+    assert written.get(state_key) == picked, (
+        f"picking a {level} did not set {state_key!r}: {written!r}")
+    assert written.get("page") == 1, "a filter change did not return to page 1"
+    if level == "work":
+        # The RAW recorded label travels with the selection, so the chip bar can
+        # name the work without a second lookup (`_KEY_WORK_LABEL`).
+        assert written.get("work_label") == _CURATED_RAW_TITLE
+
+
+@pytest.mark.parametrize("level,state_key,start", [
+    ("author", "author", "Maimonides"),
+    ("work", "work_id", _CURATED_WORK_ID),
+])
+def test_clearing_the_select_clears_that_axis(monkeypatch, level, state_key, start):
+    """The `clearable` X emits None, and that must be the SAME state change the
+    chip bar's own remove control makes -- otherwise the two controls disagree
+    about what is applied."""
+    async def _drive(client):
+        control = _facet_select(client, level)
+        assert control.value == start, (
+            "the select did not show the persisted selection at all")
+        control.value = None
+        await asyncio.sleep(0)
+
+    written = {}
+    monkeypatch.setattr(fp, "write_state", lambda s: written.update(s))
+    _render_page(monkeypatch, lang="en", state=_state(**{state_key: start}),
+                 driver=_drive)
+    assert written.get(state_key) is None, f"{state_key!r} survived the clear"
+    if level == "work":
+        assert written.get("work_label") is None
+
+
+@pytest.mark.parametrize("level,state_key,start", [
+    ("author", "author", "Maimonides"),
+    ("work", "work_id", _CURATED_WORK_ID),
+])
+def test_the_select_and_the_chip_show_the_same_axis(monkeypatch, level, state_key, start):
+    """Round-trip: what the chip bar says is applied is what the select shows as
+    selected. Two displays of one state that can disagree are worse than one.
+
+    The work case carries `work_label` as well, because that is what every
+    write site persists alongside `work_id` -- the two are written together by
+    `_facet_node._pick` and by the select's own handler. The incoherent state
+    (an id with no label) is covered by its own test below, where BOTH surfaces
+    say "title unavailable" rather than one of them printing the stored key.
+    """
+    extra = {"work_label": _CURATED_RAW_TITLE} if level == "work" else {}
+    client = _render_page(monkeypatch, lang="en",
+                          state=_state(**{state_key: start}, **extra))
+    assert _facet_select(client, level).value == start
+
+    chips = _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-chip")
+    said = "\n".join(text for chip in chips for text in _subtree_strings(chip))
+    expected = fp.facet_display_label(
+        level, {"value": start,
+                "label": _CURATED_RAW_TITLE if level == "work" else start}, "en")
+    assert expected in said, (
+        f"the {level} chip and the {level} select disagree: {said!r}")
+
+
+@pytest.mark.parametrize("level,state_key,start", [
+    ("author", "author", "A Vanished Author"),
+    ("work", "work_id", "w000404"),
+])
+def test_a_selection_the_cascade_no_longer_offers_is_still_shown(
+        monkeypatch, level, state_key, start):
+    """The facets re-fetch on every refresh, so narrowing another axis can drop
+    the selected option out of the returned set. A select whose value is absent
+    from its own options renders BLANK while the query is still filtering on it
+    -- the filter would then be invisible AND unclearable."""
+    client = _render_page(monkeypatch, lang="en", state=_state(**{state_key: start}))
+    control = _facet_select(client, level)
+    assert start in _facet_option_values(client, level), (
+        f"the applied {level} filter vanished from its own control")
+    assert control.value == start, "the control shows nothing while filtering"
+    # ...and never LABELLED with the stored key. A work's value is a
+    # `w`-prefixed id; printing it as a title puts an internal identifier in
+    # the control a reader uses to find a work.
+    labels = "\n".join(_facet_option_labels(client, level))
+    assert "w000404" not in labels, labels
+    if level == "work":
+        from shared.discovery_display_strings import missing_title
+        assert missing_title("en") in labels, (
+            "an unlabelled selection rendered as something other than the "
+            "shared 'title unavailable' wording")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_chip_and_the_select_agree_about_an_unlabelled_work(monkeypatch, lang):
+    """Both route through `facet_display_label`, so neither can print the key
+    while the other prints prose."""
+    from shared.discovery_display_strings import missing_title
+
+    client = _render_page(monkeypatch, lang=lang, state=_state(work_id="w000404"))
+    chips = _elements_with_class(client, f"{fp.ACTIVE_FILTERS_CLASS}-chip")
+    said = "\n".join(text for chip in chips for text in _subtree_strings(chip))
+    assert "w000404" not in said, f"the chip printed the stored key: {said!r}"
+    assert missing_title(lang) in said
+    assert missing_title(lang) in "\n".join(_facet_option_labels(client, "work"))
+
+
+@pytest.mark.parametrize("level", ["author", "work"])
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_an_empty_facet_still_speaks_rather_than_offering_an_empty_dropdown(
+        monkeypatch, level, lang):
+    """An empty dropdown is indistinguishable from a broken one, which is the
+    same failure the flat empty list had."""
+    client = _render_page(monkeypatch, lang=lang, facets=_fake_facets(_EMPTY_FACETS))
+    assert _facet_select(client, level) is None, (
+        "an empty facet rendered a select with nothing in it")
+    marks = _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-{level}-empty")
+    assert marks and fp.copy_text("facet_empty", lang) in "\n".join(
+        _subtree_strings(marks[0]))
 
 
 @pytest.mark.render_smoke
