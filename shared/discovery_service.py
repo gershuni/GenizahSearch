@@ -91,6 +91,35 @@ envelope key                     the query it is
 ``meta.main_pool_total_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id)``
                                  over the same rows, again with no shade
                                  predicate.
+``meta.identification_total``    ``SELECT COUNT(*) FROM
+                                 discovery_identification`` -- **no
+                                 ``main_pool`` predicate and no
+                                 ``novelty_status`` predicate.** The all-in-all
+                                 figure the headline ledes with (owner ruling,
+                                 2026-08-05). It is NOT ``all_bucket_total``,
+                                 which is shade filtered and a different
+                                 population; substituting one for the other is
+                                 the mixed-basis defect ruling U was issued
+                                 over. It is its own ``COUNT(*)`` rather than a
+                                 sum of the two pool keys below: the identity
+                                 holds today because ``main_pool`` partitions
+                                 the table, and a UI that added two separately
+                                 derived figures would go wrong the first time
+                                 either one's basis moved, silently.
+``meta.work_total``              ``SELECT COUNT(DISTINCT display_work_id)
+                                 FROM discovery_identification`` -- how many
+                                 distinct WORKS the identifications name, again
+                                 with no predicate of any kind.
+                                 ``display_work_id`` is not a choice: it is the
+                                 column ``_FINDINGS_UNIT_GROUP_BY`` groups the
+                                 per-work row unit by, so this figure and the
+                                 row count that unit returns are one population
+                                 by construction. NOTE that it is the UNION
+                                 over both buckets and is therefore larger than
+                                 either bucket's own work count; no surface may
+                                 present it as reachable through the bucket
+                                 control, which offers the two buckets and no
+                                 union between them.
 ``meta.more_pool_total``         ``SELECT COUNT(*) FROM
                                  discovery_identification WHERE main_pool = 0``
                                  -- the SECOND pool's SIZE, again with no
@@ -108,13 +137,22 @@ envelope key                     the query it is
 ``meta.all_bucket_manuscript_count``  ditto for the manuscript count
 ``meta.corpus_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id) FROM
                                  discovery_identification`` -- every bucket,
-                                 every shade. The figure ruling U renders as
-                                 "out of N fragments"; the key says
-                                 "manuscript" because ``sys_id`` IS the
-                                 manuscript-record grain.
+                                 every shade. **It counts the fragments THIS
+                                 RELEASE IDENTIFIED SOMETHING ON, not the
+                                 corpus**: the project's corpus is ~255,615
+                                 manuscript records (``libraries.csv``), and a
+                                 surface that labelled this figure "the whole
+                                 corpus" would present the denominator of what
+                                 we already matched as the denominator of
+                                 everything -- a coverage overclaim of roughly
+                                 6.6x. The key keeps its NAME (renaming a
+                                 shipped key is a separate, breaking change)
+                                 and every reader-facing string that uses it
+                                 now says what it counts.
 ``meta.corpus_page_count``       ``SELECT COUNT(DISTINCT page_id) FROM
-                                 discovery_claim`` -- every page any claim
-                                 touches. Ruling U's "across N pages".
+                                 discovery_claim`` -- every page carrying at
+                                 least one claim. Again NOT the corpus's page
+                                 count, and the rendered wording says so.
 ===============================  =========================================
 
 **``main_pool_total`` AND ``total`` ARE TWO DIFFERENT POPULATIONS.** ``total``
@@ -2315,6 +2353,22 @@ class DiscoveryService:
         quality figure: the prohibition on the second pool's assessment ever
         becoming a percentage, a score or an interval is untouched, and so is
         ruling T's rule that the bucket CONTROL carries no count.
+
+        `meta['identification_total']`, `meta['work_total']` and
+        `meta['corpus_manuscript_count']` are the headline's three
+        UNCONDITIONAL figures (owner ruling, 2026-08-05): `COUNT(*)`,
+        `COUNT(DISTINCT display_work_id)` and `COUNT(DISTINCT sys_id)` over the
+        identification table, no `main_pool` predicate and no `novelty_status`
+        predicate on any of them. Because they share ONE basis they may be read
+        together; `total` (shade filtered) and `all_bucket_total` (also shade
+        filtered) may NOT be mixed in with them, which is the same mixed-basis
+        substitution this docstring warns about one paragraph up.
+
+        `corpus_manuscript_count` and `corpus_page_count` count the fragments
+        and pages THIS RELEASE TOUCHED, not the corpus. Both names are older
+        than that distinction; the table above states what each one actually
+        counts, and no reader-facing string built from them may say "the whole
+        corpus".
         """
         if not self.is_available():
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
@@ -2362,6 +2416,25 @@ class DiscoveryService:
                 "SELECT COUNT(*) AS n FROM discovery_identification "
                 "WHERE main_pool = 0"
             ).fetchone()["n"])
+            # THE ALL-IN-ALL figure the headline ledes with (owner ruling,
+            # 2026-08-05). Its own COUNT(*), not `main_pool_total +
+            # more_pool_total`: the identity holds only while `main_pool`
+            # partitions the table, and a figure assembled by adding two
+            # separately-derived numbers goes wrong the first time either
+            # basis moves -- with nothing to notice it.
+            identification_total = int(conn.execute(
+                "SELECT COUNT(*) AS n FROM discovery_identification"
+            ).fetchone()["n"])
+            # The headline's other unconditional figure: how many DISTINCT
+            # WORKS those identifications name. `display_work_id` is not a
+            # choice made here -- it is the column `_FINDINGS_UNIT_GROUP_BY`
+            # groups the per-work row unit by, so this count and the number of
+            # rows that unit would return are the same population by
+            # construction rather than by coincidence.
+            work_total = int(conn.execute(
+                "SELECT COUNT(DISTINCT display_work_id) AS n "
+                "FROM discovery_identification"
+            ).fetchone()["n"])
             corpus_manuscripts = int(conn.execute(
                 "SELECT COUNT(DISTINCT sys_id) AS n FROM discovery_identification"
             ).fetchone()["n"])
@@ -2397,6 +2470,8 @@ class DiscoveryService:
             "sidecar_version": provenance.get("sidecar_version") or self._last_version,
             "audience": provenance.get("audience"),
             "main_pool_manuscript_count": main_manuscripts,
+            "identification_total": identification_total,
+            "work_total": work_total,
             "main_pool_total": main_pool_total,
             "main_pool_total_manuscript_count": main_pool_total_manuscripts,
             "more_pool_total": more_pool_total,

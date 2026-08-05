@@ -155,6 +155,11 @@ SENTINEL_POOL_MANUSCRIPTS = 52111
 #: forbidden list -- the figure the invitation shows is read from the artifact
 #: at request time and may be a literal nowhere.
 SENTINEL_MORE_POOL_TOTAL = 46111
+#: The APPROVED headline's own two figures (owner ruling, 2026-08-05): the
+#: all-in-all identification count and the distinct-work count. The fragment
+#: figure the lede shows is `SENTINEL_CORPUS_MANUSCRIPTS`, which already exists.
+SENTINEL_IDENTIFICATION_TOTAL = 39444
+SENTINEL_WORK_TOTAL = 2555
 
 SENTINEL_VALUES: Tuple[int, ...] = (
     SENTINEL_TOTAL,
@@ -166,6 +171,19 @@ SENTINEL_VALUES: Tuple[int, ...] = (
     SENTINEL_POOL_TOTAL,
     SENTINEL_POOL_MANUSCRIPTS,
     SENTINEL_MORE_POOL_TOTAL,
+    SENTINEL_IDENTIFICATION_TOTAL,
+    SENTINEL_WORK_TOTAL,
+)
+
+#: The APPROVED headline, driven from an envelope whose every figure is a
+#: sentinel. Registered here so the capture below and the provenance assertion
+#: read one definition.
+_APPROVED_HEADLINE_FIGURES: Tuple[Tuple[str, int], ...] = (
+    ("corpus_manuscript_count", SENTINEL_CORPUS_MANUSCRIPTS),
+    ("work_total", SENTINEL_WORK_TOTAL),
+    ("identification_total", SENTINEL_IDENTIFICATION_TOTAL),
+    ("main_pool_total", SENTINEL_POOL_TOTAL),
+    ("more_pool_total", SENTINEL_MORE_POOL_TOTAL),
 )
 
 
@@ -216,6 +234,22 @@ def sentinel_launch_envelope_with_pool_size() -> Dict[str, Any]:
     """
     envelope = sentinel_launch_envelope()
     envelope["meta"]["more_pool_total"] = SENTINEL_MORE_POOL_TOTAL
+    return envelope
+
+
+def sentinel_launch_envelope_approved() -> Dict[str, Any]:
+    """The APPROVED headline's envelope: the lede pair, the second pool's size
+    and the two all-in-all figures.
+
+    Separate from the three above for the same reason they are separate from
+    each other: each one is what proves that the block below it still renders
+    when its own key is absent, and folding them together would delete three
+    degradation proofs while looking like tidying.
+    """
+    envelope = sentinel_launch_envelope_with_lede()
+    envelope["meta"]["more_pool_total"] = SENTINEL_MORE_POOL_TOTAL
+    envelope["meta"]["identification_total"] = SENTINEL_IDENTIFICATION_TOTAL
+    envelope["meta"]["work_total"] = SENTINEL_WORK_TOTAL
     return envelope
 
 
@@ -581,6 +615,46 @@ def test_every_rendered_headline_figure_equals_the_envelope_value(lang):
     for key in ("main_pool_manuscript_count", "corpus_manuscript_count",
                 "corpus_page_count"):
         assert "{:,}".format(envelope["meta"][key]) in text, key
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_every_figure_of_the_APPROVED_headline_equals_the_envelope_value(lang):
+    """The owner-approved block (2026-08-05), figure by figure.
+
+    Five sentinels, none of which appears in any artifact or in either half of
+    136-22's forbidden list, so a hardcode fails here in whatever form it took.
+    The fragment figure is asserted as the LEDE element specifically -- the one
+    number on this page that must not silently become a different population.
+    """
+    envelope = sentinel_launch_envelope_approved()
+    client = render_headline(envelope, lang)
+    text = scoped_text(client, fr.LAUNCH_CLASS)
+
+    for key, sentinel in _APPROVED_HEADLINE_FIGURES:
+        assert envelope["meta"][key] == sentinel, f"the fixture drifted at {key}"
+        assert "{:,}".format(sentinel) in text, (
+            f"{key} did not reach the headline: {text!r}")
+
+    lede = _elements_with_class(client, fr.LAUNCH_FRAGMENTS_CLASS)
+    assert len(lede) == 1
+    assert getattr(lede[0], "text", None) == "{:,}".format(SENTINEL_CORPUS_MANUSCRIPTS)
+    # ...and the CONTRIBUTION, on its own (shade-filtered) basis, is still here.
+    assert "{:,}".format(SENTINEL_TOTAL) in text
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_approved_headline_claims_no_corpus_denominator(lang):
+    """`corpus_manuscript_count` counts fragments this release identified
+    something on and `corpus_page_count` counts pages carrying a claim, while
+    the project's corpus is ~255,615 manuscript records. "In the whole corpus"
+    over those two figures overstated coverage by roughly 6.6x, on the most
+    prominent line of a scholarly surface."""
+    text = scoped_text(render_headline(sentinel_launch_envelope_approved(), lang),
+                       fr.LAUNCH_CLASS)
+    for claim in ("whole corpus", "entire corpus", "כלל האוסף", "כל האוסף"):
+        assert claim not in text, f"the headline still claims {claim!r}: {text!r}"
     ASSERTION_COUNT["n"] += 1
 
 
@@ -1959,6 +2033,12 @@ def capture_rendered_output(destination: str) -> str:
                 for level in ("domain", "author", "work")}}),
             ("sized-pool-invite",
              {"launch": sentinel_launch_envelope_with_pool_size()}),
+            # (4) the APPROVED headline: the fragments/works lede, the
+            #     all-in-all line and the pool split. Painted only from an
+            #     envelope carrying all of those keys, so without this case the
+            #     scan would never have looked at any of them.
+            ("approved-headline",
+             {"launch": sentinel_launch_envelope_approved()}),
         ):
             patch = _Patch()
             try:

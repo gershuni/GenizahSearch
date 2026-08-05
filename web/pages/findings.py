@@ -965,7 +965,9 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
 def _render_filter_bar(state: Dict[str, Any], lang: str, refresh) -> List[Any]:
     """Build the sidebar cards; return the state-dependent re-sync callables."""
     syncs = [_render_novelty_switch(state, lang, refresh)]
-    _render_bucket_control(state, lang, refresh)
+    # The bucket control is state-dependent too, and was not collected -- see
+    # `_render_bucket_control`'s "IT WENT STALE".
+    syncs.append(_render_bucket_control(state, lang, refresh))
     _render_facet_groups(lang)
     _render_coverage_filter(lang)
     return syncs
@@ -1073,7 +1075,7 @@ _SEGMENT_ON = (
 )
 
 
-def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
+def _render_bucket_control(state: Dict[str, Any], lang: str, refresh):
     """THE "more matches" control (ruling T).
 
     A first-class, always-rendered control in the filter bar -- never inside an
@@ -1112,7 +1114,21 @@ def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
     from the shared vocabulary, in match framing -- the second bucket means
     there was not enough evidence for the main-pool rule, never that those
     identifications are probably wrong.
+
+    IT WENT STALE (fixed 2026-08-05, found by two external reviewers). This
+    function returned None and the filter bar collected a re-sync callable only
+    from the novelty switch -- and the bar is BUILT ONCE, so `selected` was
+    evaluated at build time and never again. Clicking "more matches" switched
+    the result set while the chip kept `here` on the main pool and
+    `aria-pressed="true"` stayed on the wrong control: ruling T's own control
+    visibly and accessibly contradicting the result set it had just produced,
+    for sighted and screen-reader readers alike.
+
+    It now returns a sync callable the ONE refresh path runs before the state is
+    persisted or queried, exactly as `_render_novelty_switch` does, so what the
+    control shows and what the query did cannot disagree.
     """
+    chips: List[Tuple[str, Any]] = []
     with _filter_card(f"{BUCKET_CONTROL_CLASS}-group"):
         _card_header(copy_text("pool_card_header", lang))
         # ONE SEGMENT. The enclosing rule and the zero gap are what turn two
@@ -1128,7 +1144,6 @@ def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
             for in_main in (True, False):
                 target = BUCKET_MAIN if in_main else BUCKET_MORE
                 label = bucket_name(in_main, lang)
-                selected = state["bucket"] == target
 
                 async def _select(_event=None, target=target) -> None:
                     state["bucket"] = target
@@ -1136,12 +1151,36 @@ def _render_bucket_control(state: Dict[str, Any], lang: str, refresh) -> None:
                     await refresh()
 
                 chip = ui.button(label, on_click=_select).props("flat dense no-caps")
-                chip.classes("fchip here" if selected else "fchip")
-                chip.props(f'aria-pressed={"true" if selected else "false"}')
-                chip.style(_SEGMENT_ON if selected else _SEGMENT_OFF)
+                chips.append((target, chip))
         ui.label(rule_sentence(lang)).classes(
             f"{BUCKET_CONTROL_CLASS}-rule dnote text-xs"
         )
+
+    def _sync() -> None:
+        """Re-read `state['bucket']` and re-apply BOTH announcements.
+
+        All three of them, together: the `here` class a sighted reader sees, the
+        `aria-pressed` a screen reader hears, and the inline segment styling
+        that is the only visible difference between the two halves. Applying one
+        without the others is how the control announced its state to one reader
+        and not the other in the first place.
+        """
+        for target, chip in chips:
+            selected = state["bucket"] == target
+            # CLASSES: add/remove, never `replace` -- `replace` drops every
+            # other class on the element, the framework's included.
+            chip.classes(add="fchip here" if selected else "fchip",
+                         remove="" if selected else "here")
+            chip.props(f'aria-pressed={"true" if selected else "false"}')
+            # STYLE: `replace`, and it has to be. The two segment styles are not
+            # symmetric -- the selected one sets a background, a colour and a
+            # weight that the unselected one does not mention -- so ADDING the
+            # unselected style over the selected one would leave a deselected
+            # chip still painted as selected.
+            chip.style(replace=_SEGMENT_ON if selected else _SEGMENT_OFF)
+
+    _sync()
+    return _sync
 
 
 def _render_coverage_filter(lang: str) -> None:

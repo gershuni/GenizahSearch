@@ -500,10 +500,17 @@ def _fake_launch(*, status="ok", meta_extra=None):
 
 
 def _render_page(monkeypatch, *, lang="en", findings=None, facets=None, state=None,
-                 launch=None):
+                 launch=None, driver=None):
     """Render the REAL create_findings_page() in a bare client context.
 
-    Returns the NiceGUI Client; tests walk `client.elements` directly."""
+    Returns the NiceGUI Client; tests walk `client.elements` directly.
+
+    `driver(client)` is awaited INSIDE the same event loop and after the page
+    has painted, which is the only way to drive a control whose handler is a
+    coroutine that awaits the page's own refresh path. A test that clicks after
+    `asyncio.run` has returned has no loop to await on, and one that calls the
+    handler synchronously never runs the refresh at all -- which is exactly the
+    class of defect this harness exists to catch."""
     _ensure_sim()
     from nicegui import core, ui
     from nicegui.client import Client
@@ -523,6 +530,8 @@ def _render_page(monkeypatch, *, lang="en", findings=None, facets=None, state=No
         with Client(ui.page("/_findings_page_probe")) as client:
             with client:
                 await fp.create_findings_page()
+                if driver is not None:
+                    await driver(client)
         holder["client"] = client
 
     try:
@@ -2917,6 +2926,174 @@ def test_the_headline_degrades_to_the_previous_block_without_the_new_keys(lang):
     assert len(_elements_with_class(client, fr.LAUNCH_SHADE_CLASS)) == 3
 
 
+# ---------------------------------------------------------------------------
+# TASK E (2026-08-05) — the headline leads with the RELEASE, not with a pool.
+#
+# The lede was the main pool, a subset, and the second pool appeared nowhere in
+# the headline at all. The first fix led with the all-in-all identification
+# count; the owner chose against it from a rendered comparison, because 81% of
+# fragments carry exactly one identification, so "53,581 identifications on
+# 38,431 fragments" reads as an error rather than as a distribution. The
+# approved block ledes with TWO DIFFERENT KINDS of thing -- fragments and works
+# -- so no ratio is invited, states the all-in-all count quietly under them, and
+# shows the pool split.
+#
+# All three lede figures share ONE basis (every bucket, every shade). The
+# contribution keeps its own basis line, because it does not.
+# ---------------------------------------------------------------------------
+
+_ALL_SENTINEL_TOTAL = 71333
+_ALL_SENTINEL_WORKS = 6444
+_ALL_SENTINEL_FRAGMENTS = 59222
+_ALL_SENTINEL_MORE_POOL = 34555
+
+
+def _launch_envelope_v3() -> dict:
+    envelope = _launch_envelope(with_lede=True)
+    envelope["meta"].update({
+        "identification_total": _ALL_SENTINEL_TOTAL,
+        "work_total": _ALL_SENTINEL_WORKS,
+        "corpus_manuscript_count": _ALL_SENTINEL_FRAGMENTS,
+        "more_pool_total": _ALL_SENTINEL_MORE_POOL,
+    })
+    return envelope
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_headline_ledes_with_fragments_and_works_from_the_envelope(lang):
+    from web.components import findings_rows as fr
+
+    client = _render_headline(_launch_envelope_v3(), lang)
+
+    fragments = _elements_with_class(client, fr.LAUNCH_FRAGMENTS_CLASS)
+    assert len(fragments) == 1, "the lede figure did not render"
+    assert getattr(fragments[0], "text", None) == "{:,}".format(_ALL_SENTINEL_FRAGMENTS)
+    assert "text-4xl" in (fragments[0]._classes or []), (
+        "the lede is not the largest figure in the block")
+
+    labels = _elements_with_class(client, fr.LAUNCH_FRAGMENTS_LABEL_CLASS)
+    assert len(labels) == 1
+    assert getattr(labels[0], "text", None) == fr.copy_text(
+        "launch_fragments_lede", lang)
+    # TWO ELEMENTS IN ONE BASELINE ROW, never one string.
+    lede_rows = _elements_with_class(client, fr.LAUNCH_LEDE_CLASS)
+    assert len(lede_rows) == 1
+    assert fragments[0].parent_slot.parent is lede_rows[0]
+    assert labels[0].parent_slot.parent is lede_rows[0]
+
+    # The work count is its OWN element, carrying its own weight, inside the
+    # "matched to ... known works" line.
+    works = _elements_with_class(client, fr.LAUNCH_WORK_TOTAL_CLASS)
+    assert len(works) == 1
+    assert getattr(works[0], "text", None) == "{:,}".format(_ALL_SENTINEL_WORKS)
+    assert "font-semibold" in (works[0]._classes or [])
+    matched = _elements_with_class(client, fr.LAUNCH_MATCHED_CLASS)
+    assert len(matched) == 1 and works[0].parent_slot.parent is matched[0]
+    # ...and the parts, in DOM order, reassemble the template EXACTLY -- no
+    # space introduced or lost at either boundary, which is the whole risk of
+    # splitting a sentence into elements. Read from each element's own `text`
+    # rather than through `_subtree_strings`, which reports every string twice.
+    line = "".join(child.text or "" for child in matched[0])
+    assert line == fr.copy_text("launch_matched_works", lang).format(
+        count="{:,}".format(_ALL_SENTINEL_WORKS)), line
+
+    # The all-in-all count, quietly, from its own key.
+    all_totals = _elements_with_class(client, fr.LAUNCH_ALL_TOTAL_CLASS)
+    assert len(all_totals) == 1
+    assert getattr(all_totals[0], "text", None) == fr.copy_text(
+        "launch_matches_in_all", lang).format(
+            count="{:,}".format(_ALL_SENTINEL_TOTAL))
+
+    # ...and the CONTRIBUTION is still there, at its own weight, with its own
+    # basis line: it is shade filtered and the three figures above it are not.
+    totals = _elements_with_class(client, fr.LAUNCH_TOTAL_CLASS)
+    assert len(totals) == 1
+    assert "33" in (getattr(totals[0], "text", None) or "")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_headline_shows_the_pool_split_and_names_both_buckets(lang):
+    """The level that makes the second pool visible as a comparable body of
+    work. Ruling T forbids a count on the bucket CONTROL -- this is the
+    headline, and a separate test asserts the figures did not reach the chips.
+    """
+    from shared.discovery_display_strings import bucket_name
+    from web.components import findings_rows as fr
+
+    client = _render_headline(_launch_envelope_v3(), lang)
+    halves = _elements_with_class(client, fr.LAUNCH_SPLIT_ITEM_CLASS)
+    assert len(halves) == 2, "the pool split did not render both halves"
+    said = [getattr(half, "text", "") for half in halves]
+
+    for count, in_main in ((_LEDE_SENTINEL_TOTAL, True),
+                           (_ALL_SENTINEL_MORE_POOL, False)):
+        expected = fr.copy_text("launch_pool_share", lang).format(
+            count="{:,}".format(count), bucket=bucket_name(in_main, lang))
+        assert expected in said, f"{expected!r} not in {said!r}"
+
+    rows = _elements_with_class(client, fr.LAUNCH_SPLIT_CLASS)
+    assert len(rows) == 1
+    assert {half.parent_slot.parent for half in halves} == {rows[0]}
+
+
+def test_a_half_of_the_split_with_no_figure_is_omitted_not_zeroed():
+    from web.components import findings_rows as fr
+
+    envelope = _launch_envelope_v3()
+    del envelope["meta"]["more_pool_total"]
+    client = _render_headline(envelope, "en")
+    halves = _elements_with_class(client, fr.LAUNCH_SPLIT_ITEM_CLASS)
+    assert len(halves) == 1, "a missing pool figure was rendered as a zero"
+    assert "{:,}".format(_LEDE_SENTINEL_TOTAL) in (halves[0].text or "")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_headline_claims_no_corpus_denominator(lang):
+    """A COVERAGE OVERCLAIM, fixed. `corpus_manuscript_count` counts fragments
+    that already carry a computed identification and `corpus_page_count` counts
+    pages carrying at least one claim, while the project's corpus is ~255,615
+    manuscript records -- so "out of N fragments ... in the whole corpus" made
+    the release read roughly 6.6x better covered than it is, on the most
+    prominent line of a scholarly surface.
+
+    Asserted over EVERY block the module can render, not just the new one: the
+    string was shared, and a fallback path that kept the overclaim would still
+    ship it to anyone whose envelope is a version behind.
+    """
+    from web.components import findings_rows as fr
+
+    for key in fr.copy_keys():
+        value = fr.copy_text(key, lang)
+        for claim in ("whole corpus", "entire corpus", "the corpus",
+                      "כלל האוסף", "כל האוסף"):
+            assert claim not in value, (
+                f"{key!r} claims a corpus denominator it does not count: {value!r}")
+
+    for envelope in (_launch_envelope_v3(),
+                     _launch_envelope(with_lede=True),
+                     _launch_envelope(with_lede=False)):
+        client = _render_headline(envelope, lang)
+        text = "\n".join(_subtree_strings(
+            _elements_with_class(client, fr.LAUNCH_CLASS)[0]))
+        for claim in ("whole corpus", "entire corpus", "כלל האוסף", "כל האוסף"):
+            assert claim not in text, f"the headline still says {claim!r}: {text!r}"
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_headline_degrades_to_the_previous_lede_block_without_the_all_keys(lang):
+    """Three blocks, each the previous one's fallback. An envelope carrying the
+    lede pair but no `identification_total` renders the earlier 2026-08-05
+    block, and a missing key never becomes a rendered zero."""
+    from web.components import findings_rows as fr
+
+    client = _render_headline(_launch_envelope(with_lede=True), lang)
+    assert not _elements_with_class(client, fr.LAUNCH_FRAGMENTS_CLASS)
+    assert not _elements_with_class(client, fr.LAUNCH_ALL_TOTAL_CLASS)
+    assert not _elements_with_class(client, fr.LAUNCH_SPLIT_ITEM_CLASS)
+    # ...and the block it DOES render is the pool-lede one, intact.
+    assert len(_elements_with_class(client, fr.LAUNCH_POOL_TOTAL_CLASS)) == 1
+
+
 def test_no_launch_figure_is_written_as_a_literal_in_the_row_component():
     """The lede's two figures join the forbidden set the moment the committed
     figure file names them, and 136-22's guard is RUN here rather than assumed
@@ -2929,16 +3106,23 @@ def test_no_launch_figure_is_written_as_a_literal_in_the_row_component():
             f"{key} is not in the committed figure file, so no literal of it is "
             "forbidden anywhere — regenerate the file")
 
+    for key in ("meta.identification_total", "meta.work_total"):
+        assert key in committed, (
+            f"{key} is not in the committed figure file, so no literal of it is "
+            "forbidden anywhere — regenerate the file")
+
     figures = guard.forbidden_figures()
-    key_names = guard.envelope_key_names(_launch_envelope(with_lede=True))
+    key_names = guard.envelope_key_names(_launch_envelope_v3())
     root = pathlib.Path(__file__).resolve().parents[1]
     violations = guard.scan_launch_literals(root, figures, key_names)
     assert not violations, "launch figures found as literals: " + "; ".join(
         v.message() for v in violations)
     # The sentinels above must never BE real figures, or these tests would be
     # agreement rather than provenance.
-    assert _LEDE_SENTINEL_TOTAL not in figures
-    assert _LEDE_SENTINEL_MANUSCRIPTS not in figures
+    for sentinel in (_LEDE_SENTINEL_TOTAL, _LEDE_SENTINEL_MANUSCRIPTS,
+                     _ALL_SENTINEL_TOTAL, _ALL_SENTINEL_WORKS,
+                     _ALL_SENTINEL_FRAGMENTS, _ALL_SENTINEL_MORE_POOL):
+        assert sentinel not in figures
 
 
 # ---------------------------------------------------------------------------
@@ -3435,6 +3619,65 @@ def test_the_two_bucket_chips_read_as_one_segment_with_a_visible_selection(monke
     # Ruling T still holds over the whole card, header and prose included.
     text = "\n".join(_subtree_strings(segment))
     assert not _DIGIT_RE.findall(text), f"a number reached the bucket control: {text!r}"
+
+
+@pytest.mark.parametrize("start", ["main", "more"])
+def test_clicking_the_bucket_control_moves_its_own_selected_state(monkeypatch, start):
+    """THE CONTROL WENT STALE, and only a CLICK can see it.
+
+    `_render_bucket_control` returned None and the filter bar collected a
+    re-sync callable only from the novelty switch, while the bar itself is built
+    ONCE -- so `selected` was evaluated at build time and never again. Clicking
+    "more matches" switched the whole result set while the chip kept `here` on
+    the main pool and `aria-pressed="true"` stayed on the wrong half: ruling T's
+    own control contradicting the result set it had just produced, for sighted
+    and screen-reader readers alike.
+
+    A test that renders from initial state PASSES against that defect, which is
+    why this one drives the control's OWN registered click listener inside the
+    page's event loop and asserts all three announcements moved together.
+    """
+    other = "more" if start == "main" else "main"
+    seen = {}
+
+    async def _drive(client):
+        segment = _elements_with_class(client, fp.BUCKET_CONTROL_CLASS)[0]
+        chips = [element for element in segment.descendants()
+                 if "fchip" in (element._classes or [])]
+        assert len(chips) == 2
+        pressed = [c for c in chips if (c._props or {}).get("aria-pressed") == "true"]
+        assert len(pressed) == 1, "no single bucket is announced as active"
+        target = [c for c in chips if c is not pressed[0]][0]
+
+        listeners = [listener for listener in target._event_listeners.values()
+                     if listener.type == "click"]
+        assert listeners, "the bucket chip is wired to nothing"
+        result = listeners[0].handler(None)
+        if asyncio.iscoroutine(result):
+            await result
+
+        seen["chips"] = chips
+        seen["clicked"] = target
+        seen["stale"] = pressed[0]
+
+    _render_page(monkeypatch, lang="en", state=_state(bucket=start), driver=_drive)
+
+    clicked, stale = seen["clicked"], seen["stale"]
+    assert (clicked._props or {}).get("aria-pressed") == "true", (
+        f"clicking {other!r} left aria-pressed on the other half -- a screen "
+        "reader is told the page is showing what it is not")
+    assert (stale._props or {}).get("aria-pressed") == "false"
+    assert "here" in (clicked._classes or []), (
+        "the clicked half did not take the selected treatment")
+    assert "here" not in (stale._classes or []), (
+        "the previously selected half kept its `here` class")
+    # The inline segment styling is the only difference a sighted reader sees,
+    # and the two styles are not symmetric -- ADDING one over the other leaves a
+    # deselected chip still painted as selected.
+    assert dict(clicked._style or {}) != dict(stale._style or {})
+    assert "background" in dict(clicked._style or {})
+    assert "background" not in dict(stale._style or {}), (
+        "the deselected half kept the selected background")
 
 
 # ---------------------------------------------------------------------------

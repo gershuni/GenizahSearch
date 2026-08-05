@@ -877,7 +877,16 @@ LAUNCH_LITERAL_EXEMPTIONS = ()
 
 #: Characters that must not abut a rendered figure for it to count as a hit --
 #: so `1177402` and `177402.5` are not read as the corpus page count.
-_FIGURE_BOUNDARY = set("0123456789.,_") | {"٬", " ", " ", "׳"}
+#:
+#: `#` joined them on 2026-08-05, when `meta.work_total` (a THREE-digit
+#: figure, 555 on the served artifact) collided with the CSS grey `#555`
+#: inside `web/pages/puzzle.py`'s embedded canvas script. That is a PRECISION
+#: fix to the scanner and NOT an exemption: `LAUNCH_LITERAL_EXEMPTIONS` stays
+#: empty, every position stays in scope, and no hardcoded count is written
+#: `#53581` in any language. Short figures are what a scan over a whole
+#: repository keeps colliding with, and the durable answer is to say once what
+#: a hit is NOT -- never to list the files where a hit may be ignored.
+_FIGURE_BOUNDARY = set("0123456789.,_#") | {"٬", " ", " ", "׳"}
 
 #: Hebrew-locale digit grouping. Hebrew renders thousands with the same comma
 #: the Latin locale does -- so the comma form already covers both -- and these

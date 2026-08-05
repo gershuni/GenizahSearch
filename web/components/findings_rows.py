@@ -103,6 +103,19 @@ LAUNCH_CLASS = "gs-findings-launch"
 LAUNCH_LEDE_CLASS = "gs-findings-launch-lede"
 LAUNCH_POOL_TOTAL_CLASS = "gs-findings-launch-pool-total"
 LAUNCH_POOL_LABEL_CLASS = "gs-findings-launch-pool-label"
+#: The APPROVED lede (owner ruling, 2026-08-05): fragments and works, then the
+#: all-in-all match count, then the pool split. Every figure is its own element
+#: for the same reason the main-pool lede's is -- a Latin-digit run and a
+#: Hebrew phrase concatenated into one string can reorder at the boundary --
+#: and each half of the split carries its own bucket name, because a number
+#: with no bucket beside it is a number a reader has to guess the basis of.
+LAUNCH_FRAGMENTS_CLASS = "gs-findings-launch-fragments"
+LAUNCH_FRAGMENTS_LABEL_CLASS = "gs-findings-launch-fragments-label"
+LAUNCH_MATCHED_CLASS = "gs-findings-launch-matched"
+LAUNCH_WORK_TOTAL_CLASS = "gs-findings-launch-work-total"
+LAUNCH_ALL_TOTAL_CLASS = "gs-findings-launch-all-total"
+LAUNCH_SPLIT_CLASS = "gs-findings-launch-split"
+LAUNCH_SPLIT_ITEM_CLASS = "gs-findings-launch-split-item"
 LAUNCH_TOTAL_CLASS = "gs-findings-launch-total"
 LAUNCH_BASIS_CLASS = "gs-findings-launch-basis"
 LAUNCH_SHADE_CLASS = "gs-findings-launch-shade"
@@ -184,13 +197,81 @@ _COPY: Dict[str, Dict[str, str]] = {
         "en": "Across {count} fragments.",
         "he": "על פני {count} קטעים.",
     },
-    # The context figures. They count EVERY bucket and every shade, so the line
-    # says so in words -- a context number beside a main-pool headline that did
-    # not name its own basis is exactly the mixed-basis defect ruling U was
-    # issued over.
+    # -- THE APPROVED LEDE (owner ruling, 2026-08-05). The headline led with the
+    # -- MAIN POOL, a subset: the number a reader met first was smaller than the
+    # -- release, and the second pool appeared nowhere in the headline at all.
+    #
+    # The first draft of the fix led with the all-in-all identification count
+    # alone, and the owner chose against it from a rendered comparison, for a
+    # measured reason: 81% of fragments (31,158 of 38,431) carry exactly one
+    # identification, so a reader's one-fragment-one-identification model is
+    # right most of the time -- which makes "53,581 identifications on 38,431
+    # fragments" look like an error rather than like a distribution. The
+    # approved lede therefore states TWO DIFFERENT KINDS of thing, fragments and
+    # works, so no ratio is invited at all, and puts the identification count
+    # under them as a quiet third line.
+    #
+    # All three figures share ONE basis (every bucket, every shade), which is
+    # what lets them sit in one block. `total` and `all_bucket_total` are shade
+    # filtered and must never join them.
+    "launch_fragments_lede": {
+        "en": "fragments",
+        "he": "קטעים",
+    },
+    "launch_matched_works": {
+        "en": "matched to {count} known works",
+        "he": "הותאמו ל" + _MAQAF + "{count} חיבורים מוכרים",
+    },
+    # WORDING NOTE, raised rather than resolved silently: this line says
+    # "matches" while the line below it says "identifications" and the page is
+    # titled "Computed Identifications". The owner approved this wording; the
+    # alternative would have meant editing a ratified string, which is not a
+    # change to make in passing. Flagged for a vocabulary ruling.
+    "launch_matches_in_all": {
+        "en": "{count} matches in all.",
+        "he": "{count} התאמות בסך הכל.",
+    },
+    # THE POOL SPLIT, directly under the lede that sums it. It is what makes the
+    # second pool visible as a real, comparable body of work rather than a word
+    # on a chip -- the owner's stated reason for leading with the sum.
+    #
+    # RULING T IS UNTOUCHED: it forbids a count on the bucket CONTROL, and this
+    # is the headline. The figures must never be mirrored onto the chips.
+    #
+    # The Hebrew does NOT open with the figure: a Latin-digit run at the start
+    # of an RTL label reorders unpredictably at the boundary with the word after
+    # it, so the Hebrew leads with the bucket name and the English with the
+    # count. `{bucket}` is `bucket_name`, the single definition.
+    "launch_pool_share": {
+        "en": "{count} under '{bucket}'",
+        "he": "תחת '{bucket}': {count}",
+    },
+    # The scope figures, which count what THIS RELEASE TOUCHED. They used to be
+    # rendered as "Out of {fragments} fragments across {pages} pages in the
+    # whole corpus", and that was a COVERAGE OVERCLAIM on the most prominent
+    # line of a scholarly surface: `corpus_manuscript_count` counts fragments
+    # that already carry a computed identification and `corpus_page_count`
+    # counts pages carrying at least one claim, while the project's corpus is
+    # ~255,615 manuscript records. Presenting the denominator of what we matched
+    # as the denominator of everything made the release read ~6.6x better
+    # covered than it is. Both strings now say what they count; neither claims a
+    # corpus denominator, and none is invented from another database.
     "launch_context": {
-        "en": "Out of {fragments} fragments across {pages} pages in the whole corpus.",
-        "he": "מתוך {fragments} קטעים ב" + _MAQAF + "{pages} דפים בכלל האוסף.",
+        "en": (
+            "Across {fragments} fragments carrying a computed identification, "
+            "on {pages} pages with at least one match."
+        ),
+        "he": (
+            "על פני {fragments} קטעים שיש בהם זיהוי מחושב, ב" + _MAQAF +
+            "{pages} דפים עם התאמה אחת לפחות."
+        ),
+    },
+    # The same scope statement with the FRAGMENT half dropped, for the block
+    # whose lede already gave the fragment figure. Repeating it two lines lower
+    # is the reading hazard the level structure exists to remove.
+    "launch_claim_pages": {
+        "en": "On {pages} pages with at least one match.",
+        "he": "ב" + _MAQAF + "{pages} דפים עם התאמה אחת לפחות.",
     },
     # -- the three contribution shades, match-framed (ruling U constraint 4).
     #    `container_predicts` says what the aid DID name; it never says the aid
@@ -362,7 +443,22 @@ def render_launch_headline(
     at request time, which is what the sentinel fixture in this plan's suite
     proves.
 
-    RANK (2026-08-05): the block LED WITH THE SUBSET. `total` is the
+    LEAD (2026-08-05, owner ruling): "the headline should say all in all how
+    many computed identifications there are, that's the main number to be
+    highlighted" -- the lede was the MAIN POOL, a subset, and the second pool
+    was not in the headline at all. The approved block ledes with the FRAGMENT
+    count and the WORK count (two different kinds of thing, so no ratio is
+    invited), states the all-in-all match count quietly under them, and shows
+    the pool split so the second pool is visible as a comparable body of work
+    rather than as a word on a chip. The contribution figure and its shades
+    keep their wording, their classes and their basis line; only their rank
+    moved. THREE blocks now, and each is the previous one's fallback: no
+    `main_pool_total` renders the 2026-08-04 block, no `identification_total`
+    renders the earlier 2026-08-05 lede block, and a missing key never becomes
+    a rendered zero.
+
+    RANK (2026-08-05, earlier the same day): the block LED WITH THE SUBSET.
+    `total` is the
     shade-filtered contribution figure -- what the release adds to the finding
     aids -- and the release's own size, every main-pool identification whatever
     its shade, was not in the envelope at all. Seven figures then sat at two
@@ -400,7 +496,10 @@ def render_launch_headline(
         if meta.get("main_pool_total") is None:
             _render_launch_v1(items, meta, total, main_pool_name, lang)
             return
-        _render_launch_v2(items, meta, total, main_pool_name, lang)
+        if meta.get("identification_total") is None:
+            _render_launch_v2(items, meta, total, main_pool_name, lang)
+            return
+        _render_launch_v3(items, meta, total, main_pool_name, lang)
 
 
 def _render_launch_v1(items, meta: Mapping[str, Any], total: Any,
@@ -511,6 +610,135 @@ def _render_launch_v2(items, meta: Mapping[str, Any], total: Any,
         ui.label(
             copy_text("launch_context", lang).format(
                 fragments=_count(fragments), pages=_count(pages))
+        ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
+
+
+def _render_matched_works_line(work_total: Any, lang: str) -> None:
+    """"matched to {count} known works", with the FIGURE as its own element.
+
+    Split around the placeholder rather than rendered as one label, so the
+    count can carry its own weight and read as a figure beside the lede's. The
+    row has NO gap and each text part keeps its own spacing (`white-space:
+    pre`), so the line renders exactly as the template reads -- in Hebrew the
+    maqaf abuts its number with no space introduced between them, which a flex
+    gap would have added.
+    """
+    template = copy_text("launch_matched_works", lang)
+    prefix, _placeholder, suffix = template.partition("{count}")
+    with ui.row().classes(f"{LAUNCH_MATCHED_CLASS} items-baseline gap-0 flex-wrap"):
+        if prefix:
+            ui.label(prefix).classes("text-sm").style("white-space: pre;")
+        ui.label(_count(work_total)).classes(
+            f"{LAUNCH_WORK_TOTAL_CLASS} text-sm font-semibold")
+        if suffix:
+            ui.label(suffix).classes("text-sm").style("white-space: pre;")
+
+
+def _render_launch_v3(items, meta: Mapping[str, Any], total: Any,
+                      main_pool_name: str, lang: str) -> None:
+    """THE APPROVED BLOCK (owner ruling, 2026-08-05), five levels.
+
+    What changed from `_render_launch_v2`, and why each thing is where it is:
+
+    * the LEDE is the FRAGMENT count and the WORK count -- two different KINDS
+      of thing, deliberately. The first draft led with the all-in-all
+      identification count alone and the owner chose against it from a rendered
+      comparison: 81% of fragments carry exactly one identification, so
+      "53,581 identifications on 38,431 fragments" reads as an error rather
+      than as a distribution. Stating fragments and works invites no ratio at
+      all;
+    * the ALL-IN-ALL count follows as a quiet third line. It is
+      `meta.identification_total`, read from its OWN key rather than summed
+      from the two pool figures below it: that sum is right only while
+      `main_pool` partitions the table, and a headline assembled by arithmetic
+      over two separately derived numbers goes wrong silently;
+    * the POOL SPLIT is new, and it is the level that makes the second pool
+      visible as a comparable body of work. Ruling T forbids a count on the
+      bucket CONTROL; this is the headline, and these figures must never be
+      mirrored onto the chips;
+    * the CONTRIBUTION keeps its string, its class, its figure and its own
+      basis line -- it is shade filtered, the three figures above it are not,
+      and the dotted rule plus that basis line are what keep the two bases
+      apart;
+    * the SCOPE line drops its fragment half (the lede has just given it) and
+      no longer claims a corpus denominator at all.
+
+    Every figure is still read from the envelope through a placeholder, which
+    is what the sentinel fixture proves; every level is skipped when its own
+    key is absent rather than rendered as a zero.
+    """
+    # LEVEL 1 -- the lede figure and its noun, TWO elements in one baseline
+    # row, never one concatenated string.
+    fragments = meta.get("corpus_manuscript_count")
+    if fragments is not None:
+        with ui.row().classes(
+            f"{LAUNCH_LEDE_CLASS} items-baseline gap-x-3 gap-y-1 flex-wrap"
+        ):
+            ui.label(_count(fragments)).classes(
+                f"{LAUNCH_FRAGMENTS_CLASS} text-4xl font-bold"
+            ).style("color: var(--primary-700);")
+            ui.label(copy_text("launch_fragments_lede", lang)).classes(
+                f"{LAUNCH_FRAGMENTS_LABEL_CLASS} text-sm")
+
+    # LEVEL 1b -- what those fragments were matched TO.
+    work_total = meta.get("work_total")
+    if work_total is not None:
+        _render_matched_works_line(work_total, lang)
+
+    # LEVEL 1c -- the all-in-all count, quietly.
+    ui.label(
+        copy_text("launch_matches_in_all", lang).format(
+            count=_count(meta.get("identification_total")))
+    ).classes(f"{LAUNCH_ALL_TOTAL_CLASS} dnote text-xs")
+
+    # LEVEL 2 -- the split, each half naming its own bucket. The PRESENT halves
+    # are selected before anything is drawn, so an envelope carrying one figure
+    # and not the other states the one it has instead of withholding both or
+    # inventing the missing one -- and the skip is a filter rather than a
+    # `continue` inside the paint loop, which would be a painting function's
+    # line that no capture can execute.
+    split = [
+        (value, bucket)
+        for value, bucket in ((meta.get("main_pool_total"), main_pool_name),
+                              (meta.get("more_pool_total"), ds.bucket_name(False, lang)))
+        if value is not None
+    ]
+    if split:
+        with ui.row().classes(
+            f"{LAUNCH_SPLIT_CLASS} items-baseline gap-x-4 gap-y-1 flex-wrap"
+        ):
+            for value, bucket in split:
+                ui.label(
+                    copy_text("launch_pool_share", lang).format(
+                        count=_count(value), bucket=bucket)
+                ).classes(f"{LAUNCH_SPLIT_ITEM_CLASS} text-sm")
+
+    # The separator. LOGICAL and inline -- no stylesheet rule, no new class to
+    # keep in sync, and nothing that needs to flip for RTL.
+    ui.element("div").classes("w-full").style(
+        "border-block-start: 1px dotted var(--border-light); "
+        "margin-block-start: 6px; padding-block-start: 6px;"
+    )
+
+    # LEVEL 3 -- the contribution: SAME string, SAME class, SAME figure.
+    ui.label(
+        copy_text("launch_total", lang).format(count=_count(total))
+    ).classes(f"{LAUNCH_TOTAL_CLASS} text-xl font-bold")
+    ui.label(
+        copy_text("launch_basis", lang).format(bucket=main_pool_name)
+    ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
+
+    # LEVEL 4 -- the three shades, unchanged, decomposing the line above them.
+    with ui.row().classes("items-baseline gap-x-4 gap-y-1 flex-wrap"):
+        for item in items:
+            _render_launch_shade(item, lang)
+
+    # LEVEL 5 -- what the release TOUCHED, and it says so: pages carrying at
+    # least one match, with no corpus denominator claimed anywhere.
+    pages = meta.get("corpus_page_count")
+    if pages is not None:
+        ui.label(
+            copy_text("launch_claim_pages", lang).format(pages=_count(pages))
         ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
 
 
@@ -764,13 +992,20 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en") -> None:
 
 
 __all__ = [
+    "LAUNCH_ALL_TOTAL_CLASS",
     "LAUNCH_BASIS_CLASS",
     "LAUNCH_CLASS",
     "LAUNCH_CONTEXT_CLASS",
+    "LAUNCH_FRAGMENTS_CLASS",
+    "LAUNCH_FRAGMENTS_LABEL_CLASS",
     "LAUNCH_LEDE_CLASS",
+    "LAUNCH_MATCHED_CLASS",
     "LAUNCH_POOL_LABEL_CLASS",
     "LAUNCH_POOL_TOTAL_CLASS",
     "LAUNCH_SHADE_CLASS",
+    "LAUNCH_SPLIT_CLASS",
+    "LAUNCH_SPLIT_ITEM_CLASS",
+    "LAUNCH_WORK_TOTAL_CLASS",
     "LAUNCH_STATE_CLASS",
     "LAUNCH_TOTAL_CLASS",
     "NOVELTY_HELP_CLASS",
