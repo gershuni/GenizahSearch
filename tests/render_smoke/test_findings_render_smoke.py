@@ -69,6 +69,7 @@ from shared.discovery_service import (
     FINDINGS_UNIT_MANUSCRIPT,
     FINDINGS_UNIT_WORK,
     FINDINGS_UNITS,
+    LAUNCH_CONTRIBUTION_SHADES,
     DiscoveryService,
     _build_findings_query,
 )
@@ -2161,3 +2162,68 @@ def test_zz_report_the_assertion_count(capsys):
         print(f"[136-18] 136-16 real-browser actionability: {state} -- "
               f"findings deploy gate {'OPEN' if met else 'BLOCKED'}")
     assert ASSERTION_COUNT["n"] > 0
+
+
+# ---------------------------------------------------------------------------
+# §3.9 -- AN UNKNOWN LAUNCH SHADE WAS ECHOED VERBATIM INTO AN EXCEPTION MESSAGE.
+#
+# `shade` arrives from the launch envelope's own items, so it is ARTIFACT
+# CONTENT, and an exception message is an egress that reaches a log and,
+# uncaught, a reader -- without passing through the markup scan or the envelope
+# scan. The message already refused to enumerate the valid vocabulary; it still
+# echoed the value it was handed, on the reasoning that a value reaching that
+# branch is by construction not one of OUR strings. That argues only about what
+# it is NOT.
+# ---------------------------------------------------------------------------
+
+def test_the_shade_error_withholds_the_value_it_was_handed(lang="en"):
+    """Driven with a value that would MATTER if it leaked.
+
+    `not_a_shade` -- the value the existing error-path fixtures use -- is
+    synthetic and harmless, so a test using it alone would pass against a
+    message that echoes everything. The probe below is shaped like the class of
+    content D-25 exists for: a shelfmark-ish token that could only have come out
+    of an artifact.
+    """
+    probe = "m_source_shelfmark_probe_value_9f2c"
+    with pytest.raises(ValueError) as excinfo:
+        fr.launch_shade_label(probe, lang)
+    message = str(excinfo.value)
+
+    assert probe not in message, (
+        "the exception echoes the artifact-derived value it received; an "
+        "exception message reaches a log and, uncaught, a reader without "
+        "passing through either scan")
+    # The message must still be USEFUL: it names the field and the authority.
+    assert "launch_shade_label" in message
+    assert "LAUNCH_CONTRIBUTION_SHADES" in message
+    # ...and still must not enumerate that authority's members.
+    for shade in LAUNCH_CONTRIBUTION_SHADES:
+        assert shade not in message
+    assert_error_path_honesty(message, lang=lang, where="launch_shade_label")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_no_launch_row_field_reaches_an_exception_message_verbatim():
+    """The same rule over the OTHER two fields of a launch shade row, so the
+    boundary is about the row rather than about one field that was reported."""
+    probes = {
+        "shade": "probe_shade_a1b2",
+        "identification_count": "probe_count_c3d4",
+        "manuscript_count": "probe_count_e5f6",
+    }
+    messages = []
+    with pytest.raises(ValueError) as excinfo:
+        fr.launch_shade_label(probes["shade"])
+    messages.append(str(excinfo.value))
+
+    # The counts go through `_count`, which never raises -- it degrades to an
+    # empty string. Recorded here so the claim covers the whole row rather than
+    # only the field that raises.
+    assert fr._count(probes["identification_count"]) == ""
+    assert fr._count(probes["manuscript_count"]) == ""
+
+    blob = "\n".join(messages)
+    for value in probes.values():
+        assert value not in blob, f"{value!r} reached an exception message"
+    ASSERTION_COUNT["n"] += 1

@@ -381,19 +381,28 @@ def launch_shade_label(shade: str, lang: str = "en") -> str:
     failure than a loud one, and echoing the stored key would put raw
     vocabulary on the release's headline.
 
-    **The message NAMES the authority instead of enumerating it.** An exception
-    message is an egress class of its own -- it reaches a log and, uncaught, a
-    reader -- without passing through either the markup scan or the envelope
-    scan, so listing the valid shades here would put three stored vocabulary
-    values on exactly the egress the honesty gate's error-path scan exists to
-    cover. The received value is safe to echo: by construction it is NOT a
-    member of the vocabulary.
+    **The message NAMES the authority instead of enumerating it, and WITHHOLDS
+    the value it received.** An exception message is an egress class of its own
+    -- it reaches a log and, uncaught, a reader -- without passing through
+    either the markup scan or the envelope scan.
+
+    Both halves are needed and only the first was there. Listing the valid
+    shades would put three stored vocabulary values on that egress. Echoing the
+    RECEIVED one puts an ARTIFACT-DERIVED value there, which is the same egress
+    and the same rule (D-25): `shade` arrives from the launch envelope's own
+    items, and the earlier reasoning for echoing it -- that a value reaching
+    this branch is by construction not a member of the vocabulary -- argues
+    only that it is not one of OUR strings. It says nothing about what it is,
+    and "not a value we recognise" is precisely the description of a value
+    nobody has checked. The service's own launch reader already applies this
+    rule to its logging, recording the exception TYPE and never an
+    artifact-derived value; this is the same boundary one layer out.
     """
     key = _SHADE_COPY_KEY.get(shade)
     if key is None:
         raise ValueError(
-            "launch_shade_label: unknown contribution shade {!r} -- the valid "
-            "set is shared.discovery_service.LAUNCH_CONTRIBUTION_SHADES".format(shade)
+            "launch_shade_label: unknown contribution shade (value withheld) -- "
+            "the valid set is shared.discovery_service.LAUNCH_CONTRIBUTION_SHADES"
         )
     return copy_text(key, lang)
 
