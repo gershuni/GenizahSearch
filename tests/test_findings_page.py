@@ -2755,6 +2755,165 @@ def test_the_headline_notes_share_one_wrapping_row_rather_than_stacking(monkeypa
 
 
 # ---------------------------------------------------------------------------
+# TASK 10 (2026-08-05) — the headline LEADS WITH THE LARGER NUMBER.
+#
+# `total` is the SHADE-FILTERED contribution figure, so the block led with the
+# subset and the release under-sold itself threefold. `meta.main_pool_total` and
+# `meta.main_pool_total_manuscript_count` are an UNCONDITIONAL main-pool
+# population — a different population from `total` and from
+# `main_pool_manuscript_count`, both of which are shade filtered.
+#
+# The figures below are SENTINELS that appear in no artifact and in no committed
+# figure file, so a hardcode fails these assertions in whatever form it took —
+# a string, a numeric constant, a formatted expression, folded arithmetic, a
+# value assembled across two module-level names, an import, or a file read. Only
+# the first four of those are visible to a static scan.
+# ---------------------------------------------------------------------------
+
+_LEDE_SENTINEL_TOTAL = 41777
+_LEDE_SENTINEL_MANUSCRIPTS = 38222
+
+
+def _launch_envelope(*, with_lede: bool) -> dict:
+    meta = {"basis": "main_pool", "main_pool_manuscript_count": 7,
+            "corpus_manuscript_count": 88, "corpus_page_count": 99}
+    if with_lede:
+        meta["main_pool_total"] = _LEDE_SENTINEL_TOTAL
+        meta["main_pool_total_manuscript_count"] = _LEDE_SENTINEL_MANUSCRIPTS
+    return {
+        "status": "ok",
+        "items": [
+            {"shade": shade, "identification_count": 10 + i, "manuscript_count": 5 + i}
+            for i, shade in enumerate(("fills_gap", "refines_granularity",
+                                       "container_predicts"))
+        ],
+        "total": 33,
+        "meta": meta,
+    }
+
+
+def _render_headline(envelope, lang="en"):
+    from web.components import findings_rows as fr
+
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+
+    holder = {}
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page("/_headline_rank_probe")) as client:
+            with client:
+                fr.render_launch_headline(envelope, lang)
+        holder["client"] = client
+
+    asyncio.run(_run())
+    return holder["client"]
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_headline_ledes_with_the_pool_total_from_the_envelope(lang):
+    from shared.discovery_display_strings import bucket_name
+    from web.components import findings_rows as fr
+
+    client = _render_headline(_launch_envelope(with_lede=True), lang)
+
+    ledes = _elements_with_class(client, fr.LAUNCH_POOL_TOTAL_CLASS)
+    assert len(ledes) == 1, "the lede figure did not render"
+    assert getattr(ledes[0], "text", None) == "{:,}".format(_LEDE_SENTINEL_TOTAL), (
+        "the lede figure is not the envelope's `meta.main_pool_total`")
+
+    labels = _elements_with_class(client, fr.LAUNCH_POOL_LABEL_CLASS)
+    assert len(labels) == 1
+    assert getattr(labels[0], "text", None) == fr.copy_text(
+        "launch_pool_total", lang).format(bucket=bucket_name(True, lang))
+
+    # THE FIGURE AND ITS LABEL ARE TWO ELEMENTS IN ONE BASELINE ROW, never one
+    # string: a leading Latin-digit run followed by a Hebrew phrase can reorder
+    # unpredictably at the boundary.
+    lede_rows = _elements_with_class(client, fr.LAUNCH_LEDE_CLASS)
+    assert len(lede_rows) == 1
+    assert ledes[0].parent_slot.parent is lede_rows[0]
+    assert labels[0].parent_slot.parent is lede_rows[0]
+    assert "items-baseline" in (lede_rows[0]._classes or [])
+
+    text = "\n".join(_subtree_strings(_elements_with_class(client, fr.LAUNCH_CLASS)[0]))
+    assert "{:,}".format(_LEDE_SENTINEL_MANUSCRIPTS) in text, (
+        "the lede's fragment span is not the envelope's "
+        "`meta.main_pool_total_manuscript_count`")
+    # ...and the CONTRIBUTION figure is still there, at its own weight, with its
+    # own basis line. The lede did not replace it.
+    totals = _elements_with_class(client, fr.LAUNCH_TOTAL_CLASS)
+    assert len(totals) == 1
+    assert "33" in (getattr(totals[0], "text", None) or "")
+
+
+def test_the_lede_and_the_contribution_are_separated():
+    """A thin rule is what stops seven numbers reading as one list: it says
+    everything below is a part of, or context for, what is above.
+
+    LOGICAL, because this surface renders in both directions — the module's own
+    guard fails on any physical directional property."""
+    from web.components import findings_rows as fr
+
+    client = _render_headline(_launch_envelope(with_lede=True), "en")
+    block = _elements_with_class(client, fr.LAUNCH_CLASS)[0]
+    separators = [
+        element for element in block.descendants()
+        if "border-block-start" in " ".join(element._style or {})
+    ]
+    assert len(separators) == 1, (
+        "the lede and the contribution run together as one list of figures")
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_headline_degrades_to_the_previous_block_without_the_new_keys(lang):
+    """An older sidecar, or any envelope built before those keys existed, must
+    render EXACTLY what shipped — never a fabricated zero, which is the same
+    class of falsehood as a hardcoded figure."""
+    from web.components import findings_rows as fr
+
+    client = _render_headline(_launch_envelope(with_lede=False), lang)
+    assert not _elements_with_class(client, fr.LAUNCH_POOL_TOTAL_CLASS), (
+        "a missing `meta.main_pool_total` still rendered a lede figure")
+    assert not _elements_with_class(client, fr.LAUNCH_LEDE_CLASS)
+
+    text = "\n".join(_subtree_strings(_elements_with_class(client, fr.LAUNCH_CLASS)[0]))
+    assert "0" not in text.replace("10", "").replace("100", ""), (
+        f"the degraded headline invented a zero: {text!r}")
+    # The 2026-08-04 block, element for element.
+    assert len(_elements_with_class(client, fr.LAUNCH_TOTAL_CLASS)) == 1
+    assert len(_elements_with_class(client, fr.LAUNCH_BASIS_CLASS)) == 2
+    assert len(_elements_with_class(client, fr.LAUNCH_CONTEXT_CLASS)) == 1
+    assert len(_elements_with_class(client, fr.LAUNCH_SHADE_CLASS)) == 3
+
+
+def test_no_launch_figure_is_written_as_a_literal_in_the_row_component():
+    """The lede's two figures join the forbidden set the moment the committed
+    figure file names them, and 136-22's guard is RUN here rather than assumed
+    to still hold."""
+    import tests.test_discovery_launch_stats as guard
+
+    committed = guard.load_committed_figures()
+    for key in ("meta.main_pool_total", "meta.main_pool_total_manuscript_count"):
+        assert key in committed, (
+            f"{key} is not in the committed figure file, so no literal of it is "
+            "forbidden anywhere — regenerate the file")
+
+    figures = guard.forbidden_figures()
+    key_names = guard.envelope_key_names(_launch_envelope(with_lede=True))
+    root = pathlib.Path(__file__).resolve().parents[1]
+    violations = guard.scan_launch_literals(root, figures, key_names)
+    assert not violations, "launch figures found as literals: " + "; ".join(
+        v.message() for v in violations)
+    # The sentinels above must never BE real figures, or these tests would be
+    # agreement rather than provenance.
+    assert _LEDE_SENTINEL_TOTAL not in figures
+    assert _LEDE_SENTINEL_MANUSCRIPTS not in figures
+
+
+# ---------------------------------------------------------------------------
 # The domain facet — counts and parent→child collapse
 # ---------------------------------------------------------------------------
 

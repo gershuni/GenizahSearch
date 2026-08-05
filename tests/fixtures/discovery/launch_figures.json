@@ -49,6 +49,18 @@
       "audience": "public",
       "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
     },
+    "meta.main_pool_total": {
+      "value": 27709,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
+    "meta.main_pool_total_manuscript_count": {
+      "value": 23312,
+      "sidecar_version": "discovery-v1-real",
+      "audience": "public",
+      "content_hash": "e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181"
+    },
     "meta.all_bucket_total": {
       "value": 17536,
       "sidecar_version": "discovery-v1-real",

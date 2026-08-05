@@ -95,6 +95,14 @@ from shared.discovery_surface_projection import is_outage
 # ---------------------------------------------------------------------------
 
 LAUNCH_CLASS = "gs-findings-launch"
+#: The LEDE -- the unconditional main-pool figure and the label beside it. Two
+#: elements in one `items-baseline` row and NEVER one concatenated string: a
+#: leading Latin-digit run followed by a Hebrew phrase can reorder
+#: unpredictably at the boundary, and the figure is the one thing on this page
+#: that must not move.
+LAUNCH_LEDE_CLASS = "gs-findings-launch-lede"
+LAUNCH_POOL_TOTAL_CLASS = "gs-findings-launch-pool-total"
+LAUNCH_POOL_LABEL_CLASS = "gs-findings-launch-pool-label"
 LAUNCH_TOTAL_CLASS = "gs-findings-launch-total"
 LAUNCH_BASIS_CLASS = "gs-findings-launch-basis"
 LAUNCH_SHADE_CLASS = "gs-findings-launch-shade"
@@ -154,6 +162,27 @@ _COPY: Dict[str, Dict[str, str]] = {
     "launch_manuscripts": {
         "en": "Across {count} fragments in the {bucket}.",
         "he": "על פני {count} קטעים ב{bucket}.",
+    },
+    # -- THE LEDE (2026-08-05). The headline led with the SUBSET: `total` is the
+    # -- shade-filtered contribution figure, and the release's own size -- every
+    # -- main-pool identification, whatever its novelty shade -- was not in the
+    # -- envelope at all until `meta.main_pool_total` was added beside it.
+    #
+    # Two keys, one basis, and the basis is NAMED in the lede itself
+    # (`{bucket}`, from the single bucket definition) rather than inferred.
+    # "computed identifications" is the page's own title, not a new claim: it
+    # says what the rows ARE -- matches found by software -- and asserts nothing
+    # about how many are right.
+    "launch_pool_total": {
+        "en": "computed identifications in the {bucket}",
+        "he": "זיהויים מחושבים ב{bucket}",
+    },
+    # DELIBERATELY NOT `launch_manuscripts` above, which repeats the bucket
+    # name. The lede has just named the pool one line up, and repeating it there
+    # is a large part of what made the old block read as a wall of figures.
+    "launch_pool_manuscripts": {
+        "en": "Across {count} fragments.",
+        "he": "על פני {count} קטעים.",
     },
     # The context figures. They count EVERY bucket and every shade, so the line
     # says so in words -- a context number beside a main-pool headline that did
@@ -332,6 +361,24 @@ def render_launch_headline(
     moved out of the envelope: every figure below is still read from `envelope`
     at request time, which is what the sentinel fixture in this plan's suite
     proves.
+
+    RANK (2026-08-05): the block LED WITH THE SUBSET. `total` is the
+    shade-filtered contribution figure -- what the release adds to the finding
+    aids -- and the release's own size, every main-pool identification whatever
+    its shade, was not in the envelope at all. Seven figures then sat at two
+    weights in one box in an order whose logic was invisible. With
+    `meta.main_pool_total` available the block takes four LEVELS: the pool total
+    ledes, the contribution follows at its old weight and its old wording, the
+    three shades decompose it, and the corpus context closes quietly. The lede
+    and the contribution are separated by a dotted rule, which is what stops
+    seven numbers reading as one list: it says everything below is a part of, or
+    context for, what is above.
+
+    IT DEGRADES. When `meta.main_pool_total` is absent -- an older sidecar, or
+    any caller with an envelope built before that key existed -- the block below
+    is EXACTLY the one shipped on 2026-08-04, element for element. A missing key
+    must never become a rendered zero: a headline reading "0" is the same class
+    of falsehood as a hardcoded one.
     """
     lang = _lang_key(lang)
     with ui.column().classes(f"{LAUNCH_CLASS} w-full gap-1 p-3").style(
@@ -345,40 +392,126 @@ def render_launch_headline(
         items = list(envelope.get("items") or ())
         meta = dict(envelope.get("meta") or {})
         total = envelope.get("total")
-
-        ui.label(
-            copy_text("launch_total", lang).format(count=_count(total))
-        ).classes(f"{LAUNCH_TOTAL_CLASS} text-xl font-bold")
-
-        # The basis, in words (ruling U constraint 1). `bucket_name` delegates
-        # to `shared.discovery_main_pool.bucket_label`, so the headline and the
-        # result bar can never name the same pool two ways.
+        # `bucket_name` delegates to `shared.discovery_main_pool.bucket_label`,
+        # so the headline and the result bar can never name the same pool two
+        # ways.
         main_pool_name = ds.bucket_name(True, lang)
-        with ui.row().classes("items-baseline gap-x-3 gap-y-1 flex-wrap"):
+
+        if meta.get("main_pool_total") is None:
+            _render_launch_v1(items, meta, total, main_pool_name, lang)
+            return
+        _render_launch_v2(items, meta, total, main_pool_name, lang)
+
+
+def _render_launch_v1(items, meta: Mapping[str, Any], total: Any,
+                      main_pool_name: str, lang: str) -> None:
+    """The 2026-08-04 block, unchanged, for an envelope with no lede figure.
+
+    Kept as its own function rather than as branches inside the new one: the
+    fallback's whole job is to be BYTE-IDENTICAL to what shipped, and a shared
+    body with conditionals is how "identical" quietly stops being true.
+    """
+    ui.label(
+        copy_text("launch_total", lang).format(count=_count(total))
+    ).classes(f"{LAUNCH_TOTAL_CLASS} text-xl font-bold")
+
+    with ui.row().classes("items-baseline gap-x-3 gap-y-1 flex-wrap"):
+        ui.label(
+            copy_text("launch_basis", lang).format(bucket=main_pool_name)
+        ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
+
+        manuscripts = meta.get("main_pool_manuscript_count")
+        if manuscripts is not None:
             ui.label(
-                copy_text("launch_basis", lang).format(bucket=main_pool_name)
+                copy_text("launch_manuscripts", lang).format(
+                    count=_count(manuscripts), bucket=main_pool_name)
             ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
 
-            manuscripts = meta.get("main_pool_manuscript_count")
-            if manuscripts is not None:
-                ui.label(
-                    copy_text("launch_manuscripts", lang).format(
-                        count=_count(manuscripts), bucket=main_pool_name)
-                ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
+        fragments = meta.get("corpus_manuscript_count")
+        pages = meta.get("corpus_page_count")
+        if fragments is not None and pages is not None:
+            ui.label(
+                copy_text("launch_context", lang).format(
+                    fragments=_count(fragments), pages=_count(pages))
+            ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
 
-            fragments = meta.get("corpus_manuscript_count")
-            pages = meta.get("corpus_page_count")
-            if fragments is not None and pages is not None:
-                ui.label(
-                    copy_text("launch_context", lang).format(
-                        fragments=_count(fragments), pages=_count(pages))
-                ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
+    # The three shades on ONE wrapping line. Each keeps its own count, its
+    # match-framed label and its fragment span; only the stacking is gone.
+    with ui.row().classes("items-baseline gap-x-4 gap-y-1 flex-wrap"):
+        for item in items:
+            _render_launch_shade(item, lang)
 
-        # The three shades on ONE wrapping line. Each keeps its own count, its
-        # match-framed label and its fragment span; only the stacking is gone.
-        with ui.row().classes("items-baseline gap-x-4 gap-y-1 flex-wrap"):
-            for item in items:
-                _render_launch_shade(item, lang)
+
+def _render_launch_v2(items, meta: Mapping[str, Any], total: Any,
+                      main_pool_name: str, lang: str) -> None:
+    """FOUR LEVELS, from a lede figure down to the corpus context.
+
+    Every number is still read from the envelope through a placeholder, and the
+    two new ones come from `meta.main_pool_total` /
+    `meta.main_pool_total_manuscript_count` -- an UNCONDITIONAL main-pool
+    population, deliberately NOT `total` (shade filtered) and deliberately NOT
+    `main_pool_manuscript_count` (also shade filtered). Pairing one basis's
+    figure with the other's is the mixed-basis defect ruling U was issued over,
+    which is why the two lede figures are read from the pair that belongs
+    together and the contribution keeps its own basis line unchanged.
+
+    `main_pool_manuscript_count` is not rendered here: the lede has just said
+    how many fragments the pool spans, and a second, smaller fragment figure
+    two lines below it -- on a different basis, in the same block -- is exactly
+    the reading hazard the level structure exists to remove. It stays in the
+    envelope under its own named key for any caller that wants it.
+    """
+    # LEVEL 1 -- the lede. The figure and its label are TWO elements in one
+    # baseline row, never one concatenated string: a leading Latin-digit run
+    # followed by a Hebrew phrase can reorder unpredictably at the boundary.
+    with ui.row().classes(
+        f"{LAUNCH_LEDE_CLASS} items-baseline gap-x-3 gap-y-1 flex-wrap"
+    ):
+        ui.label(_count(meta.get("main_pool_total"))).classes(
+            f"{LAUNCH_POOL_TOTAL_CLASS} text-4xl font-bold"
+        ).style("color: var(--primary-700);")
+        ui.label(
+            copy_text("launch_pool_total", lang).format(bucket=main_pool_name)
+        ).classes(f"{LAUNCH_POOL_LABEL_CLASS} text-sm")
+
+    # LEVEL 1b -- the basis under the lede, on the SAME (unconditional) pair.
+    pool_manuscripts = meta.get("main_pool_total_manuscript_count")
+    if pool_manuscripts is not None:
+        ui.label(
+            copy_text("launch_pool_manuscripts", lang).format(
+                count=_count(pool_manuscripts))
+        ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
+
+    # The separator. LOGICAL and inline -- no stylesheet rule, no new class to
+    # keep in sync, and nothing that needs to flip for RTL.
+    ui.element("div").classes("w-full").style(
+        "border-block-start: 1px dotted var(--border-light); "
+        "margin-block-start: 6px; padding-block-start: 6px;"
+    )
+
+    # LEVEL 2 -- the contribution: SAME string, SAME class, SAME figure as
+    # before. Only its rank changed.
+    ui.label(
+        copy_text("launch_total", lang).format(count=_count(total))
+    ).classes(f"{LAUNCH_TOTAL_CLASS} text-xl font-bold")
+    ui.label(
+        copy_text("launch_basis", lang).format(bucket=main_pool_name)
+    ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
+
+    # LEVEL 3 -- the three shades, unchanged, decomposing the line above them.
+    with ui.row().classes("items-baseline gap-x-4 gap-y-1 flex-wrap"):
+        for item in items:
+            _render_launch_shade(item, lang)
+
+    # LEVEL 4 -- the corpus context: unchanged string and class, now last and
+    # quietest. It counts EVERY bucket and every shade, and says so in words.
+    fragments = meta.get("corpus_manuscript_count")
+    pages = meta.get("corpus_page_count")
+    if fragments is not None and pages is not None:
+        ui.label(
+            copy_text("launch_context", lang).format(
+                fragments=_count(fragments), pages=_count(pages))
+        ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
 
 
 def _render_launch_shade(item: Mapping[str, Any], lang: str) -> None:
@@ -634,6 +767,9 @@ __all__ = [
     "LAUNCH_BASIS_CLASS",
     "LAUNCH_CLASS",
     "LAUNCH_CONTEXT_CLASS",
+    "LAUNCH_LEDE_CLASS",
+    "LAUNCH_POOL_LABEL_CLASS",
+    "LAUNCH_POOL_TOTAL_CLASS",
     "LAUNCH_SHADE_CLASS",
     "LAUNCH_STATE_CLASS",
     "LAUNCH_TOTAL_CLASS",

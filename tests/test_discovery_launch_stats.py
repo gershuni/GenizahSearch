@@ -351,6 +351,80 @@ def test_meta_carries_the_context_figures_on_basis_named_keys(populated_service)
 
 
 # ===========================================================================
+# Task 1, behaviour 6b (2026-08-05): the UNCONDITIONAL main-pool figures.
+#
+# `total` is and stays the SHADE-FILTERED contribution figure. There was no
+# unconditional main-pool identification count and no unconditional main-pool
+# fragment count in the envelope at all, so a surface leading with "N computed
+# identifications in the main pool" could not be built without either
+# hardcoding a number or quietly re-using the contribution figure under a
+# label that does not describe it.
+# ===========================================================================
+
+def test_meta_carries_the_unconditional_main_pool_figures(populated_service):
+    """The fixture is built so BOTH new keys differ from their shade-filtered
+    neighbours — otherwise this test would pass against an implementation that
+    simply aliased them.
+
+    Main pool in `_POPULATED_ROWS`: three `fills_gap`, two
+    `refines_granularity`, one `container_predicts` AND one `confirms`, which is
+    in the pool but is not a contribution. So the unconditional count is one
+    higher than `total`, over one more manuscript than
+    `main_pool_manuscript_count`.
+    """
+    env = populated_service.get_launch_stats_enveloped()
+    meta = env["meta"]
+
+    assert meta["main_pool_total"] == 7
+    assert meta["main_pool_total_manuscript_count"] == 6
+
+    assert meta["main_pool_total"] != env["total"], (
+        "the unconditional main-pool count equals the shade-filtered "
+        "contribution total — one of them is not being computed")
+    assert meta["main_pool_total_manuscript_count"] != meta["main_pool_manuscript_count"]
+    # ...and it is the MAIN POOL, not every bucket.
+    assert meta["main_pool_total"] < meta["all_bucket_total"] + len(_POPULATED_ROWS)
+    assert meta["main_pool_total"] < len(_POPULATED_ROWS), (
+        "the unconditional count swept in the `main_pool = 0` rows")
+
+
+def test_the_unconditional_figures_carry_no_shade_predicate(tmp_path):
+    """Directly: add a main-pool row under a shade that is NOT a contribution
+    shade, and only the unconditional pair may move."""
+    baseline = _service_for(_build_launch_db(
+        tmp_path / "shadeless-baseline.db", _POPULATED_ROWS, pages=_EXPECTED_PAGES,
+    )).get_launch_stats_enveloped()
+    extended = _service_for(_build_launch_db(
+        tmp_path / "shadeless-extended.db",
+        _POPULATED_ROWS + (("s099", "A", 1, "aid_more_specific"),),
+        pages=_EXPECTED_PAGES,
+    )).get_launch_stats_enveloped()
+
+    assert extended["total"] == baseline["total"], (
+        "a non-contribution shade joined the contribution total")
+    assert (extended["meta"]["main_pool_manuscript_count"]
+            == baseline["meta"]["main_pool_manuscript_count"])
+    assert extended["meta"]["main_pool_total"] == baseline["meta"]["main_pool_total"] + 1
+    assert (extended["meta"]["main_pool_total_manuscript_count"]
+            == baseline["meta"]["main_pool_total_manuscript_count"] + 1)
+
+
+def test_the_docstring_names_the_two_population_trap():
+    """The trap is one substitution away and cannot be caught by any test the
+    substituting caller would write, so the reader's contract has to say it
+    where a caller meets it."""
+    import inspect
+
+    from shared.discovery_service import DiscoveryService as _Service
+
+    doc = inspect.getdoc(_Service.get_launch_stats_enveloped) or ""
+    assert "main_pool_total" in doc and "total" in doc
+    for expected in ("different populations", "shade"):
+        assert expected in doc.lower(), (
+            f"the accessor's docstring does not warn about {expected!r}")
+
+
+# ===========================================================================
 # Task 1, behaviour 7: provenance -- version and audience
 # ===========================================================================
 

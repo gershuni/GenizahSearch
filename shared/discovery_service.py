@@ -85,6 +85,12 @@ envelope key                     the query it is
                                  of the per-shade manuscript counts: a
                                  manuscript contributing under two shades is
                                  counted once here and twice there.
+``meta.main_pool_total``         ``SELECT COUNT(*) FROM
+                                 discovery_identification WHERE main_pool = 1``
+                                 -- **NO ``novelty_status`` predicate at all.**
+``meta.main_pool_total_manuscript_count``  ``SELECT COUNT(DISTINCT sys_id)``
+                                 over the same rows, again with no shade
+                                 predicate.
 ``meta.all_bucket_total``        the same as ``total`` with the ``main_pool``
                                  predicate DROPPED. Ruling U constraint 1
                                  permits a page to show this only if it says
@@ -101,6 +107,22 @@ envelope key                     the query it is
                                  discovery_claim`` -- every page any claim
                                  touches. Ruling U's "across N pages".
 ===============================  =========================================
+
+**``main_pool_total`` AND ``total`` ARE TWO DIFFERENT POPULATIONS.** ``total``
+is and stays the SHADE-FILTERED contribution figure -- what the release adds to
+the finding aids -- while ``main_pool_total`` counts every main-pool
+identification whatever its novelty shade, including the shades that are not a
+contribution at all. Substituting one for the other, or summing them, or
+pairing ``main_pool_total`` with ``main_pool_manuscript_count`` (which IS shade
+filtered), reproduces exactly the mixed-basis defect ruling U was issued over:
+a figure built by adding counts taken on different bases. The same applies to
+the pair ``main_pool_total`` / ``main_pool_total_manuscript_count``, which is
+internally consistent and must be used together.
+
+If the SECOND pool's size is ever wanted, the matching key is
+``meta.more_pool_total`` (``WHERE main_pool = 0``) -- it is deliberately NOT
+added speculatively, because a number advertising that pool is an owner ruling
+rather than a reader's convenience.
 
 ``meta.basis`` states the single basis (``main_pool``) explicitly, so no
 consumer has to infer it and no consumer can mix bases silently.
@@ -2259,6 +2281,18 @@ class DiscoveryService:
         A failed or unavailable read is an OUTAGE, never `ok` with a zero
         contribution: a release headline reading "0" during a sidecar failure is
         the exact defect the envelope exists to prevent.
+
+        THE TRAP, stated where a caller reading this will meet it:
+        `meta['main_pool_total']` and `total` are TWO DIFFERENT POPULATIONS.
+        `total` is the SHADE-FILTERED contribution figure (main pool AND
+        `novelty_status IN LAUNCH_CONTRIBUTION_SHADES`); `main_pool_total`
+        carries NO shade predicate at all and counts every main-pool
+        identification. Likewise `main_pool_total_manuscript_count` is the
+        unfiltered partner of `main_pool_total`, and is NOT
+        `main_pool_manuscript_count`, which is shade filtered. Substituting one
+        for the other, summing them, or pairing a figure from one basis with a
+        figure from the other reproduces exactly the mixed-basis defect ruling U
+        was issued over.
         """
         if not self.is_available():
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
@@ -2284,6 +2318,18 @@ class DiscoveryService:
                 conn, main_pool_only=True)
             _all_by_shade, all_total, all_manuscripts = self._query_launch_contribution(
                 conn, main_pool_only=False)
+            # The UNCONDITIONAL main-pool figures: no `novelty_status`
+            # predicate, deliberately a different population from `total` and
+            # `main_pool_manuscript_count` above, which are both shade
+            # filtered. Written as one row so the two can never be read from
+            # two differently-filtered statements.
+            unconditional = conn.execute(
+                "SELECT COUNT(*) AS identifications, "
+                "COUNT(DISTINCT sys_id) AS manuscripts "
+                "FROM discovery_identification WHERE main_pool = 1"
+            ).fetchone()
+            main_pool_total = int(unconditional["identifications"])
+            main_pool_total_manuscripts = int(unconditional["manuscripts"])
             corpus_manuscripts = int(conn.execute(
                 "SELECT COUNT(DISTINCT sys_id) AS n FROM discovery_identification"
             ).fetchone()["n"])
@@ -2319,6 +2365,8 @@ class DiscoveryService:
             "sidecar_version": provenance.get("sidecar_version") or self._last_version,
             "audience": provenance.get("audience"),
             "main_pool_manuscript_count": main_manuscripts,
+            "main_pool_total": main_pool_total,
+            "main_pool_total_manuscript_count": main_pool_total_manuscripts,
             "all_bucket_total": all_total,
             "all_bucket_manuscript_count": all_manuscripts,
             "corpus_manuscript_count": corpus_manuscripts,
