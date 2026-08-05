@@ -19,10 +19,10 @@ paid** by the input artifact.
 |---|---|
 | **Cheaper than recorded** | The novelty LLM gate's real measured cost is **$40.12**, not the `~$301` the ROADMAP carries. Batching 10 cases per call is the whole difference. |
 | **One debt already paid** | `w_start`/`w_end` — the item Phase 136.1 actually waits on — is **already persisted, 100% populated, on all 502,498 gen-2 evidence rows** as `ref_start`/`ref_end`. The expensive half of that debt does not need doing. |
-| **Not as cheap as briefed** | The verdict cache is keyed on grain alone (`sys_id::work_key`) with a whole-file hash pin. It has **no mechanism to notice that a question changed**, so reusing it across a membership change is a correctness hazard, not a saving. Recommend computing fresh. |
-| **No second heavy run** | The MAPV2-8/-9 debts that "MUST ride any gen-2 heavy re-run" were scoped (§3.5): MAPV2-9's mechanism does not exist in the gen-2 lineage, and MAPV2-8 is a 301-claim ingest-time exclusion. **Neither forces a fresh Track-1 run** — this keeps the bake at roughly a week. |
-| **No corpus expansion** | gen-2's 4,160 works are a strict **subset** of the v2-era matcher's 4,509, and all 2,738 works missing a `w######` id were already in it. The reference corpus did not grow, so **CERT-01 needs no re-registration on that ground** (§3.1). |
-| **Owner decisions in** | **Mint the 2,738; M-source stays private** (2026-08-05). Measured: zero M-source works are public today, so the mint cannot block the public release; and 2,733 of 2,738 already carry a genre, so that debt is a 34-row vocabulary mapping, not 2,738 curations. |
+| **Cache reuse IS valid** | ⟨§1.4a, **reversing §1.4**⟩ The cache is keyed on grain alone with a whole-file hash pin — but both model inputs (finding-aid text; work identity) are unchanged for any pair reached through the same crosswalk, and novelty is orthogonal to band by contract. Measured **87.6% reuse** at headline scope → **≈$4**, not $40. One guardrail: never re-grain an existing `w######` in place. |
+| **No second heavy run, and no week** | MAPV2-9's mechanism does not exist in the gen-2 lineage; MAPV2-8 is a 301-claim ingest exclusion (§3.5). And the ingest is **S, not L** (§3.1a): the bake runs in ~5 min, and the builder reads only `track1_matches` + `pages`, which gen-2 already provides at 12-of-14 columns. **~2 days end to end**, not a week. |
+| **No corpus expansion** | gen-2's 4,160 works are a strict **subset** of the v2-era matcher's 4,509. **CERT-01 needs no re-registration on that ground** (§3.1). The 349-work difference is **R-source**, correctly absent — and it must stay out (§3.1, R-source). |
+| **🛑 One decision REOPENED** | The owner's "mint the 2,738" was given on my wrong premise that they were an accidental gap. **2,686 of them are D-05/D-06 exclusions** — 82% liturgy and poetry — dropped for masking risk, title-curation burden and claim quality. The real accidental gap is **52 works / 0.03% / zero shipped claims**. Adding the rest is the deferral D-05 pointed at *this* track, but it needs neutral titles, a masking review and a containment fix — none of which exist. **Recommended default: honour D-06 for this bake.** |
 
 Everything below is measured against the real artifacts on this machine, with the measurement named. Where
 I could not measure, I say so rather than estimating quietly.
@@ -370,6 +370,66 @@ quotations to the weaker "parallel" surface and keep the headline clean — fail
 liturgical shipped claims (22,186 of 36,753) are routed to `same_work`, i.e. the headline.** So admitting
 liturgy would need an explicit liturgy/containment gate, which is the handoff's "conservative headline option"
 (§5) rather than something the router gives free.
+
+#### Yes — the exclusion IS a masking decision, and v3 is where D-05 said it would be revisited
+
+I led with the CERT-01 precision finding. **That was not the original reason, and it understated the masking
+half.** D-05 (`134-CONTEXT.md`) states the rationale verbatim:
+
+> *"large literary works have obvious neutral titles + **low masking sensitivity** + cleaner same-work claims;
+> piyyut (incipit-keyed micro-units) and documentary (letters/legal docs, often untitled) are both a
+> **title-curation nightmare** AND the **highest masking risk**."*
+
+So three reasons, and **two of them are about masking and curation, not accuracy**:
+
+1. **Masking risk — directly the M-source privacy posture.** A large literary work's title is a well-known
+   public name and reveals nothing about where it came from. A piyyut is keyed by **incipit**, and documentary
+   items are often untitled and described. Those strings are exactly the kind that could de-anonymize the
+   corpus — the same hazard as the signature-vocabulary rule (never annotate the codename with the corpus's fingerprint terms): pairing the codename with fingerprint text
+   defeats it as effectively as the name would.
+2. **Title-curation burden.** Every M-source displayable field must pass **owner review before it can ship**
+   (D-08, fail-closed), because that metadata is provenance-sensitive and lives off-repo. Reviewing 2,208
+   incipit-keyed works by hand is the "nightmare"; D-06 exists to keep the review set tractable.
+3. **Claim quality** — "cleaner same-work claims" for literary works. Present from the start, and **CERT-01's
+   45%-of-error liturgical-containment finding arrived a phase later as independent confirmation**, not as the
+   founding reason.
+
+**And the correction that matters most to the owner's instinct:** D-05 does not exclude piyyut and documentary
+permanently. It excludes them **"at launch (deferred to the fast-follow / gen-2 track alongside R-source)"** —
+and *this bake is the gen-2 track*. So "we add them" is **not** reversing a decision; it is the deferral
+arriving at its designated venue. My retraction was right that it is a substantive decision and wrong to frame
+it as a policy reversal.
+
+What the deferral requires before it can land, none of which exists yet:
+
+| blocker | status |
+|---|---|
+| neutral titles for ~2,208 incipit-keyed works, owner-reviewed (D-08) | not started — the largest item |
+| a masking review of those titles (highest masking risk class) | not started |
+| a containment-aware rule for the liturgy precision failure | logged as a v3 candidate, unbuilt |
+
+The first two are bigger obstacles than the precision fix I emphasised, and the first is owner grading time —
+this project's scarcest resource.
+
+#### R-source: out of v3, and verified out
+
+Deferred by D-05 in the same breath as piyyut/documentary, and by the handoff explicitly — R-source (`RS:`) is
+the separate downstream **G-R**, *"NOT in this handoff"*. Also ~86% post-Genizah, so its relevance is a real
+question rather than a scheduling one. **Verified rather than assumed:**
+
+- `track1_matches_pilot_glaunch3_live` (the gen-2 table): **M 3,776 · REF2 299 · J 85 — zero `RS:`**.
+- `g_launch3.db` evidence rows matching `RS:%`: **0**.
+- the v2-era `track1_matches`: **349 `RS:` works** — i.e. R-source *is* present in that table.
+
+**That last line is a live trap for this bake.** `select_shown_works` reads a table literally named
+`track1_matches`; if the v3 research DB carried the v2-era one, 349 R-source works would enter silently. The
+research DB must therefore be built with `track1_matches` **materialised from the glaunch3 rows**, and
+`fullcorpus_gen2.db`'s own `track1_matches` / `track1_matches_rs*` tables must not be carried over — which is
+why §7 builds a *slim* research DB rather than copying the corpus file. Gate 2 (id-map completeness, HALT on
+unresolved) is what catches a mistake here.
+
+`.masking_patterns` holds 15 patterns (count only — contents are secret), consistent with DATA-05's requirement
+that **R-source tokens are pre-registered** alongside M-source, so a leak of either is caught by the same gate.
 
 **Three real options, in increasing cost:**
 - **(a) keep excluded** until containment-aware routing exists — recommended for this bake;
