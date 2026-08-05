@@ -192,9 +192,37 @@ required, and both are the crux of everything else:
 | manuscript | `page_id`, 48-char opaque hash | `sys_id`, 18-digit Alma | `discovery_data/crosswalk.json` is the existing bridge |
 | work | `ref_work` — `M:` / `REF2:` / `J:` prefixed raw | `w######` canonical + alias groups | census + canonical-merge mapping |
 
-Neither axis matches on either side. **Every downstream figure in this plan depends on getting these two
-maps right**, and a silent partial map is the failure mode to fear: it would not error, it would just
-under-populate. Gate accordingly (§6, gate 2).
+**MEASURED 2026-08-05.** Both maps were tested against the real artifacts. One is trivial; the other has a
+large, quantified hole.
+
+**Manuscript axis — a string split, not a lookup.** Gen-2's `page_id` *embeds* the sys_id:
+`{sys_id}_IE{ie}_P{p}_FL{fl}`. **100.00% of all 198,238 distinct page_ids match that pattern, zero
+exceptions.** No crosswalk is involved and this axis carries no risk. (It is also why the MAPV2-8
+exclude-list drops straight in — same id space.)
+
+**Work axis — `discovery_data/crosswalk.json` maps raw `ref_work` → `w######`, and covers 34% of gen-2's
+works:**
+
+| | distinct works | evidence rows |
+|---|---|---|
+| resolve via crosswalk | 1,422 of 4,160 (**34.2%**) | 439,127 of 502,498 (**87.39%**) |
+| **UNRESOLVED** | **2,738 (65.8%)** | **63,371 (12.61%)** |
+
+The gap is almost entirely one corpus: **2,733 of the 2,738 unresolved works are M-source**, plus 5 Sefaria
+and 0 JA. So the public corpora are essentially fully mapped, and the hole is the M-source long tail —
+low-claim works, which is why 66% of works is only 13% of rows.
+
+**This is the silent-under-population failure mode, now quantified rather than feared.** An ingest that
+resolves what it can and moves on would drop 12.6% of the evidence and emit no error. Three ways out, and it
+is an owner decision because they differ in kind, not degree:
+
+1. **Mint** new `w######` ids for the 2,738 → the works table goes from 1,269 to ~4,000. This is what a
+   membership expansion *means*, but it cascades into §3.6: each new work needs a neutral title and a genre.
+2. **Map up** to a parent/canonical work where one exists — cheapest, but collapses grain, which is the axis
+   v3 is supposed to improve.
+3. **Drop** → lose 12.6% of evidence, disproportionately M-source.
+
+Gate accordingly (§6, gate 2): the build must **HALT** on an unresolved id rather than skip it.
 
 ### 3.2 `w_start`/`w_end` and the locus (debts 2 / 2b) — split them
 
@@ -266,10 +294,37 @@ risky), and it is read **only by MAPV2-lineage scripts** (`audit_stage0_coverage
 3. **Blast radius measured: 301 `g_launch3` claim rows** fall on those 595 pages (the 152 "severe" are a
    subset, so fewer still).
 
-Cost: **S** — an exclusion at ingest. One loose end for execution, not for costing: `records` carries no
-`severity` field, so the 152-severe cut must be re-derived from the `criteria` thresholds
-(`cov_min`/`score_min`/`faithful_min`) or from `results/mapv2_substitution_risk.md`. **Do not silently apply
-all 595 in place of the 152** — that is a different, larger decision than the ledger authorizes.
+Cost: **S** — an exclusion at ingest.
+
+#### The 152 cannot be reproduced from what was persisted (measured 2026-08-05)
+
+I tried to re-derive it and could not, and the reason matters. The report defines severity by *matched-char
+coverage of the HTR page*: `<0.50` → 0 pages, **`0.50–0.70` → 152**, `0.70–0.85` → 441. But the persisted
+JSON stores values **rounded to 3 dp**, and the rounding is provably lossy here: 4 records store
+`faithful` as exactly `0.750` while the band predicate that admitted them is `faithful < 0.75` — so their
+unrounded values were below 0.75 and the file cannot represent the cut that produced it.
+
+| cut, from the persisted file | pages | gen-2 claim rows |
+|---|---|---|
+| `matched_frac < 0.70` | **151** | 46 |
+| `matched_frac <= 0.70` | **154** | — |
+| the full persisted risky list | **595** | **301** |
+| *the report's figure* | *152* | *not reproducible* |
+
+**So there is no honest way to apply "the 152" from the artifacts on hand** — only 151, 154, or 595. The
+unrounded values live in `fullcorpus_gen2.db` and the audit is re-runnable over its 18,982 substituted pages,
+but that is a disproportionate amount of work to settle a one-page ambiguity affecting roughly one claim row.
+
+**Recommendation: exclude at the full 595-risky level (301 claim rows, 0.084% of 358,206).** It is the
+*persisted, authoritative* artifact rather than a derived statistic; it is conservative in the safe direction;
+and it removes the reproducibility problem instead of fudging it. My earlier caution — "do not silently apply
+all 595 in place of the 152, that is a larger decision" — was right to flag it and wrong about the magnitude:
+measured, the two differ by 255 claim rows out of 358,206.
+
+**One distinction I should not gloss:** MAPV2-8 asks to **revert** those pages to v1 HTR, not to exclude them.
+Reverting recovers the finding with better text; excluding drops it. At 595 pages a re-match is cheap, so
+revert stays available as a later enhancement — but excluding achieves the *safety* goal (no claim resting on
+damaged text) without a matcher re-run, and that is the right trade for 301 rows.
 
 <details>
 <summary>The original three-way question, and what settled it</summary>
@@ -305,10 +360,13 @@ use.** Do not regenerate; feed it through the 136-09 curated-artifact path (`app
   blank template (123 rows, empty `genre_to_assign`). 58 public + 123 restricted = the 181 private. So the
   **public** release gate can pass while the **private** artifact still fails. Both need an answer.
 - **`apply_work_genres` writes only works matched in the curated artifact** — that omission is the root cause
-  of this bug. At v3's grain there are **4,160 reference works**, not 1,269, so the curated set will cover a
-  much smaller fraction. **Verify coverage against every claim-bearing work in the v3 asset rather than
-  assuming it, and expect this debt to be bigger at v3 than at v2.** This is the one item where v3 makes an
-  existing problem worse rather than better.
+  of this bug. **CONFIRMED AND SIZED 2026-08-05:** §3.1 measured 2,738 gen-2 works with no `w######` id at all.
+  If they are minted rather than dropped, **every one arrives with a NULL genre**, and the verifier fails on
+  each — so this debt is not merely "bigger at v3", it is **up to 2,738 works against the 58 just curated,
+  ~47× the work**, and 2,733 of them are M-source (masked titles, so the worklist can never leave the
+  machine). **This is the strongest argument for §3.1 option 2 (map up) over option 1 (mint)**, and the two
+  decisions must be taken together rather than separately. Verify coverage against every claim-bearing work in
+  the v3 asset rather than assuming it. This is the one item where v3 makes an existing problem worse.
 
 ### 3.7 `band_precision` (debt 7) — defer, and say why
 
@@ -340,13 +398,24 @@ of cases resolved free by the heuristic funnel. Cost for a population of P:
 | 150,000 | **$92** |
 | 173,564 — page-grain headline ceiling, an **over-count** at `(sys_id, work)` grain | **$107** |
 
-**Recommend a $150 ceiling**, which the run enforces itself (`cost_ceiling_usd`, as the $45 one did). That is
-half the `~$301` figure currently in the ROADMAP for a *larger* corpus.
+**P is now MEASURED, superseding the illustrative rows above (2026-08-05).** I had written that P "needs the
+`page_id → sys_id` crosswalk and the `ref_work → alias-work` map, so P is a build output, not an input." That
+was wrong: §3.1 established both maps are computable **today** — the manuscript axis is a string split and the
+work axis is `crosswalk.json` — so P was computed directly as distinct `(sys_id, w-id)` pairs. Alias grouping
+(`novelty_work_key`) only collapses further, so each figure is an **upper bound**:
 
-**What I could not measure, and why.** The exact P needs the `page_id → sys_id` crosswalk and the
-`ref_work → alias-work` map — i.e. §3.1, which the bake builds anyway. **P is therefore a build output, not an
-input**, and the honest sequence is: build the ingest, count P, then authorize the spend against the real
-number. The measured bounds above are for deciding whether it is worth starting, and they say yes.
+| scope | P (resolved) | cost | + unresolved-work pairs (§3.1) |
+|---|---|---|---|
+| **same_work / headline only** | 51,476 | **$32** | +13,718 |
+| **shipped claims** | 86,073 | **$53** | +23,895 |
+| all evidence | 153,606 | **$94** | +38,604 |
+
+If the 2,738 unresolved M-source works are minted (§3.1 option 1), add the right-hand column: the shipped
+scope becomes ~110k → **≈$68**.
+
+**Recommend: novelty over the shipped scope, ≈$68 worst case, under a $150 self-enforced ceiling**
+(`cost_ceiling_usd`, as the $45 one did). Every figure here is a fraction of the `~$301` still in the ROADMAP,
+for a *larger* corpus — and the headline-only scope would cost $32.
 
 **Do not touch model, effort or prompt to save money.** Not for the brief's stated reason (they are not in the
 key), but for a better one: the $0.000727 unit cost and the 78.3%-agreement re-measurement are both *of that
@@ -438,22 +507,32 @@ how it gets broken again.
 
 ## 8. Owner questions
 
-**Blocking — the bake should not start without these**
+Two questions I had listed here on the first pass are **withdrawn — they were measurable, and I measured them
+instead of asking**: the MAPV2-8 severity cut (§3.5 — the 152 is not reproducible from the persisted file; use
+the 595) and the novelty population (§4 — P is 51,476 / 86,073 / 153,606 by scope, not a build output).
 
-1. **§1.3 authorization discrepancy.** Was the 2026-08-03 novelty production run authorized at
+**Blocking — one real decision, and it is the shape of v3**
+
+1. **§3.1 + §3.6 together: what happens to the 2,738 unmapped M-source works** carrying 12.6% of the evidence?
+   **Mint** them (works table 1,269 → ~4,000, and up to 2,738 new NULL genres to curate — ~47× the 58 just
+   done, all masked titles), **map up** to a parent work (cheap, but collapses the grain v3 exists to improve),
+   or **drop** (lose 12.6% of evidence, almost all M-source). These two sections must be answered as one
+   question; answering §3.1 alone silently commits §3.6.
+
+2. **§1.3 authorization discrepancy.** Was the 2026-08-03 novelty production run authorized at
    `batch_size=10`? Its output is what the serving asset pins, and the record says the run was unauthorized.
-   Also: authorize v3's fresh novelty run under a **$150** self-enforced ceiling.
-2. **§3.5 MAPV2-8.** Apply the exclude-list as an ingest filter at the **152-severe** cut (re-derived from the
-   audit thresholds), **not** the full 595-risky list. Confirm the 152 cut, since only the 595 is persisted.
+   Then authorize v3's fresh run — now **≈$68** at the shipped scope, ceiling $150.
 
 **Non-blocking — needed before the corresponding step**
 
-3. **§3.6** The 123 restricted-work genres: curate now, or accept a private-verifier failure while the public
+3. **§3.5** Confirm exclusion at the 595-risky level (301 claim rows, 0.084%) rather than a re-derived
+   152; and that **exclude-now / revert-later** is the right trade versus reverting those pages to v1 HTR.
+4. **§3.6** The 123 restricted-work genres: curate now, or accept a private-verifier failure while the public
    release passes?
-4. **§5** The conservative headline option — gate heavily-quoted mega-works out of the same-work headline
+5. **§5** The conservative headline option — gate heavily-quoted mega-works out of the same-work headline
    surface at launch, or ship the measured surface as-is?
-5. **§3.7** Confirm `band_precision` / CERT-01 re-registration is deferred past this bake.
-6. **`discovery-v3-naming.md`** — acknowledge the rename, which supersedes wording in the owner-ratified
+6. **§3.7** Confirm `band_precision` / CERT-01 re-registration is deferred past this bake.
+7. **`discovery-v3-naming.md`** — acknowledge the rename, which supersedes wording in the owner-ratified
    `discovery-coordination.md` §1.
 
 ---
