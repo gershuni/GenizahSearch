@@ -5125,3 +5125,131 @@ def test_the_headline_does_not_track_the_readers_filters(monkeypatch):
     source = inspect.getsource(fp.fetch_launch_stats)
     assert "state" not in source.split('"""')[-1], (
         "the launch reader took the reader's state")
+
+
+# ---------------------------------------------------------------------------
+# §3.3 -- A PERSISTED PAGE PAST THE END REPORTED A FALSE EMPTY CORPUS.
+#
+# `page` is persisted. An OFFSET past the end returns no rows, so
+# `COUNT(*) OVER ()` counts nothing and the envelope's total is 0 -- for a
+# filtered set that may hold thousands. The page then rendered "No results
+# found" and "Page 1 / 1" with both pager buttons disabled, and the state
+# survived a reload: a reader whose filters narrowed under them was told the
+# corpus was empty, permanently.
+#
+# Two halves, and both are needed: the SERVICE must stop reporting a zero it
+# never measured (asserted in tests/test_discovery_findings_query.py), and the
+# PAGE must clamp its PERSISTED state -- never a display-only local -- and
+# refetch.
+# ---------------------------------------------------------------------------
+
+def _paging_findings(recorder, *, total):
+    """A findings stub that pages a real row list, exactly as SQL would --
+    including reporting the REAL total on a page past the end."""
+    async def _call(unit="identification", **kwargs):
+        page = int(kwargs.get("page") or 1)
+        size = int(kwargs.get("page_size") or fp._default_page_size())
+        recorder.append(page)
+        rows = [
+            _finding_row(f"w{index:06d}", f"ROW-{index}", f"T-S {index}")
+            for index in range((page - 1) * size, max((page - 1) * size,
+                                                      min(page * size, total)))
+        ]
+        return {
+            "status": "ok", "items": rows, "total": total,
+            "meta": {"unit": unit, "bucket": kwargs.get("bucket", "main"),
+                     "sort": "band_rank", "sort_basis": "best_band_rank",
+                     "novelty_offered": True, "include_divergent": False,
+                     "page": page, "approximate_total": False},
+        }
+    return _call
+
+
+def test_a_persisted_page_past_the_end_is_clamped_and_REFETCHED(monkeypatch):
+    """The load-bearing one. A display-only clamp fixes what the pager PRINTS
+    and leaves the reader on the empty page it printed about."""
+    pages_read = []
+    size = fp._default_page_size()
+    client = _render_page(
+        monkeypatch, lang="en",
+        findings=_paging_findings(pages_read, total=size + 1),
+        state=_state(page=999))
+
+    assert pages_read[0] == 999, "fixture error: the out-of-range page was not sent"
+    assert pages_read[-1] == 2, (
+        f"the page was never refetched inside the real set: {pages_read}")
+    assert len(pages_read) == 2, (
+        f"the clamp cost {len(pages_read)} reads; one refetch is the budget")
+
+    assert _elements_with_class(client, fp.ROW_CLASS), (
+        "the reader is still looking at an empty result")
+    assert not _elements_with_class(client, f"{fp.RESULTS_CLASS}-empty"), (
+        "the honest-empty state is rendered over a corpus that has rows")
+
+
+def test_the_clamp_moves_the_PERSISTED_state_not_a_display_local(monkeypatch):
+    """`page` is persisted, so a display-only clamp leaves the bad page in the
+    store and the reader lands back on it after a reload."""
+    store = {}
+    monkeypatch.setattr(fp, "safe_user_set",
+                        lambda key, value: store.__setitem__(key, value))
+    monkeypatch.setattr(fp, "safe_user_get",
+                        lambda key, default=None: store.get(key, default))
+    size = fp._default_page_size()
+    _render_page(monkeypatch, lang="en",
+                 findings=_paging_findings([], total=size + 1),
+                 state=_state(page=999))
+    assert store[fp._KEY_PAGE] == 2, (
+        f"the out-of-range page survived in the store as {store.get(fp._KEY_PAGE)!r}")
+
+
+def test_an_in_range_page_is_left_alone(monkeypatch):
+    """The other direction, so the clamp cannot pass by resetting every page."""
+    pages_read = []
+    size = fp._default_page_size()
+    _render_page(monkeypatch, lang="en",
+                 findings=_paging_findings(pages_read, total=size * 4),
+                 state=_state(page=3))
+    assert pages_read == [3], f"an in-range page was disturbed: {pages_read}"
+
+
+def test_the_clamp_is_pure_and_only_ever_moves_downwards():
+    """Assertable without a browser, which is the point of keeping it a pure
+    function of `(state, envelope)`."""
+    size = fp._default_page_size()
+
+    state = _state(page=999)
+    assert fp.clamp_page_to_total(state, {"status": "ok", "total": size * 2}) is True
+    assert state["page"] == 2
+
+    state = _state(page=1)
+    assert fp.clamp_page_to_total(state, {"status": "ok", "total": size * 9}) is False
+    assert state["page"] == 1, "the clamp moved a page UPWARDS"
+
+    # A genuinely empty set has ONE page, not zero.
+    state = _state(page=7)
+    assert fp.clamp_page_to_total(state, {"status": "ok", "total": 0}) is True
+    assert state["page"] == 1
+
+
+@pytest.mark.parametrize("status", ["unavailable", "timeout", "busy"])
+def test_an_outage_never_clamps_the_page(status):
+    """An outage carries no trustworthy total. Clamping against one would
+    convert a temporary failure into a PERSISTED page-1 reset -- the reader
+    loses their place because the service blinked."""
+    state = _state(page=42)
+    assert fp.clamp_page_to_total(state, {"status": status, "total": 0}) is False
+    assert state["page"] == 42
+
+
+def test_the_pager_and_the_clamp_share_one_page_arithmetic():
+    """A second copy is how the two come to disagree about which page is the
+    last one -- and disagreeing about that is the defect the clamp exists to
+    fix."""
+    import inspect
+
+    source = inspect.getsource(fp)
+    assert source.count("math.ceil(") == 1, (
+        "the page count is computed in more than one place")
+    assert "_page_count(" in inspect.getsource(fp._render_pager)
+    assert "_page_count(" in inspect.getsource(fp.clamp_page_to_total)

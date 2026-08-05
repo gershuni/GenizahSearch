@@ -722,6 +722,51 @@ async def fetch_facets(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
 # because a background context has no UI context to read it from.
 # ---------------------------------------------------------------------------
 
+def _page_count(total: Any, size: int) -> int:
+    """How many pages a set of `total` rows has, at `size` per page.
+
+    ONE arithmetic, used by the pager and by the out-of-range clamp alike. A
+    second copy is how the two come to disagree about which page is the last
+    one -- and disagreeing about that is exactly the defect the clamp exists to
+    fix.
+    """
+    try:
+        rows = int(total or 0)
+    except (TypeError, ValueError):  # pragma: no cover -- defensive
+        rows = 0
+    if rows <= 0 or size <= 0:
+        return 1
+    return max(1, math.ceil(rows / size))
+
+
+def clamp_page_to_total(state: Dict[str, Any], envelope: Dict[str, Any]) -> bool:
+    """Pull a persisted page back inside the real set. Returns whether it moved.
+
+    THE STATE, not a local for display. `_render_pager` already clamped a local
+    copy, which fixed what the pager PRINTED and nothing else: the next
+    `fetch_findings` still sent the out-of-range page, so the reader stayed on
+    an empty result with both pager buttons disabled and no way out. `page` is
+    persisted, so that state survived a reload -- a reader whose filters had
+    narrowed under them was told the corpus was empty, permanently, and the
+    caller has to REFETCH once this returns True.
+
+    Only ever moves DOWNWARDS, and only on an `ok` envelope: an outage carries
+    no trustworthy total, and clamping against one would turn a temporary
+    failure into a persisted page-1 reset.
+    """
+    if (envelope or {}).get("status") != "ok":
+        return False
+    pages = _page_count(envelope.get("total"), _default_page_size())
+    try:
+        current = int(state.get("page") or 1)
+    except (TypeError, ValueError):  # pragma: no cover -- read_state normalises
+        current = 1
+    if current <= pages:
+        return False
+    state["page"] = pages
+    return True
+
+
 def _page_is_gone(page_client: Any) -> bool:
     if page_client is None:
         return False
@@ -1001,6 +1046,16 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         envelope = await fetch_findings(state)
         if _page_is_gone(page_client):
             return
+        # A PERSISTED PAGE PAST THE END. The clamp moves the STATE (never a
+        # display-only local) and the refetch is what makes the move real --
+        # without it the reader is looking at the empty page they were clamped
+        # off. AT MOST ONE extra read: the clamped page is inside the set by
+        # construction, so the second envelope cannot be out of range again.
+        if clamp_page_to_total(state, envelope):
+            write_state(state)
+            envelope = await fetch_findings(state)
+            if _page_is_gone(page_client):
+                return
         results_region.clear()
         with results_region:
             _render_results(envelope, state, lang, refresh,
@@ -2211,7 +2266,7 @@ def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh) -> None
     against the shared maximum); this module names only the budgeted default.
     """
     size = _default_page_size()
-    pages = max(1, math.ceil(total / size)) if total > 0 else 1
+    pages = _page_count(total, size)
     page = min(max(1, state["page"]), pages)
 
     with ui.row().classes(f"pager {PAGER_CLASS} w-full gap-2 items-center"):

@@ -739,6 +739,18 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         _take(_render_findings_page(
             lang=lang, findings=tf.findings_envelope(rows_full),
             facets=rich_facets))
+        # 2b. a PERSISTED PAGE PAST THE END. The page clamps its own state and
+        #     refetches, and that refetch is a second painted result region no
+        #     other case in this capture produces -- reachable only when the
+        #     requested page is outside the real set.
+        _take(_render_findings_page(
+            lang=lang, findings=tf.findings_envelope(rows_full, total=1),
+            facets=rich_facets,
+            state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
+                   "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
+                   "novelty_only": False, "divergence": False, "domain": None,
+                   "author": None, "work_id": None, "work_label": None,
+                   "page": 9}))
         # 3. facets whose backing data is absent -- a visibly blocked control.
         _take(_render_findings_page(
             lang=lang, findings=tf.findings_envelope(rows_full),

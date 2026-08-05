@@ -2306,6 +2306,26 @@ class DiscoveryService:
                     total = counted
             else:
                 total = int(rows[0]["_total_rows"]) if rows else 0
+                if not rows and page > 1:
+                    # AN OFFSET PAST THE END RETURNS NO ROWS, so `COUNT(*)
+                    # OVER ()` has nothing to count and the window function's
+                    # total is 0 -- for a filtered set that may hold thousands.
+                    # Reported as-is, that zero is indistinguishable from a
+                    # genuine empty result, and every surface downstream renders
+                    # "no results found" over a corpus that has them, with a
+                    # pager that says page 1 of 1 and disables both directions.
+                    # A persisted page (this one is) makes that state STICKY.
+                    #
+                    # So the REAL total is resolved with the count form, on the
+                    # same predicate. It costs one extra aggregate on a path
+                    # nobody reaches in normal paging, and it turns an outage-
+                    # shaped lie into a number the surface can clamp against.
+                    count_sql, count_params = _build_findings_query(
+                        unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+                        include_divergent=include_divergent,
+                        domain=domain, author=author, work_id=work_id,
+                        count_only=True)
+                    total = int(conn.execute(count_sql, count_params).fetchone()["n"])
         except Exception as e:
             logger.error("DiscoveryService.get_findings error (unit=%s): %s", unit, e)
             return unavailable_envelope(meta={"reason": "query_failed"})
@@ -2335,6 +2355,11 @@ class DiscoveryService:
             "sort_basis": _FINDINGS_SORT_BASIS[sort],
             "novelty_offered": novelty_offered,
             "include_divergent": bool(include_divergent),
+            # The page this envelope actually SERVED, after the service's own
+            # clamp. A surface that persists its page needs to compare the page
+            # it asked for against the set that came back, and reading its own
+            # request back for that comparison proves nothing.
+            "page": page,
             "approximate_total": approximate,
         })
 

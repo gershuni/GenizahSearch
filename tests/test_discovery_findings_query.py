@@ -424,6 +424,53 @@ def test_an_exact_count_is_flagged_exact_and_a_capped_one_is_flagged_approximate
     )
 
 
+def test_a_page_past_the_end_reports_the_REAL_total_not_a_zero(service):
+    """§3.3. An OFFSET past the end returns no rows, so `COUNT(*) OVER ()` has
+    nothing to count and the window function's total is 0 -- for a set that
+    holds seven. Reported as-is, that zero is indistinguishable from an empty
+    corpus, and every surface downstream renders "no results found" over a
+    corpus that has them, with a pager that says page 1 of 1 and disables both
+    directions. Worse, the surface persists its page, so the state is sticky.
+    """
+    in_range = service.get_findings_enveloped(bucket=BUCKET_ALL, page=1, page_size=2)
+    assert in_range["total"] == len(_IDENTIFICATIONS)
+
+    past_the_end = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, page=99, page_size=2)
+    assert past_the_end["status"] == STATUS_OK
+    assert past_the_end["items"] == [], "fixture error: page 99 has rows"
+    assert past_the_end["total"] == len(_IDENTIFICATIONS), (
+        "a page past the end reports a zero the service never measured")
+    assert past_the_end["meta"]["page"] == 99, (
+        "the envelope does not say which page it served, so a surface "
+        "comparing its request against the answer has only its own request")
+
+
+def test_a_page_past_the_end_of_a_FILTERED_set_reports_that_sets_total(service):
+    """The real shape of the defect: a reader deep in the corpus narrows a
+    filter, and the page they were on no longer exists in the smaller set."""
+    filtered = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, domain=_LEAF_B1, page=1, page_size=2)
+    assert filtered["total"] == 1, "fixture error"
+
+    past = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, domain=_LEAF_B1, page=9, page_size=2)
+    assert past["items"] == []
+    assert past["total"] == 1, (
+        "the narrowed set reports itself empty, so the surface cannot tell a "
+        "stale page from a filter that genuinely matches nothing")
+
+
+def test_a_genuinely_empty_set_still_reports_zero(service):
+    """The other direction. The extra count must not manufacture a total for a
+    filter that really matches nothing."""
+    empty = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, work_id="w-does-not-exist", page=3)
+    assert empty["status"] == STATUS_OK
+    assert empty["items"] == []
+    assert empty["total"] == 0
+
+
 def test_pagination_returns_a_bounded_page_and_the_real_total(service):
     page1 = service.get_findings_enveloped(bucket=BUCKET_ALL, page=1, page_size=3)
     page2 = service.get_findings_enveloped(bucket=BUCKET_ALL, page=2, page_size=3)
