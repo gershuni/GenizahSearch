@@ -20,6 +20,7 @@ paid** by the input artifact.
 | **Cheaper than recorded** | The novelty LLM gate's real measured cost is **$40.12**, not the `~$301` the ROADMAP carries. Batching 10 cases per call is the whole difference. |
 | **One debt already paid** | `w_start`/`w_end` — the item Phase 136.1 actually waits on — is **already persisted, 100% populated, on all 502,498 gen-2 evidence rows** as `ref_start`/`ref_end`. The expensive half of that debt does not need doing. |
 | **Not as cheap as briefed** | The verdict cache is keyed on grain alone (`sys_id::work_key`) with a whole-file hash pin. It has **no mechanism to notice that a question changed**, so reusing it across a membership change is a correctness hazard, not a saving. Recommend computing fresh. |
+| **No second heavy run** | The MAPV2-8/-9 debts that "MUST ride any gen-2 heavy re-run" were scoped (§3.5): MAPV2-9's mechanism does not exist in the gen-2 lineage, and MAPV2-8 is a 301-claim ingest-time exclusion. **Neither forces a fresh Track-1 run** — this keeps the bake at roughly a week. |
 
 Everything below is measured against the real artifacts on this machine, with the measurement named. Where
 I could not measure, I say so rather than estimating quietly.
@@ -170,7 +171,7 @@ level is present in the raw ids today. Chapter/folio level is not. This material
 | 2b | Sefaria versemap resolution + `body↔norm_stream` map | **M** — the hardest remaining work | PANEL-03's *reference locus* only | **yes** — stage it |
 | 3 | novelty recompute at v3 grain | **S** — ~$40–110 measured | findings-page candidacy filter | partially — `not_checked` is honest |
 | 4 | GEN2 emitter sync (date tables) | **S** | D-17 chronological demotion | no — cheap and load-bearing |
-| 5 | MAPV2-8/-9 engine debts | **UNKNOWN — must be scoped first** | possibly a second heavy re-run | **decision, not a given** (§3.5) |
+| 5 | MAPV2-8/-9 engine debts | **S** — **scoped 2026-08-05, no heavy re-run** | headline cleanliness | no — cheap now (§3.5) |
 | 6 | 58 NULL-genre works | **XS** — curated CSV already exists | the release verifier **fails today** | no — it is a hard gate |
 | 7 | `band_precision` re-bake | **S**, but gated on a **human** step | CERT-01 closure, Phase 139 | defer — needs owner grading, not compute |
 
@@ -233,29 +234,56 @@ re-emitting from the gen-2 side so the emitter and the pinned artifact agree, an
 load-bearing, and it must happen **before** the D-17 step, whose ordering (Lever-1 → D-17, not the reverse) the
 v2 plan §6 fixed once already after a Codex round. Do not re-derive that order; inherit it.
 
-### 3.5 MAPV2-8/-9 (debt 5) — the one item I will not cost without scoping
+### 3.5 MAPV2-8/-9 (debt 5) — SCOPED 2026-08-05: **no heavy re-run needed**
 
-The forward ledger says these **MUST** ride any gen-2 heavy re-run: revert 152 severe HTR-substitution pages,
-re-key the cite-formula exemption (it currently re-admits the geonic-digest family), add JA/HTR-tolerant
-citation markers.
+> **This section was written as "uncostable until scoped", then scoped the same day. The scoping pass ran
+> (reading only — no pipeline touched) and the answer is the good one: neither debt requires a fresh heavy
+> Track-1 run.** The original three-way question is kept below the answer, because it records what was
+> actually uncertain and what settled it.
 
-**What I found, and why it is a question rather than a line item.** The re-keyed exemption exists — as
-`cite-formula gate v11 (aligned host-side exemption)` in `same_work_spike/probe/scripts/mapv2_deck.py`. But
+**MAPV2-9 (cite-formula exemption + JA/HTR-tolerant citation markers) — architecturally moot for v3.**
+There is **no cite-formula gate in the gen-2 engine at all**: no `CITE_MARKERS`, no `guard_cite`, no cite
+gate anywhere in `rsource/scripts/`. The only `cite`/`formula` matches are an unrelated `batch-formula guard`
+comment in `gen2_g_launch.py` and, in `gen2_coverage_router.py`, a `QUOTE` set of **grade labels** (the 714
+graded quotations) rather than pipeline output. Gen-2 replaced the guard with a different mechanism entirely —
+the **coverage router** (page-coverage ≥ 0.2984 → `same_work`; below → `parallel`). Confirmed downstream:
+`span_class` in `g_launch3` takes only `distinctive` / `unknown` / `shared`, never the
+`quote_ab`/`formula`/`citation` vocabulary. **So there is no wrongly-keyed exemption to re-key.** What remains
+is an **outcome** check, not a code port: verify the router does not re-admit the geonic-digest family the old
+exemption let through. That is a query against `g_launch3`. Cost: **S**.
+
+**MAPV2-8 (revert 152 severe HTR-substitution pages) — did NOT ride `g_launch3`; applying it is an
+ingest-time filter.** The gen-2 engine *does* read MAPV2 flag tables — `gen2_track1_run.py` reads
+`mapv2_page_flags` and `stage0_sys_flags` from `fullcorpus_gen2.db` — but **neither carries substitution
+severity** (`mapv2_page_flags` is `page_id, sys_id, merge_flag, weak_two_work_flag`; `stage0_sys_flags` is
+`sys_id, n_pages, n_fgp_rows, fgp_disagree`). The actual exclude-list is
+`same_work_spike/probe/data/substitution_risk_pages.json` (2026-07-11; 18,982 substitutions audited → 595
+risky), and it is read **only by MAPV2-lineage scripts** (`audit_stage0_coverage.py`, `mapv2_deck.py`) —
+**no gen-2 consumer**. Three facts make this cheap:
+
+1. The list exists and is machine-readable.
+2. Its ids are already in **gen-2's exact 48-char `page_id` space** (`{sys_id}_IE…_P…_FL…`) — no translation.
+3. **Blast radius measured: 301 `g_launch3` claim rows** fall on those 595 pages (the 152 "severe" are a
+   subset, so fewer still).
+
+Cost: **S** — an exclusion at ingest. One loose end for execution, not for costing: `records` carries no
+`severity` field, so the 152-severe cut must be re-derived from the `criteria` thresholds
+(`cov_min`/`score_min`/`faithful_min`) or from `results/mapv2_substitution_risk.md`. **Do not silently apply
+all 595 in place of the 152** — that is a different, larger decision than the ledger authorizes.
+
+<details>
+<summary>The original three-way question, and what settled it</summary>
+
+The forward ledger says these **MUST** ride any gen-2 heavy re-run. The re-keyed exemption exists — as
+`cite-formula gate v11 (aligned host-side exemption)` in `same_work_spike/probe/scripts/mapv2_deck.py` — but
 that is the **MAPV2 deck/product path**, a different lineage from the gen-2 engine
 (`rsource/scripts/gen2_track1_run.py` → `gen2_discovery_run.py`) that produced `g_launch3.db` on 2026-07-29.
-I did **not** find these fixes in the gen-2 engine path.
+Exactly one of three had to be true: (1) gen-2 already incorporates them under another name → no cost;
+(2) they are post-hoc filters applicable at ingest → **S**; (3) they are matcher-level and need a fresh heavy
+Track-1 run → **L**, reshaping this plan. **Measured answer: MAPV2-9 is (1)-by-replacement, MAPV2-8 is (2).
+Neither is (3).**
 
-So exactly one of three is true, and which one decides whether this is hours or another heavy re-run:
-
-1. the gen-2 engine already incorporates them by another name → no cost;
-2. they are post-hoc filters applicable at ingest → **S**, do it in this bake;
-3. they are matcher-level and need a **fresh heavy Track-1 run** → **L**, and it changes the whole shape of
-   this plan.
-
-**Recommendation: scope this first, cheaply, before anything else** — a targeted diff of the two engine paths
-plus a check for the 152 flagged pages in `g_launch3`. Half a day of reading buys the difference between a
-one-week and a multi-week bake. **I have not assumed an answer, and this plan is not costable until it is
-known.**
+</details>
 
 ### 3.6 The 58 NULL-genre works (debt 6) — the curated file already exists
 
@@ -330,7 +358,8 @@ dollars.
 ## 5. Recommended scope
 
 **DO in the v3 bake**
-1. Scope MAPV2-8/-9 first (§3.5) — it can invalidate the rest of this plan.
+1. **MAPV2-8** exclude-list applied at ingest, at the 152-severe cut (§3.5) — 301-claim blast radius, ids
+   already in gen-2's page space. *(The scoping this originally called for is done — see §3.5.)*
 2. The gen-2 ingest with both id-space maps (§3.1).
 3. `w_start`/`w_end` stage 1, corpus-wide, coordinate space named in the schema doc (§3.2).
 4. GEN2 emitter sync + re-pin, before D-17 (§3.4).
@@ -414,8 +443,8 @@ how it gets broken again.
 1. **§1.3 authorization discrepancy.** Was the 2026-08-03 novelty production run authorized at
    `batch_size=10`? Its output is what the serving asset pins, and the record says the run was unauthorized.
    Also: authorize v3's fresh novelty run under a **$150** self-enforced ceiling.
-2. **§3.5 MAPV2-8/-9.** Confirm the scoping pass is the first task, and that finding "matcher-level, needs a
-   fresh heavy Track-1" is an acceptable outcome that comes back for re-planning rather than being absorbed.
+2. **§3.5 MAPV2-8.** Apply the exclude-list as an ingest filter at the **152-severe** cut (re-derived from the
+   audit thresholds), **not** the full 595-risky list. Confirm the 152 cut, since only the 595 is persisted.
 
 **Non-blocking — needed before the corresponding step**
 
