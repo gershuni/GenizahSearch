@@ -715,6 +715,7 @@ READER_TEXT_FIELDS: Mapping[str, str] = {
     "relations_differ": "boolean: claim_type <> anchor_claim_type, DiscoveryService expansion query",
     "is_leaf": "boolean: the facet tree's leaf flag, DiscoveryService._project_facets",
     "novelty_offered": "boolean: whether the novelty axis is offered, shared/discovery_service.py::get_findings_enveloped",
+    "divergent": "boolean: MAX(novelty_status IN the hidden-by-default shades) over the row's group, shared/discovery_service.py::_divergence_flag_sql",
     "multi_work_annotation": "boolean: work_count > 1, DiscoveryService findings query",
 }
 
@@ -768,6 +769,7 @@ META_VOCABULARY_FIELDS: Mapping[str, frozenset] = {
     "anchor_mode": frozenset({"anchored", "unanchored"}),
     "level": frozenset(FACET_LEVELS),
     "lang": frozenset({"en", "he"}),
+    "include_divergent": frozenset({True, False}),
 }
 
 #: KEY -> a written reason. `audience` and `sidecar_version` have NO authority to

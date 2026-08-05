@@ -437,6 +437,35 @@ def divergence_warning(lang: str = "en") -> str:
     return _pick(_DIVERGENCE_WARNING, lang)
 
 
+# The per-ROW marker. The toggle above is a control and the warning is the
+# prose beside it; neither travels with a row once the reader has opened the
+# axis, and on the findings page a divergent row then sits in a flat list
+# among ordinary ones. So the row carries its own marker, and the marker
+# states BOTH facts on its face: that the two disagree, and that neither side
+# has been adjudicated.
+#
+# The second half is not decoration. `divergence_correctness` -- ruling L's
+# human-only column -- is NULL on every shipped row, so no adjudication
+# exists; a marker saying only "disagrees with the catalogue" would leave a
+# reader free to supply the missing half themselves, and the owner's own
+# reading of real cases is that BOTH directions occur. The wording therefore
+# never says which side is right, in either language.
+_DIVERGENCE_CHIP: Dict[str, str] = {
+    "en": "Disagrees with the catalogue — not adjudicated",
+    "he": "חולק על הקטלוג — לא הוכרע",
+}
+
+
+def divergence_chip(lang: str = "en") -> str:
+    """The neutral marker one catalogue-divergent row carries.
+
+    NEUTRAL BY CONSTRUCTION: it is one string with no variants, so there is
+    nothing here to colour-code by kind and no tier for a renderer to key a
+    treatment on (D-24). It names a relationship between two records; it makes
+    no claim about the match's quality and carries no figure of any kind."""
+    return _pick(_DIVERGENCE_CHIP, lang)
+
+
 # ---------------------------------------------------------------------------
 # Related pages (D-11a). These are NOT work identifications: they are
 # unevaluated candidate alignments between this page and pages of other

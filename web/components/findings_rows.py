@@ -128,6 +128,7 @@ ROW_SUB_CLASS = "gs-findings-row-sub"
 ROW_META_CLASS = "gs-findings-row-meta"
 ROW_RELATION_CLASS = "gs-findings-row-relation"
 ROW_NOVELTY_CLASS = "gs-findings-row-novelty"
+ROW_DIVERGENCE_CLASS = "gs-findings-row-divergence"
 ROW_PAGES_CLASS = "gs-findings-row-pages"
 ROW_COVERAGE_CLASS = "gs-findings-row-coverage"
 ROW_BUCKET_CLASS = "gs-findings-row-bucket"
@@ -906,6 +907,26 @@ def _render_shelfmark(item: Mapping[str, Any]) -> None:
         ui.label(str(shelfmark)).classes(ROW_SHELFMARK_CLASS)
 
 
+def divergence_marker(item: Mapping[str, Any], lang: str = "en") -> Optional[Tuple[str, str]]:
+    """`(text, tooltip)` for a catalogue-divergent row, or `None`.
+
+    Reads the SERVICE's own `divergent` flag rather than re-deriving the shade
+    membership here. That matters on the two grouped units, where
+    `novelty_status` is NULL whenever the group mixes shades: a renderer
+    deriving the marker from the shade would leave a manuscript row carrying
+    one divergent identification looking exactly like an ordinary finding, and
+    a work row never marked at all.
+
+    NEUTRAL, and the neutrality is structural: one string, one tooltip, no
+    branch on WHICH divergence shade produced it. There is nothing here to
+    colour-code by kind and no tier to key a row treatment on (D-24), which is
+    the same discipline `render_finding_row` already applies to the bucket.
+    """
+    if not item.get("divergent"):
+        return None
+    return ds.divergence_chip(lang), ds.divergence_warning(lang)
+
+
 def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str) -> None:
     """The meta line: relation chip, novelty chip, page count, coverage, bucket.
 
@@ -930,6 +951,17 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str) -> None:
         if badge is not None:
             text, classes = badge
             ui.label(text).classes(f"{classes} {ROW_NOVELTY_CLASS}")
+
+        # Ruling F's row marker. A PLAIN `.chip` -- the same neutral treatment
+        # the relation vocabulary and the manuscript pane already use -- rather
+        # than a new visual language: these rows are reached only by a reader
+        # who deliberately opened the axis, and a louder styling would be the
+        # page taking the side ruling F says nobody has taken. The full
+        # two-sentence statement rides on the chip's own tooltip.
+        divergence = divergence_marker(item, lang)
+        if divergence is not None:
+            text, tooltip = divergence
+            ui.label(text).classes(f"chip {ROW_DIVERGENCE_CLASS}").tooltip(tooltip)
 
         pages = _plural("pages", item.get("page_count"), lang)
         if pages:
@@ -1013,6 +1045,7 @@ __all__ = [
     "ROW_BUCKET_CLASS",
     "ROW_CLASS",
     "ROW_COVERAGE_CLASS",
+    "ROW_DIVERGENCE_CLASS",
     "ROW_META_CLASS",
     "ROW_NOVELTY_CLASS",
     "ROW_PAGES_CLASS",
@@ -1023,6 +1056,7 @@ __all__ = [
     "copy_keys",
     "copy_text",
     "coverage_clause",
+    "divergence_marker",
     "launch_shade_label",
     "novelty_badge",
     "render_finding_row",

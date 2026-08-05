@@ -562,6 +562,13 @@ _DEFAULT_FINDINGS_PAGE_SIZE_DEFAULT = 50
 # (`main_pool`, `best_band_rank`, `page_count`, `max_coverage_ppm`), so ONE
 # ORDER BY serves all three and a sort cannot mean different things on
 # different units.
+#
+# `{divergent}` is the ONE substitution, filled by `_divergence_flag_sql` --
+# a per-row CASE on the ungrouped unit and a MAX over the group on the two
+# grouped ones. It is written as a template rather than three hand-written
+# expressions for the same reason the rest of this table is data: the grouped
+# units would otherwise be one careless edit away from reporting a mixed group
+# as undivergent.
 _FINDINGS_UNIT_SELECT: Dict[str, str] = {
     FINDINGS_UNIT_IDENTIFICATION: """
         di.identification_id           AS identification_id,
@@ -578,6 +585,7 @@ _FINDINGS_UNIT_SELECT: Dict[str, str] = {
         di.max_coverage_ppm            AS max_coverage_ppm,
         di.relation_kind               AS relation_kind,
         di.novelty_status              AS novelty_status,
+        {divergent}                    AS divergent,
         1                              AS work_count,
         1                              AS manuscript_count,
         md.library_code                AS library_code,
@@ -599,6 +607,7 @@ _FINDINGS_UNIT_SELECT: Dict[str, str] = {
         NULL                           AS relation_kind,
         CASE WHEN COUNT(DISTINCT di.novelty_status) = 1
              THEN MIN(di.novelty_status) ELSE NULL END AS novelty_status,
+        {divergent}                    AS divergent,
         COUNT(DISTINCT di.display_work_id) AS work_count,
         1                              AS manuscript_count,
         MIN(md.library_code)           AS library_code,
@@ -619,6 +628,7 @@ _FINDINGS_UNIT_SELECT: Dict[str, str] = {
         MAX(di.max_coverage_ppm)       AS max_coverage_ppm,
         NULL                           AS relation_kind,
         NULL                           AS novelty_status,
+        {divergent}                    AS divergent,
         1                              AS work_count,
         COUNT(DISTINCT di.sys_id)      AS manuscript_count,
         NULL                           AS library_code,
@@ -865,6 +875,26 @@ def _build_findings_filter(
     return ("WHERE " + " AND ".join(where)) if where else "", params
 
 
+def _divergence_flag_sql(*, aggregate: bool) -> Tuple[str, List[Any]]:
+    """`(expression, params)` for a findings row's own divergence flag.
+
+    `aggregate=True` wraps the per-identification CASE in `MAX(...)`, which is
+    what the two GROUPED units need: a manuscript or work row is divergent when
+    ANY identification under it is, and `novelty_status` cannot answer that (it
+    is NULL on a mixed group by construction).
+
+    Returns the constant `0` when the hidden-by-default policy selects no shade
+    at all, so the flag stays a real boolean rather than becoming invalid SQL.
+    """
+    if not DIVERGENCE_SHADE_ORDER:
+        return "0", []
+    case = (
+        "CASE WHEN di.novelty_status IN (%s) THEN 1 ELSE 0 END"
+        % ",".join("?" for _ in DIVERGENCE_SHADE_ORDER)
+    )
+    return (f"MAX({case})" if aggregate else case), list(DIVERGENCE_SHADE_ORDER)
+
+
 def _build_findings_query(
     *, unit: str = FINDINGS_UNIT_IDENTIFICATION,
     sort: str = FINDINGS_SORT_BAND_RANK,
@@ -917,8 +947,13 @@ def _build_findings_query(
         return f"SELECT COUNT(*) AS n FROM ({inner})", params
 
     order_sql = f"{_FINDINGS_SORT_SQL[sort]}, {_FINDINGS_UNIT_TIEBREAK[unit]}"
+    # The flag's placeholders sit in the SELECT list, so its parameters bind
+    # BEFORE the WHERE clause's. Ordering is the whole contract of a positional
+    # parameter list; getting it wrong here would silently filter on a shade
+    # name and flag on a domain.
+    flag_sql, flag_params = _divergence_flag_sql(aggregate=bool(group_by))
     sql = f"""
-        SELECT {_FINDINGS_UNIT_SELECT[unit]},
+        SELECT {_FINDINGS_UNIT_SELECT[unit].format(divergent=flag_sql)},
                COUNT(*) OVER () AS _total_rows
         {_FINDINGS_FROM}
         {where_sql}
@@ -926,7 +961,7 @@ def _build_findings_query(
         ORDER BY {order_sql}
         LIMIT ? OFFSET ?
     """
-    return sql, [*params, page_size, max(0, (page - 1) * page_size)]
+    return sql, [*flag_params, *params, page_size, max(0, (page - 1) * page_size)]
 
 
 def _build_manuscript_works_sql(n_page_ids: int) -> str:
@@ -2285,6 +2320,12 @@ class DiscoveryService:
                 "main_pool": bool(row.get("main_pool")),
                 "novelty_offered": novelty_offered,
                 "novelty_status": row.get("novelty_status") if novelty_offered else None,
+                # Ruling F's marker, on EVERY unit -- deliberately NOT gated on
+                # `novelty_offered`. That flag answers "does a single novelty
+                # verdict mean anything on this row", which is false for a work
+                # row; whether the row disagrees with a catalogue is a
+                # different question and has an answer on all three units.
+                "divergent": bool(row.get("divergent")),
                 "multi_work_annotation": work_count > 1,
             }))
         return make_envelope(STATUS_OK, items, total, meta={

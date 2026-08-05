@@ -222,6 +222,16 @@ SURFACE_FINDING_FIELDS: Tuple[str, ...] = (
     "relation_kind",
     "novelty_status",
     "novelty_offered",
+    #: Ruling F: does this row disagree with a catalogue identification?
+    #:
+    #: A BOOLEAN, computed in SQL, and deliberately NOT left to a renderer to
+    #: derive from `novelty_status`. On the two GROUPED units `novelty_status`
+    #: is NULL whenever the aggregated identifications do not all carry the
+    #: same shade -- so a per-work row is never divergent by that test, and a
+    #: manuscript row mixing one divergent identification with one confirming
+    #: one is not either. Both would render as ordinary findings. This flag is
+    #: `MAX(...)` over the group, so a row carrying ANY divergence says so.
+    "divergent",
     "work_count",
     "manuscript_count",
     "multi_work_annotation",

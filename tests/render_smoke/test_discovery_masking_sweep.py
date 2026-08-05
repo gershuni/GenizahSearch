@@ -804,6 +804,11 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
             tf.finding_row(neutral_title=title, library_code=None,
                            page_count=None, max_coverage_ppm=None,
                            novelty_status=tf.DEFAULT_STATUS),
+            # Ruling F's divergence marker. Reachable only when the reader has
+            # opened the axis, so no undriven default render paints it -- and
+            # both of its strings (the chip and its tooltip) are reader-facing
+            # text this scan has to have looked at.
+            tf.finding_row(neutral_title=title, divergent=True),
         ]
         _take(_render_component(
             lambda rows=odd_rows, ln=lang: [fr.render_finding_row(r, ln)

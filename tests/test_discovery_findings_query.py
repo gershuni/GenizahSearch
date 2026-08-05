@@ -637,18 +637,85 @@ def test_the_divergence_filter_is_applied_in_sql_never_by_post_filtering():
     the two statements a pager and a total are read from."""
     from shared.discovery_service import DIVERGENCE_SHADE_ORDER
 
+    shades = list(DIVERGENCE_SHADE_ORDER)
+
     rows_sql, rows_params = _build_findings_query(bucket=BUCKET_ALL)
+    assert "novelty_status NOT IN" in rows_sql
+    # TWICE on the row query, and the ORDER is the contract: the SELECT list's
+    # per-row divergence flag binds first, the WHERE predicate second. A
+    # positional parameter list is the one place this can go wrong silently --
+    # swap them and the query filters on a domain and flags on a shade name.
+    assert rows_params[:len(shades)] == shades
+    assert [p for p in rows_params if p in DIVERGENCE_SHADE_ORDER] == shades * 2
+
     count_sql, count_params = _build_findings_query(
         bucket=BUCKET_ALL, count_only=True, count_cap=100)
-    for sql, params in ((rows_sql, rows_params), (count_sql, count_params)):
-        assert "novelty_status NOT IN" in sql
-        assert list(DIVERGENCE_SHADE_ORDER) == [
-            p for p in params if p in DIVERGENCE_SHADE_ORDER]
+    assert "novelty_status NOT IN" in count_sql
+    assert [p for p in count_params if p in DIVERGENCE_SHADE_ORDER] == shades, (
+        "the bounded-count form selects `1`, so only the WHERE binding is there")
 
     opted_in_sql, opted_in_params = _build_findings_query(
         bucket=BUCKET_ALL, include_divergent=True)
     assert "novelty_status NOT IN" not in opted_in_sql
-    assert not [p for p in opted_in_params if p in DIVERGENCE_SHADE_ORDER]
+    assert [p for p in opted_in_params if p in DIVERGENCE_SHADE_ORDER] == shades, (
+        "the opt-in drops the FILTER and keeps the per-row FLAG -- the rows are "
+        "shown, and each one still says what it is")
+
+
+def test_every_row_carries_its_own_divergence_flag_on_every_unit(divergence_service):
+    """The marker's INPUT. A renderer deriving it from `novelty_status` would
+    be right on the identification unit and wrong on the other two: that column
+    is NULL on a mixed group and NULL on every per-work row, so a manuscript
+    carrying one divergent identification and one confirming one -- and every
+    work row without exception -- would render as an ordinary finding."""
+    by_unit = {
+        unit: divergence_service.get_findings_enveloped(
+            unit=unit, bucket=BUCKET_ALL, include_divergent=True)
+        for unit in sorted(FINDINGS_UNITS)
+    }
+    for unit, env in by_unit.items():
+        assert all("divergent" in row for row in env["items"]), unit
+        assert all(isinstance(row["divergent"], bool) for row in env["items"]), unit
+
+    ident = {row["sys_id"]: row for row in by_unit[FINDINGS_UNIT_IDENTIFICATION]["items"]
+             if row["sys_id"] in ("s7", "s8", "s9")}
+    assert ident["s7"]["divergent"] is True
+    assert ident["s8"]["divergent"] is True
+    assert ident["s9"]["divergent"] is False
+
+    # s1 carries fills_gap AND confirms -- `novelty_status` is NULL there, and
+    # the flag still answers correctly rather than inheriting that NULL.
+    manuscripts = {row["sys_id"]: row
+                   for row in by_unit[FINDINGS_UNIT_MANUSCRIPT]["items"]}
+    assert manuscripts["s1"]["novelty_status"] is None
+    assert manuscripts["s1"]["divergent"] is False
+    assert manuscripts["s7"]["divergent"] is True
+
+    # wA is claimed by s1/s2/s6 (undivergent) AND s7 (diverges_work): the work
+    # row mixes, `novelty_status` is NULL on that unit by construction, and the
+    # flag is the only thing that can still say so.
+    works = {row["display_work_id"]: row for row in by_unit[FINDINGS_UNIT_WORK]["items"]}
+    assert works["wA"]["novelty_status"] is None
+    assert works["wA"]["divergent"] is True
+    assert works["wB"]["divergent"] is False
+
+
+def test_the_divergence_flag_survives_the_other_filters(divergence_service):
+    """The flag's placeholders sit in the SELECT list and the filters' in the
+    WHERE clause, so this is what a mis-ordered positional parameter list would
+    break: same rows, wrong flags."""
+    env = divergence_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, domain=_PARENT_A, include_divergent=True)
+    flags = {(row["sys_id"], row["display_work_id"]): row["divergent"]
+             for row in env["items"]}
+    assert set(flags) == {
+        ("s1", "wA"), ("s1", "wB"), ("s2", "wA"), ("s3", "wC"),
+        ("s6", "wA"), ("s7", "wA"), ("s9", "wC"),
+    }, "wA/wB/wC are the works under Parent A"
+    assert flags[("s7", "wA")] is True
+    assert not any(value for key, value in flags.items() if key != ("s7", "wA")), (
+        "exactly the diverges_work row is flagged -- the domain filter's own "
+        "bound parameters have not displaced the flag's")
 
 
 def test_the_divergence_predicate_is_derived_from_the_shared_policy(monkeypatch):

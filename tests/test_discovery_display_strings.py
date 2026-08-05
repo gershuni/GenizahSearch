@@ -139,6 +139,7 @@ SWEEP_INPUTS = {
         {"toggle_key": ds.TOGGLE_DIVERGENCE},
     ],
     "divergence_warning": [{}],
+    "divergence_chip": [{}],
     "related_pages_label": [{}],
     "related_pages_count_line": [{"count": 0}, {"count": 1}, {"count": 37397}],
     "bucket_name": [{"in_main_pool": True}, {"in_main_pool": False}],

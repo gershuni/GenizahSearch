@@ -300,6 +300,7 @@ def _finding_source(**overrides) -> Dict[str, Any]:
         "relation_kind": ids.CLAIM_TYPE_DIRECT_WITNESS,
         "novelty_status": CANDIDATE_STATUS,
         "novelty_offered": True,
+        "divergent": False,
         "work_count": 1,
         "manuscript_count": 1,
         "multi_work_annotation": False,
@@ -350,6 +351,7 @@ def corpus_rows() -> List[Tuple[str, Dict[str, Any]]]:
         relation_kind=ids.CLAIM_TYPE_SHARED_TEXT,
         novelty_status=DEFAULT_STATUS,
         novelty_offered=False,
+        divergent=True,
         work_count=2,
         manuscript_count=4,
         multi_work_annotation=True,
@@ -390,6 +392,7 @@ def findings_envelope(items, total=None, *, status=STATUS_OK, unit=None,
                              "sort": sort,
                              "sort_basis": "best_band_rank",
                              "novelty_offered": unit != FINDINGS_UNIT_WORK,
+                             "include_divergent": False,
                              "approximate_total": False,
                          })
 
@@ -900,6 +903,90 @@ def test_the_novelty_badge_is_solid_for_a_candidate_and_muted_for_an_unknown(lan
     assert "nov" in unknown_classes and "unknown" in unknown_classes
     assert ds.novelty_strings(lang)["badge"] in scoped_text(candidate, fr.ROW_CLASS)
     assert ds.novelty_unknown_badge(lang) in scoped_text(unknown, fr.ROW_CLASS)
+    ASSERTION_COUNT["n"] += 1
+
+
+def _tooltip_text_for(client, element) -> str:
+    """The text of the tooltip attached to `element`.
+
+    NiceGUI attaches a `Tooltip` as a SIBLING targeting the element's own id,
+    not as a descendant -- so `_subtree_texts` cannot see it and an assertion
+    written over the subtree would silently prove nothing about the tooltip.
+    """
+    target = f"#c{element.id}"
+    return "\n".join(
+        str(getattr(node, "text", "") or "")
+        for node in client.elements.values()
+        if (getattr(node, "_props", None) or {}).get("target") == target
+    )
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_a_divergent_row_is_marked_and_an_ordinary_one_is_not(lang):
+    """Ruling F: a reader who has opened the divergence axis must never be able
+    to mistake one of its rows for an ordinary finding."""
+    divergent = render_rows([finding_row(divergent=True)], lang)
+    ordinary = render_rows([finding_row(divergent=False)], lang)
+
+    marked = _elements_with_class(divergent, fr.ROW_DIVERGENCE_CLASS)
+    assert len(marked) == 1, "a divergent row carries exactly one marker"
+    assert not _elements_with_class(ordinary, fr.ROW_DIVERGENCE_CLASS), (
+        "an ordinary finding must carry no divergence marker at all")
+
+    # VISIBLE, and both facts are on its face: that the two records disagree,
+    # and that neither has been adjudicated. `divergence_correctness` is NULL
+    # on every shipped row, so a marker stating only the disagreement would
+    # leave a reader free to supply the missing half themselves.
+    assert set(scoped_text(divergent, fr.ROW_DIVERGENCE_CLASS).splitlines()) == {
+        ds.divergence_chip(lang)}
+    # And the full two-sentence statement is one hover away, on the marker's
+    # own tooltip -- the same place the panel keeps its band labels.
+    assert _tooltip_text_for(divergent, marked[0]) == ds.divergence_warning(lang)
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_divergence_marker_is_on_every_unit_not_only_the_default_one(lang):
+    """`novelty_status` is NULL on a per-work row and on a mixed manuscript
+    row, so a marker derived from the shade would be absent exactly where a
+    reader has the least context to notice."""
+    for unit in UNITS:
+        client = render_rows(
+            [finding_row(unit=unit, divergent=True, novelty_status=None,
+                         novelty_offered=False)], lang)
+        assert _elements_with_class(client, fr.ROW_DIVERGENCE_CLASS), unit
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_divergence_marker_is_neutral_and_takes_no_side(lang):
+    """D-24: no colour-coding by kind, no confidence tiering, and -- ruling F --
+    no assertion about which of the two records is right.
+
+    The class list is the whole treatment: a plain `.chip`, the same neutral
+    token the relation vocabulary already uses, with nothing keyed on WHICH
+    divergence shade produced it."""
+    client = render_rows([finding_row(divergent=True)], lang)
+    element = _elements_with_class(client, fr.ROW_DIVERGENCE_CLASS)[0]
+    assert set(element._classes) == {"chip", fr.ROW_DIVERGENCE_CLASS}, (
+        "the marker has grown a treatment of its own")
+
+    # The marker is ONE string with no per-shade branch, so a shade cannot
+    # reach it and cannot be styled differently from its sibling.
+    code = _code_lines(COMPONENT_PATH)
+    for shade in ("diverges_work", "diverges_part"):
+        assert shade not in code
+
+    text = "\n".join((scoped_text(client, fr.ROW_DIVERGENCE_CLASS),
+                      _tooltip_text_for(client, element)))
+    assert ds.divergence_warning(lang) in text, "the tooltip half is in scope too"
+    forbidden = {
+        "en": ("wrong", "incorrect", "error", "probably", "likely", "false"),
+        "he": ("שגוי", "טעות", "מוטעה", "כנראה"),
+    }[lang]
+    for word in forbidden:
+        assert word not in text.lower(), (
+            f"the marker adjudicates: {word!r} in {text!r}")
     ASSERTION_COUNT["n"] += 1
 
 
