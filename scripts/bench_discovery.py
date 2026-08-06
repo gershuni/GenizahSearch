@@ -825,7 +825,6 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         _build_findings_query,
         _build_launch_contribution_sql,
         _build_launch_manuscript_sql,
-        findings_novelty_offered,
     )
 
     units = sorted(FINDINGS_UNITS)
@@ -942,32 +941,24 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
     state_skips = {label: _state_skip(stem, kwargs, on)
                    for stem, label, kwargs, on in filter_states}
 
-    _WORK_UNIT_NOVELTY_SKIP = (
-        "the SURFACE cannot issue this: `shared.discovery_service."
-        "findings_novelty_offered` says the candidacy axis does not apply to the "
-        "per-work unit (a work spanning many manuscripts has no single verdict), "
-        "so `web/pages/findings.py::normalise_state` drops the selection the "
-        "moment the unit changes and the switch is disabled there -- and if one "
-        "ever did get through, `_build_findings_filter` RAISES rather than "
-        "returning an envelope")
-
-    def _novelty_unreachable(unit: str, on: Tuple[str, ...]) -> bool:
-        """Whether this (unit, axes-on) pair is one the SURFACE cannot produce.
-
-        Derived from the SERVICE's own predicate, never restated as
-        `unit == 'work'`. It was restated once, and the restatement was not the
-        problem: the problem was that the sentence it stood for -- "unreachable"
-        -- was FALSE. The page left the candidacy switch live while a separate
-        control changed the row unit, so a reader really could reach all 80 of
-        these states, and reaching one raised on a live page (code review round
-        15, finding 1). They are unreachable NOW because the page settles the
-        pair; `tests/test_discovery_build.py::
-        test_the_work_unit_novelty_skip_is_unreachable_THROUGH_THE_PAGE` holds
-        that claim against `web/pages/findings.py` rather than against this
-        docstring.
-        """
-        return "novelty" in on and not findings_novelty_offered(unit)
-
+    # NO WORK-UNIT CANDIDACY SKIP (removed 2026-08-06). This probe used to
+    # declare every work-unit x candidacy state "the SURFACE cannot issue this"
+    # and skip ~80 shapes unmeasured. Two things changed under that reasoning:
+    #
+    #   * `_build_findings_filter` now ACCEPTS `novelty` on the per-work unit.
+    #     It answers "does this row have at least one such identification", with
+    #     the predicate before the `GROUP BY` -- the same aggregate semantics
+    #     `di.main_pool = 1` always had. The state is not merely reachable; the
+    #     four-state selector issues it routinely, on every row unit.
+    #   * `findings_novelty_offered` survives but no longer means what the skip
+    #     read it as. It now answers only "can a row of this unit DISPLAY a
+    #     verdict" -- a question about the BADGE, not the filter. A work row
+    #     aggregates identifications that may disagree, so it shows no badge and
+    #     is still perfectly filterable.
+    #
+    # Keeping the skip would have been this probe's own documented defect
+    # inverted: declining to measure ~80 query shapes the surface really issues,
+    # while printing a reason that is no longer true. They are measured now.
     specs: List[Dict[str, Any]] = []
     for unit in units:
         # The count AT THIS UNIT for each filter state: it decides the
@@ -981,7 +972,7 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # page 13).
         unit_rows: Dict[str, int] = {}
         for _stem, label, kwargs, on in filter_states:
-            if state_skips[label] or _novelty_unreachable(unit, on):
+            if state_skips[label]:
                 continue
             count_sql, count_params = _build_findings_query(
                 unit=unit, count_only=True, **kwargs)
@@ -1004,12 +995,6 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         for sort in sorts:
             for _stem, label, kwargs, on in filter_states:
                 spec_label = f"findings_{unit}_{sort}_{label}"
-                if _novelty_unreachable(unit, on):
-                    specs.append(_skipped_spec(
-                        spec_label, kind="ordering",
-                        cap_ms=FINDINGS_ORDERING_CAP_MS,
-                        reason=_WORK_UNIT_NOVELTY_SKIP))
-                    continue
                 if state_skips[label]:
                     specs.append(_skipped_spec(
                         spec_label, kind="ordering",
@@ -1030,11 +1015,6 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # state; whether a state is deep enough is read off its own count.
         for _stem, label, kwargs, on in filter_states:
             spec_label = f"findings_{unit}_deep_page_{deep_page}_{label}"
-            if _novelty_unreachable(unit, on):
-                specs.append(_skipped_spec(
-                    spec_label, kind="ordering", cap_ms=FINDINGS_ORDERING_CAP_MS,
-                    reason=_WORK_UNIT_NOVELTY_SKIP))
-                continue
             if state_skips[label]:
                 specs.append(_skipped_spec(
                     spec_label, kind="ordering", cap_ms=FINDINGS_ORDERING_CAP_MS,
@@ -1063,11 +1043,6 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # ordering query above and costs no second statement.
         for _stem, label, kwargs, on in filter_states:
             spec_label = f"findings_{unit}_visible_total_{label}"
-            if _novelty_unreachable(unit, on):
-                specs.append(_skipped_spec(
-                    spec_label, kind="count", cap_ms=FINDINGS_COUNT_CAP_MS,
-                    reason=_WORK_UNIT_NOVELTY_SKIP))
-                continue
             if state_skips[label]:
                 specs.append(_skipped_spec(
                     spec_label, kind="count", cap_ms=FINDINGS_COUNT_CAP_MS,
