@@ -55,7 +55,66 @@ Added to §5 as a DO item.
 under the recommended scope — but a **local review deck over the excluded set** would let the owner see the
 liturgy findings and judge whether the coverage justifies building the containment fix. Precedent exists in
 exactly that shape: `EXCLUDED-STRONG-nonbible.PRIVATE.html`. It touches no masking posture, because it never
-leaves the machine.
+leaves the machine. **✅ Owner asked for this 2026-08-05 — it is a DO item.**
+
+### 🟡 Owner request 2026-08-05: an internally-shareable private artifact, INCLUDING R-source
+
+Two parts, and the first is settled while the second is not.
+
+**(a) Internal sharing of the private artifact — supported, and verified rather than assumed.** I ran the
+cell-by-cell masking scan (`--scan-sqlite`) over the existing private asset
+`discovery-v1-136rebuild.db`: **CLEAN**, with the fail-closed control confirming exit 1 when the pattern file
+is unset. So the private artifact carries **no restricted corpus name in any cell** — the masking rule is
+already satisfied *inside* it; what makes it private is the *works and assertions* it exposes, not leaked
+provenance strings. That is what makes internal team sharing feasible at all.
+
+Two conditions on sharing it, both real:
+
+1. **It must never reach the web box.** The public loader refuses it (`meta.audience != 'public'` →
+   reject-incompatible), so an accident is caught — but the deploy path is the risk, not the loader.
+2. **The recipients inherit the masking obligation.** "Internal" means people who may see restricted-corpus
+   *works*; the corpus *name* is still masked from them, since the artifact does not contain it.
+
+**Recommendation:** ship the private DB **plus** a generated `PRIVATE.html` deck, since a browsable deck is
+what internal reviewers actually use (three exist today) and a 470 MB SQLite file is not a sharing format.
+
+**(b) Adding R-source to the private artifact — this cannot ride along, for a reason that is not policy.**
+
+Measured, not assumed:
+
+| | |
+|---|---|
+| R-source in the **v2-era** matcher | **349 works · 289,080 match rows · 110,203 unshadowed · 112,630 pages** |
+| R-source in **gen-2** (`g_launch3` evidence) | **0 rows** |
+| R-source through the current builder policy | **349 of 349 dropped** by the D-06 genre filter (15 distinct genre values, none in the literary keep-set) |
+
+**The blocker is that gen-2 never matched R-source.** `g_launch3` — the evidence this whole bake ingests — has
+**zero** R-source rows. So there is nothing to include: including R-source means **running the matcher over it**,
+which is the heavy Track-1 run this plan was scoped to avoid, and which the handoff explicitly puts on a
+separate downstream track (*"R-source (`RS:`) is the separate downstream G-R, NOT in this handoff"*).
+
+Falling back to the v2-era R-source rows instead is the wrong shape and should not be done quietly: they were
+produced by the **old** engine, so they carry none of gen-2's routing, shadowing or chronology — mixing them
+into a v3 artifact would put un-routed old-engine assertions beside routed new-engine ones under one label,
+which is precisely the "new data sorted the old way" failure the owner just rejected for the corpus as a whole.
+
+**And the eligibility question is unresolved, independently of engineering:** R-source is **~86% post-Genizah**
+(responsa, Shulchan-Aruch tradition, Rishonim→Acharonim, Hasidut, modern encyclopedias). A Genizah page
+"matching" a 19th-century commentary is usually the *commentary quoting the source*, not a witness — the same
+containment failure as the liturgy class, but far more prevalent. Its own memo says it "needs careful
+eligibility handling before ingest."
+
+**Three honest options:**
+
+- **(i) v3 ships without R-source** (recommended) — the private artifact still gains everything else, and R-source
+  gets its own run rather than a rushed inclusion.
+- **(ii) A separate R-source Track-1 run**, then a v3.1 private refresh — real work (a heavy run), and it needs
+  the eligibility rule first.
+- **(iii) A local R-source review deck built from the EXISTING v2-era rows**, clearly labelled old-engine and
+  never merged into the artifact — cheap, gives the owner visibility now, decides nothing.
+
+**Recommendation: (i) + (iii).** That gives the internal artifact promptly and puts R-source in front of the
+owner without smuggling old-engine assertions into a new-engine release.
 
 **Companion:** `discovery-v3-naming.md` (why this is v3 and not v2.1). **Predecessor:**
 `discovery-v2-bake-plan.md` (the pipeline this reuses). **Input spec:**
