@@ -1440,6 +1440,91 @@ def test_the_top_figures_render_as_one_band_of_cards(lang):
     ASSERTION_COUNT["n"] += 1
 
 
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_staleness_warning_is_shown_EVEN_WITH_NO_snapshot_date(lang):
+    """"Live catalogues may hold newer information we did not check" (owner
+    ruling, 2026-08-06).
+
+    The novelty check runs against LOCAL SNAPSHOTS of FJMS, NLI, PGP and FGP, so
+    an identification the page calls a candidate may already be recorded
+    upstream. Every other caveat on this surface guards against overclaiming a
+    match's CORRECTNESS; this is the only one that guards against overclaiming its
+    NOVELTY, which is the other way a reader can be misled here.
+
+    THE UNCONDITIONAL PART IS WHAT THIS TEST IS FOR. The obvious implementation
+    hangs the warning off the as-of date, beside it -- and then an artifact that
+    recorded no snapshot date shows no warning at all, which is precisely the
+    artifact whose staleness is least knowable. Driven BOTH ways here so that
+    gating it would fail.
+    """
+    for as_of in ("2026-08-03", None):
+        client = _client_render(
+            lambda: fr.render_novelty_help(lang, as_of=as_of))
+        said = scoped_text(client, fr.NOVELTY_HELP_CLASS)
+        assert fr.copy_text("novelty_live_may_differ", lang) in said, (
+            f"the staleness warning is missing with as_of={as_of!r} -- a reader "
+            "is left believing the check was made against the live catalogues")
+
+    # AND NO DATE, EVEN WHEN ONE IS PASSED (owner ruling, 2026-08-06). The value
+    # callers supply is `data_as_of`, the BAKE's date -- but the novelty check ran
+    # against this website's own FJMS/NLI/PGP/FGP sidecars, each already older
+    # than the bake by an interval nobody recorded. So there is no single snapshot
+    # the date could describe, and printing it reads as a freshness claim about
+    # all of them. Two earlier wordings were rejected before the line itself went;
+    # this asserts the DATE is absent rather than that some phrasing is, because
+    # any phrasing around a date makes the same claim.
+    client = _client_render(
+        lambda: fr.render_novelty_help(lang, as_of="2026-08-03"))
+    said = scoped_text(client, fr.NOVELTY_HELP_CLASS)
+    assert "2026-08-03" not in said, (
+        "a date is rendered in the novelty help -- it is the bake's date, not any "
+        "source's, and it reads as the freshness of all of them")
+    assert not re.search(r"\d{4}-\d{2}-\d{2}", said), (
+        f"an ISO date reached the novelty help: {said!r}")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_howto_panels_prose_is_not_set_at_footnote_size():
+    """"The font of the text inside 'How to read this page' is too small" (owner,
+    2026-08-06).
+
+    The panel holds the page's honesty-critical prose -- the recall disclaimer,
+    the candidacy sub-line, the checked-source list, the staleness warning and the
+    two-bucket rule -- and all of it inherited `.dnote`, which is 11px. That is
+    right for a note beside a row and wrong for four paragraphs a reader has
+    deliberately opened. Prose at footnote size is prose that gets skipped, which
+    is the same failure the collapse was introduced to fix.
+
+    Asserted over the STYLESHEET rather than the render, because that is where the
+    size lives: the labels carry `.dnote` and one scoped rule lifts it inside the
+    panel. A render-side assertion would have to re-implement the cascade.
+    """
+    import pathlib
+    css = (pathlib.Path(__file__).resolve().parents[2]
+           / "web" / "static" / "common.css").read_text(encoding="utf-8")
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+    marker = ".gs-discovery .gs-findings-howto .dnote"
+    assert marker in css, (
+        "the how-to panel's prose has no size rule of its own, so it renders at "
+        "`.dnote`'s footnote size")
+    block = css[css.index(marker):]
+    block = block[:block.index("}") + 1]
+    size = re.search(r"font-size:\s*(\d+)px", block)
+    assert size and int(size.group(1)) >= 13, (
+        f"the how-to prose is still footnote-sized: {block!r}")
+
+    # ...and `.dnote` itself is UNTOUCHED, so the row meta line, the facet notes
+    # and the launch basis lines keep their small size. Widening the base rule
+    # would have been the easy fix and the wrong one.
+    base = re.search(r"\.gs-discovery \.dnote\s*\{[^}]*\}", css)
+    assert base, "the base .dnote rule vanished"
+    base_size = re.search(r"font-size:\s*(\d+)px", base.group(0))
+    assert base_size and int(base_size.group(1)) <= 12, (
+        f"the base .dnote size was widened instead of the panel's: {base.group(0)!r}")
+    ASSERTION_COUNT["n"] += 1
+
+
 def test_every_stat_card_icon_is_decorative_and_distinct():
     """Icons (owner, 2026-08-06: "what about icons"), with two properties that a
     glyph most easily gets wrong.
@@ -1621,14 +1706,29 @@ def test_the_second_bucket_section_carries_no_wording_implying_the_rows_are_wron
 
 
 @pytest.mark.parametrize("lang", LANGS)
-def test_the_novelty_help_carries_the_sources_the_date_and_the_candidacy_sentence(
+def test_the_novelty_help_carries_the_sources_and_the_candidacy_sentence(
         monkeypatch, lang):
+    """RENAMED, and the dropped word is the point: it used to assert "the date".
+
+    The as-of date was DELETED on 2026-08-06 (owner ruling) after two wordings
+    were rejected. The value rendered was `data_as_of` -- the BAKE's date -- while
+    the novelty check ran against this website's own FJMS/NLI/PGP/FGP sidecars,
+    each already older than the bake by an unrecorded interval. No single date
+    describes what was checked, so any date here reads as the freshness of all of
+    them. `test_the_staleness_warning_is_shown_EVEN_WITH_NO_snapshot_date` now
+    asserts its ABSENCE, and the categorical warning carries the freshness
+    statement instead.
+    """
     client = render_page(monkeypatch, lang=lang, as_of="2026-08-03")
     text = scoped_text(client, fr.NOVELTY_HELP_CLASS)
     assert text.strip(), "the novelty help affordance did not render"
     for source in ("PGP", "FGP", "FJMS"):
         assert source in text, f"the checked-source list omits {source}"
-    assert "2026-08-03" in text, "the help affordance states no as-of date"
+    # The STALENESS WARNING replaces the date as this affordance's freshness
+    # statement, so it is asserted here as well as in its own test -- this is the
+    # test that drives the full PAGE rather than the component.
+    assert fr.copy_text("novelty_live_may_differ", lang) in text, (
+        "the page's novelty help states nothing about the live catalogues")
     sentence = ("candidate, not a confirmed find" if lang == "en"
                 else "זהו מועמד ולא ממצא מאושר")
     assert sentence in text, (
@@ -1639,12 +1739,26 @@ def test_the_novelty_help_carries_the_sources_the_date_and_the_candidacy_sentenc
     ASSERTION_COUNT["n"] += 1
 
 
-def test_the_as_of_line_is_omitted_rather_than_guessed_when_the_artifact_records_none(
+def test_no_date_reaches_the_novelty_help_with_or_without_one_recorded(
         monkeypatch):
-    client = render_page(monkeypatch, lang="en", as_of=None)
-    text = scoped_text(client, fr.NOVELTY_HELP_CLASS)
-    assert "as of" not in text.lower()
-    assert text.strip(), "the whole affordance vanished with the date"
+    """The date is gone in BOTH directions (owner ruling, 2026-08-06).
+
+    This used to assert the line was omitted when the artifact recorded NO date --
+    a fail-closed property that mattered while the line existed. Now that no date
+    renders at all, the interesting case is the opposite one: an artifact that DOES
+    record a date must still not print it. Both are driven, so neither a restored
+    line nor a guessed date can pass.
+
+    The affordance itself must survive either way: losing the date must not lose
+    the checked-source list and the staleness warning with it.
+    """
+    for as_of in (None, "2026-08-03"):
+        client = render_page(monkeypatch, lang="en", as_of=as_of)
+        text = scoped_text(client, fr.NOVELTY_HELP_CLASS)
+        assert text.strip(), f"the whole affordance vanished with as_of={as_of!r}"
+        assert "as of" not in text.lower()
+        assert not re.search(r"\d{4}-\d{2}-\d{2}", text), (
+            f"an ISO date reached the novelty help with as_of={as_of!r}: {text!r}")
     ASSERTION_COUNT["n"] += 1
 
 

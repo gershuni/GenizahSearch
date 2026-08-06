@@ -1883,3 +1883,31 @@ body {
         justify-content: flex-start;
     }
 }
+
+/* ---- findings page: "How to read this page" is BODY TEXT, not a footnote ----
+   Owner, 2026-08-06: "the font of the text inside 'How to read this page' is too
+   small".
+
+   The panel holds the page's honesty-critical prose — the recall disclaimer, the
+   candidacy sub-line, the checked-source list, the staleness warning and the
+   two-bucket rule. All of it inherited `.dnote` (11px), which is the right size
+   for a note sitting BESIDE a row and the wrong size for four paragraphs a reader
+   has deliberately opened in order to read. Prose set at footnote size is prose
+   that gets skipped, which is the same failure the collapse was introduced to
+   fix — the owner's earlier verdict was that this text "read as a draft and
+   therefore got read by nobody".
+
+   Scoped to the panel's own class, so `.dnote` keeps its 11px everywhere else
+   (the row meta line, the facet notes, the launch basis lines). 14px is the
+   site's body size; `line-height` is raised with it because 11px leading under
+   14px text reads as cramped.
+
+   ONE RULE RATHER THAN SIX INLINE OVERRIDES. The size belongs to the container,
+   not to each label in it, and an inline `text-sm` on every child is six places
+   to forget when a seventh line is added. Every property here is
+   direction-neutral — no RTL mirror needed. */
+.gs-discovery .gs-findings-howto .dnote,
+.gs-discovery .gs-findings-howto .gs-findings-novelty-help {
+    font-size: 14px;
+    line-height: 1.55;
+}

@@ -558,12 +558,53 @@ _COPY: Dict[str, Dict[str, str]] = {
         "en": "Domain of the identified work",
         "he": "תחום החיבור המזוהה",
     },
-    # -- the novelty help affordance's as-of line. The DATE is read from the
-    #    artifact's own `data_as_of` meta key; when the artifact does not carry
-    #    one the line is omitted entirely rather than dated by guess.
-    "novelty_as_of": {
-        "en": "Sources checked as of {date}.",
-        "he": "המקורות נבדקו נכון ל" + _MAQAF + "{date}.",
+    # NO `novelty_as_of` STRING, AND NO DATE ANYWHERE IN THIS AFFORDANCE (owner
+    # ruling, 2026-08-06). Deleted rather than reworded, twice over, and the
+    # second attempt is why it is gone rather than fixed.
+    #
+    # The line rendered `data_as_of` from the artifact's meta. It first read
+    # "Sources checked as of {date}", which the owner rejected because it implied
+    # the LIVE catalogues were consulted; it was reworded to "Checked against a
+    # snapshot of the sources taken {date}", and the owner rejected that too, for
+    # a harder reason: `data_as_of` is the BAKE's date, not the snapshot's. The
+    # novelty check ran against the sidecars this website already had -- FJMS,
+    # NLI, PGP, FGP copies refreshed on their own schedules, each already older
+    # than the bake by an interval nobody recorded. So a single date cannot name
+    # what was checked, whatever words surround it: there is no one snapshot and
+    # no one date, and any date printed here is read as the freshness of all of
+    # them.
+    #
+    # The honest statement is therefore the CATEGORICAL one below, with no date at
+    # all. A reader loses nothing they could have relied on -- the date they were
+    # being shown did not mean what it appeared to mean.
+    #
+    # `data_as_of` remains in the artifact's meta and in the loader's required
+    # keys; it is provenance for us, not a reader-facing freshness claim. If a
+    # future bake records a real per-source snapshot date, that is a NEW string
+    # with its own wording ruling, not this one restored.
+    #
+    # THE STALENESS WARNING, now the whole of what this affordance says about
+    # freshness. It states the direction that matters: the live catalogues may
+    # have moved on, so an identification the page calls a candidate may already
+    # be recorded upstream.
+    #
+    # THIS IS THE HONEST DIRECTION OF THE ERROR. Every other caveat on this
+    # surface guards against overclaiming a match's correctness; this one guards
+    # against overclaiming its NOVELTY, which is the other way a reader can be
+    # misled here and the only one the rest of the page does not already cover.
+    #
+    # NO DATE, NO FIGURE, and no promise of a refresh schedule: we do not know
+    # what the live services now hold (that is the whole point), and naming a
+    # cadence would commit to one nobody has ruled on.
+    "novelty_live_may_differ": {
+        "en": (
+            "Live catalogues may hold newer information we did not check — a "
+            "candidate may already be recorded there."
+        ),
+        "he": (
+            "בקטלוגים המקוונים עשוי להיות מידע עדכני יותר שלא נבדק — ייתכן "
+            "שמועמד כבר מתועד שם."
+        ),
     },
     # -- the catalogue-title attribution (2026-08-05, coordinator ruling: ship
     #    beside the shelfmark, verbatim, one language -- see `_render_shelfmark`
@@ -1264,15 +1305,34 @@ def render_novelty_help(lang: str = "en", *, as_of: Optional[str] = None) -> Non
 
     Carries, in one place: the checked-source list, the sentence that the
     identification is an unreviewed algorithmic match so this is a candidate
-    rather than a confirmed find, and -- when the artifact records one -- the
-    date the sources were checked as of. All three come from data or from the
-    shared vocabulary; none is composed here.
+    rather than a confirmed find, and the STALENESS WARNING. Both come from data
+    or from the shared vocabulary; neither is composed here.
+
+    NO DATE IS RENDERED (owner ruling, 2026-08-06). `as_of` is still ACCEPTED and
+    deliberately IGNORED -- see `_COPY` for the full reasoning: the value callers
+    pass is `data_as_of`, the BAKE's date, while the novelty check ran against
+    this website's own FJMS/NLI/PGP/FGP sidecars, each already older than the bake
+    by an interval nobody recorded. There is no single snapshot and no single
+    date, so any date here reads as a freshness claim about all of them.
+
+    THE ARGUMENT IS KEPT rather than removed, and that is a judgement worth
+    stating. `web/pages/findings.py` passes `discovery_meta("data_as_of")` and the
+    masking sweep drives this function with an explicit `as_of`; dropping the
+    keyword would break both call sites for no gain, and keeping it means a future
+    bake that records a REAL per-source snapshot date has a wired parameter to
+    render -- under a new string with its own wording ruling, never the deleted
+    one restored.
+
+    THE STALENESS WARNING IS UNCONDITIONAL, which was true before the date went
+    and matters more now that it is the whole of what this says about freshness:
+    the live catalogues can always hold something newer, whatever the artifact
+    recorded about itself.
     """
     lang = _lang_key(lang)
     with ui.column().classes(f"{NOVELTY_HELP_CLASS} dnote text-xs gap-1"):
         ui.label(ds.novelty_strings(lang)["help"])
-        if as_of:
-            ui.label(copy_text("novelty_as_of", lang).format(date=as_of))
+        ui.label(copy_text("novelty_live_may_differ", lang)).classes(
+            f"{NOVELTY_HELP_CLASS}-live")
 
 
 def novelty_badge(item: Mapping[str, Any], lang: str = "en") -> Optional[Tuple[str, str]]:
