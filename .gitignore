@@ -235,6 +235,18 @@ corpus_mapper_output/
 # posture: temp upload -> verify -> atomic rename -> code deploy).
 /discovery_data/
 
+# discovery-v3 bake run state (scripts/v3_bake_state.py). Per-run, per-machine
+# progress ledgers + their interrupted-write temp files. Already covered by the
+# /discovery_data/ and /_tmp/ rules above, but named explicitly and without a
+# leading slash so a state file written to ANY directory is ignored: it is
+# per-machine run state that must never be committed, and it can carry step
+# names and messages. The MODULE and its tests are tracked; only the state it
+# emits is not.
+v3_bake_state*.json
+v3_bake_state*.json.*.tmp
+*.bake_state.json
+*.bake_state.json.*.tmp
+
 # Ephemeral external-AI (Codex/Gemini) CLI transcripts. These may contain
 # restricted M-source/R-source content echoed by the review tool despite
 # instructions (confirmed in phase 134 pre-flight rounds r2/r3), so they must
