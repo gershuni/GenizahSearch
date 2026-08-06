@@ -57,7 +57,7 @@ def _build_track1_db(tmp_path, rows, name="research.db"):
         """
         CREATE TABLE track1_matches (
           page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
-          title TEXT, mesirah TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          title TEXT, src_attr_note TEXT, matched_letters INT, best_density REAL, n_spans INT,
           spans_json TEXT, shadowed_by TEXT
         );
         CREATE TABLE pages (
@@ -876,7 +876,7 @@ def test_ingest_tier_a_unknown_work_id_excluded():
     conn = sqlite3.connect(":memory:")
     conn.executescript(
         "CREATE TABLE track1_matches (page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, "
-        "genre TEXT, author TEXT, title TEXT, mesirah TEXT, matched_letters INT, "
+        "genre TEXT, author TEXT, title TEXT, src_attr_note TEXT, matched_letters INT, "
         "best_density REAL, n_spans INT, spans_json TEXT, shadowed_by TEXT);"
     )
     conn.execute(

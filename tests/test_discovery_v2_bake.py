@@ -279,7 +279,7 @@ def _build_v2_finalize_fixture(tmp_path, *, neutral_titles=None):
         """
         CREATE TABLE track1_matches (
           page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
-          title TEXT, mesirah TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          title TEXT, src_attr_note TEXT, matched_letters INT, best_density REAL, n_spans INT,
           spans_json TEXT, shadowed_by TEXT
         );
         CREATE TABLE pages (
@@ -1132,7 +1132,7 @@ def _build_v2_finalize_fixture_shared_page(tmp_path):
         """
         CREATE TABLE track1_matches (
           page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
-          title TEXT, mesirah TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          title TEXT, src_attr_note TEXT, matched_letters INT, best_density REAL, n_spans INT,
           spans_json TEXT, shadowed_by TEXT
         );
         CREATE TABLE pages (
@@ -1683,7 +1683,7 @@ def _finalize_asset(tmp_path, *, v2: bool):
         """
         CREATE TABLE track1_matches (
           page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
-          title TEXT, mesirah TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          title TEXT, src_attr_note TEXT, matched_letters INT, best_density REAL, n_spans INT,
           spans_json TEXT, shadowed_by TEXT
         );
         CREATE TABLE pages (
