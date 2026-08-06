@@ -1,9 +1,18 @@
 # discovery-v3 bake plan — the gen-2 evidence refresh
 
-**Status: 🛑 CHANGES-REQUIRED — do NOT execute. Codex review 2026-08-05 returned 3 BLOCKERs + 5 HIGH**
-(`discovery-v3-bake-plan.CODEX-REVIEW.md`). Written by the gen-2 bake session before touching the pipeline,
-per the standing rule that a plan naming its costs is reviewed before spend. **No heavy run has started, and
-must not until the blockers below are closed.**
+**Status: 🟢 CLEARED TO BUILD, 2026-08-06 — with every Codex finding folded in and the scope frozen in §5.0.**
+Codex review 2026-08-05 returned 3 BLOCKERs + 5 HIGH + 2 MEDIUM + 1 LOW
+(`discovery-v3-bake-plan.CODEX-REVIEW.md`); all are now either **decided** (§5.0 decision table) or **converted
+into engineering owed before the corresponding step**, with five new gates (§6 gates 10–14) covering exactly the
+three blockers. Owner authorized execution 2026-08-05 ("Let's go").
+
+**What the blockers changed, in one line each:** the routing is now **ingested, not recomputed** (so the
+handoff's validated quality actually transfers, and the D-17 order is re-derived rather than inherited);
+`w_start`/`w_end` needs a **declared multi-span projection**, not the scalar join originally assumed; and
+novelty reuse is gated on a **per-pair input fingerprint** rather than the grain key alone.
+
+**Read §5.0 first — it is the operative scope and supersedes any conflicting prose elsewhere in this file.**
+Sections that were reversed during planning are kept in `<details>` blocks so the reversals stay auditable.
 
 | Codex finding | what it refutes | my assessment |
 |---|---|---|
@@ -115,6 +124,25 @@ eligibility handling before ingest."
 
 **Recommendation: (i) + (iii).** That gives the internal artifact promptly and puts R-source in front of the
 owner without smuggling old-engine assertions into a new-engine release.
+
+### Promote-to-public — DEFERRED to a follow-on (owner, 2026-08-05)
+
+Recorded so the mechanism is not re-derived later. Visibility is **derived, not set**: `identity_visibility`
+reads `works.source_corpus` and `assertion_visibility` reads the build-time `assertion_source_corpus`, both
+through a fail-closed `_corpus_code_to_visibility` where anything not exactly `sefaria`/`ja` is `private`.
+**There is no per-work override hook** (grepped: no `override` / `allowlist` / `force_public` in
+`shared/discovery_visibility.py` or `scripts/project_discovery_public.py`).
+
+Promotion is nonetheless cheap because the public asset is a **projection** of the private one
+(`scripts/project_discovery_public.py`), a separate build step over the same membership. An owner-approved
+promote-list would be a small, well-shaped addition to that projection, matching the existing D-08 pattern
+where owner approval gates what ships. **No re-bake, no re-match, no re-grading** — regenerate the projection
+and redeploy.
+
+Two things a future session must not skip: each promoted work needs its **title cleared as publishable**
+(D-08's whole purpose), and promoting a work makes `is_public` non-derivable from corpus alone — so the
+projection's closed-graph and leak-control checks must treat the promote-list as an input, not a bypass.
+**Do NOT implement in the v3 bake.**
 
 **Companion:** `discovery-v3-naming.md` (why this is v3 and not v2.1). **Predecessor:**
 `discovery-v2-bake-plan.md` (the pipeline this reuses). **Input spec:**
@@ -880,6 +908,37 @@ dollars.
 
 ## 5. Recommended scope
 
+### 5.0 THE OPERATIVE DECISION TABLE — dated 2026-08-05, supersedes every "DO/DEFER" line below
+
+Closes Codex's LOW finding ("current scope is internally stale — needs one unambiguous, dated decision table").
+**Where this table and any prose elsewhere in this file disagree, this table wins.**
+
+| # | question | DECISION | authority |
+|---|---|---|---|
+| 1 | **Routing** — recompute v2-style, or ingest gen-2's? | **INGEST `coverage_route`** with a declared mapping + parity checks. Do NOT recompute coverage. Re-derive the D-17 order against the ingested router; do not inherit it. | owner, "yes of course" |
+| 2 | **Selected population** — the 2,686 D-06 works? | **HONOUR D-05/D-06** — exclude them; take only the 52 policy-keeps. Liturgy/piyyut needs the containment fix first. | plan rec., owner not yet contradicted |
+| 3 | **Novelty mode** | **REUSE the cache behind a per-pair input fingerprint** (Codex blocker 3), NOT blanket reuse and NOT a full re-run. Fingerprint = every rendered prompt field incl. claim title/author + evidence text, plus alias-group and model/prompt/effort hashes. Unfingerprinted → treat as miss. | Codex blocker 3 |
+| 4 | **Novelty scope + ceiling** | **Headline (`same_work`) first**, $150 self-enforced ceiling. Est. ≈$4 at measured reuse; recompute the estimate once the fingerprint is in, since it can only *lower* reuse. | owner ("$12 → go"), revised by #3 |
+| 5 | **MAPV2-8** — 152 or 595? | **595-risky exclusion at ingest** (301 claim rows, 0.084%). The 152 is NOT reproducible from the persisted file. Named as an *exclusion*, not the requested revert. **Owner confirmation owed** (Codex HIGH). | §3.5; supersedes the "152" in the old DO list |
+| 6 | **`w_start`/`w_end`** | **Stage 1 only**, and it needs a **declared page-span→reference-span projection** + multi-span parity gate — not the scalar join §1.2 assumed (Codex blocker 1). Coordinate space (`norm_stream`) named in the schema doc. | Codex blocker 1 |
+| 7 | **R-source** | **OUT of v3.** gen-2 has zero R-source evidence; including it means a new heavy run. Plus a **local old-engine-labelled review deck** for owner visibility. | owner request + §3.1 measurement |
+| 8 | **Private artifact** | **BUILD IT**, internally shareable: private DB + generated `PRIVATE.html` deck. Never to the web box. | owner |
+| 9 | **Excluded-set deck** | **BUILD IT** — local deck over the 2,686, so the liturgy coverage can be judged. | owner, "Yes" |
+| 10 | **Promote-to-public** | **DEFERRED** to a follow-on. Do not implement here. | owner |
+| 11 | **`band_precision` / CERT-01** | **DEFERRED** — blocked on owner grading, not compute. No `tier_a` number; no re-registration on corpus-expansion grounds (measured: no expansion). | §3.1, §3.7 |
+| 12 | **Versemap resolution, JA divisions** | **DEFERRED.** Affects PANEL-03's reference *locus* only; the our-text-only highlight does not wait. | §3.2 |
+| 13 | **Genre curation** | From `_tmp/genre-curation-58-COMPLETE.csv` (58 rows, zero blanks). Coverage **verified** against every claim-bearing v3 work, not assumed. 123 restricted-work genres deferred (gates the private verifier only). | §3.6 |
+| 14 | **GEN2 emitter sync** | **DO**, and re-pin, before the D-17 step. | §3.4 |
+
+**Still owed before execution** — the remaining Codex items, none of them owner decisions:
+blocker 1's projection spec · blocker 2's declared routing mapping + parity checks · blocker 3's fingerprint ·
+the full column list for the two research tables (HIGH — and drop the pointless `source_corpus` column, which is
+never read) · `shadowed_by` derived at the producer's `(claim_id, ref_work)` grain with a **halt on any mixed
+group** · a fail-closed R-source input gate on the slim table · failure demonstrations for gates 6 and 7.
+
+<details>
+<summary>The superseded DO list (kept for audit; items 1, 2, 3 and 6 are wrong per the table above)</summary>
+
 **DO in the v3 bake**
 1. **MAPV2-8** exclude-list applied at ingest, at the 152-severe cut (§3.5) — 301-claim blast radius, ids
    already in gen-2's page space. *(The scoping this originally called for is done — see §3.5.)*
@@ -888,6 +947,8 @@ dollars.
 4. GEN2 emitter sync + re-pin, before D-17 (§3.4).
 5. Genre curation from `-COMPLETE.csv`, plus a coverage check at v3's 4,160-work grain (§3.6).
 6. Novelty recomputed fresh at v3 grain, under a $150 self-enforced ceiling (§3.3, §4).
+
+</details>
 
 **DEFER, with the cost of deferring stated**
 - **Versemap resolution / `body↔norm_stream`** (§3.2 stage 2) → PANEL-03's reference *locus* only.
@@ -924,14 +985,35 @@ the masking scan on my own two files, I ran it with the pattern file unset (**ex
 | 3 | **`w_start`/`w_end` non-NULL on every `track1_direct` row**, all corpora | null one row → must fail |
 | 4 | **Release verifier**, both audiences (`--audience public`) | must fail on today's NULL-genre artifact **before** the fix, pass after — this gate is currently RED, which is the control |
 | 5 | **Masking, `--strict --scan-repo --scan-asset --scan-sqlite`**, `MASKING_SCAN_PATTERNS_FILE` set | unset it → exit 1; `--self-test` → needle caught. **Never a skip.** |
-| 6 | **Golden fixture + discovery suites** | — |
-| 7 | **Performance** vs `discovery-budgets.md` caps | — |
+| 6 | **Golden fixture + discovery suites** | ⟨Codex MEDIUM — was blank⟩ run the suite against a deliberately mis-mapped ingest (one `page_id` prefix corrupted) → **must go red**; a suite that passes on a broken map is testing nothing |
+| 7 | **Performance** vs `discovery-budgets.md` caps | ⟨Codex MEDIUM — was blank⟩ set one cap to 0 ms → the harness must **report over-cap and fail**, proving it compares rather than records |
 | 8 | **Novelty fail-closed** — out-of-vocab → `not_checked`, counted, never a positive verdict | inject a bad status → must resolve `not_checked` |
 | 9 | **`divergence_correctness` NULL on every row** (ruling L, human-only) | inject a value in the cache → must be dropped + counted |
+| **10** | **NEW — routing parity** (Codex blocker 2): the ingested `same_work`/`parallel` split reproduces gen-2's `coverage_route` **exactly** at its own grain | flip one route label in the staged input → must fail. Absent this, "we ingested the router" is unproven and the handoff's quality figures do not transfer |
+| **11** | **NEW — `shadowed_by` mixed-group halt** (Codex HIGH): derived at the producer's `(claim_id, ref_work)` grain, all constituent rows must agree | synthesise a mixed group → **must halt**, never silently ANY/ALL it |
+| **12** | **NEW — R-source input gate** (Codex HIGH): the slim research DB is asserted to contain **zero** `RS:`-prefixed rows, and its source-table identity is fingerprinted, before every build and review-artifact invocation | plant one `RS:` row → must refuse. Gate 2 checks completeness, not absence, so it cannot catch this |
+| **13** | **NEW — novelty input fingerprint** (Codex blocker 3): a reused verdict requires an exact per-pair input fingerprint match | mutate a work's title → the pair must become a **miss**, not a hit |
+| **14** | **NEW — multi-span offset parity** (Codex blocker 1): the page-span→reference-span projection is deterministic and correct on rows carrying multiple dual-side spans | pick a known multi-span row; assert the chosen `w_start`/`w_end` against the producer's own evidence rows, not merely non-NULL |
+
+**On the masking gate (Codex MEDIUM, accepted).** The fail-closed control and `--self-test` prove the
+*mechanism* runs and can return non-zero — they do **not** prove the loaded pattern set is complete or current,
+because the self-test needle is synthetic. Owed: a **non-disclosing attestation** of the pattern set (count +
+hash, never contents — 15 patterns today) recorded per run, plus the exact asset/sqlite paths and post-build
+hashes scanned, and a real-pattern positive control that does not print the pattern.
+
+**Order of operations: NO LONGER inherited.** The v2 §6 sequence (Lever-1 coverage routing **before** D-17) was
+written for a builder that *computes* coverage. Decision #1 replaces that step with an **ingest** of gen-2's
+router, so the order must be **re-derived against the ingested router** rather than carried over (Codex blocker
+2's closing instruction). The v2 §6 rationale still applies to everything downstream of routing.
+
+<details>
+<summary>Superseded: "inherit §6 unchanged" (kept — it was right for a recomputing builder, wrong for an ingesting one)</summary>
 
 **Order of operations: inherit `discovery-v2-bake-plan.md` §6 unchanged** — one unified sequence, Lever-1
 coverage routing **before** D-17. That order was corrected once already after a Codex round; re-deriving it is
 how it gets broken again.
+
+</details>
 
 ---
 
