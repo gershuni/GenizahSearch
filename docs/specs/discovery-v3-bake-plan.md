@@ -930,6 +930,38 @@ Closes Codex's LOW finding ("current scope is internally stale — needs one una
 | 13 | **Genre curation** | From `_tmp/genre-curation-58-COMPLETE.csv` (58 rows, zero blanks). Coverage **verified** against every claim-bearing v3 work, not assumed. 123 restricted-work genres deferred (gates the private verifier only). | §3.6 |
 | 14 | **GEN2 emitter sync** | **DO**, and re-pin, before the D-17 step. | §3.4 |
 
+### 5.0a Two findings from the first build step (2026-08-06) — one is a masking-gate hole
+
+Found while enumerating the slim DB's column list (Codex's HIGH), before writing the adapter.
+
+**🛑 FINDING A — the masking scanner does NOT catch the signature-vocabulary term, and gen-2 hands it to us
+as a column name.** `track1_matches_pilot_glaunch3_live` carries a column whose name **is** the restricted
+corpus's distinctive source-record term — the exact thing
+[[project_msource_codename_rule]]'s 2026-07-27 refinement forbids pairing with the codename, because a
+fingerprint term de-anonymizes as effectively as the name. **Measured:** a file containing only that word,
+scanned with `--scan-asset` and the pattern file set, returns **"no matches — clean", exit 0.** So the D-25
+gate would not stop it reaching a committed file, a shipped asset, or a log.
+
+Consequences, in order:
+1. **The slim DB must not carry that column** — it is in the "extras" the builder never reads, so dropping it
+   costs nothing. Same for any derived artifact, deck, or log line.
+2. **`.masking_patterns` is missing a pattern.** This is an owner-held secret file (15 patterns), so I am not
+   editing it — **owner action: add the signature term.** Until then this specific leak class is uncaught, and
+   the gate's green is narrower than it looks. This is exactly the MEDIUM Codex raised (the self-test needle is
+   synthetic, so a passing scan does not attest the pattern set is complete) with a *concrete instance*.
+3. It reinforces the owed **non-disclosing attestation** (pattern count + hash per run) — a count of 15 would
+   not have revealed the gap, but a reviewed inventory would.
+
+**⚠ FINDING B — a frozen release constant coincidentally equals a gen-2 figure. Do not read it as agreement.**
+`build_discovery_sidecar.py:5558` freezes `_EXPECTED_TIER_A_ROWS = 275894`, commented
+"`track1_matches WHERE shadowed_by IS NULL`" — and 275,894 is **exactly** the gen-2 unshadowed
+`(page_id, ref_work)` pair count measured in §3.1. It is **not** either v2-era figure (364,178 with R-source,
+253,975 without). The likely reading is that the v2 release contract was frozen against a *narrower*
+population than today's v2-era table, and the collision with gen-2 is chance. **Either way the release gate
+will compare v3's tier-A count against 275,894 and either pass for the wrong reason or fail without
+explanation.** Owed: establish what that constant was frozen against, and re-pin it deliberately for v3 with
+the derivation recorded — never let it match by luck. Added as gate 15.
+
 **Still owed before execution** — the remaining Codex items, none of them owner decisions:
 blocker 1's projection spec · blocker 2's declared routing mapping + parity checks · blocker 3's fingerprint ·
 the full column list for the two research tables (HIGH — and drop the pointless `source_corpus` column, which is
@@ -993,6 +1025,8 @@ the masking scan on my own two files, I ran it with the pattern file unset (**ex
 | **11** | **NEW — `shadowed_by` mixed-group halt** (Codex HIGH): derived at the producer's `(claim_id, ref_work)` grain, all constituent rows must agree | synthesise a mixed group → **must halt**, never silently ANY/ALL it |
 | **12** | **NEW — R-source input gate** (Codex HIGH): the slim research DB is asserted to contain **zero** `RS:`-prefixed rows, and its source-table identity is fingerprinted, before every build and review-artifact invocation | plant one `RS:` row → must refuse. Gate 2 checks completeness, not absence, so it cannot catch this |
 | **13** | **NEW — novelty input fingerprint** (Codex blocker 3): a reused verdict requires an exact per-pair input fingerprint match | mutate a work's title → the pair must become a **miss**, not a hit |
+| **15** | **NEW — `_EXPECTED_TIER_A_ROWS` re-pinned deliberately** (§5.0a finding B): the frozen count's derivation is recorded and re-derived for v3, never inherited | change the ingest population by one row → must fail with the count named. Today's value coincidentally equals a gen-2 figure, so a pass would otherwise prove nothing |
+| **16** | **NEW — the signature-vocabulary term** (§5.0a finding A) appears in no slim-DB column, artifact, deck or log | plant the term in a scanned file → must be reported. **Currently FAILS this control** — the pattern is absent from `.masking_patterns`; owner action owed. Until then, an explicit column-name denylist in the slim-DB builder is the compensating control |
 | **14** | **NEW — multi-span offset parity** (Codex blocker 1): the page-span→reference-span projection is deterministic and correct on rows carrying multiple dual-side spans | pick a known multi-span row; assert the chosen `w_start`/`w_end` against the producer's own evidence rows, not merely non-NULL |
 
 **On the masking gate (Codex MEDIUM, accepted).** The fail-closed control and `--self-test` prove the
