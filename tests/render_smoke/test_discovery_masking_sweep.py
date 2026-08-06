@@ -731,7 +731,7 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
             facets=rich_facets,
             state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
                    "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
-                   "novelty_only": False, "divergence": "hidden",
+                   "novelty_view": fp.NOVELTY_VIEW_ALL,
                    "domain": "Synthetic Parent A / Synthetic Leaf A",
                    "author": None, "work_id": None, "page": 2}))
         # 2. the same cascade with NOTHING selected, so the branch renders
@@ -751,7 +751,7 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
             facets=rich_facets,
             state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
                    "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
-                   "novelty_only": False, "divergence": "hidden", "domain": None,
+                   "novelty_view": fp.NOVELTY_VIEW_ALL, "domain": None,
                    "author": None, "work_id": None, "work_label": None,
                    "page": 9}))
         # 3. facets whose backing data is absent -- a visibly blocked control.
@@ -792,9 +792,14 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         for status in (tf.STATUS_UNAVAILABLE, tf.STATUS_TIMEOUT, tf.STATUS_BUSY):
             _take(_render_findings_page(
                 lang=lang, findings=tf.findings_envelope([], status=status)))
-        # 7c. the per-work unit, DRIVEN. The candidacy switch refuses its own
-        #     toggle on a unit the service does not offer novelty for -- a
-        #     reachable state, and one that no undriven render can reach.
+        # 7c. the per-work unit, DRIVEN, with the selector on its CANDIDATES
+        #     state. This case used to paint the candidacy switch REFUSING its
+        #     own toggle on the work unit; that refusal no longer exists,
+        #     because the service answers the novelty filter on every row unit
+        #     as of 2026-08-06 and the four-state selector has no inert state
+        #     to fall into. What the case still paints -- and what nothing else
+        #     in this capture does -- is a grouped WORK row rendered under a
+        #     non-default selector state, i.e. the aggregate predicate's output.
         _take(_render_findings_page(
             lang=lang, findings=tf.findings_envelope(
                 [tf.finding_row(unit=tf.FINDINGS_UNIT_WORK, novelty_offered=False,
@@ -802,7 +807,8 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
                                 neutral_title=title)],
                 unit=tf.FINDINGS_UNIT_WORK),
             state={"unit": tf.FINDINGS_UNIT_WORK, "bucket": tf.BUCKET_MAIN,
-                   "sort": "band_rank", "novelty_only": True, "divergence": "hidden", "domain": None,
+                   "sort": "band_rank",
+                   "novelty_view": fp.NOVELTY_VIEW_CANDIDATES, "domain": None,
                    "author": None, "work_id": None, "page": 1}))
         # 7d. an envelope that does not SAY which population it counted. The
         #     result bar's reconciliation line falls closed to SILENCE there
@@ -810,20 +816,58 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         #     shipped reader produces can reach -- so nothing else in this
         #     capture paints it.
         silent = tf.findings_envelope([tf.finding_row(neutral_title=title)])
-        silent["meta"].pop("divergence", None)
+        silent["meta"].pop("divergent_included", None)
         _take(_render_findings_page(lang=lang, findings=silent))
-        # 7e. the same envelope with the axis OPEN, so the reconciliation
-        #     line's OTHER wording is painted too.
-        opened = tf.findings_envelope([tf.finding_row(neutral_title=title,
-                                                      divergent=True)])
-        opened["meta"]["divergence"] = True
-        _take(_render_findings_page(
-            lang=lang, findings=opened,
-            state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
-                   "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
-                   "novelty_only": False, "divergence": True, "domain": None,
-                   "author": None, "work_id": None, "work_label": None,
-                   "page": 1}))
+        # 7e. THE RECONCILIATION LINE'S OTHER TWO WORDINGS. It has three, keyed
+        #     on the envelope's `divergent_included` AND the reader's own view,
+        #     and the default render paints only "excluded" -- so without these
+        #     two the masking scan had never read what the other two say. The
+        #     `divergent` view gives the "alone" wording; any other view with
+        #     the rows in the count gives "included".
+        for view in (fp.NOVELTY_VIEW_DIVERGENT, fp.NOVELTY_VIEW_EITHER):
+            opened = tf.findings_envelope(
+                [tf.finding_row(neutral_title=title, divergent=True)],
+                divergent_included=True)
+            _take(_render_findings_page(
+                lang=lang, findings=opened,
+                state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
+                       "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
+                       "novelty_view": view, "domain": None,
+                       "author": None, "work_id": None, "work_label": None,
+                       "page": 1}))
+        # 7f. THE CATALOGUE TITLE, which is LIBRARY-SUPPLIED TEXT and therefore
+        #     the single most scan-relevant string this page renders. It comes
+        #     from `libraries.csv` via `state.meta_mgr.csv_bank` -- NOT from the
+        #     discovery sidecar -- so it is text this surface republishes from a
+        #     source the discovery masking rules never governed, and until this
+        #     case existed the scan had never read one.
+        #
+        #     The capture has no `meta_mgr` (nothing here boots the app), so the
+        #     lookup loop skipped entirely and `_render_shelfmark`'s title branch
+        #     was dead. Installing a fake bank paints both. SEEDED: the title
+        #     carries the sweep's own needle when one is supplied, which is what
+        #     makes the CONTROL test able to prove this path is really scanned
+        #     rather than merely executed.
+        #     TWO ROWS ON ONE sys_id, deliberately: the lookup is batched (one
+        #     read per DISTINCT sys_id, never one per row, because this page
+        #     runs on a single uvicorn worker), and the skip that makes it
+        #     batched is only reached by a repeat. One row would leave that
+        #     branch unpainted -- which the line gate caught.
+        bank_title = _seeded(seed, tf.CURATED_CATALOGUE_TITLE)
+        titled_rows = [
+            tf.finding_row(neutral_title=title, sys_id="990000000000000944"),
+            tf.finding_row(neutral_title=title, sys_id="990000000000000944"),
+        ]
+        fake_mgr = types.SimpleNamespace(
+            csv_bank={"990000000000000944": {"title": bank_title}})
+        import web.state as _web_state
+        _bank_patch = _Patch()
+        _bank_patch.setattr(_web_state.state, "meta_mgr", fake_mgr)
+        try:
+            _take(_render_findings_page(
+                lang=lang, findings=tf.findings_envelope(titled_rows)))
+        finally:
+            _bank_patch.undo()
         # 8. the novelty help, with and without an as-of date.
         for as_of in ("2026-08-03", None):
             _take(_render_component(

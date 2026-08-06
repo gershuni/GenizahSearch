@@ -374,8 +374,13 @@ _ALLOWLIST_BY_NAME: Dict[str, Tuple[str, ...]] = dict(_ALL_ALLOWLISTS)
 
 
 def findings_envelope(items, total=None, *, status=STATUS_OK, unit=None,
-                      bucket=BUCKET_MAIN, sort="band_rank") -> Dict[str, Any]:
-    """One findings envelope, through the SHIPPED constructors."""
+                      bucket=BUCKET_MAIN, sort="band_rank",
+                      divergent_included=False) -> Dict[str, Any]:
+    """One findings envelope, through the SHIPPED constructors.
+
+    `divergent_included` defaults FALSE to match the shipped service under the
+    default view, and is a parameter rather than a constant so a caller can
+    paint the reconciliation line's other two wordings."""
     unit = unit or FINDINGS_UNIT_IDENTIFICATION
     if status == STATUS_UNAVAILABLE:
         return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
@@ -393,6 +398,17 @@ def findings_envelope(items, total=None, *, status=STATUS_OK, unit=None,
                              "sort_basis": "best_band_rank",
                              "novelty_offered": unit != FINDINGS_UNIT_WORK,
                              "divergence": "hidden",
+                             # THE KEY THE RESULT BAR ACTUALLY READS as of
+                             # 2026-08-06. Omitting it made the reconciliation
+                             # line take its "the envelope did not say" early
+                             # return on every render in this fixture's reach --
+                             # so the line never painted, and the masking
+                             # capture's line-coverage gate caught that the scan
+                             # had never looked at its wording. A fixture that
+                             # silently withholds a key the shipped service
+                             # always emits is not a smaller fixture; it is a
+                             # different envelope shape than production's.
+                             "divergent_included": divergent_included,
                              "approximate_total": False,
                          })
 
@@ -883,7 +899,6 @@ def test_every_shipped_unit_renders_its_row_anatomy(lang, unit):
     assert len(rows) == 1, f"{unit}: expected exactly one row"
     assert _elements_with_class(client, fr.ROW_TITLE_CLASS), f"{unit}: no title line"
     assert _elements_with_class(client, fr.ROW_META_CLASS), f"{unit}: no meta line"
-    assert _elements_with_class(client, fr.ROW_BUCKET_CLASS), f"{unit}: no bucket name"
     ASSERTION_COUNT["n"] += 1
 
 
@@ -1184,20 +1199,37 @@ def test_the_component_derives_no_bucket_of_its_own():
 
 
 @pytest.mark.parametrize("lang", LANGS)
-def test_bucket_membership_on_every_rendered_row_equals_the_shared_rule(lang):
-    """So a future local reimplementation fails the suite rather than silently
-    diverging -- the class of bug the retired `confOf()` was."""
+def test_no_row_names_its_bucket_and_neither_pool_is_the_exception(lang):
+    """The chip was removed from BOTH pools on 2026-08-06, and BOTH is the part
+    a test has to hold.
+
+    It went because it could not vary: the page offers two buckets and no union
+    (`_OFFERED_BUCKETS`), and an expansion's children inherit their parent's
+    bucket, so the label was measured constant across every row of all six
+    unit x bucket combinations -- fifty repetitions a page of what the result
+    bar states once above them.
+
+    D-24 is why this asserts on both pools rather than on one. Dropping the
+    name from the main pool alone would leave the second pool's rows carrying a
+    marker the first pool's do not, which is exactly the per-bucket differential
+    treatment D-24 forbids. So the assertion is symmetric, and a re-introduction
+    for one pool fails here even if someone believes they are restoring a
+    feature.
+
+    Asserted against the SHARED vocabulary, not a literal: the bucket names
+    still have exactly one definition, and the result bar and launch statistics
+    still read it."""
     items = [finding_row(main_pool=True), finding_row(main_pool=False)]
     client = render_rows(items, lang)
-    rendered = [
-        "\n".join(_subtree_texts(el))
-        for el in _elements_with_class(client, fr.ROW_BUCKET_CLASS)
-    ]
-    assert len(rendered) == len(items)
-    for item, text in zip(items, rendered):
-        expected = bucket_label(bool(item["main_pool"]), lang)
-        assert expected in text, (
-            f"row bucket {text!r} is not shared/discovery_main_pool's {expected!r}")
+    # Scoped to the ROWS, not the whole client: the result bar legitimately
+    # names the bucket once, and a client-wide scan would fail on the correct
+    # rendering rather than on a row that misbehaves.
+    rendered = scoped_text(client, fr.ROW_CLASS)
+    for in_main in (True, False):
+        name = bucket_label(in_main, lang)
+        assert name not in rendered, (
+            f"a row names its bucket ({name!r}) -- that label is constant for "
+            "the whole page and belongs in the result bar, once")
     ASSERTION_COUNT["n"] += 1
 
 
@@ -1218,7 +1250,8 @@ def test_second_bucket_rows_render_on_a_populated_fixture(monkeypatch, lang):
         monkeypatch, lang=lang,
         findings=findings_envelope(items, bucket=BUCKET_MORE),
         state={"unit": FINDINGS_UNIT_IDENTIFICATION, "bucket": BUCKET_MORE,
-               "sort": "band_rank", "novelty_only": False, "divergence": "hidden", "domain": None,
+               "sort": "band_rank", "novelty_view": fp.NOVELTY_VIEW_ALL,
+               "domain": None,
                "author": None, "work_id": None, "page": 1})
     rows = _elements_with_class(client, fr.ROW_CLASS)
     assert len(rows) == len(items) and rows, (
@@ -1347,7 +1380,7 @@ def test_the_rendered_findings_page_is_honest(monkeypatch, status, lang, unit, b
         monkeypatch, lang=lang,
         findings=findings_envelope(items, status=status, unit=unit, bucket=bucket),
         state={"unit": unit, "bucket": bucket, "sort": "band_rank",
-               "novelty_only": False, "divergence": "hidden", "domain": None, "author": None,
+               "novelty_view": fp.NOVELTY_VIEW_ALL, "domain": None, "author": None,
                "work_id": None, "page": 1})
 
     for marker in (fp.PAGE_CLASS, fp.FILTER_BAR_CLASS, fp.RESULTS_CLASS,
@@ -2243,7 +2276,8 @@ def capture_rendered_output(destination: str) -> str:
                             findings=findings_envelope(items, status=status,
                                                        unit=unit, bucket=bucket),
                             state={"unit": unit, "bucket": bucket,
-                                   "sort": "band_rank", "novelty_only": False, "divergence": "hidden",
+                                   "sort": "band_rank",
+                                   "novelty_view": fp.NOVELTY_VIEW_ALL,
                                    "domain": None, "author": None,
                                    "work_id": None, "page": 1})
                     finally:
@@ -2289,7 +2323,8 @@ def capture_rendered_output(destination: str) -> str:
             #     value assignment from looping through `refresh`.
             ("selected-facets", {"state": {
                 "unit": "identification", "bucket": BUCKET_MAIN,
-                "sort": "band_rank", "novelty_only": False, "divergence": "hidden", "domain": None,
+                "sort": "band_rank", "novelty_view": fp.NOVELTY_VIEW_ALL,
+                "domain": None,
                 "author": "AN AUTHOR THE CASCADE DOES NOT OFFER",
                 "work_id": "w000404", "work_label": None, "page": 1}}),
         ):
@@ -2774,16 +2809,19 @@ def test_a_childs_filter_state_is_the_READERS_state_at_the_leaf_grain():
     the reader cannot tell which number to believe.
 
     Every axis carries over; only the grain and the pinned key differ."""
+    # NON-DEFAULT on every axis on purpose: a state of all-defaults would pass
+    # this test even if `_child_state` returned a fresh dict and carried nothing.
+    # `novelty_view` is the four-state selector's axis, and `either` is the
+    # state that would be most visibly wrong if it were dropped.
     state = {"unit": FINDINGS_UNIT_WORK, "bucket": BUCKET_MORE,
-             "sort": "band_rank", "novelty_only": True, "divergence": "only",
+             "sort": "band_rank", "novelty_view": fp.NOVELTY_VIEW_EITHER,
              "domain": "D", "author": "A", "work_id": None, "page": 7}
     child = fp._child_state(state, "work_id", "w000404")
 
     assert child["unit"] == FINDINGS_UNIT_IDENTIFICATION, "not the leaf grain"
     assert child["page"] == 1, "a child list must start at its own first page"
     assert child["work_id"] == "w000404", "the group key was not pinned"
-    for axis in ("bucket", "sort", "novelty_only", "divergence", "domain",
-                 "author"):
+    for axis in ("bucket", "sort", "novelty_view", "domain", "author"):
         assert child[axis] == state[axis], (
             "{} was not carried into the children".format(axis))
     ASSERTION_COUNT["n"] += 1
@@ -2805,7 +2843,7 @@ def test_an_UNSUPPORTED_axis_never_reaches_the_service_as_a_dropped_keyword():
         return findings_envelope([finding_row()])
 
     state = {"unit": FINDINGS_UNIT_MANUSCRIPT, "bucket": BUCKET_MAIN,
-             "sort": "band_rank", "novelty_only": False, "divergence": "hidden",
+             "sort": "band_rank", "novelty_view": fp.NOVELTY_VIEW_ALL,
              "domain": None, "author": None, "work_id": None, "page": 1}
     row = finding_row(unit=FINDINGS_UNIT_MANUSCRIPT)
 

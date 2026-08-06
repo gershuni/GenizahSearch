@@ -134,7 +134,10 @@ ROW_NOVELTY_CLASS = "gs-findings-row-novelty"
 ROW_DIVERGENCE_CLASS = "gs-findings-row-divergence"
 ROW_PAGES_CLASS = "gs-findings-row-pages"
 ROW_COVERAGE_CLASS = "gs-findings-row-coverage"
-ROW_BUCKET_CLASS = "gs-findings-row-bucket"
+#: NO `ROW_BUCKET_CLASS`. The per-row bucket chip was removed from BOTH pools on
+#: 2026-08-06 (see `_render_row_meta`), and its class constant went with it
+#: rather than lingering as a marker a test could still assert against -- a
+#: selector for an element nothing renders is a guard that can only ever pass.
 ROW_SHELFMARK_CLASS = "gs-findings-row-shelfmark"
 ROW_ANNOTATION_CLASS = "gs-findings-row-annotation"
 ROW_REPORT_CLASS = "gs-findings-row-report"
@@ -424,11 +427,26 @@ _COPY: Dict[str, Dict[str, str]] = {
         "en": "Close",
         "he": "סגירה",
     },
-    # The preview is a VIEWER, not a verdict. It shows the manuscript page; it
-    # says nothing about whether the match is right, because nothing here does.
+    # The preview is a VIEWER, not a verdict. It shows the manuscript; it says
+    # nothing about whether the match is right, because nothing here does.
+    #
+    # IT OPENS THE MANUSCRIPT, NOT THE MATCHED FOLIO, and the note now says so
+    # (owner ruling, 2026-08-06). This is a structural limit, not a bug to fix
+    # in the page: a findings row carries `page_count` and NO folio identifier,
+    # so there is nothing here to target a page with. The earlier wording --
+    # "The manuscript page, to read for yourself" -- read as a promise to open
+    # THE page, i.e. the matched one, which is the single most misleading thing
+    # this affordance could imply: a reader who lands on folio 1r of a
+    # 40-folio manuscript and finds nothing resembling the identification would
+    # reasonably conclude the identification is wrong. Naming the limit costs
+    # one clause; letting a reader discover it costs the row's credibility.
+    # Targeting the folio is deferred to a future bake carrying a
+    # representative page per identification.
     "preview_note": {
-        "en": "The manuscript page, to read for yourself.",
-        "he": "דף הכתב, לקריאה עצמית.",
+        "en": "Opens the manuscript at its first page — not the matched folio. "
+              "Browse to read it for yourself.",
+        "he": "נפתח בעמוד הראשון של כתב היד — לא בדף שהותאם. "
+              "אפשר לדפדף ולקרוא.",
     },
     # -- the domain facet's header. It NAMES ITS AXIS: the domain of the
     #    IDENTIFIED WORK, never the manuscript's catalogue domain. Filtering on
@@ -1189,13 +1207,25 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
         if coverage:
             ui.label(coverage).classes(f"{ROW_COVERAGE_CLASS} dnote text-xs")
 
-        # The bucket NAME, from the shared rule -- identical treatment in both
-        # buckets. `main_pool` is materialized by the bake from
-        # `shared.discovery_main_pool.main_pool_decision`; this renders its
-        # name and never re-decides it.
-        ui.label(ds.bucket_name(bool(item.get("main_pool")), lang)).classes(
-            f"{ROW_BUCKET_CLASS} dnote text-xs")
-
+        # NO BUCKET NAME ON THE ROW (owner ruling, 2026-08-06), and the reason is
+        # that it could not vary. The page offers exactly two buckets and no
+        # union between them (`_OFFERED_BUCKETS` deliberately excludes the
+        # all-bucket sentinel, ruling U constraint 1), and an expansion's
+        # children inherit their parent's bucket -- so this label was measured
+        # to be CONSTANT across every row of all six unit x bucket combinations.
+        # It repeated, up to fifty times a page, exactly what the result bar
+        # states once directly above the rows.
+        #
+        # It was also the only item on a meta line of ~5.3 that told the reader
+        # nothing about the row it sat on.
+        #
+        # D-24 IS SATISFIED MORE CLEANLY, not bypassed: removing it from BOTH
+        # pools leaves the two anatomies identical, which is what D-24 asks for.
+        # Removing it from one would be the demotion D-24 forbids -- so if this
+        # ever comes back, it comes back for both or not at all. The bucket name
+        # itself keeps its single definition
+        # (`shared.discovery_main_pool.bucket_label`, via `ds.bucket_name`),
+        # which the result bar and the launch statistics still read.
         if unit == FINDINGS_UNIT_MANUSCRIPT and item.get("multi_work_annotation"):
             ui.label(copy_text("multi_work", lang)).classes(
                 f"{ROW_ANNOTATION_CLASS} dnote text-xs")
@@ -1579,7 +1609,6 @@ __all__ = [
     "LAUNCH_TOTAL_CLASS",
     "NOVELTY_HELP_CLASS",
     "ROW_ANNOTATION_CLASS",
-    "ROW_BUCKET_CLASS",
     "ROW_CATALOGUE_TITLE_CLASS",
     "ROW_CLASS",
     "ROW_COVERAGE_CLASS",
