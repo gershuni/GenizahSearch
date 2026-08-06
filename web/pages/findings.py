@@ -362,17 +362,24 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     # NO FIGURE of its own. A count of what is excluded would be a third number
     # on a fourth basis, which is the mixed-basis defect ruling U was issued
     # over; and the exclusion is a category, which words state exactly.
+    #
+    # "DO NOT CORRESPOND", never "disagree" (owner ruling, 2026-08-06 -- the
+    # same vocabulary as the selector and as `shared.discovery_display_strings`'
+    # warning and row chip). These three lines had been left on the older
+    # wording after the selector was renamed, so a reader filtered on "do not
+    # correspond" and read a bar that said "disagree" about the same set: one
+    # screen, one fact, two vocabularies (found by external review).
     "divergence_excluded": {
-        "en": "Not counted here: findings that disagree with the catalogue.",
-        "he": "לא נכללים כאן: ממצאים החולקים על הקטלוג.",
+        "en": "Not counted here: findings that do not correspond to the catalogue.",
+        "he": "לא נכללים כאן: ממצאים שאינם מתאימים לקטלוג.",
     },
     "divergence_included": {
-        "en": "Counted here: findings that disagree with the catalogue.",
-        "he": "נכללים כאן: ממצאים החולקים על הקטלוג.",
+        "en": "Counted here: findings that do not correspond to the catalogue.",
+        "he": "נכללים כאן: ממצאים שאינם מתאימים לקטלוג.",
     },
     "divergence_alone": {
-        "en": "Counted here: only findings that disagree with the catalogue.",
-        "he": "נכללים כאן: רק ממצאים החולקים על הקטלוג.",
+        "en": "Counted here: only findings that do not correspond to the catalogue.",
+        "he": "נכללים כאן: רק ממצאים שאינם מתאימים לקטלוג.",
     },
     # THE THREE STATE LABELS (owner, 2026-08-05). Each one names WHAT THIS STATE
     # DOES, which is the whole correction: the control shipped with the panel's
@@ -389,34 +396,35 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     # None of the three asserts which side is right: they say only whether the
     # disagreements are out, in, or the whole of what is counted. The ratified
     # warning still sits beside them as card prose.
-    "divergence_state_hidden": {
-        "en": "Catalogue disagreements hidden",
-        "he": "מחלוקות עם הקטלוג מוסתרות",
-    },
-    "divergence_state_shown": {
-        "en": "Catalogue disagreements included",
-        "he": "מחלוקות עם הקטלוג כלולות",
-    },
-    "divergence_state_only": {
-        "en": "Catalogue disagreements only",
-        "he": "מחלוקות עם הקטלוג בלבד",
-    },
+    # NO `divergence_state_*` STRINGS. They labelled the three positions of the
+    # cycling divergence CONTROL, which the four-state selector replaced; their
+    # table (`_DIVERGENCE_STATE_KEY`) was validated but never indexed again, so
+    # the strings were unreachable. Deleted rather than retranslated: keeping
+    # them meant maintaining a THIRD vocabulary ("Catalogue disagreements" /
+    # `מחלוקות`) for a fact the selector and the row chip already state, purely
+    # to keep a dead table populated. The result bar's basis line uses
+    # `divergence_excluded` / `_included` / `_alone` above, which are live.
     # -- THE FOUR-STATE SELECTOR (owner ruling + owner-authored Hebrew,
     #    2026-08-06). ONE control replacing two, because `novelty_status` is ONE
     #    column and the two chips were fighting over it.
     #
     # WHY "CORRESPOND" AND NOT "DISAGREE". The owner's Hebrew is
     # `חוסר התאמה עם הקטלוג` -- literally "lack of correspondence with the
-    # catalogue" -- and that is a better description than the `מחלוקות`
-    # ("disputes") the three strings above use, in a way that matters here
-    # rather than being a matter of taste: a dispute has parties and implies one
-    # of them is wrong, and ruling F's whole position is that NEITHER side is
-    # adjudicated. So the English follows the Hebrew rather than the reverse,
-    # and "disagreements" is retired on this control.
+    # catalogue" -- and that is a better description than `מחלוקות`
+    # ("disputes"), in a way that matters here rather than being a matter of
+    # taste: a dispute has parties and implies one of them is wrong, and ruling
+    # F's whole position is that NEITHER side is adjudicated. So the English
+    # follows the Hebrew rather than the reverse.
     #
-    # The three `divergence_state_*` strings above are KEPT, not deleted: the
-    # result bar's basis line still reports which population it counted, and
-    # those are its words. Only the CONTROL changes.
+    # THIS IS NOW THE WHOLE PAGE'S VOCABULARY, not just this control's (owner
+    # ruling, 2026-08-06). It was applied to the selector first and the older
+    # "disagree"/`חולק`/`מחלוקות` wording was left standing on the result bar's
+    # basis lines, the shared warning and the row chip -- so one screen carried
+    # two vocabularies for one fact, and a reader who filtered on "do not
+    # correspond" read rows labelled "Disagrees". External review caught it.
+    # `shared/discovery_display_strings.py` was changed in the same pass, so the
+    # connections panel says the same thing.
+    #
     # THE SELECTOR'S OWN LABEL. "Which findings", never a bare "Show":
     # the result bar carries a "Show as" control (the row unit) a short scroll
     # away, and in ENGLISH "Show" is a strict prefix of "Show as" -- two
@@ -623,26 +631,27 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
 }
 
 
-#: Divergence mode -> the state label its control carries, and -> the result
-#: bar's basis line. ONE mapping each, so a mode added to the closed vocabulary
-#: fails loudly here rather than rendering a blank chip or a silent bar.
-_DIVERGENCE_STATE_KEY: Dict[str, str] = {
-    DIVERGENCE_HIDDEN: "divergence_state_hidden",
-    DIVERGENCE_SHOWN: "divergence_state_shown",
-    DIVERGENCE_ONLY: "divergence_state_only",
-}
-
+#: Divergence mode -> the result bar's basis line.
+#:
+#: THERE IS NO LONGER A `_DIVERGENCE_STATE_KEY` (deleted 2026-08-06). It mapped
+#: each mode to a chip label for the cycling divergence CONTROL, and that control
+#: no longer exists -- the four-state selector replaced it. The table was never
+#: indexed again, only validated, so it and its three
+#: `divergence_state_*` strings were dead weight that a copy-sweep test still
+#: dutifully swept. Keeping them would have meant maintaining a third
+#: vocabulary for the same fact (they said "Catalogue disagreements" /
+#: `מחלוקות`) purely so an unreachable table stayed populated.
 _DIVERGENCE_BASIS_KEY: Dict[str, str] = {
     DIVERGENCE_HIDDEN: "divergence_excluded",
     DIVERGENCE_SHOWN: "divergence_included",
     DIVERGENCE_ONLY: "divergence_alone",
 }
 
-if set(_DIVERGENCE_STATE_KEY) != set(DIVERGENCE_MODES) or         set(_DIVERGENCE_BASIS_KEY) != set(DIVERGENCE_MODES):
+if set(_DIVERGENCE_BASIS_KEY) != set(DIVERGENCE_MODES):
     raise RuntimeError(
         "web/pages/findings.py: the divergence mode vocabulary moved and this "
-        "module's label tables did not -- a mode with no label renders a blank "
-        "control, and one with no basis line leaves the count unexplained"
+        "module's basis table did not -- a mode with no basis line leaves the "
+        "count unexplained"
     )
 
 
@@ -1967,11 +1976,21 @@ def _facet_node(
         state["page"] = 1
         await refresh()
 
-    node = ui.button(text, on_click=_pick).props("flat dense no-caps align=left")
+    # `align=left` WOULD BE A PHYSICAL DIRECTION and is deliberately absent
+    # (external review, 2026-08-06). Quasar's `align` prop maps to a physical
+    # side, so a domain label in Hebrew stayed pinned to the LEFT edge of its
+    # own button while the rest of the tree read right-to-left. The shared block
+    # already carries the logical equivalent -- `.gs-discovery .dnode {
+    # text-align: start }` -- so the correct treatment is to let that rule apply
+    # rather than to override it per element. `justify-start` is Quasar's own
+    # flex utility and is direction-AWARE (it resolves to `flex-start`, which
+    # follows the writing mode), which is what keeps the label against the
+    # reading edge in both languages.
+    node = ui.button(text, on_click=_pick).props("flat dense no-caps")
     node.classes(
         " ".join(
             part for part in (
-                "dnode", "w-full",
+                "dnode", "w-full", "justify-start",
                 "leaf" if leaf else "",
                 "here" if selected else "",
             ) if part

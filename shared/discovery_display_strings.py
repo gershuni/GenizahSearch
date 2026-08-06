@@ -390,22 +390,36 @@ _TOGGLE_ALSO_SHARES_TEXT: Dict[str, str] = {
 
 # Ruling F (136-GATE1-DECISIONS.md section F). Divergent rows are neither
 # auto-hidden by policy nor silently trusted: the SYSTEM never treats the
-# catalogue's disagreement as a verdict, it only surfaces the disagreement
-# and lets the reader decide. The wording below therefore states THAT the
-# two disagree and says explicitly that neither side has been adjudicated --
-# it must never assert which side is right.
+# catalogue's reading as a verdict, it only surfaces the non-correspondence
+# and lets the reader decide. The wording below therefore states THAT the two
+# do not correspond and says explicitly that neither side has been adjudicated
+# -- it must never assert which side is right.
+#
+# "DO NOT CORRESPOND", NEVER "DISAGREE" / "CONFLICT" (owner ruling,
+# 2026-08-06). A disagreement implies parties, and parties imply that one of
+# them is mistaken -- which is precisely the adjudication ruling F says nobody
+# has performed. The owner authored the Hebrew (`חוסר התאמה עם הקטלוג`, "lack
+# of correspondence with the catalogue") for the findings-page selector and the
+# ENGLISH follows it rather than the reverse.
+#
+# These strings had been left on the older "disagree"/"conflict" vocabulary
+# after the selector was renamed, so one screen carried two vocabularies for
+# one fact -- a reader filtered on "do not correspond" and got rows labelled
+# "Disagrees" (found by external review, 2026-08-06). Both surfaces read this
+# module, so the panel and the findings page change together.
 _TOGGLE_DIVERGENCE: Dict[str, str] = {
-    "en": "Show findings that disagree with the catalogue",
-    "he": "הצג ממצאים החולקים על הקטלוג",
+    "en": "Show findings that do not correspond to the catalogue",
+    "he": "הצג ממצאים שאינם מתאימים לקטלוג",
 }
 
 _DIVERGENCE_WARNING: Dict[str, str] = {
     "en": (
-        "These findings conflict with an existing catalogue identification. "
-        "Neither side has been adjudicated — read them with that in mind."
+        "These findings do not correspond to an existing catalogue "
+        "identification. Neither side has been adjudicated — read them with "
+        "that in mind."
     ),
     "he": (
-        "ממצאים אלה סותרים זיהוי קטלוגי קיים. אף צד לא הוכרע — "
+        "ממצאים אלה אינם מתאימים לזיהוי קטלוגי קיים. אף צד לא הוכרע — "
         "קראו אותם בהתאם."
     ),
 }
@@ -432,8 +446,8 @@ def disclosure_toggle(toggle_key: str, lang: str = "en") -> str:
 
 
 def divergence_warning(lang: str = "en") -> str:
-    """The warning ruling F requires beside the divergence toggle. It records
-    the disagreement and explicitly declines to adjudicate it."""
+    """The warning ruling F requires beside the divergence control. It records
+    the non-correspondence and explicitly declines to adjudicate it."""
     return _pick(_DIVERGENCE_WARNING, lang)
 
 
@@ -441,18 +455,23 @@ def divergence_warning(lang: str = "en") -> str:
 # prose beside it; neither travels with a row once the reader has opened the
 # axis, and on the findings page a divergent row then sits in a flat list
 # among ordinary ones. So the row carries its own marker, and the marker
-# states BOTH facts on its face: that the two disagree, and that neither side
-# has been adjudicated.
+# states BOTH facts on its face: that the two do not correspond, and that
+# neither side has been adjudicated.
 #
 # The second half is not decoration. `divergence_correctness` -- ruling L's
 # human-only column -- is NULL on every shipped row, so no adjudication
-# exists; a marker saying only "disagrees with the catalogue" would leave a
-# reader free to supply the missing half themselves, and the owner's own
-# reading of real cases is that BOTH directions occur. The wording therefore
-# never says which side is right, in either language.
+# exists; a marker naming only the non-correspondence would leave a reader free
+# to supply the missing half themselves, and the owner's own reading of real
+# cases is that BOTH directions occur. The wording therefore never says which
+# side is right, in either language.
+#
+# "Does not correspond", never "Disagrees" -- see `_TOGGLE_DIVERGENCE` above
+# for the full reasoning. This chip is the string a reader meets MOST often
+# (~23.6% of rows carry it), so it is the one that most needs to match the
+# control they filtered with.
 _DIVERGENCE_CHIP: Dict[str, str] = {
-    "en": "Disagrees with the catalogue — not adjudicated",
-    "he": "חולק על הקטלוג — לא הוכרע",
+    "en": "Does not correspond to the catalogue — not adjudicated",
+    "he": "אינו מתאים לקטלוג — לא הוכרע",
 }
 
 

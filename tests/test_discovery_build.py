@@ -3324,22 +3324,55 @@ def test_no_candidacy_state_is_skipped_as_surface_unreachable_ON_ANY_UNIT(tmp_pa
         str(db_path), page_size=2, repeats=1, deep_page=2)
     assert result["skipped"] is False
 
-    # 1. NOTHING is skipped for surface-unreachability any more, on any unit.
-    marker = "the SURFACE cannot issue this"
-    unreachable = {s["label"] for s in result["skipped_shapes"] if marker in s["reason"]}
-    assert not unreachable, (
-        "the probe skips these shapes as surface-unreachable, but the surface "
-        "reaches every candidacy state on every row unit now: " + repr(sorted(unreachable)))
+    # THE SKIPS, BY LABEL, not by matching one remembered sentence. An earlier
+    # version of this test looked for the exact prose "the SURFACE cannot issue
+    # this" -- so a reachability skip reinstated under any other wording would
+    # have passed it, which makes the guard weaker than its own name (caught by
+    # external review, 2026-08-06). What actually needs asserting is a property
+    # of the SHAPES: no work-unit candidacy shape may be skipped for a reason
+    # about REACH, whatever words that reason uses.
+    skip_reason = {s["label"]: (s["reason"] or "") for s in result["skipped_shapes"]}
 
-    # 2. And the candidacy shapes are really enumerated at EVERY unit -- the
-    #    assertion that stops the skip being replaced by a quieter omission.
-    #    A state may still be skipped for an ASSET reason (this fixture carries
-    #    no matching row), which is a fact about the fixture, not about reach.
-    every = ({r["label"] for r in result["shapes"]}
-             | {s["label"] for s in result["skipped_shapes"]})
+    #: Vocabulary that means "the surface cannot get here". An ASSET reason (this
+    #: fixture carries no matching row; the set is shorter than the deep-page
+    #: offset) is legitimate and names the fixture, not the surface.
+    reach_words = ("cannot issue", "unreachable", "surface cannot",
+                   "not reachable", "cannot produce", "cannot be issued")
+
+    # 1. EVERY enumerated work-unit candidacy shape, across ALL THREE spec kinds
+    #    (ordering, deep page, visible total) -- not one sampled ordering label.
+    work_novelty = [label for label in
+                    ({r["label"] for r in result["shapes"]} | set(skip_reason))
+                    if label.startswith("findings_work_") and "novelty" in label]
+    assert work_novelty, (
+        "no work-unit candidacy shape is enumerated at all -- the probe lost the "
+        "states this test exists to keep measured")
+    for kind_marker in ("band_rank", "deep_page", "visible_total"):
+        assert any(kind_marker in label for label in work_novelty), (
+            f"no work-unit candidacy shape of the {kind_marker!r} kind is "
+            "enumerated; the skip could have been removed from one spec loop "
+            "and left in another")
+
+    blocked = {label: skip_reason[label] for label in work_novelty
+               if any(word in skip_reason.get(label, "").lower()
+                      for word in reach_words)}
+    assert not blocked, (
+        "these work-unit candidacy shapes are skipped for a reason about REACH, "
+        "but the surface reaches every candidacy state on every row unit now:\n"
+        + "\n".join(f"  {label}: {reason}" for label, reason in sorted(blocked.items())))
+
+    # 2. ...and no OTHER unit grew one either.
+    every = ({r["label"] for r in result["shapes"]} | set(skip_reason))
     for unit in sorted(FINDINGS_UNITS):
         assert f"findings_{unit}_band_rank_main+novelty" in every, (
             f"the {unit}/band_rank/main+novelty combination is not enumerated")
+    reach_blocked_anywhere = sorted(
+        label for label, reason in skip_reason.items()
+        if "novelty" in label
+        and any(word in reason.lower() for word in reach_words))
+    assert not reach_blocked_anywhere, (
+        "candidacy shapes skipped for a reach reason on some unit: "
+        + repr(reach_blocked_anywhere))
 
 
 def test_the_probes_filter_axes_are_PINNED_to_the_shipped_predicate_builder():

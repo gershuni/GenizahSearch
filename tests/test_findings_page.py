@@ -1395,6 +1395,60 @@ def test_the_mobile_rule_is_scoped_to_findings_row_anatomy():
             "mirroring in RTL")
 
 
+@pytest.mark.parametrize("module_path", [
+    "web/pages/findings.py",
+    "web/components/findings_rows.py",
+])
+def test_no_quasar_prop_pins_an_element_to_a_physical_side(module_path):
+    """The RTL hole the CSS-property guard above could not see.
+
+    Its sibling scans the STYLESHEET for `margin-left` and friends. A physical
+    direction can also arrive as a QUASAR PROP -- `align=left`, `side=right` --
+    which never appears in any `.css` file and so passed every existing check.
+
+    That is not hypothetical: the domain facet buttons shipped with
+    `.props("flat dense no-caps align=left")`, so a Hebrew reader saw every
+    domain label pinned to the LEFT edge of its own button while the rest of the
+    tree read right-to-left (external review, 2026-08-06). The shared block
+    already had the logical equivalent (`.dnode { text-align: start }`); the prop
+    was overriding it.
+
+    `justify-start` / `items-start` are deliberately NOT forbidden: those are
+    Quasar's flex utilities and resolve to `flex-start`, which FOLLOWS the
+    writing mode. The rule is about named physical SIDES.
+
+    SCANNED OVER CODE ONLY, comments and docstrings stripped -- the fix for the
+    defect above left behind a comment naming `align=left` in order to say why
+    it must not come back, and a raw text scan failed on the explanation instead
+    of on a defect. (The sibling render-smoke suite strips prose for the same
+    reason; `_code_lines` there has the same job.)
+    """
+    import ast
+
+    source = pathlib.Path(module_path).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    prose: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None)
+            if body and isinstance(body[0], ast.Expr) and \
+                    isinstance(body[0].value, ast.Constant) and \
+                    isinstance(body[0].value.value, str):
+                doc = body[0].value
+                prose.update(range(doc.lineno, (doc.end_lineno or doc.lineno) + 1))
+    code = "\n".join(
+        "" if (n in prose or line.lstrip().startswith("#")) else line
+        for n, line in enumerate(source.splitlines(), start=1))
+    offenders = _re.findall(
+        r"(?:align|side|anchor|self)\s*=\s*[\"']?(left|right)\b", code)
+    assert not offenders, (
+        f"{module_path} pins an element to a physical side via a Quasar prop "
+        f"({sorted(set(offenders))}) -- these surfaces render in both "
+        "directions, so use a logical/flex value (`justify-start`, "
+        "`text-align: start`) instead of a named side")
+
+
 # ---------------------------------------------------------------------------
 # (c) The INTERACTION test — through the NiceGUI User simulation, never by
 # calling the handler directly. Marked render_smoke: it enters and tears down
@@ -1821,11 +1875,34 @@ def test_the_facet_cascade_never_carries_a_selection_the_result_set_dropped(monk
         return {"status": "ok", "items": [], "total": 0, "meta": {"level": level}}
 
     monkeypatch.setattr(fp, "get_findings_facets_enveloped", _capture)
-    state = _state(unit="work", novelty_only=True)
+    # THE SELECTOR'S OWN KEY, and the assertion is now the INVERSE of what it
+    # was. Until 2026-08-06 this passed `novelty_only=True` and asserted the
+    # cascade sent `novelty=None`, because the per-work result set could not
+    # apply candidacy and mismatched facet counts would have described rows the
+    # reader was not being shown.
+    #
+    # It kept passing after the selector landed, FOR THE WRONG REASON, and that
+    # is the interesting part: `_state(**overrides)` accepts any keyword, so
+    # `novelty_only=True` silently added a key nothing reads. The request really
+    # did carry `novelty=None` -- not because the rule under test fired, but
+    # because the state said "all findings". A green test asserting an
+    # unfiltered request while claiming to test candidacy. (Caught by external
+    # review, 2026-08-06.)
+    #
+    # The service answers candidacy on every unit now, so what must hold is the
+    # opposite: the cascade CARRIES the selection, and its counts therefore
+    # describe the same population as the rows.
+    from shared.discovery_novelty import CANDIDATE_STATUS
+
+    state = _state(unit="work", novelty_view=fp.NOVELTY_VIEW_CANDIDATES)
     asyncio.run(fp.fetch_facets("domain", state))
-    assert captured["domain"]["novelty"] is None, (
-        "the facet cascade applied a candidacy filter the per-work result set "
-        "could not — the counts would not describe the rows beside them")
+    assert captured["domain"]["novelty"] == (CANDIDATE_STATUS,), (
+        "the facet cascade dropped the candidacy selection on the per-work unit "
+        "— its counts would describe a different population than the rows "
+        f"beside them; sent {captured['domain']['novelty']!r}")
+    assert captured["domain"]["divergence"] == fp.DIVERGENCE_SHOWN, (
+        "the cascade must pin the legacy divergence axis to SHOWN like every "
+        "other read, or it subtracts ruling F's rows back out")
 
 
 # ---------------------------------------------------------------------------
@@ -5096,9 +5173,14 @@ def test_the_divergence_copy_never_says_which_side_is_right(monkeypatch, lang):
     text = "\n".join(
         _node_texts(client, f"{fp.FILTER_BAR_CLASS}-divergence-warning")
         + _node_texts(client, f"{fp.FILTER_BAR_CLASS}-divergence-note")
+        # The three `divergence_state_*` keys are GONE (2026-08-06): they
+        # labelled the retired cycling control, their table was validated but
+        # never indexed, and they carried a third vocabulary ("Catalogue
+        # disagreements") for a fact the selector and the row chip already
+        # state. `copy_text` raises on an unknown key by design, so this list
+        # cannot silently outlive the strings.
         + [fp.copy_text(key, lang) for key in (
-            "divergence_state_hidden", "divergence_state_shown",
-            "divergence_state_only", "divergence_candidacy_note",
+            "divergence_candidacy_note",
             "divergence_excluded", "divergence_included",
             "divergence_alone")]).lower()
     forbidden = {
