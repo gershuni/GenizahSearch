@@ -317,9 +317,17 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     # by plan 136-22 and rendered by plan 136-18, and a placeholder digit here
     # would survive as a hardcoded launch number -- precisely the failure
     # ruling U was issued to prevent.
+    #
+    # "THE CATALOGUES WE CHECKED", not "the finding aids" (owner ruling,
+    # 2026-08-06). This is the region's SCREEN-READER label, so it was the one
+    # place the retired jargon would have survived the visible-copy sweep -- and
+    # a blind reader meeting "finding aids" while every visible card says
+    # "catalogues" gets a different vocabulary for the same fact. Same scope
+    # correction as `launch_total`: what is checked is the set we check, not every
+    # catalogue that exists.
     "headline_slot_label": {
-        "en": "What this release adds to the finding aids",
-        "he": "מה מוסיפה מהדורה זו לכלי העזר",
+        "en": "What this release adds to the catalogues we checked",
+        "he": "מה מוסיפה מהדורה זו לקטלוגים שבדקנו",
     },
     # Ruling U constraint 1: a silently approximate number presented as exact is
     # worse than no number.

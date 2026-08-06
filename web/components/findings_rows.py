@@ -112,12 +112,37 @@ LAUNCH_POOL_LABEL_CLASS = "gs-findings-launch-pool-label"
 #: Hebrew phrase concatenated into one string can reorder at the boundary --
 #: and each half of the split carries its own bucket name, because a number
 #: with no bucket beside it is a number a reader has to guess the basis of.
-#: The wrapper that puts the fragment lede and the work count ON ONE LINE
-#: (owner report, 2026-08-06). Its own class rather than a bare `ui.row()`, so a
-#: test can assert the pair really share a container instead of inferring it from
-#: rendered text -- and so a future stacking regression is visible as a missing
-#: element rather than as a layout nobody measured.
-LAUNCH_LEDE_ROW_CLASS = "gs-findings-launch-lede-row"
+#: NO `LAUNCH_LEDE_ROW_CLASS`. It existed for a few hours on 2026-08-06 as the
+#: wrapper that put the fragment lede and the work count on ONE LINE, and the
+#: STAT-CARD BAND that replaced it the same day does that job better: each figure
+#: is a bounded card in `LAUNCH_STATS_BAND_CLASS`, so the pair share a row by
+#: construction. The constant went with the element rather than lingering as a
+#: marker a test could still assert against -- a selector for something nothing
+#: renders is a guard that can only ever pass.
+#: THE STAT-CARD BAND (owner ruling, 2026-08-06: "do the top stats in neat
+#: cards"). The band and one card inside it.
+#:
+#: The card treatment is `web/pages/home.py`'s corpus-stats band, VERBATIM -- the
+#: same border, radius, tint, min-width and flex basis -- because this site
+#: already has a stat card and a second one would be a second visual language for
+#: the same kind of fact. Copied inline rather than promoted to a shared class:
+#: this module ships no stylesheet rule, and the two bands are near enough that
+#: the duplication is honest while a shared abstraction over two call sites is
+#: premature.
+LAUNCH_STATS_BAND_CLASS = "gs-findings-launch-stats"
+LAUNCH_STAT_CARD_CLASS = "gs-findings-launch-stat"
+#: A card's decorative glyph (owner, 2026-08-06: "what about icons"). Its own
+#: class so a test can assert it is DECORATIVE -- `aria-hidden`, outside the
+#: figure/label pair -- rather than a fact a reader depends on. An icon that
+#: carried meaning here would be information available only to sighted readers.
+LAUNCH_STAT_ICON_CLASS = "gs-findings-launch-stat-icon"
+#: The CONTRIBUTION band -- the shade-filtered figures, in their OWN band below
+#: the dotted rule. Deliberately NOT `LAUNCH_STATS_BAND_CLASS`: those figures
+#: count every bucket and every shade, these count the main pool only after shade
+#: filtering, and a card grid implies its cells are comparable. Two bands, one
+#: basis each, is what keeps ruling U's "one stated basis" true in a layout that
+#: cards everything.
+LAUNCH_CONTRIB_BAND_CLASS = "gs-findings-launch-contrib"
 LAUNCH_FRAGMENTS_CLASS = "gs-findings-launch-fragments"
 LAUNCH_FRAGMENTS_LABEL_CLASS = "gs-findings-launch-fragments-label"
 LAUNCH_MATCHED_CLASS = "gs-findings-launch-matched"
@@ -239,9 +264,33 @@ _COPY: Dict[str, Dict[str, str]] = {
             "Data version: {version}\n\n"
         ),
     },
+    # OWNER WORDING, 2026-08-06: "not found in available catalogs".
+    #
+    # Applied with ONE substantive change to the owner's phrasing, flagged rather
+    # than made silently: "the catalogues we checked", not "available catalogs".
+    #
+    # The reason is that "available" is a claim we cannot support and the honest
+    # version is narrower. What the novelty check actually consults is a FIXED,
+    # ENUMERABLE, DATED set -- FJMS + NLI catalogues and bibliography, titles,
+    # PGP, FGP, shelfmark attributions (`novelty_strings()['help']`, ratified) --
+    # and the ratified help text says in as many words that "absence from the
+    # finding aids checked ... only means the checked sources do not already
+    # record it". "Available catalogues" reads as ALL of them, i.e. as a claim
+    # that nothing in the scholarly literature records this identification. That
+    # is a much stronger statement than the data supports, on the most prominent
+    # line of the page, and it is the direction the whole surface leans away
+    # from. "We checked" keeps the owner's plainer word ("catalogues" for
+    # "finding aids") while keeping the scope the check really has.
+    #
+    # The claim SHAPE is unchanged and that is what matters for the honesty gate:
+    # this is a statement about where the identification is ABSENT, never about
+    # how often it is right. No rate word, no quantity word, so it cannot read as
+    # an accuracy claim beside its own four figures.
+    #
+    # Hebrew follows the same reading: `שלא נמצאו בקטלוגים שבדקנו`.
     "launch_total": {
-        "en": "{count} identifications the finding aids did not already have",
-        "he": "{count} זיהויים שכלי העזר לא כללו",
+        "en": "{count} identifications not found in the catalogues we checked",
+        "he": "{count} זיהויים שלא נמצאו בקטלוגים שבדקנו",
     },
     # Ruling U constraint 1: ONE basis, STATED IN WORDS. `{bucket}` is
     # `bucket_name(True, lang)` -- the shared bucket vocabulary, never a second
@@ -296,9 +345,22 @@ _COPY: Dict[str, Dict[str, str]] = {
         "en": "fragments",
         "he": "קטעים",
     },
+    # OWNER WORDING, 2026-08-06: "555 known works matched", not "matched to 555
+    # known works".
+    #
+    # The card put the figure ABOVE its words, and the old phrasing was written for
+    # a figure sitting INSIDE them -- so the card read "555 / matched to known
+    # works", where "matched to" dangles with nothing before it. Leading with the
+    # noun and closing with the participle is what the card shape wants: the
+    # number, then "known works matched".
+    #
+    # `{count}` STAYS IN THE TEMPLATE even though `_sentence_label` strips it for
+    # the card. The template is the single definition of the sentence and the v1/v2
+    # fallbacks may yet render it inline; a template with no placeholder would
+    # silently drop the figure there.
     "launch_matched_works": {
-        "en": "matched to {count} known works",
-        "he": "הותאמו ל" + _MAQAF + "{count} חיבורים מוכרים",
+        "en": "{count} known works matched",
+        "he": "{count} חיבורים מוכרים הותאמו",
     },
     # WORDING NOTE, raised rather than resolved silently: this line says
     # "matches" while the line below it says "identifications" and the page is
@@ -352,23 +414,43 @@ _COPY: Dict[str, Dict[str, str]] = {
         "he": "ב" + _MAQAF + "{pages} דפים עם התאמה אחת לפחות.",
     },
     # -- the three contribution shades, match-framed (ruling U constraint 4).
-    #    `container_predicts` says what the aid DID name; it never says the aid
-    #    was wrong.
+    #    Each says what the CATALOGUES DID record; none says a catalogue was
+    #    wrong.
+    #
+    # "THE CATALOGUES WE CHECKED", NOT "the aid" (owner ruling, 2026-08-06: "'the
+    # aid' is not good. should be 'available catalogs'"). Two changes in one:
+    #
+    # 1. "aid" is jargon. "Finding aid" is a library-science term of art, and on a
+    #    card with three words of room it reads as a typo for "the aid" in the
+    #    humanitarian sense. The owner is right that no reader outside the field
+    #    parses it.
+    # 2. "we checked", not "available". Applied with the same correction as
+    #    `launch_total` above and for the same reason -- the check consults a
+    #    FIXED, ENUMERABLE, DATED set (FJMS + NLI catalogues and bibliography,
+    #    titles, PGP, FGP, shelfmark attributions), and the ratified help text says
+    #    in as many words that absence from it "only means the checked sources do
+    #    not already record it". "Available catalogues" reads as ALL of them, which
+    #    would turn a statement about our own source list into a claim about the
+    #    scholarly literature. Flagged rather than applied silently.
+    #
+    # The CLAIM SHAPE is unchanged, which is what the honesty gate turns on: each
+    # label still describes what the checked catalogues recorded, never how likely
+    # our match is to be right.
     "shade_fills_gap": {
         "en": "no prior identification",
         "he": "אין זיהוי קודם",
     },
-    # NOT "more accurate than the aid": the Hebrew word for accurate is a rate
-    # word in the shared honesty gate's lexicon, and beside a shade count it
+    # NOT "more accurate than the catalogues": the Hebrew word for accurate is a
+    # rate word in the shared honesty gate's lexicon, and beside a shade count it
     # would read -- to the gate and to a reader -- as an accuracy claim about
     # the match rather than a statement about granularity.
     "shade_refines_granularity": {
-        "en": "finer than the aid",
-        "he": "פירוט עדין יותר מכלי העזר",
+        "en": "finer than the catalogues we checked",
+        "he": "פירוט עדין יותר מהקטלוגים שבדקנו",
     },
     "shade_container_predicts": {
-        "en": "the aid named only a container",
-        "he": "כלי העזר ציין מכלול בלבד",
+        "en": "the catalogues named only a container",
+        "he": "הקטלוגים ציינו מכלול בלבד",
     },
     "shade_manuscripts": {
         "en": "across {count} fragments",
@@ -676,6 +758,51 @@ def render_launch_headline(
         _render_launch_v3(items, meta, total, main_pool_name, lang)
 
 
+#: The stat card's own geometry and chrome, from `web/pages/home.py`'s band.
+#:
+#: MOBILE-FRIENDLY BY FLEX, not by a media query (owner, 2026-08-06), and the
+#: numbers here are the whole mechanism. `flex: 1 1 140px` with `min-width:
+#: 140px` means the cards fill the line they are on and wrap when they cannot:
+#: five across on a desktop, two across on a phone, with nothing to maintain and
+#: no breakpoint to get wrong. `max-width` is deliberately ABSENT -- it was
+#: capping the cards at 260px and leaving a ragged gap at the end of a wide row.
+#:
+#: 140px rather than the homepage band's 150px: this band holds FIVE cards where
+#: that one holds five *shorter* labels, and 140 is what fits two per line at
+#: 360px (the narrowest phone worth targeting) once the page padding and the
+#: block's own inline rule are subtracted.
+_STAT_CARD_STYLE = (
+    "min-width: 140px; flex: 1 1 140px; "
+    "border: 1px solid var(--border-light); border-radius: 10px; "
+    "background: var(--bg-tertiary);"
+)
+
+#: One stat card's classes. Written once because there are now five call sites
+#: and a card that drifted from the others would be the "second visual language"
+#: this band exists to avoid.
+_STAT_CARD_CLASSES = (
+    f"{LAUNCH_STAT_CARD_CLASS} items-center justify-center text-center "
+    "px-3 py-3 gap-0"
+)
+
+#: EVERY FIGURE IS BIG (owner ruling, 2026-08-06: "make all numbers big"). One
+#: constant, so "big" cannot come to mean three different sizes across five
+#: cards.
+#:
+#: `text-3xl` for the supporting figures and `text-4xl` for the lede, which is
+#: the ONE hierarchy kept: the owner chose the fragment count as the lede on
+#: 2026-08-05 from a rendered comparison, and a test enforces its size. Making
+#: every figure identical would have quietly overruled that ratified decision
+#: while implementing a layout request. A hero stat beside big supporting stats
+#: is still "all numbers big".
+_STAT_FIGURE_CLASSES = "text-3xl font-bold"
+_STAT_FIGURE_STYLE = "color: var(--primary-700); line-height: 1.15;"
+#: The noun under a figure. Small and quiet ON PURPOSE -- it is the label, and
+#: the figure is what the owner asked to make big.
+_STAT_LABEL_CLASSES = "text-xs text-center"
+_STAT_LABEL_STYLE = "color: var(--text-secondary);"
+
+
 def _render_launch_v1(items, meta: Mapping[str, Any], total: Any,
                       main_pool_name: str, lang: str) -> None:
     """The 2026-08-04 block, unchanged, for an envelope with no lede figure.
@@ -762,8 +889,24 @@ def _render_launch_v2(items, meta: Mapping[str, Any], total: Any,
         "margin-block-start: 6px; padding-block-start: 6px;"
     )
 
-    # LEVEL 2 -- the contribution: SAME string, SAME class, SAME figure as
-    # before. Only its rank changed.
+    # LEVEL 2 -- THE CONTRIBUTION, and it is carded too (owner, 2026-08-06:
+    # "what about the rest of the text").
+    #
+    # IN ITS OWN BAND, and that separation is the one thing this layout may not
+    # collapse. The five figures above count EVERY bucket and EVERY shade; these
+    # count the main pool only, after shade filtering. A card grid says "these
+    # cells are comparable", so putting the two sets in one band would assert a
+    # comparison between figures on two different bases -- the mixed-basis defect
+    # ruling U was issued over, made this time by a layout rather than by a
+    # sentence. Two bands, one basis each, with the dotted rule and the basis
+    # line between them. A test asserts the contribution never enters the band
+    # above.
+    #
+    # THE HEADLINE SENTENCE STAYS A SENTENCE. It is the page's claim -- "N
+    # identifications not found in the catalogues we checked" -- and a claim is
+    # not a stat; shrinking it into a 140px cell would bury the one line that
+    # says what this release IS. Its figure is already the largest thing in the
+    # block. So the CARDS here are the three shades that decompose it.
     ui.label(
         copy_text("launch_total", lang).format(count=_count(total))
     ).classes(f"{LAUNCH_TOTAL_CLASS} text-xl font-bold")
@@ -771,13 +914,26 @@ def _render_launch_v2(items, meta: Mapping[str, Any], total: Any,
         copy_text("launch_basis", lang).format(bucket=main_pool_name)
     ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
 
-    # LEVEL 3 -- the three shades, unchanged, decomposing the line above them.
-    with ui.row().classes("items-baseline gap-x-4 gap-y-1 flex-wrap"):
-        for item in items:
-            _render_launch_shade(item, lang)
+    # LEVEL 3 -- the three shades, now one card each: big figure, its
+    # match-framed label, and the fragment span as the card's quiet third line.
+    # Same strings, same classes, same figures -- `_render_launch_shade` renders
+    # them into a card instead of onto a wrapping text line.
+    if items:
+        with ui.row().classes(
+            f"{LAUNCH_CONTRIB_BAND_CLASS} w-full gap-3 flex-wrap items-stretch"
+        ):
+            for item in items:
+                _render_launch_shade(item, lang)
 
-    # LEVEL 4 -- the corpus context: unchanged string and class, now last and
+    # LEVEL 4 -- the corpus context: unchanged string and class, last and
     # quietest. It counts EVERY bucket and every shade, and says so in words.
+    #
+    # DELIBERATELY NOT A CARD. It carries TWO figures in one sentence whose whole
+    # job is to state the release's scope in words ("across N fragments carrying a
+    # computed identification, on M pages with at least one match"); split into
+    # cells, each number would lose the qualifier that keeps it from reading as a
+    # corpus denominator -- the coverage overclaim this string was rewritten to
+    # fix. It stays prose, quietly, under the cards.
     fragments = meta.get("corpus_manuscript_count")
     pages = meta.get("corpus_page_count")
     if fragments is not None and pages is not None:
@@ -787,136 +943,230 @@ def _render_launch_v2(items, meta: Mapping[str, Any], total: Any,
         ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
 
 
-def _render_matched_works_line(work_total: Any, lang: str) -> None:
-    """"matched to {count} known works", with the FIGURE as its own element.
+def _stat_card(figure: Any, label: str, *, figure_marker: str = "",
+               label_marker: str = "", pair_marker: str = "",
+               figure_classes: str = "", icon: Optional[str] = None,
+               note: Optional[str] = None, note_marker: str = "") -> None:
+    """ONE stat card in `web/pages/home.py`'s shape: icon, BIG FIGURE, small noun
+    under it (owner, 2026-08-06 -- "take the style from there", "what about
+    icons").
 
-    Split around the placeholder rather than rendered as one label, so the
-    count can carry its own weight and read as a figure beside the lede's. The
-    row has NO gap and each text part keeps its own spacing (`white-space:
-    pre`), so the line renders exactly as the template reads -- in Hebrew the
-    maqaf abuts its number with no space introduced between them, which a flex
-    gap would have added.
+    That shape is the whole reason every figure here can be big. The ratified
+    strings are SENTENCES with the figure inside them ("matched to {count} known
+    works", "{count} matches in all", "{count} under '{bucket}'"), and a sentence
+    cannot carry a 3xl number in its middle without wrecking its own line
+    breaking. Split at the placeholder, the same string becomes exactly the
+    homepage's figure-plus-label card -- and no ratified wording is edited,
+    because the words are unchanged and only their layout differs.
+
+    THE FIGURE AND THE LABEL ARE SEPARATE ELEMENTS, which is also what the RTL
+    property needs: a Latin-digit run and a Hebrew phrase in ONE string can
+    reorder unpredictably at the boundary. Here they cannot touch.
+
+    THE ICON IS DECORATION AND IS MARKED AS SUCH. It sits OUTSIDE `pair_marker`
+    (so the tests that read the figure/label pair are unaffected) and carries
+    `aria-hidden=true`: it adds no information the figure and its noun do not
+    already carry, so a screen reader announcing a glyph name would be noise
+    between the number and what it counts. Material names only -- the same set
+    `web/pages/home.py` draws from, so the two bands cannot diverge in style.
+
+    `note` is the card's optional third line, for the fragment span the three
+    contribution shades carry ("across N fragments"). It is quieter than the
+    label because it is a scope qualifier on the figure, not the figure's noun.
+
+    `pair_marker` goes on the container the existing tests resolve.
     """
-    template = copy_text("launch_matched_works", lang)
+    with ui.column().classes(_STAT_CARD_CLASSES).style(_STAT_CARD_STYLE):
+        if icon:
+            ui.icon(icon).classes(f"{LAUNCH_STAT_ICON_CLASS} text-2xl").props(
+                "aria-hidden=true").style("color: var(--primary-600);")
+        with ui.column().classes(
+            " ".join(part for part in (pair_marker, "items-center gap-0") if part)
+        ):
+            ui.label(_count(figure)).classes(
+                " ".join(part for part in (
+                    figure_marker, figure_classes or _STAT_FIGURE_CLASSES) if part)
+            ).style(_STAT_FIGURE_STYLE)
+            ui.label(label).classes(
+                " ".join(part for part in (label_marker, _STAT_LABEL_CLASSES)
+                         if part)
+            ).style(_STAT_LABEL_STYLE)
+        if note:
+            ui.label(note).classes(
+                " ".join(part for part in (note_marker, "text-xs text-center")
+                         if part)
+            ).style("color: var(--text-muted);")
+
+
+def _sentence_label(template: str, lang: str, **fields: Any) -> str:
+    """A ratified template with its `{count}` REMOVED, for use as a card label.
+
+    The figure moves to the card's big slot, so the words that framed it become
+    the noun underneath. The words themselves are untouched: this only drops the
+    placeholder and tidies the seam it leaves, so a reader sees the ratified
+    phrasing minus the digits that are now above it.
+
+    THE HEBREW SEAM NEEDS ITS OWN STEP, and skipping it produced a visible
+    defect. `launch_matched_works` is `הותאמו ל־{count} חיבורים מוכרים`, where the
+    maqaf ATTACHES to the number -- so removing the placeholder alone left
+    `הותאמו ל־ חיבורים מוכרים`: a dangling connector with a space after it, which
+    reads as a typo to any Hebrew reader. A prefix ending on a connector is
+    therefore closed up against what follows, giving `הותאמו לחיבורים מוכרים`
+    ("matched to known works") -- the same statement the sentence made, with its
+    figure lifted out.
+
+    Only the SEAM is touched. No word is added, removed or reordered, so the
+    ratified phrasing is intact and this stays a layout change.
+
+    `lang` is accepted for symmetry with every other string helper here and is
+    deliberately unused: the operation is purely structural, and taking the
+    argument keeps the call sites reading like their neighbours.
+    """
     prefix, _placeholder, suffix = template.partition("{count}")
-    with ui.row().classes(f"{LAUNCH_MATCHED_CLASS} items-baseline gap-0 flex-wrap"):
-        if prefix:
-            ui.label(prefix).classes("text-sm").style("white-space: pre;")
-        ui.label(_count(work_total)).classes(
-            f"{LAUNCH_WORK_TOTAL_CLASS} text-sm font-semibold")
-        if suffix:
-            ui.label(suffix).classes("text-sm").style("white-space: pre;")
+    if fields:
+        prefix, suffix = prefix.format(**fields), suffix.format(**fields)
+    prefix = " ".join(prefix.split())
+    suffix = " ".join(suffix.split())
+    if prefix.endswith((_MAQAF, "-")):
+        text = prefix.rstrip(_MAQAF + "-") + suffix
+    elif prefix and suffix:
+        text = prefix + " " + suffix
+    else:
+        text = prefix or suffix
+    return " ".join(text.split()).strip(" ,.;:").strip()
 
 
 def _render_launch_v3(items, meta: Mapping[str, Any], total: Any,
                       main_pool_name: str, lang: str) -> None:
-    """THE APPROVED BLOCK (owner ruling, 2026-08-05), five levels.
+    """THE APPROVED BLOCK (owner ruling, 2026-08-05), as TWO CARD BANDS.
 
-    What changed from `_render_launch_v2`, and why each thing is where it is:
+    LAYOUT (owner, 2026-08-06): "do the top stats in neat cards", "make all
+    numbers big", "take the style from there" (the homepage corpus-stats band),
+    "what about icons", "what about the rest of the text", "have it
+    mobile-friendly". Every figure below is now a card with a decorative glyph, a
+    big number and its noun beneath -- the homepage's own shape, so the two
+    surfaces read as one product.
 
-    * the LEDE is the FRAGMENT count and the WORK count -- two different KINDS
-      of thing, deliberately. The first draft led with the all-in-all
-      identification count alone and the owner chose against it from a rendered
-      comparison: 81% of fragments carry exactly one identification, so
-      "53,581 identifications on 38,431 fragments" reads as an error rather
-      than as a distribution. Stating fragments and works invites no ratio at
-      all;
-    * the ALL-IN-ALL count follows as a quiet third line. It is
-      `meta.identification_total`, read from its OWN key rather than summed
-      from the two pool figures below it: that sum is right only while
-      `main_pool` partitions the table, and a headline assembled by arithmetic
-      over two separately derived numbers goes wrong silently;
-    * the POOL SPLIT is new, and it is the level that makes the second pool
-      visible as a comparable body of work. Ruling T forbids a count on the
-      bucket CONTROL; this is the headline, and these figures must never be
-      mirrored onto the chips;
-    * the CONTRIBUTION keeps its string, its class, its figure and its own
-      basis line -- it is shade filtered, the three figures above it are not,
-      and the dotted rule plus that basis line are what keep the two bases
-      apart;
-    * the SCOPE line drops its fragment half (the lede has just given it) and
-      no longer claims a corpus denominator at all.
+    NOTHING ABOUT THE CLAIMS MOVED. Every figure still comes from its own
+    envelope key through a placeholder (the sentinel fixture proves it), every
+    level is skipped when its key is absent rather than rendered as a zero, and
+    every ratified string keeps its words -- the cards only lift each figure out
+    of the middle of its own sentence, because a 3xl number inside running text
+    wrecks that text's line breaking.
 
-    Every figure is still read from the envelope through a placeholder, which
-    is what the sentinel fixture proves; every level is skipped when its own
-    key is absent rather than rendered as a zero.
+    TWO BANDS, ONE BASIS EACH, and this is the constraint the layout may never
+    collapse. `LAUNCH_STATS_BAND_CLASS` holds figures counting EVERY bucket and
+    EVERY shade; `LAUNCH_CONTRIB_BAND_CLASS` holds the shade-filtered main-pool
+    contribution. A card grid asserts that its cells are comparable, so one band
+    holding both would claim a comparison between two different bases -- the
+    mixed-basis defect ruling U was issued over, expressed by a layout instead of
+    by a sentence. The dotted rule and the basis line sit between them, and a
+    test asserts the contribution never enters the first band.
+
+    WHAT IS DELIBERATELY NOT A CARD:
+
+    * the CONTRIBUTION HEADLINE ("N identifications not found in the catalogues
+      we checked"). It is the page's claim, not a stat, and its figure is already
+      the largest thing in the block. Shrinking it into a 140px cell would bury
+      the one line that says what this release IS.
+    * the SCOPE LINE. It carries two figures in a sentence whose job is to state
+      scope in words; split into cells, each number loses the qualifier that stops
+      it reading as a corpus denominator -- the coverage overclaim that string was
+      rewritten to fix.
+
+    MOBILE IS FLEX, NOT A BREAKPOINT. Every card is `flex: 1 1 140px` inside a
+    `flex-wrap` band, so the cards fill whatever line they are on and wrap when
+    they cannot: five across on a desktop, two across on a phone, with nothing to
+    maintain and no breakpoint to get wrong.
+
+    THE THREE FALLBACKS ARE UNTOUCHED. `render_launch_headline` still routes an
+    envelope with no `main_pool_total` to `_render_launch_v1` and one with no
+    `identification_total` to `_render_launch_v2`, both byte-identical to what
+    shipped. A missing key never becomes a rendered zero.
     """
-    # LEVELS 1 + 1b SIT SIDE BY SIDE (owner report, 2026-08-06: the two large
-    # figures stacked vertically pushed the first row of results below the fold).
-    #
-    # They are the two halves of ONE statement -- this many fragments, matched to
-    # that many works -- so putting them on one line is what the wording already
-    # implied, and it reclaims a whole display-size line of vertical space above
-    # the content the page exists to show.
-    #
-    # NEITHER FIGURE'S OWN STRUCTURE MOVED, and that is what keeps this safe: the
-    # lede figure and its noun are still two elements inside `LAUNCH_LEDE_CLASS`,
-    # the work count is still its own element inside `LAUNCH_MATCHED_CLASS`, and
-    # the parent-child relationships four tests assert are untouched. Only a
-    # wrapping flex container was added around the pair.
-    #
-    # `flex-wrap` and not a breakpoint: on a phone the two stack again by
-    # themselves, with no media query to maintain. `items-baseline` sits the
-    # smaller line on the larger one's baseline rather than centring it against a
-    # 4xl figure. Direction-neutral -- a plain flex row mirrors itself in Hebrew.
     fragments = meta.get("corpus_manuscript_count")
     work_total = meta.get("work_total")
-    if fragments is not None or work_total is not None:
-        with ui.row().classes(
-            f"{LAUNCH_LEDE_ROW_CLASS} items-baseline gap-x-4 gap-y-1 flex-wrap"
-        ):
-            # LEVEL 1 -- the lede figure and its noun, TWO elements in one
-            # baseline row, never one concatenated string.
-            if fragments is not None:
-                with ui.row().classes(
-                    f"{LAUNCH_LEDE_CLASS} items-baseline gap-x-3 gap-y-1 flex-wrap"
-                ):
-                    ui.label(_count(fragments)).classes(
-                        f"{LAUNCH_FRAGMENTS_CLASS} text-4xl font-bold"
-                    ).style("color: var(--primary-700);")
-                    ui.label(copy_text("launch_fragments_lede", lang)).classes(
-                        f"{LAUNCH_FRAGMENTS_LABEL_CLASS} text-sm")
-
-            # LEVEL 1b -- what those fragments were matched TO.
-            if work_total is not None:
-                _render_matched_works_line(work_total, lang)
-
-    # LEVEL 1c -- the all-in-all count, quietly.
-    ui.label(
-        copy_text("launch_matches_in_all", lang).format(
-            count=_count(meta.get("identification_total")))
-    ).classes(f"{LAUNCH_ALL_TOTAL_CLASS} dnote text-xs")
-
-    # LEVEL 2 -- the split, each half naming its own bucket. The PRESENT halves
-    # are selected before anything is drawn, so an envelope carrying one figure
-    # and not the other states the one it has instead of withholding both or
-    # inventing the missing one -- and the skip is a filter rather than a
-    # `continue` inside the paint loop, which would be a painting function's
-    # line that no capture can execute.
+    identification_total = meta.get("identification_total")
     split = [
         (value, bucket)
         for value, bucket in ((meta.get("main_pool_total"), main_pool_name),
                               (meta.get("more_pool_total"), ds.bucket_name(False, lang)))
         if value is not None
     ]
-    if split:
-        with ui.row().classes(
-            f"{LAUNCH_SPLIT_CLASS} items-baseline gap-x-4 gap-y-1 flex-wrap"
-        ):
-            for value, bucket in split:
-                ui.label(
-                    copy_text("launch_pool_share", lang).format(
-                        count=_count(value), bucket=bucket)
-                ).classes(f"{LAUNCH_SPLIT_ITEM_CLASS} text-sm")
 
-    # The separator. LOGICAL and inline -- no stylesheet rule, no new class to
-    # keep in sync, and nothing that needs to flip for RTL.
+    # BAND 1 -- every figure on the unfiltered basis: fragments, works, all-in-all
+    # matches, and one card per pool.
+    with ui.row().classes(
+        f"{LAUNCH_STATS_BAND_CLASS} w-full gap-3 flex-wrap items-stretch"
+    ):
+        # THE LEDE, at `text-4xl` where the others are `text-3xl`, and a test
+        # enforces it: the owner chose the fragment count as the lede on
+        # 2026-08-05 from a rendered comparison. "Make all numbers big" is a
+        # request about SIZE, not licence to flatten a ratified reading order --
+        # so every figure got big and the lede stayed biggest.
+        if fragments is not None:
+            _stat_card(
+                fragments, copy_text("launch_fragments_lede", lang),
+                pair_marker=LAUNCH_LEDE_CLASS,
+                figure_marker=LAUNCH_FRAGMENTS_CLASS,
+                label_marker=LAUNCH_FRAGMENTS_LABEL_CLASS,
+                figure_classes="text-4xl font-bold",
+                icon="auto_stories",
+            )
+
+        # What those fragments were matched TO.
+        if work_total is not None:
+            _stat_card(
+                work_total,
+                _sentence_label(copy_text("launch_matched_works", lang), lang),
+                pair_marker=LAUNCH_MATCHED_CLASS,
+                figure_marker=LAUNCH_WORK_TOTAL_CLASS,
+                icon="menu_book",
+            )
+
+        # The all-in-all count. The words that framed it become the noun beneath,
+        # because the wording is what states its basis ("matches in all") and a
+        # card cannot say that for it.
+        if identification_total is not None:
+            _stat_card(
+                identification_total,
+                _sentence_label(copy_text("launch_matches_in_all", lang), lang),
+                pair_marker=LAUNCH_ALL_TOTAL_CLASS,
+                icon="link",
+            )
+
+        # ONE CARD PER POOL. This is what the band buys that the stack could not:
+        # the two pools sit side by side as equally-weighted cells, which is
+        # exactly the "comparable body of work" the split exists to convey. Each
+        # names its own bucket from the single definition, and a half whose figure
+        # is absent is omitted rather than zeroed.
+        #
+        # NO NESTED ROW around the pair. It used to carry `flex: 2 1 320px`, which
+        # made the two pool cards ONE flex item -- so they wrapped as a block and
+        # could not share a line with the other three. On a phone that was a 320px
+        # item in a 140px grid. Flat siblings wrap freely.
+        for index, (value, bucket) in enumerate(split):
+            _stat_card(
+                value,
+                _sentence_label(copy_text("launch_pool_share", lang), lang,
+                                bucket=bucket),
+                pair_marker=f"{LAUNCH_SPLIT_CLASS} {LAUNCH_SPLIT_ITEM_CLASS}",
+                # `split` is built main-pool-first, so index 0 is the main pool.
+                # NEITHER glyph ranks its pool: both are neutral "a body of
+                # things" icons. A check/warning pair here would say the second
+                # pool is worse, which is the framing the pool vocabulary refuses.
+                icon="inventory_2" if index == 0 else "layers",
+            )
+
+    # The separator between the two bases. LOGICAL and inline -- no stylesheet
+    # rule, no new class to keep in sync, nothing that flips for RTL.
     ui.element("div").classes("w-full").style(
         "border-block-start: 1px dotted var(--border-light); "
         "margin-block-start: 6px; padding-block-start: 6px;"
     )
 
-    # LEVEL 3 -- the contribution: SAME string, SAME class, SAME figure.
+    # THE CONTRIBUTION CLAIM and its basis: same strings, same classes, same
+    # figures. A claim rather than a stat, so it stays a sentence.
     ui.label(
         copy_text("launch_total", lang).format(count=_count(total))
     ).classes(f"{LAUNCH_TOTAL_CLASS} text-xl font-bold")
@@ -924,13 +1174,16 @@ def _render_launch_v3(items, meta: Mapping[str, Any], total: Any,
         copy_text("launch_basis", lang).format(bucket=main_pool_name)
     ).classes(f"{LAUNCH_BASIS_CLASS} dnote text-xs")
 
-    # LEVEL 4 -- the three shades, unchanged, decomposing the line above them.
-    with ui.row().classes("items-baseline gap-x-4 gap-y-1 flex-wrap"):
-        for item in items:
-            _render_launch_shade(item, lang)
+    # BAND 2 -- the three shades that decompose the claim above, one card each:
+    # big figure, match-framed label, fragment span as the quiet third line.
+    if items:
+        with ui.row().classes(
+            f"{LAUNCH_CONTRIB_BAND_CLASS} w-full gap-3 flex-wrap items-stretch"
+        ):
+            for item in items:
+                _render_launch_shade(item, lang)
 
-    # LEVEL 5 -- what the release TOUCHED, and it says so: pages carrying at
-    # least one match, with no corpus denominator claimed anywhere.
+    # The scope line: last, quietest, and prose for the reason given above.
     pages = meta.get("corpus_page_count")
     if pages is not None:
         ui.label(
@@ -938,18 +1191,50 @@ def _render_launch_v3(items, meta: Mapping[str, Any], total: Any,
         ).classes(f"{LAUNCH_CONTEXT_CLASS} dnote text-xs")
 
 
+#: SHADE -> its decorative glyph. Keyed on the stored shade so a shade added to
+#: the frozen ruling-U tuple renders with no icon rather than a wrong one -- the
+#: figure and its label are what carry the meaning, and `_stat_card` marks the
+#: glyph `aria-hidden`, so a missing one costs a reader nothing.
+#:
+#: NONE OF THE THREE RANKS ITS SHADE. `new_releases` (nothing recorded),
+#: `zoom_in` (finer than the aid) and `inventory_2` (the aid named a container)
+#: all describe WHAT the aid said, never how likely our match is to be right --
+#: the same discipline the shade WORDING already follows. A star, a tick or a
+#: warning triangle here would be a confidence signal in a glyph, which is what
+#: D-24 forbids in a colour.
+#: `folder_open` and not `inventory_2` for `container_predicts`: the pool card in
+#: the band above already uses `inventory_2`, and one glyph appearing on two cards
+#: that mean different things is worse than no glyph at all -- a reader who has
+#: learned to skim by icon would read the two as related.
+_SHADE_ICON: Mapping[str, str] = {
+    "fills_gap": "new_releases",
+    "refines_granularity": "zoom_in",
+    "container_predicts": "folder_open",
+}
+
+
 def _render_launch_shade(item: Mapping[str, Any], lang: str) -> None:
-    """One contribution shade: its count, its match-framed label, and the
-    fragments it spans. The stored shade value never reaches markup."""
+    """One contribution shade, AS A CARD: big count, its match-framed label, and
+    the fragments it spans as the card's quiet third line.
+
+    Same string, same figure, same `LAUNCH_SHADE_CLASS`, same
+    `launch_shade_label` -- so the stored shade value still never reaches markup
+    and the raw-vocabulary guard is unaffected. What changed is the container
+    (owner, 2026-08-06: card the rest of the text, make all numbers big).
+
+    The count is `text-3xl` like every other figure in the block. It was
+    `font-semibold` body text, which is what made these three read as a wrapping
+    sentence rather than as the decomposition of the claim above them.
+    """
     label = launch_shade_label(item.get("shade"), lang)
-    with ui.row().classes(f"{LAUNCH_SHADE_CLASS} items-baseline gap-2 flex-wrap"):
-        ui.label(_count(item.get("identification_count"))).classes("font-semibold")
-        ui.label(label)
-        manuscripts = item.get("manuscript_count")
-        if manuscripts is not None:
-            ui.label(
-                copy_text("shade_manuscripts", lang).format(count=_count(manuscripts))
-            ).classes("dnote text-xs")
+    manuscripts = item.get("manuscript_count")
+    _stat_card(
+        item.get("identification_count"), label,
+        pair_marker=LAUNCH_SHADE_CLASS,
+        icon=_SHADE_ICON.get(item.get("shade") or ""),
+        note=(copy_text("shade_manuscripts", lang).format(
+            count=_count(manuscripts)) if manuscripts is not None else None),
+    )
 
 
 def _render_launch_outage(envelope: Any, lang: str, on_retry) -> None:
@@ -1703,7 +1988,6 @@ __all__ = [
     "LAUNCH_FRAGMENTS_CLASS",
     "LAUNCH_FRAGMENTS_LABEL_CLASS",
     "LAUNCH_LEDE_CLASS",
-    "LAUNCH_LEDE_ROW_CLASS",
     "LAUNCH_MATCHED_CLASS",
     "LAUNCH_POOL_LABEL_CLASS",
     "LAUNCH_POOL_TOTAL_CLASS",

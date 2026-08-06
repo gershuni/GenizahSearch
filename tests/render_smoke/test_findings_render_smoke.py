@@ -508,6 +508,25 @@ def render_rows_with_loader(*, unit, lang="en"):
             load_children=lambda _row, _page=1: None))
 
 
+def _element_ancestors(element) -> List[Any]:
+    """Every ancestor of `element`, walking up the slot chain.
+
+    Needed because the stat-card assertions are about CONTAINMENT -- "is this
+    figure inside a card" -- and containment is the whole property the card band
+    changed. Rendered text is identical whether a figure sits in a card or in a
+    prose stack, so an ancestry walk is the only thing that can tell them apart.
+    """
+    out: List[Any] = []
+    slot = getattr(element, "parent_slot", None)
+    while slot is not None:
+        parent = getattr(slot, "parent", None)
+        if parent is None:
+            break
+        out.append(parent)
+        slot = getattr(parent, "parent_slot", None)
+    return out
+
+
 def _the_row(client):
     """The single result row, for an assertion about its CHILD ORDER.
 
@@ -1359,47 +1378,160 @@ def test_every_row_carries_the_same_separator_and_no_pool_is_the_exception(lang)
     ASSERTION_COUNT["n"] += 1
 
 
-@pytest.mark.parametrize("lang", LANGS)
-def test_the_two_lede_figures_share_one_line_instead_of_stacking(lang):
-    """The two display-size figures stacked, pushing the first result below the
-    fold. They are the two halves of one statement -- this many fragments,
-    matched to that many works -- so they now share a wrapping flex row.
+#: The figures the STAT-CARD BAND must present as cards, by marker class.
+#: Contribution figures are deliberately ABSENT -- see the band test below.
+_BANDED_FIGURE_CLASSES = (
+    fr.LAUNCH_FRAGMENTS_CLASS,      # the lede: fragments
+    fr.LAUNCH_MATCHED_CLASS,        # matched to N known works
+    fr.LAUNCH_ALL_TOTAL_CLASS,      # N matches in all
+    fr.LAUNCH_SPLIT_ITEM_CLASS,     # one card per pool
+)
 
-    WHAT MUST NOT HAVE MOVED is asserted in the same test, because the risk of
-    this change is not that it fails to wrap: it is that the wrapper reparents
-    the figures and quietly breaks the bidi structure four sibling tests pin.
-    Each figure keeps its own inner container, so the digit run and its label
-    stay two elements that cannot reorder at the boundary.
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_top_figures_render_as_one_band_of_cards(lang):
+    """"Do the top stats in neat cards" (owner ruling, 2026-08-06). Seven figures
+    in a stack of prose lines became a wrapping band of bounded cards.
+
+    WHAT MUST NOT HAVE MOVED is asserted in the same test, because the risk here
+    is not that the cards fail to render: it is that wrapping each figure in a
+    card REPARENTS it and quietly breaks the bidi structure four sibling tests
+    pin. Each figure keeps its own element under its own container, so a
+    Latin-digit run and a Hebrew noun stay two elements that cannot reorder at
+    the boundary.
     """
     client = render_headline(sentinel_launch_envelope_approved(), lang)
-    wrappers = _elements_with_class(client, fr.LAUNCH_LEDE_ROW_CLASS)
-    assert len(wrappers) == 1, (
-        "the two lede figures are not in one shared row -- they stack and push "
-        "the results below the fold")
+    bands = _elements_with_class(client, fr.LAUNCH_STATS_BAND_CLASS)
+    assert len(bands) == 1, "the stat-card band did not render"
 
-    inner = [set(getattr(child, "_classes", None) or []) for child in wrappers[0]]
-    assert any(fr.LAUNCH_LEDE_CLASS in c for c in inner), (
-        "the fragment lede is not inside the shared row")
-    assert any(fr.LAUNCH_MATCHED_CLASS in c for c in inner), (
-        "the matched-works line is not inside the shared row")
+    cards = _elements_with_class(client, fr.LAUNCH_STAT_CARD_CLASS)
+    assert len(cards) >= 4, (
+        f"only {len(cards)} stat card(s) rendered -- the top figures are still "
+        "a stack of prose lines")
 
-    # The bidi structure the other tests depend on: figure and label are still
-    # SEPARATE elements under the lede's own container, never one string.
-    lede = [
-        element for element in _elements_with_class(client, fr.LAUNCH_LEDE_CLASS)
-        if fr.LAUNCH_LEDE_ROW_CLASS not in (getattr(element, "_classes", None) or [])
-    ]
+    # EVERY banded figure sits inside a card, and none was left behind in the
+    # stack. Asserted per figure rather than over rendered text: the text is
+    # IDENTICAL either way, which is exactly why a layout regression here is
+    # invisible to a text scan.
+    for marker in _BANDED_FIGURE_CLASSES:
+        elements = _elements_with_class(client, marker)
+        assert elements, f"the {marker!r} figure vanished from the headline"
+        for element in elements:
+            ancestors = {
+                c for a in _element_ancestors(element)
+                for c in (getattr(a, "_classes", None) or [])
+            }
+            assert fr.LAUNCH_STAT_CARD_CLASS in ancestors, (
+                f"the {marker!r} figure is not inside a stat card")
+
+    # ...and it WRAPS rather than depending on a breakpoint, so a phone stacks
+    # the cards with no media query to maintain.
+    assert "flex-wrap" in (bands[0]._classes or []), (
+        "the stat band does not wrap -- on a phone the cards would overflow")
+
+    # The bidi structure the other tests depend on: the lede's figure and its
+    # noun are still SEPARATE elements under the lede's own container.
+    lede = _elements_with_class(client, fr.LAUNCH_LEDE_CLASS)
     assert len(lede) == 1
     figure = _elements_with_class(client, fr.LAUNCH_FRAGMENTS_CLASS)[0]
     label = _elements_with_class(client, fr.LAUNCH_FRAGMENTS_LABEL_CLASS)[0]
     assert figure.parent_slot.parent is lede[0]
     assert label.parent_slot.parent is lede[0]
+    ASSERTION_COUNT["n"] += 1
 
-    # ...and it must WRAP rather than depend on a breakpoint, so a phone stacks
-    # them again with no media query to maintain.
-    assert "flex-wrap" in (wrappers[0]._classes or []), (
-        "the shared lede row does not wrap -- on a phone the two figures would "
-        "overflow instead of stacking")
+
+def test_every_stat_card_icon_is_decorative_and_distinct():
+    """Icons (owner, 2026-08-06: "what about icons"), with two properties that a
+    glyph most easily gets wrong.
+
+    DECORATIVE. Each icon carries `aria-hidden` and sits OUTSIDE the figure/label
+    pair. It adds nothing the number and its noun do not already say, so a screen
+    reader announcing a glyph name would be noise between the two. An icon that
+    carried meaning here would be information only sighted readers get.
+
+    DISTINCT. One glyph on two cards that mean different things is worse than no
+    glyph: a reader skimming by icon would read the two as related. This caught a
+    real duplicate -- `inventory_2` was on both the main-pool card and the
+    "aid named only a container" shade.
+
+    NOT RANKING. Asserted as an absence: no tick, star, warning or error glyph
+    anywhere in the block. Those would be confidence signals in an icon, which is
+    what D-24 forbids in a colour -- and the second pool and the three shades are
+    exactly where such a signal would land.
+    """
+    client = render_headline(sentinel_launch_envelope_approved(), "en")
+    icons = _elements_with_class(client, fr.LAUNCH_STAT_ICON_CLASS)
+    assert len(icons) >= 8, (
+        f"only {len(icons)} card icon(s) rendered -- the cards are unillustrated")
+
+    names = [(icon._props or {}).get("name") for icon in icons]
+    assert all(names), f"a card icon has no glyph name: {names!r}"
+    assert len(set(names)) == len(names), (
+        f"two cards share one glyph, so skimming by icon misleads: {names!r}")
+
+    for icon in icons:
+        props = icon._props or {}
+        assert str(props.get("aria-hidden")).lower() in ("true", "1"), (
+            f"the {props.get('name')!r} icon is announced to a screen reader; it "
+            "carries no information the figure and its noun do not")
+
+    for ranking in ("check", "check_circle", "done", "star", "grade", "warning",
+                    "error", "priority_high", "thumb_up", "thumb_down"):
+        assert ranking not in names, (
+            f"the {ranking!r} glyph ranks a figure -- a confidence signal in an "
+            "icon is what D-24 forbids in a colour")
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_shade_filtered_contribution_stays_OUT_of_the_card_band(lang):
+    """The one thing the cards may never do, and the reason it has its own test.
+
+    A card grid implies its cells are comparable. The banded figures share ONE
+    basis (every bucket, every shade); the CONTRIBUTION total and its three
+    shades are shade FILTERED and counted in the main pool only. Putting them in
+    the same band would be the mixed-basis defect ruling U was issued over --
+    presented, this time, by a layout rather than by a sentence.
+
+    So the contribution lives below the dotted rule in its OWN band. Being a card
+    is fine -- the owner asked for cards everywhere, and the shades are cards now.
+    What is forbidden is sharing the UNFILTERED band, because that is the thing
+    that asserts comparability. This is the assertion that keeps a future "merge
+    these two rows of cards, they look the same" from silently making the claim.
+    """
+    client = render_headline(sentinel_launch_envelope_approved(), lang)
+    for marker in (fr.LAUNCH_TOTAL_CLASS, fr.LAUNCH_SHADE_CLASS,
+                   fr.LAUNCH_BASIS_CLASS):
+        elements = _elements_with_class(client, marker)
+        assert elements, f"{marker!r} vanished from the headline"
+        for element in elements:
+            ancestors = {
+                c for a in _element_ancestors(element)
+                for c in (getattr(a, "_classes", None) or [])
+            }
+            assert fr.LAUNCH_STATS_BAND_CLASS not in ancestors, (
+                f"the shade-filtered {marker!r} was put in the UNFILTERED "
+                "figures' band, where a card grid implies it is comparable to "
+                "the figures beside it -- the mixed-basis defect ruling U forbids")
+
+    # ...and the two bands are really two, not one element carrying both names.
+    bands = _elements_with_class(client, fr.LAUNCH_STATS_BAND_CLASS)
+    contrib = _elements_with_class(client, fr.LAUNCH_CONTRIB_BAND_CLASS)
+    assert len(bands) == 1 and len(contrib) == 1
+    assert bands[0] is not contrib[0], (
+        "the unfiltered figures and the shade-filtered contribution share one "
+        "band -- two bases in one card grid")
+    assert fr.LAUNCH_CONTRIB_BAND_CLASS not in (bands[0]._classes or [])
+
+    # The three shades ARE cards (the owner asked for that), inside the
+    # contribution band -- so this test cannot be satisfied by simply not
+    # carding them.
+    shades = _elements_with_class(client, fr.LAUNCH_SHADE_CLASS)
+    assert len(shades) == 3, f"expected three shade cards, got {len(shades)}"
+    for shade in shades:
+        ancestors = set(_element_ancestors(shade))
+        assert contrib[0] in ancestors, "a shade card is outside its own band"
+    ASSERTION_COUNT["n"] += 1
     ASSERTION_COUNT["n"] += 1
 
 

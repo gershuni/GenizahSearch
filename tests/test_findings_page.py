@@ -3114,9 +3114,28 @@ def test_the_headline_notes_share_one_wrapping_row_rather_than_stacking(monkeypa
 
     shades = _elements_with_class(client, fr.LAUNCH_SHADE_CLASS)
     assert len(shades) == 3
-    shade_parents = {s.parent_slot.parent for s in shades}
-    assert len(shade_parents) == 1, "the three shades are still stacked"
-    assert shade_parents.pop() is not row, (
+
+    # THE SHADES SHARE ONE WRAPPING GROUP -- the property this has always
+    # asserted. Since the stat-card band (owner, 2026-08-06) each shade is a CARD,
+    # so its immediate parent is its own card and the shared group is one level
+    # up. Walking to the nearest common ancestor is what keeps the assertion about
+    # "are these three laid out together" rather than about how many wrappers deep
+    # they happen to sit.
+    def _ancestor_chain(element):
+        chain = []
+        slot = element.parent_slot
+        while slot is not None and getattr(slot, "parent", None) is not None:
+            chain.append(slot.parent)
+            slot = getattr(slot.parent, "parent_slot", None)
+        return chain
+
+    chains = [_ancestor_chain(shade) for shade in shades]
+    shared = [a for a in chains[0] if all(a in chain for chain in chains[1:])]
+    assert shared, "the three shades share no common container -- they are stacked"
+    group = shared[0]
+    assert "flex-wrap" in (group._classes or []), (
+        f"the shades' group does not wrap: {group._classes!r}")
+    assert group is not row, (
         "the shades and the notes share one row — they are two distinct groups")
 
 
@@ -3310,28 +3329,42 @@ def test_the_headline_ledes_with_fragments_and_works_from_the_envelope(lang):
     assert fragments[0].parent_slot.parent is lede_rows[0]
     assert labels[0].parent_slot.parent is lede_rows[0]
 
-    # The work count is its OWN element, carrying its own weight, inside the
-    # "matched to ... known works" line.
+    # The work count is its OWN element, carrying a BIG weight, inside the
+    # "matched to ... known works" card.
+    #
+    # `text-3xl`, not the `font-semibold` this asserted before the stat-card band
+    # (owner ruling, 2026-08-06: "make all numbers big"). The figure moved out of
+    # the middle of its sentence and into the card's own figure slot, which is
+    # what let it be sized at all -- a 3xl number inside a running sentence
+    # wrecks its line breaking.
     works = _elements_with_class(client, fr.LAUNCH_WORK_TOTAL_CLASS)
     assert len(works) == 1
     assert getattr(works[0], "text", None) == "{:,}".format(_ALL_SENTINEL_WORKS)
-    assert "font-semibold" in (works[0]._classes or [])
+    assert "text-3xl" in (works[0]._classes or []), (
+        f"the work count is not a big figure: {works[0]._classes!r}")
     matched = _elements_with_class(client, fr.LAUNCH_MATCHED_CLASS)
     assert len(matched) == 1 and works[0].parent_slot.parent is matched[0]
-    # ...and the parts, in DOM order, reassemble the template EXACTLY -- no
-    # space introduced or lost at either boundary, which is the whole risk of
-    # splitting a sentence into elements. Read from each element's own `text`
-    # rather than through `_subtree_strings`, which reports every string twice.
-    line = "".join(child.text or "" for child in matched[0])
-    assert line == fr.copy_text("launch_matched_works", lang).format(
-        count="{:,}".format(_ALL_SENTINEL_WORKS)), line
+    # ...and the FIGURE AND ITS WORDS ARE STILL SEPARATE ELEMENTS under that
+    # container, which is the RTL property this test has always been about: a
+    # Latin-digit run and a Hebrew phrase in one string can reorder at the
+    # boundary. What changed is the ORDER (figure first, words beneath) rather
+    # than the separation, so this no longer reassembles the template -- it
+    # asserts both parts are present, each in its own element.
+    parts = [child.text or "" for child in matched[0]]
+    assert len(parts) == 2, f"the card is not figure-plus-label: {parts!r}"
+    assert "{:,}".format(_ALL_SENTINEL_WORKS) in parts
+    # The ratified WORDS survive, minus the placeholder the figure now fills.
+    words = fr._sentence_label(fr.copy_text("launch_matched_works", lang), lang)
+    assert words in parts, f"{words!r} not in {parts!r}"
 
-    # The all-in-all count, quietly, from its own key.
+    # The all-in-all count, from its own key, as a card.
     all_totals = _elements_with_class(client, fr.LAUNCH_ALL_TOTAL_CLASS)
     assert len(all_totals) == 1
-    assert getattr(all_totals[0], "text", None) == fr.copy_text(
-        "launch_matches_in_all", lang).format(
-            count="{:,}".format(_ALL_SENTINEL_TOTAL))
+    said = [child.text or "" for child in all_totals[0]]
+    assert "{:,}".format(_ALL_SENTINEL_TOTAL) in said, (
+        f"the all-in-all figure is not in its card: {said!r}")
+    assert fr._sentence_label(
+        fr.copy_text("launch_matches_in_all", lang), lang) in said
 
     # ...and the CONTRIBUTION is still there, at its own weight, with its own
     # basis line: it is shade filtered and the three figures above it are not.
@@ -3352,17 +3385,45 @@ def test_the_headline_shows_the_pool_split_and_names_both_buckets(lang):
     client = _render_headline(_launch_envelope_v3(), lang)
     halves = _elements_with_class(client, fr.LAUNCH_SPLIT_ITEM_CLASS)
     assert len(halves) == 2, "the pool split did not render both halves"
-    said = [getattr(half, "text", "") for half in halves]
 
+    # ONE CARD PER POOL since the stat-card band (owner ruling, 2026-08-06), so
+    # each half is a figure element plus a label element rather than one string.
+    # The figure is BIG and the bucket name is the noun beneath it -- and the
+    # bucket still comes from the single definition, which is the property this
+    # test exists for.
     for count, in_main in ((_LEDE_SENTINEL_TOTAL, True),
                            (_ALL_SENTINEL_MORE_POOL, False)):
-        expected = fr.copy_text("launch_pool_share", lang).format(
-            count="{:,}".format(count), bucket=bucket_name(in_main, lang))
-        assert expected in said, f"{expected!r} not in {said!r}"
+        figure = "{:,}".format(count)
+        words = fr._sentence_label(
+            fr.copy_text("launch_pool_share", lang), lang,
+            bucket=bucket_name(in_main, lang))
+        match = [
+            half for half in halves
+            if figure in [child.text or "" for child in half]
+            and words in [child.text or "" for child in half]
+        ]
+        assert len(match) == 1, (
+            f"no single card carries both {figure!r} and {words!r}: "
+            + repr([[c.text for c in h] for h in halves]))
+        # ...and the figure really is a big one, not a run of body text.
+        big = [child for child in match[0]
+               if (child.text or "") == figure
+               and "text-3xl" in (child._classes or [])]
+        assert big, f"the {figure!r} pool figure is not a big number"
 
-    rows = _elements_with_class(client, fr.LAUNCH_SPLIT_CLASS)
-    assert len(rows) == 1
-    assert {half.parent_slot.parent for half in halves} == {rows[0]}
+    # BOTH halves carry the split marker, and they are SIBLINGS in the band --
+    # they used to share a nested wrapper row, which made the pair one flex item
+    # and stopped them wrapping with the other cards on a phone.
+    assert all(fr.LAUNCH_SPLIT_CLASS in (half._classes or []) for half in halves)
+    band = _elements_with_class(client, fr.LAUNCH_STATS_BAND_CLASS)
+    assert len(band) == 1
+    for half in halves:
+        ancestors = set()
+        slot = half.parent_slot
+        while slot is not None and getattr(slot, "parent", None) is not None:
+            ancestors.add(slot.parent)
+            slot = getattr(slot.parent, "parent_slot", None)
+        assert band[0] in ancestors, "a pool card is outside the stat band"
 
 
 def test_a_half_of_the_split_with_no_figure_is_omitted_not_zeroed():
@@ -3373,7 +3434,14 @@ def test_a_half_of_the_split_with_no_figure_is_omitted_not_zeroed():
     client = _render_headline(envelope, "en")
     halves = _elements_with_class(client, fr.LAUNCH_SPLIT_ITEM_CLASS)
     assert len(halves) == 1, "a missing pool figure was rendered as a zero"
-    assert "{:,}".format(_LEDE_SENTINEL_TOTAL) in (halves[0].text or "")
+    # A card, so the figure is a CHILD element rather than the container's text.
+    said = [child.text or "" for child in halves[0]]
+    assert "{:,}".format(_LEDE_SENTINEL_TOTAL) in said, said
+    # ...and no zero was invented for the absent half anywhere in the band.
+    band_text = "\n".join(_subtree_strings(
+        _elements_with_class(client, fr.LAUNCH_STATS_BAND_CLASS)[0]))
+    assert "\n0\n" not in "\n" + band_text + "\n", (
+        f"the missing pool figure was rendered as a zero: {band_text!r}")
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])
