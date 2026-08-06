@@ -412,9 +412,23 @@ _COPY: Dict[str, Dict[str, str]] = {
     # The route to the rest of the group. Named as an ACTION on the same
     # population the line beside it just counted, so the pair reads as one
     # statement: this much of that many, and here is how to see more.
+    #
+    # IT NAMES WHAT IT LOADS, and a bare "Show more" is exactly what it must not
+    # be (external review, 2026-08-06). The pool invitation on the same page is
+    # labelled "Show more possible matches" (`SHOW_MORE_TOGGLE`, a ratified D-11
+    # constant pinned byte-for-byte by `tests/test_discovery_band_labels.py`, so
+    # THIS is the string that moves). In English "Show more" was a strict PREFIX
+    # of it, so anything matching a control by text matched both -- and the two
+    # do very different things: one loads the next 25 children of the row you
+    # opened, the other switches the whole page to the second pool. A reader on
+    # a work with 2,981 children could aim for one and be given the other.
+    #
+    # This is the SAME collision class as the "Show" / "Show as" pair fixed
+    # earlier the same day, one instance further on: the fix there was to name
+    # the axis, and the fix here is to name the population.
     "expand_more": {
-        "en": "Show more",
-        "he": "הצגת עוד",
+        "en": "Load more of this group",
+        "he": "טעינת עוד מקבוצה זו",
     },
     # -- THE PREVIEW, on the identification leaf only. "Preview" rather than
     #    "open": it does not leave the page, and a reader who expects to leave

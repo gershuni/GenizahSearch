@@ -2317,12 +2317,31 @@ def test_no_control_label_on_this_page_contains_another_control_label(lang):
     """
     from web.translations import set_language, tr
 
+    import web.components.findings_rows as fr
+    from shared.discovery_display_strings import (
+        TOGGLE_MORE_MATCHES, disclosure_toggle, retry_label,
+    )
+
     set_language(lang)
     try:
+        # EVERY ACTIONABLE LABEL, not just the three selects. Restricting this
+        # to the selects was itself the gap: external review found a SECOND
+        # instance of exactly this collision among the BUTTONS -- the
+        # expansion's child pagination read "Show more", a strict prefix of the
+        # pool invitation's ratified "Show more possible matches", and the two
+        # do very different things (load the next 25 children of one row, vs
+        # switch the whole page to the second pool).
         labels = {
+            # -- the three selects
             "novelty selector": fp.copy_text("novelty_view_label", lang),
             "row unit": tr("Show as"),
             "sort": tr("Sort by"),
+            # -- the buttons a reader can aim at by name
+            "expansion pagination": fr.copy_text("expand_more", lang),
+            "pool invitation": disclosure_toggle(TOGGLE_MORE_MATCHES, lang),
+            "row preview": fr.copy_text("preview_open", lang),
+            "row report": fr.copy_text("report_link", lang),
+            "retry": retry_label(lang),
         }
         for name, label in labels.items():
             for other_name, other in labels.items():
