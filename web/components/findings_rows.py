@@ -138,6 +138,11 @@ ROW_BUCKET_CLASS = "gs-findings-row-bucket"
 ROW_SHELFMARK_CLASS = "gs-findings-row-shelfmark"
 ROW_ANNOTATION_CLASS = "gs-findings-row-annotation"
 ROW_REPORT_CLASS = "gs-findings-row-report"
+#: The catalogue's OWN title for the manuscript (libraries.csv, injected --
+#: see `_render_shelfmark`). Lives beside the shelfmark, not the meta line: it
+#: names WHICH manuscript this is, the same job the shelfmark does, rather
+#: than describing the finding.
+ROW_CATALOGUE_TITLE_CLASS = "gs-findings-row-catalogue-title"
 
 #: THE EXPANSION (owner-approved, 2026-08-05): a manuscript or work row opens
 #: IN PLACE onto the identifications underneath it. Its own classes, because the
@@ -439,6 +444,14 @@ _COPY: Dict[str, Dict[str, str]] = {
     "novelty_as_of": {
         "en": "Sources checked as of {date}.",
         "he": "המקורות נבדקו נכון ל" + _MAQAF + "{date}.",
+    },
+    # -- the catalogue-title attribution (2026-08-05, coordinator ruling: ship
+    #    beside the shelfmark, verbatim, one language -- see `_render_shelfmark`
+    #    for the reasoning). This is OUR text, introducing THEIR words, so it
+    #    alone is bilingual; the title it introduces is not translated.
+    "catalogue_title_label": {
+        "en": "Catalogued as:",
+        "he": "מקוטלג בשם:",
     },
 }
 
@@ -1009,12 +1022,43 @@ def _work_title(item: Mapping[str, Any], lang: str) -> str:
     return ds.display_work_title(work_id, raw, lang) or ds.missing_title(lang)
 
 
-def _render_shelfmark(item: Mapping[str, Any]) -> None:
-    """The manuscript link -- LIVE, unlike the work title.
+def _render_shelfmark(item: Mapping[str, Any], lang: str = "en",
+                      catalogue_title=None) -> None:
+    """The manuscript link -- LIVE, unlike the work title -- and, beside it,
+    the catalogue's OWN title for the same manuscript.
 
     `/work/{id}` does not exist until Phase 136.1, so work titles render as
     plain text; the manuscript page does exist and a reader needs to reach it
     from the row.
+
+    `catalogue_title`, like `render_finding_row`'s `load_children` and
+    `preview_url`, is INJECTED as a callable and not defaulted to a working
+    implementation: this module renders and does not read, and a manuscript's
+    catalogue title is not on the row projection (`libraries.csv`, not the
+    discovery sidecar). `None` renders nothing at all -- neither the label nor
+    an empty line -- which matters because ~14% of rows have no CSV title and a
+    blank line there would read as "the catalogue has no title", a claim this
+    module is not in a position to make.
+
+    THE TITLE ITSELF IS RENDERED VERBATIM, IN ONE LANGUAGE, NEVER TRANSLATED --
+    a deliberate departure from this page's usual bilingual discipline, ruled
+    on 2026-08-05. This element is a QUOTATION of what the library said about
+    the manuscript, and the whole point of showing it here is to let a reader
+    weigh that claim against the computed identification beside it -- on
+    ~23.6% of rows (`divergence_marker`) the two disagree. A machine
+    translation would put words in the cataloguer's mouth at exactly the
+    moment the reader is judging those words. Rendering it as written is
+    therefore the correct behaviour, not a degradation this module tolerates --
+    only the LABEL that introduces it ("Catalogued as:") is this module's own
+    text, so only the label is bilingual. `dir="auto"` on the title text
+    itself, because a Hebrew title must read correctly on an English render of
+    this page and a Latin one on a Hebrew render, and this is the one place on
+    the row that deliberately mixes directions.
+
+    Two separate elements, never one concatenated string -- the same reason
+    `LAUNCH_LEDE_CLASS` is two elements: a label in the page's language
+    followed by a title in the catalogue's own language can reorder
+    unpredictably at the boundary if joined into one run of text.
     """
     sys_id = item.get("sys_id")
     shelfmark = item.get("shelfmark_display")
@@ -1027,6 +1071,20 @@ def _render_shelfmark(item: Mapping[str, Any]) -> None:
         ui.link(str(shelfmark), f"/browse?sys_id={sys_id}").classes(ROW_SHELFMARK_CLASS)
     else:
         ui.label(str(shelfmark)).classes(ROW_SHELFMARK_CLASS)
+
+    if catalogue_title is not None:
+        title_text = catalogue_title(item)
+        if title_text:
+            # `font-weight: normal` overrides the `font-bold` the manuscript
+            # unit's title row carries; a NON-directional property, so this is
+            # not a `margin-left`-class violation of the logical-CSS rule.
+            with ui.row().classes(
+                f"{ROW_CATALOGUE_TITLE_CLASS} items-center gap-1"
+            ).style("font-weight: normal;"):
+                ui.label(copy_text("catalogue_title_label", lang)).classes(
+                    "dnote text-xs")
+                ui.label(str(title_text)).classes("dnote text-xs").props(
+                    'dir="auto"').style("unicode-bidi: isolate;")
 
 
 def divergence_marker(item: Mapping[str, Any], lang: str = "en") -> Optional[Tuple[str, str]]:
@@ -1222,7 +1280,8 @@ def expansion_target(item: Mapping[str, Any]) -> Optional[Tuple[str, str]]:
 
 def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                        sidecar_version: Any = None,
-                       load_children=None, preview_url=None) -> None:
+                       load_children=None, preview_url=None,
+                       catalogue_title=None) -> None:
     """One result row, in whichever unit the service produced it.
 
     The unit arrives ON the row (`unit`, part of the projection); it is
@@ -1237,6 +1296,12 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
     it does not read, and it does not know what a URL to a manuscript looks
     like. A component that reached for the service itself could not be swept by
     a masking capture that drives it directly, which is how this suite scans it.
+
+    `catalogue_title` is the same shape of injection, for the same reason: see
+    `_render_shelfmark`. Passed to both manuscript-identity call sites (the
+    per-manuscript unit and the identification leaf); the work unit never calls
+    `_render_shelfmark` at all, because a work spans manuscripts and has no
+    single one to title.
     """
     lang = _lang_key(lang)
     unit = item.get("unit") or FINDINGS_UNIT_IDENTIFICATION
@@ -1244,7 +1309,7 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
     with ui.column().classes(f"row {ROW_CLASS} w-full gap-1 p-2"):
         if unit == FINDINGS_UNIT_MANUSCRIPT:
             with ui.row().classes(f"{ROW_TITLE_CLASS} items-center gap-2 font-bold"):
-                _render_shelfmark(item)
+                _render_shelfmark(item, lang, catalogue_title=catalogue_title)
             works = _plural("works", item.get("work_count"), lang)
             if works:
                 ui.label(works).classes(f"{ROW_SUB_CLASS} r-sub text-xs")
@@ -1260,7 +1325,7 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
         else:
             ui.label(_work_title(item, lang)).classes(f"{ROW_TITLE_CLASS} font-bold")
             with ui.row().classes(f"{ROW_SUB_CLASS} r-sub items-center gap-2 text-xs"):
-                _render_shelfmark(item)
+                _render_shelfmark(item, lang, catalogue_title=catalogue_title)
                 author = item.get("author")
                 if author:
                     ui.label(str(author))
@@ -1515,6 +1580,7 @@ __all__ = [
     "NOVELTY_HELP_CLASS",
     "ROW_ANNOTATION_CLASS",
     "ROW_BUCKET_CLASS",
+    "ROW_CATALOGUE_TITLE_CLASS",
     "ROW_CLASS",
     "ROW_COVERAGE_CLASS",
     "ROW_DIVERGENCE_CLASS",

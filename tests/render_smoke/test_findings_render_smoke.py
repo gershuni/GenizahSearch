@@ -2968,3 +2968,233 @@ def test_an_outage_AFTER_a_good_page_shows_the_failure_instead_of_raising():
         client, fr.ROW_CHILDREN_STATE_CLASS), (
         "the outage after a good page rendered no named failure")
     ASSERTION_COUNT["n"] += 1
+
+
+# ===========================================================================
+# THE CATALOGUE TITLE (2026-08-05, coordinator-authorized addition). Beside
+# the shelfmark, not the meta line; verbatim and one language, never the
+# label; and truly absent -- no element at all -- on the ~14% of rows
+# `libraries.csv` carries no title for. `render_finding_row`'s `catalogue_title`
+# is INJECTED, the same shape as `load_children`/`preview_url`, so every test
+# below drives it directly through `fr.render_finding_row` rather than through
+# `render_rows`, which does not accept it.
+# ===========================================================================
+
+CURATED_CATALOGUE_TITLE = "משנה סדר זרעים (קטעים)"
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_catalogue_title_renders_beside_the_shelfmark_attributed_and_verbatim(lang):
+    """Present: an element carrying `ROW_CATALOGUE_TITLE_CLASS`, INSIDE the row
+    title (with the shelfmark), never inside `ROW_META_CLASS` -- two placement
+    facts a coordinate-only check on "did the text render somewhere" would
+    miss entirely.
+
+    The title text itself is BYTE-IDENTICAL regardless of the page's own
+    language (ruling: verbatim, one language, never translated) -- only the
+    LABEL introducing it is bilingual.
+    """
+    client = _client_render(lambda: fr.render_finding_row(
+        finding_row(), lang, catalogue_title=lambda _i: CURATED_CATALOGUE_TITLE))
+
+    title_elements = _elements_with_class(client, fr.ROW_CATALOGUE_TITLE_CLASS)
+    assert title_elements, "the catalogue title did not render at all"
+
+    fragment = scoped_fragment(client, fr.ROW_CATALOGUE_TITLE_CLASS)
+    assert CURATED_CATALOGUE_TITLE in fragment, (
+        "the catalogue's own title text did not render")
+    assert fr.copy_text("catalogue_title_label", lang) in fragment, (
+        "the bilingual attribution label did not render beside the title")
+
+    # NOT on the meta line -- a leaf row already carries six grey meta
+    # elements, and the coordinator's placement ruling was explicit that this
+    # must live with the shelfmark (manuscript identity), not append a
+    # seventh.
+    meta_fragment = scoped_fragment(client, fr.ROW_META_CLASS)
+    assert CURATED_CATALOGUE_TITLE not in meta_fragment, (
+        "the catalogue title rendered on the meta line, not beside the shelfmark")
+
+    # Scoped to the WHOLE row (`ROW_CLASS`), the honesty gate's own required
+    # scope -- never to `ROW_CATALOGUE_TITLE_CLASS`, which the scanner would
+    # refuse outright as an element it never sees a `gs-findings-row` on.
+    assert_surface_honesty(
+        scoped_fragment(client, fr.ROW_CLASS), scope_selector=fr.ROW_CLASS, lang=lang)
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_catalogue_title_text_is_never_translated_by_language():
+    """The title STRING is identical across an English and a Hebrew render of
+    the SAME row -- only the label bilingual, per the coordinator's ruling
+    (a deliberate departure from this page's usual bilingual discipline,
+    documented in `_render_shelfmark`'s docstring).
+
+    Deliberately NOT a substring check (`CURATED_CATALOGUE_TITLE in fragment`):
+    that form is satisfied by e.g. a per-language prefix/suffix mutation
+    (`"[en] " + title`) since the curated string still occurs inside the
+    mutated one. Instead this pulls the title element's own text nodes,
+    strips out the (expected-to-differ) label text, and asserts the
+    remainder is EXACTLY the curated string -- byte for byte -- in both
+    languages, and therefore identical to each other."""
+    en_client = _client_render(lambda: fr.render_finding_row(
+        finding_row(), "en", catalogue_title=lambda _i: CURATED_CATALOGUE_TITLE))
+    he_client = _client_render(lambda: fr.render_finding_row(
+        finding_row(), "he", catalogue_title=lambda _i: CURATED_CATALOGUE_TITLE))
+
+    en_label = fr.copy_text("catalogue_title_label", "en")
+    he_label = fr.copy_text("catalogue_title_label", "he")
+
+    # `_subtree_texts` pulls BOTH the element's own text attrs (which can
+    # duplicate across `text`/`_text`) AND every string `_props` value --
+    # picking up e.g. `"auto"` from this element's own `dir="auto"` prop.
+    # Known, expected noise (the label text and the `dir` prop value) is
+    # filtered out; deduplicating via `set` absorbs the attr-name duplication.
+    KNOWN_NOISE = {"auto"}
+    en_texts = set()
+    for element in _elements_with_class(en_client, fr.ROW_CATALOGUE_TITLE_CLASS):
+        en_texts.update(_subtree_texts(element))
+    he_texts = set()
+    for element in _elements_with_class(he_client, fr.ROW_CATALOGUE_TITLE_CLASS):
+        he_texts.update(_subtree_texts(element))
+
+    en_title_only = en_texts - {en_label} - KNOWN_NOISE
+    he_title_only = he_texts - {he_label} - KNOWN_NOISE
+
+    assert en_title_only == {CURATED_CATALOGUE_TITLE}, (
+        f"the English render's title text was {en_title_only!r}, not the "
+        f"curated string verbatim")
+    assert he_title_only == {CURATED_CATALOGUE_TITLE}, (
+        f"the Hebrew render's title text was {he_title_only!r}, not the "
+        f"curated string verbatim")
+    assert en_title_only == he_title_only, (
+        "the title text differed between languages -- it must be rendered "
+        "verbatim, in one language, regardless of UI language")
+
+    # The LABEL, unlike the title, DOES change with language.
+    assert en_label in en_texts
+    assert he_label in he_texts
+    assert he_label not in en_texts
+    assert en_label not in he_texts
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_a_missing_catalogue_title_renders_nothing_not_a_placeholder():
+    """~14% of rows carry no CSV title. Absence of data must be INVISIBLE --
+    no element, no empty row, no dash, no "untitled" -- because the injected
+    callable itself distinguishes "not asked" from "asked, found nothing":
+    both must render nothing, and this drives both shapes of that call.
+    """
+    # The callable is injected but returns falsy for this row (the coverage
+    # gap this page will see in production for ~14% of rows).
+    absent = _client_render(lambda: fr.render_finding_row(
+        finding_row(), "en", catalogue_title=lambda _i: None))
+    assert not _elements_with_class(absent, fr.ROW_CATALOGUE_TITLE_CLASS), (
+        "a row with no catalogue title rendered SOME element for it")
+
+    # The empty string is exactly as absent as `None` -- a title lookup that
+    # somehow returned "" must not paint an empty label into the row.
+    empty = _client_render(lambda: fr.render_finding_row(
+        finding_row(), "en", catalogue_title=lambda _i: ""))
+    assert not _elements_with_class(empty, fr.ROW_CATALOGUE_TITLE_CLASS)
+
+    # And the callable not being injected at all (a caller that never wires
+    # `catalogue_title`, e.g. every EXISTING call site before this change)
+    # must render nothing either -- the same behaviour `render_rows` already
+    # exercises on every other test in this suite, confirmed once more here
+    # for this specific element.
+    not_injected = render_rows([finding_row()], "en")
+    assert not _elements_with_class(not_injected, fr.ROW_CATALOGUE_TITLE_CLASS)
+
+    for client in (absent, empty, not_injected):
+        assert not scoped_text(client, fr.ROW_CATALOGUE_TITLE_CLASS).strip(), (
+            "a missing catalogue title left rendered text behind")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_catalogue_title_is_offered_on_the_manuscript_and_leaf_units_only():
+    """A work row spans many manuscripts and has no single one to title -- the
+    same reason it never calls `_render_shelfmark` at all. The per-manuscript
+    unit and the identification leaf both DO call it, so both are offered the
+    title; the work unit must never render the element even when a title is
+    injected and available.
+    """
+    for unit in (FINDINGS_UNIT_MANUSCRIPT, FINDINGS_UNIT_IDENTIFICATION):
+        client = _client_render(lambda u=unit: fr.render_finding_row(
+            finding_row(unit=u), "en",
+            catalogue_title=lambda _i: CURATED_CATALOGUE_TITLE))
+        assert _elements_with_class(client, fr.ROW_CATALOGUE_TITLE_CLASS), unit
+
+    work_client = _client_render(lambda: fr.render_finding_row(
+        finding_row(unit=FINDINGS_UNIT_WORK), "en",
+        catalogue_title=lambda _i: CURATED_CATALOGUE_TITLE))
+    assert not _elements_with_class(work_client, fr.ROW_CATALOGUE_TITLE_CLASS), (
+        "a work row rendered a catalogue title, but a work has no single "
+        "manuscript to title")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_page_batches_catalogue_titles_off_the_event_loop_never_per_row(monkeypatch):
+    """`_render_results` resolves every row's catalogue title from
+    `state.meta_mgr.csv_bank` -- a plain in-memory dict populated once at
+    process startup -- in ONE pass over `items`, before any row renders, and
+    hands each row a closure over that already-built dict rather than a
+    callable that reads anything itself.
+
+    This is a hard performance constraint (one uvicorn worker; no per-row
+    lookup, on or off the loop), and the shape that would violate it --
+    `catalogue_title` closing over `state.meta_mgr` and indexing it PER CALL
+    instead of over a pre-built dict -- would still pass every rendering
+    assertion above, because the visible output is identical either way. So
+    this test drives the REAL page (`render_page`, the same harness every
+    other full-page test in this suite uses -- `_render_results` alone takes
+    a fully-populated reader-state dict this test has no business
+    constructing by hand) and counts `csv_bank.get` calls, which must equal
+    the number of DISTINCT `sys_id`s on the page, not the number of rows and
+    not zero.
+    """
+    from unittest import mock
+
+    calls = {"n": 0}
+    csv_bank = {
+        "990000000000000944": {"title": CURATED_CATALOGUE_TITLE},
+    }
+
+    class _CountingBank(dict):
+        def get(self, key, default=None):
+            calls["n"] += 1
+            return super().get(key, default)
+
+    counting_bank = _CountingBank(csv_bank)
+    fake_meta_mgr = mock.Mock()
+    fake_meta_mgr.csv_bank = counting_bank
+
+    # Three rows, only TWO distinct sys_ids -- a per-row read would make three
+    # calls; the batched read this test is pinning makes exactly two (one per
+    # distinct sys_id), and a correct implementation would also tolerate
+    # de-duplication down to fewer, so the assertion is a ceiling, not an
+    # exact-equality trap on an implementation detail.
+    items = [
+        finding_row(sys_id="990000000000000944"),
+        finding_row(sys_id="990000000000000944"),
+        finding_row(sys_id="990000000000000111"),
+    ]
+    envelope = findings_envelope(items, total=3)
+
+    # `_render_results` imports `web.state.state` LOCALLY (inside the
+    # function body, not at module scope -- confirmed above: `fp.state` does
+    # not exist as a module attribute) precisely so the module-level `state`
+    # parameter name used throughout this page is never shadowed. Patching
+    # the real singleton is therefore the only way to intercept this read.
+    with mock.patch("web.state.state") as patched_state:
+        patched_state.meta_mgr = fake_meta_mgr
+        client = render_page(monkeypatch, lang="en", findings=envelope)
+
+    assert calls["n"] <= len(set(i["sys_id"] for i in items)), (
+        f"csv_bank.get was called {calls['n']} times for "
+        f"{len(set(i['sys_id'] for i in items))} distinct sys_ids -- a "
+        "per-row read, not the required page-wide batch")
+    assert calls["n"] > 0, "the batched lookup never ran at all"
+
+    rows_rendered = _elements_with_class(client, fr.ROW_CATALOGUE_TITLE_CLASS)
+    assert len(rows_rendered) == 2, (
+        "the two rows sharing a sys_id with a title should both show it")
+    ASSERTION_COUNT["n"] += 1

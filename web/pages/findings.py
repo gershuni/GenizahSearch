@@ -2211,12 +2211,43 @@ def _render_results(
     if items:
         _render_pool_invite(state, lang, refresh, more_pool_total)
 
+    # THE CATALOGUE TITLE (2026-08-05, coordinator-authorized addition, so a
+    # reader can recognise the physical object beside its shelfmark). Resolved
+    # ONCE for the whole page, never per row: `libraries.csv` has no home in
+    # the discovery sidecar, and `state.meta_mgr.csv_bank` is a PLAIN DICT
+    # populated once at process startup (`MetadataManager.__init__`,
+    # `shared/metadata_manager.py`) -- reading it here is synchronous and
+    # zero-I/O, the same unguarded pattern `web/main.py` and every call site in
+    # `web/pages/browse.py` already use on `state.meta_mgr.csv_bank`. It needs
+    # no offload wrapper and adds none. `app_state`, not `state`: this
+    # function's own parameter is already named `state` for the page's filter
+    # state and would shadow the module-level singleton.
+    #
+    # Missing on ~14% of rows (`libraries.csv` has no title for them); those
+    # sys_ids are simply absent from the dict below, and `catalogue_title`
+    # returns `None` for them -- `_render_shelfmark` renders nothing at all in
+    # that case, not an empty element or a placeholder.
+    from web.state import state as app_state
+    catalogue_titles: Dict[str, str] = {}
+    if app_state.meta_mgr is not None:
+        for item in items:
+            sys_id = item.get("sys_id")
+            if not sys_id or sys_id in catalogue_titles:
+                continue
+            csv_row = app_state.meta_mgr.csv_bank.get(str(sys_id))
+            title = (csv_row or {}).get("title")
+            if title:
+                catalogue_titles[sys_id] = title
+
+    def _catalogue_title(item: Mapping[str, Any]) -> Optional[str]:
+        return catalogue_titles.get(item.get("sys_id"))
+
     with ui.column().classes(f"rows {RESULTS_CLASS}-rows w-full gap-2"):
         if not items:
             _render_empty_state(state, lang, refresh, more_pool_total)
         for item in items:
             _render_row(item, lang, sidecar_version=sidecar_version,
-                        state=state)
+                        state=state, catalogue_title=_catalogue_title)
 
     _render_pager(total, state, lang, refresh,
                   page_size=effective_page_size(envelope),
@@ -2785,7 +2816,8 @@ def preview_url(item: Mapping[str, Any]) -> Optional[str]:
 
 def _render_row(item: Dict[str, Any], lang: str,
                 sidecar_version: Any = None,
-                state: Optional[Dict[str, Any]] = None) -> None:
+                state: Optional[Dict[str, Any]] = None,
+                catalogue_title=None) -> None:
     """One result row, in whichever of the three shipped units the service
     produced it.
 
@@ -2795,10 +2827,13 @@ def _render_row(item: Dict[str, Any], lang: str,
     result, not a footnote, and giving it its own renderer here is how a
     demotion creeps in.
 
-    The two reader affordances are INJECTED from here rather than reached for
+    The three reader affordances are INJECTED from here rather than reached for
     there: the component renders and does not read, and "where does a manuscript
-    live" is this page's decision. The loader closes over the reader's CURRENT
-    state, which is what keeps a parent's count and its children in agreement.
+    live" (and, now, "what did the catalogue call it") is this page's decision.
+    The loader closes over the reader's CURRENT state, which is what keeps a
+    parent's count and its children in agreement. `catalogue_title` closes over
+    the page-wide lookup `_render_results` built in one batched, off-loop-free
+    read (see there) -- never a per-row read here.
     """
     loader = None
     if state is not None:
@@ -2806,7 +2841,8 @@ def _render_row(item: Dict[str, Any], lang: str,
             return await _fetch_children(_state, row, page)
 
     rows.render_finding_row(item, lang, sidecar_version=sidecar_version,
-                            load_children=loader, preview_url=preview_url)
+                            load_children=loader, preview_url=preview_url,
+                            catalogue_title=catalogue_title)
 
 
 def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh,
