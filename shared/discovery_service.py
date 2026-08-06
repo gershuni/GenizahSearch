@@ -505,23 +505,28 @@ FINDINGS_SORTS: frozenset = frozenset({
 
 
 def findings_novelty_offered(unit: str) -> bool:
-    """Whether the candidacy axis applies to `unit`. THE authority on that rule.
+    """Whether a row of `unit` can DISPLAY a single novelty verdict.
 
     Novelty is a verdict about ONE work on ONE fragment: no finding aid we
     checked records this work there. The per-work row unit collapses many
-    manuscripts into a single line, and those lines carry no single verdict --
-    so the filter is not offered there, `_build_findings_filter` REFUSES the
-    combination, and `get_findings_enveloped` reports it as
-    `meta['novelty_offered']`.
+    manuscripts into a single line, and `novelty_status` is NULL whenever the
+    aggregated identifications do not agree -- so such a row has no verdict to
+    show. This predicate gates the DISPLAYED value (`novelty_status` on the
+    projection, the row's badge, and `meta['novelty_offered']`).
 
-    It is a function and not a comparison spelled out at each site because a
-    SURFACE has to know the same rule BEFORE it calls: `web/pages/findings.py`
-    disables the switch and drops the selection on this predicate. When the rule
-    lived only inside the raiser, the page left the switch live while the "Show
-    as" control changed the unit underneath it, and a reader who turned novelty
-    on and then chose one row per work drove the shipped builder into its own
-    `ValueError` -- an unhandled failure on a live page (code review round 15,
-    finding 1). One predicate, three callers, no restatement.
+    IT NO LONGER GATES THE FILTER (owner ruling, 2026-08-06). Those were two
+    different questions under one name: "what is this row's verdict" is
+    undefined on a grouped row, while "does this row have at least one such
+    identification under it" is well defined on every unit and is what a reader
+    filtering a list is asking. `_build_findings_filter` answers the second by
+    placing the predicate BEFORE the `GROUP BY`, exactly as the bucket filter
+    already does, so it no longer refuses any unit. See that function for the
+    measurement.
+
+    The `ValueError` this predicate used to guard was real -- a live switch over
+    a refusing builder was an unhandled failure on a live page (round 15,
+    finding 1). It is gone because the refusal is gone, not because the guard was
+    relaxed: there is no longer an unanswerable combination to protect against.
     """
     return unit != FINDINGS_UNIT_WORK
 
@@ -937,11 +942,33 @@ def _build_findings_filter(
 
     novelty_list = list(novelty) if novelty else []
     if novelty_list:
-        if not findings_novelty_offered(unit):
-            raise ValueError(
-                "novelty is not offered on the per-work unit -- a work spanning "
-                "many manuscripts has no single novelty verdict"
-            )
+        # OFFERED ON EVERY UNIT (owner ruling, 2026-08-06), and the change is a
+        # SEPARATION of two questions this predicate used to conflate:
+        #
+        #   1. "What is this row's novelty verdict?" -- undefined on a grouped
+        #      row. `novelty_status` is NULL when the aggregated identifications
+        #      do not agree, so a work row cannot DISPLAY one. That is what
+        #      `findings_novelty_offered` still answers, and it still gates the
+        #      DISPLAYED value and the row's badge.
+        #   2. "Does this row have at least one such identification under it?"
+        #      -- perfectly well defined on every unit, and the question a
+        #      reader filtering a list is actually asking.
+        #
+        # This clause is question 2, and it needs no aggregate at all: the
+        # predicate sits in the WHERE, BEFORE the `GROUP BY`, so a grouped row
+        # survives exactly when one of its identifications matches -- and its
+        # counts then describe the matching subset. That is not a new semantic
+        # invented here; `di.main_pool = 1` two blocks above has behaved this way
+        # since the bucket shipped. Measured on the heaviest main-pool work:
+        # 2,981 manuscripts unfiltered, 559 with the divergence shades selected.
+        #
+        # The raise it replaces was a real guard against a real failure -- a page
+        # that let a reader hold candidacy AND the per-work unit drove this
+        # builder into an unhandled `ValueError` (round 15, finding 1). What made
+        # that a failure was the CONTRADICTION between a live control and a
+        # refusing builder, not the combination itself. With the combination
+        # answerable, there is nothing left to refuse, and the coupling the page
+        # needed `normalise_state` for disappears with it.
         where.append("di.novelty_status IN (%s)" % ",".join("?" for _ in novelty_list))
         params.extend(novelty_list)
 

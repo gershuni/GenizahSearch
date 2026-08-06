@@ -242,7 +242,26 @@ def test_per_manuscript_unit_annotates_a_manuscript_carrying_more_than_one_work(
     )
 
 
-def test_per_work_unit_is_one_row_per_work_and_never_offers_novelty(service):
+def test_per_work_unit_states_no_verdict_but_CAN_be_filtered_by_one(service):
+    """TWO DIFFERENT QUESTIONS, and the per-work unit answers them differently.
+
+    A work row cannot DISPLAY a novelty verdict: `novelty_status` is NULL
+    whenever the aggregated identifications disagree, so there is no single
+    verdict to state. That half is unchanged and still asserted below.
+
+    It CAN be FILTERED by one, as of the owner's ruling of 2026-08-06. "Does
+    this work have at least one identification the finding aids did not already
+    have?" is well defined even though "what is this work's verdict?" is not.
+    The predicate sits before the `GROUP BY`, so a work survives when one of its
+    identifications matches and its counts then describe the matching subset --
+    the same semantics `di.main_pool = 1` has always had.
+
+    This replaced a `pytest.raises(ValueError)`. The refusal it pinned was a real
+    guard: a page with a live switch over a refusing builder drove an unhandled
+    failure (round 15, finding 1). It is gone because the combination is now
+    ANSWERABLE, not because the guard was weakened -- so the test asserts the
+    answer is correct rather than merely that nothing raised.
+    """
     env = service.get_findings_enveloped(unit=FINDINGS_UNIT_WORK, bucket=BUCKET_ALL)
     assert env["total"] == len(_WORKS)
     by_work = {row["display_work_id"]: row for row in env["items"]}
@@ -256,8 +275,33 @@ def test_per_work_unit_is_one_row_per_work_and_never_offers_novelty(service):
         )
     assert env["meta"]["novelty_offered"] is False
 
-    with pytest.raises(ValueError):
-        service.get_findings_enveloped(unit=FINDINGS_UNIT_WORK, novelty=["fills_gap"])
+    # THE FILTER WORKS, and it SELECTS -- a filter that returned everything
+    # would pass a bare "did not raise" check while doing nothing.
+    filtered = service.get_findings_enveloped(
+        unit=FINDINGS_UNIT_WORK, bucket=BUCKET_ALL, novelty=["fills_gap"])
+    assert filtered["status"] == "ok"
+    kept = {row["display_work_id"] for row in filtered["items"]}
+    # DERIVED from the fixture rows, never retyped: a hardcoded expected set
+    # would still pass if the fixture changed underneath it, which is how a test
+    # stops measuring the thing it names.
+    expected = {work for _sys, work, *_rest in _IDENTIFICATIONS
+                if _rest[-1] == "fills_gap"}
+    assert kept == expected, (
+        "the per-work novelty filter kept the wrong set of works")
+    assert 0 < len(kept) < len(_WORKS), (
+        "the fixture cannot distinguish a working filter from a no-op: it needs "
+        "at least one work with a fills_gap identification and one without")
+
+    # ...and the row's own counts describe the MATCHING subset, not the whole
+    # work -- which is the property that makes the filtered figure honest.
+    for row in filtered["items"]:
+        unfiltered = by_work[row["display_work_id"]]
+        assert row["manuscript_count"] <= unfiltered["manuscript_count"]
+
+    # The DISPLAY half is unchanged by filtering: still no verdict to state.
+    for row in filtered["items"]:
+        assert row["novelty_status"] is None
+        assert row["novelty_offered"] is False
 
 
 def test_the_per_claim_unit_is_not_reachable_through_the_api(service):
