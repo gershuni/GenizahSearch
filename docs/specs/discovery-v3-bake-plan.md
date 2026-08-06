@@ -962,6 +962,55 @@ will compare v3's tier-A count against 275,894 and either pass for the wrong rea
 explanation.** Owed: establish what that constant was frozen against, and re-pin it deliberately for v3 with
 the derivation recorded — never let it match by luck. Added as gate 15.
 
+#### FINDING A — RESOLVED, and it produced a second finding the owner must know about (2026-08-06)
+
+**Owner added the term (4 forms: Hebrew singular + plural, transliterated singular + plural) — pattern set 6 →
+10.** Verified: all four forms now scan as hits (exit 1), including an UPPERCASE transliteration, which
+confirms the documented casefolding; the neutral replacement name `src_attr_note` correctly passes (exit 0).
+The gate hole is closed.
+
+**Prerequisite done first:** the term was already in **four tracked files** (7 occurrences) — a fixture column
+name mirroring the research table, plus two planning-doc column lists. Adding the pattern without clearing
+those would have turned the gate red on already-pushed content. The fixture column was renamed to
+`src_attr_note` (safe: the builder never reads it, and every fixture INSERT is positional), the doc mentions
+redacted; 289 tests green.
+
+**🛑 SECOND FINDING — the Hebrew form is an ordinary Hebrew word, and it now matches 48 INNOCENT occurrences
+in tracked content.** The full `--scan-repo` is **RED**, and every hit is a false positive:
+
+| file | hits | what it actually is |
+|---|---|---|
+| `web/Transcriptions_part.txt` | **47** | **our own manuscript transcriptions** — Talmudic text on modes of acquisition, where the word is the standard legal term (e.g. *"a ship is acquired by drawing… R. Nathan says"*) |
+| `web/pages/help.py` | 1 (+1 as a URL-decoded form) | the Hebrew **help text**: "deleting a local join document *removes* it automatically from the community too" |
+
+Neither has anything to do with the restricted corpus. The word is common Hebrew (*handing over / transmission
+/ delivery*), so as a bare substring it cannot distinguish the fingerprint sense from ordinary usage — and
+`web/Transcriptions_part.txt` is 15 MB of exactly the Hebrew this project exists to search.
+
+**This matters beyond one red scan: `.github/workflows/ci.yml` provisions the same pattern set from the
+`MASKING_SCAN_PATTERNS` secret and runs `--scan-repo` in `render-smoke-tests`. If the Hebrew forms were added
+to that secret, CI is now RED on every run** — and the standing rule (correctly) forbids "fixing" that by
+skipping the scan.
+
+**Recommended fix — keep the transliterations, drop the bare Hebrew forms.**
+
+1. **Keep the two Latin-script (transliterated) forms.** In Latin script the word appears only as a
+   *technical/database* term — this
+   is the form that actually leaked (a column name), and it produced **zero** false positives across the whole
+   repo.
+2. **Remove the two bare Hebrew forms** from `.masking_patterns` *and* from the CI secret. As a bare substring
+   they are unusable: 48 innocent hits, 0 real ones.
+3. If the Hebrew must be covered, use a **discriminating** form rather than the bare word — the scanner does
+   substring matching, so a longer phrase pairing it with a corpus-specific context word would match the
+   fingerprint sense without matching Talmudic prose. That needs a real example of the leaking phrase to design
+   against; the column-name leak does not provide one.
+
+**The compensating control stands regardless** (gate 16): the slim DB drops that column outright, so the term
+never enters a v3 artifact by that route.
+
+**Owner action:** revert the two Hebrew lines (keep the two Latin ones) locally and in the CI secret, then
+re-run `--scan-repo` — it should return green. **I have not edited `.masking_patterns`;** it is owner-held.
+
 **Still owed before execution** — the remaining Codex items, none of them owner decisions:
 blocker 1's projection spec · blocker 2's declared routing mapping + parity checks · blocker 3's fingerprint ·
 the full column list for the two research tables (HIGH — and drop the pointless `source_corpus` column, which is
