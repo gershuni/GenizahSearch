@@ -644,6 +644,45 @@ def test_caveat_renders_between_header_and_body_and_passes_the_honesty_gate(monk
     )
 
 
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_the_caveat_carries_an_icon_and_stays_undismissible(monkeypatch, lang):
+    """"The disclaimer text is easily missed" (owner report, 2026-08-06).
+
+    The caveat already had a tinted plate and a gold inline-start rule and was
+    STILL being read past, so what it lacked was the one signal that marks a block
+    as an advisory rather than as more prose. `info` and not `warning`: nothing
+    here is going wrong, and an alarm glyph on a PERMANENT element trains a reader
+    to dismiss it.
+
+    The dismissibility half is asserted in the same test because that is the
+    property an icon most invites someone to break: a glyph makes the block look
+    like a Quasar banner, and the obvious next edit is a close button. This
+    caveat is permanent by design, so there must be no control inside it.
+    """
+    client = _render_page(monkeypatch, lang=lang)
+    caveat = _elements_with_class(client, fp.CAVEAT_CLASS)[0]
+
+    icons = [element for element in caveat.descendants()
+             if (getattr(element, "tag", "") or "").lower() in ("q-icon", "i")
+             or "q-icon" in (element._classes or [])]
+    assert icons, "the caveat renders no icon -- it reads as more prose"
+
+    # NOT an alarm glyph on a permanent element.
+    names = {(element._props or {}).get("name") for element in icons}
+    assert "warning" not in names and "error" not in names, (
+        f"the caveat uses an alarm glyph {names!r} on a permanent element")
+
+    # NOT DISMISSIBLE: no button, no link, nothing clickable inside it.
+    for element in caveat.descendants():
+        tag = (getattr(element, "tag", "") or "").lower()
+        assert tag not in ("q-btn", "a"), (
+            f"the caveat gained a {tag!r} -- it is permanent, never dismissible")
+
+    # ...and the text is still there in full, beside the glyph rather than
+    # replaced by it.
+    assert fp.copy_text("caveat", lang) in _scoped_text(client, fp.CAVEAT_CLASS)
+
+
 def test_caveat_wording_differs_between_the_two_languages():
     """A half-filled bilingual entry would silently fall back to English."""
     en = fp.copy_text("caveat", "en")

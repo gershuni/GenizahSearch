@@ -112,6 +112,12 @@ LAUNCH_POOL_LABEL_CLASS = "gs-findings-launch-pool-label"
 #: Hebrew phrase concatenated into one string can reorder at the boundary --
 #: and each half of the split carries its own bucket name, because a number
 #: with no bucket beside it is a number a reader has to guess the basis of.
+#: The wrapper that puts the fragment lede and the work count ON ONE LINE
+#: (owner report, 2026-08-06). Its own class rather than a bare `ui.row()`, so a
+#: test can assert the pair really share a container instead of inferring it from
+#: rendered text -- and so a future stacking regression is visible as a missing
+#: element rather than as a layout nobody measured.
+LAUNCH_LEDE_ROW_CLASS = "gs-findings-launch-lede-row"
 LAUNCH_FRAGMENTS_CLASS = "gs-findings-launch-fragments"
 LAUNCH_FRAGMENTS_LABEL_CLASS = "gs-findings-launch-fragments-label"
 LAUNCH_MATCHED_CLASS = "gs-findings-launch-matched"
@@ -835,23 +841,45 @@ def _render_launch_v3(items, meta: Mapping[str, Any], total: Any,
     is what the sentinel fixture proves; every level is skipped when its own
     key is absent rather than rendered as a zero.
     """
-    # LEVEL 1 -- the lede figure and its noun, TWO elements in one baseline
-    # row, never one concatenated string.
+    # LEVELS 1 + 1b SIT SIDE BY SIDE (owner report, 2026-08-06: the two large
+    # figures stacked vertically pushed the first row of results below the fold).
+    #
+    # They are the two halves of ONE statement -- this many fragments, matched to
+    # that many works -- so putting them on one line is what the wording already
+    # implied, and it reclaims a whole display-size line of vertical space above
+    # the content the page exists to show.
+    #
+    # NEITHER FIGURE'S OWN STRUCTURE MOVED, and that is what keeps this safe: the
+    # lede figure and its noun are still two elements inside `LAUNCH_LEDE_CLASS`,
+    # the work count is still its own element inside `LAUNCH_MATCHED_CLASS`, and
+    # the parent-child relationships four tests assert are untouched. Only a
+    # wrapping flex container was added around the pair.
+    #
+    # `flex-wrap` and not a breakpoint: on a phone the two stack again by
+    # themselves, with no media query to maintain. `items-baseline` sits the
+    # smaller line on the larger one's baseline rather than centring it against a
+    # 4xl figure. Direction-neutral -- a plain flex row mirrors itself in Hebrew.
     fragments = meta.get("corpus_manuscript_count")
-    if fragments is not None:
-        with ui.row().classes(
-            f"{LAUNCH_LEDE_CLASS} items-baseline gap-x-3 gap-y-1 flex-wrap"
-        ):
-            ui.label(_count(fragments)).classes(
-                f"{LAUNCH_FRAGMENTS_CLASS} text-4xl font-bold"
-            ).style("color: var(--primary-700);")
-            ui.label(copy_text("launch_fragments_lede", lang)).classes(
-                f"{LAUNCH_FRAGMENTS_LABEL_CLASS} text-sm")
-
-    # LEVEL 1b -- what those fragments were matched TO.
     work_total = meta.get("work_total")
-    if work_total is not None:
-        _render_matched_works_line(work_total, lang)
+    if fragments is not None or work_total is not None:
+        with ui.row().classes(
+            f"{LAUNCH_LEDE_ROW_CLASS} items-baseline gap-x-4 gap-y-1 flex-wrap"
+        ):
+            # LEVEL 1 -- the lede figure and its noun, TWO elements in one
+            # baseline row, never one concatenated string.
+            if fragments is not None:
+                with ui.row().classes(
+                    f"{LAUNCH_LEDE_CLASS} items-baseline gap-x-3 gap-y-1 flex-wrap"
+                ):
+                    ui.label(_count(fragments)).classes(
+                        f"{LAUNCH_FRAGMENTS_CLASS} text-4xl font-bold"
+                    ).style("color: var(--primary-700);")
+                    ui.label(copy_text("launch_fragments_lede", lang)).classes(
+                        f"{LAUNCH_FRAGMENTS_LABEL_CLASS} text-sm")
+
+            # LEVEL 1b -- what those fragments were matched TO.
+            if work_total is not None:
+                _render_matched_works_line(work_total, lang)
 
     # LEVEL 1c -- the all-in-all count, quietly.
     ui.label(
@@ -1350,7 +1378,23 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
     lang = _lang_key(lang)
     unit = item.get("unit") or FINDINGS_UNIT_IDENTIFICATION
 
-    with ui.column().classes(f"row {ROW_CLASS} w-full gap-1 p-2"):
+    # A HAIRLINE BETWEEN ROWS (owner report, 2026-08-06: "list items blend
+    # together"). Applied to EVERY row identically, in both pools and at both
+    # levels -- which is what keeps it clear of D-24: a separator is not a row
+    # TREATMENT, because it carries no information about the row it sits under
+    # and cannot be read as a verdict on it. The moment it varied by pool, novelty
+    # or band it would become exactly the styling D-24 prohibits.
+    #
+    # Inline and side-neutral: `border-block-end` is the block axis, so it needs
+    # no RTL mirror, and this module adds no stylesheet rule (a test asserts
+    # that). `--border-light` is the same token the chips and cards already use,
+    # so this is the existing hairline weight rather than a new one.
+    #
+    # `p-2` keeps its padding and `gap-1` its internal spacing; only the bottom
+    # edge is new, so no row grows or moves.
+    with ui.column().classes(f"row {ROW_CLASS} w-full gap-1 p-2").style(
+        "border-block-end: 1px solid var(--border-light);"
+    ):
         if unit == FINDINGS_UNIT_MANUSCRIPT:
             with ui.row().classes(f"{ROW_TITLE_CLASS} items-center gap-2 font-bold"):
                 _render_shelfmark(item, lang, catalogue_title=catalogue_title)
@@ -1402,6 +1446,55 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
     reader looking at an opened, empty expander -- indistinguishable from "this
     row has no matches underneath it", and one of those is an outage.
     """
+    #: THE TOGGLE IS CREATED FIRST, AND THAT ORDER IS THE WHOLE FIX (owner
+    #: report, 2026-08-06: "expanding requires excessive downward scrolling to
+    #: collapse the list").
+    #:
+    #: The button already retitles itself to "Hide the individual matches" the
+    #: moment it opens -- that was never the defect. The defect was DOM ORDER:
+    #: `body` was created before `button`, so the only control that could close
+    #: the group rendered BELOW every child it had just revealed. On the heaviest
+    #: work in the served artifact that is 25 rows away on first open and 2,981
+    #: if the reader keeps loading, so the affordance to undo the click was
+    #: reliably off-screen at the moment it was wanted.
+    #:
+    #: Nothing else about the expansion changed. The two elements are siblings in
+    #: one column and neither carries a position rule, so swapping their creation
+    #: order is the entire change -- no CSS, no wrapper, no second control.
+    button = ui.button(copy_text("expand_open", lang)).props(
+        "flat dense size=sm no-caps").classes(f"{ROW_EXPANDER_CLASS} dnote")
+    #: STICKY while the group is open, so the close control stays reachable from
+    #: anywhere inside a 2,981-child expansion instead of only from its top.
+    #:
+    #: `top: 64px` AND NOT `top: 0`, and the offset is load-bearing rather than a
+    #: taste choice. `web/main.py` renders the site chrome as
+    #: `ui.header(...).props('reveal').style('height: 64px')`, and a Quasar header
+    #: is `position: fixed` -- so it is OUTSIDE this element's scroll flow and a
+    #: sticky pinned at `top: 0` parks itself UNDERNEATH it. The control would
+    #: then be "always on screen" and invisible, which is worse than the
+    #: scroll-back-up it replaces, because a reader would have no reason to look
+    #: for it. 64px is the header's own declared height, so the button lands
+    #: exactly below the chrome when the `reveal` header is showing and 64px down
+    #: from the top when it has slid away -- visible in both states, which is the
+    #: property that matters. (The number is a LAYOUT constant, not a discovery
+    #: figure; ruling U's no-literals rule is about artifact-derived counts.)
+    #:
+    #: Applied INLINE and only here: this module adds no stylesheet rule (a test
+    #: asserts it injects no CSS), and every property is side-neutral --
+    #: `position`, `top` and `z-index` are block-axis or non-directional, so
+    #: nothing needs an RTL mirror. `top` rather than `inset-block-start` is
+    #: deliberate: this page is `horizontal-tb` in Hebrew too, so the two resolve
+    #: identically, and the guard that forbids physical properties in this file
+    #: targets the INLINE-axis ones (`margin/padding/border-left|right`,
+    #: `text-align`) because those are the ones that break mirroring.
+    #:
+    #: `background` is required, not decoration: a transparent sticky element
+    #: lets the scrolling children show through it and the label becomes
+    #: unreadable over its own list.
+    button.style(
+        "position: sticky; top: 64px; z-index: 2; "
+        "background: var(--bg-primary); align-self: flex-start;"
+    )
     body = ui.column().classes(f"{ROW_CHILDREN_CLASS} w-full gap-1")
     body.style("display: none;")
     #: `page` is the child list's OWN page, independent of the reader's page
@@ -1413,8 +1506,6 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
     #: add a second one -- two extent lines would be two different claims about
     #: the same group. Declared before the closures that rebind it.
     extent: Dict[str, Any] = {"holder": None}
-    button = ui.button(copy_text("expand_open", lang)).props(
-        "flat dense size=sm no-caps").classes(f"{ROW_EXPANDER_CLASS} dnote")
 
     async def _load(_event=None, *, append: bool = False) -> None:
         """One page of children. `append` keeps what is already on screen.
@@ -1612,6 +1703,7 @@ __all__ = [
     "LAUNCH_FRAGMENTS_CLASS",
     "LAUNCH_FRAGMENTS_LABEL_CLASS",
     "LAUNCH_LEDE_CLASS",
+    "LAUNCH_LEDE_ROW_CLASS",
     "LAUNCH_MATCHED_CLASS",
     "LAUNCH_POOL_LABEL_CLASS",
     "LAUNCH_POOL_TOTAL_CLASS",

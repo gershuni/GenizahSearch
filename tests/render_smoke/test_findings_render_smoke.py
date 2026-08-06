@@ -493,6 +493,36 @@ def render_rows(items, lang="en", sidecar_version=None):
     return _client_render(_paint)
 
 
+def render_rows_with_loader(*, unit, lang="en"):
+    """ONE grouped row with an expansion attached but NOT opened.
+
+    The loader is never called: these callers assert the CLOSED state's
+    structure -- where the toggle sits relative to the children container, and
+    how it is styled -- which is exactly what the reader meets first and exactly
+    what a text scan cannot see. A loader that returned rows would add children
+    and make the ordering assertion pass for the wrong reason.
+    """
+    return _client_render(
+        lambda: fr.render_finding_row(
+            finding_row(unit=unit), lang,
+            load_children=lambda _row, _page=1: None))
+
+
+def _the_row(client):
+    """The single result row, for an assertion about its CHILD ORDER.
+
+    Resolved by class and asserted UNIQUE rather than taken as "the first one": a
+    helper that silently picked one of several rows would make an ordering claim
+    about whichever happened to render first. Uniqueness holds because
+    `render_rows_with_loader` paints one row and never opens it, so no child rows
+    exist -- and if that ever changes, this fails loudly instead of quietly
+    measuring a child.
+    """
+    rows_ = _elements_with_class(client, fr.ROW_CLASS)
+    assert len(rows_) == 1, f"expected exactly one row, got {len(rows_)}"
+    return rows_[0]
+
+
 def _click_handlers(element) -> List[Any]:
     """Every click handler bound to `element`, however NiceGUI recorded it.
 
@@ -1230,6 +1260,146 @@ def test_no_row_names_its_bucket_and_neither_pool_is_the_exception(lang):
         assert name not in rendered, (
             f"a row names its bucket ({name!r}) -- that label is constant for "
             "the whole page and belongs in the result bar, once")
+    ASSERTION_COUNT["n"] += 1
+
+
+# ---------------------------------------------------------------------------
+# THE OWNER'S 2026-08-06 LAYOUT REPORT. Four cosmetic findings from reading the
+# live beta, each asserted over STRUCTURE rather than over rendered text -- a
+# layout defect leaves the text identical, which is why none of these was caught
+# by the ~570 assertions already in this suite and the sibling one.
+# ---------------------------------------------------------------------------
+
+
+def test_the_close_control_renders_ABOVE_the_children_it_reveals():
+    """"Expanding requires excessive downward scrolling to collapse the list."
+
+    The report read this as a missing toggle-back, and the button DOES already
+    retitle itself to "Hide the individual matches" the moment it opens. The
+    actual defect was DOM ORDER: `body` was created before `button`, so the only
+    control that could close the group rendered BELOW every child it revealed --
+    25 rows away on first open, and up to 2,981 on the heaviest work in the
+    served artifact. The affordance to undo the click was reliably off-screen at
+    the moment it was wanted.
+
+    Asserted as an INDEX COMPARISON inside the row's own child list, because that
+    is the fact that matters and it is invisible to any text scan: both orderings
+    render exactly the same strings.
+    """
+    client = render_rows_with_loader(unit=FINDINGS_UNIT_WORK)
+    row = _the_row(client)
+    children = list(row)
+    classes = [set(getattr(child, "_classes", None) or []) for child in children]
+    expander = next(i for i, c in enumerate(classes) if fr.ROW_EXPANDER_CLASS in c)
+    body = next(i for i, c in enumerate(classes) if fr.ROW_CHILDREN_CLASS in c)
+    assert expander < body, (
+        "the expansion's toggle renders after the children container, so the "
+        "only control that closes the group sits below every row it revealed")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_close_control_sticks_so_it_stays_reachable_inside_a_long_group():
+    """Ordering alone fixes the FIRST screen; a reader 300 rows into a group
+    still has to scroll back up. The toggle is sticky so it stays on screen.
+
+    The background is asserted too, and it is not decoration: a transparent
+    sticky element lets the scrolling children pass through it and its own label
+    becomes unreadable over its own list.
+
+    Every property is block-axis or non-directional, so nothing here needs an RTL
+    mirror -- which is what lets it be inline in a module that ships no CSS.
+    """
+    client = render_rows_with_loader(unit=FINDINGS_UNIT_WORK)
+    button = _elements_with_class(client, fr.ROW_EXPANDER_CLASS)[0]
+    style = getattr(button, "_style", None) or {}
+    assert style.get("position") == "sticky", (
+        "the expansion toggle is not sticky -- inside a 2,981-child group it "
+        "scrolls out of reach")
+    assert style.get("background"), (
+        "a sticky toggle with no background lets the children scroll through it")
+
+    # NOT `top: 0`, and this is the assertion that took a second attempt to get
+    # right. `web/main.py` renders the site chrome as a Quasar `ui.header` at
+    # `height: 64px`, which is `position: fixed` and therefore outside this
+    # element's scroll flow -- so a sticky pinned at the viewport top parks
+    # itself UNDER the header and is permanently invisible. "Always on screen
+    # and never visible" is worse than the scroll-back-up it replaces, because a
+    # reader has no reason to look for it. The offset must clear the chrome.
+    top = style.get("top") or ""
+    assert top not in ("", "0", "0px"), (
+        f"the sticky toggle is pinned at {top!r} -- it sits underneath the "
+        "64px fixed site header and can never be seen")
+    for physical in ("left", "right", "margin-left", "margin-right"):
+        assert physical not in style, (
+            f"the sticky toggle gained the physical property {physical!r}")
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_every_row_carries_the_same_separator_and_no_pool_is_the_exception(lang):
+    """"List items blend together." A hairline between rows, on EVERY row.
+
+    BOTH POOLS, and that symmetry is what keeps this clear of D-24. A separator
+    carries no information about the row it sits under and cannot be read as a
+    verdict on it -- but the moment it varied by pool, novelty or band it would
+    become exactly the per-row treatment D-24 prohibits. So this asserts the
+    two pools are styled IDENTICALLY, not merely that a border exists.
+    """
+    items = [finding_row(main_pool=True), finding_row(main_pool=False)]
+    client = render_rows(items, lang)
+    borders = [
+        (getattr(row, "_style", None) or {}).get("border-block-end")
+        for row in _elements_with_class(client, fr.ROW_CLASS)
+    ]
+    assert len(borders) == 2, f"expected two rows, got {len(borders)}"
+    assert all(borders), "a result row carries no separator"
+    assert borders[0] == borders[1], (
+        f"the two pools' rows are separated differently ({borders!r}) -- a "
+        "per-pool row treatment is what D-24 forbids")
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_two_lede_figures_share_one_line_instead_of_stacking(lang):
+    """The two display-size figures stacked, pushing the first result below the
+    fold. They are the two halves of one statement -- this many fragments,
+    matched to that many works -- so they now share a wrapping flex row.
+
+    WHAT MUST NOT HAVE MOVED is asserted in the same test, because the risk of
+    this change is not that it fails to wrap: it is that the wrapper reparents
+    the figures and quietly breaks the bidi structure four sibling tests pin.
+    Each figure keeps its own inner container, so the digit run and its label
+    stay two elements that cannot reorder at the boundary.
+    """
+    client = render_headline(sentinel_launch_envelope_approved(), lang)
+    wrappers = _elements_with_class(client, fr.LAUNCH_LEDE_ROW_CLASS)
+    assert len(wrappers) == 1, (
+        "the two lede figures are not in one shared row -- they stack and push "
+        "the results below the fold")
+
+    inner = [set(getattr(child, "_classes", None) or []) for child in wrappers[0]]
+    assert any(fr.LAUNCH_LEDE_CLASS in c for c in inner), (
+        "the fragment lede is not inside the shared row")
+    assert any(fr.LAUNCH_MATCHED_CLASS in c for c in inner), (
+        "the matched-works line is not inside the shared row")
+
+    # The bidi structure the other tests depend on: figure and label are still
+    # SEPARATE elements under the lede's own container, never one string.
+    lede = [
+        element for element in _elements_with_class(client, fr.LAUNCH_LEDE_CLASS)
+        if fr.LAUNCH_LEDE_ROW_CLASS not in (getattr(element, "_classes", None) or [])
+    ]
+    assert len(lede) == 1
+    figure = _elements_with_class(client, fr.LAUNCH_FRAGMENTS_CLASS)[0]
+    label = _elements_with_class(client, fr.LAUNCH_FRAGMENTS_LABEL_CLASS)[0]
+    assert figure.parent_slot.parent is lede[0]
+    assert label.parent_slot.parent is lede[0]
+
+    # ...and it must WRAP rather than depend on a breakpoint, so a phone stacks
+    # them again with no media query to maintain.
+    assert "flex-wrap" in (wrappers[0]._classes or []), (
+        "the shared lede row does not wrap -- on a phone the two figures would "
+        "overflow instead of stacking")
     ASSERTION_COUNT["n"] += 1
 
 

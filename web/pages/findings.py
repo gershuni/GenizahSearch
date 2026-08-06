@@ -1270,9 +1270,29 @@ async def _paint_headline(region: Any, lang: str, page_client: Any,
 
 def _render_caveat(lang: str) -> None:
     """The permanent caveat slot -- a designed element with the gold
-    inline-start rule, never fine print and never a dismissible warning."""
+    inline-start rule, never fine print and never a dismissible warning.
+
+    IT NOW CARRIES AN ICON (owner report, 2026-08-06: the disclaimer "is easily
+    missed"). The `caveat` class already gives it a tinted plate and a gold
+    inline-start rule, and it was still being read past -- so the missing signal
+    was the one thing that marks a block as an ADVISORY rather than as more prose.
+    `info` rather than `warning`: nothing here is going wrong, and an alarm glyph
+    on a permanent element trains a reader to dismiss it.
+
+    The element stays a plain `div` carrying `caveat` (a test pins the class, and
+    the CSS rule that draws the plate is keyed on it), and stays UNDISMISSIBLE.
+    The row is `items-start` so the glyph aligns to the first line of a wrapping
+    sentence rather than floating in the vertical middle of three lines, and the
+    text keeps `flex: 1` so it wraps beside the icon instead of pushing it out.
+    """
     with ui.element("div").classes(f"caveat {CAVEAT_CLASS} w-full p-3 text-sm"):
-        ui.label(copy_text("caveat", lang))
+        with ui.row().classes("items-start gap-2 flex-nowrap w-full"):
+            # `shrink-0` so the glyph keeps its box when the sentence wraps.
+            ui.icon("info").classes(
+                f"{CAVEAT_CLASS}-icon shrink-0"
+            ).style("color: var(--accent-gold); font-size: 20px;")
+            ui.label(copy_text("caveat", lang)).classes(
+                f"{CAVEAT_CLASS}-text").style("flex: 1 1 auto; min-width: 0;")
 
 
 def _render_mode_strip(lang: str) -> None:
@@ -1937,6 +1957,28 @@ def _node_text(label: str, count: Any) -> str:
     agrees with the result set that domain produces. (This is a FACET count,
     not a claim about anything: the ruling-T prohibition is on attaching a
     number to the BUCKET control, and that control still carries none.)
+
+    STILL ONE STRING, and that is a decision rather than an omission (owner
+    report, 2026-08-06: "count numbers in the domain list are misaligned").
+
+    The report is right about the symptom -- a ragged column of counts is harder
+    to scan than a flush one -- and the shared CSS block already ships the rule
+    that fixes it: `.gs-discovery .dnode .c { margin-inline-start: auto;
+    font-variant-numeric: tabular-nums }`, written for a `<span class="c">`
+    around the count and currently matching NOTHING, because every count arrives
+    here inside the label text.
+
+    Splitting them is deliberately NOT done in this pass. `_node_text` returns a
+    STRING and its single-definition property is pinned by
+    `test_the_count_promise_is_made_on_all_three_controls_or_on_none`: the domain
+    tree passes the result to `ui.button(text)` while the author and work facets
+    pass it as a `ui.select` OPTION LABEL, and a select option cannot hold
+    markup. So a span-based fix aligns the tree and silently does nothing for the
+    other two controls -- which is worse than the ragged column it replaces,
+    because the three lists would then disagree about the shape of the same fact
+    while a test asserts they share one formatter. Making the tree flush needs
+    that formatter split in two (an element builder for the tree, a string for
+    the selects), and that is a change with its own gate, not a cosmetic tweak.
     """
     try:
         return "{} ({:,})".format(label, int(count))
