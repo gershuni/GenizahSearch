@@ -952,6 +952,25 @@ Consequences, in order:
 3. It reinforces the owed **non-disclosing attestation** (pattern count + hash per run) — a count of 15 would
    not have revealed the gap, but a reviewed inventory would.
 
+**✅ FINDING B — RESOLVED 2026-08-06: not a coincidence. The frozen constant was pinned against the GEN-2
+population.** The slim research DB was built from the real artifacts and fed to the builder's own reader:
+`_count_tier_a_rows()` returns **275,894 — exactly `_EXPECTED_TIER_A_ROWS`**, on the first attempt, with no
+tuning. Since the slim DB is materialised *only* from `track1_matches_pilot_glaunch3_live`, that number is a
+property of the gen-2 rows, and the release contract already expects it.
+
+So the constant does **not** need re-pinning, and gate 15's concern is answered in the reassuring direction:
+the v3 tier-A population and the frozen contract agree by construction. Two things still follow:
+
+- **Gate 15 stays**, now as a *preservation* check rather than a re-pin: if a later change to the ingest moves
+  that count, the release gate must fail with the number named rather than being quietly re-pinned to whatever
+  the build produced.
+- **It implies the v2-era `track1_matches` was NOT what the contract was frozen against** (that table yields
+  364,178 unshadowed, or 253,975 excluding R-source). Worth knowing: it means the v2 release contract and the
+  v2-era research table were already out of step, which is a v2 records question, not a v3 blocker.
+
+<details>
+<summary>The original finding, before it was measured (kept — the caution was right even though the alarm was not)</summary>
+
 **⚠ FINDING B — a frozen release constant coincidentally equals a gen-2 figure. Do not read it as agreement.**
 `build_discovery_sidecar.py:5558` freezes `_EXPECTED_TIER_A_ROWS = 275894`, commented
 "`track1_matches WHERE shadowed_by IS NULL`" — and 275,894 is **exactly** the gen-2 unshadowed
@@ -961,6 +980,8 @@ population than today's v2-era table, and the collision with gen-2 is chance. **
 will compare v3's tier-A count against 275,894 and either pass for the wrong reason or fail without
 explanation.** Owed: establish what that constant was frozen against, and re-pin it deliberately for v3 with
 the derivation recorded — never let it match by luck. Added as gate 15.
+
+</details>
 
 #### FINDING A — RESOLVED, and it produced a second finding the owner must know about (2026-08-06)
 
