@@ -208,6 +208,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 from shared.discovery_band_labels import serialize_banded_claim
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
 from shared.discovery_novelty import (
+    CANDIDATE_STATUS,
     NOVELTY_STATUS_ORDER,
     NOVELTY_STATUSES,
     is_hidden_by_default,
@@ -579,6 +580,65 @@ DIVERGENCE_ONLY = "only"
 DIVERGENCE_MODES: Tuple[str, ...] = (
     DIVERGENCE_HIDDEN, DIVERGENCE_SHOWN, DIVERGENCE_ONLY,
 )
+
+
+# ---------------------------------------------------------------------------
+# THE FOUR-STATE NOVELTY SELECTOR (owner ruling, 2026-08-06).
+#
+# ONE control where the page previously had two, and the reason is the column:
+# `novelty_status` holds ONE value per identification, and `fills_gap` (a
+# candidate) and the two divergence shades are three mutually exclusive values of
+# it. Two independent controls over one column could therefore be driven into
+# states where one silently did nothing -- which is what `findings_divergence_offered`
+# and `normalise_state` existed to paper over. A single-select cannot express an
+# incoherent combination at all, so the coupling is designed out rather than
+# guarded.
+#
+# The fourth state is a UNION, not an intersection. "Divergent AND novel" is
+# EMPTY by construction at the leaf grain (measured: 0 of 53,581 rows) because one
+# column cannot hold two values; "divergent OR novel" is 7,381 main-pool rows and
+# is what a reader chasing anything the finding aids did not already have right
+# actually wants.
+#
+# EVERY MEMBER SET IS DERIVED from the policy constants, never restated: a shade
+# joining or leaving `HIDDEN_BY_DEFAULT_SHADES`, or the candidate shade moving,
+# carries these with it. A literal list here would silently stop matching.
+# ---------------------------------------------------------------------------
+
+NOVELTY_VIEW_ALL = "all"
+NOVELTY_VIEW_CANDIDATES = "candidates"
+NOVELTY_VIEW_DIVERGENT = "divergent"
+NOVELTY_VIEW_EITHER = "either"
+
+#: The closed vocabulary, in the order the selector offers them: the default
+#: (unfiltered) first, then the two single-axis narrowings, then their union.
+NOVELTY_VIEWS: Tuple[str, ...] = (
+    NOVELTY_VIEW_ALL, NOVELTY_VIEW_CANDIDATES,
+    NOVELTY_VIEW_DIVERGENT, NOVELTY_VIEW_EITHER,
+)
+
+#: VIEW -> the `novelty` argument it becomes. `None` means "no predicate", the
+#: phase-wide convention that an empty filter is not a filter.
+_NOVELTY_VIEW_SHADES: Dict[str, Optional[Tuple[str, ...]]] = {
+    NOVELTY_VIEW_ALL: None,
+    NOVELTY_VIEW_CANDIDATES: (CANDIDATE_STATUS,),
+    NOVELTY_VIEW_DIVERGENT: DIVERGENCE_SHADE_ORDER,
+    NOVELTY_VIEW_EITHER: (CANDIDATE_STATUS,) + tuple(DIVERGENCE_SHADE_ORDER),
+}
+
+
+def novelty_view_shades(view: Optional[str]) -> Optional[Tuple[str, ...]]:
+    """The `novelty` argument for a selector view. THE authority on that mapping.
+
+    An unrecognised view resolves to the UNFILTERED state rather than raising:
+    the value can arrive from a reader's persisted storage or a hand-edited
+    cookie, and a vocabulary that moved between releases must degrade to showing
+    everything -- never to showing a narrower set the reader did not choose and
+    cannot see the basis of.
+    """
+    if view not in _NOVELTY_VIEW_SHADES:
+        return None
+    return _NOVELTY_VIEW_SHADES[view]
 
 
 def findings_divergence_offered(novelty: Optional[Iterable[str]] = None) -> bool:
@@ -2476,6 +2536,24 @@ class DiscoveryService:
             "sort_basis": _FINDINGS_SORT_BASIS[sort],
             "novelty_offered": novelty_offered,
             "divergence": divergence,
+            #: WHETHER THE ROWS COUNTED HERE INCLUDE THE CATALOGUE-DIVERGENT
+            #: ONES -- a BOOLEAN derived from the predicate actually applied, so
+            #: the result bar can reconcile its count with the corpus headline
+            #: without re-deriving anything.
+            #:
+            #: Reported as a boolean rather than by echoing the selected shades:
+            #: `meta` is a governed vocabulary (a raw shade list there would be
+            #: stored machine vocabulary in a reader-facing envelope), and the
+            #: only question a surface asks of it is this yes/no. `meta`
+            #: `['divergence']` above can no longer answer it: the page pins that
+            #: axis to `shown` unconditionally now and expresses ruling F's rows
+            #: through `novelty` instead, so it would report "included" on every
+            #: render regardless of what the reader chose.
+            "divergent_included": (
+                divergence != DIVERGENCE_HIDDEN
+                if not novelty
+                else bool(set(novelty) & set(DIVERGENCE_SHADE_ORDER))
+            ),
             # The page this envelope actually SERVED, after the service's own
             # clamp. A surface that persists its page needs to compare the page
             # it asked for against the set that came back, and reading its own

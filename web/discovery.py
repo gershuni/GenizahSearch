@@ -35,9 +35,15 @@ from shared.discovery_service import (
     FINDINGS_SORTS,  # noqa: F401 -- exported for surfaces to validate against
     FINDINGS_UNIT_IDENTIFICATION,
     FINDINGS_UNITS,  # noqa: F401 -- exported for surfaces to validate against
+    NOVELTY_VIEW_ALL,  # noqa: F401 -- the selector's default, for a surface's fail-open
+    NOVELTY_VIEW_CANDIDATES,  # noqa: F401 -- exported for surfaces to label
+    NOVELTY_VIEW_DIVERGENT,  # noqa: F401 -- exported for surfaces to label
+    NOVELTY_VIEW_EITHER,  # noqa: F401 -- exported for surfaces to label
+    NOVELTY_VIEWS,  # noqa: F401 -- the closed four-state vocabulary a surface offers
     DiscoveryService,
     findings_divergence_offered,  # noqa: F401 -- the second axis rule, ditto
     findings_novelty_offered,  # noqa: F401 -- the axis rule a surface needs BEFORE it calls
+    novelty_view_shades,  # noqa: F401 -- THE view -> novelty-argument mapping
 )
 from shared.discovery_surface_projection import (
     STATUS_OK,
