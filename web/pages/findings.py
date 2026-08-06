@@ -122,6 +122,8 @@ from web.discovery import (
     get_findings_facets_enveloped,
     get_launch_stats_enveloped,
     novelty_view_shades,
+    suppress_identification,
+    suppressed_identification_ids,
 )
 from web.discovery_assets import (
     discovery_db_path,
@@ -877,12 +879,24 @@ def _novelty_selection(state: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
     return novelty_view_shades(state.get("novelty_view"))
 
 
-async def fetch_findings(state: Dict[str, Any]) -> Dict[str, Any]:
-    """One enveloped findings read. A DIRECT await on the async wrapper."""
+async def fetch_findings(state: Dict[str, Any],
+                         suppressed: Tuple[str, ...] = ()) -> Dict[str, Any]:
+    """One enveloped findings read. A DIRECT await on the async wrapper.
+
+    `suppressed` is the admin hide list, read ONCE per refresh by the caller and
+    threaded in -- never fetched here, because this is called twice on the
+    page-clamp path and a second Supabase read for the same list would be a
+    second network round trip for an answer the caller already has.
+    
+    It reaches the SQL predicate, so the COUNTS follow the hide list (owner
+    ruling, 2026-08-06): `total`, the pager and the facet counts all drop by
+    whatever was hidden, because all three are built from that one predicate.
+    """
     return await get_findings_enveloped(
         state["unit"],
         bucket=state["bucket"],
         novelty=_novelty_selection(state),
+        suppressed=suppressed,
         # ALWAYS `SHOWN` -- i.e. the divergence axis adds NO predicate. The
         # selector now expresses ruling F's rows through `novelty` (they are
         # shades of the same column), so leaving the old axis at its
@@ -913,7 +927,8 @@ async def fetch_launch_stats() -> Dict[str, Any]:
     return await get_launch_stats_enveloped()
 
 
-def _facet_request(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
+def _facet_request(level: str, state: Dict[str, Any],
+                   suppressed: Tuple[str, ...] = ()) -> Dict[str, Any]:
     """The EXACT arguments ONE facet-cascade read takes at `level`.
 
     Written ONCE and used by two callers -- the read itself and the re-fetch
@@ -949,6 +964,11 @@ def _facet_request(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
         "unit": state["unit"],
         "domain": state.get("domain") if level != "domain" else None,
         "author": state.get("author") if level == "work" else None,
+        # THE HIDE LIST IS PART OF THE REQUEST, so it is part of the re-fetch key
+        # below: suppressing a row must re-read the cascade, or a facet count
+        # would keep counting a row the result set no longer shows -- which is
+        # exactly the promise `_node_text` makes.
+        "suppressed": suppressed,
     }
 
 
@@ -967,7 +987,8 @@ def _artifact_identity() -> Tuple[Any, Any]:
     return (discovery_db_path(), discovery_sidecar_version())
 
 
-def _facet_cache_key(level: str, state: Dict[str, Any]) -> Tuple[Any, ...]:
+def _facet_cache_key(level: str, state: Dict[str, Any],
+                     suppressed: Tuple[str, ...] = ()) -> Tuple[Any, ...]:
     """A hashable rendering of `_facet_request`, plus WHICH ARTIFACT answered.
 
     Two reads with the same arguments against the same artifact return the same
@@ -982,13 +1003,15 @@ def _facet_cache_key(level: str, state: Dict[str, Any]) -> Tuple[Any, ...]:
     of ONE `_render_body` call, never a module singleton), and a bounded window
     in which a count is wrong is still a count that is wrong.
     """
-    return ((level,) + tuple(sorted(_facet_request(level, state).items()))
+    return ((level,) + tuple(sorted(_facet_request(level, state, suppressed).items()))
             + _artifact_identity())
 
 
-async def fetch_facets(level: str, state: Dict[str, Any]) -> Dict[str, Any]:
+async def fetch_facets(level: str, state: Dict[str, Any],
+                       suppressed: Tuple[str, ...] = ()) -> Dict[str, Any]:
     """One enveloped facet-cascade read. A DIRECT await on the async wrapper."""
-    return await get_findings_facets_enveloped(level, **_facet_request(level, state))
+    return await get_findings_facets_enveloped(
+        level, **_facet_request(level, state, suppressed))
 
 
 # ---------------------------------------------------------------------------
@@ -1129,9 +1152,40 @@ async def create_findings_page() -> None:
     # can only be awaited once. `fetch_launch_stats` touches no UI, so starting
     # it outside the slot stack is safe (a UI-touching background task would not
     # be -- it would have no slot to render into).
+    # THE ADMIN HIDE LIST, awaited BEFORE the launch read is dispatched.
+    #
+    # THE ORDER IS THE WHOLE POINT, and it is the opposite of what it looks like
+    # it should be. The findings query needs this list as an ARGUMENT, so there is
+    # nothing for it to overlap with -- it cannot be a task the row read races.
+    # And awaiting it AFTER dispatching the launch task would hand the loop a
+    # suspension point in which the launch read completes, so the row read would
+    # then be issued after the launch read finished: §3.7's concurrency, undone.
+    # `test_the_launch_read_and_the_row_read_OVERLAP` caught exactly that.
+    #
+    # So it is resolved FIRST, while nothing else is in flight, and the launch
+    # task is dispatched afterwards to overlap the row read as before. The cost is
+    # bounded and small: the list is process-cached for 30s, the read is skipped
+    # entirely when Supabase is not configured, and a failure is cached for 5s --
+    # so in the steady state this line costs nothing at all.
+    #
+    # A MUTABLE HOLDER, because the ✕ handler replaces the value: after hiding a
+    # row it re-reads and writes back here, so the next `refresh` filters on the
+    # new list. Without that the row the owner just hid would stay on screen.
+    #
+    # NO `try` AROUND THIS. The fail-open is `suppressed_identification_ids`'s own
+    # (it catches every exception and returns `()`), so a second handler here would
+    # be defending against something that cannot arrive -- and the masking sweep's
+    # line-granular gate proved it: the `except` and its log line were never
+    # executed by any capture, correctly, because nothing reaches them. A branch no
+    # capture can paint and no test can drive reads as coverage nobody has, which
+    # is the defect class that gate exists to find. The fail-open behaviour is
+    # unchanged and is asserted where it lives, on the wrapper.
+    hidden: Dict[str, Any] = {"ids": tuple(await suppressed_identification_ids())}
+
     launch = asyncio.ensure_future(fetch_launch_stats())
     with body:
-        await _render_body(state, lang, page_client, launch=launch)
+        await _render_body(state, lang, page_client, launch=launch,
+                           hidden=hidden)
     if _page_is_gone(page_client):
         return
     # LAST, deliberately. The headline region was reserved above the body and is
@@ -1317,7 +1371,8 @@ def _render_mode_strip(lang: str) -> None:
 
 
 async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
-                       launch: Any = None) -> None:
+                       launch: Any = None,
+                       hidden: Optional[Dict[str, Any]] = None) -> None:
     """The two-column body -- a sidebar of filter CARDS and the results beside
     it -- with ONE refresh path shared by every control, so a filter change and
     a bucket change take exactly the same route.
@@ -1358,6 +1413,23 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
     # BEFORE the state is persisted or queried, so what a control shows and
     # what the query does can never disagree.
     control_sync: List[Any] = []
+
+    #: THE ADMIN HIDE LIST for this page render, in a MUTABLE holder.
+    #:
+    #: A dict rather than a local, because the ✕ handler has to be able to replace
+    #: it: suppressing a row calls `invalidate()` and then re-reads, and `refresh`
+    #: must see the NEW list or the row the owner just hid would stay on screen
+    #: until a reload -- which reads as the button not working.
+    #:
+    #: NOT DEFAULTED HERE. An earlier revision carried `if hidden is None: hidden
+    #: = {"ids": ()}`, and the masking sweep's line-granular gate showed that line
+    #: never executes -- correctly, because `create_findings_page` is the only
+    #: caller and it always builds the holder. A defensive default against a caller
+    #: that does not exist is a line no capture can paint and no test can reach,
+    #: which reads as coverage nobody has. `hidden or {"ids": ()}` at the two use
+    #: sites keeps a bare `None` from raising without adding an unreachable
+    #: statement.
+    hidden = hidden if hidden is not None else {"ids": ()}
 
     #: THE FACET RE-FETCH CACHE, per page render. `level -> (request key,
     #: envelope)`, so a refresh re-reads exactly the levels whose inputs moved
@@ -1446,7 +1518,27 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         write_state(state)
         if _stale():
             return
-        envelope = await fetch_findings(state)
+        # THE ADMIN HIDE LIST, read ONCE per refresh and threaded into all three
+        # reads below (owner ruling, 2026-08-06). One read, not three: it is a
+        # Supabase round trip, it is process-cached, and the rows, the count and
+        # the facet cascade must all be built from the SAME list -- a second read
+        # between them could return a different one and put a count beside rows it
+        # does not describe.
+        #
+        # RESOLVED ONCE PER PAGE, NOT PER REFRESH, and read from the caller's
+        # mutable holder here. Awaiting it on this line is what an earlier draft
+        # did, and it undid §3.7: the launch read is dispatched as a task
+        # specifically so it overlaps the row read, and an `await` in front of the
+        # row read serialised the whole chain again. Caught by
+        # `test_the_launch_read_and_the_row_read_OVERLAP`, not by reading the diff.
+        #
+        # The hide list is a fact about the PAGE, not about one filter change, so
+        # reading it per refresh was wrong on its own terms as well: it put a
+        # Supabase round trip on the critical path of every control the reader
+        # touches. The ✕ handler refreshes the holder itself, so clicking it still
+        # shows the effect immediately.
+        suppressed = tuple(hidden["ids"])
+        envelope = await fetch_findings(state, suppressed)
         if _stale():
             return
         # A PERSISTED PAGE PAST THE END. The clamp moves the STATE (never a
@@ -1456,7 +1548,7 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         # construction, so the second envelope cannot be out of range again.
         if clamp_page_to_total(state, envelope):
             write_state(state)
-            envelope = await fetch_findings(state)
+            envelope = await fetch_findings(state, suppressed)
             if _stale():
                 return
         launch_meta = await _launch_meta()
@@ -1466,12 +1558,14 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         with results_region:
             _render_results(envelope, state, lang, refresh,
                             more_pool_total=launch_meta.get("more_pool_total"),
-                            sidecar_version=launch_meta.get("sidecar_version"))
+                            sidecar_version=launch_meta.get("sidecar_version"),
+                            suppressed=suppressed, hidden=hidden)
         if _stale():
             return
         await _populate_facets(
             filter_bar, state, lang, refresh,
             cache=facet_cache, page_client=page_client, is_stale=_stale,
+            suppressed=suppressed,
         )
 
     with filter_bar:
@@ -1842,6 +1936,7 @@ async def _populate_facets(
     cache: Optional[Dict[str, Tuple[Any, Dict[str, Any]]]] = None,
     page_client: Any = None,
     is_stale: Optional[Any] = None,
+    suppressed: Tuple[str, ...] = (),
 ) -> None:
     """Fill the three facet lists from the cascade -- on EVERY refresh.
 
@@ -1887,12 +1982,12 @@ async def _populate_facets(
         container = containers.get(level)
         if container is None:  # pragma: no cover -- structural
             continue
-        key = _facet_cache_key(level, state)
+        key = _facet_cache_key(level, state, suppressed)
         cached = cache.get(level) if cache is not None else None
         if cached is not None and cached[0] == key:
             envelope = cached[1]
         else:
-            envelope = await fetch_facets(level, state)
+            envelope = await fetch_facets(level, state, suppressed)
             # ONLY AN `ok` ENVELOPE IS CACHED. A `timeout` or a `busy` is a
             # statement about the SERVICE at one instant, not an answer to the
             # question this key asks -- and the key is derived from the request,
@@ -2253,6 +2348,8 @@ def _render_facet_items(
 def _render_results(
     envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh,
     more_pool_total: Any = None, sidecar_version: Any = None,
+    suppressed: Tuple[str, ...] = (),
+    hidden: Optional[Dict[str, Any]] = None,
 ) -> None:
     status = (envelope or {}).get("status")
     if status != "ok":
@@ -2310,7 +2407,9 @@ def _render_results(
             _render_empty_state(state, lang, refresh, more_pool_total)
         for item in items:
             _render_row(item, lang, sidecar_version=sidecar_version,
-                        state=state, catalogue_title=_catalogue_title)
+                        state=state, catalogue_title=_catalogue_title,
+                        refresh=refresh, suppressed=suppressed,
+                        hidden=hidden)
 
     _render_pager(total, state, lang, refresh,
                   page_size=effective_page_size(envelope),
@@ -2826,7 +2925,8 @@ def _child_state(state: Dict[str, Any], axis: str, value: str) -> Dict[str, Any]
 
 
 async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any],
-                          page: int = 1) -> Dict[str, Any]:
+                          page: int = 1,
+                          suppressed: Tuple[str, ...] = ()) -> Dict[str, Any]:
     """One grouped row's children, through the SHIPPED findings read.
 
     No new query and no new service entry point -- `_build_findings_filter`
@@ -2860,6 +2960,12 @@ async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any],
         child["unit"],
         bucket=child["bucket"],
         novelty=_novelty_selection(child),
+        # THE HIDE LIST APPLIES INSIDE AN EXPANSION TOO. A suppressed row that
+        # survived one click into its parent work would be the hide silently not
+        # working, in the one place a reader looks hardest -- and the parent's
+        # count already excludes it, so the child list would contradict the number
+        # above it.
+        suppressed=suppressed,
         # `SHOWN`, matching `fetch_findings` exactly. The children must come from
         # the SAME predicate as the parent -- that is the whole honesty property
         # of the expansion -- so any divergence here other than the parent's
@@ -2903,10 +3009,58 @@ def preview_url(item: Mapping[str, Any]) -> Optional[str]:
     return f"/browse?sys_id={quote(str(sys_id))}&embed=1"
 
 
+def _viewer_is_admin() -> bool:
+    """Whether the CURRENT viewer is an admin, for the ✕'s visibility only.
+
+    NOT THE SECURITY BOUNDARY, and that distinction is the whole reason this is
+    allowed to be a cheap in-memory check. The boundary is the RLS policy on
+    `discovery_suppressed`: its INSERT and DELETE policies test
+    `auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin')`, so a forged
+    request from a non-admin is refused by Postgres whatever this returns. This
+    only decides whether a button is drawn -- the same posture
+    `web/supabase_client.py` documents for hidden discoveries.
+
+    Fails CLOSED (no control) on any error: an unreadable auth state must not
+    render an admin affordance, and the cost of a false negative is that the
+    owner reloads the page.
+    """
+    try:
+        from web.auth_state import GlobalAuthState
+
+        return bool(GlobalAuthState.is_admin())
+    except Exception:  # noqa: BLE001 -- an auth hiccup must not break the page
+        return False
+
+
+def _notify_suppress_failed() -> None:
+    """Tell the admin the hide did NOT take effect.
+
+    A silent failure here is the worst outcome of the whole mechanism: the owner
+    clicks ✕ to take an embarrassing row off a live beta, sees the page repaint,
+    and reasonably concludes it is gone. It would not be. So a failed write says
+    so, in the one place the person who clicked is looking.
+
+    `ui.notify` rather than a rendered element: this is a transient report about
+    an ACTION, not a fact about the data, and nothing on the page should change
+    because a write failed. Wrapped because `ui.notify` needs a live client slot
+    and this can be reached from a context that has none (a probe, a client that
+    has just gone away) -- and a failed notification must not mask the failure it
+    was reporting.
+    """
+    try:
+        ui.notify(tr("Could not hide this finding. Please try again."),
+                  type="negative")
+    except Exception:  # noqa: BLE001 -- no client to notify; the log has it
+        logger.warning("findings: the hide failed and could not be reported")
+
+
 def _render_row(item: Dict[str, Any], lang: str,
                 sidecar_version: Any = None,
                 state: Optional[Dict[str, Any]] = None,
-                catalogue_title=None) -> None:
+                catalogue_title=None,
+                refresh=None,
+                suppressed: Tuple[str, ...] = (),
+                hidden: Optional[Dict[str, Any]] = None) -> None:
     """One result row, in whichever of the three shipped units the service
     produced it.
 
@@ -2926,12 +3080,38 @@ def _render_row(item: Dict[str, Any], lang: str,
     """
     loader = None
     if state is not None:
-        async def loader(row, page=1, _state=dict(state)):   # noqa: F811
-            return await _fetch_children(_state, row, page)
+        async def loader(row, page=1, _state=dict(state), _hidden=suppressed):  # noqa: F811
+            return await _fetch_children(_state, row, page, _hidden)
+
+    # THE ADMIN ✕, on the identification leaf only and only for an admin. The
+    # handler is built HERE rather than in the component for the same reason
+    # `load_children` and `preview_url` are injected: the component renders and
+    # does not read, so it cannot reach Supabase and cannot know what a refresh
+    # is. `None` when there is no refresh to run afterwards (a bare probe render),
+    # which withholds the control rather than offering a button that cannot work.
+    on_suppress = None
+    if refresh is not None and _viewer_is_admin():
+        async def on_suppress(identification_id: str) -> None:
+            if not await suppress_identification(identification_id):
+                # The write failed (no admin session, RLS refusal, Supabase
+                # down). Refreshing would repaint the same row and read as the
+                # click doing nothing at all, so SAY so instead.
+                _notify_suppress_failed()
+                return
+            # RE-READ BEFORE REFRESHING, and this order is the whole reason the
+            # hide list lives in a mutable holder. `refresh` filters on
+            # `hidden['ids']`; the write invalidated the process cache but this
+            # page's holder still has the OLD tuple, so refreshing first would
+            # repaint the row that was just hidden -- indistinguishable from a
+            # broken button.
+            if hidden is not None:
+                hidden["ids"] = await suppressed_identification_ids()
+            await refresh()
 
     rows.render_finding_row(item, lang, sidecar_version=sidecar_version,
                             load_children=loader, preview_url=preview_url,
-                            catalogue_title=catalogue_title)
+                            catalogue_title=catalogue_title,
+                            on_suppress=on_suppress)
 
 
 def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh,

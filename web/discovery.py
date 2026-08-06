@@ -18,6 +18,7 @@ query times out -- T-134-failopen.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -229,6 +230,7 @@ async def get_findings_enveloped(
     sort: str = FINDINGS_SORT_BAND_RANK,
     page: int = 1,
     page_size: Optional[int] = None,
+    suppressed: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """The corpus-wide "Computed Identifications" query (A-6).
 
@@ -251,11 +253,96 @@ async def get_findings_enveloped(
         return await _service.get_findings_enveloped_async(
             unit, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain, author=author,
-            work_id=work_id, sort=sort, page=page, page_size=page_size)
+            work_id=work_id, sort=sort, page=page, page_size=page_size,
+            suppressed=suppressed)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
         return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+#: Bounds the concurrent Supabase reads of the admin hide list.
+#:
+#: ONE, deliberately. The list is process-cached for 30s, so the only reads that
+#: reach Supabase are cache misses -- and on a cold process every concurrent
+#: visitor misses at once. A semaphore of 1 collapses that burst into a single
+#: round trip whose answer fills the cache for all of them; a wider bound would
+#: let N visitors each issue the same query for the same rows.
+_SUPPRESSION_SEMAPHORE = asyncio.Semaphore(1)
+
+
+async def suppressed_identification_ids() -> Tuple[str, ...]:
+    """The admin hide list, read OFF the event loop, as a hashable tuple.
+
+    OFF-LOOP IS NOT OPTIONAL. This is a Supabase round trip, and the findings page
+    calls it on every render -- so on the loop it would stall every concurrent
+    request while burning no CPU, which is the exact failure class
+    `web/perf_watch.py` was added to catch and the one v8.5.2 fixed in five other
+    places. It goes through `bounded_io_bound`, the same chokepoint
+    `web/discovery_genre_labels.py` uses, so this page's Supabase draw is bounded
+    process-wide rather than per-request.
+
+    A TUPLE, not a set: the value is passed into the service's async accessors,
+    which put their whole argument list into a cache key, so every member has to
+    be hashable and the ORDER has to be stable between identical requests. The
+    underlying reader returns a frozenset (unordered), so it is SORTED here --
+    without that, two identical requests could produce two different cache keys
+    and the cache would silently never hit.
+
+    FAILS OPEN to an empty tuple, which means "hide nothing". Owner-confirmed: a
+    Supabase outage must leave the findings page fully readable rather than blank.
+    The reader logs the failure at WARNING so it is not silent.
+    """
+    try:
+        from web.bounded_io import bounded_io_bound
+        from web.discovery_suppression import suppressed_ids
+
+        ids = await bounded_io_bound(_SUPPRESSION_SEMAPHORE, suppressed_ids)
+        return tuple(sorted(ids or ()))
+    except Exception as exc:  # noqa: BLE001 -- a hide list must never break a page
+        logger.warning(
+            "discovery.suppressed_identification_ids failed (%s) -- rendering "
+            "everything", type(exc).__name__)
+        return ()
+
+
+async def suppress_identification(identification_id: str) -> bool:
+    """Hide ONE identification, OFF the event loop. Returns whether it took.
+
+    LIVES HERE rather than on the page, and the reason is a guard rather than a
+    preference: `tests/test_findings_page.py::
+    test_module_adds_no_nested_offload_and_no_direct_service_call` allows the page
+    to await only this module's wrappers and its own helpers. A page that reached
+    for `bounded_io_bound` itself would be a second offload site with its own
+    bound, which is exactly the nesting that guard exists to prevent -- and it
+    caught this when the write was written on the page.
+
+    `bounded_io_bound`, NOT `run.io_bound`: `run_in_executor` does not propagate
+    contextvars, and the Supabase USER client is contextvar-scoped -- so the write
+    would silently degrade to the ANONYMOUS client and be refused by the RLS
+    policy, with no error the admin could see. That trap cost this project a
+    release (v8.5.2) and is recorded in `reference_io_bound_safe_storage_trap`.
+
+    Shares `_SUPPRESSION_SEMAPHORE` with the read: both are Supabase calls on the
+    same table from the same page, and one bound over both is what keeps this
+    page's Supabase draw fixed regardless of how many admins are clicking.
+
+    Returns False on ANY failure rather than raising, so the caller can tell the
+    admin the hide did not take -- a silent failure here would let the owner
+    believe an embarrassing row is gone when it is not.
+    """
+    if not identification_id:
+        return False
+    try:
+        from web.bounded_io import bounded_io_bound
+        from web.discovery_suppression import suppress
+
+        return bool(await bounded_io_bound(
+            _SUPPRESSION_SEMAPHORE, suppress, str(identification_id)))
+    except Exception as exc:  # noqa: BLE001 -- a failed hide must not break a page
+        logger.error("discovery.suppress_identification failed (%s)",
+                     type(exc).__name__)
+        return False
 
 
 async def get_launch_stats_enveloped() -> Dict[str, Any]:
@@ -301,6 +388,7 @@ async def get_findings_facets_enveloped(
     domain: Optional[str] = None,
     author: Optional[str] = None,
     unit: str = FINDINGS_UNIT_IDENTIFICATION,
+    suppressed: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """The domain / author / work cascade -- on the IDENTIFIED WORK's domain,
     never the manuscript's catalogue domain.
@@ -317,7 +405,7 @@ async def get_findings_facets_enveloped(
         return await _service.get_findings_facets_enveloped_async(
             level, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain, author=author,
-            unit=unit)
+            unit=unit, suppressed=suppressed)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself

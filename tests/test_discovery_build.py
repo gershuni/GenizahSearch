@@ -3406,9 +3406,31 @@ def test_the_probes_filter_axes_are_PINNED_to_the_shipped_predicate_builder():
         "a smaller space than the page can reach.")
 
     # ...and the page really does hand every one of them to the builder.
+    #
+    # READ AS AST, not by slicing to the first blank line. The slice was the
+    # earlier implementation and it was brittle in a way that produced a false
+    # RED: it stopped at the first blank line, so the moment `fetch_findings`
+    # gained a docstring with a paragraph break the "call" it inspected was the
+    # signature and half a sentence -- and the test then reported that the page
+    # passes NONE of its axes, naming `novelty` first. That is a guard failing on
+    # its own parsing rather than on the property it protects.
+    #
+    # Reading the CALL KEYWORDS is also strictly stronger than the substring scan
+    # it replaces: an axis merely mentioned in a comment satisfied the old form
+    # and does not satisfy this one.
+    import ast as _ast
+
     page_src = Path("web/pages/findings.py").read_text(encoding="utf-8")
-    call = page_src[page_src.index("async def fetch_findings"):]
-    call = call[: call.index("\n\n")]
+    _fn = next(
+        node for node in _ast.walk(_ast.parse(page_src))
+        if isinstance(node, (_ast.AsyncFunctionDef, _ast.FunctionDef))
+        and node.name == "fetch_findings"
+    )
+    call = " ".join(
+        f"{keyword.arg}="
+        for node in _ast.walk(_fn) if isinstance(node, _ast.Call)
+        for keyword in node.keywords if keyword.arg
+    )
     for axis in authority:
         assert f"{axis}=" in call, (
             f"web/pages/findings.py::fetch_findings does not pass {axis!r}; the "

@@ -1326,6 +1326,16 @@ def test_page_load_dispatch_total_is_the_sum_over_the_reads_the_page_issues():
         reads.append("launch")
         return await wd.get_launch_stats_enveloped(*args, **kwargs)
 
+    # THE FOURTH READ (2026-08-06): the admin hide list. Counted here for exactly
+    # the reason the docstring above gives for counting the launch read -- the
+    # criterion is "one dispatch per read", so a read the probe does not know
+    # about turns a correct implementation red. It is a SUPABASE read rather than
+    # a sidecar one, and it still goes through a single `bounded_io_bound`
+    # dispatch, which is what this criterion is about.
+    async def _counting_suppressed(*args, **kwargs):
+        reads.append("suppressed")
+        return await wd.suppressed_identification_ids(*args, **kwargs)
+
     _ensure_sim()
     from nicegui import core, ui
     from nicegui.client import Client
@@ -1349,6 +1359,8 @@ def test_page_load_dispatch_total_is_the_sum_over_the_reads_the_page_issues():
                 stack.enter_context(patch.object(fp, "get_findings_enveloped", _counting_findings))
                 stack.enter_context(patch.object(fp, "get_findings_facets_enveloped", _counting_facets))
                 stack.enter_context(patch.object(fp, "get_launch_stats_enveloped", _counting_launch))
+                stack.enter_context(patch.object(
+                    fp, "suppressed_identification_ids", _counting_suppressed))
                 with Client(ui.page("/_findings_dispatch_probe")) as client:
                     with client:
                         await fp.create_findings_page()
@@ -1631,12 +1643,19 @@ def _contract_bound_findings(recorder=None):
 
     async def _call(unit="identification", *, bucket="main", novelty=None,
                     divergence="hidden", domain=None, author=None,
-                    work_id=None, sort="band_rank", page=1, page_size=50):
-        # Raises for an unreachable-by-contract combination, exactly as shipped.
+                    work_id=None, sort="band_rank", page=1, page_size=50,
+                    suppressed=None):
+        # `suppressed` (2026-08-06): the admin hide list. Accepted AND FORWARDED to
+        # the real builder rather than merely swallowed -- the whole point of this
+        # stub is that it refuses what the shipped service refuses, so a filter
+        # axis it silently dropped would be an axis whose validation this test
+        # stopped exercising. Forwarding it means the over-cap raise is live here
+        # too.
         _build_findings_query(
             unit=unit, sort=sort, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain,
-            author=author, work_id=work_id, page=page, page_size=page_size)
+            author=author, work_id=work_id, suppressed=suppressed,
+            page=page, page_size=page_size)
         if recorder is not None:
             recorder.append({"unit": unit, "novelty": novelty, "bucket": bucket,
                              "divergence": divergence})

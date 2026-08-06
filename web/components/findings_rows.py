@@ -172,6 +172,10 @@ ROW_COVERAGE_CLASS = "gs-findings-row-coverage"
 ROW_SHELFMARK_CLASS = "gs-findings-row-shelfmark"
 ROW_ANNOTATION_CLASS = "gs-findings-row-annotation"
 ROW_REPORT_CLASS = "gs-findings-row-report"
+#: THE ADMIN HIDE CONTROL (owner ruling, 2026-08-06). Its own class so a test can
+#: assert it is ABSENT for a non-admin -- the property that matters, and one a
+#: scan of rendered text cannot see, because an absent button renders no text.
+ROW_SUPPRESS_CLASS = "gs-findings-row-suppress"
 #: The catalogue's OWN title for the manuscript (libraries.csv, injected --
 #: see `_render_shelfmark`). Lives beside the shelfmark, not the meta line: it
 #: names WHICH manuscript this is, the same job the shelfmark does, rather
@@ -233,6 +237,22 @@ _COPY: Dict[str, Dict[str, str]] = {
     "report_link": {
         "en": "Report a problem",
         "he": "דיווח על בעיה",
+    },
+    # THE ADMIN HIDE CONTROL's accessible name (owner ruling, 2026-08-06: "can we
+    # add X to identification so admin can click and hide it").
+    #
+    # It says HIDE, not "delete" or "reject": the row is removed from the surface
+    # and nothing about the underlying identification changes -- the artifact is
+    # content-hash verified and cannot be edited at all. Naming it "delete" would
+    # promise a permanence this mechanism does not have, and "reject" would claim
+    # an adjudication, which is the one thing no surface in this phase does.
+    #
+    # Bilingual even though only the owner sees it: an admin reading the Hebrew
+    # interface should not meet an English control, and the cost of the second
+    # string is nil.
+    "suppress_row": {
+        "en": "Hide this finding",
+        "he": "הסתרת ממצא זה",
     },
     # THE LINK TEXT IS BILINGUAL; THE PREFILLED MESSAGE IS ASCII. The reader
     # writes their own text into the body in whichever language they please;
@@ -1550,7 +1570,7 @@ def report_mailto(item: Mapping[str, Any], lang: str = "en",
 
 
 def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
-                     sidecar_version: Any = None) -> None:
+                     sidecar_version: Any = None, on_suppress=None) -> None:
     """The meta line: relation chip, novelty chip, page count, coverage, bucket.
 
     NO band tooltip. The identification grain exposes `best_band_rank` and no
@@ -1628,6 +1648,28 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
             ui.link(copy_text("report_link", lang), target).classes(
                 f"{ROW_REPORT_CLASS} dnote text-xs")
 
+        # THE ADMIN ✕. INJECTED, like every other affordance on this row: this
+        # module renders and does not read, so it cannot reach Supabase and does
+        # not know what an admin is. `None` -- the case for every ordinary reader
+        # -- renders NOTHING, not a disabled button.
+        #
+        # ON THE IDENTIFICATION LEAF ONLY, gated on `identification_id` exactly as
+        # the report link is: the grouped units aggregate many identifications into
+        # one line, so there is no single id to hide and a ✕ there would either do
+        # nothing or hide an arbitrary one of them.
+        identification = item.get("identification_id")
+        if on_suppress is not None and identification:
+            async def _hide(_event=None, _id=str(identification)) -> None:
+                await on_suppress(_id)
+
+            hide = ui.button(icon="close", on_click=_hide).props(
+                "flat round dense size=xs")
+            hide.classes(f"{ROW_SUPPRESS_CLASS} dnote")
+            # An icon-only control needs a name a screen reader can read, and
+            # `tooltip` alone is not one.
+            hide.props(f'aria-label="{copy_text("suppress_row", lang)}"')
+            hide.tooltip(copy_text("suppress_row", lang))
+
 
 #: UNIT -> the row field that identifies the group, and the filter axis the
 #: expansion pins it to. `None` on the leaf unit: an identification IS the leaf,
@@ -1698,7 +1740,7 @@ def expansion_target(item: Mapping[str, Any]) -> Optional[Tuple[str, str]]:
 def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                        sidecar_version: Any = None,
                        load_children=None, preview_url=None,
-                       catalogue_title=None) -> None:
+                       catalogue_title=None, on_suppress=None) -> None:
     """One result row, in whichever unit the service produced it.
 
     The unit arrives ON the row (`unit`, part of the projection); it is
@@ -1763,7 +1805,8 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                 if author:
                     ui.label(str(author))
 
-        _render_row_meta(item, lang, unit, sidecar_version=sidecar_version)
+        _render_row_meta(item, lang, unit, sidecar_version=sidecar_version,
+                         on_suppress=on_suppress)
 
         # THE TWO AFFORDANCES, each on the unit where it has a meaning. A
         # grouped row opens onto its children; the leaf previews its manuscript.
@@ -1772,13 +1815,15 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
         if load_children is not None and expansion_target(item) is not None:
             _render_expansion(item, lang, load_children,
                               sidecar_version=sidecar_version,
-                              preview_url=preview_url)
+                              preview_url=preview_url,
+                              on_suppress=on_suppress)
         elif unit == FINDINGS_UNIT_IDENTIFICATION and preview_url is not None:
             _render_preview(item, lang, preview_url)
 
 
 def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
-                      sidecar_version: Any = None, preview_url=None) -> None:
+                      sidecar_version: Any = None, preview_url=None,
+                      on_suppress=None) -> None:
     """The grouped row's children, IN PLACE, fetched when the reader asks.
 
     Lazy for the reason the panel's expansion is: the heaviest work carries
@@ -1919,9 +1964,14 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
                     # preview, and it cannot drift from a top-level row's
                     # anatomy. It is given NO `load_children`: a leaf has
                     # nothing under it, and passing one would build a tree.
+                    # The child is a LEAF, so it gets the ✕ too: a wrong row
+                    # inside an expanded work is exactly as visible as one at the
+                    # top level, and the owner should not have to change the row
+                    # unit to hide it.
                     render_finding_row(child, lang,
                                        sidecar_version=sidecar_version,
-                                       preview_url=preview_url)
+                                       preview_url=preview_url,
+                                       on_suppress=on_suppress)
             extent["holder"] = _render_expansion_extent(
                 state["shown"], total, lang, on_more=_more)
 
@@ -2077,6 +2127,7 @@ __all__ = [
     "REPORT_ADDRESS",
     "ROW_SHELFMARK_CLASS",
     "ROW_SUB_CLASS",
+    "ROW_SUPPRESS_CLASS",
     "ROW_TITLE_CLASS",
     "copy_keys",
     "copy_text",

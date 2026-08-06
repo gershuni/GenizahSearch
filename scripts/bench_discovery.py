@@ -356,7 +356,7 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
     """
     bucket_sql = "di.main_pool = 1" if main_pool else "di.main_pool = 0"
     out: Dict[str, Any] = {"work_id": None, "domain": None, "author": None,
-                           "novelty_status": None}
+                           "novelty_status": None, "suppressed": None}
     try:
         row = conn.execute(
             f"""
@@ -391,6 +391,19 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
     if row is not None:
         out.update({"work_id": row[0], "domain": row[1] or None,
                     "author": row[2] or None})
+    # ONE REAL SUPPRESSED ID from this bucket. Taken from the bucket rather than
+    # invented, so the `NOT IN` clause excludes a row that is really there --
+    # a made-up id would build the same SQL shape but exclude nothing, and the
+    # timing would then describe a predicate the page never runs.
+    try:
+        hidden = conn.execute(
+            f"SELECT di.identification_id FROM discovery_identification di "
+            f"WHERE {bucket_sql} LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error:                                    # pragma: no cover
+        hidden = None
+    if hidden is not None and hidden[0]:
+        out["suppressed"] = [hidden[0]]
     preferred = [s for s in statuses if s[0] == prefer_novelty]
     if preferred or statuses:
         out["novelty_status"] = (preferred or statuses)[0][0]
@@ -730,8 +743,16 @@ _FINDINGS_OUT_OF_SCOPE: Tuple[Tuple[str, str], ...] = (
 #: `author`, `work`, every AND-composition and every filtered SECOND-BUCKET
 #: combination unmeasured, while the report said "the FULL combination space"
 #: (code review round 13, finding 4).
+#: `suppressed` (2026-08-06) is the admin hide list -- a `NOT IN` over
+#: identification ids. It is measured for the same reason every other axis is: it
+#: composes as AND with all of them, it lands in the SAME predicate the count and
+#: the facet cascade are built from, and a probe that skipped it would report a
+#: narrower page than a reader can reach. The guard at
+#: `tests/test_discovery_build.py::test_the_probes_filter_axes_are_PINNED_to_the_
+#: shipped_predicate_builder` reads `_build_findings_filter`'s own signature and
+#: fails if this tuple falls behind it -- which is how this entry got added.
 _FINDINGS_FILTER_AXES: Tuple[str, ...] = (
-    "novelty", "divergence", "domain", "author", "work")
+    "novelty", "divergence", "domain", "author", "work", "suppressed")
 
 
 def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
@@ -785,6 +806,13 @@ def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
                 kwargs["author"] = pick.get("author")
             if "work" in on:
                 kwargs["work_id"] = pick.get("work_id")
+            if "suppressed" in on:
+                # A REAL id from THIS bucket, so the `NOT IN` is a predicate that
+                # excludes something rather than one the optimiser can discard.
+                # `None` when the bucket yielded none, which leaves the axis off
+                # for that state rather than measuring an empty clause and calling
+                # it measured.
+                kwargs["suppressed"] = pick.get("suppressed")
             states.append((stem, "+".join((stem,) + on), kwargs, on))
     return states
 

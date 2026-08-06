@@ -928,6 +928,22 @@ def _like_prefix(value: str) -> str:
     return _LIKE_ESCAPE_RE.sub(r"\\\1", value) + " / %"
 
 
+#: How many identifications one request may suppress.
+#:
+#: A HARD CAP, not a tuning knob. Each suppressed id becomes one `?` in a `NOT IN`
+#: clause, and SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` is 999 -- shared with
+#: every other bound parameter in the same statement. A list that grew past this
+#: would start failing as an opaque SQLite error deep inside a query, so the
+#: builder RAISES here instead, naming the cap.
+#:
+#: 200 is deliberately far below 999 and far above any plausible use. This exists
+#: to hide the handful of rows an owner finds embarrassing before a beta; a
+#: suppression list approaching 200 is evidence that the BAKE is wrong, and the
+#: fix then is the main-pool rule or the evidence, never a longer denylist. The
+#: raise is the signal that the tool is being used as a substitute for the fix.
+FINDINGS_SUPPRESSION_MAX = 200
+
+
 def _build_findings_filter(
     *, unit: str = FINDINGS_UNIT_IDENTIFICATION,
     bucket: str = BUCKET_MAIN,
@@ -936,6 +952,7 @@ def _build_findings_filter(
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
+    suppressed: Optional[Iterable[str]] = None,
 ) -> Tuple[str, List[Any]]:
     """The ONE findings predicate, shared by the row query and the facet
     counts.
@@ -1053,6 +1070,59 @@ def _build_findings_filter(
         where.append("di.display_work_id = ?")
         params.append(work_id)
 
+    # ADMIN SUPPRESSION (owner ruling, 2026-08-06): a list of identification ids
+    # the owner has hidden, so a clearly-wrong row can come off the live beta
+    # without a re-bake. The artifact is content-hash verified and refuses to
+    # serve if a single byte changes, so suppression CANNOT live in it; the ids
+    # come from Supabase and are passed IN by `web/discovery.py`. This module
+    # must not import `web/` (`tests/test_seed016_layering_executor.py`), and
+    # does not.
+    #
+    # IN THE PREDICATE, not applied to a fetched page, and that is the whole
+    # reason this is here rather than in the renderer. The owner ruled that the
+    # counts follow the suppression, which this gets for free: `total`, the pager
+    # and every facet count are built from THIS predicate, so they all drop by
+    # exactly what was hidden. Post-filtering a page would leave all three
+    # describing a population the reader is not being shown -- the same defect
+    # the divergence filter's own comment above was written about, and the same
+    # one CLAUDE.md names for a capped total ("a capped total reported as exact is
+    # a correctness defect").
+    #
+    # The LAUNCH HEADLINE figures deliberately do NOT move: they are corpus
+    # figures on ruling U's fixed basis, read by a separate query, and a corpus
+    # figure that tracked an admin's hide list would stop being a corpus figure.
+    # Owner confirmed. The result bar is what reports what the reader is seeing.
+    #
+    # `NOT IN` IS SOUND HERE, and it needs saying because the sibling divergence
+    # clause above carries a long warning about exactly this shape:
+    # `NULL NOT IN (...)` evaluates to NULL and would silently drop every row
+    # with a null in the tested column. `di.identification_id` is the table's
+    # PRIMARY KEY and therefore NOT NULL, so the null branch is unreachable by
+    # construction rather than merely unlikely.
+    suppressed_list = [str(value) for value in (suppressed or ()) if value]
+    if suppressed_list:
+        # DEDUPLICATED and ORDER-STABLE: two copies of one id would burn two
+        # parameters against the cap for no effect, and a set would make the
+        # generated SQL vary between identical requests -- which would defeat any
+        # future statement cache and makes a test assertion on the SQL flaky.
+        seen: Dict[str, None] = {}
+        for value in suppressed_list:
+            seen.setdefault(value, None)
+        suppressed_list = list(seen)
+        if len(suppressed_list) > FINDINGS_SUPPRESSION_MAX:
+            raise ValueError(
+                f"{len(suppressed_list)} suppressed identifications exceeds the "
+                f"cap of {FINDINGS_SUPPRESSION_MAX}. This tool hides the few rows "
+                "that must come off a live surface immediately; a list this long "
+                "means the bake is wrong, and the fix is the main-pool rule or "
+                "the evidence, not a longer denylist."
+            )
+        where.append(
+            "di.identification_id NOT IN (%s)"
+            % ",".join("?" for _ in suppressed_list)
+        )
+        params.extend(suppressed_list)
+
     return ("WHERE " + " AND ".join(where)) if where else "", params
 
 
@@ -1085,6 +1155,7 @@ def _build_findings_query(
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
+    suppressed: Optional[Iterable[str]] = None,
     page: int = 1,
     page_size: int = 50,
     count_only: bool = False,
@@ -1117,7 +1188,7 @@ def _build_findings_query(
     where_sql, params = _build_findings_filter(
         unit=unit, bucket=bucket, novelty=novelty,
         divergence=divergence, domain=domain,
-        author=author, work_id=work_id)
+        author=author, work_id=work_id, suppressed=suppressed)
     group_by = _FINDINGS_UNIT_GROUP_BY[unit]
     group_sql = f"GROUP BY {group_by}" if group_by else ""
 
@@ -2439,6 +2510,7 @@ class DiscoveryService:
         sort: str = FINDINGS_SORT_BAND_RANK,
         page: int = 1,
         page_size: Optional[int] = None,
+        suppressed: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
         """The corpus-wide findings query, in whichever of the three offered
         units the reader selected.
@@ -2461,7 +2533,8 @@ class DiscoveryService:
         sql, params = _build_findings_query(
             unit=unit, sort=sort, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain,
-            author=author, work_id=work_id, page=page, page_size=page_size)
+            author=author, work_id=work_id, page=page, page_size=page_size,
+            suppressed=suppressed)
 
         if not self.is_available():
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
@@ -2479,6 +2552,7 @@ class DiscoveryService:
                     unit=unit, sort=sort, bucket=bucket, novelty=novelty,
                     divergence=divergence,
                     domain=domain, author=author, work_id=work_id,
+                    suppressed=suppressed,
                     count_only=True, count_cap=count_cap)
                 counted = int(conn.execute(count_sql, count_params).fetchone()["n"])
                 if counted > count_cap:
@@ -2505,6 +2579,7 @@ class DiscoveryService:
                         unit=unit, sort=sort, bucket=bucket, novelty=novelty,
                         divergence=divergence,
                         domain=domain, author=author, work_id=work_id,
+                        suppressed=suppressed,
                         count_only=True)
                     total = int(conn.execute(count_sql, count_params).fetchone()["n"])
         except Exception as e:
@@ -2577,6 +2652,7 @@ class DiscoveryService:
         domain: Optional[str] = None,
         author: Optional[str] = None,
         unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        suppressed: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
         """The domain / author / work cascade, mirroring the catalogue page's
         accessor SHAPE (`get_browse_authors(domain)` ->
@@ -2623,6 +2699,13 @@ class DiscoveryService:
             divergence=divergence,
             domain=None if level == "domain" else domain,
             author=author if level == "work" else None,
+            # THE SUPPRESSION REACHES THE FACET COUNTS TOO (owner ruling,
+            # 2026-08-06: the counts follow the hide list). Threading it here is
+            # not optional for the same reason `divergence` is not: a cascade
+            # built without it would count rows the result set beside it does not
+            # show, and `_node_text`'s promise is that a number beside an option
+            # always agrees with what selecting that option returns.
+            suppressed=suppressed,
         )
         count_sql = _FINDINGS_FACET_COUNT_SQL[unit]
 
@@ -3593,14 +3676,18 @@ class DiscoveryService:
         sort: str = FINDINGS_SORT_BAND_RANK,
         page: int = 1,
         page_size: Optional[int] = None,
+        suppressed: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
         """Heavy by design: the corpus-wide query gets a bounded-concurrency
         slot, so a burst of findings requests degrades to an explicit `busy`
         rather than queueing behind each other and starving the browse path."""
         return await self._enveloped_off_loop(
             self.get_findings_enveloped,
+            # POSITIONAL: order matches the sync signature, `suppressed` last.
+            # A tuple (not a list) because this is also a cache key.
             (unit, bucket, tuple(novelty or ()) or None, divergence,
-             domain, author, work_id, sort, page, page_size),
+             domain, author, work_id, sort, page, page_size,
+             tuple(suppressed or ()) or None),
             timeout=self._findings_timeout(), heavy=True,
         )
 
@@ -3639,11 +3726,21 @@ class DiscoveryService:
         domain: Optional[str] = None,
         author: Optional[str] = None,
         unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        suppressed: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
+        # POSITIONAL DISPATCH: the tuple's order must match the sync method's
+        # parameter order exactly, and `suppressed` is LAST there for that reason.
+        # A tuple built in a different order would silently pass the hide list as
+        # `unit` -- which raises, loudly, but only for the shapes a test happens
+        # to drive. Kept adjacent so the two are read together.
+        #
+        # A TUPLE, not a list: this argument tuple is a cache key in
+        # `_browse_cached_call`, so every member must be hashable.
         return await self._enveloped_off_loop(
             self.get_findings_facets_enveloped,
             (level, bucket, tuple(novelty or ()) or None,
-             divergence, domain, author, unit),
+             divergence, domain, author, unit,
+             tuple(suppressed or ()) or None),
             timeout=self._findings_timeout(), heavy=True,
         )
 

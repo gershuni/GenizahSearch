@@ -504,7 +504,8 @@ class _Patch:
 def _render_findings_page(*, lang: str, findings: Any, facets: Any = None,
                           launch: Any = None, state: Any = None,
                           as_of: Optional[str] = "2026-08-03",
-                          drive: bool = True) -> Any:
+                          drive: bool = True,
+                          suppress_succeeds: bool = False) -> Any:
     """The REAL `create_findings_page()` with its three reads stubbed, rendered
     in a real client, with every control it produced CLICKED.
 
@@ -534,6 +535,28 @@ def _render_findings_page(*, lang: str, findings: Any, facets: Any = None,
     patch.setattr(fp, "get_launch_stats_enveloped", _launch)
     patch.setattr(fp, "discovery_meta",
                   lambda key: as_of if key == "data_as_of" else None)
+
+    # RENDERED AS AN ADMIN (2026-08-06), so the ✕ and its handler are painted and
+    # driven. Only an admin ever sees that control, which makes it no less
+    # scannable: D-25 binds on what CAN reach a screen, and the control puts an
+    # accessible name and a tooltip there. The line-granular gate named these lines
+    # when the feature was first added without this.
+    #
+    # THE WRITE IS STUBBED TO FAIL, deliberately, because that is the branch with
+    # reader-facing TEXT: a failed hide calls `_notify_suppress_failed`, which puts
+    # a sentence on the screen. The success branch paints nothing of its own (it
+    # re-reads and refreshes), so driving the failure covers the text and driving
+    # the success would not. It also keeps this capture from touching Supabase.
+    patch.setattr(fp, "_viewer_is_admin", lambda: True)
+
+    async def _suppress(_identification_id):
+        return suppress_succeeds
+
+    async def _no_hidden_ids():
+        return ()
+
+    patch.setattr(fp, "suppress_identification", _suppress)
+    patch.setattr(fp, "suppressed_identification_ids", _no_hidden_ids)
     if state is not None:
         patch.setattr(fp, "read_state", lambda: dict(state))
     tf.set_language(lang)
@@ -770,6 +793,16 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         # 6. no `data_as_of` recorded -- the as-of line is omitted, not guessed.
         _take(_render_findings_page(
             lang=lang, findings=tf.findings_envelope(rows_full), as_of=None))
+        # 6b. THE ADMIN HIDE, SUCCEEDING (2026-08-06). Case 6 above drives the
+        #     FAILING write, which is where the failure sentence is painted; this
+        #     drives the succeeding one, which re-reads the hide list and REFRESHES
+        #     -- so the rows are repainted through the post-suppression path. Both
+        #     are needed: the two branches paint different things, and the
+        #     line-granular gate named the success branch when only the failure was
+        #     driven.
+        _take(_render_findings_page(
+            lang=lang, findings=tf.findings_envelope(rows_full),
+            suppress_succeeds=True))
         # 7. the launch headline's outage, in each named service state and with
         #    and without a retry.
         for status in (tf.STATUS_UNAVAILABLE, tf.STATUS_TIMEOUT, tf.STATUS_BUSY):
@@ -966,6 +999,17 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
                 tf.finding_row(unit=tf.FINDINGS_UNIT_WORK, neutral_title=title),
                 ln, load_children=_children_loader(seed=seed, total=1)),
              fr.ROW_EXPANDER_CLASS),
+            # g) THE ADMIN HIDE CONTROL, rendered AND pressed (2026-08-06). It
+            #    puts an accessible name and a tooltip on the screen, both drawn
+            #    from `copy_text`, so it is reader-facing text this scan has to
+            #    have looked at -- and the line-granular gate said so by name when
+            #    it was first added without this case. Only an admin ever sees it,
+            #    which makes it no less scannable: D-25 binds on what CAN reach a
+            #    screen, not on how many people see it.
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                on_suppress=_noop_suppress),
+             fr.ROW_SUPPRESS_CLASS),
         ):
             _take(_render_component(driver) if marker is None
                   else tf.render_and_click(driver, marker))
@@ -1020,6 +1064,17 @@ def _seeded_preview_url(seed: Optional[str]) -> str:
 
 def _raising_preview_url(_item):
     raise RuntimeError("m_source_preview_probe_value_8b13")
+
+
+async def _noop_suppress(_identification_id):
+    """The admin hide handler, for the capture only.
+
+    Accepts and discards. The capture is about what the CONTROL puts on a screen
+    -- its accessible name and its tooltip, both from `copy_text` -- not about
+    what happens afterwards; the Supabase write has no reader-facing text at all
+    and lives behind `bounded_io_bound`, which this capture must not reach.
+    """
+    return None
 
 
 def capture_rendered(seed: Optional[str] = None,

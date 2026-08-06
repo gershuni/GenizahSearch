@@ -1525,6 +1525,87 @@ def test_the_howto_panels_prose_is_not_set_at_footnote_size():
     ASSERTION_COUNT["n"] += 1
 
 
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_admin_hide_control_is_ABSENT_without_an_admin_handler(lang):
+    """THE ABSENCE is the assertion, and it needs a structural test because an
+    absent button renders no text -- so no scan of rendered text can see it.
+
+    `on_suppress` is INJECTED, like every other affordance on this row: the
+    component renders and does not read, so it cannot ask who the viewer is. The
+    page passes a handler only for an admin (`_viewer_is_admin`). `None` -- the
+    case for every ordinary reader, and the DEFAULT -- must render nothing at all,
+    not a disabled control that advertises the feature.
+
+    A leaked ✕ would be a cosmetic leak rather than a breach: the RLS policy on
+    `discovery_suppressed` tests `auth.uid()` against the admin role, so a
+    non-admin who forged the insert is refused by Postgres. But a button that
+    silently fails is still a defect, and this is what keeps it from shipping.
+    """
+    client = render_rows([finding_row()], lang)
+    assert not _elements_with_class(client, fr.ROW_SUPPRESS_CLASS), (
+        "the admin hide control rendered for a reader with no admin handler")
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_admin_hide_control_appears_and_carries_the_row_it_hides(lang):
+    """With a handler, the ✕ renders -- AND pressing it reports the id of the row
+    it sits on.
+
+    The id is what makes the whole mechanism work, and getting it wrong is the
+    failure a rendering test cannot see: a ✕ wired to the wrong id, or to none,
+    looks identical and hides the wrong row (or nothing). So this DRIVES the
+    click and asserts the value delivered.
+    """
+    hidden: list = []
+
+    async def _on_suppress(identification_id):
+        hidden.append(identification_id)
+
+    row = finding_row()
+    client, pressed = _render_and_press(
+        lambda: fr.render_finding_row(row, lang, on_suppress=_on_suppress),
+        [fr.ROW_SUPPRESS_CLASS])
+
+    assert pressed == 1, f"the hide control was not pressed ({pressed})"
+    assert hidden == [row["identification_id"]], (
+        f"the ✕ reported {hidden!r} rather than its own row's id")
+
+    # An icon-only control needs a name a screen reader can read; `tooltip` alone
+    # is not one.
+    control = _elements_with_class(client, fr.ROW_SUPPRESS_CLASS)[0]
+    label = (control._props or {}).get("aria-label")
+    assert label == fr.copy_text("suppress_row", lang), (
+        f"the hide control's accessible name is {label!r}")
+    # It says HIDE, never delete or reject: nothing is removed and nothing is
+    # adjudicated -- the artifact is content-hash verified and cannot be edited.
+    lowered = label.lower()
+    for forbidden in ("delete", "remove", "reject", "wrong", "מחיקה", "דחיית"):
+        assert forbidden not in lowered, (
+            f"the hide control claims more than it does: {label!r}")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_hide_control_is_offered_on_the_LEAF_only():
+    """A grouped row aggregates many identifications into one line, so there is
+    no single id to hide -- exactly the reason `report_mailto` returns None
+    there. A ✕ on a work row would hide an arbitrary one of its children or
+    nothing at all, and both are worse than no control.
+    """
+    async def _on_suppress(_identification_id):  # pragma: no cover -- not pressed
+        return None
+
+    for unit in (FINDINGS_UNIT_MANUSCRIPT, FINDINGS_UNIT_WORK):
+        client = _client_render(
+            lambda unit=unit: fr.render_finding_row(
+                finding_row(unit=unit, identification_id=None),
+                "en", on_suppress=_on_suppress))
+        assert not _elements_with_class(client, fr.ROW_SUPPRESS_CLASS), (
+            f"the hide control rendered on the {unit!r} unit, which has no "
+            "single identification id to hide")
+    ASSERTION_COUNT["n"] += 1
+
+
 def test_every_stat_card_icon_is_decorative_and_distinct():
     """Icons (owner, 2026-08-06: "what about icons"), with two properties that a
     glyph most easily gets wrong.
