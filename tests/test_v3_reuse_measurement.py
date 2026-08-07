@@ -361,6 +361,8 @@ def test_a_REAL_WAL_change_during_the_measurement_HALTS(tmp_path, monkeypatch):
 
     held = []
 
+    observed = []
+
     def commit_through_sqlite(**_kw):
         # The connection is LEFT OPEN deliberately. Closing it checkpoints the WAL
         # into the main file and deletes the sidecar, which changes the main file --
@@ -372,6 +374,15 @@ def test_a_REAL_WAL_change_during_the_measurement_HALTS(tmp_path, monkeypatch):
         writer.execute("INSERT INTO t VALUES ('committed during the measurement')")
         writer.commit()
         held.append(writer)
+        # THEN READ IT BACK THROUGH SQLITE (Codex round 8, LOW). Without this the test
+        # proved only that `_hash_all` notices a changed sidecar; it did not show that
+        # a reader in the candidate-build path OBSERVES the committed row, which is
+        # the reason unhashed sidecar state is dangerous rather than merely untidy.
+        reader = sqlite3.connect(str(fjms))
+        try:
+            observed.extend(v for (v,) in reader.execute("SELECT v FROM t"))
+        finally:
+            reader.close()
         return [], {}, {}
 
     monkeypatch.setattr(mod, "build_all_candidates", commit_through_sqlite)
@@ -388,6 +399,14 @@ def test_a_REAL_WAL_change_during_the_measurement_HALTS(tmp_path, monkeypatch):
         ])
     # The point of the fixture: a WAL commit can leave the MAIN file byte-identical,
     # so main-file hashing alone would have seen nothing.
+    # A candidate-path reader really did see the WAL-committed row -- so the change
+    # this halts on is one that WOULD have altered the candidate population.
+    assert "committed during the measurement" in observed, (
+        f"no SQLite reader observed the committed WAL row, so this fixture proves "
+        f"only that a sidecar file changed: {observed}"
+    )
+    assert "before" in observed, "the reader did not see the pre-existing row either"
+
     try:
         assert mod._hash_or_die(str(fjms), "fjms_db") == before, (
             "the WAL commit also changed the main file, so this fixture no longer "
