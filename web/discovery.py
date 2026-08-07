@@ -306,6 +306,38 @@ async def suppressed_identification_ids() -> Tuple[str, ...]:
         return ()
 
 
+def cached_suppressed_identification_ids() -> Optional[Tuple[str, ...]]:
+    """The hide list if this process already has it cached, else `None`.
+
+    SYNCHRONOUS AND ON-LOOP BY DESIGN, and the ONLY accessor in this module that
+    is: it never touches the network, so it needs no offload and takes no slot in
+    either concurrency budget. Everything else here goes through
+    `bounded_io_bound` for exactly the reason this does not.
+
+    Added for the findings page's per-refresh coherence check (Codex review,
+    2026-08-07, HIGH): a row hidden by another admin must stop being shown on a
+    page that is already open, and the obvious fix -- calling
+    `suppressed_identification_ids` on every refresh -- put a Supabase round trip
+    on the critical path of every filter change and page turn. Two guards caught
+    that immediately: the one-dispatch-per-read probe, and a control-driving test
+    whose rows stopped arriving within its yield budget.
+
+    `None` means "nothing fresh cached", NOT "nothing hidden" -- the caller must
+    keep its existing list. Sorted for the same reason the async reader sorts: the
+    tuple lands in the service's cache key, so the order has to be stable.
+    """
+    try:
+        from web.discovery_suppression import cached_ids
+
+        ids = cached_ids()
+        return None if ids is None else tuple(sorted(ids))
+    except Exception as exc:  # noqa: BLE001 -- a cache peek must never break a page
+        logger.warning(
+            "discovery.cached_suppressed_identification_ids failed (%s)",
+            type(exc).__name__)
+        return None
+
+
 async def suppress_identification(identification_id: str) -> bool:
     """Hide ONE identification, OFF the event loop. Returns whether it took.
 

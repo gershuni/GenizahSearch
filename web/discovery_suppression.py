@@ -186,6 +186,42 @@ def suppressed_ids() -> FrozenSet[str]:
     return ids
 
 
+def cached_ids() -> Optional[FrozenSet[str]]:
+    """The hide list IF it is already in this process's cache, else `None`.
+
+    NEVER FETCHES. This is a lock acquisition, a clock read and a dict lookup, so
+    unlike `suppressed_ids` it is safe to call ON the event loop -- which is the
+    entire reason it exists.
+
+    `None` means "no fresh cached answer", and it is deliberately distinct from
+    `frozenset()`, which means "nothing is hidden". A caller must treat `None` as
+    "keep what you had" -- collapsing the two is how a fail-open empty set
+    un-hides every row (the defect this pair of functions is shaped to prevent).
+
+    WHY A PEEK RATHER THAN A READ. The findings page re-checks the hide list on
+    every refresh so a row hidden by another admin stops being shown; doing that
+    with the real (network-bound) reader would put a Supabase round trip on the
+    critical path of every filter change and page turn, on a server with ONE
+    uvicorn worker. The cached value is refreshed by page loads and dropped by
+    `invalidate()` on every write, so a peek is enough: within `CACHE_TTL_SECONDS`
+    it IS the answer, and outside it the caller keeps its own list until some
+    full read re-warms the cache.
+    """
+    now = time.monotonic()
+    with _LOCK:
+        cached = _CACHE
+    if cached is None:
+        return None
+    ttl = CACHE_TTL_SECONDS if cached[2] else FAILURE_TTL_SECONDS
+    if now - cached[0] >= ttl:
+        return None
+    # A FAILED read is not an answer. Its cached empty set records "we could not
+    # tell", and returning it here would read as "nothing is hidden".
+    if not cached[2]:
+        return None
+    return cached[1]
+
+
 def suppress(identification_id: str, client: Any = None) -> bool:
     """Hide one identification. Returns whether it is now hidden.
 

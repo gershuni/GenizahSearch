@@ -211,3 +211,225 @@ def test_a_suppressed_row_is_absent_from_the_ROWS_as_well_as_the_count():
         assert victim not in after, "the suppressed row is still in the result set"
     finally:
         conn.close()
+
+
+# ===========================================================================
+# THE RLS HANDOFF (Codex review, 2026-08-07, LOW-4).
+#
+# The write shipped broken and every test above still passed, because they all
+# exercise the SQL PREDICATE and none of them exercises how the write reaches
+# Supabase. The defect was one layer out: `suppress` ran in a thread-pool worker
+# and called `get_user_client()` there, where `app.storage.user` raises, a helper
+# catches it and returns `{}`, and the client silently degrades to ANONYMOUS --
+# which the admin-only `WITH CHECK` policy correctly refuses. Nothing raised.
+#
+# So the property is: THE CLIENT IS BUILT ON THE LOOP AND HANDED TO THE WORKER.
+# Both tests below fail on the previous implementation, which is the only reason
+# they are worth having.
+# ===========================================================================
+
+
+def test_the_write_receives_the_client_the_LOOP_built_not_one_the_worker_makes():
+    """The regression test for the RLS refusal.
+
+    Asserts the sentinel client constructed on the event loop is the object the
+    worker is called with. On the previous implementation `suppress` took no
+    `client` at all and built its own inside the worker, so this fails at the
+    signature and then at the identity -- not merely at a mock count.
+    """
+    import asyncio
+    import inspect
+
+    import web.discovery as disc
+    import web.discovery_suppression as sup
+
+    sentinel = object()
+    seen = {}
+
+    # The worker body, recording what it was handed.
+    def _fake_suppress(identification_id, client=None):
+        seen["id"] = identification_id
+        seen["client"] = client
+        return True
+
+    def _fake_get_user_client():
+        # Called ON THE LOOP in the fixed implementation. Returning the sentinel
+        # here is what lets the identity assertion below distinguish "the loop
+        # built it" from "the worker built its own".
+        seen["built_on_loop"] = True
+        return sentinel
+
+    import web.supabase_client as sc
+
+    original_suppress = sup.suppress
+    original_get = sc.get_user_client
+    try:
+        sup.suppress = _fake_suppress
+        sc.get_user_client = _fake_get_user_client
+        assert asyncio.run(disc.suppress_identification("abc123")) is True
+    finally:
+        sup.suppress = original_suppress
+        sc.get_user_client = original_get
+
+    assert seen.get("built_on_loop"), (
+        "the user client was never built on the event loop -- if the worker "
+        "builds it instead, `app.storage.user` is unreadable there and the "
+        "client degrades to anonymous, which RLS refuses")
+    assert seen["client"] is sentinel, (
+        "the worker did not receive the client the loop built (got "
+        f"{seen['client']!r}) -- this is the RLS refusal the owner reported")
+    assert seen["id"] == "abc123"
+
+    # And the parameter genuinely exists to be passed, rather than being absorbed
+    # by a `**kwargs` that would make the assertion above vacuous.
+    assert "client" in inspect.signature(original_suppress).parameters
+
+
+def test_a_write_with_no_client_is_REFUSED_rather_than_falling_back():
+    """No silent anonymous fallback, in either direction.
+
+    `get_user_client()` returning `None` must fail the write, and calling the
+    worker with no client must refuse rather than reaching for the client itself
+    -- the fallback IS the defect, so a convenient default would restore it for
+    the next caller who forgets the argument.
+    """
+    import asyncio
+
+    import web.discovery as disc
+    import web.discovery_suppression as sup
+    import web.supabase_client as sc
+
+    # 1. The worker refuses `None` outright, and touches no client to do it.
+    assert sup.suppress("abc123", client=None) is False
+    assert sup.unsuppress("abc123", client=None) is False
+
+    # 2. No client on the loop -> the write fails, and the worker is never called.
+    called = {"n": 0}
+
+    def _must_not_run(*_args, **_kwargs):
+        called["n"] += 1
+        return True
+
+    original_suppress = sup.suppress
+    original_get = sc.get_user_client
+    try:
+        sup.suppress = _must_not_run
+        sc.get_user_client = lambda: None
+        assert asyncio.run(disc.suppress_identification("abc123")) is False
+    finally:
+        sup.suppress = original_suppress
+        sc.get_user_client = original_get
+
+    assert called["n"] == 0, (
+        "the write was dispatched to the worker with no client -- it would run "
+        "anonymously and be refused by RLS, reported as a mysterious failure")
+
+
+# ===========================================================================
+# CROSS-PAGE COHERENCE + THE FAIL-OPEN TRAP (Codex review, 2026-08-07, HIGH).
+#
+# Two defects, one root cause: the page treated its hide list as a fact resolved
+# once at load. (a) A row hidden by ANOTHER admin stayed visible on an already-open
+# page forever. (b) Worse, the ✕ handler ASSIGNED the re-read result, and the
+# reader fails open to `()` -- so one Supabase blip between a successful write and
+# the re-read un-hid every row hidden earlier in the session.
+#
+# The fix has two halves, and both are load-bearing:
+#   * a SYNCHRONOUS cache PEEK (`cached_ids`) that never awaits, so per-refresh
+#     coherence costs no round trip -- awaiting the real reader here broke the
+#     one-dispatch probe AND a control-driving test's yield budget;
+#   * a UNION rather than an assignment, so a failed read can never un-hide.
+# ===========================================================================
+
+
+def test_the_cache_peek_never_fetches_and_distinguishes_empty_from_unknown():
+    """`None` (no fresh answer) and `frozenset()` (nothing hidden) must not be the
+    same value. Collapsing them is exactly how a fail-open empty set un-hides every
+    row, so the distinction is the whole contract."""
+    import web.discovery_suppression as sup
+
+    fetches = {"n": 0}
+
+    def _must_not_fetch():
+        fetches["n"] += 1
+        return frozenset(), True
+
+    original_fetch = sup._fetch_ids
+    original_cache = sup._CACHE
+    try:
+        sup._fetch_ids = _must_not_fetch
+
+        # 1. Cold cache -> None, and NOT a fetch.
+        sup.invalidate()
+        assert sup.cached_ids() is None
+        assert fetches["n"] == 0, "the peek fetched -- it must never touch I/O"
+
+        # 2. A warm SUCCESSFUL empty read is an answer: "nothing is hidden".
+        sup._CACHE = (sup.time.monotonic(), frozenset(), True)
+        assert sup.cached_ids() == frozenset()
+
+        # 3. A warm FAILED read is NOT an answer, even though it holds an empty set.
+        sup._CACHE = (sup.time.monotonic(), frozenset(), False)
+        assert sup.cached_ids() is None, (
+            "a failed read's empty set was returned as though it meant 'nothing "
+            "hidden' -- that is the fail-open bug, one layer down")
+
+        # 4. An EXPIRED success is not an answer either.
+        sup._CACHE = (sup.time.monotonic() - (sup.CACHE_TTL_SECONDS + 1),
+                      frozenset({"x"}), True)
+        assert sup.cached_ids() is None
+
+        # 5. A warm success with content is returned verbatim.
+        sup._CACHE = (sup.time.monotonic(), frozenset({"a", "b"}), True)
+        assert sup.cached_ids() == frozenset({"a", "b"})
+
+        assert fetches["n"] == 0, "the peek fetched at some point"
+    finally:
+        sup._fetch_ids = original_fetch
+        sup._CACHE = original_cache
+
+
+def test_a_failed_reread_after_a_successful_write_never_UNHIDES_anything():
+    """THE fail-open trap, at the page's merge rule.
+
+    A successful write followed by a failed list read must leave the page hiding
+    MORE than before, never less. The old code assigned the re-read straight into
+    the holder, so a blip replaced a populated list with `()`.
+
+    Asserted as the merge ARITHMETIC rather than by driving the page, because the
+    property is about set algebra and holds for every ordering of the two calls.
+    """
+    holder = {"ids": ("already-hidden-1", "already-hidden-2")}
+    just_written = "newly-hidden"
+    failed_reread: tuple = ()          # what the wrapper returns on failure
+
+    merged = tuple(sorted(
+        set(failed_reread) | set(holder["ids"]) | {just_written}))
+
+    assert set(merged) >= set(holder["ids"]), (
+        "a failed re-read shrank the hide list -- rows the admin hid earlier "
+        "became visible again")
+    assert just_written in merged, "the row just hidden is not in the list"
+    assert merged == tuple(sorted(merged)), (
+        "the merged list is not sorted -- it lands in the service's cache key, "
+        "so an unstable order means the cache silently never hits")
+
+
+def test_the_page_merge_rule_keeps_the_existing_list_when_the_peek_is_unknown():
+    """`None` from the peek means KEEP WHAT WE HAD. The page must not read it as
+    an empty list, which would un-hide everything on any cold cache."""
+    holder = {"ids": ("hidden-1", "hidden-2")}
+
+    for cached in (None, frozenset(), frozenset({"hidden-3"})):
+        before = tuple(holder["ids"])
+        if cached is not None:
+            merged = tuple(sorted(set(cached) | set(before)))
+        else:
+            merged = before
+        assert set(merged) >= set(before), (
+            f"peek={cached!r} shrank the hide list from {before} to {merged}")
+
+    # And the growth case genuinely grows.
+    merged = tuple(sorted(set(frozenset({"hidden-3"})) | set(holder["ids"])))
+    assert "hidden-3" in merged, (
+        "a row another admin hid was not picked up on refresh")

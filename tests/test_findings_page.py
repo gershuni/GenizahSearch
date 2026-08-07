@@ -6628,6 +6628,133 @@ def test_the_count_promise_is_made_on_all_three_controls_or_on_none():
 # that instead of promising something it cannot deliver.
 # ---------------------------------------------------------------------------
 
+
+def test_a_refresh_picks_up_a_row_another_admin_hid_WITHOUT_a_supabase_read(monkeypatch):
+    """THE cross-page coherence property, driven through the REAL page.
+
+    Scenario: this page loads, another admin hides a row, then this reader touches
+    any control. The refresh must pass the newly-hidden id into the findings read.
+
+    AND IT MUST DO SO WITHOUT AWAITING A SUPABASE READ. That half is not a
+    nice-to-have: awaiting the real reader on the refresh path broke the
+    one-dispatch-per-read probe AND
+    `test_clicking_cycles_hidden_then_shown_then_only_and_the_query_follows`, whose
+    rows stopped arriving inside its yield budget. So the async reader is stubbed to
+    RAISE -- if the page reaches for it during a refresh, this test fails loudly
+    rather than passing slowly.
+
+    Fails on the pre-fix implementation, which resolved the hide list once per page
+    and never consulted it again.
+    """
+    seen_suppressed = []
+
+    async def _findings(unit="identification", *, bucket="main", sort="band_rank",
+                        suppressed=(), **_kw):
+        seen_suppressed.append(tuple(suppressed))
+        return {
+            "status": "ok", "items": list(_ROWS_BY_BUCKET.get(bucket, [])),
+            "total": 1,
+            "meta": {"unit": unit, "bucket": bucket, "sort": sort,
+                     "sort_basis": "best_band_rank", "novelty_offered": True,
+                     "divergence": "shown", "divergent_included": True,
+                     "page": 1, "page_size": fp._default_page_size(),
+                     "approximate_total": False},
+        }
+
+    # The page loads with an EMPTY hide list...
+    async def _cold_list():
+        return ()
+
+    # ...and must never await this again during a refresh.
+    async def _must_not_be_awaited():
+        raise AssertionError(
+            "the refresh path awaited the Supabase hide-list reader -- that puts a "
+            "round trip on every filter change and page turn")
+
+    # Another admin's hide, visible only through the synchronous cache peek.
+    peeked = {"value": None}
+
+    def _peek():
+        return peeked["value"]
+
+    monkeypatch.setattr(fp, "suppressed_identification_ids", _cold_list)
+    monkeypatch.setattr(fp, "cached_suppressed_identification_ids", _peek)
+
+    async def _drive(client):
+        # The page has painted once, with nothing hidden.
+        assert seen_suppressed and seen_suppressed[0] == (), seen_suppressed
+        # NOW another admin hides a row, and the page must not re-read Supabase.
+        monkeypatch.setattr(fp, "suppressed_identification_ids", _must_not_be_awaited)
+        peeked["value"] = ("hidden-by-someone-else",)
+        select = _divergence_switch(client)
+        before = len(seen_suppressed)
+        # CANDIDATES, not ALL: `ALL` is the default the page loads with, so
+        # assigning it changes nothing and fires no event.
+        select.value = fp.NOVELTY_VIEW_CANDIDATES
+        for _ in range(60):
+            if len(seen_suppressed) > before:
+                break
+            await asyncio.sleep(0)
+        else:
+            raise AssertionError("the control change never produced a findings read")
+
+    _render_page(monkeypatch, lang="en", findings=_findings, driver=_drive)
+
+    assert seen_suppressed[-1] == ("hidden-by-someone-else",), (
+        "the refresh did not pass the newly-hidden id to the findings read -- a "
+        f"row another admin withdrew is still being shown (saw {seen_suppressed})")
+
+
+def test_the_peek_returning_unknown_leaves_an_existing_hide_list_intact(monkeypatch):
+    """`None` from the peek must mean KEEP WHAT WE HAD, never `()`.
+
+    Drives the real page with a POPULATED initial list and a peek that reports
+    "nothing fresh cached". Every subsequent read must still carry the original id;
+    a page that treated `None` as empty would un-hide it on the first refresh.
+    """
+    seen_suppressed = []
+
+    async def _findings(unit="identification", *, bucket="main", sort="band_rank",
+                        suppressed=(), **_kw):
+        seen_suppressed.append(tuple(suppressed))
+        return {
+            "status": "ok", "items": list(_ROWS_BY_BUCKET.get(bucket, [])),
+            "total": 1,
+            "meta": {"unit": unit, "bucket": bucket, "sort": sort,
+                     "sort_basis": "best_band_rank", "novelty_offered": True,
+                     "divergence": "shown", "divergent_included": True,
+                     "page": 1, "page_size": fp._default_page_size(),
+                     "approximate_total": False},
+        }
+
+    async def _warm_list():
+        return ("hidden-at-load",)
+
+    monkeypatch.setattr(fp, "suppressed_identification_ids", _warm_list)
+    monkeypatch.setattr(fp, "cached_suppressed_identification_ids", lambda: None)
+
+    async def _drive(client):
+        select = _divergence_switch(client)
+        before = len(seen_suppressed)
+        # CANDIDATES, not ALL: `ALL` is the default the page loads with, so
+        # assigning it changes nothing and fires no event.
+        select.value = fp.NOVELTY_VIEW_CANDIDATES
+        for _ in range(60):
+            if len(seen_suppressed) > before:
+                break
+            await asyncio.sleep(0)
+        else:
+            raise AssertionError("the control change never produced a findings read")
+
+    _render_page(monkeypatch, lang="en", findings=_findings, driver=_drive)
+
+    assert seen_suppressed, "the page issued no findings read"
+    for observed in seen_suppressed:
+        assert "hidden-at-load" in observed, (
+            "an unknown cache peek un-hid the row the page loaded with "
+            f"(saw {seen_suppressed})")
+
+
 def test_the_launch_read_and_the_row_read_OVERLAP(monkeypatch):
     """The load-bearing one. The findings read must be ISSUED while the launch
     read is still parked -- which is impossible if the launch read is awaited

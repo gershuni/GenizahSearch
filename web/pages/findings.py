@@ -118,6 +118,7 @@ from web.discovery import (
     NOVELTY_VIEW_DIVERGENT,
     NOVELTY_VIEW_EITHER,
     NOVELTY_VIEWS,
+    cached_suppressed_identification_ids,
     get_findings_enveloped,
     get_findings_facets_enveloped,
     get_launch_stats_enveloped,
@@ -1574,11 +1575,36 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         # row read serialised the whole chain again. Caught by
         # `test_the_launch_read_and_the_row_read_OVERLAP`, not by reading the diff.
         #
-        # The hide list is a fact about the PAGE, not about one filter change, so
-        # reading it per refresh was wrong on its own terms as well: it put a
-        # Supabase round trip on the critical path of every control the reader
-        # touches. The ✕ handler refreshes the holder itself, so clicking it still
-        # shows the effect immediately.
+        # RE-CHECKED ON EVERY REFRESH, THROUGH A CACHE PEEK THAT NEVER AWAITS
+        # (Codex review, 2026-08-07, HIGH). "Once per page" is the wrong lifetime
+        # for a fact other people can change: a row hidden by another admin -- or by
+        # this admin in a second tab -- stayed visible here for as long as the page
+        # was open, through every filter change and page turn.
+        #
+        # AND THE OBVIOUS FIX IS WRONG. Awaiting `suppressed_identification_ids`
+        # here puts a Supabase round trip on the critical path of every control the
+        # reader touches, and two guards caught it within a minute of my trying:
+        # the one-dispatch-per-read probe, and
+        # `test_clicking_cycles_hidden_then_shown_then_only_and_the_query_follows`,
+        # whose rows stopped arriving inside its yield budget. Dispatching it
+        # concurrently and refetching on a change is no better -- it is still an
+        # extra await before the rows can render.
+        #
+        # So this reads the PROCESS CACHE and nothing else: a lock, a clock read and
+        # a dict lookup, no I/O and no offload. Page loads warm it and every write
+        # calls `invalidate()`, so within `CACHE_TTL_SECONDS` the peek IS the
+        # current list, and outside it this page simply keeps the list it has.
+        #
+        # `None` (nothing fresh cached) means KEEP WHAT WE HAD -- never `()`. The
+        # async reader fails open to an empty tuple, so treating "could not tell" as
+        # "nothing hidden" would un-hide every row; the peek returns `None` for that
+        # case specifically. The union is belt-and-braces on the same point: this
+        # holder only ever grows within a page's life.
+        cached = cached_suppressed_identification_ids()
+        if cached is not None:
+            merged = tuple(sorted(set(cached) | set(hidden["ids"] or ())))
+            if merged != tuple(hidden["ids"]):
+                hidden["ids"] = merged
         suppressed = tuple(hidden["ids"])
         envelope = await fetch_findings(state, suppressed)
         if _stale():
@@ -3086,21 +3112,36 @@ def _notify_suppress_failed() -> None:
     an ACTION, not a fact about the data, and nothing on the page should change
     because a write failed.
 
-    NOT WRAPPED IN `try`. An earlier revision was, on the assumption that
-    `ui.notify` needs a live client slot and would raise without one -- and the
-    masking sweep's line-granular gate reported the `except` as never executed. I
-    checked the assumption instead of exempting the line: `ui.notify` called with
-    NO client context does not raise at all (it enqueues against the outbox and
-    returns). So the handler was guarding against nothing, and its `logger.warning`
-    was a line no capture could paint and no test could reach.
+    WRAPPED IN `try`, and the wrapping was REMOVED and then RESTORED -- the round
+    trip is the useful part of this comment.
 
-    That is the THIRD dead branch this gate found in the suppression work. The
-    pattern is worth naming: each one was a defensive `try` written against a
-    failure mode I had not verified, and every one of them read as coverage until
-    something executed the file line by line.
+    The masking sweep's line gate reported the `except` as never executed, so I
+    deleted it, having convinced myself `ui.notify` cannot raise without a client
+    context. It can. Codex review, 2026-08-07, checked the installed NiceGUI (3.8.0)
+    and was right: `notify()` reads `context.client`, which reads `context.slot`,
+    which RAISES `RuntimeError` on an empty slot stack. My probe missed it because I
+    called `notify` at module scope, where a default slot exists -- not from a
+    background task, where the stack is empty and it raises. That is the exact trap
+    `reference_io_bound_safe_storage_trap` already records: `ensure_future` empties
+    the slot stack, so `ui.*` RAISES there.
+
+    So the failure mode is real: a hide that fails after the reader's client has
+    gone away would turn a reported failure into an unhandled callback exception --
+    losing the report AND adding a traceback.
+
+    THE LINE GATE WAS THE RIGHT SIGNAL AND I DREW THE WRONG CONCLUSION FROM IT. "No
+    capture paints this line" has two possible causes: the branch is dead, or the
+    capture cannot produce the condition. `NON_PAINTING_EXEMPT` exists for the
+    second, and its stated admissible reason is "a `return` taken when the reader's
+    page is already gone, or a defensive `except` that assigns a local" -- which is
+    this, precisely. Three sibling entries already cover the page-gone guards in
+    `_populate_facets` and `_render_body`. Registered there rather than deleted.
     """
-    ui.notify(tr("Could not hide this finding. Please try again."),
-              type="negative")
+    try:
+        ui.notify(tr("Could not hide this finding. Please try again."),
+                  type="negative")
+    except Exception:  # noqa: BLE001 -- no live client to notify; the log has it
+        logger.warning("findings: the hide failed and could not be reported")
 
 
 def _render_row(item: Dict[str, Any], lang: str,
@@ -3153,8 +3194,25 @@ def _render_row(item: Dict[str, Any], lang: str,
                 # this page's holder still has the OLD tuple, so refreshing first
                 # would repaint the row that was just hidden -- indistinguishable
                 # from a broken button.
+                #
+                # THE UNION, NOT THE RE-READ ALONE (Codex review, 2026-08-07,
+                # HIGH). `suppressed_identification_ids` FAILS OPEN to `()`, so on
+                # a Supabase blip between the write and the re-read the holder was
+                # being overwritten with an empty tuple -- un-hiding every row
+                # hidden earlier in the session, right after a click whose whole
+                # purpose was to hide one more. A confirmed write is a fact this
+                # page knows and must not lose to a failed read, so the id is
+                # folded in explicitly and the holder only ever GROWS within a
+                # page's life.
+                #
+                # `sorted` for the same reason the wrapper sorts: the tuple lands
+                # in the service's cache key, so its ORDER has to be stable between
+                # identical requests or the cache silently never hits.
                 if hidden is not None:
-                    hidden["ids"] = await suppressed_identification_ids()
+                    refreshed = await suppressed_identification_ids()
+                    hidden["ids"] = tuple(sorted(
+                        set(refreshed) | set(hidden.get("ids") or ())
+                        | {str(identification_id)}))
                 await refresh()
             else:
                 # The write failed (no admin session, an RLS refusal, Supabase

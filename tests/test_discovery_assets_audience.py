@@ -581,20 +581,38 @@ _NON_READ_PATHS = {
 }
 
 
-def test_the_non_read_exclusions_still_name_real_functions():
-    """An exclusion whose function is gone is a dead excuse that reads as though
-    it covers something -- and an exclusion added for a real READ would silently
-    shrink the VIS-01 sweep, which is the one thing this list must not enable."""
+#: The exclusion set, PINNED EXACTLY. Not a bound, not a shape check.
+#:
+#: An earlier revision asserted `len(...) <= 4` and `len(reason) > 40`, which Codex
+#: review (2026-08-07) correctly called not a guard at all: a future coroutine that
+#: DOES read the sidecar could be added with any forty-character sentence, stay
+#: under the bound, and silently drop out of a sweep whose entire purpose is to
+#: prove no read returns a row from a private-audience artifact.
+#:
+#: Equality is the mechanism. Excluding anything else fails HERE, by name, and the
+#: only way past it is to edit this constant -- which is a diff a reviewer sees.
+_REVIEWED_NON_READ_PATHS = frozenset({
+    "suppress_identification",
+    "suppressed_identification_ids",
+})
+
+
+def test_the_non_read_exclusions_are_exactly_the_two_reviewed_paths():
+    """An exclusion whose function is gone is a dead excuse that reads as though it
+    covers something -- and an exclusion added for a real READ would silently shrink
+    the VIS-01 sweep, which is the one thing this list must not enable."""
     import web.discovery as disc
 
+    assert frozenset(_NON_READ_PATHS) == _REVIEWED_NON_READ_PATHS, (
+        "the VIS-01 non-read exclusion set changed. Every entry is a public "
+        "coroutine the audience proof no longer sweeps, so adding one is a "
+        "reviewed decision: if the new path really touches Supabase and not the "
+        "sidecar, add it to `_REVIEWED_NON_READ_PATHS` in the same commit and say "
+        "why. If it reads the sidecar, it belongs in the sweep instead.")
     for name, reason in _NON_READ_PATHS.items():
         assert hasattr(disc, name), (
             f"web.discovery.{name} no longer exists -- delete the exclusion")
         assert len(reason) > 40, f"{name} is excluded with no stated reason"
-    # It stays SMALL. Every entry is a public coroutine this proof does not cover.
-    assert len(_NON_READ_PATHS) <= 4, (
-        "the VIS-01 non-read exclusion list is growing; each entry is a path the "
-        "audience proof no longer sweeps")
 
 
 def _public_async_read_paths(disc):

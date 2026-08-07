@@ -1563,6 +1563,25 @@ NON_PAINTING_EXEMPT: Dict[Tuple[str, str, str], str] = {
         "the body of the same defensive except: a local assignment, no paint. "
         "Exempted as a pair with the handler above so neither reads as covered "
         "while the other is not.",
+    # THE PAIR BELOW WAS BRIEFLY DELETED INSTEAD OF EXEMPTED, and that was the
+    # wrong call. "No capture paints this line" has two causes -- the branch is
+    # dead, or the capture cannot produce the condition -- and I read the second as
+    # the first, having convinced myself `ui.notify` cannot raise without a client.
+    # It can: `notify` reads `context.client` -> `context.slot`, which raises
+    # `RuntimeError` on an empty slot stack (verified against the installed NiceGUI
+    # 3.8.0 after Codex review, 2026-08-07). A hide failing after the reader's
+    # client has gone away would then lose the report AND raise inside the callback.
+    ("web/pages/findings.py", "_notify_suppress_failed",
+     "except Exception:  # noqa: BLE001 -- no live client to notify; the log has it"):
+        "the no-live-client guard around the failure notice. It paints nothing -- "
+        "by definition, since it is taken exactly when there is no client to paint "
+        "to -- and reaching it needs a client that disconnected between the click "
+        "and the write's return, which a synchronous capture cannot produce "
+        "without faking the client's own liveness.",
+    ("web/pages/findings.py", "_notify_suppress_failed",
+     'logger.warning("findings: the hide failed and could not be reported")'):
+        "the body of that guard: a log line, no paint. Exempted as a pair with the "
+        "handler above so neither reads as covered while the other is not.",
 }
 
 
