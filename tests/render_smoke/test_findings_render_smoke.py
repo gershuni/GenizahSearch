@@ -3950,3 +3950,57 @@ def test_the_page_batches_catalogue_titles_off_the_event_loop_never_per_row(monk
     assert len(rows_rendered) == 2, (
         "the two rows sharing a sys_id with a title should both show it")
     ASSERTION_COUNT["n"] += 1
+
+
+def test_a_warmup_miss_cannot_outlive_the_render_that_cached_it(monkeypatch):
+    """The lifetime the page's negative cache is SAFE because of.
+
+    `csv_bank` is NOT populated atomically at startup: `MetadataManager
+    .start_background_loading` spawns a daemon thread that inserts ~255k rows ONE
+    AT A TIME, so early in a process every lookup misses (the owner's startup log,
+    2026-08-07, shows four `/computed-identifications` requests served before
+    "Loaded 255723 records into csv_bank"). This page caches misses behind
+    `_MISSING` so they stick -- which would pin "no catalogue title" for a reader
+    who arrived during warm-up, exactly the defect the browse panel's resolver had.
+
+    It does not, and for ONE reason: the memo is created inside `_render_results`,
+    which contains no `await`, so it dies with the pass that built it. A later
+    render builds a fresh one and re-reads the bank.
+
+    That is a structural property, not a behavioural one, so it is checked
+    structurally -- a render-level test cannot see it (each `render_page` builds a
+    new page and therefore a new memo, so a broken and a correct implementation
+    look identical; my first attempt at this test asserted exactly that and passed
+    against both). If the memo is ever hoisted to page scope to share it across
+    refreshes, this fails and the miss must then be gated on a non-empty bank.
+    """
+    import ast
+    import inspect
+
+    source = inspect.getsource(fp)
+    tree = ast.parse(source)
+    renderer = next(
+        (n for n in ast.walk(tree)
+         if isinstance(n, ast.FunctionDef) and n.name == "_render_results"),
+        None)
+    assert renderer is not None, "_render_results is gone -- re-point this guard"
+
+    # The memo must be assigned INSIDE the renderer...
+    assigned_here = [
+        target.id
+        for node in ast.walk(renderer) if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in ([node.target] if isinstance(node, ast.AnnAssign) else node.targets)
+        if isinstance(target, ast.Name)
+    ]
+    assert "catalogue_titles" in assigned_here, (
+        "`catalogue_titles` is no longer created inside `_render_results`, so the "
+        "negative cache can now outlive a render -- a reader who loads the page "
+        "during csv_bank warm-up would see no 'Catalogued as:' line for the rest "
+        "of their session. Gate the miss on a non-empty bank")
+
+    # ...and the renderer must stay synchronous, since an `await` would let the
+    # background loader interleave and make even a per-render memo stale.
+    assert not [n for n in ast.walk(renderer) if isinstance(n, ast.Await)], (
+        "`_render_results` now awaits, so csv_bank can change mid-render and even "
+        "a per-render negative cache can go stale")
+    ASSERTION_COUNT["n"] += 1

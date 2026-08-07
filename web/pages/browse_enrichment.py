@@ -823,7 +823,16 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
     _catalogue_rows: Dict[str, Dict[str, Any]] = {}
 
     def _csv_row(item) -> Dict[str, Any]:
-        """`csv_bank`'s row for this expansion row's manuscript, or `{}`."""
+        """`csv_bank`'s row for this expansion row's manuscript, or `{}`.
+
+        Caches HITS only, for the warm-up reason set out above. The findings page's
+        equivalent (`web/pages/findings.py::_render_results`) caches a miss too,
+        but only once the bank is non-empty, because it is held to a page-wide
+        lookup CEILING that a repeated miss would breach. This path has no such
+        ceiling -- an expansion paints a handful of rows -- so the simpler rule is
+        the right one here, and the two agree on the part that matters: nothing
+        learned from an EMPTY bank is ever remembered.
+        """
         key = str(item.get('representative_sys_id') or '')
         if not key:
             return {}

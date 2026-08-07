@@ -2475,8 +2475,9 @@ def _render_results(
     # reader can recognise the physical object beside its shelfmark). Resolved
     # ONCE for the whole page, never per row: `libraries.csv` has no home in
     # the discovery sidecar, and `state.meta_mgr.csv_bank` is a PLAIN DICT
-    # populated once at process startup (`MetadataManager.__init__`,
-    # `shared/metadata_manager.py`) -- reading it here is synchronous and
+    # populated in the BACKGROUND at startup (`MetadataManager
+    # .start_background_loading`, `shared/metadata_manager.py`; not atomically --
+    # see the memo-lifetime note below) -- reading it here is synchronous and
     # zero-I/O, the same unguarded pattern `web/main.py` and every call site in
     # `web/pages/browse.py` already use on `state.meta_mgr.csv_bank`. It needs
     # no offload wrapper and adds none. `app_state`, not `state`: this
@@ -2504,8 +2505,8 @@ def _render_results(
     # sys_id was resolved and then missed, a silent bypass that showed up only as a
     # slower render).
     #
-    # NOTHING IS LOST BY DROPPING THE PRE-PASS. `csv_bank` is a plain in-memory dict
-    # populated once at process startup, so resolution is a dict lookup with no I/O,
+    # NOTHING IS LOST BY DROPPING THE PRE-PASS. `csv_bank` is a plain in-memory dict,
+    # so resolution is a dict lookup with no I/O,
     # and the memo means each distinct sys_id is looked up exactly once per render
     # however many rows and children carry it. What the pre-pass bought was ordering,
     # not fewer lookups.
@@ -2527,13 +2528,33 @@ def _render_results(
         `test_the_page_batches_catalogue_titles_off_the_event_loop_never_per_row`
         pins -- and it is pinned as a CEILING on `csv_bank.get` calls (one per
         distinct sys_id), which memoisation satisfies exactly as a pre-pass did.
-        `csv_bank` is a plain in-memory dict populated once at process startup, so a
-        miss costs one dict lookup and no I/O.
+        `csv_bank` is a plain in-memory dict, so a miss costs one dict lookup and
+        no I/O.
 
         `_MISSING` rather than `None` as the negative cache value: ~14% of rows have
         no title in `libraries.csv`, and storing `None` would make every one of them
         re-look-up on each render pass -- harmless but pointless, and it would blur
         "not yet resolved" into "resolved, and there is no title".
+
+        CACHING A MISS IS SAFE HERE, AND ONLY BECAUSE THE MEMO IS PER-RENDER.
+        `csv_bank` is NOT populated atomically at startup, whatever the sentence
+        below once claimed: `MetadataManager.start_background_loading` spawns a
+        daemon thread that inserts the ~255k rows ONE AT A TIME, so early in a
+        process every lookup misses (the owner's startup log, 2026-08-07, shows
+        four `/computed-identifications` requests served before "Loaded 255723
+        records into csv_bank"). A memo that OUTLIVED the render would therefore
+        pin "no catalogue title" for a reader who arrived during warm-up -- which
+        is exactly the defect the browse panel's equivalent resolver had, and was
+        fixed for (`web/pages/browse_enrichment.py::_csv_row`).
+
+        This dict is created inside `_render_results` and contains no `await`, so
+        it cannot survive the pass that built it: the next `refresh()` builds a
+        fresh one and re-reads the bank. That lifetime is the whole safety
+        argument, and it is pinned by
+        `test_a_warmup_miss_cannot_outlive_the_render_that_cached_it`. If this memo
+        is ever hoisted to page scope -- to share it across refreshes, say -- the
+        warm-up defect arrives with it and the miss must then be gated on the bank
+        being non-empty.
 
         WRITTEN WITH NO EARLY `return` for the missing-sys_id case. Every row on this
         surface has a sys_id (the work unit is the one grain without one, and it never

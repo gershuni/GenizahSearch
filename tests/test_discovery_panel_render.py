@@ -797,6 +797,24 @@ def test_every_rendered_carrier_row_is_named_by_library_and_shelfmark(spy):
 
 
 def test_a_display_missing_carrier_gets_an_explicit_unnamed_treatment(spy):
+    """An unresolvable manuscript is NAMED as unresolvable, never blanked.
+
+    Reads the row's UNNAMED-MANUSCRIPT wording. It used to read
+    `ds.missing_title` -- "Title unavailable" -- which is about a missing WORK
+    title: the expansion borrowed it for a manuscript with no
+    `manuscript_display` row, so the panel told the reader a title was
+    unavailable while the work was named in the heading directly above (owner
+    report, 2026-08-07). Same property, same intent; keyed to the string that
+    path actually emits.
+
+    NOTE the harness matters here: this test drives the panel with NO
+    `catalogue_identity` resolver, which is what makes the unresolved state
+    reachable at all. In the live seam a row like this is normally RECOVERED from
+    `csv_bank` (`browse_enrichment::_catalogue_identity`), so what this pins is
+    the last-resort branch -- see
+    `test_a_row_the_catalogue_cannot_name_either_keeps_the_honest_state` in
+    `tests/render_smoke/test_panel_render_smoke.py` for the seam-level pair.
+    """
     spy.results['get_work_expansion_enveloped'] = make_envelope(
         STATUS_OK,
         [expansion_row(display_missing=True, library_code=None,
@@ -805,8 +823,10 @@ def test_a_display_missing_carrier_gets_an_explicit_unnamed_treatment(spy):
                  'filter_basis': 'displayed_band', 'anchor_excluded': True})
     client = _render(model_for(claim_items=[claim_row()]), driver=_open_expansion)
     text = _scoped_text(client, dp.PANEL_EXPANSION_CLASS)
-    assert ds.missing_title('en') in text, (
+    assert dp._RELATED_ROW_COPY['display_missing']['en'] in text, (
         'an unresolvable manuscript rendered as a blank cell')
+    assert ds.missing_title('en') not in text, (
+        'the row reports a missing WORK TITLE for an unnamed MANUSCRIPT')
 
 
 def test_differing_relations_render_two_distinct_chips(spy):
