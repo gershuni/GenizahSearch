@@ -195,7 +195,13 @@ CREATE TABLE discovery_evidence (
   adjudication_status TEXT NOT NULL CHECK (adjudication_status IN ('human_confirmed','provisional','unreviewed')),
   audit_status      TEXT NOT NULL CHECK (audit_status IN ('audit_pending','audit_passed','n/a')),
   routing_status    TEXT NOT NULL CHECK (routing_status IN ('shipped','review_only')),
-  routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none','later_shared_text','low_coverage')),
+  -- discovery-v3 / schema Amendment 2026-08-07 (E): the two gen-2 coverage-router
+  -- reasons APPENDED to the enum (see discovery_ids.ROUTING_REASONS). An enum a
+  -- writer can produce but the CHECK constraint rejects is not a vocabulary
+  -- extension, it is a build that dies at INSERT -- which is exactly what Codex
+  -- round 2 found: the router mapping was written and tested against in-memory
+  -- tuples only, so no test ever reached this constraint.
+  routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none','later_shared_text','low_coverage','gen2_parallel_surface','gen2_router_not_shipped')),
   is_new            INTEGER NOT NULL DEFAULT 0,
 
   a_page_id         TEXT NOT NULL,
@@ -3663,6 +3669,27 @@ def build_claims_and_evidence(
     # both would discard exactly the surface the router's grading validated.
     # Round 2 of the Codex review found the ingest unwired and therefore inert;
     # this is that wiring, and `assert_emitted_parity` proves it took effect.
+    #
+    # THE ORDER, stated rather than "re-derived" (Codex round 2, correctly: "'re-
+    # derive' is not an order"). v3 runs, in this sequence:
+    #
+    #   3. ingest sources          (already done above)
+    #   4. ROUTER routing          <- occupies Lever-1's slot exactly
+    #   5. D-17 chronological demotion
+    #   6. §4.5 reband (rebuild input)
+    #
+    # The router takes Lever-1's position for a substantive reason, not merely to
+    # minimise the diff: `apply_d17_demotion` groups "the currently-SHIPPED
+    # track1_direct witness population" and mutates `routing_status` as it walks
+    # each page earliest-first. Running it BEFORE the router would let it
+    # arbitrate between rows the router is about to demote -- so a work could be
+    # demoted for being chronologically later than a competitor that never ships
+    # at all, and the surviving row would carry `later_shared_text` as its reason
+    # while the actual cause was a phantom. Running the router first makes D-17's
+    # input exactly the population that ships, which is the same invariant the v2
+    # Lever-1-before-D-17 order existed to hold.
+    #
+    # Pinned by `test_the_router_runs_before_d17_not_after`.
     if gen2_router is not None:
         if apply_lever1:
             raise RoutingConflictError(

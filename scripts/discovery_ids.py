@@ -132,6 +132,25 @@ ROUTING_REASON_LATER_SHARED_TEXT = "later_shared_text"
 # 'later_shared_text' vs a §4.5 reband) could not be reconstructed from the
 # shipped asset alone (Codex R3-BLOCKER -- breaks gate 10 replayability).
 ROUTING_REASON_LOW_COVERAGE = "low_coverage"
+# discovery-v3 / schema Amendment 2026-08-07 (E): the gen-2 coverage ROUTER's
+# two non-witness outcomes. The v3 bake ingests gen-2's fitted routing decision
+# instead of re-deriving it with the Lever-1 cliff (owner decision 2026-08-05,
+# Codex blocker 2); these two reasons record WHICH router surface produced a
+# non-headline row, so the demotion cause stays reconstructible from the
+# shipped asset alone -- the same replayability requirement that forced
+# `low_coverage` to exist in 135-07.
+#
+# `gen2_parallel_surface` -- the router judged the overlap a QUOTATION, not a
+# witness. Codex round 2 was right that mapping this to `shipped` would be a
+# semantic corruption: `assemble_claims_and_evidence` derives `claim_type` from
+# witness span dominance, so a shipped quotation with the page's largest span
+# renders as `direct_witness`. It is therefore routed `review_only` -- the panel
+# and findings page already read `routing_status='shipped'` as their gate, so a
+# quotation stays out of the headline pool by construction rather than by a
+# reader remembering to check a reason code.
+ROUTING_REASON_GEN2_PARALLEL_SURFACE = "gen2_parallel_surface"
+# `gen2_router_not_shipped` -- the router itself declined the pair.
+ROUTING_REASON_GEN2_ROUTER_NOT_SHIPPED = "gen2_router_not_shipped"
 ROUTING_REASONS = frozenset({
     ROUTING_REASON_IMPURITY,
     ROUTING_REASON_RUNNER_UP_CONFLICT,
@@ -139,6 +158,8 @@ ROUTING_REASONS = frozenset({
     ROUTING_REASON_NONE,
     ROUTING_REASON_LATER_SHARED_TEXT,
     ROUTING_REASON_LOW_COVERAGE,
+    ROUTING_REASON_GEN2_PARALLEL_SURFACE,
+    ROUTING_REASON_GEN2_ROUTER_NOT_SHIPPED,
 })
 
 MERGE_BASIS_OXFORD_PART = "oxford_part"

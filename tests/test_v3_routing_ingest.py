@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from v3_routing_ingest import (  # noqa: E402
+    SURFACE_PARALLEL,
     SURFACE_TO_ROUTING,
     RoutingIngestError,
     load_router,
@@ -87,8 +88,15 @@ def test_the_ingested_routing_follows_the_router_and_the_gate_can_fail(tmp_path)
     assert reason == "gen2_router_not_shipped"
 
 
-def test_the_parallel_surface_is_shipped_but_distinguishable(tmp_path):
-    """The second surface must ship AND be tellable apart without re-deriving."""
+def test_the_two_shipped_surfaces_are_told_apart(tmp_path):
+    """`same_work` ships; `parallel` does NOT, and carries its own reason.
+
+    CORRECTED 2026-08-07: this test previously asserted `parallel` -> `shipped`,
+    which Codex round 2 identified as a semantic corruption (see
+    `test_the_parallel_surface_never_ships_as_a_witness` for the mechanism and
+    the demonstration). The router still calls both surfaces "shipped" on its own
+    side -- what changed is the builder-side routing they map onto.
+    """
     db = tmp_path / "e.db"
     _make_evidence(
         db,
@@ -97,7 +105,7 @@ def test_the_parallel_surface_is_shipped_but_distinguishable(tmp_path):
     )
     router = load_router(str(db))
     assert resolve_routing(P1, "M:w1", router)[:2] == ("shipped", None)
-    assert resolve_routing(P2, "M:w2", router)[:2] == ("shipped", "gen2_parallel_surface")
+    assert resolve_routing(P2, "M:w2", router)[:2] == ("review_only", "gen2_parallel_surface")
 
 
 def test_a_pair_the_router_never_decided_returns_no_default(tmp_path):
@@ -300,6 +308,220 @@ def test_requesting_both_the_router_and_lever1_is_refused(tmp_path):
     import build_discovery_sidecar as bds
     with pytest.raises(bds.RoutingConflictError):
         _build(rdb, _works(), load_router(str(router_db)), apply_lever1=True)
+
+
+def test_every_mapped_reason_survives_a_REAL_insert_into_the_real_schema(tmp_path):
+    """Codex round 2's most damaging find, and the one no in-memory test could reach.
+
+    The first version of this mapping invented `gen2_parallel_surface` and
+    `gen2_router_not_shipped` without adding them to `ROUTING_REASONS` or to
+    `discovery_evidence`'s `routing_reason` CHECK constraint. Every test above
+    asserted on emitted TUPLES, which never touch a database -- so a mapping
+    guaranteed to die at INSERT passed the whole suite.
+
+    This drives the ACTUAL DDL and the ACTUAL insert statement. Removing either
+    reason from the CHECK constraint turns it red.
+    """
+    import sqlite3 as sq
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import build_discovery_sidecar as bds
+    import discovery_ids as dids
+
+    for _status, reason in SURFACE_TO_ROUTING.values():
+        if reason is None:
+            continue
+        assert reason in dids.ROUTING_REASONS, (
+            f"{reason!r} is mapped by the router ingest but is not in the frozen "
+            f"ROUTING_REASONS vocabulary"
+        )
+
+    conn = sq.connect(":memory:")
+    try:
+        bds.create_schema(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO works (work_id, canonical_work_id, neutral_title, source_corpus) "
+            "VALUES ('w000001','c1','T','ja')"
+        )
+        for n, (status, reason) in enumerate(SURFACE_TO_ROUTING.values()):
+            claim_id = f"cl{n:04d}"
+            # A DISTINCT page per reason: `discovery_claim` carries a UNIQUE
+            # (page_id, work_id) constraint. Reusing one page raised
+            # IntegrityError on the second row -- another constraint no
+            # tuple-level test could have surfaced.
+            page_id = f"99000000000000{n:04d}_IE1_P1_FL1"
+            cur.execute(
+                "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, "
+                "display_evidence_id, source_corpus, sidecar_version) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (page_id, "w000001", claim_id, "direct_witness", f"ev{n:04d}", "ja", "x"),
+            )
+            # The real insert, with the real column list. A reason outside the
+            # CHECK constraint raises sqlite3.IntegrityError here.
+            cur.execute(
+                "INSERT INTO discovery_evidence (evidence_id, claim_id, evidence_kind, "
+                "evidence_source, confidence_band, adjudication_status, audit_status, "
+                "routing_status, routing_reason, is_new, a_page_id, sys_id, "
+                "span_start, span_end) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (f"ev{n:04d}", claim_id, "witness", "track1_direct", "tier_a",
+                 "unreviewed", "n/a", status, reason or "none", 0, page_id,
+                 "990000000000000001", 0, 40),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_the_parallel_surface_never_ships_as_a_witness(tmp_path):
+    """Codex round 2: a shipped `parallel` row is a semantic corruption.
+
+    `assemble_claims_and_evidence` derives `claim_type` from witness span
+    DOMINANCE, and the panel renders its relation chip from `claim_type`, not
+    from `routing_reason`. So a shipped quotation holding the page's largest span
+    resolves to `direct_witness` and enters the main pool as same-work evidence.
+
+    This asserts BOTH halves: the mapping demotes it, AND the built claim would
+    have mislabelled it had the mapping not. The second half is what makes the
+    first half matter -- without it, `review_only` looks like an arbitrary
+    preference rather than the fix to a real corruption.
+    """
+    status, reason = SURFACE_TO_ROUTING[SURFACE_PARALLEL]
+    assert status == "review_only", (
+        "a `parallel` (quotation) row is mapped to a SHIPPED witness -- it will "
+        "render as direct_witness via span dominance"
+    )
+    assert reason == "gen2_parallel_surface", "the quotation origin is not recorded"
+
+    # The corruption this prevents, demonstrated rather than asserted: build a
+    # page whose ONLY witness is the quotation, and confirm the claim_type the
+    # builder would have given it.
+    rdb = tmp_path / "r.db"
+    _tiny_research_db(rdb, [(P1, "990000000000000001", "M:w1", 40, "[[0,40,0.2]]")])
+    router_db = tmp_path / "route.db"
+    _make_evidence(router_db, [(P1, "c_w1", "parallel", 0.30, 1)],
+                   [("cl1", P1, "M:w1", "c_w1")])
+    _, built = _build(rdb, _works(), load_router(str(router_db)))
+    claim_types = {row[3] for row in built["claim_rows"]}
+    assert claim_types == {"direct_witness"}, (
+        f"expected the witness dominance rule to label this quotation "
+        f"direct_witness (that is the corruption), got {claim_types}"
+    )
+    # ...and it is kept out of every shipped-gated read anyway.
+    assert [r[_ROUTING_STATUS_IDX] for r in built["evidence_rows"]] == ["review_only"]
+    assert [r[_ROUTING_REASON_IDX] for r in built["evidence_rows"]] == ["gen2_parallel_surface"]
+
+
+def test_a_duplicate_router_key_halts_even_when_the_surfaces_agree(tmp_path):
+    """Round 2: agreeing duplicates inflate `counts` while replacing the entry,
+    so the parity report is at neither the router's grain nor the emitted one."""
+    db = tmp_path / "e.db"
+    _make_evidence(
+        db,
+        [(P1, "c_w1", "same_work", 0.9, 1), (P1, "c_w1", "same_work", 0.9, 1)],
+        [("cl1", P1, "M:w1", "c_w1")],
+    )
+    with pytest.raises(RoutingIngestError, match="more than one row"):
+        load_router(str(db))
+
+
+def test_a_row_whose_shipped_flag_contradicts_its_surface_halts(tmp_path):
+    """Round 2: `load_router` read `shipped` and threw it away."""
+    db = tmp_path / "e.db"
+    _make_evidence(db, [(P1, "c_w1", "same_work", 0.9, 0)],   # same_work but shipped=0
+                   [("cl1", P1, "M:w1", "c_w1")])
+    with pytest.raises(RoutingIngestError, match="disagrees with itself"):
+        load_router(str(db))
+
+
+def test_the_router_runs_before_d17_not_after(tmp_path):
+    """Codex round 2: the plan said the v2 order was "no longer inherited" and
+    must be "re-derived", which is not an order. This pins the one that ships.
+
+    The mechanism, made observable: `apply_d17_demotion` arbitrates among the
+    currently-SHIPPED witnesses on a page, earliest-first. Two works co-claim one
+    page here, and the router DEMOTES the earlier one. If the router ran after
+    D-17, D-17 would see both, demote the later work as "chronologically later
+    than" a competitor that does not ship at all, and stamp it
+    `later_shared_text` -- a reason naming a cause that never existed.
+
+    With the router first, the later work is the only shipped witness on the
+    page, so it has nothing to lose to and keeps its own reason.
+    """
+    rdb = tmp_path / "r.db"
+    # Both works claim P1 with overlapping, long spans (over D17_MIN_ML=200), so
+    # D-17 would consider them competitors.
+    conn = sqlite3.connect(str(rdb))
+    conn.execute(
+        "CREATE TABLE track1_matches (page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, "
+        "genre TEXT, author TEXT, title TEXT, matched_letters INT, best_density REAL, "
+        "n_spans INT, spans_json TEXT, shadowed_by TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO track1_matches VALUES (?,?,?,'JA','G','A','T',?,0.2,1,?,NULL)",
+        [(P1, "990000000000000001", "M:early", 500, "[[0,500,0.2]]"),
+         (P1, "990000000000000001", "M:late", 400, "[[10,410,0.2]]")],
+    )
+    conn.execute(
+        "CREATE TABLE pages (page_id TEXT PRIMARY KEY, sys_id TEXT, buckets TEXT, "
+        "n_chars INT, text TEXT, provenance TEXT, fgp_id INT, fgp_score REAL, htr_n_chars INT)"
+    )
+    conn.execute("INSERT INTO pages VALUES (?,?,'b',600,?,'htr',NULL,NULL,600)",
+                 (P1, "990000000000000001", "א" * 600))
+    conn.commit()
+    conn.close()
+
+    # The router ships ONLY the later work; the earlier one it declines.
+    router_db = tmp_path / "route.db"
+    _make_evidence(
+        router_db,
+        [(P1, "c_early", "not_shipped", 0.10, 0), (P1, "c_late", "same_work", 0.70, 1)],
+        [("cl1", P1, "M:early", "c_early"), ("cl2", P1, "M:late", "c_late")],
+    )
+
+    works = [
+        {"raw_work_id": "M:early", "work_id": "w000001", "source_corpus": "ja",
+         "neutral_title": "E", "author": None, "genre": None, "cat": "JA"},
+        {"raw_work_id": "M:late", "work_id": "w000002", "source_corpus": "ja",
+         "neutral_title": "L", "author": None, "genre": None, "cat": "JA"},
+    ]
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import build_discovery_sidecar as bds
+
+    conn = bds._connect_research_ro(str(rdb))
+    try:
+        result = bds.build_claims_and_evidence(
+            conn=conn, works=works, page_index=bds.PageTextIndex(conn),
+            gen2_router=load_router(str(router_db)),
+            # D-17 active: the earlier work resolves 500 years before the later.
+            cross_corpus_map=None,
+            year_by_canonical={"w000001": 500, "w000002": 1000},
+        )
+    finally:
+        conn.close()
+
+    by_work = {}
+    for row in result["evidence_rows"]:
+        # evidence_rows carry a_page_id/sys_id but not work_id; recover it via the
+        # claim row the evidence points at.
+        by_work[row[0]] = (row[_ROUTING_STATUS_IDX], row[_ROUTING_REASON_IDX])
+    claim_work = {c[2]: c[1] for c in result["claim_rows"]}
+    status_by_work = {}
+    for row in result["evidence_rows"]:
+        status_by_work[claim_work[row[1]]] = (row[_ROUTING_STATUS_IDX], row[_ROUTING_REASON_IDX])
+
+    assert status_by_work["w000001"] == ("review_only", "gen2_router_not_shipped"), (
+        f"the router's decline did not survive D-17: {status_by_work['w000001']}"
+    )
+    # THE assertion: the later work must NOT have been demoted against a
+    # competitor the router already removed.
+    assert status_by_work["w000002"][0] == "shipped", (
+        f"the later work was demoted although it is the only shipped witness on "
+        f"the page -- D-17 arbitrated against a phantom competitor, which means "
+        f"the router did not run first: {status_by_work['w000002']}"
+    )
+    assert status_by_work["w000002"][1] != "later_shared_text"
 
 
 def test_a_row_the_router_never_decided_aborts_the_build(tmp_path):

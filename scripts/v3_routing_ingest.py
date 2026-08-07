@@ -52,13 +52,33 @@ ROUTER_SURFACES = (SURFACE_SAME_WORK, SURFACE_PARALLEL, SURFACE_NOT_SHIPPED)
 # as data so the mapping is reviewable and testable rather than buried in an if.
 #
 #   same_work   -> shipped witness. The headline surface the grading measured.
-#   parallel    -> shipped, but NOT a witness claim: a quotation/parallel
-#                  relation. Carried with its own reason so a surface can tell
-#                  the two apart without re-deriving coverage.
+#   parallel    -> review_only / gen2_parallel_surface. **CORRECTED 2026-08-07
+#                  after Codex round 2.** The first version mapped this to
+#                  `shipped` on the reasoning that a quotation is still a real
+#                  relation worth surfacing. That was a semantic corruption, and
+#                  the review named the mechanism precisely: these rows keep
+#                  `evidence_kind='witness'`, and
+#                  `assemble_claims_and_evidence` derives `claim_type` from
+#                  witness SPAN DOMINANCE across the page -- so a shipped
+#                  quotation holding the page's largest span resolves to
+#                  `direct_witness`, and the panel renders its relation chip
+#                  from `claim_type`, never from `routing_reason`. A quotation
+#                  would have appeared as a direct witness and entered the main
+#                  pool as same-work evidence. `review_only` keeps it out of
+#                  every shipped-gated read by construction instead of relying
+#                  on each consumer to remember a reason code.
+#
+#                  Surfacing quotations as their own relation is a real
+#                  possibility, but it needs `evidence_kind='shared_text'` (or a
+#                  new kind) and a claim_type path that does not run the witness
+#                  dominance rule -- a dated schema amendment, not a routing
+#                  tweak. Out of scope here; the reason code preserves the
+#                  distinction in the asset so a later phase can promote them
+#                  without re-running the router.
 #   not_shipped -> review_only. The router already declined it.
 SURFACE_TO_ROUTING: Dict[str, Tuple[str, Optional[str]]] = {
     SURFACE_SAME_WORK: ("shipped", None),
-    SURFACE_PARALLEL: ("shipped", "gen2_parallel_surface"),
+    SURFACE_PARALLEL: ("review_only", "gen2_parallel_surface"),
     SURFACE_NOT_SHIPPED: ("review_only", "gen2_router_not_shipped"),
 }
 
@@ -97,6 +117,15 @@ def load_router(evidence_db: str) -> Dict:
 
         route: Dict[Tuple[str, str], Tuple[str, float, int]] = {}
         counts: Dict[str, int] = {s: 0 for s in ROUTER_SURFACES}
+        # The router's own `shipped` flag must AGREE with the surface it carries.
+        # Round 2 found the first version read the column and then discarded it,
+        # so a row whose surface and shipped state disagreed passed silently --
+        # and since a disagreement means the producer's two encodings of one
+        # decision diverged, guessing which to honour is exactly the kind of
+        # silent re-derivation this module exists to prevent.
+        surface_is_shipped = {
+            SURFACE_SAME_WORK: True, SURFACE_PARALLEL: True, SURFACE_NOT_SHIPPED: False,
+        }
         for page_id, can_id, surface, pcov, shipped in conn.execute(
             "SELECT page_id, canonical_work_id, surface, page_coverage, shipped "
             "FROM coverage_route"
@@ -106,11 +135,26 @@ def load_router(evidence_db: str) -> Dict:
                     f"coverage_route carries an unknown surface value -- refusing to "
                     f"guess its routing. Known: {sorted(SURFACE_TO_ROUTING)}"
                 )
-            key = (page_id, can_id)
-            if key in route and route[key][0] != surface:
+            if shipped is not None and bool(shipped) != surface_is_shipped[surface]:
                 raise RoutingIngestError(
-                    "coverage_route gives two different surfaces for one "
-                    "(page_id, canonical_work_id) -- the router grain is not unique"
+                    f"coverage_route row disagrees with itself: surface {surface!r} "
+                    f"implies shipped={surface_is_shipped[surface]} but the row carries "
+                    f"shipped={shipped!r}. The router's two encodings of one decision "
+                    f"have diverged -- halting rather than picking one."
+                )
+            key = (page_id, can_id)
+            if key in route:
+                # ANY duplicate halts, not merely a surface-DISAGREEING one.
+                # Round 2's finding: tolerating agreeing duplicates inflates
+                # `counts` while replacing the dict entry, so the parity report
+                # is computed at neither the router's grain nor the emitted
+                # one -- the numbers it reports would be quietly wrong even
+                # though every individual decision agreed.
+                raise RoutingIngestError(
+                    "coverage_route carries more than one row for a single "
+                    "(page_id, canonical_work_id) -- the router grain is not unique, "
+                    "so any count derived from it is not at the router's grain. "
+                    "Halting rather than de-duplicating with an undeclared rule."
                 )
             route[key] = (surface, pcov, shipped)
             counts[surface] += 1
@@ -247,24 +291,29 @@ def assert_emitted_parity(report: Dict, router: Dict) -> None:
     # wrong metric fed to the routing gate demoted ~100% of witnesses and
     # orphaned every shipped page). But "shipped == 0" is ALSO the correct answer
     # for a small or deliberately-demoted set, so the check is expressed against
-    # the ROUTER's own expectation rather than against zero: if the router says
-    # some of the rows we considered belong on a shipped surface and we shipped
-    # none of them, the mapping drifted.
-    router_ships_any = (
-        router["counts"].get(SURFACE_SAME_WORK, 0)
-        + router["counts"].get(SURFACE_PARALLEL, 0)
-    ) > 0
-    if report["considered"] and report["shipped"] == 0 and router_ships_any:
-        # Only alarming when the router had a shipped decision available for a
-        # page we actually considered -- otherwise every row legitimately routed
-        # to `not_shipped` would trip a false alarm.
-        decided_shipped_surfaces = {
+    # what the MAPPING says for the rows actually considered.
+    #
+    # The surfaces this asks about must come from `SURFACE_TO_ROUTING`, not from
+    # a hand-listed pair: an earlier version listed `same_work` + `parallel` as
+    # "the shipped surfaces", which became wrong the moment `parallel` was
+    # correctly remapped to `review_only` -- and it then failed a legitimate
+    # build. Deriving the set from the mapping keeps the guard honest through a
+    # future remapping instead of encoding today's answer twice.
+    shipped_surfaces = {
+        surface for surface, (status, _reason) in SURFACE_TO_ROUTING.items()
+        if status == "shipped"
+    }
+    if report["considered"] and report["shipped"] == 0 and shipped_surfaces:
+        # Only alarming when the mapping WOULD have shipped a row we actually
+        # considered -- otherwise a page set that legitimately routes entirely to
+        # a demoting surface would trip a false alarm.
+        would_ship = {
             key for key, (surface, _p, _s) in router["route"].items()
-            if surface in (SURFACE_SAME_WORK, SURFACE_PARALLEL)
+            if surface in shipped_surfaces
         }
-        if decided_shipped_surfaces & report.get("considered_keys", set()):
+        if would_ship & report.get("considered_keys", set()):
             raise RoutingIngestError(
-                "every considered tier-A spec was demoted although the router ships "
+                "every considered tier-A spec was demoted although the mapping ships "
                 "some of them -- the mapping or the grain is wrong (this is the shape "
                 "of the 135-07 field-collision bug)"
             )
