@@ -350,6 +350,67 @@ def test_a_dead_holders_lock_can_be_released_deliberately(tmp_path):
     BakeState(path, run_id="r1").release()
 
 
+def test_the_liveness_probe_is_correct_and_NON_DESTRUCTIVE():
+    """Codex R4 raised the probe as a BLOCKER, and measurement confirmed the risk.
+
+    On Windows `signal.CTRL_C_EVENT == 0`, so `os.kill(pid, 0)` is a console-control
+    event, NOT the POSIX existence probe -- a recovery command using it could
+    interrupt the very bake it promises not to disturb. Two further Windows
+    surprises the old code's exception branches did not survive: a bogus pid raises
+    `OSError WinError 87`, and pid 4 raises `SystemError`.
+
+    This drives a REAL CHILD PROCESS rather than the test runner's own pid (Codex
+    R4's other objection to the previous test), and checks it both alive and dead --
+    the second half is what catches an OpenProcess-only implementation, since a
+    handle on an EXITED process still opens successfully.
+    """
+    import subprocess
+    import time
+
+    from v3_bake_state import _pid_is_alive
+
+    assert _pid_is_alive(os.getpid()) is True
+    assert _pid_is_alive(999999999) is False
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        time.sleep(0.8)
+        assert child.poll() is None, "the child exited early; this proves nothing"
+        assert _pid_is_alive(child.pid) is True, "a live child was reported dead"
+        # NON-DESTRUCTIVE: probing must not disturb it.
+        for _ in range(3):
+            _pid_is_alive(child.pid)
+        time.sleep(0.4)
+        assert child.poll() is None, (
+            "the liveness probe TERMINATED or interrupted the child -- this is the "
+            "round-4 blocker: a probe that kills is not a probe"
+        )
+    finally:
+        child.kill()
+        child.wait()
+    time.sleep(0.5)
+    assert _pid_is_alive(child.pid) is False, (
+        "an EXITED process was reported alive -- an OpenProcess-only check does "
+        "this, because the handle outlives the process"
+    )
+
+
+def test_a_lock_with_no_readable_holder_fails_closed(tmp_path):
+    """Codex R4: "an unreadable/malformed lock has no PID and is treated as dead,
+    allowing unlink of a live writer's lock" -- including the writer whose own
+    holder-line write failed, which `_acquire_lock` deliberately tolerates."""
+    from v3_bake_state import LockHeldError, release_stale_lock
+
+    path = tmp_path / "s.json"
+    BakeState(path, run_id="r1").release()
+    lock = tmp_path / "s.json.lock"
+    for contents in ("", "garbage with no pid", "pid=notanumber run_id=r1"):
+        lock.write_text(contents, encoding="utf-8")
+        with pytest.raises(LockHeldError, match="no usable holder pid"):
+            release_stale_lock(path)
+        assert lock.exists(), "the unreadable lock was removed anyway"
+
+
 def test_a_LIVE_holders_lock_is_refused(tmp_path):
     """The property that makes the command safe: it cannot be used to barge in.
 

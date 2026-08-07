@@ -289,6 +289,68 @@ class BakeState:
         return {k: v.get("status", "?") for k, v in self._data["steps"].items()}
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """Is `pid` a running process? Platform-correct, and NON-DESTRUCTIVE.
+
+    **`os.kill(pid, 0)` IS NOT A PROBE ON WINDOWS** (Codex round 4, BLOCKER).
+    Measured on this machine, 2026-08-07: `signal.CTRL_C_EVENT == 0`, so signal 0
+    is a console-control event -- `os.kill(live_pid, 0)` delivers a Ctrl-C to the
+    holder's console group rather than testing for it. A recovery command that can
+    interrupt the bake it promises not to disturb is worse than no command. (Two
+    further measurements: a bogus pid raises `OSError WinError 87` "parameter is
+    incorrect" rather than the POSIX `ProcessLookupError`, and pid 4 -- the System
+    process -- raises `SystemError`, so the exception taxonomy the old code branched
+    on does not hold here either.)
+    On Windows this uses `OpenProcess(SYNCHRONIZE)` via ctypes, which only asks a
+    question. On POSIX, signal 0 genuinely is the existence probe it is documented
+    to be.
+    """
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        # PROCESS_QUERY_LIMITED_INFORMATION, not SYNCHRONIZE. Measured
+        # 2026-08-07: a handle opened on an EXITED process still opens
+        # successfully (the kernel keeps the object alive while any handle
+        # exists), so "OpenProcess succeeded" is NOT liveness -- a killed child
+        # still reported alive. GetExitCodeProcess distinguishes them:
+        # STILL_ACTIVE (259) while running, the real exit code once exited.
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        ERROR_ACCESS_DENIED = 5
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE,
+                                                ctypes.POINTER(wintypes.DWORD))
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            # ACCESS_DENIED means the process EXISTS but is not ours to query --
+            # fail closed and call it alive. Anything else (invalid parameter, not
+            # found) means no such process.
+            return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True          # cannot tell => fail closed, assume alive
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+
+        # NOTE: a process whose real exit code happens to be 259 is
+        # indistinguishable from a running one by this API. That errs toward
+        # "alive", i.e. toward refusing the release -- the safe direction, and the
+        # operator has `--force`.
+    try:
+        os.kill(pid, 0)                # POSIX: a genuine existence probe
+        return True
+    except PermissionError:            # exists, not ours
+        return True
+    except OSError:
+        return False
+
+
 def release_stale_lock(state_path, *, force: bool = False) -> Dict[str, Any]:
     """DELIBERATE recovery from a lock left by a hard-killed writer.
 
@@ -323,20 +385,18 @@ def release_stale_lock(state_path, *, force: bool = False) -> Dict[str, Any]:
                 pid = int(token.split("=", 1)[1])
             except ValueError:
                 pid = None
-    alive = False
-    if pid is not None:
-        try:
-            # Signal 0 probes existence without delivering anything. On Windows
-            # `os.kill` raises for a dead pid and returns for a live one, which is
-            # the same signal we need; a PermissionError means the process exists
-            # but is not ours, i.e. ALIVE -- so it must count as alive, not as an
-            # error to swallow.
-            os.kill(pid, 0)
-            alive = True
-        except PermissionError:
-            alive = True
-        except (OSError, ProcessLookupError):
-            alive = False
+    if pid is None:
+        # FAIL CLOSED (Codex R4). An unreadable or malformed lock has no holder to
+        # check, and treating "no pid" as "dead" would unlink a live writer's lock
+        # -- including the writer whose own `os.write` of the holder line failed,
+        # which is deliberately non-fatal in `_acquire_lock`.
+        raise LockHeldError(
+            f"the lock file records no usable holder pid ({holder or 'empty'}), so "
+            f"liveness cannot be established. Refusing to release it: an unreadable "
+            f"lock is not evidence of a dead writer. Stop any running bake and "
+            f"remove {lock_path} by hand if you are certain."
+        )
+    alive = _pid_is_alive(pid)
     if alive and not force:
         raise LockHeldError(
             f"the lock holder ({holder or 'unknown'}) is STILL RUNNING. Refusing to "
