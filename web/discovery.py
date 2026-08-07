@@ -317,11 +317,25 @@ async def suppress_identification(identification_id: str) -> bool:
     bound, which is exactly the nesting that guard exists to prevent -- and it
     caught this when the write was written on the page.
 
-    `bounded_io_bound`, NOT `run.io_bound`: `run_in_executor` does not propagate
-    contextvars, and the Supabase USER client is contextvar-scoped -- so the write
-    would silently degrade to the ANONYMOUS client and be refused by the RLS
-    policy, with no error the admin could see. That trap cost this project a
-    release (v8.5.2) and is recorded in `reference_io_bound_safe_storage_trap`.
+    THE CLIENT IS BUILT HERE, ON THE LOOP, AND PASSED IN -- and that is a fix for
+    a real defect this shipped with (owner report, 2026-08-07: *"new row violates
+    row-level security policy"*). The write runs in a thread-pool worker, where
+    `app.storage.user` raises "can only be used within a UI context";
+    `safe_user_get` catches that and returns `{}`, so `get_user_client()` finds no
+    tokens and hands back the ANONYMOUS singleton. The insert then arrives with no
+    `auth.uid()` and the admin `WITH CHECK` policy refuses it. Nothing raised and
+    nothing warned -- every layer did exactly what it was designed to do.
+
+    `get_user_client()` must therefore be called on the EVENT LOOP, where the
+    session is readable, and the built client handed to the worker. Same explicit
+    `client=` shape v8.5.2 introduced in `web/pages/corrections.py` after the
+    identical failure silently degraded user-scoped READS to anonymous.
+    `reference_io_bound_safe_storage_trap` records the pattern; I documented it in
+    this very function and still got it wrong, which is why the callee now REFUSES
+    a `None` client instead of falling back.
+
+    `bounded_io_bound`, NOT `run.io_bound`: the latter swallows cancellation and
+    leaks its permit (see `web/bounded_io.py`).
 
     Shares `_SUPPRESSION_SEMAPHORE` with the read: both are Supabase calls on the
     same table from the same page, and one bound over both is what keeps this
@@ -336,9 +350,16 @@ async def suppress_identification(identification_id: str) -> bool:
     try:
         from web.bounded_io import bounded_io_bound
         from web.discovery_suppression import suppress
+        from web.supabase_client import get_user_client
 
+        # ON THE LOOP. Reading the session is exactly what the worker cannot do.
+        client = get_user_client()
+        if client is None:
+            logger.error("discovery.suppress_identification: no Supabase client")
+            return False
         return bool(await bounded_io_bound(
-            _SUPPRESSION_SEMAPHORE, suppress, str(identification_id)))
+            _SUPPRESSION_SEMAPHORE, suppress, str(identification_id),
+            client=client))
     except Exception as exc:  # noqa: BLE001 -- a failed hide must not break a page
         logger.error("discovery.suppress_identification failed (%s)",
                      type(exc).__name__)

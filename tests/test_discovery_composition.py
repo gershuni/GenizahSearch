@@ -162,10 +162,43 @@ def test_discovery_available_false_when_sidecar_absent(monkeypatch, tmp_path):
 
 
 def test_no_ui_or_route_added_in_web_discovery_module():
-    """No discovery route/page/nav ships in Phase 134 (134-CONTEXT.md scope)."""
+    """No discovery route/page/nav ships from this module.
+
+    SCANNED OVER CODE LINES ONLY, with comments and docstrings stripped. The raw
+    scan below went red on a docstring that names the sibling MODULE
+    `web/discovery_genre_labels.py` -- a filename, in prose, explaining where the
+    off-loop chokepoint lives. That is a guard failing on its own explanation
+    rather than on the property it protects, and it is the same trap
+    `tests/render_smoke/test_findings_render_smoke.py` and
+    `tests/test_findings_page.py` both document for their own source scans.
+
+    The property is unchanged and the route check is now stricter in the way that
+    matters: a path string in a comment cannot satisfy it, and a real route
+    registration still cannot hide behind one.
+    """
+    import ast as _ast
+
     disc = _reimport_web_discovery()
-    src = inspect.getsource(disc)
+    raw = inspect.getsource(disc)
+
+    # Strip docstrings AND `#` comments, so only executable text is scanned.
+    tree = _ast.parse(raw)
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.Module, _ast.FunctionDef, _ast.AsyncFunctionDef,
+                             _ast.ClassDef)):
+            body = getattr(node, "body", None)
+            if (body and isinstance(body[0], _ast.Expr)
+                    and isinstance(body[0].value, _ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                body[0].value.value = ""
+    src = "\n".join(
+        line for line in _ast.unparse(tree).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
     forbidden_markers = ("ui.page(", "@app.get(", "@app.post(", "app.add_route", "@ui.page")
     for marker in forbidden_markers:
         assert marker not in src, f"web/discovery.py must not add UI/routes this phase (found {marker!r})"
-    assert "/discovery" not in src
+    assert "/discovery" not in src, (
+        "web/discovery.py names a `/discovery` path in EXECUTABLE code -- this "
+        "module composes services and registers no route")

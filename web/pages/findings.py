@@ -3042,16 +3042,23 @@ def _notify_suppress_failed() -> None:
 
     `ui.notify` rather than a rendered element: this is a transient report about
     an ACTION, not a fact about the data, and nothing on the page should change
-    because a write failed. Wrapped because `ui.notify` needs a live client slot
-    and this can be reached from a context that has none (a probe, a client that
-    has just gone away) -- and a failed notification must not mask the failure it
-    was reporting.
+    because a write failed.
+
+    NOT WRAPPED IN `try`. An earlier revision was, on the assumption that
+    `ui.notify` needs a live client slot and would raise without one -- and the
+    masking sweep's line-granular gate reported the `except` as never executed. I
+    checked the assumption instead of exempting the line: `ui.notify` called with
+    NO client context does not raise at all (it enqueues against the outbox and
+    returns). So the handler was guarding against nothing, and its `logger.warning`
+    was a line no capture could paint and no test could reach.
+
+    That is the THIRD dead branch this gate found in the suppression work. The
+    pattern is worth naming: each one was a defensive `try` written against a
+    failure mode I had not verified, and every one of them read as coverage until
+    something executed the file line by line.
     """
-    try:
-        ui.notify(tr("Could not hide this finding. Please try again."),
-                  type="negative")
-    except Exception:  # noqa: BLE001 -- no client to notify; the log has it
-        logger.warning("findings: the hide failed and could not be reported")
+    ui.notify(tr("Could not hide this finding. Please try again."),
+              type="negative")
 
 
 def _render_row(item: Dict[str, Any], lang: str,
@@ -3092,21 +3099,26 @@ def _render_row(item: Dict[str, Any], lang: str,
     on_suppress = None
     if refresh is not None and _viewer_is_admin():
         async def on_suppress(identification_id: str) -> None:
-            if not await suppress_identification(identification_id):
-                # The write failed (no admin session, RLS refusal, Supabase
+            # IF / ELSE rather than an early `return`, and the reason is small but
+            # real: a trailing `return` as the last statement of a branch is a line
+            # nothing can execute, and the masking sweep's line-granular gate
+            # reports it as never painted -- correctly. Written as two branches,
+            # every line is reachable and the control flow reads the same.
+            if await suppress_identification(identification_id):
+                # RE-READ BEFORE REFRESHING, and this order is the whole reason
+                # the hide list lives in a mutable holder. `refresh` filters on
+                # `hidden['ids']`; the write invalidated the process cache but
+                # this page's holder still has the OLD tuple, so refreshing first
+                # would repaint the row that was just hidden -- indistinguishable
+                # from a broken button.
+                if hidden is not None:
+                    hidden["ids"] = await suppressed_identification_ids()
+                await refresh()
+            else:
+                # The write failed (no admin session, an RLS refusal, Supabase
                 # down). Refreshing would repaint the same row and read as the
                 # click doing nothing at all, so SAY so instead.
                 _notify_suppress_failed()
-                return
-            # RE-READ BEFORE REFRESHING, and this order is the whole reason the
-            # hide list lives in a mutable holder. `refresh` filters on
-            # `hidden['ids']`; the write invalidated the process cache but this
-            # page's holder still has the OLD tuple, so refreshing first would
-            # repaint the row that was just hidden -- indistinguishable from a
-            # broken button.
-            if hidden is not None:
-                hidden["ids"] = await suppressed_identification_ids()
-            await refresh()
 
     rows.render_finding_row(item, lang, sidecar_version=sidecar_version,
                             load_children=loader, preview_url=preview_url,

@@ -48,7 +48,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import FrozenSet, Optional, Tuple
+from typing import Any, FrozenSet, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -186,30 +186,53 @@ def suppressed_ids() -> FrozenSet[str]:
     return ids
 
 
-def suppress(identification_id: str) -> bool:
+def suppress(identification_id: str, client: Any = None) -> bool:
     """Hide one identification. Returns whether it is now hidden.
 
-    Requires the caller to be an admin AT THE DATABASE: the INSERT policy is
-    `WITH CHECK (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'))`,
-    so a forged request from a non-admin is refused by Postgres. The UI's
-    admin-only ✕ is convenience, never the boundary -- the same posture
-    `web/supabase_client.py` documents for hidden discoveries.
+    ``client`` IS EFFECTIVELY REQUIRED, and passing it is the whole fix for a real
+    defect this shipped with (owner report, 2026-08-07: *"new row violates
+    row-level security policy"*).
 
-    `get_user_client()`, NOT the anon client: the policy tests `auth.uid()`, so
-    an insert on the anon client has no identity to check and is refused.
+    THE TRAP, in full, because I documented it three lines away and then walked
+    into it anyway. This function runs in a THREAD POOL worker (via
+    ``bounded_io_bound``). ``get_user_client()`` starts by reading
+    ``safe_user_get('auth_session')``, and ``app.storage.user`` is contextvar-
+    scoped -- so off the event loop it raises "can only be used within a UI
+    context", which ``safe_user_get`` catches and turns into ``{}``.
+    ``get_user_client()`` then finds no tokens and returns the ANONYMOUS
+    singleton, logging at INFO. The insert therefore arrives with no
+    ``auth.uid()``, and the admin ``WITH CHECK`` policy refuses it -- correctly.
 
-    IDEMPOTENT via the primary key: suppressing an already-suppressed row is a
-    duplicate-key error, which is reported as success because the requested state
-    (hidden) is the actual state. A double-click must not read as a failure.
+    Every layer behaved exactly as designed, which is what made it invisible:
+    nothing raised, nothing warned, and the only symptom was Postgres rejecting a
+    write the admin was entitled to make.
+
+    So the client is built ON THE LOOP by the caller (``web/discovery.py``) and
+    passed in. This is the same explicit-``client=`` shape v8.5.2 introduced in
+    ``web/pages/corrections.py`` after the identical failure degraded user-scoped
+    READS to anonymous; there it silently returned empty results, here it
+    silently loses a write. Recorded in ``reference_io_bound_safe_storage_trap``.
+
+    ``None`` is REFUSED rather than falling back to ``get_user_client()``: the
+    fallback is precisely what fails here, and a "convenient" default would
+    restore the bug for any future caller that forgets the argument.
+
+    IDEMPOTENT via the primary key: an ``upsert`` on a row that is already hidden
+    updates it instead of erroring, so a double-click reads as success -- the
+    requested state and the actual state agree.
     """
     if not identification_id:
         return False
+    if client is None:
+        # LOUD, not a silent anonymous fallback. See the docstring: the fallback
+        # is the defect.
+        logger.error(
+            "suppress() was called with no client. It runs off the event loop, "
+            "where get_user_client() cannot read the session and degrades to "
+            "anonymous -- which RLS refuses. Build the client on the loop and "
+            "pass it in.")
+        return False
     try:
-        from web.supabase_client import get_user_client
-
-        client = get_user_client()
-        if client is None:
-            return False
         client.table(TABLE).upsert(
             {"identification_id": str(identification_id)},
             on_conflict="identification_id",
@@ -222,21 +245,25 @@ def suppress(identification_id: str) -> bool:
         return False
 
 
-def unsuppress(identification_id: str) -> bool:
+def unsuppress(identification_id: str, client: Any = None) -> bool:
     """Un-hide one identification. Returns whether the delete was accepted.
 
     The undo path, and the reason no confirmation dialog guards `suppress`: the
     action is one click to make and one click to reverse, so a dialog would cost
     more than the mistake. Admin-gated at the database by the DELETE policy.
+
+    ``client`` is required for exactly the reason ``suppress``'s is -- see there.
+    A DELETE under the anonymous client is refused by the same policy shape, so
+    this would have failed identically the first time it was used.
     """
     if not identification_id:
         return False
+    if client is None:
+        logger.error(
+            "unsuppress() was called with no client -- see suppress() for why "
+            "the off-loop anonymous fallback cannot work.")
+        return False
     try:
-        from web.supabase_client import get_user_client
-
-        client = get_user_client()
-        if client is None:
-            return False
         client.table(TABLE).delete().eq(
             "identification_id", str(identification_id)).execute()
         invalidate()

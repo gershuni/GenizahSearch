@@ -554,6 +554,49 @@ def _reimport_web_discovery():
     return importlib.reload(disc)
 
 
+#: Public async wrappers in `web/discovery.py` that are NOT read paths, and so
+#: are excluded from the VIS-01 sweep by name.
+#:
+#: EXCLUDED, NOT REGISTERED, and the distinction is the point. This sweep proves
+#: that no read returns a row from a private-audience artifact; it does that by
+#: CALLING every public coroutine it finds. A WRITE has no row to leak -- it
+#: touches Supabase, not the sidecar, and the audience boundary is not a thing it
+#: can cross -- so registering its parameter would not extend the proof. It would
+#: make the sweep attempt a real Supabase insert on every run, which is both a
+#: side effect a test must not have and a call whose failure would say nothing
+#: about the audience boundary.
+#:
+#: Each entry needs a REASON, and the guard below fails on an entry whose name no
+#: longer exists -- so this cannot become a quiet escape hatch for a read that
+#: someone found inconvenient.
+_NON_READ_PATHS = {
+    "suppress_identification":
+        "a WRITE (the admin hide list, in Supabase). It reads no sidecar row, so "
+        "there is nothing here for a private artifact to leak; calling it in this "
+        "sweep would attempt a real Supabase insert.",
+    "suppressed_identification_ids":
+        "reads SUPABASE, not the sidecar -- the admin hide list. Its failure mode "
+        "is fail-open to an empty tuple, and it can no more leak a private "
+        "sidecar row than the write above can.",
+}
+
+
+def test_the_non_read_exclusions_still_name_real_functions():
+    """An exclusion whose function is gone is a dead excuse that reads as though
+    it covers something -- and an exclusion added for a real READ would silently
+    shrink the VIS-01 sweep, which is the one thing this list must not enable."""
+    import web.discovery as disc
+
+    for name, reason in _NON_READ_PATHS.items():
+        assert hasattr(disc, name), (
+            f"web.discovery.{name} no longer exists -- delete the exclusion")
+        assert len(reason) > 40, f"{name} is excluded with no stated reason"
+    # It stays SMALL. Every entry is a public coroutine this proof does not cover.
+    assert len(_NON_READ_PATHS) <= 4, (
+        "the VIS-01 non-read exclusion list is growing; each entry is a path the "
+        "audience proof no longer sweeps")
+
+
 def _public_async_read_paths(disc):
     """Every public async read wrapper in web/discovery.py, with a call-ready
     kwargs dict. A wrapper whose required parameter is not in `_READ_PATH_ARGS`
@@ -565,6 +608,8 @@ def _public_async_read_paths(disc):
         if name.startswith("_") or not inspect.iscoroutinefunction(fn):
             continue
         if getattr(fn, "__module__", None) != disc.__name__:
+            continue
+        if name in _NON_READ_PATHS:
             continue
         kwargs = {}
         for param_name, param in inspect.signature(fn).parameters.items():
