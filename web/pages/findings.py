@@ -1591,20 +1591,33 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         # extra await before the rows can render.
         #
         # So this reads the PROCESS CACHE and nothing else: a lock, a clock read and
-        # a dict lookup, no I/O and no offload. Page loads warm it and every write
-        # calls `invalidate()`, so within `CACHE_TTL_SECONDS` the peek IS the
-        # current list, and outside it this page simply keeps the list it has.
+        # a dict lookup, no I/O and no offload.
         #
         # `None` (nothing fresh cached) means KEEP WHAT WE HAD -- never `()`. The
         # async reader fails open to an empty tuple, so treating "could not tell" as
         # "nothing hidden" would un-hide every row; the peek returns `None` for that
         # case specifically. The union is belt-and-braces on the same point: this
         # holder only ever grows within a page's life.
+        #
+        # AND A PEEK ALONE IS NOT ENOUGH -- the previous revision of this block
+        # claimed coherence it did not deliver, and Codex's re-review was right to
+        # reject it. The cache is warmed ONLY by a page load and by a local write,
+        # so on a long-open page the entry expires, the peek returns `None` forever
+        # after, and the page keeps a list that can no longer change. "Within the
+        # TTL the peek IS the current list" was true; "so a peek is enough" did not
+        # follow.
+        #
+        # THE RE-WARM IS DISPATCHED AND NOT AWAITED. `_rewarm_hide_list` is a
+        # fire-and-forget task, so this refresh pays nothing and the NEXT one sees a
+        # current list -- bounded lag (one interaction) instead of unbounded
+        # staleness, and still no Supabase round trip in front of any row.
         cached = cached_suppressed_identification_ids()
         if cached is not None:
             merged = tuple(sorted(set(cached) | set(hidden["ids"] or ())))
             if merged != tuple(hidden["ids"]):
                 hidden["ids"] = merged
+        else:
+            _rewarm_hide_list()
         suppressed = tuple(hidden["ids"])
         envelope = await fetch_findings(state, suppressed)
         if _stale():
@@ -3098,6 +3111,56 @@ def _viewer_is_admin() -> bool:
         return bool(GlobalAuthState.is_admin())
     except Exception:  # noqa: BLE001 -- an auth hiccup must not break the page
         return False
+
+
+def _rewarm_hide_list() -> None:
+    """Dispatch a background re-read of the admin hide list. Awaits nothing.
+
+    THE OTHER HALF OF THE PEEK (Codex re-review, 2026-08-07). `cached_ids` never
+    fetches, and the cache is warmed only by a page load and by a local write -- so
+    without this, a long-open page's entry expires and its peek returns `None`
+    forever after, leaving the page on a list that can no longer change. The peek
+    gave "no added latency"; this gives "and it still converges".
+
+    FIRE AND FORGET, deliberately. The current refresh does not wait for it and does
+    not use its result: the point is that the NEXT refresh finds a fresh cache
+    entry. Awaiting it here would restore exactly the round-trip-per-interaction
+    this design exists to avoid.
+
+    GUARDED BY `cache_needs_refresh()` rather than by the peek's `None`, and the
+    difference is load-bearing. A FRESH FAILURE also peeks as `None`, and
+    re-dispatching on it would turn a Supabase outage into a fetch per interaction
+    -- which is what `FAILURE_TTL_SECONDS` exists to prevent. It is also what keeps
+    `test_..._issues_one_dispatch_per_read` green: in a process with no Supabase
+    credentials (CI, and every test that renders this page) the first read caches a
+    failure, so nothing dispatches.
+
+    `background_tasks.create` rather than a bare `ensure_future`: NiceGUI keeps a
+    reference, so the task cannot be garbage-collected mid-flight and its exception
+    is retrieved rather than surfacing as "never retrieved" at interpreter exit.
+    """
+    try:
+        from nicegui import background_tasks
+
+        from web.discovery_suppression import cache_needs_refresh
+
+        if not cache_needs_refresh():
+            return
+        background_tasks.create(_reread_hide_list(), name="discovery-hide-list")
+    except Exception as exc:  # noqa: BLE001 -- a re-warm must never break a refresh
+        logger.warning("findings: could not re-warm the hide list (%s)",
+                       type(exc).__name__)
+
+
+async def _reread_hide_list() -> None:
+    """The re-warm body: read the list so the process cache is refreshed.
+
+    The RETURN VALUE IS DISCARDED on purpose -- the side effect (a fresh cache
+    entry, which the next refresh's peek will find) is the whole point. The reader
+    already fails open and logs its own failures, so there is nothing to handle
+    here.
+    """
+    await suppressed_identification_ids()
 
 
 def _notify_suppress_failed() -> None:

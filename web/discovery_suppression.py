@@ -186,6 +186,31 @@ def suppressed_ids() -> FrozenSet[str]:
     return ids
 
 
+def cache_needs_refresh() -> bool:
+    """Whether a background re-warm is worth dispatching right now.
+
+    TRUE only when there is NO usable cached answer and no recent attempt: either
+    the cache is empty (nothing has read it yet, or a write invalidated it) or its
+    entry is past its TTL.
+
+    FALSE for a FRESH FAILURE, and that case is the whole reason this is a separate
+    predicate rather than `cached_ids() is None`. A cached failure means "we tried
+    moments ago and could not tell", so re-dispatching immediately would turn a
+    Supabase outage into a fetch on every single interaction -- exactly what
+    `FAILURE_TTL_SECONDS` exists to prevent. It is ALSO what keeps the findings
+    page's one-dispatch-per-read guard green: in a process with no Supabase
+    credentials (CI, and every test that renders the page) the first read caches a
+    failure, so no refresh dispatches anything.
+    """
+    now = time.monotonic()
+    with _LOCK:
+        cached = _CACHE
+    if cached is None:
+        return True
+    ttl = CACHE_TTL_SECONDS if cached[2] else FAILURE_TTL_SECONDS
+    return now - cached[0] >= ttl
+
+
 def cached_ids() -> Optional[FrozenSet[str]]:
     """The hide list IF it is already in this process's cache, else `None`.
 
@@ -202,10 +227,15 @@ def cached_ids() -> Optional[FrozenSet[str]]:
     every refresh so a row hidden by another admin stops being shown; doing that
     with the real (network-bound) reader would put a Supabase round trip on the
     critical path of every filter change and page turn, on a server with ONE
-    uvicorn worker. The cached value is refreshed by page loads and dropped by
-    `invalidate()` on every write, so a peek is enough: within `CACHE_TTL_SECONDS`
-    it IS the answer, and outside it the caller keeps its own list until some
-    full read re-warms the cache.
+    uvicorn worker.
+
+    A PEEK ALONE IS NOT ENOUGH, and an earlier revision of this docstring claimed
+    otherwise (Codex re-review, 2026-08-07). The cache is warmed only by a page
+    load and by a local write, so once its TTL expires a long-open page's peek
+    returns `None` indefinitely and the page keeps a list that can no longer
+    change. `cache_needs_refresh()` above is the other half: the page dispatches a
+    background re-warm when this returns `None` for want of a fresh entry, so the
+    NEXT refresh has a current list. Bounded lag, no added latency.
     """
     now = time.monotonic()
     with _LOCK:

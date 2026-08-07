@@ -6755,6 +6755,115 @@ def test_the_peek_returning_unknown_leaves_an_existing_hide_list_intact(monkeypa
             f"(saw {seen_suppressed})")
 
 
+
+def test_an_expired_hide_list_cache_dispatches_a_BACKGROUND_rewarm(monkeypatch):
+    """THE convergence half, at the page (Codex re-review, 2026-08-07, HIGH).
+
+    A peek that never fetches does not converge: the cache is warmed only by a page
+    load and by a local write, so once its entry expires a long-open page's peek
+    returns `None` forever and the page keeps a list that can no longer change.
+
+    So when the peek has no fresh answer the refresh must DISPATCH a re-warm -- and
+    must not await it, or the round trip is back on the critical path of every
+    control. Both halves are asserted: the re-warm was requested, and the refresh
+    still completed without waiting for it.
+    """
+    rewarms = {"n": 0}
+    reads = []
+
+    async def _findings(unit="identification", *, bucket="main", sort="band_rank",
+                        suppressed=(), **_kw):
+        reads.append(tuple(suppressed))
+        return {
+            "status": "ok", "items": list(_ROWS_BY_BUCKET.get(bucket, [])),
+            "total": 1,
+            "meta": {"unit": unit, "bucket": bucket, "sort": sort,
+                     "sort_basis": "best_band_rank", "novelty_offered": True,
+                     "divergence": "shown", "divergent_included": True,
+                     "page": 1, "page_size": fp._default_page_size(),
+                     "approximate_total": False},
+        }
+
+    async def _load_list():
+        return ("hidden-at-load",)
+
+    monkeypatch.setattr(fp, "suppressed_identification_ids", _load_list)
+    # The peek reports NO fresh answer -- the expired-cache state.
+    monkeypatch.setattr(fp, "cached_suppressed_identification_ids", lambda: None)
+    monkeypatch.setattr(fp, "_rewarm_hide_list",
+                        lambda: rewarms.__setitem__("n", rewarms["n"] + 1))
+
+    async def _drive(client):
+        select = _divergence_switch(client)
+        before = len(reads)
+        select.value = fp.NOVELTY_VIEW_CANDIDATES
+        for _ in range(60):
+            if len(reads) > before:
+                break
+            await asyncio.sleep(0)
+        else:
+            raise AssertionError("the control change never produced a findings read")
+
+    _render_page(monkeypatch, lang="en", findings=_findings, driver=_drive)
+
+    assert rewarms["n"] >= 1, (
+        "the refresh found no fresh hide list and did NOT dispatch a re-warm -- the "
+        "page would keep its stale list for as long as it stays open")
+    # ...and the rows still rendered with the list the page already had, so nothing
+    # waited on the re-warm.
+    assert reads and all("hidden-at-load" in r for r in reads), (
+        f"the refresh lost the list it already held (saw {reads})")
+
+
+def test_the_rewarm_is_NOT_dispatched_when_the_peek_has_a_fresh_answer(monkeypatch):
+    """The other direction: a fresh cache must not trigger a fetch. Without this
+    bound, the re-warm becomes a Supabase round trip on every interaction -- the
+    exact cost the peek was introduced to avoid."""
+    rewarms = {"n": 0}
+    reads = []
+
+    async def _findings(unit="identification", *, bucket="main", sort="band_rank",
+                        suppressed=(), **_kw):
+        reads.append(tuple(suppressed))
+        return {
+            "status": "ok", "items": list(_ROWS_BY_BUCKET.get(bucket, [])),
+            "total": 1,
+            "meta": {"unit": unit, "bucket": bucket, "sort": sort,
+                     "sort_basis": "best_band_rank", "novelty_offered": True,
+                     "divergence": "shown", "divergent_included": True,
+                     "page": 1, "page_size": fp._default_page_size(),
+                     "approximate_total": False},
+        }
+
+    async def _load_list():
+        return ()
+
+    monkeypatch.setattr(fp, "suppressed_identification_ids", _load_list)
+    monkeypatch.setattr(fp, "cached_suppressed_identification_ids",
+                        lambda: ("hidden-1",))
+    monkeypatch.setattr(fp, "_rewarm_hide_list",
+                        lambda: rewarms.__setitem__("n", rewarms["n"] + 1))
+
+    async def _drive(client):
+        select = _divergence_switch(client)
+        before = len(reads)
+        select.value = fp.NOVELTY_VIEW_CANDIDATES
+        for _ in range(60):
+            if len(reads) > before:
+                break
+            await asyncio.sleep(0)
+        else:
+            raise AssertionError("the control change never produced a findings read")
+
+    _render_page(monkeypatch, lang="en", findings=_findings, driver=_drive)
+
+    assert rewarms["n"] == 0, (
+        "a FRESH cache still dispatched a re-warm -- that is a Supabase round trip "
+        "on every interaction")
+    assert reads[-1] == ("hidden-1",), (
+        f"the fresh peek was not applied to the query (saw {reads})")
+
+
 def test_the_launch_read_and_the_row_read_OVERLAP(monkeypatch):
     """The load-bearing one. The findings read must be ISSUED while the launch
     read is still parked -- which is impossible if the launch read is awaited

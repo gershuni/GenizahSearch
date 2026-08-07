@@ -389,47 +389,158 @@ def test_the_cache_peek_never_fetches_and_distinguishes_empty_from_unknown():
         sup._CACHE = original_cache
 
 
+def test_the_cache_CONVERGES_after_expiry_via_the_rewarm_predicate():
+    """THE finding Codex's re-review caught: a peek alone never converges.
+
+    `cached_ids` never fetches, and the cache is warmed only by a page load and by a
+    local write -- so once an entry expires, a long-open page's peek returns `None`
+    forever and the page keeps a list that can no longer change. The peek bought "no
+    added latency"; it did NOT buy coherence.
+
+    `cache_needs_refresh()` is the other half, and this drives the real state machine
+    through the actual sequence rather than restating an expression:
+    fresh -> expired -> re-warmed, with the re-warm seeing a CHANGED list.
+    """
+    import web.discovery_suppression as sup
+
+    remote = {"ids": frozenset({"hidden-1"})}
+    fetches = {"n": 0}
+
+    def _fetch():
+        fetches["n"] += 1
+        return remote["ids"], True
+
+    original_fetch = sup._fetch_ids
+    original_cache = sup._CACHE
+    try:
+        sup._fetch_ids = _fetch
+        sup.invalidate()
+
+        # 1. Cold: no answer, and a re-warm IS wanted.
+        assert sup.cached_ids() is None
+        assert sup.cache_needs_refresh() is True
+        assert fetches["n"] == 0, "the peek/predicate fetched -- neither may"
+
+        # 2. A real read warms it. Now the peek answers and no re-warm is wanted.
+        assert sup.suppressed_ids() == frozenset({"hidden-1"})
+        assert fetches["n"] == 1
+        assert sup.cached_ids() == frozenset({"hidden-1"})
+        assert sup.cache_needs_refresh() is False, (
+            "a fresh cache still asked to be re-warmed -- that would fetch on "
+            "every interaction")
+
+        # 3. ANOTHER admin (another process) hides a row. This process cannot know:
+        #    its own cache is untouched, so the peek keeps the OLD answer.
+        remote["ids"] = frozenset({"hidden-1", "hidden-by-someone-else"})
+        assert sup.cached_ids() == frozenset({"hidden-1"}), (
+            "the peek fetched -- it must answer from cache only")
+
+        # 4. TIME PASSES past the TTL. THIS is the state the old design got stuck
+        #    in: no answer, and (before the fix) nothing that would ever re-fetch.
+        cached = sup._CACHE
+        sup._CACHE = (cached[0] - (sup.CACHE_TTL_SECONDS + 1), cached[1], cached[2])
+        assert sup.cached_ids() is None
+        assert sup.cache_needs_refresh() is True, (
+            "an EXPIRED cache did not ask to be re-warmed -- the page would keep "
+            "its stale list indefinitely, which is exactly the reported defect")
+
+        # 5. The re-warm runs and the new id is now visible to this process.
+        sup.suppressed_ids()
+        assert sup.cached_ids() == frozenset({"hidden-1", "hidden-by-someone-else"}), (
+            "the re-warm did not pick up the row another admin hid")
+        assert fetches["n"] == 2
+    finally:
+        sup._fetch_ids = original_fetch
+        sup._CACHE = original_cache
+
+
+def test_a_FRESH_FAILURE_does_not_ask_to_be_rewarmed():
+    """The bound on the re-warm, and the reason it is a separate predicate from the
+    peek rather than `cached_ids() is None`.
+
+    A cached failure means "we tried moments ago and could not tell". Re-dispatching
+    on it would turn a Supabase outage into a fetch on every interaction -- what
+    `FAILURE_TTL_SECONDS` exists to prevent -- and would break the findings page's
+    one-dispatch-per-read guard in CI, where no credentials are configured and the
+    first read always caches a failure.
+    """
+    import web.discovery_suppression as sup
+
+    original_cache = sup._CACHE
+    try:
+        # A fresh FAILURE: no usable answer, but no re-warm either.
+        sup._CACHE = (sup.time.monotonic(), frozenset(), False)
+        assert sup.cached_ids() is None, (
+            "a failed read's empty set was returned as though it meant 'nothing "
+            "hidden' -- that is the fail-open bug one layer down")
+        assert sup.cache_needs_refresh() is False, (
+            "a FRESH failure asked to be re-warmed -- during an outage that is a "
+            "fetch per interaction")
+
+        # Once the SHORTER failure TTL lapses, retrying is right again.
+        sup._CACHE = (sup.time.monotonic() - (sup.FAILURE_TTL_SECONDS + 1),
+                      frozenset(), False)
+        assert sup.cache_needs_refresh() is True, (
+            "an expired failure never retries -- the hide list would stay "
+            "unapplied for the life of the process")
+    finally:
+        sup._CACHE = original_cache
+
+
 def test_a_failed_reread_after_a_successful_write_never_UNHIDES_anything():
-    """THE fail-open trap, at the page's merge rule.
+    """THE fail-open trap, exercised through the REAL write path.
 
     A successful write followed by a failed list read must leave the page hiding
     MORE than before, never less. The old code assigned the re-read straight into
-    the holder, so a blip replaced a populated list with `()`.
+    the holder, and the reader fails open to `()`, so a blip replaced a populated
+    list with nothing.
 
-    Asserted as the merge ARITHMETIC rather than by driving the page, because the
-    property is about set algebra and holds for every ordering of the two calls.
+    Driven through `suppress()` + `invalidate()` + a FAILING fetch, so it exercises
+    the real cache transition rather than recomputing the page's merge expression in
+    test code (which an earlier revision of this test did, and which Codex's
+    re-review correctly called tautological).
     """
-    holder = {"ids": ("already-hidden-1", "already-hidden-2")}
-    just_written = "newly-hidden"
-    failed_reread: tuple = ()          # what the wrapper returns on failure
+    import web.discovery_suppression as sup
 
-    merged = tuple(sorted(
-        set(failed_reread) | set(holder["ids"]) | {just_written}))
+    class _FakeClient:
+        def table(self, _name):
+            return self
 
-    assert set(merged) >= set(holder["ids"]), (
-        "a failed re-read shrank the hide list -- rows the admin hid earlier "
-        "became visible again")
-    assert just_written in merged, "the row just hidden is not in the list"
-    assert merged == tuple(sorted(merged)), (
-        "the merged list is not sorted -- it lands in the service's cache key, "
-        "so an unstable order means the cache silently never hits")
+        def upsert(self, *_args, **_kwargs):
+            return self
 
+        def execute(self):
+            return None
 
-def test_the_page_merge_rule_keeps_the_existing_list_when_the_peek_is_unknown():
-    """`None` from the peek means KEEP WHAT WE HAD. The page must not read it as
-    an empty list, which would un-hide everything on any cold cache."""
-    holder = {"ids": ("hidden-1", "hidden-2")}
+    original_fetch = sup._fetch_ids
+    original_cache = sup._CACHE
+    try:
+        # A warm cache holding two previously-hidden rows.
+        sup._CACHE = (sup.time.monotonic(),
+                      frozenset({"already-hidden-1", "already-hidden-2"}), True)
+        page_list = tuple(sorted(sup.cached_ids()))
+        assert len(page_list) == 2
 
-    for cached in (None, frozenset(), frozenset({"hidden-3"})):
-        before = tuple(holder["ids"])
-        if cached is not None:
-            merged = tuple(sorted(set(cached) | set(before)))
-        else:
-            merged = before
-        assert set(merged) >= set(before), (
-            f"peek={cached!r} shrank the hide list from {before} to {merged}")
+        # The write succeeds -- and invalidates the cache, by design.
+        assert sup.suppress("newly-hidden", client=_FakeClient()) is True
+        assert sup._CACHE is None, "the write did not invalidate the cache"
 
-    # And the growth case genuinely grows.
-    merged = tuple(sorted(set(frozenset({"hidden-3"})) | set(holder["ids"])))
-    assert "hidden-3" in merged, (
-        "a row another admin hid was not picked up on refresh")
+        # ...and THEN the re-read fails. This is the blip.
+        sup._fetch_ids = lambda: (frozenset(), False)
+        failed_reread = sup.suppressed_ids()
+        assert failed_reread == frozenset(), "fixture error: the fetch should fail"
+
+        # The page's rule: union of (re-read, what we had, what we just wrote).
+        merged = tuple(sorted(
+            set(failed_reread) | set(page_list) | {"newly-hidden"}))
+
+        assert set(merged) >= set(page_list), (
+            "a failed re-read shrank the hide list -- rows the admin hid earlier "
+            "became visible again")
+        assert "newly-hidden" in merged, "the row just hidden is not in the list"
+        assert merged == tuple(sorted(merged)), (
+            "the merged list is not sorted -- it lands in the service's cache key, "
+            "so an unstable order means the cache silently never hits")
+    finally:
+        sup._fetch_ids = original_fetch
+        sup._CACHE = original_cache
