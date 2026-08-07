@@ -263,16 +263,58 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
     # a prohibited relation phrase inside a NEGATION, which a grep-based guard
     # cannot see. This wording states what a match IS and what it is not,
     # without reaching for any of the three prohibited words.
+    # TWO SENTENCES ADDED 2026-08-07, at the owner's request, rephrased from
+    # their draft ("Matches may point to a work with shared text. Candidates for
+    # new finds and catalog non-correspondences were LLM-generated so there might
+    # be inaccuracies").
+    #
+    # WHY THEY BELONG HERE and not in `_render_howto`: both name a limit of the
+    # DATA ITSELF rather than explaining how to read the page, and the caveat is
+    # the one block every reader meets before any row. The first sentence bounds
+    # what a match means; the second attributes the two candidacy axes to their
+    # actual producer. Together they close the gap the original caveat left -- it
+    # said the rows are unreviewed, but not that the SHADES are model-generated.
+    #
+    # THE WORDING IS CONSTRAINED IN THREE WAYS, none of them stylistic:
+    #
+    # 1. "shares wording", not "a copy of" / "quotes" / "a witness of" -- all
+    #    three are in the honesty gate's prohibited-relation list (D-21), and
+    #    "shared text" is the relation kind's OWN neutral label.
+    # 2. "does not correspond", never "disagree" (ruling F). The catalogue is not
+    #    adjudicated here and neither is our match; they either correspond or
+    #    they do not.
+    # 3. NO RATE WORD AND NO QUANTITY. The owner's "inaccuracies" sits one
+    #    morpheme from `accuracy`, which is a rate word in the gate's lexicon --
+    #    and the honest thing to say is not how OFTEN a shade is wrong (we have
+    #    no reader-facing number and are prohibited from publishing one) but THAT
+    #    a shade can be. "some will be mistaken" says exactly that and reaches
+    #    for no figure.
+    #
+    # NO INTERNAL VOCABULARY IN THE PROSE. An earlier revision said "the two
+    # candidacy readings" / "שני ממדי המועמדות" -- owner, 2026-08-07: it "sounds
+    # not good", and they were right for a reason worth recording. "Candidacy" and
+    # "axis" are this project's OWN words for the model: a reader meeting them in
+    # the caveat, before any row, has nothing to attach them to. The sentence now
+    # names the two markings by WHAT THEY SAY ("whether a row looks new, and
+    # whether it does not correspond to the catalogues") instead of by the internal
+    # term for the pair. The Hebrew drops the count as well, since "הסימון" covers
+    # both without asking the reader to hold a number.
     "caveat": {
         "en": (
             "Every row here is a text match found by software, not a reviewed "
             "identification. A text match is not by itself proof of identity — "
-            "read each row as a lead to check, never as a conclusion."
+            "read each row as a lead to check, never as a conclusion. A match may "
+            "point to a work that shares wording rather than to the work itself. "
+            "The marking of whether an identification looks new, or does not "
+            "correspond to the catalogues, comes from a language model, so some of "
+            "it will be mistaken."
         ),
         "he": (
             "כל שורה כאן היא התאמת טקסט שנמצאה על ידי תוכנה, ולא זיהוי שנבדק. "
             "התאמת טקסט אינה כשלעצמה הוכחה לזהות — יש לקרוא כל שורה ככיוון "
-            "לבדיקה, ולעולם לא כמסקנה."
+            "לבדיקה, ולעולם לא כמסקנה. התאמה עשויה להצביע על חיבור שיש בו נוסח "
+            "משותף, ולא על החיבור עצמו. כמו כן, הסימון אם זיהוי נראה חדש או אינו "
+            "מתאים לקטלוגים נעשה על ידי מודל שפה, ולכן ייתכנו בו טעויות."
         ),
     },
     # H1 -- THE BETA NOTE (owner-approved wording, applied verbatim).

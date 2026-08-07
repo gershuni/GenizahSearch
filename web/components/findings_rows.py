@@ -181,6 +181,23 @@ ROW_SUPPRESS_CLASS = "gs-findings-row-suppress"
 #: names WHICH manuscript this is, the same job the shelfmark does, rather
 #: than describing the finding.
 ROW_CATALOGUE_TITLE_CLASS = "gs-findings-row-catalogue-title"
+#: THE AUTHOR OF THE COMPUTED IDENTIFICATION'S WORK -- ours, from the sidecar
+#: (`display_author`/`author`), NEVER the catalogue's.
+#:
+#: ITS OWN LINE, ABOVE the shelfmark line, and that placement is a CORRECTNESS fix
+#: rather than a layout preference (owner report, 2026-08-07: *"the name in the id
+#: looks like it comes from the cat[alogue]"*). It previously rendered as the last
+#: element of the same flex row that carries "Catalogued as: <title>", so a reader
+#: scanning left-to-right met `Catalogued as: ספר השרשים (קטע). נתן בן יחיאל מרומי`
+#: and read the name as part of the quotation -- i.e. as the LIBRARY's attribution.
+#: That is precisely the misreading this page cannot afford: the whole purpose of
+#: showing the catalogue's own words is to let a reader weigh them AGAINST the
+#: computed identification, and an attribution on the wrong side of that line
+#: destroys the comparison.
+#:
+#: Its own class so the placement is assertable -- "which line is it on" is not
+#: something a scan of rendered text can see.
+ROW_AUTHOR_CLASS = "gs-findings-row-author"
 
 #: THE EXPANSION (owner-approved, 2026-08-05): a manuscript or work row opens
 #: IN PLACE onto the identifications underneath it. Its own classes, because the
@@ -464,9 +481,14 @@ _COPY: Dict[str, Dict[str, str]] = {
     # rate word in the shared honesty gate's lexicon, and beside a shade count it
     # would read -- to the gate and to a reader -- as an accuracy claim about
     # the match rather than a statement about granularity.
+    #
+    # "פירוט רב יותר", not "פירוט עדין יותר" (owner, 2026-08-07: the latter "does
+    # not sound good"). `עדין` is *delicate/subtle* -- an aesthetic word about
+    # texture, which is not what a granularity comparison means; `רב יותר` is
+    # plainly *more* detail, the same comparative the English "finer than" makes.
     "shade_refines_granularity": {
         "en": "finer than the catalogues we checked",
-        "he": "פירוט עדין יותר מהקטלוגים שבדקנו",
+        "he": "פירוט רב יותר מהקטלוגים שבדקנו",
     },
     "shade_container_predicts": {
         "en": "the catalogues named only a container",
@@ -1737,6 +1759,36 @@ def expansion_target(item: Mapping[str, Any]) -> Optional[Tuple[str, str]]:
     return (axis, str(value)) if value else None
 
 
+def _render_author(item: Mapping[str, Any]) -> None:
+    """The work's author, on a line of its OWN, or nothing at all.
+
+    OURS, from the sidecar projection -- not the catalogue's attribution. The
+    separate line is the whole point; see `ROW_AUTHOR_CLASS` for why sharing a row
+    with the catalogue quotation was a correctness defect rather than a cramped
+    layout.
+
+    NOT bilingual, and not translated: an author name is a name. `dir="auto"` for
+    the same reason `_render_shelfmark` puts it on the catalogue title -- a Hebrew
+    name must read correctly on an English render of this page and a Latin one on a
+    Hebrew render.
+
+    Absent author renders NOTHING -- no label, no empty line. A blank line where an
+    attribution belongs reads as "this work has no known author", which is a claim
+    about the record that a missing projection field does not support.
+
+    NO EARLY `return` for that absent case. The masking sweep's line-granular gate
+    reports a bare `return` as a line no capture paints -- correctly, since every
+    fixture carries an author -- and that gate has already found three dead branches
+    in this phase's work. Written as a positive `if`, every line here is both
+    reachable and painted.
+    """
+    author = item.get("author")
+    if author:
+        ui.label(str(author)).classes(
+            f"{ROW_AUTHOR_CLASS} {ROW_SUB_CLASS} r-sub text-xs"
+        ).props('dir="auto"').style("unicode-bidi: isolate;")
+
+
 def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                        sidecar_version: Any = None,
                        load_children=None, preview_url=None,
@@ -1790,20 +1842,19 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                 ui.label(works).classes(f"{ROW_SUB_CLASS} r-sub text-xs")
         elif unit == FINDINGS_UNIT_WORK:
             ui.label(_work_title(item, lang)).classes(f"{ROW_TITLE_CLASS} font-bold")
-            with ui.row().classes(f"{ROW_SUB_CLASS} r-sub items-center gap-2 text-xs"):
-                author = item.get("author")
-                if author:
-                    ui.label(str(author))
-                manuscripts = _plural("manuscripts", item.get("manuscript_count"), lang)
-                if manuscripts:
-                    ui.label(manuscripts)
+            _render_author(item)
+            manuscripts = _plural("manuscripts", item.get("manuscript_count"), lang)
+            if manuscripts:
+                ui.label(manuscripts).classes(f"{ROW_SUB_CLASS} r-sub text-xs")
         else:
             ui.label(_work_title(item, lang)).classes(f"{ROW_TITLE_CLASS} font-bold")
+            # THE AUTHOR FIRST, ON ITS OWN LINE, then the shelfmark line that
+            # carries the catalogue quotation. Order is the fix: see
+            # `ROW_AUTHOR_CLASS`. Sharing the row with "Catalogued as: <title>"
+            # made our attribution read as the library's.
+            _render_author(item)
             with ui.row().classes(f"{ROW_SUB_CLASS} r-sub items-center gap-2 text-xs"):
                 _render_shelfmark(item, lang, catalogue_title=catalogue_title)
-                author = item.get("author")
-                if author:
-                    ui.label(str(author))
 
         _render_row_meta(item, lang, unit, sidecar_version=sidecar_version,
                          on_suppress=on_suppress)

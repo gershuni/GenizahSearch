@@ -3667,6 +3667,76 @@ def test_the_catalogue_title_is_offered_on_the_manuscript_and_leaf_units_only():
     ASSERTION_COUNT["n"] += 1
 
 
+CURATED_AUTHOR = "Synthetic Author A"
+
+
+@pytest.mark.parametrize("unit", [FINDINGS_UNIT_IDENTIFICATION, FINDINGS_UNIT_WORK])
+def test_the_author_is_on_its_own_line_never_inside_the_catalogue_quotation(unit):
+    """OUR attribution must not render inside the line that quotes the CATALOGUE.
+
+    Owner report, 2026-08-07: *"the name in the id looks like it comes from the
+    cat[alogue]"*. It did -- the author was the last element of the same flex row as
+    `Catalogued as: <title>`, so a reader met
+    `Catalogued as: ספר השרשים (קטע). נתן בן יחיאל מרומי` as one run of text and read
+    the name as the library's attribution.
+
+    THIS TEST FAILS ON THE OLD CODE, which is the only reason it is worth having. A
+    presence check (`the author rendered somewhere`) passed before and after the
+    fix and would have caught nothing. So the assertion is about CONTAINMENT: the
+    author's text must not appear anywhere in the subtree of the element carrying
+    the catalogue title, nor in the shelfmark line's own subtree.
+
+    Parametrized over both units that render an author. Only the leaf shows a
+    catalogue title, so the containment half is vacuous on the work unit -- but the
+    "has its own element" half is not, and a future refactor that re-merges the work
+    row's author into a shared flex row would be caught here too.
+    """
+    client = _client_render(lambda: fr.render_finding_row(
+        finding_row(unit=unit, author=CURATED_AUTHOR), "en",
+        catalogue_title=lambda _i: CURATED_CATALOGUE_TITLE))
+
+    author_elements = _elements_with_class(client, fr.ROW_AUTHOR_CLASS)
+    assert author_elements, (
+        f"the author did not render in its own element on the {unit} unit")
+    assert CURATED_AUTHOR in scoped_text(client, fr.ROW_AUTHOR_CLASS), (
+        "the author element rendered but does not carry the author's name")
+
+    # THE PROPERTY: not inside the catalogue's quotation, at any depth.
+    for marker in (fr.ROW_CATALOGUE_TITLE_CLASS, fr.ROW_SHELFMARK_CLASS):
+        for element in _elements_with_class(client, marker):
+            texts = " ".join(_subtree_texts(element))
+            assert CURATED_AUTHOR not in texts, (
+                f"the author rendered INSIDE {marker} -- a reader scanning that "
+                "line reads our attribution as the catalogue's")
+
+    # And the author is NOT a sibling in the shelfmark's own flex row: the
+    # catalogue title lives there, so if both share a parent the visual seam the
+    # owner reported is back even though the containment check above passes.
+    title_parents = {id(el.parent_slot.parent)
+                     for el in _elements_with_class(client, fr.ROW_CATALOGUE_TITLE_CLASS)
+                     if getattr(el, "parent_slot", None) is not None}
+    author_parents = {id(el.parent_slot.parent) for el in author_elements
+                      if getattr(el, "parent_slot", None) is not None}
+    assert not (title_parents & author_parents), (
+        "the author shares a parent row with the catalogue title -- put it on "
+        "its own line above the shelfmark")
+
+    assert_surface_honesty(
+        scoped_fragment(client, fr.ROW_CLASS), scope_selector=fr.ROW_CLASS, lang="en")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_a_row_with_no_author_renders_no_author_element_at_all():
+    """A blank line where an attribution belongs reads as "this work has no known
+    author" -- a claim about the record that a missing projection field does not
+    support. Absent means absent, not empty."""
+    client = _client_render(lambda: fr.render_finding_row(
+        finding_row(author=None), "en"))
+    assert not _elements_with_class(client, fr.ROW_AUTHOR_CLASS), (
+        "a row with no author rendered an author element")
+    ASSERTION_COUNT["n"] += 1
+
+
 def test_the_page_batches_catalogue_titles_off_the_event_loop_never_per_row(monkeypatch):
     """`_render_results` resolves every row's catalogue title from
     `state.meta_mgr.csv_bank` -- a plain in-memory dict populated once at
