@@ -606,6 +606,70 @@ def test_a_fifth_enrichment_placeholder_exists_in_the_same_shape_as_the_four():
     assert 'update_discovery_panel_section(state, refs)' in enrich
 
 
+def _update_content_node():
+    """The `update_content` function inside `create_browse_page`, as AST."""
+    for node in ast.walk(ast.parse(_read(_BROWSE_SRC))):
+        if isinstance(node, ast.FunctionDef) and node.name == 'update_content':
+            return node
+    raise AssertionError('browse.py has no `update_content` -- re-point this guard')
+
+
+def test_update_content_refills_the_discovery_placeholders_it_rebuilds():
+    """A REBUILD that does not REFILL leaves the panel silently unbuilt.
+
+    `update_content()` clears `content_container` and reconstructs everything
+    inside it, including both discovery placeholders, as EMPTY elements. The four
+    sibling placeholders are re-populated on that same pass (each guarded by
+    `state.enrichment_loaded`); the discovery pair was not. So every later
+    `update_content()` -- Show Metadata, the line-number toggle, entering edit
+    mode, a comment refresh -- destroyed a panel the reader had open and offered
+    no way back short of reloading the page (owner report, 2026-08-07).
+
+    Checked as a STRUCTURAL property over the AST -- "the refill call is lexically
+    inside `update_content`" -- rather than as a substring of the file, because
+    the call also legitimately appears in `browse_enrichment.py` and in this
+    module's prose. A text scan would pass on either.
+    """
+    node = _update_content_node()
+    refills = [
+        call for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and _attribute_chain(call.func).endswith('update_discovery_panel_section')
+    ]
+    assert refills, (
+        '`update_content` creates the discovery placeholders but never refills '
+        'them. It rebuilds every enrichment placeholder as empty, so without a '
+        'refill the toolbar control and the panel body are destroyed by any '
+        'later re-render -- the panel had not failed and the reader had not '
+        'closed it (owner report, 2026-08-07)'
+    )
+    # ...and it is the LAST of the two placeholders that carries it, so both
+    # exist by the time the refill runs.
+    src = _read(_BROWSE_SRC)
+    panel_at = src.index("enrichment_refs['discovery_panel_container']")
+    entry_at = src.index("enrichment_refs['discovery_entry_container']")
+    refill_at = src.index('update_discovery_panel_section(state, refs)')
+    assert refill_at > panel_at and refill_at > entry_at, (
+        'the refill runs before one of the placeholders is created, so that one '
+        'is still None when the fill reads it')
+
+
+def test_the_update_content_refill_guard_can_fail():
+    """Positive control. The walk must really depend on the call being INSIDE
+    `update_content` -- a guard that would pass on a call anywhere in the file
+    is the text scan this one exists to replace."""
+    seeded = ast.parse(
+        'def create_browse_page():\n'
+        '    def update_content():\n'
+        '        x = 1\n'
+        '    update_discovery_panel_section(state, refs)\n'
+    )
+    inner = [n for n in ast.walk(seeded)
+             if isinstance(n, ast.FunctionDef) and n.name == 'update_content'][0]
+    found = [c for c in ast.walk(inner) if isinstance(c, ast.Call)]
+    assert not found, 'the walk sees calls outside the function it was given'
+
+
 def test_fetch_discovery_panel_is_part_of_the_existing_gather():
     tree = ast.parse(_read(_ENRICHMENT_SRC))
     gathered = set()

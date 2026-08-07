@@ -89,6 +89,7 @@ from web.pages.browse_enrichment import (
     discovery_panel_enabled,
     load_enrichment as _load_enrichment_fn,
     update_enrichment_sections as _update_enrichment_sections_fn,
+    update_discovery_panel_section,
     populate_bib_catalog_buttons,
 )
 
@@ -4279,6 +4280,28 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if discovery_panel_enabled():
                     discovery_panel_el = ui.element('div').classes('w-full').style('display: none;')
                     enrichment_refs['discovery_panel_container'] = discovery_panel_el
+
+                    # REFILL, exactly as the four sibling placeholders do a few
+                    # lines up (`state.enrichment_loaded` guards Joins, the
+                    # version selector, bibliography and catalog).
+                    #
+                    # `update_content()` CLEARS `content_container` and rebuilds
+                    # every placeholder inside it as empty. The other four are
+                    # re-populated inline on that same pass; the discovery pair
+                    # was not, so any later `update_content()` -- Show Metadata,
+                    # the line-number toggle, entering edit mode, a comment
+                    # refresh -- left both the toolbar control and the panel body
+                    # as empty divs. The panel had not failed and the reader had
+                    # not closed it: it was silently unbuilt, with no way back
+                    # short of a page reload (owner report, 2026-08-07).
+                    #
+                    # Placed HERE rather than beside the entry control because
+                    # this is the LATER of the two placeholders, and the refill
+                    # fills both. No `enrichment_loaded` check: the function
+                    # returns on a `None` bundle, and that single self-guard is
+                    # the authority -- a second gate here could only drift from
+                    # it.
+                    update_discovery_panel_section(state, refs)
 
                 # Comments section - below panels
                 from web.components import create_notes_panel

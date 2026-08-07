@@ -60,6 +60,10 @@ from shared.discovery_panel_model import (
     related_page_row,
 )
 from shared.discovery_surface_projection import STATUS_OK, is_outage
+from web.components.findings_rows import (
+    ROW_CATALOGUE_TITLE_CLASS,
+    copy_text as _findings_copy,
+)
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
@@ -179,12 +183,18 @@ def _render_vote_placeholders(lang: str) -> None:
                 tr('Coming soon'))
 
 
-def _render_expansion(row: Mapping[str, Any], lang: str) -> None:
+def _render_expansion(row: Mapping[str, Any], lang: str,
+                      catalogue_title=None) -> None:
     """"Other manuscripts matching <work>" -- a DESCRIPTOR until the reader asks.
 
     The read is issued on open and never with the panel: the heaviest work has
     thousands of claim rows while the median manuscript carries one work, so
     eager loading pays the worst case to serve the common one.
+
+    `catalogue_title` is threaded straight through to the rows. It is passed to
+    BOTH `_render_expansion_envelope` call sites below, including the failure
+    one: that path renders no rows, but a parameter supplied on only one of two
+    routes to the same renderer is how the two drift.
     """
     descriptor = row.get('expansion') or {}
     body = ui.element('div').classes(f'{PANEL_EXPANSION_CLASS} dbody')
@@ -225,13 +235,15 @@ def _render_expansion(row: Mapping[str, Any], lang: str) -> None:
                     {'status': 'unavailable', 'items': [], 'total': 0,
                      'meta': {'reason': 'query_failed'}},
                     lang, state, _load_page,
-                    page_size=int(descriptor.get('page_size') or 0))
+                    page_size=int(descriptor.get('page_size') or 0),
+                    catalogue_title=catalogue_title)
             return
         state['loaded'] = True
         with body:
             _render_expansion_envelope(
                 envelope, lang, state, _load_page,
-                page_size=int(descriptor.get('page_size') or 0))
+                page_size=int(descriptor.get('page_size') or 0),
+                catalogue_title=catalogue_title)
 
     async def _toggle() -> None:
         state['open'] = not state['open']
@@ -259,9 +271,38 @@ def _expansion_work_title(item: Mapping[str, Any], lang: str) -> Optional[str]:
         item.get('display_work_id') or item.get('work_id'), raw, lang) or None
 
 
+def _render_catalogue_title(item: Mapping[str, Any], lang: str,
+                            catalogue_title=None) -> None:
+    """"Catalogued as: <title>" for an expansion row, when one resolves.
+
+    THE SAME anatomy, label and class as the findings page's
+    `_render_shelfmark` -- imported from it rather than re-spelled, because the
+    two surfaces are one product and a second copy of a bilingual label is a
+    second thing to keep in step. The TITLE is never translated (it is the
+    cataloguer's own words, and on the rows where our identification and theirs
+    differ a machine translation would put words in their mouth at exactly the
+    moment the reader is judging those words); only the LABEL is bilingual.
+
+    Injected as a CALLABLE, exactly as the findings page injects it: this module
+    has no business reading `libraries.csv`, and the resolver is memoised by its
+    owner so a shared manuscript costs one lookup however many rows carry it.
+    Absent injection -- or an unresolved title -- renders NOTHING, not an empty
+    element and not a placeholder.
+    """
+    title_text = catalogue_title(item) if catalogue_title is not None else None
+    if title_text:
+        with ui.row().classes(
+            f'{ROW_CATALOGUE_TITLE_CLASS} items-center gap-1'
+        ).style('font-weight: normal;'):
+            ui.label(_findings_copy('catalogue_title_label', lang)).classes(
+                'dnote text-xs')
+            ui.label(str(title_text)).classes('dnote text-xs').props(
+                'dir="auto"').style('unicode-bidi: isolate;')
+
+
 def _render_expansion_envelope(
     envelope: Mapping[str, Any], lang: str, state: Dict[str, Any], reload_cb,
-    *, page_size: int = 0,
+    *, page_size: int = 0, catalogue_title=None,
 ) -> None:
     if is_outage(envelope):
         _service_state_block({
@@ -281,15 +322,43 @@ def _render_expansion_envelope(
     ui.label(str(total)).classes('chip')
 
     for item in items:
-        with ui.row().classes('items-center gap-2 row'):
+        with ui.row().classes('items-center gap-2 row flex-wrap'):
+            sys_id = item.get('representative_sys_id')
             if item.get('display_missing'):
                 # An absent manuscript_display row is FLAGGED, never blanked --
                 # a blank cell reads as a manuscript with no name rather than as
                 # a name we could not resolve.
-                ui.label(ds.missing_title(lang)).classes('dnote')
+                #
+                # The string says the MANUSCRIPT could not be named. It used to
+                # be `ds.missing_title` -- "Title unavailable" -- which describes
+                # a missing WORK title, so three rows on w000069 told the reader
+                # a title was unavailable when the work was named in the heading
+                # directly above and it was the shelfmark that was missing (owner
+                # report, 2026-08-07). `_RELATED_ROW_COPY['display_missing']` is
+                # the sibling renderer's already-correct wording for exactly this
+                # state, reused rather than re-worded.
+                ui.label(_RELATED_ROW_COPY['display_missing'][lang]).classes('dnote')
             else:
                 ui.label(str(item.get('library_code') or '')).classes('chip')
-                ui.label(str(item.get('shelfmark_display') or ''))
+                shelfmark = str(item.get('shelfmark_display') or '')
+                # A LINK, as every other shelfmark on both surfaces is
+                # (`_render_related_page_row` just below, and the findings page's
+                # `_render_shelfmark`). These rows answer "what else carries this
+                # work", so the next thing a reader wants is that manuscript --
+                # and it was the one shelfmark in the panel they had to copy out
+                # and paste into the search box (owner report, 2026-08-07).
+                #
+                # `representative_sys_id` is the row's own ranked representative,
+                # already on `SURFACE_EXPANSION_FIELDS`; `member_sys_ids` may hold
+                # several for a merged witness unit, and linking any other one
+                # would take the reader to a manuscript this row is not named
+                # after. No `page`: the expansion is per-CARRIER, and the
+                # representative page is not necessarily where the match sits.
+                if sys_id:
+                    ui.link(shelfmark, f'/browse?sys_id={sys_id}')
+                else:
+                    ui.label(shelfmark)
+                _render_catalogue_title(item, lang, catalogue_title)
             title = _expansion_work_title(item, lang)
             if title:
                 ui.label(title)
@@ -315,7 +384,8 @@ def _render_expansion_envelope(
             ui.button(icon='chevron_right', on_click=_next).props('flat dense size=sm')
 
 
-def _render_identification_row(row: Mapping[str, Any], lang: str) -> None:
+def _render_identification_row(row: Mapping[str, Any], lang: str,
+                               catalogue_title=None) -> None:
     with ui.element('div').classes(f'{PANEL_ROW_CLASS} row'):
         # 1. verb + work title, as PLAIN TEXT. `/work/{id}` does not exist until
         #    Phase 136.1, and a dead link is worse than plain text.
@@ -339,7 +409,7 @@ def _render_identification_row(row: Mapping[str, Any], lang: str) -> None:
 
         # 5. the actions, with the inert vote placeholders at the inline end.
         with ui.row().classes('items-center gap-2 side'):
-            _render_expansion(row, lang)
+            _render_expansion(row, lang, catalogue_title)
             _render_vote_placeholders(lang)
 
 
@@ -553,7 +623,8 @@ def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -
 
 
 def render_discovery_panel_body(
-    model: PanelModel, *, on_retry=None, page_id: Optional[str] = None
+    model: PanelModel, *, on_retry=None, page_id: Optional[str] = None,
+    catalogue_title=None,
 ) -> None:
     lang = _lang_of(model)
     root = ui.element('div').classes(f'gs-discovery {PANEL_ROOT_CLASS} w-full')
@@ -586,7 +657,8 @@ def render_discovery_panel_body(
         def _page_pane() -> None:
             with ui.element('div'):
                 for level in model.disclosure_levels:
-                    _render_level(level, lang, page_id, on_retry=on_retry)
+                    _render_level(level, lang, page_id, on_retry=on_retry,
+                                  catalogue_title=catalogue_title)
 
         with ui.element('div').classes('dpanes'):
             if model.lead_with_manuscript_pane:
@@ -598,12 +670,12 @@ def render_discovery_panel_body(
 
 
 def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
-                  on_retry=None) -> None:
+                  on_retry=None, catalogue_title=None) -> None:
     """Exactly the disclosure levels the model emits -- no more, no fewer."""
     if level.get('default_visible'):
         ui.label(level.get('label') or '').classes('font-semibold')
         for row in level.get('rows') or ():
-            _render_identification_row(row, lang)
+            _render_identification_row(row, lang, catalogue_title)
         return
 
     # A collapsed level. `notid` is applied only where the model says the level
@@ -631,7 +703,7 @@ def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
             for group in level.get('generic_groups') or ():
                 _render_generic_group(group, lang)
             for row in level.get('rows') or ():
-                _render_identification_row(row, lang)
+                _render_identification_row(row, lang, catalogue_title)
             related = level.get('related_pages')
             if related is not None:
                 _render_related_pages(related, lang, page_id, on_retry=on_retry)

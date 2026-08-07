@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from nicegui import ui, run
 
@@ -784,6 +784,42 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
             panel_container.style(
                 'display: block;' if open_state['value'] else 'display: none;')
 
+    # THE CATALOGUE TITLE for the expansion rows -- "what does the library call
+    # this manuscript", beside its shelfmark, exactly as the corpus-wide findings
+    # page shows it (`web/pages/findings.py`, coordinator-authorized 2026-08-05;
+    # missing here until the owner reported it on 2026-08-07).
+    #
+    # MEMOISED PER RENDER, and per-render is the right scope: the dict lives as
+    # long as the closure the rows capture, so a work carried by twelve
+    # manuscripts costs twelve lookups no matter how often the reader pages
+    # through the expansion, and nothing survives to go stale.
+    #
+    # `csv_bank` is a plain in-memory dict populated once at process startup
+    # (`MetadataManager.__init__`), so this is a dict lookup with NO I/O -- it
+    # needs no offload wrapper and adds none, which matters on a path the panel's
+    # own AST guard watches for exactly that (`_PANEL_PATH_FUNCTIONS`).
+    #
+    # ~14% of manuscripts have no title in `libraries.csv`; those resolve to
+    # None, and the renderer draws nothing at all for them rather than a
+    # placeholder.
+    _catalogue_titles: Dict[str, Optional[str]] = {}
+
+    def _catalogue_title(item) -> Optional[str]:
+        key = str(item.get('representative_sys_id') or '')
+        if not key:
+            return None
+        if key not in _catalogue_titles:
+            title = None
+            try:
+                from web.state import state as app_state
+                if app_state.meta_mgr is not None:
+                    csv_row = app_state.meta_mgr.csv_bank.get(key)
+                    title = (csv_row or {}).get('title') or None
+            except Exception:
+                title = None      # a title is an ENRICHMENT; never fail the row
+            _catalogue_titles[key] = title
+        return _catalogue_titles[key]
+
     # The claims envelope's own `meta['page_id']` -- the panel never re-derives
     # an id the service already told it.
     _page_id = (bundle.claims.get('meta') or {}).get('page_id')
@@ -792,7 +828,8 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
         panel_container.style(
             'display: block;' if open_state['value'] else 'display: none;')
         with panel_container:
-            render_discovery_panel_body(model, on_retry=_retry, page_id=_page_id)
+            render_discovery_panel_body(model, on_retry=_retry, page_id=_page_id,
+                                        catalogue_title=_catalogue_title)
 
     if entry_container is not None:
         with entry_container:

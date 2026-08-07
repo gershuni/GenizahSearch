@@ -429,11 +429,34 @@ _BADGE_VALUE_MARKERS: tuple = (
 #: These three match how a number is WRITTEN, so a machine enum cannot trip them.
 _PERCENT_RE = re.compile(r"\d\s*%")
 _INTERVAL_RE = re.compile(r"[\[(]\s*\d*\.\d+\s*[,–-]\s*\d*\.\d+\s*[\])]")
+#: How a DECIMAL is written, and the single reason this gate ever rejected a
+#: real manuscript.
+#:
+#: `\d*\.\d+` -- the previous spelling -- makes the integer part OPTIONAL, so the
+#: `.2` in the Cambridge shelfmark `T-S F1(1).2` reads as a decimal, and `F1` is
+#: a rate word four characters away. Every findings envelope containing one of
+#: the 39 real `T-S F1(n).n` shelfmarks therefore raised, and because the check
+#: guards the WHOLE envelope the reader lost the ENTIRE page rather than a row
+#: (owner report, 2026-08-07: `item.shelfmark_display`; 51 identifications
+#: across 37 manuscripts).
+#:
+#: So: require an explicit integer part, OR a bare `.NN` that is not preceded by
+#: a word character or a closing paren. That second alternative is what keeps
+#: `accuracy .88` caught while `F1(1).2` and `MS Heb c.57` pass -- a shelfmark's
+#: fraction-shaped tail is always glued to the segment before it, and a written
+#: rate never is.
+#:
+#: `tests/render_smoke/discovery_honesty_gate.py::_DECIMAL_RE` reached the same
+#: conclusion from the same defect ("the integer part is what keeps a shelfmark
+#: out of it -- `MS Heb c.57`"). The spellings stay SEPARATE rather than shared:
+#: mirroring is the standing rule for these checks, because a check that imports
+#: the thing it checks passes automatically when that thing changes.
+_DECIMAL = r"(?:\d+\.\d+|(?<![\w)])\.\d+)"
 #: A rate word within a short distance of a decimal. The distance bound is what
 #: keeps `1.25 seconds` and a `v0.8`-style marker out of it.
 _RATE_WORD_RE = re.compile(
-    r"(precision|accuracy|recall|confidence|f1|ci)\b[^.]{0,24}?\d*\.\d+"
-    r"|\d*\.\d+[^.]{0,24}?\b(precision|accuracy|recall|confidence|f1)",
+    r"(precision|accuracy|recall|confidence|f1|ci)\b[^.]{0,24}?" + _DECIMAL
+    + r"|" + _DECIMAL + r"[^.]{0,24}?\b(precision|accuracy|recall|confidence|f1)",
     re.IGNORECASE,
 )
 #: Version-shaped tokens are not rates. Bounded to explicit `v`/`version`

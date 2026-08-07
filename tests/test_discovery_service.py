@@ -2433,6 +2433,19 @@ def test_a_rate_under_an_allowed_key_never_reaches_a_surface(value, shape, holde
     "direct_witness", "quotes_this_work", "low_coverage", "fills_gap",
     "Talmud / Bavli", "T-S 12.123", "V0.8", "version 2.1", "1.25 seconds",
     "1,329 matched letters", "5,684 units",
+    # REAL shelfmarks that this gate actually rejected, live, on 2026-08-07.
+    # `T-S 12.123` above could never have caught it: the rule needs a rate WORD
+    # near a decimal, and the Cambridge Fragment-of-a-Fragment class is the one
+    # shelfmark family that contains one -- `F1`, four characters from `.2`,
+    # which `\d*\.\d+` read as a decimal because the integer part was optional.
+    # 39 shelfmarks / 51 identifications / 37 manuscripts, and because the check
+    # guards the WHOLE envelope, every reader whose filters touched one lost the
+    # entire findings page rather than a row.
+    "T-S F1(1).2", "T-S F1(2).121", "T-S F1(1).114", "T-S F1.2",
+    # The same fraction-shaped tail, glued to a segment, in other families --
+    # the sibling detector in `tests/render_smoke/discovery_honesty_gate.py`
+    # cites `MS Heb c.57` for exactly this reason.
+    "MS Heb c.57", "Or.1080 J266", "CUL Or.1081 2.75",
 ])
 def test_the_rate_check_does_not_reject_valid_envelope_values(value):
     """The false-positive half, and the reason this is a SHAPE rule rather than
@@ -2446,6 +2459,68 @@ def test_the_rate_check_does_not_reject_valid_envelope_values(value):
     env = make_envelope("ok", items=[{"label": value}], total=1,
                         meta={"note": value})
     assert env["status"] == "ok"
+
+
+def test_no_real_display_value_in_the_artifact_trips_the_rate_check():
+    """THE CHECK THAT WOULD HAVE CAUGHT THIS, run over the real corpus.
+
+    Every hand-written false-positive list is a list of shapes someone thought
+    of. `T-S 12.123` was in ours for months and could not have caught `T-S
+    F1(1).2`, because nobody writing it was thinking about a shelfmark that
+    contains a rate word. So this sweeps every value the artifact can actually
+    put on a surface -- shelfmarks, library codes, work titles, authors, genres
+    -- through the real predicate.
+
+    Deliberately over the CORPUS rather than over examples: the defect was a
+    collision between a real naming convention and a regex, and only real names
+    can find the next one.
+    """
+    from shared.discovery_surface_projection import _rate_or_interval_violation
+    from tests.test_discovery_launch_stats import resolve_guard_artifact
+
+    path, reason = resolve_guard_artifact()
+    if path is None:
+        pytest.skip((reason or "no resolvable discovery artifact") +
+                    " -- set DISCOVERY_LAUNCH_GUARD_DB to sweep the real corpus")
+
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        values = []
+        for sql in (
+            "SELECT shelfmark_display FROM manuscript_display",
+            "SELECT library_code FROM manuscript_display",
+            "SELECT neutral_title FROM works",
+            "SELECT author FROM works",
+            "SELECT genre FROM works",
+        ):
+            values.extend(str(v) for (v,) in conn.execute(sql) if v is not None)
+    finally:
+        conn.close()
+
+    assert values, "swept nothing -- the artifact resolved but carries no display values"
+    tripped = sorted({v for v in values if _rate_or_interval_violation(v)})
+    assert not tripped, (
+        f"{len(tripped)} real display value(s) are read as a precision claim and "
+        f"would raise, taking the WHOLE envelope down: {tripped[:10]}"
+    )
+
+
+def test_a_bare_decimal_beside_a_rate_word_is_still_refused():
+    """The fix's OWN boundary, and why it is not simply "require an integer part".
+
+    Requiring `\\d+\\.\\d+` alone would clear every shelfmark -- and would also
+    let `accuracy .88` through, which is a precision claim written the way
+    people actually write one. So the decimal rule admits a BARE `.NN` too, and
+    excludes it only when glued to a word character or a closing paren, which is
+    what a shelfmark's tail always is (`F1(1).2`, `c.57`) and what a written rate
+    never is.
+
+    This is the half of the rule a "just relax it" fix would have dropped
+    silently, so it is pinned separately from the shelfmark list above.
+    """
+    with pytest.raises(ValueError) as exc:
+        make_envelope("ok", items=[{"label": "accuracy .88"}], total=1)
+    assert "an accuracy rate" in str(exc.value)
 
 
 def test_thread_identity_control_would_catch_an_on_loop_read():

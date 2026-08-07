@@ -942,6 +942,136 @@ def test_work_titles_are_not_links():
 
 
 # ===========================================================================
+# The expansion row's own anatomy (owner report, 2026-08-07). Three defects,
+# one row: no link, the wrong missing-state string, and no catalogue title.
+# ===========================================================================
+
+def _render_expansion_rows(items, lang='en', catalogue_title=None):
+    """Paint `_render_expansion_envelope` and return the client.
+
+    Drives the SHIPPED renderer with PROJECTED rows, so a field the projection
+    does not carry cannot be smuggled in by a hand-written dict."""
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+    holder: Dict[str, Any] = {}
+
+    async def _noop_reload():                                # pragma: no cover
+        return None
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page('/_expansion_row_probe')) as client:
+            with client:
+                dp._render_expansion_envelope(
+                    make_envelope(STATUS_OK, items, len(items), meta={
+                        'work_id': 'w000001', 'anchor_mode': 'anchored',
+                        'filter_basis': 'displayed_band', 'anchor_excluded': True}),
+                    lang, {'open': True, 'page': 1, 'loaded': True}, _noop_reload,
+                    page_size=25, catalogue_title=catalogue_title)
+        holder['client'] = client
+
+    asyncio.run(_run())
+    return holder['client']
+
+
+def _client_hrefs(client) -> List[str]:
+    """Every `href` in the client.
+
+    Read off the PROP, never the tag name: NiceGUI's `ui.link` renders as a
+    `nicegui-link` custom element, so a tag-name check silently finds nothing
+    and the assertion inverts (`tests/render_smoke/test_findings_render_smoke.py
+    ::_hrefs` records the same trap)."""
+    out: List[str] = []
+    for el in client.elements.values():
+        href = (getattr(el, '_props', None) or {}).get('href')
+        if isinstance(href, str) and href:
+            out.append(href)
+    return out
+
+
+def test_an_expansion_row_links_its_shelfmark_to_that_manuscript():
+    """These rows answer "what ELSE carries this work", so the manuscript is the
+    next thing the reader wants. It was the one shelfmark in the panel they had
+    to copy out and paste into the search box."""
+    row = surface_safe_expansion(_expansion_source())
+    hrefs = _client_hrefs(_render_expansion_rows([row]))
+    assert f"/browse?sys_id={row['representative_sys_id']}" in hrefs, (
+        f'the expansion row renders no link to its manuscript; hrefs: {hrefs}')
+
+
+def test_an_expansion_row_links_its_OWN_representative_never_another_member():
+    """A merged witness unit carries several `member_sys_ids`. The row is NAMED
+    after its ranked representative, so linking any other member would take the
+    reader to a manuscript this row does not describe."""
+    row = surface_safe_expansion(_expansion_source(
+        member_sys_ids=['990000000000000946', '990000000000000999']))
+    hrefs = _client_hrefs(_render_expansion_rows([row]))
+    assert any('990000000000000946' in h for h in hrefs), hrefs
+    assert not any('990000000000000999' in h for h in hrefs), (
+        f'the row links a non-representative unit member: {hrefs}')
+
+
+def test_an_unnamed_expansion_row_offers_no_link_at_all():
+    """A row we could not name has nothing to link -- and must not emit
+    `/browse?sys_id=None`, which is a dead end dressed as a destination."""
+    row = surface_safe_expansion(_expansion_source(
+        display_missing=True, library_code=None, shelfmark_display=None))
+    hrefs = _client_hrefs(_render_expansion_rows([row]))
+    assert not hrefs, f'an unnamed row still rendered a link: {hrefs}'
+
+
+@pytest.mark.parametrize('lang', LANGS)
+def test_an_unnamed_expansion_row_says_the_MANUSCRIPT_is_unnamed(lang):
+    """Not "Title unavailable", which is about a WORK.
+
+    `display_missing` means there is no `manuscript_display` row -- 15% of
+    claim-bearing manuscripts, essentially all of them `review_only`, i.e. exactly
+    the rows that live behind "Show more possible matches". Borrowing the work's
+    missing-title string told the reader a title was unavailable while the work
+    was named in the heading directly above (owner report, 2026-08-07).
+    """
+    row = surface_safe_expansion(_expansion_source(
+        display_missing=True, library_code=None, shelfmark_display=None))
+    client = _render_expansion_rows([row], lang=lang)
+    text = '\n'.join(_subtree_texts(
+        _elements_with_class(client, dp.PANEL_EXPANSION_CLASS)[0]
+        if _elements_with_class(client, dp.PANEL_EXPANSION_CLASS)
+        else list(client.elements.values())[0]))
+    assert dp._RELATED_ROW_COPY['display_missing'][lang] in text, text
+    assert ds.missing_title(lang) not in text, (
+        'the row still reports a missing WORK TITLE for an unnamed MANUSCRIPT')
+
+
+@pytest.mark.parametrize('lang', LANGS)
+def test_an_expansion_row_shows_what_the_catalogue_calls_the_manuscript(lang):
+    """"Catalogued as: <title>", the same line the findings page carries -- so a
+    reader comparing our identification against the library's can do it here
+    too, which is the whole point of the expansion."""
+    row = surface_safe_expansion(_expansion_source())
+    marker = 'Catalogue Title Probe'
+    client = _render_expansion_rows(
+        [row], lang=lang, catalogue_title=lambda _row: marker)
+    text = '\n'.join(_subtree_texts(list(client.elements.values())[0]))
+    assert marker in text, f'the catalogue title is absent: {text}'
+    from web.components.findings_rows import copy_text as _fc
+    assert _fc('catalogue_title_label', lang) in text, (
+        'the title renders with no label introducing it as the catalogue\'s')
+
+
+def test_an_expansion_row_omits_the_catalogue_line_entirely_when_unresolved():
+    """~14% of manuscripts have no title in libraries.csv, and an unresolved
+    title renders NOTHING -- not an empty element and not a placeholder."""
+    row = surface_safe_expansion(_expansion_source())
+    for resolver in (None, lambda _row: None, lambda _row: ''):
+        client = _render_expansion_rows([row], catalogue_title=resolver)
+        classes = [c for el in client.elements.values()
+                   for c in (getattr(el, '_classes', None) or [])]
+        assert 'gs-findings-row-catalogue-title' not in classes, (
+            f'an empty catalogue-title row was rendered for {resolver!r}')
+
+
+# ===========================================================================
 # THE ENVELOPE SCAN.
 # ===========================================================================
 
@@ -2139,6 +2269,17 @@ def _render_every_panel_surface(seed: Optional[str] = None) -> str:
             state: Dict[str, Any] = {'open': True, 'page': 1, 'loaded': True}
             parts.append(_render_capture(lambda e=envelope, s=state, ln=lang: (
                 dp._render_expansion_envelope(e, ln, s, _noop_reload, page_size=25))))
+            # ...and AGAIN with a catalogue title resolving, because that line
+            # emits FREE TEXT from libraries.csv onto the surface and the scan is
+            # line-granular: without this the "Catalogued as: <title>" line would
+            # never be painted, and nothing scanned would cover what it emits.
+            # `seed` plants the restricted-string probe in the title itself, so
+            # the positive control can prove this path is really covered.
+            parts.append(_render_capture(lambda e=envelope, s=state, ln=lang: (
+                dp._render_expansion_envelope(
+                    e, ln, s, _noop_reload, page_size=25,
+                    catalogue_title=lambda _row, _t=(
+                        seed or 'Commentary on Song of Songs'): _t))))
 
     # ...and the SAME surfaces again with the lazy reads answering, so the
     # loaders, their painters and their failure branches all run. Three regimes:
@@ -2265,6 +2406,17 @@ _CAPTURE_EXEMPT: Dict[Tuple[str, str], str] = {
         'that a title added to the projection later routes through ruling R '
         'instead of being formatted inline. If that field is ever added, this '
         'exemption must be deleted and the capture must seed it.',
+    ('_render_expansion_envelope', 'ui.label(shelfmark)'):
+        'the un-linked fallback for a NAMED row with no `representative_sys_id`, '
+        'unreachable BY SCHEMA: `discovery_evidence.sys_id` is NOT NULL, and '
+        '`manuscript_display` is reached only by joining ON that sys_id -- so a '
+        'row that has a shelfmark to render always has the sys_id to link it '
+        '(verified against the served artifact: 0 NULL sys_ids in either table). '
+        'The branch mirrors `findings_rows._render_shelfmark`, whose own rows come '
+        'from `discovery_identification` and can carry a NULL. Kept rather than '
+        'dropped so a future projection that does deliver a nameless-but-named '
+        'row degrades to plain text instead of rendering `/browse?sys_id=None`; if '
+        'the schema ever relaxes, delete this and seed the capture.',
 }
 
 
@@ -2348,7 +2500,7 @@ def test_the_capture_exemption_list_has_not_grown():
     reason, and adding one is a deliberate edit to this number in the same
     commit — not a quiet widening.
     """
-    assert len(_CAPTURE_EXEMPT) == 1, (
+    assert len(_CAPTURE_EXEMPT) == 2, (
         'the masking capture\'s exemption list changed size: '
         + repr(sorted(_CAPTURE_EXEMPT)))
     for key, reason in _CAPTURE_EXEMPT.items():
@@ -2400,7 +2552,16 @@ def test_the_capture_really_holds_the_rendered_surface(masking_capture):
             f'{lang}: the row\'s granularity sub-line is not in the capture')
         # Painted ONLY by the expansion loader's own painter, which only runs
         # when a control is clicked.
-        assert ds.missing_title(lang) in rendered, (
+        #
+        # Reads the row's UNNAMED-MANUSCRIPT wording, which this canary followed
+        # when the expansion row stopped borrowing `ds.missing_title` (2026-08-07):
+        # that string means "the WORK's title could not be resolved", and the
+        # expansion was using it for a manuscript with no `manuscript_display`
+        # row, so three rows told the reader a title was unavailable while the
+        # work was named in the heading directly above. Same canary, same
+        # property -- it still fails if the click sweep stops reaching the
+        # lazily-painted body -- now keyed to the string that path really emits.
+        assert dp._RELATED_ROW_COPY['display_missing'][lang] in rendered, (
             f'{lang}: the expansion body is not in the capture, so the click '
             'sweep is not reaching the lazily-painted surfaces')
         assert ds.disclosure_toggle(ds.TOGGLE_MORE_MATCHES, lang) in rendered, (
