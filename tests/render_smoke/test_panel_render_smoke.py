@@ -946,6 +946,180 @@ def test_work_titles_are_not_links():
 # one row: no link, the wrong missing-state string, and no catalogue title.
 # ===========================================================================
 
+def _render_entry_control(model, *, highlight_new=False):
+    """Paint `render_discovery_entry_control` alone and return the client."""
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+    holder: Dict[str, Any] = {}
+
+    def _noop():                                             # pragma: no cover
+        return None
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page('/_entry_control_probe')) as client:
+            with client:
+                dp.render_discovery_entry_control(
+                    model, on_toggle=_noop, highlight_new=highlight_new)
+        holder['client'] = client
+
+    asyncio.run(_run())
+    return holder['client']
+
+
+@pytest.mark.parametrize('lang', LANGS)
+def test_the_entry_control_is_marked_new_until_the_reader_opens_it(lang):
+    """The panel is the release's one new BROWSE surface, and it arrives on a
+    toolbar already carrying seven `flat dense` controls -- so without a marker
+    it looks exactly like the things a reader has learned to ignore (owner,
+    2026-08-07).
+
+    The marker is a SEPARATE element, never text appended to the button's label:
+    the label is already `Computed identifications (N)`, and anything matching on
+    that string -- a screen reader listing controls, a test driver, the masking
+    capture -- must keep finding it intact.
+    """
+    model = build_panel_rows(bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), lang, STATUS_OK))
+
+    plain = _render_entry_control(model)
+    assert not _elements_with_class(plain, dp.PANEL_ENTRY_NEW_CLASS), (
+        'the highlight rendered for a reader who has already opened the panel')
+    assert not _elements_with_class(plain, dp.PANEL_ENTRY_NEW_BADGE_CLASS)
+
+    marked = _render_entry_control(model, highlight_new=True)
+    assert _elements_with_class(marked, dp.PANEL_ENTRY_NEW_CLASS), (
+        'the entry control carries no launch highlight for a first-time reader')
+    badges = _elements_with_class(marked, dp.PANEL_ENTRY_NEW_BADGE_CLASS)
+    assert len(badges) == 1, f'expected one NEW badge, got {len(badges)}'
+
+    # The button's own accessible name is UNCHANGED by the highlight -- the
+    # badge is a SIBLING, so the label a reader (or a driver) matches on is the
+    # same string with and without it.
+    def _button_labels(client):
+        return sorted(
+            el.text for el in client.elements.values()
+            if el.tag == 'q-btn' and getattr(el, 'text', None))
+    assert _button_labels(plain) == _button_labels(marked), (
+        'the highlight altered the control label; it must be a sibling element')
+    assert _button_labels(marked), 'no button was rendered at all'
+
+
+def test_the_new_badge_is_hidden_from_assistive_technology():
+    """The word adds nothing spoken that the button's own name does not already
+    carry, and an unlabelled "New" read out beside a control is noise."""
+    model = build_panel_rows(bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), 'en', STATUS_OK))
+    badge = _elements_with_class(
+        _render_entry_control(model, highlight_new=True),
+        dp.PANEL_ENTRY_NEW_BADGE_CLASS)[0]
+    assert (badge._props or {}).get('aria-hidden') in (True, 'true'), (
+        f'the badge is exposed to assistive tech: {badge._props!r}')
+
+
+def test_the_highlight_carries_no_claim_about_the_matches():
+    """It says the CONTROL is new. It must never imply anything about the
+    quality, novelty or confidence of what is behind it -- D-24 forbids
+    confidence styling on this surface, and a "look at this" treatment keyed on
+    findings would be exactly that through the back door.
+    """
+    model = build_panel_rows(bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), 'en', STATUS_OK))
+    text = '\n'.join(_subtree_texts(list(
+        _render_entry_control(model, highlight_new=True).elements.values())[0])).lower()
+    for forbidden in ('important', 'best', 'top', 'verified', 'confirmed',
+                      'high confidence', 'accurate', 'recommended', 'discovery',
+                      'breakthrough'):
+        assert forbidden not in text, (
+            f'the launch highlight makes a claim about the matches: {forbidden!r}')
+
+
+def test_the_seam_actually_computes_the_highlight_from_the_readers_state():
+    """The gap the tests above cannot see.
+
+    Every render test passes `highlight_new` in DIRECTLY, so all of them pass
+    against a seam that hardcodes it to `False` and shows the highlight to
+    nobody -- verified by mutation, which is how this test came to exist. The
+    renderer being able to draw a marker is not the same property as the reader
+    ever being given one.
+
+    So: the seam must READ the seen-flag and PASS what it read. Checked over the
+    AST, by dataflow rather than by text -- the value handed to
+    `render_discovery_entry_control` has to be the name the `safe_user_get`
+    result was bound to, not a constant that happens to sit in that argument.
+    """
+    import ast
+    tree = ast.parse(_read('web/pages/browse_enrichment.py'))
+    seam = next((n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef)
+                 and n.name == 'update_discovery_panel_section'), None)
+    assert seam is not None, 'update_discovery_panel_section is gone'
+
+    # What name holds the result of the seen-flag READ?
+    read_into = {
+        target.id
+        for node in ast.walk(seam) if isinstance(node, ast.Assign)
+        for target in node.targets if isinstance(target, ast.Name)
+        if any(isinstance(c, ast.Call) and getattr(c.func, 'id', None) == 'safe_user_get'
+               for c in ast.walk(node.value))
+    }
+    assert read_into, (
+        'the seam never reads the panel-seen flag, so the launch highlight is '
+        'either shown to everyone forever or to nobody at all')
+
+    # ...and is THAT name what reaches the renderer?
+    passed = [
+        kw.value for call in ast.walk(seam) if isinstance(call, ast.Call)
+        and getattr(call.func, 'id', None) == 'render_discovery_entry_control'
+        for kw in call.keywords if kw.arg == 'highlight_new'
+    ]
+    assert passed, (
+        'the entry control is rendered without `highlight_new`, so the reader '
+        'never sees the launch highlight')
+    for value in passed:
+        assert isinstance(value, ast.Name) and value.id in read_into, (
+            'the seam passes a CONSTANT for `highlight_new` rather than what it '
+            f'read from the reader\'s state ({ast.dump(value)[:60]}) -- the '
+            'highlight would be shown to everyone forever, or to nobody')
+
+
+def test_the_seam_retires_the_highlight_on_first_open_not_on_render():
+    """WRITE-ON-OPEN, never write-on-render.
+
+    The browse toolbar paints on every page load, so retiring the highlight when
+    the control RENDERS would burn it before the reader had a chance to see it.
+    It is retired when the panel is actually opened -- which is also why there is
+    no dismiss control: the highlight removes itself by being used.
+
+    Checked over the AST of the shipped seam, because the prose above the code
+    says the same thing and a text scan would match its own explanation.
+    """
+    import ast
+    tree = ast.parse(_read('web/pages/browse_enrichment.py'))
+    seam = next((n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef)
+                 and n.name == 'update_discovery_panel_section'), None)
+    assert seam is not None, 'update_discovery_panel_section is gone'
+
+    toggle = next((n for n in ast.walk(seam)
+                   if isinstance(n, ast.FunctionDef) and n.name == '_toggle_panel'), None)
+    assert toggle is not None, '_toggle_panel is gone -- re-point this guard'
+
+    writes_in_toggle = [
+        c for c in ast.walk(toggle) if isinstance(c, ast.Call)
+        and getattr(c.func, 'id', None) == 'safe_user_set'
+    ]
+    assert writes_in_toggle, (
+        'the seen-flag is not written when the panel is opened, so the highlight '
+        'never retires and becomes a permanent badge')
+
+    writes_anywhere = [
+        c for c in ast.walk(seam) if isinstance(c, ast.Call)
+        and getattr(c.func, 'id', None) == 'safe_user_set'
+    ]
+    assert len(writes_anywhere) == len(writes_in_toggle), (
+        'the seen-flag is written outside `_toggle_panel` -- a write on the '
+        'render path retires the highlight before the reader has seen it')
+
+
 def _render_expansion_rows(items, lang='en', catalogue_title=None,
                            catalogue_identity=None):
     """Paint `_render_expansion_envelope` and return the client.
@@ -2291,6 +2465,21 @@ def _render_every_panel_surface(seed: Optional[str] = None) -> str:
         parts.append(_render_capture(
             lambda m=empty_model: dp.render_discovery_entry_control(
                 m, on_toggle=_noop_toggle)))
+
+        # ...and the LAUNCH-HIGHLIGHT variant, whose badge is a rendered word the
+        # line-granular gate requires a capture to paint.
+        #
+        # A VISIBLE model, deliberately NOT `empty_model` above: that one is the
+        # hidden-entry-control fixture, so the renderer returns before it reaches
+        # the highlight at all -- the capture ran, painted nothing, and the line
+        # gate caught it. Exactly the failure this gate exists for, on the first
+        # try.
+        visible_model = build_panel_rows(
+            bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), lang, STATUS_OK,
+                       seed_title=title))
+        parts.append(_render_capture(
+            lambda m=visible_model: dp.render_discovery_entry_control(
+                m, on_toggle=_noop_toggle, highlight_new=True)))
 
         # ...and the SAME true page zero with a NON-EMPTY manuscript read: a
         # claim-less folio of a claim-rich manuscript (the measured case is RNL

@@ -1698,6 +1698,50 @@ body {
    border and the recessed fill still carry the distinction.
    Contrast — .chip.here text-primary on bg-active: light 13.89,
    parchment 13.09, dark 8.87. */
+/* ---- the entry control's LAUNCH HIGHLIGHT (owner, 2026-08-07) ----
+   The panel arrives on a browse toolbar already carrying seven controls, every
+   one of them `flat dense` — so the one new surface in the release looked
+   exactly like the six things a reader already knows how to ignore. This gives
+   it a border and a tint until the reader opens it once.
+
+   PRESENTATIONAL ONLY. It marks the CONTROL as new; it says nothing about the
+   matches behind it, and there is no per-tier or per-confidence rule here (D-24
+   forbids confidence styling on this surface, and a "look at this" treatment
+   keyed on findings would be exactly that through the back door).
+
+   `--accent-gold` deliberately, NOT `--primary-600`: the green primary is the
+   site's ACTION colour (Search, Add to Reading Desk), and this is a "notice me",
+   not a call to act. Gold is already the caveat rule's accent on this same
+   surface, so the panel keeps one accent rather than acquiring a second.
+
+   Contrast — .gs-discovery .discovery-panel-entry-new-badge text on
+   bg-tertiary: light 13.35, parchment 13.28, dark 9.45 (the same pair the
+   caveat rule measures, which is why it reuses those two variables). */
+.gs-discovery.discovery-panel-entry-new {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--accent-gold);
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    padding-inline: 4px;
+}
+.gs-discovery .discovery-panel-entry-new-badge {
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--accent-gold);
+    /* Near-black on gold in EVERY theme: --accent-gold is a fixed light value
+       (#d4a574) that does not change per theme, so a theme-following text
+       colour would go white-on-gold in dark and fail AA. Contrast 8.19. */
+    color: #1a1a1a;
+    text-align: start;
+}
+
 .gs-discovery .chip {
     display: inline-block;
     font-size: 12px;

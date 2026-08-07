@@ -30,7 +30,13 @@ from shared.fgp_service import (
     fgp_image_number_for_displayed_page, fgp_needs_full_htr,
 )
 from web.pages.browse_state import BrowseState, _crossref_cache
+from web.safe_storage import safe_user_get, safe_user_set
 from shared.synthetic_sys_id import is_synthetic_sys_id
+
+#: Per-user: has this reader OPENED the connections panel at least once? Drives
+#: the launch highlight on its toolbar entry control, and nothing else. Read and
+#: written ONLY through `web/safe_storage.py` (Phase 87 chokepoint).
+_PANEL_SEEN_KEY = 'discovery_panel_opened'
 
 logger = logging.getLogger(__name__)
 
@@ -778,11 +784,33 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
         refs.enrichment_refs['discovery_bundle'] = fresh
         update_discovery_panel_section(state, refs)
 
+    # THE LAUNCH HIGHLIGHT on the entry control (owner, 2026-08-07: "perhaps just
+    # highlight it"). The panel is the release's one new browse surface, arriving
+    # on a toolbar that already carries seven `flat dense` controls -- without a
+    # marker it is a button nobody has a reason to notice.
+    #
+    # SELF-RETIRING, and that is the whole design: it is shown until the reader
+    # OPENS the panel once, then never again. Nothing to dismiss, no second
+    # control, and no date to remember to remove -- a permanent "New" badge is
+    # just a badge, and a dismiss button for a highlight costs the reader more
+    # attention than the highlight does.
+    #
+    # Read through the `safe_storage` chokepoint (Phase 87), never `app.storage`
+    # directly: this is per-user state and the AST guard
+    # `tests/test_no_raw_storage_access.py` keeps its allowlist empty.
+    highlight_new = not bool(safe_user_get(_PANEL_SEEN_KEY, False))
+
     def _toggle_panel():
         open_state['value'] = not open_state['value']
         if panel_container is not None:
             panel_container.style(
                 'display: block;' if open_state['value'] else 'display: none;')
+        # Retire the highlight the FIRST time the panel is opened. Written on
+        # open rather than on render, because rendering the control is not the
+        # reader noticing it -- the toolbar paints on every browse page, so a
+        # write-on-render would burn the highlight before it had been seen.
+        if open_state['value'] and not safe_user_get(_PANEL_SEEN_KEY, False):
+            safe_user_set(_PANEL_SEEN_KEY, True)
 
     # THE CATALOGUE TITLE for the expansion rows -- "what does the library call
     # this manuscript", beside its shelfmark, exactly as the corpus-wide findings
@@ -902,7 +930,8 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
 
     if entry_container is not None:
         with entry_container:
-            render_discovery_entry_control(model, on_toggle=_toggle_panel)
+            render_discovery_entry_control(model, on_toggle=_toggle_panel,
+                                           highlight_new=highlight_new)
 
 
 def populate_bib_catalog_buttons(container, state: BrowseState, page):

@@ -4435,7 +4435,7 @@ def test_a_missing_size_degrades_to_the_digit_free_sentence(
 
 
 def test_the_rendered_size_equals_the_more_bucket_total_the_findings_query_returns(
-        tmp_path):
+        tmp_path, monkeypatch):
     """The cross-check the figure has to survive to be an invitation at all: a
     reader who follows it must land on the number it advertised.
 
@@ -4446,10 +4446,29 @@ def test_the_rendered_size_equals_the_more_bucket_total_the_findings_query_retur
     visibility clauses. Comparing the advertised figure against a re-run of its
     own SQL would compare a number with itself.
 
+    THE LANDING SIDE GOES THROUGH THE PAGE'S OWN `fetch_findings`, and that is
+    the whole correctness of this guard (2026-08-07). It used to call
+    `service.get_findings_enveloped(bucket="more")` directly, which picks up the
+    SERVICE's default `divergence=DIVERGENCE_HIDDEN` -- a default NO page path
+    uses, because `fetch_findings` pins `DIVERGENCE_SHOWN` unconditionally (the
+    four-state novelty selector expresses ruling F's rows through `novelty` now,
+    so the old axis must add no predicate). The test therefore measured a view
+    the product does not render: it reported a 25,872-vs-16,437 mismatch on the
+    real artifact -- exactly the 9,435 divergent rows the unused default
+    subtracts -- while the actual page landed on 25,872 and agreed with the card.
+
+    That failure mode is the dangerous direction for a guard: it was RED while
+    the product was correct, and it would have stayed GREEN if the page itself
+    ever started hiding rows, because it never asked the page anything. Reading
+    the reader's number from the reader's own code path is what makes it a check
+    on the journey rather than on a query someone rewrote in a test.
+
     Runs on a SYNTHETIC artifact first, so it holds in every environment, and
     then on the real one when it resolves -- an assertion that only ever skips
     is not a check.
     """
+    import asyncio
+
     from shared.discovery_service import DiscoveryService
     from tests.test_discovery_launch_stats import (
         _EXPECTED_PAGES,
@@ -4458,7 +4477,7 @@ def test_the_rendered_size_equals_the_more_bucket_total_the_findings_query_retur
         resolve_guard_artifact,
     )
 
-    def _agree(path, version):
+    def _agree(path, version, monkeypatch):
         service = DiscoveryService(
             path_provider=lambda: path,
             availability_callable=lambda: True,
@@ -4467,7 +4486,16 @@ def test_the_rendered_size_equals_the_more_bucket_total_the_findings_query_retur
         envelope = service.get_launch_stats_enveloped()
         assert envelope["status"] == "ok"
         advertised = envelope["meta"]["more_pool_total"]
-        landed = service.get_findings_enveloped(bucket="more")
+
+        # THE READER'S OWN READ. `fp.fetch_findings` is the one path the page
+        # uses; pointing its async wrapper at this artifact's service is the
+        # smallest substitution that leaves every argument the page passes --
+        # unit, bucket, novelty, divergence, sort -- coming from the page.
+        async def _enveloped(unit, **kwargs):
+            return service.get_findings_enveloped(unit, **kwargs)
+
+        monkeypatch.setattr(fp, "get_findings_enveloped", _enveloped)
+        landed = asyncio.run(fp.fetch_findings(_state(bucket="more")))
         assert landed["status"] == "ok"
         assert advertised == landed["total"], (
             f"{path}: the invitation would advertise {advertised} and the "
@@ -4476,7 +4504,7 @@ def test_the_rendered_size_equals_the_more_bucket_total_the_findings_query_retur
 
     synthetic = _build_launch_db(
         tmp_path / "invite-cross-check.db", _POPULATED_ROWS, pages=_EXPECTED_PAGES)
-    assert _agree(synthetic, "synthetic") > 0
+    assert _agree(synthetic, "synthetic", monkeypatch) > 0
 
     path, reason = resolve_guard_artifact()
     if path is None:
@@ -4484,7 +4512,49 @@ def test_the_rendered_size_equals_the_more_bucket_total_the_findings_query_retur
             (reason or "no resolvable discovery artifact") +
             " -- the synthetic half of this check ran; set "
             "DISCOVERY_LAUNCH_GUARD_DB to run it against the served artifact")
-    assert _agree(path, "real") > 0
+    assert _agree(path, "real", monkeypatch) > 0
+
+
+def test_the_page_never_leaves_the_divergence_axis_at_the_service_default():
+    """The trap the guard above fell into, pinned at its source.
+
+    `_build_findings_filter` still defaults `divergence=DIVERGENCE_HIDDEN`, which
+    was right before the four-state novelty selector replaced that axis and is
+    wrong now: the selector expresses ruling F's rows through `novelty` (they are
+    shades of one column), so leaving the old axis at its default subtracts them
+    a second time and the "do not correspond" view returns nothing at all.
+
+    `fetch_findings` therefore pins `DIVERGENCE_SHOWN` unconditionally. A caller
+    that FORGETS the argument silently gets the retired behaviour and no error --
+    which is exactly what happened to the cross-check above, on the real artifact,
+    for two CI runs.
+
+    Checked over the AST rather than the source text, because the page explains
+    this rule in prose directly above the line and a text scan would match its own
+    explanation.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(fp))
+    fetch = next(
+        (n for n in ast.walk(tree)
+         if isinstance(n, ast.AsyncFunctionDef) and n.name == "fetch_findings"),
+        None)
+    assert fetch is not None, "fetch_findings is gone -- re-point this guard"
+
+    passed = [
+        kw for call in ast.walk(fetch) if isinstance(call, ast.Call)
+        for kw in call.keywords if kw.arg == "divergence"
+    ]
+    assert passed, (
+        "fetch_findings no longer passes `divergence`, so it inherits the "
+        "service default DIVERGENCE_HIDDEN -- which subtracts ruling F's rows a "
+        "second time and empties the 'do not correspond' view")
+    for kw in passed:
+        assert isinstance(kw.value, ast.Name) and kw.value.id == "DIVERGENCE_SHOWN", (
+            "fetch_findings passes a divergence other than DIVERGENCE_SHOWN; the "
+            "axis must add NO predicate now that novelty expresses those shades")
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])

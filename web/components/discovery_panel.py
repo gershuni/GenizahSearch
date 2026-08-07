@@ -72,6 +72,14 @@ logger = logging.getLogger(__name__)
 #: assertion that searches the whole page can pass for the wrong reason.
 PANEL_ROOT_CLASS = 'discovery-panel'
 PANEL_ENTRY_CLASS = 'discovery-panel-entry'
+#: The launch HIGHLIGHT on the entry control (owner, 2026-08-07). The panel is a
+#: new surface arriving on a toolbar that already carries seven other controls,
+#: all rendered `flat dense`; without this it is a button nobody has a reason to
+#: notice. Purely presentational -- it says the CONTROL is new, never anything
+#: about the quality of what is behind it (D-24: no confidence styling anywhere
+#: on this surface).
+PANEL_ENTRY_NEW_CLASS = 'discovery-panel-entry-new'
+PANEL_ENTRY_NEW_BADGE_CLASS = 'discovery-panel-entry-new-badge'
 PANEL_ROW_CLASS = 'discovery-panel-row'
 PANEL_MANUSCRIPT_PANE_CLASS = 'discovery-panel-manuscript'
 PANEL_EXPANSION_CLASS = 'discovery-panel-expansion'
@@ -134,7 +142,8 @@ def _service_state_block(state: Mapping[str, Any], on_retry=None) -> None:
 # ---------------------------------------------------------------------------
 
 
-def render_discovery_entry_control(model: PanelModel, *, on_toggle=None) -> None:
+def render_discovery_entry_control(model: PanelModel, *, on_toggle=None,
+                                   highlight_new: bool = False) -> None:
     entry = model.entry_control
     if entry.get('hidden'):
         return
@@ -152,9 +161,23 @@ def render_discovery_entry_control(model: PanelModel, *, on_toggle=None) -> None
         if isinstance(count, int):
             label = f'{label} ({count})'
 
-    with ui.element('span').classes(f'gs-discovery {PANEL_ENTRY_CLASS}'):
+    # THE LAUNCH HIGHLIGHT (owner, 2026-08-07). `highlight_new` is decided by the
+    # CALLER, from the reader's own dismissal state -- this renderer never reads
+    # storage and never decides that a reader is new.
+    entry_classes = f'gs-discovery {PANEL_ENTRY_CLASS}'
+    if highlight_new:
+        entry_classes = f'{entry_classes} {PANEL_ENTRY_NEW_CLASS}'
+    with ui.element('span').classes(entry_classes):
         button = ui.button(label, icon='hub', on_click=on_toggle).props(
             'flat dense size=sm no-caps')
+        if highlight_new:
+            # A SEPARATE element, not text appended to the label: the label is
+            # already `Computed identifications (N)`, and a reader matching on
+            # that string -- a screen reader listing controls, a test driver --
+            # must still find it. `aria-hidden` because the word adds nothing
+            # spoken that the button's own name does not already carry.
+            ui.label(tr('New')).classes(
+                f'{PANEL_ENTRY_NEW_BADGE_CLASS}').props('aria-hidden=true')
         degraded_status = entry.get('degraded_status')
         if degraded_status:
             # An outage ANYWHERE behind this control keeps it VISIBLE and says
