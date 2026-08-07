@@ -3590,6 +3590,8 @@ def build_claims_and_evidence(
     year_by_canonical: Optional[Dict[str, Optional[int]]] = None,
     apply_lever1: bool = False,
     lever1_threshold: float = LEVER1_COVERAGE_CLIFF,
+    gen2_router: Optional[Dict] = None,
+    raw_work_by_minted: Optional[Dict[str, str]] = None,
     reband_tier_a: bool = False,
     v2_bands: bool = False,
     d17_delta: int = D17_DELTA_YEARS,
@@ -3653,7 +3655,34 @@ def build_claims_and_evidence(
     # each rebanded row's id regenerates over its new confidence_band and the
     # display pointer recomputes over the rebanded+demoted set.
     routing_audit_rows: List[Dict] = []
-    if apply_lever1:
+    # discovery-v3 (2026-08-07, owner decision + Codex blocker 2): when a gen-2
+    # coverage ROUTER is supplied, its decision REPLACES Lever-1 entirely -- the
+    # two are mutually exclusive by construction, not merely ordered. Measured
+    # on the real artifact: applying Lever-1's 0.45 cliff to the router's basis
+    # demotes 30,899 of 160,095 `same_work` rows (19.3%), one-way, so running
+    # both would discard exactly the surface the router's grading validated.
+    # Round 2 of the Codex review found the ingest unwired and therefore inert;
+    # this is that wiring, and `assert_emitted_parity` proves it took effect.
+    if gen2_router is not None:
+        if apply_lever1:
+            raise RoutingConflictError(
+                "gen2_router and apply_lever1 are mutually exclusive: the router "
+                "IS the coverage routing decision, and Lever-1 would re-derive it "
+                "with a different threshold (0.45 vs the router's fitted value), "
+                "demoting ~19% of the validated headline surface"
+            )
+        from v3_routing_ingest import apply_router_routing, assert_emitted_parity
+        if raw_work_by_minted is None:
+            raw_work_by_minted = {
+                w["work_id"]: w["raw_work_id"] for w in works if w.get("raw_work_id")
+            }
+        router_report = apply_router_routing(
+            evidence_specs, gen2_router,
+            raw_work_by_minted=raw_work_by_minted,
+            track1_source=_TRACK1, witness_kind=_WITNESS,
+        )
+        assert_emitted_parity(router_report, gen2_router)
+    elif apply_lever1:
         apply_lever1_coverage(evidence_specs, threshold=lever1_threshold)
     if year_by_canonical is not None:
         routing_audit_rows = apply_d17_demotion(
@@ -5566,6 +5595,17 @@ class ReleaseInputsIncompleteError(RuntimeError):
     release gate. `--allow-partial-sources` (never combined with
     `release=True`) is the ONLY sanctioned escape hatch, reserved for the
     smoke/unit path."""
+
+
+class RoutingConflictError(RuntimeError):
+    """Raised when a gen-2 coverage router AND Lever-1 are both requested.
+
+    They are two different decisions about the same question (is this page a
+    witness of this work?) over the same quantity, with different thresholds.
+    Running both silently applies the stricter one, which for discovery-v3 would
+    demote 30,899 of 160,095 router-shipped witness rows -- measured, one-way.
+    A caller that asks for both has not decided, so this refuses rather than
+    picking."""
 
 
 class InvalidPrecisionSpecError(ValueError):

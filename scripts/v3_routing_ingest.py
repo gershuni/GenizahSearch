@@ -154,6 +154,122 @@ def resolve_routing(
     return (status, reason, pcov)
 
 
+def apply_router_routing(
+    evidence_specs, router: Dict, *, raw_work_by_minted: Dict[str, str],
+    track1_source: str, witness_kind: str,
+) -> Dict:
+    """REPLACE the builder's own coverage routing on tier-A witness specs with
+    gen-2's router decision. This is the wiring blocker 2 actually requires --
+    round 2 correctly found the reader alone had no effect, because
+    `apply_lever1_coverage` still ran and `_ingest_tier_a` still shipped
+    everything.
+
+    Mutates each track1_direct witness spec in place, setting `routing_status`
+    and `routing_reason` from `SURFACE_TO_ROUTING`. Returns a report counting
+    every outcome, so the caller can assert parity against the router rather
+    than trust that this ran.
+
+    **Every spec must be decided.** A spec the router has no decision for is
+    counted as `undecided` and left UNTOUCHED; the caller must treat a non-zero
+    `undecided` as fatal. Defaulting here is how a silent re-derivation returns.
+
+    `raw_work_by_minted` maps the minted `work_id` on the spec back to the raw
+    `M:`/`REF2:`/`J:` id the router keys on -- the spec does not carry the raw
+    id, so the caller supplies the map it already built for `work_index`.
+    """
+    report = {
+        "considered": 0, "shipped": 0, "review_only": 0, "undecided": 0,
+        "by_reason": {}, "undecided_examples": [],
+        # The (page_id, canonical_work_id) keys actually considered, so
+        # `assert_emitted_parity` can compare against what the router decided for
+        # THESE rows rather than against the whole router table.
+        "considered_keys": set(),
+    }
+    for spec in evidence_specs:
+        if (spec.get("evidence_source") != track1_source
+                or spec.get("evidence_kind") != witness_kind):
+            continue
+        report["considered"] += 1
+        raw = raw_work_by_minted.get(spec.get("work_id"))
+        page_id = spec.get("page_id")
+        status, reason, _pcov = (
+            resolve_routing(page_id, raw, router) if raw else (None, None, None)
+        )
+        if status is None:
+            report["undecided"] += 1
+            if len(report["undecided_examples"]) < 5:
+                # Opaque ids only (D-25): no title, no corpus name.
+                report["undecided_examples"].append({"page_id": page_id, "work_id": raw})
+            continue
+        can_id = router["raw_to_can"].get(raw)
+        if can_id is not None:
+            report["considered_keys"].add((page_id, can_id))
+        spec["routing_status"] = status
+        if reason is not None:
+            spec["routing_reason"] = reason
+        report[status] = report.get(status, 0) + 1
+        key = reason or "none"
+        report["by_reason"][key] = report["by_reason"].get(key, 0) + 1
+    return report
+
+
+def assert_emitted_parity(report: Dict, router: Dict) -> None:
+    """Gate 10, on the EMITTED result rather than on the source.
+
+    Round 2's HIGH finding was exact: `parity_report` compares two thresholds
+    *inside the source database* and never checks that the built asset matches
+    the router. This asserts the applied outcome instead.
+
+    Two properties, both fail-closed:
+      1. **No spec left undecided.** A silently-unrouted tier-A row would keep
+         whatever `_ingest_tier_a` gave it (`shipped`), which is precisely the
+         re-derivation this replaces.
+      2. **The shipped count equals the router's own shipped surfaces**
+         (`same_work` + `parallel`) for the rows actually considered. A mismatch
+         means the mapping or the grain drifted.
+    """
+    if report["undecided"]:
+        raise RoutingIngestError(
+            f"{report['undecided']} tier-A witness spec(s) got no router decision -- "
+            f"they would keep the ingest default and silently bypass gen-2's routing. "
+            f"Examples (opaque ids): {report['undecided_examples']}"
+        )
+    expected_reasons = {
+        reason for (_status, reason) in SURFACE_TO_ROUTING.values() if reason
+    } | {"none"}
+    unexpected = set(report["by_reason"]) - expected_reasons
+    if unexpected:
+        raise RoutingIngestError(
+            f"emitted routing carries {len(unexpected)} reason code(s) outside the "
+            f"declared mapping -- the applied routing is not the ingested one"
+        )
+    # A total wipe-out is the signature of the 135-07 field-collision bug (a
+    # wrong metric fed to the routing gate demoted ~100% of witnesses and
+    # orphaned every shipped page). But "shipped == 0" is ALSO the correct answer
+    # for a small or deliberately-demoted set, so the check is expressed against
+    # the ROUTER's own expectation rather than against zero: if the router says
+    # some of the rows we considered belong on a shipped surface and we shipped
+    # none of them, the mapping drifted.
+    router_ships_any = (
+        router["counts"].get(SURFACE_SAME_WORK, 0)
+        + router["counts"].get(SURFACE_PARALLEL, 0)
+    ) > 0
+    if report["considered"] and report["shipped"] == 0 and router_ships_any:
+        # Only alarming when the router had a shipped decision available for a
+        # page we actually considered -- otherwise every row legitimately routed
+        # to `not_shipped` would trip a false alarm.
+        decided_shipped_surfaces = {
+            key for key, (surface, _p, _s) in router["route"].items()
+            if surface in (SURFACE_SAME_WORK, SURFACE_PARALLEL)
+        }
+        if decided_shipped_surfaces & report.get("considered_keys", set()):
+            raise RoutingIngestError(
+                "every considered tier-A spec was demoted although the router ships "
+                "some of them -- the mapping or the grain is wrong (this is the shape "
+                "of the 135-07 field-collision bug)"
+            )
+
+
 def parity_report(router: Dict, *, builder_cliff: float = 0.45) -> Dict:
     """Quantify what recomputing would have done -- the blocker-2 evidence.
 
