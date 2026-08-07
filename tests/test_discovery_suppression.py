@@ -488,59 +488,83 @@ def test_a_FRESH_FAILURE_does_not_ask_to_be_rewarmed():
 
 
 def test_a_failed_reread_after_a_successful_write_never_UNHIDES_anything():
-    """THE fail-open trap, exercised through the REAL write path.
+    """THE fail-open trap, through the page's REAL ✕ handler.
 
     A successful write followed by a failed list read must leave the page hiding
-    MORE than before, never less. The old code assigned the re-read straight into
-    the holder, and the reader fails open to `()`, so a blip replaced a populated
-    list with nothing.
+    MORE than before, never less. The old code assigned the re-read straight into the
+    holder, and the reader fails open to `()`, so a blip replaced a populated list
+    with nothing -- immediately after a click whose purpose was to hide one more row.
 
-    Driven through `suppress()` + `invalidate()` + a FAILING fetch, so it exercises
-    the real cache transition rather than recomputing the page's merge expression in
-    test code (which an earlier revision of this test did, and which Codex's
-    re-review correctly called tautological).
+    DRIVEN THROUGH `_render_row`'s ACTUAL HANDLER. Two earlier revisions of this test
+    recomputed the page's union expression in test code, which Codex's third pass
+    correctly called tautological: it would pass against the direct-assignment bug,
+    because the assertion never touched the production rule. This one extracts the
+    real `on_suppress` closure the page builds and calls it.
     """
-    import web.discovery_suppression as sup
+    import asyncio
 
-    class _FakeClient:
-        def table(self, _name):
-            return self
+    import web.pages.findings as fp
 
-        def upsert(self, *_args, **_kwargs):
-            return self
+    holder = {"ids": ("already-hidden-1", "already-hidden-2")}
+    captured = {}
+    refreshed = {"n": 0}
 
-        def execute(self):
-            return None
+    async def _refresh():
+        refreshed["n"] += 1
 
-    original_fetch = sup._fetch_ids
-    original_cache = sup._CACHE
+    class _Rows:
+        """Captures the `on_suppress` the page wires onto the row."""
+
+        @staticmethod
+        def render_finding_row(_item, _lang, **kwargs):
+            captured["on_suppress"] = kwargs.get("on_suppress")
+
+        def __getattr__(self, name):
+            return getattr(fp.rows, name)
+
+    original_rows = fp.rows
+    original_admin = fp._viewer_is_admin
+    original_write = fp.suppress_identification
+    original_read = fp.suppressed_identification_ids
     try:
-        # A warm cache holding two previously-hidden rows.
-        sup._CACHE = (sup.time.monotonic(),
-                      frozenset({"already-hidden-1", "already-hidden-2"}), True)
-        page_list = tuple(sorted(sup.cached_ids()))
-        assert len(page_list) == 2
+        fp.rows = _Rows()
+        fp._viewer_is_admin = lambda: True
 
-        # The write succeeds -- and invalidates the cache, by design.
-        assert sup.suppress("newly-hidden", client=_FakeClient()) is True
-        assert sup._CACHE is None, "the write did not invalidate the cache"
+        # The write SUCCEEDS...
+        async def _write_ok(_id):
+            return True
 
-        # ...and THEN the re-read fails. This is the blip.
-        sup._fetch_ids = lambda: (frozenset(), False)
-        failed_reread = sup.suppressed_ids()
-        assert failed_reread == frozenset(), "fixture error: the fetch should fail"
+        # ...and THEN the list read FAILS, returning the fail-open empty tuple.
+        async def _read_fails_open():
+            return ()
 
-        # The page's rule: union of (re-read, what we had, what we just wrote).
-        merged = tuple(sorted(
-            set(failed_reread) | set(page_list) | {"newly-hidden"}))
+        fp.suppress_identification = _write_ok
+        fp.suppressed_identification_ids = _read_fails_open
 
-        assert set(merged) >= set(page_list), (
-            "a failed re-read shrank the hide list -- rows the admin hid earlier "
-            "became visible again")
-        assert "newly-hidden" in merged, "the row just hidden is not in the list"
-        assert merged == tuple(sorted(merged)), (
-            "the merged list is not sorted -- it lands in the service's cache key, "
-            "so an unstable order means the cache silently never hits")
+        fp._render_row({"unit": "identification",
+                        "identification_id": "newly-hidden",
+                        "canonical_work_id": "w000001",
+                        "display_work_id": "w000001",
+                        "neutral_title": "T", "sys_id": "1", "main_pool": 1},
+                       "en", refresh=_refresh, hidden=holder)
+
+        handler = captured.get("on_suppress")
+        assert handler is not None, (
+            "the page wired no ✕ handler for an admin -- fixture error")
+        asyncio.run(handler("newly-hidden"))
     finally:
-        sup._fetch_ids = original_fetch
-        sup._CACHE = original_cache
+        fp.rows = original_rows
+        fp._viewer_is_admin = original_admin
+        fp.suppress_identification = original_write
+        fp.suppressed_identification_ids = original_read
+
+    assert refreshed["n"] == 1, "a successful hide did not re-render the page"
+    assert set(holder["ids"]) >= {"already-hidden-1", "already-hidden-2"}, (
+        "a failed re-read after a SUCCESSFUL write shrank the hide list -- rows "
+        f"the admin hid earlier became visible again (holder is {holder['ids']})")
+    assert "newly-hidden" in holder["ids"], (
+        "the row just hidden is not in the page's list, so the next query will "
+        "show it again")
+    assert holder["ids"] == tuple(sorted(holder["ids"])), (
+        "the merged list is not sorted -- it lands in the service's cache key, so "
+        "an unstable order means the cache silently never hits")

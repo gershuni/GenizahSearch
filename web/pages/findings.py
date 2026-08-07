@@ -1607,17 +1607,19 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         # TTL the peek IS the current list" was true; "so a peek is enough" did not
         # follow.
         #
-        # THE RE-WARM IS DISPATCHED AND NOT AWAITED. `_rewarm_hide_list` is a
-        # fire-and-forget task, so this refresh pays nothing and the NEXT one sees a
-        # current list -- bounded lag (one interaction) instead of unbounded
-        # staleness, and still no Supabase round trip in front of any row.
+        # THE RE-WARM IS DISPATCHED AND NOT AWAITED, and it APPLIES ITSELF when it
+        # lands (re-rendering only if the list actually changed). An earlier revision
+        # left the result for "the next refresh", which Codex's third pass rightly
+        # rejected: with no further interaction there is no next refresh, so
+        # staleness stayed unbounded rather than becoming bounded by one click. This
+        # refresh still pays nothing, and convergence needs no help from the reader.
         cached = cached_suppressed_identification_ids()
         if cached is not None:
             merged = tuple(sorted(set(cached) | set(hidden["ids"] or ())))
             if merged != tuple(hidden["ids"]):
                 hidden["ids"] = merged
         else:
-            _rewarm_hide_list()
+            _rewarm_hide_list(hidden, refresh, page_client)
         suppressed = tuple(hidden["ids"])
         envelope = await fetch_findings(state, suppressed)
         if _stale():
@@ -3113,7 +3115,8 @@ def _viewer_is_admin() -> bool:
         return False
 
 
-def _rewarm_hide_list() -> None:
+def _rewarm_hide_list(hidden: Optional[Dict[str, Any]] = None,
+                      refresh=None, page_client: Any = None) -> None:
     """Dispatch a background re-read of the admin hide list. Awaits nothing.
 
     THE OTHER HALF OF THE PEEK (Codex re-review, 2026-08-07). `cached_ids` never
@@ -3122,10 +3125,14 @@ def _rewarm_hide_list() -> None:
     forever after, leaving the page on a list that can no longer change. The peek
     gave "no added latency"; this gives "and it still converges".
 
-    FIRE AND FORGET, deliberately. The current refresh does not wait for it and does
-    not use its result: the point is that the NEXT refresh finds a fresh cache
-    entry. Awaiting it here would restore exactly the round-trip-per-interaction
-    this design exists to avoid.
+    NOT AWAITED BY THE REFRESH -- awaiting it would restore exactly the
+    round-trip-per-interaction this design exists to avoid -- but IT APPLIES ITSELF
+    WHEN IT LANDS. An earlier revision only warmed the cache and left the result for
+    "the next refresh", which Codex's third pass correctly rejected: with no
+    subsequent interaction there is no next refresh, so staleness was still
+    unbounded rather than bounded by one click. The task now folds what it read into
+    the page's holder and re-renders if that changed anything, so convergence needs
+    no help from the reader.
 
     GUARDED BY `cache_needs_refresh()` rather than by the peek's `None`, and the
     difference is load-bearing. A FRESH FAILURE also peeks as `None`, and
@@ -3135,32 +3142,72 @@ def _rewarm_hide_list() -> None:
     credentials (CI, and every test that renders this page) the first read caches a
     failure, so nothing dispatches.
 
+    SINGLE-FLIGHT, via the holder itself. Without a marker, every concurrent refresh
+    across every open page passes the expired-cache test and dispatches its own task
+    (Codex, MEDIUM): the shared semaphore then serialises the I/O, so they queue
+    rather than storm Supabase, but the task queue itself is unbounded and every one
+    of them is redundant. The flag lives in `hidden` rather than at module scope
+    because it is per-page state -- a global would let one page's in-flight read
+    suppress another page's, and the two hold different lists.
+
     `background_tasks.create` rather than a bare `ensure_future`: NiceGUI keeps a
     reference, so the task cannot be garbage-collected mid-flight and its exception
     is retrieved rather than surfacing as "never retrieved" at interpreter exit.
     """
+    if hidden is None:
+        return
     try:
         from nicegui import background_tasks
 
         from web.discovery_suppression import cache_needs_refresh
 
-        if not cache_needs_refresh():
+        if hidden.get("rewarming") or not cache_needs_refresh():
             return
-        background_tasks.create(_reread_hide_list(), name="discovery-hide-list")
+        hidden["rewarming"] = True
+        background_tasks.create(
+            _reread_hide_list(hidden, refresh, page_client),
+            name="discovery-hide-list")
     except Exception as exc:  # noqa: BLE001 -- a re-warm must never break a refresh
+        hidden["rewarming"] = False
         logger.warning("findings: could not re-warm the hide list (%s)",
                        type(exc).__name__)
 
 
-async def _reread_hide_list() -> None:
-    """The re-warm body: read the list so the process cache is refreshed.
+async def _reread_hide_list(hidden: Dict[str, Any], refresh,
+                            page_client: Any) -> None:
+    """The re-warm body: read the list, APPLY it, and re-render if it changed.
 
-    The RETURN VALUE IS DISCARDED on purpose -- the side effect (a fresh cache
-    entry, which the next refresh's peek will find) is the whole point. The reader
-    already fails open and logs its own failures, so there is nothing to handle
-    here.
+    Applying is the part that makes this converge. Warming the cache alone leaves
+    the new list sitting in a dict that only a future interaction would consult, so
+    a page nobody touches again never picks it up -- the defect Codex's third pass
+    named.
+
+    THE UNION, never an assignment, for the reason the ✕ handler documents: the
+    reader fails open to `()`, so assigning would un-hide every row on a failed
+    read. One consequence is worth stating plainly rather than leaving implicit: a
+    suppression REMOVED elsewhere is not picked up within this page's life. Nothing
+    in the UI can remove one -- `unsuppress` has no caller, so un-hiding is a manual
+    SQL operation -- and a reader who sees a row reappear on their next page load is
+    a far better failure than one whose hidden rows silently return because a read
+    failed.
+
+    RE-RENDERS ONLY ON A CHANGE, and only if the reader is still here. `refresh`
+    re-reads rows and facets; running it when nothing changed would be a free
+    repaint of the page under a reader who did not ask for one.
     """
-    await suppressed_identification_ids()
+    try:
+        latest = await suppressed_identification_ids()
+        merged = tuple(sorted(set(latest) | set(hidden.get("ids") or ())))
+        if merged == tuple(hidden.get("ids") or ()):
+            return
+        hidden["ids"] = merged
+        if refresh is not None and not _page_is_gone(page_client):
+            await refresh()
+    except Exception as exc:  # noqa: BLE001 -- a background re-warm must stay quiet
+        logger.warning("findings: the hide-list re-warm failed (%s)",
+                       type(exc).__name__)
+    finally:
+        hidden["rewarming"] = False
 
 
 def _notify_suppress_failed() -> None:

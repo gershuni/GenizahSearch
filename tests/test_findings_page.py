@@ -6756,19 +6756,20 @@ def test_the_peek_returning_unknown_leaves_an_existing_hide_list_intact(monkeypa
 
 
 
-def test_an_expired_hide_list_cache_dispatches_a_BACKGROUND_rewarm(monkeypatch):
-    """THE convergence half, at the page (Codex re-review, 2026-08-07, HIGH).
+def test_an_expired_cache_CONVERGES_on_its_own_with_no_further_interaction(monkeypatch):
+    """THE convergence property, end to end, through the REAL re-warm.
 
-    A peek that never fetches does not converge: the cache is warmed only by a page
-    load and by a local write, so once its entry expires a long-open page's peek
-    returns `None` forever and the page keeps a list that can no longer change.
+    An earlier revision of this test replaced `_rewarm_hide_list` with a counter,
+    which Codex's third pass correctly called insufficient: it proved the page calls
+    a helper, not that the helper reads, applies and re-renders. It also let a
+    genuine defect through -- the re-warm only warmed the CACHE and left the result
+    for "the next refresh", so a page nobody touched again never converged at all.
 
-    So when the peek has no fresh answer the refresh must DISPATCH a re-warm -- and
-    must not await it, or the round trip is back on the critical path of every
-    control. Both halves are asserted: the re-warm was requested, and the refresh
-    still completed without waiting for it.
+    So nothing here is mocked except the two I/O boundaries. The peek starts as
+    "expired" and the async reader returns a row hidden elsewhere; the page must
+    reach a state where its findings query carries that id, WITHOUT any further
+    control change.
     """
-    rewarms = {"n": 0}
     reads = []
 
     async def _findings(unit="identification", *, bucket="main", sort="band_rank",
@@ -6784,35 +6785,100 @@ def test_an_expired_hide_list_cache_dispatches_a_BACKGROUND_rewarm(monkeypatch):
                      "approximate_total": False},
         }
 
-    async def _load_list():
-        return ("hidden-at-load",)
+    # THE LIST CHANGES BETWEEN THE TWO READS, and that ordering is the whole test.
+    # The PAGE LOAD reads it first and must see nothing hidden -- otherwise
+    # `hidden["ids"]` starts populated, every later query carries the id for free,
+    # and the assertion passes without the re-warm applying anything at all (an
+    # earlier revision of this test had exactly that hole and passed against a
+    # deliberately broken cache-only re-warm). Only the SECOND read -- the re-warm's
+    # -- returns the row another admin hid.
+    remote = {"calls": 0}
 
-    monkeypatch.setattr(fp, "suppressed_identification_ids", _load_list)
-    # The peek reports NO fresh answer -- the expired-cache state.
+    async def _remote_list():
+        remote["calls"] += 1
+        if remote["calls"] == 1:
+            return ()
+        return ("hidden-by-someone-else",)
+
+    monkeypatch.setattr(fp, "suppressed_identification_ids", _remote_list)
+    # The page LOADS with nothing hidden (its own first read is stubbed below), and
+    # the peek reports no fresh cached answer -- the expired-cache state.
     monkeypatch.setattr(fp, "cached_suppressed_identification_ids", lambda: None)
-    monkeypatch.setattr(fp, "_rewarm_hide_list",
-                        lambda: rewarms.__setitem__("n", rewarms["n"] + 1))
+    # `cache_needs_refresh` is the real predicate's job; force the "wants a re-warm"
+    # answer so this test is about the page's behaviour, not the cache's clock.
+    import web.discovery_suppression as sup
+    monkeypatch.setattr(sup, "cache_needs_refresh", lambda: True)
 
     async def _drive(client):
-        select = _divergence_switch(client)
-        before = len(reads)
-        select.value = fp.NOVELTY_VIEW_CANDIDATES
-        for _ in range(60):
-            if len(reads) > before:
+        # Let the background re-warm run to completion. No control is touched.
+        for _ in range(200):
+            if any("hidden-by-someone-else" in r for r in reads):
                 break
             await asyncio.sleep(0)
-        else:
-            raise AssertionError("the control change never produced a findings read")
 
     _render_page(monkeypatch, lang="en", findings=_findings, driver=_drive)
 
-    assert rewarms["n"] >= 1, (
-        "the refresh found no fresh hide list and did NOT dispatch a re-warm -- the "
-        "page would keep its stale list for as long as it stays open")
-    # ...and the rows still rendered with the list the page already had, so nothing
-    # waited on the re-warm.
-    assert reads and all("hidden-at-load" in r for r in reads), (
-        f"the refresh lost the list it already held (saw {reads})")
+    assert any("hidden-by-someone-else" in r for r in reads), (
+        "the page never converged on the row another admin hid, with no further "
+        f"interaction -- staleness is unbounded, not one click (saw {reads})")
+
+
+def test_the_rewarm_is_SINGLE_FLIGHT_and_does_not_dispatch_a_task_per_refresh(monkeypatch):
+    """One in-flight re-warm per page, not one per refresh (Codex, MEDIUM).
+
+    Without a marker every refresh passes the expired-cache test and creates its own
+    task. The shared semaphore then serialises the I/O so Supabase is not stormed,
+    but the task queue is unbounded and every task after the first is redundant.
+
+    Counts REAL reads through the async reader while driving several refreshes.
+    """
+    reads = []
+    list_reads = {"n": 0}
+
+    async def _findings(unit="identification", *, bucket="main", sort="band_rank",
+                        suppressed=(), **_kw):
+        reads.append(tuple(suppressed))
+        return {
+            "status": "ok", "items": list(_ROWS_BY_BUCKET.get(bucket, [])),
+            "total": 1,
+            "meta": {"unit": unit, "bucket": bucket, "sort": sort,
+                     "sort_basis": "best_band_rank", "novelty_offered": True,
+                     "divergence": "shown", "divergent_included": True,
+                     "page": 1, "page_size": fp._default_page_size(),
+                     "approximate_total": False},
+        }
+
+    async def _slow_list():
+        list_reads["n"] += 1
+        # Park, so several refreshes can overlap this one in-flight read.
+        for _ in range(5):
+            await asyncio.sleep(0)
+        return ()
+
+    monkeypatch.setattr(fp, "suppressed_identification_ids", _slow_list)
+    monkeypatch.setattr(fp, "cached_suppressed_identification_ids", lambda: None)
+    import web.discovery_suppression as sup
+    monkeypatch.setattr(sup, "cache_needs_refresh", lambda: True)
+
+    async def _drive(client):
+        select = _divergence_switch(client)
+        for view in (fp.NOVELTY_VIEW_CANDIDATES, fp.NOVELTY_VIEW_DIVERGENT,
+                     fp.NOVELTY_VIEW_EITHER):
+            before = len(reads)
+            select.value = view
+            for _ in range(60):
+                if len(reads) > before:
+                    break
+                await asyncio.sleep(0)
+
+    _render_page(monkeypatch, lang="en", findings=_findings, driver=_drive)
+
+    # The page load reads the list once directly; the re-warms must not add one per
+    # refresh on top of that. Four refreshes (load + three control changes) with an
+    # always-expired cache would dispatch four tasks without the single-flight flag.
+    assert list_reads["n"] <= 3, (
+        f"the hide list was read {list_reads['n']} times across four refreshes -- "
+        "the re-warm is dispatching per refresh instead of single-flighting")
 
 
 def test_the_rewarm_is_NOT_dispatched_when_the_peek_has_a_fresh_answer(monkeypatch):
