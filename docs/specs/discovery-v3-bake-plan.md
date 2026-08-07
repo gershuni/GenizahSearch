@@ -1488,6 +1488,68 @@ is the right eventual answer and belongs in the gen-2 track, not in this bake.
 **Consequence for the novelty price:** the v3 candidate population depends on which option is chosen, so the
 $0 re-measurement cannot produce a meaningful number until it is. Option 2 makes it runnable immediately.
 
+#### 7c-bis. MEASURED 2026-08-07, and it corrects two claims I made above
+
+The owner asked how heavy option 1 really is, and whether granularity-novelty ("is *this book* attested in the
+catalogue?") is this phase or the next. Both are now measured, and the answers move the recommendation.
+
+**(a) `page_coverage` is arithmetic I already have — the re-run is NOT a matcher re-run.** Verified: the
+router's own `page_coverage` equals `matched_letters / page_chars` on **5,000/5,000** sampled rows, and the
+slim table carries **both numbers at the split grain on 100.0% of 275,894 tier-A rows**. Recomputing coverage
+per book/tractate is a SQL pass, not a gen-2 job. What is NOT free is the *threshold*: 0.2984 was calibrated on
+1,395 graded cases at the collapsed grain (`coverage_route_meta`), so honest re-derivation needs grading at the
+split grain. **Split the cost in two: recompute = trivial; re-calibrate = owner grading.** My "a gen-2 router
+re-run" framing overstated the compute and understated the grading.
+
+**(b) My "51.2% invisibly" was wrong — the real exposure is 4.5%.** Measured against the parent decision on the
+138,800 comparable rows:
+
+| | |
+|---|---|
+| split coverage **identical** to parent | 121,318 (87.4%) |
+| split coverage **lower** | 17,482 (12.6%) |
+| split coverage **higher** | **0** (coverage never rises when the unit narrows) |
+| median delta | **+0.0000**; p10 −0.0337 |
+| parent said `same_work`, split falls **below** threshold | **6,233 = 4.5% of comparable** |
+| parent said `parallel`, split **above** threshold | **0** (asserted, not assumed) |
+
+So inheritance is wrong in exactly ONE direction — over-promotion — on 6,233 rows. Of those, **46.1% sit below
+half the threshold** (coverage p50 0.158, clearly quotation) and 16.1% are within 0.05 of the line. Their works
+are the expected ones: Isaiah 634, Jeremiah 594, Psalms 567, Deuteronomy 431. The mechanism I described was
+real; the magnitude I asserted was not, and 4.5% is a materially different decision from 51%.
+
+**(c) The grain question is ALREADY SETTLED, in the split's favour — and the router is the stale artifact.**
+`crosswalk.json` maps the 39 Bible books to **39 distinct minted ids** (`M:Ytext1000_00 → w000086`, …), and
+**`M:Ytext1000` is not in the crosswalk at all** — it exists only inside `coverage_route`. So the project's
+established id space is already per-book; the collapsed id is an artifact local to the router. 2,738 of the
+router's 3,985 works are absent from the crosswalk. This reframes 7c: the slim table is not "ahead of" the
+router at some future granularity — **the router is behind the id space everything else already uses.**
+
+**(d) Granularity-novelty is THIS phase, and it is largely already paid for.** Correcting my own id-space slip
+(I first compared raw ids to the cache's minted `w######` keys and read 0% — the same mistake the D-17 audit
+hit twice): mapping through the crosswalk, the cache holds verdicts for **141 of the 164 split-grain works
+(86.0%)**. Novelty was therefore already asked *per book*, not per Bible — so "is Genesis attested here?" is a
+question the cache answers, and the 86% is a floor on how much of the granularity-novelty work is done.
+The handoff's §6.3 lists reference-granularity as a stage this milestone owns and explicitly frames it as
+**actionability, not precision** (*"it does NOT raise same-work precision"*), which agrees with (b): the labels
+barely move.
+
+**Revised recommendation.** Option 2 still ships today at $0 and is still the safe default. But (b), (c) and
+(d) together make a fourth option the better one if the owner wants the mega-works in the headline:
+
+**Option 4 — recompute coverage at the split grain, reusing the existing threshold, and route the 6,233
+one-way disagreements to `review_only`.** $0 compute, no grading, no inheritance of a parent verdict: every row
+gets a coverage number computed from ITS OWN unit. The one place the old threshold could mislead is the
+direction it can err (over-promotion), and those 6,233 rows are precisely the ones sent to review rather than
+shipped. Applying 0.2984 at the split grain yields **165,459 same_work (60.0%) / 110,435 parallel (40.0%)** over
+the full 275,894. Threshold re-calibration then becomes a later *refinement* of a shipped, honest surface
+instead of a blocker — and it is the only option that keeps the actionable per-book labels the granularity
+stage exists to deliver.
+
+**Not certified.** Reusing a collapsed-grain threshold at book grain is a judgement, not a validated
+calibration; these numbers are descriptive. Per [[feedback_discovery_vibe_not_experiment]] no precision claim
+is attached, and none of this reaches a user-facing surface as a percentage.
+
 ---
 
 ## 8. Owner questions
