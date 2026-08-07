@@ -118,6 +118,74 @@ class NoveltyCandidate:
     page_mapped: bool = True
 
 
+def candidate_input_fingerprint(
+    candidate: NoveltyCandidate, *, prompt_sha256: str = PROMPT_SHA256,
+) -> str:
+    """The per-pair INPUT fingerprint (Codex blocker 3).
+
+    Answers one question: *was this exact question already asked?* The verdict
+    cache keys on `(sys_id, ref_work_id)` alone, so a cache hit today proves only
+    that SOME question about that pair was answered. `render_case` sends the
+    claimed title, the claimed author, and the assembled per-source evidence
+    text -- all of which come from artifacts that change between runs (the baked
+    `works` row, the alias artifact, the finding-aid DBs). Reusing a verdict
+    across a changed title is reusing an answer to a different question, and it
+    is silent: the cache's whole-file SHA-256 proves the FILE is the measured
+    file, never that the QUESTION is the measured question.
+
+    `build_cache_key` and `CACHE_KEY_FIELDS` already specified this exactly, down
+    to the field order, and `INPUT_NORMALIZATION_SPEC` documents it. Nothing
+    called them on a real candidate -- the only caller was a demo block. This is
+    the bridge from a `NoveltyCandidate` to that pinned key.
+
+    THE FIELD SET IS DERIVED FROM `render_case`, not chosen: every field
+    `render_case` interpolates must appear here, or a change to it would be
+    invisible to the fingerprint. `render_case` sends `claimed_title`,
+    `claimed_author`, and `assemble_evidence_bundle`'s five sources in
+    `_SOURCE_ORDER`. `test_the_fingerprint_covers_every_field_render_case_sends`
+    pins that correspondence so a future field added to the prompt cannot quietly
+    escape the fingerprint.
+
+    `prompt_sha256` is a parameter because the production run uses the BATCHED
+    prompt (ruling O), whose text differs from the single-case one. Passing the
+    prompt actually used means a cache built under one framing cannot be reused
+    under the other -- which is right: the batch and single arms are separately
+    validated contracts, not interchangeable ones.
+
+    NOT included, deliberately: `page_mapped`. It gates whether the candidate
+    reaches the model at all (an unmapped page routes to `not_checked` without a
+    call), so it changes no question that is ever asked.
+
+    MASKING (D-25): returns a hex digest. The normalized source texts are hashed,
+    never returned, logged or stored -- so the fingerprint of an M-source
+    shelfmark attribution carries no restricted content.
+    """
+    bundle = assemble_evidence_bundle(candidate)
+
+    def _joined(source: str) -> str:
+        # The SAME separator `render_case` uses, so the fingerprint sees the same
+        # concatenation the model does -- otherwise two different per-source
+        # splits could fingerprint identically.
+        return normalize_free_text(" ||| ".join(t for t in bundle.get(source, ()) if t))
+
+    return build_cache_key({
+        "llm_model": LLM_MODEL,
+        "llm_model_version": LLM_MODEL_VERSION,
+        "llm_reasoning_effort": LLM_REASONING_EFFORT,
+        "prompt_sha256": prompt_sha256,
+        "input_normalization_sha256": INPUT_NORMALIZATION_SHA256,
+        "sys_id": candidate.sys_id,
+        "ref_work_id": candidate.ref_work_id,
+        "claimed_title_normalized": normalize_free_text(candidate.claimed_title),
+        "claimed_author_normalized": normalize_free_text(candidate.claimed_author),
+        "catalogue_text_normalized": _joined("catalogue"),
+        "bibliography_text_normalized": _joined("bibliography"),
+        "pgp_text_normalized": _joined("pgp"),
+        "fgp_text_normalized": _joined("fgp"),
+        "m_source_shelfmark_text_normalized": _joined("m_source_shelfmark"),
+    })
+
+
 def assemble_evidence_bundle(candidate: NoveltyCandidate) -> Dict[str, Tuple[str, ...]]:
     """Tags each checked source's own free text by its OWN provenance --
     NEVER a flattened, untyped, provenance-stripped list (Codex finding 5).
@@ -252,6 +320,12 @@ def run_model_arm(
     *,
     model_call: Callable[[NoveltyCandidate], Optional[Mapping[str, Any]]],
     checkpoint_path: Optional[str] = None,
+    # discovery-v3 (Codex blocker 3). Present on BOTH arms deliberately: the
+    # batched arm degrades to the single-case contract after repeated unaligned
+    # replies, and this arm owns its own checkpoint file, so a fingerprint check
+    # on the batched arm alone would leave the degraded path resuming stale
+    # answers.
+    expected_fingerprints: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Dict[str, Optional[str]]]:
     """Runs `model_call` over `residual_candidates`, one at a time,
     checkpointing to `checkpoint_path` (a JSONL file, one record per
@@ -269,6 +343,7 @@ def run_model_arm(
     """
     results: Dict[str, Dict[str, Optional[str]]] = {}
     already_done: set = set()
+    stale_resumed = 0
 
     if checkpoint_path and os.path.isfile(checkpoint_path):
         with open(checkpoint_path, "r", encoding="utf-8") as fh:
@@ -278,9 +353,22 @@ def run_model_arm(
                     continue
                 rec = json.loads(line)
                 key = _candidate_key(rec["sys_id"], rec["ref_work_id"])
+                # discovery-v3 (Codex blocker 3): a checkpoint line whose
+                # fingerprint no longer matches the candidate's CURRENT inputs is
+                # an answer to a superseded question. Dropped from `already_done`
+                # so the pair is re-asked rather than resumed -- the resume path
+                # is the one place a stale answer looks exactly like a completed
+                # one, so a mid-run input refresh would otherwise be absorbed
+                # silently and for free.
+                if expected_fingerprints is not None:
+                    want = expected_fingerprints.get(key)
+                    if want is not None and rec.get("input_fingerprint") != want:
+                        stale_resumed += 1
+                        continue
                 results[key] = {
                     "novelty_status": rec.get("novelty_status"),
                     "divergence_correctness": rec.get("divergence_correctness"),
+                    "input_fingerprint": rec.get("input_fingerprint"),
                 }
                 already_done.add(key)
 
@@ -291,7 +379,11 @@ def run_model_arm(
             if key in already_done:
                 continue
             raw = model_call(candidate)
-            resolved = resolve_model_output(raw)
+            resolved = dict(resolve_model_output(raw))
+            if expected_fingerprints is not None:
+                fp = expected_fingerprints.get(key)
+                if fp is not None:
+                    resolved["input_fingerprint"] = fp
             results[key] = resolved
             if checkpoint_fh is not None:
                 record = {
@@ -313,6 +405,11 @@ def run_model_arm_batched(
     *,
     batch_model_call: Callable[[Sequence[NoveltyCandidate]], Optional[Mapping[str, Any]]],
     checkpoint_path: Optional[str] = None,
+    # discovery-v3 (Codex blocker 3): `{grain_key: input_fingerprint}` for the
+    # candidates being judged. Supplied -> each answer records the fingerprint of
+    # the inputs it came from, and a checkpointed answer whose fingerprint no
+    # longer matches is re-asked instead of resumed. Omitted -> pre-v3 behaviour.
+    expected_fingerprints: Optional[Dict[str, str]] = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
     cost_probe: Optional[Callable[[], float]] = None,
     cost_ceiling_usd: Optional[float] = None,
@@ -350,6 +447,7 @@ def run_model_arm_batched(
 
     results: Dict[str, Dict[str, Optional[str]]] = {}
     already_done: set = set()
+    stale_resumed = 0
 
     if checkpoint_path and os.path.isfile(checkpoint_path):
         with open(checkpoint_path, "r", encoding="utf-8") as fh:
@@ -359,9 +457,22 @@ def run_model_arm_batched(
                     continue
                 rec = json.loads(line)
                 key = _candidate_key(rec["sys_id"], rec["ref_work_id"])
+                # discovery-v3 (Codex blocker 3): a checkpoint line whose
+                # fingerprint no longer matches the candidate's CURRENT inputs is
+                # an answer to a superseded question. Dropped from `already_done`
+                # so the pair is re-asked rather than resumed -- the resume path
+                # is the one place a stale answer looks exactly like a completed
+                # one, so a mid-run input refresh would otherwise be absorbed
+                # silently and for free.
+                if expected_fingerprints is not None:
+                    want = expected_fingerprints.get(key)
+                    if want is not None and rec.get("input_fingerprint") != want:
+                        stale_resumed += 1
+                        continue
                 results[key] = {
                     "novelty_status": rec.get("novelty_status"),
                     "divergence_correctness": rec.get("divergence_correctness"),
+                    "input_fingerprint": rec.get("input_fingerprint"),
                 }
                 already_done.add(key)
 
@@ -373,6 +484,9 @@ def run_model_arm_batched(
         progress(
             f"{len(already_done)} already checkpointed; {len(pending)} pending "
             f"in batches of {batch_size}"
+            + (f"; {stale_resumed} checkpointed answer(s) DISCARDED as stale "
+               "(their inputs changed since they were produced)"
+               if stale_resumed else "")
         )
 
     checkpoint_fh = open(checkpoint_path, "a", encoding="utf-8") if checkpoint_path else None
@@ -421,7 +535,14 @@ def run_model_arm_batched(
 
             for i, candidate in enumerate(chunk):
                 key = _candidate_key(candidate.sys_id, candidate.ref_work_id)
-                resolved = resolved_chunk[i + 1]
+                resolved = dict(resolved_chunk[i + 1])
+                # The fingerprint of the inputs THIS answer came from, recorded
+                # beside the answer so a later reader can PROVE the question
+                # rather than assume it (Codex blocker 3).
+                if expected_fingerprints is not None:
+                    fp = expected_fingerprints.get(key)
+                    if fp is not None:
+                        resolved["input_fingerprint"] = fp
                 results[key] = resolved
                 if checkpoint_fh is not None:
                     checkpoint_fh.write(

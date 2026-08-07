@@ -48,6 +48,8 @@ if REPO_ROOT not in sys.path:
 
 from shared.discovery_novelty import (  # noqa: E402
     BATCH_PROMPT_SHA256,
+    CACHE_KEY_FIELDS,
+    INPUT_NORMALIZATION_SHA256,
     DEFAULT_BATCH_SIZE,
     LLM_MODEL,
     LLM_REASONING_EFFORT,
@@ -59,6 +61,7 @@ from scripts.discovery_novelty_funnel import (  # noqa: E402
     CostCeilingExceeded,
     NoveltyCandidate,
     assemble_evidence_bundle,
+    candidate_input_fingerprint,
     run_heuristic_funnel,
     run_model_arm_batched,
 )
@@ -201,6 +204,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         residual = list(residual)[: args.limit]
         log(f"SMOKE: residual capped to {len(residual):,}")
 
+    # discovery-v3 (Codex blocker 3): the per-pair INPUT fingerprint for every
+    # candidate the model will judge. Keyed exactly as the model arm keys its
+    # results, so a checkpointed answer can be matched against the inputs it came
+    # from. BATCH_PROMPT_SHA256 is passed because this run uses the batched
+    # contract -- a cache built under the single-case framing must not be reused
+    # here, and vice versa.
+    fingerprints = {
+        f"{c.sys_id}::{c.ref_work_id}": candidate_input_fingerprint(
+            c, prompt_sha256=BATCH_PROMPT_SHA256)
+        for c in residual
+    }
+    log(f"input fingerprints computed for {len(fingerprints):,} residual candidates")
+
     with open(args.manifest, "w", encoding="utf-8") as fh:
         json.dump(
             {
@@ -211,6 +227,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "batch_size": args.batch_size,
                 "cost_ceiling_usd": args.cost_ceiling,
                 "residual_size": len(residual),
+                # discovery-v3 (Codex blocker 3): the fingerprint CONTRACT, so a
+                # later reader can tell which normalization/field-order produced
+                # the `input_fingerprint` values in the output -- without it, a
+                # fingerprint is an opaque hex string that proves nothing.
+                "input_fingerprint_version": "v3-2026-08-07",
+                "input_fingerprint_prompt_sha256": BATCH_PROMPT_SHA256,
+                "input_normalization_sha256": INPUT_NORMALIZATION_SHA256,
+                "input_fingerprint_fields": list(CACHE_KEY_FIELDS),
                 "heuristically_resolved": len(resolved),
                 "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
             },
@@ -229,6 +253,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             residual,
             batch_model_call=batch_call,
             checkpoint_path=args.checkpoint,
+            expected_fingerprints=fingerprints,
             batch_size=args.batch_size,
             cost_probe=cost_probe,
             cost_ceiling_usd=args.cost_ceiling,
@@ -247,6 +272,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     verdicts[f"{rec['sys_id']}::{rec['ref_work_id']}"] = {
                         "novelty_status": rec.get("novelty_status"),
                         "divergence_correctness": rec.get("divergence_correctness"),
+                        # Carried on the ceiling-recovery path too: without it a
+                        # run stopped at the cost ceiling would write an
+                        # unfingerprinted output, which then loads as all-miss.
+                        "input_fingerprint": rec.get("input_fingerprint"),
                     }
 
     # BOTH ARMS, or the output is silently wrong (caught by plan 136-12).
@@ -258,8 +287,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # fail-closed `not_checked` default on ingest, quietly discarding every
     # bypass-path candidate: the 8,327 rows that are the LARGEST single source
     # of "Candidates for new finds".
+    # The heuristic arm is fingerprinted too. It never calls the model, so no
+    # money rides on it -- but its verdicts are read by the same loader under the
+    # same gate, and an unfingerprinted heuristic verdict would load as
+    # `not_checked`, silently discarding the 8,327-row bypass path that is the
+    # largest single source of "Candidates for new finds".
+    heuristic_fingerprints = {
+        f"{c.sys_id}::{c.ref_work_id}": candidate_input_fingerprint(
+            c, prompt_sha256=BATCH_PROMPT_SHA256)
+        for c in candidates
+    }
     merged: Dict[str, Dict[str, Optional[str]]] = {
-        key: {"novelty_status": r.novelty_status, "divergence_correctness": None}
+        key: {"novelty_status": r.novelty_status, "divergence_correctness": None,
+              "input_fingerprint": heuristic_fingerprints.get(key)}
         for key, r in resolved.items()
     }
     overlap = set(merged) & set(verdicts)

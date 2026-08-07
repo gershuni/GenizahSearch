@@ -4757,7 +4757,17 @@ _NOVELTY_KEY_SEPARATOR = "::"
 
 # Keys a verdict entry may carry. `divergence_correctness` is TOLERATED and
 # then DROPPED -- see `load_novelty_verdicts` (owner ruling L).
-_NOVELTY_ENTRY_KEYS = frozenset({"novelty_status", "divergence_correctness", "source_code"})
+_NOVELTY_ENTRY_KEYS = frozenset({
+    "novelty_status", "divergence_correctness", "source_code",
+    # discovery-v3 (2026-08-07, Codex blocker 3): the per-pair INPUT fingerprint
+    # (`scripts/discovery_novelty_funnel.candidate_input_fingerprint`). Covers
+    # every field `render_case` sends -- claimed title, claimed author, the five
+    # per-source evidence texts -- plus the pinned model/version/effort/prompt/
+    # normalization identifiers. TOLERATED as absent so a pre-v3 cache still
+    # loads, but then the entry is a MISS (see `load_novelty_verdicts`): an
+    # unfingerprinted verdict cannot prove the question it answered.
+    "input_fingerprint",
+})
 
 
 def novelty_grain_key(sys_id: str, work_key: str) -> str:
@@ -4771,12 +4781,36 @@ def novelty_grain_key(sys_id: str, work_key: str) -> str:
     return f"{sys_id}{_NOVELTY_KEY_SEPARATOR}{work_key}"
 
 
-def load_novelty_verdicts(path, *, sha256: Optional[str]) -> Tuple[Dict[str, Dict], Dict]:
+def load_novelty_verdicts(
+    path, *, sha256: Optional[str],
+    expected_fingerprints: Optional[Dict[str, str]] = None,
+) -> Tuple[Dict[str, Dict], Dict]:
     """Load the hash-pinned novelty verdict cache. Returns `(entries, stats)`.
 
     Order of enforcement, all BEFORE a single verdict is read into the build:
     file present -> SHA-256 pin -> strict duplicate-key JSON parse -> top-level
-    object -> per-entry frozen shape.
+    object -> per-entry frozen shape -> per-entry INPUT FINGERPRINT.
+
+    **The fingerprint gate (discovery-v3, Codex blocker 3).** The whole-file
+    SHA-256 above proves the file is the measured FILE. It cannot prove any entry
+    answers the QUESTION this build is asking: entries key on
+    `(sys_id, work_key)`, while the prompt also carries the claimed title, the
+    claimed author and the assembled finding-aid text -- all sourced from
+    artifacts that change between runs. So a title correction, an alias-group
+    rebuild or a finding-aid refresh would silently reuse an answer to a
+    different question.
+
+    When `expected_fingerprints` is supplied (`{grain_key: fingerprint}` from
+    `candidate_input_fingerprint`), every entry must carry a matching
+    `input_fingerprint`. An entry that does not is treated as a MISS -- resolved
+    to the fail-closed `not_checked` default and counted, exactly like an
+    out-of-vocabulary status. NOT an error: a legitimately-changed input SHOULD
+    produce a miss, and raising would turn a routine input refresh into a build
+    failure. What it must never do is answer.
+
+    Passing `None` keeps the pre-v3 behaviour (no fingerprint check) so a v2
+    rebuild against the v2-era cache still works. A v3 build MUST pass it; gate
+    13 asserts a changed title becomes a miss.
 
     `sha256` is REQUIRED (a `None` raises). The verdict cache is the single
     most expensive build input in this phase and the one whose substitution
@@ -4837,6 +4871,16 @@ def load_novelty_verdicts(path, *, sha256: Optional[str]) -> Tuple[Dict[str, Dic
         "verdict_entries_malformed_key": 0,
         "verdict_entries_failed_closed": 0,
         "verdict_entries_divergence_correctness_dropped": 0,
+        # discovery-v3 (Codex blocker 3). Split so an operator can tell a cache
+        # built before the fingerprint existed (all `unfingerprinted`) from one
+        # whose INPUTS moved under it (`fingerprint_mismatch`) -- the first is a
+        # one-off migration, the second means an artifact changed and the spend
+        # is real. Reported, so "how much of the cache still applies" is a number
+        # rather than an assumption.
+        "verdict_entries_unfingerprinted": 0,
+        "verdict_entries_fingerprint_mismatch": 0,
+        "verdict_entries_fingerprint_ok": 0,
+        "verdict_fingerprint_checked": expected_fingerprints is not None,
     }
     for raw_key, raw_entry in doc.items():
         if not isinstance(raw_key, str) or _NOVELTY_KEY_SEPARATOR not in raw_key:
@@ -4853,6 +4897,29 @@ def load_novelty_verdicts(path, *, sha256: Optional[str]) -> Tuple[Dict[str, Dic
         if status not in NOVELTY_STATUSES:
             status = NOVELTY_DEFAULT_STATUS
             stats["verdict_entries_failed_closed"] += 1
+        # THE FINGERPRINT GATE. Applied AFTER the status is resolved and BEFORE
+        # the entry is stored, so a mismatched entry cannot contribute a positive
+        # verdict by any path. Demoting to the default rather than dropping the
+        # key keeps the row present-and-unanswered, which is what the surfaces
+        # already handle; dropping it would make a changed input look like a
+        # candidate that was never generated.
+        if expected_fingerprints is not None:
+            got = raw_entry.get("input_fingerprint")
+            want = expected_fingerprints.get(raw_key)
+            if not isinstance(got, str) or not got:
+                stats["verdict_entries_unfingerprinted"] += 1
+                if status != NOVELTY_DEFAULT_STATUS:
+                    status = NOVELTY_DEFAULT_STATUS
+                    stats["verdict_entries_failed_closed"] += 1
+            elif want is None or got != want:
+                # `want is None` means this build did not generate the pair at
+                # all, so no question was asked and no answer applies.
+                stats["verdict_entries_fingerprint_mismatch"] += 1
+                if status != NOVELTY_DEFAULT_STATUS:
+                    status = NOVELTY_DEFAULT_STATUS
+                    stats["verdict_entries_failed_closed"] += 1
+            else:
+                stats["verdict_entries_fingerprint_ok"] += 1
         sys_id, _sep, ref_work_id = raw_key.partition(_NOVELTY_KEY_SEPARATOR)
         entries[raw_key] = {
             "sys_id": sys_id,
