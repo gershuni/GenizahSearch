@@ -964,7 +964,7 @@ Closes Codex's LOW finding ("current scope is internally stale — needs one una
 | 1 | **Routing** — recompute v2-style, or ingest gen-2's? | **INGEST `coverage_route`** with a declared mapping + parity checks. Do NOT recompute coverage. **CLOSED IN CODE 2026-08-07** (`v3_routing_ingest.apply_router_routing`, wired in `build_claims_and_evidence`, mutually exclusive with Lever-1). **THE ORDER IS NOW STATED, not "re-derived"** (Codex R2: "'re-derive' is not an order"): ingest → **ROUTER** → D-17 → §4.5 reband. The router occupies Lever-1's slot because `apply_d17_demotion` arbitrates among the *currently-shipped* witnesses — running it first lets a work be demoted against a competitor the router is about to remove, stamping `later_shared_text` for a cause that never existed. Pinned by `test_the_router_runs_before_d17_not_after` (mutation-verified: swapping the order reproduces exactly that phantom demotion). **Two R2 corrections folded in:** the two new reason codes are now in `ROUTING_REASONS` *and* the `discovery_evidence` CHECK constraint (schema Amendment 2026-08-07 (E)) — without that every router-demoted row would have died at INSERT; and `parallel` maps to **`review_only`**, not `shipped`, because `claim_type` comes from witness span dominance and the panel's relation chip reads `claim_type`, never `routing_reason`, so a shipped quotation would have rendered as a direct witness. | owner, "yes of course"; Codex R2 |
 | 2 | **Selected population** — the 2,686 D-06 works? | **HONOUR D-05/D-06** — exclude them; take only the 52 policy-keeps. Liturgy/piyyut needs the containment fix first. **WORDING CORRECTED (Codex R2, MEDIUM):** these are **current-policy drops**, not "the real gap". Applying today's `cat`/genre selector to the missing ids partitions them; it does **not** establish that they lacked crosswalk entries *because* of the historical D-05/D-06 decision — the selector picks one representative occurrence while `cat`/genre are occurrence-level, and no audit of crosswalk-creation or approval history was done. The decision to honour the policy stands; the causal claim is withdrawn. The **zero-shipped-claims** figure must also be recomputed under the router actually shipped (decision 1), since it was measured pre-router. | plan rec., owner not yet contradicted; wording per Codex R2 |
 | 3 | **Novelty mode** | **REUSE the cache behind a per-pair input fingerprint**, NOT blanket reuse and NOT a full re-run. **CLOSED IN CODE 2026-08-07** (`candidate_input_fingerprint`; `load_novelty_verdicts(expected_fingerprints=...)`; both model arms record it; the RESUME path re-asks a stale checkpoint line rather than resuming it). The machinery was already specified — `build_cache_key`/`CACHE_KEY_FIELDS`/`INPUT_NORMALIZATION_SPEC` — and had no caller but a demo block; this is the bridge. Unfingerprinted or mismatched → **counted MISS**, not an error (a legitimately-changed input *should* miss, and raising would turn a routine refresh into a build failure). Manifest pins the fingerprint version, prompt hash, normalization hash and field list. Gate 13 mutation-verified: dropping `claimed_title` from the fingerprint turns it red. | Codex blocker 3 |
-| 4 | **Novelty scope + ceiling** | **Headline (`same_work`) first**, $150 self-enforced ceiling. **THE ≈$4 ESTIMATE AND THE 87.6% REUSE FIGURE ARE OBSOLETE, not merely unvalidated** (Codex R2, MEDIUM): they measured *key overlap*, not question identity, and a fingerprint can only lower reuse. **No spend is authorized until the real figure is measured** — run `load_novelty_verdicts` against the existing cache with `expected_fingerprints` supplied and read `verdict_entries_fingerprint_ok` vs `_mismatch`/`_unfingerprinted`. The two counters are split precisely so a pre-fingerprint cache (one-off migration) is distinguishable from inputs that moved (real spend). Report the number to the owner before any call is made. | owner ("$12 → go"), revised by #3; figures retracted per Codex R2 |
+| 4 | **Novelty scope + ceiling** | **🛑 MEASURED 2026-08-07 — THE ANSWER IS ZERO, AND THIS NEEDS AN OWNER DECISION.** See §5.0b. Reuse through the gate is **0.0%** (0 of 55,184 residual pairs), because the existing cache predates the fingerprint and carries none — every entry is `unfingerprinted`. Key overlap is **100%**, which is exactly the quantity the old "87.6% → ≈$4" figure measured and exactly why Codex rejected it. A full re-run costs about **$40** (the measured actual cost of the identical run on 2026-08-03: $40.12 over 5,528 calls at batch 10), NOT ≈$4. Both figures are retracted. Three options in §5.0b; **owner picks before any call is made.** | owner ("$12 → go") is now insufficient — the price changed 10×; Codex R2 |
 | 5 | **MAPV2-8** — 152 or 595? | **595-risky exclusion at ingest** (301 claim rows, 0.084%). The 152 is NOT reproducible from the persisted file. Named as an *exclusion*, not the requested revert. **Owner confirmation owed** (Codex HIGH). | §3.5; supersedes the "152" in the old DO list |
 | 6 | **`w_start`/`w_end`** | **Stage 1 only. CLOSED IN CODE 2026-08-07** (`project_ref_span`; schema Amendment 2026-08-07 (F)). The rule turned out to be **discoverable, not inventable**: gen-2's `ref_spans_json` carries `{p0,p1,rg0,rg1}` objects in which the producer has already PAIRED the two sides, so the projection is a *selection* among the producer's own pairs. Rule = largest page-side extent, tie-break `p0,p1,rg0,rg1` ASC. **Verified against the producer, not against itself:** its `discovery_evidence.page_start/page_end/ref_start/ref_end` tuples are drawn exactly from `ref_spans_json` (100.00% of 200,000 sampled), and this rule reproduces a producer evidence row on **381,341 of 381,341 rows (100.00%)**. The trap avoided, measured: keying on `spans_json`'s largest span (the existing R7 page-side rule) matches **no** ref entry on 12.2% of rows (46,472) because `spans_json` is a coarser HULL — that implementation would have emitted NULL offsets silently. Two ref ranges under one hull can sit 3.4M chars apart (p90 13,113), so a work-side hull would be meaningless. 22.06% of `(page, work)` pairs have multiple producer alignments; one is kept and the multiplicity is documented, never implied away. Coordinate space **named**: the reference work's `norm_stream`. Gate 14 uses a real multi-span row with the producer's real evidence rows; three mutations (order flipped / unwired / sides swapped) all turn it red. | Codex blocker 1 |
 | 7 | **R-source** | **OUT of v3.** gen-2 has zero R-source evidence; including it means a new heavy run. Plus a **local old-engine-labelled review deck** for owner visibility. | owner request + §3.1 measurement |
@@ -1139,6 +1139,54 @@ group** · a fail-closed R-source input gate on the slim table · failure demons
 
 ---
 
+### 5.0b MEASURED 2026-08-07 — the novelty cache reuse rate is ZERO, and the price is $40 not $4
+
+Ran `scripts/v3_measure_novelty_reuse.py` against the current asset, the current finding-aid DBs and the
+existing 65,200-entry verdict cache. Report: `_tmp/v3-novelty-reuse-measurement.json`. It calls no model and
+spends nothing.
+
+| quantity | value |
+|---|---|
+| cache entries | 65,200 |
+| candidates from the current asset | 65,200 |
+| heuristically resolved (no model, free) | 10,016 |
+| **residual — would reach the model** | **55,184** |
+| `residual_present_but_unfingerprinted` | **55,184 (all of them)** |
+| **reuse rate THROUGH THE GATE** | **0.0%** |
+| key-overlap rate (what the old figure measured) | **100.0%** |
+
+**Why zero, and why that is the correct answer rather than a bug.** The cache was produced on 2026-08-03,
+before the fingerprint existed, so no entry carries one. Under the gate an unfingerprinted verdict cannot prove
+which question it answered, so it does not answer. The 100% key-overlap figure is precisely the number the
+"87.6% reusable" claim was reporting — Codex's objection was that key overlap is not question identity, and the
+gap between these two rows is that objection quantified.
+
+**The price.** The identical run on 2026-08-03 cost a *measured* **$40.12** over 5,528 calls (batch 10,
+`gemini-3.6-flash`, effort low — read from the real `usage.cost` log, never estimated). So re-establishing the
+verdicts costs about **$40**, an order of magnitude above the "≈$4" the plan carried. Both the 87.6% and the ≈$4
+are retracted; the owner's "$12 → go" authorization was given against a number that no longer holds.
+
+**Why a fingerprint cannot honestly be back-filled.** The tempting shortcut is to stamp today's fingerprint onto
+the existing verdicts. That asserts exactly the thing never checked — that the inputs behind each verdict are
+today's inputs — and it would convert an unprovable reuse into a provable-looking one, which is worse than no
+gate at all. It is not offered as an option.
+
+**OWNER DECISION OWED — three options, with what each buys and costs:**
+
+1. **Re-run the model arm (~$40).** Every verdict is then fingerprinted, and every later run's reuse is real and
+   provable. Buys a cache that keeps working; costs $40 once. *This is the recommendation* — the fingerprint's
+   whole value is future runs, and $40 is the last time this population is unpriced.
+2. **Ship v3 with `not_checked` novelty on the 55,184 residual rows ($0).** Honest and free, but the "Candidates
+   for new finds" surface loses its model-derived shades. The 10,016 heuristically-resolved rows are unaffected
+   and stay populated — including the 8,327-row bypass path, the largest single source of that surface.
+3. **Run the gate against the OLD prompt hash instead ($0, NOT recommended).** The single-case and batch prompts
+   fingerprint differently by design; nothing here would let a cache built under one framing be reused under the
+   other. Mentioned only to record that it was considered and rejected: it re-opens exactly the reuse-across-a-
+   changed-question hole blocker 3 closed.
+
+Nothing in the bake is blocked by this except the novelty step itself — the router, the offsets, the slim DB and
+every gate above are independent of it.
+
 ## 6. Gates — and every one must be shown able to fail
 
 This project has a measured history of checks that reported success without performing their check
@@ -1158,24 +1206,39 @@ the masking scan on my own two files, I ran it with the pattern file unset (**ex
 | 7 | **Performance** vs `discovery-budgets.md` caps | ⟨Codex MEDIUM — was blank⟩ set one cap to 0 ms → the harness must **report over-cap and fail**, proving it compares rather than records |
 | 8 | **Novelty fail-closed** — out-of-vocab → `not_checked`, counted, never a positive verdict | inject a bad status → must resolve `not_checked` |
 | 9 | **`divergence_correctness` NULL on every row** (ruling L, human-only) | inject a value in the cache → must be dropped + counted |
-| **10** | **NEW — routing parity** (Codex blocker 2): the ingested `same_work`/`parallel` split reproduces gen-2's `coverage_route` **exactly** at its own grain | flip one route label in the staged input → must fail. Absent this, "we ingested the router" is unproven and the handoff's quality figures do not transfer |
-| **11** | **NEW — `shadowed_by` mixed-group halt** (Codex HIGH): derived at the producer's `(claim_id, ref_work)` grain, all constituent rows must agree | synthesise a mixed group → **must halt**, never silently ANY/ALL it |
-| **12** | **NEW — R-source input gate** (Codex HIGH): the slim research DB is asserted to contain **zero** `RS:`-prefixed rows, and its source-table identity is fingerprinted, before every build and review-artifact invocation | plant one `RS:` row → must refuse. Gate 2 checks completeness, not absence, so it cannot catch this |
-| **13** | **NEW — novelty input fingerprint** (Codex blocker 3): a reused verdict requires an exact per-pair input fingerprint match | mutate a work's title → the pair must become a **miss**, not a hit |
-| **15** | **NEW — `_EXPECTED_TIER_A_ROWS` re-pinned deliberately** (§5.0a finding B): the frozen count's derivation is recorded and re-derived for v3, never inherited | change the ingest population by one row → must fail with the count named. Today's value coincidentally equals a gen-2 figure, so a pass would otherwise prove nothing |
+| **10** | **✅ CLOSED 2026-08-07 — routing parity** (Codex blocker 2), now asserted on the **EMITTED** result rather than on the source. R2's finding was exact: the first `parity_report` compared two thresholds *inside the source DB* and never checked the built asset. `assert_emitted_parity` now fails on any undecided spec (the fallback was `shipped` — the very bypass this replaces), on any reason code outside the declared mapping, and on a wipe-out relative to what the mapping would ship for the rows actually considered. `load_router` additionally HALTS on a duplicate `(page_id, canonical_work_id)` (agreeing duplicates inflated `counts` while replacing the entry, so the report was at neither grain) and on a row whose `shipped` flag contradicts its `surface` (the column was read and thrown away). Tests drive `build_claims_and_evidence` itself, and one drives a REAL INSERT against the real DDL — the gap that let an unwired module pass 8 tests. Mutation-verified. |
+| **11** | **✅ CLOSED 2026-08-07 — `shadowed_by` grain**, both halts. The mixed-unit halt existed; R2 found the **reduction** to `(page_id, ref_work)` unchecked and named the two cases a mixed-unit test structurally cannot see: (a) a wholly-unshadowed unit plus a wholly-shadowed one on the same key — neither is "mixed", and the shadowed one silently drops the other's rows out of tier A; (b) two shadowed units with different values → last-write-wins. Both now halt as "not injective". Measured: ZERO such collisions on `g_launch3` today, which is exactly why it is asserted rather than assumed. Fixtures cover both cases plus two controls (agreeing units, and different works on one page, must still pass). Mutation-verified. |
+| **12** | **✅ CLOSED 2026-08-07 — R-source gate, at the CONSUMER boundary.** R2 was right that the slim builder's filter is defense in depth, not the gate: `select_shown_works`, the review-only path and `--from-approved` each build from whatever DB path the operator supplies, and `select_shown_works` has no prefix rejection — so pointing the build at the gen-2 corpus file (whose own `track1_matches` is the v2-era table with 349 restricted works) reaches a sidecar without the slim builder running at all. The gate now lives in `_connect_research_ro`, the ONE place every entrypoint opens a research DB, and returns a source-table fingerprint (row count + column set). Tested by direct invocation with a planted prefix; a third test asserts the error names no work id, because a containment report that leaks defeats itself. Mutation-verified. |
+| **13** | **✅ CLOSED 2026-08-07 — novelty input fingerprint.** `candidate_input_fingerprint` bridges a real candidate to the already-specified `build_cache_key`/`CACHE_KEY_FIELDS` (whose only prior caller was a demo block). Consumer: unfingerprinted or mismatched → **counted MISS**, never an error. Producer: both arms record it, and the RESUME path re-asks a stale checkpoint line rather than resuming it — the one place a stale answer is indistinguishable from a finished one. Manifest pins version + prompt hash + normalization hash + field list. Mutation-verified three ways including the exact case R2 named (dropping `claimed_title` → red). One test imports the REAL renderer and requires that any field which changes the rendered prompt also changes the fingerprint, so a future prompt field cannot quietly escape. |
+| **15** | **⚠️ PARTIAL 2026-08-07 — provenance recorded, inference WITHDRAWN.** R2 was right that exact agreement between the constant and the slim DB's count "is not evidence of causation" — it proves only that this transformation currently produces that number. The plan's inference is withdrawn. Recorded at the constant: the query, the dated measurement (275,894 unshadowed of 381,341; 105,447 in shadowed units), the halting derivation, and the operative rule — **the value is NEVER edited to make a run pass**. A mismatch means the population changed, which needs a decision, not a new constant. Still owed: the pre-build source-identity record in the build manifest. |
 | **16** | **NEW — the signature-vocabulary term** (§5.0a finding A) appears in no slim-DB column, artifact, deck or log | plant the term in a scanned file → must be reported. **Currently FAILS this control** — the pattern is absent from `.masking_patterns`; owner action owed. Until then, an explicit column-name denylist in the slim-DB builder is the compensating control |
-| **14** | **NEW — multi-span offset parity** (Codex blocker 1): the page-span→reference-span projection is deterministic and correct on rows carrying multiple dual-side spans | pick a known multi-span row; assert the chosen `w_start`/`w_end` against the producer's own evidence rows, not merely non-NULL |
+| **14** | **✅ CLOSED 2026-08-07 — multi-span offset parity** (Codex blocker 1). R2 called the promised gate "a placeholder" for specifying no selection rule, tie-break, or source relation; all three are fixed, and the rule is **discovered, not invented** — gen-2's `ref_spans_json` already pairs the sides, so the projection is a selection among the producer's own pairs (largest page-side extent, tie-break `p0,p1,rg0,rg1` ASC). Verified against the producer: its evidence tuples come exactly from `ref_spans_json` (100.00% of 200,000 sampled) and this rule reproduces one on **381,341/381,341 rows (100.00%)**. Fixture is a real multi-span row whose `spans_json` hull matches NO ref entry — the 12.2% (46,472-row) case a hull-keyed projection would have silently NULLed, kept as an explicit control. Three mutations (order flipped / unwired / sides swapped) all turn it red. |
 
-**On the masking gate (Codex MEDIUM, accepted).** The fail-closed control and `--self-test` prove the
-*mechanism* runs and can return non-zero — they do **not** prove the loaded pattern set is complete or current,
-because the self-test needle is synthetic. Owed: a **non-disclosing attestation** of the pattern set (count +
-hash, never contents — 15 patterns today) recorded per run, plus the exact asset/sqlite paths and post-build
-hashes scanned, and a real-pattern positive control that does not print the pattern.
+**On the masking gate (Codex MEDIUM — attestation DELIVERED 2026-08-07).** The fail-closed control and
+`--self-test` prove the *mechanism* runs and can return non-zero; they do **not** prove the loaded pattern set
+is complete, because the needle is synthetic. That limit is permanent and is not claimed away. What was owed and
+now exists: `check_atlas_masking.py --attest` emits a **non-disclosing** attestation per run — `pattern_count`,
+a `pattern_set_sha256` over the sorted set (stable under reordering, moves on any add/remove/**edit**), and each
+pattern's own 8-char digest prefix so a reviewer can see *which* entry changed. No pattern text, prefix or
+length is emitted; length is omitted deliberately, because for a short restricted term a length plus a known
+alphabet is a real narrowing. Fails closed (no pattern file → exit 1) and prints **before** the scan, so it is
+present exactly when a failing run is being diagnosed. **It immediately found a discrepancy: the live set is 8
+patterns, not the 15 recorded here** — see §5.0a. Still owed: recording the scanned asset/sqlite paths and
+post-build hashes alongside it.
 
-**Order of operations: NO LONGER inherited.** The v2 §6 sequence (Lever-1 coverage routing **before** D-17) was
-written for a builder that *computes* coverage. Decision #1 replaces that step with an **ingest** of gen-2's
-router, so the order must be **re-derived against the ingested router** rather than carried over (Codex blocker
-2's closing instruction). The v2 §6 rationale still applies to everything downstream of routing.
+**Order of operations: RE-DERIVED AND STATED (2026-08-07).** Codex R2's objection to the previous wording was
+exact — *"'re-derive' is not an order"*. The v3 sequence is:
+
+> 3. ingest sources → 4. **ROUTER routing** → 5. D-17 chronological demotion → 6. §4.5 reband
+
+The router takes Lever-1's slot for a substantive reason, not to minimise the diff: `apply_d17_demotion` groups
+*the currently-SHIPPED* track1_direct witnesses and mutates `routing_status` as it walks each page
+earliest-first. Running it before the router would let it arbitrate between rows the router is about to demote —
+so a work could be demoted for being chronologically later than a competitor that never ships at all, and the
+survivor would carry `later_shared_text` naming a cause that never existed. Running the router first makes
+D-17's input exactly the population that ships, which is the invariant the v2 Lever-1-before-D-17 order held.
+Pinned by `test_the_router_runs_before_d17_not_after`; swapping the order in the source reproduces precisely
+that phantom demotion. The v2 §6 rationale still applies to everything downstream of routing.
 
 <details>
 <summary>Superseded: "inherit §6 unchanged" (kept — it was right for a recomputing builder, wrong for an ingesting one)</summary>
