@@ -1013,3 +1013,58 @@ def test_the_key_can_come_from_the_environment(monkeypatch):
     explicit = pattern_set_attestation(["alpha"], key=b"env-supplied-key")
     assert from_env["keyed"] is True
     assert from_env["pattern_digests"] == explicit["pattern_digests"]
+
+
+def test_the_plan_describes_the_attestation_FIELDS_the_code_emits():
+    """Codex R5 (MEDIUM): the plan named `pattern_set_sha256` and recorded a fixed
+    unkeyed value, which "cannot be compared to the keyed runtime output, and an
+    unkeyed run cannot provide it at all".
+
+    Pinned against the code's ACTUAL keys rather than by reading prose, since the
+    failure mode is an operator recording a field the build never emits.
+    """
+    from check_atlas_masking import pattern_set_attestation
+
+    plan = (Path(__file__).resolve().parents[1] / "docs" / "specs"
+            / "discovery-v3-bake-plan.md").read_text(encoding="utf-8")
+
+    keyed = pattern_set_attestation(["a", "b"], key=b"k")
+    unkeyed = pattern_set_attestation(["a", "b"], key=b"")
+    # The keyed field the plan must tell an operator to record.
+    assert "pattern_set_hmac" in keyed
+    assert "pattern_set_hmac" in plan, (
+        "the plan does not name the field the attestation actually emits"
+    )
+    # The withdrawn field must not be presented as current. It may appear ONLY in
+    # the retraction that names it as withdrawn.
+    for line in plan.splitlines():
+        if "pattern_set_sha256" in line:
+            assert "withdrawn" in line or "recorded a fixed" in line, (
+                f"the plan still presents the withdrawn unkeyed field as current: "
+                f"{line.strip()[:100]}"
+            )
+    # An unkeyed run offers NO identity digest, and the plan must say so -- an
+    # operator recording only a count needs to know it cannot distinguish two
+    # same-size sets.
+    assert "pattern_set_hmac" not in unkeyed
+    assert "no identity digest" in plan
+
+
+def test_an_EMPTY_key_is_treated_as_no_key(monkeypatch):
+    """Found while writing the plan-contract test above, 2026-08-07.
+
+    `hmac.new(b"", ...)` computes happily, so an empty `MASKING_ATTESTATION_KEY` --
+    trivially produced by `export MASKING_ATTESTATION_KEY=` in a CI file, or by a
+    variable that failed to interpolate -- would have emitted digests that LOOK
+    keyed while being reproducible by anyone holding the pattern guess. That is the
+    membership oracle this function exists to prevent, wearing a disguise, and it
+    is worse than the unkeyed case because the output claims `keyed: True`.
+    """
+    from check_atlas_masking import pattern_set_attestation
+
+    for empty in (b"", None):
+        monkeypatch.setenv("MASKING_ATTESTATION_KEY", "")
+        att = pattern_set_attestation(["alpha"], key=empty)
+        assert att["keyed"] is False, f"an empty key ({empty!r}) was accepted as a key"
+        assert "pattern_set_hmac" not in att
+        assert "pattern_digests" not in att

@@ -253,6 +253,12 @@ def pattern_set_attestation(patterns, *, key=None) -> dict:
     if key is None:
         env_key = os.environ.get("MASKING_ATTESTATION_KEY") or ""
         key = env_key.encode("utf-8") if env_key else None
+    # An EMPTY key is not a key. `hmac.new(b"", ...)` computes happily, so without
+    # this an empty `MASKING_ATTESTATION_KEY` -- or an explicit `key=b""` -- would
+    # emit digests that look keyed while being reproducible by anyone, i.e. the
+    # membership oracle this function exists to avoid, wearing a disguise.
+    if not key:
+        key = None
     out = {"pattern_count": len(cleaned), "keyed": key is not None}
     if key is None:
         return out

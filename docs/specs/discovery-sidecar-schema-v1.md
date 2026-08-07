@@ -40,7 +40,11 @@ confidence_band   track1_direct -> {expert_verified, tier_a, screening_rb, scree
 adjudication_status in {human_confirmed, provisional, unreviewed}
 audit_status        in {audit_pending, audit_passed, n/a}   (NO audit_passed at launch — registry-gated, C-6; "certified" PROHIBITED)
 routing_status      in {shipped, review_only}
-routing_reason      in {impurity, runner_up_conflict, co_citation, none}
+routing_reason      in {impurity, runner_up_conflict, co_citation, none,
+                       later_shared_text, low_coverage,
+                       gen2_parallel_surface, gen2_router_not_shipped}
+                    -- the v1 four PLUS four dated additions; see
+                    -- "Amendment 2026-08-07 (E)" for the current full list
 source_corpus       in {sefaria, ja, msource}   (masked codes; internal-only; NEVER displayed, D-03a)
 merge_basis         in {oxford_part, physical_join}   (NEVER scribe, DATA-10)
 ```
@@ -120,6 +124,10 @@ CREATE TABLE discovery_evidence (
   adjudication_status TEXT NOT NULL CHECK (adjudication_status IN ('human_confirmed','provisional','unreviewed')),
   audit_status      TEXT NOT NULL CHECK (audit_status IN ('audit_pending','audit_passed','n/a')),
   routing_status    TEXT NOT NULL CHECK (routing_status IN ('shipped','review_only')),
+  -- The v1 four. FOUR MORE were added by dated amendment and ARE emitted by
+  -- `create_schema` today -- see "Amendment 2026-08-07 (E)" for the full
+  -- list. A consumer validating against the four below will REJECT a real
+  -- router-produced artifact (Codex round 5, HIGH).
   routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none')),
   is_new            INTEGER NOT NULL DEFAULT 0,  -- FLAG (C-8) — new? is a flag, NOT a surface
 
@@ -954,6 +962,50 @@ Stage 2 (resolving them to a human-readable chapter/verse locus, which needs `bo
 remains deferred. The prohibition above was written when both stages looked like one job.
 
 ---
+
+## Amendment 2026-08-07 (E) — the COMPLETE `routing_reason` vocabulary
+
+**This section is the authoritative list.** §1.1's enum line and §1.3's DDL show the v1 four for
+historical continuity; four more have been added by dated amendment since, and all eight are emitted by
+`scripts/build_discovery_sidecar.py::create_schema` today. Codex round 5 found that a consumer validating
+against the v1 four would **reject a real router-produced artifact**, so the full list is stated here and
+pinned by `tests/test_v3_research_db.py::test_the_schema_DOC_lists_every_routing_reason_the_DDL_accepts`
+— derived from `discovery_ids.ROUTING_REASONS` and the live DDL, not from matching words in prose.
+
+| value | added | meaning | status it accompanies |
+|---|---|---|---|
+| `none` | v1 | no demotion rule fired | `shipped` |
+| `impurity` | v1 | E1 impurity screen | `review_only` |
+| `runner_up_conflict` | v1 | runner-up score conflict | `review_only` |
+| `co_citation` | v1 | family-router co-citation only (F9) | `review_only` |
+| `later_shared_text` | v2, 135-05 | D-17 coarse chronological demotion: the later of two co-claiming works whose text is shared | `review_only` |
+| `low_coverage` | v2, 135-07 | Lever-1 coverage cliff: page coverage below the 0.45 threshold | `review_only` |
+| `gen2_parallel_surface` | **v3, 2026-08-07** | gen-2's coverage router judged the overlap a **QUOTATION, not a witness** | `review_only` |
+| `gen2_router_not_shipped` | **v3, 2026-08-07** | gen-2's coverage router **declined the pair** outright | `review_only` |
+
+### The two v3 router reasons, and why `parallel` is `review_only`
+
+Both are written only by a build that ingests gen-2's coverage router (`meta.coverage_routing =
+'gen2_router'`; see the plan's decision 1). The router's own vocabulary has three surfaces —
+`same_work`, `parallel`, `not_shipped` — mapped as: `same_work → shipped` with `routing_reason = 'none'`;
+`parallel → review_only / gen2_parallel_surface`; `not_shipped → review_only /
+gen2_router_not_shipped`.
+
+`parallel` maps to **`review_only`**, not `shipped`, and the reason is a real semantic constraint rather
+than caution. `assemble_claims_and_evidence` derives `claim_type` from witness **span dominance** across
+the page, and the panel renders its relation chip from `claim_type`, never from `routing_reason`. So a
+*shipped* quotation holding the page's largest span would resolve to `direct_witness` and enter the main
+pool as same-work evidence. Routing it `review_only` keeps it out of every `routing_status = 'shipped'`
+read by construction, rather than relying on each consumer to remember a reason code.
+
+Surfacing quotations as their own relation remains possible, but it needs `evidence_kind = 'shared_text'`
+(or a new kind) plus a `claim_type` path that does not run the witness dominance rule — a further dated
+amendment. The reason code preserves the distinction in the asset meanwhile, so a later phase can promote
+those rows without re-running the router.
+
+**A `review_only` row is never deleted.** Consumers filtering to `routing_status = 'shipped'` see neither
+v3 router reason; consumers reading the review surface see both and can tell a declined pair from a
+quotation without recomputing coverage.
 
 ## Amendment 2026-08-07 (F)+(G) — work-side offsets and the aligned page pair (discovery-v3)
 

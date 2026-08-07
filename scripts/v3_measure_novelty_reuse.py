@@ -57,8 +57,11 @@ import argparse
 import hashlib
 import json
 import os
+import sqlite3
 import sys
 from collections import Counter
+from pathlib import Path
+from typing import Dict
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -80,6 +83,75 @@ from shared.discovery_novelty import BATCH_PROMPT_SHA256  # noqa: E402
 
 DEFAULT_CACHE = os.path.join(REPO_ROOT, "discovery_data", "novelty_production_verdicts.json")
 DEFAULT_REPORT = os.path.join(REPO_ROOT, "_tmp", "v3-novelty-reuse-measurement.json")
+
+
+class MeasurementError(RuntimeError):
+    """Fail-closed error taking a reuse measurement."""
+
+
+def _hash_or_die(path, name: str) -> str:
+    """SHA-256 of `path`, or raise.
+
+    Codex R5 (HIGH): the first version converted an unreadable input into the
+    STRING "(unreadable: ...)" and still exited zero, so a report could describe
+    candidates whose inputs were not all hash-bound while still looking like
+    option-0 evidence. An unhashable input means the measurement cannot say what it
+    measured, which is the one thing this report exists to say.
+    """
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise MeasurementError(
+            f"cannot hash input {name!r}: {type(exc).__name__}. Refusing to write a "
+            f"report whose population is unverifiable."
+        ) from exc
+    return digest.hexdigest()
+
+
+def _verify_population(asset_path: str, claimed: str) -> Dict[str, object]:
+    """Check the `--population` LABEL against the asset itself.
+
+    A v3 asset is one whose `meta` records `coverage_routing = 'gen2_router'` -- the
+    row `finalize_build` writes when it ingests gen-2's router, which is precisely
+    what makes a population "v3". Anything else is legacy. Returns the evidence so
+    the report carries the basis for its own label rather than just the label.
+    """
+    coverage_routing = None
+    sidecar_version = None
+    try:
+        conn = sqlite3.connect(
+            Path(asset_path).resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        finally:
+            conn.close()
+        coverage_routing = meta.get("coverage_routing")
+        sidecar_version = meta.get("sidecar_version")
+    except sqlite3.Error as exc:
+        raise MeasurementError(
+            f"cannot read `meta` from the asset ({type(exc).__name__}), so the "
+            f"population label cannot be verified."
+        ) from exc
+
+    looks_v3 = coverage_routing == "gen2_router"
+    if claimed == "pinned" and not looks_v3:
+        raise MeasurementError(
+            f"--population pinned was claimed, but the asset's meta.coverage_routing "
+            f"is {coverage_routing!r}, not 'gen2_router'. This is a LEGACY-population "
+            f"measurement; labelling it `pinned` would present it as the v3 price, "
+            f"which is the error that produced the retracted ~$4 figure."
+        )
+    if claimed == "legacy" and looks_v3:
+        raise MeasurementError(
+            "--population legacy was claimed, but the asset WAS built with gen-2's "
+            "router, so this is a v3-population measurement. Label it `pinned`; an "
+            "under-claimed number gets ignored as stale."
+        )
+    return {"meta_coverage_routing": coverage_routing,
+            "meta_sidecar_version": sidecar_version}
 
 
 def main(argv=None) -> int:
@@ -105,12 +177,27 @@ def main(argv=None) -> int:
     def log(msg: str) -> None:
         print(msg, flush=True)
 
+    population_evidence = _verify_population(args.asset, args.population)
+    log(f"population label {args.population!r} verified against the asset: "
+        f"{population_evidence}")
+
     log(f"reading cache {os.path.basename(args.cache)}")
     with open(args.cache, encoding="utf-8") as fh:
         cache = json.load(fh)
     log(f"  cache entries: {len(cache):,}")
 
-    log("building candidates from the CURRENT asset + finding-aid DBs "
+    # Codex R5 (HIGH): hash BEFORE building candidates and re-verify AFTER. The
+    # first version hashed only afterwards, so an input could change during the
+    # (minutes-long) candidate build and the report would describe a population its
+    # own hashes did not cover.
+    inputs = {
+        "asset": args.asset, "cache": args.cache, "libraries_csv": args.libraries_csv,
+        "fjms_db": args.fjms_db, "fgp_db": args.fgp_db, "pgp_db": args.pgp_db,
+    }
+    log("hashing inputs BEFORE building candidates")
+    input_hashes = {name: _hash_or_die(path, name) for name, path in inputs.items()}
+
+    log("building candidates from the supplied asset + finding-aid DBs "
         "(this is the slow part)")
     candidates, _works, _libraries = build_all_candidates(
         asset_path=args.asset,
@@ -147,32 +234,27 @@ def main(argv=None) -> int:
             counters["residual_fingerprint_mismatch"] += 1
 
     covered = counters["residual_fingerprint_ok"]
-    # Codex R4: record WHICH inputs produced this number. Without these hashes the
-    # report cannot be told apart from a run over a different population, which is
-    # exactly how the ~$4 figure survived as long as it did.
-    def _hash(path):
-        try:
-            digest = hashlib.sha256()
-            with open(path, "rb") as fh:
-                for chunk in iter(lambda: fh.read(1 << 20), b""):
-                    digest.update(chunk)
-            return digest.hexdigest()
-        except OSError as exc:
-            return f"(unreadable: {type(exc).__name__})"
 
-    inputs = {
-        "asset": args.asset, "cache": args.cache, "libraries_csv": args.libraries_csv,
-        "fjms_db": args.fjms_db, "fgp_db": args.fgp_db, "pgp_db": args.pgp_db,
-    }
-    log("hashing inputs (so the report can name the population it measured)")
-    input_hashes = {name: _hash(path) for name, path in inputs.items()}
+    # Re-verify every input is byte-identical to what was hashed before the build.
+    log("re-verifying input hashes AFTER the build")
+    for name, path in inputs.items():
+        again = _hash_or_die(path, name)
+        if again != input_hashes[name]:
+            raise MeasurementError(
+                f"input {name!r} CHANGED during the measurement, so the reported "
+                f"counts describe a population these hashes do not cover. Refusing "
+                f"to write a report that would look pinned."
+            )
 
     report = {
         "measured_utc_note": "timestamp intentionally omitted -- see git commit date",
-        # THE label. `legacy` means this measures how much of the existing cache
-        # still answers ITS OWN questions -- NOT the v3 population, which does not
-        # exist until the router and final work set are fixed.
+        # THE label -- and it is VERIFIED against the asset, not taken on the
+        # caller's word (Codex R5, HIGH: "`--population` is freely selected by the
+        # caller and is not derived from, or validated against, the input asset",
+        # so "a legacy invocation can be labelled `pinned`"). `_verify_population`
+        # below refuses the mismatch.
         "population": args.population,
+        "population_verified_against": population_evidence,
         "inputs": inputs,
         "input_sha256": input_hashes,
         "cache_entries": len(cache),
@@ -201,5 +283,13 @@ def main(argv=None) -> int:
     return 0
 
 
+def _cli(argv=None) -> int:
+    try:
+        return main(argv)
+    except MeasurementError as exc:
+        print(f"FAIL (fail-closed): {exc}", file=sys.stderr)
+        return 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_cli())

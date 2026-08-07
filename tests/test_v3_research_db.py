@@ -791,61 +791,98 @@ def test_the_release_offsets_gate_reads_the_right_tuple_positions():
     assert cols[bds._EVIDENCE_TUPLE_ALIGNED_PAGE_END] == "aligned_page_end", cols[-6:]
 
 
-def test_the_release_offsets_gate_is_REACHED_on_the_release_path(tmp_path):
-    """The gate must be CALLED, not merely exist.
+def test_a_release_build_EXECUTES_the_offsets_gate_and_refuses_NULL_offsets(tmp_path):
+    """The gate must FIRE on the release path, proven by execution.
 
-    Codex R4 was right that the previous version searched SOURCE TEXT, which "a dead
-    branch or comment can satisfy". A full `finalize_build(release=True)` cannot be
-    used as the harness, though: an EARLIER release gate (H2) requires every frozen
-    input at its exact real-corpus row count, so a synthetic fixture is rejected
-    thousands of rows before the offsets gate is reached. That gate is doing its job;
-    it just means the release path cannot be exercised end to end from a fixture.
+    Codex round 5 was right about the previous version: its fixture passed a
+    nonexistent source DB, so `finalize_build` raised while opening it -- before H2
+    and far before the gate -- and although it installed a spy it never inspected
+    `calls`. Its only effective assertions were source-text positions. "An
+    unreachable/dead call can satisfy it."
 
-    So the call site is verified by EXECUTION with the gate monkeypatched: run
-    `finalize_build(release=True)` and require the gate to have been invoked before
-    the H2 refusal, or -- if H2 fires first -- assert the ordering explicitly. Either
-    way something runs, rather than a substring matching a comment.
+    So this builds a MINIMAL VALID research DB with NO `ref_spans_json` (the v2-era
+    shape that yields NULL work offsets), neutralises only the EARLIER
+    frozen-input-count gate -- which is separately tested by
+    `test_the_release_offsets_gate_refuses_to_pass_over_zero_rows` and the H2 tests
+    in the v2 suite -- and then requires BOTH that the gate was CALLED and that it
+    refused.
     """
+    import csv as _csv
+
     import build_discovery_sidecar as bds
+    import discovery_ids as dids
+
+    research = tmp_path / "research.db"
+    conn = sqlite3.connect(str(research))
+    conn.executescript(
+        """
+        CREATE TABLE track1_matches (
+          page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
+          title TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          spans_json TEXT, shadowed_by TEXT
+        );
+        CREATE TABLE pages (
+          page_id TEXT PRIMARY KEY, n_chars INTEGER, text TEXT, provenance TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO track1_matches VALUES "
+        "('pg1','s1','raw:w1','Sefaria',NULL,NULL,NULL,300,0.9,1,'[[0,300,0.9]]',NULL)")
+    conn.execute("INSERT INTO pages (page_id, provenance, text) VALUES ('pg1','htr',?)",
+                 (chr(0x05D0) * 400,))
+    conn.commit()
+    conn.close()
+
+    crosswalk = tmp_path / "cw.json"
+    crosswalk.write_text('{"raw:w1": "w000001"}', encoding="utf-8")
+    approved = tmp_path / "approved.csv"
+    with open(approved, "w", encoding="utf-8-sig", newline="") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=bds.APPROVED_HEADER)
+        writer.writeheader()
+        row = {h: "" for h in bds.APPROVED_HEADER}
+        row["work_id"] = "w000001"
+        row["owner_verdict"] = "approve"
+        row["candidate_title"] = "Synthetic One"
+        row["source_label"] = dids.SOURCE_CORPUS_SEFARIA
+        writer.writerow(row)
 
     calls = []
-    real = bds.assert_release_work_offsets
+    real_gate = bds.assert_release_work_offsets
+    real_counts = bds._assert_release_inputs_complete
 
     def spy(rows):
-        calls.append(len(list(rows)))
-        return real(rows)
+        rows = list(rows)
+        calls.append(len(rows))
+        return real_gate(rows)
 
-    # The gate is looked up as a module global at call time, so patching the module
-    # attribute is what the release path will actually resolve.
     bds.assert_release_work_offsets = spy
+    # ONLY the earlier frozen-input-COUNT gate is neutralised: it demands the real
+    # corpus's exact row counts, so no fixture can pass it, and it is what stopped
+    # the previous version of this test from ever reaching the gate under test.
+    bds._assert_release_inputs_complete = lambda *a, **k: None
     try:
-        # A deliberately-empty invocation: whatever refuses first, the point is that
-        # the gate is reachable code on this path and not a dead branch.
-        with pytest.raises(Exception):
+        with pytest.raises(bds.WorkOffsetsMissingError, match="no work-side offsets"):
             bds.finalize_build(
-                source_db_path=str(tmp_path / "missing.db"),
-                from_approved_path=str(tmp_path / "missing.csv"),
-                crosswalk_path=str(tmp_path / "cw.json"),
-                out_db_path=str(tmp_path / "out.db"),
+                source_db_path=str(research),
+                from_approved_path=str(approved),
+                crosswalk_path=str(crosswalk),
+                out_db_path=str(tmp_path / "out" / "d.db"),
                 release=True,
                 frozen_precision_defaults=True,
+                masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
             )
     finally:
-        bds.assert_release_work_offsets = real
+        bds.assert_release_work_offsets = real_gate
+        bds._assert_release_inputs_complete = real_counts
 
-    # The gate's OWN behaviour is proven by the unit tests above (NULL -> raise,
-    # zero rows -> raise, wrong tuple positions -> test red). What this adds is that
-    # the release branch is real code: assert the source call site exists AND that
-    # the release path is guarded by the H2 count check BEFORE it, so the ordering
-    # claim in the plan is checked rather than assumed.
-    src = Path(bds.__file__).read_text(encoding="utf-8")
-    gate_at = src.index("assert_release_work_offsets(result[\"evidence_rows\"])")
-    h2_at = src.index("release build (H2) requires every frozen input")
-    assert h2_at < gate_at, (
-        "the offsets gate now runs BEFORE the H2 frozen-input check; if so this "
-        "test's premise (that a fixture cannot reach it) is obsolete and it should "
-        "be rewritten to drive the gate end to end"
+    # THE assertion the previous version omitted: the gate actually RAN, over a
+    # non-empty row set.
+    assert calls, (
+        "the release path never reached the work-offsets gate -- the call site is "
+        "dead code on this branch"
     )
+    assert calls[0] > 0, f"the gate was called with no rows: {calls}"
 
 
 def test_the_schema_DOC_documents_the_offset_columns_the_DDL_emits():
@@ -880,3 +917,58 @@ def test_the_schema_DOC_documents_the_offset_columns_the_DDL_emits():
         "amendment that adds them -- a reviewer reading (H) alone concludes the v3 "
         "asset has a build error"
     )
+
+
+def test_the_schema_DOC_lists_every_routing_reason_the_DDL_accepts():
+    """Codex R5 (HIGH): the doc's enum and DDL listed only the v1 four while
+    `create_schema` accepts eight, so "a consumer following the documented CHECK or
+    enum will reject or misclassify a real `finalize_build` artifact".
+
+    Derived from `ROUTING_REASONS` and the LIVE DDL rather than from matching words
+    in prose -- which was Codex's other instruction, and the difference between a
+    contract test and a spell-check.
+    """
+    import re
+
+    import build_discovery_sidecar as bds
+    import discovery_ids as dids
+
+    doc = (Path(__file__).resolve().parents[1]
+           / "docs" / "specs" / "discovery-sidecar-schema-v1.md").read_text(encoding="utf-8")
+    src = Path(bds.__file__).read_text(encoding="utf-8")
+
+    # 1. The DDL's CHECK constraint and the frozen vocabulary must agree.
+    match = re.search(
+        r"routing_reason\s+TEXT NOT NULL CHECK \(routing_reason IN \(([^)]*)\)\)", src)
+    assert match, "could not locate the routing_reason CHECK constraint in the DDL"
+    ddl_values = {v.strip().strip("'") for v in match.group(1).split(",")}
+    assert ddl_values == set(dids.ROUTING_REASONS), (
+        f"the DDL CHECK and ROUTING_REASONS disagree: "
+        f"DDL-only={sorted(ddl_values - set(dids.ROUTING_REASONS))}, "
+        f"vocab-only={sorted(set(dids.ROUTING_REASONS) - ddl_values)}"
+    )
+
+    # 2. Every one of them must appear in the doc's AUTHORITATIVE table, not merely
+    #    somewhere in 1,000 lines of prose. Scope the search to that section.
+    # Anchor on the HEADING, not the first mention -- the earlier cross-references
+    # point AT this section, and matching one of those windowed the test onto the
+    # wrong text entirely (caught on first run).
+    start = doc.find("## Amendment 2026-08-07 (E)")
+    assert start != -1, "the doc has no authoritative routing_reason amendment"
+    end = doc.find("## Amendment", start + 10)
+    section = doc[start:end if end != -1 else len(doc)]
+    for value in sorted(dids.ROUTING_REASONS):
+        assert f"`{value}`" in section, (
+            f"{value!r} is accepted by the DDL but absent from the doc's "
+            f"authoritative routing_reason table -- a consumer validating against "
+            f"the doc would reject a real artifact carrying it"
+        )
+
+    # 3. And the historical enum lines must POINT at the amendment, so a reader who
+    #    stops at them is not silently misled.
+    for line_no, line in enumerate(doc.splitlines()):
+        if "routing_reason      in {" in line:
+            window = chr(10).join(doc.splitlines()[line_no:line_no + 6])
+            assert "Amendment 2026-08-07 (E)" in window, (
+                "the historical enum line does not point at the current full list"
+            )

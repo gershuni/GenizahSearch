@@ -1017,7 +1017,7 @@ Consequences, in order:
 self-test needle "demonstrates only scanner mechanics" and cannot attest that the pattern set is COMPLETE.
 That remains literally true and is not claimed — completeness is unknowable from inside, since the scanner
 cannot enumerate terms nobody told it about. What was missing and IS attestable is **identity**: which pattern
-set ran. Emitted per run: `pattern_count`, a `pattern_set_sha256` over the sorted set (stable under reordering,
+set ran. Emitted per run: `pattern_count`, a KEYED `pattern_set_hmac` over the sorted set (stable under reordering,
 moves on any add/remove/**edit**), and the first 8 hex chars of each pattern's own digest so a reviewer can see
 *which* entry changed. Non-disclosure is the design constraint — no pattern text, prefix or length, because for
 a short restricted term a length plus a known alphabet is a real narrowing. Fails closed: `--attest` with no
@@ -1029,9 +1029,30 @@ run is being diagnosed.
 document records. The count changed after the owner's 2026-08-06 edits (transliterations added, then the Hebrew
 forms removed following 48 innocent hits), so 8 is plausibly correct and intended — but the discrepancy was
 invisible until something printed the number, which is precisely the argument for the attestation. **Owner
-confirmation owed** that 8 is the intended set before the bake runs; record
-`pattern_set_sha256 = ea33c0f5332d88f47d631de0d33ff8d1c58ff2ee2f679f794d31c6625200526e` in the build record so
-a later run can prove it used the same reviewed set.
+confirmation owed** that 8 is the intended set before the bake runs.
+
+**🛑 THE DIGEST FIELD, CORRECTED 2026-08-07 after Codex round 5 (MEDIUM).** An earlier revision of this section
+recorded a fixed `pattern_set_sha256` value "so a later run can prove it used the same reviewed set". That is
+**withdrawn, and the value is deleted**, because it cannot do what it claimed:
+
+- The attestation no longer emits a plain SHA-256 at all. Round 3 established that an unkeyed digest is a
+  membership **oracle** (hash a candidate term, compare the prefix), so `pattern_set_attestation` now emits
+  **keyed HMACs** — `pattern_set_hmac` and keyed per-pattern prefixes — and **omits every digest** when no key
+  is present. A recorded unkeyed value is therefore not comparable with any current run's output, and an
+  unkeyed run cannot produce one to compare.
+- **The build-record contract is now:** with `MASKING_ATTESTATION_KEY` set, record `pattern_count` **and**
+  `pattern_set_hmac`; a later run under the SAME key reproduces both, which is what proves the reviewed set ran.
+  Without the key, record `pattern_count` only, and state plainly in the build record that **no identity digest
+  is available** — a count alone cannot distinguish two 8-pattern sets.
+- The key must therefore be as durable as the pattern file itself: a rotated or forgotten key makes every
+  earlier `pattern_set_hmac` unverifiable, which converts the attestation back into a bare count. Treat it with
+  the same handling as `.masking_patterns` (env-held, gitignored, not rotated casually).
+
+**Gate 16 remains NOT green, and the attestation does not change that.** The signature-vocabulary term is still
+absent from the scanned pattern set, so the scan cannot catch that class; the slim-DB column denylist is a
+compensating control for the one place the term is known to arrive, not a substitute for the scan. Owner action
+(add the pattern) and owner confirmation (that 8 is the intended count) are both still owed before masking
+evidence should be read as complete.
 
 **✅ FINDING B — RESOLVED 2026-08-06: not a coincidence. The frozen constant was pinned against the GEN-2
 population.** The slim research DB was built from the real artifacts and fed to the builder's own reader:
@@ -1254,8 +1275,8 @@ the masking scan on my own two files, I ran it with the pattern file unset (**ex
 `--self-test` prove the *mechanism* runs and can return non-zero; they do **not** prove the loaded pattern set
 is complete, because the needle is synthetic. That limit is permanent and is not claimed away. What was owed and
 now exists: `check_atlas_masking.py --attest` emits a **non-disclosing** attestation per run — `pattern_count`,
-a `pattern_set_sha256` over the sorted set (stable under reordering, moves on any add/remove/**edit**), and each
-pattern's own 8-char digest prefix so a reviewer can see *which* entry changed. No pattern text, prefix or
+a KEYED `pattern_set_hmac` over the sorted set (stable under reordering, moves on any add/remove/**edit**), and each
+pattern's own 8-char KEYED digest prefix so a reviewer can see *which* entry changed. No pattern text, prefix or
 length is emitted; length is omitted deliberately, because for a short restricted term a length plus a known
 alphabet is a real narrowing. Fails closed (no pattern file → exit 1) and prints **before** the scan, so it is
 present exactly when a failing run is being diagnosed. **It immediately found a discrepancy: the live set is 8
