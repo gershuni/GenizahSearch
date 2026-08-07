@@ -1706,24 +1706,25 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
 #: read -- `get_manuscript_works_enveloped` takes no bucket, novelty or
 #: divergence filter at all -- would show a reader children their own parent
 #: says do not exist.
-#: MANUSCRIPT IS DELIBERATELY ABSENT, and its absence is load-bearing rather
-#: than an oversight to fill in later. `_build_findings_filter` accepts
-#: `work_id` and has NO `sys_id` axis, so a manuscript expansion would pass a
-#: keyword the read silently ignores -- opening the row onto every
-#: identification matching the reader's filters instead of the ones in THAT
-#: manuscript. Measured, not feared: the argument reaches the service and is
-#: dropped without an error. That is worse than a crash, because the reader
-#: sees a plausible list and cannot tell it is the wrong one.
+#: MANUSCRIPT WAS DELIBERATELY ABSENT UNTIL 2026-08-07, and the reason it is now
+#: present is that the missing half was supplied rather than that the caution was
+#: wrong. `_build_findings_filter` had NO `sys_id` axis, so a manuscript expansion
+#: would have passed a keyword the read silently IGNORES -- opening the row onto
+#: every identification matching the reader's filters instead of the ones in THAT
+#: manuscript. Measured, not feared: the argument reached the service and was
+#: dropped without an error. That is worse than a crash, because the reader sees a
+#: plausible list and cannot tell it is the wrong one.
 #:
-#: Offering the affordance only where the predicate exists is what makes the
-#: absence safe. Adding the axis is a four-part change the guard at
-#: `tests/test_discovery_build.py::
-#: test_the_probes_filter_axes_are_PINNED_to_the_shipped_predicate_builder`
-#: enforces (the builder, the bench's axis tuple, its coherent per-bucket pick,
-#: and `fetch_findings`), and it belongs in its own package.
+#: What that safety cost was the whole unit: a reader grouping by manuscript saw a
+#: shelfmark and a work count with no way through to the identifications underneath
+#: (owner report, 2026-08-07: "In One Row Per Manuscript I don't see the computed
+#: identifications at all"). So `di.sys_id = ?` now exists in the shared predicate,
+#: and the pair below is admitted BY THE SAME DERIVED CHECK that previously refused
+#: it -- `EXPANSION_SUPPORTED_AXES` reads the builder's signature, so this table
+#: cannot claim an axis the query lacks.
 EXPANSION_KEY_BY_UNIT: Dict[str, Optional[Tuple[str, str]]] = {
     FINDINGS_UNIT_IDENTIFICATION: None,
-    FINDINGS_UNIT_MANUSCRIPT: None,
+    FINDINGS_UNIT_MANUSCRIPT: ("sys_id", "sys_id"),
     FINDINGS_UNIT_WORK: ("display_work_id", "work_id"),
 }
 
@@ -1867,6 +1868,7 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
             _render_expansion(item, lang, load_children,
                               sidecar_version=sidecar_version,
                               preview_url=preview_url,
+                              catalogue_title=catalogue_title,
                               on_suppress=on_suppress)
         elif unit == FINDINGS_UNIT_IDENTIFICATION and preview_url is not None:
             _render_preview(item, lang, preview_url)
@@ -1874,7 +1876,7 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
 
 def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
                       sidecar_version: Any = None, preview_url=None,
-                      on_suppress=None) -> None:
+                      catalogue_title=None, on_suppress=None) -> None:
     """The grouped row's children, IN PLACE, fetched when the reader asks.
 
     Lazy for the reason the panel's expansion is: the heaviest work carries
@@ -2019,9 +2021,19 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
                     # inside an expanded work is exactly as visible as one at the
                     # top level, and the owner should not have to change the row
                     # unit to hide it.
+                    # `catalogue_title` IS PASSED DOWN (owner report, 2026-08-07:
+                    # the "Catalogued as:" line was missing from a work row's
+                    # children). It was the one injected affordance the child did
+                    # not receive, so every child rendered with `None` -- which
+                    # means "render nothing", so the absence was silent. That is
+                    # the WORST place to lose it: a work row's children are its
+                    # witnesses, and comparing our identification against what
+                    # each library called the same manuscript is precisely the
+                    # reading the expansion exists to support.
                     render_finding_row(child, lang,
                                        sidecar_version=sidecar_version,
                                        preview_url=preview_url,
+                                       catalogue_title=catalogue_title,
                                        on_suppress=on_suppress)
             extent["holder"] = _render_expansion_extent(
                 state["shown"], total, lang, on_more=_more)

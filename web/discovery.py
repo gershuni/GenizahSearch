@@ -231,6 +231,7 @@ async def get_findings_enveloped(
     page: int = 1,
     page_size: Optional[int] = None,
     suppressed: Optional[Iterable[str]] = None,
+    sys_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The corpus-wide "Computed Identifications" query (A-6).
 
@@ -254,7 +255,7 @@ async def get_findings_enveloped(
             unit, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain, author=author,
             work_id=work_id, sort=sort, page=page, page_size=page_size,
-            suppressed=suppressed)
+            suppressed=suppressed, sys_id=sys_id)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself

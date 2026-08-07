@@ -214,6 +214,12 @@ STATE_CLASS = "gs-findings-state"
 # (`web/safe_storage.py`) -- never the raw per-user store (T-136-16-07).
 # ---------------------------------------------------------------------------
 
+#: "Not in the cache", distinct from a cached `None` ("looked up; there is no
+#: title"). A sentinel rather than `None` because ~14% of manuscripts have no title
+#: in `libraries.csv`, and conflating the two would re-look-up every one of them on
+#: every render pass. See `_render_results`'s `_catalogue_title`.
+_MISSING = object()
+
 _STORAGE_PREFIX = "discovery_findings_"
 
 _KEY_UNIT = _STORAGE_PREFIX + "unit"
@@ -949,6 +955,17 @@ async def fetch_findings(state: Dict[str, Any],
         domain=state.get("domain"),
         author=state.get("author"),
         work_id=state.get("work_id"),
+        # THE MANUSCRIPT AXIS (2026-08-07), read from the state like every other
+        # filter. NORMALLY ABSENT here: no control on this page sets `sys_id`, so
+        # `state.get` returns `None` and the predicate adds nothing. It is passed
+        # anyway, and that is not defensive padding --
+        # `tests/test_discovery_build.py::
+        # test_the_probes_filter_axes_are_PINNED_to_the_shipped_predicate_builder`
+        # requires every axis the builder accepts to be reachable from this call,
+        # precisely because an axis the page cannot pass is one the benchmark claims
+        # to measure and never does. The expansion path (`_fetch_children`) is what
+        # actually sets it today.
+        sys_id=state.get("sys_id"),
         sort=state["sort"],
         page=state["page"],
         page_size=_default_page_size(),
@@ -2471,19 +2488,69 @@ def _render_results(
     # returns `None` for them -- `_render_shelfmark` renders nothing at all in
     # that case, not an empty element or a placeholder.
     from web.state import state as app_state
-    catalogue_titles: Dict[str, str] = {}
-    if app_state.meta_mgr is not None:
-        for item in items:
-            sys_id = item.get("sys_id")
-            if not sys_id or sys_id in catalogue_titles:
-                continue
-            csv_row = app_state.meta_mgr.csv_bank.get(str(sys_id))
-            title = (csv_row or {}).get("title")
-            if title:
-                catalogue_titles[sys_id] = title
+    # MEMOISED ON DEMAND, and there is no separate pre-pass. There WAS one, added
+    # when this only had to serve the rows on the page; when expansion children
+    # needed titles too (2026-08-07) I added a lazy miss branch beside it and left
+    # the pre-pass in place -- and the masking sweep's line gate immediately reported
+    # the miss branch as never executed, because the pre-pass had already resolved
+    # every key any test could ask for.
+    #
+    # The gate was right, and the right conclusion was NOT to contrive a case that
+    # reaches the miss branch: two pieces of code doing the same work, one of which
+    # only ever runs when the other has not, is one piece of code too many. The
+    # accessor below now owns the whole job -- including its own key normalisation,
+    # which the two used to have to agree on by hand (they briefly did not: the batch
+    # keyed by the RAW sys_id while the lookup read `str(...)`, so a non-string
+    # sys_id was resolved and then missed, a silent bypass that showed up only as a
+    # slower render).
+    #
+    # NOTHING IS LOST BY DROPPING THE PRE-PASS. `csv_bank` is a plain in-memory dict
+    # populated once at process startup, so resolution is a dict lookup with no I/O,
+    # and the memo means each distinct sys_id is looked up exactly once per render
+    # however many rows and children carry it. What the pre-pass bought was ordering,
+    # not fewer lookups.
+    catalogue_titles: Dict[str, Optional[str]] = {}
 
     def _catalogue_title(item: Mapping[str, Any]) -> Optional[str]:
-        return catalogue_titles.get(item.get("sys_id"))
+        """The catalogue's title for `item`'s manuscript, batch first.
+
+        MEMOISED ON MISS, and that is what makes this work for EXPANSION CHILDREN
+        (owner report, 2026-08-07: the "Catalogued as:" line was absent from a work
+        row's children). The batch above can only see the sys_ids on the CURRENT
+        page; a child is fetched lazily, long after this closure was built, and its
+        manuscript may not appear at the top level at all. A pure `dict.get` returned
+        `None` for every one of them -- and `None` means "render nothing", so the
+        line silently vanished exactly where a reader comparing a work against its
+        witnesses most needs it.
+
+        STILL NOT A PER-ROW READ, which is the property
+        `test_the_page_batches_catalogue_titles_off_the_event_loop_never_per_row`
+        pins -- and it is pinned as a CEILING on `csv_bank.get` calls (one per
+        distinct sys_id), which memoisation satisfies exactly as a pre-pass did.
+        `csv_bank` is a plain in-memory dict populated once at process startup, so a
+        miss costs one dict lookup and no I/O.
+
+        `_MISSING` rather than `None` as the negative cache value: ~14% of rows have
+        no title in `libraries.csv`, and storing `None` would make every one of them
+        re-look-up on each render pass -- harmless but pointless, and it would blur
+        "not yet resolved" into "resolved, and there is no title".
+
+        WRITTEN WITH NO EARLY `return` for the missing-sys_id case. Every row on this
+        surface has a sys_id (the work unit is the one grain without one, and it never
+        calls here), so a guard clause there is a line no capture can paint -- which
+        the masking sweep's line gate reports, correctly. As a positive branch the
+        behaviour is identical and every line is reachable.
+        """
+        key = str(item.get("sys_id") or "")
+        cached = catalogue_titles.get(key, _MISSING) if key else None
+        if cached is not _MISSING:
+            return cached or None
+        title = None
+        if app_state.meta_mgr is not None:
+            csv_row = app_state.meta_mgr.csv_bank.get(key)
+            title = (csv_row or {}).get("title") or None
+        catalogue_titles[key] = title
+        return title
 
     with ui.column().classes(f"rows {RESULTS_CLASS}-rows w-full gap-2"):
         if not items:
@@ -3057,6 +3124,10 @@ async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any],
         domain=child.get("domain"),
         author=child.get("author"),
         work_id=child.get("work_id"),
+        # THE MANUSCRIPT AXIS (2026-08-07). `_child_state` pins whichever axis the
+        # parent's unit names, so this reads the same `child` dict `work_id` does --
+        # only one of the two is ever set for a given parent.
+        sys_id=child.get("sys_id"),
         sort=child["sort"],
         page=child["page"],
         page_size=_EXPANSION_PAGE_SIZE,

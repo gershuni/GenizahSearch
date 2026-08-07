@@ -568,3 +568,96 @@ def test_a_failed_reread_after_a_successful_write_never_UNHIDES_anything():
     assert holder["ids"] == tuple(sorted(holder["ids"])), (
         "the merged list is not sorted -- it lands in the service's cache key, so "
         "an unstable order means the cache silently never hits")
+
+
+# ===========================================================================
+# THE MANUSCRIPT FILTER AXIS (owner report, 2026-08-07: "In One Row Per Manuscript
+# I don't see the computed identifications at all").
+#
+# The per-manuscript unit had no expansion because the shared predicate had no
+# `sys_id` axis, and offering one would have passed a keyword the read silently
+# drops -- opening the row onto a page of the CORPUS rather than the manuscript.
+# These tests are about the axis itself, against the real artifact.
+# ===========================================================================
+
+
+def test_the_manuscript_axis_pins_children_to_exactly_one_manuscript():
+    """The property the expansion's honesty rests on: a parent's child list is the
+    identifications IN that manuscript, and its count agrees with the parent's own
+    `work_count`.
+
+    Run against the LIVE artifact, because "the SQL looks right" is what the
+    silently-dropped keyword also looked like.
+    """
+    from shared.discovery_service import (
+        FINDINGS_UNIT_IDENTIFICATION,
+        FINDINGS_UNIT_MANUSCRIPT,
+    )
+
+    db = _live_artifact()
+    if db is None:
+        pytest.skip("no live discovery artifact in this checkout")
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        sql, params = _build_findings_query(
+            unit=FINDINGS_UNIT_MANUSCRIPT, page=1, page_size=5)
+        parents = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        assert parents, "the artifact returned no manuscript rows"
+
+        for parent in parents:
+            sys_id = parent["sys_id"]
+            sql, params = _build_findings_query(
+                unit=FINDINGS_UNIT_IDENTIFICATION, sys_id=sys_id,
+                page=1, page_size=200)
+            children = [dict(r) for r in conn.execute(sql, params).fetchall()]
+            assert children, f"manuscript {sys_id} opened onto nothing"
+            # EVERY child is in THIS manuscript. A dropped keyword would return a
+            # page of the corpus, which is the defect this axis was withheld over.
+            assert {c["sys_id"] for c in children} == {sys_id}, (
+                "the manuscript expansion returned identifications from other "
+                "manuscripts -- the axis is not being applied")
+            # ...and the parent's own count is the number underneath it, because
+            # both come from ONE predicate.
+            assert int(children[0]["_total_rows"]) == int(parent["work_count"]), (
+                f"manuscript {sys_id} says {parent['work_count']} works but opens "
+                f"onto {children[0]['_total_rows']} identifications")
+    finally:
+        conn.close()
+
+
+def test_the_manuscript_axis_ACTUALLY_NARROWS_and_is_not_silently_dropped():
+    """The control for the test above, and the reason it is worth having: an
+    IGNORED `sys_id` produces a passing-looking child list too -- it is just the
+    whole corpus. So the pinned total must be strictly smaller than the unpinned
+    one, which no dropped keyword can satisfy."""
+    from shared.discovery_service import FINDINGS_UNIT_IDENTIFICATION
+
+    db = _live_artifact()
+    if db is None:
+        pytest.skip("no live discovery artifact in this checkout")
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        sql, params = _build_findings_query(
+            unit=FINDINGS_UNIT_IDENTIFICATION, count_only=True)
+        unpinned = int(conn.execute(sql, params).fetchone()["n"])
+
+        sql, params = _build_findings_query(
+            unit=FINDINGS_UNIT_IDENTIFICATION, page=1, page_size=1)
+        row = [dict(r) for r in conn.execute(sql, params).fetchall()][0]
+
+        sql, params = _build_findings_query(
+            unit=FINDINGS_UNIT_IDENTIFICATION, sys_id=row["sys_id"],
+            count_only=True)
+        pinned = int(conn.execute(sql, params).fetchone()["n"])
+
+        assert 0 < pinned < unpinned, (
+            f"pinning one manuscript gave {pinned} of {unpinned} rows -- a "
+            "predicate that narrows nothing is a keyword being dropped")
+        # And the SQL really binds it, rather than interpolating.
+        where, bound = _build_findings_filter(sys_id=row["sys_id"])
+        assert "di.sys_id = ?" in where, "the manuscript axis is not a bound predicate"
+        assert row["sys_id"] in bound
+    finally:
+        conn.close()

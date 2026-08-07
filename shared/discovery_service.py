@@ -953,6 +953,7 @@ def _build_findings_filter(
     author: Optional[str] = None,
     work_id: Optional[str] = None,
     suppressed: Optional[Iterable[str]] = None,
+    sys_id: Optional[str] = None,
 ) -> Tuple[str, List[Any]]:
     """The ONE findings predicate, shared by the row query and the facet
     counts.
@@ -1070,6 +1071,31 @@ def _build_findings_filter(
         where.append("di.display_work_id = ?")
         params.append(work_id)
 
+    # THE MANUSCRIPT AXIS (owner report, 2026-08-07: "In One Row Per Manuscript I
+    # don't see the computed identifications at all").
+    #
+    # This axis was DELIBERATELY absent, and its absence was load-bearing at the
+    # time: `web/components/findings_rows.py::EXPANSION_KEY_BY_UNIT` maps a unit to
+    # the filter axis its expansion pins, and offering a manuscript expansion
+    # against a predicate with no `sys_id` would pass a keyword the read SILENTLY
+    # IGNORES -- opening the row onto every identification matching the reader's
+    # filters instead of the ones in that manuscript. Measured then, not feared.
+    # Withholding the affordance was the safe half of that trade.
+    #
+    # The cost of the safe half was that the per-manuscript unit had no way to show
+    # its own identifications, which is what the owner hit: a reader who groups by
+    # manuscript sees a shelfmark and a work count and can go no further. So the
+    # axis is added HERE, in the one shared predicate, which is what makes the
+    # expansion honest -- the children come from the same read at the leaf grain
+    # with this key pinned, so every active filter still applies and a parent's
+    # count cannot contradict the rows underneath it.
+    #
+    # `di.sys_id` is the SAME column `_FINDINGS_UNIT_GROUP_BY` groups the manuscript
+    # unit by, so the expansion pins exactly the key the parent row was built from.
+    if sys_id:
+        where.append("di.sys_id = ?")
+        params.append(str(sys_id))
+
     # ADMIN SUPPRESSION (owner ruling, 2026-08-06): a list of identification ids
     # the owner has hidden, so a clearly-wrong row can come off the live beta
     # without a re-bake. The artifact is content-hash verified and refuses to
@@ -1156,6 +1182,7 @@ def _build_findings_query(
     author: Optional[str] = None,
     work_id: Optional[str] = None,
     suppressed: Optional[Iterable[str]] = None,
+    sys_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
     count_only: bool = False,
@@ -1188,7 +1215,7 @@ def _build_findings_query(
     where_sql, params = _build_findings_filter(
         unit=unit, bucket=bucket, novelty=novelty,
         divergence=divergence, domain=domain,
-        author=author, work_id=work_id, suppressed=suppressed)
+        author=author, work_id=work_id, suppressed=suppressed, sys_id=sys_id)
     group_by = _FINDINGS_UNIT_GROUP_BY[unit]
     group_sql = f"GROUP BY {group_by}" if group_by else ""
 
@@ -2511,6 +2538,7 @@ class DiscoveryService:
         page: int = 1,
         page_size: Optional[int] = None,
         suppressed: Optional[Iterable[str]] = None,
+        sys_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """The corpus-wide findings query, in whichever of the three offered
         units the reader selected.
@@ -2534,7 +2562,7 @@ class DiscoveryService:
             unit=unit, sort=sort, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain,
             author=author, work_id=work_id, page=page, page_size=page_size,
-            suppressed=suppressed)
+            suppressed=suppressed, sys_id=sys_id)
 
         if not self.is_available():
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
@@ -2552,7 +2580,7 @@ class DiscoveryService:
                     unit=unit, sort=sort, bucket=bucket, novelty=novelty,
                     divergence=divergence,
                     domain=domain, author=author, work_id=work_id,
-                    suppressed=suppressed,
+                    suppressed=suppressed, sys_id=sys_id,
                     count_only=True, count_cap=count_cap)
                 counted = int(conn.execute(count_sql, count_params).fetchone()["n"])
                 if counted > count_cap:
@@ -2579,7 +2607,7 @@ class DiscoveryService:
                         unit=unit, sort=sort, bucket=bucket, novelty=novelty,
                         divergence=divergence,
                         domain=domain, author=author, work_id=work_id,
-                        suppressed=suppressed,
+                        suppressed=suppressed, sys_id=sys_id,
                         count_only=True)
                     total = int(conn.execute(count_sql, count_params).fetchone()["n"])
         except Exception as e:
@@ -3677,6 +3705,7 @@ class DiscoveryService:
         page: int = 1,
         page_size: Optional[int] = None,
         suppressed: Optional[Iterable[str]] = None,
+        sys_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Heavy by design: the corpus-wide query gets a bounded-concurrency
         slot, so a burst of findings requests degrades to an explicit `busy`
@@ -3687,7 +3716,7 @@ class DiscoveryService:
             # A tuple (not a list) because this is also a cache key.
             (unit, bucket, tuple(novelty or ()) or None, divergence,
              domain, author, work_id, sort, page, page_size,
-             tuple(suppressed or ()) or None),
+             tuple(suppressed or ()) or None, sys_id),
             timeout=self._findings_timeout(), heavy=True,
         )
 

@@ -678,8 +678,23 @@ def render_and_click(paint, marker: str, *, index: int = 0):
     return holder["client"]
 
 
+def _catalogue_bank_meta_mgr():
+    """A `meta_mgr` whose `csv_bank` holds a title for the fixture row's sys_id.
+
+    Deliberately does NOT hold every sys_id: the LAZY miss branch in
+    `_render_results::_catalogue_title` is reached by a lookup the page's own batch
+    never performed, which is what an expansion child does, so a bank that answered
+    everything from the batch would leave that branch unpainted.
+    """
+    from unittest import mock
+
+    meta_mgr = mock.Mock()
+    meta_mgr.csv_bank = {"990000000000000944": {"title": CURATED_CATALOGUE_TITLE}}
+    return meta_mgr
+
+
 def render_page(monkeypatch, *, lang="en", findings=None, facets=None,
-                launch=None, state=None, as_of="2026-08-03"):
+                launch=None, state=None, as_of="2026-08-03", meta_mgr=None):
     """Render the REAL `create_findings_page()` with all three reads stubbed."""
     launch_envelope = sentinel_launch_envelope() if launch is None else launch
     findings_envelope_ = (findings if findings is not None
@@ -701,6 +716,12 @@ def render_page(monkeypatch, *, lang="en", findings=None, facets=None,
     monkeypatch.setattr(fp, "discovery_meta", lambda key: as_of if key == "data_as_of" else None)
     if state is not None:
         monkeypatch.setattr(fp, "read_state", lambda: dict(state))
+    if meta_mgr is not None:
+        # `_render_results` imports `web.state.state` INSIDE the function, so the
+        # patch has to land on that module's attribute rather than on a name in
+        # `web.pages.findings`.
+        from web import state as _web_state
+        monkeypatch.setattr(_web_state.state, "meta_mgr", meta_mgr)
     set_language(lang)
     try:
         return _client_render(lambda: fp.create_findings_page())
@@ -2824,6 +2845,16 @@ def capture_rendered_output(destination: str) -> str:
                 "domain": None,
                 "author": "AN AUTHOR THE CASCADE DOES NOT OFFER",
                 "work_id": "w000404", "work_label": None, "page": 1}}),
+            # (6) THE CATALOGUE TITLE, resolved from a real `csv_bank`. Every other
+            #     case here leaves `state.meta_mgr` as `None`, so the lookup that
+            #     reads it -- and the LAZY miss branch that resolves a sys_id the
+            #     page's own batch never saw, which is how an expansion CHILD gets
+            #     its title (2026-08-07) -- were lines no capture executed. The
+            #     masking scan had therefore never looked at what a catalogue title
+            #     puts on a screen, which is the one element on this surface rendered
+            #     VERBATIM from another party's data rather than from our own
+            #     vocabulary. That is exactly the text a masking scan exists for.
+            ("catalogue-title", {"meta_mgr": _catalogue_bank_meta_mgr()}),
         ):
             patch = _Patch()
             try:
@@ -3115,14 +3146,34 @@ def test_the_expansion_is_offered_only_where_the_PREDICATE_can_pin_it():
     that manuscript. A reader cannot see that kind of wrongness; they see a
     plausible list that is the wrong list.
 
-    So the offer is bounded by the predicate: `work` (the builder has
-    `work_id`), and NOT `manuscript` until the axis exists.
+    So the offer is bounded by the predicate -- and the BOUND is the property, not
+    the particular units on either side of it. `manuscript` was excluded while the
+    builder had no `sys_id` axis; the axis was added 2026-08-07 (owner report: the
+    per-manuscript unit showed no identifications at all), so the manuscript row is
+    now offered BECAUSE the predicate can pin it.
+
+    The assertion below is therefore written against the builder rather than against
+    a remembered list of units: every axis the table names must be one
+    `_build_findings_filter` accepts, and the LEAF must still be `None` because it
+    has nothing underneath it. Pinning "manuscript is absent" as a literal was
+    correct when it was written and would now forbid the fix -- a guard that has
+    outlived the constraint it encoded.
     """
     work = finding_row(unit=FINDINGS_UNIT_WORK)
     assert fr.expansion_target(work) == ("work_id", work["display_work_id"])
-    # The leaf has nothing underneath it, and the manuscript unit has no axis.
+    # The leaf has nothing underneath it -- that one is structural, not a
+    # predicate-capability question, and it does not change.
     assert fr.expansion_target(finding_row()) is None
-    assert fr.expansion_target(finding_row(unit=FINDINGS_UNIT_MANUSCRIPT)) is None
+
+    # The manuscript unit pins its OWN grouping key, which is what makes its
+    # children the ones in that manuscript rather than a page of the corpus.
+    manuscript = finding_row(unit=FINDINGS_UNIT_MANUSCRIPT)
+    assert fr.expansion_target(manuscript) == ("sys_id", manuscript["sys_id"])
+
+    # A grouped row with no key of its own still refuses: an expansion that cannot
+    # name what it expands would fetch the whole unfiltered leaf grain.
+    assert fr.expansion_target(finding_row(unit=FINDINGS_UNIT_MANUSCRIPT,
+                                           sys_id=None)) is None
 
     # ...and every axis the table DOES name is one the shipped builder accepts.
     for unit, pair in fr.EXPANSION_KEY_BY_UNIT.items():
@@ -3196,6 +3247,87 @@ def test_the_children_are_the_SAME_row_anatomy_as_a_top_level_row():
     # ...and exactly ONE expander on the whole subtree -- the parent's.
     assert len(_elements_with_class(client, fr.ROW_EXPANDER_CLASS)) == 1, (
         "a child was given a loader and became a tree")
+    ASSERTION_COUNT["n"] += 1
+
+
+
+def test_a_CHILD_row_carries_the_catalogue_title_too():
+    """OWNER REPORT, 2026-08-07: "In One Row Per Work children, there should be that
+    'Catalogued as:' also."
+
+    It was the ONE injected affordance the child did not receive: `_render_expansion`
+    forwarded `sidecar_version`, `preview_url` and `on_suppress` and dropped
+    `catalogue_title`, so every child rendered with `None` -- which means "render
+    nothing", so the absence was silent rather than broken-looking.
+
+    That is the worst place to lose it. A work row's children ARE its witnesses, and
+    weighing our identification against what each library called the same manuscript
+    is precisely the reading the expansion exists to support.
+
+    FAILS ON THE PRE-FIX CODE at the first assertion.
+    """
+    async def _load(_row, _page=1):
+        return findings_envelope([finding_row()], total=1)
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(
+            finding_row(unit=FINDINGS_UNIT_WORK), "en",
+            load_children=_load,
+            catalogue_title=lambda _i: CURATED_CATALOGUE_TITLE),
+        fr.ROW_EXPANDER_CLASS)
+
+    children = _elements_with_class(client, fr.ROW_CHILD_CLASS)
+    assert len(children) == 1, f"expected one child row, got {len(children)}"
+
+    # The child's OWN subtree carries it -- not merely somewhere on the page, which
+    # a parent-level title would also satisfy. The work unit renders no catalogue
+    # title of its own (a work spans manuscripts), so anything found here came from
+    # the child.
+    child_texts = " ".join(_subtree_texts(children[0]))
+    assert CURATED_CATALOGUE_TITLE in child_texts, (
+        "the child row lost the catalogue title -- a reader comparing a work "
+        "against its witnesses cannot see what each library called them")
+    assert fr.copy_text("catalogue_title_label", "en") in child_texts, (
+        "the child rendered a bare title with no attribution label")
+
+    assert_surface_honesty(
+        scoped_fragment(client, fr.ROW_CLASS), scope_selector=fr.ROW_CLASS, lang="en")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_a_MANUSCRIPT_row_opens_onto_its_own_identifications():
+    """OWNER REPORT, 2026-08-07: "In One Row Per Manuscript I don't see the computed
+    identifications at all."
+
+    It had no expansion at all, and the reason was sound at the time: the shared
+    predicate had no `sys_id` axis, so a manuscript expansion would have passed a
+    keyword the read SILENTLY DROPS and opened onto a page of the corpus. Offering
+    nothing was the safe half of that trade -- but it left a reader who groups by
+    manuscript with a shelfmark, a work count, and no way through.
+
+    The axis now exists (`di.sys_id = ?`, the same column the manuscript unit is
+    GROUPED BY), so the expansion is offered and pins its parent exactly.
+
+    FAILS ON THE PRE-FIX CODE: no expander is rendered at all.
+    """
+    seen = {}
+
+    async def _load(row, _page=1):
+        seen["row"] = row
+        return findings_envelope([finding_row()], total=1)
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(
+            finding_row(unit=FINDINGS_UNIT_MANUSCRIPT), "en",
+            load_children=_load,
+            catalogue_title=lambda _i: CURATED_CATALOGUE_TITLE),
+        fr.ROW_EXPANDER_CLASS)
+
+    assert seen.get("row") is not None, (
+        "the manuscript row rendered no expansion -- its identifications are "
+        "unreachable from this unit")
+    children = _elements_with_class(client, fr.ROW_CHILD_CLASS)
+    assert len(children) == 1, f"expected one child row, got {len(children)}"
     ASSERTION_COUNT["n"] += 1
 
 
@@ -3332,7 +3464,16 @@ def test_an_UNSUPPORTED_axis_never_reaches_the_service_as_a_dropped_keyword():
 
     Driven through `_fetch_children` with the table temporarily naming an axis
     the builder does not implement, because that is the only way to reach the
-    branch now that the shipped table names none."""
+    branch: every axis the shipped table names IS implemented, which is the
+    property the sibling test above pins.
+
+    THE FICTIONAL AXIS USED TO BE `sys_id`, which was the real historical example
+    -- and it is now a genuine axis (added 2026-08-07 so the per-manuscript unit
+    could open at all), so continuing to use it here would have made this test
+    assert that a SUPPORTED axis is refused. It asserted exactly that, and failed,
+    correctly. The example is now an axis that cannot ever be added by accident,
+    and it is checked against the builder below so this can never quietly become a
+    real one again."""
     calls = []
 
     async def _spy(unit, **kwargs):
@@ -3344,10 +3485,16 @@ def test_an_UNSUPPORTED_axis_never_reaches_the_service_as_a_dropped_keyword():
              "domain": None, "author": None, "work_id": None, "page": 1}
     row = finding_row(unit=FINDINGS_UNIT_MANUSCRIPT)
 
+    fictional_axis = "no_such_filter_axis"
+    assert fictional_axis not in fr.EXPANSION_SUPPORTED_AXES, (
+        f"{fictional_axis!r} is now a real filter axis -- pick another fiction, or "
+        "this test asserts that a supported axis is refused")
+
     original_table = dict(fr.EXPANSION_KEY_BY_UNIT)
     original_read = fp.get_findings_enveloped
     try:
-        fr.EXPANSION_KEY_BY_UNIT[FINDINGS_UNIT_MANUSCRIPT] = ("sys_id", "sys_id")
+        fr.EXPANSION_KEY_BY_UNIT[FINDINGS_UNIT_MANUSCRIPT] = (
+            "sys_id", fictional_axis)
         fp.get_findings_enveloped = _spy
         envelope = asyncio.run(fp._fetch_children(state, row))
     finally:

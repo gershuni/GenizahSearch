@@ -356,7 +356,8 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
     """
     bucket_sql = "di.main_pool = 1" if main_pool else "di.main_pool = 0"
     out: Dict[str, Any] = {"work_id": None, "domain": None, "author": None,
-                           "novelty_status": None, "suppressed": None}
+                           "novelty_status": None, "suppressed": None,
+                           "sys_id": None}
     try:
         row = conn.execute(
             f"""
@@ -404,6 +405,24 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
         hidden = None
     if hidden is not None and hidden[0]:
         out["suppressed"] = [hidden[0]]
+    # ONE REAL sys_id from this bucket, and from the CHOSEN WORK where the two
+    # co-occur. The manuscript axis (2026-08-07) is what the per-manuscript unit's
+    # expansion pins, so a timing over an invented sys_id would build the right SQL
+    # shape and select nothing -- measuring a predicate the page never runs, which
+    # is the same defect the suppressed pick above is written to avoid. The
+    # heaviest manuscript is preferred so a filtered timing is a worst case.
+    try:
+        ms = conn.execute(
+            f"SELECT di.sys_id, COUNT(*) n FROM discovery_identification di "
+            f"WHERE {bucket_sql} AND di.sys_id IS NOT NULL AND di.sys_id != '' "
+            f"GROUP BY di.sys_id ORDER BY (di.display_work_id = ?) DESC, n DESC "
+            f"LIMIT 1",
+            (out.get("work_id"),),
+        ).fetchone()
+    except sqlite3.Error:                                    # pragma: no cover
+        ms = None
+    if ms is not None and ms[0]:
+        out["sys_id"] = ms[0]
     preferred = [s for s in statuses if s[0] == prefer_novelty]
     if preferred or statuses:
         out["novelty_status"] = (preferred or statuses)[0][0]
@@ -752,7 +771,7 @@ _FINDINGS_OUT_OF_SCOPE: Tuple[Tuple[str, str], ...] = (
 #: shipped_predicate_builder` reads `_build_findings_filter`'s own signature and
 #: fails if this tuple falls behind it -- which is how this entry got added.
 _FINDINGS_FILTER_AXES: Tuple[str, ...] = (
-    "novelty", "divergence", "domain", "author", "work", "suppressed")
+    "novelty", "divergence", "domain", "author", "work", "suppressed", "sys_id")
 
 
 def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
@@ -813,6 +832,10 @@ def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
                 # for that state rather than measuring an empty clause and calling
                 # it measured.
                 kwargs["suppressed"] = pick.get("suppressed")
+            if "sys_id" in on:
+                # A REAL manuscript from THIS bucket -- see the pick above for why
+                # an invented one would measure a predicate that selects nothing.
+                kwargs["sys_id"] = pick.get("sys_id")
             states.append((stem, "+".join((stem,) + on), kwargs, on))
     return states
 

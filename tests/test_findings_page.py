@@ -1644,18 +1644,27 @@ def _contract_bound_findings(recorder=None):
     async def _call(unit="identification", *, bucket="main", novelty=None,
                     divergence="hidden", domain=None, author=None,
                     work_id=None, sort="band_rank", page=1, page_size=50,
-                    suppressed=None):
+                    suppressed=None, **extra_axes):
         # `suppressed` (2026-08-06): the admin hide list. Accepted AND FORWARDED to
         # the real builder rather than merely swallowed -- the whole point of this
         # stub is that it refuses what the shipped service refuses, so a filter
         # axis it silently dropped would be an axis whose validation this test
         # stopped exercising. Forwarding it means the over-cap raise is live here
         # too.
+        #
+        # `**extra_axes` FOR THE SAME REASON, and it is what keeps this stub from
+        # needing an edit per axis. Adding `sys_id` to the builder (2026-08-07) made
+        # this raise `TypeError` from inside a background task -- a stub whose
+        # SIGNATURE had drifted from the service it stands in for, which is the
+        # drift its docstring says it exists to prevent. Every keyword is forwarded
+        # to the real builder, so an axis the builder does not accept still fails
+        # here (loudly, as a `TypeError` from the builder itself) rather than being
+        # quietly absorbed by this fake.
         _build_findings_query(
             unit=unit, sort=sort, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain,
             author=author, work_id=work_id, suppressed=suppressed,
-            page=page, page_size=page_size)
+            page=page, page_size=page_size, **extra_axes)
         if recorder is not None:
             recorder.append({"unit": unit, "novelty": novelty, "bucket": bucket,
                              "divergence": divergence})
