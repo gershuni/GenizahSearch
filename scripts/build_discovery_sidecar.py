@@ -6485,6 +6485,17 @@ def finalize_build(
     # unless explicitly waived below -- round 3 found the fingerprint gate
     # implemented but never reached from here, which is the identical
     # correct-function-nobody-calls failure round 2 found in the router ingest.
+    # discovery-v3 (Codex R3 BLOCKER, the router bypass). Path to the gen-2
+    # evidence DB carrying `coverage_route` + `coverage_route_meta`. Supplied =>
+    # gen-2's fitted routing decision is INGESTED and REPLACES the Lever-1 cliff.
+    # Round 3 found `finalize_build` had no router input at all, so the real build
+    # applied the legacy 0.45 threshold precisely when D-17 ran -- demoting the
+    # ~19% of the validated headline surface the ingest exists to preserve. The
+    # helper accepted a router; nothing here ever built one.
+    gen2_router_evidence_db=None,
+    # The ONLY way to run the legacy coverage cliff on a v3 build. Named, like the
+    # novelty waiver, so it cannot be reached by omission -- see the guard below.
+    allow_lever1_coverage: bool = False,
     novelty_input_fingerprints: Optional[Dict[str, str]] = None,
     # The ONLY way to load a verdict cache without the fingerprint gate. Named
     # for what it actually does, so it cannot be passed absent-mindedly and shows
@@ -6618,6 +6629,35 @@ def finalize_build(
         dropped_work_ids = set()
 
     run_d17 = composition_dates_path is not None or seftja_dates_path is not None
+
+    # ---------------------------------------------------------------------
+    # discovery-v3 coverage routing (Codex R3 BLOCKER): the router, loaded HERE
+    # with the other pinned inputs, BEFORE any output mutation.
+    #
+    # Round 3's finding was that `apply_lever1=run_d17` below was the ONLY
+    # coverage-routing path a real build could take, so the entire router ingest
+    # -- module, mapping, parity gate, order justification, tests -- had no effect
+    # on any artifact. The third instance of the same failure in this work, so the
+    # guard is structural rather than a new default: when D-17 runs (the case that
+    # routes coverage at all), the caller must either supply the router or say out
+    # loud that it wants the legacy cliff.
+    # ---------------------------------------------------------------------
+    gen2_router = None
+    if gen2_router_evidence_db is not None:
+        from v3_routing_ingest import load_router as _load_gen2_router
+        gen2_router = _load_gen2_router(str(gen2_router_evidence_db))
+    if run_d17 and gen2_router is None and not allow_lever1_coverage:
+        raise RoutingConflictError(
+            "coverage routing is unspecified: D-17 is active (dates were supplied) but "
+            "neither `gen2_router_evidence_db` nor `allow_lever1_coverage` was given. "
+            "Defaulting to the legacy Lever-1 cliff is what this build must never do "
+            "silently -- measured on the real artifact, it demotes 30,899 of 160,095 "
+            "`same_work` rows (19.3%) that gen-2's fitted router ships, one-way, so the "
+            "asset would not contain the population the grading validated. Supply the "
+            "gen-2 evidence DB, or set `allow_lever1_coverage=True` to choose the legacy "
+            "cliff deliberately."
+        )
+
     composition_dates_map = {}
     seftja_dates_map = {}
     if composition_dates_path is not None:
@@ -6799,7 +6839,11 @@ def finalize_build(
             sidecar_version=REAL_SIDECAR_VERSION,
             cross_corpus_map=cross_corpus_map,
             year_by_canonical=year_by_canonical,
-            apply_lever1=run_d17,
+            # discovery-v3 (Codex R3): the router REPLACES Lever-1 when supplied.
+            # `build_claims_and_evidence` refuses both at once, so passing
+            # `apply_lever1` only when there is no router is required, not tidy.
+            gen2_router=gen2_router,
+            apply_lever1=run_d17 and gen2_router is None,
             reband_tier_a=reband_tier_a,
             v2_bands=v2_build,
         )
@@ -6943,6 +6987,14 @@ def finalize_build(
             # bake matched OPERATOR INTENT rather than letting the asset choose
             # its own contract.
             ("band_vocab_version", band_vocab_version),
+            # discovery-v3 (Codex R3 BLOCKER): WHICH coverage routing produced this
+            # asset. The two answers describe materially different populations --
+            # the legacy cliff demotes 19.3% of what the router ships -- and a
+            # reader has no build log, so without this the asset cannot say which
+            # one it contains. `gen2_router` (not the flag) drives it: intent is not
+            # evidence.
+            ("coverage_routing", "gen2_router" if gen2_router is not None
+             else ("lever1_cliff" if run_d17 else "none")),
         ]
         # v2 provenance (bake plan §7 gate 11, Codex #B2/#5): record the
         # verified SHA-256 of every supplied hash-pinned input in meta.
@@ -7253,6 +7305,19 @@ def build_parser() -> argparse.ArgumentParser:
                         help="SHA-256 pin, REQUIRED whenever --novelty-verdicts is given: "
                              "a cache that is not the cache that was MEASURED is not a "
                              "pinned input (T-136-12-03).")
+    v2_group.add_argument("--gen2-router-evidence-db", metavar="PATH", default=None,
+                        help="gen-2 evidence DB carrying coverage_route + "
+                             "coverage_route_meta (discovery-v3, Codex R3). Supplied => "
+                             "gen-2's FITTED routing decision is ingested and REPLACES the "
+                             "legacy Lever-1 0.45 cliff. REQUIRED whenever dates are given "
+                             "(i.e. whenever D-17 runs) unless "
+                             "--allow-lever1-coverage is set: measured on the real "
+                             "artifact, the legacy cliff demotes 30,899 of 160,095 "
+                             "`same_work` rows (19.3%%) the router ships, one-way.")
+    v2_group.add_argument("--allow-lever1-coverage", action="store_true",
+                        help="Run the LEGACY Lever-1 coverage cliff instead of ingesting "
+                             "gen-2's router. Choose it deliberately or not at all; it is "
+                             "recorded in the asset as coverage_routing=lever1_cliff.")
     novelty_group.add_argument("--novelty-input-fingerprints", metavar="PATH", default=None,
                         help="JSON {'{sys_id}::{work_id}': fingerprint} from "
                              "discovery_novelty_funnel.candidate_input_fingerprint. REQUIRED "
@@ -7405,6 +7470,8 @@ def main(argv=None) -> int:
         composition_dates_sha256=args.composition_dates_sha256,
         seftja_dates_path=args.seftja_dates,
         seftja_dates_sha256=args.seftja_dates_sha256,
+        gen2_router_evidence_db=args.gen2_router_evidence_db,
+        allow_lever1_coverage=args.allow_lever1_coverage,
         novelty_verdicts_path=args.novelty_verdicts,
         novelty_verdicts_sha256=args.novelty_verdicts_sha256,
         novelty_input_fingerprints=_load_novelty_fingerprints(

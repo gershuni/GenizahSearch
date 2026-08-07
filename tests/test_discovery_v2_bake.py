@@ -1102,6 +1102,12 @@ def test_finalize_build_d17_end_to_end_writes_audit_and_date_shas(tmp_path):
         out_db_path=str(fx["out_db_path"]),
         composition_dates_path=comp_path,
         seftja_dates_path=seftja_path,
+        # This is a V2 build, so the legacy Lever-1 coverage cliff is the correct
+        # routing -- but it must now be CHOSEN rather than defaulted to. Codex
+        # round 3 found the default was the only path a real build could take,
+        # which silently disabled the entire v3 router ingest; the guard that
+        # closes that fires here, which is the proof it was reachable.
+        allow_lever1_coverage=True,
         masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
     )
     conn = sqlite3.connect(str(stats["db_path"]))

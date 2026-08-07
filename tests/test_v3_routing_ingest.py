@@ -10,6 +10,7 @@ this session's vacuous-test lesson.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -537,3 +538,175 @@ def test_a_row_the_router_never_decided_aborts_the_build(tmp_path):
                    [("cl1", P2, "M:other", "c_other")])
     with pytest.raises(RoutingIngestError, match="no router decision"):
         _build(rdb, _works(), load_router(str(empty)))
+
+
+# ---------------------------------------------------------------------------
+# Codex ROUND 3 BLOCKER: `finalize_build` had NO router input at all. It never
+# imported this module and passed `apply_lever1=run_d17`, so the real build ran
+# the legacy 0.45 cliff precisely when D-17 ran -- the entire ingest (mapping,
+# parity gate, order justification, 17 tests) affected no artifact.
+#
+# The third instance of "correct function nobody calls" in this work. Every test
+# above this line drives `build_claims_and_evidence`, which is a HELPER; these
+# drive `finalize_build`, which is what the bake actually runs, and read the
+# BUILT SQLite file.
+# ---------------------------------------------------------------------------
+
+def _v3_finalize_fixture(tmp_path):
+    """Two works co-claiming one page at coverage 0.75 -- ABOVE the legacy 0.45
+    cliff, so Lever-1 ships both and the router's decision is the only thing that
+    can demote one. That makes the two routings distinguishable in the output."""
+    import csv as _csv
+
+    import discovery_ids as dids
+
+    tmp_path = Path(tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)   # callers pass a SUBdirectory
+    research_db = tmp_path / "research.db"
+    conn = sqlite3.connect(str(research_db))
+    conn.executescript(
+        """
+        CREATE TABLE track1_matches (
+          page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
+          title TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          spans_json TEXT, shadowed_by TEXT, ref_spans_json TEXT
+        );
+        CREATE TABLE pages (
+          page_id TEXT PRIMARY KEY, n_chars INTEGER, text TEXT, provenance TEXT
+        );
+        """
+    )
+    conn.executemany(
+        "INSERT INTO track1_matches VALUES (?,?,?,?,NULL,NULL,NULL,?,?,1,?,NULL,?)",
+        [
+            ("pg1", "s1", "raw:w1", "Sefaria", 300, 0.9, "[[0, 300, 0.9]]",
+             '[{"p0":0,"p1":300,"rg0":10,"rg1":310}]'),
+            ("pg1", "s1", "raw:w2", "Sefaria", 300, 0.9, "[[0, 300, 0.9]]",
+             '[{"p0":0,"p1":300,"rg0":50,"rg1":350}]'),
+        ],
+    )
+    conn.execute(
+        "INSERT INTO pages (page_id, provenance, text) VALUES ('pg1','htr',?)",
+        (chr(0x05D0) * 400,),          # coverage = 300/400 = 0.75
+    )
+    conn.commit()
+    conn.close()
+
+    crosswalk = tmp_path / "crosswalk.json"
+    crosswalk.write_text(json.dumps({"raw:w1": "w000001", "raw:w2": "w000002"}),
+                         encoding="utf-8")
+
+    import build_discovery_sidecar as bds
+
+    approved = tmp_path / "approved.csv"
+    with open(approved, "w", encoding="utf-8-sig", newline="") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=bds.APPROVED_HEADER)
+        writer.writeheader()
+        for wid, title in (("w000001", "Synthetic One"), ("w000002", "Synthetic Two")):
+            row = {h: "" for h in bds.APPROVED_HEADER}
+            row["work_id"] = wid
+            row["owner_verdict"] = "approve"
+            row["candidate_title"] = title
+            row["source_label"] = dids.SOURCE_CORPUS_SEFARIA
+            writer.writerow(row)
+
+    return {"research_db": research_db, "crosswalk": crosswalk, "approved": approved,
+            "out": tmp_path / "out" / "discovery-v3.db"}
+
+
+def _finalize(fx, tmp_path, **kw):
+    import build_discovery_sidecar as bds
+
+    tmp_path = Path(tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    dates = tmp_path / "comp.json"
+    # The FLAT pre-normalized form (raw id -> integer CE year), which is what
+    # `parse_composition_dates` accepts alongside the designator form.
+    dates.write_text(json.dumps({"raw:w1": 900, "raw:w2": 1400}), encoding="utf-8")
+    return bds.finalize_build(
+        source_db_path=str(fx["research_db"]),
+        from_approved_path=str(fx["approved"]),
+        crosswalk_path=str(fx["crosswalk"]),
+        out_db_path=str(fx["out"]),
+        composition_dates_path=str(dates),
+        masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+        **kw,
+    )
+
+
+def _routing_in_built_asset(db_path):
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(
+            "SELECT c.work_id, e.routing_status, e.routing_reason "
+            "FROM discovery_evidence e JOIN discovery_claim c ON c.claim_id = e.claim_id "
+            "WHERE e.evidence_source = 'track1_direct'"
+        ).fetchall()
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+    finally:
+        conn.close()
+    return {w: (s, r) for w, s, r in rows}, meta
+
+
+def test_finalize_build_REFUSES_to_default_to_the_legacy_cliff(tmp_path):
+    """THE round-3 fix. Silently defaulting is what the real build used to do.
+
+    Measured consequence of that default: 30,899 of 160,095 `same_work` rows
+    (19.3%) demoted, one-way -- so the asset would not contain the population the
+    grading measured, while every router test still passed.
+    """
+    import build_discovery_sidecar as bds
+
+    fx = _v3_finalize_fixture(tmp_path)
+    with pytest.raises(bds.RoutingConflictError, match="coverage routing is unspecified"):
+        _finalize(fx, tmp_path)
+
+
+def test_the_router_reaches_the_BUILT_ASSET_and_the_legacy_cliff_does_not(tmp_path):
+    """Build twice through `finalize_build` and read the emitted SQLite.
+
+    Every earlier router test drove the helper. This drives the real entrypoint
+    and asserts on rows read back out of the built file -- the only evidence that
+    distinguishes "the ingest works" from "the ingest runs".
+    """
+    router_db = tmp_path / "route.db"
+    _make_evidence(
+        router_db,
+        # w1 ships; w2 the router DECLINES -- at coverage 0.75 the legacy cliff
+        # would ship both, so this difference can only come from the router.
+        [("pg1", "c_w1", "same_work", 0.75, 1), ("pg1", "c_w2", "not_shipped", 0.75, 0)],
+        [("cl1", "pg1", "raw:w1", "c_w1"), ("cl2", "pg1", "raw:w2", "c_w2")],
+    )
+
+    fx_router = _v3_finalize_fixture(tmp_path / "a")
+    _finalize(fx_router, tmp_path / "a", gen2_router_evidence_db=str(router_db))
+    routed, meta_routed = _routing_in_built_asset(fx_router["out"])
+
+    fx_legacy = _v3_finalize_fixture(tmp_path / "b")
+    _finalize(fx_legacy, tmp_path / "b", allow_lever1_coverage=True)
+    legacy, meta_legacy = _routing_in_built_asset(fx_legacy["out"])
+
+    assert routed["w000002"] == ("review_only", "gen2_router_not_shipped"), (
+        f"the router's decline did not reach the built asset: {routed}"
+    )
+    assert routed["w000001"][0] == "shipped", routed
+    # The control: under the legacy cliff w2 is NOT demoted for coverage, so the
+    # difference above is attributable to the router and nothing else.
+    assert legacy["w000002"][1] != "gen2_router_not_shipped", (
+        f"the legacy path produced a router reason -- the two are not distinct: {legacy}"
+    )
+    # And the asset says which routing produced it.
+    assert meta_routed["coverage_routing"] == "gen2_router", meta_routed.get("coverage_routing")
+    assert meta_legacy["coverage_routing"] == "lever1_cliff", meta_legacy.get("coverage_routing")
+
+
+def test_the_cli_offers_and_threads_the_router(tmp_path):
+    """A CLI build must face the same forced choice; a declared-but-unthreaded
+    flag is the same bypass in a new place."""
+    import build_discovery_sidecar as bds
+
+    src = Path(bds.__file__).read_text(encoding="utf-8")
+    assert "--gen2-router-evidence-db" in src
+    assert "--allow-lever1-coverage" in src
+    assert "gen2_router_evidence_db=args.gen2_router_evidence_db" in src
+    assert "allow_lever1_coverage=args.allow_lever1_coverage" in src
