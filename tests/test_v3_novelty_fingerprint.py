@@ -335,3 +335,136 @@ def test_a_current_checkpoint_line_is_resumed_without_re_billing(tmp_path):
     )
     assert not calls, "an up-to-date checkpointed answer was re-billed"
     assert results[key]["novelty_status"] == "fills_gap"
+
+
+# ---------------------------------------------------------------------------
+# 4. Codex ROUND 3 BLOCKER: the gate existed but `finalize_build` never reached
+#    it. `load_novelty_verdicts` was called there WITHOUT `expected_fingerprints`,
+#    so the real build accepted stale and unfingerprinted positive verdicts --
+#    the identical "correct function nobody calls" failure round 2 found in the
+#    router ingest, in the very fix for round 2's other blocker.
+#
+#    Zero tests supplied a verdict cache to `finalize_build`, which is exactly
+#    why it survived. These close that.
+# ---------------------------------------------------------------------------
+
+def _fingerprint_map(path: Path, mapping) -> None:
+    path.write_text(json.dumps(mapping), encoding="utf-8")
+
+
+def test_finalize_build_refuses_a_verdict_cache_without_fingerprints(tmp_path):
+    """THE round-3 fix: omitting the fingerprints must be impossible-by-accident.
+
+    The guard is asserted at `finalize_build`'s own boundary rather than through a
+    full build, because it is deliberately placed BEFORE any output mutation --
+    which means it raises before any of the heavy source loading, and that
+    ordering is itself the property worth pinning.
+    """
+    import build_discovery_sidecar as bds
+
+    cache = tmp_path / "v.json"
+    sha = _write_cache(cache, {"990000000000000001::w000001": {"novelty_status": "fills_gap"}})
+
+    with pytest.raises(bds.NoveltyVerdictCacheError, match="without `novelty_input_fingerprints`"):
+        bds.finalize_build(
+            source_db_path=str(tmp_path / "missing.db"),
+            from_approved_path=str(tmp_path / "missing.csv"),
+            crosswalk_path=str(tmp_path / "cw.json"),
+            out_db_path=str(tmp_path / "out.db"),
+            novelty_verdicts_path=str(cache),
+            novelty_verdicts_sha256=sha,
+        )
+
+
+def test_the_waiver_must_be_named_explicitly_to_skip_the_gate(tmp_path):
+    """The escape hatch exists for a v2-era rebuild, and is impossible to trip
+    by omission -- it has to be asked for by name."""
+    import build_discovery_sidecar as bds
+
+    cache = tmp_path / "v.json"
+    sha = _write_cache(cache, {"990000000000000001::w000001": {"novelty_status": "fills_gap"}})
+
+    # With the waiver, the novelty guard no longer fires -- the build proceeds and
+    # fails LATER, on the missing source DB. A different error proves the guard was
+    # passed rather than that nothing happened.
+    with pytest.raises(Exception) as exc:
+        bds.finalize_build(
+            source_db_path=str(tmp_path / "missing.db"),
+            from_approved_path=str(tmp_path / "missing.csv"),
+            crosswalk_path=str(tmp_path / "cw.json"),
+            out_db_path=str(tmp_path / "out.db"),
+            novelty_verdicts_path=str(cache),
+            novelty_verdicts_sha256=sha,
+            novelty_allow_unfingerprinted_cache=True,
+        )
+    assert "novelty_input_fingerprints" not in str(exc.value), (
+        "the explicit waiver did not suppress the fingerprint guard"
+    )
+
+
+def test_supplying_fingerprints_also_passes_the_guard(tmp_path):
+    """The other control: the normal v3 path must not be blocked."""
+    import build_discovery_sidecar as bds
+
+    key = "990000000000000001::w000001"
+    cache = tmp_path / "v.json"
+    sha = _write_cache(cache, {key: {"novelty_status": "fills_gap",
+                                     "input_fingerprint": "CURRENT"}})
+    with pytest.raises(Exception) as exc:
+        bds.finalize_build(
+            source_db_path=str(tmp_path / "missing.db"),
+            from_approved_path=str(tmp_path / "missing.csv"),
+            crosswalk_path=str(tmp_path / "cw.json"),
+            out_db_path=str(tmp_path / "out.db"),
+            novelty_verdicts_path=str(cache),
+            novelty_verdicts_sha256=sha,
+            novelty_input_fingerprints={key: "CURRENT"},
+        )
+    assert "novelty_input_fingerprints" not in str(exc.value)
+
+
+def test_the_cli_offers_both_the_fingerprints_and_the_named_waiver():
+    """A CLI build must face the same forced choice as a programmatic one --
+    otherwise the guard is only enforced on the path nobody uses."""
+    import build_discovery_sidecar as bds
+
+    parser_src = Path(bds.__file__).read_text(encoding="utf-8")
+    assert "--novelty-input-fingerprints" in parser_src
+    assert "--novelty-allow-unfingerprinted-cache" in parser_src
+    # And the CLI must actually THREAD them, not merely declare them: a declared
+    # flag that is never passed through is the same bypass in a new place.
+    assert "novelty_input_fingerprints=_load_novelty_fingerprints(" in parser_src
+    assert "novelty_allow_unfingerprinted_cache=args.novelty_allow_unfingerprinted_cache" in parser_src
+
+
+def test_a_malformed_fingerprint_file_fails_closed(tmp_path):
+    """Supplying the flag means intending the gate to run, so a bad file must
+    raise rather than degrade to "no fingerprints"."""
+    import build_discovery_sidecar as bds
+
+    empty = tmp_path / "fp.json"
+    _fingerprint_map(empty, {})
+    with pytest.raises(bds.NoveltyVerdictCacheError, match="non-empty JSON object"):
+        bds._load_novelty_fingerprints(str(empty))
+
+    wrong = tmp_path / "fp2.json"
+    _fingerprint_map(wrong, {"k": 123})
+    with pytest.raises(bds.NoveltyVerdictCacheError, match="string-to-string"):
+        bds._load_novelty_fingerprints(str(wrong))
+
+    assert bds._load_novelty_fingerprints(None) is None
+
+
+def test_the_asset_records_whether_the_gate_ran():
+    """A reader must be able to tell a gated asset from a waived one WITHOUT the
+    build log, which is not shipped. The cache SHA proves which file was read; it
+    says nothing about whether each verdict was checked against its question."""
+    import build_discovery_sidecar as bds
+
+    src = Path(bds.__file__).read_text(encoding="utf-8")
+    assert '"novelty_input_fingerprint_checked"' in src, (
+        "the asset does not record whether the fingerprint gate ran"
+    )
+    # And it must be driven by the loader's own stat, never by the flag -- the
+    # flag records intent, the stat records what happened.
+    assert 'novelty_input_stats.get("verdict_fingerprint_checked")' in src

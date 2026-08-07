@@ -4868,6 +4868,33 @@ def novelty_grain_key(sys_id: str, work_key: str) -> str:
     return f"{sys_id}{_NOVELTY_KEY_SEPARATOR}{work_key}"
 
 
+def _load_novelty_fingerprints(path) -> Optional[Dict[str, str]]:
+    """Read the `{grain_key: input_fingerprint}` map for the CLI path.
+
+    Fails closed on a malformed file rather than degrading to "no fingerprints":
+    a caller who supplied the flag intends the gate to run, and silently skipping
+    it would be worse than not offering the flag at all.
+    """
+    if path is None:
+        return None
+    doc = _json_loads_strict(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(doc, dict) or not doc:
+        raise NoveltyVerdictCacheError(
+            "novelty input-fingerprint file must be a non-empty JSON object of "
+            "{'{sys_id}::{work_id}': fingerprint}"
+        )
+    bad = sum(
+        1 for k, v in doc.items()
+        if not isinstance(k, str) or not isinstance(v, str) or not v
+    )
+    if bad:
+        raise NoveltyVerdictCacheError(
+            f"{bad} novelty input-fingerprint entr(ies) are not a non-empty "
+            f"string-to-string mapping (keys/values withheld -- masking)"
+        )
+    return doc
+
+
 def load_novelty_verdicts(
     path, *, sha256: Optional[str],
     expected_fingerprints: Optional[Dict[str, str]] = None,
@@ -6453,6 +6480,17 @@ def finalize_build(
     novelty_verdicts_path=None,
     novelty_verdicts_sha256: Optional[str] = None,
     novelty_alias_groups_path=None,
+    # discovery-v3 (Codex R3 BLOCKER): `{grain_key: input_fingerprint}` for the
+    # pairs this build generated. REQUIRED whenever a verdict cache is supplied,
+    # unless explicitly waived below -- round 3 found the fingerprint gate
+    # implemented but never reached from here, which is the identical
+    # correct-function-nobody-calls failure round 2 found in the router ingest.
+    novelty_input_fingerprints: Optional[Dict[str, str]] = None,
+    # The ONLY way to load a verdict cache without the fingerprint gate. Named
+    # for what it actually does, so it cannot be passed absent-mindedly and shows
+    # up in a build record. A v2 rebuild against the v2-era cache legitimately
+    # needs it; a v3 build must never set it.
+    novelty_allow_unfingerprinted_cache: bool = False,
     work_domains_path=None,
     work_domains_content_hash: Optional[str] = None,
     work_author_aliases_path=None,
@@ -6604,8 +6642,24 @@ def finalize_build(
     novelty_grain_index: Optional[Dict[str, Dict]] = None
     novelty_input_stats: Dict = {}
     if novelty_verdicts_path is not None:
+        # discovery-v3 (Codex R3 BLOCKER). The fingerprint gate has to be
+        # UNSKIPPABLE-BY-OMISSION here: a caller that simply forgets the argument
+        # would silently accept stale positive verdicts, which is exactly the
+        # reuse-across-a-changed-question hole blocker 3 closed. So the choice is
+        # forced -- supply the fingerprints, or say out loud that you are not
+        # gating. There is no third, quiet option.
+        if novelty_input_fingerprints is None and not novelty_allow_unfingerprinted_cache:
+            raise NoveltyVerdictCacheError(
+                "a novelty verdict cache was supplied without `novelty_input_fingerprints`. "
+                "Without them an entry cannot prove WHICH question it answered, so a stale "
+                "verdict (changed title, rebuilt alias group, refreshed finding aid) would "
+                "be reused silently. Pass the fingerprints computed by "
+                "`discovery_novelty_funnel.candidate_input_fingerprint`, or -- only for a "
+                "v2-era rebuild -- set `novelty_allow_unfingerprinted_cache=True` explicitly."
+            )
         verdict_entries, verdict_stats = load_novelty_verdicts(
-            novelty_verdicts_path, sha256=novelty_verdicts_sha256)
+            novelty_verdicts_path, sha256=novelty_verdicts_sha256,
+            expected_fingerprints=novelty_input_fingerprints)
         novelty_grain_index, grain_stats = build_novelty_grain_index(
             verdict_entries, novelty_alias_groups)
         novelty_input_stats = {**verdict_stats, **grain_stats}
@@ -6904,6 +6958,16 @@ def finalize_build(
         if novelty_input_stats.get("verdict_cache_sha256"):
             meta_rows.append(
                 ("novelty_verdicts_sha256", novelty_input_stats["verdict_cache_sha256"]))
+            # discovery-v3 (Codex R3 BLOCKER): record IN THE ASSET whether the
+            # fingerprint gate ran. The cache SHA proves which FILE was read; only
+            # this proves whether each verdict was checked against the question it
+            # answered. An asset built through the waiver is a materially
+            # different claim, and a reader must be able to tell without the build
+            # log -- which is not shipped.
+            meta_rows.append((
+                "novelty_input_fingerprint_checked",
+                "1" if novelty_input_stats.get("verdict_fingerprint_checked") else "0",
+            ))
         # 136-12: the curated artifacts' verified content hashes. A POPULATED
         # `works.genre` column must be able to name the pinned artifact that
         # produced it -- the release verifier checks exactly that, and it is the
@@ -7189,6 +7253,21 @@ def build_parser() -> argparse.ArgumentParser:
                         help="SHA-256 pin, REQUIRED whenever --novelty-verdicts is given: "
                              "a cache that is not the cache that was MEASURED is not a "
                              "pinned input (T-136-12-03).")
+    novelty_group.add_argument("--novelty-input-fingerprints", metavar="PATH", default=None,
+                        help="JSON {'{sys_id}::{work_id}': fingerprint} from "
+                             "discovery_novelty_funnel.candidate_input_fingerprint. REQUIRED "
+                             "with --novelty-verdicts (discovery-v3, Codex R3): the cache SHA "
+                             "proves which FILE was read, never which QUESTION each entry "
+                             "answered, so without these a stale verdict (changed title, "
+                             "rebuilt alias group, refreshed finding aid) is reused silently. "
+                             "A pair whose fingerprint is absent or differs resolves to the "
+                             "fail-closed `not_checked` and is COUNTED.")
+    novelty_group.add_argument("--novelty-allow-unfingerprinted-cache", action="store_true",
+                        help="Load a verdict cache WITHOUT the fingerprint gate. Only for a "
+                             "v2-era rebuild against the v2-era cache; a v3 build must never "
+                             "use it. Named for what it does so it cannot be passed "
+                             "absent-mindedly, and recorded in the asset's meta as "
+                             "novelty_input_fingerprint_checked=0.")
     novelty_group.add_argument("--work-domains", metavar="PATH", default=None,
                         help="Hash-pinned curated work-domain artifact (plan 136-09) -> "
                              "works.genre at the CANONICAL grain. A row still HELD for owner "
@@ -7328,6 +7407,9 @@ def main(argv=None) -> int:
         seftja_dates_sha256=args.seftja_dates_sha256,
         novelty_verdicts_path=args.novelty_verdicts,
         novelty_verdicts_sha256=args.novelty_verdicts_sha256,
+        novelty_input_fingerprints=_load_novelty_fingerprints(
+            args.novelty_input_fingerprints),
+        novelty_allow_unfingerprinted_cache=args.novelty_allow_unfingerprinted_cache,
         novelty_alias_groups_path=args.novelty_alias_groups,
         work_domains_path=args.work_domains,
         work_domains_content_hash=args.work_domains_content_hash,
