@@ -2505,6 +2505,65 @@ def test_no_real_display_value_in_the_artifact_trips_the_rate_check():
     )
 
 
+@pytest.mark.parametrize("interval", [
+    "[0.88, 0.94]", "(0.88-0.94)", "[0.88 , 0.94]", "(0.9–0.95)",
+    # The BARE-decimal spelling, which a paper writes as readily as the full one.
+    # It is why the interval rule deliberately does NOT get the rate rule's
+    # not-glued-to-a-word-character escape: an opening bracket is neither a word
+    # character nor `)`, so `[.88, .94]` and a hypothetical `(.2, .3)` shelfmark
+    # are the SAME shape to any lookbehind, and only one of them is real.
+    "[.88, .94]", "(.88-.94)",
+])
+def test_a_confidence_interval_is_refused_in_both_spellings(interval):
+    """A Codex review (2026-08-07) proposed relaxing this rule the way the rate
+    rule was relaxed, on the strength of `MS Heb c.57 (.2, .3)`. This pins why
+    that would be wrong: the relaxation cannot tell that string from a real
+    interval, and the string is not a real shelfmark (see the sweep below)."""
+    with pytest.raises(ValueError) as exc:
+        make_envelope("ok", items=[{"note": interval}], total=1)
+    assert "a confidence interval" in str(exc.value)
+
+
+def test_no_real_shelfmark_anywhere_carries_a_bracketed_decimal_pair():
+    """The other half of that judgement, measured rather than assumed.
+
+    Swept over EVERY `call_numbers` variant in libraries.csv -- ~720k of them,
+    not just the one shortest form the artifact stores for display, because the
+    catalogue is where a naming convention would show up first. If this ever
+    fails, the interval rule has acquired a real false positive and the trade-off
+    recorded on `_INTERVAL_RE` has to be re-decided with the new evidence.
+    """
+    import csv as _csv
+    import re as _re
+    from pathlib import Path
+
+    catalogue = Path(__file__).resolve().parents[1] / "libraries.csv"
+    if not catalogue.is_file():
+        pytest.skip(f"{catalogue} is absent -- the catalogue sweep needs it")
+
+    pair = _re.compile(r"[\[(]\s*\d*\.\d+\s*[,–-]\s*\d*\.\d+\s*[\])]")
+    scanned = 0
+    offenders = []
+    with open(catalogue, encoding="utf-8-sig", newline="") as handle:
+        for row in _csv.reader(handle):
+            if not row or len(row) < 3:
+                continue
+            for variant in row[2].split("|"):
+                variant = variant.strip()
+                if not variant:
+                    continue
+                scanned += 1
+                if pair.search(variant):
+                    offenders.append(variant)
+
+    assert scanned > 500_000, (
+        f"only {scanned} call-number variants scanned -- the sweep is reading "
+        "the wrong column or the wrong file")
+    assert not offenders, (
+        f"{len(offenders)} real shelfmark(s) carry a bracketed decimal pair and "
+        f"would be refused as a confidence interval: {offenders[:10]}")
+
+
 def test_a_bare_decimal_beside_a_rate_word_is_still_refused():
     """The fix's OWN boundary, and why it is not simply "require an integer part".
 

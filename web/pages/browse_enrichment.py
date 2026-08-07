@@ -794,31 +794,45 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
     # manuscripts costs twelve lookups no matter how often the reader pages
     # through the expansion, and nothing survives to go stale.
     #
-    # `csv_bank` is a plain in-memory dict populated once at process startup
-    # (`MetadataManager.__init__`), so this is a dict lookup with NO I/O -- it
-    # needs no offload wrapper and adds none, which matters on a path the panel's
-    # own AST guard watches for exactly that (`_PANEL_PATH_FUNCTIONS`).
+    # The lookup itself is a dict `.get` with NO I/O, so it needs no offload
+    # wrapper and adds none -- which matters on a path the panel's own AST guard
+    # watches for exactly that (`_PANEL_PATH_FUNCTIONS`).
     #
-    # ~14% of manuscripts have no title in `libraries.csv`; those resolve to
-    # None, and the renderer draws nothing at all for them rather than a
-    # placeholder.
-    _catalogue_titles: Dict[str, Optional[str]] = {}
+    # ONLY A HIT IS CACHED. `csv_bank` is NOT populated atomically at startup:
+    # `MetadataManager.start_background_loading` spawns a daemon thread that
+    # inserts the ~255k rows ONE AT A TIME (`_load_heavy_caches_bg`), so during
+    # the warm-up window a manuscript's row may simply not be there yet. Caching
+    # that miss would pin "no catalogue title" for the life of the panel: the
+    # loader would finish moments later and the reader would still see no
+    # "Catalogued as:" line, on every page of the expansion, until a full
+    # re-render they have no reason to trigger. Caching only hits makes the miss
+    # RETRYABLE -- the next page turn resolves it -- and costs one extra dict
+    # lookup per unresolved row per paint, which is not a cost worth a stale
+    # answer. (Codex review, 2026-08-07; my first comment here asserted the
+    # atomic-startup claim, which is false.)
+    #
+    # ~14% of manuscripts have no title in `libraries.csv` even fully loaded.
+    # Those keep resolving to None, and the renderer draws nothing at all for
+    # them rather than a placeholder -- indistinguishable, to the reader, from
+    # the warm-up case, and correct in both.
+    _catalogue_titles: Dict[str, str] = {}
 
     def _catalogue_title(item) -> Optional[str]:
         key = str(item.get('representative_sys_id') or '')
         if not key:
             return None
-        if key not in _catalogue_titles:
-            title = None
+        cached = _catalogue_titles.get(key)
+        if cached is None:
             try:
                 from web.state import state as app_state
                 if app_state.meta_mgr is not None:
                     csv_row = app_state.meta_mgr.csv_bank.get(key)
-                    title = (csv_row or {}).get('title') or None
+                    cached = (csv_row or {}).get('title') or None
             except Exception:
-                title = None      # a title is an ENRICHMENT; never fail the row
-            _catalogue_titles[key] = title
-        return _catalogue_titles[key]
+                cached = None     # a title is an ENRICHMENT; never fail the row
+            if cached:
+                _catalogue_titles[key] = cached
+        return cached
 
     # The claims envelope's own `meta['page_id']` -- the panel never re-derives
     # an id the service already told it.

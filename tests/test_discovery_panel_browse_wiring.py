@@ -606,6 +606,63 @@ def test_a_fifth_enrichment_placeholder_exists_in_the_same_shape_as_the_four():
     assert 'update_discovery_panel_section(state, refs)' in enrich
 
 
+def test_the_catalogue_title_resolver_does_not_cache_a_warmup_miss(monkeypatch):
+    """`csv_bank` is NOT populated atomically at startup.
+
+    `MetadataManager.start_background_loading` spawns a daemon thread that
+    inserts ~255k rows ONE AT A TIME, so early in a process a manuscript's row
+    may simply not be there yet. Caching that miss would pin "no catalogue title"
+    for the life of the panel: the loader finishes moments later and the reader
+    still sees no "Catalogued as:" line, on every page of the expansion, until a
+    full re-render they have no reason to trigger (Codex review, 2026-08-07 --
+    the first version of this resolver cached `None`).
+
+    Drives the REAL closure out of `update_discovery_panel_section`, with a
+    csv_bank that fills between two calls, rather than re-implementing the memo
+    here: a hand-rolled copy of the logic would pass while the shipped one cached.
+    """
+    bank: Dict[str, Any] = {}
+
+    class _MetaMgr:
+        csv_bank = bank
+
+    class _AppState:
+        meta_mgr = _MetaMgr()
+
+    import web.state as web_state
+    monkeypatch.setattr(web_state, 'state', _AppState(), raising=False)
+
+    resolver = _extract_catalogue_title_resolver()
+    item = {'representative_sys_id': '990000000000000946'}
+
+    assert resolver(item) is None, 'a row absent from csv_bank resolved to something'
+    bank['990000000000000946'] = {'title': 'ספר השרשים'}
+    assert resolver(item) == 'ספר השרשים', (
+        'the resolver cached the warm-up miss, so a title that arrived moments '
+        'later can never be shown')
+    # ...and a HIT is still memoised: the point of the memo is that a work
+    # carried by many manuscripts does not re-look-up per row.
+    bank.clear()
+    assert resolver(item) == 'ספר השרשים', 'a resolved title was not memoised'
+
+
+def _extract_catalogue_title_resolver():
+    """The `_catalogue_title` closure the live seam builds, obtained by running
+    `update_discovery_panel_section` far enough to define it.
+
+    Built by exec'ing the SHIPPED source of the closure rather than by importing
+    a copy, so this test cannot pass against a resolver that differs from the one
+    the panel uses."""
+    import textwrap
+    src = _read(_ENRICHMENT_SRC)
+    start = src.index('    _catalogue_titles: Dict[str, str] = {}')
+    end = src.index('    # The claims envelope', start)
+    body = textwrap.dedent(src[start:end])
+    namespace: Dict[str, Any] = {'Dict': Dict, 'Optional': Optional, 'Any': Any}
+    exec(compile(body, _ENRICHMENT_SRC, 'exec'), namespace)
+    return namespace['_catalogue_title']
+
+
 def _update_content_node():
     """The `update_content` function inside `create_browse_page`, as AST."""
     for node in ast.walk(ast.parse(_read(_BROWSE_SRC))):

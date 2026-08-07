@@ -428,7 +428,6 @@ _BADGE_VALUE_MARKERS: tuple = (
 #: badge markers stayed a closed two-item list, and the reasoning holds here.
 #: These three match how a number is WRITTEN, so a machine enum cannot trip them.
 _PERCENT_RE = re.compile(r"\d\s*%")
-_INTERVAL_RE = re.compile(r"[\[(]\s*\d*\.\d+\s*[,–-]\s*\d*\.\d+\s*[\])]")
 #: How a DECIMAL is written, and the single reason this gate ever rejected a
 #: real manuscript.
 #:
@@ -452,6 +451,31 @@ _INTERVAL_RE = re.compile(r"[\[(]\s*\d*\.\d+\s*[,–-]\s*\d*\.\d+\s*[\])]")
 #: mirroring is the standing rule for these checks, because a check that imports
 #: the thing it checks passes automatically when that thing changes.
 _DECIMAL = r"(?:\d+\.\d+|(?<![\w)])\.\d+)"
+#: A bracketed pair of decimals -- `[0.88, 0.94]`, `(0.88-0.94)`, `[.88, .94]`.
+#:
+#: Spelled through `_DECIMAL` for ONE spelling of "how a decimal is written" in
+#: this module, so a future tightening cannot be applied to the rate rule and
+#: forgotten here. That is hygiene, and it is worth stating plainly that it is
+#: NOT a fix: a Codex review (2026-08-07) read the shared `\d*\.\d+` as the same
+#: optional-integer-part defect and offered `MS Heb c.57 (.2, .3)` as a shelfmark
+#: it would wrongly reject. That string is STILL rejected here, and deliberately
+#: so on both counts --
+#:
+#:   * the lookbehind cannot help: `(` is neither a word character nor `)`, so a
+#:     bracket-opened `.2` is "bare" by construction. Any rule that let it pass
+#:     would also let `[.88, .94]` pass, which is a confidence interval written
+#:     exactly as a paper writes one;
+#:   * and it is not a real shelfmark. A bracketed pair of decimals joined by a
+#:     comma or a dash occurs ZERO times across all 720,948 `call_numbers`
+#:     variants in libraries.csv -- checked over every variant, not just the
+#:     shortest one the artifact stores for display. In BOTH spellings: bare
+#:     (`(.2, .3)`) and full (`(0.2, 0.3)`).
+#:
+#: So this rule has no live false positive and no plausible one; unlike the rate
+#: rule, whose false positive was 39 real shelfmarks a reader actually lost the
+#: page on.
+_INTERVAL_RE = re.compile(
+    r"[\[(]\s*" + _DECIMAL + r"\s*[,–-]\s*" + _DECIMAL + r"\s*[\])]")
 #: A rate word within a short distance of a decimal. The distance bound is what
 #: keeps `1.25 seconds` and a `v0.8`-style marker out of it.
 _RATE_WORD_RE = re.compile(
