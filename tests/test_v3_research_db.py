@@ -29,8 +29,23 @@ T1_COLS = ("page_id", "sys_id", "work_id", "cat", "genre", "author", "title",
            # discovery-v3 (Codex blocker 1): the producer's PAIRED dual-side
            # spans, from which `project_ref_span` selects the work-side offsets.
            "ref_spans_json")
+# The SOURCE `pages` table keeps its FULL width on purpose: the real gen-2 corpus
+# file has all nine columns, and the point of PAGES_COLUMNS is that the slim DB
+# copies only the four the builder reads. A narrow source fixture would make the
+# selection untestable -- it would pass even if the builder copied everything.
 PG_COLS = ("page_id", "sys_id", "buckets", "n_chars", "text", "provenance",
            "fgp_id", "fgp_score", "htr_n_chars")
+
+
+def _page_row(page_id: str, *, n_chars: str = "10", text: str = "text",
+              provenance: str = "htr"):
+    """A FULL-width source pages row. The four fields the builder actually reads
+    are named; the five it does not are filled with values a copy would carry
+    through, so `test_the_slim_pages_table_carries_only_the_read_surface` can
+    prove they were dropped rather than merely absent."""
+    sys_id = page_id.split("_", 1)[0]
+    return (page_id, sys_id, "bucket-value", n_chars, text, provenance,
+            "999", "0.9", n_chars)
 
 
 def _forbidden_name() -> str:
@@ -129,10 +144,8 @@ def test_r_source_rows_are_excluded_and_the_guard_can_fail(tmp_path):
     _make_corpus(corpus,
                  [_row("990000000000000001", "M:Ytext1"),
                   _row("990000000000000002", "RS:restricted_work")],   # <- planted
-                 [(_page_id("990000000000000001"), "990000000000000001",
-                   "b", "10", "text", "htr", None, None, "10"),
-                  (_page_id("990000000000000002"), "990000000000000002",
-                   "b", "10", "text", "htr", None, None, "10")])
+                 [_page_row(_page_id("990000000000000001")),
+                  _page_row(_page_id("990000000000000002"))])
     _make_evidence(evidence, [("c1", _page_id("990000000000000001"), "M:Ytext1", [None])])
 
     stats = build(str(corpus), str(evidence), str(out))
@@ -198,8 +211,7 @@ def test_a_sys_id_disagreeing_with_page_id_halts(tmp_path):
     bad = list(_row("990000000000000001", "M:w1"))
     bad[1] = "990000000000009999"          # sys_id != page_id prefix
     _make_corpus(corpus, [tuple(bad)],
-                 [(_page_id("990000000000000001"), "990000000000000001",
-                   "b", "10", "t", "htr", None, None, "10")])
+                 [_page_row(_page_id("990000000000000001"), text="t")])
     _make_evidence(evidence, [("c1", _page_id("990000000000000001"), "M:w1", [None])])
     with pytest.raises(ResearchDbError, match="embedded"):
         build(str(corpus), str(evidence), str(out))
@@ -208,8 +220,7 @@ def test_a_sys_id_disagreeing_with_page_id_halts(tmp_path):
 def test_it_refuses_to_overwrite_without_force(tmp_path):
     corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
     _make_corpus(corpus, [_row("990000000000000001", "M:w1")],
-                 [(_page_id("990000000000000001"), "990000000000000001",
-                   "b", "10", "t", "htr", None, None, "10")])
+                 [_page_row(_page_id("990000000000000001"), text="t")])
     _make_evidence(evidence, [("c1", _page_id("990000000000000001"), "M:w1", [None])])
     build(str(corpus), str(evidence), str(out))
     with pytest.raises(ResearchDbError, match="refusing to overwrite"):
@@ -221,8 +232,7 @@ def test_the_builders_own_reader_accepts_the_slim_db(tmp_path):
     """End-to-end: the sidecar builder's real reader must consume this shape."""
     corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
     _make_corpus(corpus, [_row("990000000000000001", "M:w1", cat="JA")],
-                 [(_page_id("990000000000000001"), "990000000000000001",
-                   "b", "10", "text", "htr", None, None, "10")])
+                 [_page_row(_page_id("990000000000000001"))])
     _make_evidence(evidence, [("c1", _page_id("990000000000000001"), "M:w1", [None])])
     build(str(corpus), str(evidence), str(out))
 
@@ -373,7 +383,7 @@ def test_gate14_the_offsets_reach_the_built_evidence_row(tmp_path):
     match_row = (_REAL_PAGE_ID, sys_id, _REAL_WORK_ID, "JA", "G", "A", "T",
                  "1367", "0.24", "2", _REAL_SPANS, _REAL_REF_SPANS)
     _make_corpus(corpus, [match_row],
-                 [(_REAL_PAGE_ID, sys_id, "b", "1800", "text", "htr", None, None, "1800")])
+                 [_page_row(_REAL_PAGE_ID, n_chars="1800")])
     _make_evidence(evidence, [("c1", _REAL_PAGE_ID, _REAL_WORK_ID, [None])])
     build(str(corpus), str(evidence), str(out))
 
@@ -405,3 +415,273 @@ def test_gate14_the_offsets_reach_the_built_evidence_row(tmp_path):
         f"the built evidence row carries work-side offsets ({w_start}, {w_end}); "
         f"expected the producer's (4735, 5461)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Codex round 2 (HIGH): the (claim_id, ref_work) -> (page_id, ref_work)
+# reduction. The mixed-unit halt cannot see a collision BETWEEN units, and the
+# tests before this covered only one producer unit per output key.
+#
+# Measured on the real artifact: zero such collisions today. These pin the
+# assertion so a producer change cannot make the reduction silently lossy.
+# ---------------------------------------------------------------------------
+
+def test_two_units_on_one_page_and_work_with_disagreeing_outcomes_halt(tmp_path):
+    """Case (a): one wholly-unshadowed unit + one wholly-shadowed unit.
+
+    Neither unit is MIXED, so the existing check passes both -- and the shadowed
+    one wins the dict, dropping the unshadowed unit's rows out of tier A. This is
+    the exact silent loss Codex named.
+    """
+    evidence = tmp_path / "e.db"
+    page = _page_id("990000000000000001")
+    _make_evidence(evidence, [
+        ("claimA", page, "M:w1", [None, None]),          # wholly UNSHADOWED
+        ("claimB", page, "M:w1", ["M:beat", "M:beat"]),   # wholly SHADOWED, same key
+    ])
+    with pytest.raises(ResearchDbError, match="not injective"):
+        derive_shadowed_by(str(evidence))
+
+
+def test_two_shadowed_units_with_different_values_halt(tmp_path):
+    """Case (b): last-write-wins on the shadowing work id."""
+    evidence = tmp_path / "e.db"
+    page = _page_id("990000000000000001")
+    _make_evidence(evidence, [
+        ("claimA", page, "M:w1", ["M:beat_one"]),
+        ("claimB", page, "M:w1", ["M:beat_two"]),   # same key, DIFFERENT value
+    ])
+    with pytest.raises(ResearchDbError, match="not injective"):
+        derive_shadowed_by(str(evidence))
+
+
+def test_two_units_that_AGREE_are_accepted(tmp_path):
+    """The control. Halting on every multi-unit key would be too strict: two
+    units with the same outcome have one defined value, so they must pass."""
+    evidence = tmp_path / "e.db"
+    page = _page_id("990000000000000001")
+    _make_evidence(evidence, [
+        ("claimA", page, "M:w1", ["M:beat"]),
+        ("claimB", page, "M:w1", ["M:beat"]),   # same key, SAME value
+    ])
+    got = derive_shadowed_by(str(evidence))
+    assert got[(page, "M:w1")] == "M:beat"
+
+
+def test_two_units_on_DIFFERENT_works_do_not_collide(tmp_path):
+    """The other control: the key includes ref_work, so two works on one page
+    are independent and must not trip the guard."""
+    evidence = tmp_path / "e.db"
+    page = _page_id("990000000000000001")
+    _make_evidence(evidence, [
+        ("claimA", page, "M:w1", [None]),
+        ("claimB", page, "M:w2", ["M:beat"]),
+    ])
+    got = derive_shadowed_by(str(evidence))
+    assert (page, "M:w1") not in got
+    assert got[(page, "M:w2")] == "M:beat"
+
+
+# ---------------------------------------------------------------------------
+# Codex round 2 (HIGH): containment at the CONSUMER boundary.
+#
+# The slim builder's filter is defense in depth. Round 2's point: an operator can
+# point the build at ANY research DB -- notably the gen-2 corpus file, whose own
+# `track1_matches` is the v2-era table with 349 restricted-corpus works -- and
+# `select_shown_works` has no prefix rejection, so those rows classify through the
+# ordinary cat/genre path and ship. The gate has to be where the DB is OPENED.
+# ---------------------------------------------------------------------------
+
+def _research_db_with(path: Path, work_ids):
+    """A minimal research DB, bypassing the slim builder entirely -- which is
+    exactly the path round 2 said was ungated."""
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        "CREATE TABLE track1_matches (page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, "
+        "genre TEXT, author TEXT, title TEXT, matched_letters INT, best_density REAL, "
+        "n_spans INT, spans_json TEXT, shadowed_by TEXT, ref_spans_json TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO track1_matches VALUES (?,?,?,'JA','G','A','T',10,0.2,1,'[]',NULL,NULL)",
+        [(_page_id(f"99000000000000000{i}"), f"99000000000000000{i}", w)
+         for i, w in enumerate(work_ids, start=1)],
+    )
+    conn.execute(
+        "CREATE TABLE pages (page_id TEXT PRIMARY KEY, n_chars INT, text TEXT, "
+        "provenance TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_a_direct_research_db_with_a_restricted_row_is_refused_at_open(tmp_path):
+    """THE test round 2 asked for: direct invocation, planted prefix.
+
+    `_connect_research_ro` is where every entrypoint opens its research DB, so
+    gating there covers the real build, the review-only path and
+    `--from-approved` without any of them having to remember.
+    """
+    from build_discovery_sidecar import RestrictedCorpusLeakError, _connect_research_ro
+
+    db = tmp_path / "sneaky.db"
+    _research_db_with(db, ["M:Ytext1", "RS:restricted_work"])   # <- never slim-built
+    with pytest.raises(RestrictedCorpusLeakError, match="EXCLUDED from this asset"):
+        _connect_research_ro(str(db))
+
+
+def test_a_clean_research_db_opens_and_reports_its_source_identity(tmp_path):
+    """The control, plus the source-table fingerprint round 2 asked for.
+
+    Without this, "refuse everything" would satisfy the test above while making
+    the build impossible.
+    """
+    from build_discovery_sidecar import (
+        _connect_research_ro, assert_research_db_contains_no_excluded_corpus,
+    )
+
+    db = tmp_path / "clean.db"
+    _research_db_with(db, ["M:Ytext1", "REF2:sef_something", "J:ja_something"])
+    conn = _connect_research_ro(str(db))
+    try:
+        report = assert_research_db_contains_no_excluded_corpus(conn)
+    finally:
+        conn.close()
+    assert report["gated"] is True
+    assert report["track1_matches_rows"] == 3
+    assert report["excluded_prefix_rows"] == 0
+    # The identity: which table shape was gated.
+    assert "ref_spans_json" in report["track1_matches_columns"]
+
+
+def test_the_leak_error_names_no_work_id(tmp_path):
+    """D-25: a containment report must not itself leak.
+
+    The restricted work id is the thing being contained, so echoing it into an
+    error message (which lands in logs and CI output) would defeat the gate it
+    reports.
+    """
+    from build_discovery_sidecar import RestrictedCorpusLeakError, _connect_research_ro
+
+    db = tmp_path / "sneaky.db"
+    secret = "RS:a_very_distinctive_restricted_id"
+    _research_db_with(db, ["M:Ytext1", secret])
+    with pytest.raises(RestrictedCorpusLeakError) as exc:
+        _connect_research_ro(str(db))
+    assert secret not in str(exc.value)
+    assert "a_very_distinctive_restricted_id" not in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Codex round 2 (MEDIUM): `test_the_builders_own_reader_accepts_the_slim_db`
+# called ONLY `select_shown_works` -- "not `_ingest_tier_a`, `PageTextIndex`,
+# `_compute_htr_snapshot_hash`, review emission, or the approved path. It cannot
+# establish the advertised compatibility."
+#
+# These exercise every reader the builder actually uses against the slim DB.
+# ---------------------------------------------------------------------------
+
+def test_the_slim_pages_table_carries_only_the_read_surface(tmp_path):
+    """The narrowed copy, proven rather than asserted.
+
+    The source fixture carries all nine `pages` columns with recognisable values
+    in the five the builder never reads, so this fails if any of them are copied.
+    """
+    corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
+    page = _page_id("990000000000000001")
+    _make_corpus(corpus, [_row("990000000000000001", "M:w1", cat="JA")], [_page_row(page)])
+    _make_evidence(evidence, [("c1", page, "M:w1", [None])])
+    build(str(corpus), str(evidence), str(out))
+
+    conn = sqlite3.connect(str(out))
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(pages)")}
+    finally:
+        conn.close()
+    assert cols == {"page_id", "n_chars", "text", "provenance"}, (
+        f"the slim pages table is not exactly the read surface: {sorted(cols)}"
+    )
+    for unread in ("sys_id", "buckets", "fgp_id", "fgp_score", "htr_n_chars"):
+        assert unread not in cols, f"{unread} is copied but never read"
+
+
+def test_every_builder_reader_consumes_the_slim_db(tmp_path):
+    """All four readers, not one.
+
+    `select_shown_works` (candidate selection), `PageTextIndex` (both its text
+    and its normalized-letter paths), `_count_tier_a_rows` (the release contract)
+    and `_compute_htr_snapshot_hash` (the corpus snapshot). If the slim shape is
+    wrong for any of them, the bake fails at a different, later step -- which is
+    what "advertised compatibility" has to mean.
+    """
+    corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
+    page = _page_id("990000000000000001")
+    _make_corpus(
+        corpus,
+        [_row("990000000000000001", "M:w1", cat="JA",
+              spans="[[0,40,0.3]]",
+              ref_spans='[{"p0":0,"p1":40,"rg0":100,"rg1":140}]')],
+        [_page_row(page, n_chars="100", text="א" * 100)],
+    )
+    _make_evidence(evidence, [("c1", page, "M:w1", [None])])
+    build(str(corpus), str(evidence), str(out))
+
+    from build_discovery_sidecar import (
+        PageTextIndex, _compute_htr_snapshot_hash, _connect_research_ro,
+        _count_tier_a_rows, _ingest_tier_a, assign_opaque_work_ids,
+        select_shown_works,
+    )
+
+    conn = _connect_research_ro(str(out))
+    try:
+        works = assign_opaque_work_ids(
+            select_shown_works(conn), tmp_path / "cw.json", create_if_missing=True)
+        assert [w["raw_work_id"] for w in works] == ["M:w1"]
+
+        # PageTextIndex: text layer + snapshot hash, then the letter count.
+        page_index = PageTextIndex(conn)
+        layer, snap = page_index.get(page)
+        assert layer == "htr" and snap, (layer, snap)
+
+        # _ingest_tier_a: the real ingest, over the real work index.
+        specs = _ingest_tier_a(conn, {w["raw_work_id"]: w for w in works}, page_index)
+        assert len(specs) == 1, specs
+        assert (specs[0]["w_start"], specs[0]["w_end"]) == (100, 140), (
+            "the work-side offsets did not survive the slim DB"
+        )
+        # `coverage` is attached from the page's normalized letter count, which is
+        # PageTextIndex's OTHER read path.
+        assert specs[0].get("page_norm_letters") == 100, specs[0].get("page_norm_letters")
+
+        # The release-contract count and the corpus snapshot.
+        assert _count_tier_a_rows(conn) == 1
+        assert len(_compute_htr_snapshot_hash(conn)) == 64
+    finally:
+        conn.close()
+
+
+def test_the_review_artifact_path_consumes_the_slim_db(tmp_path):
+    """The review-only build mode, which round 2 named specifically."""
+    corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
+    page = _page_id("990000000000000001")
+    _make_corpus(
+        corpus,
+        [_row("990000000000000001", "M:w1", cat="JA",
+              spans="[[0,40,0.3]]",
+              ref_spans='[{"p0":0,"p1":40,"rg0":100,"rg1":140}]')],
+        [_page_row(page, n_chars="100", text="א" * 100)],
+    )
+    _make_evidence(evidence, [("c1", page, "M:w1", [None])])
+    build(str(corpus), str(evidence), str(out))
+
+    import build_discovery_sidecar as bds
+
+    outcome = bds.build_candidate_review_artifact(
+        source_db_path=str(out),
+        out_csv_path=str(tmp_path / "review.csv"),
+        crosswalk_path=str(tmp_path / "cw.json"),
+        create_crosswalk_if_missing=True,
+        fjms_db_path=None,
+    )
+    assert outcome["candidate_count"] == 1, outcome
+    assert outcome["emitted_row_count"] >= 1, outcome
+    assert (tmp_path / "review.csv").exists()

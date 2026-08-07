@@ -3981,9 +3981,96 @@ def _compute_htr_snapshot_hash(conn: sqlite3.Connection) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
+class RestrictedCorpusLeakError(RuntimeError):
+    """A research DB carries rows from a corpus excluded from this asset."""
+
+
+# Work-id prefixes excluded from the v3 asset by decision. Mirrors
+# `v3_build_research_db.EXCLUDED_WORK_PREFIXES` -- the slim builder DROPS them at
+# the source; this is the CONSUMER-side gate for the case where the slim builder
+# was never run.
+_EXCLUDED_WORK_PREFIXES: Tuple[str, ...] = ("RS:",)
+
+
+def assert_research_db_contains_no_excluded_corpus(
+    conn: sqlite3.Connection, *, prefixes: Tuple[str, ...] = _EXCLUDED_WORK_PREFIXES,
+) -> Dict:
+    """Gate 12, at the CONSUMER boundary (Codex round 2, HIGH).
+
+    Round 2's finding was exact: the slim builder's prefix filter and post-build
+    scan are "useful defense in depth, not the required gate", because
+    `select_shown_works`, the review-only path and `--from-approved` each build
+    their candidate set from whatever database path the operator supplies. So a
+    different research DB -- notably the gen-2 corpus file, whose own
+    `track1_matches` table is the V2-ERA one carrying 349 restricted-corpus works
+    -- reaches a sidecar or a review artifact without `v3_build_research_db.py`
+    ever running. `select_shown_works` has no prefix rejection: those rows are
+    classified through the ordinary `cat`/genre path and ship.
+
+    Placed in `_connect_research_ro` so EVERY entrypoint is covered by
+    construction. A gate each caller has to remember to invoke is a gate that a
+    future caller will not invoke.
+
+    Returns a fingerprint of what was checked -- row count and the table's own
+    column set -- so a build record can show WHICH source table was gated rather
+    than merely that a gate ran.
+
+    Masking (D-25): counts and prefixes only. No work id, title or reference text
+    is returned, logged or interpolated into the error -- a leak report must not
+    itself leak.
+    """
+    tables = {
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "track1_matches" not in tables:
+        # Nothing to gate: a caller passing a DB with no match table (some unit
+        # tests) is not a containment risk. Recorded rather than silently passed.
+        return {"gated": False, "reason": "no track1_matches table"}
+    total = conn.execute("SELECT COUNT(*) FROM track1_matches").fetchone()[0]
+    offending = 0
+    for prefix in prefixes:
+        offending += conn.execute(
+            "SELECT COUNT(*) FROM track1_matches WHERE work_id LIKE ? || '%'",
+            (prefix,),
+        ).fetchone()[0]
+    if offending:
+        raise RestrictedCorpusLeakError(
+            f"the research DB carries {offending} of {total} match row(s) whose "
+            f"work id is from a corpus EXCLUDED from this asset. This is the "
+            f"signature of pointing the build at the gen-2 corpus file (whose own "
+            f"`track1_matches` is the v2-era table) instead of at a slim DB built "
+            f"by scripts/v3_build_research_db.py. Refusing to read it. "
+            f"(No work id is echoed here -- D-25.)"
+        )
+    return {
+        "gated": True,
+        "track1_matches_rows": total,
+        "excluded_prefix_rows": 0,
+        # The source-table identity round 2 asked for: a caller can record WHICH
+        # table shape was gated, so "the gate ran" is checkable against "the gate
+        # ran on the thing that was built".
+        "track1_matches_columns": sorted(
+            r[1] for r in conn.execute("PRAGMA table_info(track1_matches)")
+        ),
+    }
+
+
 def _connect_research_ro(db_path) -> sqlite3.Connection:
+    """Open a research DB read-only, GATED for excluded-corpus containment.
+
+    The gate runs here rather than at each call site because there are four
+    entrypoints (real build, review-only, `--from-approved`, and tests) and a
+    future fifth would otherwise arrive ungated.
+    """
     uri = Path(db_path).resolve().as_uri() + "?mode=ro"
-    return sqlite3.connect(uri, uri=True)
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        assert_research_db_contains_no_excluded_corpus(conn)
+    except BaseException:
+        conn.close()
+        raise
+    return conn
 
 
 def _insert_works_real(
@@ -5821,6 +5908,30 @@ _EXPECTED_E1_R3_FRAME_ROWS = 9996
 _EXPECTED_Q2_WITNESS_COLLECTION_ROWS = 4367
 _EXPECTED_Q2_SHARED_TEXT_ROWS = 60156
 _EXPECTED_TIER_A_ROWS = 275894  # track1_matches WHERE shadowed_by IS NULL
+# PROVENANCE (Codex round 2, HIGH -- and the finding was right).
+#
+# The v3 slim DB's own tier-A count is 275,894: EXACTLY this frozen value. The
+# bake plan read that as evidence the release contract had been pinned against
+# the gen-2 population. **That inference is not sound**, and is withdrawn:
+# numerical agreement between a constant and one transformation's output proves
+# only that this transformation currently produces that number. The constant
+# carried no source-table fingerprint, no derivation query and no dated origin,
+# so nothing distinguishes "deliberately pinned" from "coincidence".
+#
+# What IS established, and all that is claimed:
+#   - the query is stated (`WHERE shadowed_by IS NULL`), so the count is
+#     reproducible from any research DB;
+#   - measured 2026-08-07 on the v3 slim DB built from
+#     `track1_matches_pilot_glaunch3_live`: 275,894 unshadowed of 381,341 total,
+#     with 105,447 rows in wholly-shadowed units;
+#   - `derive_shadowed_by` HALTS on a mixed unit and on a non-injective
+#     reduction, so the derivation is not silently order-dependent.
+#
+# The operative rule, which matters more than the number's history: **this value
+# is NEVER edited to make a run pass.** A mismatch means the population changed,
+# and a changed population needs a decision, not a new constant. The build
+# records the actual count in its release-contract check either way, so a
+# divergence is visible rather than absorbed.
 
 
 class ReleaseInputsIncompleteError(RuntimeError):

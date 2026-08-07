@@ -15,6 +15,12 @@ row would be classified through the ordinary `cat`/genre path and ship. So the
 name `track1_matches` is materialised HERE from the gen-2 rows only, and the
 build never opens the corpus file again.
 
+The two tables carry EXACTLY the columns the builder reads -- enumerated per
+read site in the `TRACK1_COLUMNS`/`PAGES_COLUMNS` comments, not counted. Codex
+round 2 found five unread `pages` fields being copied, and they are gone: `text`
+is page transcription content, so a narrower copy is a narrower containment
+boundary, not housekeeping.
+
 Two derived columns, because the gen-2 match table lacks them:
 
 * `shadowed_by` -- gen-2 records shadowing on EVIDENCE rows, not match rows. The
@@ -69,9 +75,19 @@ TRACK1_COLUMNS: Tuple[str, ...] = (
     # never read (reference-text-derived, D-25).
     "ref_spans_json",
 )
+# EXACTLY the columns the builder reads, verified by enumerating every `FROM
+# pages` in build_discovery_sidecar.py (three sites, 2026-08-07):
+#   PageTextIndex.get            -> provenance, text  (WHERE page_id = ?)
+#   PageTextIndex norm-letters   -> text              (WHERE page_id = ?)
+#   _compute_htr_snapshot_hash   -> COUNT(*), SUM(n_chars)
+#
+# Codex round 2 (MEDIUM) found the first version carried five fields nobody
+# reads (`sys_id`, `buckets`, `fgp_id`, `fgp_score`, `htr_n_chars`), so the claim
+# "exactly the read surface" was false. Dropped. This is not tidiness: `text` is
+# page transcription content, and the smaller the copied surface, the smaller the
+# containment boundary to reason about.
 PAGES_COLUMNS: Tuple[str, ...] = (
-    "page_id", "sys_id", "buckets", "n_chars", "text", "provenance",
-    "fgp_id", "fgp_score", "htr_n_chars",
+    "page_id", "n_chars", "text", "provenance",
 )
 
 # D-25: column names that must never be emitted. Substring match, casefolded.
@@ -144,13 +160,49 @@ def derive_shadowed_by(evidence_db: str) -> Dict[Tuple[str, str], str]:
 
     shadowed: Dict[Tuple[str, str], str] = {}
     mixed: List[Tuple[str, str]] = []
+    # Codex round 2 (HIGH): checking the PRODUCER's grain and then reducing to
+    # `(page_id, ref_work)` is only safe if the reduction is injective. It found
+    # the two cases the mixed-unit check cannot see, and both are real defects,
+    # not hypotheticals:
+    #
+    #   (a) a wholly-UNSHADOWED unit and a wholly-SHADOWED unit on the same
+    #       (page, work). Neither unit is "mixed", so both pass -- and the
+    #       shadowed one silently determines the match row, dropping the
+    #       unshadowed unit's rows out of tier A.
+    #   (b) two shadowed units with DIFFERENT values -> last-write-wins.
+    #
+    # Measured on `g_launch3` (2026-08-07): ZERO `(page_id, ref_work)` keys are
+    # fed by more than one `claim_id`, and zero carry disagreeing shadow values.
+    # So the reduction is injective TODAY -- which is exactly why it must be
+    # asserted rather than assumed: a producer change would make it silently
+    # lossy, and nothing in the emitted DB would show it.
+    seen_units: Dict[Tuple[str, str], Tuple[str, object]] = {}
+    collisions: List[Tuple[str, str]] = []
     for page_id, ref_work, n_unshadowed, n_total, a_shadow in rows:
+        key = (page_id, ref_work)
+        state = "unshadowed" if n_unshadowed == n_total else (
+            "mixed" if n_unshadowed != 0 else "shadowed")
+        prior = seen_units.get(key)
+        if prior is not None and prior != (state, a_shadow if state == "shadowed" else None):
+            # A second producer unit reduces onto this key with a DIFFERENT
+            # outcome. There is no defined match-row value; halt.
+            collisions.append(key)
+        else:
+            seen_units[key] = (state, a_shadow if state == "shadowed" else None)
         if n_unshadowed == n_total:
             continue                      # wholly unshadowed -> NULL
         if n_unshadowed != 0:
             mixed.append((page_id, ref_work))
             continue
         shadowed[(page_id, ref_work)] = a_shadow
+    if collisions:
+        raise ResearchDbError(
+            f"{len(collisions)} (page_id, ref_work) key(s) are produced by MORE THAN "
+            f"ONE competition unit with DISAGREEING outcomes -- the reduction from the "
+            f"producer's (claim_id, ref_work) grain to the match table's "
+            f"(page_id, ref_work) grain is not injective, so the match-row value would "
+            f"be decided by row order. Halting. First key: {collisions[0][0][:24]}…"
+        )
     if mixed:
         raise ResearchDbError(
             f"{len(mixed)} competition unit(s) are MIXED (some evidence rows shadowed, "
@@ -194,9 +246,8 @@ def build(corpus_db: str, evidence_db: str, out_path: str, *, force: bool = Fals
             "spans_json TEXT, shadowed_by TEXT, ref_spans_json TEXT)"
         )
         dst.execute(
-            "CREATE TABLE pages (page_id TEXT PRIMARY KEY, sys_id TEXT, buckets TEXT, "
-            "n_chars INTEGER, text TEXT, provenance TEXT, fgp_id INTEGER, "
-            "fgp_score REAL, htr_n_chars INTEGER)"
+            "CREATE TABLE pages (page_id TEXT PRIMARY KEY, n_chars INTEGER, "
+            "text TEXT, provenance TEXT)"
         )
 
         # `shadowed_by` is DERIVED (appended per row below); everything else is
