@@ -860,3 +860,137 @@ def test_per_key_parity_runs_inside_the_builder(tmp_path):
                    [("cl1", P1, "M:w1", "c_w1")])
     _, built = _build(rdb, _works(), load_router(str(ship)))
     assert built["router_parity"]["checked"] == 1, built.get("router_parity")
+
+
+# ---------------------------------------------------------------------------
+# Codex ROUND 4 HIGH: parity was SKIPPED whenever D-17 demoted anything, so "one
+# valid D-17 demotion makes the list non-empty and suppresses the per-key
+# router/assembled comparison for every row". D-17 is now RECONCILED instead.
+# ---------------------------------------------------------------------------
+
+def test_parity_runs_on_a_D17_BUILD_and_accepts_only_audited_demotions(tmp_path):
+    """THE round-4 case: a build with BOTH a router decision and a real demotion.
+
+    The fixture's two works co-claim one page with overlapping long spans and are
+    500 years apart, so D-17 demotes the later one. The router ships both. Parity
+    must therefore run (not skip) and must accept exactly that demotion because an
+    audit row names it.
+    """
+    router_db = tmp_path / "route.db"
+    _make_evidence(
+        router_db,
+        [("pg1", "c_w1", "same_work", 0.75, 1), ("pg1", "c_w2", "same_work", 0.75, 1)],
+        [("cl1", "pg1", "raw:w1", "c_w1"), ("cl2", "pg1", "raw:w2", "c_w2")],
+    )
+    fx = _v3_finalize_fixture(tmp_path)
+    _finalize(fx, tmp_path, gen2_router_evidence_db=str(router_db))
+
+    routed, _meta = _routing_in_built_asset(fx["out"])
+    conn = sqlite3.connect(str(fx["out"]))
+    try:
+        audit = conn.execute(
+            "SELECT decision, demoted_work_id FROM discovery_routing_audit").fetchall()
+    finally:
+        conn.close()
+
+    # D-17 really did demote (otherwise this test proves nothing about the skip).
+    demoted = [w for w, (status, _r) in routed.items() if status == "review_only"]
+    assert demoted, f"no D-17 demotion occurred; the fixture no longer exercises it: {routed}"
+    assert any(d == "demoted" for d, _w in audit), f"no audit row was written: {audit}"
+    assert (fx["out"]).exists()
+
+    # AND parity must have RUN. "The build completed" is not that: it is exactly
+    # what the skipped version also produced -- caught by mutation testing
+    # 2026-08-07, when restoring `and not routing_audit_rows` left this test green.
+    # So drive the same D-17 build through the helper and read the parity report.
+    import build_discovery_sidecar as bds
+
+    conn = bds._connect_research_ro(str(fx["research_db"]))
+    try:
+        works = bds.assign_opaque_work_ids(
+            bds.select_shown_works(conn), fx["crosswalk"], create_if_missing=False)
+        built = bds.build_claims_and_evidence(
+            conn=conn, works=works, page_index=bds.PageTextIndex(conn),
+            gen2_router=load_router(str(router_db)),
+            year_by_canonical={"w000001": 900, "w000002": 1400},
+            raw_work_by_minted={w["work_id"]: w["raw_work_id"] for w in works},
+        )
+    finally:
+        conn.close()
+    assert built["routing_audit_rows"], "the helper build produced no D-17 demotion"
+    assert "router_parity" in built, (
+        "parity did NOT run on a D-17 build -- one valid demotion suppressed the "
+        "per-key comparison for every row, which is the round-4 finding"
+    )
+    assert built["router_parity"]["mismatches"] == 0
+    assert built["router_parity"]["checked"] >= 2, built["router_parity"]
+
+
+def test_parity_rejects_a_demotion_that_no_audit_row_justifies(tmp_path):
+    """The teeth: without a matching audit row, a demotion is a parity failure.
+
+    This is what the skip used to hide -- with parity disabled on D-17 builds, ANY
+    routing change could ride along beside a legitimate demotion.
+    """
+    from v3_routing_ingest import assert_assembled_parity
+
+    router_db = tmp_path / "r.db"
+    _make_evidence(router_db, [(P1, "c_w1", "same_work", 0.9, 1)],
+                   [("cl1", P1, "M:w1", "c_w1")])
+    router = load_router(str(router_db))
+
+    claim_rows = [(P1, "w000001", "CL1", "direct_witness", "e", "ja", "x")]
+    row = [None] * 47
+    row[1] = "CL1"
+    row[3] = "track1_direct"
+    row[7] = "review_only"           # demoted, though the router shipped it
+    kwargs = dict(routing_status_idx=7, claim_id_idx=1, evidence_source_idx=3,
+                  track1_source="track1_direct",
+                  raw_work_by_minted={"w000001": "M:w1"},
+                  # The audit rows key on the BUILDER's canonical id, which for an
+                  # unmerged work is the minted id itself.
+                  canonical_by_minted={"w000001": "w000001"})
+
+    # No audit rows at all -> the demotion is unjustified.
+    with pytest.raises(RoutingIngestError, match="1 of 1 assembled"):
+        assert_assembled_parity([tuple(row)], router, claim_rows, **kwargs)
+
+    # An audit row for a DIFFERENT (page, work) does not justify it either.
+    with pytest.raises(RoutingIngestError, match="1 of 1 assembled"):
+        assert_assembled_parity(
+            [tuple(row)], router, claim_rows,
+            d17_audit_rows=[{"decision": "demoted", "page_id": "other",
+                             "demoted_work_id": "w000001"}], **kwargs)
+
+    # The MATCHING audit row does.
+    ok = assert_assembled_parity(
+        [tuple(row)], router, claim_rows,
+        d17_audit_rows=[{"decision": "demoted", "page_id": P1,
+                         "demoted_work_id": "w000001"}], **kwargs)
+    assert ok == {"checked": 1, "mismatches": 0}
+
+
+def test_parity_rejects_an_audit_row_no_asset_row_reflects(tmp_path):
+    """The other direction: the audit trail must not claim a demotion the asset
+    does not show, or the trail is not replayable from the shipped artifact."""
+    from v3_routing_ingest import assert_assembled_parity
+
+    router_db = tmp_path / "r.db"
+    _make_evidence(router_db, [(P1, "c_w1", "same_work", 0.9, 1)],
+                   [("cl1", P1, "M:w1", "c_w1")])
+    router = load_router(str(router_db))
+    claim_rows = [(P1, "w000001", "CL1", "direct_witness", "e", "ja", "x")]
+    row = [None] * 47
+    row[1] = "CL1"
+    row[3] = "track1_direct"
+    row[7] = "shipped"               # NOT demoted...
+    with pytest.raises(RoutingIngestError, match="no assembled track1_direct row reflects"):
+        assert_assembled_parity(
+            [tuple(row)], router, claim_rows,
+            # ...but the trail says it was.
+            d17_audit_rows=[{"decision": "demoted", "page_id": P1,
+                             "demoted_work_id": "w000001"}],
+            routing_status_idx=7, claim_id_idx=1, evidence_source_idx=3,
+            track1_source="track1_direct",
+            raw_work_by_minted={"w000001": "M:w1"},
+            canonical_by_minted={"w000001": "w000001"})

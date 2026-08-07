@@ -262,6 +262,8 @@ def assert_assembled_parity(
     routing_status_idx: int, claim_id_idx: int,
     evidence_source_idx: int, track1_source: str,
     raw_work_by_minted: Dict[str, str],
+    d17_audit_rows=(),
+    canonical_by_minted: Optional[Dict[str, str]] = None,
 ) -> Dict:
     """PER-KEY parity against the ASSEMBLED rows (Codex R3, HIGH).
 
@@ -282,6 +284,30 @@ def assert_assembled_parity(
     Returns a per-key report `{checked, mismatches}`. Raises on the first
     disagreement with counts only (D-25).
 
+    D-17 IS RECONCILED, NOT EXEMPTED (Codex R4, HIGH). The first version SKIPPED
+    this gate entirely whenever D-17 demoted anything, on the reasoning that D-17
+    legitimately changes routing after the router. Round 4 was right that this
+    disables parity on exactly the builds that matter: one valid demotion suppresses
+    the comparison for every row, and nothing then reconciles the final statuses
+    with the router's. So instead of skipping, each `review_only` row that the
+    router shipped must be justified by a MATCHING D-17 audit row. A demotion with
+    no audit row, or an audit row for a row nobody demoted, both fail.
+
+    THE TWO CANONICAL SPACES, which is the subtlety here and cost two wrong
+    attempts. `apply_d17_demotion` writes `demoted_work_id` as the BUILDER's
+    canonical id (`ids.canonical_work_id` over the MINTED `w######`, so a merged
+    twin is never compared against itself). The router keys on GEN-2's
+    `canonical_work_id`. Those are different id spaces, and matching them directly
+    silently matches nothing -- which is exactly what happened: my first version
+    keyed on the raw id, the second on gen-2's canonical, and both reported an
+    "audit trail disagrees with the asset" failure whose real cause was this
+    mismatch. So the audit key is translated through `canonical_by_minted`, which
+    the caller supplies because it already computed it.
+
+    A caller that omits it gets NO reconciliation -- every D-17 demotion then reads
+    as a parity failure, loudly. That is the right default for a translation nobody
+    can infer.
+
     Note on scope: this compares the ASSEMBLED rows rather than the inserted ones.
     Assembly is where dedup and collision resolution happen -- everything after it
     is a positional `executemany` of these same tuples, so a divergence below this
@@ -289,6 +315,13 @@ def assert_assembled_parity(
     `test_the_release_offsets_gate_reads_the_right_tuple_positions` covers
     separately.
     """
+    # (page_id, demoted_raw_work_id) -> the audited D-17 demotions.
+    audited = {
+        (a.get("page_id"), a.get("demoted_work_id"))
+        for a in d17_audit_rows
+        if a.get("decision") == "demoted" and a.get("demoted_work_id") is not None
+    }
+    audited_used = set()
     # The router's decision, keyed by (page_id, canonical_work_id).
     expected_status = {}
     for key, (surface, _pcov, _shipped) in router["route"].items():
@@ -319,14 +352,47 @@ def assert_assembled_parity(
                 "(page, canonical work) pair -- it would ship unrouted"
             )
         checked += 1
-        if row[routing_status_idx] != want:
-            mismatches += 1
-    if mismatches:
+        got = row[routing_status_idx]
+        if got == want:
+            continue
+        # The ONE permitted divergence: the router shipped it and D-17 demoted it,
+        # with an audit row naming exactly this (page, work). Anything else is a
+        # parity failure.
+        builder_canon = (canonical_by_minted or {}).get(minted_work)
+        if (want == "shipped" and got == "review_only"
+                and builder_canon is not None
+                and (page_id, builder_canon) in audited):
+            audited_used.add((page_id, builder_canon))
+            continue
+        mismatches += 1
+    # An audit row that matches no demoted assembled row means the audit trail and
+    # the asset disagree -- the trail claims a demotion the asset does not show.
+    #
+    # Reported AFTER the per-key mismatches, and both are named in one message: an
+    # unjustified demotion and an unmatched audit row are usually two views of the
+    # SAME defect, so raising on whichever is checked first told half the story and
+    # sent the reader after the wrong cause. (My first version raised on the audit
+    # side first and reported an audit/asset disagreement for what was actually a
+    # grain error in this function.)
+    unused = audited - audited_used
+    if mismatches or unused:
+        detail = []
+        if mismatches:
+            detail.append(
+                f"{mismatches} of {checked} assembled track1_direct row(s) carry a "
+                f"routing_status that does NOT match gen-2's decision for their own "
+                f"(page, canonical work) key, and no D-17 audit row justifies the "
+                f"difference"
+            )
+        if unused:
+            detail.append(
+                f"{len(unused)} D-17 audit row(s) record a demotion that no assembled "
+                f"track1_direct row reflects, so the trail is not replayable from the "
+                f"shipped artifact"
+            )
         raise RoutingIngestError(
-            f"{mismatches} of {checked} assembled track1_direct row(s) carry a "
-            f"routing_status that does NOT match gen-2's decision for their own "
-            f"(page, canonical work) key. This is a per-key comparison, so a "
-            f"compensating pair of errors cannot hide in a total."
+            "routing parity failed (per-key, so a compensating pair of errors cannot "
+            "hide in a total): " + "; ".join(detail)
         )
     if not checked:
         raise RoutingIngestError(

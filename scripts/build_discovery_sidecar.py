@@ -3964,20 +3964,33 @@ def build_claims_and_evidence(
         evidence_specs, work_source_corpus, sidecar_version=sidecar_version)
     result["routing_audit_rows"] = routing_audit_rows
 
-    # discovery-v3 (Codex R3, HIGH): PER-KEY parity against the ASSEMBLED rows.
-    # Runs here because this is the first point the assembled rows exist -- after
+    # discovery-v3 (Codex R3 HIGH, corrected per R4): PER-KEY parity against the
+    # ASSEMBLED rows. Runs here because this is the first point they exist -- after
     # dedup on evidence_id and collision resolution, which is where a row could
-    # silently acquire a different routing than the router gave it. Skipped when
-    # D-17 demotion ran, because D-17 legitimately CHANGES routing after the
-    # router: comparing then would report the intended demotions as parity
-    # failures. The router's own decision is verified by the gate; D-17's is
-    # verified by its audit rows and `assert_pair_coverage_floor`.
-    if gen2_router is not None and not routing_audit_rows:
+    # silently acquire a routing the router never gave it.
+    #
+    # ALWAYS runs when a router is supplied. An earlier version skipped it whenever
+    # D-17 demoted anything; round 4 was right that this disables parity on exactly
+    # the builds that matter, since one valid demotion suppresses the check for
+    # every row. D-17 is now RECONCILED instead: a `review_only` row the router
+    # shipped is permitted only when a D-17 audit row names that same
+    # (page_id, work). Unmatched audit rows fail too.
+    if gen2_router is not None:
         from v3_routing_ingest import assert_assembled_parity
         result["router_parity"] = assert_assembled_parity(
             result["evidence_rows"], gen2_router, result["claim_rows"],
             routing_status_idx=7, claim_id_idx=1, evidence_source_idx=3,
             track1_source=_TRACK1, raw_work_by_minted=raw_work_by_minted,
+            d17_audit_rows=routing_audit_rows,
+            # The D-17 audit rows key on the BUILDER's canonical id (over the
+            # minted work_id), while the router keys on gen-2's. Supply the
+            # translation rather than letting the gate guess -- it is computed
+            # here anyway, and an omitted map makes every demotion read as a
+            # parity failure, loudly.
+            canonical_by_minted={
+                w["work_id"]: ids.canonical_work_id(w["work_id"], cross_corpus_map or {})
+                for w in works
+            },
         )
     return result
 
