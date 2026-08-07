@@ -1,6 +1,52 @@
 # discovery-v3 bake plan — the gen-2 evidence refresh
 
-**Status: 🟢 CLEARED TO BUILD, 2026-08-06 — with every Codex finding folded in and the scope frozen in §5.0.**
+**Status: 🛑 CODEX ROUND 2 = CHANGES-REQUIRED (2026-08-07). DO NOT EXECUTE. 3 BLOCKERs, all three of round 1's
+BLOCKERs re-opened as NOT CLOSED** (`discovery-v3-bake-plan.CODEX-REVIEW-R2.md`).
+
+> **The central finding, and it is correct: my router ingest is not wired to anything.**
+> `scripts/build_discovery_sidecar.py` neither imports nor calls `v3_routing_ingest`; `_ingest_tier_a` still
+> marks every tier-A row shipped and `build_claims_and_evidence` still calls `apply_lever1_coverage`.
+> **Verified by grep: zero references.** So the 30,899 demotions I measured would happen anyway, and the
+> module I described as "closing blocker 2 in code" is, in Codex's word, decoration. I reported a decision as
+> implemented when only its reader existed.
+>
+> Codex's round-1 disposition, verbatim: **BLOCKER 1 NOT CLOSED · BLOCKER 2 NOT CLOSED · BLOCKER 3 NOT
+> CLOSED**; five HIGH items PARTIALLY closed. Two of those three I had already labelled "engineering owed" —
+> which round 2 rightly calls laundering an unsolved problem into a promise.
+>
+> **New HIGH/MEDIUM findings worth naming, because each refutes something I asserted:**
+> - The parity report is **not a parity gate**: it compares thresholds inside the source, never an *emitted*
+>   result, so nothing checks that the built asset matches the router.
+> - `derive_shadowed_by` halts on a mixed producer unit and then **reduces to `(page_id, ref_work)`
+>   unchecked** — two distinct claims on one page/work can silently overwrite each other.
+> - R-source containment is **not enforced at the consumer boundary**: a caller pointed at any other research
+>   DB bypasses my filter entirely.
+> - `_EXPECTED_TIER_A_ROWS == 275,894` is **numerical agreement, not evidence of causation.** I read a
+>   coincidence as proof the contract was pinned against this population. Codex is right that I cannot know
+>   that without the recorded derivation.
+> - The state ledger is **single-writer safe only**; two processes sharing a directory can lose a step, and the
+>   temp sweep could unlink a live writer's temp.
+> - My "the builder's own reader accepts the slim DB" test calls **only `select_shown_works`** — not
+>   `_ingest_tier_a`, `PageTextIndex`, `_compute_htr_snapshot_hash`, or either build mode. It cannot establish
+>   the compatibility I claimed.
+>
+> Codex found no literally un-failable test this round, but judged several **insufficient** — the router suite
+> never reaches the builder, the research-DB test never reaches real ingestion, the shadow suite omits the
+> page/work collision, the ledger suite omits concurrent writers. Caveat on its own verdict: it **could not
+> execute** the suites (no working interpreter in its sandbox), so its review is static and source-grounded.
+>
+> **Nothing is approved. No heavy run, no spend.** The honest state: three modules exist and pass their own
+> tests, none is connected to the pipeline, and the three original blockers are open.
+
+> **⚠ Correction, 2026-08-07.** This line previously read "🟢 CLEARED TO BUILD", which **overstated the
+> record**: the only Codex verdict on file is **CHANGES-REQUIRED**
+> (`discovery-v3-bake-plan.CODEX-REVIEW.md`). I folded the findings in and then marked it green myself; the
+> owner then authorized execution. That is an owner go-ahead, **not** an external approval, and this project's
+> convention is a convergence loop — re-review until no HIGH remains. Round 2 is now running over the amended
+> plan **and** the three modules actually built since (`v3_bake_state`, `v3_build_research_db`,
+> `v3_routing_ingest`). Two of the three blockers are rewritten as *engineering owed* rather than closed, so a
+> reviewer may still reject the approach; the third was closed in code Codex has not seen.
+> **No heavy run and no spend until round 2 returns.** Owner asked for this explicitly.
 Codex review 2026-08-05 returned 3 BLOCKERs + 5 HIGH + 2 MEDIUM + 1 LOW
 (`discovery-v3-bake-plan.CODEX-REVIEW.md`); all are now either **decided** (§5.0 decision table) or **converted
 into engineering owed before the corresponding step**, with five new gates (§6 gates 10–14) covering exactly the
