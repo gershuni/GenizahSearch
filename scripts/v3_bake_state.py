@@ -44,16 +44,100 @@ from typing import Any, Callable, Dict, Optional
 class BakeState:
     """Resumable step ledger for one bake run."""
 
+    # A temp file younger than this may belong to a LIVE writer, so the sweep
+    # leaves it alone. Generous on purpose: a stale temp is litter, while
+    # unlinking a live writer's temp makes its `os.replace` fail -- so the two
+    # error directions are not symmetric and the check should err toward leaving
+    # files behind.
+    _TEMP_MIN_AGE_SECONDS = 300
+
     def __init__(self, path: str | os.PathLike, *, run_id: str) -> None:
         self.path = Path(path)
         self.run_id = run_id
         self._data: Dict[str, Any] = {"run_id": run_id, "steps": {}, "log": []}
-        if self.path.exists():
-            self._load()
-        else:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._save()
-        self._sweep_stale_temps()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # THE WRITER LOCK, before any read or write (Codex round 2, MEDIUM).
+        # Round 2's finding was correct on both counts: two instances could load
+        # the same JSON, add different completed steps, and the later `os.replace`
+        # would lose the other's step -- atomic replace protects a reader from a
+        # torn write, not two writers from each other. And the temp sweep could
+        # unlink a live first writer's temp before its replace.
+        #
+        # A lock is the right answer rather than a compare-and-swap merge: two
+        # concurrent bakes over one state directory is an operator mistake, not a
+        # mode to support, and merging their step sets would report a run
+        # complete that no single process ever ran. So: fail the second launcher
+        # LOUDLY.
+        self._lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        self._lock_fd = self._acquire_lock()
+        try:
+            if self.path.exists():
+                self._load()
+            else:
+                self._save()
+            self._sweep_stale_temps()
+        except BaseException:
+            self.release()
+            raise
+
+    # ---------------- single-writer lock ----------------
+
+    def _acquire_lock(self) -> int:
+        """Take an exclusive lock for this process's lifetime, or fail loudly.
+
+        `O_CREAT | O_EXCL` is the portable primitive: it succeeds for exactly one
+        process. Deliberately NOT `fcntl`/`msvcrt` advisory locking -- those
+        differ per platform, and this must behave identically on the Windows dev
+        box and a Linux runner.
+
+        A lock file left by a killed process is the awkward case. It is NOT
+        auto-reaped on age: doing so would silently re-admit the very
+        double-writer this prevents if the first process were merely slow. The
+        error says exactly what to do instead, because an unattended bake that
+        halts with a clear instruction is strictly better than one that
+        corrupts its own ledger.
+        """
+        try:
+            fd = os.open(str(self._lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            # Who holds it, so the refusal below can say something actionable.
+            try:
+                os.write(fd, f"pid={os.getpid()} run_id={self.run_id}\n".encode("utf-8"))
+            except OSError:
+                pass
+            return fd
+        except FileExistsError:
+            holder = ""
+            try:
+                holder = self._lock_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+            raise RuntimeError(
+                f"bake state is already locked by another process ({holder or 'unknown'}). "
+                f"Two writers over one state file lose each other's completed steps, so "
+                f"this launcher refuses to start. If no bake is actually running (a killed "
+                f"process leaves the lock behind), delete it explicitly: {self._lock_path}"
+            ) from None
+
+    def release(self) -> None:
+        """Release the lock. Idempotent, and safe to call from a `finally`."""
+        fd = getattr(self, "_lock_fd", None)
+        if fd is None:
+            return
+        self._lock_fd = None
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(self._lock_path)
+        except OSError:
+            pass
+
+    def __enter__(self) -> "BakeState":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.release()
 
     # ---------------- persistence ----------------
 
@@ -90,6 +174,20 @@ class BakeState:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp, self.path)  # atomic on Windows and POSIX
+            # Codex round 2: fsync the PARENT DIRECTORY, or the durability claim
+            # in this docstring is only half true. `os.fsync` on the file commits
+            # its CONTENTS; the rename that publishes them lives in the
+            # directory's own metadata, which can still be lost on power failure.
+            # Best-effort: directory fds are not openable on Windows, and a
+            # failure here means weaker durability, never a wrong state file.
+            try:
+                dir_fd = os.open(str(self.path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except (OSError, AttributeError, ValueError):
+                pass
         except BaseException:
             # Never leave a stray temp file behind on failure -- and never let
             # cleanup mask the original error.
@@ -112,10 +210,22 @@ class BakeState:
         Swept on construction, i.e. exactly when a resume happens. Failure to
         unlink is ignored deliberately: a stale temp is litter, never a
         correctness problem, and must not prevent a resume.
+
+        AGE-GATED (Codex round 2, MEDIUM). The first version unlinked every
+        matching name, which on platforms permitting unlink of an open file could
+        delete a LIVE writer's temp between its `mkstemp` and its `os.replace` --
+        turning litter-collection into a write failure. The writer lock above
+        makes a concurrent bake impossible, but this is defense in depth for the
+        case where the lock file was manually removed, and the trade is trivially
+        favourable: leaving a young orphan costs one dead file until the next
+        resume, whereas unlinking a live temp breaks the write.
         """
         try:
+            now = time.time()
             for stale in self.path.parent.glob(self.path.name + ".*.tmp"):
                 try:
+                    if now - stale.stat().st_mtime < self._TEMP_MIN_AGE_SECONDS:
+                        continue          # may belong to a live writer
                     stale.unlink()
                 except OSError:
                     pass
