@@ -111,6 +111,30 @@ def _hash_or_die(path, name: str) -> str:
     return digest.hexdigest()
 
 
+# SQLite sidecars that can hold committed content the main file does not yet show.
+# Hashing only the main path lets candidate input change while its hash is stable
+# (Codex round 6, HIGH).
+_SQLITE_SIDECAR_SUFFIXES = ("-journal", "-wal", "-shm")
+
+
+def _hash_all(inputs: Dict[str, str]) -> Dict[str, str]:
+    """Hash every input AND any SQLite sidecar that exists beside it.
+
+    A sidecar that is ABSENT is recorded as absent rather than skipped: one
+    appearing mid-measurement is exactly the change this needs to detect, and
+    silently omitting it from the first pass would make the second pass agree.
+    """
+    out: Dict[str, str] = {}
+    for name, path in inputs.items():
+        out[name] = _hash_or_die(path, name)
+        for suffix in _SQLITE_SIDECAR_SUFFIXES:
+            sidecar = f"{path}{suffix}"
+            key = f"{name}{suffix}"
+            out[key] = (_hash_or_die(sidecar, key) if os.path.exists(sidecar)
+                        else "(absent)")
+    return out
+
+
 def _verify_population(asset_path: str, claimed: str) -> Dict[str, object]:
     """Check the `--population` LABEL against the asset itself.
 
@@ -136,22 +160,39 @@ def _verify_population(asset_path: str, claimed: str) -> Dict[str, object]:
             f"population label cannot be verified."
         ) from exc
 
-    looks_v3 = coverage_routing == "gen2_router"
-    if claimed == "pinned" and not looks_v3:
+    # WHAT MAKES A POPULATION "v3" (Codex round 6, MEDIUM -- and the finding was
+    # right). The first version equated v3 with `coverage_routing == 'gen2_router'`,
+    # which mislabels a SUPPORTED build: `finalize_build` deliberately allows
+    # `allow_lever1_coverage=True` and records `coverage_routing = 'lever1_cliff'`,
+    # and such a build is still a v3 assembly with a v3 work set -- its candidate
+    # population is v3 even though its routing is the legacy cliff. Rejecting it as
+    # `pinned` made the measurement unavailable for a choice the build offers.
+    #
+    # So the test is whether the asset was built by THIS pipeline at all: it carries
+    # a `coverage_routing` meta row, which only a v3-era `finalize_build` writes. The
+    # ROUTING MODE is reported separately, so a reader can tell a router-routed v3
+    # population from a deliberately cliff-routed one without either being mislabelled.
+    is_v3_build = coverage_routing is not None
+    if claimed == "pinned" and not is_v3_build:
         raise MeasurementError(
-            f"--population pinned was claimed, but the asset's meta.coverage_routing "
-            f"is {coverage_routing!r}, not 'gen2_router'. This is a LEGACY-population "
-            f"measurement; labelling it `pinned` would present it as the v3 price, "
-            f"which is the error that produced the retracted ~$4 figure."
+            f"--population pinned was claimed, but the asset records no "
+            f"`meta.coverage_routing` row at all (sidecar_version="
+            f"{sidecar_version!r}), so it predates the v3 pipeline. This is a "
+            f"LEGACY-population measurement; labelling it `pinned` would present it "
+            f"as the v3 price, the error that produced the retracted ~$4 figure."
         )
-    if claimed == "legacy" and looks_v3:
+    if claimed == "legacy" and is_v3_build:
         raise MeasurementError(
-            "--population legacy was claimed, but the asset WAS built with gen-2's "
-            "router, so this is a v3-population measurement. Label it `pinned`; an "
-            "under-claimed number gets ignored as stale."
+            f"--population legacy was claimed, but the asset was built by the v3 "
+            f"pipeline (meta.coverage_routing={coverage_routing!r}). Label it "
+            f"`pinned`; an under-claimed number gets ignored as stale, so the real "
+            f"price never reaches the owner."
         )
     return {"meta_coverage_routing": coverage_routing,
-            "meta_sidecar_version": sidecar_version}
+            "meta_sidecar_version": sidecar_version,
+            # Reported so a `pinned` number is never ambiguous about WHICH v3
+            # routing produced its population.
+            "routing_mode": coverage_routing or "(pre-v3: no coverage_routing row)"}
 
 
 def main(argv=None) -> int:
@@ -181,21 +222,25 @@ def main(argv=None) -> int:
     log(f"population label {args.population!r} verified against the asset: "
         f"{population_evidence}")
 
-    log(f"reading cache {os.path.basename(args.cache)}")
-    with open(args.cache, encoding="utf-8") as fh:
-        cache = json.load(fh)
-    log(f"  cache entries: {len(cache):,}")
-
-    # Codex R5 (HIGH): hash BEFORE building candidates and re-verify AFTER. The
-    # first version hashed only afterwards, so an input could change during the
-    # (minutes-long) candidate build and the report would describe a population its
-    # own hashes did not cover.
+    # Codex R5+R6 (HIGH): hash EVERY input BEFORE anything reads it, and re-verify
+    # after. R5 fixed the candidate build; R6 found two remaining holes, both real:
+    #   * the cache was LOADED before it was hashed, so a change in between left the
+    #     counters computed from the old object while the report recorded the new
+    #     hash -- and the stable second hash then falsely confirmed it;
+    #   * SQLite can serve committed content from sibling `-journal`/`-wal` files,
+    #     which were never hashed, so candidate input could change while both
+    #     main-file hashes agreed.
     inputs = {
         "asset": args.asset, "cache": args.cache, "libraries_csv": args.libraries_csv,
         "fjms_db": args.fjms_db, "fgp_db": args.fgp_db, "pgp_db": args.pgp_db,
     }
-    log("hashing inputs BEFORE building candidates")
-    input_hashes = {name: _hash_or_die(path, name) for name, path in inputs.items()}
+    log("hashing every input BEFORE any of them is read")
+    input_hashes = _hash_all(inputs)
+
+    log(f"reading cache {os.path.basename(args.cache)}")
+    with open(args.cache, encoding="utf-8") as fh:
+        cache = json.load(fh)
+    log(f"  cache entries: {len(cache):,}")
 
     log("building candidates from the supplied asset + finding-aid DBs "
         "(this is the slow part)")
@@ -235,16 +280,19 @@ def main(argv=None) -> int:
 
     covered = counters["residual_fingerprint_ok"]
 
-    # Re-verify every input is byte-identical to what was hashed before the build.
-    log("re-verifying input hashes AFTER the build")
-    for name, path in inputs.items():
-        again = _hash_or_die(path, name)
-        if again != input_hashes[name]:
-            raise MeasurementError(
-                f"input {name!r} CHANGED during the measurement, so the reported "
-                f"counts describe a population these hashes do not cover. Refusing "
-                f"to write a report that would look pinned."
-            )
+    # Re-verify every input -- including SQLite sidecars -- is byte-identical to
+    # what was hashed before anything read it.
+    log("re-verifying every input hash AFTER the measurement")
+    again = _hash_all(inputs)
+    changed = sorted(k for k in input_hashes if again.get(k) != input_hashes[k])
+    changed += sorted(k for k in again if k not in input_hashes)
+    if changed:
+        raise MeasurementError(
+            f"{len(changed)} input(s) CHANGED during the measurement "
+            f"({', '.join(changed)}), so the reported counts describe a population "
+            f"these hashes do not cover. Refusing to write a report that would look "
+            f"pinned."
+        )
 
     report = {
         "measured_utc_note": "timestamp intentionally omitted -- see git commit date",

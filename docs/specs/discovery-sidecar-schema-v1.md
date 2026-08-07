@@ -43,8 +43,9 @@ routing_status      in {shipped, review_only}
 routing_reason      in {impurity, runner_up_conflict, co_citation, none,
                        later_shared_text, low_coverage,
                        gen2_parallel_surface, gen2_router_not_shipped}
-                    -- the v1 four PLUS four dated additions; see
-                    -- "Amendment 2026-08-07 (E)" for the current full list
+                    -- ALL EIGHT current values (the v1 four plus four dated
+                    -- additions); see "Amendment 2026-08-07 (E)" for each one's
+                    -- date, meaning and accompanying routing_status
 source_corpus       in {sefaria, ja, msource}   (masked codes; internal-only; NEVER displayed, D-03a)
 merge_basis         in {oxford_part, physical_join}   (NEVER scribe, DATA-10)
 ```
@@ -124,11 +125,13 @@ CREATE TABLE discovery_evidence (
   adjudication_status TEXT NOT NULL CHECK (adjudication_status IN ('human_confirmed','provisional','unreviewed')),
   audit_status      TEXT NOT NULL CHECK (audit_status IN ('audit_pending','audit_passed','n/a')),
   routing_status    TEXT NOT NULL CHECK (routing_status IN ('shipped','review_only')),
-  -- The v1 four. FOUR MORE were added by dated amendment and ARE emitted by
-  -- `create_schema` today -- see "Amendment 2026-08-07 (E)" for the full
-  -- list. A consumer validating against the four below will REJECT a real
-  -- router-produced artifact (Codex round 5, HIGH).
-  routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none')),
+  -- All EIGHT current values (Codex round 6, MEDIUM: a comment warning that the
+  -- displayed DDL rejects a real artifact "does not make the SQL safe for a
+  -- consumer to implement or copy", so the SQL itself is now correct). The last
+  -- four were added by dated amendment; `Amendment 2026-08-07 (E)` carries their
+  -- dates and semantics. Kept in sync with `create_schema` by
+  -- test_the_schema_DOC_lists_every_routing_reason_the_DDL_accepts.
+  routing_reason    TEXT NOT NULL CHECK (routing_reason IN ('impurity','runner_up_conflict','co_citation','none','later_shared_text','low_coverage','gen2_parallel_surface','gen2_router_not_shipped')),
   is_new            INTEGER NOT NULL DEFAULT 0,  -- FLAG (C-8) — new? is a flag, NOT a surface
 
   -- this evidence row's OWN origin (R5) — normally == claim.page_id, but

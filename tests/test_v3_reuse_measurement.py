@@ -41,32 +41,49 @@ def _asset(path: Path, *, coverage_routing=None, version="discovery-v1-real"):
     return path
 
 
-def test_a_legacy_asset_cannot_be_labelled_pinned(tmp_path):
+def test_a_PRE_V3_asset_cannot_be_labelled_pinned(tmp_path):
     """THE round-5 property: the label is verified, not asserted.
 
-    `meta.coverage_routing = 'gen2_router'` is the row `finalize_build` writes when
-    it ingests gen-2's router, which is what makes a population v3. Anything else is
-    legacy, whatever the caller types.
+    A pre-v3 asset carries NO `meta.coverage_routing` row -- only a v3-era
+    `finalize_build` writes one -- so it cannot be a v3 population whatever the
+    caller types.
     """
     legacy = _asset(tmp_path / "legacy.db")
     assert _verify_population(str(legacy), "legacy")["meta_coverage_routing"] is None
-    with pytest.raises(MeasurementError, match="not 'gen2_router'"):
+    with pytest.raises(MeasurementError, match="no `meta.coverage_routing` row"):
         _verify_population(str(legacy), "pinned")
 
 
-def test_a_lever1_asset_is_also_legacy(tmp_path):
-    """A build that CHOSE the legacy cliff is a legacy population too -- the field
-    records what ran, so `lever1_cliff` must not pass as pinned."""
+def test_a_DELIBERATE_lever1_v3_build_is_a_v3_population(tmp_path):
+    """Codex round 6 (MEDIUM), correcting my own first definition.
+
+    I had equated "v3 population" with `coverage_routing == 'gen2_router'`. That
+    mislabels a build the pipeline SUPPORTS: `allow_lever1_coverage=True` records
+    `coverage_routing = 'lever1_cliff'`, and such a build still has a v3 assembly and
+    a v3 work set -- its candidate population is v3 even though its routing is the
+    legacy cliff. Rejecting it made the measurement unavailable for a supported
+    choice. The routing MODE is now reported separately instead, so neither case is
+    mislabelled.
+    """
     cliff = _asset(tmp_path / "cliff.db", coverage_routing="lever1_cliff")
-    with pytest.raises(MeasurementError, match="not 'gen2_router'"):
-        _verify_population(str(cliff), "pinned")
+    got = _verify_population(str(cliff), "pinned")
+    assert got["routing_mode"] == "lever1_cliff", (
+        "a deliberately cliff-routed v3 build is rejected as a v3 population, or its "
+        "routing mode is not reported -- a `pinned` number would then be ambiguous "
+        "about which routing produced it"
+    )
+    # ...and it must NOT be passable as legacy either.
+    with pytest.raises(MeasurementError, match="Label it `pinned`"):
+        _verify_population(str(cliff), "legacy")
 
 
 def test_a_router_asset_cannot_be_labelled_legacy(tmp_path):
     """The other direction, which matters for a different reason: an under-claimed
     v3 measurement gets ignored as stale, so the real price never reaches the owner."""
     routed = _asset(tmp_path / "v3.db", coverage_routing="gen2_router")
-    assert _verify_population(str(routed), "pinned")["meta_coverage_routing"] == "gen2_router"
+    got = _verify_population(str(routed), "pinned")
+    assert got["meta_coverage_routing"] == "gen2_router"
+    assert got["routing_mode"] == "gen2_router"
     with pytest.raises(MeasurementError, match="Label it `pinned`"):
         _verify_population(str(routed), "legacy")
 
@@ -88,26 +105,121 @@ def test_an_unhashable_input_halts_instead_of_becoming_a_report_string(tmp_path)
         _hash_or_die(str(tmp_path / "missing.bin"), "missing")
 
 
-def test_the_hashes_are_taken_before_the_build_and_reverified_after():
-    """A hash taken only afterwards does not cover the population that was built.
+def test_a_cache_changed_after_loading_HALTS(tmp_path, monkeypatch):
+    """Codex round 6 (HIGH), and my previous test could not have caught it.
 
-    Asserted on the source ORDER because the failure needs a minutes-long build to
-    reproduce, and the property is structural: the pre-build hash must precede
-    `build_all_candidates`, and a post-build re-verification must exist.
+    That test asserted three SOURCE substrings around `build_all_candidates`. Round 6
+    was right that it "does not execute the branch, mutate an input, or establish
+    that every reader's state is covered" -- keeping those strings while retaining the
+    cache-read-before-hash race stayed green.
+
+    This EXECUTES `main()` with a real cache file that is MUTATED during candidate
+    construction, and requires the run to halt. Before the fix the counters would come
+    from the pre-mutation object while the report recorded the post-mutation hash, and
+    a stable second hash would falsely confirm it.
     """
     import scripts.v3_measure_novelty_reuse as mod
 
-    src = Path(mod.__file__).read_text(encoding="utf-8")
-    pre = src.index("hashing inputs BEFORE building candidates")
-    build = src.index("build_all_candidates(")
-    post = src.index("re-verifying input hashes AFTER the build")
-    assert pre < build < post, (
-        "the input hashes are no longer taken before the build and re-verified "
-        "after it, so the report can describe a population its hashes do not cover"
+    asset = _asset(tmp_path / "v3.db", coverage_routing="gen2_router")
+    cache = tmp_path / "verdicts.json"
+    cache.write_text('{"s1::w000001": {"novelty_status": "fills_gap"}}', encoding="utf-8")
+    for name in ("libraries.csv", "fjms.db", "fgp.db", "pgp.db"):
+        (tmp_path / name).write_bytes(b"x")
+
+    # Mutate the cache in the EXACT race window: between the moment it is read and
+    # the moment it is hashed. Patching `json.load` is what pins the ORDER -- mutating
+    # during `build_all_candidates` (my first attempt) is caught by the post-run
+    # re-verification whichever order the code uses, so it could not distinguish
+    # hash-then-load from load-then-hash. Mutation testing found that: swapping the
+    # two left the test green.
+    real_load = mod.json.load
+
+    def load_then_mutate(fh):
+        loaded = real_load(fh)
+        cache.write_text('{"s1::w000001": {"novelty_status": "confirms"}}',
+                         encoding="utf-8")
+        return loaded
+
+    monkeypatch.setattr(mod.json, "load", load_then_mutate)
+    monkeypatch.setattr(mod, "build_all_candidates", lambda **_kw: ([], {}, {}))
+    monkeypatch.setattr(mod, "run_heuristic_funnel", lambda _c: ({}, []))
+    with pytest.raises(MeasurementError, match="CHANGED during the measurement"):
+        mod.main([
+            "--asset", str(asset), "--cache", str(cache), "--population", "pinned",
+            "--libraries-csv", str(tmp_path / "libraries.csv"),
+            "--fjms-db", str(tmp_path / "fjms.db"),
+            "--fgp-db", str(tmp_path / "fgp.db"),
+            "--pgp-db", str(tmp_path / "pgp.db"),
+            "--report", str(tmp_path / "r.json"),
+        ])
+    assert not (tmp_path / "r.json").exists(), (
+        "a report was written despite an input changing mid-measurement"
     )
-    assert "CHANGED during the measurement" in src, (
-        "a changed input no longer halts the measurement"
-    )
+
+
+def test_a_SQLITE_JOURNAL_appearing_mid_measurement_HALTS(tmp_path, monkeypatch):
+    """The second round-6 hole: SQLite can serve committed content from sibling
+    `-journal`/`-wal` files, which the first version never hashed -- so candidate
+    input could change while both main-file hashes agreed.
+
+    A sidecar appearing mid-run is the detectable form of that, which is why an
+    ABSENT sidecar is recorded as `(absent)` rather than skipped: skipping it would
+    make the second pass agree with the first.
+    """
+    import scripts.v3_measure_novelty_reuse as mod
+
+    asset = _asset(tmp_path / "v3.db", coverage_routing="gen2_router")
+    cache = tmp_path / "verdicts.json"
+    cache.write_text("{}", encoding="utf-8")
+    for name in ("libraries.csv", "fjms.db", "fgp.db", "pgp.db"):
+        (tmp_path / name).write_bytes(b"x")
+
+    def fake_build(**_kw):
+        # A WAL file appears beside the asset, as it would under a concurrent writer.
+        (tmp_path / "v3.db-wal").write_bytes(b"committed-but-not-in-the-main-file")
+        return [], {}, {}
+
+    monkeypatch.setattr(mod, "build_all_candidates", fake_build)
+    with pytest.raises(MeasurementError, match="CHANGED during the measurement"):
+        mod.main([
+            "--asset", str(asset), "--cache", str(cache), "--population", "pinned",
+            "--libraries-csv", str(tmp_path / "libraries.csv"),
+            "--fjms-db", str(tmp_path / "fjms.db"),
+            "--fgp-db", str(tmp_path / "fgp.db"),
+            "--pgp-db", str(tmp_path / "pgp.db"),
+            "--report", str(tmp_path / "r.json"),
+        ])
+
+
+def test_an_UNCHANGED_measurement_writes_its_report(tmp_path, monkeypatch):
+    """The control. Without it, "halt on everything" would satisfy both tests above
+    while making the measurement impossible to run."""
+    import json as _json
+
+    import scripts.v3_measure_novelty_reuse as mod
+
+    asset = _asset(tmp_path / "v3.db", coverage_routing="gen2_router")
+    cache = tmp_path / "verdicts.json"
+    cache.write_text("{}", encoding="utf-8")
+    for name in ("libraries.csv", "fjms.db", "fgp.db", "pgp.db"):
+        (tmp_path / name).write_bytes(b"x")
+
+    monkeypatch.setattr(mod, "build_all_candidates", lambda **_kw: ([], {}, {}))
+    monkeypatch.setattr(mod, "run_heuristic_funnel", lambda _c: ({}, []))
+    rc = mod.main([
+        "--asset", str(asset), "--cache", str(cache), "--population", "pinned",
+        "--libraries-csv", str(tmp_path / "libraries.csv"),
+        "--fjms-db", str(tmp_path / "fjms.db"),
+        "--fgp-db", str(tmp_path / "fgp.db"),
+        "--pgp-db", str(tmp_path / "pgp.db"),
+        "--report", str(tmp_path / "r.json"),
+    ])
+    assert rc == 0
+    report = _json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))
+    assert report["population"] == "pinned"
+    # The sidecar keys must be present and recorded as absent -- that is what makes
+    # a later appearance detectable.
+    assert report["input_sha256"]["asset-wal"] == "(absent)", report["input_sha256"]
 
 
 def test_a_failed_measurement_exits_nonzero(tmp_path, capsys):

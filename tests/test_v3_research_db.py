@@ -948,8 +948,23 @@ def test_the_schema_DOC_lists_every_routing_reason_the_DDL_accepts():
         f"vocab-only={sorted(set(dids.ROUTING_REASONS) - ddl_values)}"
     )
 
-    # 2. Every one of them must appear in the doc's AUTHORITATIVE table, not merely
-    #    somewhere in 1,000 lines of prose. Scope the search to that section.
+    # 1b. The DOC's own displayed DDL must accept the same eight (Codex R6): a
+    #     comment warning that the displayed SQL is wrong "does not make the SQL
+    #     safe for a consumer to implement or copy".
+    doc_match = re.search(
+        r"routing_reason\s+TEXT NOT NULL CHECK \(routing_reason IN \(([^)]*)\)\)", doc)
+    assert doc_match, "the schema doc has no routing_reason CHECK to validate"
+    doc_ddl_values = {v.strip().strip("'") for v in doc_match.group(1).split(",")}
+    assert doc_ddl_values == ddl_values, (
+        f"the DOC's DDL and the LIVE DDL disagree: "
+        f"doc-only={sorted(doc_ddl_values - ddl_values)}, "
+        f"live-only={sorted(ddl_values - doc_ddl_values)}"
+    )
+
+    # 2. Every one of them must appear in the doc's authoritative TABLE -- parsed as
+    #    table rows, not searched anywhere in the section (Codex R6: "deleting a
+    #    router row while leaving its token in the explanatory mapping below the
+    #    table can pass").
     # Anchor on the HEADING, not the first mention -- the earlier cross-references
     # point AT this section, and matching one of those windowed the test onto the
     # wrong text entirely (caught on first run).
@@ -957,12 +972,14 @@ def test_the_schema_DOC_lists_every_routing_reason_the_DDL_accepts():
     assert start != -1, "the doc has no authoritative routing_reason amendment"
     end = doc.find("## Amendment", start + 10)
     section = doc[start:end if end != -1 else len(doc)]
-    for value in sorted(dids.ROUTING_REASONS):
-        assert f"`{value}`" in section, (
-            f"{value!r} is accepted by the DDL but absent from the doc's "
-            f"authoritative routing_reason table -- a consumer validating against "
-            f"the doc would reject a real artifact carrying it"
-        )
+    # Parse the markdown table body: rows starting `| \`value\` |`.
+    table_values = set(re.findall(r"^\|\s*`([a-z0-9_]+)`\s*\|", section, re.M))
+    assert table_values == set(dids.ROUTING_REASONS), (
+        f"the doc's authoritative TABLE and the frozen vocabulary disagree: "
+        f"table-only={sorted(table_values - set(dids.ROUTING_REASONS))}, "
+        f"vocab-only={sorted(set(dids.ROUTING_REASONS) - table_values)} -- a "
+        f"consumer validating against the doc would reject a real artifact"
+    )
 
     # 3. And the historical enum lines must POINT at the amendment, so a reader who
     #    stops at them is not silently misled.
