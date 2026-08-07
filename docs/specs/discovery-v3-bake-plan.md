@@ -1391,6 +1391,105 @@ must not be "fixed" by dropping `cat` — the builder needs it to derive `source
 
 ---
 
+### 7b. RESOLVED 2026-08-07 — the assembly's exact input set, and two gates that earned their keep
+
+Recorded because none of it was written down and I had to derive it. The v3 assembly's twelve inputs:
+
+| input | resolved path | pin |
+|---|---|---|
+| source DB | `_tmp/v3_research_slim.db` (built §7a) | `tier_a_unshadowed=275894`, matches the frozen constant |
+| approved works | `discovery_data/discovery-review-approved-final.csv` | — |
+| crosswalk | `discovery_data/crosswalk.json` | `bcde04bd…` |
+| canonical merges | `same_work_spike/probe/rsource/data/v2_canonical_merges.build.json` | `cc054d11…` |
+| composition dates | `discovery_data/composition_dates.json` | `2b46b470…` |
+| seftja dates | `same_work_spike/probe/rsource/data/seftja_dates.json` | `00760289…` |
+| novelty verdicts | `discovery_data/novelty_production_verdicts.json` | `eb6fc4f8…` |
+| work domains | `discovery_data/work_domains-v1.json` | `sha256:57393773…` |
+| work author aliases | `discovery_data/work_author_aliases-v1.json` | `sha256:ddb2f644…` **(see below)** |
+| Q2/E1 collections (8 files) | `same_work_spike/probe/data/*.jsonl` | all eight match their frozen counts exactly |
+| gen-2 router evidence | `same_work_spike/probe/rsource/data/g_launch3.db` | 19.3% demotion reproduced |
+| libraries / FJMS | `libraries.csv`, `fist_data/fjms_enrichment.db` | — |
+
+**The author-alias pin MOVED, legitimately.** v2's meta records `acce47f6…`; the artifact on disk declares
+`ddb2f644…`. Traced rather than assumed: commit `5e38ee74` (2026-08-04, one day AFTER v2 baked) regenerated it
+— *"the author alias map now matches the catalogue's English name too"*, the Maimonides-rendered-twice fix,
+scope 2 of 610 authored works. The file is gitignored (regenerated, not committed), which is why only the hash
+records the change. Both curation artifacts were validated with their OWN `compute_content_hash` and are
+self-consistent; `work_domains` still matches v2's pin exactly, and its ruling state is clean
+(`needs_ruling_held: 0`, all 29 needs-ruling rows ruled, `unassigned: 0`). **The v3 build therefore pins the
+NEWER alias hash deliberately, not by drift.**
+
+**Two gates did real work, on the first two attempts:**
+
+1. **H2 refused to default.** `real-mode distillation requires an explicit --release or
+   --allow-partial-sources choice (H2) -- no default is silently permitted`. Correct: this is the full corpus,
+   `--allow-partial-sources` is documented "ONLY for the smoke/unit path", so `--release` is the honest flag —
+   and it is the only path that exercises the release-only `w_start`/`w_end` offsets gate (gate 3) on real data.
+2. **`ReleaseInputsIncompleteError` caught a wrong path.** I pointed `--research-data-dir` at
+   `probe/rsource/data`; the eight Q2/E1 collections live in `probe/data`. Every collection loaded as **0 rows**
+   and the release gate named all eight with expected-vs-got. Under `--allow-partial-sources` this would have
+   produced a *successful* build missing 84,000 evidence rows — the exact "passes for the wrong reason" failure
+   the row-count pins exist to prevent. This is gate 1 (row-count preservation) demonstrating it can fail
+   without anyone mutating anything.
+
+---
+
+### 7c. 🛑 BLOCKED 2026-08-07 — the router and the slim table are at DIFFERENT GRAINS. Owner decision owed.
+
+The assembly halted on the wipe-out guard (gate 10), which is the guard working:
+
+> `RoutingIngestError: 154897 tier-A witness spec(s) got no router decision -- they would keep the
+> ingest default and silently bypass gen-2's routing.`
+
+**Diagnosed to the row. This is NOT a missing router run and NOT a scope decision — it is a grain mismatch:**
+
+| measurement | value |
+|---|---|
+| router rows / distinct works | 354,528 / **3,985** |
+| slim tier-A rows / distinct works | 275,894 / **4,093** |
+| tier-A pairs with no router decision | **141,358 (51.2% of rows)** |
+| …whose **page** is absent from the router | **0** — every page is scored |
+| works present in BOTH, their tier-A rows missing | **0 of 134,536** — coverage is perfect where grains agree |
+| missing pairs whose work ends in `_NN` | 138,800 |
+| …that resolve at the **collapsed parent** `(page_id, parent)` | **138,800 = 98.2% of all missing** |
+
+The router scored `M:Ytext1000`; the slim table carries `M:Ytext1000_00 … _38`. The handoff names this exact
+id as the over-collapsed case (*"`M:Ytext1000` = 39 Bible books"*), and
+[[project_novelty_is_granularity_relative]] says novelty must be RECOMPUTED at the bake's grain, never
+migrated. **The same now demonstrably applies to routing.** The unscored works are the mega-works: p50 **40**
+rows/work vs **3** for scored, max **17,590** vs 5,462.
+
+**The residual, separately:** 2,447 pairs over just **15** works, no `_NN` suffix, absent from the router at
+any grain (all pages scored, so not a page gap). `matched_letters` p50 163 — small matches. These need their
+own answer; a parent-grain mapping would not touch them.
+
+**I did NOT write a suffix-stripping fallback, and it should not be written casually.** Mapping a sub-work's
+routing decision from its collapsed parent asserts that the parent's `page_coverage` describes the child —
+and coverage is *precisely* the quantity that changes with grain: a page matching one Bible book at 0.75 of
+the page does not match the 39-book collapsed work at 0.75 of anything comparable. Silently inheriting the
+parent's verdict would reintroduce the error the router exists to fix, on 51.2% of rows, invisibly.
+
+**Three real options for the owner:**
+
+1. **Re-run the coverage router at the split grain** — the honest fix, and the only one whose thresholds mean
+   what they say. Cost: a gen-2 router re-run over 4,093 works, not a bake step. The threshold (0.2984) was
+   calibrated on 1,395 graded cases at the COLLAPSED grain, so it would need re-deriving too.
+2. **Route every unscored pair to `review_only`** (reason `gen2_router_not_shipped` — the code already exists
+   for exactly this). $0, ships now, honest: nothing claims a routing decision that was never made. Cost: the
+   mega-works leave the same-work headline surface — **which is what the handoff's own conservative option
+   recommends** (*"gate the collapsed/heavily-quoted mega-works out of the same-work HEADLINE surface"*).
+3. **Bake at the collapsed grain** — feed the router's own work ids through, no split. Coherent, but discards
+   the granularity gain that motivated v3 in the first place.
+
+**Recommendation: option 2.** It is free, it is the handoff's own advice, it uses machinery already built and
+tested, and it keeps every claim truthful — an unscored pair is marked unscored rather than guessed. Option 1
+is the right eventual answer and belongs in the gen-2 track, not in this bake.
+
+**Consequence for the novelty price:** the v3 candidate population depends on which option is chosen, so the
+$0 re-measurement cannot produce a meaningful number until it is. Option 2 makes it runnable immediately.
+
+---
+
 ## 8. Owner questions
 
 > **✅ CODEX APPROVED 2026-08-07, round 9** — `VERDICT: APPROVE`, recorded verbatim in
