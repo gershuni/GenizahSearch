@@ -60,6 +60,14 @@ GEN2_MATCH_TABLE = "track1_matches_pilot_glaunch3_live"
 TRACK1_COLUMNS: Tuple[str, ...] = (
     "page_id", "sys_id", "work_id", "cat", "genre", "author", "title",
     "matched_letters", "best_density", "n_spans", "spans_json", "shadowed_by",
+    # discovery-v3 (2026-08-07, Codex blocker 1): the producer's PAIRED
+    # dual-side spans. Added when the work-side offsets (`w_start`/`w_end`)
+    # became a shipped column -- `spans_json` alone carries only the page side,
+    # and its largest span is a HULL that matches no reference entry on 12.2% of
+    # rows, so projecting from it would emit NULL offsets for 46,472 rows.
+    # `project_ref_span` reads this; the `cigar` field inside each entry is
+    # never read (reference-text-derived, D-25).
+    "ref_spans_json",
 )
 PAGES_COLUMNS: Tuple[str, ...] = (
     "page_id", "sys_id", "buckets", "n_chars", "text", "provenance",
@@ -183,7 +191,7 @@ def build(corpus_db: str, evidence_db: str, out_path: str, *, force: bool = Fals
             "CREATE TABLE track1_matches ("
             "page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT, "
             "title TEXT, matched_letters INT, best_density REAL, n_spans INT, "
-            "spans_json TEXT, shadowed_by TEXT)"
+            "spans_json TEXT, shadowed_by TEXT, ref_spans_json TEXT)"
         )
         dst.execute(
             "CREATE TABLE pages (page_id TEXT PRIMARY KEY, sys_id TEXT, buckets TEXT, "
@@ -191,7 +199,14 @@ def build(corpus_db: str, evidence_db: str, out_path: str, *, force: bool = Fals
             "fgp_score REAL, htr_n_chars INTEGER)"
         )
 
+        # `shadowed_by` is DERIVED (appended per row below); everything else is
+        # read straight from the source. The insert column list is built to match
+        # this order explicitly rather than reusing TRACK1_COLUMNS, because
+        # `shadowed_by` sits mid-tuple in the declared column order while the
+        # derived value is appended LAST -- relying on the two coinciding is how
+        # a later column addition silently shifts every value by one.
         read_cols = [c for c in TRACK1_COLUMNS if c != "shadowed_by"]
+        insert_cols = read_cols + ["shadowed_by"]
         excluded = sys_mismatch = 0
         batch: List[Tuple] = []
         n_match = 0
@@ -211,14 +226,14 @@ def build(corpus_db: str, evidence_db: str, out_path: str, *, force: bool = Fals
                          + (shadowed.get((page_id, work_id)),))
             if len(batch) >= 20000:
                 dst.executemany(
-                    f"INSERT INTO track1_matches ({', '.join(TRACK1_COLUMNS)}) "
-                    f"VALUES ({', '.join('?' * len(TRACK1_COLUMNS))})", batch)
+                    f"INSERT INTO track1_matches ({', '.join(insert_cols)}) "
+                    f"VALUES ({', '.join('?' * len(insert_cols))})", batch)
                 n_match += len(batch)
                 batch.clear()
         if batch:
             dst.executemany(
-                f"INSERT INTO track1_matches ({', '.join(TRACK1_COLUMNS)}) "
-                f"VALUES ({', '.join('?' * len(TRACK1_COLUMNS))})", batch)
+                f"INSERT INTO track1_matches ({', '.join(insert_cols)}) "
+                f"VALUES ({', '.join('?' * len(insert_cols))})", batch)
             n_match += len(batch)
         if sys_mismatch:
             raise ResearchDbError(

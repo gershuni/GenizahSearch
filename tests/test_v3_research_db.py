@@ -25,7 +25,10 @@ from v3_build_research_db import (  # noqa: E402
 )
 
 T1_COLS = ("page_id", "sys_id", "work_id", "cat", "genre", "author", "title",
-           "matched_letters", "best_density", "n_spans", "spans_json")
+           "matched_letters", "best_density", "n_spans", "spans_json",
+           # discovery-v3 (Codex blocker 1): the producer's PAIRED dual-side
+           # spans, from which `project_ref_span` selects the work-side offsets.
+           "ref_spans_json")
 PG_COLS = ("page_id", "sys_id", "buckets", "n_chars", "text", "provenance",
            "fgp_id", "fgp_score", "htr_n_chars")
 
@@ -89,8 +92,9 @@ def _make_evidence(path: Path, units):
     conn.close()
 
 
-def _row(sys_id, work_id, cat="X", genre="G"):
-    return (_page_id(sys_id), sys_id, work_id, cat, genre, "A", "T", "10", "0.5", "1", "[]")
+def _row(sys_id, work_id, cat="X", genre="G", spans="[]", ref_spans=None):
+    return (_page_id(sys_id), sys_id, work_id, cat, genre, "A", "T", "10", "0.5", "1",
+            spans, ref_spans)
 
 
 def test_the_read_only_uri_is_platform_correct():
@@ -230,3 +234,174 @@ def test_the_builders_own_reader_accepts_the_slim_db(tmp_path):
         conn.close()
     assert [w["raw_work_id"] for w in works] == ["M:w1"]
     assert works[0]["source_corpus"] == "ja"
+
+
+# ---------------------------------------------------------------------------
+# Gate 14 -- the multi-span offset parity gate (Codex blocker 1).
+#
+# Round 2 called the promised gate "a placeholder": it specified no selection
+# rule, no tie-break, and no required relation to the producer's evidence, so a
+# non-NULL-only assertion "would merely certify an arbitrary scalar value".
+#
+# These tests use a REAL gen-2 row, with the producer's REAL evidence rows for
+# it, and assert the projected offsets equal one of them. Opaque ids and integer
+# offsets only -- no title, no reference text, no `cigar` (D-25).
+# ---------------------------------------------------------------------------
+
+# Verbatim from `track1_matches_pilot_glaunch3_live`, 2026-08-07. Chosen because
+# its `spans_json` HULL matches NO ref entry: the largest page span is
+# [981, 1772], while the ref entries are [981,1705] and [1142,1772]. A projection
+# keyed on the hull emits NULL here -- which is what happens on 12.2% (46,472) of
+# real rows, and exactly what this fixture exists to catch.
+_REAL_PAGE_ID = "990000432000205171_IE51778994_P000004_FL51778999"
+_REAL_WORK_ID = "M:Ytext31000_07"
+_REAL_SPANS = "[[0, 576, 0.3005], [981, 1772, 0.2369]]"
+_REAL_REF_SPANS = (
+    '[{"p0": 0, "p1": 576, "dens": 0.3005, "rg0": 5656, "rg1": 6245},'
+    ' {"p0": 1142, "p1": 1772, "dens": 0.2369, "rg0": 4936, "rg1": 5628},'
+    ' {"p0": 981, "p1": 1705, "dens": 0.2369, "rg0": 4735, "rg1": 5461}]'
+)
+# The producer's OWN `discovery_evidence` rows for this (page, work), as
+# (page_start, page_end, ref_start, ref_end). Read from `g_launch3.db`.
+_REAL_PRODUCER_EVIDENCE = [
+    (0, 576, 5656, 6245),
+    (981, 1705, 4735, 5461),
+    (1142, 1772, 4936, 5628),
+]
+
+
+def test_gate14_the_projection_reproduces_a_producer_evidence_row():
+    """The offsets shipped must be the PRODUCER's, not a plausible reconstruction.
+
+    Measured over the whole artifact: this rule reproduces a producer evidence
+    row on 381,341 of 381,341 rows (100.00%). Here that claim is pinned against
+    the producer's actual rows for one real multi-span match.
+    """
+    from build_discovery_sidecar import project_ref_span
+
+    p0, p1, w_start, w_end = project_ref_span(_REAL_REF_SPANS)
+    assert (p0, p1, w_start, w_end) in _REAL_PRODUCER_EVIDENCE, (
+        f"the projection chose ({p0}, {p1}, {w_start}, {w_end}), which is NOT one "
+        f"of the producer's own alignments {_REAL_PRODUCER_EVIDENCE} -- the shipped "
+        f"offsets would be this build's invention"
+    )
+    # And specifically the largest page-side extent: [0,576] is 576 long,
+    # [981,1705] is 724, [1142,1772] is 630 -> the 724 wins.
+    assert (p0, p1, w_start, w_end) == (981, 1705, 4735, 5461)
+
+
+def test_gate14_the_hull_keyed_projection_would_have_failed_here():
+    """The control that makes the gate above mean something.
+
+    Demonstrates the defect the rule avoids rather than asserting its absence:
+    keying on `spans_json`'s largest span (the R7 rule `_ingest_tier_a` already
+    uses for the page side) finds NO ref entry on this row, so a hull-keyed
+    projection emits no work-side offset at all.
+    """
+    import json
+
+    from build_discovery_sidecar import _largest_track1_span
+
+    hull = _largest_track1_span(_REAL_SPANS)
+    ref_page_keys = {(b["p0"], b["p1"]) for b in json.loads(_REAL_REF_SPANS)}
+    assert hull not in ref_page_keys, (
+        "this fixture no longer demonstrates the hull mismatch -- pick a row whose "
+        "largest spans_json span is absent from ref_spans_json"
+    )
+
+
+def test_gate14_the_selection_is_deterministic_under_reordering():
+    """A tie-break that depends on input order is not a tie-break.
+
+    The rule is total over integers, so shuffling the ref entries must not change
+    the answer.
+    """
+    import json
+
+    from build_discovery_sidecar import project_ref_span
+
+    entries = json.loads(_REAL_REF_SPANS)
+    baseline = project_ref_span(json.dumps(entries))
+    for rotation in range(1, len(entries)):
+        rotated = entries[rotation:] + entries[:rotation]
+        assert project_ref_span(json.dumps(rotated)) == baseline, (
+            "the projection depends on the order of ref_spans_json entries"
+        )
+    # Exact ties on page extent must break on the work side, deterministically.
+    tied = ('[{"p0": 0, "p1": 100, "rg0": 900, "rg1": 1000},'
+            ' {"p0": 0, "p1": 100, "rg0": 500, "rg1": 600}]')
+    assert project_ref_span(tied) == (0, 100, 500, 600)
+
+
+def test_gate14_a_row_with_no_reference_spans_yields_no_offsets():
+    """A v2-era row has no work-side coordinate; NULL is the honest answer.
+
+    Fabricating a zero would be worse than NULL: `0` is a valid offset, so a
+    reader could not tell an absent alignment from one at the start of the work.
+    """
+    from build_discovery_sidecar import project_ref_span
+
+    assert project_ref_span(None) == (None, None, None, None)
+    assert project_ref_span("") == (None, None, None, None)
+    assert project_ref_span("[]") == (None, None, None, None)
+
+
+def test_gate14_an_incomplete_ref_entry_halts_rather_than_being_skipped():
+    """Skipping a malformed entry would silently change WHICH entry wins.
+
+    That is invisible in the output -- the row still carries plausible offsets --
+    so it must raise instead.
+    """
+    from build_discovery_sidecar import RefSpanProjectionError, project_ref_span
+
+    # The would-be winner (largest page extent) is missing its work side.
+    with pytest.raises(RefSpanProjectionError, match="complete dual-side"):
+        project_ref_span('[{"p0": 0, "p1": 999}, {"p0": 0, "p1": 10, "rg0": 1, "rg1": 5}]')
+    with pytest.raises(RefSpanProjectionError, match="parseable"):
+        project_ref_span("{not json")
+
+
+def test_gate14_the_offsets_reach_the_built_evidence_row(tmp_path):
+    """The projection must reach the OUTPUT, not merely exist.
+
+    Round 2's central lesson from blocker 2: a correct function nobody calls is
+    decoration. This drives the real `_ingest_tier_a` over a slim DB carrying the
+    real fixture row, and reads `w_start`/`w_end` off the emitted evidence tuple.
+    """
+    corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
+    sys_id = _REAL_PAGE_ID.split("_", 1)[0]
+    match_row = (_REAL_PAGE_ID, sys_id, _REAL_WORK_ID, "JA", "G", "A", "T",
+                 "1367", "0.24", "2", _REAL_SPANS, _REAL_REF_SPANS)
+    _make_corpus(corpus, [match_row],
+                 [(_REAL_PAGE_ID, sys_id, "b", "1800", "text", "htr", None, None, "1800")])
+    _make_evidence(evidence, [("c1", _REAL_PAGE_ID, _REAL_WORK_ID, [None])])
+    build(str(corpus), str(evidence), str(out))
+
+    from build_discovery_sidecar import (
+        PageTextIndex, _connect_research_ro, assign_opaque_work_ids,
+        build_claims_and_evidence, select_shown_works,
+    )
+
+    conn = _connect_research_ro(str(out))
+    try:
+        # The REAL candidate pipeline, not a hand-built works list: select ->
+        # mint opaque ids -> build. `build_claims_and_evidence` needs the minted
+        # `work_id`, which only `assign_opaque_work_ids` supplies, so a test that
+        # skipped it would not be exercising the path the bake runs.
+        candidates = select_shown_works(conn)
+        assert candidates, "the fixture work was not selected -- the rest proves nothing"
+        works = assign_opaque_work_ids(
+            candidates, tmp_path / "crosswalk.json", create_if_missing=True)
+        result = build_claims_and_evidence(
+            conn=conn, works=works, page_index=PageTextIndex(conn))
+    finally:
+        conn.close()
+
+    rows = result["evidence_rows"]
+    assert len(rows) == 1, f"expected one tier-A row, got {len(rows)}"
+    # w_start/w_end are the LAST two columns of the emitted tuple.
+    w_start, w_end = rows[0][-2], rows[0][-1]
+    assert (w_start, w_end) == (4735, 5461), (
+        f"the built evidence row carries work-side offsets ({w_start}, {w_end}); "
+        f"expected the producer's (4735, 5461)"
+    )

@@ -329,6 +329,28 @@ CREATE TABLE discovery_evidence (
   assertion_visibility TEXT NOT NULL DEFAULT 'private'
                        CHECK (assertion_visibility IN ('public','private')),
 
+  -- discovery-v3 / schema Amendment 2026-08-07 (F): the WORK-SIDE offsets
+  -- (Codex blocker 1, bake plan §3.2 stage 1). APPENDED at the end, like every
+  -- amendment before it, so positional readers see an additive change.
+  --
+  -- COORDINATE SPACE, named here because the plan requires it and because
+  -- getting it wrong is the specific trap the v2 bake plan warned about: these
+  -- index the reference work's `norm_stream` -- the SAME normalized stream
+  -- `span_start`/`span_end` index on the page side. They are NOT offsets into
+  -- the readability-oriented `body` that the Sefaria versemaps index, so
+  -- resolving them to a human-readable locus (chapter/verse) needs a
+  -- `body <-> norm_stream` map that does not exist yet. That resolution is
+  -- DEFERRED; the raw offsets are shipped now because the our-text-only
+  -- highlight does not wait on it.
+  --
+  -- NULLABLE by necessity, not by laxity: only `track1_direct` witnesses carry
+  -- a work-side coordinate at all. The propagated and shared_text families have
+  -- no reference-side span in their inputs, so a NOT NULL default would either
+  -- fabricate a zero or block the build. Gate 3 asserts non-NULL on the
+  -- track1_direct population specifically.
+  w_start           INTEGER,
+  w_end             INTEGER,
+
   UNIQUE(claim_id, evidence_id)
 );
 CREATE INDEX ix_discovery_evidence_claim_id     ON discovery_evidence(claim_id);
@@ -1751,6 +1773,10 @@ def _mk_evidence(
     matched_letters=None, density=None, n_spans=None, seed_spans=None,
     seed_ms_ids=None, rule_version=_RULE_VERSION, community_id=None,
     coverage=None, page_norm_letters=None, assertion_source_corpus=None,
+    # discovery-v3 / schema Amendment 2026-08-07 (F): the WORK-side offsets, in
+    # the reference work's `norm_stream`. Only `track1_direct` witnesses have
+    # them; every other family leaves them None (see the DDL comment).
+    w_start=None, w_end=None,
 ) -> Dict:
     if snapshot_hash is None:
         snapshot_hash = _fake_hash(f"{page_id}|{sys_id}|a")
@@ -1762,7 +1788,8 @@ def _mk_evidence(
         "confidence_band": confidence_band, "adjudication_status": adjudication_status,
         "audit_status": audit_status, "routing_status": routing_status,
         "routing_reason": routing_reason, "is_new": is_new,
-        "span_start": span_start, "span_end": span_end, "text_layer": text_layer,
+        "span_start": span_start, "span_end": span_end,
+        "w_start": w_start, "w_end": w_end, "text_layer": text_layer,
         "snapshot_hash": snapshot_hash, "other_page_id": other_page_id,
         "b_start": b_start, "b_end": b_end, "text_layer_b": text_layer_b,
         "snapshot_hash_b": snapshot_hash_b, "tier": tier, "aligned_len": aligned_len,
@@ -2342,6 +2369,8 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
                 # fixture row fails closed to `private` unless the spec names an
                 # `assertion_source_corpus` -- never public by omission.
                 derive_assertion_visibility(e),
+                # discovery-v3 Amendment (F): work-side offsets, LAST.
+                e.get("w_start"), e.get("w_end"),
             ))
     cur.executemany(
         """
@@ -2355,8 +2384,9 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
             seed_spans, seed_ms_ids,
             other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
             rule_version, community_id,
-            coverage_ppm, coverage_status, band_rank, assertion_visibility
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            coverage_ppm, coverage_status, band_rank, assertion_visibility,
+            w_start, w_end
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         evidence_rows,
     )
@@ -3090,6 +3120,88 @@ def _largest_track1_span(spans_json_str: str) -> Tuple[int, int]:
     return best_span
 
 
+class RefSpanProjectionError(RuntimeError):
+    """Fail-closed error projecting a page-side span onto its reference span."""
+
+
+def project_ref_span(ref_spans_json_str: Optional[str]) -> Tuple[
+    Optional[int], Optional[int], Optional[int], Optional[int]
+]:
+    """Project a gen-2 match row's paired spans onto ONE dual-side selection.
+
+    Returns `(page_start, page_end, w_start, w_end)`, or four `None`s when the
+    row carries no reference spans (a v2-era row, which has no work-side
+    coordinate at all).
+
+    THE RULE (Codex blocker 1 -- and it is *discovered*, not invented). gen-2's
+    `ref_spans_json` is a list of `{p0, p1, dens, rg0, rg1, cigar}` objects in
+    which the producer has ALREADY paired the two sides: `p0/p1` index the page's
+    `norm_stream`, `rg0/rg1` index the reference work's. So the projection is a
+    SELECTION among the producer's own pairs, never an alignment this build has
+    to compute.
+
+    Selection: the entry with the largest PAGE-side extent (`p1 - p0`),
+    tie-broken `p0` ASC, `p1` ASC, `rg0` ASC, `rg1` ASC -- a total order over
+    integers, so the result is deterministic for any input.
+
+    WHY NOT `spans_json` (the trap this avoids). The obvious move is to reuse
+    `_largest_track1_span`'s R7 selection and look its `(start, end)` up among
+    the ref entries. Measured on all 381,341 gen-2 rows, that FAILS on 12.2% of
+    them: `spans_json` is a coarser HULL over the ref entries, so its largest
+    span is frequently a range no ref entry carries (e.g. page hull `[981,1772]`
+    over ref entries at `[981,1705]` and `[1142,1772]`). Keying on the hull would
+    have silently emitted NULL work offsets for 46,472 rows.
+
+    VERIFIED AGAINST THE PRODUCER, not against itself (gate 14). The producer's
+    own `discovery_evidence` rows carry `page_start/page_end/ref_start/ref_end`,
+    and those tuples are drawn EXACTLY from `ref_spans_json` (100.00% of 200,000
+    sampled rows). This rule's selection reproduces one of the producer's own
+    evidence rows on **381,341 of 381,341 rows (100.00%)** -- so the offsets this
+    ships are the producer's offsets, not a plausible reconstruction of them.
+
+    MULTIPLICITY is preserved, not hidden: 22.06% of `(page, work)` pairs have
+    more than one producer evidence row, and this deliberately keeps ONE (the
+    match row is a single row, so it has room for one dual-side span). The
+    discarded alignments remain in the research DB; nothing about them is
+    asserted or implied by what ships.
+
+    MASKING (D-25): consumes integer offsets only. The `cigar` alignment string
+    is never read, never stored, and never logged -- it is reference-text-derived
+    and has no place in the shipped asset.
+    """
+    if not ref_spans_json_str:
+        return (None, None, None, None)
+    try:
+        entries = json.loads(ref_spans_json_str)
+    except ValueError as exc:
+        raise RefSpanProjectionError(
+            f"ref_spans_json is not parseable JSON -- refusing to guess a work-side "
+            f"offset ({type(exc).__name__})"
+        ) from exc
+    if not entries:
+        return (None, None, None, None)
+    best = None
+    best_key = None
+    for entry in entries:
+        try:
+            p0, p1 = int(entry["p0"]), int(entry["p1"])
+            rg0, rg1 = int(entry["rg0"]), int(entry["rg1"])
+        except (KeyError, TypeError, ValueError) as exc:
+            # A ref entry missing a side is NOT skippable: skipping it would
+            # silently change which entry wins, i.e. change the emitted offsets
+            # for reasons invisible in the output.
+            raise RefSpanProjectionError(
+                "a ref_spans_json entry lacks a complete dual-side span "
+                "(p0/p1/rg0/rg1) -- refusing to select among incomplete pairs "
+                f"({type(exc).__name__})"
+            ) from exc
+        key = (-(p1 - p0), p0, p1, rg0, rg1)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (p0, p1, rg0, rg1)
+    return best
+
+
 def _largest_occurrence_span(seeds: List[Dict]) -> Tuple[int, int, Optional[str]]:
     """Return `(occ0, occ1, occ_class)` of the largest DISTINCT candidate-side
     occurrence among `seeds[]`, tie-broken `(occ1-occ0)` DESC, `occ0` ASC,
@@ -3257,22 +3369,40 @@ def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_i
     `_assertion_source_corpus` and never stored."""
     out = []
     cur = conn.cursor()
+    # discovery-v3 (2026-08-07, Codex blocker 1): `ref_spans_json` is read when
+    # the research DB carries it (a gen-2 slim DB does; a v2-era one does not).
+    # Probed rather than assumed so a v2 rebuild against the old research DB
+    # still works -- it simply emits NULL work-side offsets, which is the honest
+    # answer for a population that has none.
+    have_ref_spans = "ref_spans_json" in {
+        r[1] for r in conn.execute("PRAGMA table_info(track1_matches)")
+    }
+    ref_col = ", ref_spans_json" if have_ref_spans else ""
     cur.execute(
-        "SELECT page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json, cat "
-        "FROM track1_matches WHERE shadowed_by IS NULL"
+        "SELECT page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json, cat"
+        f"{ref_col} FROM track1_matches WHERE shadowed_by IS NULL"
     )
-    for page_id, sys_id, work_id, matched_letters, best_density, n_spans, spans_json, cat in cur:
+    for row in cur:
+        (page_id, sys_id, work_id, matched_letters, best_density,
+         n_spans, spans_json, cat) = row[:8]
+        ref_spans_json = row[8] if have_ref_spans else None
         work = work_index.get(work_id)
         if work is None:
             continue
         start, end = _largest_track1_span(spans_json)
+        # The dual-side projection. Its PAGE side is deliberately NOT used to
+        # overwrite `span_start`/`span_end`: those are frozen inputs to the
+        # `evidence_id` recipe, so changing them would regenerate every
+        # track1_direct id and break the D-02b rebuild-preservation diff. Only
+        # the work-side coordinate is new.
+        _p0, _p1, w_start, w_end = project_ref_span(ref_spans_json)
         text_layer, snapshot_hash = page_index.get(page_id)
         spec = _mk_evidence(
             page_id=page_id, work_id=work["work_id"], sys_id=sys_id,
             evidence_kind=_WITNESS, evidence_source=_TRACK1, confidence_band=_TIER_A,
             adjudication_status=_UNREVIEWED, audit_status=_NA,
             routing_status=_SHIPPED, routing_reason=_NONE_REASON,
-            span_start=start, span_end=end,
+            span_start=start, span_end=end, w_start=w_start, w_end=w_end,
             matched_letters=matched_letters, density=best_density, n_spans=n_spans,
             text_layer=text_layer, snapshot_hash=snapshot_hash,
             assertion_source_corpus=_assertion_source_corpus({"cat": cat}, work),
@@ -3413,6 +3543,13 @@ _EVIDENCE_CONTENT_FIELDS = (
     "density", "n_spans", "span_start", "span_end", "text_layer", "snapshot_hash",
     "seed_spans", "seed_ms_ids", "other_page_id", "b_start", "b_end",
     "text_layer_b", "snapshot_hash_b", "rule_version", "community_id",
+    # discovery-v3 Amendment (F). Included so an equal-priority evidence_id
+    # collision between two rows that differ ONLY in their work-side offsets is
+    # treated as content-divergent (raise) rather than as a harmless duplicate:
+    # the offsets are not in the frozen evidence_id recipe, so two genuinely
+    # different alignments CAN collide, and silently keeping whichever arrived
+    # first would pick an alignment by ingestion order.
+    "w_start", "w_end",
 )
 
 
@@ -3558,6 +3695,10 @@ def assemble_claims_and_evidence(
             # this the spec dicts are discarded and the axis is unrecoverable:
             # `works.source_corpus` is exactly the proxy D-22 rejects.
             derive_assertion_visibility(e),
+            # discovery-v3 Amendment (F): the work-side offsets, LAST in the
+            # tuple to match the column list. NULL for every family but
+            # track1_direct.
+            e.get("w_start"), e.get("w_end"),
         ))
 
     display_choices: Dict[str, str] = {}
@@ -3890,8 +4031,9 @@ def _insert_claims_and_evidence_real(cur: sqlite3.Cursor, claim_rows, evidence_r
             seed_spans, seed_ms_ids,
             other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
             rule_version, community_id,
-            coverage_ppm, coverage_status, band_rank, assertion_visibility
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            coverage_ppm, coverage_status, band_rank, assertion_visibility,
+            w_start, w_end
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         evidence_rows,
     )
