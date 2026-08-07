@@ -1334,7 +1334,17 @@ how it gets broken again.
 
 ## 8. Owner questions
 
-> **🛑 EXECUTION READINESS — the authoritative statement (2026-08-07, Codex round 7).** The sentence below
+> **✅ CODEX APPROVED 2026-08-07, round 9** — `VERDICT: APPROVE`, recorded verbatim in
+> `discovery-v3-bake-plan.CODEX-APPROVAL-R9.md`. Nine rounds; rounds 2–8 returned CHANGES-REQUIRED and
+> found, among much else, that four separate gates were **written but never called** by a real build (the
+> router ingest, the novelty fingerprint gate, the router inside `finalize_build`, and parity disabled on
+> D-17 builds) — plus eight of my own tests that passed without checking anything. Round 9: *"I found no new
+> production-code defect and no remaining un-failable test... I found no remaining production-code
+> blocker."* Every fix is mutation-proven: the defect is re-introduced and the test must go red.
+>
+> The owner actions and run-time records below are **unchanged by that approval** — they are not code.
+>
+> **🛑 EXECUTION READINESS — the authoritative statement (2026-08-07, Codex rounds 7–9).** The sentence below
 > once read "Nothing is blocking any more", which was false and is corrected here rather than deleted, because
 > two review rounds had to point at the contradiction. The four *owner questions* below really are closed by
 > measurement. **The BAKE is not ready to execute as a release-quality run.** Three lists, deliberately
