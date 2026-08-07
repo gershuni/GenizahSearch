@@ -319,11 +319,27 @@ def test_the_routing_modes_match_what_finalize_build_writes():
     from scripts.v3_measure_novelty_reuse import _V3_ROUTING_MODES
 
     src = Path(bds.__file__).read_text(encoding="utf-8")
-    match = re.search(
-        r'\("coverage_routing", "gen2_router" if gen2_router is not None\s*'
-        r'else \("(\w+)" if run_d17 else "(\w+)"\)\)', src)
-    assert match, "could not locate the coverage_routing meta expression"
-    written = {"gen2_router", match.group(1), match.group(2)}
+    # Locate the ("coverage_routing", <expr>) tuple and harvest EVERY string
+    # literal the expression can yield. Formatting-agnostic on purpose: the
+    # previous version pinned one exact single-line shape and broke the moment the
+    # expression grew a fourth alternative and wrapped, which made a real
+    # vocabulary change look like a missing expression.
+    start = src.index('("coverage_routing"')
+    depth = 0
+    end = start
+    for i in range(start, len(src)):
+        if src[i] == "(":
+            depth += 1
+        elif src[i] == ")":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    expr = src[start:end]
+    assert expr.startswith('("coverage_routing"'), (
+        "could not locate the coverage_routing meta expression")
+    written = set(re.findall(r'"([a-z0-9_]+)"', expr)) - {"coverage_routing"}
+    assert written, f"no candidate values found in the writer expression: {expr!r}"
     assert written == set(_V3_ROUTING_MODES), (
         f"the checker's closed vocabulary and the writer disagree: "
         f"writer-only={sorted(written - set(_V3_ROUTING_MODES))}, "

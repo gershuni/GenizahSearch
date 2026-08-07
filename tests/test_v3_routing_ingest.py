@@ -23,6 +23,7 @@ from v3_routing_ingest import (  # noqa: E402
     SURFACE_PARALLEL,
     SURFACE_TO_ROUTING,
     RoutingIngestError,
+    RoutingRegrainError,
     load_router,
     parity_report,
     resolve_routing,
@@ -648,6 +649,297 @@ def _routing_in_built_asset(db_path):
     return {w: (s, r) for w, s, r in rows}, meta
 
 
+def _split_grain_fixture(tmp_path):
+    """A research DB whose work ids are SPLIT (`raw:w1_00`, `raw:w1_01`) while the
+    router only ever scored the collapsed parent (`c_w1`).
+
+    This is the real v3 shape in miniature: gen-2 scored `M:Ytext1000` (39 Bible
+    books as one work); the slim table carries `M:Ytext1000_00 ... _38`.
+
+    The two sub-works are deliberately on OPPOSITE sides of the threshold at their
+    OWN grain -- 300/400 = 0.75 and 40/400 = 0.10 against a 0.2984 cut -- while the
+    collapsed parent is a single `same_work` at 0.75. So inheriting the parent's
+    verdict ships both, and per-work recomputation ships exactly one. Nothing but a
+    real re-grain can produce that split.
+    """
+    import csv as _csv
+
+    import discovery_ids as dids
+
+    tmp_path = Path(tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    research_db = tmp_path / "research.db"
+    conn = sqlite3.connect(str(research_db))
+    conn.executescript(
+        """
+        CREATE TABLE track1_matches (
+          page_id TEXT, sys_id TEXT, work_id TEXT, cat TEXT, genre TEXT, author TEXT,
+          title TEXT, matched_letters INT, best_density REAL, n_spans INT,
+          spans_json TEXT, shadowed_by TEXT, ref_spans_json TEXT
+        );
+        CREATE TABLE pages (
+          page_id TEXT PRIMARY KEY, n_chars INTEGER, text TEXT, provenance TEXT
+        );
+        """
+    )
+    conn.executemany(
+        "INSERT INTO track1_matches VALUES (?,?,?,?,NULL,NULL,NULL,?,?,1,?,NULL,?)",
+        [
+            ("pg1", "s1", "raw:w1_00", "Sefaria", 300, 0.9, "[[0, 300, 0.9]]",
+             '[{"p0":0,"p1":300,"rg0":10,"rg1":310}]'),
+            ("pg1", "s1", "raw:w1_01", "Sefaria", 40, 0.9, "[[0, 40, 0.9]]",
+             '[{"p0":0,"p1":40,"rg0":50,"rg1":90}]'),
+        ],
+    )
+    # `n_chars` MUST be populated: it is the router's own denominator (the RAW
+    # character length), and the re-grainer treats a missing one as undecided
+    # rather than guessing -- so leaving it NULL here halts the build, which is
+    # how this fixture was caught being wrong.
+    conn.execute(
+        "INSERT INTO pages (page_id, n_chars, provenance, text) VALUES ('pg1',400,'htr',?)",
+        (chr(0x05D0) * 400,),
+    )
+    conn.commit()
+    conn.close()
+
+    crosswalk = tmp_path / "crosswalk.json"
+    crosswalk.write_text(
+        json.dumps({"raw:w1_00": "w000001", "raw:w1_01": "w000002"}), encoding="utf-8")
+
+    import build_discovery_sidecar as bds
+
+    approved = tmp_path / "approved.csv"
+    with open(approved, "w", encoding="utf-8-sig", newline="") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=bds.APPROVED_HEADER)
+        writer.writeheader()
+        for wid, title in (("w000001", "Synthetic Book Zero"),
+                           ("w000002", "Synthetic Book One")):
+            row = {h: "" for h in bds.APPROVED_HEADER}
+            row["work_id"] = wid
+            row["owner_verdict"] = "approve"
+            row["candidate_title"] = title
+            row["source_label"] = dids.SOURCE_CORPUS_SEFARIA
+            writer.writerow(row)
+
+    return {"research_db": research_db, "crosswalk": crosswalk, "approved": approved,
+            "out": tmp_path / "out" / "discovery-v3.db"}
+
+
+def _split_router_db(path, *, parent_surface="same_work", parent_cov=0.75):
+    """A router that scored ONLY the collapsed parent, plus the evidence rows the
+    split-grain estimand is computed from (`MAX(matched_letters_legacy)` per
+    `(page_id, ref_work)`)."""
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        "CREATE TABLE coverage_route (page_id TEXT, canonical_work_id TEXT, run_id TEXT, "
+        "page_coverage REAL, matched_letters INT, page_chars INT, shipped INT, surface TEXT)"
+    )
+    # The parent id IS the canonical id, matching the real artifact: verified on
+    # `g_launch3`, `raw_to_can['M:Ytext1000'] == 'M:Ytext1000'`, and the collapsed
+    # parent appears in `coverage_route` under that same id. A fixture keying the
+    # route on a separate `c_*` id would not be the shape being fixed.
+    conn.execute(
+        "INSERT INTO coverage_route VALUES ('pg1','raw:w1','g',?,300,400,?,?)",
+        (parent_cov, 0 if parent_surface == "not_shipped" else 1, parent_surface),
+    )
+    conn.execute("CREATE TABLE coverage_route_meta (run_id TEXT, threshold REAL)")
+    conn.execute("INSERT INTO coverage_route_meta VALUES ('g', 0.2984126984126984)")
+    conn.execute(
+        "CREATE TABLE discovery_claim (claim_id TEXT, page_id TEXT, work_id TEXT, "
+        "canonical_work_id TEXT)"
+    )
+    conn.execute("INSERT INTO discovery_claim VALUES ('cl1','pg1','raw:w1','raw:w1')")
+    conn.execute(
+        "CREATE TABLE discovery_evidence (evidence_id TEXT, claim_id TEXT, "
+        "ref_work TEXT, matched_letters_legacy INT, shadowed_by TEXT)"
+    )
+    # The per-BOOK widths. 300/400 = 0.75 (ships); 40/400 = 0.10 (review).
+    conn.executemany(
+        "INSERT INTO discovery_evidence VALUES (?,'cl1',?,?,NULL)",
+        [("ev1", "raw:w1_00", 300), ("ev2", "raw:w1_01", 40)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_split_grain_regraining_reaches_the_BUILT_ASSET(tmp_path):
+    """Option 4, end to end through the REAL entrypoint, asserted on the built file.
+
+    The router scored only the collapsed parent as ONE `same_work`. Inheriting that
+    verdict would ship BOTH sub-works. Per-work recomputation ships only the one
+    whose own coverage clears the threshold. Reading the emitted SQLite is the only
+    evidence that distinguishes "the re-grain works" from "the re-grain runs".
+    """
+    router_db = tmp_path / "route.db"
+    _split_router_db(router_db)
+
+    fx = _split_grain_fixture(tmp_path / "a")
+    _finalize(fx, tmp_path / "a", gen2_router_evidence_db=str(router_db))
+    routed, meta = _routing_in_built_asset(fx["out"])
+
+    assert routed["w000001"][0] == "shipped", (
+        f"the sub-work at 0.75 coverage should ship: {routed}")
+    assert routed["w000002"] == ("review_only", "gen2_parallel_surface"), (
+        f"the sub-work at 0.10 coverage should be demoted on its OWN coverage, "
+        f"not inherit the parent's same_work: {routed}")
+
+    # The asset must SAY which routing produced it, and that the threshold was
+    # borrowed across grains -- a reader has no build log.
+    assert meta["coverage_routing"] == "gen2_router_split_regrained", meta
+    assert meta["coverage_threshold_grain_calibrated"] == "collapsed_canonical", meta
+    assert meta["coverage_threshold_grain_applied"] == "split_work", meta
+    assert meta["coverage_threshold_source"] == "coverage_route_meta.threshold", meta
+    assert float(meta["coverage_threshold"]) == 0.2984126984126984, meta
+
+
+def test_split_regraining_PRESERVES_not_shipped_instead_of_recomputing_it(tmp_path):
+    """`not_shipped` is an ELIGIBILITY decision, not a coverage verdict.
+
+    Measured on the real artifact: 14,406 of 118,789 `not_shipped` router rows sit
+    ABOVE the threshold, because the surface encodes shadowing plus gen-2's own
+    chronological demotion. So a re-grain that recomputed coverage and compared it
+    to the threshold would SHIP rows gen-2 deliberately declined -- and no
+    monotonicity or wipe-out gate would notice, because it is a different axis.
+
+    Here the parent is `not_shipped` while the sub-work's own coverage is 0.75,
+    comfortably above the cut. It must still be `review_only`.
+    """
+    router_db = tmp_path / "route.db"
+    _split_router_db(router_db, parent_surface="not_shipped", parent_cov=0.75)
+
+    fx = _split_grain_fixture(tmp_path / "a")
+    _finalize(fx, tmp_path / "a", gen2_router_evidence_db=str(router_db))
+    routed, _meta = _routing_in_built_asset(fx["out"])
+
+    assert routed["w000001"] == ("review_only", "gen2_router_not_shipped"), (
+        f"a not_shipped parent must be PRESERVED, never recomputed -- the sub-work "
+        f"clears the threshold on its own coverage and must still not ship: {routed}")
+    assert routed["w000002"] == ("review_only", "gen2_router_not_shipped"), routed
+
+
+def test_split_regraining_reads_the_threshold_from_the_ARTIFACT(tmp_path):
+    """The threshold must come from `coverage_route_meta`, never a literal.
+
+    Truncated variants already exist in this tree (`0.298` as the gen-2 producer's
+    fallback, `0.2984` in this file's own older fixture) and each moves ~90 real
+    rows across the line. So: move the threshold in the INPUT above the sub-work's
+    own coverage and the emitted routing must follow.
+    """
+    router_db = tmp_path / "route.db"
+    _split_router_db(router_db)
+    conn = sqlite3.connect(str(router_db))
+    # 0.9 > 0.75, so the previously-shipping sub-work must now be demoted.
+    conn.execute("UPDATE coverage_route_meta SET threshold = 0.9")
+    conn.commit()
+    conn.close()
+
+    fx = _split_grain_fixture(tmp_path / "a")
+    _finalize(fx, tmp_path / "a", gen2_router_evidence_db=str(router_db))
+    routed, meta = _routing_in_built_asset(fx["out"])
+
+    assert routed["w000001"] == ("review_only", "gen2_parallel_surface"), (
+        f"raising the threshold in the ARTIFACT did not change the emitted routing, "
+        f"so the value is hardcoded somewhere: {routed}")
+    assert float(meta["coverage_threshold"]) == 0.9, meta
+
+
+def test_parity_reports_regrained_rows_apart_from_INDEPENDENTLY_verified_ones(tmp_path):
+    """The per-key parity gate is TAUTOLOGICAL on re-grained rows -- say so in the
+    report rather than letting one total imply otherwise.
+
+    Found adversarially: `assert_assembled_parity` builds `expected_status` from
+    `router["route"]`, and `regrain_router_to_split` MUTATES that same dict in
+    place. So for a re-grained key the gate compares the recomputation against
+    itself. That is self-consistency, and the gate's own docstring advertises
+    non-circularity ("two INDEPENDENT artifacts") -- which is true only for the keys
+    gen-2 actually decided. On the real population that would have been ~138,800 of
+    275,894 rows silently counted as independent agreement.
+
+    So: build with re-graining and require the report to attribute the rows
+    correctly. Both sub-work rows here are re-grained (gen-2 scored only the
+    collapsed parent), so `checked_independent` must be 0 -- and that 0 is the
+    honest number.
+    """
+    router_db = tmp_path / "route.db"
+    _split_router_db(router_db)
+
+    fx = _split_grain_fixture(tmp_path / "a")
+    result = _finalize(fx, tmp_path / "a", gen2_router_evidence_db=str(router_db))
+    parity = result["router_parity"]
+
+    assert parity["checked"] == parity["checked_independent"] + parity["checked_regrained"], parity
+    assert parity["checked_regrained"] > 0, (
+        f"re-graining ran, so some rows MUST be attributed to it: {parity}")
+    assert parity["checked_independent"] == 0, (
+        f"gen-2 scored only the collapsed parent here, so no row is independently "
+        f"verified -- reporting otherwise would overstate the gate: {parity}")
+
+
+def test_split_regraining_REFUSES_an_impossible_coverage(tmp_path):
+    """The coverage sanity bound, proven able to fire.
+
+    Written because a mutation check found it unprovable: deleting the `pcov > 1.0`
+    guard left every other split test green, since no fixture produced an impossible
+    coverage. A guard nothing can trip is decoration.
+
+    Why the bound matters, measured: `matched_letters` is a NORMALIZED Hebrew-letter
+    width while `n_chars` is the RAW character length, so the ratio is structurally
+    capped near 0.84 (max 0.842 over 275,894 real tier-A rows) and is DELIBERATELY
+    mixed-unit -- the threshold was calibrated against that same mismatch. A value
+    above 1.0 therefore means the numerator/denominator pair is no longer the one the
+    threshold describes, e.g. someone "helpfully" normalized the denominator, which
+    silently promotes ~3.7% of rows with no other error signal.
+
+    Here the denominator is shrunk below the numerator (400 -> 100 against a
+    matched width of 300), which is exactly what a wrong denominator looks like.
+    """
+    import build_discovery_sidecar as bds
+
+    router_db = tmp_path / "route.db"
+    _split_router_db(router_db)
+
+    fx = _split_grain_fixture(tmp_path / "a")
+    conn = sqlite3.connect(str(fx["research_db"]))
+    # 300 matched letters over a 100-char page => coverage 3.0, impossible.
+    conn.execute("UPDATE pages SET n_chars = 100 WHERE page_id = 'pg1'")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(
+        (bds.RoutingConflictError, RoutingRegrainError),
+        match="exceeds 1.0",
+    ):
+        _finalize(fx, tmp_path / "a", gen2_router_evidence_db=str(router_db))
+
+
+def test_split_regraining_HALTS_when_a_row_cannot_be_decided(tmp_path):
+    """The undecided halt, proven able to fire.
+
+    Written because a mutation check found it unprovable: removing the halt from
+    `finalize_build` left every other split test GREEN, since no fixture produced an
+    undecided row. A gate nothing can trip is decoration -- this session's own
+    lesson, four times over.
+
+    Here the page carries NO `n_chars`, so there is no denominator and the row's
+    coverage is unknowable. It must HALT rather than default the row to shipped (or
+    silently drop it), because an unrouted row that keeps the ingest default is
+    exactly the silent bypass the router exists to prevent.
+    """
+    import build_discovery_sidecar as bds
+
+    router_db = tmp_path / "route.db"
+    _split_router_db(router_db)
+
+    fx = _split_grain_fixture(tmp_path / "a")
+    conn = sqlite3.connect(str(fx["research_db"]))
+    conn.execute("UPDATE pages SET n_chars = NULL WHERE page_id = 'pg1'")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(bds.RoutingConflictError, match="no routing decision"):
+        _finalize(fx, tmp_path / "a", gen2_router_evidence_db=str(router_db))
+
+
 def test_finalize_build_REFUSES_to_default_to_the_legacy_cliff(tmp_path):
     """THE round-3 fix. Silently defaulting is what the real build used to do.
 
@@ -679,7 +971,11 @@ def test_the_router_reaches_the_BUILT_ASSET_and_the_legacy_cliff_does_not(tmp_pa
     )
 
     fx_router = _v3_finalize_fixture(tmp_path / "a")
-    _finalize(fx_router, tmp_path / "a", gen2_router_evidence_db=str(router_db))
+    # COLLAPSED grain deliberately: this fixture's work ids ARE the router's keys,
+    # so there is nothing to re-grain. Split-grain re-graining has its own test
+    # (`test_split_grain_regraining_reaches_the_BUILT_ASSET`).
+    _finalize(fx_router, tmp_path / "a", gen2_router_evidence_db=str(router_db),
+              regrain_split_grain=False)
     routed, meta_routed = _routing_in_built_asset(fx_router["out"])
 
     fx_legacy = _v3_finalize_fixture(tmp_path / "b")
@@ -849,7 +1145,14 @@ def test_per_key_parity_catches_a_mis_demotion_that_the_wipeout_guard_misses(tmp
         evidence_rows, router, claim_rows, routing_status_idx=7, claim_id_idx=1,
         evidence_source_idx=3, track1_source="track1_direct",
         raw_work_by_minted=raw_by_minted)
-    assert report == {"checked": 10, "mismatches": 0}
+    assert report["checked"] == 10
+    assert report["mismatches"] == 0
+    # No re-graining ran here, so every checked row is INDEPENDENT verification
+    # (gen-2 decided it; the builder emitted it). The split is reported because
+    # `checked` alone would otherwise read as N rows of independent agreement even
+    # when half the population was compared against the re-grainer's own output.
+    assert report["checked_independent"] == 10, report
+    assert report["checked_regrained"] == 0, report
 
     # Nine wrongly demoted, ONE shipping -> the wipe-out guard is satisfied, the
     # per-key check is not.
@@ -922,7 +1225,9 @@ def test_parity_runs_on_a_D17_BUILD_and_accepts_only_audited_demotions(tmp_path)
         [("cl1", "pg1", "raw:w1", "c_w1"), ("cl2", "pg1", "raw:w2", "c_w2")],
     )
     fx = _v3_finalize_fixture(tmp_path)
-    _finalize(fx, tmp_path, gen2_router_evidence_db=str(router_db))
+    # COLLAPSED grain: this fixture's work ids are the router's own keys.
+    _finalize(fx, tmp_path, gen2_router_evidence_db=str(router_db),
+              regrain_split_grain=False)
 
     routed, _meta = _routing_in_built_asset(fx["out"])
     conn = sqlite3.connect(str(fx["out"]))
@@ -1006,7 +1311,11 @@ def test_parity_rejects_a_demotion_that_no_audit_row_justifies(tmp_path):
         [tuple(row)], router, claim_rows,
         d17_audit_rows=[{"decision": "demoted", "page_id": P1,
                          "demoted_work_id": "w000001"}], **kwargs)
-    assert ok == {"checked": 1, "mismatches": 0}
+    assert ok["checked"] == 1
+    assert ok["mismatches"] == 0
+    # No re-graining in this fixture, so the checked row is independent verification.
+    assert ok["checked_independent"] == 1, ok
+    assert ok["checked_regrained"] == 0, ok
 
 
 def test_parity_rejects_an_audit_row_no_asset_row_reflects(tmp_path):

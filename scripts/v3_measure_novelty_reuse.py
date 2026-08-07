@@ -118,7 +118,18 @@ _SQLITE_SIDECAR_SUFFIXES = ("-journal", "-wal", "-shm")
 
 # The COMPLETE set of `meta.coverage_routing` values `finalize_build` writes. Kept in
 # step with the writer by `test_the_routing_modes_match_what_finalize_build_writes`.
-_V3_ROUTING_MODES = frozenset({"gen2_router", "lever1_cliff", "none"})
+# The CLOSED set of values `finalize_build` writes to `meta.coverage_routing`.
+# `gen2_router_split_regrained` was added 2026-08-07 with option 4: gen-2's router
+# decision OVERLAID with split-grain (book/tractate) decisions for the keys it only
+# scored at the collapsed grain. It is a distinct population from `gen2_router` --
+# 141,358 more tier-A rows carry a decision -- so it must be a distinct label, not
+# folded into the old one. Pinned by
+# `test_the_routing_modes_match_what_finalize_build_writes`, which derives the
+# writer's alternatives from `finalize_build`'s own meta expression and fails if
+# that expression and this set disagree.
+_V3_ROUTING_MODES = frozenset({
+    "gen2_router", "gen2_router_split_regrained", "lever1_cliff", "none",
+})
 
 
 def _hash_all(inputs: Dict[str, str]) -> Dict[str, str]:

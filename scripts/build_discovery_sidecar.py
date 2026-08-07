@@ -6668,6 +6668,18 @@ def finalize_build(
     # The ONLY way to run the legacy coverage cliff on a v3 build. Named, like the
     # novelty waiver, so it cannot be reached by omission -- see the guard below.
     allow_lever1_coverage: bool = False,
+    # SPLIT-GRAIN RE-GRAINING (option 4, owner-approved 2026-08-07). Default TRUE
+    # because on the real v3 population the build CANNOT COMPLETE without it: gen-2
+    # scored collapsed canonical ids, so 138,800 of 275,894 tier-A rows have no
+    # decision at their own key and the wipe-out guard halts. A default of False
+    # would make the documented v3 path a build that always fails.
+    #
+    # It is still a named parameter, and set False it restores the exact
+    # pre-re-grain behaviour -- which is what the v2-population fixtures and the
+    # existing router tests exercise, and what a caller deliberately baking at the
+    # COLLAPSED grain would want. Whichever path runs is recorded in `meta`
+    # (`coverage_threshold_grain_applied`), so a reader needs no build log.
+    regrain_split_grain: bool = True,
     novelty_input_fingerprints: Optional[Dict[str, str]] = None,
     # The ONLY way to load a verdict cache without the fingerprint gate. Named
     # for what it actually does, so it cannot be passed absent-mindedly and shows
@@ -6815,9 +6827,13 @@ def finalize_build(
     # loud that it wants the legacy cliff.
     # ---------------------------------------------------------------------
     gen2_router = None
+    regrain_report = None
     if gen2_router_evidence_db is not None:
         from v3_routing_ingest import load_router as _load_gen2_router
         gen2_router = _load_gen2_router(str(gen2_router_evidence_db))
+        # NOTE: the split-grain re-grain runs LATER, once `conn_research` is open
+        # (it needs `pages.n_chars` and the tier-A key list from the research DB).
+        # Search for `regrain_router_to_split` below.
     if run_d17 and gen2_router is None and not allow_lever1_coverage:
         raise RoutingConflictError(
             "coverage routing is unspecified: D-17 is active (dates were supplied) but "
@@ -6936,6 +6952,59 @@ def finalize_build(
             q2_collection_with_arabic=q2_collection_with_arabic,
             tier_a_row_count=tier_a_row_count,
         )
+
+        # SPLIT-GRAIN RE-GRAINING (option 4, owner-approved 2026-08-07). Runs
+        # HERE: after every input gate (so a bad input still fails while prior
+        # artifacts are untouched) and before any mutation, but inside the
+        # `conn_research` scope it needs.
+        #
+        # gen-2 scored COLLAPSED canonical ids (`M:Ytext1000` = 39 Bible books as
+        # ONE work); the v3 slim table carries the SPLIT ids. So 138,800 of
+        # 275,894 tier-A rows have no decision at their own key and the wipe-out
+        # guard halts -- correctly. This OVERLAYS a decision for each of them,
+        # computed with the router's OWN estimand and OWN threshold. Full
+        # rationale and the three hazards it closes:
+        # `v3_routing_ingest.regrain_router_to_split`.
+        #
+        # OVERLAY, NEVER REPLACE. Every key gen-2 already decided keeps its
+        # verdict verbatim (`kept_exact` = 134,536), so this cannot move a row the
+        # 400-card grading measured. A full recompute would instead move 6,276
+        # rows out of `same_work` AND 2,725 into it, and would discard gen-2's
+        # `not_shipped` -- which is shadowing PLUS gen-2's own chronological
+        # demotion, a signal no coverage recompute can reproduce.
+        if gen2_router is not None and regrain_split_grain:
+            from v3_routing_ingest import (
+                load_split_grain_coverage as _load_split_cov,
+                regrain_router_to_split as _regrain,
+            )
+            _split_max = _load_split_cov(str(gen2_router_evidence_db))
+            # `pages.n_chars` is the RAW character length, and that is
+            # DELIBERATE. `matched_letters` is a NORMALIZED Hebrew-letter width,
+            # so `page_coverage` is a mixed-unit ratio ~23% "too low" -- and the
+            # threshold was calibrated against that same mismatch. Feeding the
+            # builder's own `compute_page_coverage` (normalized denominator) into
+            # this threshold over-promotes 3.7% of tier-A rows with NO error
+            # signal. Measured 2026-08-07; do NOT "correct" this to
+            # `norm_stream_letter_count`. This file has already shipped one
+            # field-collision bug of exactly this shape (135-07, `density` fed in
+            # as `coverage` -- see `apply_lever1_coverage`).
+            _page_chars = {
+                p: n for p, n in conn_research.execute(
+                    "SELECT page_id, n_chars FROM pages")
+            }
+            _tier_a_keys = conn_research.execute(
+                "SELECT page_id, work_id FROM track1_matches "
+                "WHERE shadowed_by IS NULL"
+            ).fetchall()
+            regrain_report = _regrain(
+                gen2_router, _split_max, _page_chars, _tier_a_keys)
+            if regrain_report["undecided"]:
+                raise RoutingConflictError(
+                    f"split-grain re-graining left {regrain_report['undecided']} "
+                    f"tier-A row(s) with no routing decision -- they would keep the "
+                    f"ingest default and silently bypass coverage routing. Halting "
+                    f"rather than defaulting."
+                )
 
         # Every gate passed -- ONLY NOW is it safe to mutate: delete any
         # prior output .db, create the output directory, mint/persist
@@ -7179,9 +7248,42 @@ def finalize_build(
             # reader has no build log, so without this the asset cannot say which
             # one it contains. `gen2_router` (not the flag) drives it: intent is not
             # evidence.
-            ("coverage_routing", "gen2_router" if gen2_router is not None
-             else ("lever1_cliff" if run_d17 else "none")),
+            ("coverage_routing", (
+                "gen2_router_split_regrained" if regrain_report is not None
+                else ("gen2_router" if gen2_router is not None
+                      else ("lever1_cliff" if run_d17 else "none")))),
         ]
+        # SPLIT-GRAIN RE-GRAINING provenance (option 4). The honesty-critical rows:
+        # the threshold was calibrated at the COLLAPSED grain and APPLIED at the
+        # split grain, and the asset must say so rather than imply a validated
+        # calibration at the grain it shipped. Measured basis for reusing it: of the
+        # 1,395 graded claims the threshold was fitted on, 340 (24.2%) fall on the
+        # three works v3 splits; refitting on the grain-clean 1,055 gives 0.2531, so
+        # reusing 0.2984 costs 0.47pp accuracy there and is the CONSERVATIVE choice
+        # (the refit would ship 10,224 MORE rows). Defensible -- but a JUDGEMENT,
+        # not a calibration, which is exactly what these rows record.
+        if regrain_report is not None:
+            from v3_routing_ingest import (
+                REGRAIN_META_APPLIED_GRAIN as _RM_APPLIED,
+                REGRAIN_META_CALIBRATED_GRAIN as _RM_CALIB,
+                REGRAIN_META_SOURCE as _RM_SRC,
+                REGRAIN_META_THRESHOLD as _RM_THR,
+            )
+            meta_rows.extend([
+                (_RM_THR, repr(regrain_report["threshold"])),
+                (_RM_CALIB, regrain_report["threshold_grain_calibrated"]),
+                (_RM_APPLIED, regrain_report["threshold_grain_applied"]),
+                # WHERE the threshold came from -- read from the router's own meta
+                # row, never a literal. Truncated variants (0.298, 0.2984) exist in
+                # the tree and each moves 90 rows across the line.
+                (_RM_SRC, "coverage_route_meta.threshold"),
+                ("coverage_regrain_kept_exact", str(regrain_report["kept_exact"])),
+                ("coverage_regrain_recomputed", str(
+                    regrain_report["recomputed_same_work"]
+                    + regrain_report["recomputed_parallel"])),
+                ("coverage_regrain_disagrees_with_parent",
+                 str(regrain_report["disagrees_with_parent"])),
+            ])
         # v2 provenance (bake plan §7 gate 11, Codex #B2/#5): record the
         # verified SHA-256 of every supplied hash-pinned input in meta.
         if canonical_merges_sha256 is not None:
@@ -7323,6 +7425,14 @@ def finalize_build(
         "band_precision_rows": len(bp_rows),
         "artifact_masking_issues": artifact_issue_count,
         "evidence_id_collisions": result.get("evidence_id_collisions", 0),
+        # SPLIT-GRAIN RE-GRAINING (option 4) and the parity gate's HONEST split.
+        # `router_parity.checked_regrained` is compared against the re-grainer's own
+        # output (same dict), so it is self-consistency; only
+        # `checked_independent` is cross-artifact verification. Surfaced here so the
+        # build summary states both rather than one total that reads like the whole
+        # population was independently verified.
+        "router_parity": result.get("router_parity"),
+        "coverage_regrain": regrain_report,
         "manifest_path": str(manifest_path),
         "db_path": str(out_path),
     }

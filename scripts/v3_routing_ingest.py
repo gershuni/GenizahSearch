@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -85,6 +86,97 @@ SURFACE_TO_ROUTING: Dict[str, Tuple[str, Optional[str]]] = {
 
 class RoutingIngestError(RuntimeError):
     """Fail-closed error ingesting the router decision."""
+
+
+class RoutingRegrainError(RoutingIngestError):
+    """Fail-closed error re-graining the router decision to the split grain."""
+
+
+# ---------------------------------------------------------------------------
+# SPLIT-GRAIN RE-GRAINING (option 4, owner-approved 2026-08-07)
+# ---------------------------------------------------------------------------
+#
+# THE PROBLEM, measured. gen-2's router scored COLLAPSED canonical ids -- most
+# consequentially `M:Ytext1000`, which is all 39 books of the Bible as ONE work
+# (its own handoff names this as the over-collapsed case). The v3 slim table
+# carries the SPLIT ids (`M:Ytext1000_00` = Genesis ... `_38`), i.e. book /
+# tractate grain. So 141,358 of 275,894 tier-A rows (51.2%) have no decision at
+# their own key and the wipe-out guard halts -- correctly.
+#
+# WHY NOT INHERIT THE PARENT'S VERDICT. The parent's `page_coverage` is computed
+# from MAX(matched_letters) over the WHOLE collapsed group, so it describes "this
+# page overlaps somewhere in the 39-book Bible", not "this page is a copy of
+# Genesis". Measured: inheritance would over-promote 6,233 rows (parent
+# `same_work`, own-grain coverage below threshold), 46.4% of them below HALF the
+# threshold. Coverage NEVER rises when the unit narrows (verified: 0 of 138,800
+# comparable rows), so the error is strictly one-way -- over-promotion.
+#
+# WHAT THIS DOES INSTEAD. Recompute the router's OWN estimand at the split grain
+# and apply the router's OWN threshold. Two properties make that legitimate, both
+# measured on the real artifacts rather than argued:
+#
+#  1. THE ESTIMAND IS REACHABLE AT SPLIT GRAIN. The producer
+#     (`gen2_coverage_router.py` L19) defines the calibrated feature as
+#     "MAX(matched_letters_legacy) over ALL evidence of the group / page n_chars",
+#     NOT shadow-filtered. `coverage_route.matched_letters` equals that MAX on
+#     354,528/354,528 rows (100.000%). And `discovery_evidence.ref_work` DOES
+#     carry all 39 book-level ids even though `discovery_claim.work_id` collapses
+#     them -- so grouping evidence by `(page_id, ref_work)` yields the same
+#     estimand per book, available for 275,894/275,894 tier-A rows.
+#  2. IT REPRODUCES GEN-2 WHERE THE GRAINS AGREE. Applied to rows gen-2 scored at
+#     the same key, this reproduces its surface on 134,512/134,536 (99.982%). All
+#     24 exceptions are one-way (`same_work` -> `parallel`) and each is a case
+#     where a DIFFERENT `ref_work` under the same canonical id carried a wider
+#     span, so gen-2's group MAX exceeded this work's own. Scoring each work on
+#     its own widest span is the intended change.
+#
+# THREE HAZARDS THIS CLOSES BY CONSTRUCTION, each one measured:
+#
+#  A. `not_shipped` IS NOT A COVERAGE VERDICT. Cross-tab over all 354,528 router
+#     rows: `same_work` is exactly coverage>=T and `parallel` exactly coverage<T,
+#     but `not_shipped` carries 14,406 rows ABOVE the threshold. It is an upstream
+#     eligibility decision (111,144 shadowed + 24,720 `later_shared_text`; it maps
+#     to `routing_status='review_only'` on 121,114/121,114 gen-2 claims). So a
+#     `not_shipped` key is PRESERVED verbatim and never recomputed. Recomputing it
+#     would silently ship rows gen-2 declined, and no existing gate checks that
+#     axis -- it is not a monotonicity violation, it is a different axis.
+#  B. MERGES ARE A SECOND RE-GRAINING, INDEPENDENT OF `_NN`. `raw_to_can` holds 16
+#     alias entries where raw != canonical -- owner-ratified canonical MERGES
+#     (Jaccard 0.978-1.000, all `owner_verdict: approve`), e.g.
+#     `M:Ytext273001 -> REF2:sef_tur_orach_chaim`. These carry NO `_NN` suffix, so
+#     a suffix-stripping-only reconciliation misses them: that is exactly the
+#     "2,558 rows over 16 works the router never scored" which was a JOIN BUG in
+#     my gap measurement, not a gap. Resolving exact -> `_NN` parent -> canonical
+#     alias leaves ZERO unresolved. Scoring an alias side independently would
+#     split one owner-approved work into two, and `discovery_identification` is
+#     `UNIQUE (sys_id, canonical_work_id)` -- so it corrupts the identification
+#     grain, not merely a label. Alias rows therefore keep the CANONICAL decision.
+#  C. THE UNITS ARE MISMATCHED ON PURPOSE. `matched_letters` is a NORMALIZED
+#     Hebrew-letter width; `pages.n_chars` is the RAW character length (verified
+#     400/400 raw, 0/400 normalized; ratio p50 0.767). So every coverage value is
+#     ~23% "too low" -- and the threshold was calibrated against that same
+#     mismatched ratio. Numerator and denominator must stay mismatched TOGETHER:
+#     "correcting" the denominator while keeping the frozen threshold flips 3.9%
+#     of rows to `same_work` with no error signal. Never normalize here.
+#
+# THE THRESHOLD IS REUSED, NOT RE-DERIVED, AND THAT IS RECORDED. It was calibrated
+# at the COLLAPSED grain on 1,395 graded claims, of which 340 (24.2%) fall on the
+# three works v3 splits. Refitting on the grain-clean 1,055 gives 0.2531 -- so
+# reusing 0.2984 costs 0.47pp accuracy on those rows and is the CONSERVATIVE
+# choice (the refit would ship 10,224 MORE rows). Reuse is therefore defensible,
+# but it is a JUDGEMENT, not a validated calibration at this grain, and
+# `regrain_router_to_split` records both grains in its report so the artifact
+# cannot imply otherwise.
+
+# The re-grain decision's provenance, recorded in `meta` so a reader needs no
+# build log. Keys are meta row names; see `docs/specs/discovery-v3-bake-plan.md`.
+REGRAIN_META_CALIBRATED_GRAIN = "coverage_threshold_grain_calibrated"
+REGRAIN_META_APPLIED_GRAIN = "coverage_threshold_grain_applied"
+REGRAIN_META_THRESHOLD = "coverage_threshold"
+REGRAIN_META_SOURCE = "coverage_threshold_source"
+
+GRAIN_COLLAPSED = "collapsed_canonical"
+GRAIN_SPLIT = "split_work"
 
 
 def _ro_uri(db_path) -> str:
@@ -178,6 +270,235 @@ def load_router(evidence_db: str) -> Dict:
     return {"route": route, "raw_to_can": raw_to_can, "meta": meta, "counts": counts}
 
 
+_SPLIT_SUFFIX = re.compile(r"^(.*)_(\d+)$")
+
+
+def _router_threshold(router: Dict) -> float:
+    """The router's OWN threshold, read from its meta row. NEVER a literal.
+
+    Measured reason this is enforced rather than trusted: truncated variants of
+    this value already exist in the tree (`0.298` as the producer's fallback,
+    `0.2984` in a test fixture), and either moves 90 rows across the line versus
+    the artifact's exact 0.2984126984126984.
+    """
+    meta = router.get("meta") or {}
+    # Accept either column name. The real `g_launch3` artifact calls it
+    # `threshold`; `parity_report` already reads `meta.get("t") or
+    # meta.get("threshold")`, so a second, stricter contract here would reject an
+    # input the rest of the module accepts.
+    raw = meta.get("threshold")
+    if raw is None:
+        raw = meta.get("t")
+    if raw is None:
+        raise RoutingRegrainError(
+            "coverage_route_meta carries neither `threshold` nor `t` -- refusing to "
+            "re-grain a routing decision against an unknown cut"
+        )
+    try:
+        t = float(raw)
+    except (TypeError, ValueError):
+        raise RoutingRegrainError(
+            "coverage_route_meta.threshold is not a number -- refusing to guess it"
+        ) from None
+    if not (0.0 < t < 1.0):
+        raise RoutingRegrainError(
+            f"coverage_route_meta.threshold is out of range ({t!r}) -- a coverage "
+            f"cut must lie strictly between 0 and 1"
+        )
+    return t
+
+
+def load_split_grain_coverage(evidence_db: str) -> Dict[Tuple[str, str], int]:
+    """`(page_id, ref_work) -> MAX(matched_letters_legacy)`, the producer's estimand.
+
+    Grouped by `discovery_evidence.ref_work` rather than `discovery_claim.work_id`,
+    because `ref_work` carries the BOOK-level ids (all 39 under `M:Ytext1000`)
+    while `work_id` collapses them -- that asymmetry is what makes the split grain
+    computable at all.
+
+    Deliberately NOT shadow-filtered, matching `gen2_coverage_router.py`'s
+    "over ALL evidence of the group ... NOT shadow-filtered". Filtering here would
+    compute a different quantity from the one the threshold was fitted on.
+    """
+    conn = sqlite3.connect(_ro_uri(evidence_db), uri=True)
+    try:
+        conn.execute("PRAGMA cache_size=-400000")
+        best: Dict[Tuple[str, str], int] = {}
+        for page_id, ref_work, ml in conn.execute(
+            "SELECT cl.page_id, e.ref_work, e.matched_letters_legacy "
+            "FROM discovery_claim cl JOIN discovery_evidence e ON e.claim_id = cl.claim_id"
+        ):
+            if ml is None or ref_work is None or page_id is None:
+                continue
+            key = (page_id, ref_work)
+            if ml > best.get(key, -1):
+                best[key] = ml
+    finally:
+        conn.close()
+    if not best:
+        raise RoutingRegrainError(
+            "no (page_id, ref_work) coverage groups could be built from the evidence "
+            "DB -- refusing to re-grain against an empty estimand"
+        )
+    return best
+
+
+def regrain_router_to_split(
+    router: Dict, split_max: Dict[Tuple[str, str], int],
+    page_chars: Dict[str, int], tier_a_keys,
+) -> Dict:
+    """ADD split-grain decisions to `router["route"]`, in place, and report.
+
+    `tier_a_keys` is the iterable of `(page_id, raw_work_id)` pairs the builder will
+    actually ingest (tier A = unshadowed). Every one of them must end up with a
+    decision at its OWN key, so `resolve_routing` finds it without any caller
+    needing to know re-graining happened. That is the whole point: the entry is
+    written into the SAME dict under the SAME shape, so `resolve_routing`,
+    `apply_router_routing` and `assert_assembled_parity` are untouched.
+
+    `page_chars` is `pages.page_id -> n_chars`, the RAW character length. Do not
+    normalize it (hazard C above).
+
+    Resolution order per key, and why each step exists:
+      1. EXACT `(page_id, raw_work_id)` already in the route -- gen-2 scored this
+         very key; keep its decision verbatim, recompute nothing.
+      2. `not_shipped` at the resolved key -> PRESERVE (hazard A: eligibility, not
+         coverage).
+      3. CANONICAL ALIAS (`raw_to_can[w] != w`) -> keep the canonical decision
+         (hazard B: splitting an owner-ratified merge corrupts the identification
+         grain).
+      4. Otherwise RECOMPUTE from this work's own MAX and the router's own
+         threshold, with `>=` (matching the producer; 3 rows sit exactly at T).
+
+    A key that cannot be decided by any step is counted in `undecided` and left
+    absent -- the caller's wipe-out guard must then halt. Defaulting here is how a
+    silent re-derivation returns.
+    """
+    threshold = _router_threshold(router)
+    route = router["route"]
+    raw_to_can = router.get("raw_to_can") or {}
+
+    # The keys this call ADDS, so `assert_assembled_parity` can report them
+    # separately from the ones gen-2 decided. Without this the parity gate is
+    # TAUTOLOGICAL on them: it builds `expected_status` from `router["route"]`,
+    # which is the very dict mutated below, so a re-grained row is compared
+    # against the recomputation itself. That is self-consistency, not independent
+    # verification, and the gate's docstring advertises non-circularity -- so the
+    # two populations must be counted apart rather than summed into one number
+    # that reads like 275,894 rows of independent agreement.
+    router.setdefault("regrained_keys", set())
+
+    report = {
+        "threshold": threshold,
+        "threshold_grain_calibrated": GRAIN_COLLAPSED,
+        "threshold_grain_applied": GRAIN_SPLIT,
+        "considered": 0,
+        "kept_exact": 0,
+        "kept_not_shipped": 0,
+        "kept_canonical_alias": 0,
+        "recomputed_same_work": 0,
+        "recomputed_parallel": 0,
+        "undecided": 0,
+        "undecided_examples": [],
+        # Rows whose recomputed surface DISAGREES with the collapsed parent's --
+        # the population inheriting the parent verdict would have got wrong.
+        "disagrees_with_parent": 0,
+        "added": 0,
+    }
+
+    for page_id, raw_work in tier_a_keys:
+        report["considered"] += 1
+        key = (page_id, raw_work)
+
+        if key in route:
+            report["kept_exact"] += 1
+            continue
+
+        # Which router key does this row belong to, if any?
+        parent_key = None
+        m = _SPLIT_SUFFIX.match(raw_work)
+        if m and (page_id, m.group(1)) in route:
+            parent_key = (page_id, m.group(1))
+        alias_key = None
+        can = raw_to_can.get(raw_work)
+        if can is not None and can != raw_work:
+            if (page_id, can) in route:
+                alias_key = (page_id, can)
+            else:
+                m2 = _SPLIT_SUFFIX.match(can)
+                if m2 and (page_id, m2.group(1)) in route:
+                    alias_key = (page_id, m2.group(1))
+
+        anchor = parent_key or alias_key
+        if anchor is None:
+            report["undecided"] += 1
+            if len(report["undecided_examples"]) < 5:
+                # Opaque ids only (D-25).
+                report["undecided_examples"].append(
+                    {"page_id": page_id, "work_id": raw_work}
+                )
+            continue
+
+        anchor_surface, anchor_pcov, anchor_shipped = route[anchor]
+
+        # (2) eligibility, not coverage -- never recomputed.
+        if anchor_surface == SURFACE_NOT_SHIPPED:
+            route[key] = (SURFACE_NOT_SHIPPED, anchor_pcov, anchor_shipped)
+            router["regrained_keys"].add(key)
+            report["kept_not_shipped"] += 1
+            report["added"] += 1
+            continue
+
+        # (3) an owner-ratified merge keeps the canonical decision.
+        if parent_key is None and alias_key is not None:
+            route[key] = (anchor_surface, anchor_pcov, anchor_shipped)
+            router["regrained_keys"].add(key)
+            report["kept_canonical_alias"] += 1
+            report["added"] += 1
+            continue
+
+        # (4) recompute this work's OWN coverage.
+        n_chars = page_chars.get(page_id)
+        own_max = split_max.get(key)
+        if not n_chars or own_max is None:
+            report["undecided"] += 1
+            if len(report["undecided_examples"]) < 5:
+                report["undecided_examples"].append(
+                    {"page_id": page_id, "work_id": raw_work}
+                )
+            continue
+        pcov = own_max / n_chars
+        # SANITY BOUND. `matched_letters` is a NORMALIZED Hebrew-letter width and
+        # `n_chars` is the RAW character length, so this ratio is structurally
+        # bounded well below 1.0 (measured: max 0.842 over 275,894 tier-A rows,
+        # and 0 rows with matched_letters > n_chars). A value above 1.0 therefore
+        # means the numerator and denominator are no longer the pair the threshold
+        # was calibrated on -- e.g. someone "helpfully" normalized the
+        # denominator, which silently promotes ~3.7% of rows with no error signal.
+        # Without this, such a defect emits impossible coverage and every other
+        # gate accepts it. Fail loudly instead; see also the paired
+        # `n_chars == len(text)` assertion in the bake plan's gate list.
+        if pcov > 1.0:
+            raise RoutingRegrainError(
+                f"recomputed split-grain coverage exceeds 1.0 ({pcov:.4f}) -- the "
+                f"numerator and denominator are not the pair the threshold was "
+                f"calibrated on. Refusing to route on an impossible coverage. "
+                f"(counts only, D-25: matched={own_max}, denominator={n_chars})"
+            )
+        surface = SURFACE_SAME_WORK if pcov >= threshold else SURFACE_PARALLEL
+        route[key] = (surface, pcov, 1)
+        router["regrained_keys"].add(key)
+        report["added"] += 1
+        if surface == SURFACE_SAME_WORK:
+            report["recomputed_same_work"] += 1
+        else:
+            report["recomputed_parallel"] += 1
+        if surface != anchor_surface:
+            report["disagrees_with_parent"] += 1
+
+    return report
+
+
 def resolve_routing(
     page_id: str, work_id: str, router: Dict
 ) -> Tuple[Optional[str], Optional[str], Optional[float]]:
@@ -186,11 +507,21 @@ def resolve_routing(
     Returns `(None, None, None)` when the router has no decision for the pair --
     the caller must treat that as a HALT condition, not a default. Defaulting is
     how a silent re-derivation creeps back in.
+
+    OWN KEY FIRST (discovery-v3 split-grain re-graining). `regrain_router_to_split`
+    writes a decision under the row's OWN `(page_id, raw_work_id)`, and a split id
+    like `M:Ytext1000_26` is deliberately absent from `raw_to_can` -- gen-2 never
+    had it. So an exact own-key hit is honoured BEFORE the canonical translation;
+    without this, every re-grained row would resolve to `None` and the wipe-out
+    guard would halt on a decision that had in fact been made. The canonical path
+    is unchanged for every key the re-grainer did not touch.
     """
-    can_id = router["raw_to_can"].get(work_id)
-    if can_id is None:
-        return (None, None, None)
-    entry = router["route"].get((page_id, can_id))
+    entry = router["route"].get((page_id, work_id))
+    if entry is None:
+        can_id = router["raw_to_can"].get(work_id)
+        if can_id is None:
+            return (None, None, None)
+        entry = router["route"].get((page_id, can_id))
     if entry is None:
         return (None, None, None)
     surface, pcov, _shipped = entry
@@ -333,6 +664,11 @@ def assert_assembled_parity(
 
     checked = 0
     mismatches = 0
+    # Split the total: `checked_independent` is the only part that is genuine
+    # cross-artifact verification (gen-2 decided it, the builder emitted it).
+    # `checked_regrained` compares the re-grainer's own output against itself.
+    checked_independent = 0
+    checked_regrained = 0
     for row in evidence_rows:
         if row[evidence_source_idx] != track1_source:
             continue
@@ -344,14 +680,35 @@ def assert_assembled_parity(
             )
         page_id, minted_work = pair
         raw = raw_work_by_minted.get(minted_work)
-        can_id = router["raw_to_can"].get(raw) if raw else None
-        want = expected_status.get((page_id, can_id)) if can_id else None
+        # OWN KEY FIRST, mirroring `resolve_routing`: a re-grained split row's
+        # decision lives under its own raw id, which is absent from `raw_to_can`.
+        # Reading only the canonical translation here would report every
+        # re-grained row as unrouted -- a parity gate failing on the rows it was
+        # extended to cover.
+        resolved_key = (page_id, raw) if raw else None
+        want = expected_status.get(resolved_key) if resolved_key else None
+        if want is None:
+            can_id = router["raw_to_can"].get(raw) if raw else None
+            if can_id:
+                resolved_key = (page_id, can_id)
+                want = expected_status.get(resolved_key)
+            else:
+                resolved_key = None
         if want is None:
             raise RoutingIngestError(
                 "an assembled track1_direct row has no router decision for its "
                 "(page, canonical work) pair -- it would ship unrouted"
             )
         checked += 1
+        # WHICH population this row belongs to. A re-grained key's `expected_status`
+        # was written by `regrain_router_to_split` into the SAME dict this gate
+        # reads, so comparing them is SELF-CONSISTENCY, not the independent
+        # cross-artifact verification this gate's docstring advertises. Counted
+        # apart so `checked` is never read as N rows of independent agreement.
+        if resolved_key in (router.get("regrained_keys") or ()):
+            checked_regrained += 1
+        else:
+            checked_independent += 1
         got = row[routing_status_idx]
         if got == want:
             continue
@@ -399,7 +756,16 @@ def assert_assembled_parity(
             "zero assembled track1_direct rows were compared, so parity verified "
             "nothing -- a gate that passes over an empty population is a false green"
         )
-    return {"checked": checked, "mismatches": 0}
+    return {
+        "checked": checked,
+        "mismatches": 0,
+        # Reported apart so `checked` is never read as N rows of INDEPENDENT
+        # agreement. Only `checked_independent` is that; `checked_regrained` is
+        # self-consistency, because `regrain_router_to_split` wrote those
+        # `expected_status` entries into the same dict this gate reads.
+        "checked_independent": checked_independent,
+        "checked_regrained": checked_regrained,
+    }
 
 
 def assert_emitted_parity(report: Dict, router: Dict) -> None:
