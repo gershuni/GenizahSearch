@@ -968,12 +968,16 @@ remains deferred. The prohibition above was written when both stages looked like
 
 ## Amendment 2026-08-07 (E) — the COMPLETE `routing_reason` vocabulary
 
-**This section is the authoritative list.** §1.1's enum line and §1.3's DDL show the v1 four for
-historical continuity; four more have been added by dated amendment since, and all eight are emitted by
-`scripts/build_discovery_sidecar.py::create_schema` today. Codex round 5 found that a consumer validating
-against the v1 four would **reject a real router-produced artifact**, so the full list is stated here and
-pinned by `tests/test_v3_research_db.py::test_the_schema_DOC_lists_every_routing_reason_the_DDL_accepts`
-— derived from `discovery_ids.ROUTING_REASONS` and the live DDL, not from matching words in prose.
+**This section is the authoritative list**, and §1.1's enum line and §1.3's DDL now carry **all eight**
+values too, matching `scripts/build_discovery_sidecar.py::create_schema`. (History, since two review rounds
+turned on it: the v1 contract had four; `later_shared_text` and `low_coverage` were added in v2; the two
+`gen2_*` router reasons in v3. Codex round 5 found a consumer validating against the v1 four would **reject
+a real router-produced artifact**; round 6 found that annotating the outdated SQL with a warning was not
+enough, since "a comment does not make the SQL safe for a consumer to implement or copy" — so the DDL
+itself was corrected.) Pinned by
+`tests/test_v3_research_db.py::test_the_schema_DOC_lists_every_routing_reason_the_DDL_accepts`, which
+compares this table's parsed rows, §1.3's CHECK, the live DDL's CHECK and
+`discovery_ids.ROUTING_REASONS` against each other — never by matching words in prose.
 
 | value | added | meaning | status it accompanies |
 |---|---|---|---|

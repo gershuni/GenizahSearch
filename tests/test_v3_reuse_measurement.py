@@ -230,3 +230,169 @@ def test_a_failed_measurement_exits_nonzero(tmp_path, capsys):
     rc = _cli(["--asset", str(tmp_path / "nope.db"), "--population", "pinned"])
     assert rc == 1
     assert "fail-closed" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Codex ROUND 7 findings.
+# ---------------------------------------------------------------------------
+
+def test_an_asset_changed_between_verification_and_hashing_HALTS(tmp_path, monkeypatch):
+    """Codex R7 (HIGH): `_verify_population` read the asset BEFORE `_hash_all`.
+
+    So an asset changed in that window left the report carrying a population claim
+    derived from the OLD state while its hashes -- and the final re-verification --
+    described the new one, and the two agreed. The fix is ordering: hash first, then
+    derive the claim from the hashed state.
+
+    Reproduced by mutating the asset from inside `_verify_population`, i.e. exactly
+    the window. With the fix the mutation lands AFTER the first hash, so the closing
+    re-verification catches it; before the fix it landed between the read and the
+    hash and nothing did.
+    """
+    import scripts.v3_measure_novelty_reuse as mod
+
+    asset = _asset(tmp_path / "v3.db", coverage_routing="gen2_router")
+    cache = tmp_path / "verdicts.json"
+    cache.write_text("{}", encoding="utf-8")
+    for name in ("libraries.csv", "fjms.db", "fgp.db", "pgp.db"):
+        (tmp_path / name).write_bytes(b"x")
+
+    real_verify = mod._verify_population
+
+    def verify_then_mutate(path, claimed):
+        out = real_verify(path, claimed)
+        with open(path, "ab") as fh:          # change the asset in the window
+            fh.write(b"\x00appended")
+        return out
+
+    monkeypatch.setattr(mod, "_verify_population", verify_then_mutate)
+    monkeypatch.setattr(mod, "build_all_candidates", lambda **_kw: ([], {}, {}))
+    monkeypatch.setattr(mod, "run_heuristic_funnel", lambda _c: ({}, []))
+
+    with pytest.raises(MeasurementError, match="CHANGED during the measurement"):
+        mod.main([
+            "--asset", str(asset), "--cache", str(cache), "--population", "pinned",
+            "--libraries-csv", str(tmp_path / "libraries.csv"),
+            "--fjms-db", str(tmp_path / "fjms.db"),
+            "--fgp-db", str(tmp_path / "fgp.db"),
+            "--pgp-db", str(tmp_path / "pgp.db"),
+            "--report", str(tmp_path / "r.json"),
+        ])
+    assert not (tmp_path / "r.json").exists()
+
+
+def test_an_unrecognised_routing_mode_is_REFUSED(tmp_path):
+    """Codex R7 (MEDIUM): accepting any non-null value "replaces one unsound proxy
+    with another" -- notably `coverage_routing='none'`, which `finalize_build` writes
+    whenever D-17 is inactive, was silently accepted as `pinned`.
+
+    The vocabulary is now closed. `none` is still a v3 build (the pipeline wrote the
+    row) but its mode is reported, so a `pinned` number says which routing produced
+    it; an UNKNOWN value is refused outright, because it means the writer changed or
+    the row was hand-edited.
+    """
+    from scripts.v3_measure_novelty_reuse import _V3_ROUTING_MODES
+
+    none_asset = _asset(tmp_path / "none.db", coverage_routing="none")
+    got = _verify_population(str(none_asset), "pinned")
+    assert got["routing_mode"] == "none", (
+        "a v3 build with no coverage routing is no longer reported as such -- a "
+        "`pinned` number would not say which routing produced its population"
+    )
+
+    bogus = _asset(tmp_path / "bogus.db", coverage_routing="hand_edited_value")
+    with pytest.raises(MeasurementError, match="not.*one of"):
+        _verify_population(str(bogus), "pinned")
+    assert "hand_edited_value" not in _V3_ROUTING_MODES
+
+
+def test_the_routing_modes_match_what_finalize_build_writes():
+    """The closed vocabulary must track the WRITER, or it rejects a real asset.
+
+    Derived from the writer's own expression rather than restated, so adding a fourth
+    mode to `finalize_build` without updating the checker fails here instead of at a
+    measurement.
+    """
+    import re
+
+    import build_discovery_sidecar as bds
+    from scripts.v3_measure_novelty_reuse import _V3_ROUTING_MODES
+
+    src = Path(bds.__file__).read_text(encoding="utf-8")
+    match = re.search(
+        r'\("coverage_routing", "gen2_router" if gen2_router is not None\s*'
+        r'else \("(\w+)" if run_d17 else "(\w+)"\)\)', src)
+    assert match, "could not locate the coverage_routing meta expression"
+    written = {"gen2_router", match.group(1), match.group(2)}
+    assert written == set(_V3_ROUTING_MODES), (
+        f"the checker's closed vocabulary and the writer disagree: "
+        f"writer-only={sorted(written - set(_V3_ROUTING_MODES))}, "
+        f"checker-only={sorted(set(_V3_ROUTING_MODES) - written)}"
+    )
+
+
+def test_a_REAL_WAL_change_during_the_measurement_HALTS(tmp_path, monkeypatch):
+    """Codex R7 (LOW): my WAL test wrote arbitrary bytes named `*.db-wal`, so "no
+    SQLite reader observes a valid WAL-backed state" -- it proved the key comparison
+    notices an appearing file, which is easier than the claim.
+
+    This uses a REAL WAL-mode SQLite database and commits a change through SQLite
+    during the measurement, so the sidecar content is genuine WAL state that a reader
+    would observe.
+    """
+    import scripts.v3_measure_novelty_reuse as mod
+
+    asset = _asset(tmp_path / "v3.db", coverage_routing="gen2_router")
+    cache = tmp_path / "verdicts.json"
+    cache.write_text("{}", encoding="utf-8")
+    (tmp_path / "libraries.csv").write_bytes(b"x")
+    (tmp_path / "fgp.db").write_bytes(b"x")
+    (tmp_path / "pgp.db").write_bytes(b"x")
+
+    # A genuine WAL-mode database as one of the candidate inputs.
+    fjms = tmp_path / "fjms.db"
+    conn = sqlite3.connect(str(fjms))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE t (v TEXT)")
+    conn.execute("INSERT INTO t VALUES ('before')")
+    conn.commit()
+    conn.close()
+    before = mod._hash_or_die(str(fjms), "fjms_db")
+
+    held = []
+
+    def commit_through_sqlite(**_kw):
+        # The connection is LEFT OPEN deliberately. Closing it checkpoints the WAL
+        # into the main file and deletes the sidecar, which changes the main file --
+        # so a closed writer would be caught by main-file hashing alone and the
+        # fixture would not demonstrate why sidecars matter. An open connection is
+        # also the realistic case: a concurrent writer holding the database.
+        writer = sqlite3.connect(str(fjms))
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("INSERT INTO t VALUES ('committed during the measurement')")
+        writer.commit()
+        held.append(writer)
+        return [], {}, {}
+
+    monkeypatch.setattr(mod, "build_all_candidates", commit_through_sqlite)
+    monkeypatch.setattr(mod, "run_heuristic_funnel", lambda _c: ({}, []))
+
+    with pytest.raises(MeasurementError, match="CHANGED during the measurement"):
+        mod.main([
+            "--asset", str(asset), "--cache", str(cache), "--population", "pinned",
+            "--libraries-csv", str(tmp_path / "libraries.csv"),
+            "--fjms-db", str(fjms),
+            "--fgp-db", str(tmp_path / "fgp.db"),
+            "--pgp-db", str(tmp_path / "pgp.db"),
+            "--report", str(tmp_path / "r.json"),
+        ])
+    # The point of the fixture: a WAL commit can leave the MAIN file byte-identical,
+    # so main-file hashing alone would have seen nothing.
+    try:
+        assert mod._hash_or_die(str(fjms), "fjms_db") == before, (
+            "the WAL commit also changed the main file, so this fixture no longer "
+            "demonstrates why sidecars must be hashed -- it would pass without them"
+        )
+    finally:
+        for writer in held:
+            writer.close()

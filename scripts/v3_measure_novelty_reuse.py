@@ -116,6 +116,10 @@ def _hash_or_die(path, name: str) -> str:
 # (Codex round 6, HIGH).
 _SQLITE_SIDECAR_SUFFIXES = ("-journal", "-wal", "-shm")
 
+# The COMPLETE set of `meta.coverage_routing` values `finalize_build` writes. Kept in
+# step with the writer by `test_the_routing_modes_match_what_finalize_build_writes`.
+_V3_ROUTING_MODES = frozenset({"gen2_router", "lever1_cliff", "none"})
+
 
 def _hash_all(inputs: Dict[str, str]) -> Dict[str, str]:
     """Hash every input AND any SQLite sidecar that exists beside it.
@@ -172,6 +176,18 @@ def _verify_population(asset_path: str, claimed: str) -> Dict[str, object]:
     # a `coverage_routing` meta row, which only a v3-era `finalize_build` writes. The
     # ROUTING MODE is reported separately, so a reader can tell a router-routed v3
     # population from a deliberately cliff-routed one without either being mislabelled.
+    # A CLOSED vocabulary (Codex round 7, MEDIUM): accepting any non-null value
+    # "replaces one unsound proxy with another". These are exactly the three values
+    # `finalize_build` writes -- `gen2_router` (router ingested), `lever1_cliff`
+    # (legacy cliff chosen deliberately), `none` (no coverage routing ran because
+    # D-17 was inactive). An unknown value means the writer changed, or the meta row
+    # was hand-edited, and either way the label cannot be derived from it.
+    if coverage_routing is not None and coverage_routing not in _V3_ROUTING_MODES:
+        raise MeasurementError(
+            f"the asset's meta.coverage_routing is {coverage_routing!r}, which is not "
+            f"one of the {sorted(_V3_ROUTING_MODES)} values this pipeline writes. "
+            f"Refusing to derive a population label from an unrecognised value."
+        )
     is_v3_build = coverage_routing is not None
     if claimed == "pinned" and not is_v3_build:
         raise MeasurementError(
@@ -218,10 +234,6 @@ def main(argv=None) -> int:
     def log(msg: str) -> None:
         print(msg, flush=True)
 
-    population_evidence = _verify_population(args.asset, args.population)
-    log(f"population label {args.population!r} verified against the asset: "
-        f"{population_evidence}")
-
     # Codex R5+R6 (HIGH): hash EVERY input BEFORE anything reads it, and re-verify
     # after. R5 fixed the candidate build; R6 found two remaining holes, both real:
     #   * the cache was LOADED before it was hashed, so a change in between left the
@@ -236,6 +248,14 @@ def main(argv=None) -> int:
     }
     log("hashing every input BEFORE any of them is read")
     input_hashes = _hash_all(inputs)
+
+    # The population check reads the asset, so it runs AFTER the hash (Codex round 7,
+    # HIGH). Previously it ran first, so an asset changed between the verification and
+    # the hash would leave the report carrying a population claim from the OLD state
+    # while its hashes -- and the final re-verification -- described the new one.
+    population_evidence = _verify_population(args.asset, args.population)
+    log(f"population label {args.population!r} verified against the hashed asset: "
+        f"{population_evidence}")
 
     log(f"reading cache {os.path.basename(args.cache)}")
     with open(args.cache, encoding="utf-8") as fh:

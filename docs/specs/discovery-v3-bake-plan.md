@@ -1334,7 +1334,34 @@ how it gets broken again.
 
 ## 8. Owner questions
 
-**Nothing is blocking any more. Four questions were closed by measurement rather than by asking**, which is the
+> **🛑 EXECUTION READINESS — the authoritative statement (2026-08-07, Codex round 7).** The sentence below
+> once read "Nothing is blocking any more", which was false and is corrected here rather than deleted, because
+> two review rounds had to point at the contradiction. The four *owner questions* below really are closed by
+> measurement. **The BAKE is not ready to execute as a release-quality run.** Three lists, deliberately
+> separated:
+>
+> **MUST FIX IN CODE — nothing outstanding.** Every Codex blocker and HIGH through round 7 is closed with
+> mutation-verified tests (rounds 2–7: the router ingest and its wiring into `finalize_build`, the work-side
+> offsets and their coherent pairing, gate 3's release enforcement, per-key parity reconciled with D-17, the
+> novelty fingerprint and its `finalize_build` bypass, the shadow-grain halts, consumer-boundary containment,
+> the destructive liveness probe, and the measurement's hash races).
+>
+> **OWNER ACTION OWED — blocks a release-quality run:**
+> 1. Add the missing restricted pattern to `.masking_patterns` (§5.0a finding A). **Gate 16 is NOT green**
+>    without it; the slim-DB column denylist is a compensating control for the one arrival point we know of,
+>    not the scan.
+> 2. Confirm the intended pattern count — the attestation reports **8**, this file elsewhere says 15.
+> 3. Run the full strict scan (`--strict --scan-repo --scan-asset --scan-sqlite`) with that set, and confirm
+>    it passes.
+> 4. Choose the novelty option (§5.0b). **Recommended: option 0 first** — the $0 re-measurement against real
+>    v3 inputs, which is now genuinely pinned. No spend is authorized at either the retracted ≈$4 or the
+>    legacy-population $40.12.
+>
+> **MUST RECORD AT RUN TIME:** the keyed attestation (`pattern_count` + `pattern_set_hmac` under a retained
+> key — without the key there is no identity digest at all), the scanned asset/SQLite paths with their
+> post-build hashes, and the pre-build source-identity record gate 15 still owes.
+
+**Four owner questions were closed by measurement rather than by asking**, which is the
 posture this file should have started in:
 
 - **§3.5** the MAPV2-8 severity cut — the 152 is not reproducible from the persisted file; use the 595.
@@ -1348,8 +1375,12 @@ posture this file should have started in:
 - **§1.3** the authorization discrepancy — **resolved 2026-08-05: the owner confirms the run happened.** The
   stale claims in `.planning/ROADMAP.md` SC-6 (run "UNAUTHORIZED", cost `~$301`) are corrected in place.
 
-**Nothing is owed.** One courtesy confirmation before money moves: v3's fresh novelty run at **≈$68** (shipped
-scope, $150 self-enforced ceiling) — same model/prompt/effort, so the validated configuration is unchanged.
+**No further owner QUESTIONS are owed on the four items above** — but see the execution-readiness box: four
+owner ACTIONS are owed before a release-quality run, and the novelty spend needs a decision at a number that
+does not yet exist. The **≈$68** figure once quoted here is **retracted** along with the ≈$4: §5.0b measures
+0.0% cache reuse through the fingerprint gate over the legacy population, and the only comparable actual spend
+is $40.12 — which is *also* not the v3 price, because the v3 candidate population does not exist until the
+router and final work set are built. Option 0 produces that number for $0.
 
 **Non-blocking — needed before the corresponding step**
 
