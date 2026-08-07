@@ -172,8 +172,49 @@ def create_page():
         # under the text anyway.
         _ann_dir = 'rtl' if is_rtl() else 'ltr'
 
+        #: The count-free blurb, and the template that carries the figure. The
+        #: count is the number of DISTINCT WORKS matched -- `meta.work_total`,
+        #: the same figure the findings page headline shows.
+        _DISCOVERY_BLURB_PLAIN = (
+            'Software has matched Genizah fragments to works we already know. '
+            'Use it to look for new witnesses to a text you study — and judge '
+            'each match yourself.')
+        _DISCOVERY_BLURB_COUNTED = (
+            'Software has matched Genizah fragments to {count} works we already '
+            'know. Use it to look for new witnesses to a text you study — and '
+            'judge each match yourself.')
+
+        def _fill_discovery_count(label) -> None:
+            """Replace the blurb with its counted form, once the figure is read.
+
+            DEFERRED, never inline: `create_page` is SYNCHRONOUS and the launch
+            read is async over a 393 MB sidecar, so computing it here would put
+            a query on the single uvicorn event loop -- stalling every concurrent
+            request, including static files, while burning no CPU. The homepage
+            already defers its own corpus stats exactly this way.
+
+            The card renders the count-FREE sentence first and gains the figure a
+            moment later, so a slow or failed read costs the reader a number and
+            never the card: `{count}` is a size, not the claim.
+            """
+            async def _deferred():
+                try:
+                    from web.discovery import get_launch_stats_enveloped
+                    envelope = await get_launch_stats_enveloped()
+                    if envelope.get('status') != 'ok':
+                        return
+                    total = envelope.get('meta', {}).get('work_total')
+                    if not isinstance(total, int) or total <= 0:
+                        return      # never print a zero, a None or a "many"
+                    label.text = tr(_DISCOVERY_BLURB_COUNTED).format(
+                        count=f'{total:,}')
+                except Exception:
+                    pass            # the count is an ENRICHMENT; keep the card
+            asyncio.ensure_future(_deferred())
+
         def _announcement_card(*, mark, route, gradient, shadow, chip_color,
-                               icon, title, blurb, cta, cta_text_color):
+                               icon, title, blurb, cta, cta_text_color,
+                               on_blurb=None):
             with ui.element('div').classes(
                 'flex-1 min-w-[280px] rounded-xl overflow-hidden cursor-pointer '
                 'hover:shadow-2xl transition-all'
@@ -197,7 +238,10 @@ def create_page():
                             'px-2 py-0.5 rounded-full text-xs font-semibold'
                         ).style('background: rgba(255,255,255,0.20); color: white;')
                     h2(tr(title), classes='text-xl font-bold text-white', style='margin: 0;')
-                    ui.label(tr(blurb)).classes('text-sm text-white/90 flex-grow')
+                    _blurb_label = ui.label(tr(blurb)).classes(
+                        'text-sm text-white/90 flex-grow')
+                    if on_blurb is not None:
+                        on_blurb(_blurb_label)
                     ui.button(tr(cta), icon=icon).props(
                         f'unelevated color=white text-color={cta_text_color}'
                     ).classes('font-bold self-start')
@@ -226,9 +270,8 @@ def create_page():
                         chip_color='#4338ca',
                         icon='travel_explore',
                         title='Computed Identifications',
-                        blurb=('Software has matched Genizah fragments to works we '
-                               'already know. Use it to look for new witnesses to a '
-                               'text you study — and judge each match yourself.'),
+                        blurb=_DISCOVERY_BLURB_PLAIN,
+                        on_blurb=_fill_discovery_count,
                         cta='Explore Computed Identifications',
                         cta_text_color='indigo-9',
                     )

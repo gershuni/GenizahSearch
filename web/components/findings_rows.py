@@ -486,9 +486,15 @@ _COPY: Dict[str, Dict[str, str]] = {
     # not sound good"). `עדין` is *delicate/subtle* -- an aesthetic word about
     # texture, which is not what a granularity comparison means; `רב יותר` is
     # plainly *more* detail, the same comparative the English "finer than" makes.
+    #
+    # "שנבדקו", not "שבדקנו" (owner, 2026-08-07). The passive drops the
+    # first-person: the sentence is about WHICH catalogues were consulted, not
+    # about who did the consulting, and "we checked" put a speaker into a row
+    # that otherwise has none. The English "we checked" is unchanged -- it reads
+    # naturally there, and the owner corrected only the Hebrew.
     "shade_refines_granularity": {
         "en": "finer than the catalogues we checked",
-        "he": "פירוט רב יותר מהקטלוגים שבדקנו",
+        "he": "פירוט רב יותר מהקטלוגים שנבדקו",
     },
     "shade_container_predicts": {
         "en": "the catalogues named only a container",
@@ -563,9 +569,14 @@ _COPY: Dict[str, Dict[str, str]] = {
     # -- THE PREVIEW, on the identification leaf only. "Preview" rather than
     #    "open": it does not leave the page, and a reader who expects to leave
     #    and does not is a reader who lost their filters.
+    #    "כתב היד", not "הכתב" (owner, 2026-08-07). `הכתב` on its own is *the
+    #    handwriting* or *the script* -- a palaeographic word, and exactly the
+    #    wrong one on a surface where readers do compare hands. The manuscript is
+    #    `כתב היד`; only the full construct says the object rather than its
+    #    letterforms.
     "preview_open": {
         "en": "Preview the manuscript",
-        "he": "תצוגה מקדימה של הכתב",
+        "he": "תצוגה מקדימה של כתב היד",
     },
     "preview_close": {
         "en": "Close",

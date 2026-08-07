@@ -4738,11 +4738,31 @@ TRANSLATIONS.update({
     # The point of the surface, in the owner's words: many computed
     # identifications OF KNOWN WORKS, so a reader can go looking for NEW
     # TEXTUAL WITNESSES ("עדי נוסח") of a work they study. Still match-framed
-    # ("matched", "judge each match") and still count-free.
+    # ("matched", "judge each match").
+    #
+    # NOW CARRIES A COUNT (owner, 2026-08-07). `{count}` is the number of
+    # DISTINCT WORKS -- `meta.work_total`, the same figure the findings page
+    # headline shows, computed at request time and a literal NOWHERE (ruling U:
+    # a committed launch figure fails the repo-wide scan).
+    #
+    # A count of works is a SIZE, not a rate: it says how much was matched, never
+    # how often the matching is right. Checked against the honesty gate's
+    # accuracy detector, which passes it in both languages.
+    #
+    # "אלגוריתם ממוחשב" over the owner's dictated "ממחושב" -- the standard form
+    # of the word; the owner's is a typo for the same term, not a variant.
+    "Software has matched Genizah fragments to {count} works we already know. Use "
+    "it to look for new witnesses to a text you study — and judge each match "
+    "yourself.":
+        "אלגוריתם ממוחשב התאים קטעי גניזה ל-{count} חיבורים מוכרים. השתמשו בו כדי "
+        "לחפש עדי נוסח חדשים לחיבור שאתם חוקרים — ושפטו כל התאמה בעצמכם.",
+    # The count-free form, kept as the DEGRADED variant: the homepage renders
+    # before any discovery read, so if the launch figure is unavailable the card
+    # must still say something true rather than print a zero or "None".
     "Software has matched Genizah fragments to works we already know. Use it to "
     "look for new witnesses to a text you study — and judge each match yourself.":
-        "תוכנה התאימה קטעי גניזה לחיבורים מוכרים. השתמשו בה כדי לחפש עדי נוסח "
-        "חדשים לחיבור שאתם חוקרים — ושפטו כל התאמה בעצמכם.",
+        "אלגוריתם ממוחשב התאים קטעי גניזה לחיבורים מוכרים. השתמשו בו כדי לחפש עדי "
+        "נוסח חדשים לחיבור שאתם חוקרים — ושפטו כל התאמה בעצמכם.",
     # elaborated intro / how-to (2026-07-21) — two paragraphs; replaces the old one-liner.
     "A graphical view of textual connections between manuscripts across the Genizah. Manuscripts containing similar text are grouped together into clusters, and connections between manuscripts are marked with a thin line. Alongside the clusters and manuscripts, catalogue information from the National Library and the Friedberg Genizah Project is shown. You can zoom in and out, focus on a particular cluster, and open a preview of a specific manuscript to read it. For the best experience on a phone, tap Full screen — there you can pan and zoom the map freely; a larger screen simply shows more of it at once.": "תצוגה גרפית של קשרים טקסטואליים בין כתבי יד ברחבי הגניזה. כתבי יד המכילים טקסט דומה מקובצים יחד לאשכולות. קשרים בין כתבי יד מסומנים בקו דק. לצד הקבוצות וכתבי היד מובא המידע הקטלוגי מהספרייה הלאומית ומפרויקט הגניזה של פרידברג. ניתן להתמקד או להתרחק, לעיין בקבוצה מסוימת, לפתוח בתצוגה מקדימה כתב יד מסוים ולעיין בו. לחוויה הטובה ביותר בטלפון, לחצו על 'מסך מלא' — שם ניתן להזיז את המפה ולהתמקד בה בחופשיות; מסך גדול יותר פשוט מציג יותר ממנה בבת אחת.",
     "Use the atlas to get an overall sense of the structure of the Genizah corpus and the connections within it, and to discover new, previously unknown connections. For example, if within a cluster of linguistics manuscripts you find a manuscript identified as 'Biblical fragments,' this manuscript too may be a work of linguistics.": 'השתמשו באטלס כדי להתרשם כללית ממבנה קורפוס הגניזה ומן הקשרים בתוכו, וכן למציאת קשרים חדשים ולא ידועים. לדוגמה, אם מצאתם בקבוצה המכילה כתבי יד של בלשנות כתב יד המזוהה כ"קטעי מקרא", ייתכן שגם כתב יד זה הוא חיבור בבלשנות.',
