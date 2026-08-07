@@ -124,11 +124,44 @@ def test_a_concurrent_reader_never_observes_a_partial_state_file(tmp_path):
         f"{len(partials)} of {observations} reads saw a partial/invalid state file "
         f"(first: {partials[0]}) -- the writer is not atomic"
     )
-    # The survivor of the kill must still be loadable, not merely parseable.
-    BakeState(state_file, run_id="kill")
+    # A hard kill CAN leave a temp file behind -- that is the atomic pattern
+    # working as intended (orphan a temp rather than corrupt the real file), not
+    # a defect. An earlier version of this test asserted no temp survived, which
+    # was simply wrong and failed on CI's Linux runner while passing on Windows,
+    # where the kill happened to land outside the window more often. What IS
+    # owed is that the orphans get reaped, so a repeatedly-killed unattended run
+    # does not fill its directory: construction sweeps them.
+    BakeState(state_file, run_id="kill")   # the survivor must still be loadable
     assert not list(tmp_path.glob("s.json.*.tmp")), (
-        "an interrupted write leaked a temp file"
+        "stale temp files survived a resume -- _sweep_stale_temps did not run"
     )
+
+
+def test_a_resume_reaps_temp_files_orphaned_by_a_killed_write(tmp_path):
+    """Directly: the sweep runs, and it is scoped to THIS state file's temps.
+
+    Written after CI caught the wrong assertion above. A kill-based test cannot
+    reliably create an orphan (that is why the original assertion was wrong on
+    one platform and not the other), so the orphan is planted instead.
+    """
+    path = tmp_path / "s.json"
+    BakeState(path, run_id="r1").mark_done("a")
+    orphan_a = tmp_path / "s.json.deadbeef.tmp"
+    orphan_b = tmp_path / "s.json.cafe1234.tmp"
+    orphan_a.write_text("half-written", encoding="utf-8")
+    orphan_b.write_text("half-written", encoding="utf-8")
+    # Must NOT be swept: a different state file's temp, and an unrelated file.
+    other = tmp_path / "other.json.abc.tmp"
+    other.write_text("someone else's", encoding="utf-8")
+    unrelated = tmp_path / "s.json.backup"
+    unrelated.write_text("keep me", encoding="utf-8")
+
+    BakeState(path, run_id="r1")            # a resume
+
+    assert not orphan_a.exists() and not orphan_b.exists(), "orphans were not reaped"
+    assert other.exists(), "swept another state file's temp -- too broad"
+    assert unrelated.exists(), "swept a non-temp file -- too broad"
+    assert path.exists(), "swept the real state file"
 
 
 def test_a_non_atomic_writer_would_fail_this_suite(tmp_path):

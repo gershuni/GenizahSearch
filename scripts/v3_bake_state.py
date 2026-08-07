@@ -53,6 +53,7 @@ class BakeState:
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._save()
+        self._sweep_stale_temps()
 
     # ---------------- persistence ----------------
 
@@ -97,6 +98,29 @@ class BakeState:
             except OSError:
                 pass
             raise
+
+    def _sweep_stale_temps(self) -> None:
+        """Remove temp files orphaned by a previously killed write.
+
+        A hard kill (SIGKILL, power loss) between `mkstemp` and `os.replace`
+        leaves the temp file behind BY DESIGN -- that is the cost of never
+        corrupting the real state file, and it is the correct trade. But an
+        unattended, resumable bake can be killed many times, so the orphans must
+        be reaped rather than accumulated; otherwise a long run slowly fills the
+        directory with dead 0.5 MB files.
+
+        Swept on construction, i.e. exactly when a resume happens. Failure to
+        unlink is ignored deliberately: a stale temp is litter, never a
+        correctness problem, and must not prevent a resume.
+        """
+        try:
+            for stale in self.path.parent.glob(self.path.name + ".*.tmp"):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     # ---------------- step ledger ----------------
 

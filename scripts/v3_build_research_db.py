@@ -75,6 +75,20 @@ FORBIDDEN_COLUMN_SUBSTRINGS: Tuple[str, ...] = ("mesir",)
 EXCLUDED_WORK_PREFIXES: Tuple[str, ...] = ("RS:",)
 
 
+def _ro_uri(db_path) -> str:
+    """Read-only SQLite URI for `db_path`.
+
+    Mirrors `build_discovery_sidecar._connect_research_ro` deliberately. An
+    earlier version of this module sliced `as_uri()[8:]` to strip the `file://`
+    prefix, which is CORRECT on Windows (`file:///C:/x` -> `C:/x`) and WRONG on
+    POSIX (`file:///tmp/x` -> `tmp/x`), silently turning an absolute path into a
+    relative one -- every read then failed with "unable to open database file".
+    Caught by CI on ubuntu, never locally. `as_uri()` already emits a valid URI;
+    only the query string needs appending.
+    """
+    return Path(db_path).resolve().as_uri() + "?mode=ro"
+
+
 class ResearchDbError(RuntimeError):
     """Fail-closed error building the slim research DB."""
 
@@ -103,7 +117,7 @@ def derive_shadowed_by(evidence_db: str) -> Dict[Tuple[str, str], str]:
     drifts. Only wholly-shadowed units appear in the result; absent means NULL
     (unshadowed), which is what `WHERE shadowed_by IS NULL` selects.
     """
-    conn = sqlite3.connect(f"file:{Path(evidence_db).resolve().as_uri()[8:]}?mode=ro", uri=True)
+    conn = sqlite3.connect(_ro_uri(evidence_db), uri=True)
     try:
         conn.execute("PRAGMA cache_size=-300000")
         rows = conn.execute(
@@ -147,9 +161,7 @@ def build(corpus_db: str, evidence_db: str, out_path: str, *, force: bool = Fals
     assert_no_forbidden_columns(TRACK1_COLUMNS + PAGES_COLUMNS)
     shadowed = derive_shadowed_by(evidence_db)
 
-    src = sqlite3.connect(
-        f"file:{Path(corpus_db).resolve().as_uri()[8:]}?mode=ro", uri=True
-    )
+    src = sqlite3.connect(_ro_uri(corpus_db), uri=True)
     tmp = out.with_suffix(out.suffix + ".partial")
     if tmp.exists():
         tmp.unlink()                       # a prior interrupted attempt

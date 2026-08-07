@@ -93,6 +93,32 @@ def _row(sys_id, work_id, cat="X", genre="G"):
     return (_page_id(sys_id), sys_id, work_id, cat, genre, "A", "T", "10", "0.5", "1", "[]")
 
 
+def test_the_read_only_uri_is_platform_correct():
+    """Regression guard for the CI-only failure of 2026-08-07.
+
+    The first version built its read-only URI as `as_uri()[8:]`, stripping
+    `file://`. That is right on Windows (`file:///C:/x` -> `C:/x`) and WRONG on
+    POSIX (`file:///tmp/x` -> `tmp/x`), so every read failed with "unable to open
+    database file" on CI's Linux runner while passing on this Windows machine.
+
+    Asserted on the STRING rather than by opening a file, so the POSIX shape is
+    checked from any platform -- a test that only opened a local DB would keep
+    passing on Windows, which is exactly how the bug shipped.
+    """
+    from v3_build_research_db import _ro_uri
+
+    uri = _ro_uri(__file__)
+    assert uri.startswith("file:///"), f"lost the file:// scheme or a path slash: {uri}"
+    assert uri.endswith("?mode=ro")
+    # The path component must remain ABSOLUTE after the scheme.
+    path_part = uri[len("file://"):].split("?", 1)[0]
+    assert path_part.startswith("/"), (
+        f"path component is relative ({path_part!r}) -- this is the [8:] bug"
+    )
+    # And it must be usable by sqlite3 on this platform.
+    sqlite3.connect(_ro_uri(__file__), uri=True).close()
+
+
 def test_r_source_rows_are_excluded_and_the_guard_can_fail(tmp_path):
     """Containment: an R-source row must not reach the slim DB."""
     corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
