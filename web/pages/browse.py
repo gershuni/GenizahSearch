@@ -3987,6 +3987,48 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if image_toggle_btn:
                     image_toggle_btn.on('click', toggle_image_panel)
 
+                # Discovery connections panel body (Phase 136, plan 136-17).
+                #
+                # FULL WIDTH, DIRECTLY BELOW THE TOOLBAR that carries its entry
+                # button (owner, 2026-08-07). It sat beneath the two viewer panes
+                # until then, which put it a 60vh scroll away from the control
+                # that opens it: the reader clicked, nothing visibly happened,
+                # and the panel they had asked for was off-screen. Adjacency to
+                # its own control is the whole point of the placement.
+                #
+                # Still full width and still OUTSIDE `viewer-panels`, for the
+                # reason the old comment gave: at `flex: 0 0 50%` x 60vh neither
+                # pane has room for it. Above the panes rather than inside one.
+                #
+                # Empty until the enrichment phase fills it; hidden until the
+                # reader opens the entry control.
+                if discovery_panel_enabled():
+                    discovery_panel_el = ui.element('div').classes('w-full').style('display: none;')
+                    enrichment_refs['discovery_panel_container'] = discovery_panel_el
+
+                    # REFILL, exactly as the four sibling placeholders do above
+                    # (`state.enrichment_loaded` guards Joins, the version
+                    # selector, bibliography and catalog).
+                    #
+                    # `update_content()` CLEARS `content_container` and rebuilds
+                    # every placeholder inside it as empty. The other four are
+                    # re-populated inline on that same pass; the discovery pair
+                    # was not, so any later `update_content()` -- Show Metadata,
+                    # the line-number toggle, entering edit mode, a comment
+                    # refresh -- left both the toolbar control and the panel body
+                    # as empty divs. The panel had not failed and the reader had
+                    # not closed it: it was silently unbuilt, with no way back
+                    # short of a page reload (owner report, 2026-08-07).
+                    #
+                    # Placed HERE, after BOTH placeholders exist, because the
+                    # refill fills both -- the entry control is created further
+                    # up, in the toolbar. Order is load-bearing and pinned by
+                    # `test_update_content_refills_the_discovery_placeholders_it_rebuilds`.
+                    # No `enrichment_loaded` check: the function returns on a
+                    # `None` bundle, and that single self-guard is the authority
+                    # -- a second gate here could only drift from it.
+                    update_discovery_panel_section(state, refs)
+
                 # Main container with flex row
                 with ui.element('div').classes('viewer-panels').style(
                     'display: flex; flex-direction: row; gap: 16px; min-height: 60vh; width: 100%;'
@@ -4271,37 +4313,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Initial render
                             render_text_content(page.text if page.text else None)
-
-                # Discovery connections panel body (Phase 136, plan 136-17).
-                # FULL WIDTH BENEATH the two panes: at `flex: 0 0 50%` x 60vh
-                # neither pane has room for it, and this is the only place the
-                # even-pane layout fits. Empty until the enrichment phase fills
-                # it; hidden until the reader opens the toolbar entry control.
-                if discovery_panel_enabled():
-                    discovery_panel_el = ui.element('div').classes('w-full').style('display: none;')
-                    enrichment_refs['discovery_panel_container'] = discovery_panel_el
-
-                    # REFILL, exactly as the four sibling placeholders do a few
-                    # lines up (`state.enrichment_loaded` guards Joins, the
-                    # version selector, bibliography and catalog).
-                    #
-                    # `update_content()` CLEARS `content_container` and rebuilds
-                    # every placeholder inside it as empty. The other four are
-                    # re-populated inline on that same pass; the discovery pair
-                    # was not, so any later `update_content()` -- Show Metadata,
-                    # the line-number toggle, entering edit mode, a comment
-                    # refresh -- left both the toolbar control and the panel body
-                    # as empty divs. The panel had not failed and the reader had
-                    # not closed it: it was silently unbuilt, with no way back
-                    # short of a page reload (owner report, 2026-08-07).
-                    #
-                    # Placed HERE rather than beside the entry control because
-                    # this is the LATER of the two placeholders, and the refill
-                    # fills both. No `enrichment_loaded` check: the function
-                    # returns on a `None` bundle, and that single self-guard is
-                    # the authority -- a second gate here could only drift from
-                    # it.
-                    update_discovery_panel_section(state, refs)
 
                 # Comments section - below panels
                 from web.components import create_notes_panel

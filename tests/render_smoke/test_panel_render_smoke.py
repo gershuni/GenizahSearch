@@ -946,7 +946,8 @@ def test_work_titles_are_not_links():
 # one row: no link, the wrong missing-state string, and no catalogue title.
 # ===========================================================================
 
-def _render_expansion_rows(items, lang='en', catalogue_title=None):
+def _render_expansion_rows(items, lang='en', catalogue_title=None,
+                           catalogue_identity=None):
     """Paint `_render_expansion_envelope` and return the client.
 
     Drives the SHIPPED renderer with PROJECTED rows, so a field the projection
@@ -968,7 +969,8 @@ def _render_expansion_rows(items, lang='en', catalogue_title=None):
                         'work_id': 'w000001', 'anchor_mode': 'anchored',
                         'filter_basis': 'displayed_band', 'anchor_excluded': True}),
                     lang, {'open': True, 'page': 1, 'loaded': True}, _noop_reload,
-                    page_size=25, catalogue_title=catalogue_title)
+                    page_size=25, catalogue_title=catalogue_title,
+                    catalogue_identity=catalogue_identity)
         holder['client'] = client
 
     asyncio.run(_run())
@@ -1057,6 +1059,58 @@ def test_an_expansion_row_shows_what_the_catalogue_calls_the_manuscript(lang):
     from web.components.findings_rows import copy_text as _fc
     assert _fc('catalogue_title_label', lang) in text, (
         'the title renders with no label introducing it as the catalogue\'s')
+
+
+@pytest.mark.parametrize('lang', LANGS)
+def test_an_artifact_unnamed_row_is_named_from_the_catalogue_instead(lang):
+    """The unresolved state is the LAST resort, not the first.
+
+    `manuscript_display` covers only `shipped`/`human_confirmed` carriers, so
+    every `review_only` one is absent -- 6,884 of 46,390, i.e. exactly the rows
+    behind "Show more possible matches", which made the named-failure string the
+    NORMAL state here rather than the rare one (owner report, 2026-08-07: three
+    on a single screen).
+    """
+    row = surface_safe_expansion(_expansion_source(
+        display_missing=True, library_code=None, shelfmark_display=None))
+    client = _render_expansion_rows(
+        [row], lang=lang,
+        catalogue_identity=lambda _r: {'library_code': 'RNL',
+                                       'shelfmark_display': 'Ms. EVR ARAB I 1868'})
+    text = '\n'.join(_subtree_texts(list(client.elements.values())[0]))
+    assert 'Ms. EVR ARAB I 1868' in text and 'RNL' in text, text
+    assert dp._RELATED_ROW_COPY['display_missing'][lang] not in text, (
+        'the row was named AND still reports itself unnamed')
+    # ...and the recovered name is a LINK, like every other named row.
+    assert f"/browse?sys_id={row['representative_sys_id']}" in _client_hrefs(client)
+
+
+@pytest.mark.parametrize('lang', LANGS)
+def test_a_row_the_catalogue_cannot_name_either_keeps_the_honest_state(lang):
+    """A fallback that silently blanked would be worse than the string it
+    replaced. When neither source can name the manuscript, the row says so."""
+    row = surface_safe_expansion(_expansion_source(
+        display_missing=True, library_code=None, shelfmark_display=None))
+    for resolver in (None, lambda _r: None):
+        client = _render_expansion_rows([row], lang=lang, catalogue_identity=resolver)
+        text = '\n'.join(_subtree_texts(list(client.elements.values())[0]))
+        assert dp._RELATED_ROW_COPY['display_missing'][lang] in text, (
+            f'{resolver!r}: an unnameable row rendered neither a name nor the '
+            'unresolved state')
+
+
+def test_the_fallback_never_overrides_a_name_the_artifact_supplied():
+    """The sidecar stays authoritative wherever it HAS an answer -- the fallback
+    fills a gap and never competes. A resolver that fired on a named row would
+    let a stale catalogue silently contradict the served artifact."""
+    row = surface_safe_expansion(_expansion_source())          # display_missing=False
+    client = _render_expansion_rows(
+        [row], catalogue_identity=lambda _r: {'library_code': 'WRONG',
+                                              'shelfmark_display': 'Wrong 1.1'})
+    text = '\n'.join(_subtree_texts(list(client.elements.values())[0]))
+    assert row['shelfmark_display'] in text
+    assert 'Wrong 1.1' not in text and 'WRONG' not in text, (
+        'the catalogue fallback overrode the artifact\'s own name')
 
 
 def test_an_expansion_row_omits_the_catalogue_line_entirely_when_unresolved():
@@ -2280,6 +2334,23 @@ def _render_every_panel_surface(seed: Optional[str] = None) -> str:
                     e, ln, s, _noop_reload, page_size=25,
                     catalogue_title=lambda _row, _t=(
                         seed or 'Commentary on Song of Songs'): _t))))
+            # ...and once more with an ARTIFACT-UNNAMED row recovered from the
+            # catalogue, because that path emits a library code and a shelfmark
+            # that never passed through the sidecar's projection -- a second
+            # egress for free text, and the scan is line-granular.
+            unnamed = make_envelope(
+                STATUS_OK,
+                [surface_safe_expansion(_expansion_source(
+                    display_missing=True, library_code=None,
+                    shelfmark_display=None))],
+                1, meta={'work_id': 'w000001', 'anchor_mode': 'anchored',
+                         'filter_basis': 'displayed_band', 'anchor_excluded': True})
+            parts.append(_render_capture(lambda e=unnamed, ln=lang: (
+                dp._render_expansion_envelope(
+                    e, ln, {'open': True, 'page': 1, 'loaded': True},
+                    _noop_reload, page_size=25,
+                    catalogue_identity=lambda _row, _s=(seed or 'Ms. EVR ARAB I 1868'): {
+                        'library_code': 'RNL', 'shelfmark_display': _s}))))
 
     # ...and the SAME surfaces again with the lazy reads answering, so the
     # loaders, their painters and their failure branches all run. Three regimes:

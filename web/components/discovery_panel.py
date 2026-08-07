@@ -184,7 +184,7 @@ def _render_vote_placeholders(lang: str) -> None:
 
 
 def _render_expansion(row: Mapping[str, Any], lang: str,
-                      catalogue_title=None) -> None:
+                      catalogue_title=None, catalogue_identity=None) -> None:
     """"Other manuscripts matching <work>" -- a DESCRIPTOR until the reader asks.
 
     The read is issued on open and never with the panel: the heaviest work has
@@ -236,14 +236,16 @@ def _render_expansion(row: Mapping[str, Any], lang: str,
                      'meta': {'reason': 'query_failed'}},
                     lang, state, _load_page,
                     page_size=int(descriptor.get('page_size') or 0),
-                    catalogue_title=catalogue_title)
+                    catalogue_title=catalogue_title,
+                    catalogue_identity=catalogue_identity)
             return
         state['loaded'] = True
         with body:
             _render_expansion_envelope(
                 envelope, lang, state, _load_page,
                 page_size=int(descriptor.get('page_size') or 0),
-                catalogue_title=catalogue_title)
+                catalogue_title=catalogue_title,
+                catalogue_identity=catalogue_identity)
 
     async def _toggle() -> None:
         state['open'] = not state['open']
@@ -302,7 +304,7 @@ def _render_catalogue_title(item: Mapping[str, Any], lang: str,
 
 def _render_expansion_envelope(
     envelope: Mapping[str, Any], lang: str, state: Dict[str, Any], reload_cb,
-    *, page_size: int = 0, catalogue_title=None,
+    *, page_size: int = 0, catalogue_title=None, catalogue_identity=None,
 ) -> None:
     if is_outage(envelope):
         _service_state_block({
@@ -324,6 +326,25 @@ def _render_expansion_envelope(
     for item in items:
         with ui.row().classes('items-center gap-2 row flex-wrap'):
             sys_id = item.get('representative_sys_id')
+            # THE FALLBACK NAME, resolved before the branch is chosen so the row
+            # asks "can this be named at all?" rather than "did the artifact name
+            # it?" (owner report, 2026-08-07: three rows on one screen read
+            # "Manuscript not in the display index" for manuscripts the rest of
+            # the site names fine).
+            #
+            # `manuscript_display` is built only for `shipped`/`human_confirmed`
+            # carriers, so EVERY `review_only` one is absent from it -- and those
+            # are precisely the rows behind "Show more possible matches". The
+            # unresolved state was therefore the NORMAL state here, not the rare
+            # one, which is not what a named-failure string is for.
+            #
+            # Merged, never overriding: a row the artifact DID name keeps the
+            # artifact's own strings, so the sidecar stays authoritative wherever
+            # it has an answer and the fallback only fills a gap.
+            if item.get('display_missing') and catalogue_identity is not None:
+                recovered = catalogue_identity(item)
+                if recovered:
+                    item = {**item, **recovered, 'display_missing': False}
             if item.get('display_missing'):
                 # An absent manuscript_display row is FLAGGED, never blanked --
                 # a blank cell reads as a manuscript with no name rather than as
@@ -385,7 +406,7 @@ def _render_expansion_envelope(
 
 
 def _render_identification_row(row: Mapping[str, Any], lang: str,
-                               catalogue_title=None) -> None:
+                               catalogue_title=None, catalogue_identity=None) -> None:
     with ui.element('div').classes(f'{PANEL_ROW_CLASS} row'):
         # 1. verb + work title, as PLAIN TEXT. `/work/{id}` does not exist until
         #    Phase 136.1, and a dead link is worse than plain text.
@@ -409,7 +430,7 @@ def _render_identification_row(row: Mapping[str, Any], lang: str,
 
         # 5. the actions, with the inert vote placeholders at the inline end.
         with ui.row().classes('items-center gap-2 side'):
-            _render_expansion(row, lang, catalogue_title)
+            _render_expansion(row, lang, catalogue_title, catalogue_identity)
             _render_vote_placeholders(lang)
 
 
@@ -624,7 +645,7 @@ def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -
 
 def render_discovery_panel_body(
     model: PanelModel, *, on_retry=None, page_id: Optional[str] = None,
-    catalogue_title=None,
+    catalogue_title=None, catalogue_identity=None,
 ) -> None:
     lang = _lang_of(model)
     root = ui.element('div').classes(f'gs-discovery {PANEL_ROOT_CLASS} w-full')
@@ -658,7 +679,8 @@ def render_discovery_panel_body(
             with ui.element('div'):
                 for level in model.disclosure_levels:
                     _render_level(level, lang, page_id, on_retry=on_retry,
-                                  catalogue_title=catalogue_title)
+                                  catalogue_title=catalogue_title,
+                                  catalogue_identity=catalogue_identity)
 
         with ui.element('div').classes('dpanes'):
             if model.lead_with_manuscript_pane:
@@ -670,12 +692,14 @@ def render_discovery_panel_body(
 
 
 def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
-                  on_retry=None, catalogue_title=None) -> None:
+                  on_retry=None, catalogue_title=None,
+                  catalogue_identity=None) -> None:
     """Exactly the disclosure levels the model emits -- no more, no fewer."""
     if level.get('default_visible'):
         ui.label(level.get('label') or '').classes('font-semibold')
         for row in level.get('rows') or ():
-            _render_identification_row(row, lang, catalogue_title)
+            _render_identification_row(row, lang, catalogue_title,
+                                       catalogue_identity)
         return
 
     # A collapsed level. `notid` is applied only where the model says the level
@@ -703,7 +727,8 @@ def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
             for group in level.get('generic_groups') or ():
                 _render_generic_group(group, lang)
             for row in level.get('rows') or ():
-                _render_identification_row(row, lang, catalogue_title)
+                _render_identification_row(row, lang, catalogue_title,
+                                           catalogue_identity)
             related = level.get('related_pages')
             if related is not None:
                 _render_related_pages(related, lang, page_id, on_retry=on_retry)

@@ -815,24 +815,69 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
     # Those keep resolving to None, and the renderer draws nothing at all for
     # them rather than a placeholder -- indistinguishable, to the reader, from
     # the warm-up case, and correct in both.
-    _catalogue_titles: Dict[str, str] = {}
+    #
+    # ONE accessor, TWO uses: the catalogue title AND the manuscript's NAME (see
+    # `_catalogue_identity` below). A second lookup path over the same dict is a
+    # second place for the key normalisation to drift, which has already happened
+    # once on the findings page.
+    _catalogue_rows: Dict[str, Dict[str, Any]] = {}
 
-    def _catalogue_title(item) -> Optional[str]:
+    def _csv_row(item) -> Dict[str, Any]:
+        """`csv_bank`'s row for this expansion row's manuscript, or `{}`."""
         key = str(item.get('representative_sys_id') or '')
         if not key:
-            return None
-        cached = _catalogue_titles.get(key)
+            return {}
+        cached = _catalogue_rows.get(key)
         if cached is None:
             try:
                 from web.state import state as app_state
                 if app_state.meta_mgr is not None:
-                    csv_row = app_state.meta_mgr.csv_bank.get(key)
-                    cached = (csv_row or {}).get('title') or None
+                    cached = app_state.meta_mgr.csv_bank.get(key) or None
             except Exception:
-                cached = None     # a title is an ENRICHMENT; never fail the row
+                cached = None     # this is ENRICHMENT; never fail the row
             if cached:
-                _catalogue_titles[key] = cached
-        return cached
+                _catalogue_rows[key] = cached
+        return cached or {}
+
+    def _catalogue_title(item) -> Optional[str]:
+        return _csv_row(item).get('title') or None
+
+    def _catalogue_identity(item) -> Optional[Dict[str, str]]:
+        """`{library_code, shelfmark_display}` for a row the ARTIFACT could not
+        name, or None.
+
+        WHY THIS EXISTS. `manuscript_display` is built only for manuscripts
+        carrying a `shipped` or `human_confirmed` claim
+        (`scripts/build_discovery_sidecar.py::populate_manuscript_display`), so
+        every `review_only` carrier is absent from it -- 6,884 of 46,390, and
+        those are exactly the rows that live behind "Show more possible matches".
+        The panel therefore printed "Manuscript not in the display index" three
+        times on one screen for manuscripts the rest of the site names fine
+        (owner report, 2026-08-07).
+
+        NOT A TRUST BOUNDARY WIDENING, and worth being explicit about why, since
+        this reaches around the artifact:
+          * the ROWS are already on the reader's screen; only their NAME was
+            missing. Nothing new is disclosed.
+          * all 6,884 carry `assertion_visibility = 'public'` (verified against
+            the served artifact), so none is withheld by the visibility gate.
+          * `libraries.csv` is the SAME source `populate_manuscript_display`
+            reads, and the same one `/browse` renders shelfmarks from on every
+            page. This is the artifact's own source, not a new one.
+          * an M-source/R-source name cannot arrive here: `csv_bank` carries
+            library codes and shelfmarks, and the corpus a match came from is
+            not in it.
+
+        Returns None when the row cannot be named after all, and the caller then
+        renders the named unresolved state exactly as before -- a fallback that
+        silently blanked would be worse than the string it replaced.
+        """
+        row = _csv_row(item)
+        library = str(row.get('library_code') or '').strip()
+        shelfmark = str(row.get('shelfmark') or '').strip()
+        if library and shelfmark:
+            return {'library_code': library, 'shelfmark_display': shelfmark}
+        return None
 
     # The claims envelope's own `meta['page_id']` -- the panel never re-derives
     # an id the service already told it.
@@ -843,7 +888,8 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
             'display: block;' if open_state['value'] else 'display: none;')
         with panel_container:
             render_discovery_panel_body(model, on_retry=_retry, page_id=_page_id,
-                                        catalogue_title=_catalogue_title)
+                                        catalogue_title=_catalogue_title,
+                                        catalogue_identity=_catalogue_identity)
 
     if entry_container is not None:
         with entry_container:

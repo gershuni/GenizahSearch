@@ -632,7 +632,7 @@ def test_the_catalogue_title_resolver_does_not_cache_a_warmup_miss(monkeypatch):
     import web.state as web_state
     monkeypatch.setattr(web_state, 'state', _AppState(), raising=False)
 
-    resolver = _extract_catalogue_title_resolver()
+    resolver = _extract_csv_bank_closures()['_catalogue_title']
     item = {'representative_sys_id': '990000000000000946'}
 
     assert resolver(item) is None, 'a row absent from csv_bank resolved to something'
@@ -646,21 +646,89 @@ def test_the_catalogue_title_resolver_does_not_cache_a_warmup_miss(monkeypatch):
     assert resolver(item) == 'ספר השרשים', 'a resolved title was not memoised'
 
 
-def _extract_catalogue_title_resolver():
-    """The `_catalogue_title` closure the live seam builds, obtained by running
-    `update_discovery_panel_section` far enough to define it.
+def test_the_fallback_names_a_manuscript_the_artifact_could_not(monkeypatch):
+    """`manuscript_display` covers only `shipped`/`human_confirmed` carriers, so
+    every `review_only` one is absent -- 6,884 of 46,390, and precisely the rows
+    behind "Show more possible matches". The panel printed "Manuscript not in the
+    display index" for manuscripts the rest of the site names fine (owner report,
+    2026-08-07).
 
-    Built by exec'ing the SHIPPED source of the closure rather than by importing
-    a copy, so this test cannot pass against a resolver that differs from the one
-    the panel uses."""
-    import textwrap
-    src = _read(_ENRICHMENT_SRC)
-    start = src.index('    _catalogue_titles: Dict[str, str] = {}')
-    end = src.index('    # The claims envelope', start)
-    body = textwrap.dedent(src[start:end])
-    namespace: Dict[str, Any] = {'Dict': Dict, 'Optional': Optional, 'Any': Any}
-    exec(compile(body, _ENRICHMENT_SRC, 'exec'), namespace)
-    return namespace['_catalogue_title']
+    Both parts of the name are required: a library with no shelfmark, or the
+    reverse, is not a name and must keep the honest unresolved state rather than
+    render half of one.
+    """
+    bank: Dict[str, Any] = {
+        '990001536550205171': {'library_code': 'RNL',
+                               'shelfmark': 'Ms. EVR ARAB I 1868'},
+        'half-a-name': {'library_code': 'CUL', 'shelfmark': ''},
+        'other-half': {'library_code': '', 'shelfmark': 'T-S 12.123'},
+    }
+
+    class _MetaMgr:
+        csv_bank = bank
+
+    class _AppState:
+        meta_mgr = _MetaMgr()
+
+    import web.state as web_state
+    monkeypatch.setattr(web_state, 'state', _AppState(), raising=False)
+    identity = _extract_csv_bank_closures()['_catalogue_identity']
+
+    assert identity({'representative_sys_id': '990001536550205171'}) == {
+        'library_code': 'RNL', 'shelfmark_display': 'Ms. EVR ARAB I 1868'}, (
+        'a real review_only carrier still could not be named')
+    for partial in ('half-a-name', 'other-half', 'not-in-the-bank'):
+        assert identity({'representative_sys_id': partial}) is None, (
+            f'{partial} produced a partial name; the row must stay honestly '
+            'unresolved rather than render half a shelfmark')
+    assert identity({}) is None, 'a row with no sys_id resolved to a name'
+
+
+#: The csv_bank-backed closures inside `update_discovery_panel_section`, in the
+#: order they must be defined for the later ones to see the earlier ones.
+_CSV_BANK_CLOSURES = ('_csv_row', '_catalogue_title', '_catalogue_identity')
+
+
+def _extract_csv_bank_closures():
+    """The SHIPPED csv_bank closures, exec'd out of `browse_enrichment.py`.
+
+    Exec'd rather than imported because they are closures over a per-render memo
+    dict, so there is no importable handle -- and rather than re-implemented,
+    because a hand-rolled copy of the memo would pass this test while the shipped
+    one cached a miss.
+
+    Located by AST over the enclosing function, never by slicing on a literal
+    line of source. The first version of this helper keyed on
+    `'    _catalogue_titles: Dict[str, str] = {}'` and broke the moment that dict
+    was renamed -- a test that fails on a rename it does not care about is a test
+    someone deletes. The memo dict is rebuilt here (one dict, shared by all three
+    closures, exactly as the render does) so its NAME is not part of the contract;
+    the function names are, and those are what this asserts on.
+    """
+    tree = ast.parse(_read(_ENRICHMENT_SRC))
+    outer = [n for n in ast.walk(tree)
+             if isinstance(n, ast.FunctionDef)
+             and n.name == 'update_discovery_panel_section']
+    assert outer, 'update_discovery_panel_section is gone -- re-point this helper'
+
+    wanted = {n.name: n for n in outer[0].body
+              if isinstance(n, ast.FunctionDef) and n.name in _CSV_BANK_CLOSURES}
+    missing = [name for name in _CSV_BANK_CLOSURES if name not in wanted]
+    assert not missing, (
+        f'{missing} are no longer defined directly in '
+        'update_discovery_panel_section -- this helper execs them in isolation, '
+        'so it must be re-pointed rather than left passing against nothing')
+
+    module = ast.Module(body=[wanted[name] for name in _CSV_BANK_CLOSURES],
+                        type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace: Dict[str, Any] = {
+        'Dict': Dict, 'Optional': Optional, 'Any': Any,
+        # the per-render memo the closures share, by whatever name they use
+        '_catalogue_rows': {},
+    }
+    exec(compile(module, _ENRICHMENT_SRC, 'exec'), namespace)
+    return namespace
 
 
 def _update_content_node():
