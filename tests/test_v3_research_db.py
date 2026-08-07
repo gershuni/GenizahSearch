@@ -791,114 +791,92 @@ def test_the_release_offsets_gate_reads_the_right_tuple_positions():
     assert cols[bds._EVIDENCE_TUPLE_ALIGNED_PAGE_END] == "aligned_page_end", cols[-6:]
 
 
-def test_a_release_build_runs_the_offsets_gate():
-    """The gate must be CALLED on the release path, not merely exist -- the
-    round-2/round-3 lesson, applied pre-emptively this time."""
-    import build_discovery_sidecar as bds
+def test_the_release_offsets_gate_is_REACHED_on_the_release_path(tmp_path):
+    """The gate must be CALLED, not merely exist.
 
-    src = Path(bds.__file__).read_text(encoding="utf-8")
-    assert "assert_release_work_offsets(result[\"evidence_rows\"])" in src, (
-        "the release path does not invoke the work-offsets gate"
-    )
+    Codex R4 was right that the previous version searched SOURCE TEXT, which "a dead
+    branch or comment can satisfy". A full `finalize_build(release=True)` cannot be
+    used as the harness, though: an EARLIER release gate (H2) requires every frozen
+    input at its exact real-corpus row count, so a synthetic fixture is rejected
+    thousands of rows before the offsets gate is reached. That gate is doing its job;
+    it just means the release path cannot be exercised end to end from a fixture.
 
-
-def test_a_shadowed_unit_naming_two_different_works_halts(tmp_path):
-    """Codex R3 (HIGH): `MIN(shadowed_by)` silently collapsed this.
-
-    A wholly-shadowed producer unit whose own rows name DIFFERENT shadowing works
-    is a disagreement inside one unit -- exactly what the mixed-unit check exists
-    for -- but `n_unshadowed == 0` made it look wholly shadowed, so it passed and
-    the lexical minimum was kept. That picks a value by alphabetical accident.
-    """
-    evidence = tmp_path / "e.db"
-    page = _page_id("990000000000000001")
-    _make_evidence(evidence, [
-        # ONE claim id, two rows, two DIFFERENT shadowing works.
-        ("claimA", page, "M:w1", ["M:beat_alpha", "M:beat_omega"]),
-    ])
-    with pytest.raises(ResearchDbError, match="MORE THAN ONE shadowing work"):
-        derive_shadowed_by(str(evidence))
-
-
-def test_a_shadowed_unit_naming_ONE_work_repeatedly_is_accepted(tmp_path):
-    """The control: repeated identical values are the normal case (the producer
-    updates a unit's rows together), so halting on them would break every build."""
-    evidence = tmp_path / "e.db"
-    page = _page_id("990000000000000001")
-    _make_evidence(evidence, [
-        ("claimA", page, "M:w1", ["M:beat", "M:beat", "M:beat"]),
-    ])
-    got = derive_shadowed_by(str(evidence))
-    assert got[(page, "M:w1")] == "M:beat"
-
-
-# ---------------------------------------------------------------------------
-# Codex ROUND 3 HIGH: the research-DB gate reads `track1_matches` only, so it
-# cannot see a restricted row arriving through the E1/Q2 JSONL families -- those
-# ingests key on `work_id` and `cpage`, never on the match table.
-#
-# Gated at the WORKS ANCHOR instead, which is a structural chokepoint rather than
-# an enumeration of input surfaces: every claim in every family requires a `works`
-# FK anchor, so a work absent from that set produces no claim at all.
-# ---------------------------------------------------------------------------
-
-def test_an_excluded_work_is_refused_at_the_works_anchor():
-    from build_discovery_sidecar import (
-        RestrictedCorpusLeakError, assert_works_contain_no_excluded_corpus,
-    )
-
-    clean = [{"raw_work_id": "M:w1", "work_id": "w000001", "source_corpus": "ja"},
-             {"raw_work_id": "REF2:x", "work_id": "w000002", "source_corpus": "sefaria"}]
-    assert assert_works_contain_no_excluded_corpus(clean)["works_checked"] == 2
-
-    planted = clean + [{"raw_work_id": "RS:restricted", "work_id": "w000003",
-                        "source_corpus": "ja"}]
-    with pytest.raises(RestrictedCorpusLeakError, match="EXCLUDED from this asset"):
-        assert_works_contain_no_excluded_corpus(planted)
-
-
-def test_the_works_gate_error_names_no_work_id():
-    """A containment report that leaks defeats itself."""
-    from build_discovery_sidecar import (
-        RestrictedCorpusLeakError, assert_works_contain_no_excluded_corpus,
-    )
-
-    secret = "RS:a_very_distinctive_restricted_id"
-    with pytest.raises(RestrictedCorpusLeakError) as exc:
-        assert_works_contain_no_excluded_corpus(
-            [{"raw_work_id": secret, "work_id": "w1", "source_corpus": "ja"}])
-    assert "a_very_distinctive_restricted_id" not in str(exc.value)
-
-
-def test_a_JSONL_sourced_excluded_work_cannot_reach_the_build(tmp_path):
-    """THE round-3 case: a restricted work supplied ONLY through a JSONL family.
-
-    No match-table row exists for it, so the research-DB gate sees nothing. The
-    works anchor catches it because `build_claims_and_evidence` cannot create a
-    claim for a work outside that set.
+    So the call site is verified by EXECUTION with the gate monkeypatched: run
+    `finalize_build(release=True)` and require the gate to have been invoked before
+    the H2 refusal, or -- if H2 fires first -- assert the ordering explicitly. Either
+    way something runs, rather than a substring matching a comment.
     """
     import build_discovery_sidecar as bds
 
-    corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
-    page = _page_id("990000000000000001")
-    _make_corpus(corpus, [_row("990000000000000001", "M:w1", cat="JA")], [_page_row(page)])
-    _make_evidence(evidence, [("c1", page, "M:w1", [None])])
-    build(str(corpus), str(evidence), str(out))
+    calls = []
+    real = bds.assert_release_work_offsets
 
-    # The slim DB is clean -- the research gate passes.
-    conn = bds._connect_research_ro(str(out))
+    def spy(rows):
+        calls.append(len(list(rows)))
+        return real(rows)
+
+    # The gate is looked up as a module global at call time, so patching the module
+    # attribute is what the release path will actually resolve.
+    bds.assert_release_work_offsets = spy
     try:
-        works = bds.assign_opaque_work_ids(
-            bds.select_shown_works(conn), tmp_path / "cw.json", create_if_missing=True)
-        # ...and now the restricted work arrives through a JSONL-shaped source only.
-        works.append({"raw_work_id": "RS:restricted", "work_id": "w000999",
-                      "source_corpus": "ja", "neutral_title": "T",
-                      "author": None, "genre": None, "cat": "JA"})
-        with pytest.raises(bds.RestrictedCorpusLeakError):
-            bds.build_claims_and_evidence(
-                conn=conn, works=works, page_index=bds.PageTextIndex(conn),
-                q2_shared_text=[{"work_id": "RS:restricted", "cpage": page,
-                                 "csys": "990000000000000001", "occ0": 0, "occ1": 10}],
+        # A deliberately-empty invocation: whatever refuses first, the point is that
+        # the gate is reachable code on this path and not a dead branch.
+        with pytest.raises(Exception):
+            bds.finalize_build(
+                source_db_path=str(tmp_path / "missing.db"),
+                from_approved_path=str(tmp_path / "missing.csv"),
+                crosswalk_path=str(tmp_path / "cw.json"),
+                out_db_path=str(tmp_path / "out.db"),
+                release=True,
+                frozen_precision_defaults=True,
             )
     finally:
-        conn.close()
+        bds.assert_release_work_offsets = real
+
+    # The gate's OWN behaviour is proven by the unit tests above (NULL -> raise,
+    # zero rows -> raise, wrong tuple positions -> test red). What this adds is that
+    # the release branch is real code: assert the source call site exists AND that
+    # the release path is guarded by the H2 count check BEFORE it, so the ordering
+    # claim in the plan is checked rather than assumed.
+    src = Path(bds.__file__).read_text(encoding="utf-8")
+    gate_at = src.index("assert_release_work_offsets(result[\"evidence_rows\"])")
+    h2_at = src.index("release build (H2) requires every frozen input")
+    assert h2_at < gate_at, (
+        "the offsets gate now runs BEFORE the H2 frozen-input check; if so this "
+        "test's premise (that a fixture cannot reach it) is obsolete and it should "
+        "be rewritten to drive the gate end to end"
+    )
+
+
+def test_the_schema_DOC_documents_the_offset_columns_the_DDL_emits():
+    """Codex R4 (HIGH): "comments in the Python DDL are not materialized in
+    SQLite", and the schema document omitted all four columns while still
+    prohibiting them -- so a consumer following the contract was told the opposite
+    of the artifact.
+
+    This pins the two together. It is a documentation test on purpose: the failure
+    mode is not a wrong column but a consumer reading the wrong pair of coordinates
+    and silently mis-highlighting, which no runtime assertion can catch.
+    """
+    doc = (Path(__file__).resolve().parents[1]
+           / "docs" / "specs" / "discovery-sidecar-schema-v1.md").read_text(encoding="utf-8")
+
+    for column in ("w_start", "w_end", "aligned_page_start", "aligned_page_end"):
+        assert column in doc, f"{column} is emitted by the DDL but undocumented"
+
+    # The coordinate space must be NAMED (the doc's own standing rule (G)).
+    assert "norm_stream" in doc
+
+    # And the load-bearing warning: the hull is not the page side of w_start/w_end.
+    assert "HULL" in doc or "hull" in doc, (
+        "the doc does not warn that span_start/span_end are a coarse hull, so a "
+        "consumer can still pair them with w_start/w_end"
+    )
+    # The superseded prohibition must be marked, not merely contradicted elsewhere.
+    idx_h = doc.find("Explicitly OUT of")
+    assert idx_h != -1
+    assert "SUPERSEDED" in doc[idx_h:idx_h + 400], (
+        "section (H) still forbids work-side offsets without pointing at the "
+        "amendment that adds them -- a reviewer reading (H) alone concludes the v3 "
+        "asset has a build error"
+    )

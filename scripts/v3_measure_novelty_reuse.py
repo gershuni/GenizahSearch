@@ -27,11 +27,34 @@ fingerprint onto a verdict produced from yesterday's inputs asserts exactly the
 thing that was never checked. What CAN be done is reported here per pair, so the
 owner can decide with a number rather than a guess.
 
+**WHAT THIS MEASURES, AND WHAT IT DOES NOT** (Codex round 4, HIGH -- the finding
+was right and this is the correction). The candidate population is built from the
+asset and finding-aid DBs passed in, which DEFAULT to the LEGACY v2 asset. So a
+default run measures the reuse rate over the **legacy** candidate population -- and
+that is precisely why its residual agreed exactly with the prior run's 55,184. It
+is a valid measurement of "how much of the existing cache still answers the
+questions it was built for", which is the right question for deciding whether the
+cache survives at all. It is **NOT** a measurement of the v3 population: the v3
+router, crosswalk and work set are not yet fixed, so the v3 candidate set does not
+exist to measure.
+
+Two consequences, both recorded in the report rather than left to a reader:
+  * every input path is now recorded WITH ITS CONTENT HASH, so a later reader can
+    tell which population a number describes;
+  * `population` says `legacy` or `pinned` explicitly. A number without that label
+    is the kind of figure the ~$4 estimate was.
+
+The honest v3 sequence, therefore: build the router and the final work set FIRST,
+then re-run this against those inputs to get the v3 residual, and only then decide
+whether to spend. That is the $0 post-assembly dry measurement round 4 asked for,
+and it is now the recommended option in the plan.
+
 MASKING (D-25): counts and hex digests only.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -62,7 +85,20 @@ DEFAULT_REPORT = os.path.join(REPO_ROOT, "_tmp", "v3-novelty-reuse-measurement.j
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cache", default=DEFAULT_CACHE)
-    ap.add_argument("--asset", default=DEFAULT_ASSET)
+    ap.add_argument("--asset", default=DEFAULT_ASSET,
+                    help="the discovery asset the candidate population is built from. "
+                         "DEFAULTS TO THE LEGACY v2 ASSET -- pass the v3 asset "
+                         "explicitly to measure the v3 population.")
+    # Codex R4: these were hardcoded, so a run could not be pointed at v3 inputs and
+    # the report could not say which population it described.
+    ap.add_argument("--libraries-csv", default=DEFAULT_LIBRARIES_CSV)
+    ap.add_argument("--fjms-db", default=DEFAULT_FJMS_DB)
+    ap.add_argument("--fgp-db", default=DEFAULT_FGP_DB)
+    ap.add_argument("--pgp-db", default=DEFAULT_PGP_DB)
+    ap.add_argument("--population", choices=("legacy", "pinned"), default="legacy",
+                    help="LABEL for the report: what population these inputs "
+                         "represent. A reuse number without this label is unusable "
+                         "-- it is the mistake the retracted ~$4 estimate made.")
     ap.add_argument("--report", default=DEFAULT_REPORT)
     args = ap.parse_args(argv)
 
@@ -78,10 +114,10 @@ def main(argv=None) -> int:
         "(this is the slow part)")
     candidates, _works, _libraries = build_all_candidates(
         asset_path=args.asset,
-        libraries_csv=DEFAULT_LIBRARIES_CSV,
-        fjms_db=DEFAULT_FJMS_DB,
-        fgp_db=DEFAULT_FGP_DB,
-        pgp_db=DEFAULT_PGP_DB,
+        libraries_csv=args.libraries_csv,
+        fjms_db=args.fjms_db,
+        fgp_db=args.fgp_db,
+        pgp_db=args.pgp_db,
     )
     log(f"  candidates: {len(candidates):,}")
 
@@ -111,8 +147,34 @@ def main(argv=None) -> int:
             counters["residual_fingerprint_mismatch"] += 1
 
     covered = counters["residual_fingerprint_ok"]
+    # Codex R4: record WHICH inputs produced this number. Without these hashes the
+    # report cannot be told apart from a run over a different population, which is
+    # exactly how the ~$4 figure survived as long as it did.
+    def _hash(path):
+        try:
+            digest = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+            return digest.hexdigest()
+        except OSError as exc:
+            return f"(unreadable: {type(exc).__name__})"
+
+    inputs = {
+        "asset": args.asset, "cache": args.cache, "libraries_csv": args.libraries_csv,
+        "fjms_db": args.fjms_db, "fgp_db": args.fgp_db, "pgp_db": args.pgp_db,
+    }
+    log("hashing inputs (so the report can name the population it measured)")
+    input_hashes = {name: _hash(path) for name, path in inputs.items()}
+
     report = {
         "measured_utc_note": "timestamp intentionally omitted -- see git commit date",
+        # THE label. `legacy` means this measures how much of the existing cache
+        # still answers ITS OWN questions -- NOT the v3 population, which does not
+        # exist until the router and final work set are fixed.
+        "population": args.population,
+        "inputs": inputs,
+        "input_sha256": input_hashes,
         "cache_entries": len(cache),
         "candidates": len(candidates),
         "heuristically_resolved": len(resolved),

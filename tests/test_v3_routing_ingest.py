@@ -750,16 +750,55 @@ def test_the_asset_meta_is_read_from_a_BUILT_asset_not_from_source_text(tmp_path
     )
 
 
-def test_the_cli_offers_and_threads_the_router(tmp_path):
-    """A CLI build must face the same forced choice; a declared-but-unthreaded
-    flag is the same bypass in a new place."""
+def test_the_cli_PARSES_and_threads_the_router_flags(tmp_path):
+    """A CLI build must face the same forced choice.
+
+    Codex R4: the previous version searched source text "rather than invoking the
+    parser/CLI". This invokes the REAL parser and then the REAL `main()`, capturing
+    what reaches `finalize_build` -- so a declared-but-unthreaded flag (the same
+    bypass in a new place) fails here.
+    """
     import build_discovery_sidecar as bds
 
-    src = Path(bds.__file__).read_text(encoding="utf-8")
-    assert "--gen2-router-evidence-db" in src
-    assert "--allow-lever1-coverage" in src
-    assert "gen2_router_evidence_db=args.gen2_router_evidence_db" in src
-    assert "allow_lever1_coverage=args.allow_lever1_coverage" in src
+    # 1. The real parser must accept both flags and land them on the namespace.
+    # The source DB is POSITIONAL (`db_path`), not a flag.
+    args = bds.build_parser().parse_args([
+        "x.db", "--from-approved", "a.csv",
+        "--crosswalk", "cw.json", "--out", "o.db",
+        "--gen2-router-evidence-db", "route.db", "--allow-lever1-coverage",
+    ])
+    assert args.gen2_router_evidence_db == "route.db"
+    assert args.allow_lever1_coverage is True
+
+    # 2. `main()` must THREAD them into finalize_build. Captured rather than
+    #    source-matched: this is the step a declared-only flag would fail.
+    seen = {}
+    real = bds.finalize_build
+
+    def spy(**kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop here -- the kwargs are what this test is about")
+
+    bds.finalize_build = spy
+    try:
+        with pytest.raises(RuntimeError, match="stop here"):
+            bds.main([
+                "x.db", "--from-approved", "a.csv",
+                "--crosswalk", "cw.json", "--out", "o.db",
+                "--gen2-router-evidence-db", "route.db",
+                # H2 demands an explicit release/partial choice before any build.
+                "--allow-partial-sources",
+            ])
+    finally:
+        bds.finalize_build = real
+
+    assert seen.get("gen2_router_evidence_db") == "route.db", (
+        f"the CLI declared --gen2-router-evidence-db but did not pass it: "
+        f"{seen.get('gen2_router_evidence_db')!r}"
+    )
+    assert "allow_lever1_coverage" in seen, (
+        "the CLI does not pass allow_lever1_coverage at all"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -844,15 +883,15 @@ def test_per_key_parity_refuses_to_pass_over_zero_rows(tmp_path):
 
 
 def test_per_key_parity_runs_inside_the_builder(tmp_path):
-    """It must be CALLED, not merely exist."""
-    import build_discovery_sidecar as bds
+    """It must be CALLED, not merely exist.
 
-    src = Path(bds.__file__).read_text(encoding="utf-8")
-    assert "assert_assembled_parity(" in src, (
-        "the builder does not invoke the per-key parity check"
-    )
-    # Verified live: the router path builds cleanly through it (the routing tests
-    # above all run with `gen2_router` supplied and no D-17 audit rows).
+    Codex R4: the previous version searched source text and then used a
+    no-D-17-audit helper build, so "its mutation evidence tests the easier no-D-17
+    property". The source check is gone; this asserts the parity REPORT is present
+    on the built result, and
+    `test_parity_runs_on_a_D17_BUILD_and_accepts_only_audited_demotions` covers the
+    D-17 branch with its own report assertion.
+    """
     rdb = tmp_path / "r.db"
     _tiny_research_db(rdb, [(P1, "990000000000000001", "M:w1", 40, "[[0,40,0.2]]")])
     ship = tmp_path / "s.db"

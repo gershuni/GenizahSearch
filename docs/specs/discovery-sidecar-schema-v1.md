@@ -932,15 +932,89 @@ in the wrong place (652 characters off on the sampled case). Any future offset c
 discovery-v2.1 `w_start`/`w_end` on the work side) MUST state its coordinate space in the same
 sentence that defines it.
 
-### (H) Explicitly OUT of this rebuild
+### (H) Explicitly OUT of **the 136 rebuild** — SUPERSEDED for discovery-v3 by Amendment 2026-08-07 (F)+(G)
 
-`w_start`/`w_end` (work-side match offsets) and the Sefaria versemap reference-resolution stage are
-DEFERRED to discovery-v2.1 by owner decision 2026-08-02 (`136-CONTEXT.md` RE-SCOPE block) — they serve
-only the reference-side locus and the side-by-side evidence view, both moved to Phase 136.1/v2.1, and
-they carried the build's hardest work (the `body` ↔ `norm_stream` coordinate mapping). **No field for
-either may appear in this asset.** A schema reviewer finding a `w_start`/`w_end`-shaped column, or a
-versemap-derived reference field, on the `discovery_evidence`/`discovery_claim`/`works` tables in this
-rebuild has found a build error.
+> **⚠️ SCOPE.** This section governs the **Phase 136 rebuild** and remains correct for it. It is
+> **SUPERSEDED for the discovery-v3 asset**, which DOES carry work-side offsets — see
+> *Amendment 2026-08-07 (F)+(G)* below. Read that section before concluding a `w_start`-shaped
+> column is a build error. (Codex round 4 correctly flagged that a consumer following this document
+> was being told the opposite of the v3 artifact's contract.)
+
+`w_start`/`w_end` (work-side match offsets) and the Sefaria versemap reference-resolution stage were
+DEFERRED to a later bake by owner decision 2026-08-02 (`136-CONTEXT.md` RE-SCOPE block) — they serve
+only the reference-side locus and the side-by-side evidence view, both moved to Phase 136.1, and they
+carried the build's hardest work (the `body` ↔ `norm_stream` coordinate mapping). **No field for either
+may appear in the 136 asset.** A schema reviewer finding a `w_start`/`w_end`-shaped column, or a
+versemap-derived reference field, on the `discovery_evidence`/`discovery_claim`/`works` tables **in the
+136 rebuild** has found a build error.
+
+**What changed in v3:** the offsets turned out to be free — gen-2's `ref_spans_json` already carries the
+producer's PAIRED dual-side spans, so Stage 1 (raw offsets) needs no coordinate mapping at all. Only
+Stage 2 (resolving them to a human-readable chapter/verse locus, which needs `body` ↔ `norm_stream`)
+remains deferred. The prohibition above was written when both stages looked like one job.
+
+---
+
+## Amendment 2026-08-07 (F)+(G) — work-side offsets and the aligned page pair (discovery-v3)
+
+Adds **four** columns to `discovery_evidence`, appended at the end of the column list so every
+pre-existing column keeps its ordinal position (a positional reader sees an additive change):
+
+```sql
+  -- (F) The WORK side of the match, in the reference work's NORMALIZED Hebrew-letter
+  -- stream (`norm_stream`) -- the SAME coordinate space span_start/span_end index on
+  -- the page side, per the standing rule in (G) above. NOT offsets into the
+  -- readability-oriented `body` that the Sefaria versemaps index; resolving these to a
+  -- chapter/verse locus needs a `body` <-> `norm_stream` map that does not exist yet
+  -- and is still deferred.
+  w_start            INTEGER,
+  w_end              INTEGER,
+  -- (G) The PAGE side of the SAME producer alignment as w_start/w_end.
+  aligned_page_start INTEGER,
+  aligned_page_end   INTEGER,
+```
+
+### The rule a consumer must follow
+
+**A two-sided alignment is `(aligned_page_start, aligned_page_end, w_start, w_end)` — all four from ONE
+producer alignment. `span_start`/`span_end` are NOT the page side of `w_start`/`w_end`.**
+
+`span_start`/`span_end` hold the largest span in `spans_json`, which is a **coarse page-only HULL** over
+the producer's paired alignments. Measured on the real artifact: on **12.2% of rows (46,472)** that hull
+matches no reference entry at all, and two reference ranges under one hull can sit **3.4M characters
+apart** (p90 gap 13,113). Pairing the hull with a work interval drawn from a narrower entry would assert
+a correspondence the producer never made — which is exactly the defect Codex round 3 identified, and the
+reason these two columns exist rather than `span_start`/`span_end` being redefined.
+
+`span_start`/`span_end` keep their existing meaning and are unchanged, because they are **frozen inputs
+to the `evidence_id` recipe** (§SS2): redefining them would regenerate every `track1_direct` evidence id
+and break the D-02b rebuild-preservation diff. They remain valid as a coarse page locator and as the id
+input; they are not a work-side correspondence.
+
+### Nullability, and what it means
+
+All four are **NULLABLE**, and this is a contract rather than laxity: only `evidence_source =
+'track1_direct'` rows have a work-side coordinate at all. The propagated and `shared_text` families
+carry no reference-side span in their inputs, so a `NOT NULL` default would either fabricate a zero —
+indistinguishable from a real alignment at the start of a work — or block the build.
+
+**On a `--release` build, all four are non-NULL on every `track1_direct` row**, enforced by
+`assert_release_work_offsets` (which also refuses to pass over an empty population). A non-release
+rebuild against a v2-era research DB legitimately emits NULLs, because that population has no paired
+spans; such an asset is not a release artifact.
+
+### Provenance
+
+Selection rule: among the row's own `ref_spans_json` entries, the one with the largest **page-side**
+extent, tie-broken `p0` ASC, `p1` ASC, `rg0` ASC, `rg1` ASC — a total order over integers, so the result
+is deterministic and independent of input order. Verified against the producer's own
+`discovery_evidence.page_start/page_end/ref_start/ref_end`: those tuples are drawn exactly from
+`ref_spans_json` (100.00% of 200,000 sampled), and this rule reproduces one of them on **381,341 of
+381,341 rows (100.00%)**. So the shipped offsets are the producer's, not a reconstruction.
+
+**Multiplicity is dropped, not resolved:** 22.06% of `(page, work)` pairs have more than one producer
+alignment, and the match-table grain is one row, so one is kept. Nothing in the asset asserts or implies
+anything about the discarded alignments.
 
 ---
 
