@@ -221,6 +221,15 @@ corpus_mapper_output/
 # PUZZLE_UPLOAD_SECRET env-sourced-secret posture. NEVER commit this file.
 /.masking_patterns
 
+# discovery-v3 (2026-08-07): the HMAC key for the NON-DISCLOSING pattern-set
+# attestation (`check_atlas_masking.py --attest`). Same handling as
+# `.masking_patterns` itself: env-held, gitignored, NOT rotated casually --
+# rotating it makes every previously-recorded `pattern_set_hmac` unverifiable,
+# which silently downgrades the attestation back to a bare count. An UNKEYED
+# attestation deliberately omits all digests (an unkeyed digest is a membership
+# oracle: hash a guessed term, compare the prefix).
+/.masking_attest_key
+
 # Phase 133 baked atlas asset (offline bake output). Lives OUTSIDE web/static/
 # on purpose -- the /static mount at web/main.py:740 serves web/static/
 # publicly, which would let the asset bypass the atlas-preview feature flag.

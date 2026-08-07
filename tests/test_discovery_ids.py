@@ -410,8 +410,11 @@ def _insert_evidence(conn, *, routing_reason):
 def test_routing_reason_later_shared_text_constant_and_membership():
     assert d.ROUTING_REASON_LATER_SHARED_TEXT == "later_shared_text"
     assert "later_shared_text" in d.ROUTING_REASONS
-    # 135-07 added the Lever-1 coverage-demotion reason `low_coverage`.
-    assert len(d.ROUTING_REASONS) == 6
+    # 135-07 added the Lever-1 coverage-demotion reason `low_coverage` (6).
+    # Schema Amendment 2026-08-07 (E) added the two gen-2 routing reasons
+    # `gen2_parallel_surface` + `gen2_router_not_shipped` (8). See the golden
+    # pin below for the authoritative set.
+    assert len(d.ROUTING_REASONS) == 8
 
 
 def test_routing_reason_low_coverage_constant_and_membership():
@@ -530,6 +533,30 @@ def test_discovery_routing_audit_accepts_valid_row():
         conn.close()
 
 
+def test_discovery_evidence_routing_reason_check_accepts_gen2_reasons():
+    """Amendment (E): the DDL CHECK must accept both gen-2 routing reasons.
+
+    A real INSERT, not a constant lookup: the first version of the gen-2 router
+    added the constants to `ROUTING_REASONS` but not to the `routing_reason`
+    CHECK, so every ingest would have died at INSERT while the vocabulary tests
+    stayed green.
+    """
+    for reason in (
+        d.ROUTING_REASON_GEN2_PARALLEL_SURFACE,
+        d.ROUTING_REASON_GEN2_ROUTER_NOT_SHIPPED,
+    ):
+        conn = _fresh_schema_conn()
+        try:
+            _insert_evidence(conn, routing_reason=reason)  # must insert cleanly
+            (n,) = conn.execute(
+                "SELECT COUNT(*) FROM discovery_evidence WHERE routing_reason = ?",
+                (reason,),
+            ).fetchone()
+            assert n == 1, f"{reason} did not survive the routing_reason CHECK"
+        finally:
+            conn.close()
+
+
 def test_discovery_routing_audit_rejects_bogus_decision():
     conn = _fresh_schema_conn()
     try:
@@ -548,9 +575,15 @@ def test_discovery_routing_audit_rejects_bogus_decision():
 #    (the 2026-07-24 amendment) + discovery-band-labels-v1.md §5 alongside it.
 #    135-07 added `low_coverage` (the Lever-1 coverage-demotion reason, bake
 #    plan §4.4) to ROUTING_REASONS.
+#    Schema Amendment 2026-08-07 (E) added `gen2_parallel_surface` +
+#    `gen2_router_not_shipped`: the two-surface gen-2 coverage router replaces
+#    the Lever-1 cliff, so a row demoted by it carries WHICH surface sent it to
+#    review rather than the cliff's `low_coverage`. `low_coverage` is RETAINED
+#    (v2-read-compat: shipped v2 rows carry it).
 
 GOLDEN_ROUTING_REASONS = [
-    "co_citation", "impurity", "later_shared_text", "low_coverage", "none",
+    "co_citation", "gen2_parallel_surface", "gen2_router_not_shipped",
+    "impurity", "later_shared_text", "low_coverage", "none",
     "runner_up_conflict",
 ]
 GOLDEN_TRACK1_CONFIDENCE_BANDS = [

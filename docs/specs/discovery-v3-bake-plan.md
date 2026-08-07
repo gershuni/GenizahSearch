@@ -629,8 +629,13 @@ research DB must therefore be built with `track1_matches` **materialised from th
 why §7 builds a *slim* research DB rather than copying the corpus file. Gate 2 (id-map completeness, HALT on
 unresolved) is what catches a mistake here.
 
-`.masking_patterns` holds 15 patterns (count only — contents are secret), consistent with DATA-05's requirement
-that **R-source tokens are pre-registered** alongside M-source, so a leak of either is caught by the same gate.
+`.masking_patterns` holds **8** patterns (count only — contents are secret; attested per run, §5.0a),
+consistent with DATA-05's requirement that **R-source tokens are pre-registered** alongside M-source, so a leak
+of either is caught by the same gate. *(This line said 15 until 2026-08-07. The 15 was never measured — it was
+carried forward from an earlier draft. The attested count is 8, and the arithmetic reconciles exactly: 6
+original → 10 after the owner added four fingerprint forms on 2026-08-06 → **8** after the two bare-Hebrew
+forms were removed, those being ordinary Hebrew that matched 48 innocent occurrences in our own transcriptions.
+Nothing is missing; the number in this file was.)*
 
 **Three real options, in increasing cost:**
 - **(a) keep excluded** until containment-aware routing exists — recommended for this bake;
@@ -1026,10 +1031,16 @@ looks like evidence while attesting nothing). Printed BEFORE the scan, so it is 
 run is being diagnosed.
 
 **⚠️ AND IT IMMEDIATELY FOUND SOMETHING.** The live set attests **`pattern_count = 8`**, not the 15 this
-document records. The count changed after the owner's 2026-08-06 edits (transliterations added, then the Hebrew
+document recorded. The count changed after the owner's 2026-08-06 edits (transliterations added, then the Hebrew
 forms removed following 48 innocent hits), so 8 is plausibly correct and intended — but the discrepancy was
-invisible until something printed the number, which is precisely the argument for the attestation. **Owner
-confirmation owed** that 8 is the intended set before the bake runs.
+invisible until something printed the number, which is precisely the argument for the attestation.
+
+**✅ RECONCILED 2026-08-07 — 8 is correct, and the "15" was the error.** The count was never measured; it was
+carried from an earlier draft. The arithmetic closes exactly: **6** original → **10** after the owner added four
+fingerprint forms (Hebrew singular + plural, transliterated singular + plural) → **8** after the two bare-Hebrew
+forms were withdrawn as unusable (ordinary Hebrew; 48 innocent hits in our own transcriptions). Every stale
+"15" in this file has been corrected to 8. Nothing is absent from the set — the number in the document was
+wrong, not the file.
 
 **🛑 THE DIGEST FIELD, CORRECTED 2026-08-07 after Codex round 5 (MEDIUM).** An earlier revision of this section
 recorded a fixed `pattern_set_sha256` value "so a later run can prove it used the same reviewed set". That is
@@ -1048,11 +1059,23 @@ recorded a fixed `pattern_set_sha256` value "so a later run can prove it used th
   earlier `pattern_set_hmac` unverifiable, which converts the attestation back into a bare count. Treat it with
   the same handling as `.masking_patterns` (env-held, gitignored, not rotated casually).
 
-**Gate 16 remains NOT green, and the attestation does not change that.** The signature-vocabulary term is still
-absent from the scanned pattern set, so the scan cannot catch that class; the slim-DB column denylist is a
-compensating control for the one place the term is known to arrive, not a substitute for the scan. Owner action
-(add the pattern) and owner confirmation (that 8 is the intended count) are both still owed before masking
-evidence should be read as complete.
+**✅ GATE 16 IS NOW GREEN (2026-08-07) — measured, not assumed.** The earlier verdict ("the signature-vocabulary
+term is still absent from the scanned pattern set") is **falsified**. The owner's addition DID land; only this
+document was stale. Probed by writing each candidate form to a scratch file and scanning it with the live
+pattern set — the term itself is never printed, only the exit code:
+
+| probe | scanner verdict |
+|---|---|
+| transliterated singular | **CAUGHT** (exit 1) |
+| transliterated plural | **CAUGHT** (exit 1) |
+| bare 5-char stem | passes clean (exit 0) — *expected*: this is the `FORBIDDEN_COLUMN_SUBSTRINGS` value, cleartext in committed code by design |
+| neutral replacement `src_attr_note` | passes clean (exit 0) — the control |
+
+So the leak class the finding was about **is** caught by the scan now, in both Latin-script forms. The bare stem
+is deliberately *not* a pattern: it is the denylist substring in `v3_build_research_db.py`, and making it one
+would turn the repo scan red on the guard itself. The bare-Hebrew forms remain excluded by measured decision
+(48 innocent hits), so for that script the slim-DB column denylist stays the operative control — which is what
+it was always documented to be. Both owner actions on this gate are **discharged**.
 
 **✅ FINDING B — RESOLVED 2026-08-06: not a coincidence. The frozen constant was pinned against the GEN-2
 population.** The slim research DB was built from the real artifacts and fed to the builder's own reader:
@@ -1268,7 +1291,7 @@ the masking scan on my own two files, I ran it with the pattern file unset (**ex
 | **12** | **✅ CLOSED 2026-08-07 — R-source gate, at the CONSUMER boundary.** R2 was right that the slim builder's filter is defense in depth, not the gate: `select_shown_works`, the review-only path and `--from-approved` each build from whatever DB path the operator supplies, and `select_shown_works` has no prefix rejection — so pointing the build at the gen-2 corpus file (whose own `track1_matches` is the v2-era table with 349 restricted works) reaches a sidecar without the slim builder running at all. The gate now lives in `_connect_research_ro`, the ONE place every entrypoint opens a research DB, and returns a source-table fingerprint (row count + column set). Tested by direct invocation with a planted prefix; a third test asserts the error names no work id, because a containment report that leaks defeats itself. Mutation-verified. |
 | **13** | **✅ CLOSED 2026-08-07 — novelty input fingerprint.** `candidate_input_fingerprint` bridges a real candidate to the already-specified `build_cache_key`/`CACHE_KEY_FIELDS` (whose only prior caller was a demo block). Consumer: unfingerprinted or mismatched → **counted MISS**, never an error. Producer: both arms record it, and the RESUME path re-asks a stale checkpoint line rather than resuming it — the one place a stale answer is indistinguishable from a finished one. Manifest pins version + prompt hash + normalization hash + field list. Mutation-verified three ways including the exact case R2 named (dropping `claimed_title` → red). One test imports the REAL renderer and requires that any field which changes the rendered prompt also changes the fingerprint, so a future prompt field cannot quietly escape. |
 | **15** | **⚠️ PARTIAL 2026-08-07 — provenance recorded, inference WITHDRAWN.** R2 was right that exact agreement between the constant and the slim DB's count "is not evidence of causation" — it proves only that this transformation currently produces that number. The plan's inference is withdrawn. Recorded at the constant: the query, the dated measurement (275,894 unshadowed of 381,341; 105,447 in shadowed units), the halting derivation, and the operative rule — **the value is NEVER edited to make a run pass**. A mismatch means the population changed, which needs a decision, not a new constant. Still owed: the pre-build source-identity record in the build manifest. |
-| **16** | **NEW — the signature-vocabulary term** (§5.0a finding A) appears in no slim-DB column, artifact, deck or log | plant the term in a scanned file → must be reported. **Currently FAILS this control** — the pattern is absent from `.masking_patterns`; owner action owed. Until then, an explicit column-name denylist in the slim-DB builder is the compensating control |
+| **16** | **✅ CLOSED 2026-08-07 — the signature-vocabulary term** (§5.0a finding A) appears in no slim-DB column, artifact, deck or log. The earlier "currently FAILS this control" verdict is **falsified**: the owner's addition had landed and only this document was stale. Proven by the control itself — each candidate form written to a scratch file and scanned with the live set (the term is never printed, only the exit code): **transliterated singular → CAUGHT (exit 1)**, **transliterated plural → CAUGHT (exit 1)**, neutral replacement `src_attr_note` → clean (the control), bare 5-char stem → clean *by design* (it is the `FORBIDDEN_COLUMN_SUBSTRINGS` value, cleartext in committed code, so making it a pattern would redden the repo scan on the guard itself). Bare-Hebrew forms stay excluded by measured decision (48 innocent hits in our own transcriptions), so for that script the column denylist remains the operative control — as always documented. | plant the term in a scanned file → must be reported. **Done, both Latin-script forms.** |
 | **14** | **✅ CLOSED 2026-08-07 — multi-span offset parity** (Codex blocker 1). R2 called the promised gate "a placeholder" for specifying no selection rule, tie-break, or source relation; all three are fixed, and the rule is **discovered, not invented** — gen-2's `ref_spans_json` already pairs the sides, so the projection is a selection among the producer's own pairs (largest page-side extent, tie-break `p0,p1,rg0,rg1` ASC). Verified against the producer: its evidence tuples come exactly from `ref_spans_json` (100.00% of 200,000 sampled) and this rule reproduces one on **381,341/381,341 rows (100.00%)**. Fixture is a real multi-span row whose `spans_json` hull matches NO ref entry — the 12.2% (46,472-row) case a hull-keyed projection would have silently NULLed, kept as an explicit control. Three mutations (order flipped / unwired / sides swapped) all turn it red. |
 
 **On the masking gate (Codex MEDIUM — attestation DELIVERED 2026-08-07).** The fail-closed control and
