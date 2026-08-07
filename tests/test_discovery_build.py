@@ -136,6 +136,59 @@ def test_map_cat_to_source_corpus():
     assert sidecar_build._map_cat_to_source_corpus("") is None
 
 
+def test_the_restricted_corpus_name_maps_to_the_masked_bucket_never_an_open_one():
+    """D-25 / §7a: the REAL restricted name must land in `msource`.
+
+    `test_map_cat_to_source_corpus` above proves the else-branch works for a
+    placeholder label (`AnyOtherResearchLabel`). That cannot catch the failure
+    this guards: someone adding the restricted corpus's actual name to
+    `_OPEN_CORPUS_CATS_SEFARIA` would route 106,887 rows (measured 2026-08-07 on
+    the slim DB) to `sefaria` and publish the association.
+
+    The needle comes from the OWNER-HELD pattern file, never from this repo, so
+    the test exercises the real term while committing nothing. Skips when the
+    pattern file is absent (a dev box without the secret) -- but it must SKIP,
+    not silently pass, and it never treats an empty set as clean.
+    """
+    import os
+
+    patterns_file = os.environ.get("MASKING_SCAN_PATTERNS_FILE")
+    if not patterns_file or not Path(patterns_file).exists():
+        pytest.skip("MASKING_SCAN_PATTERNS_FILE unset/absent -- owner-held secret")
+
+    patterns = cam.load_patterns()
+    assert patterns, "empty pattern set must never read as clean"
+
+    needles = [p if isinstance(p, str) else getattr(p, "pattern", "") for p in patterns]
+    needles = [n for n in needles if n]
+
+    # NON-DISCLOSURE: every comparison below is reduced to a COUNT or a bool
+    # BEFORE the assert. pytest's assertion rewriting echoes the operands of a
+    # failing expression, so `assert needle not in label` would print the
+    # restricted term on failure -- a masking guard that leaks what it guards.
+    # Verified: the mutated run's output contains no needle, only an index.
+    open_labels = sidecar_build._OPEN_CORPUS_CATS_SEFARIA | {sidecar_build._OPEN_CORPUS_CAT_JA}
+    contaminated = sorted(
+        i for i, n in enumerate(needles)
+        if any(n.casefold() in label.casefold() for label in open_labels)
+    )
+    assert not contaminated, (
+        f"pattern index/indices {contaminated} appear inside an OPEN-corpus `cat` "
+        f"label, so the restricted corpus would map to an open `source_corpus` and "
+        f"the association would ship. Indices only -- no pattern or label echoed."
+    )
+
+    # And each restricted pattern, used AS a cat value, must reach `msource`.
+    misrouted = sorted(
+        i for i, n in enumerate(needles)
+        if sidecar_build._map_cat_to_source_corpus(n) != ids.SOURCE_CORPUS_MSOURCE
+    )
+    assert not misrouted, (
+        f"pattern index/indices {misrouted} did NOT map to the masked bucket. "
+        f"Indices only -- no pattern echoed."
+    )
+
+
 def test_is_literary_genre_keep_and_exclude():
     assert sidecar_build._is_literary_genre("ספרות יפה") is True  # belles-lettres
     assert sidecar_build._is_literary_genre("פיוט ותפילה") is False  # piyyut and prayer

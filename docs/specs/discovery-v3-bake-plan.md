@@ -1291,7 +1291,7 @@ the masking scan on my own two files, I ran it with the pattern file unset (**ex
 | **12** | **✅ CLOSED 2026-08-07 — R-source gate, at the CONSUMER boundary.** R2 was right that the slim builder's filter is defense in depth, not the gate: `select_shown_works`, the review-only path and `--from-approved` each build from whatever DB path the operator supplies, and `select_shown_works` has no prefix rejection — so pointing the build at the gen-2 corpus file (whose own `track1_matches` is the v2-era table with 349 restricted works) reaches a sidecar without the slim builder running at all. The gate now lives in `_connect_research_ro`, the ONE place every entrypoint opens a research DB, and returns a source-table fingerprint (row count + column set). Tested by direct invocation with a planted prefix; a third test asserts the error names no work id, because a containment report that leaks defeats itself. Mutation-verified. |
 | **13** | **✅ CLOSED 2026-08-07 — novelty input fingerprint.** `candidate_input_fingerprint` bridges a real candidate to the already-specified `build_cache_key`/`CACHE_KEY_FIELDS` (whose only prior caller was a demo block). Consumer: unfingerprinted or mismatched → **counted MISS**, never an error. Producer: both arms record it, and the RESUME path re-asks a stale checkpoint line rather than resuming it — the one place a stale answer is indistinguishable from a finished one. Manifest pins version + prompt hash + normalization hash + field list. Mutation-verified three ways including the exact case R2 named (dropping `claimed_title` → red). One test imports the REAL renderer and requires that any field which changes the rendered prompt also changes the fingerprint, so a future prompt field cannot quietly escape. |
 | **15** | **⚠️ PARTIAL 2026-08-07 — provenance recorded, inference WITHDRAWN.** R2 was right that exact agreement between the constant and the slim DB's count "is not evidence of causation" — it proves only that this transformation currently produces that number. The plan's inference is withdrawn. Recorded at the constant: the query, the dated measurement (275,894 unshadowed of 381,341; 105,447 in shadowed units), the halting derivation, and the operative rule — **the value is NEVER edited to make a run pass**. A mismatch means the population changed, which needs a decision, not a new constant. Still owed: the pre-build source-identity record in the build manifest. |
-| **16** | **✅ CLOSED 2026-08-07 — the signature-vocabulary term** (§5.0a finding A) appears in no slim-DB column, artifact, deck or log. The earlier "currently FAILS this control" verdict is **falsified**: the owner's addition had landed and only this document was stale. Proven by the control itself — each candidate form written to a scratch file and scanned with the live set (the term is never printed, only the exit code): **transliterated singular → CAUGHT (exit 1)**, **transliterated plural → CAUGHT (exit 1)**, neutral replacement `src_attr_note` → clean (the control), bare 5-char stem → clean *by design* (it is the `FORBIDDEN_COLUMN_SUBSTRINGS` value, cleartext in committed code, so making it a pattern would redden the repo scan on the guard itself). Bare-Hebrew forms stay excluded by measured decision (48 innocent hits in our own transcriptions), so for that script the column denylist remains the operative control — as always documented. | plant the term in a scanned file → must be reported. **Done, both Latin-script forms.** |
+| **16** | **✅ CLOSED 2026-08-07 — the signature-vocabulary term** (§5.0a finding A) appears in no slim-DB column **name**, shipped artifact, deck or log. *(Scope corrected the same day: the term is absent from column NAMES, but the restricted corpus's own name IS a `cat` **value** on 106,887 slim-DB rows — see §7a. That is a separate, contained finding, not this gate.)* The earlier "currently FAILS this control" verdict is **falsified**: the owner's addition had landed and only this document was stale. Proven by the control itself — each candidate form written to a scratch file and scanned with the live set (the term is never printed, only the exit code): **transliterated singular → CAUGHT (exit 1)**, **transliterated plural → CAUGHT (exit 1)**, neutral replacement `src_attr_note` → clean (the control), bare 5-char stem → clean *by design* (it is the `FORBIDDEN_COLUMN_SUBSTRINGS` value, cleartext in committed code, so making it a pattern would redden the repo scan on the guard itself). Bare-Hebrew forms stay excluded by measured decision (48 innocent hits in our own transcriptions), so for that script the column denylist remains the operative control — as always documented. | plant the term in a scanned file → must be reported. **Done, both Latin-script forms.** |
 | **14** | **✅ CLOSED 2026-08-07 — multi-span offset parity** (Codex blocker 1). R2 called the promised gate "a placeholder" for specifying no selection rule, tie-break, or source relation; all three are fixed, and the rule is **discovered, not invented** — gen-2's `ref_spans_json` already pairs the sides, so the projection is a selection among the producer's own pairs (largest page-side extent, tie-break `p0,p1,rg0,rg1` ASC). Verified against the producer: its evidence tuples come exactly from `ref_spans_json` (100.00% of 200,000 sampled) and this rule reproduces one on **381,341/381,341 rows (100.00%)**. Fixture is a real multi-span row whose `spans_json` hull matches NO ref entry — the 12.2% (46,472-row) case a hull-keyed projection would have silently NULLed, kept as an explicit control. Three mutations (order flipped / unwired / sides swapped) all turn it red. |
 
 **On the masking gate (Codex MEDIUM — attestation DELIVERED 2026-08-07).** The fail-closed control and
@@ -1352,6 +1352,42 @@ how it gets broken again.
   `web/components/discovery_panel.py`, `shared/discovery_panel_model.py`, `shared/discovery_service.py`. If
   the bake needs a service change, write it up and hand it over. Stage explicit paths on every commit; never
   `git add -A`.
+
+---
+
+### 7a. MEASURED 2026-08-07 — the slim research DB carries the restricted corpus NAME in `cat` values
+
+Found by actually running `--scan-sqlite` against the built slim DB rather than reasoning about it.
+**106,892 hits, exit 1:**
+
+| where | hits | what it is |
+|---|---|---|
+| `track1_matches.cat` | **106,887** | one of ten distinct `cat` values IS the restricted corpus's own name, used as gen-2's source label |
+| `pages.text` | 5 | our own manuscript transcriptions — the same innocent-Hebrew class as the 48 hits in §5.0a |
+
+**This is contained, and the shipped sidecar is unaffected.** Verified on the artifact, not asserted:
+
+- `_map_cat_to_source_corpus` masks **by elimination** — the open-corpus set maps to `sefaria`, `JA` to `ja`,
+  and *everything else* falls through an else-branch to `msource`. So the builder never compares against or
+  writes the restricted name. Confirmed by running the real function over all ten live values: the restricted
+  one → `msource`.
+- The slim DB lives in `_tmp/`, is **gitignored** (`.gitignore:184`) and **untracked**; `--scan-repo` stays
+  clean with it on disk.
+
+**The operative rule this establishes:** the slim research DB is an **intermediate**, inside the masking
+boundary — not a publishable artifact. It must never be committed, attached, scp'd, or included in a deck or
+handoff. Only the built sidecar crosses the boundary, and it crosses because `source_corpus` is a masked
+enum rather than a copied label.
+
+**Also a correction to my own earlier claim.** Gate 16's line said the term "appears in no slim-DB column".
+The *column* is indeed dropped (`FORBIDDEN_COLUMN_SUBSTRINGS`), but a column-name guard says nothing about
+**values**, and the corpus name is a value on 106,887 rows. The gate wording is corrected above. The lesson is
+the familiar one: the denylist I wrote guarded the axis I was thinking about, and the scan found the axis I
+was not.
+
+**Owed at bake time:** run `--scan-sqlite` against the **built v3 sidecar** (not the slim DB) and require
+clean, which is the assertion that actually matters. `--scan-sqlite` on the slim DB is expected to be RED and
+must not be "fixed" by dropping `cat` — the builder needs it to derive `source_corpus`.
 
 ---
 
