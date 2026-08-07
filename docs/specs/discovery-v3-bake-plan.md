@@ -496,8 +496,22 @@ Running the 2,738 through that exact policy:
 **Two conclusions, both reversing what I told the owner:**
 
 1. **Nothing is being "lost".** The 12.58% I warned about is material v2 *declined on purpose*. Honouring
-   D-06, the **real gap is 52 works / 141 evidence rows / 0.03% of the corpus — and zero shipped claims**, i.e.
-   inert. Those 52 are worth a look as genuine omissions; they are not a decision.
+   D-06, the remainder is **52 works / 141 evidence rows / 0.03% of the corpus**. Those 52 are worth a look;
+   they are not a decision.
+
+   **WORDING CORRECTED TWICE (Codex R2 then R3, both right).** Two claims are withdrawn, not softened:
+
+   - *"the real gap"* → **current-policy drops**. Applying today's `cat`/genre selector to the missing ids
+     *partitions* them; it does not establish that they lacked crosswalk entries **because** of the historical
+     D-05/D-06 decision. The selector picks one representative occurrence while `cat`/genre are
+     occurrence-level fields, and no audit of crosswalk creation or approval history was done. Calling the
+     result "the real gap" asserts a cause that was never measured.
+   - *"zero shipped claims, i.e. inert"* → **not yet established**. The zero was measured under the routing in
+     force at the time, which was the legacy Lever-1 cliff. Decision 1 replaces that with gen-2's router, which
+     ships a **different and larger** population (the cliff demotes 19.3% of what the router ships). Until the
+     figure is recomputed under the router actually shipped, "inert" is an inference from a superseded
+     measurement — and it is the load-bearing reason this population is being set aside, so it is worth
+     recomputing rather than restating.
 2. **"Adding them" would reverse D-06** — folding ~2,686 piyyut/documentary/unclassified works and 42,258
    shipped claims into the discovery corpus. That is a substantive product decision about what the corpus is
    *for*, not a gap fix, and it is precisely the call D-06 reserves to the owner.

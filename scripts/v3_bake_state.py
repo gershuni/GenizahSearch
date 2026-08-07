@@ -35,10 +35,15 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+
+
+class LockHeldError(RuntimeError):
+    """Another process holds this state file's writer lock."""
 
 
 class BakeState:
@@ -111,11 +116,15 @@ class BakeState:
                 holder = self._lock_path.read_text(encoding="utf-8").strip()
             except OSError:
                 pass
-            raise RuntimeError(
-                f"bake state is already locked by another process ({holder or 'unknown'}). "
-                f"Two writers over one state file lose each other's completed steps, so "
-                f"this launcher refuses to start. If no bake is actually running (a killed "
-                f"process leaves the lock behind), delete it explicitly: {self._lock_path}"
+            raise LockHeldError(
+                f"bake state is already locked by another process "
+                f"({holder or 'unknown'}). Two writers over one state file lose each "
+                f"other's completed steps, so this launcher refuses to start. "
+                f"If no bake is actually running -- a hard kill (SIGKILL, power loss) "
+                f"cannot release the lock -- recover DELIBERATELY with: "
+                f"python scripts/v3_bake_state.py --release-stale-lock {self.path} "
+                f"-- which checks the recorded holder is not a live process before "
+                f"removing the lock, so it cannot barge in on a running bake."
             ) from None
 
     def release(self) -> None:
@@ -278,3 +287,99 @@ class BakeState:
 
     def summary(self) -> Dict[str, str]:
         return {k: v.get("status", "?") for k, v in self._data["steps"].items()}
+
+
+def release_stale_lock(state_path, *, force: bool = False) -> Dict[str, Any]:
+    """DELIBERATE recovery from a lock left by a hard-killed writer.
+
+    Codex round 3 (MEDIUM): the lock is correct against concurrent writers, but a
+    SIGKILL or power loss cannot release it, so recovery required an operator to
+    know which file to delete -- turning the resumable unattended bake into a stuck
+    run after exactly the failure the ledger exists to survive. That is a real
+    operational cost, and the fix is a named command rather than a weaker lock.
+
+    It is deliberately NOT automatic and NOT age-based. Both would re-admit the
+    double-writer this prevents: a slow step can outlive any age threshold, and an
+    auto-reap on startup is indistinguishable from no lock at all.
+
+    Instead it checks LIVENESS of the recorded holder pid. A live holder is refused
+    outright, so the command cannot be used to barge in on a running bake; a dead
+    holder is released and reported. `force` exists for the case where the pid has
+    been reused by an unrelated process, which liveness alone cannot distinguish --
+    the operator asserts it, and the assertion is visible in the shell history.
+    """
+    lock_path = Path(str(state_path) + ".lock")
+    if not lock_path.exists():
+        return {"released": False, "reason": "no lock file present"}
+    holder = ""
+    try:
+        holder = lock_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    pid = None
+    for token in holder.split():
+        if token.startswith("pid="):
+            try:
+                pid = int(token.split("=", 1)[1])
+            except ValueError:
+                pid = None
+    alive = False
+    if pid is not None:
+        try:
+            # Signal 0 probes existence without delivering anything. On Windows
+            # `os.kill` raises for a dead pid and returns for a live one, which is
+            # the same signal we need; a PermissionError means the process exists
+            # but is not ours, i.e. ALIVE -- so it must count as alive, not as an
+            # error to swallow.
+            os.kill(pid, 0)
+            alive = True
+        except PermissionError:
+            alive = True
+        except (OSError, ProcessLookupError):
+            alive = False
+    if alive and not force:
+        raise LockHeldError(
+            f"the lock holder ({holder or 'unknown'}) is STILL RUNNING. Refusing to "
+            f"release it -- that would admit a second writer to a live bake and lose "
+            f"one of their completed steps. Stop the process first, or pass --force if "
+            f"you are certain the pid has been reused."
+        )
+    try:
+        lock_path.unlink()
+    except PermissionError:
+        # Windows refuses to unlink a file another handle still holds open. That
+        # only happens when the holder is LIVE and in this same process tree --
+        # i.e. exactly the case `--force` is claiming is safe but is not. Report it
+        # honestly rather than pretending the release succeeded.
+        raise LockHeldError(
+            f"the lock file is still open by a live handle ({holder or 'unknown'}), so "
+            f"the OS refuses to remove it. The holder is genuinely running; stop it "
+            f"before recovering."
+        ) from None
+    return {"released": True, "holder": holder, "holder_was_alive": alive}
+
+
+def main(argv=None) -> int:
+    """Small CLI for the operational cases the ledger owns."""
+    import argparse
+
+    ap = argparse.ArgumentParser(description="v3 bake state ledger utilities")
+    ap.add_argument("--release-stale-lock", metavar="STATE_PATH", required=True,
+                    help="Release the writer lock for this state file, ONLY if its "
+                         "recorded holder process is no longer running.")
+    ap.add_argument("--force", action="store_true",
+                    help="Release even if the recorded pid appears live (use only "
+                         "when you are certain the pid was reused).")
+    args = ap.parse_args(argv)
+    try:
+        result = release_stale_lock(args.release_stale_lock, force=args.force)
+    except LockHeldError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
+    for key, value in result.items():
+        print(f"  {key:18s} {value}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

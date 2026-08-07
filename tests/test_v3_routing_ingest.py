@@ -700,6 +700,56 @@ def test_the_router_reaches_the_BUILT_ASSET_and_the_legacy_cliff_does_not(tmp_pa
     assert meta_legacy["coverage_routing"] == "lever1_cliff", meta_legacy.get("coverage_routing")
 
 
+def test_the_asset_meta_is_read_from_a_BUILT_asset_not_from_source_text(tmp_path):
+    """Codex R3 (MEDIUM): the fingerprint-gate meta test searches SOURCE TEXT, so
+    "a dead branch or comment can satisfy it".
+
+    The same objection applies to any meta assertion, so the routing counterpart is
+    checked by opening the built SQLite and reading the row -- which
+    `test_the_router_reaches_the_BUILT_ASSET_and_the_legacy_cliff_does_not` already
+    does for `coverage_routing`. This adds the equivalent for the NOVELTY gate flag,
+    which previously had only the source-text check.
+    """
+    import hashlib
+
+    fx = _v3_finalize_fixture(tmp_path)
+    key = "s1::w000001"
+    cache = tmp_path / "verdicts.json"
+    cache.write_text(json.dumps({key: {"novelty_status": "fills_gap",
+                                       "input_fingerprint": "FP1"}}),
+                     encoding="utf-8")
+    sha = hashlib.sha256(cache.read_bytes()).hexdigest()
+
+    _finalize(fx, tmp_path, allow_lever1_coverage=True,
+              novelty_verdicts_path=str(cache), novelty_verdicts_sha256=sha,
+              novelty_input_fingerprints={key: "FP1"})
+
+    conn = sqlite3.connect(str(fx["out"]))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+    finally:
+        conn.close()
+    assert meta.get("novelty_input_fingerprint_checked") == "1", (
+        f"the BUILT asset does not record that the fingerprint gate ran: "
+        f"{meta.get('novelty_input_fingerprint_checked')!r}"
+    )
+
+    # And the WAIVED build must record 0 -- otherwise the flag is decorative.
+    fx2 = _v3_finalize_fixture(tmp_path / "waived")
+    _finalize(fx2, tmp_path / "waived", allow_lever1_coverage=True,
+              novelty_verdicts_path=str(cache), novelty_verdicts_sha256=sha,
+              novelty_allow_unfingerprinted_cache=True)
+    conn = sqlite3.connect(str(fx2["out"]))
+    try:
+        meta2 = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+    finally:
+        conn.close()
+    assert meta2.get("novelty_input_fingerprint_checked") == "0", (
+        "a WAIVED build records the same value as a gated one -- a reader cannot "
+        "tell them apart, which is the whole point of the field"
+    )
+
+
 def test_the_cli_offers_and_threads_the_router(tmp_path):
     """A CLI build must face the same forced choice; a declared-but-unthreaded
     flag is the same bypass in a new place."""

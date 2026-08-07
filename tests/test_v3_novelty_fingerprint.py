@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -384,10 +385,11 @@ def test_the_waiver_must_be_named_explicitly_to_skip_the_gate(tmp_path):
     cache = tmp_path / "v.json"
     sha = _write_cache(cache, {"990000000000000001::w000001": {"novelty_status": "fills_gap"}})
 
-    # With the waiver, the novelty guard no longer fires -- the build proceeds and
-    # fails LATER, on the missing source DB. A different error proves the guard was
-    # passed rather than that nothing happened.
-    with pytest.raises(Exception) as exc:
+    # With the waiver the novelty guard no longer fires. Codex R3 noted that
+    # catching ANY later exception is too weak -- it would also pass if the cache
+    # were never loaded at all -- so the SPECIFIC downstream failure is asserted:
+    # the research DB does not exist, which is the next thing finalize_build does.
+    with pytest.raises(sqlite3.OperationalError, match="unable to open database file") as exc:
         bds.finalize_build(
             source_db_path=str(tmp_path / "missing.db"),
             from_approved_path=str(tmp_path / "missing.csv"),
@@ -410,7 +412,8 @@ def test_supplying_fingerprints_also_passes_the_guard(tmp_path):
     cache = tmp_path / "v.json"
     sha = _write_cache(cache, {key: {"novelty_status": "fills_gap",
                                      "input_fingerprint": "CURRENT"}})
-    with pytest.raises(Exception) as exc:
+    # As above (Codex R3): the SPECIFIC next failure, not any exception.
+    with pytest.raises(sqlite3.OperationalError, match="unable to open database file") as exc:
         bds.finalize_build(
             source_db_path=str(tmp_path / "missing.db"),
             from_approved_path=str(tmp_path / "missing.csv"),

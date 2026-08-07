@@ -870,12 +870,16 @@ if __name__ == '__main__':
 # confirm the set that ran is the reviewed set.
 # ---------------------------------------------------------------------------
 
+_ATT_KEY = b"test-attestation-key"
+
+
 def test_the_attestation_identifies_the_pattern_set():
     from check_atlas_masking import pattern_set_attestation
 
-    att = pattern_set_attestation(["alpha", "beta", "gamma"])
+    att = pattern_set_attestation(["alpha", "beta", "gamma"], key=_ATT_KEY)
     assert att["pattern_count"] == 3
-    assert len(att["pattern_set_sha256"]) == 64
+    assert att["keyed"] is True
+    assert len(att["pattern_set_hmac"]) == 64
     assert len(att["pattern_digests"]) == 3
 
 
@@ -885,7 +889,7 @@ def test_the_attestation_discloses_no_pattern_text_prefix_or_length():
     from check_atlas_masking import pattern_set_attestation
 
     secret = "averydistinctiverestrictedterm"
-    att = pattern_set_attestation([secret, "second"])
+    att = pattern_set_attestation([secret, "second"], key=_ATT_KEY)
     blob = repr(att)
     assert secret not in blob
     # No prefix of meaningful length either -- a leaked prefix is a leak.
@@ -913,21 +917,21 @@ def test_the_set_digest_changes_when_the_set_changes():
     visible. This is the failure the 2026-08-06 gap would have shown up as."""
     from check_atlas_masking import pattern_set_attestation
 
-    full = pattern_set_attestation(["a", "b", "c"])
-    short = pattern_set_attestation(["a", "b"])
-    assert full["pattern_set_sha256"] != short["pattern_set_sha256"]
+    full = pattern_set_attestation(["a", "b", "c"], key=_ATT_KEY)
+    short = pattern_set_attestation(["a", "b"], key=_ATT_KEY)
+    assert full["pattern_set_hmac"] != short["pattern_set_hmac"]
     assert full["pattern_count"] != short["pattern_count"]
     # An EDITED pattern must move the digest too, not only an added/removed one.
     # THIS is the load-bearing assertion: a digest computed over the COUNT alone
     # would satisfy every add/remove check above (the counts differ), so without a
     # same-count edit the test passes for the wrong reason. Caught by mutation
     # testing 2026-08-07 -- a content-blind digest survived the first version.
-    edited = pattern_set_attestation(["a", "b", "c2"])
+    edited = pattern_set_attestation(["a", "b", "c2"], key=_ATT_KEY)
     assert edited["pattern_count"] == full["pattern_count"], (
         "this control requires the SAME count, or it cannot detect a "
         "count-only digest"
     )
-    assert full["pattern_set_sha256"] != edited["pattern_set_sha256"], (
+    assert full["pattern_set_hmac"] != edited["pattern_set_hmac"], (
         "editing a pattern without changing the count did not move the set "
         "digest -- the digest is content-blind, so a silently-swapped pattern "
         "set would attest as identical"
@@ -942,9 +946,9 @@ def test_the_set_digest_is_stable_under_reordering_and_duplication():
     ignored -- which is the same as not having one."""
     from check_atlas_masking import pattern_set_attestation
 
-    a = pattern_set_attestation(["x", "y", "z"])
-    b = pattern_set_attestation(["z", "x", "y", "x"])
-    assert a["pattern_set_sha256"] == b["pattern_set_sha256"]
+    a = pattern_set_attestation(["x", "y", "z"], key=_ATT_KEY)
+    b = pattern_set_attestation(["z", "x", "y", "x"], key=_ATT_KEY)
+    assert a["pattern_set_hmac"] == b["pattern_set_hmac"]
     assert a["pattern_count"] == b["pattern_count"] == 3
 
 
@@ -955,3 +959,57 @@ def test_attest_fails_closed_without_a_pattern_file(tmp_path, monkeypatch):
 
     monkeypatch.delenv("MASKING_SCAN_PATTERNS_FILE", raising=False)
     assert cam.main(["--attest"]) == 1
+
+
+def test_an_unkeyed_attestation_emits_NO_digests(monkeypatch):
+    """Codex round 3 (MEDIUM), correcting my own "not a hint" claim.
+
+    An unsalted SHA-256 prefix is a membership ORACLE: hash a candidate term,
+    compare the first 8 hex chars, and membership is confirmed at negligible
+    collision risk for any guessable short term. So with no key the digests are
+    OMITTED rather than emitted unkeyed -- an attestation is a convenience, and a
+    convenience is not worth a confirmation oracle over restricted vocabulary.
+    """
+    from check_atlas_masking import pattern_set_attestation
+
+    monkeypatch.delenv("MASKING_ATTESTATION_KEY", raising=False)
+    att = pattern_set_attestation(["alpha", "beta"])
+    assert att["keyed"] is False
+    assert att["pattern_count"] == 2, "the bare count must still be emitted"
+    assert "pattern_digests" not in att, (
+        "unkeyed per-pattern digests were emitted -- anyone can hash a candidate "
+        "term and confirm membership from the prefix"
+    )
+    assert "pattern_set_hmac" not in att
+    assert not any("sha256" in k for k in att), (
+        f"an unkeyed digest field survives under another name: {sorted(att)}"
+    )
+
+
+def test_the_keyed_digest_is_not_reproducible_without_the_key():
+    """The property that makes keying worth doing: a holder of a candidate term
+    cannot confirm it without also holding the key."""
+    from check_atlas_masking import pattern_set_attestation
+
+    secret = "averydistinctiverestrictedterm"
+    with_key = pattern_set_attestation([secret], key=b"the-real-key")
+    other_key = pattern_set_attestation([secret], key=b"a-guessed-key")
+    assert with_key["pattern_digests"] != other_key["pattern_digests"], (
+        "the digests do not depend on the key -- keying bought nothing"
+    )
+    # The plain SHA-256 of the term must NOT appear: that would defeat the point.
+    from hashlib import sha256 as _sha256
+    plain = _sha256(secret.encode("utf-8")).hexdigest()
+    assert plain[:8] not in repr(with_key)
+
+
+def test_the_key_can_come_from_the_environment(monkeypatch):
+    """So a CI run keys its attestation the same way it loads its patterns --
+    env-held secret, never a committed literal."""
+    from check_atlas_masking import pattern_set_attestation
+
+    monkeypatch.setenv("MASKING_ATTESTATION_KEY", "env-supplied-key")
+    from_env = pattern_set_attestation(["alpha"])
+    explicit = pattern_set_attestation(["alpha"], key=b"env-supplied-key")
+    assert from_env["keyed"] is True
+    assert from_env["pattern_digests"] == explicit["pattern_digests"]

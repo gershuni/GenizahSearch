@@ -86,6 +86,7 @@ Usage:
 """
 
 import argparse
+import hmac
 import os
 import re
 import sqlite3
@@ -203,7 +204,7 @@ def load_patterns() -> list[str]:
     ]
 
 
-def pattern_set_attestation(patterns) -> dict:
+def pattern_set_attestation(patterns, *, key=None) -> dict:
     """A NON-DISCLOSING attestation of the pattern set that was used.
 
     Codex rounds 1 and 2 (MEDIUM) both held this open: the unset-pattern control
@@ -221,31 +222,46 @@ def pattern_set_attestation(patterns) -> dict:
     is the reviewed set, and makes a silent shrink (a truncated or half-written
     pattern file) visible.
 
-    Returns, and deliberately nothing more:
-      `pattern_count`   how many patterns were loaded
-      `pattern_set_sha256` digest over the SORTED patterns -- stable under
-                        reordering, changes if any pattern is added, removed or
-                        edited
-      `pattern_digests` the first 8 hex chars of each pattern's own SHA-256,
-                        sorted. Lets a reviewer diff two runs pattern-by-pattern
-                        and see WHICH entry changed, without learning any of them.
+    KEYED, because an unkeyed digest is a membership ORACLE (Codex round 3,
+    MEDIUM -- and the finding was right, correcting my own claim that a truncated
+    digest "is not a hint"). Anyone holding a candidate term can hash it and
+    compare: with an unsalted SHA-256, an 8-hex prefix confirms membership for any
+    guessable short term at negligible collision risk, and the full set digest
+    confirms a whole candidate set the same way. That is a far weaker property than
+    "non-disclosing", so the digests are now HMAC-keyed.
 
-    NON-DISCLOSURE is the whole design constraint: this output is meant for a
-    build record and CI log, so it must be safe where the patterns themselves are
-    not. No pattern, prefix, length or character is emitted -- a truncated digest
-    of a secret is not a hint toward the secret. (Lengths are omitted on purpose:
-    for a short restricted term, a length plus a known alphabet is a real
-    narrowing.)
+    The key comes from `MASKING_ATTESTATION_KEY` (an env-held secret, the same
+    idiom as the pattern file itself) or is passed explicitly. **Without a key the
+    digests are OMITTED entirely** rather than emitted unkeyed: an attestation is a
+    convenience, and a convenience is not worth a confirmation oracle over
+    restricted vocabulary. `pattern_count` is always emitted -- a bare count
+    discloses nothing about content.
+
+    Returns:
+      `pattern_count`     how many patterns were loaded (always)
+      `keyed`             whether a key was available
+      `pattern_set_hmac`  keyed digest over the SORTED patterns -- stable under
+                          reordering, changes on any add/remove/edit (keyed only)
+      `pattern_digests`   first 8 hex chars of each pattern's own keyed digest,
+                          sorted, so a reviewer can see WHICH entry changed
+                          between two runs (keyed only)
+
+    Keying costs nothing operationally: a reviewer comparing two runs needs only
+    that the values match across runs, and the same key yields the same digests.
     """
     cleaned = sorted({p for p in patterns if isinstance(p, str) and p})
-    joined = "\n".join(cleaned).encode("utf-8")
-    return {
-        "pattern_count": len(cleaned),
-        "pattern_set_sha256": sha256(joined).hexdigest(),
-        "pattern_digests": [
-            sha256(p.encode("utf-8")).hexdigest()[:8] for p in cleaned
-        ],
-    }
+    if key is None:
+        env_key = os.environ.get("MASKING_ATTESTATION_KEY") or ""
+        key = env_key.encode("utf-8") if env_key else None
+    out = {"pattern_count": len(cleaned), "keyed": key is not None}
+    if key is None:
+        return out
+    joined = chr(10).join(cleaned).encode("utf-8")
+    out["pattern_set_hmac"] = hmac.new(key, joined, "sha256").hexdigest()
+    out["pattern_digests"] = [
+        hmac.new(key, p.encode("utf-8"), "sha256").hexdigest()[:8] for p in cleaned
+    ]
+    return out
 
 
 def _require_patterns(patterns) -> list[str]:
@@ -1441,8 +1457,17 @@ def main(argv=None) -> int:
         # diagnosed, which is when "which pattern set ran?" is asked.
         print("masking pattern-set attestation (non-disclosing):")
         print(f"  pattern_count       {att['pattern_count']}")
-        print(f"  pattern_set_sha256  {att['pattern_set_sha256']}")
-        print(f"  pattern_digests     {' '.join(att['pattern_digests'])}")
+        if att.get("keyed"):
+            print(f"  pattern_set_hmac    {att['pattern_set_hmac']}")
+            print(f"  pattern_digests     {' '.join(att['pattern_digests'])}")
+        else:
+            # Codex R3: an UNKEYED digest is a membership oracle -- hash a
+            # candidate term, compare the prefix. So no key means no digests, and
+            # the run says so rather than emitting a weaker artifact that looks
+            # like the strong one.
+            print("  pattern_set_hmac    (omitted -- MASKING_ATTESTATION_KEY unset)")
+            print("  pattern_digests     (omitted -- an unkeyed digest would let "
+                  "anyone confirm a guessed pattern)")
         surfaces = []
         if args.scan_repo:
             surfaces.append("repo")

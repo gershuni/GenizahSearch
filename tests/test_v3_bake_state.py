@@ -280,7 +280,14 @@ def test_the_refusal_names_the_holder_and_the_remedy(tmp_path):
         first.release()
     message = str(exc.value)
     assert f"pid={os.getpid()}" in message, "the refusal does not identify the holder"
-    assert "s.json.lock" in message, "the refusal does not name the file to delete"
+    # The remedy is now a NAMED RECOVERY COMMAND rather than "delete this file"
+    # (Codex R3): a hard kill cannot release the lock, so recovery has to be
+    # something an operator can run, and it must refuse a live holder rather than
+    # letting an operator barge in with rm.
+    assert "--release-stale-lock" in message, (
+        "the refusal does not name the recovery command"
+    )
+    assert "s.json" in message, "the refusal does not name the state file"
 
 
 def test_a_lost_update_is_what_the_lock_prevents(tmp_path):
@@ -317,3 +324,82 @@ def test_release_is_idempotent_and_safe_in_a_finally(tmp_path):
     with BakeState(tmp_path / "s.json", run_id="r1"):
         pass                 # __exit__ releases; a second release inside is fine
     BakeState(tmp_path / "s.json", run_id="r1").release()
+
+
+# ---------------------------------------------------------------------------
+# Codex ROUND 3 (MEDIUM): the lock is correct against concurrent writers, but a
+# hard kill cannot release it -- "it converts the documented unattended resume
+# path into a stuck run after exactly the failure mode this ledger is intended to
+# survive". A named recovery command, gated on holder liveness.
+# ---------------------------------------------------------------------------
+
+def test_a_dead_holders_lock_can_be_released_deliberately(tmp_path):
+    from v3_bake_state import release_stale_lock
+
+    path = tmp_path / "s.json"
+    BakeState(path, run_id="r1").release()
+    # Simulate a hard-killed writer: a lock naming a pid that is not running.
+    lock = tmp_path / "s.json.lock"
+    lock.write_text("pid=999999999 run_id=r1\n", encoding="utf-8")
+
+    result = release_stale_lock(path)
+    assert result["released"] is True
+    assert result["holder_was_alive"] is False
+    assert not lock.exists()
+    # ...and the bake resumes.
+    BakeState(path, run_id="r1").release()
+
+
+def test_a_LIVE_holders_lock_is_refused(tmp_path):
+    """The property that makes the command safe: it cannot be used to barge in.
+
+    Without this the recovery command would just be `rm` with extra steps, and
+    would reintroduce the lost-update the lock exists to prevent.
+    """
+    from v3_bake_state import LockHeldError, release_stale_lock
+
+    path = tmp_path / "s.json"
+    state = BakeState(path, run_id="r1")     # THIS process holds it, and is alive
+    try:
+        with pytest.raises(LockHeldError, match="STILL RUNNING"):
+            release_stale_lock(path)
+        assert (tmp_path / "s.json.lock").exists(), "the live lock was removed anyway"
+        # `--force` claims the pid was REUSED, i.e. the holder is not really this
+        # bake. When the holder is genuinely live and in this process, Windows
+        # refuses the unlink because the handle is open -- so force still fails,
+        # honestly, rather than reporting a release that did not happen. On POSIX
+        # the unlink succeeds (an open file can be unlinked), which is the
+        # documented reused-pid escape. Both outcomes are correct; asserting the
+        # platform-specific one would make this test a platform check.
+        try:
+            forced = release_stale_lock(path, force=True)
+            assert forced["released"] is True
+        except LockHeldError as exc:
+            assert "still open by a live handle" in str(exc)
+    finally:
+        state.release()
+
+
+def test_releasing_a_nonexistent_lock_is_a_no_op(tmp_path):
+    """An unattended recovery script must be safe to run unconditionally."""
+    from v3_bake_state import release_stale_lock
+
+    result = release_stale_lock(tmp_path / "never-existed.json")
+    assert result["released"] is False
+
+
+def test_the_recovery_cli_exists_and_refuses_a_live_holder(tmp_path):
+    import v3_bake_state as vbs
+
+    path = tmp_path / "s.json"
+    state = BakeState(path, run_id="r1")
+    try:
+        assert vbs.main(["--release-stale-lock", str(path)]) == 1, (
+            "the CLI released a live holder's lock"
+        )
+    finally:
+        state.release()
+    lock = tmp_path / "s.json.lock"
+    lock.write_text("pid=999999999 run_id=r1\n", encoding="utf-8")
+    assert vbs.main(["--release-stale-lock", str(path)]) == 0
+    assert not lock.exists()
