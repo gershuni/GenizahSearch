@@ -257,6 +257,85 @@ def apply_router_routing(
     return report
 
 
+def assert_assembled_parity(
+    evidence_rows, router: Dict, claim_rows, *,
+    routing_status_idx: int, claim_id_idx: int,
+    evidence_source_idx: int, track1_source: str,
+    raw_work_by_minted: Dict[str, str],
+) -> Dict:
+    """PER-KEY parity against the ASSEMBLED rows (Codex R3, HIGH).
+
+    Round 3's objection to `assert_emitted_parity` was correct and is worth stating
+    precisely: it checks only that nothing was left undecided, that the reason
+    codes are known, and that not *everything* was demoted. So a mapping error
+    demoting **90%** of `same_work` rows passes, as long as one row ships. And
+    comparing `report["shipped"]` against a count recomputed from
+    `SURFACE_TO_ROUTING` would be circular -- both sides come from the same table.
+
+    The non-circular comparison is between two INDEPENDENT artifacts: the router's
+    own `surface` per key, and the `routing_status` that actually landed on the
+    assembled evidence row for that key, AFTER `assemble_claims_and_evidence` has
+    deduplicated on `evidence_id`, resolved collisions and dropped rows. Every
+    track1_direct row must match, row by row -- not in aggregate, since two
+    compensating errors cancel in a total.
+
+    Returns a per-key report `{checked, mismatches}`. Raises on the first
+    disagreement with counts only (D-25).
+
+    Note on scope: this compares the ASSEMBLED rows rather than the inserted ones.
+    Assembly is where dedup and collision resolution happen -- everything after it
+    is a positional `executemany` of these same tuples, so a divergence below this
+    point would be an INSERT-column bug, which
+    `test_the_release_offsets_gate_reads_the_right_tuple_positions` covers
+    separately.
+    """
+    # The router's decision, keyed by (page_id, canonical_work_id).
+    expected_status = {}
+    for key, (surface, _pcov, _shipped) in router["route"].items():
+        expected_status[key] = SURFACE_TO_ROUTING[surface][0]
+
+    # Assembled claim rows carry (page_id, work_id, claim_id, ...) -- so the claim
+    # id resolves back to the (page, minted work) pair the evidence belongs to.
+    claim_key = {c[2]: (c[0], c[1]) for c in claim_rows}
+
+    checked = 0
+    mismatches = 0
+    for row in evidence_rows:
+        if row[evidence_source_idx] != track1_source:
+            continue
+        pair = claim_key.get(row[claim_id_idx])
+        if pair is None:
+            raise RoutingIngestError(
+                "an assembled evidence row references a claim id absent from the "
+                "assembled claim rows -- parity cannot be established"
+            )
+        page_id, minted_work = pair
+        raw = raw_work_by_minted.get(minted_work)
+        can_id = router["raw_to_can"].get(raw) if raw else None
+        want = expected_status.get((page_id, can_id)) if can_id else None
+        if want is None:
+            raise RoutingIngestError(
+                "an assembled track1_direct row has no router decision for its "
+                "(page, canonical work) pair -- it would ship unrouted"
+            )
+        checked += 1
+        if row[routing_status_idx] != want:
+            mismatches += 1
+    if mismatches:
+        raise RoutingIngestError(
+            f"{mismatches} of {checked} assembled track1_direct row(s) carry a "
+            f"routing_status that does NOT match gen-2's decision for their own "
+            f"(page, canonical work) key. This is a per-key comparison, so a "
+            f"compensating pair of errors cannot hide in a total."
+        )
+    if not checked:
+        raise RoutingIngestError(
+            "zero assembled track1_direct rows were compared, so parity verified "
+            "nothing -- a gate that passes over an empty population is a false green"
+        )
+    return {"checked": checked, "mismatches": 0}
+
+
 def assert_emitted_parity(report: Dict, router: Dict) -> None:
     """Gate 10, on the EMITTED result rather than on the source.
 

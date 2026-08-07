@@ -149,7 +149,14 @@ def derive_shadowed_by(evidence_db: str) -> Dict[Tuple[str, str], str]:
             SELECT cl.page_id, e.ref_work,
                    SUM(CASE WHEN e.shadowed_by IS NULL THEN 1 ELSE 0 END) AS n_unshadowed,
                    COUNT(*) AS n_total,
-                   MIN(e.shadowed_by) AS a_shadow
+                   MIN(e.shadowed_by) AS a_shadow,
+                   -- Codex R3 (HIGH): MIN() alone silently collapses a unit whose
+                   -- rows carry DIFFERENT non-NULL shadowing works to the lexical
+                   -- minimum. That is a disagreement inside one producer unit --
+                   -- exactly what the mixed-unit check was meant to catch -- but
+                   -- `n_unshadowed == 0` makes it look wholly shadowed, so it
+                   -- passed. Counting the distinct values makes it visible.
+                   COUNT(DISTINCT e.shadowed_by) AS n_distinct_shadow
             FROM discovery_evidence e
             JOIN discovery_claim cl ON cl.claim_id = e.claim_id
             GROUP BY e.claim_id, e.ref_work
@@ -178,7 +185,14 @@ def derive_shadowed_by(evidence_db: str) -> Dict[Tuple[str, str], str]:
     # lossy, and nothing in the emitted DB would show it.
     seen_units: Dict[Tuple[str, str], Tuple[str, object]] = {}
     collisions: List[Tuple[str, str]] = []
-    for page_id, ref_work, n_unshadowed, n_total, a_shadow in rows:
+    ambiguous_within_unit: List[Tuple[str, str]] = []
+    for page_id, ref_work, n_unshadowed, n_total, a_shadow, n_distinct_shadow in rows:
+        # A wholly-shadowed unit must name ONE shadowing work. Two distinct values
+        # inside one producer unit have no defined match-row value, and taking the
+        # lexical minimum would pick one by alphabetical accident.
+        if n_unshadowed == 0 and (n_distinct_shadow or 0) > 1:
+            ambiguous_within_unit.append((page_id, ref_work))
+            continue
         key = (page_id, ref_work)
         state = "unshadowed" if n_unshadowed == n_total else (
             "mixed" if n_unshadowed != 0 else "shadowed")
@@ -195,6 +209,14 @@ def derive_shadowed_by(evidence_db: str) -> Dict[Tuple[str, str], str]:
             mixed.append((page_id, ref_work))
             continue
         shadowed[(page_id, ref_work)] = a_shadow
+    if ambiguous_within_unit:
+        raise ResearchDbError(
+            f"{len(ambiguous_within_unit)} wholly-shadowed competition unit(s) name "
+            f"MORE THAN ONE shadowing work among their own evidence rows. The match "
+            f"row has one `shadowed_by` value, and choosing the lexical minimum would "
+            f"pick it by alphabetical accident. Halting. First key: "
+            f"{ambiguous_within_unit[0][0][:24]}…"
+        )
     if collisions:
         raise ResearchDbError(
             f"{len(collisions)} (page_id, ref_work) key(s) are produced by MORE THAN "

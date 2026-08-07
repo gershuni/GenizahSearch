@@ -350,6 +350,28 @@ CREATE TABLE discovery_evidence (
   -- track1_direct population specifically.
   w_start           INTEGER,
   w_end             INTEGER,
+  -- discovery-v3 / schema Amendment 2026-08-07 (G): the PAGE side of the SAME
+  -- producer alignment `w_start`/`w_end` came from (Codex R3 BLOCKER).
+  --
+  -- Why this exists rather than reusing `span_start`/`span_end`. Those are frozen
+  -- inputs to the `evidence_id` recipe, so they cannot be changed without
+  -- regenerating every track1_direct id and breaking the D-02b
+  -- rebuild-preservation diff. But they hold the largest `spans_json` span, which
+  -- is a HULL over the producer's paired alignments -- on the real fixture, page
+  -- hull [981,1772] while the selected pair's page side is [981,1705]. Emitting
+  -- the hull beside a work interval from a NARROWER entry claims a
+  -- correspondence that does not exist: round 3's finding was exact, and it
+  -- matters for the page highlight, the D-17 overlap computation and any consumer
+  -- reading the four columns as one alignment.
+  --
+  -- So the coherent pair is `(aligned_page_start, aligned_page_end, w_start,
+  -- w_end)` -- all four from ONE producer alignment. `span_start`/`span_end`
+  -- remain what they always were (the hull, an id input and a coarse locator) and
+  -- are NOT a work-side correspondence. A consumer wanting a two-sided alignment
+  -- must read these four; that is stated in the schema doc, not left to be
+  -- inferred.
+  aligned_page_start INTEGER,
+  aligned_page_end   INTEGER,
 
   UNIQUE(claim_id, evidence_id)
 );
@@ -1455,6 +1477,65 @@ def compute_pair_coverage(audit_rows: List[Dict]) -> Tuple[int, int, float]:
     return r, u, r / u
 
 
+class WorkOffsetsMissingError(RuntimeError):
+    """A release build emitted track1_direct rows with no work-side offsets."""
+
+
+# Positions of the fields this gate reads inside an emitted evidence-row TUPLE.
+# Indexed rather than named because `assemble_claims_and_evidence` emits tuples
+# for `executemany`; the constants are asserted against the INSERT column list by
+# `test_the_release_offsets_gate_reads_the_right_tuple_positions`, so a column
+# added in the middle cannot silently shift what this gate checks.
+_EVIDENCE_TUPLE_EVIDENCE_SOURCE = 3
+_EVIDENCE_TUPLE_W_START = -4
+_EVIDENCE_TUPLE_W_END = -3
+_EVIDENCE_TUPLE_ALIGNED_PAGE_START = -2
+_EVIDENCE_TUPLE_ALIGNED_PAGE_END = -1
+
+
+def assert_release_work_offsets(evidence_rows) -> int:
+    """Gate 3, enforced on the EMITTED rows of a release build.
+
+    Every `track1_direct` row must carry all four coordinates of one producer
+    alignment (`w_start`/`w_end` plus the `aligned_page_*` side, Amendment (G)).
+    A NULL means either the research DB had no `ref_spans_json` (a v2-era DB fed
+    to a v3 release) or the projection failed silently -- both of which the plan
+    says must halt, and neither of which anything checked.
+
+    Returns the number of rows verified, so a caller can record that the gate saw
+    a non-zero population: an assertion that passes over zero rows is the
+    canonical false green, and this gate would otherwise pass on an empty build.
+
+    Masking (D-25): counts only. No page id, work id or offset is echoed.
+    """
+    checked = 0
+    missing = 0
+    for row in evidence_rows:
+        if row[_EVIDENCE_TUPLE_EVIDENCE_SOURCE] != _TRACK1:
+            continue
+        checked += 1
+        if any(row[i] is None for i in (
+            _EVIDENCE_TUPLE_W_START, _EVIDENCE_TUPLE_W_END,
+            _EVIDENCE_TUPLE_ALIGNED_PAGE_START, _EVIDENCE_TUPLE_ALIGNED_PAGE_END,
+        )):
+            missing += 1
+    if missing:
+        raise WorkOffsetsMissingError(
+            f"{missing} of {checked} track1_direct evidence row(s) in a RELEASE build "
+            f"carry no work-side offsets. Either the research DB lacks "
+            f"`ref_spans_json` (a v2-era DB cannot satisfy a v3 release) or the "
+            f"page-span -> reference-span projection failed. Halting rather than "
+            f"shipping an asset whose offsets column is silently unpopulated."
+        )
+    if not checked:
+        raise WorkOffsetsMissingError(
+            "a RELEASE build emitted ZERO track1_direct evidence rows, so the "
+            "work-offsets gate verified nothing. A gate that passes over an empty "
+            "population is a false green, not a pass."
+        )
+    return checked
+
+
 def assert_pair_coverage_floor(audit_rows: List[Dict], *, floor: float) -> float:
     r, u, cov = compute_pair_coverage(audit_rows)
     if cov < floor:
@@ -1777,6 +1858,8 @@ def _mk_evidence(
     # the reference work's `norm_stream`. Only `track1_direct` witnesses have
     # them; every other family leaves them None (see the DDL comment).
     w_start=None, w_end=None,
+    # Amendment (G): the PAGE side of the same producer alignment as w_start/w_end.
+    aligned_page_start=None, aligned_page_end=None,
 ) -> Dict:
     if snapshot_hash is None:
         snapshot_hash = _fake_hash(f"{page_id}|{sys_id}|a")
@@ -1789,7 +1872,9 @@ def _mk_evidence(
         "audit_status": audit_status, "routing_status": routing_status,
         "routing_reason": routing_reason, "is_new": is_new,
         "span_start": span_start, "span_end": span_end,
-        "w_start": w_start, "w_end": w_end, "text_layer": text_layer,
+        "w_start": w_start, "w_end": w_end,
+        "aligned_page_start": aligned_page_start, "aligned_page_end": aligned_page_end,
+        "text_layer": text_layer,
         "snapshot_hash": snapshot_hash, "other_page_id": other_page_id,
         "b_start": b_start, "b_end": b_end, "text_layer_b": text_layer_b,
         "snapshot_hash_b": snapshot_hash_b, "tier": tier, "aligned_len": aligned_len,
@@ -2369,8 +2454,10 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
                 # fixture row fails closed to `private` unless the spec names an
                 # `assertion_source_corpus` -- never public by omission.
                 derive_assertion_visibility(e),
-                # discovery-v3 Amendment (F): work-side offsets, LAST.
+                # discovery-v3 Amendments (F) + (G): the work-side offsets and
+                # the PAGE side of that same producer alignment, LAST.
                 e.get("w_start"), e.get("w_end"),
+                e.get("aligned_page_start"), e.get("aligned_page_end"),
             ))
     cur.executemany(
         """
@@ -2385,8 +2472,8 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
             other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
             rule_version, community_id,
             coverage_ppm, coverage_status, band_rank, assertion_visibility,
-            w_start, w_end
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            w_start, w_end, aligned_page_start, aligned_page_end
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         evidence_rows,
     )
@@ -3395,7 +3482,11 @@ def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_i
         # `evidence_id` recipe, so changing them would regenerate every
         # track1_direct id and break the D-02b rebuild-preservation diff. Only
         # the work-side coordinate is new.
-        _p0, _p1, w_start, w_end = project_ref_span(ref_spans_json)
+        # BOTH sides of the selected producer alignment (Codex R3): the page side
+        # is retained rather than discarded, because `span_start`/`span_end` hold
+        # the coarser hull and pairing that with this work interval would assert a
+        # correspondence the producer never made.
+        aligned_p0, aligned_p1, w_start, w_end = project_ref_span(ref_spans_json)
         text_layer, snapshot_hash = page_index.get(page_id)
         spec = _mk_evidence(
             page_id=page_id, work_id=work["work_id"], sys_id=sys_id,
@@ -3403,6 +3494,7 @@ def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_i
             adjudication_status=_UNREVIEWED, audit_status=_NA,
             routing_status=_SHIPPED, routing_reason=_NONE_REASON,
             span_start=start, span_end=end, w_start=w_start, w_end=w_end,
+            aligned_page_start=aligned_p0, aligned_page_end=aligned_p1,
             matched_letters=matched_letters, density=best_density, n_spans=n_spans,
             text_layer=text_layer, snapshot_hash=snapshot_hash,
             assertion_source_corpus=_assertion_source_corpus({"cat": cat}, work),
@@ -3549,7 +3641,7 @@ _EVIDENCE_CONTENT_FIELDS = (
     # the offsets are not in the frozen evidence_id recipe, so two genuinely
     # different alignments CAN collide, and silently keeping whichever arrived
     # first would pick an alignment by ingestion order.
-    "w_start", "w_end",
+    "w_start", "w_end", "aligned_page_start", "aligned_page_end",
 )
 
 
@@ -3699,6 +3791,7 @@ def assemble_claims_and_evidence(
             # tuple to match the column list. NULL for every family but
             # track1_direct.
             e.get("w_start"), e.get("w_end"),
+            e.get("aligned_page_start"), e.get("aligned_page_end"),
         ))
 
     display_choices: Dict[str, str] = {}
@@ -3755,6 +3848,12 @@ def build_claims_and_evidence(
     (`track1_matches WHERE shadowed_by IS NULL`); pass None to skip it (unit
     tests that only exercise the E1/Q2 JSONL-shaped sources).
     """
+    # discovery-v3 (Codex R3, HIGH): containment at the works ANCHOR, checked here
+    # because this is the single point every evidence family's claims pass through
+    # -- a row whose raw work id is absent from `works` is excluded outright (§10),
+    # so gating this set covers the E1/Q2 JSONL sources that the research-DB gate
+    # structurally cannot see.
+    assert_works_contain_no_excluded_corpus(works)
     work_index = {w["raw_work_id"]: w for w in works}
     work_source_corpus = {w["work_id"]: w["source_corpus"] for w in works}
 
@@ -3864,6 +3963,22 @@ def build_claims_and_evidence(
     result = assemble_claims_and_evidence(
         evidence_specs, work_source_corpus, sidecar_version=sidecar_version)
     result["routing_audit_rows"] = routing_audit_rows
+
+    # discovery-v3 (Codex R3, HIGH): PER-KEY parity against the ASSEMBLED rows.
+    # Runs here because this is the first point the assembled rows exist -- after
+    # dedup on evidence_id and collision resolution, which is where a row could
+    # silently acquire a different routing than the router gave it. Skipped when
+    # D-17 demotion ran, because D-17 legitimately CHANGES routing after the
+    # router: comparing then would report the intended demotions as parity
+    # failures. The router's own decision is verified by the gate; D-17's is
+    # verified by its audit rows and `assert_pair_coverage_floor`.
+    if gen2_router is not None and not routing_audit_rows:
+        from v3_routing_ingest import assert_assembled_parity
+        result["router_parity"] = assert_assembled_parity(
+            result["evidence_rows"], gen2_router, result["claim_rows"],
+            routing_status_idx=7, claim_id_idx=1, evidence_source_idx=3,
+            track1_source=_TRACK1, raw_work_by_minted=raw_work_by_minted,
+        )
     return result
 
 
@@ -4056,6 +4171,50 @@ def assert_research_db_contains_no_excluded_corpus(
     }
 
 
+def assert_works_contain_no_excluded_corpus(
+    works, *, prefixes: Tuple[str, ...] = _EXCLUDED_WORK_PREFIXES,
+) -> Dict:
+    """Containment at the WORKS ANCHOR (Codex R3, HIGH).
+
+    Round 3's finding was that the research-DB gate reads `track1_matches` only,
+    so it cannot see a restricted row arriving through the E1/Q2 JSONL families:
+    those ingests key on `work_id` and `cpage`, not on the match table.
+
+    This gate closes that class in one place by using a structural fact rather
+    than enumerating input surfaces. `build_claims_and_evidence` builds
+    `work_index` from `works` and EXCLUDES any row whose raw work id is absent
+    (§10: no claim can exist without a `works` FK anchor). So every claim in every
+    family -- track1_direct, propagated witness, family-router, shared_text --
+    passes through this set. Gating it therefore covers the JSONL paths without a
+    per-source check that a future fifth source would arrive after.
+
+    What it does NOT cover, stated rather than implied: a restricted PAGE reached
+    by an allowed work. `pages` carries no work id, so page-level provenance is
+    not derivable here; the slim builder's page copy is bounded by the gen-2
+    corpus, and closing that class properly needs a page-provenance column the
+    producer does not currently emit. Recorded in the plan as owed, not claimed
+    closed.
+
+    Masking (D-25): counts and prefixes only.
+    """
+    offending = 0
+    total = 0
+    for w in works:
+        total += 1
+        raw = w.get("raw_work_id") or ""
+        if raw.startswith(prefixes):
+            offending += 1
+    if offending:
+        raise RestrictedCorpusLeakError(
+            f"{offending} of {total} approved work(s) are from a corpus EXCLUDED from "
+            f"this asset. Every claim requires a `works` FK anchor, so these would "
+            f"admit restricted rows through ANY evidence family -- including the "
+            f"E1/Q2 JSONL sources, which the research-DB gate cannot see. Refusing to "
+            f"build. (No work id is echoed here -- D-25.)"
+        )
+    return {"works_checked": total, "excluded_prefix_works": 0}
+
+
 def _connect_research_ro(db_path) -> sqlite3.Connection:
     """Open a research DB read-only, GATED for excluded-corpus containment.
 
@@ -4119,8 +4278,8 @@ def _insert_claims_and_evidence_real(cur: sqlite3.Cursor, claim_rows, evidence_r
             other_page_id, b_start, b_end, text_layer_b, snapshot_hash_b,
             rule_version, community_id,
             coverage_ppm, coverage_status, band_rank, assertion_visibility,
-            w_start, w_end
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            w_start, w_end, aligned_page_start, aligned_page_end
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         evidence_rows,
     )
@@ -6851,6 +7010,20 @@ def finalize_build(
         # Production coverage gate (Codex #5) -- only on a --release build.
         if release and run_d17:
             assert_pair_coverage_floor(routing_audit_rows, floor=coverage_floor)
+        # discovery-v3 gate 3 (Codex R3 BLOCKER): work-side offsets non-NULL on
+        # every track1_direct row of a RELEASE build. Round 3 found the gate
+        # existed only in the plan: `_ingest_tier_a` probes for `ref_spans_json`
+        # and emits NULL when it is absent, so a v2-era research DB could produce
+        # a release artifact carrying precisely the missing coordinates gate 3 says
+        # must halt -- and the tests asserted NULL was the expected v2 result, so
+        # nothing contradicted it.
+        #
+        # Release-only, deliberately: a v2 rebuild is a legitimate operation whose
+        # population genuinely has no work-side coordinate, and failing it would
+        # block a real task to enforce a v3 property. A RELEASE build is where the
+        # claim is made.
+        if release:
+            assert_release_work_offsets(result["evidence_rows"])
 
         oxford_parts = _load_oxford_parts(libraries_csv_path) if libraries_csv_path else []
         physical_joins = _load_physical_joins(fjms_db_path) if fjms_db_path else []

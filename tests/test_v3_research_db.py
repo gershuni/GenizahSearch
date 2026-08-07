@@ -409,11 +409,35 @@ def test_gate14_the_offsets_reach_the_built_evidence_row(tmp_path):
 
     rows = result["evidence_rows"]
     assert len(rows) == 1, f"expected one tier-A row, got {len(rows)}"
-    # w_start/w_end are the LAST two columns of the emitted tuple.
-    w_start, w_end = rows[0][-2], rows[0][-1]
+    # The FULL four-coordinate tuple (Codex R3 BLOCKER). Amendment (G) appends the
+    # PAGE side of the same producer alignment after the work side, so the emitted
+    # order is (..., w_start, w_end, aligned_page_start, aligned_page_end).
+    w_start, w_end = rows[0][-4], rows[0][-3]
+    ap_start, ap_end = rows[0][-2], rows[0][-1]
     assert (w_start, w_end) == (4735, 5461), (
         f"the built evidence row carries work-side offsets ({w_start}, {w_end}); "
         f"expected the producer's (4735, 5461)"
+    )
+    # THE round-3 property: all four coordinates must come from ONE producer
+    # alignment. Round 3's finding was that the page side was the coarser
+    # `spans_json` HULL while the work side came from a narrower ref entry, so the
+    # four columns asserted a correspondence the producer never made.
+    assert (ap_start, ap_end, w_start, w_end) in [
+        (p0, p1, r0, r1) for (p0, p1, r0, r1) in _REAL_PRODUCER_EVIDENCE
+    ], (
+        f"the emitted four-coordinate tuple ({ap_start}, {ap_end}, {w_start}, {w_end}) "
+        f"is not one of the producer's own alignments {_REAL_PRODUCER_EVIDENCE} -- the "
+        f"two sides do not describe the same alignment"
+    )
+    # And it must NOT be the hull, which is what `span_start`/`span_end` still hold.
+    span_start_idx, span_end_idx = 26, 27
+    assert (rows[0][span_start_idx], rows[0][span_end_idx]) == (981, 1772), (
+        "span_start/span_end are no longer the spans_json hull -- they are frozen "
+        "evidence_id inputs and must not change"
+    )
+    assert (ap_start, ap_end) != (rows[0][span_start_idx], rows[0][span_end_idx]), (
+        "this fixture no longer demonstrates the hull-vs-alignment difference, so "
+        "the assertion above proves nothing -- pick a row where they differ"
     )
 
 
@@ -685,3 +709,196 @@ def test_the_review_artifact_path_consumes_the_slim_db(tmp_path):
     assert outcome["candidate_count"] == 1, outcome
     assert outcome["emitted_row_count"] >= 1, outcome
     assert (tmp_path / "review.csv").exists()
+
+
+# ---------------------------------------------------------------------------
+# Codex ROUND 3 BLOCKER: gate 3 ("w_start/w_end non-NULL on every track1_direct
+# row, all corpora") existed only in the plan. `_ingest_tier_a` probes for
+# `ref_spans_json` and emits NULL when absent, so a v2-era research DB could
+# produce a RELEASE artifact carrying exactly the missing coordinates gate 3 says
+# must halt -- and the tests asserted NULL was the expected v2 result, so nothing
+# contradicted it.
+# ---------------------------------------------------------------------------
+
+def _evidence_tuple(*, source="track1_direct", w=(10, 20), ap=(0, 5), width=47):
+    """An emitted-shaped evidence tuple: source at index 3, the four offsets last."""
+    row = [None] * width
+    row[3] = source
+    row[-4], row[-3] = w
+    row[-2], row[-1] = ap
+    return tuple(row)
+
+
+def test_the_release_offsets_gate_halts_on_a_null_work_offset():
+    from build_discovery_sidecar import WorkOffsetsMissingError, assert_release_work_offsets
+
+    ok = [_evidence_tuple(), _evidence_tuple(w=(30, 40), ap=(6, 9))]
+    assert assert_release_work_offsets(ok) == 2
+
+    for bad in (
+        _evidence_tuple(w=(None, 20)),
+        _evidence_tuple(w=(10, None)),
+        _evidence_tuple(ap=(None, 5)),
+        _evidence_tuple(ap=(0, None)),
+    ):
+        with pytest.raises(WorkOffsetsMissingError, match="no work-side offsets"):
+            assert_release_work_offsets([_evidence_tuple(), bad])
+
+
+def test_the_release_offsets_gate_ignores_families_that_have_no_work_side():
+    """Propagated and shared_text rows genuinely have no reference-side span, so
+    demanding one would fail every real build."""
+    from build_discovery_sidecar import assert_release_work_offsets
+
+    rows = [
+        _evidence_tuple(),
+        _evidence_tuple(source="propagated", w=(None, None), ap=(None, None)),
+    ]
+    assert assert_release_work_offsets(rows) == 1
+
+
+def test_the_release_offsets_gate_refuses_to_pass_over_zero_rows():
+    """A gate that passes over an empty population is the canonical false green --
+    the specific failure mode this repo has a measured history of."""
+    from build_discovery_sidecar import WorkOffsetsMissingError, assert_release_work_offsets
+
+    with pytest.raises(WorkOffsetsMissingError, match="ZERO track1_direct"):
+        assert_release_work_offsets([])
+    with pytest.raises(WorkOffsetsMissingError, match="ZERO track1_direct"):
+        assert_release_work_offsets([_evidence_tuple(source="propagated")])
+
+
+def test_the_release_offsets_gate_reads_the_right_tuple_positions():
+    """The indices must track the INSERT column list, or the gate silently checks
+    the wrong columns after any schema amendment.
+
+    Derived from the real INSERT statement rather than restated, so a column added
+    in the middle fails here instead of quietly shifting what gets validated.
+    """
+    import re
+
+    import build_discovery_sidecar as bds
+
+    src = Path(bds.__file__).read_text(encoding="utf-8")
+    match = re.search(
+        r"INSERT INTO discovery_evidence \(\s*(.*?)\s*\) VALUES", src, re.S)
+    assert match, "could not locate the discovery_evidence INSERT column list"
+    cols = [c.strip() for c in match.group(1).replace("\n", " ").split(",") if c.strip()]
+    assert cols[bds._EVIDENCE_TUPLE_EVIDENCE_SOURCE] == "evidence_source", cols[:6]
+    assert cols[bds._EVIDENCE_TUPLE_W_START] == "w_start", cols[-6:]
+    assert cols[bds._EVIDENCE_TUPLE_W_END] == "w_end", cols[-6:]
+    assert cols[bds._EVIDENCE_TUPLE_ALIGNED_PAGE_START] == "aligned_page_start", cols[-6:]
+    assert cols[bds._EVIDENCE_TUPLE_ALIGNED_PAGE_END] == "aligned_page_end", cols[-6:]
+
+
+def test_a_release_build_runs_the_offsets_gate():
+    """The gate must be CALLED on the release path, not merely exist -- the
+    round-2/round-3 lesson, applied pre-emptively this time."""
+    import build_discovery_sidecar as bds
+
+    src = Path(bds.__file__).read_text(encoding="utf-8")
+    assert "assert_release_work_offsets(result[\"evidence_rows\"])" in src, (
+        "the release path does not invoke the work-offsets gate"
+    )
+
+
+def test_a_shadowed_unit_naming_two_different_works_halts(tmp_path):
+    """Codex R3 (HIGH): `MIN(shadowed_by)` silently collapsed this.
+
+    A wholly-shadowed producer unit whose own rows name DIFFERENT shadowing works
+    is a disagreement inside one unit -- exactly what the mixed-unit check exists
+    for -- but `n_unshadowed == 0` made it look wholly shadowed, so it passed and
+    the lexical minimum was kept. That picks a value by alphabetical accident.
+    """
+    evidence = tmp_path / "e.db"
+    page = _page_id("990000000000000001")
+    _make_evidence(evidence, [
+        # ONE claim id, two rows, two DIFFERENT shadowing works.
+        ("claimA", page, "M:w1", ["M:beat_alpha", "M:beat_omega"]),
+    ])
+    with pytest.raises(ResearchDbError, match="MORE THAN ONE shadowing work"):
+        derive_shadowed_by(str(evidence))
+
+
+def test_a_shadowed_unit_naming_ONE_work_repeatedly_is_accepted(tmp_path):
+    """The control: repeated identical values are the normal case (the producer
+    updates a unit's rows together), so halting on them would break every build."""
+    evidence = tmp_path / "e.db"
+    page = _page_id("990000000000000001")
+    _make_evidence(evidence, [
+        ("claimA", page, "M:w1", ["M:beat", "M:beat", "M:beat"]),
+    ])
+    got = derive_shadowed_by(str(evidence))
+    assert got[(page, "M:w1")] == "M:beat"
+
+
+# ---------------------------------------------------------------------------
+# Codex ROUND 3 HIGH: the research-DB gate reads `track1_matches` only, so it
+# cannot see a restricted row arriving through the E1/Q2 JSONL families -- those
+# ingests key on `work_id` and `cpage`, never on the match table.
+#
+# Gated at the WORKS ANCHOR instead, which is a structural chokepoint rather than
+# an enumeration of input surfaces: every claim in every family requires a `works`
+# FK anchor, so a work absent from that set produces no claim at all.
+# ---------------------------------------------------------------------------
+
+def test_an_excluded_work_is_refused_at_the_works_anchor():
+    from build_discovery_sidecar import (
+        RestrictedCorpusLeakError, assert_works_contain_no_excluded_corpus,
+    )
+
+    clean = [{"raw_work_id": "M:w1", "work_id": "w000001", "source_corpus": "ja"},
+             {"raw_work_id": "REF2:x", "work_id": "w000002", "source_corpus": "sefaria"}]
+    assert assert_works_contain_no_excluded_corpus(clean)["works_checked"] == 2
+
+    planted = clean + [{"raw_work_id": "RS:restricted", "work_id": "w000003",
+                        "source_corpus": "ja"}]
+    with pytest.raises(RestrictedCorpusLeakError, match="EXCLUDED from this asset"):
+        assert_works_contain_no_excluded_corpus(planted)
+
+
+def test_the_works_gate_error_names_no_work_id():
+    """A containment report that leaks defeats itself."""
+    from build_discovery_sidecar import (
+        RestrictedCorpusLeakError, assert_works_contain_no_excluded_corpus,
+    )
+
+    secret = "RS:a_very_distinctive_restricted_id"
+    with pytest.raises(RestrictedCorpusLeakError) as exc:
+        assert_works_contain_no_excluded_corpus(
+            [{"raw_work_id": secret, "work_id": "w1", "source_corpus": "ja"}])
+    assert "a_very_distinctive_restricted_id" not in str(exc.value)
+
+
+def test_a_JSONL_sourced_excluded_work_cannot_reach_the_build(tmp_path):
+    """THE round-3 case: a restricted work supplied ONLY through a JSONL family.
+
+    No match-table row exists for it, so the research-DB gate sees nothing. The
+    works anchor catches it because `build_claims_and_evidence` cannot create a
+    claim for a work outside that set.
+    """
+    import build_discovery_sidecar as bds
+
+    corpus, evidence, out = tmp_path / "c.db", tmp_path / "e.db", tmp_path / "slim.db"
+    page = _page_id("990000000000000001")
+    _make_corpus(corpus, [_row("990000000000000001", "M:w1", cat="JA")], [_page_row(page)])
+    _make_evidence(evidence, [("c1", page, "M:w1", [None])])
+    build(str(corpus), str(evidence), str(out))
+
+    # The slim DB is clean -- the research gate passes.
+    conn = bds._connect_research_ro(str(out))
+    try:
+        works = bds.assign_opaque_work_ids(
+            bds.select_shown_works(conn), tmp_path / "cw.json", create_if_missing=True)
+        # ...and now the restricted work arrives through a JSONL-shaped source only.
+        works.append({"raw_work_id": "RS:restricted", "work_id": "w000999",
+                      "source_corpus": "ja", "neutral_title": "T",
+                      "author": None, "genre": None, "cat": "JA"})
+        with pytest.raises(bds.RestrictedCorpusLeakError):
+            bds.build_claims_and_evidence(
+                conn=conn, works=works, page_index=bds.PageTextIndex(conn),
+                q2_shared_text=[{"work_id": "RS:restricted", "cpage": page,
+                                 "csys": "990000000000000001", "occ0": 0, "occ1": 10}],
+            )
+    finally:
+        conn.close()

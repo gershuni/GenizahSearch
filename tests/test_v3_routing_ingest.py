@@ -710,3 +710,103 @@ def test_the_cli_offers_and_threads_the_router(tmp_path):
     assert "--allow-lever1-coverage" in src
     assert "gen2_router_evidence_db=args.gen2_router_evidence_db" in src
     assert "allow_lever1_coverage=args.allow_lever1_coverage" in src
+
+
+# ---------------------------------------------------------------------------
+# Codex ROUND 3 HIGH: `assert_emitted_parity` checks only no-undecided, known
+# reasons, and total wipe-out -- "a mapping that wrongly demotes 90% of
+# `same_work` rows passes as long as one ships". And comparing a count recomputed
+# from `SURFACE_TO_ROUTING` against itself would be circular.
+#
+# `assert_assembled_parity` compares two INDEPENDENT artifacts per key: the
+# router's own `surface`, and the `routing_status` that actually landed on the
+# assembled row after dedup and collision resolution.
+# ---------------------------------------------------------------------------
+
+def test_per_key_parity_catches_a_mis_demotion_that_the_wipeout_guard_misses(tmp_path):
+    """THE round-3 property: nine of ten rows wrongly demoted, one shipping.
+
+    The old guard passes this (something shipped, nothing undecided, reasons all
+    known). The per-key check cannot: it compares each row against the router's
+    decision for that row's own key.
+    """
+    from v3_routing_ingest import assert_assembled_parity
+
+    pages = [f"9900000000000000{i:02d}_IE1_P1_FL1" for i in range(10)]
+    router_db = tmp_path / "r.db"
+    _make_evidence(
+        router_db,
+        [(p, f"c_w{i}", "same_work", 0.9, 1) for i, p in enumerate(pages)],
+        [(f"cl{i}", p, f"M:w{i}", f"c_w{i}") for i, p in enumerate(pages)],
+    )
+    router = load_router(str(router_db))
+    raw_by_minted = {f"w{i:06d}": f"M:w{i}" for i in range(10)}
+
+    def rows(demote_count):
+        claim_rows, evidence_rows = [], []
+        for i, p in enumerate(pages):
+            claim_id = f"CL{i}"
+            claim_rows.append((p, f"w{i:06d}", claim_id, "direct_witness", "e", "ja", "x"))
+            row = [None] * 47
+            row[1] = claim_id
+            row[3] = "track1_direct"
+            row[7] = "review_only" if i < demote_count else "shipped"
+            evidence_rows.append(tuple(row))
+        return claim_rows, evidence_rows
+
+    # All ten correctly shipped -> parity holds.
+    claim_rows, evidence_rows = rows(0)
+    report = assert_assembled_parity(
+        evidence_rows, router, claim_rows, routing_status_idx=7, claim_id_idx=1,
+        evidence_source_idx=3, track1_source="track1_direct",
+        raw_work_by_minted=raw_by_minted)
+    assert report == {"checked": 10, "mismatches": 0}
+
+    # Nine wrongly demoted, ONE shipping -> the wipe-out guard is satisfied, the
+    # per-key check is not.
+    claim_rows, evidence_rows = rows(9)
+    with pytest.raises(RoutingIngestError, match="9 of 10 assembled"):
+        assert_assembled_parity(
+            evidence_rows, router, claim_rows, routing_status_idx=7, claim_id_idx=1,
+            evidence_source_idx=3, track1_source="track1_direct",
+            raw_work_by_minted=raw_by_minted)
+
+    # And a SINGLE wrong row is caught -- aggregate checks would round this away.
+    claim_rows, evidence_rows = rows(1)
+    with pytest.raises(RoutingIngestError, match="1 of 10 assembled"):
+        assert_assembled_parity(
+            evidence_rows, router, claim_rows, routing_status_idx=7, claim_id_idx=1,
+            evidence_source_idx=3, track1_source="track1_direct",
+            raw_work_by_minted=raw_by_minted)
+
+
+def test_per_key_parity_refuses_to_pass_over_zero_rows(tmp_path):
+    from v3_routing_ingest import assert_assembled_parity
+
+    router_db = tmp_path / "r.db"
+    _make_evidence(router_db, [(P1, "c_w1", "same_work", 0.9, 1)],
+                   [("cl1", P1, "M:w1", "c_w1")])
+    with pytest.raises(RoutingIngestError, match="zero assembled"):
+        assert_assembled_parity(
+            [], load_router(str(router_db)), [], routing_status_idx=7, claim_id_idx=1,
+            evidence_source_idx=3, track1_source="track1_direct",
+            raw_work_by_minted={})
+
+
+def test_per_key_parity_runs_inside_the_builder(tmp_path):
+    """It must be CALLED, not merely exist."""
+    import build_discovery_sidecar as bds
+
+    src = Path(bds.__file__).read_text(encoding="utf-8")
+    assert "assert_assembled_parity(" in src, (
+        "the builder does not invoke the per-key parity check"
+    )
+    # Verified live: the router path builds cleanly through it (the routing tests
+    # above all run with `gen2_router` supplied and no D-17 audit rows).
+    rdb = tmp_path / "r.db"
+    _tiny_research_db(rdb, [(P1, "990000000000000001", "M:w1", 40, "[[0,40,0.2]]")])
+    ship = tmp_path / "s.db"
+    _make_evidence(ship, [(P1, "c_w1", "same_work", 0.40, 1)],
+                   [("cl1", P1, "M:w1", "c_w1")])
+    _, built = _build(rdb, _works(), load_router(str(ship)))
+    assert built["router_parity"]["checked"] == 1, built.get("router_parity")
