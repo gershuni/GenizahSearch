@@ -854,3 +854,104 @@ def test_cli_corrupt_brotli_exit_nonzero(tmp_path):
 
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-v']))
+
+
+# ---------------------------------------------------------------------------
+# The non-disclosing pattern-set attestation (Codex rounds 1 and 2, MEDIUM --
+# held open both times: "the non-disclosing pattern-set attestation and
+# real-pattern positive control are still explicitly owed. A synthetic self-test
+# cannot attest completeness.")
+#
+# Completeness genuinely cannot be attested from inside -- the scanner cannot
+# enumerate terms nobody told it about. What was missing and IS attestable is
+# IDENTITY: which pattern set ran. It matters concretely: on 2026-08-06 the set
+# was found missing a signature term that gen-2 hands over as a column NAME, and
+# a bare count would not have shown it, but a per-pattern digest lets a reviewer
+# confirm the set that ran is the reviewed set.
+# ---------------------------------------------------------------------------
+
+def test_the_attestation_identifies_the_pattern_set():
+    from check_atlas_masking import pattern_set_attestation
+
+    att = pattern_set_attestation(["alpha", "beta", "gamma"])
+    assert att["pattern_count"] == 3
+    assert len(att["pattern_set_sha256"]) == 64
+    assert len(att["pattern_digests"]) == 3
+
+
+def test_the_attestation_discloses_no_pattern_text_prefix_or_length():
+    """The whole design constraint. This output goes into build records and CI
+    logs, so it has to be safe where the patterns are not."""
+    from check_atlas_masking import pattern_set_attestation
+
+    secret = "averydistinctiverestrictedterm"
+    att = pattern_set_attestation([secret, "second"])
+    blob = repr(att)
+    assert secret not in blob
+    # No prefix of meaningful length either -- a leaked prefix is a leak.
+    for n in range(4, len(secret) + 1):
+        assert secret[:n] not in blob, f"a {n}-char prefix of the pattern leaked"
+    # And no length disclosure: for a short term, length + a known alphabet is a
+    # real narrowing, so the attestation deliberately omits it. Asserted on the
+    # KEYS rather than by searching the blob for the number -- a two-digit length
+    # occurs by chance inside a hex digest, so the substring form was unsound
+    # (it failed on a coincidental "30" and would have passed for the wrong
+    # reason on other inputs).
+    assert not any("len" in key.lower() for key in att), (
+        f"the attestation exposes a length-shaped field: {sorted(att)}"
+    )
+    # Nor may any VALUE be the length, or be derived from it.
+    for value in att.values():
+        if isinstance(value, int):
+            assert value != len(secret) or value == att["pattern_count"], (
+                "an integer field equals the pattern length"
+            )
+
+
+def test_the_set_digest_changes_when_the_set_changes():
+    """A silent shrink -- a truncated or half-written pattern file -- must be
+    visible. This is the failure the 2026-08-06 gap would have shown up as."""
+    from check_atlas_masking import pattern_set_attestation
+
+    full = pattern_set_attestation(["a", "b", "c"])
+    short = pattern_set_attestation(["a", "b"])
+    assert full["pattern_set_sha256"] != short["pattern_set_sha256"]
+    assert full["pattern_count"] != short["pattern_count"]
+    # An EDITED pattern must move the digest too, not only an added/removed one.
+    # THIS is the load-bearing assertion: a digest computed over the COUNT alone
+    # would satisfy every add/remove check above (the counts differ), so without a
+    # same-count edit the test passes for the wrong reason. Caught by mutation
+    # testing 2026-08-07 -- a content-blind digest survived the first version.
+    edited = pattern_set_attestation(["a", "b", "c2"])
+    assert edited["pattern_count"] == full["pattern_count"], (
+        "this control requires the SAME count, or it cannot detect a "
+        "count-only digest"
+    )
+    assert full["pattern_set_sha256"] != edited["pattern_set_sha256"], (
+        "editing a pattern without changing the count did not move the set "
+        "digest -- the digest is content-blind, so a silently-swapped pattern "
+        "set would attest as identical"
+    )
+    # ...and the per-pattern digests show WHICH entry changed.
+    assert set(full["pattern_digests"]) != set(edited["pattern_digests"])
+    assert len(set(full["pattern_digests"]) & set(edited["pattern_digests"])) == 2
+
+
+def test_the_set_digest_is_stable_under_reordering_and_duplication():
+    """Otherwise every reviewer diff would be noise, and the attestation would be
+    ignored -- which is the same as not having one."""
+    from check_atlas_masking import pattern_set_attestation
+
+    a = pattern_set_attestation(["x", "y", "z"])
+    b = pattern_set_attestation(["z", "x", "y", "x"])
+    assert a["pattern_set_sha256"] == b["pattern_set_sha256"]
+    assert a["pattern_count"] == b["pattern_count"] == 3
+
+
+def test_attest_fails_closed_without_a_pattern_file(tmp_path, monkeypatch):
+    """An attestation of an EMPTY set would be the worst possible artifact: a
+    build record that looks like evidence while attesting nothing."""
+    import check_atlas_masking as cam
+
+    monkeypatch.delenv("MASKING_SCAN_PATTERNS_FILE", raising=False)
+    assert cam.main(["--attest"]) == 1

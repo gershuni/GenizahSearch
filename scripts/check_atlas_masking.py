@@ -203,6 +203,51 @@ def load_patterns() -> list[str]:
     ]
 
 
+def pattern_set_attestation(patterns) -> dict:
+    """A NON-DISCLOSING attestation of the pattern set that was used.
+
+    Codex rounds 1 and 2 (MEDIUM) both held this open: the unset-pattern control
+    and the `--self-test` needle "demonstrate only scanner mechanics", and a
+    synthetic needle cannot attest that the pattern set is COMPLETE. That remains
+    literally true -- completeness is unknowable from inside, since the scanner
+    cannot enumerate terms nobody told it about. What IS attestable, and what was
+    missing, is *identity*: which pattern set ran.
+
+    Why identity matters concretely rather than as bookkeeping: on 2026-08-06 the
+    set was found to be missing a signature-vocabulary term that gen-2 hands over
+    as a column NAME, so a scan returned "clean, exit 0" on a file containing only
+    that word. A bare count of 15 would not have revealed the gap -- but a
+    per-pattern digest lets a reviewer confirm afterwards that the set which ran
+    is the reviewed set, and makes a silent shrink (a truncated or half-written
+    pattern file) visible.
+
+    Returns, and deliberately nothing more:
+      `pattern_count`   how many patterns were loaded
+      `pattern_set_sha256` digest over the SORTED patterns -- stable under
+                        reordering, changes if any pattern is added, removed or
+                        edited
+      `pattern_digests` the first 8 hex chars of each pattern's own SHA-256,
+                        sorted. Lets a reviewer diff two runs pattern-by-pattern
+                        and see WHICH entry changed, without learning any of them.
+
+    NON-DISCLOSURE is the whole design constraint: this output is meant for a
+    build record and CI log, so it must be safe where the patterns themselves are
+    not. No pattern, prefix, length or character is emitted -- a truncated digest
+    of a secret is not a hint toward the secret. (Lengths are omitted on purpose:
+    for a short restricted term, a length plus a known alphabet is a real
+    narrowing.)
+    """
+    cleaned = sorted({p for p in patterns if isinstance(p, str) and p})
+    joined = "\n".join(cleaned).encode("utf-8")
+    return {
+        "pattern_count": len(cleaned),
+        "pattern_set_sha256": sha256(joined).hexdigest(),
+        "pattern_digests": [
+            sha256(p.encode("utf-8")).hexdigest()[:8] for p in cleaned
+        ],
+    }
+
+
 def _require_patterns(patterns) -> list[str]:
     """Enforce a non-empty, validated pattern set at EVERY public scan entry
     point (HIGH-9). A zero-pattern scan is the canonical false-green and is a
@@ -1334,6 +1379,12 @@ def parse_args(argv=None):
     parser.add_argument('--strict', action='store_true',
                         help='CI mode: require BOTH surfaces; scan every asset file; '
                              'fail on any traversal/read error')
+    parser.add_argument('--attest', action='store_true',
+                        help='Print a NON-DISCLOSING attestation of the pattern set '
+                             'that ran (count + set digest + per-pattern digest '
+                             'prefixes) and, with --scan-repo/--scan-asset/'
+                             '--scan-sqlite, of what was scanned. Safe for a build '
+                             'record: no pattern text, prefix or length is emitted.')
     parser.add_argument('--self-test', action='store_true',
                         help='Run a quick internal smoke check with a synthetic pattern')
     return parser.parse_args(argv)
@@ -1358,9 +1409,10 @@ def main(argv=None) -> int:
     # HIGH-10: presence is tested with `is not None` / the store_true flags --
     # NEVER truthiness of the option value.
     if args.self_test:
-        if args.scan_repo or asset_requested or sqlite_requested or args.strict:
+        if (args.scan_repo or asset_requested or sqlite_requested or args.strict
+                or args.attest):
             print("ERROR: --self-test cannot be combined with --scan-repo / "
-                  "--scan-asset / --scan-sqlite / --strict.", file=sys.stderr)
+                  "--scan-asset / --scan-sqlite / --strict / --attest.", file=sys.stderr)
             return 2
         return _run_self_test()
 
@@ -1369,9 +1421,10 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
 
-    if not args.scan_repo and not asset_requested and not sqlite_requested:
+    if (not args.scan_repo and not asset_requested and not sqlite_requested
+            and not args.attest):
         print("Nothing to do -- pass --scan-repo and/or --scan-asset PATH "
-              "and/or --scan-sqlite PATH (or --self-test)", file=sys.stderr)
+              "and/or --scan-sqlite PATH (or --self-test / --attest)", file=sys.stderr)
         return 2
 
     patterns = load_patterns()
@@ -1380,6 +1433,26 @@ def main(argv=None) -> int:
     except ScanError as exc:
         print(f"ERROR: {_sanitize(exc)}", file=sys.stderr)
         return 1
+
+    if args.attest:
+        att = pattern_set_attestation(patterns)
+        # Printed BEFORE the scan on purpose: an attestation emitted only after a
+        # clean run would be missing exactly when a failing run is being
+        # diagnosed, which is when "which pattern set ran?" is asked.
+        print("masking pattern-set attestation (non-disclosing):")
+        print(f"  pattern_count       {att['pattern_count']}")
+        print(f"  pattern_set_sha256  {att['pattern_set_sha256']}")
+        print(f"  pattern_digests     {' '.join(att['pattern_digests'])}")
+        surfaces = []
+        if args.scan_repo:
+            surfaces.append("repo")
+        if asset_requested:
+            surfaces.append(f"asset:{args.scan_asset}")
+        if sqlite_requested:
+            surfaces.append(f"sqlite:{args.scan_sqlite}")
+        print(f"  surfaces            {', '.join(surfaces) or '(none -- attest only)'}")
+        if not (args.scan_repo or asset_requested or sqlite_requested):
+            return 0
 
     try:
         issues: list[Issue] = []
