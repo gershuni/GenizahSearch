@@ -89,6 +89,7 @@ from shared.discovery_service import (
     _build_findings_filter,
 )
 from shared.discovery_surface_projection import is_outage
+from web.components import discovery_links as links
 
 # ---------------------------------------------------------------------------
 # Marker classes. Render-smoke assertions scope to these; an assertion that
@@ -226,13 +227,14 @@ def preview_targets_a_folio(item: Mapping[str, Any]) -> bool:
     source; this closes it at the two consumers as well, so neither a hand-built
     row nor a future second producer can reopen it.
 
-    Deliberately in the RENDERER module, which the page already imports: the
-    reverse direction would be an import cycle, and a third home for the rule
-    would be a third thing to keep in step.
+    A THIN ADAPTER over `web/components/discovery_links.py`, which owns the rule
+    for all three discovery link sites. This function's whole content is knowing
+    which two KEYS a findings row carries the address under; the rule itself is
+    not restated here, because a second statement of it is how the panel's rows
+    and this page's rows came to disagree in the first place.
     """
-    page = item.get("first_match_page")
-    return isinstance(page, int) and page > 0 and bool(
-        item.get("first_match_volume_ie"))
+    return links.browse_target_is_a_folio(
+        item.get("first_match_page"), item.get("first_match_volume_ie"))
 
 NOVELTY_HELP_CLASS = "gs-findings-novelty-help"
 

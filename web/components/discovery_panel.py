@@ -60,6 +60,7 @@ from shared.discovery_panel_model import (
     related_page_row,
 )
 from shared.discovery_surface_projection import STATUS_OK, is_outage
+from web.components import discovery_links as links
 from web.components.findings_rows import (
     ROW_CATALOGUE_TITLE_CLASS,
     copy_text as _findings_copy,
@@ -396,10 +397,22 @@ def _render_expansion_envelope(
                 # already on `SURFACE_EXPANSION_FIELDS`; `member_sys_ids` may hold
                 # several for a merged witness unit, and linking any other one
                 # would take the reader to a manuscript this row is not named
-                # after. No `page`: the expansion is per-CARRIER, and the
-                # representative page is not necessarily where the match sits.
-                if sys_id:
-                    ui.link(shelfmark, f'/browse?sys_id={sys_id}')
+                # after.
+                #
+                # IT NOW CARRIES THE FOLIO TOO (owner request, 2026-08-08). This
+                # comment used to end "No `page`: the expansion is per-CARRIER,
+                # and the representative page is not necessarily where the match
+                # sits" -- which was wrong. The row's representative IS the
+                # carrier's best-ranked claim FOR THIS WORK, so its page is a
+                # page this work was matched on. It is not the ONLY one, which is
+                # why the service names the pair `representative_*` and no
+                # ordinal is claimed. Landing a reader on the manuscript's first
+                # page instead was the same defect the findings preview had.
+                target = links.browse_url(
+                    sys_id, page=item.get('representative_page'),
+                    volume_ie=item.get('representative_volume_ie'))
+                if target:
+                    ui.link(shelfmark, target)
                 else:
                     ui.label(shelfmark)
                 _render_catalogue_title(item, lang, catalogue_title)
@@ -509,17 +522,24 @@ def _render_related_page_row(row: Mapping[str, Any], lang: str) -> None:
             shelfmark = str(row.get('shelfmark_display') or '')
             sys_id = row.get('sys_id')
             page_number = row.get('page_number')
-            # The SAME target the findings row links to, built the same way
-            # (`web/components/findings_rows.py::_render_shelfmark`; there is no
-            # shared builder to call, and this is not the place to invent a
-            # second one). `page` is added when the id carried a folio number --
-            # `/browse` takes it as `page: int` (`web/main.py::
-            # browse_page_route`), so the link lands on the FOLIO the alignment
-            # is about rather than on the manuscript's first page.
-            target = f'/browse?sys_id={sys_id}'
-            if isinstance(page_number, int):
-                target = f'{target}&page={page_number}'
-            ui.link(shelfmark, target)
+            # THE SHARED BUILDER, which this comment used to say did not exist
+            # ("there is no shared builder to call, and this is not the place to
+            # invent a second one"). `web/components/discovery_links.py` is now
+            # that place, and all three discovery link sites go through it.
+            #
+            # THE VOLUME IS THE FIX (owner request, 2026-08-08). This row already
+            # added `&page=<n>` on its own, and that was a HALF ADDRESS: folio
+            # numbering is per volume, so a bare `page` resolves against whichever
+            # volume `/browse` opens, and on the 988 identifications that span
+            # volumes the reader landed on a real folio in the wrong place --
+            # which reads as the alignment being wrong rather than the link.
+            # `browse_url` adds the two together or neither.
+            target = links.browse_url(
+                sys_id, page=page_number, volume_ie=row.get('volume_ie'))
+            if target:
+                ui.link(shelfmark, target)
+            else:
+                ui.label(shelfmark)
         page_number = row.get('page_number')
         if isinstance(page_number, int):
             ui.label(

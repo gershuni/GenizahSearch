@@ -51,7 +51,12 @@ from shared.discovery_panel_model import (
     build_panel_rows,
     iter_rows,
 )
-from shared.discovery_service import LAUNCH_CONTRIBUTION_SHADES
+from shared.discovery_service import (
+    LAUNCH_CONTRIBUTION_SHADES,
+    _browse_address_from_page_id,
+    _page_number_from_page_id,
+    _volume_ie_from_page_id,
+)
 from shared.discovery_surface_projection import (
     _ALL_ALLOWLISTS,
     STATUS_BUSY,
@@ -212,8 +217,9 @@ def _work_summary_source(**overrides) -> Dict[str, Any]:
 
 
 def _related_page_source(**overrides) -> Dict[str, Any]:
+    _page_id = '990000000000000945_IE1_P000004_FL9'
     row = {
-        'related_page_id': '990000000000000945_IE1_P000001_FL9',
+        'related_page_id': _page_id,
         # The manuscript this page belongs to, as the joined query resolves it
         # (2026-08-05). Non-null here so the allowlist-coverage assertion sees
         # every field, and so the capture paints a real shelfmark -- which is
@@ -221,7 +227,11 @@ def _related_page_source(**overrides) -> Dict[str, Any]:
         'sys_id': '990000000000000945',
         'library_code': 'CUL',
         'shelfmark_display': 'T-S 12.945',
-        'page_number': 1,
+        # Folio FOUR, not folio one, for the same reason the expansion fixture
+        # uses folio nine: a folio-1 fixture cannot distinguish a targeted link
+        # from an untargeted one.
+        'page_number': _page_number_from_page_id(_page_id),
+        'volume_ie': _volume_ie_from_page_id(_page_id),
         'display_missing': False,
         'evidence_id': 'd' * 64,
         'evidence_source': ids.EVIDENCE_SOURCE_PROPAGATED,
@@ -238,7 +248,16 @@ def _expansion_source(**overrides) -> Dict[str, Any]:
         'work_id': 'w000001',
         'unit_id': 'unit-2',
         'representative_sys_id': '990000000000000946',
-        'representative_page_id': '990000000000000946_IE1_P000001_FL1',
+        # Folio NINE, not folio one: a folio-1 fixture makes a targeted link and
+        # an untargeted one produce the same URL, so every assertion about the
+        # difference would pass without checking it.
+        'representative_page_id': '990000000000000946_IE1_P000009_FL9',
+        # Parsed by the SERVICE's own accessor, never written as literals beside
+        # the id -- the fixture then cannot claim an address the id does not
+        # carry, and the pair stays atomic exactly as the service emits it.
+        **dict(zip(('representative_page', 'representative_volume_ie'),
+                   _browse_address_from_page_id(
+                       '990000000000000946_IE1_P000009_FL9'))),
         'representative_claim_id': 'e' * 64,
         'member_sys_ids': ['990000000000000946'],
         'library_code': 'CUL',
@@ -1172,8 +1191,37 @@ def test_an_expansion_row_links_its_shelfmark_to_that_manuscript():
     to copy out and paste into the search box."""
     row = surface_safe_expansion(_expansion_source())
     hrefs = _client_hrefs(_render_expansion_rows([row]))
-    assert f"/browse?sys_id={row['representative_sys_id']}" in hrefs, (
+    assert any(h.startswith(f"/browse?sys_id={row['representative_sys_id']}")
+               for h in hrefs), (
         f'the expansion row renders no link to its manuscript; hrefs: {hrefs}')
+
+
+def test_an_expansion_row_links_to_the_FOLIO_its_representative_claim_is_on():
+    """These rows answer "what else carries this work", and the answer is only
+    useful if the reader lands where the work is (owner request, 2026-08-08).
+
+    The row already ranked a representative claim; `representative_page_id` is
+    that claim's page, so a page this work was matched on was available all
+    along and the link threw it away. The comment that used to sit on this link
+    said "the representative page is not necessarily where the match sits",
+    which was simply wrong about what `best_row` is.
+    """
+    row = surface_safe_expansion(_expansion_source())
+    hrefs = _client_hrefs(_render_expansion_rows([row]))
+    assert any('page=9' in h and 'volume_ie=IE1' in h for h in hrefs), (
+        f'the expansion row still opens the manuscript, not the folio: {hrefs}')
+
+
+def test_an_expansion_row_withholds_a_folio_it_cannot_fully_address():
+    """A representative page id with no volume component addresses a folio
+    number in an unknown volume, which for a multi-volume manuscript is a
+    different page in each one. The row keeps its manuscript link and drops the
+    folio rather than guessing which volume the reader meant."""
+    row = surface_safe_expansion(_expansion_source(
+        representative_page_id='990000000000000946_P000009_FL9',
+        representative_page=None, representative_volume_ie=None))
+    hrefs = _client_hrefs(_render_expansion_rows([row]))
+    assert hrefs == ['/browse?sys_id=990000000000000946'], hrefs
 
 
 def test_an_expansion_row_links_its_OWN_representative_never_another_member():
@@ -1256,7 +1304,8 @@ def test_an_artifact_unnamed_row_is_named_from_the_catalogue_instead(lang):
     assert dp._RELATED_ROW_COPY['display_missing'][lang] not in text, (
         'the row was named AND still reports itself unnamed')
     # ...and the recovered name is a LINK, like every other named row.
-    assert f"/browse?sys_id={row['representative_sys_id']}" in _client_hrefs(client)
+    assert any(h.startswith(f"/browse?sys_id={row['representative_sys_id']}")
+               for h in _client_hrefs(client))
 
 
 @pytest.mark.parametrize('lang', LANGS)
@@ -2331,8 +2380,18 @@ def _lazy_read_envelopes(seed: Optional[str], lang: str) -> Dict[str, Any]:
              surface_safe_related_page(_related_page_source(
                  related_page_id='990000000000000946_IE1_P000002_FL11',
                  sys_id=None, library_code=None, shelfmark_display=None,
-                 page_number=None, display_missing=True))],
-            2, meta={'unit': 'distinct_opposite_pages'}),
+                 page_number=None, volume_ie=None, display_missing=True)),
+             # A row that IS named but has no manuscript to link to. It renders
+             # the shelfmark as PLAIN TEXT rather than as a link -- the branch
+             # `browse_url` returning None selects (2026-08-08) -- and plain text
+             # on a screen is exactly what this scan exists to look at. Before
+             # the shared builder, this row emitted `/browse?sys_id=None`, a dead
+             # end dressed as a destination; the sibling expansion renderer
+             # already had a test forbidding that and this one did not.
+             surface_safe_related_page(_related_page_source(
+                 related_page_id='990000000000000947_IE1_P000005_FL13',
+                 sys_id=None, display_missing=False))],
+            3, meta={'unit': 'distinct_opposite_pages'}),
         'outage': unavailable_envelope(meta={'reason': 'query_failed'}),
     }
 

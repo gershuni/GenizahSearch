@@ -191,6 +191,11 @@ SURFACE_RELATED_PAGE_FIELDS: Tuple[str, ...] = (
     "library_code",
     "shelfmark_display",
     "page_number",
+    #: The volume that folio number belongs to. Required for the row's LINK, not
+    #: for its label: folio numbering is PER VOLUME, so `page=3` with no volume
+    #: addresses a different page in each one. The row rendered exactly that
+    #: half-address until 2026-08-08.
+    "volume_ie",
     "display_missing",
     "evidence_id",
     "evidence_source",
@@ -285,6 +290,12 @@ SURFACE_EXPANSION_FIELDS: Tuple[str, ...] = (
     "representative_sys_id",
     "representative_page_id",
     "representative_claim_id",
+    #: The representative claim's folio, as the TWO components of a `/browse`
+    #: address -- never parsed out of `representative_page_id` by a renderer.
+    #: BOTH or NEITHER (`_browse_address_from_page_id`), so this row's link
+    #: cannot be a folio number pointed at an unknown volume.
+    "representative_page",
+    "representative_volume_ie",
     "member_sys_ids",
     # what NAMES it (an absent manuscript_display row is FLAGGED, not blanked)
     "library_code",

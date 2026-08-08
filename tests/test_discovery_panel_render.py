@@ -42,7 +42,8 @@ from shared.discovery_panel_model import (
     PanelServiceBundle,
     build_panel_rows,
 )
-from shared.discovery_service import DiscoveryService
+from shared.discovery_service import (
+    DiscoveryService, _browse_address_from_page_id, _volume_ie_from_page_id)
 from shared.discovery_surface_projection import (
     SURFACE_CLAIM_FIELDS,
     SURFACE_EXPANSION_FIELDS,
@@ -157,6 +158,11 @@ def related_page_row(**overrides):
         'library_code': 'CUL',
         'shelfmark_display': RELATED_SHELFMARK,
         'page_number': 3,
+        # DERIVED FROM THE PAGE ID BY THE SERVICE'S OWN PARSER, never written as
+        # a literal beside it: the fixture then cannot claim a volume the id does
+        # not carry, which is exactly the drift that let this row ship a link
+        # with a folio and no volume.
+        'volume_ie': _volume_ie_from_page_id(RELATED_PAGE_ID),
         'display_missing': False,
         'evidence_id': 'ev-99',
         'evidence_source': ids.EVIDENCE_SOURCE_PROPAGATED,
@@ -169,14 +175,25 @@ def related_page_row(**overrides):
     return row
 
 
+#: The expansion row's representative page, in the CORPUS's own id shape. It used
+#: to be the placeholder `'page-2'`, which carries neither a folio nor a volume --
+#: fine while nothing read it, and useless the moment the row's link had to land
+#: on the folio.
+EXPANSION_PAGE_ID = '990051079570205172_IE1_P000009_FL21'
+
+
 def expansion_row(**overrides):
     row = {field: None for field in SURFACE_EXPANSION_FIELDS}
     row.update({
         'work_id': 'w000001',
         'unit_id': 'unit-2',
         'representative_sys_id': '990051079570205172',
-        'representative_page_id': 'page-2',
+        'representative_page_id': EXPANSION_PAGE_ID,
         'representative_claim_id': 'claim-2',
+        # Derived by the SERVICE's own parser, so the fixture cannot claim an
+        # address the page id does not carry.
+        **dict(zip(('representative_page', 'representative_volume_ie'),
+                   _browse_address_from_page_id(EXPANSION_PAGE_ID))),
         'member_sys_ids': ['990051079570205172'],
         'library_code': 'CUL',
         'shelfmark_display': 'T-S 12.123',
@@ -647,10 +664,14 @@ def test_a_related_page_row_shows_a_library_chip_and_a_linked_shelfmark(spy, lan
     links = [el for el in section.descendants() if type(el).__name__ == 'Link']
     assert len(links) == 1, f'the shelfmark is not a link ({len(links)} links)'
     assert links[0].text == RELATED_SHELFMARK
-    # The FOLIO, not just the manuscript: `/browse` takes `page` as an int, and
-    # an alignment is about one page of the other manuscript.
+    # The FOLIO **AND ITS VOLUME**, not just the manuscript. `/browse` takes
+    # `page` as an int and an alignment is about one page of the other
+    # manuscript -- but folio numbering is PER VOLUME, so this row used to emit
+    # `&page=3` alone and that is a different page in each volume of a
+    # multi-volume manuscript (owner request, 2026-08-08). The volume is not
+    # decoration on the address; it is half of it.
     assert (links[0]._props or {}).get('href') == (
-        f'/browse?sys_id={RELATED_SYS_ID}&page=3'), (
+        f'/browse?sys_id={RELATED_SYS_ID}&page=3&volume_ie=IE1'), (
         'the shelfmark does not link to the folio the alignment is about')
 
 

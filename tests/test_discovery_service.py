@@ -2621,6 +2621,7 @@ def test_thread_identity_control_would_catch_an_on_loop_read():
 from shared.discovery_service import (  # noqa: E402 -- appended section
     BUCKET_ALL,
     DIVERGENCE_SHOWN,
+    _browse_address_from_page_id,
     FINDINGS_UNIT_IDENTIFICATION,
     FINDINGS_UNIT_MANUSCRIPT,
     FINDINGS_UNIT_WORK,
@@ -2813,6 +2814,61 @@ def test_a_FOLIO_WITHOUT_ITS_VOLUME_is_withheld_rather_than_half_answered():
     # to page 1 silently, which is the unresolved case wearing a folio's clothes.
     assert _browse_address_from_page_id(f"{_FOLIO_SYS}_{_FOLIO_VOL_A}_P000000_FL1") == (
         None, None)
+
+
+def test_a_related_page_row_names_the_VOLUME_its_folio_number_belongs_to(
+        tmp_path):
+    """The candidate-alignment row already carried `page_number` and NOT the
+    volume, so the panel linked `&page=<n>` alone -- a real folio in an unknown
+    volume (owner request, 2026-08-08).
+
+    ASSERTED AT THE SERVICE, not only at the renderer, and the difference is the
+    reason this test exists: the panel's own tests build their rows by hand, so
+    the service could stop emitting the volume entirely and every render test
+    would still pass while every production link lost its folio. A mutation
+    proved exactly that before this was written.
+    """
+    anchor = _folio_page(_FOLIO_VOL_A, 3)
+    other = f"990000000000000906_{_FOLIO_VOL_B}_P000012_FL{_FOLIO_VOL_B[2:]}12"
+    works = [(_FOLIO_WORK, _FOLIO_WORK, "Synthetic Shared Text Work", None,
+              None, "sefaria")]
+    specs = [sidecar_build._mk_evidence(
+        page_id=anchor, work_id=_FOLIO_WORK, sys_id=_FOLIO_SYS,
+        evidence_kind=sidecar_build._SHARED_TEXT,
+        evidence_source=sidecar_build._PROPAGATED,
+        confidence_band=sidecar_build._NOT_EVALUATED,
+        adjudication_status=sidecar_build._UNREVIEWED,
+        audit_status=sidecar_build._NA,
+        routing_status=sidecar_build._SHIPPED,
+        routing_reason=sidecar_build._NONE_REASON,
+        span_start=0, span_end=400, other_page_id=other, b_start=0, b_end=400,
+    )]
+    service = _service_for(
+        _new_sidecar(tmp_path, "related_volume.db", works=works,
+                     evidence_specs=specs, version=_FOLIO_VERSION),
+        _FOLIO_VERSION)
+    env = service.get_related_pages_enveloped(anchor)
+    assert env["status"] == STATUS_OK and env["items"], env
+    row = env["items"][0]
+    assert row["page_number"] == 12, row
+    assert row["volume_ie"] == _FOLIO_VOL_B, row
+
+
+def test_an_expansion_row_names_its_representative_claims_folio_and_volume(
+        folio_service):
+    """The panel's "other manuscripts carrying this work" row linked to the
+    manuscript's first page while already holding the ranked representative
+    claim's own page id. Asserted at the SERVICE for the same reason as the
+    related-page pair above."""
+    rows = folio_service.get_work_witnesses(_FOLIO_WORK)
+    assert rows, "the fixture produced no expansion rows"
+    row = rows[0]
+    page, volume = _browse_address_from_page_id(row["representative_page_id"])
+    assert row["representative_page"] == page
+    assert row["representative_volume_ie"] == volume
+    # ...and it is a REAL address, not two Nones agreeing with each other.
+    assert isinstance(row["representative_page"], int)
+    assert row["representative_volume_ie"] == _FOLIO_VOL_A
 
 
 def test_a_FAILED_folio_resolution_costs_the_link_and_never_the_result_set(

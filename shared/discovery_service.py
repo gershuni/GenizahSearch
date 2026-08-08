@@ -458,6 +458,20 @@ def _browse_address_from_page_id(page_id: Any) -> Tuple[Optional[int], Optional[
     return folio, volume
 
 
+def _representative_browse_address(page_id: Any) -> Dict[str, Any]:
+    """The expansion row's two `/browse` address keys, as a dict to splat.
+
+    A DICT rather than two assignments because the expansion row is built in TWO
+    places -- the SQL projection (`_present_expansion_row`) and the pure-Python
+    reference (`_project_work_witnesses`) -- which deliberately mirror each other
+    and are compared key-for-key by
+    `tests/test_discovery_work_expansion.py::test_sql_projection_matches_the_pure_reference`.
+    One call each is one thing to keep in step instead of four.
+    """
+    page, volume = _browse_address_from_page_id(page_id)
+    return {"representative_page": page, "representative_volume_ie": volume}
+
+
 #: The character immediately after `_` (0x5F) in ASCII, and therefore the
 #: exclusive upper bound of the half-open range that selects exactly the page
 #: ids beginning `{sys_id}_`. A RANGE and not a `LIKE`/`GLOB` prefix because
@@ -1820,6 +1834,11 @@ def _project_work_witnesses(
             "representative_sys_id": best_row["sys_id"],
             "representative_page_id": best_row["page_id"],
             "representative_claim_id": best_row["claim_id"],
+            # The representative claim's folio, as a `/browse` address. See the
+            # note on the SQL projection's identical pair in
+            # `_present_expansion_row`; the two producers MIRROR each other and
+            # `test_sql_projection_matches_the_pure_reference` compares every key.
+            **_representative_browse_address(best_row["page_id"]),
             "claim_type": claim_type,
             "evidence_source": best_row["evidence_source"],
             "confidence_band": displayed_band,
@@ -1901,6 +1920,17 @@ def _present_expansion_row(
         "representative_sys_id": row["sys_id"],
         "representative_page_id": row["page_id"],
         "representative_claim_id": row["claim_id"],
+        # WHERE THIS CARRIER'S MATCH IS (owner request, 2026-08-08). The row
+        # already ranked its representative claim; `page_id` is that claim's
+        # folio, so the shelfmark link can land on the page the row is about
+        # instead of on the manuscript's first page.
+        #
+        # The panel's link comment used to say "the representative page is not
+        # necessarily where the match sits", which was wrong: `best_row` IS the
+        # carrier's best-ranked claim FOR THIS WORK, so its page is a page this
+        # work was matched on. What it is not is the ONLY such page -- hence
+        # "representative" in the name, and no ordinal claimed anywhere.
+        **_representative_browse_address(row["page_id"]),
         "claim_type": claim_type,
         "evidence_source": row["evidence_source"],
         "confidence_band": row["confidence_band"],
@@ -2645,6 +2675,20 @@ class DiscoveryService:
             surface_safe_related_page({
                 **row,
                 "page_number": _page_number_from_page_id(row.get("related_page_id")),
+                # THE VOLUME THAT FOLIO NUMBER BELONGS TO (owner request,
+                # 2026-08-08). This row already linked with `&page=<n>` and NO
+                # volume, which for a multi-volume manuscript is not an
+                # approximate address but a different page in each volume --
+                # `/browse` resolves a bare `page` against whichever volume it
+                # opens. 988 of the artifact's identifications span volumes.
+                #
+                # A SEPARATE key from `page_number`, not folded into it, because
+                # the two serve different jobs: `page_number` is a DISPLAYED
+                # fact ("Folio 3") that stays true whether or not a volume could
+                # be parsed, while the LINK needs a complete address and is
+                # gated on both through `browse_target_is_a_folio`. Collapsing
+                # them would blank a folio label to protect a link.
+                "volume_ie": _volume_ie_from_page_id(row.get("related_page_id")),
                 # A LEFT JOIN that found nothing is a NAMED state, never a
                 # blank: the surface says the manuscript is not in the display
                 # index rather than printing the composite id it does have.

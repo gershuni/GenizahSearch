@@ -1535,6 +1535,11 @@ _INTERNAL_EXPANSION_KEYS = frozenset({
     "band_label",
     # what NAMES the carrier
     "library_code", "shelfmark_display", "display_missing",
+    # WHERE THE CARRIER'S MATCH IS (2026-08-08): the representative claim's
+    # folio, as the two components of a `/browse` address. Not a parsed form of
+    # `representative_page_id` that a renderer could re-derive -- the composite
+    # id is the service's to take apart, and no surface holds it.
+    "representative_page", "representative_volume_ie",
 })
 
 #: Keys that exist INTERNALLY and are deliberately stripped by the projection.

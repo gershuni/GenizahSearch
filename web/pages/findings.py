@@ -82,7 +82,6 @@ import logging
 import math
 import os
 from typing import Any, Dict, List, Mapping, Optional, Tuple
-from urllib.parse import quote
 
 from nicegui import ui
 
@@ -99,6 +98,7 @@ from shared.discovery_display_strings import (
     rule_sentence,
     service_state_message,
 )
+from web.components import discovery_links
 from web.components import findings_rows as rows
 from web.components.typography import h1
 from web.discovery import (
@@ -3183,10 +3183,12 @@ def preview_url(item: Mapping[str, Any]) -> Optional[str]:
     therefore not defensive padding -- it is the difference between a link that
     lands on a matched folio and one that lands a volume away.
 
-    THE TEST IS `rows.preview_targets_a_folio`, THE SAME CALL THE ROW'S NOTE
-    MAKES, and sharing it is the point rather than tidiness: this link and that
-    sentence are two statements about one fact, and two derivations of one fact
-    is how they come to disagree.
+    THE BUILDER IS `web/components/discovery_links.py`, shared with BOTH of the
+    connections panel's link sites, and `rows.preview_targets_a_folio` -- the
+    call the row's NOTE makes -- is the same module's predicate. Sharing it is
+    the point rather than tidiness: this link and that sentence are two
+    statements about one fact, and two derivations of one fact is how they come
+    to disagree.
 
     The bare `sys_id` form REMAINS the fallback, deliberately: a row whose folio
     did not resolve still has a manuscript worth reaching, and the row's note
@@ -3195,15 +3197,9 @@ def preview_url(item: Mapping[str, Any]) -> Optional[str]:
     `None` when the row carries no `sys_id`, so a preview is withheld rather
     than pointing at a page that cannot resolve.
     """
-    sys_id = item.get("sys_id")
-    if not sys_id:
-        return None
-    url = f"/browse?sys_id={quote(str(sys_id))}&embed=1"
-    if rows.preview_targets_a_folio(item):
-        url += "&page={}&volume_ie={}".format(
-            int(item["first_match_page"]),
-            quote(str(item["first_match_volume_ie"])))
-    return url
+    return discovery_links.browse_url(
+        item.get("sys_id"), page=item.get("first_match_page"),
+        volume_ie=item.get("first_match_volume_ie"), embed=True)
 
 
 def _viewer_is_admin() -> bool:

@@ -1219,6 +1219,17 @@ def related_page_row(item: Mapping[str, Any]) -> Dict[str, Any]:
         "library_code": item.get("library_code"),
         "shelfmark_display": item.get("shelfmark_display"),
         "page_number": item.get("page_number"),
+        # The volume that folio number belongs to (2026-08-08). Carried for the
+        # row's LINK, which needs a COMPLETE address: folio numbering is per
+        # volume, so `page=3` alone is a different page in each volume of a
+        # multi-volume manuscript -- and this row emitted exactly that until the
+        # volume was threaded through here.
+        #
+        # This is the composite id's ONLY legitimate descendant on the row. The
+        # id itself is still deliberately absent (see the docstring); what
+        # reaches the renderer is the parsed volume, which is not printable as
+        # an identifier and is consumed by `browse_url` alone.
+        "volume_ie": item.get("volume_ie"),
         # Trust the service's own flag when it sent one; fall back to the
         # fields themselves, so a row from an older envelope still resolves to
         # a named state rather than to a half-blank line.
