@@ -206,17 +206,64 @@ def _best_claim_all_types(claims: List[Dict[str, Any]]) -> Dict[Tuple[str, str],
     return best
 
 
+def load_work_attributions(
+    path: Optional[str], crosswalk_path: Optional[str] = None
+) -> Dict[str, str]:
+    """Load `emit_work_attributions.py`'s output, keyed by MINTED work id.
+
+    The file is keyed on RAW work ids (what the reference corpus carries); the
+    novelty candidate is keyed on the minted `w######`. This translates through
+    the crosswalk, because keying the lookup on the wrong id space is the exact
+    failure this bake has hit repeatedly -- and it fails SILENTLY, as an empty
+    source rather than an error.
+
+    Returns `{}` when no path is supplied, which is the pre-2026-08-08 behaviour
+    and correct for a fixture run.
+    """
+    if not path:
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        payload = json.load(fh)
+    raw = payload.get("attributions") or {}
+    if not crosswalk_path or not os.path.isfile(crosswalk_path):
+        # No crosswalk => cannot translate. Returning the raw-keyed map would
+        # silently match nothing; say so instead.
+        raise SystemExit(
+            "work attributions supplied without a crosswalk -- the file is keyed "
+            "on raw work ids and the candidates are keyed on minted ids, so "
+            "without the mapping every lookup would silently miss"
+        )
+    with open(crosswalk_path, encoding="utf-8") as fh:
+        crosswalk = json.load(fh)
+    out: Dict[str, str] = {}
+    for raw_id, text in raw.items():
+        minted = crosswalk.get(raw_id)
+        if minted:
+            out[minted] = text
+    return out
+
+
 def build_all_candidates(
     asset_path: str,
     libraries_csv: str,
     fjms_db: str,
     pgp_db: str,
     fgp_db: str,
+    work_attributions: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[NoveltyCandidate], Dict[str, Dict[str, Any]], Dict[str, Dict[str, str]]]:
     """Builds a REAL `NoveltyCandidate` for every shipped (sys_id, work_id)
     pair in the live asset, from the real sidecars. Returns
     (candidates, works_by_id, libraries_by_sys_id) -- the latter two so the
-    instrument writer can render shelfmarks/titles without re-querying."""
+    instrument writer can render shelfmarks/titles without re-querying.
+
+    `work_attributions` maps MINTED work id -> the reference corpus's own witness
+    attribution for that work (the neutral `src_attr_note`; see
+    `scripts/emit_work_attributions.py`). Supply it via
+    `load_work_attributions`. Omitted => the source is empty, which is what this
+    function did unconditionally until 2026-08-08: the field existed, was
+    fingerprinted, and was hardcoded to `None`, so the gate reported checking a
+    source it never read.
+    """
     conn = connect_readonly(asset_path)
     works = load_works(conn)
     claims = load_claims(conn)
@@ -253,7 +300,7 @@ def build_all_candidates(
                 pgp_description=pgp.get("description") or None,
                 pgp_transcription=pgp.get("transcription") or None,
                 fgp_texts=fgp_texts,
-                m_source_shelfmark_text=None,
+                m_source_shelfmark_text=(work_attributions or {}).get(wid) or None,
                 page_mapped=True,
             )
         )

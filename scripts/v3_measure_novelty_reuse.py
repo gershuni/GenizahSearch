@@ -78,6 +78,7 @@ from scripts.discovery_novelty_probe import (  # noqa: E402
     DEFAULT_LIBRARIES_CSV,
     DEFAULT_PGP_DB,
     build_all_candidates,
+    load_work_attributions,
 )
 from shared.discovery_novelty import BATCH_PROMPT_SHA256  # noqa: E402
 
@@ -239,6 +240,12 @@ def main(argv=None) -> int:
                     help="LABEL for the report: what population these inputs "
                          "represent. A reuse number without this label is unusable "
                          "-- it is the mistake the retracted ~$4 estimate made.")
+    ap.add_argument("--work-attributions", default=None,
+                    help="emit_work_attributions.py output; the reference corpus's "
+                         "own witness attribution per work. A FINGERPRINT input.")
+    ap.add_argument("--crosswalk", default=os.path.join(
+                        REPO_ROOT, "discovery_data", "crosswalk.json"),
+                    help="raw->minted work id map, needed to key the attributions")
     ap.add_argument("--report", default=DEFAULT_REPORT)
     args = ap.parse_args(argv)
 
@@ -275,12 +282,20 @@ def main(argv=None) -> int:
 
     log("building candidates from the supplied asset + finding-aid DBs "
         "(this is the slow part)")
+    # The reference corpus's own witness attribution (neutral `src_attr_note`).
+    # It is a FINGERPRINT input, so measuring without it prices a different
+    # question than the one a real run would ask -- and any verdict bought
+    # before it is wired would be invalidated the moment it is.
+    attributions = load_work_attributions(args.work_attributions, args.crosswalk)
+    log(f"  work attributions: {len(attributions):,}"
+        + ("" if attributions else "  (NONE supplied -- this source will be empty)"))
     candidates, _works, _libraries = build_all_candidates(
         asset_path=args.asset,
         libraries_csv=args.libraries_csv,
         fjms_db=args.fjms_db,
         fgp_db=args.fgp_db,
         pgp_db=args.pgp_db,
+        work_attributions=attributions,
     )
     log(f"  candidates: {len(candidates):,}")
 
