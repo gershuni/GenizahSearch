@@ -499,6 +499,92 @@ def regrain_router_to_split(
     return report
 
 
+def route_e1_by_coverage(
+    router: Dict, e1_keys, matched_letters: Dict[Tuple[str, str], int],
+    page_chars: Dict[str, int],
+) -> Dict:
+    """ADD coverage decisions for the E1 witness population, in place.
+
+    WHY THIS IS A SEPARATE FUNCTION FROM `regrain_router_to_split`. That one
+    re-grains keys gen-2 DID score, at a finer grain. This one decides keys gen-2
+    NEVER scored at any grain -- measured: 0 of 19,238 E1 pairs appear in
+    `coverage_route`, `discovery_claim` or `discovery_evidence`. Collapsing the
+    two would let a genuinely-undecided key silently inherit a re-grain path and
+    stop the wipe-out guard from ever firing.
+
+    WHY THE POPULATION EXISTS AT ALL, stated so the extrapolation is visible
+    rather than buried: the matcher partitions every `(page, work)` pair into
+    tier A (verifies at the production boundary) and tier B (verifies only in the
+    wide band), and E1 is drawn ENTIRELY from tier B. gen-2's router was fitted
+    and run over tier A. Applying its threshold here is therefore an
+    EXTRAPOLATION onto a population the calibration never saw -- owner-authorized
+    2026-08-08, descriptive only, and no precision claim attaches to it. The rows
+    keep their own `confidence_band`, so a consumer can always separate them.
+
+    THE UNIT, which is the thing most likely to be got wrong. Coverage here is
+    `matched_letters / pages.n_chars` -- the RAW character denominator, because
+    that is the pair gen-2's threshold was fitted against. The builder ALSO
+    computes a `coverage` field for Lever-1 using a NORMALIZED denominator
+    (`page_norm_letters`); it is a different number (~0.767 ratio) and feeding it
+    to this threshold would systematically over-promote. Do not "simplify" this
+    by reusing `spec['coverage']`.
+
+    `matched_letters` maps `(page_id, raw_work_id) -> ml`. For E1 there is exactly
+    one row per pair, so its own `ml` IS the group maximum -- the same estimand
+    the split-grain path takes a MAX to obtain, not a different one.
+
+    Keys are tagged into `router["e1_keys"]` so `assert_assembled_parity` reports
+    them apart from independently-verified rows, for the same reason the re-grained
+    ones are: comparing a decision against the code that just made it is not
+    verification.
+    """
+    threshold = _router_threshold(router)
+    route = router["route"]
+    router.setdefault("e1_keys", set())
+    report = {
+        "considered": 0, "added": 0, "already_present": 0,
+        "same_work": 0, "parallel": 0, "undecided": 0, "undecided_examples": [],
+        "threshold": threshold,
+    }
+    for key in e1_keys:
+        report["considered"] += 1
+        if key in route:
+            # gen-2 did score it after all -- keep its decision, touch nothing.
+            # Measured 0 today, but a future router run could cover some of these
+            # and silently overwriting a real decision would be the worse bug.
+            report["already_present"] += 1
+            continue
+        page_id, _raw_work = key
+        n_chars = page_chars.get(page_id)
+        ml = matched_letters.get(key)
+        if not n_chars or ml is None:
+            report["undecided"] += 1
+            if len(report["undecided_examples"]) < 5:
+                report["undecided_examples"].append(
+                    {"page_id": page_id, "work_id": _raw_work}
+                )
+            continue
+        pcov = ml / n_chars
+        # Same sanity bound, same reason, as the split-grain path: a normalized
+        # denominator sneaking in here would promote rows with no error signal.
+        if pcov > 1.0:
+            raise RoutingRegrainError(
+                f"E1 coverage exceeds 1.0 ({pcov:.4f}) -- the numerator and "
+                f"denominator are not the pair the threshold was calibrated on. "
+                f"Refusing to route on an impossible coverage. "
+                f"(counts only, D-25: matched={ml}, denominator={n_chars})"
+            )
+        surface = SURFACE_SAME_WORK if pcov >= threshold else SURFACE_PARALLEL
+        route[key] = (surface, pcov, 1)
+        router["e1_keys"].add(key)
+        report["added"] += 1
+        if surface == SURFACE_SAME_WORK:
+            report["same_work"] += 1
+        else:
+            report["parallel"] += 1
+    return report
+
+
 def resolve_routing(
     page_id: str, work_id: str, router: Dict
 ) -> Tuple[Optional[str], Optional[str], Optional[float]]:
@@ -669,6 +755,7 @@ def assert_assembled_parity(
     # `checked_regrained` compares the re-grainer's own output against itself.
     checked_independent = 0
     checked_regrained = 0
+    checked_e1 = 0
     for row in evidence_rows:
         if row[evidence_source_idx] != track1_source:
             continue
@@ -707,6 +794,12 @@ def assert_assembled_parity(
         # apart so `checked` is never read as N rows of independent agreement.
         if resolved_key in (router.get("regrained_keys") or ()):
             checked_regrained += 1
+        elif resolved_key in (router.get("e1_keys") or ()):
+            # Same self-consistency caveat, different population: gen-2 never
+            # scored these keys, so the "expected" status is this build's own
+            # extrapolation. Reported apart from BOTH the independent rows and
+            # the re-grained ones, because they carry a different warrant.
+            checked_e1 += 1
         else:
             checked_independent += 1
         got = row[routing_status_idx]
@@ -765,6 +858,7 @@ def assert_assembled_parity(
         # `expected_status` entries into the same dict this gate reads.
         "checked_independent": checked_independent,
         "checked_regrained": checked_regrained,
+        "checked_e1": checked_e1,
     }
 
 

@@ -3416,19 +3416,45 @@ def _assertion_source_corpus(row: Dict, work: Dict) -> Optional[str]:
 def _ingest_e1_rows(
     rows: Iterable[Dict], *, work_index: Dict[str, Dict], page_index,
     confidence_band: str, adjudication_status: str, audit_status: str,
+    e1_ref_spans: Optional[Dict[Tuple[str, str], str]] = None,
 ) -> List[Dict]:
     """Ingest ONE of the four DISJOINT E1 track1_direct source populations
     (e1_ra_confirmed / e1_adjudicated_a / e1_rb_screening / e1_r3_frame) --
     all four share the same row shape (page_id, sys_id, work_id, o0, o1, ml,
     dens, n_spans); band assignment is BY-SOURCE (the caller fixes
-    `confidence_band`), no within-track1_direct fall-through (F1)."""
+    `confidence_band`), no within-track1_direct fall-through (F1).
+
+    `e1_ref_spans` (2026-08-08) maps RAW `(page_id, work_id)` -> the producer's
+    `ref_spans_json` for that pair, so E1 rows carry the same four dual-side
+    coordinates `_ingest_tier_a` emits and can satisfy gate 3.
+
+    Why it is a PARAMETER and not read here. These rows come from tier B, which
+    the production matcher never ref-instrumented: `mapv2_track1_run.py:424`
+    drops the reference coordinate it just computed. The map is produced by a
+    separate, frame-parity-gated regeneration (`e1_tierb_frame.py`) and carried
+    in the research DB. Passing it in keeps this function a pure transform and
+    keeps the *provenance* decision -- which regeneration, gated how -- at the
+    call site where it can be seen.
+
+    Absent map => four `None`s, exactly as before. That is correct for a v2 or
+    smoke build and is NOT a silent release hazard: gate 3 halts a `--release`
+    build on precisely that condition.
+    """
     out = []
+    ref_spans = e1_ref_spans or {}
     for row in rows:
         work = work_index.get(row["work_id"])
         if work is None:
             continue
         text_layer, snapshot_hash = page_index.get(row["page_id"])
         matched_letters = row.get("ml")
+        # Keyed on the RAW work id, which is what the matcher wrote and what the
+        # JSONL carries -- NOT `work["work_id"]` (the minted `w######`). Using the
+        # minted id would miss every row, and the failure would look like "the
+        # regeneration produced nothing" rather than a key mismatch.
+        aligned_page_start, aligned_page_end, w_start, w_end = project_ref_span(
+            ref_spans.get((row["page_id"], row["work_id"]))
+        )
         spec = _mk_evidence(
             page_id=row["page_id"], work_id=work["work_id"], sys_id=row["sys_id"],
             evidence_kind=_WITNESS, evidence_source=_TRACK1, confidence_band=confidence_band,
@@ -3438,9 +3464,39 @@ def _ingest_e1_rows(
             matched_letters=matched_letters, density=row.get("dens"), n_spans=row.get("n_spans"),
             text_layer=text_layer, snapshot_hash=snapshot_hash,
             assertion_source_corpus=_assertion_source_corpus(row, work),
+            w_start=w_start, w_end=w_end,
+            aligned_page_start=aligned_page_start, aligned_page_end=aligned_page_end,
         )
         out.append(_attach_coverage(spec, page_index, row["page_id"], matched_letters))
     return out
+
+
+E1_REF_SPANS_TABLE = "e1_ref_spans"
+
+
+def load_e1_ref_spans(conn: Optional[sqlite3.Connection]) -> Dict[Tuple[str, str], str]:
+    """Read the frame-parity-gated tier-B reference spans out of the research DB.
+
+    Returns `{}` when the table is absent -- a v2-era research DB legitimately has
+    no tier-B instrumentation, and a smoke fixture has no need of one. The release
+    path does not rely on this being non-empty: gate 3 is what refuses to ship a
+    `track1_direct` row with no work-side coordinate, and it counts rows rather
+    than trusting a table to exist.
+    """
+    if conn is None:
+        return {}
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (E1_REF_SPANS_TABLE,),
+    ).fetchone()
+    if row is None:
+        return {}
+    return {
+        (page_id, work_id): ref_spans_json
+        for page_id, work_id, ref_spans_json in conn.execute(
+            f"SELECT page_id, work_id, ref_spans_json FROM {E1_REF_SPANS_TABLE}"
+        )
+    }
 
 
 def _ingest_tier_a(conn: sqlite3.Connection, work_index: Dict[str, Dict], page_index) -> List[Dict]:
@@ -3867,21 +3923,29 @@ def build_claims_and_evidence(
     expert_tier_band = _HIGH_CONFIDENCE_ALGORITHMIC if v2_bands else _EXPERT_VERIFIED
 
     evidence_specs: List[Dict] = []
+    # The tier-B reference coordinates (2026-08-08). Read ONCE and shared by all
+    # four collections -- they are disjoint populations over one keyspace, so a
+    # per-collection read would be four scans of the same table.
+    e1_ref_spans = load_e1_ref_spans(conn)
     evidence_specs += _ingest_e1_rows(
         e1_ra_confirmed, work_index=work_index, page_index=page_index,
         confidence_band=expert_tier_band, adjudication_status=_UNREVIEWED, audit_status=_AUDIT_PENDING,
+        e1_ref_spans=e1_ref_spans,
     )
     evidence_specs += _ingest_e1_rows(
         e1_adjudicated_a, work_index=work_index, page_index=page_index,
         confidence_band=expert_tier_band, adjudication_status=_HUMAN_CONFIRMED, audit_status=_AUDIT_PENDING,
+        e1_ref_spans=e1_ref_spans,
     )
     evidence_specs += _ingest_e1_rows(
         e1_rb_screening, work_index=work_index, page_index=page_index,
         confidence_band=_SCREENING_RB, adjudication_status=_PROVISIONAL, audit_status=_NA,
+        e1_ref_spans=e1_ref_spans,
     )
     evidence_specs += _ingest_e1_rows(
         e1_r3_frame, work_index=work_index, page_index=page_index,
         confidence_band=_SCREENING_CANON, adjudication_status=_PROVISIONAL, audit_status=_NA,
+        e1_ref_spans=e1_ref_spans,
     )
     if conn is not None:
         evidence_specs += _ingest_tier_a(conn, work_index, page_index)
@@ -6828,6 +6892,7 @@ def finalize_build(
     # ---------------------------------------------------------------------
     gen2_router = None
     regrain_report = None
+    e1_route_report = None
     if gen2_router_evidence_db is not None:
         from v3_routing_ingest import load_router as _load_gen2_router
         gen2_router = _load_gen2_router(str(gen2_router_evidence_db))
@@ -7005,6 +7070,40 @@ def finalize_build(
                     f"ingest default and silently bypass coverage routing. Halting "
                     f"rather than defaulting."
                 )
+
+            # E1 witness routing (2026-08-08, owner-authorized). The four E1
+            # collections are drawn ENTIRELY from the matcher's tier B, which
+            # gen-2's router never scored at ANY grain -- measured 0 of 19,238
+            # pairs present in `coverage_route`, `discovery_claim` or
+            # `discovery_evidence`. The split-grain re-grain above does not reach
+            # them (it is fed tier-A keys only), so without this they keep the
+            # ingest default and `assert_emitted_parity` halts on 16,097 rows.
+            #
+            # Same threshold, same raw-`n_chars` unit, same `>=`, same
+            # impossible-coverage refusal as the tier-A path. It is an
+            # EXTRAPOLATION onto a population the calibration never saw, and it
+            # is recorded as such in meta rather than presented as fitted.
+            _e1_ml: Dict[Tuple[str, str], int] = {}
+            _e1_keys = []
+            for _rows in (e1_ra_confirmed, e1_adjudicated_a,
+                          e1_rb_screening, e1_r3_frame):
+                for _r in (_rows or ()):
+                    _k = (_r["page_id"], _r["work_id"])
+                    _ml = _r.get("ml")
+                    if _ml is not None:
+                        _e1_ml[_k] = _ml
+                    _e1_keys.append(_k)
+            if _e1_keys:
+                from v3_routing_ingest import route_e1_by_coverage as _route_e1
+                e1_route_report = _route_e1(
+                    gen2_router, _e1_keys, _e1_ml, _page_chars)
+                if e1_route_report["undecided"]:
+                    raise RoutingConflictError(
+                        f"E1 coverage routing left "
+                        f"{e1_route_report['undecided']} row(s) with no decision "
+                        f"-- they would keep the ingest default and silently "
+                        f"bypass coverage routing. Halting rather than defaulting."
+                    )
 
         # Every gate passed -- ONLY NOW is it safe to mutate: delete any
         # prior output .db, create the output directory, mint/persist
@@ -7283,6 +7382,17 @@ def finalize_build(
                     + regrain_report["recomputed_parallel"])),
                 ("coverage_regrain_disagrees_with_parent",
                  str(regrain_report["disagrees_with_parent"])),
+            ])
+        if e1_route_report is not None:
+            # The E1 extrapolation, recorded so a reader of the ASSET can see
+            # that this population was routed by a threshold fitted on a
+            # different tier -- not inferred from the absence of a note.
+            meta_rows.extend([
+                ("coverage_e1_routing", "threshold_extrapolated_tier_b"),
+                ("coverage_e1_considered", str(e1_route_report["considered"])),
+                ("coverage_e1_routed", str(e1_route_report["added"])),
+                ("coverage_e1_same_work", str(e1_route_report["same_work"])),
+                ("coverage_e1_parallel", str(e1_route_report["parallel"])),
             ])
         # v2 provenance (bake plan §7 gate 11, Codex #B2/#5): record the
         # verified SHA-256 of every supplied hash-pinned input in meta.

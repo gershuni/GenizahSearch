@@ -1552,6 +1552,110 @@ is attached, and none of this reaches a user-facing surface as a percentage.
 
 ---
 
+## 7d. The bake RAN. Both blockers closed, and the novelty price is measured (2026-08-08)
+
+`ASSEMBLE_EXIT=0`. The first complete v3 artifact exists: `works 1,269 · discovery_claim 268,361 ·
+discovery_evidence 297,415 · witness_units 5,547 · discovery_identification 66,388 · manuscript_display 45,241`,
+`content_hash de7896c3…`. Two blockers stood between §7c and this, and they were sequential — closing the
+first only revealed the second.
+
+### Blocker 1 — routing (closed by option 4, §7c-bis)
+
+Recorded in the asset itself: `coverage_routing=gen2_router_split_regrained`, `kept_exact 134,536`,
+`recomputed 138,796`, `disagrees_with_parent 6,233`, threshold `0.2984126984126984` read from
+`coverage_route_meta.threshold`, both grains named. The 6,233 figure reproduces §7c-bis's prediction exactly.
+
+### Blocker 2 — gate 3 had NO work-side offsets for E1, and nothing had noticed
+
+**The finding.** The four E1 collections are `track1_direct`, so release gate 3
+(`assert_release_work_offsets`) demands `w_start`/`w_end`/`aligned_page_*` on every one. `_ingest_e1_rows`
+never set them; `_mk_evidence` defaults all four to `None`. Reproduced end to end: **16,105 of 16,105**
+emitted E1 rows would have halted the build. It was invisible until now only because the routing gate at
+`build_claims_and_evidence` fires ~40 lines earlier — so **fixing routing alone would not have unblocked the
+bake**, it would have advanced the halt by one gate.
+
+**Why E1 has no offsets, and why that is structural rather than an oversight.** The matcher partitions every
+`(page, work)` pair at `mapv2_track1_run.assign_page`: tier A (verifies at the production boundary) →
+`track1_matches`, tier B (verifies only in the wide band) → `track1_candidates`. One `if/continue/else`, so the
+two are disjoint by construction — measured `381,341 + 1,900,171 = 2,281,512` exact union, intersection **0**,
+over 156,612 shared pages and 3,550 shared works. **E1 draws 19,238/19,238 (100.0%) from tier B and 0 from
+tier A.** The ref-instrumented pilot enriches `m['accepted_works']` only; its own docstring says *"tier-B is
+not ref-instrumented here."*
+
+**The consequence for reading the two lanes against each other, stated because it is easy to get backwards:**
+E1's zero overlap with tier A carries **no information about agreement or disagreement** — the two lanes were
+never given the opportunity to agree. It is not a quality signal in either direction. What it *does* mean is
+that E1 is the pile which did **not** clear the primary bar, subsequently filtered, scored, and — for 174 rows
+only — individually adjudicated. (`e1_ra_confirmed`'s 1,570 are band-evaluated and `unreviewed`; band ≠
+adjudication, 134-CONTEXT R6.)
+
+**The fix, and why it was cheap.** The coordinate was never unobtainable: `mapv2_track1_run.py:411-412`
+computes `r0`/`r1` per hull and line 424 discards them, while `seg_off` — bound at line 293 — is never read
+again. It was one array lookup from being stored. `gen2_track1_pilot.py` already carries `off + r0, off + r1`
+on every hull for tier A, so a `GEN2_TIER=b` emitter (default stays `a`; existing invocations byte-identical)
+re-runs the SAME shared membership kernel over exactly the E1 pages. **5.1 minutes**, not the "hardest
+remaining work" this file previously implied.
+
+**Frame parity, BLOCKING, and it is the load-bearing gate** — `span_start`/`span_end` are frozen inputs to the
+E1 `evidence_id` recipe, so a one-letter page-side drift regenerates every E1 id:
+
+| | |
+|---|---|
+| pages in scope | 18,779 |
+| frozen tier-B rows on them | 61,270 |
+| regenerated | **61,270** |
+| frozen-only / regenerated-only / column-unequal | **0 / 0 / 0** |
+| E1 pairs absent from the regeneration | **0 of 19,238** |
+| regenerated rows with no reference span | **0** |
+
+Result in the artifact: **254,612 `track1_direct` rows, 0 with a NULL work-side offset.** Gate 3 satisfied
+with data, not waived.
+
+### E1 routing — an extrapolation, labelled as one
+
+`route_e1_by_coverage` decides keys gen-2 never scored, using the same threshold, the same RAW `n_chars`
+denominator and the same impossible-coverage refusal as the split-grain path. **19,236 routed — 13,166
+`same_work` (68.4%) / 6,070 `parallel`; 0 undecided.** Two pairs turned out to carry a genuine gen-2
+`coverage_route` verdict (both `parallel`) and are **preserved verbatim**, which is why that branch was written
+defensively rather than assuming the measured zero. (The earlier "0 of 19,238" was measured against
+`discovery_claim`/`discovery_evidence`; against `coverage_route` it is 2.)
+
+The asset records this as `coverage_e1_routing=threshold_extrapolated_tier_b`, so a reader sees that the
+threshold was fitted on a different tier — rather than having to infer it from the absence of a note. Owner-
+authorized 2026-08-08; descriptive, no precision claim, and the rows keep their own `confidence_band`.
+
+### Novelty: the v3 price, which is the number §5.0b option 0 existed to produce
+
+Measured against the real v3 asset (`--population pinned`, verified against the asset's own
+`coverage_routing`), $0 spent, no model called:
+
+| | |
+|---|---|
+| candidates | 67,079 |
+| heuristically resolved (no model) | 10,267 (**15.3%**) |
+| **residual — would reach the model** | **56,812** |
+| reuse through the fingerprint gate | **0.0%** (every cache entry predates the fingerprint) |
+| bare key overlap | 95.5% — *this is the quantity the retracted "87.6% → ≈$4" was reporting* |
+| residual breakdown | 54,254 present-but-unfingerprinted + 2,558 absent from cache |
+
+At the **measured** unit cost ($40.12 ÷ 55,184 = **$0.000727** per LLM-decided case, §1.3), the v3 novelty pass
+is **≈ $41.30**. The 15.3% heuristic rate reproduces the legacy 15.4% almost exactly, which is the main reason
+to trust the projection. **This supersedes both retracted figures (≈$4 and ≈$68) and is the first number that
+describes the v3 population rather than the legacy one.** It remains an owner spend decision.
+
+### Gate discipline
+
+Every gate added here was proven able to fail, per [[feedback_gates_must_be_proven_able_to_fail]] and
+[[feedback_gates_must_change_the_artifact]]. Tier-B emitter equivalence: 5/6 mutations RED (the 6th is
+provably a no-op — `margin_band` returns `'singleton'` whenever `n_competitors == 0`, and `margin` is `None`
+exactly then). Frame parity: perturbed the REAL regenerated table three ways — a one-letter `matched_letters`
+drift, a deleted row, a NULLed reference span — all RED, green again after restore. Offset wiring: 5/5 RED,
+including one written specifically to catch "the builder never calls the loader", which was a **real** gap —
+the first test round passed while the builder ignored the data entirely. One of those tests was also not
+running at all (`-k e1` did not match its name), which hid a genuine failure.
+
+---
+
 ## 8. Owner questions
 
 > **✅ CODEX APPROVED 2026-08-07, round 9** — `VERDICT: APPROVE`, recorded verbatim in

@@ -887,6 +887,146 @@ def test_ingest_e1_rows_expert_verified_split_and_offsets():
     assert human_confirmed[0]["adjudication_status"] == ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED
 
 
+# --------------------------------------------------------------------------
+# E1 tier-B work-side offsets (2026-08-08). The E1 population is drawn entirely
+# from the matcher's tier B, which production never ref-instrumented, so these
+# rows shipped four NULL coordinates and could not satisfy release gate 3. The
+# spans now arrive via `e1_ref_spans` in the research DB, produced by a
+# frame-parity-gated regeneration.
+# --------------------------------------------------------------------------
+
+_E1_REF_SPANS_JSON = (
+    '[{"p0": 0, "p1": 5, "dens": 0.1, "rg0": 400, "rg1": 405, "cigar": "5.5="},'
+    ' {"p0": 6, "p1": 30, "dens": 0.2, "rg0": 900, "rg1": 924, "cigar": "24.24="}]'
+)
+
+
+def _e1_fixture():
+    work_index = {"raw:w1": {"work_id": "w000001"}}
+    page_idx = sidecar_build.PageTextIndex(_pages_conn([("p1", "htr", "hello world")]))
+    rows = [{"page_id": "p1", "sys_id": "s1", "work_id": "raw:w1",
+             "o0": 0, "o1": 5, "ml": 5, "dens": 0.9, "n_spans": 1}]
+    return work_index, page_idx, rows
+
+
+def _ingest_one_e1(ref_spans):
+    work_index, page_idx, rows = _e1_fixture()
+    out = sidecar_build._ingest_e1_rows(
+        rows, work_index=work_index, page_index=page_idx,
+        confidence_band=ids.CONFIDENCE_BAND_EXPERT_VERIFIED,
+        adjudication_status=ids.ADJUDICATION_STATUS_UNREVIEWED,
+        audit_status=ids.AUDIT_STATUS_AUDIT_PENDING,
+        e1_ref_spans=ref_spans,
+    )
+    assert len(out) == 1
+    return out[0]
+
+
+def test_e1_rows_carry_the_WORK_SIDE_offsets_when_the_spans_are_supplied():
+    """The whole point: an E1 row must end up with all four coordinates of ONE
+    producer alignment, which is what release gate 3 requires."""
+    spec = _ingest_one_e1({("p1", "raw:w1"): _E1_REF_SPANS_JSON})
+    # the LARGEST page-side entry wins (p1-p0 = 24 beats 5), per project_ref_span
+    assert spec["aligned_page_start"] == 6
+    assert spec["aligned_page_end"] == 30
+    assert spec["w_start"] == 900
+    assert spec["w_end"] == 924
+    # the page-side hull is UNTOUCHED -- it is a frozen evidence_id input
+    assert spec["span_start"] == 0 and spec["span_end"] == 5
+
+
+def test_e1_ref_spans_are_keyed_on_the_RAW_work_id_not_the_minted_one():
+    """The trap: `work_index` maps raw->minted, and keying the lookup on the
+    minted id would miss every row while looking like an empty regeneration."""
+    minted_key = {("p1", "w000001"): _E1_REF_SPANS_JSON}
+    spec = _ingest_one_e1(minted_key)
+    assert spec["w_start"] is None, (
+        "a minted-id key must NOT resolve -- if it does, the lookup is keyed on "
+        "the wrong id space and the raw-keyed real data would silently miss"
+    )
+    raw_key = {("p1", "raw:w1"): _E1_REF_SPANS_JSON}
+    assert _ingest_one_e1(raw_key)["w_start"] == 900
+
+
+def test_e1_rows_without_spans_still_ingest_with_NULL_offsets():
+    """Backward compatibility: a v2-era or smoke build has no tier-B
+    instrumentation and must still ingest. Gate 3, not this function, is what
+    refuses to SHIP such a row."""
+    for absent in ({}, None, {("other", "raw:w9"): _E1_REF_SPANS_JSON}):
+        spec = _ingest_one_e1(absent)
+        assert (spec["w_start"], spec["w_end"],
+                spec["aligned_page_start"], spec["aligned_page_end"]) == (None,) * 4
+
+
+def test_e1_supplied_spans_actually_satisfy_release_gate_3():
+    """End-to-end on the real gate, not on the dict: the four coordinates must
+    survive into the emitted tuple positions `assert_release_work_offsets` reads.
+    A test that only checked the spec dict would pass while the tuple was wrong."""
+    from build_discovery_sidecar import (
+        WorkOffsetsMissingError, assemble_claims_and_evidence,
+        assert_release_work_offsets,
+    )
+    with_spans = _ingest_one_e1({("p1", "raw:w1"): _E1_REF_SPANS_JSON})
+    without = _ingest_one_e1({})
+
+    corpus = {"w000001": "sefaria"}
+    ok = assemble_claims_and_evidence([with_spans], corpus, sidecar_version="t")
+    assert assert_release_work_offsets(ok["evidence_rows"]) == 1
+
+    bad = assemble_claims_and_evidence([without], corpus, sidecar_version="t")
+    with pytest.raises(WorkOffsetsMissingError):
+        assert_release_work_offsets(bad["evidence_rows"])
+
+
+def test_load_e1_ref_spans_is_absent_table_tolerant_and_reads_what_is_there():
+    conn = sqlite3.connect(":memory:")
+    assert sidecar_build.load_e1_ref_spans(conn) == {}
+    assert sidecar_build.load_e1_ref_spans(None) == {}
+    conn.execute("CREATE TABLE e1_ref_spans (page_id TEXT, work_id TEXT, "
+                 "ref_spans_json TEXT)")
+    conn.execute("INSERT INTO e1_ref_spans VALUES (?,?,?)",
+                 ("p1", "raw:w1", _E1_REF_SPANS_JSON))
+    loaded = sidecar_build.load_e1_ref_spans(conn)
+    assert loaded, "a populated e1_ref_spans table must not read back empty"
+    assert loaded == {("p1", "raw:w1"): _E1_REF_SPANS_JSON}
+
+
+def test_the_BUILDER_actually_reads_e1_ref_spans_from_the_research_db():
+    """The wiring, not the function. `_ingest_e1_rows` taking a map proves
+    nothing if `build_claims_and_evidence` never fetches one -- the "correct
+    function nobody calls" failure this bake has already shipped four times.
+
+    So this drives the REAL entry point with a research DB that carries the
+    table, and asserts the offsets reach the emitted evidence row.
+    """
+    conn = _pages_conn([("p1", "htr", "hello world")])
+    conn.execute("CREATE TABLE e1_ref_spans (page_id TEXT, work_id TEXT, "
+                 "ref_spans_json TEXT)")
+    conn.execute("INSERT INTO e1_ref_spans VALUES (?,?,?)",
+                 ("p1", "raw:w1", _E1_REF_SPANS_JSON))
+    # Empty, but present: passing a `conn` makes the builder ingest tier A too,
+    # and the point of this test is the E1 path in a realistic research DB.
+    conn.execute("CREATE TABLE track1_matches (page_id TEXT, sys_id TEXT, "
+                 "work_id TEXT, cat TEXT, matched_letters INT, best_density REAL, "
+                 "n_spans INT, spans_json TEXT, shadowed_by TEXT, "
+                 "ref_spans_json TEXT)")
+
+    works = [{"work_id": "w000001", "raw_work_id": "raw:w1",
+              "canonical_work_id": "w000001", "source_corpus": "sefaria"}]
+    rows = [{"page_id": "p1", "sys_id": "s1", "work_id": "raw:w1",
+             "o0": 0, "o1": 5, "ml": 5, "dens": 0.9, "n_spans": 1}]
+
+    result = sidecar_build.build_claims_and_evidence(
+        conn=conn, works=works,
+        page_index=sidecar_build.PageTextIndex(conn),
+        e1_ra_confirmed=rows, sidecar_version="t",
+    )
+    from build_discovery_sidecar import assert_release_work_offsets
+    # The gate is the assertion: it reads the four tuple positions directly, so
+    # it cannot pass unless the offsets survived ingest -> assemble -> tuple.
+    assert assert_release_work_offsets(result["evidence_rows"]) == 1
+
+
 @pytest.mark.parametrize("band,adjudication_status,audit_status", [
     (ids.CONFIDENCE_BAND_SCREENING_RB, ids.ADJUDICATION_STATUS_PROVISIONAL, ids.AUDIT_STATUS_NA),
     (ids.CONFIDENCE_BAND_SCREENING_CANON, ids.ADJUDICATION_STATUS_PROVISIONAL, ids.AUDIT_STATUS_NA),
