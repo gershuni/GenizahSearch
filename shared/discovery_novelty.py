@@ -641,6 +641,16 @@ CACHE_KEY_FIELDS: Tuple[str, ...] = (
     "pgp_text_normalized",
     "fgp_text_normalized",
     "m_source_shelfmark_text_normalized",
+    # 2026-08-08. Whether M-source RECORDS this manuscript as a witness of this
+    # work ("high"/"low"/"ambiguous"/""). A DECISION input, not prose: a `high`
+    # match resolves the candidate to `confirms` with no model call, so a verdict
+    # reached while this was unknown must never be reused once it is known.
+    #
+    # Appended, not inserted: `build_cache_key` hashes this tuple IN ORDER, so
+    # moving an existing entry would change every key for no semantic reason.
+    # Adding one changes them all deliberately -- which is correct here, and
+    # costs nothing today because reuse through the gate is already 0%.
+    "known_witness_confidence",
 )
 
 

@@ -206,6 +206,45 @@ def _best_claim_all_types(claims: List[Dict[str, Any]]) -> Dict[Tuple[str, str],
     return best
 
 
+def load_work_witnesses(
+    path: Optional[str], crosswalk_path: Optional[str] = None
+) -> Dict[str, Dict]:
+    """Load `emit_work_witnesses.py`'s output, keyed by MINTED work id.
+
+    Returns `{minted_work_id: {"witnesses": {sys_id: {...}}, "attestation": str}}`.
+
+    Supersedes `load_work_attributions`: that read ONE of the corpus's three
+    witness channels, as free text, and understated "already known" by ~3x
+    (1,375 flips versus 4,518 measured on the real artifact). This reads the
+    pre-resolved three-channel join, so no shelfmark matching happens here --
+    that belongs to the pipeline that owns it, not to the novelty gate.
+
+    Same raw->minted translation, and the same refusal without a crosswalk: the
+    file is keyed on raw ids, and a mismatched id space fails SILENTLY as an
+    empty source rather than as an error.
+    """
+    if not path:
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        payload = json.load(fh)
+    wit = payload.get("witnesses") or {}
+    att = payload.get("attestation") or {}
+    if not crosswalk_path or not os.path.isfile(crosswalk_path):
+        raise SystemExit(
+            "work witnesses supplied without a crosswalk -- the file is keyed on "
+            "raw work ids and the candidates are keyed on minted ids, so without "
+            "the mapping every lookup would silently miss"
+        )
+    with open(crosswalk_path, encoding="utf-8") as fh:
+        crosswalk = json.load(fh)
+    out: Dict[str, Dict] = {}
+    for raw_id, per_sys in wit.items():
+        minted = crosswalk.get(raw_id)
+        if minted:
+            out[minted] = {"witnesses": per_sys, "attestation": att.get(raw_id)}
+    return out
+
+
 def load_work_attributions(
     path: Optional[str], crosswalk_path: Optional[str] = None
 ) -> Dict[str, str]:
@@ -250,6 +289,7 @@ def build_all_candidates(
     pgp_db: str,
     fgp_db: str,
     work_attributions: Optional[Dict[str, str]] = None,
+    work_witnesses: Optional[Dict[str, Dict]] = None,
 ) -> Tuple[List[NoveltyCandidate], Dict[str, Dict[str, Any]], Dict[str, Dict[str, str]]]:
     """Builds a REAL `NoveltyCandidate` for every shipped (sys_id, work_id)
     pair in the live asset, from the real sidecars. Returns
@@ -289,6 +329,20 @@ def build_all_candidates(
         pgp = pgp_texts_idx.get(sid, {})
         fgp_rows = fgp_rows_idx.get(sid, [])
         fgp_texts = tuple(x for tup in fgp_rows for x in tup if x)
+        # Recorded-witness lookup is per (manuscript, work), NOT per work: the
+        # question is whether the corpus attests THIS manuscript, and a per-work
+        # answer would mark every claim on a well-attested work as known.
+        wit_entry = (work_witnesses or {}).get(wid)
+        witness_conf = None
+        attestation = (work_attributions or {}).get(wid) or None
+        if wit_entry:
+            hit = (wit_entry.get("witnesses") or {}).get(str(sid))
+            if hit:
+                witness_conf = hit.get("confidence")
+            # The attestation summary rides along whenever the work has witness
+            # data, so the model sees the context even when this manuscript is
+            # not among them -- but it is never itself the decision.
+            attestation = wit_entry.get("attestation") or attestation
         candidates.append(
             NoveltyCandidate(
                 sys_id=sid,
@@ -300,7 +354,8 @@ def build_all_candidates(
                 pgp_description=pgp.get("description") or None,
                 pgp_transcription=pgp.get("transcription") or None,
                 fgp_texts=fgp_texts,
-                m_source_shelfmark_text=(work_attributions or {}).get(wid) or None,
+                m_source_shelfmark_text=attestation,
+                known_witness_confidence=witness_conf,
                 page_mapped=True,
             )
         )

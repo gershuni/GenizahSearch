@@ -112,6 +112,15 @@ class NoveltyCandidate:
     # withheld throughout this module; treated as an ordinary checked
     # source, tagged "m_source_shelfmark" and NEVER named.
     m_source_shelfmark_text: Optional[str] = None
+    # 2026-08-08. Does the reference corpus RECORD this manuscript as a witness
+    # of this work, across its three witness channels? One of "high" / "low" /
+    # "ambiguous" (the source table's own precision-first tiers) or None.
+    #
+    # This is a per-(sys_id, work) fact, not per-work prose, and it is DECISIVE
+    # in one direction only: a recorded witness means the claim restates
+    # something the corpus already attests. Absence proves nothing -- catalogue
+    # coverage is uneven -- so this must never be read as evidence of novelty.
+    known_witness_confidence: Optional[str] = None
     # False simulates a page that failed to map to this sys_id (Codex
     # finding 4) -- routes to not_checked rather than being silently
     # dropped or mis-evaluated.
@@ -183,6 +192,9 @@ def candidate_input_fingerprint(
         "pgp_text_normalized": _joined("pgp"),
         "fgp_text_normalized": _joined("fgp"),
         "m_source_shelfmark_text_normalized": _joined("m_source_shelfmark"),
+        # A DECISION input, so it belongs in the fingerprint: a verdict reached
+        # while this was unknown must not be reused once it is known.
+        "known_witness_confidence": candidate.known_witness_confidence or "",
     })
 
 
@@ -267,6 +279,26 @@ def run_heuristic_pass(candidate: NoveltyCandidate) -> HeuristicResult:
         return HeuristicResult(True, DEFAULT_STATUS, UNMAPPED_PAGE_REASON, {})
 
     bundle = assemble_evidence_bundle(candidate)
+
+    # 2026-08-08 -- RECORDED WITNESS, checked BEFORE the no-source-text rule.
+    #
+    # The reference corpus already attests THIS manuscript as a witness of THIS
+    # work, at exact-classmark-plus-agreeing-library confidence. That is not a
+    # hint to weigh, it is the answer: the claim restates something recorded.
+    # Resolving it here costs no model call.
+    #
+    # Ordering matters and is the whole point. Rule 2 below ships a candidate as
+    # `fills_gap` when NO checked source has text -- and 98 claims measured on
+    # the real artifact carry that label while being recorded witnesses. Placing
+    # this after rule 2 would leave every one of them mislabelled.
+    #
+    # ONLY `high` auto-resolves. The source's own tiers put `low` at
+    # classmark-without-library agreement and `ambiguous` at a classmark
+    # resolving to many manuscripts; both are real signal but not proof, so they
+    # travel to the model inside the bundle instead of short-circuiting it.
+    if candidate.known_witness_confidence == "high":
+        return HeuristicResult(True, "confirms", "recorded_witness:high", bundle)
+
     has_any_text = any(texts for texts in bundle.values())
     if not has_any_text:
         return HeuristicResult(True, CANDIDATE_STATUS, NO_SOURCE_TEXT_REASON, bundle)

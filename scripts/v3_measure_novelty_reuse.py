@@ -79,6 +79,7 @@ from scripts.discovery_novelty_probe import (  # noqa: E402
     DEFAULT_PGP_DB,
     build_all_candidates,
     load_work_attributions,
+    load_work_witnesses,
 )
 from shared.discovery_novelty import BATCH_PROMPT_SHA256  # noqa: E402
 
@@ -246,6 +247,9 @@ def main(argv=None) -> int:
     ap.add_argument("--crosswalk", default=os.path.join(
                         REPO_ROOT, "discovery_data", "crosswalk.json"),
                     help="raw->minted work id map, needed to key the attributions")
+    ap.add_argument("--work-witnesses", default=None,
+                    help="emit_work_witnesses.py output; M-source's RECORDED "
+                         "witnesses per (work, manuscript). A FINGERPRINT input.")
     ap.add_argument("--report", default=DEFAULT_REPORT)
     args = ap.parse_args(argv)
 
@@ -287,8 +291,11 @@ def main(argv=None) -> int:
     # question than the one a real run would ask -- and any verdict bought
     # before it is wired would be invalidated the moment it is.
     attributions = load_work_attributions(args.work_attributions, args.crosswalk)
+    witnesses = load_work_witnesses(args.work_witnesses, args.crosswalk)
     log(f"  work attributions: {len(attributions):,}"
         + ("" if attributions else "  (NONE supplied -- this source will be empty)"))
+    log(f"  works with recorded witnesses: {len(witnesses):,}"
+        + ("" if witnesses else "  (NONE supplied -- recorded-witness rule inert)"))
     candidates, _works, _libraries = build_all_candidates(
         asset_path=args.asset,
         libraries_csv=args.libraries_csv,
@@ -296,6 +303,7 @@ def main(argv=None) -> int:
         fgp_db=args.fgp_db,
         pgp_db=args.pgp_db,
         work_attributions=attributions,
+        work_witnesses=witnesses,
     )
     log(f"  candidates: {len(candidates):,}")
 
