@@ -2603,3 +2603,234 @@ def test_thread_identity_control_would_catch_an_on_loop_read():
         "a direct synchronous call somehow left the loop thread -- this control "
         "no longer demonstrates the failure it exists to demonstrate"
     )
+
+
+# ===========================================================================
+# WHERE THE MATCH IS: the first matched folio, resolved at read time
+# (owner report, 2026-08-08).
+#
+# The findings row's preview opened `/browse` at the manuscript's FIRST page,
+# and the row copy named that as a structural limit -- "a findings row carries
+# `page_count` and NO folio identifier" -- with the folio deferred to a future
+# bake. The first clause was true of the GRAIN and false of the ASSET: every
+# contributing page id is already on `discovery_evidence.a_page_id`, aggregated
+# away only when `populate_discovery_identification` collapses a group into one
+# row. These tests pin the read-time resolution that recovers it.
+# ===========================================================================
+
+from shared.discovery_service import (  # noqa: E402 -- appended section
+    BUCKET_ALL,
+    DIVERGENCE_SHOWN,
+    FINDINGS_UNIT_IDENTIFICATION,
+    FINDINGS_UNIT_MANUSCRIPT,
+    FINDINGS_UNIT_WORK,
+)
+
+_FOLIO_VERSION = "test-first-matched-folio"
+_FOLIO_SYS = "990000000000000905"
+#: TWO volumes, with the LOWER folio number in the LEXICOGRAPHICALLY LATER one.
+#: That inversion is the whole point of the fixture: a rule that took "the
+#: lowest folio number in the manuscript" would answer folio 2 and cross a
+#: volume boundary to do it, and folio 2 of volume 2 is not earlier than folio 3
+#: of volume 1.
+_FOLIO_VOL_A = "IE100000001"
+_FOLIO_VOL_B = "IE100000002"
+_FOLIO_WORK = "w000905"
+
+
+def _folio_page(volume: str, folio: int) -> str:
+    """A page id in the CORPUS's own shape, `{sys_id}_{ie_id}_P{n:06d}_{fl_id}`.
+
+    Built here rather than hand-written per row so a fixture cannot drift from
+    the shape the resolver's range predicate and the two parsers depend on.
+    """
+    return f"{_FOLIO_SYS}_{volume}_P{folio:06d}_FL{int(volume[2:]) + folio}"
+
+
+def _build_first_folio_db(tmp_path):
+    works = [(_FOLIO_WORK, _FOLIO_WORK, "Synthetic Multi Folio Work",
+              "Synthetic Author F", "Synthetic Parent A / Synthetic Leaf A",
+              "sefaria")]
+
+    def _row(page_id, *, shipped=True, reviewed=False):
+        return sidecar_build._mk_evidence(
+            page_id=page_id, work_id=_FOLIO_WORK, sys_id=_FOLIO_SYS,
+            evidence_kind=sidecar_build._WITNESS,
+            evidence_source=sidecar_build._TRACK1,
+            confidence_band=sidecar_build._TIER_A,
+            adjudication_status=(sidecar_build._HUMAN_CONFIRMED if reviewed
+                                 else sidecar_build._UNREVIEWED),
+            audit_status=sidecar_build._NA,
+            routing_status=(sidecar_build._SHIPPED if shipped
+                            else sidecar_build._REVIEW_ONLY),
+            routing_reason=(sidecar_build._NONE_REASON if shipped
+                            else sidecar_build._LOW_COVERAGE),
+            span_start=0, span_end=900, matched_letters=880, n_spans=1,
+            coverage=0.9, page_norm_letters=978,
+        )
+
+    specs = [
+        # INELIGIBLE, and it sorts FIRST of all four. Neither shipped nor human
+        # confirmed, so `populate_discovery_identification` excludes it from the
+        # group and `page_count` does not count it -- a resolver that dropped
+        # the eligibility clause would point every reader of this row at a folio
+        # the row itself does not claim.
+        _row(_folio_page(_FOLIO_VOL_A, 1), shipped=False, reviewed=False),
+        _row(_folio_page(_FOLIO_VOL_A, 3)),
+        _row(_folio_page(_FOLIO_VOL_A, 9)),
+        _row(_folio_page(_FOLIO_VOL_B, 2)),
+    ]
+    return _new_sidecar(tmp_path, "first_folio.db", works=works,
+                        evidence_specs=specs, version=_FOLIO_VERSION)
+
+
+@pytest.fixture()
+def folio_service(tmp_path):
+    return _service_for(_build_first_folio_db(tmp_path), _FOLIO_VERSION)
+
+
+def _folio_leaf_row(service):
+    env = service.get_findings_enveloped(
+        unit=FINDINGS_UNIT_IDENTIFICATION, bucket=BUCKET_ALL,
+        divergence=DIVERGENCE_SHOWN)
+    assert env["status"] == STATUS_OK and env["items"], env
+    return env["items"][0]
+
+
+def test_the_leaf_row_carries_the_FIRST_matched_folio_and_its_volume(folio_service):
+    """The two components of one `/browse` address, parsed in the SERVICE."""
+    item = _folio_leaf_row(folio_service)
+    assert item["first_match_page"] == 3, item
+    assert item["first_match_volume_ie"] == _FOLIO_VOL_A, item
+
+
+def test_the_first_folio_never_crosses_a_VOLUME_boundary_for_a_lower_number(
+        folio_service):
+    """Folio 2 of volume 2 is not earlier than folio 3 of volume 1.
+
+    988 of the served artifact's 53,581 identifications span more than one
+    volume, so a rule that ordered by bare folio number would send that
+    population into the wrong volume -- and a reader cannot see that they are in
+    the wrong volume, which makes it worse than a link that plainly failed.
+    """
+    item = _folio_leaf_row(folio_service)
+    assert item["first_match_page"] != 2, (
+        "the resolver crossed into a later volume to answer with a lower folio "
+        "number")
+    assert item["first_match_volume_ie"] != _FOLIO_VOL_B
+
+
+def test_an_INELIGIBLE_page_is_never_the_folio_the_preview_opens(folio_service):
+    """THE eligibility gate, and the one that can really fail.
+
+    The ineligible row sorts FIRST of the fixture's four, so a resolver that
+    dropped `routing_status='shipped' OR adjudication_status='human_confirmed'`
+    answers folio 1 and this test fails. `page_count` counts three pages, and
+    the folio a reader is sent to has to be one of the three the row is
+    counting -- otherwise the row's own number denies the page it opened.
+    """
+    item = _folio_leaf_row(folio_service)
+    assert item["first_match_page"] != 1, (
+        "the preview targets a page the identification's own page_count "
+        "excludes -- the eligibility predicate is not being applied")
+    assert item["page_count"] == 3, item
+
+
+def test_the_first_matched_folio_is_resolved_on_the_LEAF_unit_only(folio_service):
+    """A work row spans manuscripts and a manuscript row spans works, so "the
+    first matched folio" on either would have to CHOOSE which of the row's
+    candidates to answer for -- and choosing between a row's candidates is
+    adjudication, the one thing no surface in this phase does.
+
+    THE RESOLVER MUST NOT BE CALLED ON A GROUPED UNIT, and asserting the CALL is
+    the only way to measure that. The output alone proves nothing: a grouped row
+    carries a NULL on one half of the lookup key, so the lookup misses and the
+    field comes back None whether the guard is there or not -- an earlier version
+    of this test asserted exactly that and passed with the guard deleted. What
+    the guard actually buys is not running the query at all, once per grouped
+    page, on a single-uvicorn-worker server.
+    """
+    calls = []
+    original = folio_service._first_match_pages
+
+    def _spy(conn, sys_ids):
+        calls.append(list(sys_ids))
+        return original(conn, sys_ids)
+
+    folio_service._first_match_pages = _spy
+    try:
+        for unit in (FINDINGS_UNIT_MANUSCRIPT, FINDINGS_UNIT_WORK):
+            env = folio_service.get_findings_enveloped(
+                unit=unit, bucket=BUCKET_ALL, divergence=DIVERGENCE_SHOWN)
+            assert env["status"] == STATUS_OK and env["items"], (unit, env)
+            for item in env["items"]:
+                assert item["first_match_page"] is None, (unit, item)
+                assert item["first_match_volume_ie"] is None, (unit, item)
+        assert calls == [], (
+            "the folio resolver ran for a grouped unit, which has no single "
+            "folio to resolve: {}".format(calls))
+        # ...and the SAME spy sees the leaf ask for it, so "no calls" above is a
+        # measured absence rather than a spy that was never wired up.
+        _folio_leaf_row(folio_service)
+        assert len(calls) == 1 and calls[0] == [_FOLIO_SYS], calls
+    finally:
+        folio_service._first_match_pages = original
+
+
+def test_a_page_id_without_the_corpus_shape_resolves_to_NOTHING():
+    """Both components are None TOGETHER, so the surface has one state to
+    branch on and `preview_url` cannot build a half-resolved address."""
+    from shared.discovery_service import _browse_address_from_page_id
+
+    for bad in (None, "", 12, "d13g_p22", "990000_IE1_FL9"):
+        assert _browse_address_from_page_id(bad) == (None, None), bad
+    good = _folio_page(_FOLIO_VOL_A, 3)
+    assert _browse_address_from_page_id(good) == (3, _FOLIO_VOL_A)
+
+
+def test_a_FOLIO_WITHOUT_ITS_VOLUME_is_withheld_rather_than_half_answered():
+    """A page id carrying a folio and NO volume must resolve to NEITHER.
+
+    Found by review, and it is the one failure this whole change exists to
+    prevent, reached from the other side. The two parsers accept different
+    things -- `_page_number_from_page_id` matches a bare `_P<n>_` anywhere while
+    the volume parser needs the full `_IE<n>_P<n>_` run -- so `9900_P000007_FL1`
+    parses to a folio and no volume. A consumer that asked only "is there a
+    folio?" would then print "opens at a folio the match was found on" over a
+    link that, lacking the volume, opens the manuscript. The note would be
+    claiming more than the link delivers, on the exact rows where a reader is
+    least able to tell.
+    """
+    from shared.discovery_service import (
+        _browse_address_from_page_id, _page_number_from_page_id)
+
+    partial = "9900_P000007_FL1"
+    # The half that makes the hazard real: the folio parser DOES answer here.
+    assert _page_number_from_page_id(partial) == 7
+    # ...and the atomic accessor refuses to pass it on as half an address.
+    assert _browse_address_from_page_id(partial) == (None, None)
+    # A zero or negative folio is not an address either -- `/browse` clamps it
+    # to page 1 silently, which is the unresolved case wearing a folio's clothes.
+    assert _browse_address_from_page_id(f"{_FOLIO_SYS}_{_FOLIO_VOL_A}_P000000_FL1") == (
+        None, None)
+
+
+def test_a_FAILED_folio_resolution_costs_the_link_and_never_the_result_set(
+        folio_service):
+    """A folio is a link detail. Losing one must degrade the preview to the
+    manuscript it always opened -- never take down a result page that has
+    already been fetched."""
+    class _Broken:
+        def execute(self, *_a, **_k):
+            raise sqlite3.OperationalError("no such table: discovery_evidence")
+
+    assert folio_service._first_match_pages(_Broken(), [_FOLIO_SYS]) == {}
+    # ...and with the resolver returning nothing, the rows still arrive.
+    original = folio_service._first_match_pages
+    folio_service._first_match_pages = lambda *_a, **_k: {}
+    try:
+        item = _folio_leaf_row(folio_service)
+    finally:
+        folio_service._first_match_pages = original
+    assert item["first_match_page"] is None
+    assert item["sys_id"] == _FOLIO_SYS

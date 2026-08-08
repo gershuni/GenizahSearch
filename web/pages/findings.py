@@ -3167,7 +3167,7 @@ def unavailable_envelope_shape() -> Dict[str, Any]:
 
 
 def preview_url(item: Mapping[str, Any]) -> Optional[str]:
-    """The leaf row's manuscript, in the EXISTING bare browse viewer.
+    """The leaf row's MATCHED FOLIO, in the EXISTING bare browse viewer.
 
     `?embed=1` is the route built for the discovery-review iframe and reused by
     `/atlas`: it renders the viewer with no nav shell AND disables snapshot
@@ -3175,13 +3175,35 @@ def preview_url(item: Mapping[str, Any]) -> Optional[str]:
     property that matters here -- previewing a manuscript from this page must not
     overwrite wherever the reader had left `/browse`.
 
+    `page` AND `volume_ie` ARE ADDED TOGETHER OR NOT AT ALL (owner report,
+    2026-08-08). They are the two components of ONE address the service parsed
+    out of ONE page id; a folio number without its volume addresses more than one
+    page in the 988 identifications that span volumes, and `/browse` would
+    resolve it against whichever volume it happened to open. Requiring both is
+    therefore not defensive padding -- it is the difference between a link that
+    lands on a matched folio and one that lands a volume away.
+
+    THE TEST IS `rows.preview_targets_a_folio`, THE SAME CALL THE ROW'S NOTE
+    MAKES, and sharing it is the point rather than tidiness: this link and that
+    sentence are two statements about one fact, and two derivations of one fact
+    is how they come to disagree.
+
+    The bare `sys_id` form REMAINS the fallback, deliberately: a row whose folio
+    did not resolve still has a manuscript worth reaching, and the row's note
+    says which of the two it is about to do rather than promising the folio.
+
     `None` when the row carries no `sys_id`, so a preview is withheld rather
     than pointing at a page that cannot resolve.
     """
     sys_id = item.get("sys_id")
     if not sys_id:
         return None
-    return f"/browse?sys_id={quote(str(sys_id))}&embed=1"
+    url = f"/browse?sys_id={quote(str(sys_id))}&embed=1"
+    if rows.preview_targets_a_folio(item):
+        url += "&page={}&volume_ie={}".format(
+            int(item["first_match_page"]),
+            quote(str(item["first_match_volume_ie"])))
+    return url
 
 
 def _viewer_is_admin() -> bool:

@@ -2316,6 +2316,107 @@ def test_freshness_against_the_artifact_actually_being_served():
     assert check_freshness() is not None
 
 
+def test_the_first_matched_folio_reproduces_the_stored_page_count_corpus_wide():
+    """THE resolver's correctness claim, measured on the served artifact.
+
+    The folio the findings preview opens is resolved at READ time, from
+    `discovery_evidence.a_page_id`, while the row's `page_count` was materialized
+    at BUILD time by `populate_discovery_identification`. Those are two different
+    programs reading the same fact, and if they ever disagree the surface sends a
+    reader to a folio the row's own number excludes -- which is invisible to the
+    reader and reads as the identification being wrong.
+
+    So the two are checked against each other over EVERY identification, not a
+    sample: the read-time predicate must produce exactly `page_count` pages for
+    each one, and must leave none of them unresolved. Corpus-wide on the served
+    artifact this is ~2s and 53,581 comparisons.
+    """
+    db = _resolve_real_artifact()
+    if db is None:
+        pytest.skip(_NO_ARTIFACT_HINT)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        row = conn.execute(
+            """
+            WITH resolved AS (
+              SELECT de.sys_id AS sys_id, w.canonical_work_id AS canonical_work_id,
+                     COUNT(DISTINCT de.a_page_id) AS n_pages,
+                     MIN(de.a_page_id) AS first_page
+              FROM discovery_evidence de
+              JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+              JOIN works w            ON w.work_id   = dc.work_id
+              WHERE de.routing_status = 'shipped'
+                 OR de.adjudication_status = 'human_confirmed'
+              GROUP BY de.sys_id, w.canonical_work_id
+            )
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN r.n_pages = di.page_count THEN 1 ELSE 0 END) AS agree,
+                   SUM(CASE WHEN r.first_page IS NULL THEN 1 ELSE 0 END) AS unresolved
+            FROM discovery_identification di
+            LEFT JOIN resolved r
+              ON r.sys_id = di.sys_id
+             AND r.canonical_work_id = di.canonical_work_id
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+    total, agree, unresolved = int(row[0]), int(row[1] or 0), int(row[2] or 0)
+    assert total > 0, "the served artifact carries no identifications"
+    assert agree == total, (
+        f"{total - agree} of {total} identifications disagree with the read-time "
+        "folio predicate -- the preview would open a page the row's own "
+        "page_count excludes")
+    assert unresolved == 0, (
+        f"{unresolved} of {total} identifications resolve to NO folio at all")
+
+
+def test_the_folio_query_stays_INDEX_DRIVEN_on_the_served_artifact():
+    """The folio query's join order, pinned by the PLAN and not by a clock.
+
+    WHAT THIS DOES AND DOES NOT CATCH, stated precisely because the obvious
+    reading is wrong. As the query stands today the `CROSS JOIN` hint changes
+    NOTHING -- with no selective predicate on `works` the planner reaches the
+    index-driven order unaided, and the query plans and runs identically with a
+    plain `JOIN` (measured on the served artifact: 0.4 / 35.5 / 101.2 ms against
+    0.3 / 36.0 / 102.0 ms). Deleting the hint alone therefore does NOT fail this
+    test, and it is not supposed to.
+
+    What fails it is the regression that actually happened once, in an
+    exploratory version of this query: a selective `w.canonical_work_id IN (...)`
+    predicate added while the order hint is absent. That combination pulls the
+    planner onto `ix_works_canonical` and reaches the evidence through every
+    claim of the identified work -- 230ms for a 50-row page, and unbounded in the
+    corpus's worst case, since the heaviest works carry tens of thousands of
+    claims. Verified by mutation.
+
+    AGAINST THE REAL ARTIFACT, DELIBERATELY. The same assertion over the
+    synthetic fixture passes even for that mutation -- four evidence rows and one
+    work give the planner nothing to be wrong about -- so on the fixture it was a
+    gate that could not fail, which is worse than no gate.
+    """
+    from shared.discovery_service import (
+        _FIRST_MATCH_PAGE_SQL, _PAGE_ID_PREFIX_SENTINEL)
+
+    db = _resolve_real_artifact()
+    if db is None:
+        pytest.skip(_NO_ARTIFACT_HINT)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        sys_id = conn.execute(
+            "SELECT sys_id FROM discovery_identification LIMIT 1").fetchone()[0]
+        plan = [r[3] for r in conn.execute(
+            "EXPLAIN QUERY PLAN " + _FIRST_MATCH_PAGE_SQL.format(values="(?)"),
+            (sys_id, _PAGE_ID_PREFIX_SENTINEL))]
+    finally:
+        conn.close()
+    assert any("ix_discovery_evidence_a_page_id" in step for step in plan), (
+        "the folio query no longer enters discovery_evidence through its "
+        "a_page_id index -- check for a selective predicate added on `works` "
+        "without the CROSS JOIN order hint:\n" + "\n".join(plan))
+    assert not any(step.startswith("SCAN de") for step in plan), (
+        "the folio query SCANS discovery_evidence:\n" + "\n".join(plan))
+
+
 # ===========================================================================
 # Task 2: THE GUARD ITSELF
 # ===========================================================================

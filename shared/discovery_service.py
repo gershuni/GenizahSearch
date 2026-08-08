@@ -203,7 +203,9 @@ import threading
 import weakref
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import (
+    Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple,
+)
 
 from shared.discovery_band_labels import serialize_banded_claim
 from shared.discovery_errors import DiscoveryOverload, DiscoveryUnavailable
@@ -403,6 +405,148 @@ def _page_number_from_page_id(page_id: Any) -> Optional[int]:
         return int(match.group(1))
     except ValueError:                                       # pragma: no cover
         return None
+
+
+#: The VOLUME component of a corpus page id, `{sys_id}_{ie_id}_P{n:06d}_{fl_id}`.
+#: Anchored on the `_P` that follows it so a sys_id containing `IE` (none do, but
+#: the id's shape is not this module's to guarantee) cannot be read as a volume.
+_PAGE_ID_VOLUME_IE_RE = re.compile(r"_(IE\d+)_P\d+_")
+
+
+def _volume_ie_from_page_id(page_id: Any) -> Optional[str]:
+    """The inventory-entry (volume) id carried INSIDE a page id, or None.
+
+    The sibling of `_page_number_from_page_id`, and needed for the same reason
+    the folio number is: a MULTI-VOLUME manuscript numbers its folios PER
+    VOLUME, so a folio number without its volume addresses more than one page
+    and `/browse` resolves it against whichever volume it happens to be showing.
+    988 of the served artifact's 53,581 identifications span more than one
+    volume, so this is a real population and not a theoretical one.
+
+    Returns None rather than raising, exactly as its sibling does: a page id
+    that carries no volume is a link that says less, while an exception here
+    would take down a result set that has already been fetched.
+    """
+    if not isinstance(page_id, str):
+        return None
+    match = _PAGE_ID_VOLUME_IE_RE.search(page_id)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _browse_address_from_page_id(page_id: Any) -> Tuple[Optional[int], Optional[str]]:
+    """`(folio, volume)` for a page id -- BOTH or NEITHER, never one of the two.
+
+    ATOMICITY IS ENFORCED HERE, IN THE SERVICE, and not left to each consumer to
+    re-derive (Codex review, 2026-08-08). The two parsers accept different
+    things: `_page_number_from_page_id` matches a bare `_P<n>_` anywhere, while
+    `_volume_ie_from_page_id` requires the full `_IE<n>_P<n>_` run. So an id
+    carrying a folio and no volume -- `9900_P000007_FL1` -- parses to
+    `(7, None)`, and a consumer that asked only "is there a folio?" would then
+    tell a reader it was opening the matched folio while the link it built,
+    lacking the volume, opened the manuscript instead.
+
+    That is the ONE failure this whole change exists to prevent, arrived at from
+    the other side: the note must never claim more than the link delivers. One
+    predicate, applied once, at the point the pair is produced.
+    """
+    folio = _page_number_from_page_id(page_id)
+    volume = _volume_ie_from_page_id(page_id)
+    if folio is None or folio <= 0 or not volume:
+        return None, None
+    return folio, volume
+
+
+#: The character immediately after `_` (0x5F) in ASCII, and therefore the
+#: exclusive upper bound of the half-open range that selects exactly the page
+#: ids beginning `{sys_id}_`. A RANGE and not a `LIKE`/`GLOB` prefix because
+#: `_` is a LIKE wildcard and because the range is what lets SQLite drive the
+#: join from `ix_discovery_evidence_a_page_id` -- see `_FIRST_MATCH_PAGE_SQL`.
+_PAGE_ID_PREFIX_SENTINEL = "`"
+
+#: The FIRST matched folio of every identification carried by a set of
+#: manuscripts, in ONE query (plan: owner report, 2026-08-08).
+#:
+#: WHY THIS EXISTS. The findings row's preview opened `/browse` at the
+#: manuscript's FIRST page rather than at a page the match was found on, and a
+#: reader who lands on folio 1r of a 40-folio manuscript and sees nothing
+#: resembling the identification reasonably concludes the identification is
+#: wrong. The row copy named that limit rather than hiding it, on the stated
+#: basis that "a findings row carries `page_count` and NO folio identifier" and
+#: that targeting the folio needed "a future bake carrying a representative page
+#: per identification". THE SECOND HALF OF THAT WAS NOT TRUE: every contributing
+#: page id is already in the served asset on `discovery_evidence.a_page_id`; it
+#: is only the IDENTIFICATION GRAIN that aggregates them away. So this resolves
+#: them at read time and no re-bake is owed.
+#:
+#: THE PREDICATE IS THE BUILDER'S, VERBATIM. `populate_discovery_identification`
+#: groups `WHERE de.routing_status = 'shipped' OR de.adjudication_status =
+#: 'human_confirmed'` and stores `page_count = len({a_page_id})` over that group.
+#: Reproducing it here is what makes the resolved folio one of the pages the row
+#: is counting; any other predicate would point a reader at a page the row's own
+#: number does not include. `test_the_first_match_resolver_reproduces_the_stored_
+#: page_count` pins the two against each other over the whole artifact.
+#:
+#: `MIN(a_page_id)` PICKS ONE VOLUME AND THEN ITS EARLIEST MATCHED FOLIO --
+#: lexicographic order over a shared `{sys_id}_` prefix sorts by inventory-entry
+#: id first, then by the zero-padded `P{n:06d}` (which orders numerically as
+#: text), then by folio id.
+#:
+#: WHAT THAT IS AND IS NOT (Codex review, 2026-08-08). Within one volume it is
+#: exactly "the earliest matched folio", and 52,593 of the artifact's 53,581
+#: identifications live in one volume. ACROSS volumes it is NOT an authoritative
+#: order and must not be described as one: inventory-entry ids run 7, 8 and 9
+#: digits here, so their lexicographic order is not even their numeric order --
+#: on 163 of the 988 multi-volume identifications a numeric reading names a
+#: different volume, and neither reading is the volumes' shelf order, which the
+#: sidecar does not carry at all. The reader-facing copy therefore says "a folio
+#: the match was found on" and claims no ordinal.
+#:
+#: What the rule DOES guarantee everywhere is that it never crosses a volume
+#: boundary to find a lower folio number -- folio 2 of one volume is not earlier
+#: than folio 5 of another, and an ordering by bare folio number would send this
+#: population into the wrong volume, which a reader cannot see.
+#:
+#: The range predicate depends on BINARY-collated TEXT comparison, which is the
+#: schema's default and what `ix_discovery_evidence_a_page_id` is built with. A
+#: custom collation on `a_page_id` would change which rows the half-open range
+#: selects; nothing in the build sets one, and the plan-shape test below would
+#: notice the index dropping out.
+#:
+#: `CROSS JOIN` IS SQLite's join-ORDER HINT, not a cartesian product -- it forces
+#: the query to be driven from the asked-for manuscripts into
+#: `ix_discovery_evidence_a_page_id`.
+#:
+#: IT CHANGES NOTHING TODAY, and saying otherwise would be the more useful lie:
+#: measured on the served artifact, this query plans and runs IDENTICALLY with a
+#: plain `JOIN` (0.4ms / 35.5ms / 101.2ms vs 0.3ms / 36.0ms / 102.0ms across a
+#: default first page, a mid-corpus page, and the 50 manuscripts with the
+#: heaviest evidence fan-out). With no selective predicate on `works` the planner
+#: reaches the right order unaided.
+#:
+#: It is kept as INSURANCE against one specific edit, because that edit has
+#: already been written once: an exploratory version of this query also filtered
+#: `w.canonical_work_id IN (...)`, and that single added predicate pulled the
+#: planner onto `ix_works_canonical` -- 230ms for a 50-row page, and unbounded in
+#: the corpus's worst case, since the heaviest works carry tens of thousands of
+#: claims. `test_the_folio_query_stays_INDEX_DRIVEN_on_the_served_artifact` fails
+#: on exactly that combination.
+_FIRST_MATCH_PAGE_SQL = """
+    WITH asked(sys_id) AS (VALUES {values})
+    SELECT de.sys_id           AS sys_id,
+           w.canonical_work_id AS canonical_work_id,
+           MIN(de.a_page_id)   AS page_id
+    FROM asked
+    CROSS JOIN discovery_evidence de
+        ON de.a_page_id >= asked.sys_id || '_'
+       AND de.a_page_id <  asked.sys_id || ?
+    JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+    JOIN works w            ON w.work_id   = dc.work_id
+    WHERE (de.routing_status = 'shipped'
+           OR de.adjudication_status = 'human_confirmed')
+    GROUP BY de.sys_id, w.canonical_work_id
+"""
 
 
 def _build_band_rank_case_sql() -> str:
@@ -2526,6 +2670,48 @@ class DiscoveryService:
         # The shared DISCOVERY_PAGE_SIZE_MAX ceiling is unchanged and applies.
         return DiscoveryService._clamp_page_size(page_size)
 
+    def _first_match_pages(
+        self, conn: Any, sys_ids: Sequence[str],
+    ) -> Dict[Tuple[str, str], str]:
+        """`{(sys_id, canonical_work_id): first matched page id}`, in ONE query.
+
+        BATCHED, and that is a correctness property rather than a tuning one:
+        this app runs a SINGLE uvicorn worker, so a per-row lookup on a 50-row
+        result page is 50 serialized round trips inside one request -- the exact
+        shape `get_related_pages_enveloped` already documents as forbidden ("the
+        name is resolved HERE, in ONE joined query, and never per row in the UI
+        layer").
+
+        Measured on the served artifact, batched, for a 50-manuscript page:
+        0.4ms on a default first page, 35.5ms mid-corpus, and 101.2ms on the 50
+        manuscripts with the heaviest evidence fan-out -- against ~425ms for the
+        same work issued one manuscript at a time. The spread is the fan-out, not
+        the page size: a manuscript identified with many works groups all of its
+        eligible evidence. The worst case is bounded by the page size times that
+        fan-out and runs in the HEAVY executor under its own timeout, so it
+        degrades to a `timeout` envelope rather than to a stalled event loop.
+
+        Returns `{}` -- never raises and never propagates -- on ANY failure, and
+        the caller degrades to the pre-existing behaviour (the preview opens the
+        manuscript, and the row's copy says so). A folio that could not be
+        resolved must cost a reader a better link, not the result set.
+        """
+        keys = [s for s in dict.fromkeys(str(x) for x in sys_ids if x)]
+        if not keys:
+            return {}
+        sql = _FIRST_MATCH_PAGE_SQL.format(
+            values=",".join(["(?)"] * len(keys)))
+        try:
+            cur = conn.execute(sql, (*keys, _PAGE_ID_PREFIX_SENTINEL))
+            return {
+                (str(row["sys_id"]), str(row["canonical_work_id"])): str(row["page_id"])
+                for row in cur.fetchall()
+                if row["page_id"]
+            }
+        except Exception as e:  # noqa: BLE001 -- a link detail, never the page
+            logger.error("DiscoveryService._first_match_pages error: %s", e)
+            return {}
+
     def get_findings_enveloped(
         self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
         bucket: str = BUCKET_MAIN,
@@ -2614,12 +2800,39 @@ class DiscoveryService:
             logger.error("DiscoveryService.get_findings error (unit=%s): %s", unit, e)
             return unavailable_envelope(meta={"reason": "query_failed"})
 
+        # WHERE THE MATCH ACTUALLY IS, on the leaf unit only (owner report,
+        # 2026-08-08). Resolved for the rows THIS PAGE returned and no others --
+        # after `LIMIT`, so the cost is bounded by the page size and not by the
+        # filtered set, which can be tens of thousands of rows.
+        #
+        # LEAF ONLY, and for the reason the preview itself is leaf-only: a work
+        # row spans manuscripts and a manuscript row spans works, so "the first
+        # matched folio" on either would have to CHOOSE which of the row's
+        # candidates to answer for, and choosing between a row's candidates is
+        # adjudication -- the one thing no surface in this phase does.
+        first_pages: Dict[Tuple[str, str], str] = {}
+        if unit == FINDINGS_UNIT_IDENTIFICATION and rows:
+            first_pages = self._first_match_pages(
+                conn, [row.get("sys_id") for row in rows])
+
         items = []
         for row in rows:
             work_count = int(row.get("work_count") or 1)
+            first_address = _browse_address_from_page_id(first_pages.get(
+                (str(row.get("sys_id") or ""), str(row.get("canonical_work_id") or ""))))
             items.append(surface_safe_finding({
                 **row,
                 "unit": unit,
+                # The two components of a `/browse` address, parsed in the
+                # SERVICE so no surface has to know the page id's shape -- and
+                # so that no surface has a reason to hold the composite id at
+                # all. BOTH OR NEITHER, enforced by the one predicate in
+                # `_browse_address_from_page_id`: the row's copy and the row's
+                # link must not be able to disagree about whether there is a
+                # folio, and the only way to guarantee that is for there to be
+                # one answer rather than two derivations of it.
+                "first_match_page": first_address[0],
+                "first_match_volume_ie": first_address[1],
                 "domain": row.get("genre") or DOMAIN_UNASSIGNED,
                 "main_pool": bool(row.get("main_pool")),
                 "novelty_offered": novelty_offered,

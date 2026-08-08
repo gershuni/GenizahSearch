@@ -987,6 +987,17 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
                 tf.finding_row(neutral_title=title), ln,
                 preview_url=lambda _i: _seeded_preview_url(seed)),
              fr.ROW_PREVIEW_CLASS + "-toggle"),
+            # d2) the SAME preview on a row whose matched folio did NOT resolve.
+            #     A DIFFERENT SENTENCE reaches the screen on this branch -- the
+            #     note stops promising a folio and says it is opening the
+            #     manuscript instead -- so it is reader-facing text this scan has
+            #     to have looked at, and the line-granular gate names the branch
+            #     if it has not.
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title, first_match_page=None,
+                               first_match_volume_ie=None),
+                ln, preview_url=lambda _i: _seeded_preview_url(seed)),
+             fr.ROW_PREVIEW_CLASS + "-toggle"),
             # e) a preview whose URL BUILDER raises -- withheld, not crashed.
             (lambda ln=lang: fr.render_finding_row(
                 tf.finding_row(neutral_title=title), ln,

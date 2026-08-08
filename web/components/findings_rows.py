@@ -212,6 +212,28 @@ ROW_CHILDREN_STATE_CLASS = "gs-findings-row-children-state"
 #: adjudication -- which is the one thing no surface here does.
 ROW_PREVIEW_CLASS = "gs-findings-row-preview"
 
+
+def preview_targets_a_folio(item: Mapping[str, Any]) -> bool:
+    """Whether this row's preview opens ON a matched folio rather than on the
+    manuscript's first page.
+
+    ONE PREDICATE, USED BY BOTH THE NOTE AND THE LINK (Codex review,
+    2026-08-08). The note lives here and the URL is built in `web/pages/
+    findings.py`, so before this existed each asked its own question -- the note
+    "is there a folio?" and the URL "is there a folio AND a volume?" -- and a row
+    carrying one without the other made the note promise what the link did not
+    deliver. The service now emits the pair atomically, which closes it at the
+    source; this closes it at the two consumers as well, so neither a hand-built
+    row nor a future second producer can reopen it.
+
+    Deliberately in the RENDERER module, which the page already imports: the
+    reverse direction would be an import cycle, and a third home for the rule
+    would be a third thing to keep in step.
+    """
+    page = item.get("first_match_page")
+    return isinstance(page, int) and page > 0 and bool(
+        item.get("first_match_volume_ie"))
+
 NOVELTY_HELP_CLASS = "gs-findings-novelty-help"
 
 #: U+05BE HEBREW PUNCTUATION MAQAF -- D-21 fixes the Hebrew compound hyphen at
@@ -585,19 +607,50 @@ _COPY: Dict[str, Dict[str, str]] = {
     # The preview is a VIEWER, not a verdict. It shows the manuscript; it says
     # nothing about whether the match is right, because nothing here does.
     #
-    # IT OPENS THE MANUSCRIPT, NOT THE MATCHED FOLIO, and the note now says so
-    # (owner ruling, 2026-08-06). This is a structural limit, not a bug to fix
-    # in the page: a findings row carries `page_count` and NO folio identifier,
-    # so there is nothing here to target a page with. The earlier wording --
-    # "The manuscript page, to read for yourself" -- read as a promise to open
-    # THE page, i.e. the matched one, which is the single most misleading thing
-    # this affordance could imply: a reader who lands on folio 1r of a
-    # 40-folio manuscript and finds nothing resembling the identification would
-    # reasonably conclude the identification is wrong. Naming the limit costs
-    # one clause; letting a reader discover it costs the row's credibility.
-    # Targeting the folio is deferred to a future bake carrying a
-    # representative page per identification.
+    # TWO NOTES, BECAUSE THE AFFORDANCE NOW HAS TWO OUTCOMES (owner report,
+    # 2026-08-08). It USED to have one: it opened the manuscript at folio 1
+    # always, and the note named that limit on the stated basis that "a findings
+    # row carries `page_count` and NO folio identifier, so there is nothing here
+    # to target a page with", with the folio deferred to a future bake. The
+    # second half of that was wrong -- every contributing page id was already in
+    # the served asset on `discovery_evidence.a_page_id`, aggregated away only at
+    # the identification grain -- so the service now resolves it at read time and
+    # the preview opens ON a matched folio.
+    #
+    # The old wording is KEPT, verbatim, as `preview_note_manuscript`, because
+    # the fallback it describes is still reachable: a row whose folio did not
+    # resolve opens the manuscript exactly as before, and telling that reader
+    # they are looking at the matched folio is the single most misleading thing
+    # this affordance could say. A reader who lands on folio 1r of a 40-folio
+    # manuscript and finds nothing resembling the identification reasonably
+    # concludes the identification is wrong.
+    #
+    # "A folio the match was found on" -- never "THE matched folio", and never
+    # "the FIRST" either. Both stronger readings are claims this sentence is not
+    # entitled to make:
+    #
+    #   * "the" -- 46% of identifications match on more than one folio, so there
+    #     is usually no single matched folio to be definite about.
+    #   * "the first" -- the folio is chosen by ordering page ids, which orders
+    #     by inventory-entry id before folio number. THAT IS NOT AN AUTHORITATIVE
+    #     VOLUME ORDER (Codex review, 2026-08-08): inventory-entry ids are 7, 8
+    #     and 9 digits long in the served artifact, so their order is neither
+    #     numeric nor the shelf order of the volumes, and on 163 of the 988
+    #     multi-volume identifications a numeric reading would name a different
+    #     volume. Within ONE volume the choice genuinely is the earliest matched
+    #     folio, which is the 98.2% case -- but a sentence that says "first" on
+    #     every row is wrong on the rest, and the row cannot tell a reader which
+    #     kind it is.
+    #
+    # The weaker sentence is true of every row, which is the only kind of
+    # sentence this surface is allowed to print.
     "preview_note": {
+        "en": "Opens at a folio the match was found on. "
+              "Browse to read it for yourself.",
+        "he": "נפתח בדף שבו נמצאה ההתאמה. "
+              "אפשר לדפדף ולקרוא.",
+    },
+    "preview_note_manuscript": {
         "en": "Opens the manuscript at its first page — not the matched folio. "
               "Browse to read it for yourself.",
         "he": "נפתח בעמוד הראשון של כתב היד — לא בדף שהותאם. "
@@ -2128,6 +2181,13 @@ def _render_preview(item: Mapping[str, Any], lang: str, preview_url) -> None:
     so previewing a manuscript here cannot overwrite the reader's own browse
     position. That property is why the bare viewer is reused rather than a new
     read being written against the same data.
+
+    THE NOTE IS CHOSEN FROM THE ROW, NOT FROM THE URL. `first_match_page` is the
+    row's own record of whether the service resolved a matched folio, and it is
+    the SAME value `preview_url` requires before it targets one -- so the note
+    and the link cannot disagree. Parsing the URL to find out would be a second
+    derivation of the same fact, and a second derivation is how the note starts
+    promising a folio the link is not opening.
     """
     try:
         url = preview_url(item)
@@ -2149,7 +2209,9 @@ def _render_preview(item: Mapping[str, Any], lang: str, preview_url) -> None:
         if state["open"] and not state["loaded"]:
             state["loaded"] = True
             with body:
-                ui.label(copy_text("preview_note", lang)).classes(
+                note_key = ("preview_note" if preview_targets_a_folio(item)
+                            else "preview_note_manuscript")
+                ui.label(copy_text(note_key, lang)).classes(
                     "dnote text-xs")
                 # The iframe is created on FIRST OPEN, not with the row: a page
                 # of 50 rows would otherwise issue 50 manuscript loads nobody

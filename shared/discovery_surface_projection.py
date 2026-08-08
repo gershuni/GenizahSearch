@@ -235,6 +235,27 @@ SURFACE_FINDING_FIELDS: Tuple[str, ...] = (
     "work_count",
     "manuscript_count",
     "multi_work_annotation",
+    #: WHERE THE MATCH IS: the first matched folio's `/browse` address, as its
+    #: TWO components and never as the composite page id they came from (owner
+    #: report, 2026-08-08).
+    #:
+    #: The composite `{sys_id}_{ie_id}_P{n:06d}_{fl_id}` is deliberately NOT
+    #: allowlisted. `get_related_pages_enveloped` already carries the scar from
+    #: handing one to a surface -- the panel rendered
+    #: `990051620920205171_IE167198813_P000003_FL167198817` where a shelfmark
+    #: belongs -- and the fix there was to resolve the id in the service and let
+    #: no surface hold it. A surface that had the id here would eventually print
+    #: it, and the same defect would return under a different name.
+    #:
+    #: `first_match_volume_ie` is not optional decoration: a multi-volume
+    #: manuscript numbers its folios PER VOLUME, so the page number alone
+    #: addresses more than one page.
+    #:
+    #: BOTH ARE None TOGETHER when the folio did not resolve. That is a NAMED
+    #: state the row's copy branches on, exactly as `display_missing` is on the
+    #: related-page row -- never a silent fallback that keeps promising a folio.
+    "first_match_page",
+    "first_match_volume_ie",
 )
 
 #: PANEL-02 (plan 136-21): ONE row of the "Other manuscripts matching <work>"

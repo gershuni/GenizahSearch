@@ -304,6 +304,11 @@ def _finding_source(**overrides) -> Dict[str, Any]:
         "work_count": 1,
         "manuscript_count": 1,
         "multi_work_annotation": False,
+        # A folio that is NOT 1, deliberately: a default of 1 would make "opens
+        # at the matched folio" and "opens at the manuscript" produce the same
+        # URL, and every test of the difference would pass without checking it.
+        "first_match_page": 7,
+        "first_match_volume_ie": "IE47974133",
     }
     row.update(overrides)
     return row
@@ -355,6 +360,11 @@ def corpus_rows() -> List[Tuple[str, Dict[str, Any]]]:
         work_count=2,
         manuscript_count=4,
         multi_work_annotation=True,
+        # The UNRESOLVED folio, which is also the only value the two GROUPED
+        # units can carry: the service resolves the first matched folio on the
+        # leaf alone.
+        first_match_page=None,
+        first_match_volume_ie=None,
     )))
     rows.append(("SURFACE_FACET_FIELDS", facet_row()))
     rows.append(("SURFACE_FACET_FIELDS", facet_row(
@@ -3405,9 +3415,110 @@ def test_the_preview_points_at_the_BARE_browse_viewer():
     previewing a manuscript from this page must not overwrite wherever the reader
     had left `/browse`. Without `embed=1` it would."""
     url = fp.preview_url(finding_row(sys_id="990000895680205171"))
-    assert url == "/browse?sys_id=990000895680205171&embed=1"
+    assert url.startswith("/browse?sys_id=990000895680205171&embed=1")
     # Withheld, not pointed at a page that cannot resolve.
     assert fp.preview_url(finding_row(sys_id=None)) is None
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_preview_opens_at_the_MATCHED_folio_not_the_manuscripts_first_page():
+    """THE defect this targeting fixes (owner report, 2026-08-08).
+
+    46% of the served artifact's identifications match on more than one folio,
+    and the preview opened every one of them at folio 1 -- so a reader landing on
+    an unrelated opening of a 40-folio manuscript had to conclude either that the
+    identification was wrong or that the affordance was. Both readings cost the
+    row its credibility, and one of them is unfair to a correct match.
+    """
+    url = fp.preview_url(finding_row(
+        sys_id="990000895680205171", first_match_page=7,
+        first_match_volume_ie="IE47974133"))
+    assert "page=7" in url, url
+    assert "volume_ie=IE47974133" in url, url
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_folio_and_its_volume_are_added_TOGETHER_or_not_at_all():
+    """A multi-volume manuscript numbers its folios PER VOLUME, so `page=2` with
+    no volume addresses a different page in each of them -- and `/browse` would
+    resolve it against whichever volume it happened to open. 988 of the served
+    artifact's identifications span more than one volume, so this is a
+    population and not a hypothetical.
+
+    Half a resolution is therefore worse than none: it looks targeted and lands
+    somewhere else. The unresolved row keeps the manuscript link it always had.
+    """
+    for page, volume in ((7, None), (None, "IE47974133"), (None, None)):
+        url = fp.preview_url(finding_row(
+            sys_id="990000895680205171", first_match_page=page,
+            first_match_volume_ie=volume))
+        assert url == "/browse?sys_id=990000895680205171&embed=1", (
+            "page={!r} volume={!r} produced a half-resolved target: {}".format(
+                page, volume, url))
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_preview_note_says_which_of_the_two_things_it_is_about_to_do(lang):
+    """The note and the link are driven by the SAME field, so they cannot
+    disagree.
+
+    The old note promised the manuscript's first page unconditionally, which is
+    now wrong on the resolved rows; promising the matched folio unconditionally
+    would be wrong on the unresolved ones, and that is the more damaging of the
+    two errors -- it tells a reader that the folio in front of them is the
+    evidence when it is not.
+    """
+    opened = render_and_click(
+        lambda: fr.render_finding_row(
+            finding_row(), lang,
+            preview_url=lambda _i: "/browse?sys_id=X&embed=1"),
+        fr.ROW_PREVIEW_CLASS + "-toggle")
+    resolved_text = scoped_text(opened, fr.ROW_PREVIEW_CLASS)
+    assert fr.copy_text("preview_note", lang) in resolved_text, resolved_text
+
+    opened_plain = render_and_click(
+        lambda: fr.render_finding_row(
+            finding_row(first_match_page=None, first_match_volume_ie=None), lang,
+            preview_url=lambda _i: "/browse?sys_id=X&embed=1"),
+        fr.ROW_PREVIEW_CLASS + "-toggle")
+    plain_text = scoped_text(opened_plain, fr.ROW_PREVIEW_CLASS)
+    assert fr.copy_text("preview_note_manuscript", lang) in plain_text, plain_text
+    # ...and the two are genuinely different sentences, so the assertions above
+    # cannot both be satisfied by one string.
+    assert fr.copy_text("preview_note", lang) != fr.copy_text(
+        "preview_note_manuscript", lang)
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_note_never_promises_a_folio_the_LINK_is_not_opening(lang):
+    """THE failure the two-sentence design exists to prevent, driven over every
+    combination of the two fields rather than the two that were designed for.
+
+    Found by review: the note asked "is there a folio?" while the URL asked "is
+    there a folio AND a volume?", so a row carrying a folio without its volume --
+    reachable from a page id like `9900_P000007_FL1`, which the folio parser
+    accepts and the volume parser does not -- printed "opens at a folio the match
+    was found on" above a link that opened the manuscript. The reader has no way
+    to detect that; they conclude the identification is wrong.
+    """
+    for page, volume in ((7, "IE47974133"), (7, None), (None, "IE47974133"),
+                         (None, None), (0, "IE47974133")):
+        item = finding_row(sys_id="990000895680205171", first_match_page=page,
+                           first_match_volume_ie=volume)
+        url = fp.preview_url(item)
+        link_targets_folio = "page=" in url
+        opened = render_and_click(
+            lambda it=item, ln=lang: fr.render_finding_row(
+                it, ln, preview_url=lambda _i, u=url: u),
+            fr.ROW_PREVIEW_CLASS + "-toggle")
+        text = scoped_text(opened, fr.ROW_PREVIEW_CLASS)
+        note_promises_folio = fr.copy_text("preview_note", lang) in text
+        assert note_promises_folio == link_targets_folio, (
+            "page={!r} volume={!r}: the note says folio={} but the link says "
+            "folio={} -- {}".format(page, volume, note_promises_folio,
+                                    link_targets_folio, url))
     ASSERTION_COUNT["n"] += 1
 
 
