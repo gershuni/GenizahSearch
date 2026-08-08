@@ -1656,6 +1656,72 @@ running at all (`-k e1` did not match its name), which hid a genuine failure.
 
 ---
 
+## 7e. The novelty gate never read M-source's own attribution — and what that was worth (2026-08-08)
+
+Found by the owner asking whether the gate considers M-source's version references. It does not, and it
+never did. `NoveltyCandidate.m_source_shelfmark_text` is threaded into `assemble_evidence_bundle`, listed in
+`_SOURCE_ORDER` and is a **fingerprint input** — while the sole production assignment was the literal `None`.
+The only non-`None` assignments in the tree were two test fixtures, so every test passed over an empty source.
+
+**Wired** via `scripts/emit_work_attributions.py` (5,077 works) → `--work-attributions` → crosswalk-translated
+to minted ids in `build_all_candidates`. Kept OUT of the shipped asset: the gate's verdicts ship, its inputs
+need not. The emitter resolves the restricted field name **by elimination** rather than writing it — the first
+draft hardcoded it and the masking scan correctly rejected the file; output verified byte-identical.
+
+### It made the bake MORE expensive, and that is the finding
+
+| | before | after |
+|---|---:|---:|
+| heuristically resolved | 10,267 | 4,479 |
+| residual (reaches the model) | 56,812 | **62,600** |
+| projected spend @ $0.000727 | $41.30 | **$45.51** |
+
+**5,788 candidates were qualifying for the funnel's rule 2** — *"no checked source says anything, therefore
+this ships as `fills_gap` automatically"* — **only because a source we hold was invisible to it.** They were
+auto-declared discoveries because nobody was looking. The delta is exactly conserved, and adding a source can
+only ADD name-matches, so the loss can come only from that auto-`fills_gap` bucket.
+
+### The flip rate: 0.5–0.9% corpus-wide, ~21–26% where the comparison is possible
+
+Measured by THREE independent methods (token-normalization, numeric-signature, reverse-lookup), each attacked
+by a skeptic who re-derived the number rather than re-running the script.
+
+| method | flips | rate of D0 (197,093) |
+|---|---:|---:|
+| token-normalized | 1,375 | 0.698% |
+| numeric-signature | 1,217 | 0.617% |
+| reverse-lookup (confident) | 987 | 0.501% |
+| skeptic's independent matcher, self-corrected | ~1,387 | 0.704% |
+
+**All three skeptics found the methods err STRICT, never loose.** Zero false positives were found in any
+method's confident set. Library-stratified permutation nulls: observed 1,083 hits vs permuted mean 5.0 (218×),
+and 400–2000× on the other arms — the signal is manuscript-specific, not an artifact. One skeptic confirmed
+131 additional missed flips (+10.8%) from institution routing, so the honest reading is a **floor**.
+
+**Why the corpus-wide rate is so low, and it is structural rather than encouraging:** 142,047 claims (72% of
+D0) belong to the 39 Bible works, whose attribution is one complete non-Genizah codex — independently verified
+absent from `libraries.csv` (0 rows for the series). The classical strata point at single non-Genizah codices
+likewise. Those claims **cannot** flip. Structural ceiling corpus-wide: **0.54%**.
+
+**Where the attribution names a manuscript that IS in our corpus (4,921 claims), 20.6–25.6% flip.** Per
+institution, within the comparable subset: AIU 85.5%, Kaufmann 44.0%, JTS 31.4%, **CUL ~31%**, Bodleian 16.7%.
+
+**The reframing all three methods reached independently, which bounds everything above:** this field is **not
+a witness list**. It records the SINGLE base manuscript the edition was transcribed from (887 of 896 parsed
+segments name exactly one). A work may have twenty catalogued witnesses and this names one. So it establishes
+a **lower bound** on "already known" and can never establish an upper one.
+
+**Practical scale, stated so the fix is not oversold:** of the 987 confident flips, only **20 currently carry
+`fills_gap`** — the rest were already caught by other aids. This source's UNIQUE contribution to the current
+artifact is therefore small. The larger effect is the 5,788 auto-`fills_gap` candidates that now get examined
+at all, which the flip measurement does not capture.
+
+Largest known blind spot, unmeasured: **28,342 claims (14.4% of D0)** whose attribution cites a bare
+Neubauer/Margoliouth catalogue number, for which `libraries.csv` carries a variant on only 33 of 255,725
+records. The flip rate there cannot currently be measured.
+
+---
+
 ## 8. Owner questions
 
 > **✅ CODEX APPROVED 2026-08-07, round 9** — `VERDICT: APPROVE`, recorded verbatim in
