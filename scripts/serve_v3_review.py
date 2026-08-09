@@ -114,6 +114,91 @@ SHORT_MATCH_LETTERS = 150
 
 
 # ---------------------------------------------------------------------------
+# THE GROUPED NOVELTY VIEW -- the public page's sidebar card 1, mirrored.
+#
+# `/computed-identifications` does NOT offer the raw shade list. It offers FOUR
+# GROUPS under the header "Which findings", and until now this tool offered only
+# the eight raw shades -- so a reader could not ask the private surface the
+# question the public one is built around, and "what does the public page show
+# here?" had to be answered by hand-unioning chips. This clone exists so the two
+# surfaces stay comparable; a grouping that differed would end that.
+#
+# THE AUTHORITY is `shared/discovery_service.py::_NOVELTY_VIEW_SHADES`, itself
+# derived from `shared/discovery_novelty.py::HIDDEN_BY_DEFAULT_SHADES` -- so a
+# shade joining or leaving the hidden-by-default policy moves the public
+# grouping automatically. It is RESTATED here rather than imported because this
+# file is stdlib-only by contract (a teammate needs the DB, this file, and
+# Python -- not a checkout). A restatement that can drift silently is worth
+# nothing, so `check_novelty_views` below re-derives the mapping from the real
+# module WHENEVER the repo happens to be importable and says so loudly on a
+# mismatch; outside the repo it is a no-op and the tool still runs.
+#
+# `None` means NO PREDICATE, the same convention the service uses: an empty
+# filter is not a filter. An unrecognised view widens to `all` rather than
+# raising, mirroring `novelty_view_shades` -- a vocabulary that moved between
+# releases must degrade to showing everything, never to a narrower set the
+# reader did not choose.
+#
+# THE RAW 8-SHADE FACET STAYS (card 5 below). The grader is grading the gate,
+# and hiding its outputs makes it ungradeable. The two COMPOSE: the view is an
+# independent WHERE clause, so selecting one narrows the shade facet beneath it
+# to that view's members and their counts.
+# ---------------------------------------------------------------------------
+
+NOVELTY_VIEW_DEFAULT = "all"
+
+NOVELTY_VIEW_SHADES = {
+    "all": None,
+    "candidates": ("fills_gap",),
+    "divergent": ("diverges_work", "diverges_part"),
+    "either": ("fills_gap", "diverges_work", "diverges_part"),
+}
+
+# The public page's own words, in the public page's own order: `novelty_view_*`
+# from `web/pages/findings.py`, except the candidacy option, which reuses the
+# ratified `novelty_strings()['toggle']` name there and does so here too.
+NOVELTY_VIEW_LABELS = (
+    ("all", "All findings"),
+    ("candidates", "Candidates for new finds"),
+    ("divergent", "Do not correspond to the catalogue"),
+    ("either", "Candidates or non-correspondence"),
+)
+
+# `divergence_warning()`, verbatim -- ruling F's control is an explicitly WARNED
+# one, so the warning travels with the grouping rather than being left behind on
+# the public page.
+NOVELTY_VIEW_WARNING = (
+    "These findings do not correspond to an existing catalogue identification. "
+    "Neither side has been adjudicated — read them with that in mind.")
+
+
+def check_novelty_views(say=print) -> bool:
+    """Re-derive the grouping from the service and report any drift.
+
+    Compares MEMBERSHIP (sets), not tuple order: the mapping becomes an
+    `IN (...)` predicate, so a reordering of `DIVERGENCE_SHADE_ORDER` is not a
+    difference and must not be reported as one. Returns True only when the
+    check actually ran and matched.
+    """
+    try:
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from shared.discovery_service import NOVELTY_VIEWS, novelty_view_shades
+    except Exception:
+        return False                      # no checkout -- nothing to compare to
+    real = {v: novelty_view_shades(v) for v in NOVELTY_VIEWS}
+    norm = lambda m: {k: (None if v is None else frozenset(v)) for k, v in m.items()}
+    if norm(real) == norm(NOVELTY_VIEW_SHADES):
+        return True
+    say("! novelty views DRIFTED from shared/discovery_service.py -- this tool "
+        "no longer groups the shades the way /computed-identifications does, so "
+        "the two surfaces are not comparable.")
+    say("!   public: %r" % (real,))
+    say("!   here  : %r" % (NOVELTY_VIEW_SHADES,))
+    return False
+
+
+# ---------------------------------------------------------------------------
 # The slim facet projection
 # ---------------------------------------------------------------------------
 
@@ -931,6 +1016,14 @@ const SITE = "__SITE__";
 const PREVIEW = "__PREVIEW__";
 const DOCS = /*__DOCS__*/{};
 const NUMS = /*__NUMS__*/{};
+// The public page's four grouped views, [key, label] in ITS order, injected
+// from NOVELTY_VIEW_LABELS so the two surfaces cannot drift apart in the
+// browser after agreeing on the server.
+const VIEWS = /*__VIEWS__*/[];
+// A JSON-encoded string, not a raw `__TOKEN__` splice: the warning is prose
+// with an em dash and could one day gain a quote or an apostrophe, and a splice
+// into a literal would then be a syntax error rather than a visible typo.
+const VIEW_WARN = /*__VIEWWARN__*/"";
 // One threshold, injected from SHORT_MATCH_LETTERS. The row's known-weakness
 // prompt and the sidebar's length filter must name the SAME number -- a chip
 // that warns at 150 beside a filter that cuts at 100 is two facts.
@@ -989,10 +1082,17 @@ const RELCARD = {same_work:"Witness — this page is a copy of the work",
 // selection that empties itself (the reader unticks the last box) resets to
 // no-restriction rather than to zero rows: an all-unticked control that shows
 // every row would be a control lying about what it did.
+// `view` is the public page's grouped novelty selector and `novelty` is this
+// tool's raw shade facet. They are SEPARATE keys on purpose: the view is the
+// question the public surface asks, the shades are the gate being graded, and
+// the server ANDs them, so a view narrows the shade list to its members.
 const S = {relation:new Set(), novelty:new Set(), pool:new Set(),
            corpus:new Set(), poolreason:"", claim:"", disagree:false,
            domain:"", author:"", work:"", nontiera:false, adjudicated:false,
-           letters:"", graded:"", q:"", sort:"work", size:25, off:0};
+           letters:"", graded:"", q:"", view:"all", sort:"work", size:25, off:0};
+// "" is what clearAxis leaves behind and "all" is what the control ships with;
+// both mean the unfiltered state, and neither is ever sent on the wire.
+const curView = () => S.view || "all";
 const DOPEN = new Set();          // which domain parents are expanded
 let OTHER_NOV = false;            // card 4's "other" group expanded
 
@@ -1002,6 +1102,7 @@ function params(extra){
     for (const v of S[k]) p.append(k, v);
   for (const k of ["poolreason","claim","domain","author","work","graded","q","sort"])
     if (S[k]) p.set(k, S[k]);
+  if (curView() !== "all") p.set("view", curView());
   if (S.disagree) p.set("disagree", "1");
   if (S.nontiera) p.set("nontiera", "1");
   if (S.adjudicated) p.set("adjudicated", "1");
@@ -1046,7 +1147,8 @@ function reset(){
   S.corpus = new Set();
   S.poolreason = ""; S.claim = ""; S.disagree = false; S.domain = "";
   S.author = ""; S.work = ""; S.nontiera = false; S.adjudicated = false;
-  S.letters = ""; S.graded = ""; S.q = ""; S.sort = "work"; S.off = 0;
+  S.letters = ""; S.graded = ""; S.q = ""; S.view = "all";
+  S.sort = "work"; S.off = 0;
   $("q").value = "";
   for (const k of COMBOS) { const el = $(k + "_t"); if (el) el.value = ""; }
   load(0);
@@ -1159,7 +1261,25 @@ function renderSidebar(f){
     "and <code>insufficient_length</code> are the population the known-weakness " +
     "note tells you to distrust."));
 
-  // CARD 4 -- novelty. ALL ten raw shade names, never the public page's gated
+  // CARD 4 -- THE PUBLIC PAGE'S GROUPED VIEW, immediately above the raw shade
+  // facet it narrows. A <select>, like the public control and for its reasons:
+  // four prose labels do not fit a chip row, and a reader sees all four at once
+  // instead of discovering them by clicking.
+  //
+  // NO COUNTS ON THE OPTIONS -- also the public page's rule (a number inside a
+  // filter reads as a finding). The counts a grader needs are right below, on
+  // the shades themselves, and they already narrow to the chosen view.
+  out.push(card("", "Which findings — the public page's grouping",
+    `<select onchange="setView(this.value)">` + VIEWS.map(t =>
+      `<option value="${esc(t[0])}"${curView()===String(t[0])?" selected":""}>` +
+      `${esc(t[1])}</option>`).join("") + `</select>`,
+    "Exactly the four groups /computed-identifications offers, from the same " +
+    "source of truth — so &lsquo;what does the public page show here?&rsquo; is " +
+    "one click, not a hand-union of chips. It composes with the shades below: " +
+    "choosing a view leaves only that view&rsquo;s shades in the next card. " +
+    esc(VIEW_WARN)));
+
+  // CARD 5 -- novelty. ALL ten raw shade names, never the public page's gated
   // subset: the grader is grading the gate, and hiding eight of its outputs
   // makes it ungradeable.
   const novAll = L(f.novelty).map(t => String(t[0]));
@@ -1182,20 +1302,20 @@ function renderSidebar(f){
     num(NUMS.never_evaluated) + " of its " + num(NUMS.not_checked) +
     " rows are the never-evaluated block, i.e. the rule never ran."));
 
-  // CARD 5 -- the domain tree, public shape exactly.
+  // CARD 6 -- the domain tree, public shape exactly.
   out.push(card("", "Domain of the identified work", domainTree(f.domains), ""));
 
-  // CARD 6 -- author, normalised. See author_key() in the server: one person
+  // CARD 7 -- author, normalised. See author_key() in the server: one person
   // appeared as up to three separate entries and picking one hid 82% of them.
   out.push(card("", "Author", combo("author", "author: all", f.authors),
     "Surface spellings of one person are merged into a single entry; " +
     "the filter still matches every form."));
 
-  // CARD 7 -- work, keyed on work_id. 43 titles are shared by more than one
+  // CARD 8 -- work, keyed on work_id. 43 titles are shared by more than one
   // work_id, so a title alone does not name a work.
   out.push(card("", "Work", combo("work", "work: all", f.works), ""));
 
-  // CARD 8 -- reference corpus, ALWAYS through the redaction map.
+  // CARD 9 -- reference corpus, ALWAYS through the redaction map.
   const corpVals = L(f.corpus).map(t => String(t[0]));
   out.push(card("", "Reference corpus",
     `<div class="stack">` + L(f.corpus).map(t => chipBtn(isOn("corpus", t[0]),
@@ -1203,7 +1323,7 @@ function renderSidebar(f){
       `toggleMulti('corpus','${t[0]}',${JSON.stringify(corpVals).replace(/"/g,"&quot;")})`
       )).join("") + `</div>`, ""));
 
-  // CARD 9 -- escape hatches, all off by default.
+  // CARD 10 -- escape hatches, all off by default.
   const gradeVals = [["","any"],["no","ungraded only"],["yes","graded only"]];
   // Match length. The row already warns that a match under SHORT_MATCH letters
   // may rest on shared scripture; this is the control that lets the grader ASK
@@ -1232,6 +1352,13 @@ function renderSidebar(f){
   $("sidebar").innerHTML = out.join("");
   fillCombo("author", f.authors);
   fillCombo("work", f.works);
+}
+// VALIDATED, not trusted, exactly as the public handler does it: an unknown
+// value widens to "all" rather than reaching the server. (The server widens
+// too -- this only keeps the control's own label honest.)
+function setView(v){
+  S.view = VIEWS.some(t => String(t[0]) === String(v)) ? String(v) : "all";
+  apply();
 }
 function setClaim(v){ S.claim = v; apply(); }
 function setReason(v){ S.poolreason = v; apply(); }
@@ -1658,6 +1785,11 @@ function renderChipBar(f){
   if (S.pool.size) add("pool: " + [...S.pool].map(v =>
       poolLabel("pool", v)).join(", "), `clearAxis('pool')`);
   if (S.poolreason) add("demoted: " + S.poolreason, `clearAxis('poolreason')`);
+  // The view gets a chip because it HAS a neutral state ("All findings") for a
+  // chip to return it to -- the same test every other chip here passes and the
+  // public control fails. Named by its reader-facing label, not its key.
+  if (curView() !== "all") add("which findings: " + viewLabel(curView()),
+                               `clearAxis('view')`);
   if (S.novelty.size) add("novelty: " + [...S.novelty].join(", "), `clearAxis('novelty')`);
   if (S.domain) add("domain: " + (S.domain === NULL_TOKEN ? "no domain recorded" : S.domain),
                     `clearAxis('domain')`);
@@ -1679,6 +1811,10 @@ function renderChipBar(f){
 const lookup = (list, v, i) => {
   const hit = (list || []).find(t => String(t[0]) === String(v));
   return hit ? String(hit[i]) : String(v);
+};
+const viewLabel = v => {
+  const hit = VIEWS.find(t => String(t[0]) === String(v));
+  return hit ? String(hit[1]) : String(v);
 };
 const authorLabel = f => lookup(f && f.authors, S.author, 1);
 const workLabel = f => lookup(f && f.works, S.work, 1);
@@ -1800,7 +1936,9 @@ def render_page(docs, nums, site, preview_mode) -> str:
           .replace("__PREVIEW__", preview_mode)
           .replace("__SHORT__", str(int(SHORT_MATCH_LETTERS)))
           .replace("/*__DOCS__*/{}", _js_json(docs))
-          .replace("/*__NUMS__*/{}", _js_json(nums)))
+          .replace("/*__NUMS__*/{}", _js_json(nums))
+          .replace("/*__VIEWS__*/[]", _js_json([list(t) for t in NOVELTY_VIEW_LABELS]))
+          .replace('/*__VIEWWARN__*/""', _js_json(NOVELTY_VIEW_WARNING)))
     return (PAGE_HTML
             .replace("__CSS__", css)
             .replace("<!--__HELP__-->", build_help_html(docs))
@@ -2025,6 +2163,22 @@ class Handler(BaseHTTPRequestHandler):
             elif v:
                 cl.append("r.%s = :%s" % (col, key))
                 pr[key] = v
+
+        # The GROUPED novelty view. A second, independent clause on the same
+        # column as the raw shade facet, which is what makes the two compose:
+        # `view=candidates` plus a shade selection is the intersection, and a
+        # shade outside the view simply has no rows -- which is the truth, not a
+        # swallowed filter. `None` (the `all` view, or any value not in the
+        # vocabulary) adds no clause at all; an empty filter is not a filter.
+        if exclude != "view":
+            shades = NOVELTY_VIEW_SHADES.get(self._one(q, "view"))
+            if shades:
+                names = []
+                for i, shade in enumerate(shades):
+                    nm = "__view_%d" % i
+                    pr[nm] = shade
+                    names.append(":" + nm)
+                cl.append("r.novelty_status IN (%s)" % ",".join(names))
 
         # Domain: a parent selection is a strict SUPERSET of its leaves. All 61
         # non-null values carry ' / ', so a value without it is always a parent.
@@ -2548,6 +2702,10 @@ def main(argv=None) -> int:
     Handler.site = args.site.rstrip("/")
     Handler.preview_mode = args.preview
     _fr = ensure_facet_table(args.db, say=lambda m: print(m, flush=True))
+    # Cheap (a constants-only import, ~0.1s) and worth doing at every launch:
+    # the whole value of the grouped view is that it matches the public page,
+    # and a mismatch that nobody is told about is worse than no control at all.
+    _views_ok = check_novelty_views(say=lambda m: print(m, flush=True))
 
     port = args.port
     if _port_is_taken(port):
@@ -2576,6 +2734,9 @@ def main(argv=None) -> int:
     print("facets    : ready, %s rows indexed" % format(_fr, ","))
     print("grades    : %s.grades.db  (nothing is ever written to the review DB)"
           % args.db)
+    print("views     : %s" % ("verified against shared/discovery_service.py"
+                              if _views_ok else "NOT verified (no checkout, or "
+                              "drift reported above)"))
     print("site      : %s" % Handler.site)
     print("preview   : %s" % Handler.preview_mode)
     print("")
