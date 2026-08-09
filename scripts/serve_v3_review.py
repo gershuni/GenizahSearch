@@ -118,7 +118,14 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 const DIV = ["catalogue_correct","claim_correct","unclear"];
 let off = 0, total = 0, LAST = [];
 const $ = id => document.getElementById(id);
-const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+// QUOTES MUST BE ESCAPED, not just `&` and `<`. This value is interpolated into
+// HTML ATTRIBUTES (`<option value="...">`), and Hebrew titles carry gershayim as
+// a plain double quote -- `תנ"ך, תהלים` closed the attribute early and the option
+// rendered as `תנ`, silently losing the rest of every such title. Escaping only
+// the text-content characters is the wrong rule for an attribute.
+const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")
+                        .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+                        .replace(/'/g,"&#39;");
 
 // TYPEABLE FILTERS. `datalist` gives native type-ahead over hundreds of options
 // (1,080 works make a plain <select> unusable), but its value is the LABEL, so
