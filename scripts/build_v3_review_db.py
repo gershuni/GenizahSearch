@@ -460,7 +460,49 @@ def main(argv=None) -> int:
         out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 35), batch)
     out.commit()
 
-    for k, v in (("schema", "discovery-v3-review/1"),
+    # DEFINITIONS TRAVEL WITH THE FILE. This artifact is shared, and a reader
+    # opening it in a SQLite browser sees column names with no way to know that
+    # `claim_type` is not a relation or that `main_pool=0` is not a verdict of
+    # wrong. The viewer carries the same text on screen; this is for everyone who
+    # never opens the viewer.
+    for k, v in (
+        ("doc.router_verdict",
+         "THE RELATION, and the only witness-vs-quoter axis that was validated "
+         "(~1,400 blind + 400 graded cards). same_work = this page is a copy of "
+         "the work; parallel = it quotes the work; not_shipped / shared_text = "
+         "other router outcomes. Decided by how much of the PAGE the match covers."),
+        ("doc.claim_type",
+         "NOT a relation. Says only which matched span is LARGEST ON THIS PAGE. No "
+         "minimum length, never reads the text, and a page with a single match gets "
+         "'direct_witness' by default however short. 45,149 rows the router called a "
+         "quotation carry direct_witness. Use router_verdict for the relation."),
+        ("doc.main_pool",
+         "1 = main pool (shown first), 0 = 'more matches' (held behind), NULL = the "
+         "rule was never evaluated for this row. Describes the whole IDENTIFICATION "
+         "(manuscript x work across all its pages), not this row. 0 means the evidence "
+         "did not meet the rule -- NOT that the identification is wrong."),
+        ("doc.routing_status",
+         "shipped = would reach the public site; review_only = held back. Most "
+         "quotations are review_only, which is the router working as intended."),
+        ("doc.novelty_status",
+         "Automated judgement of whether this identification adds anything to what the "
+         "catalogues and bibliography already record. not_checked is an honest 'no "
+         "answer', never a guess."),
+        ("doc.divergence_correctness",
+         "HUMAN-ONLY and empty by design. When our identification and the catalogue "
+         "disagree, who is right. The model measured 8/28 on this -- at or below chance "
+         "for three options -- so it was removed from the model's job. Grades recorded "
+         "through the viewer live in a separate <db>.grades.db."),
+        ("doc.ms_match_vs_ref_match",
+         "The two sides will NOT match closely: a Genizah fragment against a printed "
+         "edition runs ~0.4 apart per character (orthography, abbreviations, real "
+         "variants, editorial markup and vowels). That is what a witness looks like."),
+        ("doc.known_weakness",
+         "The screen that suppresses matches resting on shared scripture is stale and "
+         "misses part of the reference corpus, so some matches sit on a verse or "
+         "liturgical formula many works quote. Treat SHORT matches on such text with "
+         "suspicion. See docs/OPEN_ISSUES.md (2026-08-09)."),
+        ("schema", "discovery-v3-review/1"),
                  ("built_from_artifact", os.path.basename(args.artifact)),
                  ("rows", str(len(rows))),
                  ("ref_from_source_text", str(n_ref_ok)),

@@ -88,6 +88,14 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  .stream{color:#c9a227;font-size:11px}
  .combo{position:relative}
  .combo input{min-width:9rem}
+ #help{margin:12px;background:var(--card);border:1px solid var(--line);border-radius:10px}
+ #help>summary{cursor:pointer;padding:10px 12px;font-weight:600;color:var(--acc)}
+ .helpbody{padding:0 16px 12px;max-width:62rem}
+ .helpbody h4{margin:14px 0 4px;font-size:13px}
+ .helpbody p{margin:4px 0;color:#c3c7cd;font-size:13px}
+ .helpbody .hn{color:var(--dim);font-weight:400}
+ .helpbody .warn{border-inline-start:3px solid #c9a227;padding-inline-start:9px}
+ .helpbody .ok{border-inline-start:3px solid #3f8f6b;padding-inline-start:9px}
  .pager{display:flex;gap:8px;justify-content:center;padding:16px}
 </style></head><body>
 <header><div class="filters">
@@ -108,8 +116,62 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
         oninput="typed()" onkeydown="if(event.key==='Enter')load(0)">
  <button onclick="reset()">Reset</button>
  <button onclick="exportGrades()">Export grades</button>
+ <button onclick="toggleHelp()" id="helpbtn">? What do these mean</button>
  <span class="count" id="count"></span>
 </div></header>
+<details id="help"><summary>What these columns mean — read before grading</summary>
+<div class="helpbody">
+
+<h4>relation <span class="hn">(the router's verdict)</span></h4>
+<p>What this <b>one page</b> is to <b>one work</b>: a <b>witness</b> (the page is a copy
+of the work) or a <b>quotation</b> (it merely quotes it). Decided by how much of the page
+the match covers.</p>
+<p class="ok">This is the axis that was actually validated — roughly 1,400 blind cards plus
+400 more, graded by hand, against the question "is the whole work present on this page?"</p>
+
+<h4>span rank <span class="hn">(NOT a relation — read this one carefully)</span></h4>
+<p>Only says which matched span is <b>largest on this page</b>. It has no minimum length and
+it never looks at the text. <b>A page with just one match gets "largest span" automatically,
+however short.</b></p>
+<p class="warn">It is shown only so you can see where it <b>disagrees with the router</b>:
+45,149 rows the router called a quotation still carry "largest span on page". Those rows
+are badged, and you can list them with relation = quotation + span rank = largest.</p>
+
+<h4>pool</h4>
+<p><b>main pool</b> = shown first; <b>more matches</b> = held behind it. This describes the
+whole <b>identification</b> (one manuscript × one work, across all its pages), not this row —
+254,612 rows collapse into 110,110 identifications.</p>
+<p class="warn"><b>"More matches" does not mean wrong.</b> It means the evidence did not meet
+the rule — too short, a single folio, an unresolved tie, a missing signal. It is not a
+confidence score and not a correctness verdict.</p>
+<p><b>no identification record</b> is a third state, not a synonym for "more matches": the
+rule was never evaluated for that row.</p>
+
+<h4>shown+review</h4>
+<p>Whether the row would reach the public site (<b>shown</b>) or is held back
+(<b>review only</b>). Most quotations are review-only — that is the router doing its job.</p>
+
+<h4>novelty</h4>
+<p>What the automated gate judged about whether this identification adds anything to what is
+already recorded in the catalogues and bibliography. Ten possible shades;
+<b>not_checked</b> is an honest "no answer", never a guess.</p>
+
+<h4>Which is right? <span class="hn">(the buttons — this is the job)</span></h4>
+<p>When our identification and the catalogue disagree, who is correct. <b>This is empty by
+design and only a person can fill it</b>: the model was measured at 8/28 on this question —
+at or below chance for three options — while the owner scored 31/32, so it was removed from
+the model's job entirely. Your answers save to disk immediately and survive rebuilds.</p>
+
+<h4>Two things that will look wrong but are not</h4>
+<p><b>The two text panes will not match closely.</b> A Genizah fragment against a printed
+edition runs about 0.4 apart on a character basis — different orthography, abbreviations,
+real variants, and the edition carries editorial markup and vowels the fragment does not.
+That is what a witness looks like, not an error.</p>
+<p><b>A short match on a famous passage is a known weakness.</b> The screen that should
+suppress matches resting on shared scripture is out of date and misses part of the reference
+corpus, so some matches sit on a verse or a liturgical formula that many works quote. Treat
+short matches on such text with suspicion.</p>
+</div></details>
 <div id="app"></div>
 <div class="pager">
  <button onclick="prev()">&larr; prev</button>
@@ -314,6 +376,7 @@ function reset(){
   for (const k of ["novelty","pool","claim","relation","routing","graded","q"]) $(k).value = "";
   load(0);
 }
+function toggleHelp(){ const h = $("help"); h.open = !h.open; }
 function next(){ if (off + 25 < total) load(off + 25); }
 function prev(){ if (off > 0) load(Math.max(0, off - 25)); }
 function exportGrades(){ window.location = "/api/export"; }
