@@ -99,7 +99,8 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
         oninput="picked('work')" size="22"><datalist id="work_l"></datalist></span>
  <select id="novelty" onchange="load(0)"><option value="">novelty: all</option></select>
  <select id="pool" onchange="load(0)"><option value="">pool: all</option></select>
- <select id="claim" onchange="load(0)"><option value="">relation: all</option></select>
+ <select id="relation" onchange="load(0)"><option value="">relation: all</option></select>
+ <select id="claim" onchange="load(0)"><option value="">span rank: all</option></select>
  <select id="routing" onchange="load(0)"><option value="">shown+review: all</option></select>
  <select id="graded" onchange="load(0)"><option value="">graded: any</option>
    <option value="no">ungraded only</option><option value="yes">graded only</option></select>
@@ -151,7 +152,7 @@ function picked(k){
 function params(extra){
   const p = new URLSearchParams();
   for (const k of COMBOS) { const v = comboValue(k); if (v) p.set(k, v); }
-  for (const k of ["novelty","pool","claim","routing","graded","q"])
+  for (const k of ["novelty","pool","claim","relation","routing","graded","q"])
     if ($(k).value) p.set(k, $(k).value);
   Object.entries(extra||{}).forEach(([k,v]) => p.set(k,v));
   return p;
@@ -186,10 +187,10 @@ async function facets(){
     }).join("");
   }
   for (const [id,key] of [["novelty","novelty"],["pool","pool"],["claim","claim"],
-                          ["routing","routing"]]) {
+                          ["relation","relation"],["routing","routing"]]) {
     const cur = $(id).value;
-    const name = {novelty:"novelty", pool:"pool", claim:"relation",
-                  routing:"shown+review"}[id];
+    const name = {novelty:"novelty", pool:"pool", claim:"span rank",
+                  relation:"relation", routing:"shown+review"}[id];
     let opts = f[key].map(([v,lab,n]) =>
       `<option value="${esc(v)}"${String(v)===cur?" selected":""}>`
       + `${esc(poolLabel(id,v))} (${n.toLocaleString()})</option>`);
@@ -207,8 +208,14 @@ function poolLabel(id, v){
     if (v === NULL_TOKEN || v === null) return "no identification record";
     return String(v) === "1" ? "main pool" : "more matches";
   }
-  if (id === "claim") return {direct_witness:"alleged direct",
-    quotes_this_work:"alleged citation", shared_text:"shared wording"}[v] || String(v);
+  // THE RELATION comes from the ROUTER -- the only witness-vs-quoter signal
+  // gen-2 actually graded. claim_type is a frozen v1 heuristic about which span
+  // is biggest on the page, so it is named for that and never as a relation.
+  if (id === "relation") return {same_work:"witness (router)",
+    parallel:"quotation (router)", not_shipped:"not shipped (router)",
+    shared_text:"shared text"}[v] || (v === NULL_TOKEN ? "not routed" : String(v));
+  if (id === "claim") return {direct_witness:"largest span on page",
+    quotes_this_work:"smaller span on page", shared_text:"shared wording"}[v] || String(v);
   if (id === "routing") return {shipped:"shown on site",
     review_only:"review only"}[v] || String(v);
   return String(v);
@@ -235,7 +242,11 @@ async function load(newOff){
         <span class="badge ${x.main_pool===null?"none":(x.main_pool==1?"pool":"more")}">${
           x.main_pool===null ? "no identification record"
                              : (x.main_pool==1 ? "main pool" : "more matches")}</span>
-        <span class="badge ${x.claim_type==="quotes_this_work"?"cite":""}">${poolLabel("claim",x.claim_type)}</span>
+        <span class="badge ${x.router_verdict==="parallel"?"cite":(x.router_verdict==="same_work"?"pool":"none")}"
+          title="the router's verdict -- the witness-vs-quoter signal gen-2 graded">${poolLabel("relation",x.router_verdict)}</span>
+        <span class="badge none" title="claim_type: which matched span is largest on this page. NOT a relation: a lone match on a page gets 'largest' by default, with no length floor.">${poolLabel("claim",x.claim_type)}</span>
+        ${x.router_verdict==="parallel" && x.claim_type==="direct_witness"
+          ? `<span class="badge ro" title="45,149 rows are in this state">label disagrees with router</span>` : ``}
         ${x.routing_status!=="shipped" ? `<span class="badge ro">review only — not shown on the site</span>` : ``}
         ${browseUrl(x) ? `<button onclick="preview('${x.evidence_id}',this)">◱ preview folio</button>` : ``}
       </div>
@@ -300,7 +311,7 @@ let typeTimer = null;
 function typed(){ clearTimeout(typeTimer); typeTimer = setTimeout(() => load(0), 300); }
 function reset(){
   for (const k of COMBOS) $(k + "_t").value = "";
-  for (const k of ["novelty","pool","claim","routing","graded","q"]) $(k).value = "";
+  for (const k of ["novelty","pool","claim","relation","routing","graded","q"]) $(k).value = "";
   load(0);
 }
 function next(){ if (off + 25 < total) load(off + 25); }
@@ -353,7 +364,7 @@ class Handler(BaseHTTPRequestHandler):
     FILTERS = (("domain", "domain"), ("author", "work_author"),
                ("work", "work_id"), ("novelty", "novelty_status"),
                ("pool", "main_pool"), ("claim", "claim_type"),
-               ("routing", "routing_status"))
+               ("relation", "router_verdict"), ("routing", "routing_status"))
 
     def _where(self, q, exclude=None):
         """`exclude` drops ONE filter from the clause.
@@ -424,6 +435,7 @@ class Handler(BaseHTTPRequestHandler):
                     ("novelty", "novelty_status", "novelty_status", "novelty"),
                     ("pool", "main_pool", "main_pool", "pool"),
                     ("claim", "claim_type", "claim_type", "claim"),
+                    ("relation", "router_verdict", "router_verdict", "relation"),
                     ("routing", "routing_status", "routing_status", "routing")):
                 # Each facet is computed with its OWN filter excluded (see
                 # `_where`), so its list stays switchable instead of collapsing to

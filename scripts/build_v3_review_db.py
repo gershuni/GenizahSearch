@@ -111,6 +111,19 @@ CREATE TABLE review_row (
   -- inside the main pool -- gate 1 asks whether ANY direct claim exists).
   claim_type        TEXT,
   relation_kind     TEXT,
+  -- THE ROUTER'S OWN VERDICT, which is the only witness-vs-quoter signal gen-2
+  -- actually validated (1,402 + 400 owner-graded cards; ~0.89 weighted precision
+  -- on the same_work surface). Derived from routing_reason, never re-decided.
+  --
+  -- `claim_type` above is NOT this. It is a frozen v1 heuristic -- which matched
+  -- span is largest on the page -- and a lone match on a page resolves to
+  -- `direct_witness` by construction, with no length floor and no sight of the
+  -- text. Measured on this artifact: 76.9% of `direct_witness` rows earned it by
+  -- being the only match on their page, and 45,149 rows the router explicitly
+  -- called a quotation are stored `direct_witness`. Presenting claim_type as the
+  -- relation is what put "alleged direct" on a router-demoted quotation.
+  routing_reason    TEXT,
+  router_verdict    TEXT,   -- same_work | parallel | not_shipped | shared_text
 
   novelty_status        TEXT,
   divergence_correctness TEXT,
@@ -163,6 +176,26 @@ def build_source_map(staging: str) -> dict:
         for e in json.load(open(man, encoding="utf-8"))["entries"]:
             src["REF2:" + e["key"]] = ("R", os.path.join(staging, e["body_file"]))
     return src
+
+
+def router_verdict_of(routing_reason, routing_status):
+    """The router's verdict, read off routing_reason -- never re-derived.
+
+    `none` + shipped is the router saying same_work; the demotion reasons name
+    themselves. Anything unrecognised returns None rather than being folded into
+    a neighbour, so a new reason shows up as unknown instead of silently
+    becoming "witness".
+    """
+    r = (routing_reason or "").strip().lower()
+    if r in ("", "none"):
+        return "same_work" if routing_status == "shipped" else None
+    if r.startswith("gen2_parallel"):
+        return "parallel"
+    if r == "gen2_router_not_shipped":
+        return "not_shipped"
+    if r == "later_shared_text":
+        return "shared_text"
+    return None
 
 
 _HEADER_RE = None
@@ -265,6 +298,7 @@ def main(argv=None) -> int:
       SELECT de.evidence_id, de.sys_id, de.a_page_id, dc.work_id,
              w.neutral_title, w.author, w.genre, w.source_corpus,
              di.main_pool, di.main_pool_reason, dc.claim_type, di.relation_kind,
+             de.routing_reason,
              de.novelty_status, de.divergence_correctness, de.confidence_band,
              de.adjudication_status, de.routing_status,
              de.matched_letters, de.n_spans, de.coverage_ppm, de.coverage_status,
@@ -324,7 +358,7 @@ def main(argv=None) -> int:
     batch = []
     for i, r in enumerate(rows):
         (eid, sysid, pid, minted, wtitle, wauthor, wgenre, wcorpus,
-         mpool, mreason, ctype, rkind,
+         mpool, mreason, ctype, rkind, rreason,
          nov, dvc, band, adj, routing, ml, nspans, cppm, cstat,
          a0, a1, w0, w1) = r
 
@@ -411,18 +445,19 @@ def main(argv=None) -> int:
                       cat_title.get(sysid),
                       minted, wtitle, wauthor, wgenre, wcorpus,
                       mpool, mreason, ctype, rkind,
+                      rreason, router_verdict_of(rreason, routing),
                       nov, dvc, band, adj, routing,
                       ml, nspans, cppm, cstat,
                       ms[0], ms[1], ms[2], ref[0], ref[1], ref[2],
                       1 if w_is_stream else 0))
         if len(batch) >= 2000:
-            out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 33), batch)
+            out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 35), batch)
             out.commit()
             batch = []
             log("  %d / %d rows" % (i + 1, len(rows)))
 
     if batch:
-        out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 33), batch)
+        out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 35), batch)
     out.commit()
 
     for k, v in (("schema", "discovery-v3-review/1"),
@@ -443,9 +478,10 @@ def main(argv=None) -> int:
     out.execute("""CREATE TABLE facet_row AS SELECT
                      evidence_id, sys_id, shelfmark, domain, work_id, work_title,
                      work_author, novelty_status, main_pool, claim_type,
-                     routing_status FROM review_row""")
+                     router_verdict, routing_status FROM review_row""")
     for _c in ("domain", "work_id", "work_author", "novelty_status",
-               "main_pool", "claim_type", "routing_status", "evidence_id"):
+               "main_pool", "claim_type", "router_verdict", "routing_status",
+               "evidence_id"):
         out.execute("CREATE INDEX ix_fr_%s ON facet_row(%s)" % (_c, _c))
     out.commit()
     out.execute("VACUUM")
