@@ -150,9 +150,23 @@ function params(extra){
   Object.entries(extra||{}).forEach(([k,v]) => p.set(k,v));
   return p;
 }
+let facetSeq = 0;
 async function facets(){
-  const r = await fetch("/api/facets?" + params());
-  const f = await r.json();
+  // A failed or SUPERSEDED facets fetch must not blank the controls. Previously
+  // any error here threw out of facets(), every <select> kept only its default
+  // "all" option, and nothing said why. The sequence guard also stops a slow
+  // early response from overwriting a newer one.
+  const mine = ++facetSeq;
+  let f;
+  try {
+    const r = await fetch("/api/facets?" + params());
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    f = await r.json();
+  } catch (e) {
+    $("count").textContent += "  · filter lists unavailable (" + e.message + ")";
+    return;
+  }
+  if (mine !== facetSeq) return;
   for (const k of COMBOS) {
     const key = {domain:"domains", author:"authors", work:"works"}[k];
     MAP[k] = {};
@@ -292,9 +306,23 @@ load(0);
 
 class Handler(BaseHTTPRequestHandler):
     db_path = None
+    # Facets are pure functions of the filter state, and the reader re-issues the
+    # same state constantly (every page turn calls facets()). Bounded so a long
+    # session cannot grow it without limit.
+    _facet_cache = {}
+    _facet_lock = __import__("threading").Lock()
 
     def log_message(self, *a):
         pass
+
+    def handle_one_request(self):
+        # A reader who navigates or re-filters mid-response aborts the socket.
+        # That is normal client behaviour, not a fault, and printing a traceback
+        # for it buries real errors in noise.
+        try:
+            super().handle_one_request()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
 
     def _conn(self):
         con = sqlite3.connect(self.db_path)
@@ -362,10 +390,21 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/":
             return self._send(None, "text/html; charset=utf-8", PAGE.encode("utf-8"))
         con = self._conn()
-        join = "LEFT JOIN g.human_grade hg ON hg.evidence_id = r.evidence_id"
+        # JOIN ONLY WHEN NEEDED. Carrying this LEFT JOIN on every facet query cost
+        # seconds over 254,612 rows for a column most queries never read -- and a
+        # facets response slow enough to be cancelled leaves every dropdown empty,
+        # because the client's facets() throws on the aborted fetch.
+        graded_active = bool((q.get("graded") or [""])[0])
+        join = ("LEFT JOIN g.human_grade hg ON hg.evidence_id = r.evidence_id"
+                if graded_active else "")
         where, pr = self._where(q)
 
         if u.path == "/api/facets":
+            ckey = tuple(sorted((k, v[0]) for k, v in q.items() if v and v[0]))
+            with self._facet_lock:
+                hit = self._facet_cache.get(ckey)
+            if hit is not None:
+                return self._send(hit)
             out = {}
             # (key, VALUE column, LABEL column). The value is what the filter
             # compares; the label is what the reader picks. They differ for works
@@ -390,20 +429,25 @@ class Handler(BaseHTTPRequestHandler):
                 # cannot reach a third of its own domain. Facet lists are small
                 # (tens of domains/authors), so they are returned whole.
                 rows = con.execute(
-                    "SELECT r.%s AS v, MAX(r.%s) AS lab, COUNT(*) n FROM review_row r %s %s "
+                    "SELECT r.%s AS v, MAX(r.%s) AS lab, COUNT(*) n FROM facet_row r %s %s "
                     "GROUP BY 1 ORDER BY n DESC" % (valcol, labcol, join, fw), fp).fetchall()
                 out[key] = [[NULL_TOKEN if x["v"] is None else x["v"],
                              x["lab"], x["n"]] for x in rows]
+            with self._facet_lock:
+                if len(self._facet_cache) > 200:
+                    self._facet_cache.clear()
+                self._facet_cache[ckey] = out
             return self._send(out)
 
         if u.path == "/api/rows":
             off = int((q.get("offset") or ["0"])[0])
+            rjoin = "LEFT JOIN g.human_grade hg ON hg.evidence_id = r.evidence_id"
             total = con.execute("SELECT COUNT(*) c FROM review_row r %s %s"
                                 % (join, where), pr).fetchone()["c"]
             pr2 = dict(pr, lim=PAGE_SIZE, off=off)
             rows = con.execute(
                 "SELECT r.*, hg.divergence_correctness AS grade FROM review_row r %s %s "
-                "ORDER BY r.work_id, r.sys_id LIMIT :lim OFFSET :off" % (join, where), pr2).fetchall()
+                "ORDER BY r.work_id, r.sys_id LIMIT :lim OFFSET :off" % (rjoin, where), pr2).fetchall()
             return self._send({"total": total, "rows": [dict(x) for x in rows]})
 
         if u.path == "/api/export":
@@ -474,6 +518,45 @@ def main(argv=None) -> int:
     if not os.path.exists(args.db):
         raise SystemExit("review DB not found: %s" % args.db)
     Handler.db_path = args.db
+    # ENSURE INDEXES. `routing_status` had none, and its GROUP BY cost ~1s per
+    # facet over 254,612 rows -- seven facets made the response slow enough for
+    # the browser to cancel it, which is what left every dropdown empty. Created
+    # here rather than only in the builder so an existing 1.4 GB artifact does
+    # not have to be rebuilt for an index.
+    _ix = sqlite3.connect(args.db)
+    for name, col in (("ix_rr_routing", "routing_status"),
+                      ("ix_rr_band", "confidence_band")):
+        try:
+            _ix.execute("CREATE INDEX IF NOT EXISTS %s ON review_row(%s)" % (name, col))
+        except sqlite3.OperationalError:
+            pass          # older artifact without the column -- not fatal
+
+    # A SLIM TABLE FOR FACETS. Each review_row carries ~6 KB of both-sides text,
+    # so ANY facet scan drags that payload through memory for columns it never
+    # reads -- which is why a filtered facets call still took seconds even with
+    # the right indexes. This projection is the filterable columns only (~40 MB
+    # against 1.4 GB), so a facet scan touches a fraction of the data.
+    # Derived here rather than only in the builder so an existing artifact gains
+    # it without a rebuild; it is a cache, and dropping it costs only speed.
+    have = _ix.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                       "AND name='facet_row'").fetchone()[0]
+    if have:
+        same = (_ix.execute("SELECT COUNT(*) FROM facet_row").fetchone()[0] ==
+                _ix.execute("SELECT COUNT(*) FROM review_row").fetchone()[0])
+        if not same:
+            _ix.execute("DROP TABLE facet_row")     # stale against a rebuild
+            have = 0
+    if not have:
+        print("building the facet index table (one time)...", flush=True)
+        _ix.execute("""CREATE TABLE facet_row AS SELECT
+                         evidence_id, sys_id, shelfmark, domain, work_id,
+                         work_title, work_author, novelty_status, main_pool,
+                         claim_type, routing_status FROM review_row""")
+        for col in ("domain", "work_id", "work_author", "novelty_status",
+                    "main_pool", "claim_type", "routing_status", "evidence_id"):
+            _ix.execute("CREATE INDEX ix_fr_%s ON facet_row(%s)" % (col, col))
+    _ix.commit()
+    _ix.close()
 
     port = args.port
     if _port_is_taken(port):

@@ -137,6 +137,7 @@ CREATE INDEX ix_rr_diverge  ON review_row(divergence_correctness);
 CREATE INDEX ix_rr_sys      ON review_row(sys_id);
 CREATE INDEX ix_rr_pool     ON review_row(main_pool);
 CREATE INDEX ix_rr_claim    ON review_row(claim_type);
+CREATE INDEX ix_rr_routing  ON review_row(routing_status);
 """
 
 
@@ -433,6 +434,19 @@ def main(argv=None) -> int:
                  ("context_chars", str(CONTEXT)),
                  ("audience", "private")):
         out.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (k, v))
+    # SLIM FACET PROJECTION. Every review_row carries ~6 KB of both-sides text,
+    # so a facet GROUP BY drags that payload through memory for columns it never
+    # reads -- measured at 7.7s for one /api/facets call before this existed, slow
+    # enough that the browser cancelled it and the reader saw empty dropdowns.
+    # ~40 MB against 1.4 GB. The server rebuilds it if absent or stale, so this is
+    # an optimisation, never a correctness dependency.
+    out.execute("""CREATE TABLE facet_row AS SELECT
+                     evidence_id, sys_id, shelfmark, domain, work_id, work_title,
+                     work_author, novelty_status, main_pool, claim_type,
+                     routing_status FROM review_row""")
+    for _c in ("domain", "work_id", "work_author", "novelty_status",
+               "main_pool", "claim_type", "routing_status", "evidence_id"):
+        out.execute("CREATE INDEX ix_fr_%s ON facet_row(%s)" % (_c, _c))
     out.commit()
     out.execute("VACUUM")
     out.close()
