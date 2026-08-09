@@ -471,3 +471,49 @@ def test_the_asset_records_whether_the_gate_ran():
     # And it must be driven by the loader's own stat, never by the flag -- the
     # flag records intent, the stat records what happened.
     assert 'novelty_input_stats.get("verdict_fingerprint_checked")' in src
+
+
+# ---------------------------------------------------------------------------
+# 6. The recorded-witness field -- a DECISION input, not a prompt input.
+# ---------------------------------------------------------------------------
+#
+# Added 2026-08-09, after the production run. `known_witness_confidence` is the
+# one cache-key field the suite above structurally cannot reach: every test in
+# section 1 derives its expectation from what `render_batch` SENDS, and this
+# field is never rendered -- a `high`-confidence recorded witness is resolved by
+# the heuristic funnel and the model is never called. So it changes the ANSWER
+# without changing the PROMPT, and `test_the_fingerprint_covers_every_field_
+# render_case_sends` skips it (its assertion is guarded on `prompt_changed`).
+#
+# That gap is not academic. `build_cache_key` hashes ONLY the members of
+# `CACHE_KEY_FIELDS` and silently ignores anything else, so adding the field to
+# the funnel's cache-key dict did nothing until it was also added to that tuple.
+# Deleting it again would today pass the entire suite while making $42.28 of
+# verdicts reusable against a question they did not answer.
+
+
+def test_the_recorded_witness_field_moves_the_fingerprint():
+    """A different recorded-witness confidence is a different question."""
+    assert "known_witness_confidence" in CACHE_KEY_FIELDS, (
+        "known_witness_confidence left the cache key -- verdicts computed WITH "
+        "the recorded-witness map would be reused for a witness-blind question"
+    )
+    blind = candidate_input_fingerprint(_candidate(known_witness_confidence=None))
+    high = candidate_input_fingerprint(_candidate(known_witness_confidence="high"))
+    low = candidate_input_fingerprint(_candidate(known_witness_confidence="low"))
+    assert blind != high, "witness-blind and high-confidence share a fingerprint"
+    assert high != low, "high and low confidence share a fingerprint"
+
+
+def test_the_recorded_witness_field_is_invisible_to_the_prompt():
+    """Why section 1 cannot cover it -- pinned, so the reasoning stays true.
+
+    If this ever starts failing, the field HAS become a prompt input and belongs
+    in `_PROMPT_FIELDS` like any other; the special-case above is then obsolete.
+    """
+    assert render_batch([_candidate(known_witness_confidence="high")]) == render_batch(
+        [_candidate(known_witness_confidence=None)]
+    ), (
+        "known_witness_confidence now reaches the rendered prompt -- add it to "
+        "_PROMPT_FIELDS and retire this special case"
+    )

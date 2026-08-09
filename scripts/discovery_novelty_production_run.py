@@ -65,7 +65,8 @@ from scripts.discovery_novelty_funnel import (  # noqa: E402
     run_heuristic_funnel,
     run_model_arm_batched,
 )
-from scripts.discovery_novelty_probe import (  # noqa: E402
+from scripts.discovery_novelty_probe import (
+    load_work_witnesses,  # noqa: E402
     DEFAULT_ASSET,
     DEFAULT_FGP_DB,
     DEFAULT_FJMS_DB,
@@ -175,6 +176,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="HARD ceiling in USD on real cumulative spend. Required -- there is no "
                         "default, so an unbounded run cannot happen by omission.")
     p.add_argument("--limit", type=int, default=None, help="smoke only: cap residual candidates")
+    p.add_argument("--work-witnesses", default=None,
+                   help="emit_work_witnesses.py output -- M-source's recorded "
+                        "witnesses. Required unless --allow-no-witnesses.")
+    p.add_argument("--crosswalk", default=os.path.join(
+                       REPO_ROOT, "discovery_data", "crosswalk.json"))
+    p.add_argument("--allow-no-witnesses", action="store_true",
+                   help="deliberately run without the recorded-witness source")
     p.add_argument("--api-key-env", default="OPENROUTER_API_KEY")
     args = p.parse_args(argv)
 
@@ -194,8 +202,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
     log(f"loading real data from {args.asset}")
+    # M-source's RECORDED WITNESSES (2026-08-08). REQUIRED for a real run, not
+    # optional: a `high`-confidence recorded witness resolves deterministically
+    # to `confirms`, so omitting the map BUYS ~900 verdicts that need no model
+    # call -- and computes every remaining verdict blind to a decision input that
+    # is IN the fingerprint, so they would not match the measured population.
+    witnesses = load_work_witnesses(args.work_witnesses, args.crosswalk)
+    if args.work_witnesses:
+        log(f"recorded-witness works: {len(witnesses):,}")
+    elif not args.allow_no_witnesses:
+        print("ERROR: --work-witnesses not supplied. A production run without it "
+              "buys verdicts the funnel can resolve for free and fingerprints "
+              "them against a source it never read. Pass --allow-no-witnesses to "
+              "override deliberately.")
+        return 2
     candidates, works, libraries = build_all_candidates(
-        args.asset, args.libraries_csv, args.fjms_db, args.pgp_db, args.fgp_db
+        args.asset, args.libraries_csv, args.fjms_db, args.pgp_db, args.fgp_db,
+        work_witnesses=witnesses,
     )
     resolved, residual = run_heuristic_funnel(candidates)
     log(f"candidates={len(candidates):,} heuristically_resolved={len(resolved):,} residual={len(residual):,}")
