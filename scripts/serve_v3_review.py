@@ -33,6 +33,9 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DIVERGENCE_VALUES = ("catalogue_correct", "claim_correct", "unclear")
+# Stands in for SQL NULL on the wire, so a genuinely-absent value stays
+# selectable and keeps a name of its own instead of collapsing into a neighbour.
+NULL_TOKEN = "__null__"
 PAGE_SIZE = 25
 
 PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -58,6 +61,11 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
        font-size:12px;margin-bottom:8px}
  .badge{background:#2a2f38;border-radius:999px;padding:2px 9px;color:var(--fg)}
  .badge.nov{background:#26405c}
+ .badge.pool{background:#1e4034}
+ .badge.more{background:#3d3520}
+ .badge.cite{background:#4a2c46}
+ .badge.ro{background:#4a2222;color:#ffd9d9}
+ .badge.none{background:#2f2f36;color:#b9bcc4}
  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
  @media(max-width:900px){.cols{grid-template-columns:1fr}}
  .cat{color:var(--fg);background:#231f16;border:1px solid #3a3222;border-radius:6px;
@@ -92,6 +100,7 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  <select id="novelty" onchange="load(0)"><option value="">novelty: all</option></select>
  <select id="pool" onchange="load(0)"><option value="">pool: all</option></select>
  <select id="claim" onchange="load(0)"><option value="">relation: all</option></select>
+ <select id="routing" onchange="load(0)"><option value="">shown+review: all</option></select>
  <select id="graded" onchange="load(0)"><option value="">graded: any</option>
    <option value="no">ungraded only</option><option value="yes">graded only</option></select>
  <input id="q" placeholder="shelfmark contains…" size="15"
@@ -129,7 +138,7 @@ function picked(k){
 function params(extra){
   const p = new URLSearchParams();
   for (const k of COMBOS) { const v = comboValue(k); if (v) p.set(k, v); }
-  for (const k of ["novelty","pool","claim","graded","q"])
+  for (const k of ["novelty","pool","claim","routing","graded","q"])
     if ($(k).value) p.set(k, $(k).value);
   Object.entries(extra||{}).forEach(([k,v]) => p.set(k,v));
   return p;
@@ -149,9 +158,11 @@ async function facets(){
       return `<option value="${esc(label)}">${n.toLocaleString()}</option>`;
     }).join("");
   }
-  for (const [id,key] of [["novelty","novelty"],["pool","pool"],["claim","claim"]]) {
+  for (const [id,key] of [["novelty","novelty"],["pool","pool"],["claim","claim"],
+                          ["routing","routing"]]) {
     const cur = $(id).value;
-    const name = {novelty:"novelty", pool:"pool", claim:"relation"}[id];
+    const name = {novelty:"novelty", pool:"pool", claim:"relation",
+                  routing:"shown+review"}[id];
     let opts = f[key].map(([v,lab,n]) =>
       `<option value="${esc(v)}"${String(v)===cur?" selected":""}>`
       + `${esc(poolLabel(id,v))} (${n.toLocaleString()})</option>`);
@@ -163,10 +174,16 @@ async function facets(){
 // The reader-facing bucket names are the site's own ("main pool" / "more
 // matches"), never "more findings". The second bucket means the evidence did not
 // meet the rule -- it is NOT a statement that the identification is wrong.
+const NULL_TOKEN = "__null__";
 function poolLabel(id, v){
-  if (id === "pool") return String(v) === "1" ? "main pool" : "more matches";
+  if (id === "pool") {
+    if (v === NULL_TOKEN || v === null) return "no identification record";
+    return String(v) === "1" ? "main pool" : "more matches";
+  }
   if (id === "claim") return {direct_witness:"alleged direct",
     quotes_this_work:"alleged citation", shared_text:"shared wording"}[v] || String(v);
+  if (id === "routing") return {shipped:"shown on site",
+    review_only:"review only"}[v] || String(v);
   return String(v);
 }
 function pane(title, b, m, a, isStream){
@@ -188,6 +205,11 @@ async function load(newOff){
         <span>identified as: <b>${esc(x.work_title||x.work_id)}</b>${x.work_author?" · "+esc(x.work_author):""}</span>
         <span>${x.matched_letters} letters${x.n_spans>1?` · ${x.n_spans} spans`:""}</span>
         <span class="badge">${esc(x.source_corpus||"")}</span>
+        <span class="badge ${x.main_pool===null?"none":(x.main_pool==1?"pool":"more")}">${
+          x.main_pool===null ? "no identification record"
+                             : (x.main_pool==1 ? "main pool" : "more matches")}</span>
+        <span class="badge ${x.claim_type==="quotes_this_work"?"cite":""}">${poolLabel("claim",x.claim_type)}</span>
+        ${x.routing_status!=="shipped" ? `<span class="badge ro">review only — not shown on the site</span>` : ``}
         ${browseUrl(x) ? `<button onclick="preview('${x.evidence_id}',this)">◱ preview folio</button>` : ``}
       </div>
       ${x.catalogue_title ? `<div class="meta"><span class="cat">catalogued as:
@@ -251,7 +273,7 @@ let typeTimer = null;
 function typed(){ clearTimeout(typeTimer); typeTimer = setTimeout(() => load(0), 300); }
 function reset(){
   for (const k of COMBOS) $(k + "_t").value = "";
-  for (const k of ["novelty","pool","claim","graded","q"]) $(k).value = "";
+  for (const k of ["novelty","pool","claim","routing","graded","q"]) $(k).value = "";
   load(0);
 }
 function next(){ if (off + 25 < total) load(off + 25); }
@@ -289,7 +311,8 @@ class Handler(BaseHTTPRequestHandler):
     # filter key -> column. One table, so every filter is a plain equality.
     FILTERS = (("domain", "domain"), ("author", "work_author"),
                ("work", "work_id"), ("novelty", "novelty_status"),
-               ("pool", "main_pool"), ("claim", "claim_type"))
+               ("pool", "main_pool"), ("claim", "claim_type"),
+               ("routing", "routing_status"))
 
     def _where(self, q, exclude=None):
         """`exclude` drops ONE filter from the clause.
@@ -305,7 +328,14 @@ class Handler(BaseHTTPRequestHandler):
             if key == exclude:
                 continue
             v = (q.get(key) or [""])[0]
-            if v:
+            if v == NULL_TOKEN:
+                # A NULL cannot be selected with `=`. 64,406 review-only rows
+                # carry no identification record at all, so `main_pool` is NULL
+                # for them -- and that is a THIRD state, not a synonym for "not
+                # in the main pool". Without this they were unselectable and,
+                # worse, rendered under the wrong bucket name.
+                cl.append("r.%s IS NULL" % col)
+            elif v:
                 cl.append("r.%s = :%s" % (col, key))
                 pr[key] = v
         s = (q.get("q") or [""])[0]
@@ -341,7 +371,8 @@ class Handler(BaseHTTPRequestHandler):
                     ("works", "work_id", "work_title", "work"),
                     ("novelty", "novelty_status", "novelty_status", "novelty"),
                     ("pool", "main_pool", "main_pool", "pool"),
-                    ("claim", "claim_type", "claim_type", "claim")):
+                    ("claim", "claim_type", "claim_type", "claim"),
+                    ("routing", "routing_status", "routing_status", "routing")):
                 # Each facet is computed with its OWN filter excluded (see
                 # `_where`), so its list stays switchable instead of collapsing to
                 # the single value already chosen.
@@ -354,7 +385,8 @@ class Handler(BaseHTTPRequestHandler):
                 rows = con.execute(
                     "SELECT r.%s AS v, MAX(r.%s) AS lab, COUNT(*) n FROM review_row r %s %s "
                     "GROUP BY 1 ORDER BY n DESC" % (valcol, labcol, join, fw), fp).fetchall()
-                out[key] = [[x["v"], x["lab"], x["n"]] for x in rows]
+                out[key] = [[NULL_TOKEN if x["v"] is None else x["v"],
+                             x["lab"], x["n"]] for x in rows]
             return self._send(out)
 
         if u.path == "/api/rows":
