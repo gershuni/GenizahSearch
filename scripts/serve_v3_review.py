@@ -274,20 +274,63 @@ class Handler(BaseHTTPRequestHandler):
         self._send({"ok": True})
 
 
+class ReviewServer(ThreadingHTTPServer):
+    # MUST be False on Windows. `HTTPServer` defaults it to 1, and Windows honours
+    # SO_REUSEADDR by letting a SECOND process bind a port another process already
+    # holds -- so this server would start, print its URL, and quietly lose every
+    # request to whatever was already listening. That is not hypothetical: a stale
+    # `http.server` on 8777 served its own directory listing to a reader who had
+    # just started this one, and nothing anywhere reported a conflict.
+    allow_reuse_address = False
+
+
+def _port_is_taken(port: int) -> bool:
+    """Someone already listening on loopback? Ask by connecting, not by binding:
+    on Windows a bind can succeed against an in-use port, which is the whole bug."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.35)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "discovery_data", "discovery-v3-REVIEW.db"))
     ap.add_argument("--port", type=int, default=8777)
+    ap.add_argument("--strict-port", action="store_true",
+                    help="fail if --port is busy instead of moving to a free one")
     args = ap.parse_args(argv)
     if not os.path.exists(args.db):
         raise SystemExit("review DB not found: %s" % args.db)
     Handler.db_path = args.db
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+
+    port = args.port
+    if _port_is_taken(port):
+        if args.strict_port:
+            raise SystemExit(
+                "port %d is already serving something else (a stale http.server?). "
+                "Stop it, or re-run without --strict-port to use the next free port."
+                % port)
+        print("! port %d is already in use by another server -- moving on" % port)
+        for cand in range(port + 1, port + 40):
+            if not _port_is_taken(cand):
+                port = cand
+                break
+        else:
+            raise SystemExit("no free port in %d-%d" % (port + 1, port + 39))
+
+    try:
+        srv = ReviewServer(("127.0.0.1", port), Handler)
+    except OSError as e:
+        raise SystemExit("could not bind 127.0.0.1:%d -- %s" % (port, e))
+
     print("review DB : %s (%.0f MB)" % (args.db, os.path.getsize(args.db) / 1e6))
     print("grades    : %s.grades.db" % args.db)
-    print("open      : http://127.0.0.1:%d" % args.port)
+    print("")
+    print("   OPEN:   http://127.0.0.1:%d" % port)
+    print("")
     srv.serve_forever()
     return 0
 
