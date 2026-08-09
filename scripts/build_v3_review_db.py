@@ -61,6 +61,7 @@ DEFAULT_REF = os.path.join(REPO_ROOT, "same_work_spike", "probe", "data",
                            "ref_corpus_v2.pkl")
 DEFAULT_XWALK = os.path.join(REPO_ROOT, "discovery_data", "crosswalk.json")
 DEFAULT_STAGING = os.path.join(REPO_ROOT, "same_work_spike", "probe", "refs_staging")
+DEFAULT_LIBRARIES_CSV = os.path.join(REPO_ROOT, "libraries.csv")
 DEFAULT_OUT = os.path.join(REPO_ROOT, "discovery_data", "discovery-v3-REVIEW.db")
 
 # Context kept either side of the match, in RAW characters. Enough to judge the
@@ -76,7 +77,17 @@ CREATE TABLE review_row (
   shelfmark       TEXT,
   library_code    TEXT,
   page_id         TEXT NOT NULL,
-  folio           TEXT,
+  -- Parsed out of page_id (`{sys}_{IE…}_{P000211}_{FL…}`) so the viewer can
+  -- address the LIVE /browse viewer at the matched folio. `browse_url`'s rule is
+  -- that page and volume_ie travel TOGETHER or not at all -- a page number with
+  -- no volume is a different folio in each volume of a multi-volume manuscript,
+  -- so half an address is worse than none.
+  page_num        INTEGER,
+  volume_ie       TEXT,
+  -- The CATALOGUE's own title for the manuscript (libraries.csv), beside the
+  -- computed identification. Not in the sidecar and not in manuscript_display;
+  -- it is the claim the reader is weighing ours against.
+  catalogue_title TEXT,
 
   work_id         TEXT NOT NULL,      -- minted (w######)
   work_title      TEXT,
@@ -137,6 +148,8 @@ def build_source_map(staging: str) -> dict:
 _HEADER_RE = None
 # `M:Ytext1000_26` -> base `M:Ytext1000`. Split-grain part suffix only.
 _SPLIT_ID_RE = __import__("re").compile(r"^(.*)_(\d+)$")
+# `{sys}_{IE163082409}_{P000001}_{FL163082411}` -> volume IE + folio number.
+_PAGE_ID_RE = __import__("re").compile(r"_(IE\d+)_P(\d+)_")
 
 # Sibling split works are adjacent in minted-id order, so a tiny cache turns
 # 141 reloads of one very large file into a handful.
@@ -202,6 +215,7 @@ def main(argv=None) -> int:
     ap.add_argument("--ref", default=DEFAULT_REF)
     ap.add_argument("--crosswalk", default=DEFAULT_XWALK)
     ap.add_argument("--staging", default=DEFAULT_STAGING)
+    ap.add_argument("--libraries-csv", default=DEFAULT_LIBRARIES_CSV)
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--limit", type=int, default=None, help="smoke: cap rows")
     ap.add_argument("--routing", default="shipped",
@@ -255,6 +269,23 @@ def main(argv=None) -> int:
     except sqlite3.OperationalError:
         log("manuscript_display unavailable -- shelfmarks will be blank")
     log("manuscript display rows: %d" % len(disp))
+
+    # Catalogue titles. Only the sys_ids this build actually needs are kept --
+    # libraries.csv carries ~255,000 records and the shipped set touches a small
+    # fraction of them.
+    need = {r[1] for r in rows}
+    cat_title = {}
+    if os.path.exists(args.libraries_csv):
+        import csv as _csv
+        with open(args.libraries_csv, encoding="utf-8-sig", newline="") as fh:
+            for rec in _csv.reader(fh):
+                if len(rec) > 7 and rec[0] in need:
+                    t = (rec[7] or "").strip()
+                    if t:
+                        cat_title[rec[0]] = t
+        log("catalogue titles: %d of %d manuscripts" % (len(cat_title), len(need)))
+    else:
+        log("libraries.csv not found -- catalogue titles will be blank")
 
     if os.path.exists(args.out):
         os.remove(args.out)
@@ -347,20 +378,26 @@ def main(argv=None) -> int:
             n_ref_none += 1
 
         shelf, lib = disp.get(sysid, (None, None))
-        batch.append((eid, sysid, shelf, lib, pid, None,
+        # SEARCH, not match: page_id begins with the sys_id, so an anchored match
+        # returns None for every row and the preview link silently loses its folio.
+        pm = _PAGE_ID_RE.search(pid or "")
+        vol_ie = pm.group(1) if pm else None
+        page_no = int(pm.group(2)) if pm else None
+        batch.append((eid, sysid, shelf, lib, pid, page_no, vol_ie,
+                      cat_title.get(sysid),
                       minted, wtitle, wauthor, wgenre, wcorpus,
                       nov, dvc, band, adj, routing,
                       ml, nspans, cppm, cstat,
                       ms[0], ms[1], ms[2], ref[0], ref[1], ref[2],
                       1 if w_is_stream else 0))
         if len(batch) >= 2000:
-            out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 27), batch)
+            out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 29), batch)
             out.commit()
             batch = []
             log("  %d / %d rows" % (i + 1, len(rows)))
 
     if batch:
-        out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 27), batch)
+        out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 29), batch)
     out.commit()
 
     for k, v in (("schema", "discovery-v3-review/1"),

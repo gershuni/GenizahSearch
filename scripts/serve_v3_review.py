@@ -60,6 +60,15 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  .badge.nov{background:#26405c}
  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
  @media(max-width:900px){.cols{grid-template-columns:1fr}}
+ .cat{color:var(--fg);background:#231f16;border:1px solid #3a3222;border-radius:6px;
+      padding:4px 9px;font-size:12px}
+ .cat b{color:#e0c07a;font-weight:600}
+ .prev{margin-top:10px;border:1px solid var(--line);border-radius:8px;overflow:hidden;
+       background:#0f1114;display:none}
+ .prev.on{display:block}
+ .prev iframe{width:100%;height:62vh;border:0;background:#fff}
+ .prev .bar{display:flex;gap:10px;align-items:center;padding:6px 9px;
+            border-bottom:1px solid var(--line);color:var(--dim);font-size:12px}
  .pane h4{margin:0 0 6px;font-size:13px;color:var(--dim);font-weight:600}
  .txt{direction:rtl;text-align:right;background:#0f1114;border:1px solid var(--line);
       border-radius:8px;padding:10px;max-height:320px;overflow:auto;
@@ -90,7 +99,7 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 </div>
 <script>
 const DIV = ["catalogue_correct","claim_correct","unclear"];
-let off = 0, total = 0;
+let off = 0, total = 0, LAST = [];
 const $ = id => document.getElementById(id);
 const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
 
@@ -120,7 +129,7 @@ async function load(newOff){
   if (newOff !== undefined) off = newOff;
   const r = await fetch("/api/rows?" + params({offset: off}));
   const d = await r.json();
-  total = d.total;
+  total = d.total; LAST = d.rows;
   $("count").textContent = `${d.total.toLocaleString()} rows · showing ${off+1}-${Math.min(off+d.rows.length,total)}`;
   $("app").innerHTML = d.rows.map(x => `
     <div class="card">
@@ -128,14 +137,18 @@ async function load(newOff){
         <span class="badge nov">${esc(x.novelty_status)}</span>
         <span class="badge">${esc(x.domain||"—")}</span>
         <span>${esc(x.library_code||"")} <b>${esc(x.shelfmark||x.sys_id)}</b></span>
-        <span>work: <b>${esc(x.work_title||x.work_id)}</b>${x.work_author?" · "+esc(x.work_author):""}</span>
+        <span>identified as: <b>${esc(x.work_title||x.work_id)}</b>${x.work_author?" · "+esc(x.work_author):""}</span>
         <span>${x.matched_letters} letters${x.n_spans>1?` · ${x.n_spans} spans`:""}</span>
         <span class="badge">${esc(x.source_corpus||"")}</span>
+        ${browseUrl(x) ? `<button onclick="preview('${x.evidence_id}',this)">◱ preview folio</button>` : ``}
       </div>
+      ${x.catalogue_title ? `<div class="meta"><span class="cat">catalogued as:
+         <b dir="auto">${esc(x.catalogue_title)}</b></span></div>` : ``}
       <div class="cols">
         ${pane("Manuscript", x.ms_before, x.ms_match, x.ms_after, false)}
         ${pane("Reference edition", x.ref_before, x.ref_match, x.ref_after, x.ref_is_stream)}
       </div>
+      <div class="prev" id="prev-${x.evidence_id}"></div>
       <div class="grade">
         <span style="color:var(--dim)">Which is right?</span>
         ${DIV.map(v => `<button class="${x.grade===v?'sel':''}"
@@ -144,6 +157,36 @@ async function load(newOff){
       </div>
     </div>`).join("");
   facets();
+}
+// The LIVE site's bare viewer. `embed=1` is the route built for exactly this --
+// no site chrome, and it does NOT persist/restore browse state, so previewing
+// here cannot overwrite wherever the reader left /browse in their own tab.
+// page and volume_ie travel TOGETHER or not at all: a folio number without its
+// volume is a DIFFERENT folio in each volume of a multi-volume manuscript, so a
+// half address looks targeted and lands somewhere else.
+const SITE = "https://genizahsearch.com";
+function browseUrl(x, embed){
+  if (!x.sys_id) return null;
+  let u = SITE + "/browse?sys_id=" + encodeURIComponent(x.sys_id);
+  if (embed) u += "&embed=1";
+  if (x.page_num && x.volume_ie)
+    u += "&page=" + x.page_num + "&volume_ie=" + encodeURIComponent(x.volume_ie);
+  return u;
+}
+// Lazy BY DESIGN: 25 iframes to the live site per page turn would hammer it and
+// make every page load wait on the network. The frame is built on click.
+function preview(id, btn){
+  const box = document.getElementById("prev-" + id);
+  if (box.classList.contains("on")) {
+    box.classList.remove("on"); box.innerHTML = ""; btn.textContent = "◱ preview folio"; return;
+  }
+  const x = LAST.find(r => r.evidence_id === id);
+  const full = browseUrl(x, false), emb = browseUrl(x, true);
+  box.innerHTML = `<div class="bar"><span>live genizahsearch.com — folio ${x.page_num||"?"}</span>
+      <a href="${full}" target="_blank" rel="noopener">open in a tab ↗</a></div>
+    <iframe src="${emb}" loading="lazy" referrerpolicy="no-referrer"></iframe>`;
+  box.classList.add("on");
+  btn.textContent = "◱ hide folio";
 }
 async function grade(id, val, btn){
   await fetch("/api/grade", {method:"POST", headers:{"Content-Type":"application/json"},
