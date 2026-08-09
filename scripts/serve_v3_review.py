@@ -123,7 +123,13 @@ const $ = id => document.getElementById(id);
 // a plain double quote -- `תנ"ך, תהלים` closed the attribute early and the option
 // rendered as `תנ`, silently losing the rest of every such title. Escaping only
 // the text-content characters is the wrong rule for an attribute.
-const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")
+// COERCE, do not assume a string. `main_pool` arrives from SQLite as the INTEGER
+// 1, and `(1 || "")` is the number 1 -- `.replace` does not exist on it, so esc()
+// threw and took facets() down with it. Novelty populated first, then pool threw,
+// so pool/relation/shown+review silently kept only their "all" option. `?? ""`
+// rather than `|| ""` for the same reason: `0` is a real value here and `||`
+// would erase it.
+const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;")
                         .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
                         .replace(/'/g,"&#39;");
 
