@@ -547,7 +547,7 @@ def main(argv=None) -> int:
             _ix.execute("DROP TABLE facet_row")     # stale against a rebuild
             have = 0
     if not have:
-        print("building the facet index table (one time)...", flush=True)
+        print("facets    : building the facet index table (one time)...", flush=True)
         _ix.execute("""CREATE TABLE facet_row AS SELECT
                          evidence_id, sys_id, shelfmark, domain, work_id,
                          work_title, work_author, novelty_status, main_pool,
@@ -555,6 +555,7 @@ def main(argv=None) -> int:
         for col in ("domain", "work_id", "work_author", "novelty_status",
                     "main_pool", "claim_type", "routing_status", "evidence_id"):
             _ix.execute("CREATE INDEX ix_fr_%s ON facet_row(%s)" % (col, col))
+    _fr = _ix.execute("SELECT COUNT(*) FROM facet_row").fetchone()[0]
     _ix.commit()
     _ix.close()
 
@@ -578,7 +579,11 @@ def main(argv=None) -> int:
     except OSError as e:
         raise SystemExit("could not bind 127.0.0.1:%d -- %s" % (port, e))
 
+    # SAY WHICH. Silence looked the same whether the facet table was built,
+    # found, or failed to appear -- and an absent one is the difference between
+    # sub-second filters and a response slow enough for the browser to cancel.
     print("review DB : %s (%.0f MB)" % (args.db, os.path.getsize(args.db) / 1e6))
+    print("facets    : ready, %s rows indexed" % format(_fr, ","))
     print("grades    : %s.grades.db" % args.db)
     print("")
     print("   OPEN:   http://127.0.0.1:%d" % port)
