@@ -83,10 +83,18 @@ def test_every_component_is_URL_QUOTED():
     assert url.count("&") == 2, f"an unescaped separator reached the query: {url}"
 
 
-def test_the_three_discovery_surfaces_all_route_through_this_builder():
-    """A STRUCTURAL guard, because the defect this module fixes was three
-    hand-built URLs drifting apart -- and a fourth would drift the same way
-    without failing any behavioural test that exists today.
+def test_every_discovery_surface_routes_through_this_builder():
+    """A STRUCTURAL guard, because the defect this module fixes was hand-built
+    URLs drifting apart -- and the next one would drift the same way without
+    failing any behavioural test that exists today.
+
+    FOUR link sites now, across three modules: the findings preview
+    (`web/pages/findings.py`), the findings row's shelfmark
+    (`web/components/findings_rows.py`), and the panel's expansion and
+    candidate-alignment rows (`web/components/discovery_panel.py`). The
+    shelfmark was the LAST one found, on 2026-08-09, and it was found by a
+    reader noticing that one row offered two destinations for the same claim --
+    not by any test here.
 
     Asserts on the SOURCE because the alternative -- rendering every surface and
     comparing hrefs -- proves only that today's outputs happen to agree, which
@@ -98,6 +106,7 @@ def test_the_three_discovery_surfaces_all_route_through_this_builder():
 
     root = pathlib.Path(__file__).resolve().parents[1]
     for relative in ("web/pages/findings.py",
+                     "web/components/findings_rows.py",
                      "web/components/discovery_panel.py"):
         source = (root / relative).read_text(encoding="utf-8")
         tree = ast.parse(source)

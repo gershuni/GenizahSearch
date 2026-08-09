@@ -1095,6 +1095,44 @@ def test_work_titles_are_plain_text_and_the_shelfmark_is_a_live_link():
     ASSERTION_COUNT["n"] += 1
 
 
+def test_the_shelfmark_link_opens_the_MATCHED_FOLIO_not_the_manuscript():
+    """The row's most prominent destination must not be its least useful one
+    (owner report, 2026-08-09).
+
+    The preview two lines below already opened the matched folio, so the row was
+    offering two destinations for one claim and sending the reader to folio 1
+    from the one they are likeliest to click.
+    """
+    client = render_rows([finding_row()], "en")
+    targets = [href for element in _elements_with_class(client, fr.ROW_SHELFMARK_CLASS)
+               for href in _hrefs(element)]
+    assert targets, "the shelfmark is not a link"
+    assert all("page=7" in t and "volume_ie=IE47974133" in t for t in targets), (
+        f"the shelfmark still opens the manuscript, not the folio: {targets}")
+    # NOT the embedded viewer: this is a navigation the reader asked for, so it
+    # gets the full page. Only the preview's iframe needs the bare route.
+    assert not any("embed=1" in t for t in targets), targets
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_MANUSCRIPT_unit_shelfmark_stays_a_plain_manuscript_link():
+    """A manuscript row spans works, so it has no single folio to answer for --
+    and the service resolves the folio on the identification LEAF only.
+
+    The renderer must not have to know that. It asks `browse_url` for an address
+    from whatever the row carries, and a grouped row carries None, so the
+    degradation is automatic rather than a second place that knows which unit
+    has a folio.
+    """
+    client = render_rows([finding_row(unit=FINDINGS_UNIT_MANUSCRIPT,
+                                      first_match_page=None,
+                                      first_match_volume_ie=None)], "en")
+    targets = [href for element in _elements_with_class(client, fr.ROW_SHELFMARK_CLASS)
+               for href in _hrefs(element)]
+    assert targets == ["/browse?sys_id=990000000000000944"], targets
+    ASSERTION_COUNT["n"] += 1
+
+
 @pytest.mark.parametrize("lang", LANGS)
 def test_the_per_manuscript_unit_annotates_a_multi_work_manuscript(lang):
     """Driven by `multi_work_annotation`, which the service computes -- never

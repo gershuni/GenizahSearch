@@ -1537,8 +1537,9 @@ def _work_title(item: Mapping[str, Any], lang: str) -> str:
 
 def _render_shelfmark(item: Mapping[str, Any], lang: str = "en",
                       catalogue_title=None) -> None:
-    """The manuscript link -- LIVE, unlike the work title -- and, beside it,
-    the catalogue's OWN title for the same manuscript.
+    """The manuscript link -- LIVE, unlike the work title, and pointed at the
+    MATCHED FOLIO where the row knows one -- and, beside it, the catalogue's OWN
+    title for the same manuscript.
 
     `/work/{id}` does not exist until Phase 136.1, so work titles render as
     plain text; the manuscript page does exist and a reader needs to reach it
@@ -1573,15 +1574,32 @@ def _render_shelfmark(item: Mapping[str, Any], lang: str = "en",
     followed by a title in the catalogue's own language can reorder
     unpredictably at the boundary if joined into one run of text.
     """
-    sys_id = item.get("sys_id")
     shelfmark = item.get("shelfmark_display")
     library = item.get("library_code")
     if library:
         ui.label(str(library)).classes("chip")
     if not shelfmark:
         return
-    if sys_id:
-        ui.link(str(shelfmark), f"/browse?sys_id={sys_id}").classes(ROW_SHELFMARK_CLASS)
+    # THE FOLIO, WHEN THE ROW KNOWS ONE (owner report, 2026-08-09). This link
+    # opened the manuscript's first page while the preview two lines below it
+    # opened the matched folio -- so the SAME row offered two destinations for
+    # the same claim and the more prominent one was the less useful.
+    #
+    # THE UNIT DECIDES, without this function branching on it. `first_match_*`
+    # is resolved by the service on the identification LEAF only: a manuscript
+    # row spans works and has no single folio to answer for, so the pair is None
+    # there and `browse_url` degrades to the manuscript on its own. Branching on
+    # `item['unit']` here would be a second place that knows which unit has a
+    # folio, and the two would drift.
+    #
+    # NO `embed`: this is a navigation the reader asked for, so it gets the full
+    # page. The preview's iframe is the one that needs the bare, snapshot-safe
+    # viewer.
+    target = links.browse_url(
+        item.get("sys_id"), page=item.get("first_match_page"),
+        volume_ie=item.get("first_match_volume_ie"))
+    if target:
+        ui.link(str(shelfmark), target).classes(ROW_SHELFMARK_CLASS)
     else:
         ui.label(str(shelfmark)).classes(ROW_SHELFMARK_CLASS)
 
