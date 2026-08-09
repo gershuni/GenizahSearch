@@ -6,14 +6,31 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased] — Connections Atlas (beta, web)
 
-### Built and deployed, NOT public — discovery read surfaces (web, flag-gated)
+### LIVE (beta) — discovery read surfaces (web)
 
-- **Two discovery surfaces are deployed to production behind `DISCOVERY_ENABLED`, which is unset,
-  so they hide completely.** Nothing discovery-related is visible to any visitor: the flag is
-  necessary but not sufficient (`web/discovery_assets.py::discovery_available()` also requires a
-  startup-validated, content-hash-matched sidecar of the right audience), the nav entry is gated on
-  the same predicate, and `/computed-identifications` returns 404 while the flag is off. **Deployed
-  and gated is not live**; this entry records what exists, not a launch.
+- **`DISCOVERY_ENABLED` was turned ON in production on 2026-08-08, and both surfaces are now
+  publicly visible.** This heading and the paragraph below previously read "Built and deployed,
+  NOT public … the flag is unset, so they hide completely"; that was accurate until the flip and is
+  corrected here rather than left to read as current state. The gate itself is unchanged and still
+  fail-closed: the flag is necessary but not sufficient
+  (`web/discovery_assets.py::discovery_available()` also requires a startup-validated,
+  content-hash-matched sidecar of the right audience), the nav entry is gated on the same predicate,
+  and `/computed-identifications` returns 404 whenever either half is missing.
+
+- **Every link from a discovery surface opens the folio the match is on, not the manuscript's first
+  page** (2026-08-08/09). Four link sites were affected and all four now build their target through
+  one shared builder (`web/components/discovery_links.py`): the findings row's shelfmark and its
+  preview, and the connections panel's "other manuscripts carrying this work" and "show more
+  possible matches" rows. 46% of identifications match on more than one folio and most do not match
+  on folio 1, so a reader landed on an unrelated opening and could only conclude that the
+  identification was wrong. No re-bake was needed — every contributing page id was already in the
+  served artifact on `discovery_evidence.a_page_id`, aggregated away only at the identification
+  grain, so the folio is resolved at read time. The folio and its volume are added **together or not
+  at all**: folio numbering is per volume, so a folio number alone addresses a different page in each
+  volume of a multi-volume manuscript (988 identifications span volumes), and the panel's
+  candidate-alignment rows had been emitting exactly that half-address. Where a folio cannot be fully
+  resolved the link degrades to the manuscript and the row's own note says so, so no sentence
+  promises more than its link delivers.
   - A **connections panel** on the browse page, opened by a "Computed identifications / זיהויים
     מחושבים" control, listing a manuscript's computed same-work matches in two buckets — a main pool
     and a "more matches" bucket — with the relation stated on each row, matched-letter coverage
