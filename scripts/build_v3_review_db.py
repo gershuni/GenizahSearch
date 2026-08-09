@@ -95,6 +95,23 @@ CREATE TABLE review_row (
   domain          TEXT,               -- works.genre
   source_corpus   TEXT,               -- MASKED code, never a corpus name
 
+  -- THE TWO GEN-2 DISTINCTIONS, taken from the artifact rather than re-derived.
+  -- `main_pool` is `shared.discovery_main_pool.main_pool_decision`'s own boolean,
+  -- already computed onto discovery_identification; a guard in that module forbids
+  -- any second definition of the rule anywhere under shared/ or web/, so this
+  -- reads the decision and never restates it. Reader-facing names are
+  -- "main pool" / "more matches" (`bucket_label`) -- NOT "more findings".
+  -- The second bucket means the evidence did not meet the rule; it never means
+  -- the identification is probably wrong.
+  main_pool         INTEGER,
+  main_pool_reason  TEXT,
+  -- alleged-direct vs alleged-citation. `claim_type` is this ROW's relation;
+  -- `relation_kind` is the whole identification's, and they can differ (an
+  -- identification may carry both, which is why a `quotes_this_work` row can sit
+  -- inside the main pool -- gate 1 asks whether ANY direct claim exists).
+  claim_type        TEXT,
+  relation_kind     TEXT,
+
   novelty_status        TEXT,
   divergence_correctness TEXT,
   confidence_band       TEXT,
@@ -118,6 +135,8 @@ CREATE INDEX ix_rr_work     ON review_row(work_id);
 CREATE INDEX ix_rr_novelty  ON review_row(novelty_status);
 CREATE INDEX ix_rr_diverge  ON review_row(divergence_correctness);
 CREATE INDEX ix_rr_sys      ON review_row(sys_id);
+CREATE INDEX ix_rr_pool     ON review_row(main_pool);
+CREATE INDEX ix_rr_claim    ON review_row(claim_type);
 """
 
 
@@ -244,6 +263,7 @@ def main(argv=None) -> int:
     sql = """
       SELECT de.evidence_id, de.sys_id, de.a_page_id, dc.work_id,
              w.neutral_title, w.author, w.genre, w.source_corpus,
+             di.main_pool, di.main_pool_reason, dc.claim_type, di.relation_kind,
              de.novelty_status, de.divergence_correctness, de.confidence_band,
              de.adjudication_status, de.routing_status,
              de.matched_letters, de.n_spans, de.coverage_ppm, de.coverage_status,
@@ -251,6 +271,8 @@ def main(argv=None) -> int:
       FROM discovery_evidence de
       JOIN discovery_claim dc ON dc.claim_id = de.claim_id
       JOIN works w ON w.work_id = dc.work_id
+      LEFT JOIN discovery_identification di
+             ON di.sys_id = de.sys_id AND di.canonical_work_id = w.canonical_work_id
       WHERE de.evidence_source = 'track1_direct' AND de.w_start IS NOT NULL
       %s
       ORDER BY dc.work_id, de.a_page_id
@@ -301,6 +323,7 @@ def main(argv=None) -> int:
     batch = []
     for i, r in enumerate(rows):
         (eid, sysid, pid, minted, wtitle, wauthor, wgenre, wcorpus,
+         mpool, mreason, ctype, rkind,
          nov, dvc, band, adj, routing, ml, nspans, cppm, cstat,
          a0, a1, w0, w1) = r
 
@@ -386,18 +409,19 @@ def main(argv=None) -> int:
         batch.append((eid, sysid, shelf, lib, pid, page_no, vol_ie,
                       cat_title.get(sysid),
                       minted, wtitle, wauthor, wgenre, wcorpus,
+                      mpool, mreason, ctype, rkind,
                       nov, dvc, band, adj, routing,
                       ml, nspans, cppm, cstat,
                       ms[0], ms[1], ms[2], ref[0], ref[1], ref[2],
                       1 if w_is_stream else 0))
         if len(batch) >= 2000:
-            out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 29), batch)
+            out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 33), batch)
             out.commit()
             batch = []
             log("  %d / %d rows" % (i + 1, len(rows)))
 
     if batch:
-        out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 29), batch)
+        out.executemany("INSERT INTO review_row VALUES (%s)" % ",".join("?" * 33), batch)
     out.commit()
 
     for k, v in (("schema", "discovery-v3-review/1"),

@@ -78,16 +78,23 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  .grade{margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
  .grade button.sel{background:var(--acc);color:#00121f;border-color:var(--acc)}
  .stream{color:#c9a227;font-size:11px}
+ .combo{position:relative}
+ .combo input{min-width:9rem}
  .pager{display:flex;gap:8px;justify-content:center;padding:16px}
 </style></head><body>
 <header><div class="filters">
- <select id="domain" onchange="load(0)"><option value="">domain: all</option></select>
- <select id="author" onchange="load(0)"><option value="">author: all</option></select>
- <select id="work" onchange="load(0)"><option value="">work: all</option></select>
+ <span class="combo"><input id="domain_t" list="domain_l" placeholder="domain: all"
+        oninput="picked('domain')" size="18"><datalist id="domain_l"></datalist></span>
+ <span class="combo"><input id="author_t" list="author_l" placeholder="author: all"
+        oninput="picked('author')" size="16"><datalist id="author_l"></datalist></span>
+ <span class="combo"><input id="work_t" list="work_l" placeholder="work: all"
+        oninput="picked('work')" size="22"><datalist id="work_l"></datalist></span>
  <select id="novelty" onchange="load(0)"><option value="">novelty: all</option></select>
+ <select id="pool" onchange="load(0)"><option value="">pool: all</option></select>
+ <select id="claim" onchange="load(0)"><option value="">relation: all</option></select>
  <select id="graded" onchange="load(0)"><option value="">graded: any</option>
    <option value="no">ungraded only</option><option value="yes">graded only</option></select>
- <input id="q" placeholder="shelfmark contains…" size="16"
+ <input id="q" placeholder="shelfmark contains…" size="15"
         oninput="typed()" onkeydown="if(event.key==='Enter')load(0)">
  <button onclick="reset()">Reset</button>
  <button onclick="exportGrades()">Export grades</button>
@@ -104,9 +111,25 @@ let off = 0, total = 0, LAST = [];
 const $ = id => document.getElementById(id);
 const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
 
+// TYPEABLE FILTERS. `datalist` gives native type-ahead over hundreds of options
+// (1,080 works make a plain <select> unusable), but its value is the LABEL, so
+// each combo keeps its own label->value map. A label the reader has not matched
+// yet is simply not a filter -- never a silent no-match.
+const COMBOS = ["domain","author","work"];
+const MAP = {domain:{}, author:{}, work:{}};
+function comboValue(k){
+  const t = ($(k + "_t").value || "").trim();
+  if (!t) return "";
+  return (t in MAP[k]) ? MAP[k][t] : "";   // typed but not yet a real pick
+}
+function picked(k){
+  const t = ($(k + "_t").value || "").trim();
+  if (!t || (t in MAP[k])) load(0);                    // only query on a real pick
+}
 function params(extra){
   const p = new URLSearchParams();
-  for (const k of ["domain","author","work","novelty","graded","q"])
+  for (const k of COMBOS) { const v = comboValue(k); if (v) p.set(k, v); }
+  for (const k of ["novelty","pool","claim","graded","q"])
     if ($(k).value) p.set(k, $(k).value);
   Object.entries(extra||{}).forEach(([k,v]) => p.set(k,v));
   return p;
@@ -114,21 +137,37 @@ function params(extra){
 async function facets(){
   const r = await fetch("/api/facets?" + params());
   const f = await r.json();
-  for (const [id,key] of [["domain","domains"],["author","authors"],
-                          ["work","works"],["novelty","novelty"]]) {
-    const cur = $(id).value;
-    // The facet lists are themselves filtered, so narrowing one control can drop
-    // the CURRENT selection of another out of its list. Re-adding it keeps the
-    // filter you set from disappearing out from under you -- otherwise the
-    // control silently reverts to "all" and the row count jumps with no cause
-    // the reader can see.
-    let opts = f[key].map(([v,lab,n]) =>
-      `<option value="${esc(v)}"${v===cur?" selected":""}>`
-      + `${esc(lab||v||"(none)")} (${n.toLocaleString()})</option>`);
-    if (cur && !f[key].some(([v]) => v === cur))
-      opts.unshift(`<option value="${esc(cur)}" selected>${esc(cur)} (0 here)</option>`);
-    $(id).innerHTML = `<option value="">${id}: all</option>` + opts.join("");
+  for (const k of COMBOS) {
+    const key = {domain:"domains", author:"authors", work:"works"}[k];
+    MAP[k] = {};
+    const seen = {};
+    $(k + "_l").innerHTML = f[key].map(([v,lab,n]) => {
+      let label = String(lab || v || "(none)");
+      if (seen[label]) label += "  · " + v;      // keep duplicates distinct
+      seen[label] = 1;
+      MAP[k][label] = v;
+      return `<option value="${esc(label)}">${n.toLocaleString()}</option>`;
+    }).join("");
   }
+  for (const [id,key] of [["novelty","novelty"],["pool","pool"],["claim","claim"]]) {
+    const cur = $(id).value;
+    const name = {novelty:"novelty", pool:"pool", claim:"relation"}[id];
+    let opts = f[key].map(([v,lab,n]) =>
+      `<option value="${esc(v)}"${String(v)===cur?" selected":""}>`
+      + `${esc(poolLabel(id,v))} (${n.toLocaleString()})</option>`);
+    if (cur && !f[key].some(([v]) => String(v) === cur))
+      opts.unshift(`<option value="${esc(cur)}" selected>${esc(cur)} (0 here)</option>`);
+    $(id).innerHTML = `<option value="">${name}: all</option>` + opts.join("");
+  }
+}
+// The reader-facing bucket names are the site's own ("main pool" / "more
+// matches"), never "more findings". The second bucket means the evidence did not
+// meet the rule -- it is NOT a statement that the identification is wrong.
+function poolLabel(id, v){
+  if (id === "pool") return String(v) === "1" ? "main pool" : "more matches";
+  if (id === "claim") return {direct_witness:"alleged direct",
+    quotes_this_work:"alleged citation", shared_text:"shared wording"}[v] || String(v);
+  return String(v);
 }
 function pane(title, b, m, a, isStream){
   return `<div class="pane"><h4>${title}${isStream?' <span class="stream">[unspaced letter stream]</span>':''}</h4>
@@ -211,7 +250,8 @@ async function grade(id, val, btn){
 let typeTimer = null;
 function typed(){ clearTimeout(typeTimer); typeTimer = setTimeout(() => load(0), 300); }
 function reset(){
-  for (const k of ["domain","author","work","novelty","graded","q"]) $(k).value = "";
+  for (const k of COMBOS) $(k + "_t").value = "";
+  for (const k of ["novelty","pool","claim","graded","q"]) $(k).value = "";
   load(0);
 }
 function next(){ if (off + 25 < total) load(off + 25); }
@@ -246,10 +286,24 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _where(self, q):
+    # filter key -> column. One table, so every filter is a plain equality.
+    FILTERS = (("domain", "domain"), ("author", "work_author"),
+               ("work", "work_id"), ("novelty", "novelty_status"),
+               ("pool", "main_pool"), ("claim", "claim_type"))
+
+    def _where(self, q, exclude=None):
+        """`exclude` drops ONE filter from the clause.
+
+        That is what makes a facet list usable: a facet computed WITH its own
+        selection applied contains exactly one option -- the thing already
+        chosen -- so switching from one work to another meant first setting the
+        control back to "all". Every other filter still applies, so the counts
+        stay honest about the rest of the query.
+        """
         cl, pr = [], {}
-        for key, col in (("domain", "domain"), ("author", "work_author"),
-                         ("work", "work_id"), ("novelty", "novelty_status")):
+        for key, col in self.FILTERS:
+            if key == exclude:
+                continue
             v = (q.get(key) or [""])[0]
             if v:
                 cl.append("r.%s = :%s" % (col, key))
@@ -281,10 +335,17 @@ class Handler(BaseHTTPRequestHandler):
             # and MUST NOT be conflated -- the first version listed work TITLES
             # while the filter compared work_id, so choosing any work returned
             # zero rows. Nothing failed; the two were simply never the same string.
-            for key, valcol, labcol in (("domains", "domain", "domain"),
-                                        ("authors", "work_author", "work_author"),
-                                        ("works", "work_id", "work_title"),
-                                        ("novelty", "novelty_status", "novelty_status")):
+            for key, valcol, labcol, own in (
+                    ("domains", "domain", "domain", "domain"),
+                    ("authors", "work_author", "work_author", "author"),
+                    ("works", "work_id", "work_title", "work"),
+                    ("novelty", "novelty_status", "novelty_status", "novelty"),
+                    ("pool", "main_pool", "main_pool", "pool"),
+                    ("claim", "claim_type", "claim_type", "claim")):
+                # Each facet is computed with its OWN filter excluded (see
+                # `_where`), so its list stays switchable instead of collapsing to
+                # the single value already chosen.
+                fw, fp = self._where(q, exclude=own)
                 # NO SILENT CAP. The first version stopped at 400 and the corpus
                 # has 1,269 works, so a third of them were simply absent from the
                 # "select a work" control with nothing saying so -- a filter that
@@ -292,7 +353,7 @@ class Handler(BaseHTTPRequestHandler):
                 # (tens of domains/authors), so they are returned whole.
                 rows = con.execute(
                     "SELECT r.%s AS v, MAX(r.%s) AS lab, COUNT(*) n FROM review_row r %s %s "
-                    "GROUP BY 1 ORDER BY n DESC" % (valcol, labcol, join, where), pr).fetchall()
+                    "GROUP BY 1 ORDER BY n DESC" % (valcol, labcol, join, fw), fp).fetchall()
                 out[key] = [[x["v"], x["lab"], x["n"]] for x in rows]
             return self._send(out)
 
