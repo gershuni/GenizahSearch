@@ -41,11 +41,28 @@ Grades are saved to disk the moment you click, into a separate file
 you close the browser or the server. **Export grades** in the header writes them
 out as JSON to send back.
 
-## Two things that will look wrong and are not
+The sidebar mirrors the public findings page — same controls, same grouping — plus the
+axes only this file carries: **relation** (the router's witness-vs-quotation verdict),
+**span rank**, **match length**, corpus, pool reason, band, review state, and
+graded/ungraded. One chip selects the 45,149 rows where the router and the span rank
+disagree.
+
+If the folio image does not load for a manuscript, add `--preview frame` to embed the live
+browse page instead, or just use the `open in a tab` link on the row.
+
+## Three things that will look wrong and are not
 
 - **The two panes will not read as the same text.** A Genizah fragment against a
   printed edition diverges heavily — different spelling, different abbreviation,
   damage. Roughly 40% apart is normal, not a bug.
+- **"Catalogued as:" is NOT what the software read.** It is one field of the library
+  record. The novelty label was decided on more — the FJMS catalogue entry, the
+  bibliography, PGP and FGP transcriptions. On 83% of `confirms` rows the line you see
+  differs from the text that was actually judged, so a label can look absurd beside it and
+  still be defensible. One measured example: a manuscript catalogued only as `קובץ`
+  ("miscellany") is marked `confirms` because the bibliography records it in two Schäfer
+  catalogues *of Hekhalot manuscripts*. Judge the label on the two text panes, not on this
+  line.
 - **Some short matches rest on shared scripture or liturgy.** The screen that is
   supposed to suppress those is running against a stale list, so a passage both
   texts merely *quote* can still appear as though it identified the work. Short
