@@ -908,6 +908,30 @@ button:hover{border-color:var(--primary-600)}
 .gs-discovery .txt mark{background:var(--accent-gold);color:#1a1a1a}
 .gs-discovery .stream{font-size:11px;color:var(--text-secondary)}
 
+/* --- private G2: pane C, what the novelty gate read ----------------------- */
+/* Label and text sit in ONE grid so the labels line up down the block and a
+   long Hebrew catalogue string cannot push the label out of view. Collapses to
+   one column on the same 900px breakpoint the panes use. */
+.gs-discovery .readwrap{margin-block-start:6px}
+.gs-discovery .readbody{margin-block-start:6px;padding:9px 10px;
+  background:var(--bg-tertiary);border:1px solid var(--border-light);
+  border-radius:8px;max-height:340px;overflow:auto}
+.gs-discovery .rdrow{display:grid;grid-template-columns:170px 1fr;gap:10px;
+  padding-block:4px;border-block-end:1px solid var(--border-light)}
+.gs-discovery .rdrow:last-child{border-block-end:0}
+@media(max-width:900px){.gs-discovery .rdrow{grid-template-columns:1fr}}
+.gs-discovery .rdlab{font-size:11px;color:var(--text-secondary);
+  text-transform:uppercase;letter-spacing:.03em;padding-block-start:2px}
+.gs-discovery .rdtxt{font-size:13px;line-height:1.7;white-space:pre-wrap}
+/* The per-work count is dimmed when it is not about this manuscript, so the
+   eye does not read it as evidence for the row it is sitting on. */
+.gs-discovery .rdrow.weak .rdtxt{color:var(--text-secondary)}
+.gs-discovery .rdwarn{font-size:12px;line-height:1.6;margin-block-end:6px;
+  padding:6px 8px;border-radius:6px;border:1px solid var(--border-medium);
+  background:var(--bg-secondary)}
+.gs-discovery .fchip.warnchip{border-color:var(--border-medium);
+  color:var(--text-secondary)}
+
 /* --- private H: pane B, the folio preview -------------------------------- */
 .gs-discovery .prev{margin-block-start:10px;border:1px solid var(--border-light);
   border-radius:8px;overflow:hidden;background:var(--bg-tertiary);display:none}
@@ -1577,6 +1601,7 @@ function rowHtml(x){
     ${author}
     <div class="side gap-2 items-center flex-wrap">${shelf}</div>
     ${cat}
+    ${readBlock(x)}
     <div class="gs-findings-row-meta side items-center gap-2 flex-wrap">${m.join("")}</div>
     <div class="cols" id="txt-${id}">${panes(x)}</div>
     <div class="dnote" id="txtnote-${id}">${esc(DOCS["doc.ms_match_vs_ref_match"])}</div>
@@ -1601,6 +1626,90 @@ function panes(x){
               x.ms_before, x.ms_match, x.ms_after, false) +
          pane("ref", x.evidence_id, "Reference edition — " + x.corpus_label,
               x.ref_before, x.ref_match, x.ref_after, x.ref_is_stream);
+}
+// ---- pane C: what the novelty gate read, DEFAULT CLOSED ------------------
+// The row's "Catalogued as:" line is libraries.csv column 7 ALONE; the gate
+// judged on a combined catalogue text plus bibliography, PGP, FGP and an
+// M-source witness count, and on 83% of `confirms` rows the two differ -- so a
+// correct label looked absurd. Every string here is built server-side
+// (`_attach_gate`), including the corpus name, which is produced BY the
+// redaction map rather than trusted to already agree with it.
+function readBlock(x){
+  const id = x.evidence_id, r = x.read;
+  // The BUTTON carries the warning, because it is what a grader sees without
+  // expanding: a bundle resting on nothing but a per-work count must not be
+  // discoverable only by clicking.
+  let flag = "", body;
+  if (!r) {
+    flag = " — nothing: never put to the gate";
+    body = `<div class="dnote">This identification was never put to the novelty
+      gate (novelty <b>not_checked</b>), so there is nothing it read. The line
+      above is the catalogue title only.</div>`;
+  } else if (r.missing_table) {
+    flag = " — not available";
+    body = `<div class="dnote">The <code>gate_fact</code> table is not attached to
+      this review DB. Run <code>scripts/attach_gate_facts.py</code>.</div>`;
+  } else {
+    const parts = [];
+    if (r.nothing_else)
+      parts.push(`<div class="rdwarn">This identification rests on NOTHING about
+        this manuscript — only a count of the work's other witnesses, below.</div>`);
+    if (r.empty)
+      parts.push(`<div class="dnote">The gate found no catalogue, bibliography,
+        PGP or FGP text for this manuscript.</div>`);
+    (r.items || []).forEach(it => {
+      parts.push(`<div class="rdrow"><span class="rdlab">${esc(it.label)}</span>
+        <span class="rdtxt" dir="auto" style="unicode-bidi:isolate">${esc(it.text)}</span></div>`);
+    });
+    if (r.thin_title)
+      parts.push(`<div class="dnote">The row's “Catalogued as:” line shows only
+        <span dir="auto" style="unicode-bidi:isolate">${esc(r.thin_title)}</span> —
+        the gate read the fuller catalogue text above.</div>`);
+    if (r.msrc) {
+      // NOT about this manuscript unless a witness actually matched. Said in
+      // the LABEL, not buried in a footnote.
+      const lab = r.msrc.about_this_ms
+        ? esc(r.msrc.label) + " — this manuscript matched" +
+          (r.msrc.conf ? " (" + esc(r.msrc.conf) + " confidence)" : "")
+        : esc(r.msrc.label) + " — about the WORK, not this manuscript";
+      parts.push(`<div class="rdrow${r.msrc.about_this_ms?``:` weak`}">
+        <span class="rdlab">${lab}</span>
+        <span class="rdtxt" dir="auto" style="unicode-bidi:isolate">${esc(r.msrc.text)}</span></div>`);
+      if (!r.msrc.about_this_ms)
+        parts.push(`<div class="dnote">A per-work, count-only statement: how many
+          OTHER witnesses that corpus records for this work. Nothing tied this
+          manuscript to it.</div>`);
+    }
+    if (r.reason)
+      parts.push(`<div class="dnote">gate's own reason: <code>${esc(r.reason)}</code></div>`);
+    // The count is of sources ABOUT THIS MANUSCRIPT. A per-work witness count
+    // is named separately and never totted up with them -- adding it would put
+    // the "rests on nothing" rows at "1 source", which is the false impression
+    // this whole block exists to remove.
+    const n = (r.items || []).length;
+    if (r.nothing_else) flag = " — only a per-work count";
+    else if (r.empty) flag = " — nothing found";
+    else {
+      flag = " — " + n + (n === 1 ? " source" : " sources");
+      if (r.msrc) flag += r.msrc.about_this_ms
+        ? " + an " + r.msrc.label + " match" : " + a per-work count";
+    }
+    body = parts.join("");
+  }
+  const cls = (r && (r.nothing_else || !r.items || !r.items.length)) || !r
+    ? "fchip warnchip" : "fchip";
+  return `<div class="readwrap">
+    <button class="${cls}" id="rd-${esc(id)}" onclick="toggleRead('${escJs(id)}',this)"
+      >What the software read${esc(flag)}</button>
+    <div class="readbody" id="readb-${esc(id)}" style="display:none">${body}</div>
+  </div>`;
+}
+function toggleRead(id, btn){
+  const box = $("readb-" + id);
+  if (!box) return;
+  const hidden = box.style.display === "none";
+  box.style.display = hidden ? "block" : "none";
+  btn.classList.toggle("here", hidden);
 }
 function toggleText(id, btn){
   const box = $("txt-" + id), note = $("txtnote-" + id);
@@ -2313,6 +2422,117 @@ class Handler(BaseHTTPRequestHandler):
         d["corpus_label"] = corpus_label(d.pop("source_corpus", None))
         return d
 
+    # -- what the novelty gate actually read --------------------------------
+    #
+    # THE BUG THIS CLOSES. The row's "Catalogued as:" line is `libraries.csv`
+    # column 7 and nothing else, but the gate judged on a COMBINED catalogue
+    # text plus bibliography, PGP, FGP and an M-source witness count. On 83% of
+    # `confirms` rows the displayed title differs from what was read, so a
+    # CORRECT label looks absurd. `gate_fact` (attached by
+    # scripts/attach_gate_facts.py) carries the gate's own inputs, and this
+    # joins them onto the 25 rows ON SCREEN only -- filters, facets and counts
+    # still run entirely on the slim `facet_row`, which is the whole reason
+    # this tool stays fast.
+    _GATE_SOURCES = (
+        ("gate_catalogue", "catalogue"),
+        ("bib_text", "bibliography"),
+        ("pgp_text", "PGP"),
+        ("fgp_text", "FGP"),
+    )
+    # `gate_fact` is ADDITIVE and may simply not be there (an older review DB,
+    # or the attach script never run). Resolved once per process; a missing
+    # table degrades to a block that says so, never to a 500 on the rows
+    # endpoint -- the grading tool must keep painting.
+    _gate_table = None
+
+    def _has_gate(self, con):
+        if Handler._gate_table is None:
+            Handler._gate_table = bool(self._query(
+                con, "rows.gate_probe",
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='gate_fact'").fetchone())
+        return Handler._gate_table
+
+    @staticmethod
+    def _route_corpus_mentions(text):
+        """Every corpus name in gate text goes out through `corpus_label()`.
+
+        The stored codename is already the masked one, so this is a no-op on
+        today's data -- which is the point: the rendered string is produced BY
+        the redaction map rather than merely believed to agree with it, so a
+        source that ever ships a raw name cannot reach the browser unnoticed.
+        """
+        label = corpus_label("msource")
+        out = str(text or "")
+        for token in ("M-source", "M-SOURCE", "m-source"):
+            out = out.replace(token, label)
+        return out
+
+    def _attach_gate(self, con, rows):
+        """Hang the gate's own evidence on each payload as `read`.
+
+        `read` is None when the pair was never put to the gate (novelty
+        `not_checked`); the client says that plainly rather than drawing an
+        empty block.
+        """
+        for d in rows:
+            d["read"] = None
+        if not self._has_gate(con):
+            for d in rows:
+                d["read"] = {"missing_table": True}
+            return
+        pairs, params, clauses = [], [], []
+        for d in rows:
+            key = (d.get("sys_id"), d.get("work_id"))
+            if key in pairs or not key[0]:
+                continue
+            pairs.append(key)
+            clauses.append("(sys_id = ? AND ref_work_id = ?)")
+            params.extend(key)
+        if not pairs:
+            return
+        got = {}
+        for x in self._query(
+                con, "rows.gate",
+                "SELECT * FROM gate_fact WHERE " + " OR ".join(clauses),
+                params).fetchall():
+            got[(x["sys_id"], x["ref_work_id"])] = x
+        for d in rows:
+            x = got.get((d.get("sys_id"), d.get("work_id")))
+            if x is None:
+                continue
+            items = []
+            for col, label in self._GATE_SOURCES:
+                text = (x[col] or "").strip()
+                if text:
+                    items.append({"label": label,
+                                  "text": self._route_corpus_mentions(text)})
+            read = {"items": items, "reason": x["heuristic_reason"] or ""}
+            # The thin title is worth naming ONLY when it differs from what was
+            # read -- that difference IS the bug the block exists to explain.
+            thin = (x["displayed_title"] or "").strip()
+            combined = (x["gate_catalogue"] or "").strip()
+            read["thin_title"] = thin if (thin and thin != combined) else ""
+            msrc = (x["msrc_text"] or "").strip()
+            if msrc:
+                # PER-WORK and COUNT-ONLY. `witness_conf IS NULL` means nothing
+                # tied THIS manuscript to that corpus -- the line is then not
+                # about this manuscript at all, and 725 `confirms` rows rest on
+                # nothing else. Both facts travel with the text, never inferred
+                # in the client.
+                read["msrc"] = {
+                    "text": self._route_corpus_mentions(msrc),
+                    "label": corpus_label("msource"),
+                    "about_this_ms": x["witness_conf"] is not None,
+                    "conf": x["witness_conf"] or "",
+                }
+            else:
+                read["msrc"] = None
+            read["nothing_else"] = bool(
+                not items and read["msrc"] and not read["msrc"]["about_this_ms"])
+            read["empty"] = not items and not read["msrc"]
+            d["read"] = read
+
     # -- facets ------------------------------------------------------------
     def _facets(self, con, q):
         out = {}
@@ -2518,6 +2738,8 @@ class Handler(BaseHTTPRequestHandler):
                     d["grade"] = d.get("grade") or ""
                     d["note"] = d.get("note") or ""
                     rows.append(d)
+                # ONE extra query, for the 25 addresses already on screen.
+                self._attach_gate(con, rows)
             graded_total = self._query(
                 con, "rows.graded_total",
                 "SELECT COUNT(*) AS c FROM g.human_grade WHERE "
