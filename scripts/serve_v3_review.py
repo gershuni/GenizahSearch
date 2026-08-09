@@ -1,6 +1,6 @@
 """Local review server over the full v3 quote-identification DB.
 
-WHY A SERVER AND NOT A PAGE. The review set is ~194,000 rows carrying both
+WHY A SERVER AND NOT A PAGE. The review set is 254,612 rows carrying both
 sides of every match; as one HTML file that is over a gigabyte and no browser
 opens it. So the DB stays a DB and this serves slices of it. Stdlib only
 (`http.server` + `sqlite3`) -- a teammate needs the DB, this file, and Python.
@@ -587,6 +587,67 @@ def _port_is_taken(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+FACET_COLS = ("evidence_id", "sys_id", "shelfmark", "domain", "work_id",
+              "work_title", "work_author", "novelty_status", "main_pool",
+              "claim_type", "router_verdict", "routing_status")
+
+
+def ensure_facet_table(db_path, say=print):
+    """Make sure the DB carries a current slim facet projection. Returns its rows.
+
+    A SLIM TABLE FOR FACETS. Each review_row carries ~6 KB of both-sides text, so
+    ANY facet scan drags that payload through memory for columns it never reads --
+    which is why a filtered facets call still took seconds even with the right
+    indexes. This projection is the filterable columns only (~40 MB against
+    1.4 GB), so a facet scan touches a fraction of the data.
+
+    Done here rather than only in the builder so an artifact already on a
+    teammate's disk gains it without a 1.5 GB rebuild; it is a cache, and dropping
+    it costs only speed.
+    """
+    con = sqlite3.connect(db_path)
+    try:
+        # ENSURE INDEXES. `routing_status` had none, and its GROUP BY cost ~1s per
+        # facet over 254,612 rows -- seven facets made the response slow enough for
+        # the browser to cancel it, which is what left every dropdown empty.
+        for name, col in (("ix_rr_routing", "routing_status"),
+                          ("ix_rr_band", "confidence_band")):
+            try:
+                con.execute("CREATE INDEX IF NOT EXISTS %s ON review_row(%s)"
+                            % (name, col))
+            except sqlite3.OperationalError:
+                pass          # older artifact without the column -- not fatal
+
+        have = con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                           "AND name='facet_row'").fetchone()[0]
+        if have:
+            same = (con.execute("SELECT COUNT(*) FROM facet_row").fetchone()[0] ==
+                    con.execute("SELECT COUNT(*) FROM review_row").fetchone()[0])
+            # ALSO CHECK THE COLUMNS, not just the row count. A facet_row built by
+            # an older copy of this script has no `router_verdict` -- the relation
+            # axis every filter and chip now reads -- and a row-count check calls
+            # that table current. It would serve, and the relation filter would be
+            # silently dead, which is precisely the failure this artifact was
+            # shipped to a teammate to avoid.
+            cols = {r[1] for r in con.execute("PRAGMA table_info(facet_row)")}
+            if not same or not set(FACET_COLS) <= cols:
+                con.execute("DROP TABLE facet_row")     # stale against a rebuild
+                have = 0
+        if not have:
+            say("facets    : building the facet index table (one time)...")
+            con.execute("CREATE TABLE facet_row AS SELECT %s FROM review_row"
+                        % ", ".join(FACET_COLS))
+            for col in ("domain", "work_id", "work_author", "novelty_status",
+                        "main_pool", "claim_type", "router_verdict",
+                        "routing_status", "evidence_id"):
+                con.execute("CREATE INDEX ix_fr_%s ON facet_row(%s)" % (col, col))
+        n = con.execute("SELECT COUNT(*) FROM facet_row").fetchone()[0]
+        con.commit()
+        return n
+    finally:
+        con.close()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=os.path.join(
@@ -599,46 +660,8 @@ def main(argv=None) -> int:
     if not os.path.exists(args.db):
         raise SystemExit("review DB not found: %s" % args.db)
     Handler.db_path = args.db
-    # ENSURE INDEXES. `routing_status` had none, and its GROUP BY cost ~1s per
-    # facet over 254,612 rows -- seven facets made the response slow enough for
-    # the browser to cancel it, which is what left every dropdown empty. Created
-    # here rather than only in the builder so an existing 1.4 GB artifact does
-    # not have to be rebuilt for an index.
-    _ix = sqlite3.connect(args.db)
-    for name, col in (("ix_rr_routing", "routing_status"),
-                      ("ix_rr_band", "confidence_band")):
-        try:
-            _ix.execute("CREATE INDEX IF NOT EXISTS %s ON review_row(%s)" % (name, col))
-        except sqlite3.OperationalError:
-            pass          # older artifact without the column -- not fatal
-
-    # A SLIM TABLE FOR FACETS. Each review_row carries ~6 KB of both-sides text,
-    # so ANY facet scan drags that payload through memory for columns it never
-    # reads -- which is why a filtered facets call still took seconds even with
-    # the right indexes. This projection is the filterable columns only (~40 MB
-    # against 1.4 GB), so a facet scan touches a fraction of the data.
-    # Derived here rather than only in the builder so an existing artifact gains
-    # it without a rebuild; it is a cache, and dropping it costs only speed.
-    have = _ix.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
-                       "AND name='facet_row'").fetchone()[0]
-    if have:
-        same = (_ix.execute("SELECT COUNT(*) FROM facet_row").fetchone()[0] ==
-                _ix.execute("SELECT COUNT(*) FROM review_row").fetchone()[0])
-        if not same:
-            _ix.execute("DROP TABLE facet_row")     # stale against a rebuild
-            have = 0
-    if not have:
-        print("facets    : building the facet index table (one time)...", flush=True)
-        _ix.execute("""CREATE TABLE facet_row AS SELECT
-                         evidence_id, sys_id, shelfmark, domain, work_id,
-                         work_title, work_author, novelty_status, main_pool,
-                         claim_type, routing_status FROM review_row""")
-        for col in ("domain", "work_id", "work_author", "novelty_status",
-                    "main_pool", "claim_type", "routing_status", "evidence_id"):
-            _ix.execute("CREATE INDEX ix_fr_%s ON facet_row(%s)" % (col, col))
-    _fr = _ix.execute("SELECT COUNT(*) FROM facet_row").fetchone()[0]
-    _ix.commit()
-    _ix.close()
+    _fr = ensure_facet_table(args.db,
+                             say=lambda m: print(m, flush=True))
 
     port = args.port
     if _port_is_taken(port):
