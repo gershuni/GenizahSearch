@@ -81,14 +81,15 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  .pager{display:flex;gap:8px;justify-content:center;padding:16px}
 </style></head><body>
 <header><div class="filters">
- <select id="domain"><option value="">domain: all</option></select>
- <select id="author"><option value="">author: all</option></select>
- <select id="work"><option value="">work: all</option></select>
- <select id="novelty"><option value="">novelty: all</option></select>
- <select id="graded"><option value="">graded: any</option>
+ <select id="domain" onchange="load(0)"><option value="">domain: all</option></select>
+ <select id="author" onchange="load(0)"><option value="">author: all</option></select>
+ <select id="work" onchange="load(0)"><option value="">work: all</option></select>
+ <select id="novelty" onchange="load(0)"><option value="">novelty: all</option></select>
+ <select id="graded" onchange="load(0)"><option value="">graded: any</option>
    <option value="no">ungraded only</option><option value="yes">graded only</option></select>
- <input id="q" placeholder="shelfmark contains…" size="16">
- <button onclick="load(0)">Apply</button>
+ <input id="q" placeholder="shelfmark contains…" size="16"
+        oninput="typed()" onkeydown="if(event.key==='Enter')load(0)">
+ <button onclick="reset()">Reset</button>
  <button onclick="exportGrades()">Export grades</button>
  <span class="count" id="count"></span>
 </div></header>
@@ -116,9 +117,17 @@ async function facets(){
   for (const [id,key] of [["domain","domains"],["author","authors"],
                           ["work","works"],["novelty","novelty"]]) {
     const cur = $(id).value;
-    $(id).innerHTML = `<option value="">${id}: all</option>` +
-      f[key].map(([v,n]) => `<option value="${esc(v)}"${v===cur?" selected":""}>`
-        + `${esc(v||"(none)")} (${n.toLocaleString()})</option>`).join("");
+    // The facet lists are themselves filtered, so narrowing one control can drop
+    // the CURRENT selection of another out of its list. Re-adding it keeps the
+    // filter you set from disappearing out from under you -- otherwise the
+    // control silently reverts to "all" and the row count jumps with no cause
+    // the reader can see.
+    let opts = f[key].map(([v,lab,n]) =>
+      `<option value="${esc(v)}"${v===cur?" selected":""}>`
+      + `${esc(lab||v||"(none)")} (${n.toLocaleString()})</option>`);
+    if (cur && !f[key].some(([v]) => v === cur))
+      opts.unshift(`<option value="${esc(cur)}" selected>${esc(cur)} (0 here)</option>`);
+    $(id).innerHTML = `<option value="">${id}: all</option>` + opts.join("");
   }
 }
 function pane(title, b, m, a, isStream){
@@ -195,6 +204,16 @@ async function grade(id, val, btn){
   [...row.querySelectorAll("button")].forEach(b => b.classList.remove("sel"));
   if (val) btn.classList.add("sel");
 }
+
+// Choosing a filter APPLIES it. An Apply button made every change a two-step
+// action and, worse, let the controls show a state the rows below did not match.
+// The text box debounces so a shelfmark search does not fire a query per keystroke.
+let typeTimer = null;
+function typed(){ clearTimeout(typeTimer); typeTimer = setTimeout(() => load(0), 300); }
+function reset(){
+  for (const k of ["domain","author","work","novelty","graded","q"]) $(k).value = "";
+  load(0);
+}
 function next(){ if (off + 25 < total) load(off + 25); }
 function prev(){ if (off > 0) load(Math.max(0, off - 25)); }
 function exportGrades(){ window.location = "/api/export"; }
@@ -257,17 +276,24 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/facets":
             out = {}
-            for key, col in (("domains", "domain"), ("authors", "work_author"),
-                             ("works", "work_title"), ("novelty", "novelty_status")):
+            # (key, VALUE column, LABEL column). The value is what the filter
+            # compares; the label is what the reader picks. They differ for works
+            # and MUST NOT be conflated -- the first version listed work TITLES
+            # while the filter compared work_id, so choosing any work returned
+            # zero rows. Nothing failed; the two were simply never the same string.
+            for key, valcol, labcol in (("domains", "domain", "domain"),
+                                        ("authors", "work_author", "work_author"),
+                                        ("works", "work_id", "work_title"),
+                                        ("novelty", "novelty_status", "novelty_status")):
                 # NO SILENT CAP. The first version stopped at 400 and the corpus
                 # has 1,269 works, so a third of them were simply absent from the
                 # "select a work" control with nothing saying so -- a filter that
                 # cannot reach a third of its own domain. Facet lists are small
                 # (tens of domains/authors), so they are returned whole.
                 rows = con.execute(
-                    "SELECT r.%s AS v, COUNT(*) n FROM review_row r %s %s "
-                    "GROUP BY 1 ORDER BY n DESC" % (col, join, where), pr).fetchall()
-                out[key] = [[x["v"], x["n"]] for x in rows]
+                    "SELECT r.%s AS v, MAX(r.%s) AS lab, COUNT(*) n FROM review_row r %s %s "
+                    "GROUP BY 1 ORDER BY n DESC" % (valcol, labcol, join, where), pr).fetchall()
+                out[key] = [[x["v"], x["lab"], x["n"]] for x in rows]
             return self._send(out)
 
         if u.path == "/api/rows":
