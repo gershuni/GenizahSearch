@@ -1722,6 +1722,76 @@ records. The flip rate there cannot currently be measured.
 
 ---
 
+## 7f. The novelty run RAN, and the fingerprint gate is armed for the first time (2026-08-09)
+
+Commit `354e5ead`. **$42.28** real spend, 5,659 calls, **67,079 of 67,079** shipped `(manuscript, work)` pairs
+judged at the v3 grain, 2 retries out of 5,659. The re-assembled asset (`content_hash=d62ee5a2`, was
+`de7896c3`) records `novelty_input_fingerprint_checked=1` with **67,079 fingerprint-OK / 0 mismatched /
+0 unfingerprinted / 0 failed-closed**. §7d's assembly ran the v2-era cache under
+`--novelty-allow-unfingerprinted-cache`; that waiver is gone, and a v3 build no longer needs it.
+
+**Verdicts:** 24,133 `confirms`, 17,482 `diverges_work`, 9,871 `fills_gap`, 6,580 `refines_granularity`,
+4,067 `aid_more_specific`, 3,936 `container_predicts`, 500 `not_checked`, 492 `diverges_part`, 9 `extends`,
+9 `alias_merge`.
+
+### The price probe, and why a smoke could not have answered it
+
+§7d recorded the measured price as `$40–110`. A 30-case smoke put it at `$0.0021`/case → **~$119**, against a
+~$41 authorization. Rather than spend 3× the quote or abandon the run on a 3-call sample, a **$5 hard-ceiling
+probe** priced 6,710 real cases at **$0.000745** — 1.03× the historical rate — projecting $42.16 against an
+actual **$42.28**, 0.3% out.
+
+The smoke was unrepresentative in a specific, repeatable way: **cost per case declines across the run**
+($0.00093 → $0.00061 by quarter). Any short prefix over-projects. Price this gate from a ceiling-bounded
+probe, never from a smoke. The checkpoint makes that free — a resumed run re-bills nothing.
+
+### The gate had no producer
+
+`--novelty-input-fingerprints` was specified in §1 (D-25/Codex R3) and **unimplementable**: nothing in the
+tree emitted the file, so the named waiver was the only way to supply a cache at all. New:
+`scripts/emit_novelty_input_fingerprints.py`.
+
+It recomputes fingerprints from the **build's own inputs** — never from the verdict file's own stamped
+`input_fingerprint` values, which would compare a file against itself and pass by construction. It emits
+**flat** `{key: fingerprint}`, the one shape `_load_novelty_fingerprints` accepts; the first draft wrapped the
+map in a provenance envelope that its only consumer rejects, and nothing would have caught that until a
+full-corpus build failed at the end. Provenance therefore travels in a companion `.meta.json`.
+
+The witness map is **required** to emit (override: `--allow-no-witnesses`), and the production runner now
+**refuses** to run without it. Without the map a run buys ~900 verdicts the funnel resolves for free and
+computes the rest blind to a field that is IN the fingerprint — producing a population that does not match the
+one that was measured and priced.
+
+### Mutation-proved, both halves
+
+* Emitting **witness-blind** flips **8,125 of 67,079** pairs to MISMATCH — so the fingerprint demonstrably
+  carries the recorded-witness field, and the emitter's verify path can report mismatch.
+* Removing `known_witness_confidence` from `CACHE_KEY_FIELDS` collapses blind/high/low to **one** fingerprint
+  and turns the new tests red.
+
+The second closes a real hole. Every pre-existing per-field test in the gate-13 suite derives its expectation
+from what `render_batch` **sends** — and this field is never rendered, because a high-confidence recorded
+witness is resolved by the heuristic funnel and the model is never called. It changes the ANSWER without
+changing the PROMPT, so `test_the_fingerprint_covers_every_field_render_case_sends` skips it (its assertion is
+guarded on `prompt_changed`). Deleting the field would have passed the entire suite while making $42.28 of
+verdicts reusable against a question they did not answer.
+
+### Coverage is complete, not merely large
+
+| routing_status | pairs | rows | `not_checked` |
+|---|---|---|---|
+| **shipped** | **67,079** | 193,993 | 1,329 |
+| review_only | 62,801 | 103,422 | 64,693 |
+
+Shipped distinct pairs **= 67,079 = exactly** the population fingerprinted and judged. The remaining
+`not_checked` rows are `review_only` — never presented as discoveries, so correctly unjudged rather than
+silently skipped. `frame_content_hash` is **byte-identical** across the two assemblies (`dc15864d`), proving
+the novelty axis was the only thing that moved; `evidence_id_collisions` unchanged at 187.
+
+**Not deployed.** Local build; `discovery_data/manifest.json` untouched, `DISCOVERY_ENABLED` still unset.
+
+---
+
 ## 8. Owner questions
 
 > **✅ CODEX APPROVED 2026-08-07, round 9** — `VERDICT: APPROVE`, recorded verbatim in
