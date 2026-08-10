@@ -15,6 +15,7 @@ from shared.discovery_locus import (
     PIECE_SEP,
     RANGE_SEP,
     amud_ordinal,
+    citation_runs,
     citation_seq_for_daf,
     compress_pieces,
     daf_label_he,
@@ -238,6 +239,77 @@ class TestCitationOrderIsNotTableOrder:
     def test_a_reversed_range_is_refused_rather_than_reordered(self):
         with pytest.raises(ValueError):
             split_at_citation_breaks(3, 1, self.SEQ)
+
+
+class TestCitationRuns:
+    """Rendering from citation positions rather than table ordinals.
+
+    Berakhot's real shape: the edition revisits נו ע"ב and נז ע"א, so four table
+    units name only two folios.
+    """
+
+    BERAKHOT = [(57, 1), (56, 2), (57, 1), (56, 2)]
+    SEQ = citation_seq_for_daf(BERAKHOT)
+    #: citation position -> label, which is what a citation-space render indexes
+    LABEL_AT = {p: daf_label_he(d, a) for p, (d, a) in zip(SEQ, BERAKHOT)}
+
+    def test_the_same_folio_visited_twice_is_cited_once(self):
+        runs, unplaced = citation_runs([(0, 3)], self.SEQ)
+        assert unplaced == []
+        assert render_ranges(runs, self.LABEL_AT) == 'נו ע"ב–נז ע"א'
+
+    def test_rendering_from_ordinals_would_have_repeated_the_folios(self):
+        """The defect, proven able to fail -- honest about the pieces, unreadable
+        as a citation."""
+        labels = [daf_label_he(d, a) for d, a in self.BERAKHOT]
+        by_ordinal = render_ranges(compress_pieces([(0, 3)], self.SEQ), labels)
+        assert by_ordinal == 'נז ע"א; נו ע"ב–נז ע"א; נו ע"ב'
+        assert render_ranges(*citation_runs([(0, 3)], self.SEQ)[:1], self.LABEL_AT) != by_ordinal
+
+    def test_a_genuine_gap_is_still_a_gap_in_citation_space(self):
+        """Folding to a set must not become folding to a hull."""
+        seq = citation_seq_for_daf([(2, 1), (2, 2), (9, 1)])
+        labels = {p: daf_label_he(d, a) for p, (d, a) in zip(seq, [(2, 1), (2, 2), (9, 1)])}
+        runs, _ = citation_runs([(0, 2)], seq)
+        assert render_ranges(runs, labels) == 'ב ע"א–ב ע"ב; ט ע"א'
+
+    def test_taking_the_hull_would_have_claimed_seven_unwitnessed_folios(self):
+        """The defect, proven able to fail."""
+        seq = citation_seq_for_daf([(2, 1), (2, 2), (9, 1)])
+        places = [p for p in seq if p is not None]
+        hull = [(min(places), max(places))]
+        assert hull == [(4, 18)]
+        assert citation_runs([(0, 2)], seq)[0] == [(4, 5), (18, 18)]
+
+    def test_a_unit_with_no_citation_position_is_reported_not_dropped(self):
+        seq = citation_seq_for_daf([(5, 1), (None, 1)])
+        runs, unplaced = citation_runs([(0, 1)], seq)
+        assert unplaced == [1]
+        assert runs == [(10, 10)]
+
+    def test_an_inversion_folds_away_because_position_order_is_the_only_order(self):
+        runs, _ = citation_runs([(0, 3)], citation_seq_for_daf(
+            [(93, 2), (94, 1), (63, 2), (64, 1)]))
+        assert runs == [(127, 128), (187, 188)]
+
+    def test_a_reversed_piece_is_refused(self):
+        with pytest.raises(ValueError):
+            citation_runs([(3, 1)], self.SEQ)
+
+
+class TestRenderRangesLabelLookup:
+    def test_a_missing_citation_position_is_refused_rather_than_guessed(self):
+        with pytest.raises(IndexError):
+            render_ranges([(4, 4)], {5: "ה"})
+
+    def test_a_negative_key_does_not_wrap_round_to_the_end_of_the_work(self):
+        """On a list, -1 would silently cite the work's last unit."""
+        with pytest.raises(IndexError):
+            render_ranges([(-1, -1)], ["א", "ב", "ג"])
+
+    def test_a_reversed_range_is_refused(self):
+        with pytest.raises(ValueError):
+            render_ranges([(3, 1)], ["א", "ב", "ג", "ד"])
 
 
 class TestCitationSeqForDaf:

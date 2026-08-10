@@ -28,6 +28,7 @@ __all__ = [
     "units_for_span",
     "compress_pieces",
     "split_at_citation_breaks",
+    "citation_runs",
     "citation_seq_for_daf",
     "render_ranges",
     "select_locus_work",
@@ -392,8 +393,69 @@ def citation_seq_for_daf(
     return out
 
 
-def render_ranges(ranges: Sequence[Tuple[int, int]], labels: Sequence[str]) -> str:
-    """Runs of unit ordinals -> the displayed citation, e.g. ``ב–יא; טו–לב``.
+def citation_runs(
+    pieces: Iterable[Tuple[int, int]], citation_seq: Sequence[Optional[int]]
+) -> Tuple[List[Tuple[int, int]], List[int]]:
+    """Unit-ordinal ranges -> the runs of CITATION POSITIONS they witness.
+
+    Returns ``(runs, unplaced)``: merged inclusive runs in citation space, and the
+    ordinals of any units that carry no citation position, which are reported rather
+    than dropped so the caller can decide (they must never be silently swallowed).
+
+    THE INDEX IS IN ORDINAL SPACE; THE CITATION IS NOT. An ordinal identifies a
+    place in the table, and a table can visit the same folio twice -- 46 of 87
+    marker-bearing works do, 495 repeated units in all, because the edition's
+    arrangement revisits a folio the printed foliation only numbers once. Rendering
+    from ordinals then hands the reader `נז ע"א; נו ע"ב–נז ע"א; נו ע"ב`: honest about
+    the pieces, and unreadable as a citation.
+
+    A reader asks which folios the fragment witnesses. Two table units on the same
+    folio are ONE answer to that question, so the render folds to the set of
+    positions touched and merges what is genuinely consecutive there -- `נו ע"ב–נז
+    ע"א`. Nothing is lost: `discovery_locus_piece` still stores the exact ordinals,
+    so the part filter keeps answering at full resolution while the printed citation
+    reads the way a citation reads.
+    """
+    positions = set()
+    unplaced: List[int] = []
+    for lo, hi in pieces:
+        if hi < lo:
+            raise ValueError(f"piece ({lo}, {hi}) has its ends reversed")
+        for ordinal in range(lo, hi + 1):
+            place = citation_seq[ordinal]
+            if place is None:
+                unplaced.append(ordinal)
+            else:
+                positions.add(place)
+    runs: List[Tuple[int, int]] = []
+    for place in sorted(positions):
+        if runs and place == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], place)
+        else:
+            runs.append((place, place))
+    return runs, sorted(set(unplaced))
+
+
+def _label_at(labels, key: int) -> str:
+    """Look a label up by ordinal or by citation position, refusing a miss.
+
+    `labels` is a list when the caller renders from ordinals and a mapping when it
+    renders from citation positions. A negative key is refused explicitly: on a list
+    it would silently wrap round and cite the wrong end of the work.
+    """
+    if key < 0:
+        raise IndexError(f"{key} is not a label key")
+    try:
+        return labels[key]
+    except (KeyError, IndexError):
+        raise IndexError(f"no label for {key}") from None
+
+
+def render_ranges(ranges: Sequence[Tuple[int, int]], labels) -> str:
+    """Runs -> the displayed citation, e.g. ``ב–יא; טו–לב``.
+
+    `labels` is indexed by whatever space `ranges` is in: a sequence keyed by unit
+    ordinal, or a mapping keyed by citation position (see `citation_runs`).
 
     Labels are emitted verbatim from the source's own Hebrew numerals. Nothing here
     wraps the result in brackets or parentheses: the surface envelope rejects a
@@ -402,9 +464,10 @@ def render_ranges(ranges: Sequence[Tuple[int, int]], labels: Sequence[str]) -> s
     """
     out = []
     for lo, hi in ranges:
-        if not (0 <= lo < len(labels)) or not (0 <= hi < len(labels)):
-            raise IndexError(f"range ({lo}, {hi}) falls outside {len(labels)} units")
-        out.append(labels[lo] if lo == hi else f"{labels[lo]}{RANGE_SEP}{labels[hi]}")
+        if hi < lo:
+            raise ValueError(f"range ({lo}, {hi}) has its ends reversed")
+        head, tail = _label_at(labels, lo), _label_at(labels, hi)
+        out.append(head if lo == hi else f"{head}{RANGE_SEP}{tail}")
     return PIECE_SEP.join(out)
 
 
