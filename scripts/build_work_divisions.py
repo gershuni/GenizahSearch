@@ -1421,6 +1421,19 @@ def build_ja_pages(
     positions = [(_as_int(number, -1), stream_offset_for_raw(offsets, raw_pos))
                  for number, raw_pos in page_starts]
 
+    # A SECTION THAT OPENS MID-PAGE IS ITS OWN PLACE. The chain used to be sampled at
+    # the page START alone, so every letter after a mid-page marker was published under
+    # the PREVIOUS section's name -- and nothing about that output looks wrong: the page
+    # number is right, the offsets are right, and the reader is told the wrong פצל. The
+    # scholar audit found it twice, both times by pointing at the marker visible in the
+    # quoted text. Measured across the family: 2,858 of 14,885 pages hold such a change
+    # and 1,482,431 letters sat after one.
+    #
+    # So a page contributes one unit per section it holds text of, each keeping the
+    # page's own number, because both halves really are on that page. A marker whose
+    # bound chain equals the one already in force is NOT a new place (3 in the corpus):
+    # splitting there would manufacture two identical labels for `_disambiguate_labels`
+    # to number, which reads as an edition revisiting a page.
     units: List[Unit] = []
     parts_at: Dict[int, List[str]] = {}
     for index, (page, start) in enumerate(positions):
@@ -1429,12 +1442,23 @@ def build_ja_pages(
             continue
         section_index = bisect.bisect_right(section_offsets, start) - 1
         parts = sections[section_index][1] if section_index >= 0 else []
-        parts_at.setdefault(start, list(parts))
-        label = ", ".join(list(parts) + [f"עמ' {page}"])
-        # The printed page IS an address system, and the ascending check below
-        # guarantees no two units claim one page.
-        units.append(Unit(len(units), start, f"page:{page}", label, None,
-                          (f"page:{page}",)))
+        places: List[Tuple[int, List[str]]] = [(start, list(parts))]
+        for offset, inner in sections[section_index + 1:]:
+            if offset >= end:
+                break
+            if inner != places[-1][1]:
+                places.append((offset, list(inner)))
+        for place_start, place_parts in places:
+            parts_at.setdefault(place_start, list(place_parts))
+            label = ", ".join(list(place_parts) + [f"עמ' {page}"])
+            # The stated address is page AND section, as ONE level. It has to
+            # distinguish two halves of a page or the label gate has nothing to
+            # compare and a shed collapsing them would go green; and it has to stay one
+            # level, because the boundary gate reads element 0 as a containing division
+            # -- and for a page grain there is none. A range across a section boundary
+            # is an ordinary page citation, not a boundary a fragment never crossed.
+            units.append(Unit(len(units), place_start, f"page:{page}", label, None,
+                              (f"page:{page}|{', '.join(place_parts)}",)))
 
     units = _dedupe_ascending(units)
     if not units:
@@ -1446,8 +1470,17 @@ def build_ja_pages(
     # produced `מנחות צד ע"א–סג ע"ב` from exactly this assumption going unchecked,
     # and there the numbering came from the same kind of source. An edition that does
     # not ascend falls back to the marker grain rather than shipping a bad range.
+    #
+    # A TIE IS ADMITTED FOR EXACTLY ONE REASON: the two units are two sections of one
+    # page, which is what the split above emits by construction. The same page twice
+    # under the same section is still the repeat this check exists to refuse. Without
+    # the relaxation the split would send every one of the 79 works holding a mid-page
+    # change to the weaker marker grain -- a silent, total regression dressed as a
+    # fail-closed.
     numbers = [_as_int(u.part_key.split(":", 1)[1], -1) for u in units]
-    if any(b <= a for a, b in zip(numbers, numbers[1:])):
+    places = list(zip(numbers, (tuple(parts_at.get(u.start, [])) for u in units)))
+    if any(b < a or (b == a and pb == pa)
+           for (a, pa), (b, pb) in zip(places, places[1:])):
         return None
 
     # ONE shed depth for the whole work, decided last so it runs over the units that

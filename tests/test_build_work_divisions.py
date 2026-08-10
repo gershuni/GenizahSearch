@@ -12,6 +12,7 @@ rather than asserted.
 """
 from __future__ import annotations
 
+import bisect
 import collections
 import json
 import os
@@ -31,9 +32,11 @@ from scripts.build_work_divisions import (
     _daf_units,
     _is_foreign_label,
     _dedupe_ascending,
+    _ja_divisions,
     _ja_flattens,
     _ja_keep,
     _ja_resurfaces,
+    _marker_label,
     _msource_files,
     _source_title_key,
     _split_divisions,
@@ -62,6 +65,7 @@ from shared.discovery_locus import (
     citation_runs,
     norm_stream,
     parse_canonical_header,
+    stream_offset_for_raw,
     render_ranges,
     shorten_range_tail,
 )
@@ -937,6 +941,93 @@ class TestBuildJaPages:
         built = build_ja_pages(path, ref_id, shipped, source)
         assert built.units[0].label_he == "עמ' 1"
         assert built.units[1].label_he == "פרק א, עמ' 2"
+
+    # -- the section a page CONTAINS a change of -------------------------------
+
+    #: A new section opening halfway down a page. The audit found it twice --
+    #: *"it's פצל ד - see in the text"* and *"it's +91.~ +[פ,~ +לו]~ as you can see"*
+    #: -- and both notes point at the marker the reader can see in the quoted text.
+    MID_PAGE = [
+        ("9", [(1, "+פרק~ +א~"), (2, "פתיחת הפרק")]),
+        ("10", [(1, "סוף הפרק"), (2, "+פרק~ +ב~"), (3, "תחילת הבא")]),
+        ("11", [(1, "המשך")]),
+    ]
+
+    def test_a_section_opening_MID_PAGE_is_its_own_place(self, tmp_path):
+        """The page number is right and the section name was not. It was sampled at
+        the page START, so everything after a mid-page marker carried the PREVIOUS
+        section's name -- 19.2% of the family's 14,885 pages, and 1,482,431 letters."""
+        path, ref_id, shipped, source = self._write(tmp_path, self.MID_PAGE)
+        built = build_ja_pages(path, ref_id, shipped, source)
+        assert [u.label_he for u in built.units] == [
+            "פרק א, עמ' 9", "פרק א, עמ' 10", "פרק ב, עמ' 10", "פרק ב, עמ' 11"]
+        assert [u.part_key for u in built.units] == [
+            "page:9", "page:10", "page:10", "page:11"]
+
+    def test_sampling_at_the_page_start_named_the_wrong_section(self, tmp_path):
+        """PROVEN ABLE TO FAIL: the shipped bisect, re-run locally over the same
+        sections. Nothing about its output looks wrong -- every offset is right, the
+        page number is right, and the reader is told the wrong פרק."""
+        path, ref_id, shipped, source = self._write(tmp_path, self.MID_PAGE)
+        built = build_ja_pages(path, ref_id, shipped, source)
+        rebuilt, page_starts = ja_reconstruct(
+            source[_source_title_key(self.TITLE)], self.TITLE)
+        _, offsets = norm_stream(rebuilt)
+        sections = [(stream_offset_for_raw(offsets, pos), _marker_label(kind, numeral))
+                    for pos, kind, numeral in _ja_divisions(rebuilt)]
+        starts = [o for o, _ in sections]
+
+        def at_page_start(page, start):
+            index = bisect.bisect_right(starts, start) - 1
+            return f"{sections[index][1]}, עמ' {page}" if index >= 0 else f"עמ' {page}"
+
+        pages = [(number, stream_offset_for_raw(offsets, pos))
+                 for number, pos in page_starts]
+        old = [at_page_start(number, start) for number, start in pages]
+        assert old == ["פרק א, עמ' 9", "פרק א, עמ' 10", "פרק ב, עמ' 11"]
+        # page 10 holds text of BOTH פרקים and was published entirely under `פרק א`
+        assert "פרק ב, עמ' 10" not in old
+        assert "פרק ב, עמ' 10" in [u.label_he for u in built.units]
+
+    def test_the_split_halves_are_two_places_to_the_gate(self, tmp_path):
+        """Two units on one page must record two stated addresses, or the label gate
+        has nothing to compare and a shed that collapsed them would go green."""
+        path, ref_id, shipped, source = self._write(tmp_path, self.MID_PAGE)
+        built = build_ja_pages(path, ref_id, shipped, source)
+        ten = [u for u in built.units if u.part_key == "page:10"]
+        assert len(ten) == 2
+        assert ten[0].source_address != ten[1].source_address
+        assert check_invariants([built]) == []
+
+    def test_a_span_over_both_halves_renders_as_one_readable_range(self, tmp_path):
+        path, ref_id, shipped, source = self._write(tmp_path, self.MID_PAGE)
+        built = build_ja_pages(path, ref_id, shipped, source)
+        labels = {u.citation_pos: u.label_he for u in built.units}
+        runs, unplaced = citation_runs([(1, 3)],
+                                       [u.citation_pos for u in built.units])
+        assert unplaced == []
+        assert render_ranges(runs, labels) == "פרק א, עמ' 10–פרק ב, עמ' 11"
+
+    def test_a_page_number_that_REPEATS_still_falls_back(self, tmp_path):
+        """The relaxation is exactly one case wide. A tie is admitted only where the
+        section changes; the same page twice under the same section is the repeat the
+        ascending check exists to refuse, and `citation_pos = unit_ord` would be a lie."""
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("9", [(1, "+פרק~ +א~"), (2, "אאאא")]),
+            ("9", [(1, "בבבב")]),
+        ])
+        assert build_ja_pages(path, ref_id, shipped, source) is None
+
+    def test_a_mid_page_marker_that_changes_nothing_does_not_split(self, tmp_path):
+        """Two markers resolving to one chain are one place -- 3 in the corpus.
+        Splitting there would manufacture two identical labels for
+        `_disambiguate_labels` to number, which reads as an edition revisiting a page."""
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "+פרק~ +א~"), (2, "פתיחה")]),
+            ("2", [(1, "+פרק~ +ב~"), (2, "גוף"), (3, "+פרק~ +ב~"), (4, "עוד")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        assert [u.label_he for u in built.units] == ["פרק א, עמ' 1", "פרק ב, עמ' 2"]
 
     def test_the_publishers_tree_supplies_the_stated_parent(self, tmp_path):
         """The point of harvesting the tree: `פרק א` becomes `שער ראשון, פרק א` because
