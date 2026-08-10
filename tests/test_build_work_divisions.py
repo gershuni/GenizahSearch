@@ -142,7 +142,7 @@ class TestChapterUnits:
 
     def test_an_unparsed_header_contributes_no_unit(self):
         assert _chapter_units([(None, 0), (addr("א"), 10)]) == [
-            Unit(0, 10, "ch:0.1", "א", 1, ("", "1", ""))
+            Unit(0, 10, "ch:0.1", "א", 1, ("", "1", "", ""))
         ]
 
     def test_ordinals_are_a_dense_run_from_zero(self):
@@ -239,7 +239,7 @@ class TestTheEnclosingDivision:
         whose builder merely forgot to say which book they are in."""
         one = [(addr("יא", division="בראשית"), 0), (addr("יב", division="בראשית"), 90)]
         assert [u.source_address for u in _chapter_units(one)] == [
-            ("בראשית", "11", ""), ("בראשית", "12", "")]
+            ("בראשית", "11", "", ""), ("בראשית", "12", "", "")]
 
     def test_the_boundary_gate_fires_when_the_packing_is_reverted(self):
         """PROVEN ABLE TO FAIL. On the shipped build 22 real spans already render as
@@ -1146,7 +1146,10 @@ class TestTheYerushalmiSubUnitReadsHalakhah:
                               with_sub=True)[0]
         assert unit.part_key == "ch:0.8.1"
         assert unit.citation_pos == 801
-        assert unit.source_address == ("", "8", "1")
+        # the sub KIND is a level too: the map renders `משנה` and `הלכה` alike, so
+        # without it two headers stating different sub-units at one number would
+        # record one address as well as one label, and the gate compares the two
+        assert unit.source_address == ("", "8", "1", "משנה")
 
     def test_the_artifact_gate_reports_the_old_word(self):
         """PROVEN ABLE TO FAIL: the shipped labels, run through the gate."""
@@ -1158,6 +1161,29 @@ class TestTheYerushalmiSubUnitReadsHalakhah:
         fresh = [u._replace(label_he="פרק ח, הלכה א") for u in stale]
         assert check_invariants([WorkUnits(
             "M:y", "msource_header", "chapter_halakhah", fresh, 500)]) == []
+
+    def test_two_different_sub_units_at_one_number_are_two_stated_places(self):
+        """PROVEN ABLE TO FAIL, and this blind spot belonged to neither change that
+        made it. Renaming `משנה` to `הלכה` made the label map non-injective; carrying
+        the stated address as division/chapter/sub dropped the kind. Either alone is
+        fine. Together, two headers stating DIFFERENT sub-units at the same number
+        render one string AND record one address -- and the gate compares exactly
+        those two things, so it would have gone quietly green."""
+        marks = [(parse_canonical_header("פרק ג, משנה ה"), 0),
+                 (parse_canonical_header("פרק ג, פסוק ז"), 400),
+                 (parse_canonical_header("פרק ג, הלכה ה"), 800)]
+        units = _chapter_units(marks, with_sub=True)
+        assert [u.label_he for u in units] == [
+            "פרק ג, הלכה ה", "פרק ג, פסוק ז", "פרק ג, הלכה ה"]
+        problems = check_invariants([WorkUnits(
+            "M:y", "msource_header", "chapter_halakhah", units, 2_000)])
+        assert any("name more than one place" in p for p in problems)
+
+        # with the kind dropped from the stated address -- the shape before this fix
+        blind = [u._replace(source_address=u.source_address[:3]) for u in units]
+        assert len({u.source_address for u in blind}) == 2   # three places, two addresses
+        assert not any("name more than one place" in p for p in check_invariants(
+            [WorkUnits("M:y", "msource_header", "chapter_halakhah", blind, 2_000)]))
 
     def test_a_range_still_shortens_on_the_new_word(self):
         units = _chapter_units(

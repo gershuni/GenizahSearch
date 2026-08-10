@@ -435,7 +435,13 @@ _SUB_KIND_LABEL = {"משנה": "הלכה", "הלכה": "הלכה", "פסוק": "
 #: Numbering bases for the dense citation position. A chapter never runs past 99
 #: halakhot anywhere in this corpus (measured max 45), and `parse_unit_numeral`
 #: refuses anything above 999 by construction, so neither base can be overrun by a
-#: value that reached this point. Both are wide enough that a DIVISION boundary is
+#: value that reached this point. THAT IS A COUPLING, not an independent fact: it
+#: holds because `parse_unit_numeral` accepts a Hebrew numeral only if `heb_numeral`
+#: round-trips it, and `heb_numeral` stops at 999. Widening `heb_numeral` -- which
+#: looks like a display decision about the 102 staged labels that exceed 999 -- would
+#: widen the parser corpus-wide and collide division 0 chapter 1085 with division 1
+#: chapter 85 at position 1085. Anything that touches it must widen this base too.
+#: Both are wide enough that a DIVISION boundary is
 #: never a successor: the last conceivable place in one division and the first in
 #: the next are 101 apart at the finest grain, never 1. That is the point -- a
 #: fragment witnessing the end of one הלכות and the start of the next must render as
@@ -512,10 +518,19 @@ def _chapter_units(
         # is kept even where the label omits it, which is the whole point: it is what
         # tells a work whose chapters really are unique from one whose builder merely
         # forgot to say which book they are in.
+        # The sub KIND is a level of the stated address, not decoration, and leaving
+        # it out was a blind spot neither change that produced it could see alone.
+        # `_SUB_KIND_LABEL` maps `משנה` AND `הלכה` onto the same rendered word, so two
+        # headers stating different sub-units at the same number -- `פרק ג, משנה ה`
+        # and `פרק ג, הלכה ה` -- would render one string, and without this element
+        # they would also record one address, which is exactly the pair of facts the
+        # gate compares. Latent today (none of the 13,059 four-column headers states
+        # `הלכה`) and precisely the future work `_SUB_KIND_LABEL` warns about.
         source = (
             address.division,
             str(chapter_value) if chapter_value is not None else chapter,
             str(sub_value) if with_sub and address.sub else "",
+            address.sub_kind if with_sub else "",
         )
         # Collapse on the stated address, not on the rendered label: two divisions
         # whose adjacent chapters share a numeral would otherwise fold into one unit

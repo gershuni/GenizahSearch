@@ -324,12 +324,23 @@ def daf_label_he(daf: int, amud: int, prefix: str = "") -> str:
 #: 11,904 fires, leaves the audited 24-letter case firing, and makes a short unit
 #: uncitable-as-an-opener impossible rather than merely unlikely.
 #:
+#: AS SHIPPED, both conditions together: 11,893 fires and 11,892 rendered citations
+#: move (5.08% of the 234,060 real spans), 0 ranges emptied, 0 dropping half a span.
+#:
 #: 30 rather than 25 is a margin, and the cost of the margin is stated rather than
-#: hidden: 25 is the MINIMUM that closes the audited case, 30 fires on 11,903 of
-#: 234,060 real rows (5.09%) against 9,076 at 25, and takes the rows where the dropped
-#: unit held a quarter or more of the span from 43 to 74. The ceiling is just above:
-#: at 35 the rule starts removing units holding the MAJORITY of a span, at 100 it does
-#: so on 1,442 rows.
+#: hidden (these are the bare-threshold numbers, so that the sweep is comparable
+#: across settings): 25 is the MINIMUM that closes the audited case, 30 fires on
+#: 11,904 of 234,060 real rows against 9,077 at 25, and takes the rows where the
+#: dropped unit held a quarter or more of the span from 43 to 74. The ceiling is just
+#: above: at 35 the rule starts removing units holding the MAJORITY of a span, at 100
+#: it does so on 1,442 rows.
+#:
+#: One family behaves unlike the rest and is worth knowing about: the Arukh's entries
+#: are short (median 115 letters against 354 for the staged chapter grain overall), so
+#: the threshold fires on 10.0% of its spans -- the highest rate anywhere -- and after
+#: the headword repair each dropped unit is a NAMED entry rather than a numeral. The
+#: drops there are still defensible: the median witnessed fraction of the dropped
+#: entry is 0.07, and none is witnessed even half.
 MIN_UNIT_OVERLAP = 30
 
 
