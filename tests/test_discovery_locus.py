@@ -24,12 +24,14 @@ from shared.discovery_locus import (
     compress_pieces,
     daf_label_he,
     heb_numeral,
+    label_segments,
     norm_stream,
     parse_canonical_header,
     parse_unit_numeral,
     render_ranges,
     sefaria_daf,
     select_locus_work,
+    shorten_range_tail,
     split_at_citation_breaks,
     stream_offset_for_raw,
     units_for_span,
@@ -272,11 +274,16 @@ class TestCitationRuns:
         assert render_ranges(*citation_runs([(0, 3)], self.SEQ)[:1], self.LABEL_AT) != by_ordinal
 
     def test_a_genuine_gap_is_still_a_gap_in_citation_space(self):
-        """Folding to a set must not become folding to a hull."""
+        """Folding to a set must not become folding to a hull.
+
+        The first run reads `ב ע"א–ע"ב` and not `ב ע"א–ב ע"ב`: both ends are the same
+        leaf, so the repeated folio is dropped (see `shorten_range_tail`). The gap
+        after it is what this test is actually about, and it survives.
+        """
         seq = citation_seq_for_daf([(2, 1), (2, 2), (9, 1)])
         labels = {p: daf_label_he(d, a) for p, (d, a) in zip(seq, [(2, 1), (2, 2), (9, 1)])}
         runs, _ = citation_runs([(0, 2)], seq)
-        assert render_ranges(runs, labels) == 'ב ע"א–ב ע"ב; ט ע"א'
+        assert render_ranges(runs, labels) == 'ב ע"א–ע"ב; ט ע"א'
 
     def test_taking_the_hull_would_have_claimed_seven_unwitnessed_folios(self):
         """The defect, proven able to fail."""
@@ -356,6 +363,129 @@ class TestRenderRanges:
     def test_an_out_of_range_ordinal_is_refused_rather_than_silently_clipped(self):
         with pytest.raises(IndexError):
             render_ranges([(0, 9)], self.LABELS)
+
+
+class TestLabelSegments:
+    def test_a_compound_label_splits_on_its_parts(self):
+        assert label_segments("פרק ג, משנה ה") == ["פרק ג", "משנה ה"]
+
+    def test_a_simple_label_is_one_part(self):
+        assert label_segments('יד ע"א') == ['יד ע"א']
+
+    def test_commas_inside_a_witness_list_are_not_part_boundaries(self):
+        """A Judeo-Arabic section can be numbered and then list the manuscripts that
+        witness it. Splitting inside the brackets would let the range renderer elide
+        half the list as a shared prefix, so the reader would be shown a witness list
+        with manuscripts missing from one end."""
+        assert label_segments("1. [פ, מ, לא, לו, ליא]") == ["1. [פ, מ, לא, לו, ליא]"]
+
+    def test_a_bracketed_list_still_splits_from_a_following_part(self):
+        assert label_segments("1. [פ, מ], עמ' 12") == ["1. [פ, מ]", "עמ' 12"]
+
+    def test_an_unclosed_bracket_does_not_swallow_the_rest_of_the_label(self):
+        """THE DEFECT, PROVEN ABLE TO FAIL. Real headings arrive unbalanced --
+        `הקדמה למסכת אבות [שמונה פרקים` is one of them. A running-depth counter never
+        returns to zero after that stray `[`, so the page part fuses to the section
+        name and a range in that work can never shorten."""
+        label = "הקדמה למסכת אבות [שמונה פרקים, עמ' 372"
+        assert label_segments(label) == ["הקדמה למסכת אבות [שמונה פרקים", "עמ' 372"]
+
+        def running_depth(text: str) -> list:
+            parts, depth, current, index = [], 0, [], 0
+            while index < len(text):
+                ch = text[index]
+                if ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth = max(0, depth - 1)
+                if depth == 0 and text.startswith(", ", index):
+                    parts.append("".join(current))
+                    current = []
+                    index += 2
+                    continue
+                current.append(ch)
+                index += 1
+            parts.append("".join(current))
+            return parts
+
+        assert running_depth(label) == [label]
+
+    def test_an_unclosed_bracket_still_lets_a_page_range_shorten(self):
+        head = "הקדמה למסכת אבות [שמונה פרקים, עמ' 372"
+        tail = "הקדמה למסכת אבות [שמונה פרקים, עמ' 373"
+        assert shorten_range_tail(head, tail) == "373"
+
+
+class TestShortenRangeTail:
+    def test_a_repeated_page_word_is_dropped(self):
+        assert shorten_range_tail("עמ' 43", "עמ' 47") == "47"
+
+    def test_a_repeated_leading_part_is_dropped(self):
+        assert shorten_range_tail("פרק ג, משנה ה", "פרק ג, משנה ז") == "ז"
+
+    def test_a_daf_range_within_one_leaf_keeps_only_the_column(self):
+        assert shorten_range_tail('יד ע"א', 'יד ע"ב') == 'ע"ב'
+
+    def test_nothing_shared_means_nothing_dropped(self):
+        assert shorten_range_tail('צג ע"ב', 'צד ע"א') == 'צד ע"א'
+
+    def test_a_differing_first_part_protects_the_rest_from_elision(self):
+        """THE DEFECT THIS EXISTS FOR, on labels this corpus really carries.
+
+        Maimonides' letters are sections named `אגרת תימן`, `איגרת פרידה אל אחיו` and
+        so on -- so two ends of a range routinely share the leading word `אגרת` while
+        naming DIFFERENT letters. Eliding a shared word without first requiring that
+        every part before it matched turns
+
+            אגרת תימן, עמ' 43 – אגרת פרידה, עמ' 12
+        into
+            אגרת תימן, עמ' 43 – פרידה, עמ' 12
+
+        which reads as though `פרידה` were a subdivision of the Epistle to Yemen. The
+        guard is the `shared == len(head_parts) - 1` condition; reintroduced below
+        without it.
+        """
+        head, tail = "אגרת תימן, עמ' 43", "אגרת פרידה, עמ' 12"
+        assert shorten_range_tail(head, tail) == tail
+
+        def unconditional(head: str, tail: str) -> str:
+            head_parts, tail_parts = label_segments(head), label_segments(tail)
+            shared = 0
+            while (shared < min(len(head_parts), len(tail_parts))
+                   and head_parts[shared] == tail_parts[shared]):
+                shared += 1
+            rest = tail_parts[shared:]
+            if not rest or shared >= len(head_parts):
+                return tail
+            head_words, tail_words = head_parts[shared].split(), rest[0].split()
+            common = 0
+            while (common < min(len(head_words), len(tail_words)) - 1
+                   and head_words[common] == tail_words[common]):
+                common += 1
+            return ", ".join([" ".join(tail_words[common:])] + rest[1:])
+
+        assert unconditional(head, tail) == "פרידה, עמ' 12"
+
+    def test_the_last_word_is_never_elided_away(self):
+        """Two labels that agree on everything are not a range; the caller gets the
+        tail back whole rather than a dash with nothing after it."""
+        assert shorten_range_tail("עמ' 43", "עמ' 43") == "עמ' 43"
+
+    def test_a_witness_list_is_not_half_elided(self):
+        head, tail = "1. [פ, מ, לא]", "2. [פ, מ, לא]"
+        assert shorten_range_tail(head, tail) == tail
+
+    def test_render_ranges_applies_it(self):
+        labels = ["הקדמה, עמ' 9", "הקדמה, עמ' 10", "הקדמה, עמ' 11"]
+        assert render_ranges([(0, 2)], labels) == f"הקדמה, עמ' 9{RANGE_SEP}11"
+
+    def test_render_ranges_leaves_a_cross_section_range_fully_named(self):
+        labels = ["הקדמה, עמ' 20", "פרק א, עמ' 21"]
+        assert render_ranges([(0, 1)], labels) == f"הקדמה, עמ' 20{RANGE_SEP}פרק א, עמ' 21"
+
+    def test_the_shortened_citation_is_still_never_bracketed(self):
+        labels = ["עמ' 4", "עמ' 9"]
+        assert not any(ch in render_ranges([(0, 1)], labels) for ch in "()")
 
 
 class TestNormStream:

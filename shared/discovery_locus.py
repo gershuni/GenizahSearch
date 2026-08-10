@@ -44,6 +44,8 @@ __all__ = [
     "daf_label_he",
     "RANGE_SEP",
     "PIECE_SEP",
+    "label_segments",
+    "shorten_range_tail",
 ]
 
 #: Between the two ends of one continuous run (en dash, the citation convention).
@@ -485,23 +487,101 @@ def _label_at(labels, key: int) -> str:
         raise IndexError(f"no label for {key}") from None
 
 
+def label_segments(label: str) -> List[str]:
+    """Split a compound label on `, ` -- but NEVER inside brackets.
+
+    A Judeo-Arabic section label can be `1. [פ, מ, לא, לו, ליא]`: a section number
+    followed by the manuscripts that witness it. Those commas are inside the witness
+    list and are not part boundaries, so a plain `split(", ")` would cut the list up
+    and then the range renderer would elide half of it as a shared prefix.
+
+    Only a bracket that actually CLOSES protects anything. Real headings arrive
+    unbalanced -- `הקדמה למסכת אבות [שמונה פרקים` is one -- and a running-depth
+    counter would let that stray `[` suppress every separator to the end of the
+    label, so the page part would fuse to the section name and never shorten.
+    """
+    protected = [False] * len(label)
+    stack: List[Tuple[str, int]] = []
+    pairs = {")": "(", "]": "[", "}": "{"}
+    for index, ch in enumerate(label):
+        if ch in "([{":
+            stack.append((ch, index))
+        elif ch in ")]}" and stack and stack[-1][0] == pairs[ch]:
+            _, opened = stack.pop()
+            for position in range(opened, index + 1):
+                protected[position] = True
+
+    parts, current = [], []
+    index = 0
+    while index < len(label):
+        if not protected[index] and label.startswith(", ", index):
+            parts.append("".join(current))
+            current = []
+            index += 2
+            continue
+        current.append(label[index])
+        index += 1
+    parts.append("".join(current))
+    return [p for p in parts if p != ""] or [label]
+
+
+def shorten_range_tail(head: str, tail: str) -> str:
+    """The tail of a range, with whatever it already shares with the head removed.
+
+    `עמ' 43–עמ' 47` is not a page range anyone writes; `עמ' 43–47` is. The same rule
+    covers every family at once, because a repeated leading part is the normal shape
+    of a compound label: `פרק ג, משנה ה–פרק ג, משנה ז` shortens to `פרק ג, משנה ה–ז`,
+    and `יד ע"א–יד ע"ב` to `יד ע"א–ע"ב`.
+
+    Two stages, and the second is CONDITIONAL on the first having consumed
+    everything before it. Whole leading parts go first; then, only if the two labels
+    now differ in their very first remaining part, a shared leading word inside that
+    part goes too. Without that condition `פרק ג, משנה ה` and `פרק ד, משנה ב` would
+    lose the `משנה` from the tail while still disagreeing about the chapter, and the
+    reader would be told the range ends at `פרק ד, ב` -- a different address.
+
+    Never returns empty: two identical labels are not a range, and a caller that
+    hands us one gets the tail back whole rather than a dangling dash.
+    """
+    head_parts, tail_parts = label_segments(head), label_segments(tail)
+    shared = 0
+    while (shared < min(len(head_parts), len(tail_parts))
+           and head_parts[shared] == tail_parts[shared]):
+        shared += 1
+    rest = tail_parts[shared:]
+    if not rest:
+        return tail
+    if shared == len(head_parts) - 1:
+        head_words, tail_words = head_parts[shared].split(), rest[0].split()
+        common = 0
+        while (common < min(len(head_words), len(tail_words)) - 1
+               and head_words[common] == tail_words[common]):
+            common += 1
+        if common:
+            rest = [" ".join(tail_words[common:])] + rest[1:]
+    return ", ".join(p for p in rest if p) or tail
+
+
 def render_ranges(ranges: Sequence[Tuple[int, int]], labels) -> str:
     """Runs -> the displayed citation, e.g. ``ב–יא; טו–לב``.
 
     `labels` is indexed by whatever space `ranges` is in: a sequence keyed by unit
     ordinal, or a mapping keyed by citation position (see `citation_runs`).
 
-    Labels are emitted verbatim from the source's own Hebrew numerals. Nothing here
-    wraps the result in brackets or parentheses: the surface envelope rejects a
-    bracketed numeric pair, and because that guard covers the WHOLE envelope a single
-    bad string costs the reader the entire page rather than one row.
+    Labels are emitted verbatim from the source's own Hebrew numerals; the only thing
+    done to them is dropping a repetition the reader does not need (see
+    `shorten_range_tail`). Nothing here wraps the result in brackets or parentheses:
+    the surface envelope rejects a bracketed numeric pair, and because that guard
+    covers the WHOLE envelope a single bad string costs the reader the entire page
+    rather than one row.
     """
     out = []
     for lo, hi in ranges:
         if hi < lo:
             raise ValueError(f"range ({lo}, {hi}) has its ends reversed")
         head, tail = _label_at(labels, lo), _label_at(labels, hi)
-        out.append(head if lo == hi else f"{head}{RANGE_SEP}{tail}")
+        out.append(head if lo == hi
+                   else f"{head}{RANGE_SEP}{shorten_range_tail(head, tail)}")
     return PIECE_SEP.join(out)
 
 

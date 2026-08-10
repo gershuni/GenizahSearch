@@ -6,12 +6,21 @@ stored work-side offset into a citation, but only if it is handed the work's
 address vocabulary as ascending start offsets in the SAME normalized stream the
 offsets were measured in. Producing that vocabulary is this script's whole job.
 
-Four families, four mechanisms, one output shape:
+Four families, five mechanisms, one output shape:
 
   canonical headers   `##division, פרק N, ...##` line markers          (M-source)
   inline daf markers  `<דף X, עמ' Y>` inside the text                  (M-source)
-  Judeo-Arabic        `+kind~ +numeral~` line markers                  (M-source/JA)
+  Judeo-Arabic pages  the printed page carried in the source record    (M-source/JA)
+  Judeo-Arabic marks  `+kind~ +numeral~` line markers, the fallback    (M-source/JA)
   staged versemaps    a sidecar JSON indexing the body by chapter:verse
+
+WHERE THE SOURCE STATES AN ADDRESS, IT WINS OVER ONE WE WORK OUT. Judeo-Arabic has
+both: printed page numbers sitting in the source record beside the text, and inline
+markers whose hierarchy has to be inferred from how the numbering restarts. The
+pages are preferred wherever they rebuild the stream exactly, because they are
+carried rather than derived, they name a page in an edition whose publisher and
+editor are recorded alongside, and they are three times finer. The marker grain
+remains as the fallback for anything the pages cannot address.
 
 FAIL CLOSED, PER WORK. A work whose stream does not re-derive byte-for-byte from
 its source gets NO units at all. It is not close enough, and a work that is
@@ -56,6 +65,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import bisect
 import collections
 import functools
 import hashlib
@@ -90,6 +100,7 @@ from shared.discovery_locus import (  # noqa: E402
 ENV_REF_PKL = "GENIZAH_REF_CORPUS_PKL"
 ENV_MSOURCE_DIR = "GENIZAH_MSOURCE_DIR"
 ENV_JA_DIR = "GENIZAH_JA_DIR"
+ENV_JA_SOURCE_DIR = "GENIZAH_JA_SOURCE_DIR"
 ENV_STAGING_DIR = "GENIZAH_REFS_STAGING_DIR"
 ENV_CROSSWALK = "GENIZAH_REF_CROSSWALK"
 
@@ -125,6 +136,14 @@ _JA_MAX_DEPTH = 3
 #: the surface's interval scanner rejects a bracketed pair of DECIMALS, and a list
 #: of Hebrew sigla is not one.
 _MARKUP_CHARS = str.maketrans({c: None for c in "{}<>"})
+#: A bracketed pair of decimals -- `[28- 27]`, `(12,13)`. Keeping square brackets was
+#: justified on the grounds that a list of Hebrew sigla is never a decimal pair. That
+#: is true of the sigla and false of the corpus: one real heading reads
+#: `319א. כז א- יט [28- 27]`, a numeric cross-reference the publisher bracketed. The
+#: surface's interval scanner rejects this shape for the WHOLE envelope, so that one
+#: heading would cost a reader the entire page. Only the brackets are removed; the
+#: numbers are the publisher's and stay.
+_BRACKETED_PAIR_RE = re.compile(r"[\[(](\s*\d+\s*[-–,]\s*\d+\s*)[\])]")
 
 
 def _clean_marker_text(text: str) -> str:
@@ -135,6 +154,7 @@ def _clean_marker_text(text: str) -> str:
     reading `<שופטים>` -- it exposes the transport encoding to a reader.
     """
     cleaned = html.unescape(text).translate(_MARKUP_CHARS)
+    cleaned = _BRACKETED_PAIR_RE.sub(r"\1", cleaned)
     return cleaned.strip().strip(",:;.").strip()
 
 
@@ -450,18 +470,7 @@ def build_ja(path: str, ref_id: str, shipped: Dict[str, str]) -> Optional[WorkUn
     if shipped.get(ref_id) != stream:
         return None                        # fail closed
 
-    marked: List[Tuple[int, str, Optional[str]]] = []
-    position = 0
-    for line in raw.split("\n"):
-        tokens = _JA_MARKER_RE.findall(line)
-        if tokens and line.lstrip().startswith("+"):
-            kind, numeral = _split_ja_heading(tokens)
-            marked.append((position + len(line) - len(line.lstrip()), kind, numeral))
-        position += len(line) + 1
-
-    divisions = [(p, k, n) for p, k, n in marked if k not in JA_LEAF_KINDS]
-    if len(divisions) < 3:
-        divisions = marked                 # a document with no coarse tier is flat
+    divisions = _ja_divisions(raw)
     if not divisions:
         return None
 
@@ -483,6 +492,28 @@ def build_ja(path: str, ref_id: str, shipped: Dict[str, str]) -> Optional[WorkUn
     units = _disambiguate_labels(units)
     units = [u._replace(citation_pos=i) for i, u in enumerate(units)]
     return WorkUnits(ref_id, "ja", "division", units, len(stream))
+
+
+def _ja_divisions(raw: str) -> List[Tuple[int, str, Optional[str]]]:
+    """Every division-tier marker in a Judeo-Arabic document, as (raw_pos, kind, numeral).
+
+    Shared by both grains: the division grain turns these into units, and the page
+    grain uses them only to name the section a page falls in. Reading the markers
+    twice from two copies of this loop is how the two grains would drift apart.
+    """
+    marked: List[Tuple[int, str, Optional[str]]] = []
+    position = 0
+    for line in raw.split("\n"):
+        tokens = _JA_MARKER_RE.findall(line)
+        if tokens and line.lstrip().startswith("+"):
+            kind, numeral = _split_ja_heading(tokens)
+            marked.append((position + len(line) - len(line.lstrip()), kind, numeral))
+        position += len(line) + 1
+
+    divisions = [(p, k, n) for p, k, n in marked if k not in JA_LEAF_KINDS]
+    if len(divisions) < 3:
+        return marked                      # a document with no coarse tier is flat
+    return divisions
 
 
 def _split_ja_heading(tokens: Sequence[str]) -> Tuple[str, Optional[str]]:
@@ -602,6 +633,158 @@ def _disambiguate_labels(units: Sequence[Unit]) -> List[Unit]:
         seen[unit.label_he] += 1
         out.append(unit._replace(label_he=f"{unit.label_he} ({seen[unit.label_he]})"))
     return out
+
+
+# --------------------------------------------------------------------------
+# Family 3b: Judeo-Arabic printed pages
+# --------------------------------------------------------------------------
+
+def _as_int(value, default: int = 0) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _source_title_key(text: str) -> str:
+    return "".join(ch for ch in (text or "") if ch.isalnum())
+
+
+def ja_source_index(source_dir: str) -> Dict[str, dict]:
+    """`AuthorName, TitleName` (folded) -> the source document, for exact binding only.
+
+    Deliberately exact. A substring fallback here once bound a commentary on Exodus
+    to the commentary on Genesis by the same author, and a mis-binding does not fail
+    -- it silently addresses one work with another work's pages.
+    """
+    index: Dict[str, dict] = {}
+    for name in sorted(os.listdir(source_dir)):
+        if not name.endswith(".json"):
+            continue
+        with open(os.path.join(source_dir, name), encoding="utf-8") as handle:
+            doc = json.load(handle)
+        key = _source_title_key(f"{doc.get('AuthorName','')},{doc.get('TitleName','')}")
+        index.setdefault(key, doc)
+    return index
+
+
+def ja_reconstruct(doc: dict, title_line: str) -> Tuple[str, List[Tuple[str, int]]]:
+    """Rebuild a document from its source pages, and say where each page begins.
+
+    ROWS ARE SORTED BY LINE NUMBER, and that is not tidying. In array order three of
+    the eighty-nine documents come out with their rows transposed -- same length to
+    the character, content out of sequence -- so the rebuild fails byte-exactness and
+    the work fails closed. Sorting fixes all three and changes none of the other
+    eighty-six. PAGES are left in array order, because sorting those fixes nothing
+    and would reorder any edition whose printed numbering is not monotonic.
+
+    The title line is prepended because the ingest indexed it: it is the document's
+    first line and its letters are in the stream every stored offset was measured
+    against.
+    """
+    pieces: List[str] = [title_line + "\n"]
+    starts: List[Tuple[str, int]] = []
+    length = len(pieces[0])
+    for page in doc.get("Content") or []:
+        starts.append((str(page.get("PageNumber")), length))
+        for row in sorted(page.get("rows") or [],
+                          key=lambda r: _as_int(r.get("LineNumber"))):
+            text = (row.get("Text") or "") + "\n"
+            pieces.append(text)
+            length += len(text)
+    return "".join(pieces), starts
+
+
+def build_ja_pages(
+    path: str, ref_id: str, shipped: Dict[str, str], source: Dict[str, dict]
+) -> Optional[WorkUnits]:
+    """Judeo-Arabic addressed by the printed page of its named edition.
+
+    This is the stronger of the two Judeo-Arabic grains and it is preferred wherever
+    the source document is available. It is not inferred from anything: the page
+    number is carried in the source beside the text it belongs to, it is the PRINTED
+    number rather than a running index (documents commonly open at page 23), and the
+    edition it belongs to is named in the same record -- publisher, city, year and
+    editor -- so the address is checkable against a book on a shelf.
+
+    The division grain, by contrast, has to work out from the numbering which marker
+    kinds contain which. That inference is sound where the text is regular and
+    visibly strained where it is not, and against the publisher's own partition tree
+    it agrees on a third of top-level labels.
+
+    Pages are also finer: 17,320 of them across the family at a median 686 letters,
+    against 5,968 divisions at 1,990.
+
+    Each page is labelled with the section it falls in, but with that section's OWN
+    label only -- never the inferred enclosing chain. The chain is the part that is
+    guessed, so a verified page address does not carry it.
+
+    Fails closed on anything less than byte-exactness: page boundaries that are off
+    by a line put every address on this work in the wrong place, quietly.
+    """
+    raw = _read(path)
+    stream = norm_stream(raw)[0]
+    if shipped.get(ref_id) != stream:
+        return None
+
+    lines = raw.split("\n")
+    title_line = lines[1].strip() if len(lines) > 1 else ""
+    doc = source.get(_source_title_key(title_line))
+    if doc is None:
+        return None
+
+    rebuilt, page_starts = ja_reconstruct(doc, title_line)
+    rebuilt_stream, offsets = norm_stream(rebuilt)
+    if rebuilt_stream != stream:
+        return None                        # fail closed: the pages do not line up
+    if not page_starts:
+        return None
+
+    # Section names come from the SAME text, so their offsets are in the same space.
+    sections = [(stream_offset_for_raw(offsets, pos),
+                 _clean_marker_text(f"{kind} {numeral}".strip() if numeral else kind))
+                for pos, kind, numeral in _ja_divisions(rebuilt)]
+    sections = [(o, label) for o, label in sections if label]
+    section_offsets = [o for o, _ in sections]
+
+    # A page is a place only if it holds letters of its own. 3,717 real pages carry
+    # no rows at all, and each of those shares a start offset with the page AFTER it.
+    #
+    # This cannot be left to `_dedupe_ascending`, which keeps the FIRST of a tie: the
+    # empty page would survive and the following page's text would be published under
+    # the empty page's number, off by a page and silently. So the emptiness test is
+    # explicit and comes first -- a page is dropped when the next page begins where it
+    # did, which is precisely the statement that it contains nothing.
+    positions = [(_as_int(number, -1), stream_offset_for_raw(offsets, raw_pos))
+                 for number, raw_pos in page_starts]
+
+    units: List[Unit] = []
+    for index, (page, start) in enumerate(positions):
+        end = positions[index + 1][1] if index + 1 < len(positions) else len(stream)
+        if page < 0 or end <= start:
+            continue
+        section_index = bisect.bisect_right(section_offsets, start) - 1
+        section = sections[section_index][1] if section_index >= 0 else ""
+        label = f"{section}, עמ' {page}" if section else f"עמ' {page}"
+        units.append(Unit(len(units), start, f"page:{page}", label, None))
+
+    units = _dedupe_ascending(units)
+    if not units:
+        return None
+
+    # The printed numbering must RISE along the text, or `citation_pos = unit_ord` is
+    # a lie and a two-page span renders as a range running backwards. Measured: all
+    # 89 documents ascend, so this costs nothing today -- but the daf family already
+    # produced `מנחות צד ע"א–סג ע"ב` from exactly this assumption going unchecked,
+    # and there the numbering came from the same kind of source. An edition that does
+    # not ascend falls back to the marker grain rather than shipping a bad range.
+    numbers = [_as_int(u.part_key.split(":", 1)[1], -1) for u in units]
+    if any(b <= a for a, b in zip(numbers, numbers[1:])):
+        return None
+
+    units = _disambiguate_labels(units)
+    units = [u._replace(citation_pos=i) for i, u in enumerate(units)]
+    return WorkUnits(ref_id, "ja", "page", units, len(stream))
 
 
 # --------------------------------------------------------------------------
@@ -786,6 +969,19 @@ def check_invariants(works: Sequence[WorkUnits]) -> List[str]:
             problems.append(
                 f"{work.ref_id}: {len(ambiguous)} label(s) name more than one place, "
                 f"e.g. {ambiguous[0]!r}")
+
+        # A bracketed decimal pair anywhere in a label is fatal at the surface, and
+        # fatal for the whole envelope rather than for the row that carries it. The
+        # builder strips the shape, so this is the backstop for a source that invents
+        # a new way to produce it -- a comment asserting the shape cannot occur is
+        # what let the first one through.
+        fatal = sorted(u.label_he for u in work.units
+                       if _BRACKETED_PAIR_RE.search(u.label_he))
+        if fatal:
+            problems.append(
+                f"{work.ref_id}: {len(fatal)} label(s) carry a bracketed decimal "
+                f"pair, which the surface envelope rejects wholesale, "
+                f"e.g. {fatal[0]!r}")
     return problems
 
 
@@ -797,6 +993,7 @@ corpora are restricted:
   {ENV_REF_PKL}      the reference-corpus pickle (the SHIPPED streams)
   {ENV_MSOURCE_DIR}    the M-source edition directory
   {ENV_JA_DIR}         the Judeo-Arabic per-document directory
+  {ENV_JA_SOURCE_DIR}  the Judeo-Arabic SOURCE json (carries printed page numbers)
   {ENV_STAGING_DIR}  the staged bodies + versemap sidecars
   {ENV_CROSSWALK}   crosswalk.json (optional; reference id -> work id)""")
     parser.add_argument("--out", required=True, help="output directory")
@@ -850,18 +1047,35 @@ corpora are restricted:
 
     ja_dir = os.environ.get(ENV_JA_DIR)
     if "ja" in families and ja_dir and os.path.isdir(ja_dir):
+        ja_source_dir = os.environ.get(ENV_JA_SOURCE_DIR)
+        source = (ja_source_index(ja_source_dir)
+                  if ja_source_dir and os.path.isdir(ja_source_dir) else {})
+        if not source:
+            print(f"  NOTE: {ENV_JA_SOURCE_DIR} unset -- falling back to the weaker "
+                  f"inferred-division grain for Judeo-Arabic")
         names = sorted(f for f in os.listdir(ja_dir) if f.endswith(".txt"))
+        pages = 0
         for name in names:
             # The reference id is `J:` + the filename stem, which is what the ingest
             # minted. Numbering by position instead silently mismatches every work
             # and the whole family fails closed with nothing to point at.
             ref_id = "J:" + os.path.splitext(name)[0]
-            built = build_ja(os.path.join(ja_dir, name), ref_id, shipped)
+            full = os.path.join(ja_dir, name)
+            # Pages are preferred, divisions are the fallback. A work whose source
+            # pages do not rebuild the stream exactly still gets an address, from the
+            # grain that needs no source at all.
+            built = build_ja_pages(full, ref_id, shipped, source) if source else None
+            if built:
+                pages += 1
+            else:
+                built = build_ja(full, ref_id, shipped)
             if built:
                 works.append(built)
             else:
                 skipped["ja"] += 1
-        print(f"  JA: {sum(1 for w in works if w.family == 'ja')} built, "
+        print(f"  JA: {sum(1 for w in works if w.family == 'ja')} built "
+              f"({pages} by printed page, "
+              f"{sum(1 for w in works if w.family == 'ja') - pages} by division), "
               f"{skipped['ja']} skipped", flush=True)
     elif "ja" in families:
         print(f"  SKIPPED: {ENV_JA_DIR} is not set or not a directory")

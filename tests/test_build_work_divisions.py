@@ -26,9 +26,13 @@ from scripts.build_work_divisions import (
     _clean_marker_text,
     _dedupe_ascending,
     _msource_files,
+    _source_title_key,
     _split_divisions,
+    build_ja_pages,
     build_sefaria,
     check_invariants,
+    ja_reconstruct,
+    ja_source_index,
     sefaria_render_kind,
     write_artifact,
 )
@@ -200,6 +204,34 @@ class TestCleanMarkerText:
         assert _clean_marker_text("מאמר א:") == "מאמר א"
 
 
+class TestBracketedDecimalPair:
+    """The one shape that costs a reader the whole page rather than one row."""
+
+    def test_a_bracketed_numeric_cross_reference_loses_its_brackets(self):
+        assert _clean_marker_text("319א. כז א- יט [28- 27]") == "319א. כז א- יט 28- 27"
+
+    def test_a_witness_list_of_hebrew_sigla_keeps_its_brackets(self):
+        assert _clean_marker_text("1. [פ, מ, לא, לו, ליא]") == "1. [פ, מ, לא, לו, ליא]"
+
+    def test_a_bracketed_single_number_is_left_alone(self):
+        assert _clean_marker_text("סימן [א]") == "סימן [א]"
+        assert _clean_marker_text("[הקדמה]") == "[הקדמה]"
+
+    def test_the_invariant_catches_the_shape_if_it_ever_survives(self):
+        """PROVEN ABLE TO FAIL. The builder strips it; this is the backstop, and it
+        exists because the previous defence was a comment asserting the shape could
+        not occur -- while one real heading already carried it."""
+        clean = WorkUnits("w1", "ja", "page", [
+            Unit(0, 0, "page:1", "פרק א, עמ' 1", 0)], 100)
+        assert check_invariants([clean]) == []
+
+        carrying = WorkUnits("w1", "ja", "page", [
+            Unit(0, 0, "page:1", "כז א- יט [28- 27], עמ' 345", 0)], 100)
+        problems = check_invariants([carrying])
+        assert len(problems) == 1
+        assert "bracketed decimal pair" in problems[0]
+
+
 class TestJaLeafKinds:
     def test_the_verse_tier_is_excluded_from_the_citable_grain(self):
         """76.3% of all JA markers, median 72 letters -- finer than a stored span."""
@@ -208,6 +240,223 @@ class TestJaLeafKinds:
     def test_the_coarse_kinds_are_not_in_it(self):
         for kind in ("פרק", "סימן", "שאלה", "מסכת", "שער", "פיסקא"):
             assert kind not in JA_LEAF_KINDS
+
+
+# ---------------------------------------------------------------------------
+# Judeo-Arabic printed pages
+# ---------------------------------------------------------------------------
+
+def _ja_source_doc(pages, author="פלוני", title="חיבור לדוגמה"):
+    """A fabricated source record in the real shape: pages, each holding rows."""
+    return {
+        "AuthorName": author,
+        "TitleName": title,
+        "Publisher": "מוציא לאור",
+        "PublisherCity": "ירושלים",
+        "PublisherYear": 'התש"ף',
+        "Editor": "עורך",
+        "Content": [{"PageNumber": number,
+                     "rows": [{"LineNumber": ln, "Text": text}
+                              for ln, text in rows]}
+                    for number, rows in pages],
+    }
+
+
+class TestJaReconstruct:
+    def test_a_page_start_is_recorded_before_its_own_rows(self):
+        doc = _ja_source_doc([("7", [(1, "אאא"), (2, "בבב")]),
+                              ("8", [(1, "גגג")])])
+        text, starts = ja_reconstruct(doc, "כותרת")
+        assert text == "כותרת\nאאא\nבבב\nגגג\n"
+        assert [n for n, _ in starts] == ["7", "8"]
+        assert text[starts[0][1]:].startswith("אאא")
+        assert text[starts[1][1]:].startswith("גגג")
+
+    def test_rows_are_emitted_in_line_number_order_not_array_order(self):
+        doc = _ja_source_doc([("7", [(2, "שני"), (1, "ראשון"), (3, "שלישי")])])
+        text, _ = ja_reconstruct(doc, "כותרת")
+        assert text == "כותרת\nראשון\nשני\nשלישי\n"
+
+    def test_array_order_would_have_transposed_the_text(self):
+        """THE DEFECT, PROVEN ABLE TO FAIL. Three of the eighty-nine real documents
+        arrive with rows out of sequence -- the same length to the character, so a
+        length check sees nothing. Under array order the rebuild does not reproduce
+        the indexed stream and the work fails closed, losing its address entirely."""
+        doc = _ja_source_doc([("7", [(2, "שני"), (1, "ראשון"), (3, "שלישי")])])
+        in_array_order = "כותרת\n" + "".join(
+            (row["Text"] + "\n") for row in doc["Content"][0]["rows"])
+        assert in_array_order == "כותרת\nשני\nראשון\nשלישי\n"
+        assert ja_reconstruct(doc, "כותרת")[0] != in_array_order
+
+    def test_pages_are_left_in_array_order(self):
+        """Sorting pages fixes nothing real and would reorder any edition whose
+        printed numbering is not monotonic -- front matter, plates, appendices."""
+        doc = _ja_source_doc([("12", [(1, "אחד")]), ("3", [(1, "שני")])])
+        assert [n for n, _ in ja_reconstruct(doc, "כ")[1]] == ["12", "3"]
+
+    def test_the_title_line_is_part_of_the_text(self):
+        """The ingest indexed it, so its letters are in the stream every stored
+        offset was measured against. Dropping it shifts every page by its length."""
+        doc = _ja_source_doc([("1", [(1, "גוף")])])
+        assert ja_reconstruct(doc, "שם החיבור")[0].startswith("שם החיבור\n")
+        assert ja_reconstruct(doc, "שם החיבור")[1][0][1] == len("שם החיבור\n")
+
+
+class TestJaSourceIndex:
+    def test_a_document_is_found_by_its_author_and_title(self, tmp_path):
+        doc = _ja_source_doc([("1", [(1, "גוף")])], author="פלוני", title="ספר")
+        (tmp_path / "1.json").write_text(json.dumps(doc, ensure_ascii=False),
+                                        encoding="utf-8")
+        index = ja_source_index(str(tmp_path))
+        assert _source_title_key("פלוני, ספר") in index
+
+    def test_a_near_miss_does_not_bind(self, tmp_path):
+        """Exact only. A substring fallback once bound a commentary on one biblical
+        book to the same author's commentary on another, and a mis-binding does not
+        fail -- it addresses one work with a different work's pages."""
+        doc = _ja_source_doc([("1", [(1, "גוף")])], author="פלוני", title="פירוש שמות")
+        (tmp_path / "1.json").write_text(json.dumps(doc, ensure_ascii=False),
+                                         encoding="utf-8")
+        index = ja_source_index(str(tmp_path))
+        assert _source_title_key("פלוני, פירוש") not in index
+
+    def test_punctuation_and_spacing_do_not_defeat_the_match(self):
+        assert (_source_title_key("פלוני, ספר-הדוגמה")
+                == _source_title_key("פלוני,ספר הדוגמה"))
+
+
+class TestBuildJaPages:
+    """The page grain end to end, through the real fail-closed gate."""
+
+    TITLE = "פלוני, ספר הדוגמה"
+
+    def _write(self, tmp_path, pages, title=None):
+        title = title or self.TITLE
+        doc = _ja_source_doc(pages, author="פלוני", title="ספר הדוגמה")
+        text, _ = ja_reconstruct(doc, title)
+        # The per-document file the ingest read: a lead-in, the title, a rule, body.
+        body = text.split("\n", 1)[1]
+        path = tmp_path / "07-דוגמה.txt"
+        path.write_text("***\n" + title + "\n----------\n" + body, encoding="utf-8")
+        ref_id = "J:07-דוגמה"
+        shipped = {ref_id: norm_stream(path.read_text(encoding="utf-8"))[0]}
+        return str(path), ref_id, shipped, {_source_title_key(title): doc}
+
+    def test_one_unit_per_page_labelled_with_its_section(self, tmp_path):
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("9", [(1, "+פרק~ +א~"), (2, "טקסט ראשון")]),
+            ("10", [(1, "עוד טקסט")]),
+            ("11", [(1, "+פרק~ +ב~"), (2, "טקסט אחר")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        assert built is not None
+        assert built.grain == "page"
+        assert [u.label_he for u in built.units] == [
+            "פרק א, עמ' 9", "פרק א, עמ' 10", "פרק ב, עמ' 11"]
+        assert [u.part_key for u in built.units] == ["page:9", "page:10", "page:11"]
+
+    def test_the_printed_number_is_used_not_a_running_index(self, tmp_path):
+        """Documents commonly open at page 23. Numbering from zero would give every
+        one of them an address that is not in the book."""
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("23", [(1, "+פרק~ +א~"), (2, "פתיחה")]),
+            ("24", [(1, "המשך")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        assert [u.part_key for u in built.units] == ["page:23", "page:24"]
+
+    def test_a_page_with_no_rows_does_not_become_an_address(self, tmp_path):
+        """3,717 real pages carry no rows at all. They are not places."""
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("9", [(1, "+פרק~ +א~"), (2, "טקסט")]),
+            ("10", []),
+            ("11", [(1, "עוד")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        assert [u.part_key for u in built.units] == ["page:9", "page:11"]
+
+    def test_deduping_a_tie_by_keeping_the_first_would_misnumber_the_next_page(
+            self, tmp_path):
+        """THE DEFECT, PROVEN ABLE TO FAIL, and it is an off-by-a-page not a gap.
+
+        An empty page and the page after it share a start offset, because the offset
+        is recorded before the rows are read. Resolving that tie by keeping the FIRST
+        -- which is what the generic deduper does -- publishes the following page's
+        text under the empty page's number. Nothing about the output looks wrong: the
+        offsets still ascend, the invariants still pass, and the reader is sent one
+        page early.
+        """
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("9", [(1, "+פרק~ +א~"), (2, "טקסט")]),
+            ("10", []),
+            ("11", [(1, "עוד")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        text_offset = {u.part_key: u.start for u in built.units}["page:11"]
+
+        keep_first = _dedupe_ascending([
+            Unit(0, 0, "page:9", "פרק א, עמ' 9", None),
+            Unit(1, text_offset, "page:10", "פרק א, עמ' 10", None),
+            Unit(2, text_offset, "page:11", "פרק א, עמ' 11", None),
+        ])
+        assert [u.part_key for u in keep_first] == ["page:9", "page:10"]
+        assert check_invariants([WorkUnits(ref_id, "ja", "page", keep_first,
+                                           built.stream_len)]) == []
+
+    def test_offsets_are_ascending_and_land_inside_the_stream(self, tmp_path):
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "+פרק~ +א~"), (2, "אאאא")]),
+            ("2", [(1, "בבבב")]),
+            ("3", [(1, "גגגג")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        starts = [u.start for u in built.units]
+        assert starts == sorted(starts)
+        assert starts[-1] < built.stream_len
+        assert check_invariants([built]) == []
+
+    def test_the_label_carries_the_sections_own_name_not_the_inferred_chain(self, tmp_path):
+        """The enclosing chain is the inferred part. A verified page address does not
+        borrow it -- the owner's objection to invented containment was that a chain
+        asserting one section sits inside another reads as information."""
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "+שער~ +א~"), (2, "פתיחה")]),
+            ("2", [(1, "+פרק~ +א~"), (2, "גוף")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        assert [u.label_he for u in built.units] == ["שער א, עמ' 1", "פרק א, עמ' 2"]
+        assert not any(", " in u.label_he.rsplit(", ", 1)[0] for u in built.units)
+
+    def test_a_stream_that_does_not_match_gets_no_units(self, tmp_path):
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "+פרק~ +א~"), (2, "טקסט")]),
+        ])
+        assert build_ja_pages(path, ref_id, {ref_id: "אחר"}, source) is None
+
+    def test_a_document_with_no_source_record_gets_no_units(self, tmp_path):
+        path, ref_id, shipped, _ = self._write(tmp_path, [
+            ("1", [(1, "+פרק~ +א~"), (2, "טקסט")]),
+        ])
+        assert build_ja_pages(path, ref_id, shipped, {}) is None
+
+    def test_pages_that_do_not_ascend_fall_back_rather_than_ship(self, tmp_path):
+        """A numbering that runs backwards makes `citation_pos = unit_ord` false, and
+        a two-page span then renders as a range with its ends reversed. The daf family
+        already emitted `מנחות צד ע"א–סג ע"ב` from exactly this assumption unchecked."""
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("30", [(1, "+פרק~ +א~"), (2, "אאאא")]),
+            ("12", [(1, "בבבב")]),
+        ])
+        assert build_ja_pages(path, ref_id, shipped, source) is None
+
+    def test_a_page_before_any_section_marker_is_still_addressable(self, tmp_path):
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "טקסט בלי סימון")]),
+            ("2", [(1, "+פרק~ +א~"), (2, "גוף")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        assert built.units[0].label_he == "עמ' 1"
+        assert built.units[1].label_he == "פרק א, עמ' 2"
 
 
 # ---------------------------------------------------------------------------
