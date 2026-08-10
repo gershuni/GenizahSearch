@@ -989,6 +989,48 @@ class TestBuildJaPages:
 # Structural gates
 # ---------------------------------------------------------------------------
 
+class TestTheYerushalmiSubUnitReadsHalakhah:
+    """Owner ruling, reversing an argument the module itself used to make.
+
+    The point of the assertions below is that this is a RENAME and not a renumbering:
+    the ordinal, the part key and the citation position must all be the same
+    afterwards, and the parser must still report what the source actually says.
+    """
+
+    def test_the_source_states_mishnah_and_the_reader_sees_halakhah(self):
+        address = parse_canonical_header("פרק ח, משנה א")
+        assert address.sub_kind == "משנה"          # RED if the PARSER is changed
+        unit = _chapter_units([(address, 0)], with_sub=True)[0]
+        assert unit.label_he == "פרק ח, הלכה א"     # RED if the map is reverted
+
+    def test_the_ordinal_is_untouched(self):
+        """A rename that renumbered would satisfy the label assertion and be wrong."""
+        unit = _chapter_units([(parse_canonical_header("פרק ח, משנה א"), 0)],
+                              with_sub=True)[0]
+        assert unit.part_key == "ch:0.8.1"
+        assert unit.citation_pos == 801
+        assert unit.source_address == ("", "8", "1")
+
+    def test_the_artifact_gate_reports_the_old_word(self):
+        """PROVEN ABLE TO FAIL: the shipped labels, run through the gate."""
+        stale = [Unit(0, 0, "ch:0.8.1", "פרק ח, משנה א", 801, ("", "8", "1"))]
+        problems = check_invariants([WorkUnits(
+            "M:y", "msource_header", "chapter_halakhah", stale, 500)])
+        assert any("still render the sub-unit as משנה" in p for p in problems)
+
+        fresh = [u._replace(label_he="פרק ח, הלכה א") for u in stale]
+        assert check_invariants([WorkUnits(
+            "M:y", "msource_header", "chapter_halakhah", fresh, 500)]) == []
+
+    def test_a_range_still_shortens_on_the_new_word(self):
+        units = _chapter_units(
+            [(parse_canonical_header("פרק ג, משנה ד"), 0),
+             (parse_canonical_header("פרק ג, משנה ה"), 90)], with_sub=True)
+        runs, _ = citation_runs([(0, 1)], [u.citation_pos for u in units])
+        assert render_ranges(runs, {u.citation_pos: u.label_he for u in units}) == (
+            "פרק ג, הלכה ד–ה")
+
+
 class TestTheDivisionSurvivesTheWalk:
     """The gate compares the label against the STATED address, so it is blind to a
     level dropped BEFORE both are built. That is the one hole it cannot close from

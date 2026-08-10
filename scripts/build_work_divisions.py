@@ -41,12 +41,32 @@ address would still send a reader to the wrong place. So the rule is: whatever t
 source header says IS the address, and where two editions of one work exist they
 are two works with two unit tables, never one reconciled table.
 
-Worth knowing what that commits us to for the Yerushalmi specifically: the indexed
-edition labels its sub-unit `משנה`, not `הלכה`, so its citations read
-`פרק ח, משנה א`. That is the edition indexing by the mishnah a sugya comments on,
-which is both self-consistent and more stable across editions than a halakhah
-count -- but it is still ONE edition's system, and the surface should say so
-rather than let a reader assume their own volume agrees.
+Worth knowing what that commits us to for the Yerushalmi specifically -- and where
+the owner has overruled it. The indexed edition labels its sub-unit `משנה`, not
+`הלכה`, and this file argued from that for citing `פרק ח, משנה א`: the edition
+indexing by the mishnah a sugya comments on, self-consistent and more stable across
+editions than a halakhah count. THE OWNER HAS RULED THE OTHER WAY. The sub-unit is
+DISPLAYED as `הלכה`, so the same place reads `פרק ח, הלכה א`. The old argument stays
+written down rather than being deleted, because it is why the header says what it
+says, and the next reader will otherwise re-derive it and re-open a settled question.
+
+The reversal renames; it does not renumber, and that distinction is the whole of it.
+Only the kind WORD is rewritten, at the single site that renders it, and only for a
+four-column leaf. The ordinal beside it is the source's own numeral, untouched, and
+so are the unit's offset, its part key and its citation position: measured, all
+2,315 units of the 48 four-column works change their displayed word and not one
+changes its identity or its place. ONE DIVISION AUTHORITY, NAMED therefore still
+holds -- the source states `משנה`, `parse_canonical_header` still reports `משנה`, and
+the rename happens on the way to the reader rather than on the way in. What the
+citation asserts is unchanged: the passage's place in THIS edition's own sequence of
+sub-units, never a claim that another volume numbers its halakhot the same way.
+
+The corpus has one piece of evidence of its own for the ruling. Comparing each
+Yerushalmi chapter's highest sub-ordinal with the same chapter of the same tractate
+in the corpus's own Mishnah, 281 of 292 agree; ten fall short, which only says the
+Yerushalmi has gaps -- and one, נדרים chapter ט, states an ELEVENTH sub where that
+mishnah chapter has ten. A sub-unit that outruns the mishnayot is a halakhah
+division, not a mishnah index.
 
 MASKING. No source path appears here. The reference corpora are restricted, so
 their directories arrive through the environment (see `--help`) exactly as the
@@ -373,10 +393,18 @@ def _split_divisions(
     return [(d, payloads[d], addresses[d]) for d in order]
 
 
-#: The finest header field a citation may use, per grain. `halakhah` addresses the
-#: Yerushalmi the way it is actually cited; `chapter` is right for Mishnah and
-#: Tosefta, whose chapters are already close to the size of a stored span.
-_SUB_KIND_LABEL = {"משנה": "משנה", "הלכה": "הלכה", "פסוק": "פסוק"}
+#: The ONE place the sub-unit's word is chosen, and `משנה -> הלכה` is an owner ruling
+#: that reverses an argument this module used to make (see the docstring).
+#:
+#: It is a blanket rewrite of that word, so what makes it safe is that it is read only
+#: under `with_sub`, which is set only for a FOUR-COLUMN leaf. Measured over the whole
+#: M-source directory rather than over the works that happen to build: 51 of 8,233
+#: files are four-column, 50 of them are the Yerushalmi, and the 51st states no
+#: parseable address at all so it renders no sub-unit. Every one of the 13,059 headers
+#: in that set states `משנה`; none states `הלכה` or `פסוק`. A future four-column work
+#: that is NOT the Yerushalmi would be renamed wrongly, and no gate here could tell --
+#: which is why the population is recorded as a measurement and not as an assumption.
+_SUB_KIND_LABEL = {"משנה": "הלכה", "הלכה": "הלכה", "פסוק": "פסוק"}
 
 #: Numbering bases for the dense citation position. A chapter never runs past 99
 #: halakhot anywhere in this corpus (measured max 45), and `parse_unit_numeral`
@@ -1505,6 +1533,18 @@ def check_invariants(works: Sequence[WorkUnits]) -> List[str]:
             problems.append(f"{work.ref_id}: every unit shares one citation position")
 
         problems.extend(_ambiguity_problems(work))
+
+        # The owner's ruling, checked on the artifact rather than trusted to the
+        # constant staying edited. Honest about its reach: it asserts the ABSENCE of
+        # the old word, so it catches a reverted map and cannot catch a future
+        # four-column work that is not the Yerushalmi and for which `משנה` would have
+        # been right. That risk is recorded at `_SUB_KIND_LABEL`, not gated here.
+        if work.grain == "chapter_halakhah":
+            stale = sorted(u.label_he for u in work.units if "משנה" in u.label_he)
+            if stale:
+                problems.append(
+                    f"{work.ref_id}: {len(stale)} label(s) still render the sub-unit "
+                    f"as משנה, which the owner ruled reads הלכה, e.g. {stale[0]!r}")
 
         # A bracketed decimal pair anywhere in a label is fatal at the surface, and
         # fatal for the whole envelope rather than for the row that carries it. The
