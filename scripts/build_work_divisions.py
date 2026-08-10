@@ -67,6 +67,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import collections
+import difflib
 import functools
 import hashlib
 import html
@@ -101,6 +102,7 @@ ENV_REF_PKL = "GENIZAH_REF_CORPUS_PKL"
 ENV_MSOURCE_DIR = "GENIZAH_MSOURCE_DIR"
 ENV_JA_DIR = "GENIZAH_JA_DIR"
 ENV_JA_SOURCE_DIR = "GENIZAH_JA_SOURCE_DIR"
+ENV_JA_TREE = "GENIZAH_JA_PARTITION_TREE"
 ENV_STAGING_DIR = "GENIZAH_REFS_STAGING_DIR"
 ENV_CROSSWALK = "GENIZAH_REF_CROSSWALK"
 
@@ -155,6 +157,10 @@ def _clean_marker_text(text: str) -> str:
     """
     cleaned = html.unescape(text).translate(_MARKUP_CHARS)
     cleaned = _BRACKETED_PAIR_RE.sub(r"\1", cleaned)
+    # Internal runs of whitespace collapse. The publisher's own headings carry
+    # `פרק  א.` and similar, and once a heading is quoted inside a citation its
+    # typesetting slack becomes a double space in the middle of an address.
+    cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip().strip(",:;.").strip()
 
 
@@ -494,12 +500,13 @@ def build_ja(path: str, ref_id: str, shipped: Dict[str, str]) -> Optional[WorkUn
     return WorkUnits(ref_id, "ja", "division", units, len(stream))
 
 
-def _ja_divisions(raw: str) -> List[Tuple[int, str, Optional[str]]]:
-    """Every division-tier marker in a Judeo-Arabic document, as (raw_pos, kind, numeral).
+def _ja_markers(raw: str) -> List[Tuple[int, str, Optional[str]]]:
+    """EVERY `+...~` marker in a Judeo-Arabic document, as (raw_pos, kind, numeral).
 
-    Shared by both grains: the division grain turns these into units, and the page
-    grain uses them only to name the section a page falls in. Reading the markers
-    twice from two copies of this loop is how the two grains would drift apart.
+    Both tiers, verse analogue included. The division grain filters this down; the
+    tree binder wants all of it, because the publisher's tree reaches the verse level
+    and restricting the sequence to the coarse tier would leave its leaves with
+    nothing to align against.
     """
     marked: List[Tuple[int, str, Optional[str]]] = []
     position = 0
@@ -509,11 +516,25 @@ def _ja_divisions(raw: str) -> List[Tuple[int, str, Optional[str]]]:
             kind, numeral = _split_ja_heading(tokens)
             marked.append((position + len(line) - len(line.lstrip()), kind, numeral))
         position += len(line) + 1
+    return marked
 
+
+def _ja_divisions(raw: str) -> List[Tuple[int, str, Optional[str]]]:
+    """The division-tier markers only -- the citable grain.
+
+    Shared by both grains: the division grain turns these into units, and the page
+    grain uses them only to name the section a page falls in. Reading the markers
+    twice from two copies of this loop is how the two grains would drift apart.
+    """
+    marked = _ja_markers(raw)
     divisions = [(p, k, n) for p, k, n in marked if k not in JA_LEAF_KINDS]
     if len(divisions) < 3:
         return marked                      # a document with no coarse tier is flat
     return divisions
+
+
+def _marker_label(kind: str, numeral: Optional[str]) -> str:
+    return _clean_marker_text(f"{kind} {numeral}".strip() if numeral else kind)
 
 
 def _split_ja_heading(tokens: Sequence[str]) -> Tuple[str, Optional[str]]:
@@ -646,8 +667,134 @@ def _as_int(value, default: int = 0) -> int:
         return default
 
 
+# --------------------------------------------------------------------------
+# The publisher's partition tree: labels and a STATED hierarchy
+# --------------------------------------------------------------------------
+
+#: A label folded to its letters and digits, for comparing the two sides. The
+#: difference being removed is typographic -- the publisher renders
+#: `א. בענין פדיון שבויים`, the marker stream writes the same words with its own
+#: spacing -- so this is not a looser match, it is the same match with the
+#: typography taken out.
+_LABEL_FOLD_RE = re.compile(r"[^0-9א-ת]+")
+
+#: How much of the publisher's tree must be found, in order, inside the marker
+#: sequence before its hierarchy is trusted for a work. Measured against the
+#: top-level-only harvest, 87 of 89 documents clear 0.30 and the two that do not are
+#: organised by a principle the markers do not express at all (one by manuscript
+#: siglum). A work below the bar keeps its own labels: the cost of borrowing from a
+#: misalignment is a chain that STATES a false containment, which is the exact defect
+#: the tree was fetched to remove.
+JA_TREE_MIN_ALIGNMENT = 0.30
+
+
+def _fold_label(text: str) -> str:
+    return _LABEL_FOLD_RE.sub("", text or "")
+
+
+def ja_tree_index(path: str) -> Dict[str, List[dict]]:
+    """Load the harvested partition trees, keyed by the site's own title id."""
+    with open(path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    trees = payload.get("harvested") or {}
+    out: Dict[str, List[dict]] = {}
+    for title_id, tree in trees.items():
+        nodes = [n for n in (tree.get("nodes") or []) if str(n.get("text") or "").strip()]
+        if nodes:
+            out[str(title_id)] = _tree_reading_order(nodes)
+    return out
+
+
+def _tree_reading_order(nodes: Sequence[dict]) -> List[dict]:
+    """Sort tree nodes into reading order by their `Index` path.
+
+    Sorting on the path COMPONENT-WISE as integers, never as a string: `"10"` sorts
+    before `"9"` lexically, which would silently interleave a work's tenth section
+    into its ninth. The order matters because the alignment below is positional.
+    """
+    return sorted(nodes, key=lambda n: [int(p) for p in str(n["path"]).split(":")])
+
+
+def ja_tree_chain(node: dict, by_path: Dict[str, dict]) -> List[str]:
+    """The publisher's own labels from the top of the tree down to this node."""
+    parts: List[str] = []
+    components = str(node["path"]).split(":")
+    for depth in range(len(components)):
+        ancestor = by_path.get(":".join(components[:depth + 1]))
+        if ancestor:
+            label = _clean_marker_text(str(ancestor.get("text") or ""))
+            if label:
+                parts.append(label)
+    return parts[-_JA_MAX_DEPTH:]
+
+
+def bind_tree_chains(
+    markers: Sequence[Tuple[int, str, Optional[str]]], nodes: Sequence[dict]
+) -> Dict[int, List[str]]:
+    """raw position -> the publisher's stated label chain, for the markers it names.
+
+    Both sequences are in reading order -- the tree provably so, its `value` ids being
+    allocated depth-first and monotonic in 92 of 92 works -- so they can be aligned
+    positionally and each side contributes what it has: the markers know WHERE, the
+    tree knows WHAT and, crucially, WHAT CONTAINS IT.
+
+    That last part is the reason this exists. `_infer_containers` has to deduce
+    containment from where the numbering restarts, and on an irregular text it deduces
+    a chain that is confidently wrong. Here the publisher states it: a marker reading
+    `פסוק א` becomes `פרק א, פסוק א` because the tree puts that verse under that
+    chapter, not because anything worked it out.
+
+    Returns {} rather than a partial map when the alignment is too weak to trust --
+    borrowing a parent from a misalignment would assert a containment that is not
+    there, which is worse than having no parent at all.
+    """
+    if not markers or not nodes:
+        return {}
+    left = [_fold_label(_marker_label(kind, numeral)) for _, kind, numeral in markers]
+    right = [_fold_label(str(n.get("text") or "")) for n in nodes]
+    blocks = difflib.SequenceMatcher(None, left, right, autojunk=False)\
+        .get_matching_blocks()
+    matched = sum(size for _, _, size in blocks)
+    if matched / len(right) < JA_TREE_MIN_ALIGNMENT:
+        return {}
+
+    by_path = {str(n["path"]): n for n in nodes}
+    chains: Dict[int, List[str]] = {}
+    for i, j, size in blocks:
+        for offset in range(size):
+            chain = ja_tree_chain(nodes[j + offset], by_path)
+            if chain:
+                chains[markers[i + offset][0]] = chain
+    return chains
+
+
 def _source_title_key(text: str) -> str:
     return "".join(ch for ch in (text or "") if ch.isalnum())
+
+
+@functools.lru_cache(maxsize=4)
+def _load_ja_sources(source_dir: str) -> Tuple[Dict[str, dict], Dict[str, str]]:
+    """Read the source directory once: documents by title key, and keys by title id.
+
+    Cached because the build asks for both views and these files carry the full text
+    of the corpus; reading them twice is a minute of I/O for nothing.
+    """
+    by_key: Dict[str, dict] = {}
+    key_by_title_id: Dict[str, str] = {}
+    for name in sorted(os.listdir(source_dir)):
+        if not name.endswith(".json"):
+            continue
+        with open(os.path.join(source_dir, name), encoding="utf-8") as handle:
+            doc = json.load(handle)
+        key = _source_title_key(f"{doc.get('AuthorName','')},{doc.get('TitleName','')}")
+        by_key.setdefault(key, doc)
+        # The filename stem IS the site's own title id, which is what makes the tree
+        # bind exactly rather than by fuzzy title match. A title-similarity fallback
+        # previously bound one biblical commentary to the same author's commentary on
+        # a different book, and a mis-bound tree does not fail -- it publishes one
+        # work's section names over another work's text.
+        key_by_title_id[os.path.splitext(name)[0]] = key
+    return by_key, key_by_title_id
 
 
 def ja_source_index(source_dir: str) -> Dict[str, dict]:
@@ -657,15 +804,20 @@ def ja_source_index(source_dir: str) -> Dict[str, dict]:
     to the commentary on Genesis by the same author, and a mis-binding does not fail
     -- it silently addresses one work with another work's pages.
     """
-    index: Dict[str, dict] = {}
-    for name in sorted(os.listdir(source_dir)):
-        if not name.endswith(".json"):
-            continue
-        with open(os.path.join(source_dir, name), encoding="utf-8") as handle:
-            doc = json.load(handle)
-        key = _source_title_key(f"{doc.get('AuthorName','')},{doc.get('TitleName','')}")
-        index.setdefault(key, doc)
-    return index
+    return _load_ja_sources(source_dir)[0]
+
+
+def ja_trees_by_source_key(
+    source_dir: str, trees: Dict[str, List[dict]]
+) -> Dict[str, List[dict]]:
+    """Re-key the harvested trees by the same title key the documents are keyed on."""
+    key_by_title_id = _load_ja_sources(source_dir)[1]
+    out: Dict[str, List[dict]] = {}
+    for title_id, nodes in trees.items():
+        key = key_by_title_id.get(str(title_id))
+        if key:
+            out[key] = nodes
+    return out
 
 
 def ja_reconstruct(doc: dict, title_line: str) -> Tuple[str, List[Tuple[str, int]]]:
@@ -696,7 +848,8 @@ def ja_reconstruct(doc: dict, title_line: str) -> Tuple[str, List[Tuple[str, int
 
 
 def build_ja_pages(
-    path: str, ref_id: str, shipped: Dict[str, str], source: Dict[str, dict]
+    path: str, ref_id: str, shipped: Dict[str, str], source: Dict[str, dict],
+    tree: Optional[Sequence[dict]] = None,
 ) -> Optional[WorkUnits]:
     """Judeo-Arabic addressed by the printed page of its named edition.
 
@@ -715,9 +868,12 @@ def build_ja_pages(
     Pages are also finer: 17,320 of them across the family at a median 686 letters,
     against 5,968 divisions at 1,990.
 
-    Each page is labelled with the section it falls in, but with that section's OWN
-    label only -- never the inferred enclosing chain. The chain is the part that is
-    guessed, so a verified page address does not carry it.
+    Each page is labelled with the section it falls in. Which label that is depends on
+    whether the publisher has told us: given its partition tree, the section carries
+    the publisher's STATED chain (`שער א, פרק ג`), and otherwise its own bare label
+    (`פרק ג`) and nothing more. The chain `_infer_containers` deduces is deliberately
+    NOT used here -- a deduced containment is the one thing a verified page address
+    must not carry, since a false parent reads as information.
 
     Fails closed on anything less than byte-exactness: page boundaries that are off
     by a line put every address on this work in the wrong place, quietly.
@@ -741,10 +897,16 @@ def build_ja_pages(
         return None
 
     # Section names come from the SAME text, so their offsets are in the same space.
-    sections = [(stream_offset_for_raw(offsets, pos),
-                 _clean_marker_text(f"{kind} {numeral}".strip() if numeral else kind))
-                for pos, kind, numeral in _ja_divisions(rebuilt)]
-    sections = [(o, label) for o, label in sections if label]
+    # The chains are bound against EVERY marker, not just the citable tier: the tree
+    # reaches the verse level, and its leaves need something to align against or the
+    # whole alignment weakens. Only the coarse tier is then used to name a page --
+    # labelling a page with a verse would claim the page IS that verse.
+    chains = bind_tree_chains(_ja_markers(rebuilt), tree or [])
+    sections = []
+    for pos, kind, numeral in _ja_divisions(rebuilt):
+        label = ", ".join(chains.get(pos) or [_marker_label(kind, numeral)])
+        if label:
+            sections.append((stream_offset_for_raw(offsets, pos), label))
     section_offsets = [o for o, _ in sections]
 
     # A page is a place only if it holds letters of its own. 3,717 real pages carry
@@ -994,6 +1156,7 @@ corpora are restricted:
   {ENV_MSOURCE_DIR}    the M-source edition directory
   {ENV_JA_DIR}         the Judeo-Arabic per-document directory
   {ENV_JA_SOURCE_DIR}  the Judeo-Arabic SOURCE json (carries printed page numbers)
+  {ENV_JA_TREE}  the harvested partition trees (optional; stated section names)
   {ENV_STAGING_DIR}  the staged bodies + versemap sidecars
   {ENV_CROSSWALK}   crosswalk.json (optional; reference id -> work id)""")
     parser.add_argument("--out", required=True, help="output directory")
@@ -1053,30 +1216,64 @@ corpora are restricted:
         if not source:
             print(f"  NOTE: {ENV_JA_SOURCE_DIR} unset -- falling back to the weaker "
                   f"inferred-division grain for Judeo-Arabic")
+
+        # The publisher's partition trees, if they have been harvested. Optional by
+        # design: without them a section is named by its own bare label, which is
+        # correct but says nothing about what contains it.
+        tree_path = os.environ.get(ENV_JA_TREE)
+        trees = (ja_tree_index(tree_path)
+                 if tree_path and os.path.exists(tree_path) else {})
+        tree_for_key: Dict[str, List[dict]] = {}
+        if trees and ja_source_dir:
+            tree_for_key = ja_trees_by_source_key(ja_source_dir, trees)
+            print(f"  partition trees: {len(trees)} harvested, "
+                  f"{len(tree_for_key)} bound to a document, "
+                  f"{sum(len(n) for n in trees.values()):,} nodes")
+        elif not trees:
+            print(f"  NOTE: {ENV_JA_TREE} unset -- Judeo-Arabic sections will carry "
+                  f"their own label with no stated parent")
+
         names = sorted(f for f in os.listdir(ja_dir) if f.endswith(".txt"))
-        pages = 0
+        pages = with_tree = 0
         for name in names:
             # The reference id is `J:` + the filename stem, which is what the ingest
             # minted. Numbering by position instead silently mismatches every work
             # and the whole family fails closed with nothing to point at.
             ref_id = "J:" + os.path.splitext(name)[0]
             full = os.path.join(ja_dir, name)
+            # The document's own tree, found through the SAME title key its pages are
+            # found by, so a work can never be given another work's section names.
+            lines = _read(full).split("\n")
+            key = _source_title_key(lines[1].strip() if len(lines) > 1 else "")
+            nodes = tree_for_key.get(key)
             # Pages are preferred, divisions are the fallback. A work whose source
             # pages do not rebuild the stream exactly still gets an address, from the
             # grain that needs no source at all.
-            built = build_ja_pages(full, ref_id, shipped, source) if source else None
+            built = (build_ja_pages(full, ref_id, shipped, source, nodes)
+                     if source else None)
             if built:
                 pages += 1
+                if nodes:
+                    with_tree += 1
             else:
                 built = build_ja(full, ref_id, shipped)
             if built:
                 works.append(built)
             else:
                 skipped["ja"] += 1
-        print(f"  JA: {sum(1 for w in works if w.family == 'ja')} built "
-              f"({pages} by printed page, "
-              f"{sum(1 for w in works if w.family == 'ja') - pages} by division), "
-              f"{skipped['ja']} skipped", flush=True)
+        ja_built = sum(1 for w in works if w.family == "ja")
+        # Count what actually reached the labels, not what was merely offered: a tree
+        # can bind to a document and still be rejected by the alignment gate, and
+        # reporting the offer as the outcome would overstate the tree's contribution.
+        stated = sum(1 for w in works if w.family == "ja"
+                     for u in w.units if u.label_he.count(", ") > 1)
+        stated_works = sum(1 for w in works if w.family == "ja"
+                           and any(u.label_he.count(", ") > 1 for u in w.units))
+        print(f"  JA: {ja_built} built ({pages} by printed page, "
+              f"{ja_built - pages} by division), {skipped['ja']} skipped", flush=True)
+        print(f"      {with_tree} matched to a harvested tree; "
+              f"{stated:,} addresses in {stated_works} works name a parent the "
+              f"publisher STATES", flush=True)
     elif "ja" in families:
         print(f"  SKIPPED: {ENV_JA_DIR} is not set or not a directory")
 

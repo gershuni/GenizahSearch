@@ -28,11 +28,14 @@ from scripts.build_work_divisions import (
     _msource_files,
     _source_title_key,
     _split_divisions,
+    _tree_reading_order,
+    bind_tree_chains,
     build_ja_pages,
     build_sefaria,
     check_invariants,
     ja_reconstruct,
     ja_source_index,
+    ja_tree_chain,
     sefaria_render_kind,
     write_artifact,
 )
@@ -217,6 +220,12 @@ class TestBracketedDecimalPair:
         assert _clean_marker_text("סימן [א]") == "סימן [א]"
         assert _clean_marker_text("[הקדמה]") == "[הקדמה]"
 
+    def test_the_publishers_typesetting_slack_does_not_reach_the_citation(self):
+        """Real headings arrive as `פרק  א.`; quoted inside an address that becomes a
+        double space in the middle of a citation."""
+        assert _clean_marker_text("פרק  א.") == "פרק א"
+        assert _clean_marker_text("שער\tראשון") == "שער ראשון"
+
     def test_the_invariant_catches_the_shape_if_it_ever_survives(self):
         """PROVEN ABLE TO FAIL. The builder strips it; this is the backstop, and it
         exists because the previous defence was a comment asserting the shape could
@@ -323,6 +332,96 @@ class TestJaSourceIndex:
     def test_punctuation_and_spacing_do_not_defeat_the_match(self):
         assert (_source_title_key("פלוני, ספר-הדוגמה")
                 == _source_title_key("פלוני,ספר הדוגמה"))
+
+
+def _node(path, text, value=None):
+    return {"path": path, "depth": path.count(":"), "text": text, "value": value}
+
+
+class TestTreeReadingOrder:
+    def test_paths_sort_component_wise_as_integers(self):
+        nodes = [_node("10", "י"), _node("9", "ט"), _node("9:2", "ב"), _node("9:10", "י")]
+        assert [n["text"] for n in _tree_reading_order(nodes)] == ["ט", "ב", "י", "י"]
+
+    def test_string_sorting_would_interleave_the_tenth_section_into_the_ninth(self):
+        """THE DEFECT, PROVEN ABLE TO FAIL. The alignment below is positional, so an
+        order that puts section 10 before section 9 does not merely look untidy -- it
+        hands each marker the wrong node's parent."""
+        nodes = [_node("10", "י"), _node("9", "ט")]
+        assert [n["text"] for n in _tree_reading_order(nodes)] == ["ט", "י"]
+        as_strings = sorted(nodes, key=lambda n: n["path"])
+        assert [n["text"] for n in as_strings] == ["י", "ט"]
+
+
+class TestJaTreeChain:
+    NODES = [_node("0", "שער ראשון"), _node("0:0", "פרק א"), _node("0:1", "פרק ב"),
+             _node("1", "שער שני"), _node("1:0", "פרק א")]
+
+    def _by_path(self):
+        return {n["path"]: n for n in self.NODES}
+
+    def test_a_child_carries_the_parent_the_publisher_states(self):
+        assert ja_tree_chain(self.NODES[1], self._by_path()) == ["שער ראשון", "פרק א"]
+
+    def test_a_top_level_node_has_no_parent_to_state(self):
+        assert ja_tree_chain(self.NODES[0], self._by_path()) == ["שער ראשון"]
+
+    def test_two_sections_with_the_same_child_label_stay_distinguishable(self):
+        by_path = self._by_path()
+        assert ja_tree_chain(self.NODES[1], by_path) != ja_tree_chain(self.NODES[4], by_path)
+
+    def test_a_chain_is_capped_so_a_citation_stays_readable(self):
+        deep = [_node("0", "א"), _node("0:0", "ב"), _node("0:0:0", "ג"),
+                _node("0:0:0:0", "ד"), _node("0:0:0:0:0", "ה")]
+        chain = ja_tree_chain(deep[-1], {n["path"]: n for n in deep})
+        assert len(chain) == 3
+        assert chain[-1] == "ה"
+
+
+class TestBindTreeChains:
+    """Markers know WHERE, the tree knows WHAT CONTAINS IT. Both in reading order."""
+
+    MARKERS = [(0, "פרק", "א"), (100, "פסוק", "א"), (200, "פסוק", "ב"),
+               (300, "פרק", "ב"), (400, "פסוק", "א")]
+    NODES = [_node("0", "פרק א"), _node("0:0", "פסוק א"), _node("0:1", "פסוק ב"),
+             _node("1", "פרק ב"), _node("1:0", "פסוק א")]
+
+    def test_a_bare_verse_gains_the_chapter_the_publisher_puts_it_under(self):
+        chains = bind_tree_chains(self.MARKERS, self.NODES)
+        assert chains[100] == ["פרק א", "פסוק א"]
+        assert chains[400] == ["פרק ב", "פסוק א"]
+
+    def test_the_two_identical_verse_labels_get_DIFFERENT_parents(self):
+        """The reason positional alignment is used rather than label lookup: `פסוק א`
+        occurs under both chapters, and a dictionary keyed on the label would give
+        both the same parent and silently misplace one."""
+        chains = bind_tree_chains(self.MARKERS, self.NODES)
+        assert chains[100] != chains[400]
+
+        by_label = {n["text"]: n for n in self.NODES}
+        assert by_label["פסוק א"]["path"] == "1:0"      # the LAST one wins, wrongly
+
+    def test_typographic_differences_do_not_defeat_the_match(self):
+        nodes = [_node("0", "פרק  א."), _node("0:0", " פסוק א ")]
+        chains = bind_tree_chains(self.MARKERS[:2], nodes)
+        assert chains[100] == ["פרק א", "פסוק א"]
+
+    def test_a_tree_that_does_not_align_contributes_NOTHING(self):
+        """Fail closed. Borrowing a parent from a misalignment asserts a containment
+        that is not in the source, which is the exact defect the tree was fetched to
+        remove -- worse than having no parent at all."""
+        unrelated = [_node(str(i), f"מדור {i}") for i in range(12)]
+        assert bind_tree_chains(self.MARKERS, unrelated) == {}
+
+    def test_no_tree_means_no_chains_rather_than_an_error(self):
+        assert bind_tree_chains(self.MARKERS, []) == {}
+        assert bind_tree_chains([], self.NODES) == {}
+
+    def test_a_partially_aligned_tree_binds_only_what_it_matched(self):
+        nodes = self.NODES + [_node("2", "פרק ג"), _node("2:0", "פסוק א")]
+        chains = bind_tree_chains(self.MARKERS, nodes)
+        assert set(chains) <= {p for p, _, _ in self.MARKERS}
+        assert chains[100] == ["פרק א", "פסוק א"]
 
 
 class TestBuildJaPages:
@@ -457,6 +556,64 @@ class TestBuildJaPages:
         built = build_ja_pages(path, ref_id, shipped, source)
         assert built.units[0].label_he == "עמ' 1"
         assert built.units[1].label_he == "פרק א, עמ' 2"
+
+    def test_the_publishers_tree_supplies_the_stated_parent(self, tmp_path):
+        """The point of harvesting the tree: `פרק א` becomes `שער ראשון, פרק א` because
+        the publisher SAYS so, not because a restart pattern was read as containment."""
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "+שער~ +ראשון~"), (2, "פתיחה")]),
+            ("2", [(1, "+פרק~ +א~"), (2, "גוף")]),
+            ("3", [(1, "+פרק~ +ב~"), (2, "עוד")]),
+        ])
+        tree = _tree_reading_order([
+            _node("0", "שער ראשון"), _node("0:0", "פרק א"), _node("0:1", "פרק ב")])
+        built = build_ja_pages(path, ref_id, shipped, source, tree)
+        assert [u.label_he for u in built.units] == [
+            "שער ראשון, עמ' 1", "שער ראשון, פרק א, עמ' 2", "שער ראשון, פרק ב, עמ' 3"]
+
+    def test_without_a_tree_the_section_carries_its_own_label_alone(self, tmp_path):
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "+שער~ +ראשון~"), (2, "פתיחה")]),
+            ("2", [(1, "+פרק~ +א~"), (2, "גוף")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source, None)
+        assert [u.label_he for u in built.units] == ["שער ראשון, עמ' 1", "פרק א, עמ' 2"]
+
+    def test_a_page_is_never_labelled_with_a_VERSE(self, tmp_path):
+        """The tree is aligned against every marker so its leaves have anchors, but a
+        page holds many verses -- naming the page after one of them would claim the
+        page IS that verse. Only the coarse tier may name a page.
+
+        Three chapters, because a document with fewer than three coarse markers is
+        treated as flat and then its verses ARE the only structure it has.
+        """
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "+פרק~ +א~"), (2, "+פסוק~ +א~"), (3, "טקסט"),
+                   (4, "+פסוק~ +ב~"), (5, "עוד")]),
+            ("2", [(1, "+פסוק~ +ג~"), (2, "המשך")]),
+            ("3", [(1, "+פרק~ +ב~"), (2, "+פסוק~ +א~"), (3, "שוב")]),
+            ("4", [(1, "+פרק~ +ג~"), (2, "+פסוק~ +א~"), (3, "סוף")]),
+        ])
+        tree = _tree_reading_order([
+            _node("0", "פרק א"), _node("0:0", "פסוק א"),
+            _node("0:1", "פסוק ב"), _node("0:2", "פסוק ג"),
+            _node("1", "פרק ב"), _node("1:0", "פסוק א"),
+            _node("2", "פרק ג"), _node("2:0", "פסוק א")])
+        built = build_ja_pages(path, ref_id, shipped, source, tree)
+        assert [u.label_he for u in built.units] == [
+            "פרק א, עמ' 1", "פרק א, עמ' 2", "פרק ב, עמ' 3", "פרק ג, עמ' 4"]
+        assert not any("פסוק" in u.label_he for u in built.units)
+
+    def test_a_tree_belonging_to_another_work_contributes_nothing(self, tmp_path):
+        path, ref_id, shipped, source = self._write(tmp_path, [
+            ("1", [(1, "+פרק~ +א~"), (2, "גוף")]),
+            ("2", [(1, "+פרק~ +ב~"), (2, "עוד")]),
+            ("3", [(1, "+פרק~ +ג~"), (2, "שוב")]),
+        ])
+        foreign = _tree_reading_order([_node(str(i), f"מדור {i}") for i in range(14)])
+        built = build_ja_pages(path, ref_id, shipped, source, foreign)
+        assert [u.label_he for u in built.units] == [
+            "פרק א, עמ' 1", "פרק ב, עמ' 2", "פרק ג, עמ' 3"]
 
 
 # ---------------------------------------------------------------------------
