@@ -474,3 +474,113 @@ def test_verify_cert01_grading_unmodified():
 def test_allowlist_provenance_clean():
     violations = vrp.check_allowlist_provenance()
     assert violations == [], violations
+
+
+# ---------------------------------------------------------------------------
+# The amendment section must be BOUNDED.
+#
+# `check_allowlist_provenance` claims to confirm that every allowlisted column
+# is cited in ONE dated amendment section. The schema doc carries several
+# amendments after that one (2026-08-07 (E), 2026-08-07 (F)+(G), 2026-08-03),
+# so a reader from the outside cannot see whether the check is scoped or not --
+# both a bounded and an unbounded parser return "clean" against the real doc.
+#
+# These are the tests that tell the two apart. The mutation is: put a name ONLY
+# in a LATER amendment. A bounded parser rejects it; the read-to-EOF parser
+# accepts it, and the check silently certifies a provenance it never had.
+# ---------------------------------------------------------------------------
+
+_SENTINEL_COLUMN = "sentinel_only_in_a_later_amendment"
+
+_TWO_AMENDMENT_DOC = f"""# Discovery Sidecar Schema v1
+
+## 1. Two-Table Claim Model
+
+Body text that belongs to no amendment.
+
+{vrp.SCHEMA_AMENDMENT_HEADER}
+
+### (A) additions
+
+This section cites `locus_he` and nothing else.
+
+## Amendment 2026-08-07 (F)+(G) -- a LATER, DIFFERENT dated section
+
+This section cites `{_SENTINEL_COLUMN}`, which the earlier section never
+mentions. A check scoped to the earlier section must not see it.
+"""
+
+
+def _write_two_amendment_doc(tmp_path) -> str:
+    path = tmp_path / "schema-two-amendments.md"
+    path.write_text(_TWO_AMENDMENT_DOC, encoding="utf-8")
+    return str(path)
+
+
+def test_amendment_section_stops_at_the_next_amendment(tmp_path):
+    """A name in a later dated section is NOT in the requested section's text."""
+    doc = _write_two_amendment_doc(tmp_path)
+    section = vrp._read_amendment_section_text(doc)
+    assert "locus_he" in section, "the requested section's own content must survive"
+    assert _SENTINEL_COLUMN not in section, (
+        "the section runs to the NEXT heading of the same level, not to EOF -- "
+        "otherwise every later amendment is silently folded into this one"
+    )
+
+
+def test_a_column_cited_only_later_fails_the_provenance_check(tmp_path, monkeypatch):
+    """The gate, end to end: allowlisting a column documented only in a later
+    amendment must be reported as a violation."""
+    doc = _write_two_amendment_doc(tmp_path)
+    monkeypatch.setattr(
+        vrp, "ALLOWED_DIFFERING_COLUMNS",
+        {"discovery_evidence": frozenset({_SENTINEL_COLUMN})},
+    )
+    violations = vrp.check_allowlist_provenance(doc)
+    assert len(violations) == 1, violations
+    assert _SENTINEL_COLUMN in violations[0]
+
+
+def test_a_column_cited_in_the_requested_section_still_passes(tmp_path, monkeypatch):
+    """The bound must not be so tight that it rejects the real thing -- a
+    section parser that returned nothing would pass the two tests above while
+    being useless."""
+    doc = _write_two_amendment_doc(tmp_path)
+    monkeypatch.setattr(
+        vrp, "ALLOWED_DIFFERING_COLUMNS",
+        {"discovery_evidence": frozenset({"locus_he"})},
+    )
+    assert vrp.check_allowlist_provenance(doc) == []
+
+
+def test_read_to_eof_would_have_accepted_the_later_citation(tmp_path):
+    """The defect, proven able to fail -- against a LOCAL re-implementation of
+    the old behaviour, so the sensitivity of the two tests above is demonstrated
+    rather than asserted."""
+    doc = _write_two_amendment_doc(tmp_path)
+    text = Path(doc).read_text(encoding="utf-8")
+    read_to_eof = text[text.find(vrp.SCHEMA_AMENDMENT_HEADER):]      # <- the old parser
+
+    assert _SENTINEL_COLUMN in read_to_eof, "the old parser swallows the later amendment"
+    assert _SENTINEL_COLUMN not in vrp._read_amendment_section_text(doc)
+
+
+def test_a_missing_amendment_header_is_still_an_explicit_failure(tmp_path):
+    path = tmp_path / "no-amendment.md"
+    path.write_text("# Schema\n\nNo amendment section here.\n", encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        vrp._read_amendment_section_text(str(path))
+
+
+def test_the_real_schema_doc_section_is_actually_bounded():
+    """Against the committed doc: the section must end before the amendments
+    that follow it, and must not be empty."""
+    section = vrp._read_amendment_section_text()
+    assert section.startswith(vrp.SCHEMA_AMENDMENT_HEADER)
+    assert len(section) > 200, "a section parser that returns nothing passes vacuously"
+    for later in (
+        "## Amendment 2026-08-07 (E)",
+        "## Amendment 2026-08-07 (F)+(G)",
+        "## Amendment 2026-08-03",
+    ):
+        assert later not in section, f"{later} must not be folded into the cited section"

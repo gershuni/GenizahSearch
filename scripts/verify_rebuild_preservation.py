@@ -176,14 +176,34 @@ _BAND_PRECISION_TIER_A_ALLOWED_FIELDS = frozenset({"measurement_status", "ci_low
 # ---------------------------------------------------------------------------
 
 def _read_amendment_section_text(schema_doc_path: Optional[str] = None) -> str:
+    """The text of ONE dated amendment section: its heading to the next `## `
+    heading at the same level, or EOF -- whichever comes first.
+
+    The bound is the point. This previously returned `text[idx:]`, i.e. the
+    heading to EOF, and the schema doc carries several amendments after the
+    cited one. A column documented only in a LATER amendment therefore passed a
+    check whose whole claim is that the allowlist matches ONE frozen, dated
+    contract -- silently, because both parsers report the real doc as clean.
+    The heading is matched at line start so a mention of the section's name in
+    running prose cannot be taken for the section itself.
+    """
     path = schema_doc_path or SCHEMA_DOC_PATH
     text = Path(path).read_text(encoding="utf-8")
-    idx = text.find(SCHEMA_AMENDMENT_HEADER)
-    if idx == -1:
+    lines = text.splitlines(keepends=True)
+    start = next(
+        (i for i, ln in enumerate(lines) if ln.rstrip("\r\n") == SCHEMA_AMENDMENT_HEADER),
+        None,
+    )
+    if start is None:
         raise RuntimeError(
-            f"{path}: could not find {SCHEMA_AMENDMENT_HEADER!r} -- allowlist provenance check cannot run"
+            f"{path}: could not find {SCHEMA_AMENDMENT_HEADER!r} at the start of a line "
+            f"-- allowlist provenance check cannot run"
         )
-    return text[idx:]
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+        len(lines),
+    )
+    return "".join(lines[start:end])
 
 
 def check_allowlist_provenance(schema_doc_path: Optional[str] = None) -> List[str]:
