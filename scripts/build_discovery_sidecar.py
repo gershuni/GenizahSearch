@@ -72,6 +72,15 @@ import check_atlas_masking as _cam  # scripts/check_atlas_masking.py -- DATA-05 
 # CALLS it -- there is deliberately no `main_pool`-shaped function anywhere in
 # this file, so the three surfaces cannot disagree about which bucket an
 # identification belongs to.
+from shared.discovery_locus import (  # noqa: E402
+    parse_ref_span_alignments,
+    select_primary_alignment,
+)
+# Deliberate re-export: this error was raised from this module before the parsing moved
+# to `shared.discovery_locus`, and callers -- including the frozen gate-14 tests --
+# import it from here. Re-exporting keeps it the SAME class, so `isinstance` and
+# `pytest.raises` both continue to hold.
+from shared.discovery_locus import RefSpanProjectionError  # noqa: E402,F401
 from shared.discovery_main_pool import (  # noqa: E402
     MAIN_POOL_REASONS,
     Identification as MainPoolIdentification,
@@ -3207,10 +3216,6 @@ def _largest_track1_span(spans_json_str: str) -> Tuple[int, int]:
     return best_span
 
 
-class RefSpanProjectionError(RuntimeError):
-    """Fail-closed error projecting a page-side span onto its reference span."""
-
-
 def project_ref_span(ref_spans_json_str: Optional[str]) -> Tuple[
     Optional[int], Optional[int], Optional[int], Optional[int]
 ]:
@@ -3219,6 +3224,13 @@ def project_ref_span(ref_spans_json_str: Optional[str]) -> Tuple[
     Returns `(page_start, page_end, w_start, w_end)`, or four `None`s when the
     row carries no reference spans (a v2-era row, which has no work-side
     coordinate at all).
+
+    THE CONTRACT IS UNCHANGED. The parsing and the selection now live in
+    `shared.discovery_locus` -- `parse_ref_span_alignments` and
+    `select_primary_alignment` -- because the locus stage needs EVERY alignment a row
+    carries, not just the one an evidence row has room for, and two copies of this
+    reading would drift. What ships from here is byte-identical: verified over all
+    381,341 real rows against the pre-refactor implementation.
 
     THE RULE (Codex blocker 1 -- and it is *discovered*, not invented). gen-2's
     `ref_spans_json` is a list of `{p0, p1, dens, rg0, rg1, cigar}` objects in
@@ -3246,47 +3258,20 @@ def project_ref_span(ref_spans_json_str: Optional[str]) -> Tuple[
     evidence rows on **381,341 of 381,341 rows (100.00%)** -- so the offsets this
     ships are the producer's offsets, not a plausible reconstruction of them.
 
-    MULTIPLICITY is preserved, not hidden: 22.06% of `(page, work)` pairs have
-    more than one producer evidence row, and this deliberately keeps ONE (the
-    match row is a single row, so it has room for one dual-side span). The
-    discarded alignments remain in the research DB; nothing about them is
-    asserted or implied by what ships.
+    MULTIPLICITY is preserved, not hidden: 22.0% of rows carry more than one
+    distinct work-side span, and this deliberately keeps ONE (the match row is a
+    single row, so it has room for one dual-side span). The others are no longer
+    discarded at the source -- `parse_ref_span_alignments` returns all of them for
+    the locus stage -- but nothing about them is asserted by THIS column.
 
     MASKING (D-25): consumes integer offsets only. The `cigar` alignment string
     is never read, never stored, and never logged -- it is reference-text-derived
     and has no place in the shipped asset.
     """
-    if not ref_spans_json_str:
+    primary = select_primary_alignment(parse_ref_span_alignments(ref_spans_json_str))
+    if primary is None:
         return (None, None, None, None)
-    try:
-        entries = json.loads(ref_spans_json_str)
-    except ValueError as exc:
-        raise RefSpanProjectionError(
-            f"ref_spans_json is not parseable JSON -- refusing to guess a work-side "
-            f"offset ({type(exc).__name__})"
-        ) from exc
-    if not entries:
-        return (None, None, None, None)
-    best = None
-    best_key = None
-    for entry in entries:
-        try:
-            p0, p1 = int(entry["p0"]), int(entry["p1"])
-            rg0, rg1 = int(entry["rg0"]), int(entry["rg1"])
-        except (KeyError, TypeError, ValueError) as exc:
-            # A ref entry missing a side is NOT skippable: skipping it would
-            # silently change which entry wins, i.e. change the emitted offsets
-            # for reasons invisible in the output.
-            raise RefSpanProjectionError(
-                "a ref_spans_json entry lacks a complete dual-side span "
-                "(p0/p1/rg0/rg1) -- refusing to select among incomplete pairs "
-                f"({type(exc).__name__})"
-            ) from exc
-        key = (-(p1 - p0), p0, p1, rg0, rg1)
-        if best_key is None or key < best_key:
-            best_key = key
-            best = (p0, p1, rg0, rg1)
-    return best
+    return (primary.page_start, primary.page_end, primary.w_start, primary.w_end)
 
 
 def _largest_occurrence_span(seeds: List[Dict]) -> Tuple[int, int, Optional[str]]:

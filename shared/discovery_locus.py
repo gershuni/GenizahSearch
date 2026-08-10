@@ -19,6 +19,7 @@ and `parse_canonical_header` drops it by construction rather than by convention.
 from __future__ import annotations
 
 import bisect
+import json
 import re
 import unicodedata
 from array import array
@@ -46,6 +47,11 @@ __all__ = [
     "PIECE_SEP",
     "label_segments",
     "shorten_range_tail",
+    "RefAlignment",
+    "RefSpanProjectionError",
+    "parse_ref_span_alignments",
+    "select_primary_alignment",
+    "merge_witnessed_spans",
 ]
 
 #: Between the two ends of one continuous run (en dash, the citation convention).
@@ -583,6 +589,136 @@ def render_ranges(ranges: Sequence[Tuple[int, int]], labels) -> str:
         out.append(head if lo == hi
                    else f"{head}{RANGE_SEP}{shorten_range_tail(head, tail)}")
     return PIECE_SEP.join(out)
+
+
+class RefSpanProjectionError(RuntimeError):
+    """Fail-closed error reading a match row's paired page/work spans."""
+
+
+class RefAlignment(NamedTuple):
+    """ONE dual-side alignment, exactly as the producer paired it.
+
+    `page_start`/`page_end` index the manuscript page's normalized stream;
+    `w_start`/`w_end` index the reference work's. The pairing is the producer's, not
+    something computed here.
+    """
+
+    page_start: int
+    page_end: int
+    w_start: int
+    w_end: int
+
+
+def parse_ref_span_alignments(ref_spans_json_str: Optional[str]) -> List[RefAlignment]:
+    """EVERY dual-side alignment a match row carries, in the producer's own order.
+
+    The bake has until now kept one alignment per row -- the largest page-side extent
+    -- because an evidence row has room for one dual-side span. Measured over all
+    381,341 real rows: **86,724 (22.7%) carry more than one**, and **83,998 (22.0%)
+    carry more than one DISTINCT work-side span**. Those are the rows whose evidence
+    genuinely sits in several places, and a citation that names only one of them is
+    not merely coarse, it is wrong about where the fragment is.
+
+    Order is the producer's, deliberately. Sorting here would silently change which
+    alignment `select_primary_alignment` returns on a tie, and that function's
+    tie-break is frozen.
+
+    RAISES rather than skipping. An entry missing one side cannot be dropped: dropping
+    it changes which entry wins, and the row still comes out carrying plausible
+    offsets, so nothing downstream can see that it happened. Measured: 0 of 381,341
+    real rows are malformed, so this path is a guard against a future producer, not a
+    tolerance for the present one.
+
+    MASKING: reads the four integer fields only. The `cigar` alignment string is
+    reference-text-derived; it is never read, stored, or logged.
+    """
+    if not ref_spans_json_str:
+        return []
+    try:
+        entries = json.loads(ref_spans_json_str)
+    except ValueError as exc:
+        raise RefSpanProjectionError(
+            f"ref_spans_json is not parseable JSON -- refusing to guess a work-side "
+            f"offset ({type(exc).__name__})"
+        ) from exc
+    if not entries:
+        return []
+    out: List[RefAlignment] = []
+    for entry in entries:
+        try:
+            out.append(RefAlignment(int(entry["p0"]), int(entry["p1"]),
+                                    int(entry["rg0"]), int(entry["rg1"])))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RefSpanProjectionError(
+                "a ref_spans_json entry lacks a complete dual-side span "
+                "(p0/p1/rg0/rg1) -- refusing to select among incomplete pairs "
+                f"({type(exc).__name__})"
+            ) from exc
+    return out
+
+
+def select_primary_alignment(
+    alignments: Sequence[RefAlignment],
+) -> Optional[RefAlignment]:
+    """The ONE alignment a single evidence row carries. This rule is FROZEN.
+
+    Largest page-side extent, tie-broken `page_start` ASC, `page_end` ASC, `w_start`
+    ASC, `w_end` ASC -- a total order over integers, so the answer does not depend on
+    the order the entries arrived in.
+
+    Verified against the producer rather than against itself: this selection
+    reproduces one of the producer's own evidence rows on 381,341 of 381,341 rows.
+    Changing it would move the work-side offsets of the whole shipped asset.
+    """
+    best, best_key = None, None
+    for item in alignments:
+        key = (-(item.page_end - item.page_start), item.page_start, item.page_end,
+               item.w_start, item.w_end)
+        if best_key is None or key < best_key:
+            best, best_key = item, key
+    return best
+
+
+def merge_witnessed_spans(
+    spans: Iterable[Tuple[int, int]]
+) -> List[Tuple[int, int]]:
+    """Half-open work-side spans -> the same witnessed text, without repetition.
+
+    Merges spans that OVERLAP OR TOUCH, and never spans with a gap between them. The
+    distinction is the whole point and it is not the same rule as the citation's:
+
+      * merging `[100,200)` with `[150,300)` into `[100,300)` loses nothing -- every
+        offset in the union is witnessed by one of the two.
+      * merging `[100,200)` with `[201,300)` would claim offset 200, which nothing
+        witnesses. That is the fabrication the never-bridge-a-gap rule forbids.
+
+    Needed because the producer records overlapping CANDIDATE alignments: measured
+    over the real rows, consecutive distinct work spans overlap 48,011 times and nest
+    12,519 times, and the merge folds 65,048 of 506,011 alignments (12.9%), taking
+    rows with more than one piece from 22.0% to 12.8%.
+
+    WHAT THIS IS AND IS NOT, measured rather than assumed. It does NOT fix a wrong
+    citation: over the 5,664 real rows where the merge folds something and the work has
+    a unit table, the rendered citation changes on **0 of them**, because
+    `citation_runs` already folds overlapping pieces to the set of citation positions
+    they touch. So this is storage hygiene. It belongs in the contract anyway --
+    `locus_piece_count` is a published number recomputed from the pieces, and without
+    the merge it overstates scatter on every one of those 5,664 rows.
+
+    This is an interval normalization, not a citation decision. The citation's own
+    rule -- adjacency in unit ordinal, never in characters -- still applies afterwards
+    and is enforced separately by `compress_pieces` and `citation_runs`.
+    """
+    ordered = sorted((int(a), int(b)) for a, b in spans)
+    out: List[Tuple[int, int]] = []
+    for start, end in ordered:
+        if end < start:
+            raise ValueError(f"span ({start}, {end}) has its ends reversed")
+        if out and start <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], end))
+        else:
+            out.append((start, end))
+    return out
 
 
 def select_locus_work(

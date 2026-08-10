@@ -18,6 +18,8 @@ import pytest
 from shared.discovery_locus import (
     PIECE_SEP,
     RANGE_SEP,
+    RefAlignment,
+    RefSpanProjectionError,
     amud_ordinal,
     citation_runs,
     citation_seq_for_daf,
@@ -25,12 +27,15 @@ from shared.discovery_locus import (
     daf_label_he,
     heb_numeral,
     label_segments,
+    merge_witnessed_spans,
     norm_stream,
+    parse_ref_span_alignments,
     parse_canonical_header,
     parse_unit_numeral,
     render_ranges,
     sefaria_daf,
     select_locus_work,
+    select_primary_alignment,
     shorten_range_tail,
     split_at_citation_breaks,
     stream_offset_for_raw,
@@ -486,6 +491,126 @@ class TestShortenRangeTail:
     def test_the_shortened_citation_is_still_never_bracketed(self):
         labels = ["עמ' 4", "עמ' 9"]
         assert not any(ch in render_ranges([(0, 1)], labels) for ch in "()")
+
+
+class TestParseRefSpanAlignments:
+    """WP4: the bake kept ONE alignment per row; the locus needs every one."""
+
+    REAL = ('[{"p0": 0, "p1": 576, "dens": 0.3, "rg0": 5656, "rg1": 6245, "cigar": "X"},'
+            ' {"p0": 1142, "p1": 1772, "dens": 0.29, "rg0": 4936, "rg1": 5628, "cigar": "Y"},'
+            ' {"p0": 981, "p1": 1705, "dens": 0.24, "rg0": 4735, "rg1": 5461, "cigar": "Z"}]')
+
+    def test_every_alignment_is_returned_in_the_producers_order(self):
+        got = parse_ref_span_alignments(self.REAL)
+        assert len(got) == 3
+        assert got[0] == RefAlignment(0, 576, 5656, 6245)
+        assert got[2] == RefAlignment(981, 1705, 4735, 5461)
+
+    def test_the_cigar_is_never_read(self):
+        """Reference-text-derived; it has no place in the shipped asset."""
+        assert all(len(a) == 4 for a in parse_ref_span_alignments(self.REAL))
+        assert "cigar" not in str(parse_ref_span_alignments(self.REAL))
+
+    def test_a_row_with_no_reference_spans_yields_nothing(self):
+        for empty in (None, "", "[]"):
+            assert parse_ref_span_alignments(empty) == []
+
+    def test_an_incomplete_entry_raises_rather_than_being_skipped(self):
+        """PROVEN ABLE TO FAIL. Skipping changes WHICH entry wins, and the row still
+        comes out carrying plausible offsets, so nothing downstream can see it."""
+        blob = '[{"p0": 0, "p1": 999}, {"p0": 0, "p1": 10, "rg0": 1, "rg1": 5}]'
+        with pytest.raises(RefSpanProjectionError, match="complete dual-side"):
+            parse_ref_span_alignments(blob)
+
+        def skipping(text):
+            out = []
+            for entry in __import__("json").loads(text):
+                try:
+                    out.append(RefAlignment(int(entry["p0"]), int(entry["p1"]),
+                                            int(entry["rg0"]), int(entry["rg1"])))
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+            return out
+
+        survived = skipping(blob)
+        assert len(survived) == 1
+        assert select_primary_alignment(survived) == RefAlignment(0, 10, 1, 5)
+
+    def test_unparseable_json_raises(self):
+        with pytest.raises(RefSpanProjectionError, match="parseable"):
+            parse_ref_span_alignments("{not json")
+
+
+class TestSelectPrimaryAlignment:
+    """The frozen rule. Changing it moves the work-side offsets of the whole asset."""
+
+    def test_the_largest_page_extent_wins(self):
+        got = select_primary_alignment(
+            parse_ref_span_alignments(TestParseRefSpanAlignments.REAL))
+        assert got == RefAlignment(981, 1705, 4735, 5461)
+
+    def test_it_does_not_depend_on_the_order_the_entries_arrived_in(self):
+        entries = parse_ref_span_alignments(TestParseRefSpanAlignments.REAL)
+        baseline = select_primary_alignment(entries)
+        for rotation in range(1, len(entries)):
+            assert select_primary_alignment(
+                entries[rotation:] + entries[:rotation]) == baseline
+
+    def test_an_exact_tie_breaks_on_the_work_side(self):
+        tied = [RefAlignment(0, 100, 900, 1000), RefAlignment(0, 100, 500, 600)]
+        assert select_primary_alignment(tied) == RefAlignment(0, 100, 500, 600)
+        assert select_primary_alignment(list(reversed(tied))) == \
+            RefAlignment(0, 100, 500, 600)
+
+    def test_nothing_to_select_from_is_None_not_an_invented_zero(self):
+        """`0` is a valid offset, so a fabricated zero is indistinguishable from an
+        alignment at the start of the work."""
+        assert select_primary_alignment([]) is None
+
+
+class TestMergeWitnessedSpans:
+    def test_overlapping_spans_become_one(self):
+        assert merge_witnessed_spans([(100, 200), (150, 300)]) == [(100, 300)]
+
+    def test_touching_spans_become_one(self):
+        assert merge_witnessed_spans([(100, 200), (200, 300)]) == [(100, 300)]
+
+    def test_a_nested_span_adds_nothing(self):
+        assert merge_witnessed_spans([(100, 300), (150, 200)]) == [(100, 300)]
+
+    def test_a_GAP_is_never_bridged(self):
+        """THE DEFECT THIS EXISTS TO AVOID, and it runs the opposite way from the
+        merge: joining `[100,200)` to `[201,300)` claims offset 200, which nothing
+        witnesses. Reintroduced locally as a merge that ignores the gap test."""
+        assert merge_witnessed_spans([(100, 200), (201, 300)]) == \
+            [(100, 200), (201, 300)]
+
+        def gapless(spans):
+            ordered = sorted(spans)
+            out = [ordered[0]]
+            for start, end in ordered[1:]:
+                out[-1] = (out[-1][0], max(out[-1][1], end))
+            return out
+
+        assert gapless([(100, 200), (201, 300)]) == [(100, 300)]
+
+    def test_the_input_order_does_not_matter(self):
+        assert merge_witnessed_spans([(300, 400), (100, 200)]) == \
+            [(100, 200), (300, 400)]
+
+    def test_a_reversed_span_is_refused(self):
+        with pytest.raises(ValueError):
+            merge_witnessed_spans([(300, 100)])
+
+    def test_nothing_in_nothing_out(self):
+        assert merge_witnessed_spans([]) == []
+
+    def test_a_real_shaped_row_folds_to_the_spans_it_witnesses(self):
+        alignments = parse_ref_span_alignments(TestParseRefSpanAlignments.REAL)
+        merged = merge_witnessed_spans((a.w_start, a.w_end) for a in alignments)
+        # 4735-5461 and 4936-5628 overlap; 5656-6245 sits apart and must stay apart.
+        assert merged == [(4735, 5628), (5656, 6245)]
 
 
 class TestNormStream:
