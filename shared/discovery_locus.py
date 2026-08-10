@@ -18,6 +18,7 @@ and `parse_canonical_header` drops it by construction rather than by convention.
 """
 from __future__ import annotations
 
+import bisect
 import re
 from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
@@ -28,6 +29,13 @@ __all__ = [
     "compress_pieces",
     "render_ranges",
     "select_locus_work",
+    "stream_offset_for_raw",
+    "heb_numeral",
+    "parse_unit_numeral",
+    "amud_ordinal",
+    "AMUD_MAX",
+    "sefaria_daf",
+    "daf_label_he",
     "RANGE_SEP",
     "PIECE_SEP",
 ]
@@ -82,6 +90,166 @@ def parse_canonical_header(inner: str) -> Optional[LocusAddress]:
         sub=_GIRSA_RE.sub("", (match.group("sub") or "").strip()),
         sub_kind=(match.group("kind") or "").strip(),
     )
+
+
+def stream_offset_for_raw(offsets: Sequence[int], raw_pos: int) -> int:
+    """Raw (NFC) character position -> offset in the normalized letter stream.
+
+    `offsets` is the second element of `norm_stream()`: ascending, one entry per
+    stream character, holding that character's index in the NFC source. Every call
+    site in the pipeline writes ``stream, _ = norm_stream(...)`` and throws it away;
+    it is the only bridge between the two coordinate systems, and the reason the
+    remaining work here is a bisect rather than a re-alignment.
+
+    Answers "the first stream character at or after `raw_pos`", which is what a unit
+    START wants. A raw position past the last letter yields ``len(offsets)`` -- the
+    half-open end of the stream, not an error, because a division whose text is all
+    punctuation legitimately begins where the stream ends.
+    """
+    return bisect.bisect_left(offsets, raw_pos)
+
+
+#: Additive gematria. No thousands and no geresh: nothing in this corpus's citation
+#: labels needs either, and inventing forms the editions do not use would make a
+#: rendered citation unrecognisable to the reader it is for.
+_HEB_ONES = ("", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט")
+_HEB_TENS = ("", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ")
+_HEB_HUNDREDS = ("", "ק", "ר", "ש", "ת", "תק", "תר", "תש", "תת", "תתק")
+_HEB_VALUE = {
+    "א": 1, "ב": 2, "ג": 3, "ד": 4, "ה": 5, "ו": 6, "ז": 7, "ח": 8, "ט": 9,
+    "י": 10, "כ": 20, "ל": 30, "מ": 40, "נ": 50, "ס": 60, "ע": 70, "פ": 80, "צ": 90,
+    "ק": 100, "ר": 200, "ש": 300, "ת": 400,
+    "ך": 20, "ם": 40, "ן": 50, "ף": 80, "ץ": 90,
+}
+#: Folded before the round-trip check, so a label written with a final letter is
+#: still recognised as the numeral it denotes (ך is 20 exactly as כ is).
+_FINAL_FOLD = str.maketrans({"ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ"})
+
+
+def heb_numeral(value: int) -> str:
+    """1 -> 'א', 15 -> 'טו', 176 -> 'קעו'. For addresses that arrive as integers.
+
+    15 and 16 are written טו/טז, never יה/יו: those spell the Name. This is not a
+    stylistic preference -- an edition does not print יה for 15, so a citation that
+    did would not match the page the reader turns to.
+    """
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError(f"not a citable numeral: {value!r}")
+    if value > 999:
+        raise ValueError(f"{value} is outside the range these citations use")
+    hundreds, rest = divmod(value, 100)
+    if rest in (15, 16):
+        return _HEB_HUNDREDS[hundreds] + ("טו" if rest == 15 else "טז")
+    tens, ones = divmod(rest, 10)
+    return _HEB_HUNDREDS[hundreds] + _HEB_TENS[tens] + _HEB_ONES[ones]
+
+
+def parse_unit_numeral(label: str) -> Optional[int]:
+    """'קעו' -> 176, and '176' -> 176. None when the label is not a numeral.
+
+    Additive gematria, tolerant of the punctuation an edition puts round a numeral
+    (geresh, quotes, spaces). Used to SORT unit labels, which is where it earns its
+    keep: marker order in an edition is not always citation order, so the unit table
+    must be ordered by the number each label denotes.
+
+    DECIMAL LABELS ARE REAL. 173 of the corpus's 8,736 daf markers spell the folio in
+    ASCII digits rather than letters, across 95 distinct labels ('17', '120', '159').
+    A Hebrew-only parser drops those markers, and dropping a marker does not lose a
+    citation -- it silently WIDENS the neighbouring one over the text the dropped
+    marker was there to divide.
+
+    WELL-FORMED IS THE LOAD-BEARING WORD. Summing every Hebrew letter present -- the
+    obvious implementation, and the one the probe tree uses -- reads a WORD as a
+    number: הקדמה sums to 154, and an unnumbered opening section would sort into the
+    middle of the tractate between daf 153 and 155, where nothing about it looks
+    wrong. So the value must ROUND-TRIP: a label is a numeral only if re-rendering
+    its own sum reproduces it exactly.
+
+    That test is exact rather than heuristic, which matters, because the near-miss
+    rules are not enough. Requiring non-increasing letter values rejects הקדמה
+    (5, 100) but accepts עמוד (70, 40, 6, 4 = 120), and עמוד is a word this corpus
+    actually uses. Under round-trip, 120 renders קכ, which is not עמוד, so it is
+    refused -- while קעו, טו, טז and תתקצט all reproduce themselves and pass.
+    """
+    text = (label or "").strip()
+    digits = [ch for ch in text if ch.isascii() and ch.isdigit()]
+    if digits:
+        # Mixed script is not a numeral in either system -- refuse rather than pick.
+        if any(ch in _HEB_VALUE for ch in text):
+            return None
+        value = int("".join(digits))
+        return value if 1 <= value <= 999 else None
+    letters = [ch.translate(_FINAL_FOLD) for ch in text if ch in _HEB_VALUE]
+    if not letters:
+        return None
+    value = sum(_HEB_VALUE[ch] for ch in letters)
+    try:
+        canonical = heb_numeral(value)
+    except ValueError:
+        return None
+    return value if canonical == "".join(letters) else None
+
+
+#: Columns per folio, by foliation. Two for a Bavli daf (recto/verso); FOUR for the
+#: Yerushalmi, which is printed two columns to the side.
+AMUD_MAX = 4
+_AMUD_LETTERS = ("א", "ב", "ג", "ד")
+
+
+def amud_ordinal(label: str) -> int:
+    """'א' -> 1 ... 'ד' -> 4; 0 when the label names no column.
+
+    Not two-valued, and this is measured rather than defensive: of the corpus's
+    8,736 inline daf markers, 772 -- 8.8% -- carry ג or ד. Those are Yerushalmi
+    folios, printed four columns to the leaf, so ע"ג and ע"ד are ordinary citations
+    there. A recto/verso model does not merely mislabel them; it has nowhere to put
+    them, so they are dropped, and a dropped marker silently widens its neighbour
+    over the text it was there to divide.
+    """
+    first = (label or "").strip()[:1]
+    return _AMUD_LETTERS.index(first) + 1 if first in _AMUD_LETTERS else 0
+
+
+def sefaria_daf(index: int) -> Tuple[int, int]:
+    """Sefaria's flat Talmud section index -> (daf, amud), amud 1 = ע\"א.
+
+    Sefaria addresses a tractate as one flat sequence in which index 1 is the
+    non-existent 1a, so 3 is 2a -- where every Bavli tractate actually begins. The
+    conversion is uniform: ``daf = (n + 1) // 2``, recto on odd.
+
+    It is uniform in the strong sense, checked rather than assumed: across the 36
+    staged Tosafot works the recovered last daf lands on or inside the real tractate
+    length every time, with zero overshoots (Bava Batra 176a of 176, Shabbat 157b of
+    157, Ketubot 112b of 112, Yoma 88a of 88). Works that begin later -- Tosafot on
+    Keritot at index 17, on Megillah at 4 -- need no correction: that IS where that
+    commentary starts. The per-work offset table the plan budgeted for is not needed,
+    and building one would encode 59 chances to be wrong in place of one formula that
+    an external oracle already confirms.
+
+    The 25 staged Rif works index their OWN foliation from 1 = 1a, which the same
+    formula gives. Their labels must say so; see `daf_label_he`.
+    """
+    if not isinstance(index, int) or isinstance(index, bool) or index < 1:
+        raise ValueError(f"not a Sefaria section index: {index!r}")
+    return (index + 1) // 2, 2 - (index % 2)
+
+
+def daf_label_he(daf: int, amud: int, prefix: str = "") -> str:
+    """(14, 1) -> 'יד ע\"א'. `prefix` names a foliation that is not the tractate's.
+
+    Columns run 1..4: two for a Bavli daf, four for a Yerushalmi folio.
+
+    The prefix exists for one reason. A Rif work is paginated by the Rif's own
+    folios, which run about a third of the tractate's, so `ברכות ג ע\"א` rendered from
+    a Rif index points a reader at Bavli Berakhot 3a -- a real page, in the right
+    tractate, that is not the text. A wrong citation that resolves is worse than one
+    that does not, so the foliation is named in the label itself rather than left to
+    a column heading the reader may not be looking at.
+    """
+    if not isinstance(amud, int) or isinstance(amud, bool) or not 1 <= amud <= AMUD_MAX:
+        raise ValueError(f"a folio has {AMUD_MAX} columns at most, not column {amud!r}")
+    label = f'{heb_numeral(daf)} ע"{_AMUD_LETTERS[amud - 1]}'
+    return f"{prefix} {label}" if prefix else label
 
 
 def units_for_span(unit_starts: Sequence[int], start: int, end: int) -> Tuple[int, int]:
