@@ -7,7 +7,11 @@ reintroduces the real defect against a LOCAL re-implementation and asserts the
 assertion would have caught it -- so the test's own sensitivity is demonstrated,
 not assumed.
 """
+import importlib.util
+import pathlib
 import re
+import unicodedata
+from array import array
 
 import pytest
 
@@ -20,6 +24,7 @@ from shared.discovery_locus import (
     compress_pieces,
     daf_label_he,
     heb_numeral,
+    norm_stream,
     parse_canonical_header,
     parse_unit_numeral,
     render_ranges,
@@ -351,6 +356,72 @@ class TestRenderRanges:
     def test_an_out_of_range_ordinal_is_refused_rather_than_silently_clipped(self):
         with pytest.raises(IndexError):
             render_ranges([(0, 9)], self.LABELS)
+
+
+class TestNormStream:
+    """The ported normalizer. A drift here does not raise -- it silently moves every
+    stored offset in the corpus at once -- so it is pinned two ways."""
+
+    def test_it_keeps_only_base_letters_and_folds_finals(self):
+        stream, _ = norm_stream("בְּרוּךֶ אַתָּה [יי] מלך העולם, צ̇מאן")
+        assert stream.startswith("ברוכאתה")
+        assert not any(ch in stream for ch in " [],ְֶּ")
+        assert not any(ch in stream for ch in "ךםןףץ")
+
+    def test_the_offset_map_is_one_index_per_stream_character(self):
+        text = "אב, גד"
+        stream, offsets = norm_stream(text)
+        assert stream == "אבגד"
+        assert list(offsets) == [0, 1, 4, 5]
+        assert all(text[o] == c for o, c in zip(offsets, "אבגד"))
+
+    def test_offsets_index_the_NFC_text_not_the_input(self):
+        """NFC is applied first, so an offset is only meaningful against NFC text.
+
+        The source character at an offset is the UNFOLDED one -- ם where the stream
+        holds מ -- which is the whole reason a snippet must be sliced from the source
+        and never reconstructed from the stream.
+        """
+        decomposed = unicodedata.normalize("NFD", "שָׁלוֹם")
+        stream, offsets = norm_stream(decomposed)
+        nfc = unicodedata.normalize("NFC", decomposed)
+        assert stream == "שלומ"
+        assert [nfc[o] for o in offsets] == ["ש", "ל", "ו", "ם"]
+        assert nfc[offsets[-1]] == "ם" and stream[-1] == "מ"
+
+    def test_a_stream_with_no_hebrew_is_empty_rather_than_an_error(self):
+        assert norm_stream("hello, 1234!") == ("", array("i"))
+
+    def test_pinned_vectors(self):
+        """Fixed values, so the contract holds even where the research tree is not."""
+        assert norm_stream("")[0] == ""
+        assert norm_stream("שלום")[0] == "שלומ"
+        assert norm_stream("אְ̇ב")[0] == "אב"
+        assert list(norm_stream("אְ̇ב")[1]) == [0, 3]
+
+    def test_it_has_not_drifted_from_the_pipelines_own_normalizer(self):
+        """The real guard, against the real object rather than a description of it.
+
+        Skipped where the research tree is absent (CI); load-bearing where it is
+        present, which is where a divergence would be introduced.
+        """
+        probe = pathlib.Path("same_work_spike/probe/scripts/normalize.py")
+        if not probe.exists():
+            pytest.skip("research tree not present in this checkout")
+        spec = importlib.util.spec_from_file_location("_probe_normalize", probe)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        samples = [
+            "בְּרוּךֶ אַתָּה [יי] אלהינו מלך העולם, הזן אותנו צ̇מאן ואת־העולם כלו",
+            "##בראשית, פרק א, פסוק א##\n>> בראשית ברא אלהים",
+            "+פרק~ +א~ אלחק פי קולה {ארץ עוץ}",
+            "<דף טז, עמ' א> תנו רבנן",
+            "ךםןףץ ABC 123 ְ֑̇",
+            "",
+        ]
+        for sample in samples:
+            assert norm_stream(sample) == module.norm_stream(sample), sample[:40]
 
 
 class TestStreamOffsetForRaw:

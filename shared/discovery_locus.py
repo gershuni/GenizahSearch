@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import bisect
 import re
+import unicodedata
+from array import array
 from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 __all__ = [
@@ -32,6 +34,7 @@ __all__ = [
     "citation_seq_for_daf",
     "render_ranges",
     "select_locus_work",
+    "norm_stream",
     "stream_offset_for_raw",
     "heb_numeral",
     "parse_unit_numeral",
@@ -93,6 +96,37 @@ def parse_canonical_header(inner: str) -> Optional[LocusAddress]:
         sub=_GIRSA_RE.sub("", (match.group("sub") or "").strip()),
         sub_kind=(match.group("kind") or "").strip(),
     )
+
+
+#: א..ת. Finals fold to their base so a word-final letter matches its medial form.
+_STREAM_MIN, _STREAM_MAX = 0x05D0, 0x05EA
+
+
+def norm_stream(text: str) -> Tuple[str, "array[int]"]:
+    """The reference corpus's coordinate system: (letter stream, offset map).
+
+    Space-free Hebrew base letters, finals folded, everything else -- nikud,
+    cantillation, the Judeo-Arabic upper dot, punctuation, brackets, digits, Latin,
+    whitespace -- dropped as a separator. `offsets[i]` is the NFC-text index of
+    stream character i, which is the bridge `stream_offset_for_raw` bisects.
+
+    PORTED, NOT IMPORTED, and that is a deliberate trade. The pipeline's copy lives
+    in the research tree, which is gitignored and unversioned, so importing it would
+    make every stored offset in the product depend on a file no commit can pin. The
+    cost is that the two can drift apart silently, and a drift here does not raise --
+    it moves every offset in the corpus at once. `tests/test_discovery_locus.py`
+    therefore diffs this implementation against the pipeline's whenever the research
+    tree is present, and pins fixed vectors when it is not.
+    """
+    nfc = unicodedata.normalize("NFC", text)
+    out: List[str] = []
+    offsets: "array[int]" = array("i")
+    for index, ch in enumerate(nfc):
+        folded = ch.translate(_FINAL_FOLD)
+        if _STREAM_MIN <= ord(folded) <= _STREAM_MAX:
+            out.append(folded)
+            offsets.append(index)
+    return "".join(out), offsets
 
 
 def stream_offset_for_raw(offsets: Sequence[int], raw_pos: int) -> int:
