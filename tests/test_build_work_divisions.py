@@ -24,6 +24,7 @@ from scripts.build_work_divisions import (
     Edition,
     Unit,
     WorkUnits,
+    _arukh_headwords,
     _chapter_units,
     _clean_marker_text,
     _daf_units,
@@ -988,6 +989,96 @@ class TestBuildJaPages:
 # ---------------------------------------------------------------------------
 # Structural gates
 # ---------------------------------------------------------------------------
+
+class TestABareOrdinalIsNotACitation:
+    """`שע–שעט` in ספר הערוך and `מא` in הלכות גדולות: the scholar audit's two
+    complaints about the staged family, which fail for different reasons and so need
+    different repairs. Owner: *"Where is שע-שעט? what is the source?"* and *"What's
+    מא in הלכות גדולות?"*
+    """
+
+    BODY = "אאאא\nבבבב\nגגגג\nדדדד\n"
+
+    def _build(self, tmp_path, key, records):
+        (tmp_path / "k.txt").write_text(self.BODY, encoding="utf-8")
+        (tmp_path / "k.versemap.json").write_text(
+            json.dumps({"units": records}, ensure_ascii=False), encoding="utf-8")
+        return build_sefaria(key, str(tmp_path), "k.txt", "k.versemap.json",
+                             "REF2:k", {"REF2:k": norm_stream(self.BODY)[0]})
+
+    def test_a_work_numbered_by_siman_says_so(self, tmp_path):
+        built = self._build(tmp_path, "sef_halakhot_gedolot",
+                            [{"chapter": 1, "start": 0}, {"chapter": 2, "start": 5}])
+        assert [u.label_he for u in built.units] == ["סימן א", "סימן ב"]
+
+    def test_a_work_the_table_does_not_name_keeps_the_bare_ordinal(self, tmp_path):
+        """NEGATIVE CONTROL. A counting word applied everywhere would be a
+        confidently wrong citation with every offset still right, and five works
+        whose counting unit could not be established are deliberately absent from the
+        table -- they wait on a ruling rather than on a guess."""
+        built = self._build(tmp_path, "sef_rashi_isaiah",
+                            [{"chapter": 11, "start": 0}, {"chapter": 12, "start": 5}])
+        assert [u.label_he for u in built.units] == ["יא", "יב"]
+
+    def test_a_dictionary_is_cited_by_its_headword(self, tmp_path):
+        """Naming what the number counts cannot help here: the Arukh's staged number
+        is a segment index no printed edition prints, so `ערך שע` is exactly as
+        unlookupable as `שע`."""
+        body = "שלום ראשון\nשמים שני\nתורה זרה\n"
+        (tmp_path / "k.txt").write_text(body, encoding="utf-8")
+        (tmp_path / "k.versemap.json").write_text(json.dumps({"units": [
+            {"chapter": 1, "start": 0, "end": 11},
+            {"chapter": 2, "start": 11, "end": 22},
+            {"chapter": 3, "start": 22, "end": 33}]}, ensure_ascii=False),
+            encoding="utf-8")
+        built = build_sefaria("sef_arukh_letter_shin", str(tmp_path), "k.txt",
+                              "k.versemap.json", "REF2:k",
+                              {"REF2:k": norm_stream(body)[0]})
+        # the third entry does not open with the filed letter, so it keeps its ordinal
+        assert [u.label_he for u in built.units] == ["ערך שלום", "ערך שמים", "ג"]
+
+    def test_the_filed_letter_is_read_off_the_file_not_transliterated(self, tmp_path):
+        """No 22-row key-to-letter table to go stale: the modal first letter of the
+        file's own entries IS the letter it is filed under."""
+        body = "מלך גוף\nמנחה גוף\nמסכת גוף\nזרה גוף\n"
+        starts = [0]
+        for line in body.split("\n")[:-1]:
+            starts.append(starts[-1] + len(line) + 1)
+        records = [{"chapter": i + 1, "start": starts[i], "end": starts[i + 1]}
+                   for i in range(4)]
+        assert _arukh_headwords(records, body) == ["מלך", "מנחה", "מסכת", None]
+
+    def test_a_repeated_headword_is_numbered_rather_than_left_ambiguous(self, tmp_path):
+        """48.4% of Arukh entries share a headword with another entry. A citation
+        that silently named five places would be worse than an ugly one."""
+        body = "שפר אחד\nשפר שני\nשפר שלישי\n"
+        (tmp_path / "k.txt").write_text(body, encoding="utf-8")
+        (tmp_path / "k.versemap.json").write_text(json.dumps({"units": [
+            {"chapter": 1, "start": 0, "end": 8},
+            {"chapter": 2, "start": 8, "end": 16},
+            {"chapter": 3, "start": 16, "end": 26}]}, ensure_ascii=False),
+            encoding="utf-8")
+        built = build_sefaria("sef_arukh_letter_shin", str(tmp_path), "k.txt",
+                              "k.versemap.json", "REF2:k",
+                              {"REF2:k": norm_stream(body)[0]})
+        assert [u.label_he for u in built.units] == [
+            "ערך שפר (1)", "ערך שפר (2)", "ערך שפר (3)"]
+        assert check_invariants([built]) == []
+
+    def test_without_the_occurrence_number_the_gate_reports_it(self, tmp_path):
+        """PROVEN ABLE TO FAIL: drop `_disambiguate_labels` and three distinct stated
+        addresses render one string."""
+        collided = [Unit(i, i * 10, f"chapter:{i + 1}", "ערך שפר", i + 1,
+                         (f"chapter:{i + 1}",)) for i in range(3)]
+        problems = check_invariants([WorkUnits("REF2:k", "sefaria", "chapter",
+                                               collided, 100)])
+        assert any("name more than one place" in p for p in problems)
+
+    def test_the_daf_kinds_are_untouched_by_either_repair(self, tmp_path):
+        built = self._build(tmp_path, "sef_rif_berakhot",
+                            [{"chapter": 1, "start": 0}, {"chapter": 2, "start": 5}])
+        assert [u.label_he for u in built.units] == ['רי"ף א ע"א', 'רי"ף א ע"ב']
+
 
 class TestTheYerushalmiSubUnitReadsHalakhah:
     """Owner ruling, reversing an argument the module itself used to make.

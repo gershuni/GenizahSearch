@@ -184,6 +184,10 @@ _MARKER_RESIDUE_RE = re.compile(r"\+\s*\d+\s*~")
 #: At least one Hebrew letter. An address is a Hebrew citation at this stage.
 _HAS_HEBREW_RE = re.compile(r"[א-ת]")
 _HAS_LATIN_RE = re.compile(r"[A-Za-z]")
+#: Word-final letters folded to their medial form. Spelled out here rather than
+#: reached for inside `shared/discovery_locus`, which keeps its own copy private:
+#: this is a fact about the Hebrew alphabet, not a shared policy that could drift.
+_FINAL_FOLD = str.maketrans({"ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ"})
 
 
 def _is_foreign_label(label: str) -> bool:
@@ -1227,6 +1231,80 @@ _DAF_KEY_RE = re.compile(r"^(?:sef|b2)_(?:tosafot|rabbeinu_chananel)_")
 #: Keys whose `chapter` is an amud index in the RIF's separate foliation.
 _RIF_KEY_RE = re.compile(r"^(?:sef|b2)_rif_")
 _RIF_PREFIX = 'רי"ף'
+#: A dictionary, whose citable unit is the HEADWORD and not an ordinal. See
+#: `_arukh_headwords`.
+_ARUKH_KEY_RE = re.compile(r"^(?:sef|b2)_arukh_letter_")
+
+#: WHAT THE NUMBER COUNTS, per staged work. The sidecar records a bare integer and
+#: nothing else -- its `ref` is the English title plus an index, `Halakhot Gedolot
+#: 41:1` -- so a citation built from it reads `מא`, which is technically right and
+#: unusable. The owner's complaint was exactly that: *"What's מא in הלכות גדולות?"*
+#:
+#: This adds no identity, no grain and no renumbering. It says what the existing
+#: number is, which is the same act as naming the Rif's foliation in its own label
+#: rather than leaving a reader to assume the tractate's. 12,436 evidence rows are
+#: addressed by one of these words.
+#:
+#: IT IS ALSO THE ONE TABLE HERE THAT IS EDITORIAL KNOWLEDGE RATHER THAN A
+#: MEASUREMENT, and a wrong word is a confidently wrong citation with every offset
+#: still right -- which no gate in this file can detect. It is eight rows so that a
+#: scholar can check it in one pass. Works whose counting unit could not be
+#: established are deliberately absent and keep the bare ordinal: מדרש שכל טוב,
+#: כתר מלכות, בראשית רבתי, אגרת רב שרירא גאון, הלל -- 1,067 evidence rows waiting on
+#: a ruling rather than on a guess.
+_SEFARIA_UNIT_WORD = {
+    "sef_halakhot_gedolot": "סימן",
+    "sef_tur_orach_chaim": "סימן",
+    "sef_teshuvot_hageonim": "סימן",      # also covers …_shaarei_teshuva
+    "sef_yalkut_shimoni_": "רמז",
+    "sef_sefer_hachinukh": "מצוה",
+    "sef_guide_part_": "פרק",
+    "sef_tanna_debei_eliyahu_": "פרק",
+    "sef_seder_olam_zutta": "פרק",
+}
+
+
+def sefaria_unit_word(key: str) -> str:
+    """The word the edition counts by, or "" when nothing is known for this work."""
+    for prefix, word in _SEFARIA_UNIT_WORD.items():
+        if key.startswith(prefix) or key.startswith("b2_" + prefix[4:]):
+            return word
+    return ""
+
+
+def _arukh_headwords(records: Sequence[dict], raw: str) -> List[Optional[str]]:
+    """The lemma opening each entry of a dictionary -- or None where it is not one.
+
+    THE ONE LABEL IN THIS FILE DERIVED FROM BODY TEXT, and the exception is
+    deliberate. Everywhere else a label is copied from a division marker the source
+    wrote; here there is no marker to copy. The Arukh's staged `chapter` is a
+    segment index that no printed edition prints, so naming what it counts -- the
+    repair that answers `סימן מא` -- cannot help: `ערך שע` is exactly as unlookupable
+    as `שע`. The headword is the only address a reader can turn to in a printed
+    Arukh, and it is the work's own citation vocabulary rather than a description of
+    its contents.
+
+    The discriminator is that a letter-file's entries begin with that letter, and the
+    letter is read OFF THE FILE rather than transliterated from its key: the modal
+    first letter of the file's own entries is the letter it is filed under, which
+    needs no 22-row table to go stale. Measured across all 22 letter files, 8,318 of
+    8,373 entries (99.3%) open with a token beginning in the filed letter. The 55
+    that do not are mostly a letter's opening preface -- 21 of them are its first
+    entry -- and they get None, so they keep the bare ordinal rather than publishing
+    a word of prose dressed as a citation.
+    """
+    tokens: List[Optional[str]] = []
+    for record in records:
+        slice_ = raw[int(record.get("start", 0)):int(record.get("end", 0))]
+        first = slice_.split(None, 1)[0] if slice_.split() else ""
+        tokens.append(first or None)
+    initials = collections.Counter(
+        token[0].translate(_FINAL_FOLD) for token in tokens if token)
+    if not initials:
+        return [None] * len(records)
+    filed, _ = initials.most_common(1)[0]
+    return [token if token and token[0].translate(_FINAL_FOLD) == filed else None
+            for token in tokens]
 
 
 def sefaria_render_kind(key: str, source_ref: str) -> str:
@@ -1261,7 +1339,8 @@ def build_sefaria(
     body_path = os.path.join(staging_dir, body_file)
     if not os.path.exists(body_path):
         return None
-    stream, offsets = norm_stream(_read(body_path))
+    raw = _read(body_path)
+    stream, offsets = norm_stream(raw)
     if shipped.get(ref_id) != stream:
         return None                        # fail closed
 
@@ -1269,7 +1348,10 @@ def build_sefaria(
     kind = sefaria_render_kind(key, source_ref or sidecar.get("source_ref", ""))
     records = sidecar.get("units") or []
     if records:
-        return _sefaria_verse_units(ref_id, kind, records, offsets, len(stream))
+        # The raw body travels on for the one family whose address is a headword; it
+        # is already read here, so this costs nothing beyond not throwing it away.
+        return _sefaria_verse_units(ref_id, kind, records, offsets, len(stream),
+                                    key=key, raw=raw)
     sections = sidecar.get("sections") or []
     if sections:
         return _sefaria_section_units(ref_id, sections, offsets, len(stream))
@@ -1277,16 +1359,29 @@ def build_sefaria(
 
 
 def _sefaria_verse_units(
-    ref_id: str, kind: str, records: Sequence[dict], offsets: Sequence[int], stream_len: int
+    ref_id: str, kind: str, records: Sequence[dict], offsets: Sequence[int],
+    stream_len: int, key: str = "", raw: str = "",
 ) -> Optional[WorkUnits]:
     """One unit per RUN of the same `chapter`; `verse` is the sub-field, not the grain.
 
     The sub-index is deliberately NOT rendered for the daf kinds. Only 25.8% of
     daf-family spans fall inside a single numbered comment, so a `2a §1` would be
     wrong or misleading for roughly three rows in four.
+
+    A BARE ORDINAL IS NOT A CITATION, which is what the scholar audit said about this
+    family in two different ways. `שע–שעט` in ספר הערוך and `מא` in הלכות גדולות are
+    both technically right and both unusable, and they fail differently: הלכות גדולות
+    IS numbered by siman in print, so the number is fine and only its name is missing;
+    the Arukh's number is a staged segment index that appears in no edition, so naming
+    it would not help and the headword is the only real address. Hence two repairs,
+    and a work in neither class keeps the bare numeral rather than being guessed at.
     """
+    headwords = (_arukh_headwords(records, raw)
+                 if raw and _ARUKH_KEY_RE.match(key or "") else None)
+    word = sefaria_unit_word(key or "") if kind == "chapter" else ""
+
     units: List[Unit] = []
-    for record in records:
+    for index, record in enumerate(records):
         chapter = record.get("chapter")
         if chapter is None:
             continue
@@ -1298,13 +1393,27 @@ def _sefaria_verse_units(
             label = daf_label_he(daf, amud, _RIF_PREFIX if kind == "daf_rif" else "")
             position = daf * 2 + amud - 1
         else:
+            # Above 999 the numeral has no additive Hebrew form this corpus uses, so
+            # the decimal stands. 102 real labels land here, all in two works, and
+            # they now at least say what they count (`רמז 1085`).
             label = heb_numeral(int(chapter)) if 1 <= int(chapter) <= 999 else str(chapter)
             position = int(chapter)
+            headword = headwords[index] if headwords else None
+            if headword:
+                label = f"ערך {headword}"
+            elif word:
+                label = f"{word} {label}"
         units.append(Unit(len(units), start, f"{kind}:{chapter}", label, position,
                           (f"{kind}:{chapter}",)))
     units = _dedupe_ascending(units)
     if not units:
         return None
+    if headwords:
+        # A dictionary repeats a headword -- 48.4% of Arukh entries share theirs with
+        # another, and 87.3% of those are one contiguous multi-entry lemma. The
+        # occurrence number is honest about which of them a reader is being sent to;
+        # a citation that silently named five places would not be.
+        units = _disambiguate_labels(units)
     return WorkUnits(ref_id, "sefaria", kind, units, stream_len)
 
 
