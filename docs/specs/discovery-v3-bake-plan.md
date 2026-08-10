@@ -414,7 +414,7 @@ level is present in the raw ids today. Chapter/folio level is not. This material
 |---|---|---|---|---|
 | 1 | gen-2 evidence ingest (the bake itself) | ~~**L**~~ → **S**, re-measured 2026-08-05 (§3.1a) | everything | no — it *is* the bake |
 | 2 | `w_start`/`w_end` **persistence** | **XS** — already in the input | Phase 136.1 PANEL-03 | no, and no reason to |
-| 2b | Sefaria versemap resolution + `body↔norm_stream` map | **M** — the hardest remaining work | PANEL-03's *reference locus* only | **yes** — stage it |
+| 2b | Sefaria versemap resolution + `body↔norm_stream` map | ~~**M** — the hardest remaining work~~ → **S**, re-measured 2026-08-10 (§3.2) | PANEL-03's *reference locus* only | **yes** — stage it |
 | 3 | novelty recompute at v3 grain | **S** — ~$40–110 measured | findings-page candidacy filter | partially — `not_checked` is honest |
 | 4 | GEN2 emitter sync (date tables) | **S** | D-17 chronological demotion | no — cheap and load-bearing |
 | 5 | MAPV2-8/-9 engine debts | **S** — **scoped 2026-08-05, no heavy re-run** | headline cleanliness | no — cheap now (§3.5) |
@@ -766,6 +766,28 @@ work, because the 322 staged versemaps index `body` and the offsets index `norm_
 deterministic functions of the same source text, so it is mechanical — but it is per-work, it is the item the
 owner trimmed out of Phase 136 precisely because it "carried the build's hardest work", and nothing else in
 this bake depends on it.
+
+> **RE-MEASURED 2026-08-10 (reference-granularity stage, WP1/WP3): S, not M.** The `body ↔ norm_stream`
+> map is not built, it is *kept*. `norm_stream()` already returns `(stream, offsets)` — its docstring
+> says the offset map exists "so any span … can be projected back" — and every call site in the
+> pipeline writes `stream, _ =` and discards it. Recovering it is a bisect. Measured end to end: all
+> **326** staged works rebuild byte-exactly, **187,233** versemap units convert with **0** empty
+> intervals, **0** out of order and **0** overlapping, and **0 of 328** bodies are non-NFC, so the
+> sidecar's raw indices and the normalizer's NFC indices are already the same coordinate space.
+>
+> The genuinely unbuilt piece was thought to be a hand-authored ~60-row per-work table of index→daf
+> offsets, since Bavli commentaries start at Sefaria index 3 and the Rif works at 1. **That table is
+> not needed.** The conversion is uniform — `daf = (n+1)//2`, recto on odd — and the differing start
+> is simply where each commentary begins. Against real Vilna tractate lengths: **54 amud-indexed
+> works, 0 overshoots, 39 landing exactly on the final daf**. A 59-row table would have been 59
+> chances to be wrong in place of one formula an external oracle confirms.
+>
+> What the re-measurement DID find is elsewhere and is not small: **v3 stores exactly one
+> `(w_start, w_end)` per claim** — 0 of 254,612 private and 0 of 221,771 public `(page, work)` pairs
+> carry a second distinct span, against **84,122 of 381,341 (22.1%)** multi-alignment pairs in the
+> gen-2 store. The owner's "remember the exact pieces" ruling is therefore **unimplementable against
+> this bake as it stands**; the locus's WP4 (carry every parsed alignment through) is a precondition
+> for it, not a refinement. See `docs/specs/discovery-sidecar-schema-v1.md` and the locus plan.
 
 **Recommendation: ship stage 1 in the v3 bake; run stage 2 as its own follow-on.** Phase 136.1's
 *our-text-only* evidence highlight does not wait on either (it uses page-side `span_start`/`span_end`, which

@@ -2421,6 +2421,25 @@ of definition.
 
 ### JA — DEFERRED to stage 2 (owner, 2026-08-01)
 
+> **CORRECTION, 2026-08-10 (reference-granularity stage, WP3).** The passage below is **wrong on the
+> facts**, and it is the stated basis on which JA was deferred, so the deferral rested on a
+> misreading rather than on a constraint. JA documents carry an inline division system:
+> **89 of 92 documents hold `+kind~` markers, 53,117 of them, one every ~634 characters**
+> (`פסוק` 14,574 · `משנה` 4,144 · `פרק` 1,899 · `סימן` 335, over a 1,090-kind tail). The three
+> without are two test stubs and a 50-byte file. Excluding the verse tier — too fine to cite, 76.3%
+> of all markers at a median 72 letters — leaves **5,973 citable divisions at a median 552 letters**,
+> and **79.8% of real stored spans land in exactly one of them**.
+>
+> The one thing the passage gets right is that the marker letters are *in the indexed stream*: the JA
+> ingest normalizes the whole raw file with no stripping, so the markers contribute 140,754 letters,
+> **1.10%** of the JA stream, as content. Measured: 89 of 89 documents rebuild byte-exactly **with**
+> the markers and **0 of 89 without**, so they must never be stripped — doing so changes the stream
+> and invalidates every stored offset. That is a hygiene defect to fix only on a run that recomputes
+> the offsets anyway; it is not an absence of structure.
+>
+> The owner corrected this in the same direction before it was measured. JA is **in scope** for the
+> locus, on the same footing as the other three families.
+
 JA works enter via `track1_build_ref.py` from per-document text files whose only structure is a
 `'***\n<title>\n---\n'` header. There is **no internal division at all** — no chapters, no sections — so
 unlike Sefaria there is nothing to map, only something to invent or recover. That is why it is deferred
