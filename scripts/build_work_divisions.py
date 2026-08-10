@@ -470,36 +470,56 @@ def _chapter_units(
 
     The rule is stated as a property of the document rather than a list of works:
     carry the division exactly when the source states more than one. A per-tractate
-    file states none, and a monolith child IS its division, so both keep the bare
-    chapter numeral they render today (`בראשית · יב`) and nothing about the Bible
-    family moves. A work stating several gets `הלכות תלמוד תורה, פרק ה` -- the shape
-    the owner ruled on, with `פרק` spelled out, because `הלכות תלמוד תורה, ה` would
-    read as though `ה` were the sub-unit rather than the chapter.
+    file states none, and a monolith child IS its division, so neither adds one. A work
+    stating several gets `הלכות תלמוד תורה, פרק ה` -- the shape the owner ruled on.
 
     Where the division is dropped it is still recorded in `source_address`, so the
     gate can tell a work whose chapters really are unique from one whose builder
     merely forgot to say which book they are in.
+
+    THE COUNTING WORD IS ALWAYS SAID, and it is the source's own. A bare `ד` was a
+    second thing the scholar audit objected to in three places -- *"we should call it
+    פרק ד"*, *"should say פרק ב"*, *"פרק לד"* -- and it is the same complaint as
+    `מא` in הלכות גדולות one family over: a number that names nothing is not a
+    citation. The word is never chosen here; it is whatever `parse_canonical_header`
+    read off the header, so `סדר התפילה` is cited by its own `הלכה` and a שער by its
+    own `סעיף`. `shorten_range_tail` elides the repeat, so a range still reads
+    `פרק קכט–קל` rather than `פרק קכט–פרק קל`.
     """
-    stated = list(dict.fromkeys(
-        address.division for address, _ in marks
-        if address is not None and address.division))
+    addressed = [(a, o) for a, o in marks if a is not None and a.chapter]
+    stated = list(dict.fromkeys(a.division for a, _ in addressed if a.division))
     with_division = len(stated) > 1
-    division_ord = {name: index for index, name in enumerate(stated)}
+
+    # ONE SLOT PER NUMBERING SYSTEM, and the system is the division AND the word it
+    # counts by -- not the division alone. The ordinal exists to keep numbering that
+    # restarts from colliding in citation space, and two counting words are two
+    # numberings just as surely as two books are: a work stating both `פרק א` and
+    # `פסוק א` at its top level states two places, and `ordinal * _DIVISION_BASE +
+    # value` put them at one position.
+    #
+    # The EMPTY division needs a slot of its own for the same reason. It used to fall
+    # through `.get(division, 0)` onto slot 0, which is also the first NAMED division's
+    # slot -- harmless while a work had divisions everywhere or nowhere, and wrong the
+    # moment one has both, which is the ordinary shape of a work whose שער opens with
+    # text of its own before its first פרק. The gate found this on 13 works the instant
+    # the parser grew wide enough to build them; it was never reachable before.
+    systems = list(dict.fromkeys(
+        (a.division, a.chapter_kind or "פרק") for a, _ in addressed))
+    division_ord = {system: index for index, system in enumerate(systems)}
 
     units: List[Unit] = []
-    for address, offset in marks:
-        if address is None or not address.chapter:
-            continue
+    for address, offset in addressed:
         chapter = address.chapter
         chapter_value = parse_unit_numeral(chapter)
-        ordinal = division_ord.get(address.division, 0)
+        chapter_word = address.chapter_kind or "פרק"
+        ordinal = division_ord[(address.division, chapter_word)]
 
         parts = [address.division] if with_division else []
         if with_sub:
             kind_word = _SUB_KIND_LABEL.get(address.sub_kind, address.sub_kind)
             sub = address.sub
             sub_value = (parse_unit_numeral(sub) or 0) if sub else 0
-            parts.append(f"פרק {chapter}"
+            parts.append(f"{chapter_word} {chapter}"
                          + (f", {kind_word} {sub}" if sub and kind_word else ""))
             key = f"ch:{ordinal}.{chapter_value if chapter_value is not None else chapter}" \
                   f".{sub_value}"
@@ -507,7 +527,7 @@ def _chapter_units(
                         + sub_value)
         else:
             sub_value = 0
-            parts.append(f"פרק {chapter}" if with_division else chapter)
+            parts.append(f"{chapter_word} {chapter}")
             key = f"ch:{ordinal}.{chapter_value if chapter_value is not None else chapter}"
             # A chapter whose label is not a numeral has no place in the citation
             # ORDER, so it gets no position and can never merge with a neighbour.
@@ -527,11 +547,18 @@ def _chapter_units(
         # they would also record one address, which is exactly the pair of facts the
         # gate compares. Latent today (none of the 13,059 four-column headers states
         # `הלכה`) and precisely the future work `_SUB_KIND_LABEL` warns about.
+        #
+        # The CHAPTER word is here for the same reason one level down. Two headers in
+        # one division stating `פרק ג` and `הלכה ג` are two places; the citation
+        # position is built from the numeral alone, so without this element they record
+        # one address, and the position gate -- whose whole job is to notice that two
+        # places share a position -- would compare one address with itself and pass.
         source = (
             address.division,
             str(chapter_value) if chapter_value is not None else chapter,
             str(sub_value) if with_sub and address.sub else "",
             address.sub_kind if with_sub else "",
+            chapter_word,
         )
         # Collapse on the stated address, not on the rendered label: two divisions
         # whose adjacent chapters share a numeral would otherwise fold into one unit

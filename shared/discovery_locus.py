@@ -67,6 +67,29 @@ _ADDR_RE = re.compile(
     r"פרק\s+(?P<chapter>[^,|]+?)\s*"
     r"(?:,\s*(?P<kind>פסוק|משנה|הלכה)\s+(?P<sub>[^,|]+?)\s*)?$"
 )
+
+# `##division, <word> N, פסוק|משנה|הלכה N##`, tried ONLY where the pattern above fails.
+#
+# THE COUNTING WORD IS READ RATHER THAN ASSUMED. It used to be the literal `פרק` and
+# nothing else, so a work numbering its top level by another word -- `סדר התפילה, הלכה א`,
+# `שער ב, סעיף ג`, `פרק ג, דיבור א` -- parsed as no address at all: every one of its
+# headers emitted NO unit and its text fell silently into the last `פרק` before it.
+# Measured over the whole M-source directory: 314 such headers in 8 works holding
+# 154,373 letters, and the whole of `סדר התפילה` -- 20.3% of משנה תורה ספר אהבה -- was
+# published under the label `הלכות מילה, פרק ג`. The scholar audit found it three times
+# on one deck, once marked *"crucial!"*.
+#
+# SECOND, NOT MERGED INTO THE PATTERN ABOVE, and the order is the whole safety argument.
+# With the word open, `פרק א, פסוק ו` becomes ambiguous: the optional division group is
+# tried first, so it reads as division `פרק א` numbered by `פסוק` -- the VERSE as the
+# chapter and the chapter as the book. Every per-tractate header in the corpus has that
+# shape. Trying the corpus's own vocabulary first makes the wide read reachable only for
+# bodies the narrow one rejects, so nothing that parses today can change meaning.
+_WIDE_ADDR_RE = re.compile(
+    r"^(?:(?P<div>[^,]+?),\s*)?"
+    r"(?P<word>[א-ת]{2,10})\s+(?P<chapter>[^,|]+?)\s*"
+    r"(?:,\s*(?P<kind>פסוק|משנה|הלכה)\s+(?P<sub>[^,|]+?)\s*)?$"
+)
 #: Edition apparatus, not part of a citation.
 _GIRSA_RE = re.compile(r"\s*\(גרסה\)\s*$")
 
@@ -78,6 +101,7 @@ class LocusAddress(NamedTuple):
     chapter: str           #: Hebrew numeral, verbatim from the source -- never re-rendered
     sub: str               #: Hebrew numeral, or "" when the header carries no finer field
     sub_kind: str          #: "פסוק" | "משנה" | "הלכה" | ""
+    chapter_kind: str = "פרק"   #: what the SOURCE calls the chapter level
 
 
 def parse_canonical_header(inner: str) -> Optional[LocusAddress]:
@@ -94,16 +118,33 @@ def parse_canonical_header(inner: str) -> Optional[LocusAddress]:
 
     Returns None when the body carries no chapter, which is correct rather than
     exceptional: a work whose header does not address is simply not addressable.
+
+    A COUNTING WORD OTHER THAN `פרק` MUST NUMBER SOMETHING, and that asymmetry is the
+    price of reading the word instead of fixing it. `פרק` is the vocabulary this corpus
+    was built on and keeps its exact behaviour, numeral or not. Any other word is
+    accepted only when what follows it parses as a numeral -- because with the word open
+    the pattern also matches a two-word HEADING (`הלכות דעות`, `טבול יום`, `הלילה השני`),
+    and publishing a heading as though it were an address is the failure this stage
+    exists to avoid. Measured: the numeral test admits exactly the 314 headers that
+    state a real address and refuses all 114 that do not.
     """
     body = inner.split("|", 1)[0].strip()
     match = _ADDR_RE.match(body)
+    word = "פרק"
     if match is None:
-        return None
+        match = _WIDE_ADDR_RE.match(body)
+        if match is None:
+            return None
+        word = (match.group("word") or "").strip()
+        if parse_unit_numeral(
+                _GIRSA_RE.sub("", (match.group("chapter") or "").strip())) is None:
+            return None
     return LocusAddress(
         division=(match.group("div") or "").strip(),
         chapter=_GIRSA_RE.sub("", (match.group("chapter") or "").strip()),
         sub=_GIRSA_RE.sub("", (match.group("sub") or "").strip()),
         sub_kind=(match.group("kind") or "").strip(),
+        chapter_kind=word,
     )
 
 

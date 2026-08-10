@@ -15,6 +15,7 @@ from __future__ import annotations
 import collections
 import json
 import os
+import re
 import sqlite3
 
 import pytest
@@ -56,11 +57,13 @@ from scripts.build_work_divisions import (
 )
 from shared.discovery_locus import (
     PIECE_SEP,
+    RANGE_SEP,
     LocusAddress,
     citation_runs,
     norm_stream,
     parse_canonical_header,
     render_ranges,
+    shorten_range_tail,
 )
 
 PROVENANCE = "| PROVENANCE-FIELD: SOURCE-MS"
@@ -116,15 +119,16 @@ class TestSplitDivisions:
 # Chapter units
 # ---------------------------------------------------------------------------
 
-def addr(chapter, division="", sub="", kind=""):
+def addr(chapter, division="", sub="", kind="", word="פרק"):
     """One parsed header, in the shape `parse_canonical_header` returns."""
-    return LocusAddress(division=division, chapter=chapter, sub=sub, sub_kind=kind)
+    return LocusAddress(division=division, chapter=chapter, sub=sub, sub_kind=kind,
+                        chapter_kind=word)
 
 
 class TestChapterUnits:
     def test_one_unit_per_chapter_at_the_offset_the_chapter_opens(self):
         units = _chapter_units([(addr("א"), 0), (addr("א"), 20), (addr("ב"), 55)])
-        assert [(u.label_he, u.start) for u in units] == [("א", 0), ("ב", 55)]
+        assert [(u.label_he, u.start) for u in units] == [("פרק א", 0), ("פרק ב", 55)]
 
     def test_a_run_of_one_label_collapses_to_one_unit(self):
         """The Yerushalmi interleaves a main and a variant segment under one
@@ -147,7 +151,7 @@ class TestChapterUnits:
 
     def test_an_unparsed_header_contributes_no_unit(self):
         assert _chapter_units([(None, 0), (addr("א"), 10)]) == [
-            Unit(0, 10, "ch:0.1", "א", 1, ("", "1", "", ""))
+            Unit(0, 10, "ch:0.1", "פרק א", 1, ("", "1", "", "", "פרק"))
         ]
 
     def test_ordinals_are_a_dense_run_from_zero(self):
@@ -231,20 +235,22 @@ class TestTheEnclosingDivision:
         assert positions[1] == positions[0] + 1           # inside a division: adjacent
         assert positions[2] != positions[1] + 1           # across one: never
 
-    def test_a_work_stating_ONE_division_keeps_the_bare_numeral(self):
+    def test_a_work_stating_ONE_division_still_omits_it(self):
         """A monolith child IS its division and a per-tractate file states none, so
-        nothing about the Bible family moves. `בראשית · יב` is what the audit judged."""
+        neither repeats it. What DID move is the counting word -- see
+        `TestTheCountingWordIsAlwaysSaid` -- after the audit objected to a bare `ד`
+        in three places."""
         one = [(addr("יא", division="בראשית"), 0), (addr("יב", division="בראשית"), 90)]
-        assert [u.label_he for u in _chapter_units(one)] == ["יא", "יב"]
+        assert [u.label_he for u in _chapter_units(one)] == ["פרק יא", "פרק יב"]
         none = [(addr("יא"), 0), (addr("יב"), 90)]
-        assert [u.label_he for u in _chapter_units(none)] == ["יא", "יב"]
+        assert [u.label_he for u in _chapter_units(none)] == ["פרק יא", "פרק יב"]
 
     def test_the_dropped_division_is_still_recorded_for_the_gate(self):
         """So the gate can tell a work whose chapters really are unique from one
         whose builder merely forgot to say which book they are in."""
         one = [(addr("יא", division="בראשית"), 0), (addr("יב", division="בראשית"), 90)]
         assert [u.source_address for u in _chapter_units(one)] == [
-            ("בראשית", "11", "", ""), ("בראשית", "12", "", "")]
+            ("בראשית", "11", "", "", "פרק"), ("בראשית", "12", "", "", "פרק")]
 
     def test_the_boundary_gate_fires_when_the_packing_is_reverted(self):
         """PROVEN ABLE TO FAIL. On the shipped build 22 real spans already render as
@@ -1284,7 +1290,9 @@ class TestTheYerushalmiSubUnitReadsHalakhah:
         # the sub KIND is a level too: the map renders `משנה` and `הלכה` alike, so
         # without it two headers stating different sub-units at one number would
         # record one address as well as one label, and the gate compares the two
-        assert unit.source_address == ("", "8", "1", "משנה")
+        # the CHAPTER word is a level for the same reason -- see
+        # `TestTheCountingWordIsAlwaysSaid`
+        assert unit.source_address == ("", "8", "1", "משנה", "פרק")
 
     def test_the_artifact_gate_reports_the_old_word(self):
         """PROVEN ABLE TO FAIL: the shipped labels, run through the gate."""
@@ -1361,6 +1369,128 @@ class TestTheDivisionSurvivesTheWalk:
             "הלכות אלף", "הלכות אלף", "הלכות בית"]
         assert [a.chapter for a in addresses] == ["א", "ב", "א"]   # what was kept
         assert len({a.chapter for a in addresses}) == 2            # three places, two
+
+
+class TestTheCountingWordIsAlwaysSaid:
+    """`ד` is not a citation, and the source already says what it counts.
+
+    The scholar audit objected three times on one deck -- *"we should call it פרק ד"*
+    (משנה, זבחים), *"should say פרק ב"* (תנ"ך, נחום), *"פרק לד"* (תרגום יונתן) -- which
+    is the same complaint as `מא` in הלכות גדולות one family over.
+
+    The word is never chosen here. It is read off the header, so a work numbering by
+    something else is cited by ITS word, and a work the parser cannot read is not
+    guessed at.
+    """
+
+    def test_a_bare_ordinal_now_names_what_it_counts(self):
+        units = _chapter_units([(addr("ד"), 0), (addr("לד"), 90)])
+        assert [u.label_he for u in units] == ["פרק ד", "פרק לד"]
+
+    def test_the_word_is_the_SOURCE_word_not_a_fixed_one(self):
+        """`סדר התפילה` is numbered by הלכה, and 20.3% of משנה תורה ספר אהבה is in it."""
+        marks = [(addr("ג", division="הלכות מילה"), 0),
+                 (addr("א", division="סדר התפילה", word="הלכה"), 90),
+                 (addr("ב", division="סדר התפילה", word="הלכה"), 180)]
+        assert [u.label_he for u in _chapter_units(marks)] == [
+            "הלכות מילה, פרק ג", "סדר התפילה, הלכה א", "סדר התפילה, הלכה ב"]
+
+    def test_a_range_still_elides_the_repeated_word(self):
+        """`פרק קכט–פרק קל` is not how anyone writes a range. The shortening already
+        covered this shape; the point is to check it rather than assume it, because
+        naming the word is exactly what could have broken it."""
+        units = _chapter_units([(addr("קכט"), 0), (addr("קל"), 90)])
+        head, tail = units[0].label_he, units[1].label_he
+        assert head + RANGE_SEP + shorten_range_tail(head, tail) == "פרק קכט–קל"
+
+    #: Two counting words numbering from א inside one division. Real: Ytext11000
+    #: states both `פרק א` and `פסוק א` at its top level, and it was unreachable
+    #: before the parser could read a word other than `פרק`.
+    TWO_WORDS = [
+        (addr("ג", division="ד"), 0),
+        (addr("ג", division="ד", word="הלכה"), 90),
+        (addr("א", division="ה"), 200),
+    ]
+
+    def test_two_counting_words_at_one_numeral_are_two_citation_positions(self):
+        """A numbering system is the division AND the word it counts by. Two words are
+        two numberings just as surely as two books are, so they must not share a
+        position -- `citation_runs` prints ONE label per position."""
+        units = _chapter_units(self.TWO_WORDS)
+        assert [u.label_he for u in units[:2]] == ["ד, פרק ג", "ד, הלכה ג"]
+        assert units[0].citation_pos != units[1].citation_pos
+        assert check_invariants([WorkUnits("w", "msource_header", "chapter",
+                                           units, 900)]) == []
+
+    def test_the_position_gate_fires_when_the_packing_is_reverted(self):
+        """PROVEN ABLE TO FAIL, and this pair is why the word is in the stated address
+        as well as in the label. Revert the packing to key on the division alone and
+        the two units collide at position 3; the gate reports it only because their
+        stated addresses differ, so it has two things to compare."""
+        units = _chapter_units(self.TWO_WORDS)
+        work = WorkUnits("w", "msource_header", "chapter", units, 900)
+
+        reverted = [u._replace(citation_pos=p) for u, p in zip(units, [3, 3, 1001])]
+        problems = check_invariants([work._replace(units=reverted)])
+        assert any("cover more than one place" in p for p in problems)
+
+        # ...and with the word left out of the stated address as well, the SAME
+        # collision reports nothing: the gate compares one address with itself
+        blind = [u._replace(source_address=u.source_address[:4]) for u in reverted]
+        assert blind[0].source_address == blind[1].source_address
+        assert not any("cover more than one place" in p for p in
+                       check_invariants([work._replace(units=blind)]))
+
+
+class TestTheParserReadsTheCountingWord:
+    """314 headers in 8 works held 154,373 letters that reached no unit, because the
+    parser insisted the level be called `פרק`."""
+
+    def test_a_level_numbered_by_something_other_than_perek_parses(self):
+        for body, word, chapter in (
+                ("סדר התפילה, הלכה א", "הלכה", "א"),
+                ("שער ב, סעיף ג", "סעיף", "ג"),
+                ("פרק ג, דיבור א", "דיבור", "א"),
+                ("פרק ב, פסקה ד", "פסקה", "ד"),
+        ):
+            address = parse_canonical_header(body)
+            assert address is not None, body
+            assert (address.chapter_kind, address.chapter) == (word, chapter), body
+
+    def test_it_used_to_parse_as_no_address_at_all(self):
+        """PROVEN ABLE TO FAIL: the shipped regex, re-run locally. This is not a
+        degraded address -- the header emitted NO unit, so its text fell into the last
+        `פרק` before it and was published under that label."""
+        old = re.compile(
+            r"^(?:(?P<div>[^,]+?),\s*)?"
+            r"פרק\s+(?P<chapter>[^,|]+?)\s*"
+            r"(?:,\s*(?P<kind>פסוק|משנה|הלכה)\s+(?P<sub>[^,|]+?)\s*)?$")
+        assert old.match("סדר התפילה, הלכה א") is None
+        assert parse_canonical_header("סדר התפילה, הלכה א") is not None
+
+    def test_perek_keeps_its_exact_behaviour_numeral_or_not(self):
+        """The vocabulary the corpus was built on does not move, and that asymmetry
+        is deliberate: a non-numeral chapter under `פרק` is still an address."""
+        address = parse_canonical_header("בראשית, פרק ראשון")
+        assert address is not None
+        assert (address.division, address.chapter) == ("בראשית", "ראשון")
+
+    def test_a_two_word_HEADING_is_refused_rather_than_published(self):
+        """The price of reading the word instead of fixing it. With the word open the
+        pattern also matches a heading, and publishing a heading dressed as an address
+        is the failure this stage exists to avoid. These are the real bodies: a
+        Mishneh Torah division opener, a mishnaic tractate name, a night of a
+        haggadah, and a bare provenance field with no address at all."""
+        for body in ("הלכות דעות", "טבול יום", "הלילה השני", "אהלות"):
+            assert parse_canonical_header(body) is None, body
+
+    def test_the_numeral_test_is_what_separates_them(self):
+        """PROVEN ABLE TO FAIL: drop the guard and the headings parse."""
+        loose = re.compile(
+            r"^(?:(?P<div>[^,]+?),\s*)?"
+            r"(?P<word>[א-ת]{2,10})\s+(?P<chapter>[^,|]+?)\s*$")
+        assert loose.match("טבול יום") is not None       # would have been published
+        assert parse_canonical_header("טבול יום") is None
 
 
 class TestEveryGrainRecordsTheStatedAddress:
