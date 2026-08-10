@@ -25,6 +25,7 @@ from scripts.build_work_divisions import (
     WorkUnits,
     _chapter_units,
     _clean_marker_text,
+    _is_foreign_label,
     _dedupe_ascending,
     _msource_files,
     _source_title_key,
@@ -240,6 +241,64 @@ class TestBracketedDecimalPair:
         double space in the middle of a citation."""
         assert _clean_marker_text("פרק  א.") == "פרק א"
         assert _clean_marker_text("שער\tראשון") == "שער ראשון"
+
+    def test_an_english_incipit_is_reported(self):
+        """PROVEN ABLE TO FAIL. One anthology's `section_he` values are English
+        incipits, and 5 of them reached a generated audit deck as addresses."""
+        clean = WorkUnits("w1", "sefaria", "section", [
+            Unit(0, 0, "sec:0", "מגיד", 0)], 100)
+        assert check_invariants([clean]) == []
+
+        english = WorkUnits("w1", "sefaria", "section", [
+            Unit(0, 0, "sec:0", "In the Beginning Our Fathers Were Idol Worshipers", 0)],
+            100)
+        problems = check_invariants([english])
+        assert len(problems) == 1
+        assert "non-Hebrew language" in problems[0]
+
+    def test_a_bare_NUMBER_is_not_a_foreign_label(self):
+        """The first draft of this gate demanded a Hebrew letter, and so condemned 192
+        real labels that are simply numbers -- four M-source works numbering their
+        chapters in digits, and the chapters above 999 of two works too long for a
+        Hebrew numeral. A number is inconsistent with the Hebrew numerals elsewhere; it
+        is not the wrong language."""
+        for label in ("1", "1000", "22"):
+            assert not _is_foreign_label(label)
+        numbered = WorkUnits("w1", "msource_header", "chapter",
+                             [Unit(0, 0, "ch:1", "1", 0)], 100)
+        assert check_invariants([numbered]) == []
+
+    def test_a_hebrew_label_quoting_a_LATIN_shelfmark_is_not_foreign(self):
+        """The obvious correction -- reject Latin letters -- would have condemned 49
+        real labels, all of them Hebrew labels naming a Cambridge manuscript."""
+        label = "מגילת סתרים, קטעים, כ\"י קמברידג' T- S Ar. 29/187c"
+        assert not _is_foreign_label(label)
+        assert check_invariants([WorkUnits(
+            "J:x", "ja", "page", [Unit(0, 0, "page:1", label, 0)], 100)]) == []
+
+    def test_the_two_shapes_are_told_apart(self):
+        assert _is_foreign_label("In the Beginning")
+        assert not _is_foreign_label("פרק א")
+        assert not _is_foreign_label("7")
+        assert not _is_foreign_label("סימן [א] T- S Ar. Box 5")
+
+    def test_a_section_table_with_an_english_label_builds_nothing(self, tmp_path):
+        """Refused for the WHOLE work: a table mixing `פרק ג` with an English incipit
+        reads as a bug wherever the second one lands."""
+        body = "אאאא\nבבבב\nגגגג\n"
+        (tmp_path / "k.txt").write_text(body, encoding="utf-8")
+        shipped = {"REF2:k": norm_stream(body)[0]}
+
+        def build(labels):
+            (tmp_path / "k.versemap.json").write_text(json.dumps(
+                {"sections": [{"section_he": lab, "start": i * 5}
+                               for i, lab in enumerate(labels)]},
+                ensure_ascii=False), encoding="utf-8")
+            return build_sefaria("k", str(tmp_path), "k.txt", "k.versemap.json",
+                                 "REF2:k", shipped)
+
+        assert build(["מגיד", "הלל", "נרצה"]) is not None
+        assert build(["מגיד", "In the Beginning", "נרצה"]) is None
 
     def test_the_invariant_catches_the_shape_if_it_ever_survives(self):
         """PROVEN ABLE TO FAIL. The builder strips it; this is the backstop, and it

@@ -160,6 +160,30 @@ _BRACKETED_PAIR_RE = re.compile(r"[\[(](\s*\d+\s*[-–,]\s*\d+\s*)[\])]")
 #: form of a marker, not part of the heading, and it reached 20 citations. Same class
 #: of leak as `&lt;שופטים&gt;` -- a reader should never see how the text was encoded.
 _MARKER_RESIDUE_RE = re.compile(r"\+\s*\d+\s*~")
+#: At least one Hebrew letter. An address is a Hebrew citation at this stage.
+_HAS_HEBREW_RE = re.compile(r"[א-ת]")
+_HAS_LATIN_RE = re.compile(r"[A-Za-z]")
+
+
+def _is_foreign_label(label: str) -> bool:
+    """A label written in the wrong LANGUAGE -- not merely in the wrong numerals.
+
+    Three shapes turned up in the real corpus and only the first is a defect:
+
+      `In the Beginning Our Fathers Were Idol Worshipers` -- an English incipit where a
+        Hebrew citation belongs. 38 of them in one liturgical anthology, and 5 reached
+        a generated audit deck as addresses.
+      `1`, `1000` -- a number. Inconsistent with the Hebrew numerals every other family
+        renders, and worth recording, but a number is not the wrong language.
+      `כ"י קמברידג' T- S Ar. Box 5, [סימן א]` -- a Hebrew label quoting a manuscript
+        shelfmark. 49 of these, all legitimate.
+
+    So the test is Latin letters WITHOUT Hebrew. Rejecting Latin outright would have
+    discarded all 49 shelfmark labels; requiring a Hebrew letter would have discarded
+    192 perfectly unambiguous numbers.
+    """
+    return bool(label) and bool(_HAS_LATIN_RE.search(label)) \
+        and not _HAS_HEBREW_RE.search(label)
 
 
 def _clean_marker_text(text: str) -> str:
@@ -1166,7 +1190,15 @@ def _sefaria_verse_units(
 def _sefaria_section_units(
     ref_id: str, sections: Sequence[dict], offsets: Sequence[int], stream_len: int
 ) -> Optional[WorkUnits]:
-    """Short liturgical texts, cited by section NAME rather than by number."""
+    """Short liturgical texts, cited by section NAME rather than by number.
+
+    FAILS CLOSED on a table whose section names are not Hebrew. One anthology's
+    `section_he` values are English incipits -- `In the Beginning Our Fathers Were Idol
+    Worshipers` -- and an address is a Hebrew citation at this stage, so such a work
+    falls back to its title alone rather than publishing an address in the wrong
+    language. Refused for the WHOLE work, not per label: a table mixing `פרק ג` with an
+    English incipit reads as a bug wherever the second one lands.
+    """
     units: List[Unit] = []
     for index, section in enumerate(sections):
         label = (section.get("section_he") or "").strip()
@@ -1174,6 +1206,8 @@ def _sefaria_section_units(
         units.append(Unit(len(units), start, f"sec:{index}", label, index))
     units = _dedupe_ascending(units)
     if not units:
+        return None
+    if any(_is_foreign_label(u.label_he) for u in units):
         return None
     return WorkUnits(ref_id, "sefaria", "section", units, stream_len)
 
@@ -1296,6 +1330,23 @@ def check_invariants(works: Sequence[WorkUnits]) -> List[str]:
                 f"{work.ref_id}: {len(fatal)} label(s) carry a bracketed decimal "
                 f"pair, which the surface envelope rejects wholesale, "
                 f"e.g. {fatal[0]!r}")
+
+        # An address is a HEBREW citation at this stage, by owner decision. One
+        # liturgical anthology carries English section incipits, and a table mixing
+        # `פרק ג` with `In the Beginning Our Fathers Were Idol Worshipers` reads as a
+        # bug wherever the second one lands. The recorded resolution is that such a
+        # work falls back to its title alone, so the builder refuses it -- but the
+        # gate stays, because the next source to do this will not be that one.
+        #
+        # Language, NOT numerals: see `_is_foreign_label`. A first draft of this gate
+        # demanded a Hebrew letter and so condemned 192 bare numbers, and the obvious
+        # correction -- reject Latin -- would have condemned 49 Hebrew labels quoting a
+        # Cambridge shelfmark.
+        foreign = sorted(u.label_he for u in work.units if _is_foreign_label(u.label_he))
+        if foreign:
+            problems.append(
+                f"{work.ref_id}: {len(foreign)} label(s) are written in a non-Hebrew "
+                f"language, e.g. {foreign[0][:60]!r}")
     return problems
 
 
