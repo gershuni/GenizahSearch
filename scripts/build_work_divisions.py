@@ -901,9 +901,13 @@ def _disambiguate_labels(units: Sequence[Unit]) -> List[Unit]:
 
 #: How wide a Judeo-Arabic page address may be before the work sheds an ancestor.
 #: Owner: *"The JA title is just weird, does not seem like title. Should perhaps be
-#: shortened."* Measured at 60: 10 of 89 works shed, 2,524 units change, 10,094
-#: rendered ranges get shorter and none gets longer. 50 buys 19 more units at the
-#: cost of a third work losing a level; 70 gives up half the gain.
+#: shortened."* Measured at 60, with both guards: 6 of 89 works shed, 1,520 units
+#: change, 6,077 rendered ranges get shorter and none gets longer. Length: median
+#: 25→22, p95 49→44, max 144→100, over-40 1,481→1,170, over-60 180→79, over-120 2→0.
+#:
+#: Four further works are refused outright by the flattening guard and keep their full
+#: chains -- which is where a third of the unguarded shed's apparent gain came from,
+#: and it was not a gain.
 JA_LABEL_BUDGET = 60
 
 
@@ -947,6 +951,36 @@ def _ja_resurfaces(rows: Sequence[Tuple[Sequence[str], str]], depth: int) -> boo
                for part, hidden_at in first_hidden.items())
 
 
+def _ja_flattens(rows: Sequence[Tuple[Sequence[str], str]], depth: int) -> bool:
+    """Would shedding to `depth` make two DIFFERENT sections render the same text?
+
+    The second guard, and it closes a hole the range tests cannot see -- which is why
+    it is a separate function rather than another clause. A range whose two ends sit
+    in different sections that now render alike is SHORTER, so a length test passes
+    it; the dropped ancestor is hidden at BOTH ends, so nothing is re-stated and the
+    resurfacing test passes it; and it is sibling-to-sibling, so it never reads as a
+    child running into its parent. Every acceptance test the shed was designed against
+    is blind to it by construction.
+
+    What the reader gets is `4, עמ' 89–95` for a span crossing two different מקאלות:
+    one section, seven pages, and wrong about where the fragment is.
+
+    Measured on the corpus, without this guard: 258 ordered pairs flatten across a
+    section boundary and 205 units land in a section whose rendering it shares.
+    `ספר המצוות` loses `מצות עשה` against `מצות לא תעשה`, so positive and negative
+    commandment 5 become indistinguishable; a Torah commentary loses the chapter,
+    which for a commentary IS the citation; `עשרים מאמרים` renders a bare `4`.
+
+    Not a length or a position test -- it reads only which SECTION each rendering came
+    from, so it refuses the same way at every budget.
+    """
+    by_render: Dict[str, set] = {}
+    for parts, _ in rows:
+        by_render.setdefault(", ".join(_ja_keep(parts, depth)), set()).add(
+            ", ".join(parts))
+    return any(len(sections) > 1 for sections in by_render.values())
+
+
 def ja_shed_depth(
     rows: Sequence[Tuple[Sequence[str], str]], budget: int = JA_LABEL_BUDGET
 ) -> int:
@@ -966,7 +1000,9 @@ def ja_shed_depth(
     while depth < deepest - 1:
         widest = max(len(", ".join(_ja_keep(parts, depth))) + len(tail)
                      for parts, tail in rows)
-        if widest <= budget or _ja_resurfaces(rows, depth + 1):
+        if (widest <= budget
+                or _ja_resurfaces(rows, depth + 1)
+                or _ja_flattens(rows, depth + 1)):
             break
         depth += 1
     return depth

@@ -30,6 +30,7 @@ from scripts.build_work_divisions import (
     _daf_units,
     _is_foreign_label,
     _dedupe_ascending,
+    _ja_flattens,
     _ja_keep,
     _ja_resurfaces,
     _msource_files,
@@ -1004,30 +1005,43 @@ class TestTheJudeoArabicShed:
     stripped of, and a uniform DEPTH CAP fails the same way on a depth count while
     barely reaching the length -- deleting every ancestor in the corpus still leaves
     318 labels over 40 characters, because the length is in the innermost element.
+
+    TWO guards, and the second was found only after the first shipped. Range-safety
+    (nothing longer, nothing re-stated, never a child running into its parent) is not
+    the whole of correctness: a shed can also make two DIFFERENT sections render
+    alike, and every range test passes that by construction. See
+    `test_two_sections_that_would_render_alike_block_the_shed`.
     """
 
-    #: A work whose chains are all two deep: shedding is safe.
-    EVEN = [(["שער א", "פרק א"], ", עמ' 1"), (["שער א", "פרק ב"], ", עמ' 2"),
-            (["שער ב", "פרק א"], ", עמ' 3")]
+    #: Two deep, and every innermost element distinct: shedding is safe.
+    SAFE = [(["שער א", "פרק א"], ", עמ' 1"), (["שער א", "פרק ב"], ", עמ' 2"),
+            (["שער ב", "פרק ג"], ", עמ' 3")]
+    #: Two deep, and TWO SECTIONS THAT WOULD RENDER ALIKE. This was written as the
+    #: safe case and it is the defect: shedding gives `פרק א, עמ' 1–3`, one section
+    #: spanning three pages, across two different gates. Every range test passes it
+    #: -- shorter, nothing re-stated, sibling-to-sibling -- which is why it needed a
+    #: guard of its own rather than another clause in the ones that were there.
+    FLATTENS = [(["שער א", "פרק א"], ", עמ' 1"), (["שער א", "פרק ב"], ", עמ' 2"),
+                (["שער ב", "פרק א"], ", עמ' 3")]
     #: A work where a name is an ancestor early and a whole label LATER. Shedding it
     #: would make the later page render as the earlier page's own parent.
     UNEVEN = [(["הקדמה", "פרק א"], ", עמ' 1"), (["הקדמה", "פרק ב"], ", עמ' 2"),
               (["הקדמה"], ", עמ' 3")]
 
     def test_a_work_within_budget_sheds_nothing(self):
-        assert ja_shed_depth(self.EVEN, budget=60) == 0
+        assert ja_shed_depth(self.SAFE, budget=60) == 0
 
     def test_a_work_over_budget_sheds_one_level_for_every_unit(self):
-        assert ja_shed_depth(self.EVEN, budget=12) == 1
-        assert [_ja_keep(parts, 1) for parts, _ in self.EVEN] == [
-            ["פרק א"], ["פרק ב"], ["פרק א"]]
+        assert ja_shed_depth(self.SAFE, budget=12) == 1
+        assert [_ja_keep(parts, 1) for parts, _ in self.SAFE] == [
+            ["פרק א"], ["פרק ב"], ["פרק ג"]]
 
     def test_the_innermost_element_is_never_shed(self):
         """Criterion E, and it is what protects the work whose organising principle is
         a manuscript siglum -- there the siglum is the ancestor, but elsewhere the
         innermost element IS the address, and 46 of the 48 labels still over budget
         after the shed have no ancestor left at all."""
-        assert ja_shed_depth(self.EVEN, budget=1) == 1        # not 2
+        assert ja_shed_depth(self.SAFE, budget=1) == 1        # not 2
         assert _ja_keep(["שער א", "פרק א"], 5) == ["פרק א"]
         # and the search stops there rather than reporting a depth that changes
         # nothing: past `deepest - 1` every chain is already down to one element
@@ -1040,7 +1054,26 @@ class TestTheJudeoArabicShed:
         as running from a chapter into the introduction that contains it."""
         assert ja_shed_depth(self.UNEVEN, budget=8) == 0
         assert _ja_resurfaces(self.UNEVEN, 1)
-        assert not _ja_resurfaces(self.EVEN, 1)
+        assert not _ja_resurfaces(self.SAFE, 1)
+
+    def test_two_sections_that_would_render_alike_block_the_shed(self):
+        """PROVEN ABLE TO FAIL, and it is the case the acceptance tests could not see.
+        A range whose ends sit in different sections that now render alike is SHORTER,
+        hides the ancestor at BOTH ends so nothing is re-stated, and is
+        sibling-to-sibling so it never reads as a child running into its parent. On
+        the corpus this flattened 258 ordered pairs: `4, עמ' 89–95` for a span
+        crossing two different מקאלות."""
+        assert _ja_flattens(self.FLATTENS, 1)
+        assert not _ja_flattens(self.SAFE, 1)
+        assert ja_shed_depth(self.FLATTENS, budget=12) == 0
+        assert ja_shed_depth(self.SAFE, budget=12) == 1
+
+    def test_every_range_test_passes_the_flattened_case(self):
+        """Which is the whole argument for a separate guard: the shed is refused by
+        `_ja_flattens` and by nothing else."""
+        kept = [_ja_keep(parts, 1) for parts, _ in self.FLATTENS]
+        assert ja_range_regressions(self.FLATTENS, kept) == 0
+        assert not _ja_resurfaces(self.FLATTENS, 1)
 
     def _shed(self, rows, depth):
         return [_ja_keep(parts, depth) for parts, _ in rows]
@@ -1055,7 +1088,7 @@ class TestTheJudeoArabicShed:
         assert ja_range_regressions(self.UNEVEN, self._shed(self.UNEVEN, 0)) == 0
 
     def test_the_gate_stays_green_on_a_safe_shed(self):
-        assert ja_range_regressions(self.EVEN, self._shed(self.EVEN, 1)) == 0
+        assert ja_range_regressions(self.SAFE, self._shed(self.SAFE, 1)) == 0
 
     def test_the_gate_catches_a_range_that_gets_LONGER(self):
         """The other half of the gate, and the reason it takes the emitted chains
