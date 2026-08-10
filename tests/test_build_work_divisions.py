@@ -20,6 +20,7 @@ import pytest
 
 from scripts.build_work_divisions import (
     JA_LEAF_KINDS,
+    Edition,
     Unit,
     WorkUnits,
     _chapter_units,
@@ -33,6 +34,7 @@ from scripts.build_work_divisions import (
     build_ja_pages,
     build_sefaria,
     check_invariants,
+    ja_edition,
     ja_reconstruct,
     ja_source_index,
     ja_tree_chain,
@@ -450,6 +452,73 @@ class TestBindTreeChains:
         chains = bind_tree_chains(self.MARKERS, nodes)
         assert set(chains) <= {p for p, _, _ in self.MARKERS}
         assert chains[100] == ["פרק א", "פסוק א"]
+
+
+class TestJaEdition:
+    """What a reader needs to check a page address against a book on a shelf."""
+
+    def test_the_imprint_and_both_names_are_carried(self):
+        doc = _ja_source_doc([("1", [(1, "גוף")])])
+        doc["OriginalName"] = "כתאב אלמואזנה"
+        ed = ja_edition(doc)
+        assert ed.title_he == "חיבור לדוגמה"
+        assert ed.title_original == "כתאב אלמואזנה"
+        assert (ed.publisher, ed.publisher_city, ed.editor) == \
+            ("מוציא לאור", "ירושלים", "עורך")
+
+    def test_an_original_name_that_merely_repeats_the_title_is_dropped(self):
+        """5 of 92 real documents record no distinct original name, and a consumer
+        must not render the same name twice."""
+        doc = _ja_source_doc([("1", [(1, "גוף")])])
+        doc["OriginalName"] = doc["TitleName"]
+        assert ja_edition(doc).title_original == ""
+
+    def test_a_missing_field_becomes_an_empty_string_not_None(self):
+        doc = _ja_source_doc([("1", [(1, "גוף")])])
+        doc.pop("Editor")
+        doc["Edition"] = None
+        ed = ja_edition(doc)
+        assert ed.editor == "" and ed.edition == ""
+
+    def test_the_original_name_is_kept_in_hebrew_letters_verbatim(self):
+        """Judeo-Arabic is the Arabic language in Hebrew script, and all 92 real
+        records are written that way. This is the name the source carries, not a
+        translation of anything, so nothing is transliterated or rendered."""
+        doc = _ja_source_doc([("1", [(1, "גוף")])])
+        doc["OriginalName"] = "אלמכ'תאר פי אלאמאנאת ואלאעתקאדאת"
+        assert ja_edition(doc).title_original == "אלמכ'תאר פי אלאמאנאת ואלאעתקאדאת"
+
+    def test_a_page_built_from_the_source_carries_its_edition(self, tmp_path):
+        helper = TestBuildJaPages()
+        path, ref_id, shipped, source = helper._write(tmp_path, [
+            ("1", [(1, "+פרק~ +א~"), (2, "גוף")]),
+        ])
+        built = build_ja_pages(path, ref_id, shipped, source)
+        assert built.edition is not None
+        assert built.edition.publisher == "מוציא לאור"
+
+    def test_the_edition_reaches_the_artifact(self, tmp_path):
+        edition = Edition("ספר", "כתאב", 'רס"ג', "רב סעדיה", "מוציא", "ירושלים",
+                          'התש"ף', "עורך", "")
+        work = WorkUnits("J:x", "ja", "page",
+                         [Unit(0, 0, "page:1", "פרק א, עמ' 1", 0)], 100, edition)
+        out = str(tmp_path / "a.db")
+        write_artifact(out, [work])
+        conn = sqlite3.connect(out)
+        row = conn.execute(
+            "SELECT title_he, title_original, author_short, publisher, editor "
+            "FROM locus_edition WHERE locus_ref_id='J:x'").fetchone()
+        conn.close()
+        assert row == ("ספר", "כתאב", 'רס"ג', "מוציא", "עורך")
+
+    def test_a_work_with_no_edition_writes_no_row(self, tmp_path):
+        work = WorkUnits("M:y", "msource_header", "chapter",
+                         [Unit(0, 0, "ch:1", "פרק א", 0)], 100)
+        out = str(tmp_path / "b.db")
+        write_artifact(out, [work])
+        conn = sqlite3.connect(out)
+        assert conn.execute("SELECT COUNT(*) FROM locus_edition").fetchone()[0] == 0
+        conn.close()
 
 
 class TestResolveTree:

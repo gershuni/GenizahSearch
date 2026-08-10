@@ -58,6 +58,13 @@ came from is not, so a reader cannot check the address against a named volume.
 Carrying the printed folio alongside is the mitigation -- a folio is shared across
 editions where an internal numbering is not.
 
+For Judeo-Arabic that tension does not arise, and `locus_edition` resolves it
+outright: the edition is a published volume, so its publisher, city, year and editor
+are emitted and the page address is checkable against a book on a shelf. The same
+table carries the work's own ARABIC name, in Hebrew letters -- these works are known
+by it as much as by their Hebrew titles (`תפסיר ישעיה` for what we call
+`ישעיה תרגום`), so a catalogue may use either, and a reader may know only one.
+
 Usage:
     python -X utf8 -u scripts/build_work_divisions.py --out _tmp/locus
     python -X utf8 -u scripts/build_work_divisions.py --out _tmp/locus --family ja
@@ -183,12 +190,36 @@ class Unit(NamedTuple):
     citation_pos: Optional[int]  #: position in the work's OWN citation order, or None
 
 
+class Edition(NamedTuple):
+    """What a reader needs to check a page address against a book on a shelf.
+
+    Carried for Judeo-Arabic, where the edition is a published volume with a named
+    publisher and editor. Also carries the work's OWN name -- these works are known by
+    their Arabic titles as much as their Hebrew ones, and a catalogue may use either.
+
+    `title_original` is NOT a translation of anything. It is the name the source
+    records, in Hebrew letters, the script Judeo-Arabic is written in -- so it does not
+    touch the rule that a work title is never machine-translated.
+    """
+
+    title_he: str
+    title_original: str        #: the work's Arabic name; "" when it has no distinct one
+    author_short: str          #: as the source abbreviates it, e.g. `רס"ג`
+    author_full: str           #: as the source spells it out
+    publisher: str
+    publisher_city: str
+    publisher_year: str
+    editor: str
+    edition: str
+
+
 class WorkUnits(NamedTuple):
     ref_id: str
     family: str
     grain: str
     units: List[Unit]
     stream_len: int
+    edition: Optional[Edition] = None
 
 
 # --------------------------------------------------------------------------
@@ -862,6 +893,29 @@ def _load_ja_sources(source_dir: str) -> Tuple[Dict[str, dict], Dict[str, str]]:
     return by_key, key_by_title_id
 
 
+def ja_edition(doc: dict) -> Edition:
+    """The imprint and the names, read straight off the source record.
+
+    `title_original` is dropped when it merely repeats the Hebrew title (5 of 92 real
+    documents), so a consumer never renders the same name twice.
+    """
+    def field(name: str) -> str:
+        return str(doc.get(name) or "").strip()
+
+    original = field("OriginalName")
+    return Edition(
+        title_he=field("TitleName"),
+        title_original="" if original == field("TitleName") else original,
+        author_short=field("AuthorName"),
+        author_full=field("FullName"),
+        publisher=field("Publisher"),
+        publisher_city=field("PublisherCity"),
+        publisher_year=field("PublisherYear"),
+        editor=field("Editor"),
+        edition=field("Edition"),
+    )
+
+
 def ja_source_index(source_dir: str) -> Dict[str, dict]:
     """`AuthorName, TitleName` (folded) -> the source document, for exact binding only.
 
@@ -1017,7 +1071,7 @@ def build_ja_pages(
 
     units = _disambiguate_labels(units)
     units = [u._replace(citation_pos=i) for i, u in enumerate(units)]
-    return WorkUnits(ref_id, "ja", "page", units, len(stream))
+    return WorkUnits(ref_id, "ja", "page", units, len(stream), ja_edition(doc))
 
 
 # --------------------------------------------------------------------------
@@ -1150,6 +1204,29 @@ CREATE TABLE locus_unit (
 -- twice, so two units legitimately share one citation. The index keeps them
 -- apart by unit_ord; the citation folds them together by part_key.
 CREATE INDEX ix_locus_unit_part ON locus_unit(locus_ref_id, part_key);
+
+-- The edition a page address belongs to, and the names the work goes by.
+--
+-- Present only where the edition is a published volume that can be named. This is
+-- what closes the gap recorded at the top of this file: a page number is checkable
+-- only against a stated imprint, and a citation that says `עמ' 43` without saying
+-- whose page 43 is asking the reader to trust it.
+--
+-- `title_original` is the work's own Arabic name, in Hebrew letters. It is carried
+-- because these works are known by it as much as by their Hebrew titles, and a
+-- catalogue may use either -- `תפסיר ישעיה` for what we call `ישעיה תרגום`. Empty
+-- when the source records no distinct original name.
+CREATE TABLE locus_edition (
+  locus_ref_id    TEXT PRIMARY KEY REFERENCES locus_work(locus_ref_id),
+  title_he        TEXT NOT NULL,
+  title_original  TEXT NOT NULL,
+  author_short    TEXT NOT NULL,
+  author_full     TEXT NOT NULL,
+  publisher       TEXT NOT NULL,
+  publisher_city  TEXT NOT NULL,
+  publisher_year  TEXT NOT NULL,
+  editor          TEXT NOT NULL,
+  edition         TEXT NOT NULL);
 """
 
 
@@ -1166,6 +1243,10 @@ def write_artifact(path: str, works: Sequence[WorkUnits]) -> None:
         "INSERT INTO locus_unit VALUES (?,?,?,?,?,?)",
         [(w.ref_id, u.unit_ord, u.start, u.part_key, u.label_he, u.citation_pos)
          for w in works for u in w.units],
+    )
+    conn.executemany(
+        "INSERT INTO locus_edition VALUES (?,?,?,?,?,?,?,?,?,?)",
+        [(w.ref_id,) + tuple(w.edition) for w in works if w.edition is not None],
     )
     conn.commit()
     conn.close()
