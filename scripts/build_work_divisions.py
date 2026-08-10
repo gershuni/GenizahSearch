@@ -87,6 +87,7 @@ from shared.discovery_locus import (  # noqa: E402
     citation_seq_for_daf,
     daf_label_he,
     heb_numeral,
+    label_segments,
     norm_stream,
     parse_canonical_header,
     parse_unit_numeral,
@@ -146,6 +147,12 @@ _MARKUP_CHARS = str.maketrans({c: None for c in "{}<>"})
 #: heading would cost a reader the entire page. Only the brackets are removed; the
 #: numbers are the publisher's and stay.
 _BRACKETED_PAIR_RE = re.compile(r"[\[(](\s*\d+\s*[-–,]\s*\d+\s*)[\])]")
+#: Marker syntax embedded in a heading -- `+3~`, `+10~`. The publisher's own partition
+#: tree carries it: one node reads
+#: `[ספר השנים לרבנו יהודה הכהן ראש הסדר ז"ל] +3~ [החלק הראשון]`. It is the transport
+#: form of a marker, not part of the heading, and it reached 20 citations. Same class
+#: of leak as `&lt;שופטים&gt;` -- a reader should never see how the text was encoded.
+_MARKER_RESIDUE_RE = re.compile(r"\+\s*\d+\s*~")
 
 
 def _clean_marker_text(text: str) -> str:
@@ -157,6 +164,8 @@ def _clean_marker_text(text: str) -> str:
     """
     cleaned = html.unescape(text).translate(_MARKUP_CHARS)
     cleaned = _BRACKETED_PAIR_RE.sub(r"\1", cleaned)
+    # Marker syntax, then any tilde left over. A `~` in a citation is never right.
+    cleaned = _MARKER_RESIDUE_RE.sub(" ", cleaned).replace("~", " ")
     # Internal runs of whitespace collapse. The publisher's own headings carry
     # `פרק  א.` and similar, and once a heading is quoted inside a citation its
     # typesetting slack becomes a double space in the middle of an address.
@@ -716,16 +725,78 @@ def _tree_reading_order(nodes: Sequence[dict]) -> List[dict]:
 
 
 def ja_tree_chain(node: dict, by_path: Dict[str, dict]) -> List[str]:
-    """The publisher's own labels from the top of the tree down to this node."""
+    """The publisher's own labels from the top of the tree down to this node.
+
+    A link that repeats its parent is dropped. The tree legitimately nests a book
+    under its own name -- `בראשית` the book, then `בראשית` the reading, then the
+    chapter -- and quoted into a citation that becomes `בראשית, בראשית, א`, which
+    reads as a mistake rather than as a hierarchy.
+    """
     parts: List[str] = []
     components = str(node["path"]).split(":")
     for depth in range(len(components)):
         ancestor = by_path.get(":".join(components[:depth + 1]))
         if ancestor:
             label = _clean_marker_text(str(ancestor.get("text") or ""))
-            if label:
+            if label and label != (parts[-1] if parts else None):
                 parts.append(label)
     return parts[-_JA_MAX_DEPTH:]
+
+
+def tree_alignment(
+    markers: Sequence[Tuple[int, str, Optional[str]]], nodes: Sequence[dict]
+) -> Tuple[int, float, list]:
+    """(labels matched, fraction of the tree matched, the matching blocks)."""
+    if not markers or not nodes:
+        return 0, 0.0, []
+    left = [_fold_label(_marker_label(kind, numeral)) for _, kind, numeral in markers]
+    right = [_fold_label(str(n.get("text") or "")) for n in nodes]
+    blocks = difflib.SequenceMatcher(None, left, right, autojunk=False)\
+        .get_matching_blocks()
+    matched = sum(size for _, _, size in blocks)
+    return matched, matched / len(right), blocks
+
+
+def resolve_tree(
+    markers: Sequence[Tuple[int, str, Optional[str]]],
+    preferred: Optional[Sequence[dict]],
+    candidates: Optional[Dict[str, List[dict]]] = None,
+) -> Tuple[Optional[Sequence[dict]], str]:
+    """Which tree really belongs to this document. Returns (nodes, how it was decided).
+
+    The filename binding is a claim, not a fact, and it is measurably WRONG: the
+    source filenames are not the site's title ids throughout, and two documents were
+    handed each other's trees -- `אגרות שמואל בן עלי` given the section names of
+    `ספר המאזניים` and vice versa, each aligning at 0.000 with what it was given while
+    aligning at 1.000 with the other's. So the claim is checked before it is used, and
+    a failure is repaired by looking for the tree that does fit.
+
+    The search ranks by labels MATCHED, not by the fraction of the tree matched. A
+    two-node tree whose labels occur anywhere in the document scores a perfect
+    fraction -- one such tree scores 1.000 against three unrelated works -- so the
+    fraction alone would replace a 500-node tree that fits with a tiny one that
+    happens not to contradict anything. It is still required as a floor.
+
+    A margin is required too: the winner must match at least twice what the runner-up
+    does. Two volumes of one commentary have near-identical structures, and binding
+    either of them on a coin-toss would publish one volume's section names over the
+    other's text -- which no gate downstream could detect, because every offset would
+    still be right.
+    """
+    if preferred and tree_alignment(markers, preferred)[1] >= JA_TREE_MIN_ALIGNMENT:
+        return preferred, "filename"
+    if not candidates:
+        return None, "unbound"
+    scored = sorted(
+        ((tree_alignment(markers, nodes)[0], tree_alignment(markers, nodes)[1], key)
+         for key, nodes in candidates.items()), reverse=True)
+    if not scored:
+        return None, "unbound"
+    matched, ratio, key = scored[0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0
+    if ratio >= JA_TREE_MIN_ALIGNMENT and matched >= max(3, 2 * runner_up):
+        return candidates[key], f"searched->{key}"
+    return None, "unbound"
 
 
 def bind_tree_chains(
@@ -748,14 +819,8 @@ def bind_tree_chains(
     borrowing a parent from a misalignment would assert a containment that is not
     there, which is worse than having no parent at all.
     """
-    if not markers or not nodes:
-        return {}
-    left = [_fold_label(_marker_label(kind, numeral)) for _, kind, numeral in markers]
-    right = [_fold_label(str(n.get("text") or "")) for n in nodes]
-    blocks = difflib.SequenceMatcher(None, left, right, autojunk=False)\
-        .get_matching_blocks()
-    matched = sum(size for _, _, size in blocks)
-    if matched / len(right) < JA_TREE_MIN_ALIGNMENT:
+    _, ratio, blocks = tree_alignment(markers, nodes)
+    if ratio < JA_TREE_MIN_ALIGNMENT:
         return {}
 
     by_path = {str(n["path"]): n for n in nodes}
@@ -850,6 +915,8 @@ def ja_reconstruct(doc: dict, title_line: str) -> Tuple[str, List[Tuple[str, int
 def build_ja_pages(
     path: str, ref_id: str, shipped: Dict[str, str], source: Dict[str, dict],
     tree: Optional[Sequence[dict]] = None,
+    all_trees: Optional[Dict[str, List[dict]]] = None,
+    resolution: Optional[Dict[str, str]] = None,
 ) -> Optional[WorkUnits]:
     """Judeo-Arabic addressed by the printed page of its named edition.
 
@@ -901,7 +968,11 @@ def build_ja_pages(
     # reaches the verse level, and its leaves need something to align against or the
     # whole alignment weakens. Only the coarse tier is then used to name a page --
     # labelling a page with a verse would claim the page IS that verse.
-    chains = bind_tree_chains(_ja_markers(rebuilt), tree or [])
+    markers = _ja_markers(rebuilt)
+    nodes, how = resolve_tree(markers, tree, all_trees)
+    if resolution is not None:
+        resolution[ref_id] = how
+    chains = bind_tree_chains(markers, nodes or [])
     sections = []
     for pos, kind, numeral in _ja_divisions(rebuilt):
         label = ", ".join(chains.get(pos) or [_marker_label(kind, numeral)])
@@ -1235,6 +1306,7 @@ corpora are restricted:
 
         names = sorted(f for f in os.listdir(ja_dir) if f.endswith(".txt"))
         pages = with_tree = 0
+        resolution: Dict[str, str] = {}
         for name in names:
             # The reference id is `J:` + the filename stem, which is what the ingest
             # minted. Numbering by position instead silently mismatches every work
@@ -1249,7 +1321,8 @@ corpora are restricted:
             # Pages are preferred, divisions are the fallback. A work whose source
             # pages do not rebuild the stream exactly still gets an address, from the
             # grain that needs no source at all.
-            built = (build_ja_pages(full, ref_id, shipped, source, nodes)
+            built = (build_ja_pages(full, ref_id, shipped, source, nodes,
+                                    tree_for_key, resolution)
                      if source else None)
             if built:
                 pages += 1
@@ -1265,15 +1338,30 @@ corpora are restricted:
         # Count what actually reached the labels, not what was merely offered: a tree
         # can bind to a document and still be rejected by the alignment gate, and
         # reporting the offer as the outcome would overstate the tree's contribution.
+        # Counted with the bracket-aware splitter, not `count(", ")`: a section label
+        # can carry a witness list, `1. [פ, מ]`, whose internal commas are not part
+        # boundaries -- and counting them overstated this by a whole work.
+        def _states_parent(unit: Unit) -> bool:
+            return len(label_segments(unit.label_he)) > 2
+
         stated = sum(1 for w in works if w.family == "ja"
-                     for u in w.units if u.label_he.count(", ") > 1)
+                     for u in w.units if _states_parent(u))
         stated_works = sum(1 for w in works if w.family == "ja"
-                           and any(u.label_he.count(", ") > 1 for u in w.units))
+                           and any(_states_parent(u) for u in w.units))
         print(f"  JA: {ja_built} built ({pages} by printed page, "
               f"{ja_built - pages} by division), {skipped['ja']} skipped", flush=True)
         print(f"      {with_tree} matched to a harvested tree; "
               f"{stated:,} addresses in {stated_works} works name a parent the "
               f"publisher STATES", flush=True)
+        how = collections.Counter(
+            v.split("->")[0] for v in resolution.values())
+        print(f"      tree resolution: {dict(how)}", flush=True)
+        for ref_id, note in sorted(resolution.items()):
+            if note.startswith("searched"):
+                # The key names where the fitting tree was FILED, not what it contains
+                # -- the whole point is that the filing is what turned out to be wrong.
+                print(f"        REBOUND {ref_id}: its own tree did not fit; using the "
+                      f"one filed under {note.split('->', 1)[1]!r}", flush=True)
     elif "ja" in families:
         print(f"  SKIPPED: {ENV_JA_DIR} is not set or not a directory")
 

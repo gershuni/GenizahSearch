@@ -36,6 +36,8 @@ from scripts.build_work_divisions import (
     ja_reconstruct,
     ja_source_index,
     ja_tree_chain,
+    resolve_tree,
+    tree_alignment,
     sefaria_render_kind,
     write_artifact,
 )
@@ -220,6 +222,17 @@ class TestBracketedDecimalPair:
         assert _clean_marker_text("סימן [א]") == "סימן [א]"
         assert _clean_marker_text("[הקדמה]") == "[הקדמה]"
 
+    def test_marker_syntax_in_the_publishers_own_heading_is_stripped(self):
+        """The partition tree embeds the transport form of a marker inside a heading:
+        `[ספר השנים ...] +3~ [החלק הראשון]`. It reached 20 citations. Same class of leak
+        as `&lt;שופטים&gt;` -- a reader should never see how the text was encoded."""
+        assert _clean_marker_text("[ספר השנים] +3~ [החלק הראשון]") == \
+            "[ספר השנים] [החלק הראשון]"
+
+    def test_a_stray_tilde_never_survives_into_a_citation(self):
+        assert "~" not in _clean_marker_text("פרק א~")
+        assert _clean_marker_text("שער~ראשון") == "שער ראשון"
+
     def test_the_publishers_typesetting_slack_does_not_reach_the_citation(self):
         """Real headings arrive as `פרק  א.`; quoted inside an address that becomes a
         double space in the middle of a citation."""
@@ -370,6 +383,21 @@ class TestJaTreeChain:
         by_path = self._by_path()
         assert ja_tree_chain(self.NODES[1], by_path) != ja_tree_chain(self.NODES[4], by_path)
 
+    def test_a_link_repeating_its_parent_is_dropped(self):
+        """The tree nests a book under its own name -- `בראשית` the book, `בראשית` the
+        reading, then the chapter -- and quoted into a citation that reads
+        `בראשית, בראשית, א`, which looks like a mistake rather than a hierarchy."""
+        nodes = [_node("0", "בראשית"), _node("0:0", "בראשית"), _node("0:0:0", "א")]
+        chain = ja_tree_chain(nodes[-1], {n["path"]: n for n in nodes})
+        assert chain == ["בראשית", "א"]
+
+    def test_a_label_repeating_a_NON_adjacent_ancestor_is_kept(self):
+        """Only a link repeating its immediate parent is redundant. `הקדמה` inside
+        discourse 1 whose own book also opens with a `הקדמה` is a different place."""
+        nodes = [_node("0", "הקדמה"), _node("0:0", "מאמר א"), _node("0:0:0", "הקדמה")]
+        chain = ja_tree_chain(nodes[-1], {n["path"]: n for n in nodes})
+        assert chain == ["הקדמה", "מאמר א", "הקדמה"]
+
     def test_a_chain_is_capped_so_a_citation_stays_readable(self):
         deep = [_node("0", "א"), _node("0:0", "ב"), _node("0:0:0", "ג"),
                 _node("0:0:0:0", "ד"), _node("0:0:0:0:0", "ה")]
@@ -422,6 +450,64 @@ class TestBindTreeChains:
         chains = bind_tree_chains(self.MARKERS, nodes)
         assert set(chains) <= {p for p, _, _ in self.MARKERS}
         assert chains[100] == ["פרק א", "פסוק א"]
+
+
+class TestResolveTree:
+    """The filename binding is a claim, and it is measurably wrong on real data."""
+
+    MARKERS = [(0, "פרק", "א"), (100, "פרק", "ב"), (200, "פרק", "ג"),
+               (300, "פרק", "ד"), (400, "פרק", "ה")]
+    RIGHT = [_node("0", "פרק א"), _node("1", "פרק ב"), _node("2", "פרק ג"),
+             _node("3", "פרק ד"), _node("4", "פרק ה")]
+    WRONG = [_node(str(i), f"האות {n}") for i, n in enumerate("אבגדהוזחט")]
+
+    def test_a_tree_that_fits_is_used_without_a_search(self):
+        nodes, how = resolve_tree(self.MARKERS, self.RIGHT, {"x": self.WRONG})
+        assert nodes is self.RIGHT
+        assert how == "filename"
+
+    def test_a_tree_that_does_not_fit_is_replaced_by_one_that_does(self):
+        """Two real documents were handed each other's trees -- each aligning at 0.000
+        with what it was given and 1.000 with the other's."""
+        nodes, how = resolve_tree(self.MARKERS, self.WRONG,
+                                  {"right": self.RIGHT, "wrong": self.WRONG})
+        assert nodes is self.RIGHT
+        assert how == "searched->right"
+
+    def test_a_tiny_tree_does_not_win_on_the_FRACTION_it_matched(self):
+        """THE DEFECT, PROVEN ABLE TO FAIL. Ranking by fraction-of-tree-matched lets a
+        two-node tree whose labels occur anywhere score a perfect 1.000 -- one real
+        tree scores 1.000 against three unrelated works -- and so replace a large tree
+        that genuinely fits. Ranking is by labels MATCHED; the fraction is only a floor.
+        """
+        tiny = [_node("0", "פרק א")]
+        nodes, how = resolve_tree(self.MARKERS, self.WRONG,
+                                  {"tiny": tiny, "right": self.RIGHT})
+        assert nodes is self.RIGHT
+
+        by_fraction = max(
+            (tree_alignment(self.MARKERS, cand)[1], key)
+            for key, cand in {"tiny": tiny, "right": self.RIGHT}.items())
+        assert by_fraction[1] == "tiny"
+        assert tree_alignment(self.MARKERS, tiny)[1] == 1.0
+
+    def test_two_equally_plausible_trees_bind_NEITHER(self):
+        """Two volumes of one commentary have near-identical structures. Binding either
+        on a coin-toss would publish one volume's section names over the other's text,
+        and no gate downstream could see it -- every offset would still be right."""
+        twin = [_node(str(i), n["text"]) for i, n in enumerate(self.RIGHT)]
+        nodes, how = resolve_tree(self.MARKERS, self.WRONG,
+                                  {"a": self.RIGHT, "b": twin})
+        assert nodes is None
+        assert how == "unbound"
+
+    def test_nothing_fits_means_nothing_is_bound(self):
+        nodes, how = resolve_tree(self.MARKERS, self.WRONG, {"wrong": self.WRONG})
+        assert nodes is None
+        assert how == "unbound"
+
+    def test_no_candidates_at_all_is_not_an_error(self):
+        assert resolve_tree(self.MARKERS, None, None) == (None, "unbound")
 
 
 class TestBuildJaPages:
