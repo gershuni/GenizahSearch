@@ -30,6 +30,8 @@ from scripts.build_work_divisions import (
     _daf_units,
     _is_foreign_label,
     _dedupe_ascending,
+    _ja_keep,
+    _ja_resurfaces,
     _msource_files,
     _source_title_key,
     _split_divisions,
@@ -41,7 +43,9 @@ from scripts.build_work_divisions import (
     build_sefaria,
     check_invariants,
     ja_edition,
+    ja_range_regressions,
     ja_reconstruct,
+    ja_shed_depth,
     ja_source_index,
     ja_tree_chain,
     resolve_tree,
@@ -989,6 +993,104 @@ class TestBuildJaPages:
 # ---------------------------------------------------------------------------
 # Structural gates
 # ---------------------------------------------------------------------------
+
+class TestTheJudeoArabicShed:
+    """One shed depth per WORK, and a guard that is the whole design.
+
+    Owner: *"The JA title is just weird… Should perhaps be shortened."* Labels run to
+    144 characters. Two shortening families were designed and measured on RENDERED
+    RANGES rather than on unit labels, and both were refused: deciding per SECTION
+    makes 4,020 ordered pairs longer and 1,853 re-state an ancestor the head was
+    stripped of, and a uniform DEPTH CAP fails the same way on a depth count while
+    barely reaching the length -- deleting every ancestor in the corpus still leaves
+    318 labels over 40 characters, because the length is in the innermost element.
+    """
+
+    #: A work whose chains are all two deep: shedding is safe.
+    EVEN = [(["שער א", "פרק א"], ", עמ' 1"), (["שער א", "פרק ב"], ", עמ' 2"),
+            (["שער ב", "פרק א"], ", עמ' 3")]
+    #: A work where a name is an ancestor early and a whole label LATER. Shedding it
+    #: would make the later page render as the earlier page's own parent.
+    UNEVEN = [(["הקדמה", "פרק א"], ", עמ' 1"), (["הקדמה", "פרק ב"], ", עמ' 2"),
+              (["הקדמה"], ", עמ' 3")]
+
+    def test_a_work_within_budget_sheds_nothing(self):
+        assert ja_shed_depth(self.EVEN, budget=60) == 0
+
+    def test_a_work_over_budget_sheds_one_level_for_every_unit(self):
+        assert ja_shed_depth(self.EVEN, budget=12) == 1
+        assert [_ja_keep(parts, 1) for parts, _ in self.EVEN] == [
+            ["פרק א"], ["פרק ב"], ["פרק א"]]
+
+    def test_the_innermost_element_is_never_shed(self):
+        """Criterion E, and it is what protects the work whose organising principle is
+        a manuscript siglum -- there the siglum is the ancestor, but elsewhere the
+        innermost element IS the address, and 46 of the 48 labels still over budget
+        after the shed have no ancestor left at all."""
+        assert ja_shed_depth(self.EVEN, budget=1) == 1        # not 2
+        assert _ja_keep(["שער א", "פרק א"], 5) == ["פרק א"]
+        # and the search stops there rather than reporting a depth that changes
+        # nothing: past `deepest - 1` every chain is already down to one element
+
+    def test_a_name_that_resurfaces_later_blocks_the_shed(self):
+        """PROVEN ABLE TO FAIL. Uniform shedding keeps head and tail structurally
+        alike -- but the chains are not equally deep, so a page directly under a
+        division keeps that division as its WHOLE label while a page under a
+        sub-section has it removed. If the shallow one comes later, the range reads
+        as running from a chapter into the introduction that contains it."""
+        assert ja_shed_depth(self.UNEVEN, budget=8) == 0
+        assert _ja_resurfaces(self.UNEVEN, 1)
+        assert not _ja_resurfaces(self.EVEN, 1)
+
+    def _shed(self, rows, depth):
+        return [_ja_keep(parts, depth) for parts, _ in rows]
+
+    def test_without_the_guard_that_work_would_render_a_child_into_its_parent(self):
+        """The defect the guard exists to prevent, rendered rather than asserted."""
+        head = ", ".join(_ja_keep(self.UNEVEN[1][0], 1)) + self.UNEVEN[1][1]
+        tail = ", ".join(_ja_keep(self.UNEVEN[2][0], 1)) + self.UNEVEN[2][1]
+        assert head == "פרק ב, עמ' 2"
+        assert tail == "הקדמה, עמ' 3"        # the parent of the head's own chapter
+        assert ja_range_regressions(self.UNEVEN, self._shed(self.UNEVEN, 1)) > 0
+        assert ja_range_regressions(self.UNEVEN, self._shed(self.UNEVEN, 0)) == 0
+
+    def test_the_gate_stays_green_on_a_safe_shed(self):
+        assert ja_range_regressions(self.EVEN, self._shed(self.EVEN, 1)) == 0
+
+    def test_the_gate_catches_a_range_that_gets_LONGER(self):
+        """The other half of the gate, and the reason it takes the emitted chains
+        rather than a shed depth. A gate parameterised by one depth can only describe
+        a UNIFORM rule, so it could not express the per-SECTION rule that made 4,020
+        ordered pairs longer -- head and tail stop sharing a prefix, so
+        `shorten_range_tail` stops eliding and the tail re-prints the ancestor."""
+        rows = [(["שער ארוך מאוד", "פרק א"], ", עמ' 1"),
+                (["שער ארוך מאוד", "פרק ב"], ", עמ' 2")]
+        assert ja_range_regressions(rows, self._shed(rows, 0)) == 0
+        assert ja_range_regressions(rows, self._shed(rows, 1)) == 0
+
+        # the refused shape: ONE section sheds and its sibling does not
+        per_section = [rows[0][0][1:], rows[1][0]]
+        assert ja_range_regressions(rows, per_section) > 0
+
+    def test_a_work_end_to_end_sheds_and_keeps_its_pages(self, tmp_path):
+        long_section = "מאמר ראשון על עניין ארוך במיוחד שאין לו סוף"
+        doc = _ja_source_doc([
+            ("1", [(1, f"+{long_section}~"), (2, "טקסט")]),
+            ("2", [(1, "+פרק~ +א~"), (2, "עוד טקסט")]),
+            ("3", [(1, "+פרק~ +ב~"), (2, "טקסט אחרון")]),
+        ], author="פלוני", title="ספר")
+        text, _ = ja_reconstruct(doc, "פלוני, ספר")
+        path = tmp_path / "07-דוגמה.txt"
+        path.write_text("***\nפלוני, ספר\n----------\n" + text.split("\n", 1)[1],
+                        encoding="utf-8")
+        shipped = {"J:x": norm_stream(path.read_text(encoding="utf-8"))[0]}
+        built = build_ja_pages(str(path), "J:x", shipped,
+                               {_source_title_key("פלוני, ספר"): doc})
+        assert [u.part_key for u in built.units] == ["page:1", "page:2", "page:3"]
+        assert all(u.label_he.endswith(f"עמ' {n}") for u, n in
+                   zip(built.units, (1, 2, 3)))
+        assert check_invariants([built]) == []
+
 
 class TestTheSourcesOwnDefectsSurviveVerbatim:
     """Two things in the Judeo-Arabic labels look like our bugs and are not.

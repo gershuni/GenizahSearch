@@ -142,6 +142,7 @@ from shared.discovery_locus import (  # noqa: E402
     parse_canonical_header,
     parse_unit_numeral,
     sefaria_daf,
+    shorten_range_tail,
     stream_offset_for_raw,
 )
 
@@ -898,6 +899,117 @@ def _disambiguate_labels(units: Sequence[Unit]) -> List[Unit]:
 # Family 3b: Judeo-Arabic printed pages
 # --------------------------------------------------------------------------
 
+#: How wide a Judeo-Arabic page address may be before the work sheds an ancestor.
+#: Owner: *"The JA title is just weird, does not seem like title. Should perhaps be
+#: shortened."* Measured at 60: 10 of 89 works shed, 2,524 units change, 10,094
+#: rendered ranges get shorter and none gets longer. 50 buys 19 more units at the
+#: cost of a third work losing a level; 70 gives up half the gain.
+JA_LABEL_BUDGET = 60
+
+
+def _ja_keep(parts: Sequence[str], depth: int) -> List[str]:
+    """The chain with `depth` outermost levels dropped. The innermost never goes."""
+    return list(parts[depth:]) if len(parts) > depth else list(parts[-1:])
+
+
+def _ja_resurfaces(rows: Sequence[Tuple[Sequence[str], str]], depth: int) -> bool:
+    """Would shedding to `depth` hide a name that reappears LATER in page order?
+
+    This is the whole design, not a patch on it. Shedding uniformly across a work
+    keeps head and tail of a range structurally alike, so `shorten_range_tail` goes
+    on eliding the shared prefix -- which is what a per-SECTION rule destroys, and
+    the reason one was refused (measured: 4,020 ordered pairs longer, 1,853 with a
+    tail re-stating an ancestor the head had been stripped of).
+
+    But uniform is not sufficient, because the chains are not equally deep. A page
+    sitting directly under a division carries that division's name as its WHOLE
+    label, while a page under a sub-section has the same name removed. If the
+    shallow one comes later, the range renders head = child, tail = the child's own
+    parent -- a citation that reads as running from a chapter into the introduction
+    that contains it. Measured on one real work: 310 ordered pairs.
+
+    Ordered, deliberately: only the TAIL of a range can re-state anything, so the
+    harmful configuration is exactly "hidden at ordinal i, shown at some j > i". The
+    unordered form refuses whenever a removed string survives anywhere, and in 10 of
+    the 12 long works every top-level name also occurs deeper -- so it is green and
+    inert, shedding 41 units where the ordered form sheds 2,524.
+    """
+    first_hidden: Dict[str, int] = {}
+    last_shown: Dict[str, int] = {}
+    for ordinal, (parts, _) in enumerate(rows):
+        kept = set(_ja_keep(parts, depth))
+        for part in parts:
+            if part in kept:
+                last_shown[part] = ordinal
+            else:
+                first_hidden.setdefault(part, ordinal)
+    return any(last_shown.get(part, -1) > hidden_at
+               for part, hidden_at in first_hidden.items())
+
+
+def ja_shed_depth(
+    rows: Sequence[Tuple[Sequence[str], str]], budget: int = JA_LABEL_BUDGET
+) -> int:
+    """ONE shed depth for a whole work: how many ancestors every address drops.
+
+    `rows` is `(chain parts outermost-first, the page tail)` per unit, in ordinal
+    order. Scans depths upward and stops at the first that fits, or at the last one
+    the resurfacing guard permits -- so a work that cannot shed safely stays long
+    rather than acquiring a citation that reads backwards.
+    """
+    if not rows:
+        return 0
+    # Never past `deepest - 1`: at that point every chain is down to its innermost
+    # element and a further step changes nothing but the reported number.
+    deepest = max(len(parts) for parts, _ in rows)
+    depth = 0
+    while depth < deepest - 1:
+        widest = max(len(", ".join(_ja_keep(parts, depth))) + len(tail)
+                     for parts, tail in rows)
+        if widest <= budget or _ja_resurfaces(rows, depth + 1):
+            break
+        depth += 1
+    return depth
+
+
+def ja_range_regressions(
+    rows: Sequence[Tuple[Sequence[str], str]], kept: Sequence[Sequence[str]]
+) -> int:
+    """Ordered pairs whose RENDERED RANGE got worse. The gate, over the artifact.
+
+    Two assertions, both about what a reader sees rather than about the shedding
+    function's own termination -- which is what made an earlier gate ("a unit may
+    carry more than one element only if it fits the budget") a theorem that could
+    never go red:
+
+      LONGER    the shortened range must not be longer than the unshortened one.
+      RESTATED  no segment of the shortened TAIL may be a name the shortened HEAD
+                was stripped of.
+
+    IT TAKES THE EMITTED CHAINS, not a shed depth, and that is deliberate: a gate
+    parameterised by one depth can only ever describe a uniform rule, so it could not
+    express -- let alone refuse -- the per-SECTION rule that made 4,020 ordered pairs
+    longer and 1,853 re-state a stripped ancestor. Handed the labels themselves it
+    judges any shortening at all.
+
+    Proven able to fail on the real corpus twice over: deleting the resurfacing guard
+    turns it red on 310 pairs, and re-instating the refused per-section rule turns it
+    red on 4,020 longer and 1,853 restated.
+    """
+    labels = [(", ".join(keep_parts) + tail, ", ".join(parts) + tail,
+               set(parts) - set(keep_parts))
+              for (parts, tail), keep_parts in zip(rows, kept)]
+    bad = 0
+    for index, (head, head_full, hidden) in enumerate(labels):
+        for tail, tail_full, _ in labels[index + 1:]:
+            if (len(head) + len(shorten_range_tail(head, tail))
+                    > len(head_full) + len(shorten_range_tail(head_full, tail_full))):
+                bad += 1
+            elif hidden & set(label_segments(shorten_range_tail(head, tail))):
+                bad += 1
+    return bad
+
+
 def _as_int(value, default: int = 0) -> int:
     try:
         return int(str(value).strip())
@@ -1225,11 +1337,14 @@ def build_ja_pages(
     if resolution is not None:
         resolution[ref_id] = how
     chains = bind_tree_chains(markers, nodes or [])
-    sections = []
+    # The chain travels as a LIST. Joining it here is what forced the earlier
+    # shortening attempts to decide per section, and a per-section decision is
+    # exactly what breaks a range.
+    sections: List[Tuple[int, List[str]]] = []
     for pos, kind, numeral in _ja_divisions(rebuilt):
-        label = ", ".join(chains.get(pos) or [_marker_label(kind, numeral)])
-        if label:
-            sections.append((stream_offset_for_raw(offsets, pos), label))
+        parts = [p for p in (chains.get(pos) or [_marker_label(kind, numeral)]) if p]
+        if parts:
+            sections.append((stream_offset_for_raw(offsets, pos), parts))
     section_offsets = [o for o, _ in sections]
 
     # A page is a place only if it holds letters of its own. 3,717 real pages carry
@@ -1244,13 +1359,15 @@ def build_ja_pages(
                  for number, raw_pos in page_starts]
 
     units: List[Unit] = []
+    parts_at: Dict[int, List[str]] = {}
     for index, (page, start) in enumerate(positions):
         end = positions[index + 1][1] if index + 1 < len(positions) else len(stream)
         if page < 0 or end <= start:
             continue
         section_index = bisect.bisect_right(section_offsets, start) - 1
-        section = sections[section_index][1] if section_index >= 0 else ""
-        label = f"{section}, עמ' {page}" if section else f"עמ' {page}"
+        parts = sections[section_index][1] if section_index >= 0 else []
+        parts_at.setdefault(start, list(parts))
+        label = ", ".join(list(parts) + [f"עמ' {page}"])
         # The printed page IS an address system, and the ascending check below
         # guarantees no two units claim one page.
         units.append(Unit(len(units), start, f"page:{page}", label, None,
@@ -1269,6 +1386,28 @@ def build_ja_pages(
     numbers = [_as_int(u.part_key.split(":", 1)[1], -1) for u in units]
     if any(b <= a for a, b in zip(numbers, numbers[1:])):
         return None
+
+    # ONE shed depth for the whole work, decided last so it runs over the units that
+    # actually survive, and VERIFIED against the rendered range rather than trusted.
+    # A work whose gate fires keeps its full chains: too long is a complaint, a range
+    # that reads backwards is a wrong citation.
+    rows = [(parts_at.get(u.start, []), f", עמ' {number}")
+            for u, number in zip(units, numbers)]
+    depth = ja_shed_depth(rows)
+    if depth:
+        kept = [_ja_keep(parts, depth) for parts, _ in rows]
+        regressions = ja_range_regressions(rows, kept)
+        if regressions:
+            # The guard is supposed to make this unreachable. If it is ever reached,
+            # the guard is wrong and the work keeps its long labels -- said out loud,
+            # because a silent fallback here would look exactly like a work that
+            # simply had nothing to shed.
+            print(f"    {ref_id}: REFUSED the shed -- {regressions} ordered pair(s) "
+                  f"would render worse; keeping the full chains", flush=True)
+            depth = 0
+        else:
+            units = [u._replace(label_he=", ".join(parts + [f"עמ' {number}"]))
+                     for u, parts, number in zip(units, kept, numbers)]
 
     units = _disambiguate_labels(units)
     units = [u._replace(citation_pos=i) for i, u in enumerate(units)]
