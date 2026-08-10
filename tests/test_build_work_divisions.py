@@ -195,6 +195,10 @@ class TestCleanMarkerText:
     def test_a_trailing_separator_left_by_an_empty_level_is_dropped(self):
         assert _clean_marker_text("פרק א, {}") == "פרק א"
 
+    def test_a_headings_own_trailing_punctuation_is_not_part_of_its_name(self):
+        """The source writes `+מאמר~ +א:~`, and `מאמר א:, פרק ג` reads as a typo."""
+        assert _clean_marker_text("מאמר א:") == "מאמר א"
+
 
 class TestJaLeafKinds:
     def test_the_verse_tier_is_excluded_from_the_citable_grain(self):

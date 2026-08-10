@@ -19,11 +19,35 @@ mis-derived by even one character has every one of its offsets shifted, so every
 citation it produces would be confidently wrong. Skipped works are counted and
 named in the coverage report rather than passed over quietly.
 
+ONE DIVISION AUTHORITY, NAMED. Every label emitted here is the indexed edition's
+OWN division label, copied verbatim. Nothing is recomputed, renumbered, or mapped
+onto another edition's system, and no such mapping is implied by the output.
+
+That is a commitment rather than an implementation detail, because the systems
+genuinely disagree. Yerushalmi halakhah numbering differs between editions; so do
+paragraph numbering in the midrashim and siman numbering in the codes. A citation
+built by mixing two authorities, or by silently renumbering into a third, would be
+wrong in a way no gate here could detect -- every offset would be right and the
+address would still send a reader to the wrong place. So the rule is: whatever the
+source header says IS the address, and where two editions of one work exist they
+are two works with two unit tables, never one reconciled table.
+
+Worth knowing what that commits us to for the Yerushalmi specifically: the indexed
+edition labels its sub-unit `משנה`, not `הלכה`, so its citations read
+`פרק ח, משנה א`. That is the edition indexing by the mishnah a sugya comments on,
+which is both self-consistent and more stable across editions than a halakhah
+count -- but it is still ONE edition's system, and the surface should say so
+rather than let a reader assume their own volume agrees.
+
 MASKING. No source path appears here. The reference corpora are restricted, so
 their directories arrive through the environment (see `--help`) exactly as the
 masking pattern file does. A canonical work's SECTION LABEL is a universal
 citation and is emitted; the source-manuscript provenance field carried in the
-same header is cut at the first `|` and never reaches the output.
+same header is cut at the first `|` and never reaches the output. Note the tension
+this creates with the paragraph above: the label is publishable, the edition it
+came from is not, so a reader cannot check the address against a named volume.
+Carrying the printed folio alongside is the mitigation -- a folio is shared across
+editions where an internal numbering is not.
 
 Usage:
     python -X utf8 -u scripts/build_work_divisions.py --out _tmp/locus
@@ -97,7 +121,8 @@ def _clean_marker_text(text: str) -> str:
     literal characters, and a citation reading `&lt;שופטים&gt;` is worse than one
     reading `<שופטים>` -- it exposes the transport encoding to a reader.
     """
-    return html.unescape(text).translate(_MARKUP_CHARS).strip().strip(",").strip()
+    cleaned = html.unescape(text).translate(_MARKUP_CHARS)
+    return cleaned.strip().strip(",:;.").strip()
 
 
 class Unit(NamedTuple):
@@ -220,11 +245,22 @@ def _split_divisions(raw: str) -> List[Tuple[str, List[str], List[Optional[str]]
     return [(d, payloads[d], chapters[d]) for d in order]
 
 
-def _chapter_units(labels_in_order: Sequence[Tuple[Optional[str], int]]) -> List[Unit]:
-    """[(chapter label, stream offset)] -> one unit per RUN of a label.
+#: The finest header field a citation may use, per grain. `halakhah` addresses the
+#: Yerushalmi the way it is actually cited; `chapter` is right for Mishnah and
+#: Tosefta, whose chapters are already close to the size of a stored span.
+_SUB_KIND_LABEL = {"משנה": "משנה", "הלכה": "הלכה", "פסוק": "פסוק"}
+
+
+def _chapter_units(
+    labels_in_order: Sequence[Tuple[Optional[str], int]], with_sub: bool = False
+) -> List[Unit]:
+    """[(address, stream offset)] -> one unit per RUN of the same address.
+
+    Each entry's address is `(chapter, sub, sub_kind)` when `with_sub`, otherwise
+    the chapter label alone.
 
     Collapsing runs is not tidying. The Yerushalmi interleaves a main-text segment
-    and a variant segment under one chapter -- y.Berakhot carries 1,151 headers for
+    and a variant segment under one address -- y.Berakhot carries 1,151 headers for
     9 chapters -- so without the collapse a work gets hundreds of duplicate-labelled
     units and its citations become unusable.
     """
@@ -232,11 +268,25 @@ def _chapter_units(labels_in_order: Sequence[Tuple[Optional[str], int]]) -> List
     for label, offset in labels_in_order:
         if label is None:
             continue
-        if units and units[-1].label_he == label:
+        if with_sub:
+            chapter, sub, sub_kind = label
+            if not chapter:
+                continue
+            kind_word = _SUB_KIND_LABEL.get(sub_kind, sub_kind)
+            rendered = f"פרק {chapter}, {kind_word} {sub}" if sub and kind_word else f"פרק {chapter}"
+            chapter_value = parse_unit_numeral(chapter) or 0
+            sub_value = parse_unit_numeral(sub) or 0 if sub else 0
+            key = f"ch:{chapter_value}.{sub_value}"
+            # Dense so that consecutive halakhot are successors: a chapter never
+            # runs past 99 halakhot anywhere in this corpus (measured max 45).
+            position = chapter_value * 100 + sub_value
+        else:
+            rendered = label
+            position = parse_unit_numeral(label)
+            key = f"ch:{position if position else label}"
+        if units and units[-1].label_he == rendered:
             continue
-        value = parse_unit_numeral(label)
-        units.append(Unit(len(units), offset, f"ch:{value if value else label}",
-                          label, value))
+        units.append(Unit(len(units), offset, key, rendered, position))
     return _dedupe_ascending(units)
 
 
@@ -298,8 +348,14 @@ def build_msource_standalone(
 
     folios = [(m.start(), m.group(1).strip(), m.group(2).strip())
               for m in _DAF_RE.finditer(stripped)]
-    header_units = _standalone_header_units(raw)
     columns = 4 if any(amud_ordinal(a) > 2 for _, _, a in folios) else 2
+    # A four-column leaf is the Yerushalmi, which is cited by chapter and halakhah;
+    # its printed column is 2,945 letters, so coarse that 90.8% of stored spans sit
+    # inside one and the citation narrows nothing. Its header address is 1,398 --
+    # the real analogue of a Bavli amud -- so the header carries the citation and
+    # the column rides along beside it.
+    with_sub = columns == 4
+    header_units = _standalone_header_units(raw, with_sub=with_sub)
 
     grain = prefer
     if prefer == "auto":
@@ -309,22 +365,29 @@ def build_msource_standalone(
         if units:
             return WorkUnits(ref_id, "msource_daf", f"daf{columns}", units, len(stream))
     if header_units:
-        return WorkUnits(ref_id, "msource_header", "chapter", header_units, len(stream))
+        return WorkUnits(ref_id, "msource_header",
+                         "chapter_halakhah" if with_sub else "chapter",
+                         header_units, len(stream))
     return None
 
 
-def _standalone_header_units(raw: str) -> List[Unit]:
-    """Chapter units for a whole-file work, offsets measured in the STRIPPED stream."""
+def _standalone_header_units(raw: str, with_sub: bool = False) -> List[Unit]:
+    """Header units for a whole-file work, offsets measured in the STRIPPED stream."""
     offset = 0
-    marks: List[Tuple[Optional[str], int]] = []
+    marks: List[Tuple[Optional[object], int]] = []
     for line in raw.split("\n"):
         header = _HEADER_LINE_RE.match(line.strip())
         if header:
             address = parse_canonical_header(header.group(1))
-            marks.append((address.chapter if address else None, offset))
+            if address is None:
+                marks.append((None, offset))
+            elif with_sub:
+                marks.append(((address.chapter, address.sub, address.sub_kind), offset))
+            else:
+                marks.append((address.chapter, offset))
             continue
         offset += len(norm_stream(line)[0])
-    return _chapter_units(marks)
+    return _chapter_units(marks, with_sub=with_sub)
 
 
 def _daf_units(
@@ -390,41 +453,84 @@ def build_ja(path: str, ref_id: str, shipped: Dict[str, str]) -> Optional[WorkUn
     if not divisions:
         return None
 
-    # CONTEXT BY POSITION, NOT BY KIND FREQUENCY. Filtering parents on "this kind
-    # occurs at least twice" drops every singleton heading -- and a document that
-    # collects twelve biblical books gives each book a heading of its own kind,
-    # count 1. All twelve vanish from the context, the chapter numbering resets
-    # twelve times with nothing to distinguish it, and 51 of 69 units end up sharing
-    # a label. Rarer is COARSER, so kinds are ranked by how seldom they occur.
-    #
-    # A finer kind is popped off the enclosing stack; an EQUALLY rare one is not.
-    # That second half matters: Hovot ha-Levavot has ten gates and ten prefaces, one
-    # per gate, so the two kinds tie at ten -- and popping on a tie discards the gate
-    # and leaves ten identical `פתיחה, פצל א`. A kind only ever replaces ITSELF.
-    frequency = collections.Counter(k for _, k, _ in divisions)
+    containers = _infer_containers(divisions)
     units: List[Unit] = []
-    stack: List[Tuple[int, str, str]] = []          # (rank, kind, own label)
+    open_context: List[Tuple[str, str]] = []        # (kind, its rendered label)
     for raw_pos, kind, numeral in divisions:
-        rank = frequency[kind]
-        while stack and (stack[-1][0] > rank or stack[-1][1] == kind):
-            stack.pop()
-        own = f"{kind} {numeral}".strip() if numeral else kind
-        stack.append((rank, kind, own))
-        # The enclosing chain, not just the nearest parent: a three-level document
-        # (tractate > chapter > mishnah) needs both ancestors to be distinguishing.
-        # Capped at the innermost few, because the stack can legitimately grow past
-        # what a citation can carry -- a grammar treatise cites four biblical books
-        # in a row, each a heading of its own singleton kind, and equal rarity gives
-        # no reason to pop one for the next. `הקדמת המחבר, אלגזו אלאול, שופטים,
-        # מלכים א, ישעיהו, ירמיהו` is not a citation; the innermost levels are the
-        # ones that locate the text.
-        label = _clean_marker_text(", ".join(entry[2] for entry in stack[-_JA_MAX_DEPTH:]))
+        own = _clean_marker_text(f"{kind} {numeral}".strip() if numeral else kind)
+        # Only a kind something is actually nested INSIDE stays open as context.
+        while open_context and open_context[-1][0] == kind:
+            open_context.pop()
+        parts = [label for _, label in open_context[-(_JA_MAX_DEPTH - 1):]] + [own]
         units.append(Unit(len(units), stream_offset_for_raw(offsets, raw_pos),
-                          f"ja:{len(units)}", label, len(units)))
+                          f"ja:{len(units)}", ", ".join(p for p in parts if p),
+                          len(units)))
+        if kind in containers:
+            open_context.append((kind, own))
     units = _dedupe_ascending(units)
     units = _disambiguate_labels(units)
     units = [u._replace(citation_pos=i) for i, u in enumerate(units)]
     return WorkUnits(ref_id, "ja", "division", units, len(stream))
+
+
+def _infer_containers(divisions: Sequence[Tuple[int, str, Optional[str]]]) -> set:
+    """Which marker kinds genuinely CONTAIN another kind, read off the numbering.
+
+    A nested sequence restarts; a top-level one does not. That is the whole test,
+    and it is a fact about the document rather than a guess about its vocabulary.
+
+    Rarity is the guess it replaces, and rarity produces confidently WRONG output
+    rather than merely vague output. Saadia on Job carries one `{הקדמה}` at the
+    top, forty-two `פרק` running א to מב without a break, and three `{פתיחה}`
+    sitting BETWEEN chapters. Ranked by rarity those nest, and chapter 35 is cited
+    `הקדמה, פתיחה, פרק לה` -- a chain asserting that the chapter is inside a
+    preface which is inside the introduction, when the three are siblings in a
+    linear commentary and none contains any other. An ambiguous label is visibly
+    unhelpful; a false containment claim reads as information.
+
+    Under the numbering test that document yields no containers at all, which is
+    correct, while the documents that really are nested still resolve: `פצל`
+    restarts at every gate of Hovot ha-Levavot, `פרק` restarts at every discourse
+    of Emunot ve-De'ot, and `פרק` restarts at each of the twelve book headings in
+    Ibn Balaam -- headings that are a singleton kind apiece, which is exactly what
+    a frequency rule cannot see. The parent need not be numbered; it need only be
+    the thing the restart happens at.
+    """
+    positions: Dict[str, List[Tuple[int, Optional[int]]]] = collections.defaultdict(list)
+    for index, (_, kind, numeral) in enumerate(divisions):
+        positions[kind].append((index, parse_unit_numeral(numeral) if numeral else None))
+
+    containers: set = set()
+    for kind, entries in positions.items():
+        numbered = [(i, v) for i, v in entries if v is not None]
+        if len(numbered) < 4:
+            continue                       # too short to tell a restart from noise
+        restarts = [numbered[j][0] for j in range(1, len(numbered))
+                    if numbered[j][1] <= numbered[j - 1][1]]
+        if len(restarts) < 2:
+            continue                       # monotonic: this kind is top level
+        own_positions = [i for i, _ in entries]
+        opened_by: List[str] = []
+        for restart in restarts:
+            # The gap is everything between the END of the previous block and this
+            # restart. The container is the FIRST marker in it, not the nearest:
+            # Hovot ha-Levavot opens each gate `אלבאב`, then `פתיחה`, then `פצל א`,
+            # so the nearest heading to the restart is the preface -- a SIBLING of
+            # the chapters -- while the gate is what actually opens the block.
+            previous = max((p for p in own_positions if p < restart), default=-1)
+            gap = [divisions[i][1] for i in range(previous + 1, restart)
+                   if divisions[i][1] != kind]
+            if gap:
+                opened_by.append(gap[0])
+        # MOST restarts must be opened by a heading, not all of them. Requiring all
+        # was too strict to survive real text: one gate transition in Hovot
+        # ha-Levavot has no heading between the blocks, and abandoning the kind on
+        # that single anomaly discarded a hierarchy that is plainly there in the
+        # other nine. A sequence with no explained restart at all is still refused,
+        # which is what keeps a linear commentary from acquiring a false parent.
+        if len(opened_by) * 2 >= len(restarts):
+            containers |= set(opened_by)
+    return containers
 
 
 def _disambiguate_labels(units: Sequence[Unit]) -> List[Unit]:
