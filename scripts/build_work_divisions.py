@@ -1549,13 +1549,73 @@ _SEFARIA_UNIT_WORD = {
     "sef_guide_part_": "פרק",
     "sef_tanna_debei_eliyahu_": "פרק",
     "sef_seder_olam_zutta": "פרק",
+    # A COMMENTARY OR TARGUM ON A NAMED BIBLICAL BOOK, whose `chapter` is that book's
+    # chapter. Added after the audit asked for it twice -- *"פרק לד"* on
+    # תרגום יונתן על ירמיהו, in two separate passes -- which makes it a ruling rather
+    # than a preference.
+    #
+    # The claim is one sentence and it is checkable in a single pass, which is the
+    # standard this table is held to: EVERY work reachable by these prefixes is a
+    # commentary or targum on a book of the Bible. Measured over the whole staged set
+    # at the time of writing -- 164 works, and every one of their top chapters equals
+    # its book's own chapter count (Rashi on Psalms 150, Targum Jonathan on Isaiah 66,
+    # Onkelos Genesis 50, Radak on Obadiah 1). Not one tractate and not one
+    # paragraph-numbered midrash is reachable. `tests/test_build_work_divisions.py`
+    # re-checks that against the real staging manifest whenever the research tree is
+    # present, so a corpus that grows out of the claim goes red rather than quiet.
+    #
+    # WHAT STAYS BARE, and why, because that is the load-bearing half: בראשית רבתי is
+    # numbered by PARAGRAPH within one parasha -- 93 of them for parashat Bereshit,
+    # where Genesis has 50 chapters -- so `פרק 93` would be confidently wrong, and it
+    # is the reason this is a prefix list rather than "every staged chapter". כתר
+    # מלכות (a piyyut), הלל and אגרת רב שרירא גאון likewise keep the bare ordinal.
+    #
+    # מדרש שכל טוב was on that waiting list and comes OFF it on evidence: its
+    # versemap runs `15:1` to `50:105` on Bereshit, i.e. Genesis chapters and verses,
+    # so what its number counts is now established rather than guessed.
+    "sef_rashi_": "פרק",
+    "sef_ibn_ezra_": "פרק",
+    "sef_radak_": "פרק",
+    "sef_ramban_": "פרק",
+    "sef_lekach_tov_": "פרק",
+    "sef_midrash_aggadah_": "פרק",
+    "sef_sekhel_tov_": "פרק",
+    "sef_targum_jerusalem_": "פרק",
+    # `sef_targum_neofiti` is DELIBERATELY absent, and the test that holds this table
+    # to the corpus is what found it: alone among the targumim its `source_ref` names
+    # no book at all ("Targum Neofiti"), so the sentence this table asserts is simply
+    # untrue of it. One work, one unit; it keeps the bare ordinal.
+    # These three carry NO corpus prefix in the staging manifest -- the keys are
+    # `targum_onkelos_genesis`, not `sef_targum_onkelos_genesis`. Written out as they
+    # really are rather than normalised, because `sefaria_unit_word`'s `b2_` fallback
+    # rewrites only a leading `sef_`, so a guessed prefix here matches nothing and
+    # fails SILENTLY -- the work simply keeps its bare ordinal and looks unlisted.
+    "targum_onkelos_": "פרק",
+    "targum_jonathan_": "פרק",
+    "targum_ketuvim_": "פרק",
+    # Its Torah volumes only. The tractate volumes never reach here: `_DAF_KEY_RE`
+    # routes `rabbeinu_chananel` to the daf grain except for the five Torah books,
+    # which is exactly the set named here.
+    "sef_rabbeinu_chananel_genesis": "פרק",
+    "sef_rabbeinu_chananel_exodus": "פרק",
+    "sef_rabbeinu_chananel_leviticus": "פרק",
+    "sef_rabbeinu_chananel_numbers": "פרק",
+    "sef_rabbeinu_chananel_deuteronomy": "פרק",
 }
 
 
 def sefaria_unit_word(key: str) -> str:
-    """The word the edition counts by, or "" when nothing is known for this work."""
+    """The word the edition counts by, or "" when nothing is known for this work.
+
+    The `b2_` form of a key is the same work re-staged, so a `sef_`-prefixed entry
+    matches it too. Only a leading `sef_` is rewritten -- an entry that carries no
+    corpus prefix (the three `targum_*` families) is matched literally, which is why
+    those are written out as they really are.
+    """
     for prefix, word in _SEFARIA_UNIT_WORD.items():
-        if key.startswith(prefix) or key.startswith("b2_" + prefix[4:]):
+        if key.startswith(prefix):
+            return word
+        if prefix.startswith("sef_") and key.startswith("b2_" + prefix[4:]):
             return word
     return ""
 

@@ -37,6 +37,7 @@ from scripts.build_work_divisions import (
     _ja_keep,
     _ja_resurfaces,
     _marker_label,
+    _SEFARIA_UNIT_WORD,
     _msource_files,
     _source_title_key,
     _split_divisions,
@@ -56,6 +57,7 @@ from scripts.build_work_divisions import (
     resolve_tree,
     tree_alignment,
     sefaria_render_kind,
+    sefaria_unit_word,
     write_artifact,
 )
 from shared.discovery_locus import (
@@ -71,6 +73,13 @@ from shared.discovery_locus import (
 )
 
 PROVENANCE = "| PROVENANCE-FIELD: SOURCE-MS"
+
+#: The staged corpus lives in the gitignored research tree. Where it is present the
+#: editorial claim in `_SEFARIA_UNIT_WORD` is checked against it; where it is not, the
+#: measured population stands recorded in that table's own comment.
+_STAGING_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "same_work_spike", "probe", "refs_staging")
 
 
 # ---------------------------------------------------------------------------
@@ -1290,13 +1299,96 @@ class TestABareOrdinalIsNotACitation:
         assert [u.label_he for u in built.units] == ["סימן א", "סימן ב"]
 
     def test_a_work_the_table_does_not_name_keeps_the_bare_ordinal(self, tmp_path):
-        """NEGATIVE CONTROL. A counting word applied everywhere would be a
-        confidently wrong citation with every offset still right, and five works
-        whose counting unit could not be established are deliberately absent from the
-        table -- they wait on a ruling rather than on a guess."""
-        built = self._build(tmp_path, "sef_rashi_isaiah",
+        """NEGATIVE CONTROL, and the load-bearing half of the table. A counting word
+        applied everywhere would be a confidently wrong citation with every offset
+        still right. בראשית רבתי numbers by PARAGRAPH within one parasha -- 93 of them
+        for parashat Bereshit, where Genesis has 50 chapters -- so `פרק 93` names
+        nothing."""
+        built = self._build(tmp_path, "sef_bereshit_rabbati_parashat_bereshit",
                             [{"chapter": 11, "start": 0}, {"chapter": 12, "start": 5}])
         assert [u.label_he for u in built.units] == ["יא", "יב"]
+
+    def test_a_commentary_on_a_biblical_book_says_perek(self, tmp_path):
+        """The audit asked twice, in two separate passes -- *"פרק לד"* on
+        תרגום יונתן על ירמיהו -- which makes it a ruling."""
+        for key in ("targum_jonathan_jeremiah", "sef_rashi_psalms", "b2_radak_isaiah",
+                    "targum_onkelos_genesis", "sef_sekhel_tov_bereshit",
+                    "sef_rabbeinu_chananel_genesis"):
+            built = self._build(tmp_path, key,
+                                [{"chapter": 33, "start": 0}, {"chapter": 34, "start": 5}])
+            assert [u.label_he for u in built.units] == ["פרק לג", "פרק לד"], key
+
+    def test_the_one_targum_naming_no_book_keeps_the_bare_ordinal(self, tmp_path):
+        """Found by the corpus check, not by reading the list. Alone among the targumim
+        its source_ref names no book, so the table's sentence is untrue of it."""
+        built = self._build(tmp_path, "sef_targum_neofiti",
+                            [{"chapter": 1, "start": 0}, {"chapter": 2, "start": 5}])
+        assert [u.label_he for u in built.units] == ["א", "ב"]
+
+    def test_a_prefix_carrying_no_corpus_tag_is_matched_literally(self):
+        """PROVEN ABLE TO FAIL. The three `targum_*` families carry no `sef_`/`b2_`
+        tag, and the `b2_` fallback rewrites only a leading `sef_` -- so a prefix
+        guessed as `sef_targum_onkelos_` would match nothing and fail SILENTLY, the
+        work merely keeping its bare ordinal and looking unlisted."""
+        assert sefaria_unit_word("targum_onkelos_genesis") == "פרק"
+        assert sefaria_unit_word("sef_targum_onkelos_genesis") == ""
+
+    def test_the_tractate_volumes_of_one_family_never_reach_the_word(self):
+        """`rabbeinu_chananel` spans both a Torah commentary and Talmud commentaries.
+        The Torah volumes are cited by chapter; the tractate volumes are an amud index
+        and are routed away before the word is chosen, so only the five Torah books
+        are named."""
+        assert sefaria_render_kind("sef_rabbeinu_chananel_genesis", "") == "chapter"
+        assert sefaria_render_kind("sef_rabbeinu_chananel_sukkah", "") == "daf_bavli"
+        assert sefaria_unit_word("sef_rabbeinu_chananel_sukkah") == ""
+
+    @pytest.mark.skipif(not os.path.isdir(_STAGING_DIR),
+                        reason="the research tree is not present")
+    def test_the_tables_claim_holds_over_the_REAL_staged_corpus(self):
+        """The table asserts one sentence: every work reachable by these prefixes is a
+        commentary or targum on a book of the BIBLE. That is editorial knowledge, so it
+        is checked against the corpus rather than trusted -- a staged set that grows out
+        of the claim turns this red instead of quietly publishing `פרק` over an amud
+        index or a midrashic paragraph.
+
+        Measured when written: 164 works, every one naming a biblical book, and not one
+        tractate or paragraph-numbered midrash reachable.
+        """
+        manifest = json.load(open(os.path.join(_STAGING_DIR, "manifest.json"),
+                                  encoding="utf-8"))
+        #: The 39 books, as the source_ref spells them.
+        books = {
+            "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua",
+            "Judges", "I Samuel", "II Samuel", "I Kings", "II Kings", "Isaiah",
+            "Jeremiah", "Ezekiel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah",
+            "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah",
+            "Malachi", "Psalms", "Proverbs", "Job", "Song of Songs", "Ruth",
+            "Lamentations", "Ecclesiastes", "Esther", "Daniel", "Ezra", "Nehemiah",
+            "I Chronicles", "II Chronicles",
+            # the Torah books as the two Hebrew-titled families transliterate them
+            "Bereshit", "Shemot", "Vayikra", "Bamidbar", "Devarim",
+        }
+        perek = [prefix for prefix, word in _SEFARIA_UNIT_WORD.items()
+                 if word == "פרק" and prefix not in (
+                     "sef_guide_part_", "sef_tanna_debei_eliyahu_",
+                     "sef_seder_olam_zutta")]
+        reached, offenders = 0, []
+        for entry in manifest["entries"]:
+            key = entry["key"]
+            if not sefaria_unit_word(key) == "פרק":
+                continue
+            if not any(key.startswith(p)
+                       or (p.startswith("sef_") and key.startswith("b2_" + p[4:]))
+                       for p in perek):
+                continue                       # one of the three pre-existing rows
+            reached += 1
+            source_ref = entry.get("source_ref", "")
+            if not any(re.search(rf"(?:^|[\s,]){re.escape(b)}\s*$", source_ref)
+                       or re.search(rf"(?:^|[\s,]){re.escape(b)}(?:[\s,]|$)", source_ref)
+                       for b in books):
+                offenders.append((key, source_ref))
+        assert reached >= 150, f"only {reached} works reached -- did the keys move?"
+        assert offenders == [], offenders
 
     def test_a_dictionary_is_cited_by_its_headword(self, tmp_path):
         """Naming what the number counts cannot help here: the Arukh's staged number
@@ -1750,7 +1842,7 @@ class TestBuildSefaria:
                               "b.versemap.json", "REF2:b", {"REF2:b": stream})
         assert built is not None
         assert built.grain == "chapter"
-        assert [u.label_he for u in built.units] == ["א", "ב", "ג"]
+        assert [u.label_he for u in built.units] == ["פרק א", "פרק ב", "פרק ג"]
         assert [u.start for u in built.units] == [0, 3, 6]
 
     def test_a_work_whose_stream_does_not_rebuild_gets_no_units_at_all(self, tmp_path):
