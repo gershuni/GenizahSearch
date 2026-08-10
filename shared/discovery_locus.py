@@ -27,6 +27,8 @@ __all__ = [
     "parse_canonical_header",
     "units_for_span",
     "compress_pieces",
+    "split_at_citation_breaks",
+    "citation_seq_for_daf",
     "render_ranges",
     "select_locus_work",
     "stream_offset_for_raw",
@@ -283,11 +285,54 @@ def _floor_index(starts: Sequence[int], offset: int) -> int:
     return max(low - 1, 0)
 
 
-def compress_pieces(pieces: Iterable[Tuple[int, int]]) -> List[Tuple[int, int]]:
+def split_at_citation_breaks(
+    lo_ord: int, hi_ord: int, citation_seq: Sequence[Optional[int]]
+) -> List[Tuple[int, int]]:
+    """Split one unit range wherever the CITATION stops running forwards.
+
+    `citation_seq[i]` is unit i's position in its own citation system, as a dense
+    integer whose successor is +1: ``daf * 2 + amud - 1`` for a two-sided folio,
+    ``daf * 4 + amud - 1`` for a Yerushalmi leaf, the chapter number for a chapter
+    table. ``None`` means "this unit has no citation position", which can never be
+    adjacent to anything.
+
+    TABLE ORDER IS NOT CITATION ORDER, and assuming otherwise is the defect this
+    whole module is most exposed to. The units of a work are ordered by where they
+    sit in the stream, because that is what the bisect needs. In the Talmud editions
+    that order is the edition's own arrangement, which follows the chapters -- while
+    the printed daf markers follow the printed foliation. Where the two disagree the
+    marker sequence steps BACKWARDS: measured, the daf sequence rises monotonically
+    in only 41 of 87 marker-bearing works, Bavli Berakhot alone inverts 11 times
+    (<דף טז, עמ' א> is immediately followed by <דף טו, עמ' ב>), and Menachot jumps
+    31 folios back at צד ע"א -> סג ע"ב.
+
+    Merging on table adjacency across such a step prints a descending citation. On
+    the real shipped data that is 27 spans crossing an inversion and 17 rendering
+    visibly backwards -- `בבלי מנחות צד ע"א–סג ע"ב`. Backwards is the LUCKY case: it
+    is at least visible. The same step in the other direction yields a forward-
+    looking range that quietly claims forty folios the fragment never touches.
+    """
+    if hi_ord < lo_ord:
+        raise ValueError(f"range ({lo_ord}, {hi_ord}) has its ends reversed")
+    runs: List[Tuple[int, int]] = []
+    start = lo_ord
+    for i in range(lo_ord, hi_ord):
+        here, nxt = citation_seq[i], citation_seq[i + 1]
+        if here is None or nxt is None or nxt != here + 1:
+            runs.append((start, i))
+            start = i + 1
+    runs.append((start, hi_ord))
+    return runs
+
+
+def compress_pieces(
+    pieces: Iterable[Tuple[int, int]],
+    citation_seq: Optional[Sequence[Optional[int]]] = None,
+) -> List[Tuple[int, int]]:
     """Merge unit intervals into display runs -- BY CITATION ADJACENCY ONLY.
 
-    Two pieces join only when they overlap or are immediate successors in unit
-    ordinal. They are never joined because they are close in characters.
+    Two pieces join only when they overlap or are immediate successors. They are
+    never joined because they are close in characters.
 
     This is the most dangerous rule in the feature and the reason it is stated
     negatively. Alignments that sit a few dozen characters apart still routinely
@@ -296,6 +341,13 @@ def compress_pieces(pieces: Iterable[Tuple[int, int]]) -> List[Tuple[int, int]]:
     answering searches correctly the whole time, so the search results and the
     printed citation would disagree with no error anywhere -- silent, and only
     findable by reading the manuscript.
+
+    Pass `citation_seq` for any family whose table order is not its citation order
+    (see `split_at_citation_breaks`); successorship is then required in BOTH, and
+    each merged run is guaranteed to be a real forward run of citations. Omit it
+    only where the two orders are proven identical -- which holds for the Bible and
+    Sefaria chapter tables, whose labels are strictly increasing by construction,
+    and not for the Talmud daf tables.
     """
     ordered = sorted(set(pieces))
     if not ordered:
@@ -303,13 +355,41 @@ def compress_pieces(pieces: Iterable[Tuple[int, int]]) -> List[Tuple[int, int]]:
     for lo, hi in ordered:
         if lo > hi:
             raise ValueError(f"piece ({lo}, {hi}) has its ends reversed")
+    if citation_seq is not None:
+        ordered = sorted(
+            run for lo, hi in ordered for run in split_at_citation_breaks(lo, hi, citation_seq)
+        )
     merged: List[List[int]] = [list(ordered[0])]
     for lo, hi in ordered[1:]:
-        if lo <= merged[-1][1] + 1:
+        adjacent = lo <= merged[-1][1] + 1
+        if adjacent and citation_seq is not None and lo == merged[-1][1] + 1:
+            prev, here = citation_seq[merged[-1][1]], citation_seq[lo]
+            adjacent = prev is not None and here is not None and here == prev + 1
+        if adjacent:
             merged[-1][1] = max(merged[-1][1], hi)
         else:
             merged.append([lo, hi])
     return [(lo, hi) for lo, hi in merged]
+
+
+def citation_seq_for_daf(
+    folios: Sequence[Tuple[Optional[int], int]], columns_per_folio: int = 2
+) -> List[Optional[int]]:
+    """[(daf, amud)] -> the dense citation positions `compress_pieces` wants.
+
+    ``columns_per_folio`` is 2 for a Bavli daf and 4 for a Yerushalmi leaf. A unit
+    whose folio could not be read is ``None``, so nothing merges across it: an
+    unreadable label is a break in the citation, not a licence to bridge one.
+    """
+    if columns_per_folio not in (2, AMUD_MAX):
+        raise ValueError(f"a folio has 2 or {AMUD_MAX} columns, not {columns_per_folio}")
+    out: List[Optional[int]] = []
+    for daf, amud in folios:
+        if daf is None or not 1 <= amud <= columns_per_folio:
+            out.append(None)
+        else:
+            out.append(daf * columns_per_folio + amud - 1)
+    return out
 
 
 def render_ranges(ranges: Sequence[Tuple[int, int]], labels: Sequence[str]) -> str:

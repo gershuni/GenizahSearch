@@ -15,6 +15,7 @@ from shared.discovery_locus import (
     PIECE_SEP,
     RANGE_SEP,
     amud_ordinal,
+    citation_seq_for_daf,
     compress_pieces,
     daf_label_he,
     heb_numeral,
@@ -23,6 +24,7 @@ from shared.discovery_locus import (
     render_ranges,
     sefaria_daf,
     select_locus_work,
+    split_at_citation_breaks,
     stream_offset_for_raw,
     units_for_span,
 )
@@ -163,6 +165,96 @@ class TestCompressPieces:
     def test_a_reversed_piece_is_refused(self):
         with pytest.raises(ValueError):
             compress_pieces([(5, 2)])
+
+
+class TestCitationOrderIsNotTableOrder:
+    """The defect both adversarial passes found on real shipped data.
+
+    A work's units are ordered by where they sit in the stream, because that is what
+    the bisect needs. In the Talmud editions that order follows the CHAPTERS while
+    the printed daf markers follow the FOLIATION, and where the two disagree the
+    marker sequence steps backwards. Measured: the daf sequence rises monotonically
+    in only 41 of 87 marker-bearing works.
+
+    This fixture is Menachot's real shape -- four consecutive marker units whose
+    folios run צג ע"ב, צד ע"א, סג ע"ב, סד ע"א: a 31-folio step back at the seam.
+    """
+
+    #: (daf, amud) per table unit, in stream order.
+    MENACHOT = [(93, 2), (94, 1), (63, 2), (64, 1)]
+    SEQ = citation_seq_for_daf(MENACHOT)
+
+    def test_a_span_crossing_the_inversion_is_split_not_bridged(self):
+        assert split_at_citation_breaks(0, 3, self.SEQ) == [(0, 1), (2, 3)]
+
+    def test_a_span_inside_one_forward_run_is_left_whole(self):
+        assert split_at_citation_breaks(0, 1, self.SEQ) == [(0, 1)]
+
+    def test_compression_will_not_join_across_the_seam(self):
+        assert compress_pieces([(1, 1), (2, 2)], self.SEQ) == [(1, 1), (2, 2)]
+
+    def test_table_adjacency_alone_would_have_printed_a_descending_citation(self):
+        """The defect, proven able to fail. On real shipped data 27 spans cross an
+        inversion and 17 render visibly backwards -- `בבלי מנחות צד ע\"א–סג ע\"ב`."""
+        labels = [daf_label_he(d, a) for d, a in self.MENACHOT]
+
+        table_only = compress_pieces([(1, 1), (2, 2)])          # <- no citation_seq
+        assert table_only == [(1, 2)]
+        assert render_ranges(table_only, labels) == 'צד ע"א–סג ע"ב'
+
+        honest = compress_pieces([(1, 1), (2, 2)], self.SEQ)
+        assert render_ranges(honest, labels) == 'צד ע"א; סג ע"ב'
+
+    def test_the_forward_facing_inversion_is_the_dangerous_one(self):
+        """Backwards is the lucky case -- it is at least visible. The same step the
+        other way prints a forward range claiming folios never touched."""
+        rising = citation_seq_for_daf([(63, 2), (64, 1), (93, 1), (94, 1)])
+        labels = [daf_label_he(d, a) for d, a in [(63, 2), (64, 1), (93, 1), (94, 1)]]
+
+        assert render_ranges(compress_pieces([(1, 1), (2, 2)]), labels) == 'סד ע"א–צג ע"א'
+        assert compress_pieces([(1, 1), (2, 2)], rising) == [(1, 1), (2, 2)]
+
+    def test_a_yerushalmi_leaf_runs_four_columns_before_it_turns(self):
+        seq = citation_seq_for_daf([(7, 3), (7, 4), (8, 1)], columns_per_folio=4)
+        assert split_at_citation_breaks(0, 2, seq) == [(0, 2)]
+
+    def test_the_two_column_rule_would_have_broken_that_leaf_in_two(self):
+        """The defect, proven able to fail: ע\"ד is not adjacent to the next ח ע\"א
+        under a two-sided model, so a continuous Yerushalmi span splits."""
+        two = citation_seq_for_daf([(7, 3), (7, 4), (8, 1)])
+        assert two[1] is None                                   # ע"ד has no place
+        assert split_at_citation_breaks(0, 2, two) == [(0, 0), (1, 1), (2, 2)]
+
+    def test_an_unreadable_folio_breaks_the_run_rather_than_bridging_it(self):
+        seq = citation_seq_for_daf([(5, 1), (None, 1), (5, 2)])
+        assert seq[1] is None
+        assert split_at_citation_breaks(0, 2, seq) == [(0, 0), (1, 1), (2, 2)]
+
+    def test_a_chapter_table_that_really_is_monotonic_still_merges(self):
+        """The rule must not be so strict that it refuses the families where table
+        order IS citation order -- Bible and Sefaria chapters, proven increasing."""
+        assert compress_pieces([(0, 1), (2, 3)], [1, 2, 3, 4]) == [(0, 3)]
+
+    def test_a_reversed_range_is_refused_rather_than_reordered(self):
+        with pytest.raises(ValueError):
+            split_at_citation_breaks(3, 1, self.SEQ)
+
+
+class TestCitationSeqForDaf:
+    def test_consecutive_amudim_are_consecutive_positions(self):
+        assert citation_seq_for_daf([(2, 1), (2, 2), (3, 1)]) == [4, 5, 6]
+
+    def test_a_four_column_leaf_uses_four_slots(self):
+        """ז ע\"ד is 7*4+3 = 31 and ח ע\"א is 8*4+0 = 32 -- successors, as they must
+        be: the last column of a leaf runs straight into the first of the next."""
+        assert citation_seq_for_daf([(7, 4), (8, 1)], columns_per_folio=4) == [31, 32]
+
+    def test_a_skipped_column_is_not_a_successor(self):
+        assert citation_seq_for_daf([(7, 1), (8, 1)]) == [14, 16]
+
+    def test_a_column_count_no_folio_has_is_refused(self):
+        with pytest.raises(ValueError):
+            citation_seq_for_daf([(2, 1)], columns_per_folio=3)
 
 
 class TestRenderRanges:
