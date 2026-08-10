@@ -305,14 +305,24 @@ def daf_label_he(daf: int, amud: int, prefix: str = "") -> str:
 #: citation, so the reader was told the fragment witnesses a sub-unit it barely
 #: grazes.
 #:
-#: ABSOLUTE, not a fraction of the unit, and that is measured rather than preferred.
-#: Unit extents differ by two orders of magnitude across the families -- a liturgical
-#: section runs 617 letters at the median against 5,126 for a Yerushalmi halakhah --
-#: so 5% of a unit is 31 letters in one family and 256 in another, which is larger
-#: than the median stored span. On the real rows a 5%-of-unit rule discards first
-#: units holding up to 1,115 letters of aligned text, and drops more than half the
-#: whole span on 902 rows; the absolute rule drops more than half on none. Whether a
-#: clip is a witness is a property of the clip, not of what it clips.
+#: ABSOLUTE, not a fraction of the unit, and the reason is measured OUTCOMES rather
+#: than convenience. (An earlier draft argued the absolute rule wins because it needs
+#: no unit extent. That is false: under the `lo < hi` gate below both neighbouring
+#: starts exist, so the extent is free either way. The argument was wrong; the
+#: conclusion survives on the numbers.) On the real rows a 5%-of-unit rule discards
+#: first units holding up to 1,115 letters of aligned text and drops more than half
+#: the whole span on 902 rows -- capped at 100 letters it still does so on 514 --
+#: while the absolute rule drops more than half on none. Whether a clip is a witness
+#: is mostly a property of the clip.
+#:
+#: Mostly, not wholly, and the exception is real: a unit SHORTER than the threshold
+#: could never open a citation at all under a bare absolute rule, and 407 of the
+#: artifact's 55,449 units are. Measured, 11 real spans dropped a first unit they
+#: witnessed at least half of and 3 dropped one they witnessed ENTIRELY -- a 7-letter
+#: chapter, wholly inside the span, removed for being small. So the rule also
+#: requires that the span covers less than half the unit. That guard costs 11 of
+#: 11,904 fires, leaves the audited 24-letter case firing, and makes a short unit
+#: uncitable-as-an-opener impossible rather than merely unlikely.
 #:
 #: 30 rather than 25 is a margin, and the cost of the margin is stated rather than
 #: hidden: 25 is the MINIMUM that closes the audited case, 30 fires on 11,903 of
@@ -360,13 +370,19 @@ def units_for_span(
     hi = max(lo, _floor_index(unit_starts, max(start, end - 1)))
     if min_overlap and lo < hi:
         # `lo < hi` carries three guarantees at once, which is why it is the whole
-        # condition: `unit_starts[lo + 1]` exists, the span runs past it (so the first
-        # unit's covered extent is exactly this difference -- no stream length and no
-        # extent table needed), and `lo + 1 <= hi`, so the rule can NEVER empty a
-        # range. A span lying entirely inside one unit is untouched by construction,
-        # however short it is; the shortest stored span in the corpus is 36 letters
-        # and it keeps its address.
-        if unit_starts[lo + 1] - max(start, unit_starts[lo]) < min_overlap:
+        # condition: `unit_starts[lo + 1]` exists, the span runs past it (so both the
+        # covered extent and the FULL extent of the first unit are readable here,
+        # with no stream length and no extent table), and `lo + 1 <= hi`, so the rule
+        # can NEVER empty a range. A span lying entirely inside one unit is untouched
+        # by construction however short it is; the shortest stored span in the corpus
+        # is 36 letters and it keeps its address.
+        covered = unit_starts[lo + 1] - max(start, unit_starts[lo])
+        extent = unit_starts[lo + 1] - unit_starts[lo]
+        # Two conditions, and the second is not a refinement of the first. `covered`
+        # asks whether the touch is too small to mean anything; `covered * 2 < extent`
+        # asks whether it is a CLIP at all. A unit the fragment witnessed outright is
+        # never dropped for being short.
+        if covered < min_overlap and covered * 2 < extent:
             lo += 1
     return lo, max(lo, hi)
 

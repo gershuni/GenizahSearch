@@ -40,6 +40,7 @@ from shared.discovery_locus import (
     split_at_citation_breaks,
     stream_offset_for_raw,
     units_for_span,
+    MIN_UNIT_OVERLAP,
 )
 
 # The real header grammar, all four canonical families.
@@ -178,6 +179,30 @@ class TestTheMinimumOverlap:
         """Starting before unit 0 means witnessing all of it, so the overlap is the
         unit, not the distance from the span's start."""
         assert units_for_span(self.STARTS, 0, 250) == (0, 2)
+
+    def test_a_unit_SHORTER_than_the_threshold_is_not_thereby_uncitable(self):
+        """Without the half-unit guard, 407 of the artifact's 55,449 units could never
+        open a citation -- and 3 real spans dropped a first unit they witnessed
+        ENTIRELY: a 7-letter chapter, wholly inside the span, removed for being small.
+        The touch being small and the touch being a CLIP are different questions."""
+        tiny = [0, 7, 1_000]                       # unit 0 is 7 letters long
+        assert units_for_span(tiny, 0, 500) == (0, 1)
+
+    def test_the_guard_does_not_rescue_a_genuine_clip(self):
+        """PROVEN ABLE TO FAIL in the other direction: a tail-of-the-unit touch is
+        still refused, which is the audit's own case and the reason the rule exists."""
+        assert units_for_span([0, 100, 200], 76, 150) == (1, 1)
+
+    def test_the_threshold_itself_is_pinned_not_merely_its_existence(self):
+        """The assertions above hold at ANY threshold from 25 to 50 -- they pin the
+        rule's existence, not its size -- and 50 would drop 275 real rows where the
+        dropped unit held a quarter of the span and 26 where it held half. So the
+        boundary is pinned exactly, and the constant with it: moving it is a
+        deliberate act with measured cost, not a tuning accident."""
+        starts = [0, 1_000, 2_000]
+        assert units_for_span(starts, 1_000 - MIN_UNIT_OVERLAP, 1_500) == (0, 1)
+        assert units_for_span(starts, 1_000 - MIN_UNIT_OVERLAP + 1, 1_500) == (1, 1)
+        assert MIN_UNIT_OVERLAP == 30
 
     def test_the_END_probe_is_a_different_rule_and_is_not_disturbed(self):
         """`end - 1` refuses a unit the span never reaches; the threshold refuses one

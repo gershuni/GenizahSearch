@@ -1464,6 +1464,17 @@ def _ambiguity_problems(work: WorkUnits) -> List[str]:
     That is a hole, and it is closed from the other side: a test asserts that every
     unit produced by every real builder path carries one.
     """
+    # The shape is CHECKED, not trusted. A `source_address` handed in as a string
+    # would satisfy every test below by duck-typing and mean something else entirely:
+    # `len(...) > 1` would read "longer than one character" and `[0]` would be the
+    # first LETTER, so `daf:57.1` and `daf:99.2` would look like the same division and
+    # the boundary gate would go quietly green on a family it never examined.
+    wrong_shape = [u for u in work.units if not isinstance(u.source_address, tuple)]
+    if wrong_shape:
+        return [f"{work.ref_id}: {len(wrong_shape)} unit(s) record a stated address "
+                f"that is not a tuple of levels, so the ambiguity gates cannot read "
+                f"it, e.g. {wrong_shape[0].source_address!r}"]
+
     by_label: Dict[str, set] = collections.defaultdict(set)
     by_position: Dict[Optional[int], set] = collections.defaultdict(set)
     for unit in work.units:
