@@ -104,14 +104,27 @@ _HEADER_LINE_RE = re.compile(r"^##(.*?)##\s*$")
 _DAF_RE = re.compile(r"<דף ([^,>]{1,12}), עמ' ([^>]{1,6})>")
 _YTEXT_RE = re.compile(r"Ytext(\d+)")
 #: `+kind~` / `+kind~ +numeral~` at the head of a Judeo-Arabic line.
-_JA_MARKER_RE = re.compile(r"\+([^\s~]*)~")
+#
+# The terminator is `~`, NOT whitespace. Stopping at the first space truncates every
+# multi-word heading, and the damage is invisible without an outside reference:
+# `+1. [פ, מ, לא, לו, ליא]~` became `1. פ`, which still looks like a plausible
+# label. Checked against the publisher's own partition tree, that one work has 314
+# divisions under both readings -- identical boundaries, 313 of 314 labels wrong.
+_JA_MARKER_RE = re.compile(r"\+([^~\n]*)~")
 #: The verse-analogue tier: too fine to cite, 76.3% of all JA markers.
 JA_LEAF_KINDS = frozenset({"פסוק", "פס'", "משנה"})
 #: How many levels of the enclosing chain a citation may carry.
 _JA_MAX_DEPTH = 3
 #: Editorial delimiters round a heading -- `{הקדמה}`, `<שופטים>`, some of them
 #: arriving HTML-escaped. They mark the heading, they are not part of its name.
-_MARKUP_CHARS = str.maketrans({c: None for c in "{}<>[]"})
+#:
+#: SQUARE brackets are deliberately NOT in this set. They are not a delimiter: they
+#: enclose the manuscripts that witness a section, `1. [פ, מ, לא, לו, ליא]`, and the
+#: publisher's own tree renders them. Stripping them lost the distinction between a
+#: witness list and the section number it qualifies. They are also safe to print --
+#: the surface's interval scanner rejects a bracketed pair of DECIMALS, and a list
+#: of Hebrew sigla is not one.
+_MARKUP_CHARS = str.maketrans({c: None for c in "{}<>"})
 
 
 def _clean_marker_text(text: str) -> str:
@@ -442,8 +455,7 @@ def build_ja(path: str, ref_id: str, shipped: Dict[str, str]) -> Optional[WorkUn
     for line in raw.split("\n"):
         tokens = _JA_MARKER_RE.findall(line)
         if tokens and line.lstrip().startswith("+"):
-            kind = tokens[0]
-            numeral = tokens[1] if len(tokens) > 1 else None
+            kind, numeral = _split_ja_heading(tokens)
             marked.append((position + len(line) - len(line.lstrip()), kind, numeral))
         position += len(line) + 1
 
@@ -471,6 +483,31 @@ def build_ja(path: str, ref_id: str, shipped: Dict[str, str]) -> Optional[WorkUn
     units = _disambiguate_labels(units)
     units = [u._replace(citation_pos=i) for i, u in enumerate(units)]
     return WorkUnits(ref_id, "ja", "division", units, len(stream))
+
+
+def _split_ja_heading(tokens: Sequence[str]) -> Tuple[str, Optional[str]]:
+    """The `+...~` tokens of one line -> (kind, numeral) for a whole heading.
+
+    A heading is not two tokens. One line carries as many as it needs:
+
+        +1.~ +[פ,~ +מ,~ +לא,~ +לו,~ +ליא]~
+
+    is a single division whose label the publisher renders `1. [פ, מ, לא, לו, ליא]`
+    -- a section number followed by the manuscripts that witness it. Reading only
+    the first two tokens gave `1. פ`, which is not obviously wrong on the page and
+    is wrong on 313 of that work's 314 divisions. It took the publisher's own tree
+    to see it, which is the argument for having fetched the tree.
+
+    A leading token that is itself a numeral means the section is bare-numbered and
+    has no kind word; otherwise the first token is the kind and the rest qualify it.
+    """
+    if not tokens:
+        return "", None
+    head = tokens[0].strip()
+    rest = " ".join(t.strip() for t in tokens[1:]).strip()
+    if parse_unit_numeral(head.rstrip(".")) is not None:
+        return "", (f"{head} {rest}".strip() if rest else head)
+    return head, (rest or None)
 
 
 def _infer_containers(divisions: Sequence[Tuple[int, str, Optional[str]]]) -> set:
