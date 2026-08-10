@@ -990,6 +990,52 @@ class TestBuildJaPages:
 # Structural gates
 # ---------------------------------------------------------------------------
 
+class TestTheSourcesOwnDefectsSurviveVerbatim:
+    """Two things in the Judeo-Arabic labels look like our bugs and are not.
+
+    The Latin classmarks read as though a bidi renderer had reversed them --
+    `7 8G S _T` where a reader expects `T-S G8 7`. Measured, each such string is
+    byte-identical in three independent layers: the document as stored, the
+    publisher's separately harvested partition tree, and our label. And `T- S` is not
+    a lost space: this source writes EVERY hyphen with a following space -- 679
+    occurrences in these labels, 521 of them between two Hebrew letters (`ו- ח`), 111
+    between digits (`35- 38`), and not one unspaced hyphen anywhere. Nor is there an
+    inverse to apply: of 17 distinct Latin runs, 9 already read canonically, so any
+    reordering rule would break the ones that are right to fix the ones that are not.
+
+    `תרגום הפסוקום` is the same kind of thing: the source's own typo, present in the
+    marker stream, in the publisher's tree and in the source record, against 39
+    correctly spelled siblings in the same work.
+
+    ONE DIVISION AUTHORITY, NAMED settles both. A label quietly corrected here would
+    disagree with the publisher's own tree, and a reader holding one of the two would
+    have no way to tell which. These tests exist so that a later reader who notices
+    the mangling does not "fix" it.
+    """
+
+    def test_a_latin_classmark_is_emitted_exactly_as_the_source_wrote_it(self):
+        for marker in ('כ"י קמברידג\' T- S Ar. Box 43', 'כ"י קמברידג\' 7 8G S _T'):
+            assert _clean_marker_text("{" + marker + "}") == marker
+
+    def test_the_hyphen_convention_is_the_sources_and_is_not_normalised(self):
+        """It is applied to Hebrew and digits identically, so a rule that closed the
+        gap in a Latin run would be treating one script's typography as an error."""
+        for marker in ("ו- ח", "35- 38", "א- ק"):
+            assert _clean_marker_text(marker) == marker
+
+    def test_a_typo_in_the_source_is_not_corrected_on_the_way_out(self):
+        assert _clean_marker_text("{תרגום הפסוקום מג, כט- לד}") == \
+            "תרגום הפסוקום מג, כט- לד"
+
+    def test_reordering_the_latin_would_break_the_runs_that_are_already_right(self):
+        """PROVEN ABLE TO FAIL: the obvious repair, applied to the 9 canonical runs."""
+        def buggy(text):
+            return " ".join(reversed(text.split()))
+
+        assert buggy("T- S Ar. Box 5") != "T- S Ar. Box 5"
+        assert buggy("Ms. heb. e100") != "Ms. heb. e100"
+
+
 class TestABareOrdinalIsNotACitation:
     """`שע–שעט` in ספר הערוך and `מא` in הלכות גדולות: the scholar audit's two
     complaints about the staged family, which fail for different reasons and so need

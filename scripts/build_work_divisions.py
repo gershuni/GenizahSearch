@@ -68,6 +68,28 @@ Yerushalmi has gaps -- and one, נדרים chapter ט, states an ELEVENTH sub wh
 mishnah chapter has ten. A sub-unit that outruns the mishnayot is a halakhah
 division, not a mishnah index.
 
+TWO THINGS IN THE JUDEO-ARABIC LABELS LOOK LIKE OUR BUGS AND ARE NOT, recorded here
+because both were reported as ours and the obvious repair for each is wrong.
+
+The Latin classmarks read as though a bidi renderer had reversed them -- `7 8G S _T`
+where a reader expects `T-S G8 7`. Each such string is byte-identical in three
+independent layers: the document as stored, the publisher's separately harvested
+partition tree, and our label. `T- S` is not a lost space either: this source writes
+EVERY hyphen with a following space, 679 times across these labels, 521 of them
+between two Hebrew letters (`ו- ח`) and 111 between digits (`35- 38`), with not one
+unspaced hyphen anywhere -- so closing the gap in a Latin run would be treating one
+script's typography as an error. And there is no inverse to apply: of 17 distinct
+Latin runs 9 already read canonically, so a reordering rule breaks the ones that are
+right in order to fix the ones that are not.
+
+`תרגום הפסוקום` is the same kind of thing -- the source's own typo, present in the
+marker stream, in the publisher's tree and in the source record, against 39 correctly
+spelled siblings in the same work.
+
+ONE DIVISION AUTHORITY, NAMED settles both: they are emitted verbatim. A label
+quietly corrected here would disagree with the publisher's own tree, and a reader
+holding one of the two would have no way to tell which.
+
 MASKING. No source path appears here. The reference corpora are restricted, so
 their directories arrive through the environment (see `--help`) exactly as the
 masking pattern file does. A canonical work's SECTION LABEL is a universal
@@ -546,7 +568,22 @@ def build_msource_standalone(
       YERUSHALMI -> the header's chapter+halakhah. Its printed column is 2,945
       letters, so coarse that 90.8% of spans land inside one and the citation
       narrows nothing; the header address is 1,398 letters, which is the true
-      analogue of a Bavli amud. The column is still recorded, to be shown beside it.
+      analogue of a Bavli amud.
+
+    THE PRINTED COLUMN IS NOT CARRIED, and an earlier version of this docstring said
+    it was ("recorded, to be shown beside it"). It is not: `folios` below is read,
+    used to count columns, and dropped on the header branch. Correcting the claim
+    rather than quietly building the thing, because the thing is not free. The
+    column IS reachable -- the two coordinate spaces agree exactly on 48 of 48 works,
+    and 2,314 of 2,315 header units would get one (the miss opens before the file's
+    first daf marker) -- but it would have to be bisected through
+    `stream_offset_for_raw`, since the markers are at RAW positions in the stripped
+    text while a header unit's offset is a STREAM offset. Two reasons it is a
+    decision rather than a line of code: a single start-column is exact for only
+    68.4% of header units (517 span two columns, 132 span four, one spans fifteen),
+    so for a third of them it would name a place the unit merely begins in; and a
+    parenthetical folio puts a SECOND address system inside one rendered string,
+    which is the one thing ONE DIVISION AUTHORITY, NAMED forbids.
     """
     number_match = _YTEXT_RE.search(ref_id)
     if not number_match:
@@ -567,7 +604,8 @@ def build_msource_standalone(
     # its printed column is 2,945 letters, so coarse that 90.8% of stored spans sit
     # inside one and the citation narrows nothing. Its header address is 1,398 --
     # the real analogue of a Bavli amud -- so the header carries the citation and
-    # the column rides along beside it.
+    # `folios` is used here only to count columns. It does NOT ride along beside the
+    # address; see the docstring for what carrying it would actually cost.
     with_sub = columns == 4
     header_units = _standalone_header_units(raw, with_sub=with_sub)
 
