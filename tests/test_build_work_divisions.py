@@ -12,6 +12,7 @@ rather than asserted.
 """
 from __future__ import annotations
 
+import collections
 import json
 import os
 import sqlite3
@@ -25,13 +26,16 @@ from scripts.build_work_divisions import (
     WorkUnits,
     _chapter_units,
     _clean_marker_text,
+    _daf_units,
     _is_foreign_label,
     _dedupe_ascending,
     _msource_files,
     _source_title_key,
     _split_divisions,
+    _standalone_header_units,
     _tree_reading_order,
     bind_tree_chains,
+    build_ja,
     build_ja_pages,
     build_sefaria,
     check_invariants,
@@ -44,7 +48,14 @@ from scripts.build_work_divisions import (
     sefaria_render_kind,
     write_artifact,
 )
-from shared.discovery_locus import norm_stream
+from shared.discovery_locus import (
+    PIECE_SEP,
+    LocusAddress,
+    citation_runs,
+    norm_stream,
+    parse_canonical_header,
+    render_ranges,
+)
 
 PROVENANCE = "| PROVENANCE-FIELD: SOURCE-MS"
 
@@ -73,9 +84,16 @@ class TestSplitDivisions:
         assert divisions[0][1] == ["בראשית ברא אלהים", "והארץ היתה תהו", "ויכלו השמים"]
         assert divisions[1][1] == ["ואלה שמות"]
 
-    def test_each_payload_line_carries_the_chapter_in_force_at_that_point(self):
+    def test_each_payload_line_carries_the_address_in_force_at_that_point(self):
         divisions = _split_divisions(MONOLITH)
-        assert divisions[0][2] == ["א", "א", "ב"]
+        assert [a.chapter for a in divisions[0][2]] == ["א", "א", "ב"]
+
+    def test_the_whole_parsed_address_travels_not_just_the_chapter(self):
+        """The division is what the ambiguity gate compares against, and a level
+        dropped at the parse cannot be recovered further down."""
+        first = _split_divisions(MONOLITH)[0][2][0]
+        assert (first.division, first.chapter, first.sub_kind, first.sub) == (
+            "בראשית", "א", "פסוק", "א")
 
     def test_header_words_never_enter_the_payload(self):
         """The stream is payload-only; a header word in it shifts every offset."""
@@ -92,38 +110,175 @@ class TestSplitDivisions:
 # Chapter units
 # ---------------------------------------------------------------------------
 
+def addr(chapter, division="", sub="", kind=""):
+    """One parsed header, in the shape `parse_canonical_header` returns."""
+    return LocusAddress(division=division, chapter=chapter, sub=sub, sub_kind=kind)
+
+
 class TestChapterUnits:
     def test_one_unit_per_chapter_at_the_offset_the_chapter_opens(self):
-        units = _chapter_units([("א", 0), ("א", 20), ("ב", 55)])
+        units = _chapter_units([(addr("א"), 0), (addr("א"), 20), (addr("ב"), 55)])
         assert [(u.label_he, u.start) for u in units] == [("א", 0), ("ב", 55)]
 
     def test_a_run_of_one_label_collapses_to_one_unit(self):
         """The Yerushalmi interleaves a main and a variant segment under one
         chapter -- y.Berakhot carries 1,151 headers for 9 chapters."""
-        marks = [("א", i * 10) for i in range(600)] + [("ב", 6000)]
+        marks = [(addr("א"), i * 10) for i in range(600)] + [(addr("ב"), 6000)]
         assert len(_chapter_units(marks)) == 2
 
     def test_not_collapsing_would_have_produced_hundreds_of_duplicate_labels(self):
         """The defect, proven able to fail."""
         def buggy(marks):
-            return [(label, offset) for label, offset in marks if label is not None]
+            return [(a.chapter, offset) for a, offset in marks if a is not None]
 
-        marks = [("א", i * 10) for i in range(600)] + [("ב", 6000)]
+        marks = [(addr("א"), i * 10) for i in range(600)] + [(addr("ב"), 6000)]
         assert len(buggy(marks)) == 601
         assert len(_chapter_units(marks)) == 2
 
     def test_the_citation_position_is_the_numeral_the_label_denotes(self):
-        units = _chapter_units([("א", 0), ("ב", 10), ("טו", 20)])
+        units = _chapter_units([(addr("א"), 0), (addr("ב"), 10), (addr("טו"), 20)])
         assert [u.citation_pos for u in units] == [1, 2, 15]
 
     def test_an_unparsed_header_contributes_no_unit(self):
-        assert _chapter_units([(None, 0), ("א", 10)]) == [
-            Unit(0, 10, "ch:1", "א", 1)
+        assert _chapter_units([(None, 0), (addr("א"), 10)]) == [
+            Unit(0, 10, "ch:0.1", "א", 1, ("", "1", ""))
         ]
 
     def test_ordinals_are_a_dense_run_from_zero(self):
-        units = _chapter_units([("א", 0), ("ב", 10), ("ג", 20)])
+        units = _chapter_units([(addr("א"), 0), (addr("ב"), 10), (addr("ג"), 20)])
         assert [u.unit_ord for u in units] == [0, 1, 2]
+
+    def test_a_chapter_that_is_not_a_numeral_gets_no_citation_position(self):
+        """It has no place in the citation ORDER, so it may never merge with a
+        neighbour -- `compress_pieces` refuses to bridge a `None`."""
+        units = _chapter_units([(addr("א"), 0), (addr("הקדמה"), 10)])
+        assert [u.citation_pos for u in units] == [1, None]
+
+
+# ---------------------------------------------------------------------------
+# The enclosing division -- the largest defect the scholar audit found
+# ---------------------------------------------------------------------------
+
+class TestTheEnclosingDivision:
+    """Mishneh Torah is Book -> Hilkhot X -> chapter, and the chapter grain emitted
+    the chapter alone, so ספר המדע carried five units labelled `ה`."""
+
+    #: Two sets of הלכות, each numbering its chapters from א. The shape is real: a
+    #: book of Mishneh Torah, five הלכות deep, is why 46 of one work's 187 units
+    #: named more than one place.
+    RESTARTING = [
+        (addr("א", division="הלכות דעות"), 0),
+        (addr("ב", division="הלכות דעות"), 500),
+        (addr("א", division="הלכות תלמוד תורה"), 900),
+        (addr("ב", division="הלכות תלמוד תורה"), 1400),
+    ]
+
+    def test_the_address_names_the_division_the_source_states(self):
+        assert [u.label_he for u in _chapter_units(self.RESTARTING)] == [
+            "הלכות דעות, פרק א", "הלכות דעות, פרק ב",
+            "הלכות תלמוד תורה, פרק א", "הלכות תלמוד תורה, פרק ב"]
+
+    def test_dropping_it_named_two_places_with_one_label(self):
+        """PROVEN ABLE TO FAIL: the shipped defect, re-run locally."""
+        def buggy(marks):
+            return [a.chapter for a, _ in marks]
+
+        assert buggy(self.RESTARTING) == ["א", "ב", "א", "ב"]
+        assert len(set(buggy(self.RESTARTING))) == 2      # four places, two labels
+
+    def test_the_gate_now_sees_it(self):
+        """PROVEN ABLE TO FAIL, and this is the one that matters: the OLD gate could
+        not see this shape at all. It grouped labels by citation position, and
+        `_chapter_units` set the position to the chapter's VALUE -- so the two `א`s
+        collided there too and the table was indistinguishable from an edition
+        legitimately revisiting one folio."""
+        units = _chapter_units(self.RESTARTING)
+        assert check_invariants([WorkUnits("w", "msource_header", "chapter",
+                                           units, 2_000)]) == []
+
+        # the same table with the division dropped from the LABEL only -- the stated
+        # address still records it, which is exactly what makes the gate able to fire
+        dropped = [u._replace(label_he=u.label_he.split(", ")[-1].replace("פרק ", ""))
+                   for u in units]
+        problems = check_invariants([WorkUnits("w", "msource_header", "chapter",
+                                               dropped, 2_000)])
+        assert any("name more than one place" in p for p in problems)
+
+        def old_gate(units):
+            """The gate as it was written, reviewed and believed."""
+            by_label = collections.defaultdict(set)
+            for unit in units:
+                if unit.label_he:
+                    by_label[unit.label_he].add(unit.citation_pos)
+            return sorted(lab for lab, places in by_label.items() if len(places) > 1)
+
+        # and it reported nothing, because the citation position collided as well
+        collapsed = [u._replace(label_he=lab, citation_pos=pos)
+                     for u, lab, pos in zip(units, ["א", "ב", "א", "ב"], [1, 2, 1, 2])]
+        assert old_gate(collapsed) == []
+
+    def test_a_division_boundary_is_never_a_citation_successor(self):
+        """A fragment witnessing the end of one הלכות and the start of the next must
+        render as two pieces. If the boundary were a successor, `compress_pieces`
+        would merge them into one range spanning a boundary it never crosses."""
+        positions = [u.citation_pos for u in _chapter_units(self.RESTARTING)]
+        assert positions[1] == positions[0] + 1           # inside a division: adjacent
+        assert positions[2] != positions[1] + 1           # across one: never
+
+    def test_a_work_stating_ONE_division_keeps_the_bare_numeral(self):
+        """A monolith child IS its division and a per-tractate file states none, so
+        nothing about the Bible family moves. `בראשית · יב` is what the audit judged."""
+        one = [(addr("יא", division="בראשית"), 0), (addr("יב", division="בראשית"), 90)]
+        assert [u.label_he for u in _chapter_units(one)] == ["יא", "יב"]
+        none = [(addr("יא"), 0), (addr("יב"), 90)]
+        assert [u.label_he for u in _chapter_units(none)] == ["יא", "יב"]
+
+    def test_the_dropped_division_is_still_recorded_for_the_gate(self):
+        """So the gate can tell a work whose chapters really are unique from one
+        whose builder merely forgot to say which book they are in."""
+        one = [(addr("יא", division="בראשית"), 0), (addr("יב", division="בראשית"), 90)]
+        assert [u.source_address for u in _chapter_units(one)] == [
+            ("בראשית", "11", ""), ("בראשית", "12", "")]
+
+    def test_the_boundary_gate_fires_when_the_packing_is_reverted(self):
+        """PROVEN ABLE TO FAIL. On the shipped build 22 real spans already render as
+        one continuous range whose ends sit in different divisions -- `ד–ה` running
+        from הלכות קריית שמע into הלכות תפילה וברכת כוהנים. The two units need not be
+        neighbours in the table: `citation_runs` merges what is consecutive in
+        CITATION space, so the gate looks there. The packing makes it arithmetically
+        impossible, which is exactly the kind of claim this file has had wrong before,
+        so the gate checks it rather than the comment asserting it."""
+        units = _chapter_units(self.RESTARTING)
+        work = WorkUnits("w", "msource_header", "chapter", units, 2_000)
+        assert check_invariants([work]) == []
+
+        # the old packing: the chapter's own value, with no division term
+        reverted = [u._replace(citation_pos=v) for u, v in zip(units, [1, 2, 1, 2])]
+        problems = check_invariants([work._replace(units=reverted)])
+        assert any("ACROSS a division boundary" in p for p in problems)
+
+    def test_a_span_across_a_boundary_renders_as_two_pieces_not_one_range(self):
+        """The consequence the boundary gate exists to prevent, shown end to end
+        through the real renderer rather than asserted about the integers."""
+        units = _chapter_units(self.RESTARTING)
+        sequence = [u.citation_pos for u in units]
+        runs, unplaced = citation_runs([(1, 2)], sequence)      # דעות ב .. ת"ת א
+        by_position = {u.citation_pos: u.label_he for u in units}
+        assert render_ranges(runs, by_position) == (
+            "הלכות דעות, פרק ב" + PIECE_SEP + "הלכות תלמוד תורה, פרק א")
+        assert unplaced == []
+
+        # and inside one division it is still a single range, correctly shortened
+        runs, _ = citation_runs([(0, 1)], sequence)
+        assert render_ranges(runs, by_position) == "הלכות דעות, פרק א–ב"
+
+    def test_two_divisions_whose_adjacent_chapters_share_a_numeral_stay_apart(self):
+        """The run-collapse compares the STATED ADDRESS, not the rendered label. On
+        the label it would have folded the last chapter of one division into the
+        first of the next wherever the label omits the division."""
+        touching = [(addr("א", division="הלכות דעות"), 0),
+                    (addr("א", division="הלכות תלמוד תורה"), 700)]
+        assert len(_chapter_units(touching)) == 2
 
 
 class TestDedupeAscending:
@@ -833,6 +988,104 @@ class TestBuildJaPages:
 # ---------------------------------------------------------------------------
 # Structural gates
 # ---------------------------------------------------------------------------
+
+class TestTheDivisionSurvivesTheWalk:
+    """The gate compares the label against the STATED address, so it is blind to a
+    level dropped BEFORE both are built. That is the one hole it cannot close from
+    inside, and it is the hole the original defect went through -- the division was
+    parsed correctly and discarded one line later. So the plumbing is tested
+    separately, at the point where the header text becomes a mark.
+    """
+
+    STANDALONE = "\n".join([
+        f"##הלכות אלף, פרק א, הלכה א {PROVENANCE}##",
+        "טקסט של הפרק הראשון",
+        f"##הלכות אלף, פרק ב, הלכה א {PROVENANCE}##",
+        "טקסט של הפרק השני",
+        f"##הלכות בית, פרק א, הלכה א {PROVENANCE}##",
+        "טקסט אחר לגמרי",
+    ])
+
+    def test_the_division_reaches_the_unit_from_the_header_text(self):
+        units = _standalone_header_units(self.STANDALONE)
+        assert [u.source_address[0] for u in units] == [
+            "הלכות אלף", "הלכות אלף", "הלכות בית"]
+
+    def test_reading_only_the_chapter_would_have_lost_it_silently(self):
+        """PROVEN ABLE TO FAIL: the shipped shape of the defect. It is not an error
+        -- the units still build, the offsets are still right, and the only symptom
+        is a citation naming a place the fragment is not in."""
+        addresses = [parse_canonical_header(line.strip("#").split("|")[0])
+                     for line in self.STANDALONE.split("\n") if line.startswith("##")]
+        assert [a.division for a in addresses] == [
+            "הלכות אלף", "הלכות אלף", "הלכות בית"]
+        assert [a.chapter for a in addresses] == ["א", "ב", "א"]   # what was kept
+        assert len({a.chapter for a in addresses}) == 2            # three places, two
+
+
+class TestEveryGrainRecordsTheStatedAddress:
+    """The hole in the ambiguity gate, closed from the other side.
+
+    `_ambiguity_problems` SKIPS a unit that records no stated address rather than
+    assuming it clean, because a hand-built fixture legitimately has none. That makes
+    a family which forgot to record one silently ungated -- so every real builder path
+    is checked here to produce one. This is the artifact, not the payload: each grain
+    is driven through its own entry point rather than asserted about in the abstract.
+    """
+
+    def _all_recorded(self, units):
+        return units and all(u.source_address for u in units)
+
+    def test_the_chapter_grain(self):
+        assert self._all_recorded(_chapter_units([(addr("א"), 0), (addr("ב"), 50)]))
+
+    def test_the_daf_grain_including_a_folio_nobody_can_read(self):
+        offsets = list(range(400))
+        units = _daf_units([(0, "יד", "א"), (100, "יד", "ב"), (200, "עמוד", "א")],
+                           offsets, 2)
+        assert self._all_recorded(units)
+        assert units[2].label_he == ""          # unreadable, and still gated
+
+    def test_the_ja_division_grain(self, tmp_path):
+        raw = "***\nפלוני, ספר\n----------\n" + "\n".join(
+            f"+פרק~ +{n}~\nגוף הפרק" for n in ("א", "ב", "ג", "ד"))
+        path = tmp_path / "07-דוגמה.txt"
+        path.write_text(raw, encoding="utf-8")
+        built = build_ja(str(path), "J:x", {"J:x": norm_stream(raw)[0]})
+        assert built.grain == "division"
+        assert self._all_recorded(built.units)
+
+    def test_the_ja_page_grain(self, tmp_path):
+        doc = _ja_source_doc([("9", [(1, "+פרק~ +א~"), (2, "טקסט")]),
+                              ("10", [(1, "עוד")])], author="פלוני", title="ספר")
+        text, _ = ja_reconstruct(doc, "פלוני, ספר")
+        path = tmp_path / "07-דוגמה.txt"
+        path.write_text("***\nפלוני, ספר\n----------\n" + text.split("\n", 1)[1],
+                        encoding="utf-8")
+        shipped = {"J:x": norm_stream(path.read_text(encoding="utf-8"))[0]}
+        built = build_ja_pages(str(path), "J:x", shipped,
+                               {_source_title_key("פלוני, ספר"): doc})
+        assert built.grain == "page"
+        assert self._all_recorded(built.units)
+
+    def test_the_staged_verse_grain(self, tmp_path):
+        assert self._all_recorded(
+            self._staged(tmp_path, {"units": [{"chapter": 1, "start": 0},
+                                              {"chapter": 2, "start": 5}]}).units)
+
+    def test_the_staged_section_grain(self, tmp_path):
+        assert self._all_recorded(
+            self._staged(tmp_path, {"sections": [{"section_he": "מגיד", "start": 0},
+                                                 {"section_he": "הלל", "start": 5}]}).units)
+
+    def _staged(self, tmp_path, sidecar):
+        body = "אאאא\nבבבב\nגגגג\n"
+        (tmp_path / "k.txt").write_text(body, encoding="utf-8")
+        (tmp_path / "k.versemap.json").write_text(
+            json.dumps(sidecar, ensure_ascii=False), encoding="utf-8")
+        return build_sefaria("k", str(tmp_path), "k.txt", "k.versemap.json",
+                             "REF2:k", {"REF2:k": norm_stream(body)[0]})
+
 
 class TestCheckInvariants:
     def _work(self, units):

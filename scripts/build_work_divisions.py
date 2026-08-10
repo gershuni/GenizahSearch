@@ -90,6 +90,7 @@ from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.discovery_locus import (  # noqa: E402
+    LocusAddress,
     amud_ordinal,
     citation_seq_for_daf,
     daf_label_he,
@@ -205,13 +206,31 @@ def _clean_marker_text(text: str) -> str:
 
 
 class Unit(NamedTuple):
-    """One citable division of one work."""
+    """One citable division of one work.
+
+    `source_address` is the odd one out and it is here for the gate. The other four
+    fields are all things this file DECIDED; `source_address` is what the source
+    STATED, carried through unrendered so the two can be compared. Without it the
+    ambiguity gate is structurally blind: when a builder drops a level of the stated
+    address, the label, the part key and the citation position all collapse together,
+    and nothing left in the table records that they were ever distinct.
+
+    It is a TUPLE OF LEVELS, coarsest first, because one of the gates needs to know
+    where a division ENDS and not merely that two addresses differ. A family with no
+    containing level states a one-element address, and that is the honest encoding:
+    a daf has no division, so no rule about division boundaries can apply to it.
+
+    It is builder-internal. `write_artifact` does not persist it -- the artifact's
+    schema is a published contract, and this is evidence for a check, not an address.
+    """
 
     unit_ord: int              #: position in the table; ASCENDING in stream offset
     start: int                 #: offset into the work's normalized stream
     part_key: str              #: stable machine key -- never rendered, never Hebrew
     label_he: str              #: what a reader sees
     citation_pos: Optional[int]  #: position in the work's OWN citation order, or None
+    #: the levels of the address the SOURCE states, coarsest first -- for the gate only
+    source_address: Tuple[str, ...] = ()
 
 
 class Edition(NamedTuple):
@@ -314,18 +333,25 @@ def _msource_files(msource_dir: str) -> Dict[str, str]:
     return found
 
 
-def _split_divisions(raw: str) -> List[Tuple[str, List[str], List[Optional[str]]]]:
-    """A monolith -> [(division, payload lines, chapter label per line)].
+def _split_divisions(
+    raw: str,
+) -> List[Tuple[str, List[str], List[Optional[LocusAddress]]]]:
+    """A monolith -> [(division, payload lines, the address in force per line)].
 
     Reproduces the research tree's split EXACTLY -- payload-only, `>>` lines joined
     with a single space -- because that is the recipe the shipped child streams were
     built with, and a stream that differs by one character invalidates every offset.
+
+    The WHOLE parsed address travels, not just the chapter it used to carry. Each
+    child here is one division, so the division level adds nothing to a child's
+    citation -- but it is what the ambiguity gate compares against, and a level that
+    is dropped at the parse can never be recovered further down.
     """
     order: List[str] = []
     payloads: Dict[str, List[str]] = {}
-    chapters: Dict[str, List[Optional[str]]] = {}
+    addresses: Dict[str, List[Optional[LocusAddress]]] = {}
     current: Optional[str] = None
-    current_chapter: Optional[str] = None
+    current_address: Optional[LocusAddress] = None
     for line in raw.split("\n"):
         text = line.strip()
         header = _HEADER_LINE_RE.match(text)
@@ -334,18 +360,17 @@ def _split_divisions(raw: str) -> List[Tuple[str, List[str], List[Optional[str]]
             current = inner.split(",")[0].strip()
             if current not in payloads:
                 payloads[current] = []
-                chapters[current] = []
+                addresses[current] = []
                 order.append(current)
-            address = parse_canonical_header(inner)
-            current_chapter = address.chapter if address else None
+            current_address = parse_canonical_header(inner)
             continue
         if text.startswith(">>"):
             payload = text[2:].strip()
             if not payload or current is None:
                 continue
             payloads[current].append(payload)
-            chapters[current].append(current_chapter)
-    return [(d, payloads[d], chapters[d]) for d in order]
+            addresses[current].append(current_address)
+    return [(d, payloads[d], addresses[d]) for d in order]
 
 
 #: The finest header field a citation may use, per grain. `halakhah` addresses the
@@ -353,43 +378,97 @@ def _split_divisions(raw: str) -> List[Tuple[str, List[str], List[Optional[str]]
 #: Tosefta, whose chapters are already close to the size of a stored span.
 _SUB_KIND_LABEL = {"משנה": "משנה", "הלכה": "הלכה", "פסוק": "פסוק"}
 
+#: Numbering bases for the dense citation position. A chapter never runs past 99
+#: halakhot anywhere in this corpus (measured max 45), and `parse_unit_numeral`
+#: refuses anything above 999 by construction, so neither base can be overrun by a
+#: value that reached this point. Both are wide enough that a DIVISION boundary is
+#: never a successor: the last conceivable place in one division and the first in
+#: the next are 101 apart at the finest grain, never 1. That is the point -- a
+#: fragment witnessing the end of one הלכות and the start of the next must render as
+#: two pieces, not as one range spanning a boundary it never crosses.
+_SUB_BASE = 100
+_DIVISION_BASE = 1000
+
 
 def _chapter_units(
-    labels_in_order: Sequence[Tuple[Optional[str], int]], with_sub: bool = False
+    marks: Sequence[Tuple[Optional[LocusAddress], int]], with_sub: bool = False
 ) -> List[Unit]:
-    """[(address, stream offset)] -> one unit per RUN of the same address.
-
-    Each entry's address is `(chapter, sub, sub_kind)` when `with_sub`, otherwise
-    the chapter label alone.
+    """[(parsed address, stream offset)] -> one unit per RUN of the same address.
 
     Collapsing runs is not tidying. The Yerushalmi interleaves a main-text segment
     and a variant segment under one address -- y.Berakhot carries 1,151 headers for
     9 chapters -- so without the collapse a work gets hundreds of duplicate-labelled
     units and its citations become unusable.
+
+    THE ENCLOSING DIVISION IS CARRIED WHEN THE WORK HAS MORE THAN ONE. Mishneh Torah
+    is Book -> Hilkhot X -> chapter, and emitting the chapter alone gave ספר המדע
+    five units labelled `ה`, one per set of הלכות it holds. The reader is handed a
+    citation naming five places; the scholar audit found it, and the gate that should
+    have found it could not, because the chapter VALUE was also the citation position
+    and so the five collided there too.
+
+    The rule is stated as a property of the document rather than a list of works:
+    carry the division exactly when the source states more than one. A per-tractate
+    file states none, and a monolith child IS its division, so both keep the bare
+    chapter numeral they render today (`בראשית · יב`) and nothing about the Bible
+    family moves. A work stating several gets `הלכות תלמוד תורה, פרק ה` -- the shape
+    the owner ruled on, with `פרק` spelled out, because `הלכות תלמוד תורה, ה` would
+    read as though `ה` were the sub-unit rather than the chapter.
+
+    Where the division is dropped it is still recorded in `source_address`, so the
+    gate can tell a work whose chapters really are unique from one whose builder
+    merely forgot to say which book they are in.
     """
+    stated = list(dict.fromkeys(
+        address.division for address, _ in marks
+        if address is not None and address.division))
+    with_division = len(stated) > 1
+    division_ord = {name: index for index, name in enumerate(stated)}
+
     units: List[Unit] = []
-    for label, offset in labels_in_order:
-        if label is None:
+    for address, offset in marks:
+        if address is None or not address.chapter:
             continue
+        chapter = address.chapter
+        chapter_value = parse_unit_numeral(chapter)
+        ordinal = division_ord.get(address.division, 0)
+
+        parts = [address.division] if with_division else []
         if with_sub:
-            chapter, sub, sub_kind = label
-            if not chapter:
-                continue
-            kind_word = _SUB_KIND_LABEL.get(sub_kind, sub_kind)
-            rendered = f"פרק {chapter}, {kind_word} {sub}" if sub and kind_word else f"פרק {chapter}"
-            chapter_value = parse_unit_numeral(chapter) or 0
-            sub_value = parse_unit_numeral(sub) or 0 if sub else 0
-            key = f"ch:{chapter_value}.{sub_value}"
-            # Dense so that consecutive halakhot are successors: a chapter never
-            # runs past 99 halakhot anywhere in this corpus (measured max 45).
-            position = chapter_value * 100 + sub_value
+            kind_word = _SUB_KIND_LABEL.get(address.sub_kind, address.sub_kind)
+            sub = address.sub
+            sub_value = (parse_unit_numeral(sub) or 0) if sub else 0
+            parts.append(f"פרק {chapter}"
+                         + (f", {kind_word} {sub}" if sub and kind_word else ""))
+            key = f"ch:{ordinal}.{chapter_value if chapter_value is not None else chapter}" \
+                  f".{sub_value}"
+            position = ((ordinal * _DIVISION_BASE + (chapter_value or 0)) * _SUB_BASE
+                        + sub_value)
         else:
-            rendered = label
-            position = parse_unit_numeral(label)
-            key = f"ch:{position if position else label}"
-        if units and units[-1].label_he == rendered:
+            sub_value = 0
+            parts.append(f"פרק {chapter}" if with_division else chapter)
+            key = f"ch:{ordinal}.{chapter_value if chapter_value is not None else chapter}"
+            # A chapter whose label is not a numeral has no place in the citation
+            # ORDER, so it gets no position and can never merge with a neighbour.
+            position = (None if chapter_value is None
+                        else ordinal * _DIVISION_BASE + chapter_value)
+        rendered = ", ".join(p for p in parts if p)
+        # The address the SOURCE stated, level by level -- never the rendered string,
+        # or the gate would be comparing the renderer with itself. The division level
+        # is kept even where the label omits it, which is the whole point: it is what
+        # tells a work whose chapters really are unique from one whose builder merely
+        # forgot to say which book they are in.
+        source = (
+            address.division,
+            str(chapter_value) if chapter_value is not None else chapter,
+            str(sub_value) if with_sub and address.sub else "",
+        )
+        # Collapse on the stated address, not on the rendered label: two divisions
+        # whose adjacent chapters share a numeral would otherwise fold into one unit
+        # wherever the label omits the division.
+        if units and units[-1].source_address == source:
             continue
-        units.append(Unit(len(units), offset, key, rendered, position))
+        units.append(Unit(len(units), offset, key, rendered, position, source))
     return _dedupe_ascending(units)
 
 
@@ -403,7 +482,7 @@ def build_msource_children(
         return []
     raw = _read(os.path.join(msource_dir, name))
     out: List[WorkUnits] = []
-    for index, (division, payload_lines, chapter_labels) in enumerate(_split_divisions(raw)):
+    for index, (division, payload_lines, line_addresses) in enumerate(_split_divisions(raw)):
         stream = norm_stream(" ".join(payload_lines))[0]
         if not stream:
             continue
@@ -411,9 +490,9 @@ def build_msource_children(
         if shipped.get(ref_id) != stream:
             continue                       # fail closed: not byte-exact, no units
         offset = 0
-        marks: List[Tuple[Optional[str], int]] = []
-        for payload, label in zip(payload_lines, chapter_labels):
-            marks.append((label, offset))
+        marks: List[Tuple[Optional[LocusAddress], int]] = []
+        for payload, address in zip(payload_lines, line_addresses):
+            marks.append((address, offset))
             offset += len(norm_stream(payload)[0])
         units = _chapter_units(marks)
         if units:
@@ -475,19 +554,19 @@ def build_msource_standalone(
 
 
 def _standalone_header_units(raw: str, with_sub: bool = False) -> List[Unit]:
-    """Header units for a whole-file work, offsets measured in the STRIPPED stream."""
+    """Header units for a whole-file work, offsets measured in the STRIPPED stream.
+
+    The whole parsed address is handed on. Reading `.chapter` and discarding
+    `.division` here is what gave 53 works an address naming more than one place --
+    the division was already parsed, already correct, and thrown away one line before
+    it was needed.
+    """
     offset = 0
-    marks: List[Tuple[Optional[object], int]] = []
+    marks: List[Tuple[Optional[LocusAddress], int]] = []
     for line in raw.split("\n"):
         header = _HEADER_LINE_RE.match(line.strip())
         if header:
-            address = parse_canonical_header(header.group(1))
-            if address is None:
-                marks.append((None, offset))
-            elif with_sub:
-                marks.append(((address.chapter, address.sub, address.sub_kind), offset))
-            else:
-                marks.append((address.chapter, offset))
+            marks.append((parse_canonical_header(header.group(1)), offset))
             continue
         offset += len(norm_stream(line)[0])
     return _chapter_units(marks, with_sub=with_sub)
@@ -502,10 +581,15 @@ def _daf_units(
         start = stream_offset_for_raw(offsets, raw_pos)
         if daf is None or not 1 <= amud <= columns:
             # An unreadable folio still divides the text; it just cannot be cited.
-            units.append(Unit(len(units), start, f"daf:?{len(units)}", "", None))
+            # Its stated address is unique per occurrence, because two folios nobody
+            # can read are not thereby the same folio.
+            units.append(Unit(len(units), start, f"daf:?{len(units)}", "", None,
+                              (f"daf:?{len(units)}",)))
             continue
+        # The edition revisiting one folio states ONE address twice, which is why the
+        # ambiguity gate lets two units share a label here and nowhere else.
         units.append(Unit(len(units), start, f"daf:{daf}.{amud}",
-                          daf_label_he(daf, amud), None))
+                          daf_label_he(daf, amud), None, (f"daf:{daf}.{amud}",)))
     units = _dedupe_ascending(units)
     sequence = citation_seq_for_daf(
         [(parse_unit_numeral(u.label_he.split(" ")[0]) if u.label_he else None,
@@ -553,9 +637,14 @@ def build_ja(path: str, ref_id: str, shipped: Dict[str, str]) -> Optional[WorkUn
         while open_context and open_context[-1][0] == kind:
             open_context.pop()
         parts = [label for _, label in open_context[-(_JA_MAX_DEPTH - 1):]] + [own]
+        # This family states no address SYSTEM -- it has headings, not a foliation --
+        # so every marker is its own place and the stated address is where it sits.
+        # That is what makes the label gate bite here: two markers whose full chains
+        # render alike are two places under one citation, which is precisely the
+        # collision `_disambiguate_labels` exists to resolve.
         units.append(Unit(len(units), stream_offset_for_raw(offsets, raw_pos),
                           f"ja:{len(units)}", ", ".join(p for p in parts if p),
-                          len(units)))
+                          len(units), (f"marker@{raw_pos}",)))
         if kind in containers:
             open_context.append((kind, own))
     units = _dedupe_ascending(units)
@@ -1077,7 +1166,10 @@ def build_ja_pages(
         section_index = bisect.bisect_right(section_offsets, start) - 1
         section = sections[section_index][1] if section_index >= 0 else ""
         label = f"{section}, עמ' {page}" if section else f"עמ' {page}"
-        units.append(Unit(len(units), start, f"page:{page}", label, None))
+        # The printed page IS an address system, and the ascending check below
+        # guarantees no two units claim one page.
+        units.append(Unit(len(units), start, f"page:{page}", label, None,
+                          (f"page:{page}",)))
 
     units = _dedupe_ascending(units)
     if not units:
@@ -1180,7 +1272,8 @@ def _sefaria_verse_units(
         else:
             label = heb_numeral(int(chapter)) if 1 <= int(chapter) <= 999 else str(chapter)
             position = int(chapter)
-        units.append(Unit(len(units), start, f"{kind}:{chapter}", label, position))
+        units.append(Unit(len(units), start, f"{kind}:{chapter}", label, position,
+                          (f"{kind}:{chapter}",)))
     units = _dedupe_ascending(units)
     if not units:
         return None
@@ -1203,7 +1296,10 @@ def _sefaria_section_units(
     for index, section in enumerate(sections):
         label = (section.get("section_he") or "").strip()
         start = stream_offset_for_raw(offsets, section.get("start", 0))
-        units.append(Unit(len(units), start, f"sec:{index}", label, index))
+        # Sections are named, not numbered, so the sidecar's own ordering is the only
+        # address there is -- two sections sharing a NAME are still two places.
+        units.append(Unit(len(units), start, f"sec:{index}", label, index,
+                          (f"sec:{index}",)))
     units = _dedupe_ascending(units)
     if not units:
         return None
@@ -1286,6 +1382,111 @@ def write_artifact(path: str, works: Sequence[WorkUnits]) -> None:
     conn.close()
 
 
+def _ambiguity_problems(work: WorkUnits) -> List[str]:
+    """A citation must name ONE place -- checked against what the SOURCE stated.
+
+    THIS GATE WAS REBUILT AFTER IT FAILED TO FIRE. Its first version grouped labels
+    by `citation_pos` and reported a label sitting at more than one position. It
+    could not see the largest real defect in the stage: 53 works whose numbering
+    restarts under each division emitted the chapter alone, so `ספר המדע` carried
+    five units labelled `ה`. The position collided too -- `_chapter_units` set
+    `citation_pos` to the numeral's VALUE -- so a table holding five different places
+    under one label was indistinguishable, from the outside, from the legitimate case
+    of an edition revisiting one folio. The gate read correctly and was structurally
+    blind, and reading it again would never have found that; the scholar audit did.
+
+    What it needed was evidence the builder had already thrown away, so `Unit` now
+    carries `source_address`: the address the SOURCE states, unrendered. Two gates
+    follow, and between them they cover both ways a reader can be misled:
+
+      LABEL      two units whose stated addresses DIFFER must not render the same
+                 string. Otherwise one printed citation points at several
+                 indistinguishable places.
+      POSITION   two units whose stated addresses DIFFER must not share a citation
+                 position. This one guards the renderer rather than the reader:
+                 `shared/discovery_locus.citation_runs` folds pieces to the SET of
+                 citation positions touched and prints ONE label per position, so a
+                 collision does not merely blur two places -- it prints the label of
+                 whichever place was seen first, which may not be the one the
+                 fragment is in. Measured on the shipped build: 11,577 of the 14,535
+                 real stored spans landing in a multi-division work would have taken
+                 a label naming the wrong הלכות or the wrong book.
+      BOUNDARY   two ADJACENT units in different divisions must not be citation
+                 successors, or `compress_pieces` merges them into one range across a
+                 boundary the fragment never crosses. Measured on the shipped build:
+                 4 such pairs exist, and 22 real spans already render as one
+                 continuous range whose two ends sit in different divisions
+                 (`ד–ה` running from הלכות קריית שמע into הלכות תפילה וברכת כוהנים).
+                 The packing makes this impossible by arithmetic -- which is exactly
+                 the kind of claim that has been wrong twice in this file already, so
+                 it is checked rather than asserted.
+
+    The legitimate revisit still passes both: an edition that returns to folio 57a
+    produces two units whose stated address is the same `daf:57.1`, so neither gate
+    sees more than one address.
+
+    WHAT THIS GATE CANNOT DO, stated so nobody mistakes its reach. It proves the
+    RENDERING is injective over the addresses the parser handed it. It cannot prove
+    the parser read the source correctly -- that is `parse_canonical_header`'s own
+    tests' job -- and a builder that dropped a level in the parse rather than in the
+    render would satisfy it. It is independent of the label renderer, which is the
+    thing that was wrong; it is not independent of everything.
+
+    Units with no recorded `source_address` are skipped rather than assumed clean.
+    That is a hole, and it is closed from the other side: a test asserts that every
+    unit produced by every real builder path carries one.
+    """
+    by_label: Dict[str, set] = collections.defaultdict(set)
+    by_position: Dict[Optional[int], set] = collections.defaultdict(set)
+    for unit in work.units:
+        if not unit.source_address:
+            continue
+        if unit.label_he:
+            by_label[unit.label_he].add(unit.source_address)
+        if unit.citation_pos is not None:
+            by_position[unit.citation_pos].add(unit.source_address)
+
+    # IN CITATION SPACE, NOT IN TABLE ORDER, and that distinction is the whole gate.
+    # `citation_runs` folds a span's pieces to the SET of citation positions it
+    # touches and then merges what is consecutive THERE, so two units at opposite ends
+    # of the table bridge into one range whenever their positions happen to be
+    # successors. A table-adjacency check finds 4 such pairs on the shipped build; the
+    # mechanism that actually printed `ד–ה` across two הלכות reaches 22 spans.
+    #
+    # A one-level address states no containing division, so no rule about crossing one
+    # can apply to it -- that is why the address is levels rather than a string.
+    divisions_at: Dict[int, set] = collections.defaultdict(set)
+    for unit in work.units:
+        if len(unit.source_address) > 1 and unit.citation_pos is not None:
+            divisions_at[unit.citation_pos].add(unit.source_address[0])
+    crossings = [place for place in sorted(divisions_at)
+                 if place + 1 in divisions_at
+                 and len(divisions_at[place] | divisions_at[place + 1]) > 1]
+
+    problems: List[str] = []
+    if crossings:
+        place = crossings[0]
+        problems.append(
+            f"{work.ref_id}: {len(crossings)} citation position(s) are a successor "
+            f"ACROSS a division boundary, so a span touching both sides renders as "
+            f"ONE range over a boundary it never crosses, e.g. positions "
+            f"{place},{place + 1} span {sorted(divisions_at[place] | divisions_at[place + 1])}")
+    ambiguous = sorted(lab for lab, stated in by_label.items() if len(stated) > 1)
+    if ambiguous:
+        problems.append(
+            f"{work.ref_id}: {len(ambiguous)} label(s) name more than one place the "
+            f"source states separately, e.g. {ambiguous[0]!r} names "
+            f"{sorted(by_label[ambiguous[0]])[:3]}")
+    collided = sorted(p for p, stated in by_position.items() if len(stated) > 1)
+    if collided:
+        problems.append(
+            f"{work.ref_id}: {len(collided)} citation position(s) cover more than one "
+            f"place the source states separately, so the render would print one "
+            f"place's label for another, e.g. position {collided[0]} covers "
+            f"{sorted(by_position[collided[0]])[:3]}")
+    return problems
+
+
 def check_invariants(works: Sequence[WorkUnits]) -> List[str]:
     """Structural gates. These are what a wrong table looks like from the outside."""
     problems: List[str] = []
@@ -1303,20 +1504,7 @@ def check_invariants(works: Sequence[WorkUnits]) -> List[str]:
         if work.grain.startswith("daf") and len(set(positions)) < 2 and len(positions) > 2:
             problems.append(f"{work.ref_id}: every unit shares one citation position")
 
-        # A citation must name ONE place. Two units may legitimately share a folio
-        # -- the edition revisits it -- and those fold together at render time by
-        # citation position. What is never acceptable is two units at DIFFERENT
-        # citation positions rendering the same string, because then the reader is
-        # handed one label pointing at several indistinguishable places.
-        by_label: Dict[str, set] = collections.defaultdict(set)
-        for unit in work.units:
-            if unit.label_he:
-                by_label[unit.label_he].add(unit.citation_pos)
-        ambiguous = sorted(lab for lab, places in by_label.items() if len(places) > 1)
-        if ambiguous:
-            problems.append(
-                f"{work.ref_id}: {len(ambiguous)} label(s) name more than one place, "
-                f"e.g. {ambiguous[0]!r}")
+        problems.extend(_ambiguity_problems(work))
 
         # A bracketed decimal pair anywhere in a label is fatal at the surface, and
         # fatal for the whole envelope rather than for the row that carries it. The
