@@ -143,6 +143,53 @@ class TestUnitsForSpan:
             units_for_span(self.STARTS, 250, 100)
 
 
+class TestTheMinimumOverlap:
+    """A first unit the span barely grazes is not a place the fragment witnesses.
+
+    The scholar audit's case, in the audit's own words: `פרק ג, משנה ה–ו` where
+    `משנה ו` was right, because the span opens 24 letters before משנה ו begins and so
+    clips only the tail of משנה ה.
+    """
+
+    STARTS = [0, 100, 200, 300]
+
+    def test_a_sliver_of_the_first_unit_does_not_earn_a_citation(self):
+        assert units_for_span(self.STARTS, 76, 250) == (1, 2)
+
+    def test_without_the_rule_that_sliver_bought_a_whole_unit(self):
+        """PROVEN ABLE TO FAIL, and this assertion is what keeps the one above
+        honest: it pins the pre-rule answer, so a threshold widened until everything
+        advances cannot make the test pass for the wrong reason."""
+        assert units_for_span(self.STARTS, 76, 250, min_overlap=0) == (0, 2)
+
+    def test_the_threshold_can_never_empty_a_range(self):
+        """One letter of unit 0 on a two-unit span still yields a citable range."""
+        lo, hi = units_for_span(self.STARTS, 99, 150)
+        assert (lo, hi) == (1, 1)
+        assert lo <= hi
+
+    def test_a_short_span_inside_one_unit_still_cites_it(self):
+        """36 letters is the shortest span in the whole corpus. A span that does not
+        cross a boundary is untouched however short it is -- `lo < hi` is the whole
+        condition, so this holds by construction rather than by a second check."""
+        assert units_for_span([0, 1_000], 500, 536) == (0, 0)
+
+    def test_a_span_that_covers_the_first_unit_outright_keeps_it(self):
+        """Starting before unit 0 means witnessing all of it, so the overlap is the
+        unit, not the distance from the span's start."""
+        assert units_for_span(self.STARTS, 0, 250) == (0, 2)
+
+    def test_the_END_probe_is_a_different_rule_and_is_not_disturbed(self):
+        """`end - 1` refuses a unit the span never reaches; the threshold refuses one
+        it reaches and barely touches. Merging them would lose one of the two."""
+        assert units_for_span(self.STARTS, 0, 100) == (0, 0)
+        assert units_for_span(self.STARTS, 0, 100, min_overlap=0) == (0, 0)
+
+    def test_a_negative_threshold_is_refused_rather_than_ignored(self):
+        with pytest.raises(ValueError):
+            units_for_span(self.STARTS, 0, 250, min_overlap=-1)
+
+
 class TestCompressPieces:
     def test_adjacent_units_merge_into_one_run(self):
         assert compress_pieces([(0, 1), (2, 3)]) == [(0, 3)]

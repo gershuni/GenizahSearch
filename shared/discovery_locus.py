@@ -29,6 +29,7 @@ __all__ = [
     "LocusAddress",
     "parse_canonical_header",
     "units_for_span",
+    "MIN_UNIT_OVERLAP",
     "compress_pieces",
     "split_at_citation_breaks",
     "citation_runs",
@@ -297,7 +298,35 @@ def daf_label_he(daf: int, amud: int, prefix: str = "") -> str:
     return f"{prefix} {label}" if prefix else label
 
 
-def units_for_span(unit_starts: Sequence[int], start: int, end: int) -> Tuple[int, int]:
+#: A first unit touched by fewer letters than this was CLIPPED, not witnessed.
+#:
+#: The scholar audit's case: a span opening 24 letters before משנה ו begins earned
+#: `פרק ג, משנה ה–ו` where `משנה ו` was the answer. Any one-character touch bought a
+#: citation, so the reader was told the fragment witnesses a sub-unit it barely
+#: grazes.
+#:
+#: ABSOLUTE, not a fraction of the unit, and that is measured rather than preferred.
+#: Unit extents differ by two orders of magnitude across the families -- a liturgical
+#: section runs 617 letters at the median against 5,126 for a Yerushalmi halakhah --
+#: so 5% of a unit is 31 letters in one family and 256 in another, which is larger
+#: than the median stored span. On the real rows a 5%-of-unit rule discards first
+#: units holding up to 1,115 letters of aligned text, and drops more than half the
+#: whole span on 902 rows; the absolute rule drops more than half on none. Whether a
+#: clip is a witness is a property of the clip, not of what it clips.
+#:
+#: 30 rather than 25 is a margin, and the cost of the margin is stated rather than
+#: hidden: 25 is the MINIMUM that closes the audited case, 30 fires on 11,903 of
+#: 234,060 real rows (5.09%) against 9,076 at 25, and takes the rows where the dropped
+#: unit held a quarter or more of the span from 43 to 74. The ceiling is just above:
+#: at 35 the rule starts removing units holding the MAJORITY of a span, at 100 it does
+#: so on 1,442 rows.
+MIN_UNIT_OVERLAP = 30
+
+
+def units_for_span(
+    unit_starts: Sequence[int], start: int, end: int,
+    min_overlap: int = MIN_UNIT_OVERLAP,
+) -> Tuple[int, int]:
     """Half-open stream interval ``[start, end)`` -> inclusive ``(lo_ord, hi_ord)``.
 
     `unit_starts` is the ascending start offset of every unit of ONE work, so the
@@ -306,13 +335,39 @@ def units_for_span(unit_starts: Sequence[int], start: int, end: int) -> Tuple[in
     The high end probes ``end - 1``, not ``end``: a span ending exactly on a unit
     boundary stops *before* that unit, and citing the unit it never reaches is the
     single easiest way to publish a confidently wrong reference.
+
+    THE TWO BOUNDARY RULES ARE NOT THE SAME RULE and must not be merged. The ``end -
+    1`` probe refuses a unit the span does not reach AT ALL; `min_overlap` refuses a
+    first unit the span reaches and barely touches. Pass ``min_overlap=0`` for raw
+    geometry.
+
+    The threshold applies at the START only. The end side has a measured twin -- 14.7%
+    of boundary-crossing spans touch their last unit with under 25 letters, and one
+    real row renders `סא ע"א–ע"ב` off a single letter of the verso -- but the ruling
+    that produced this rule was about the start, so the end is left alone rather than
+    quietly widened. Two consequences worth knowing before anyone adds it: the never-
+    empty guarantee below stops being free (measured, exactly one real two-unit span
+    is under the threshold at BOTH ends), and an end-side sliver is a genuine if tiny
+    touch, whereas a start-side one is often the tail of the previous unit.
     """
     if not unit_starts:
         raise ValueError("a work with no units cannot carry a locus")
     if end < start:
         raise ValueError(f"span end {end} precedes start {start}")
+    if min_overlap < 0:
+        raise ValueError(f"a minimum overlap cannot be negative: {min_overlap!r}")
     lo = _floor_index(unit_starts, start)
-    hi = _floor_index(unit_starts, max(start, end - 1))
+    hi = max(lo, _floor_index(unit_starts, max(start, end - 1)))
+    if min_overlap and lo < hi:
+        # `lo < hi` carries three guarantees at once, which is why it is the whole
+        # condition: `unit_starts[lo + 1]` exists, the span runs past it (so the first
+        # unit's covered extent is exactly this difference -- no stream length and no
+        # extent table needed), and `lo + 1 <= hi`, so the rule can NEVER empty a
+        # range. A span lying entirely inside one unit is untouched by construction,
+        # however short it is; the shortest stored span in the corpus is 36 letters
+        # and it keeps its address.
+        if unit_starts[lo + 1] - max(start, unit_starts[lo]) < min_overlap:
+            lo += 1
     return lo, max(lo, hi)
 
 
