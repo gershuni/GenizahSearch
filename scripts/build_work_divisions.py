@@ -35,6 +35,7 @@ import argparse
 import collections
 import functools
 import hashlib
+import html
 import json
 import os
 import pickle
@@ -82,6 +83,21 @@ _YTEXT_RE = re.compile(r"Ytext(\d+)")
 _JA_MARKER_RE = re.compile(r"\+([^\s~]*)~")
 #: The verse-analogue tier: too fine to cite, 76.3% of all JA markers.
 JA_LEAF_KINDS = frozenset({"פסוק", "פס'", "משנה"})
+#: How many levels of the enclosing chain a citation may carry.
+_JA_MAX_DEPTH = 3
+#: Editorial delimiters round a heading -- `{הקדמה}`, `<שופטים>`, some of them
+#: arriving HTML-escaped. They mark the heading, they are not part of its name.
+_MARKUP_CHARS = str.maketrans({c: None for c in "{}<>[]"})
+
+
+def _clean_marker_text(text: str) -> str:
+    """Strip the editorial delimiters a heading arrives wrapped in.
+
+    Entities are unescaped FIRST: some headings carry `&lt;…&gt;` rather than the
+    literal characters, and a citation reading `&lt;שופטים&gt;` is worse than one
+    reading `<שופטים>` -- it exposes the transport encoding to a reader.
+    """
+    return html.unescape(text).translate(_MARKUP_CHARS).strip().strip(",").strip()
 
 
 class Unit(NamedTuple):
@@ -394,12 +410,17 @@ def build_ja(path: str, ref_id: str, shipped: Dict[str, str]) -> Optional[WorkUn
             stack.pop()
         own = f"{kind} {numeral}".strip() if numeral else kind
         stack.append((rank, kind, own))
-        # The WHOLE enclosing chain, not just the nearest parent: a three-level
-        # document (tractate > chapter > mishnah) needs both ancestors to be unique.
-        label = ", ".join(entry[2] for entry in stack)
+        # The enclosing chain, not just the nearest parent: a three-level document
+        # (tractate > chapter > mishnah) needs both ancestors to be distinguishing.
+        # Capped at the innermost few, because the stack can legitimately grow past
+        # what a citation can carry -- a grammar treatise cites four biblical books
+        # in a row, each a heading of its own singleton kind, and equal rarity gives
+        # no reason to pop one for the next. `הקדמת המחבר, אלגזו אלאול, שופטים,
+        # מלכים א, ישעיהו, ירמיהו` is not a citation; the innermost levels are the
+        # ones that locate the text.
+        label = _clean_marker_text(", ".join(entry[2] for entry in stack[-_JA_MAX_DEPTH:]))
         units.append(Unit(len(units), stream_offset_for_raw(offsets, raw_pos),
-                          f"ja:{len(units)}", label.replace("{", "").replace("}", ""),
-                          len(units)))
+                          f"ja:{len(units)}", label, len(units)))
     units = _dedupe_ascending(units)
     units = _disambiguate_labels(units)
     units = [u._replace(citation_pos=i) for i, u in enumerate(units)]

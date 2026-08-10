@@ -23,6 +23,7 @@ from scripts.build_work_divisions import (
     Unit,
     WorkUnits,
     _chapter_units,
+    _clean_marker_text,
     _dedupe_ascending,
     _msource_files,
     _split_divisions,
@@ -171,6 +172,29 @@ class TestSefariaRenderKind:
 # ---------------------------------------------------------------------------
 # The Judeo-Arabic leaf tier
 # ---------------------------------------------------------------------------
+
+class TestCleanMarkerText:
+    def test_editorial_delimiters_are_not_part_of_the_heading(self):
+        assert _clean_marker_text("{הקדמה}") == "הקדמה"
+        assert _clean_marker_text("<שופטים>") == "שופטים"
+
+    def test_an_html_escaped_heading_does_not_reach_the_reader_escaped(self):
+        """Some headings arrive as entities; `&lt;שופטים&gt;` in a citation exposes
+        the transport encoding to a reader."""
+        assert _clean_marker_text("&lt;שופטים&gt;") == "שופטים"
+
+    def test_stripping_without_unescaping_first_would_have_left_the_entity(self):
+        """The defect, proven able to fail."""
+        markup = str.maketrans({c: None for c in "{}<>[]"})
+        assert "&lt;שופטים&gt;".translate(markup) == "&lt;שופטים&gt;"
+        assert _clean_marker_text("&lt;שופטים&gt;") == "שופטים"
+
+    def test_a_chain_keeps_its_separators(self):
+        assert _clean_marker_text("{הקדמה}, פרק א") == "הקדמה, פרק א"
+
+    def test_a_trailing_separator_left_by_an_empty_level_is_dropped(self):
+        assert _clean_marker_text("פרק א, {}") == "פרק א"
+
 
 class TestJaLeafKinds:
     def test_the_verse_tier_is_excluded_from_the_citable_grain(self):
