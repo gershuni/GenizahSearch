@@ -84,6 +84,8 @@ genizah.log
 backend.log
 web.log
 .claude/settings.local.json
+.claude/settings.local.json.*
+.claude/settings.local.*.json
 פקודת אריזה.txt
 .nicegui/
 data/*
