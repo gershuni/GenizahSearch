@@ -49,6 +49,22 @@ CRITICAL_DOCS = [
 # How old is "stale" (days)
 STALE_THRESHOLD_DAYS = 90
 
+# --- Context budget -----------------------------------------------------------
+# These files are read into EVERY AI session's context, so their size is a
+# RECURRING cost, not a one-time one. In August 2026 CLAUDE.md had grown to 76 KB
+# (56 KB of it a second copy of CHANGELOG.md) and docs/OPEN_ISSUES.md to 465 KB,
+# which CLAUDE.md itself ordered every session to read in full -- ~135k resident
+# tokens before any work began. Both were split; these ceilings stop the regrowth,
+# because a prose rule asking future sessions to move closed items out is advisory
+# and this is enforced.
+#
+# If a ceiling is hit, SPLIT the file (closed/historical content -> docs/archive/),
+# do not raise the number. scripts/split_open_issues.ps1 does it for the tracker.
+CONTEXT_BUDGET = [
+    ('CLAUDE.md', 40_000),
+    ('docs/OPEN_ISSUES.md', 180_000),
+]
+
 
 def print_header(text: str):
     """Print a section header."""
@@ -138,6 +154,26 @@ def check_stale_docs() -> list:
             except ValueError:
                 pass
 
+    return issues
+
+
+def check_context_budget() -> list:
+    """Check that always-loaded AI-context files stay under their size ceiling."""
+    issues = []
+    for rel_path, ceiling in CONTEXT_BUDGET:
+        full_path = ROOT_DIR / rel_path
+        if not full_path.exists():
+            issues.append(f"Missing: {rel_path} (context-budget target)")
+            continue
+        size = full_path.stat().st_size
+        if size > ceiling:
+            over = size - ceiling
+            issues.append(
+                f"{rel_path}: {size:,} bytes exceeds the {ceiling:,}-byte context "
+                f"ceiling by {over:,} (~{size // 4:,} tokens resident every session). "
+                f"Split closed/historical content into docs/archive/ -- do not raise "
+                f"the ceiling."
+            )
     return issues
 
 
@@ -243,7 +279,21 @@ def main():
     else:
         print_status(True, f"All documents updated within {STALE_THRESHOLD_DAYS} days")
 
-    # 4. Check for broken links
+    # 4. Check the always-loaded context files against their size ceiling
+    print("\n🧠 AI Context Budget")
+    print("-" * 40)
+    oversize = check_context_budget()
+    if oversize:
+        for o in oversize:
+            print_status(False, o)
+        total_issues += len(oversize)
+    else:
+        for rel_path, ceiling in CONTEXT_BUDGET:
+            size = (ROOT_DIR / rel_path).stat().st_size
+            pct = 100 * size / ceiling
+            print_status(True, f"{rel_path}: {size:,} / {ceiling:,} bytes ({pct:.0f}%)")
+
+    # 5. Check for broken links
     print("\n🔗 Internal Links")
     print("-" * 40)
     broken = check_broken_links()
@@ -267,6 +317,7 @@ def main():
         print(f"❌ Found {total_issues} blocking issue(s):")
         print(f"   - Missing documents: {len(missing)}")
         print(f"   - Outdated terms: {len(outdated)}")
+        print(f"   - Context-budget overruns: {len(oversize)}")
         print(f"   - Broken links: {len(broken)}")
         print("\nReview docs/DOCUMENTATION_MAINTENANCE.md for guidance.")
 

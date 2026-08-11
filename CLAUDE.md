@@ -2,6 +2,29 @@
 
 > This file provides context for AI assistants working on the GenizahSearch project.
 
+## How to work here
+
+**Start with `powershell -File scripts/init.ps1`.** It prints repo state, milestone state,
+the tracker's newest entry, recent `_tmp/` working notes, and every gate's exit code. Run it
+instead of reading documentation to re-orient.
+
+**When the owner is asking a question, describing a problem, or thinking out loud, the
+deliverable is your assessment — not a change.** Lead with the outcome: the first sentence
+answers "what happened". Then stop.
+
+**Before reporting progress, check each claim against a tool result from this session.**
+Report only what you can point at evidence for, and say plainly when something is unverified.
+"Tests pass" requires a test run in this session, not an inference from the diff.
+
+**Write shell commands to a `.ps1` file and run the file** rather than composing long inline
+commands. This is PowerShell 5.1: no `&&`, no ternary, and here-strings passed inline to a
+native command get mangled. Use `git commit -F <file>` for commit messages.
+
+**Keep the always-loaded files small.** `CLAUDE.md` and `docs/OPEN_ISSUES.md` are read every
+session, so their size is a recurring cost; `scripts/check_docs.py` fails the build if either
+passes its ceiling. When a ceiling is hit, split closed content into `docs/archive/` — never
+raise the number.
+
 ## Project Overview
 
 GenizahSearch is a collaborative research platform for the Cairo Genizah, featuring:
