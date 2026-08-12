@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Admin suppression of individual computed identifications (owner ruling,
 2026-08-06).
 
@@ -122,7 +122,7 @@ def test_the_not_in_clause_is_safe_because_the_column_is_the_primary_key():
     """
     db = _live_artifact()
     if db is None:
-        pytest.skip("no live discovery artifact in this checkout")
+        pytest.skip(_LIVE_ARTIFACT_SKIP)
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
         columns = {
@@ -145,13 +145,59 @@ def test_the_not_in_clause_is_safe_because_the_column_is_the_primary_key():
 # ---------------------------------------------------------------------------
 
 
+#: Why the live-artifact tests did not run, when they did not. Set by
+#: `_live_artifact`; read by the skip messages so "did not run" always says
+#: WHICH reason, and a stale artifact never reads as an absent one.
+_LIVE_ARTIFACT_SKIP = "no live discovery artifact in this checkout"
+
+#: Columns the CURRENT read paths select, which a pre-CD-batch artifact lacks.
+#: Checked because these tests run the real `_build_findings_query` against
+#: whatever happens to be staged locally.
+_REQUIRED_LIVE_COLUMNS = {"rendered_relation"}
+
+
 def _live_artifact():
-    """The served artifact, or None. Read-only, never modified."""
+    """The served artifact, or None. Read-only, never modified.
+
+    Also refuses an artifact whose SCHEMA predates the columns the queries under
+    test select. Existence was the only check until 2026-08-12, and once the
+    C-track read paths began selecting `di.rendered_relation` unconditionally, a
+    checkout serving a pre-batch artifact got `sqlite3.OperationalError: no such
+    column` raised from inside a test body -- a red suite that says nothing about
+    the code and everything about which file happens to sit in
+    `discovery_data/live`.
+
+    The same treatment the real-artifact expansion probe got in step 3d: check
+    for the COLUMN, not merely the tables, and skip with a reason that NAMES the
+    staleness instead of raising. A pre-batch artifact is refused by the runtime
+    loader too (`web/discovery_assets.py::_REQUIRED_COLUMNS`), so skipping here
+    agrees with what production would do rather than papering over it.
+    """
+    global _LIVE_ARTIFACT_SKIP
     live = REPO_ROOT / "discovery_data" / "live"
     if not live.is_dir():
+        _LIVE_ARTIFACT_SKIP = "no live discovery artifact in this checkout"
         return None
     candidates = sorted(live.glob("discovery-v1-*.db"))
-    return candidates[0] if candidates else None
+    if not candidates:
+        _LIVE_ARTIFACT_SKIP = "no live discovery artifact in this checkout"
+        return None
+    db = candidates[0]
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        present = {r[1] for r in conn.execute(
+            "PRAGMA table_info(discovery_identification)")}
+    finally:
+        conn.close()
+    missing = _REQUIRED_LIVE_COLUMNS - present
+    if missing:
+        _LIVE_ARTIFACT_SKIP = (
+            f"the staged live artifact ({db.name}) predates the 2026-08-12 CD "
+            f"batch -- missing discovery_identification.{', '.join(sorted(missing))}. "
+            "Re-stage a current asset to exercise these tests.")
+        return None
+    _LIVE_ARTIFACT_SKIP = "no live discovery artifact in this checkout"
+    return db
 
 
 def test_suppressing_rows_reduces_the_TOTAL_by_exactly_that_many():
@@ -164,7 +210,7 @@ def test_suppressing_rows_reduces_the_TOTAL_by_exactly_that_many():
     """
     db = _live_artifact()
     if db is None:
-        pytest.skip("no live discovery artifact in this checkout")
+        pytest.skip(_LIVE_ARTIFACT_SKIP)
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -195,7 +241,7 @@ def test_a_suppressed_row_is_absent_from_the_ROWS_as_well_as_the_count():
     and "the row is gone" are different claims, and a bug could satisfy one."""
     db = _live_artifact()
     if db is None:
-        pytest.skip("no live discovery artifact in this checkout")
+        pytest.skip(_LIVE_ARTIFACT_SKIP)
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -596,7 +642,7 @@ def test_the_manuscript_axis_pins_children_to_exactly_one_manuscript():
 
     db = _live_artifact()
     if db is None:
-        pytest.skip("no live discovery artifact in this checkout")
+        pytest.skip(_LIVE_ARTIFACT_SKIP)
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -635,7 +681,7 @@ def test_the_manuscript_axis_ACTUALLY_NARROWS_and_is_not_silently_dropped():
 
     db = _live_artifact()
     if db is None:
-        pytest.skip("no live discovery artifact in this checkout")
+        pytest.skip(_LIVE_ARTIFACT_SKIP)
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
