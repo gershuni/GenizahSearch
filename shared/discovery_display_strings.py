@@ -119,20 +119,62 @@ _DOT = "·"
 
 
 # ---------------------------------------------------------------------------
-# Relation chips (D-21 match framing). The stored `claim_type` vocabulary is
-# this table's KEY set; its display labels are the only thing that leaves.
+# Relation chips. The KEY set is the RENDERED-RELATION vocabulary
+# (`ids.RENDERED_RELATIONS`), not the stored `claim_type` vocabulary; its
+# display labels are the only thing that leaves.
+#
+# ⟨AMENDED 2026-08-12 -- C-track, owner ruling 2026-08-11, the "softer
+# register"; `docs/specs/discovery-relation-matrix-v1.md` §1 is the frozen
+# table these strings come from⟩
+#
+# Two changes, one of which is a correction rather than a rewording:
+#
+#   * "Direct match" / "התאמה ישירה" is RETIRED. It was the label on 28,462 of
+#     28,464 main-pool rows -- a chip that says the same thing about almost
+#     everything is not telling a reader anything, and "direct" overclaims what
+#     a text match establishes. It becomes "Matches this work": a claim about
+#     TEXT, not about identity.
+#   * "Partial match" for `quotes_this_work` was a MISNOMER, not merely a
+#     stiff phrase. The row means "this page includes a quotation OF the work",
+#     which is not a partial version of matching it. "Includes a quotation".
+#     (Note the noun: the honesty gate prohibits the bare word "quotes" as
+#     relation wording -- `_PROHIBITED_PHRASES` -- so the frozen vocabulary
+#     says "quotation", and this is one reason it does.)
+#
+# The keys are re-based on the rendered vocabulary because that is what callers
+# will pass once every surface reads `rendered_relation`. It is safe during the
+# transition: `direct_witness`, `quotes_this_work` and `shared_text` are
+# spelled identically in both vocabularies, so a caller still passing a raw
+# `claim_type` lands on the same row it always did.
+#
+# `uncertain` MUST be present before any surface reads the matrix column.
+# `relation_chip` raises on an unknown key, and `findings_rows.py` wraps the
+# call in `except ValueError` -- so a missing entry would not fail loudly
+# there, it would silently drop the chip from every fail-closed row.
+#
+# `work_quotes_page` is DELIBERATELY ABSENT. Assigning its reader strings is an
+# owner item deferred until a validated direction signal ships (§1), and the
+# matrix provably never emits it in v1 (asserted in
+# `tests/test_discovery_relation_matrix.py`). Absence therefore means "this
+# cannot reach a reader", and the raise is the proof rather than a gap.
 # ---------------------------------------------------------------------------
 
 _RELATION_CHIP: Dict[str, Dict[str, str]] = {
-    ids.CLAIM_TYPE_DIRECT_WITNESS: {"en": "Direct match", "he": "התאמה ישירה"},
-    ids.CLAIM_TYPE_QUOTES_THIS_WORK: {"en": "Partial match", "he": "התאמה חלקית"},
-    ids.CLAIM_TYPE_SHARED_TEXT: {"en": "Shared text", "he": "טקסט משותף"},
+    ids.RENDERED_RELATION_DIRECT_WITNESS: {
+        "en": "Matches this work", "he": "מתאים לחיבור"},
+    ids.RENDERED_RELATION_QUOTES_THIS_WORK: {
+        "en": "Includes a quotation", "he": "כולל ציטוט"},
+    ids.RENDERED_RELATION_SHARED_TEXT: {
+        "en": "Shares text with this work", "he": "חולק טקסט"},
+    ids.RENDERED_RELATION_UNCERTAIN: {
+        "en": "Needs review", "he": "דורש בדיקה"},
 }
 
 
 def relation_chip(relation_kind: str, lang: str = "en") -> str:
-    """The reader-facing chip for a stored relation kind -- "Direct match" /
-    "Partial match" / "Shared text" and their Hebrew equivalents.
+    """The reader-facing chip for a rendered relation -- "Matches this work" /
+    "Includes a quotation" / "Shares text with this work" / "Needs review" and
+    their Hebrew equivalents.
 
     Raises `ValueError` on an unknown kind: a blank chip on a real row is a
     worse failure than a loud one, because it silently hides what kind of

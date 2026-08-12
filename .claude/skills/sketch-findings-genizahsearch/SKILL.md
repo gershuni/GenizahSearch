@@ -37,7 +37,7 @@ page's identifications and the manuscript picture get **equal** weight.
 
 Honesty constraints are absolute and greppable: no precision percentage, no confidence interval, no
 human-review badge, and none of "copy of" / "quotes" / "witness of" in display. Relation kinds are
-labelled with match-framing ("Direct match / Partial match / Shared text"). Coverage is shown only for
+labelled with match-framing ("Matches this work / Includes a quotation / Shares text with this work / Needs review" — the softer register, owner ruling 2026-08-11). Coverage is shown only for
 the direct family and always labelled as matched-letter coverage. **A negated use still violates the
 rule** — "not proof that a folio is a *copy of* the work" is a violation, because a grep-based CI guard
 cannot see the negation.
@@ -45,7 +45,7 @@ cannot see the negation.
 Evidence quality is displayed as **two buckets — "main pool" / "more matches"** on every discovery
 surface (owner, 2026-08-01). The split is **not a new rule**: it is
 `shared/discovery_band_labels.py::is_default_eligible()`, which already exists. Frozen band labels
-survive as tooltips; the visible chip on a row states the **relation** ("Direct match / Partial match /
+survive as tooltips; the visible chip on a row states the **relation** ("Matches this work / Includes a quotation /
 Shared text"). Novelty is voiced **"Candidates for new finds"**, asserting candidacy only; "New
 discovery" was offered and declined, because it stacks two unearned claims (that the match is correct,
 and that it is new) on a row with no human review until Phase 137.

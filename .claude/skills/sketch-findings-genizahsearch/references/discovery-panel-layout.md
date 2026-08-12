@@ -32,7 +32,7 @@ between header and body rather than being buried as fine print or shouted as a w
 (needed: one sampled manuscript has 61 works elsewhere).
 
 **One relation filter** in the panel header, AND-composed with the other controls, empty set = all.
-Labels use match-framing only — **"Direct match / Partial match / Shared text"**. The owner explicitly
+Labels use match-framing only — **"Matches this work / Includes a quotation / Shares text with this work / Needs review"** (softer register, owner ruling 2026-08-11; the retired "Direct match"/"Partial match" pair must NOT come back — see `docs/specs/discovery-relation-matrix-v1.md` §1). The owner explicitly
 declined "Citations", so D-21 is unamended and the prohibited display words never appear. (Sketch 001
 built a relation **+ tier** filter; the tier half is deleted — see *Two buckets* below.)
 
@@ -48,7 +48,7 @@ building either surface. The parts that bear on the panel:
   confidence filter; that is now wrong, because there is no confidence axis to filter on. Quality is the
   bucket (a default plus a toggle), kind is the relation filter. The panel ends up with **one filter and
   one toggle** — simpler than either previous plan.
-- **The row chip shows the relation, not a confidence level** — "Direct match" / "Partial match" /
+- **The row chip shows the relation, not a confidence level** — "Matches this work" / "Includes a quotation" /
   "Shared text", with the frozen band label on hover.
 - **`confOf()` and `STRONG_BANDS` must not be copied from sketch 003**, and **nothing may be built on
   `density`** — it is edit-distance, not coverage, and the repo warns that treating it as coverage
@@ -106,7 +106,7 @@ The meta line's first element is the **relation chip**, carrying the frozen band
 same markup as the findings page:
 
 ```html
-<span class="rel" title="Algorithmic match — tier A">Direct match</span>
+<span class="rel" title="Algorithmic match — tier A">Matches this work</span>
 ```
 
 Keep it visually neutral. Colour-coding the chip by relation kind reintroduces per-tier styling through

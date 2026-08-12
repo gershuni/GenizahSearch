@@ -200,23 +200,81 @@ def flatten_strings(value):
 # ---------------------------------------------------------------------------
 
 def test_relation_chip_returns_match_framing_and_never_a_stored_key():
-    assert ds.relation_chip(ids.CLAIM_TYPE_DIRECT_WITNESS, "en") == "Direct match"
-    assert ds.relation_chip(ids.CLAIM_TYPE_QUOTES_THIS_WORK, "en") == "Partial match"
-    assert ds.relation_chip(ids.CLAIM_TYPE_SHARED_TEXT, "en") == "Shared text"
+    """The softer register (owner ruling 2026-08-11), pinned pair by pair
+    against `docs/specs/discovery-relation-matrix-v1.md` §1."""
+    assert ds.relation_chip(ids.RENDERED_RELATION_DIRECT_WITNESS, "en") == (
+        "Matches this work")
+    assert ds.relation_chip(ids.RENDERED_RELATION_QUOTES_THIS_WORK, "en") == (
+        "Includes a quotation")
+    assert ds.relation_chip(ids.RENDERED_RELATION_SHARED_TEXT, "en") == (
+        "Shares text with this work")
+    assert ds.relation_chip(ids.RENDERED_RELATION_UNCERTAIN, "en") == "Needs review"
 
-    assert ds.relation_chip(ids.CLAIM_TYPE_DIRECT_WITNESS, "he") == "התאמה ישירה"
-    assert ds.relation_chip(ids.CLAIM_TYPE_QUOTES_THIS_WORK, "he") == "התאמה חלקית"
-    assert ds.relation_chip(ids.CLAIM_TYPE_SHARED_TEXT, "he") == "טקסט משותף"
+    assert ds.relation_chip(ids.RENDERED_RELATION_DIRECT_WITNESS, "he") == "מתאים לחיבור"
+    assert ds.relation_chip(ids.RENDERED_RELATION_QUOTES_THIS_WORK, "he") == "כולל ציטוט"
+    assert ds.relation_chip(ids.RENDERED_RELATION_SHARED_TEXT, "he") == "חולק טקסט"
+    assert ds.relation_chip(ids.RENDERED_RELATION_UNCERTAIN, "he") == "דורש בדיקה"
 
     for lang in LANGS:
-        for key in STORED_RELATION_KEYS:
+        for key in sorted(ids.RENDERED_RELATIONS - {ids.RENDERED_RELATION_WORK_QUOTES_PAGE}):
             chip = ds.relation_chip(key, lang)
-            for stored in STORED_RELATION_KEYS:
+            for stored in tuple(STORED_RELATION_KEYS) + tuple(ids.RENDERED_RELATIONS):
                 assert stored not in chip
 
     # An unknown relation kind must raise, never render a blank chip.
     with pytest.raises(ValueError):
         ds.relation_chip("no_such_kind", "en")
+
+
+def test_the_retired_labels_are_gone_from_every_chip():
+    """A regression guard rather than a restatement of the test above. "Direct
+    match" sat on 28,462 of 28,464 main-pool rows and "Partial match" was an
+    outright misnomer for a quotation; either creeping back is the kind of edit
+    that reads as harmless in a diff."""
+    retired = ("Direct match", "Partial match", "התאמה ישירה", "התאמה חלקית")
+    for lang in LANGS:
+        for key in sorted(ids.RENDERED_RELATIONS - {ids.RENDERED_RELATION_WORK_QUOTES_PAGE}):
+            chip = ds.relation_chip(key, lang)
+            for gone in retired:
+                assert gone != chip, f"{key}/{lang} still renders the retired {gone!r}"
+
+
+def test_the_quotation_chip_avoids_the_wording_the_honesty_gate_prohibits():
+    """Not a style preference: `discovery_honesty_gate._PROHIBITED_PHRASES`
+    forbids the bare word "quotes" as relation wording, so the frozen
+    vocabulary says "quotation". If someone "simplifies" the label back to
+    "Quotes this work", every panel render-smoke test fails — this says why in
+    one place instead of leaving the next person to rediscover it."""
+    import re
+
+    en = ds.relation_chip(ids.RENDERED_RELATION_QUOTES_THIS_WORK, "en")
+    assert re.search(r"\bquotes\b", en.lower()) is None
+    assert re.search(r"\bcopy of\b", en.lower()) is None
+    assert re.search(r"\bwitness of\b", en.lower()) is None
+
+
+def test_work_quotes_page_has_no_strings_and_raises():
+    """Deliberate absence, per §1: assigning its reader strings is an owner item
+    deferred until a validated direction signal ships, and the matrix provably
+    never emits it in v1. The raise IS the proof that it cannot reach a reader;
+    adding a placeholder label here would quietly remove that proof."""
+    for lang in LANGS:
+        with pytest.raises(ValueError):
+            ds.relation_chip(ids.RENDERED_RELATION_WORK_QUOTES_PAGE, lang)
+
+
+def test_every_state_the_matrix_can_emit_has_a_chip():
+    """The load-bearing pairing: `relation_chip` raises on an unknown key and
+    `web/components/findings_rows.py` wraps the call in `except ValueError`, so
+    a missing entry does NOT fail loudly on a surface — it silently drops the
+    chip. `uncertain` is the state this would have hit, on every fail-closed
+    row, the moment a surface started reading the matrix column."""
+    from shared import discovery_relation_matrix as matrix
+
+    emittable = ids.RENDERED_RELATIONS - matrix.NEVER_RENDERED_IN_V1
+    for lang in LANGS:
+        for state in sorted(emittable):
+            assert ds.relation_chip(state, lang)
 
 
 # ---------------------------------------------------------------------------

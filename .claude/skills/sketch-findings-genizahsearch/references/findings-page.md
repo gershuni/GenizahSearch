@@ -75,7 +75,7 @@ group is same-work claims — it is the same kinds of match at lower evidence, n
    filter; it is a default plus a "show more matches" toggle, the same shape the panel already uses.
 2. **The default result count changes** from 65,200 to the main pool (46,644 post-rebuild). Say so in
    the result bar rather than silently narrowing.
-3. **This page now needs the relation filter the panel has** — "Direct match / Partial match / Shared
+3. **This page now needs the relation filter the panel has** — "Matches this work / Includes a quotation / Shares
    text". Removing the confidence chips otherwise leaves *no* way to filter by kind of match, and at
    78 / 9 / 13 that is a filter readers will want. It is also genuinely orthogonal to the bucket
    (kind vs grading quality), which the deleted chips were not.
@@ -289,7 +289,7 @@ The chip carries the frozen band label as its tooltip, which is how the display-
 reversible — the precise label is one hover away, never lost:
 
 ```html
-<span class="rel" title="Algorithmic match — tier A">Direct match</span>
+<span class="rel" title="Algorithmic match — tier A">Matches this work</span>
 ```
 
 Bucket membership comes from the shared predicate, never a local reimplementation:
