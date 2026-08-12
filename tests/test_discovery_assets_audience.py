@@ -262,6 +262,16 @@ _AMENDMENT_COLUMNS = {
         "main_pool", "main_pool_reason", "best_band_rank", "page_count",
         "max_coverage_ppm", "relation_kind", "novelty_status",
         "divergence_correctness", "assertion_visibility", "identity_visibility",
+        # ⟨PROMOTED 2026-08-12, C-track step 3c⟩ From the LATER Amendment
+        # 2026-08-12, where it is marker-conditional. It is unconditionally
+        # required now because three read paths SELECT it unconditionally, so an
+        # asset without it does not degrade -- it loads, reports itself
+        # available, and answers every panel and findings read with
+        # `unavailable / query_failed` (measured on the served pre-batch asset).
+        # This mirror is therefore no longer "exactly the 2026-08-02 amendment";
+        # it is "every column a read path cannot run without", which is what the
+        # contract was always for.
+        "rendered_relation",
     }),
     "manuscript_display": frozenset({
         "sys_id", "library_code", "library_sort_key",

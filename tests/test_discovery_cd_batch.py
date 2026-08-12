@@ -387,20 +387,47 @@ def test_loader_refuses_marker_present_but_table_missing(tmp_path, monkeypatch):
         _restore_loader_state()
 
 
+#: Omitting `rendered_relation` now takes BOTH knobs. Since C-track step 3c the
+#: column is created at the POST-REBUILD step (the loader requires it
+#: unconditionally, so the shape the fixture calls "what the loader accepts"
+#: carries it), and it is added again at the CD-batch step. Asking only the
+#: second knob leaves the column present and turns a refusal test green for the
+#: wrong reason.
+_OMIT_RENDERED_RELATION = {
+    "omit_columns": [("discovery_identification", "rendered_relation")],
+    "post_rebuild_kwargs": {
+        "omit_columns": [("discovery_identification", "rendered_relation")]},
+}
+
+
 def test_loader_refuses_marker_present_but_column_missing(tmp_path, monkeypatch):
     try:
-        fixture_mod.materialize_cd_batch_sidecar(
-            tmp_path, omit_columns=[("discovery_identification", "rendered_relation")]
-        )
+        fixture_mod.materialize_cd_batch_sidecar(tmp_path, **_OMIT_RENDERED_RELATION)
         assert _load_from(tmp_path, monkeypatch) is False
     finally:
         monkeypatch.undo()
         _restore_loader_state()
 
 
-def test_loader_accepts_pre_batch_asset_without_marker(tmp_path, monkeypatch):
-    """The rollback-safety half of (U): NO marker -> none of the batch is
-    required, so the currently-deployed asset keeps loading under new code."""
+def test_the_batch_stays_marker_conditional_except_for_the_column_surfaces_read(
+        tmp_path, monkeypatch):
+    """(U)'s rollback half, AMENDED 2026-08-12 by C-track step 3c.
+
+    As written, this asserted that a pre-batch asset keeps loading -- no marker,
+    none of the batch required -- so the deployed asset would survive new code.
+    That property stopped being reachable the moment three read paths began
+    SELECTing `discovery_identification.rendered_relation`: such an asset loads,
+    reports itself available, and then answers every claims / manuscript-pane /
+    findings read with `unavailable / query_failed`. Measured on the served
+    pre-batch asset, not inferred.
+
+    So the column is now unconditionally required and a pre-batch asset is
+    REFUSED -- discovery hides cleanly instead of erroring on first query, which
+    is the loader's stated job. Everything else in the batch stays
+    marker-conditional, which is the half of (U) that still holds: the second
+    case below omits the marker, every batch TABLE and the count meta keys, and
+    still loads.
+    """
     try:
         fixture_mod.materialize_cd_batch_sidecar(tmp_path, omit_marker=True,
                                                  omit_tables=list(
@@ -409,9 +436,29 @@ def test_loader_accepts_pre_batch_asset_without_marker(tmp_path, monkeypatch):
                                                      ("discovery_identification", "routing_reason"),
                                                      ("discovery_identification", "rendered_relation"),
                                                  ],
+                                                 post_rebuild_kwargs=_OMIT_RENDERED_RELATION[
+                                                     "post_rebuild_kwargs"],
                                                  omit_meta_keys=list(
                                                      fixture_mod.CD_BATCH_COUNT_META_KEY_BY_TABLE.values()))
-        assert _load_from(tmp_path, monkeypatch) is True
+        assert _load_from(tmp_path, monkeypatch) is False, (
+            "an asset without `rendered_relation` must not reach a read path "
+            "that selects it")
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+    try:
+        fixture_mod.materialize_cd_batch_sidecar(tmp_path, omit_marker=True,
+                                                 omit_tables=list(
+                                                     fixture_mod.CD_BATCH_TABLE_COLUMNS),
+                                                 omit_columns=[
+                                                     ("discovery_identification", "routing_reason"),
+                                                 ],
+                                                 omit_meta_keys=list(
+                                                     fixture_mod.CD_BATCH_COUNT_META_KEY_BY_TABLE.values()))
+        assert _load_from(tmp_path, monkeypatch) is True, (
+            "the locus tables, the count meta keys and `routing_reason` are "
+            "still marker-conditional -- no read path selects any of them")
     finally:
         monkeypatch.undo()
         _restore_loader_state()

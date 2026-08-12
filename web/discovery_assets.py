@@ -218,6 +218,22 @@ _REQUIRED_COLUMNS: Dict[str, frozenset] = {
         "page_count",
         "max_coverage_ppm",
         "relation_kind",
+        #: ⟨PROMOTED 2026-08-12 -- C-track step 3c⟩ Also listed in
+        #: `_AMENDMENT_2026_08_12_COLUMNS` below, where it is marker-CONDITIONAL.
+        #: It is required UNCONDITIONALLY here because three read paths now
+        #: SELECT it unconditionally (the claims query, the manuscript-pane
+        #: query, the findings query), so an asset without it does not degrade
+        #: -- it loads, reports itself available, and then answers every panel
+        #: and findings read with `unavailable / query_failed`. MEASURED on the
+        #: currently-served pre-batch asset, not inferred.
+        #:
+        #: That retires half of the amendment's rollback story, and deliberately:
+        #: "the deployed asset keeps loading under new code" stopped being
+        #: reachable the moment the read paths took a dependency on the column.
+        #: The remaining choice was between a clean hide and a visible outage on
+        #: every panel, and this file's whole stated job is to prevent "a live
+        #: nav entry that errors on its first query".
+        "rendered_relation",
         "novelty_status",
         "divergence_correctness",
         "assertion_visibility",

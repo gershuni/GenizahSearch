@@ -88,6 +88,16 @@ NEW_TABLE_COLUMNS: Dict[str, Tuple[Tuple[str, str], ...]] = {
         ("page_count", "INTEGER NOT NULL"),
         ("max_coverage_ppm", "INTEGER"),
         ("relation_kind", "TEXT NOT NULL"),
+        # ⟨ADDED 2026-08-12, C-track step 3c⟩ Strictly a column of the LATER
+        # Amendment 2026-08-12, and it sits in this 2026-08-02-shaped list on
+        # purpose: the loader now requires it UNCONDITIONALLY (three read paths
+        # select it), so "the shape the loader accepts" -- which is what this
+        # helper exists to build -- includes it regardless of amendment. A
+        # DEFAULT so every existing row-writer keeps working, and the
+        # fail-closed state as that default, because a fixture row that invented
+        # `direct_witness` would be a fixture asserting a relation nobody
+        # computed.
+        ("rendered_relation", "TEXT NOT NULL DEFAULT 'uncertain'"),
         ("novelty_status", "TEXT NOT NULL"),
         ("divergence_correctness", "TEXT"),
         ("assertion_visibility", "TEXT NOT NULL"),
