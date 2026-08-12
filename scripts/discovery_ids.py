@@ -162,6 +162,28 @@ ROUTING_REASONS = frozenset({
     ROUTING_REASON_GEN2_ROUTER_NOT_SHIPPED,
 })
 
+# The Contract-1 rendered-relation states (schema Amendment 2026-08-12 (O);
+# semantics frozen in docs/specs/discovery-relation-matrix-v1.md §1-2). This is
+# the DISPLAY verdict stored on discovery_identification.rendered_relation --
+# claim_type / routing_status / every other stored column never change.
+# `work_quotes_page` renders only where a validated direction signal supports
+# it; no such signal exists today, so it always falls to shared_text.
+RENDERED_RELATION_DIRECT_WITNESS = "direct_witness"
+RENDERED_RELATION_SHARED_TEXT = "shared_text"
+RENDERED_RELATION_QUOTES_THIS_WORK = "quotes_this_work"
+RENDERED_RELATION_WORK_QUOTES_PAGE = "work_quotes_page"
+RENDERED_RELATION_UNCERTAIN = "uncertain"
+RENDERED_RELATIONS = frozenset({
+    RENDERED_RELATION_DIRECT_WITNESS,
+    RENDERED_RELATION_SHARED_TEXT,
+    RENDERED_RELATION_QUOTES_THIS_WORK,
+    RENDERED_RELATION_WORK_QUOTES_PAGE,
+    RENDERED_RELATION_UNCERTAIN,
+})
+# The matrix's missing-input posture: until C-track lands the matrix
+# computation, every build stores this value (Amendment 2026-08-12 (O)).
+RENDERED_RELATION_FAIL_CLOSED = RENDERED_RELATION_UNCERTAIN
+
 MERGE_BASIS_OXFORD_PART = "oxford_part"
 MERGE_BASIS_PHYSICAL_JOIN = "physical_join"
 MERGE_BASES = frozenset({MERGE_BASIS_OXFORD_PART, MERGE_BASIS_PHYSICAL_JOIN})

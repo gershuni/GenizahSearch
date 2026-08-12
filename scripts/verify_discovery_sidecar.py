@@ -218,7 +218,22 @@ def check_column_allowlist(conn: sqlite3.Connection) -> List[str]:
             if col_lower in RESTRICTED_TO_WORKS_COLUMNS and tbl != "works":
                 violations.append(f"{tbl}.{col}: title/author/genre column only allowed on works")
 
-    for tbl, col in (("works", "work_id"), ("works", "canonical_work_id"), ("discovery_claim", "work_id")):
+    id_sweep = (
+        ("works", "work_id"),
+        ("works", "canonical_work_id"),
+        ("discovery_claim", "work_id"),
+        # CD batch / schema Amendment 2026-08-12: the locus + Contract-1 input
+        # tables key on opaque ids too. The raw locus_ref_id ('M:', 'J:',
+        # 'REF2:' shaped) is deliberately NOT stored in the asset -- the
+        # D-track import re-keys via the crosswalk -- and this sweep is what
+        # keeps that true rather than merely intended.
+        ("locus_work", "work_id"),
+        ("discovery_region_map", "work_id"),
+        ("discovery_curated_quoter", "canonical_work_id"),
+    )
+    for tbl, col in id_sweep:
+        if not _has_table(conn, tbl):
+            continue
         cur.execute(f'SELECT DISTINCT "{col}" FROM "{tbl}"')
         for (val,) in cur.fetchall():
             if val is not None and str(val).startswith(_RAW_WORK_ID_PREFIXES):
@@ -1261,6 +1276,9 @@ _AUTHORIZED_INDEXES = frozenset({
     "ix_discovery_identification_canonical_work_id",
     "ix_discovery_identification_sys_id",
     "ix_manuscript_display_sort",
+    # CD batch / schema Amendment 2026-08-12 (N)/(Q).
+    "ix_locus_unit_part",
+    "ix_stratum_membership_identification",
 })
 # `manuscript_display` is sourced ONLY from libraries.csv and carries NO work
 # title, NO reference text and NO locus (T-136-11-03).
@@ -1749,6 +1767,19 @@ _GATE_BEARING_TABLES = frozenset({
     "discovery_routing_audit",
     "discovery_identification",
     "manuscript_display",
+    # CD batch / schema Amendment 2026-08-12: same hazard class. An absent
+    # locus_unit silently no-ops the Contract-0 basis gate; an absent
+    # region map / curated list makes matrix steps 3/4 read as "never fires"
+    # with no violation anywhere; absent Contract-4 tables no-op the
+    # withholding gates. The batch builder creates all seven unconditionally,
+    # so absence on a current asset is a build defect, never a profile.
+    "locus_work",
+    "locus_unit",
+    "locus_edition",
+    "discovery_region_map",
+    "discovery_curated_quoter",
+    "discovery_stratum_membership",
+    "discovery_withholding",
 })
 
 
@@ -1834,6 +1865,124 @@ def check_frame_content_hash(
 
 
 # ---------------------------------------------------------------------------
+# 9. CD batch (schema Amendment 2026-08-12) -- the amendment contract + the
+#    Contract-0 coordinate-basis pin
+# ---------------------------------------------------------------------------
+
+_AMENDMENT_2026_08_12_IDENTIFICATION_COLUMNS = ("routing_reason", "rendered_relation")
+
+# MIRRORED from the builder's AMENDMENT_2026_08_12_COUNT_TABLES, deliberately
+# NOT imported (the verifier's standing independence convention -- a builder
+# bug must be visible to the verifier that exists to catch it; drift between
+# the two literals is guarded by test).
+_AMENDMENT_2026_08_12_COUNT_TABLES = (
+    "locus_work",
+    "locus_unit",
+    "locus_edition",
+    "discovery_region_map",
+    "discovery_curated_quoter",
+    "discovery_stratum_membership",
+    "discovery_withholding",
+)
+
+
+def check_amendment_2026_08_12_contract(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """The CD batch's own presence-and-vocabulary contract: the unconditional
+    `locus_schema_version` marker, the two `discovery_identification` columns
+    with their closed vocabularies, and one release-contract count per new
+    table (zero is a legitimate count -- the batch creates them empty; the
+    count keys keep a half-imported asset from passing as complete).
+
+    The row-for-row rendered_relation RECOMPUTE-equality gate is C-track's,
+    landing with the matrix implementation itself; until then every build
+    stores the fail-closed state and this check pins vocabulary + presence."""
+    violations: List[str] = []
+    if "locus_schema_version" not in meta:
+        violations.append(
+            "meta.locus_schema_version absent -- a current asset must carry the "
+            "Amendment 2026-08-12 marker (the builder writes it unconditionally)"
+        )
+    for column in _AMENDMENT_2026_08_12_IDENTIFICATION_COLUMNS:
+        if not _has_column(conn, "discovery_identification", column):
+            violations.append(
+                f"discovery_identification.{column}: column absent (Amendment 2026-08-12)"
+            )
+    if not violations:
+        stored_relations = {
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT rendered_relation FROM discovery_identification")
+        }
+        bad_relations = stored_relations - ids.RENDERED_RELATIONS
+        if bad_relations:
+            violations.append(
+                f"discovery_identification.rendered_relation: {sorted(bad_relations)} "
+                "outside the frozen five-state vocabulary"
+            )
+        stored_reasons = {
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT routing_reason FROM discovery_identification")
+        }
+        bad_reasons = stored_reasons - ids.ROUTING_REASONS
+        if bad_reasons:
+            violations.append(
+                f"discovery_identification.routing_reason: {sorted(bad_reasons)} "
+                "outside the frozen routing_reason vocabulary"
+            )
+    for table in _AMENDMENT_2026_08_12_COUNT_TABLES:
+        key = f"expected_rows_{table}"
+        if not _has_table(conn, table):
+            continue  # check_gate_bearing_tables_present already reports absence
+        (actual,) = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+        expected = meta.get(key)
+        try:
+            expected_int = int(expected)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            violations.append(f"meta.{key} missing or non-integer (actual count {actual})")
+            continue
+        if expected_int != actual:
+            violations.append(f"meta.{key}={expected_int} != actual {table} count {actual}")
+    return violations
+
+
+def check_locus_reference_basis(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """Contract 0 (Amendment 2026-08-12 (T)): the bake's reference-corpus hash
+    and the locus build's must be THE SAME STREAM, asserted -- not assumed.
+
+    - Both pins present -> they must be EQUAL (even with an empty locus table:
+      an asset carrying contradictory pins is wrong somewhere).
+    - locus_unit populated -> BOTH pins are REQUIRED. A populated address
+      table with an unpinned basis is exactly the silent-refresh hazard the
+      preflight measured (214,132 offsets agreeing empirically, nothing
+      contractually).
+    - locus_unit empty and a pin missing -> nothing asserted yet, no
+      violation (the pre-D-track batch state)."""
+    violations: List[str] = []
+    bake_pin = meta.get("reference_corpus_sha256")
+    locus_pin = meta.get("locus_reference_corpus_sha256")
+    if bake_pin is not None and locus_pin is not None and bake_pin != locus_pin:
+        violations.append(
+            "Contract 0: meta.reference_corpus_sha256 != meta.locus_reference_corpus_sha256 "
+            "-- the evidence offsets and the locus units index DIFFERENT reference streams; "
+            "every citation resolved across them is unsound"
+        )
+    if _has_table(conn, "locus_unit"):
+        (n_units,) = conn.execute("SELECT COUNT(*) FROM locus_unit").fetchone()
+        if n_units:
+            if bake_pin is None:
+                violations.append(
+                    "Contract 0: locus_unit is populated but meta.reference_corpus_sha256 "
+                    "is absent -- the bake never pinned the stream its w_start/w_end index"
+                )
+            if locus_pin is None:
+                violations.append(
+                    "Contract 0: locus_unit is populated but "
+                    "meta.locus_reference_corpus_sha256 is absent -- the import never "
+                    "carried the locus build's own stream pin"
+                )
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # verify() -- the single all-invariant entry point
 # ---------------------------------------------------------------------------
 
@@ -1891,6 +2040,10 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         violations += check_gate_bearing_tables_present(conn)
         violations += check_authorized_index_set(conn)
         violations += check_kept_tie_names_its_pair(conn)
+        # CD batch (schema Amendment 2026-08-12): the amendment's own
+        # presence/vocabulary/count contract + the Contract-0 basis pin.
+        violations += check_amendment_2026_08_12_contract(conn, meta)
+        violations += check_locus_reference_basis(conn, meta)
         violations += check_coverage_gap_report(conn)  # non-fatal report
     finally:
         conn.close()

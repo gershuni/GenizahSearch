@@ -411,6 +411,109 @@ def _project_band_precision(ctx: ProjectionContext) -> List[Dict[str, Any]]:
     return _rows_as_dicts(ctx.conn, "band_precision")
 
 
+def _project_locus_work(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    """CD batch / schema Amendment 2026-08-12 (N): a locus row follows its
+    work -- rows for pruned (e.g. M-source-identity) works never ship. The
+    table-presence guards on the rules below are defensive style (mirroring
+    _project_manuscript_display), NOT a pre-batch compatibility promise: a
+    pre-batch private input already fails loudly one step later, when the
+    identification materializer's INSERT names the amendment's two new
+    columns. Projection input is a post-batch private asset by contract."""
+    if "locus_work" not in _table_names(ctx.conn):
+        return []
+    return [
+        row for row in _rows_as_dicts(ctx.conn, "locus_work")
+        if row["work_id"] in ctx.public_work_ids
+    ]
+
+
+def _kept_locus_work_ids(ctx: ProjectionContext) -> Set[str]:
+    return {row["work_id"] for row in _project_locus_work(ctx)}
+
+
+def _project_locus_unit(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    if "locus_unit" not in _table_names(ctx.conn):
+        return []
+    kept = _kept_locus_work_ids(ctx)
+    return [
+        row for row in _rows_as_dicts(ctx.conn, "locus_unit")
+        if row["work_id"] in kept
+    ]
+
+
+def _project_locus_edition(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    if "locus_edition" not in _table_names(ctx.conn):
+        return []
+    kept = _kept_locus_work_ids(ctx)
+    return [
+        row for row in _rows_as_dicts(ctx.conn, "locus_edition")
+        if row["work_id"] in kept
+    ]
+
+
+def _project_discovery_region_map(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    """Amendment 2026-08-12 (R): region rows follow their locus_work row."""
+    if "discovery_region_map" not in _table_names(ctx.conn):
+        return []
+    kept = _kept_locus_work_ids(ctx)
+    return [
+        row for row in _rows_as_dicts(ctx.conn, "discovery_region_map")
+        if row["work_id"] in kept
+    ]
+
+
+def _project_discovery_curated_quoter(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    """Explicit rule: copy verbatim (Amendment 2026-08-12 (R)). The curated
+    quoter list is versioned, owner-ruled CONFIG -- opaque canonical ids +
+    dates only, never per-asset row aggregates -- so the band_precision
+    pass-through rationale applies, with its own citation as that rule's
+    comment demands."""
+    if "discovery_curated_quoter" not in _table_names(ctx.conn):
+        return []
+    return _rows_as_dicts(ctx.conn, "discovery_curated_quoter")
+
+
+def _project_discovery_withholding(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    """Explicit rule: copy verbatim (Amendment 2026-08-12 (Q)). Withholding
+    scopes are versioned control-plane config the RUNTIME compiles against
+    the public rows; carrying a predicate whose stratum was pruned is inert
+    (it matches nothing), and the frame-time bijection gates own consistency."""
+    if "discovery_withholding" not in _table_names(ctx.conn):
+        return []
+    return _rows_as_dicts(ctx.conn, "discovery_withholding")
+
+
+def _project_discovery_stratum_membership(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    """Emits NOTHING here by design (Amendment 2026-08-12 (Q)) -- membership
+    rows reference discovery_identification, which is itself materialized
+    AFTER the base tables (see _project_discovery_identification below). The
+    filtered copy runs in _materialize_public_stratum_membership; returning []
+    keeps the table under the every-table-needs-a-rule guard."""
+    return []
+
+
+def _materialize_public_stratum_membership(
+    private_conn: sqlite3.Connection, out_conn: sqlite3.Connection
+) -> int:
+    """Copy stratum-membership rows whose identification survives into the
+    JUST-materialized public discovery_identification (same ordering
+    dependency as the identification itself; identification_ids are stable
+    sha256 keys, so surviving rows keep their ids)."""
+    if "discovery_stratum_membership" not in _table_names(private_conn):
+        return 0
+    public_ids = {
+        r[0] for r in out_conn.execute(
+            "SELECT identification_id FROM discovery_identification")
+    }
+    rows = [
+        row for row in _rows_as_dicts(private_conn, "discovery_stratum_membership")
+        if row["identification_id"] in public_ids
+    ]
+    out_conn.execute("DELETE FROM discovery_stratum_membership")
+    _insert_rows(out_conn, "discovery_stratum_membership", rows)
+    return len(rows)
+
+
 def _project_discovery_identification(ctx: ProjectionContext) -> List[Dict[str, Any]]:
     """Emits NOTHING here by design (2026-08-03, 136-13 gate 5).
 
@@ -513,6 +616,17 @@ def _project_meta(ctx: ProjectionContext, projected_counts: Dict[str, int]) -> L
         "witness_units": "expected_rows_units",
         "discovery_identification": "expected_rows_discovery_identification",
         "manuscript_display": "expected_rows_manuscript_display",
+        # Amendment 2026-08-12 (U): RECOMPUTED like every count (zero is a
+        # legitimate count). The lock/version/hash keys of the same amendment
+        # are deliberately NOT here -- they are copied constants, and
+        # recomputing them would un-lock them.
+        "locus_work": "expected_rows_locus_work",
+        "locus_unit": "expected_rows_locus_unit",
+        "locus_edition": "expected_rows_locus_edition",
+        "discovery_region_map": "expected_rows_discovery_region_map",
+        "discovery_curated_quoter": "expected_rows_discovery_curated_quoter",
+        "discovery_stratum_membership": "expected_rows_discovery_stratum_membership",
+        "discovery_withholding": "expected_rows_discovery_withholding",
     }
     for table, meta_key in _COUNT_KEY_BY_TABLE.items():
         if meta_key in out_meta or table in projected_counts:
@@ -530,6 +644,19 @@ PROJECTION_RULES: Dict[str, Callable] = {
     "discovery_routing_audit": _project_discovery_routing_audit,
     "band_precision": _project_band_precision,
     "discovery_identification": _project_discovery_identification,
+    # CD batch / schema Amendment 2026-08-12 -- registered WITH the DDL, in
+    # the same commit set, because this registry hard-rejects unknown tables
+    # (Codex pre-flight finding 4): a batch asset must project cleanly with
+    # zero rows in all seven. `rendered_relation` needs no rule of its own --
+    # it rides the identification rematerialization (the production
+    # materializer recomputes it per asset, post-pruning, by construction).
+    "locus_work": _project_locus_work,
+    "locus_unit": _project_locus_unit,
+    "locus_edition": _project_locus_edition,
+    "discovery_region_map": _project_discovery_region_map,
+    "discovery_curated_quoter": _project_discovery_curated_quoter,
+    "discovery_withholding": _project_discovery_withholding,
+    "discovery_stratum_membership": _project_discovery_stratum_membership,
     # `meta` is handled specially (needs the OTHER tables' projected counts
     # first) -- see `project()`. Listed here so the table-inventory check
     # below treats it as covered rather than unprojected.
@@ -604,6 +731,41 @@ def check_fk_closure(conn: sqlite3.Connection) -> List[str]:
                     f"routing_audit {audit_id}: demoted_work_id {demoted_work_id!r} not in projected works"
                 )
 
+    # CD batch / schema Amendment 2026-08-12: the locus family + Contract-4
+    # membership close over the same graph.
+    if _table_exists(conn, "locus_work"):
+        locus_work_ids = set()
+        for work_id, in cur.execute("SELECT work_id FROM locus_work").fetchall():
+            locus_work_ids.add(work_id)
+            if work_id not in work_ids:
+                violations.append(
+                    f"locus_work {work_id}: not in projected works (dangling FK)"
+                )
+        for table in ("locus_unit", "locus_edition", "discovery_region_map"):
+            if not _table_exists(conn, table):
+                continue
+            for work_id, in cur.execute(f"SELECT DISTINCT work_id FROM {table}").fetchall():
+                if work_id not in locus_work_ids:
+                    violations.append(
+                        f"{table}: work_id {work_id!r} not in projected locus_work (dangling FK)"
+                    )
+
+    if _table_exists(conn, "discovery_stratum_membership") and _table_exists(
+        conn, "discovery_identification"
+    ):
+        ident_ids = {
+            r[0] for r in cur.execute(
+                "SELECT identification_id FROM discovery_identification").fetchall()
+        }
+        for ident_id, in cur.execute(
+            "SELECT DISTINCT identification_id FROM discovery_stratum_membership"
+        ).fetchall():
+            if ident_id not in ident_ids:
+                violations.append(
+                    f"stratum_membership: identification_id {ident_id!r} not in projected "
+                    "discovery_identification (dangling FK)"
+                )
+
     return violations
 
 
@@ -628,6 +790,14 @@ def check_meta_counts(conn: sqlite3.Connection) -> List[str]:
         "expected_rows_units": "witness_units",
         "expected_rows_discovery_identification": "discovery_identification",
         "expected_rows_manuscript_display": "manuscript_display",
+        # Amendment 2026-08-12 (U).
+        "expected_rows_locus_work": "locus_work",
+        "expected_rows_locus_unit": "locus_unit",
+        "expected_rows_locus_edition": "locus_edition",
+        "expected_rows_discovery_region_map": "discovery_region_map",
+        "expected_rows_discovery_curated_quoter": "discovery_curated_quoter",
+        "expected_rows_discovery_stratum_membership": "discovery_stratum_membership",
+        "expected_rows_discovery_withholding": "discovery_withholding",
     }
     for key, table in table_by_key.items():
         if key not in meta:
@@ -839,6 +1009,14 @@ def project(
             if "discovery_identification" in projected_counts:
                 projected_counts["discovery_identification"] = (
                     _materialize_public_identification(out_conn)
+                )
+            # Amendment 2026-08-12 (Q): membership rows reference the
+            # identification table, so their filtered copy runs only AFTER it
+            # is materialized -- and, like it, before _project_meta publishes
+            # the row count.
+            if "discovery_stratum_membership" in projected_counts:
+                projected_counts["discovery_stratum_membership"] = (
+                    _materialize_public_stratum_membership(private_conn, out_conn)
                 )
             meta_rows = _project_meta(ctx, projected_counts)
             _insert_rows(out_conn, "meta", meta_rows)

@@ -132,7 +132,13 @@ _SCHEMA_DDL = [
         novelty_status TEXT NOT NULL,
         divergence_correctness TEXT,
         assertion_visibility TEXT NOT NULL,
-        identity_visibility TEXT NOT NULL
+        identity_visibility TEXT NOT NULL,
+        -- CD batch (schema Amendment 2026-08-12 (P)/(O)): written by the
+        -- production materializer -- the best row's routing_reason and the
+        -- fail-closed rendered relation. Additive at the end, defaults for
+        -- ALTER parity with the real DDL.
+        routing_reason TEXT NOT NULL DEFAULT 'none',
+        rendered_relation TEXT NOT NULL DEFAULT 'uncertain'
     )""",
     """CREATE TABLE manuscript_display (
         sys_id TEXT PRIMARY KEY,

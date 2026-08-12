@@ -137,6 +137,13 @@ SIDECAR_VERSION = "discovery-v1-synthetic-fixture"
 # a reader inspecting discovery_claim.sidecar_version.
 REAL_SIDECAR_VERSION = "discovery-v1-real"
 
+# CD batch / schema Amendment 2026-08-12 (U): the unconditional post-batch
+# marker. NOT a schema_version bump (that marker stays `discovery-v1`, pinned
+# by test) -- a loader that sees this key requires every table, column and
+# count key the amendment adds; an asset without it is a pre-batch asset and
+# validates exactly as before.
+LOCUS_SCHEMA_VERSION = "locus-v1"
+
 # Frozen constant timestamps (F13/determinism) -- NEVER wall-clock, so a
 # rebuild in any environment reproduces byte-identical output.
 FROZEN_BUILD_DATE = "2026-07-22T00:00:00Z"
@@ -524,6 +531,27 @@ CREATE TABLE discovery_identification (
                        ),
   assertion_visibility TEXT NOT NULL CHECK (assertion_visibility IN ('public','private')),
   identity_visibility  TEXT NOT NULL CHECK (identity_visibility IN ('public','private')),
+  -- CD batch / schema Amendment 2026-08-12 (P): the routing_reason of this
+  -- identification's OWN best evidence row (lowest band_rank, then the D-13b
+  -- lexicographic evidence_id tie-break -- the same `best` the display basis
+  -- and novelty inheritance already use). Codex pre-flight finding 2's rule,
+  -- verbatim; matrix step 2 reads it. DEFAULT 'none' exists only for additive
+  -- ALTER compatibility -- the materializer always writes an explicit value.
+  routing_reason      TEXT NOT NULL DEFAULT 'none'
+                      CHECK (routing_reason IN
+                        ('impurity','runner_up_conflict','co_citation','none',
+                         'later_shared_text','low_coverage','gen2_parallel_surface',
+                         'gen2_router_not_shipped')),
+  -- CD batch / schema Amendment 2026-08-12 (O): the Contract-1 rendered
+  -- relation -- the stored output of the frozen precedence matrix
+  -- (docs/specs/discovery-relation-matrix-v1.md §2), recomputed per asset
+  -- after public pruning. Until C-track lands the matrix computation every
+  -- build writes the fail-closed state 'uncertain' (the matrix's own
+  -- missing-input rule); NO surface reads this column before C-track.
+  rendered_relation   TEXT NOT NULL DEFAULT 'uncertain'
+                      CHECK (rendered_relation IN
+                        ('direct_witness','shared_text','quotes_this_work',
+                         'work_quotes_page','uncertain')),
   UNIQUE (sys_id, canonical_work_id)
 );
 
@@ -553,6 +581,99 @@ CREATE INDEX ix_discovery_identification_sys_id
   ON discovery_identification(sys_id);
 CREATE INDEX ix_manuscript_display_sort
   ON manuscript_display(library_sort_key, shelfmark_sort_key);
+
+-- ---------------------------------------------------------------------------
+-- CD batch / schema Amendment 2026-08-12 (N): the locus address tables.
+-- Created EMPTY by the batch; POPULATED by the D-track import, which re-keys
+-- the build_work_divisions.py artifact from raw locus_ref_id to the OPAQUE
+-- work_id via the crosswalk (fail-closed: no crosswalk entry -> the row is
+-- skipped and counted, never guessed). The raw locus_ref_id is NEVER stored
+-- -- opaque ids only, the same posture as every other table (the verifier's
+-- raw-work-id sweep covers these tables too); provenance lives in the import
+-- report. locus_unit.start_offset indexes the work's norm_stream -- the SAME
+-- coordinate space as w_start/w_end (rule (G)).
+-- ---------------------------------------------------------------------------
+CREATE TABLE locus_work (
+  work_id       TEXT PRIMARY KEY REFERENCES works(work_id),
+  family        TEXT NOT NULL CHECK (family IN ('sefaria','ja','msource_header')),
+  grain         TEXT NOT NULL,
+  stream_len    INTEGER NOT NULL,
+  unit_count    INTEGER NOT NULL
+);
+CREATE TABLE locus_unit (
+  work_id      TEXT NOT NULL REFERENCES locus_work(work_id),
+  unit_ord     INTEGER NOT NULL,
+  start_offset INTEGER NOT NULL,
+  part_key     TEXT NOT NULL,
+  label_he     TEXT NOT NULL,
+  citation_pos INTEGER,
+  PRIMARY KEY (work_id, unit_ord)
+);
+CREATE INDEX ix_locus_unit_part ON locus_unit(work_id, part_key);
+CREATE TABLE locus_edition (
+  work_id         TEXT PRIMARY KEY REFERENCES locus_work(work_id),
+  title_he        TEXT NOT NULL,
+  title_original  TEXT NOT NULL,
+  author_short    TEXT NOT NULL,
+  author_full     TEXT NOT NULL,
+  publisher       TEXT NOT NULL,
+  publisher_city  TEXT NOT NULL,
+  publisher_year  TEXT NOT NULL,
+  editor          TEXT NOT NULL,
+  edition         TEXT NOT NULL
+);
+
+-- CD batch / schema Amendment 2026-08-12 (R): Contract-1's two input tables.
+-- Matrix step 3 reads discovery_region_map at the single region_version named
+-- in meta; step 4's curated half reads discovery_curated_quoter at the single
+-- curated_quoter_version. `discriminative` is tri-state ON PURPOSE: NULL is an
+-- 'open' card and fails closed under the frozen step-3 semantics (a unit with
+-- no row at all ALWAYS blocks the demotion -- the map is partial). Both ship
+-- EMPTY from the batch; C-track populates (region: the owner's 2026-08-11
+-- input; curated v1: both Yalkut works, owner ruling 2026-08-12).
+CREATE TABLE discovery_region_map (
+  region_version TEXT NOT NULL,
+  work_id        TEXT NOT NULL REFERENCES locus_work(work_id),
+  unit_ord       INTEGER NOT NULL,
+  discriminative INTEGER CHECK (discriminative IN (0,1) OR discriminative IS NULL),
+  source         TEXT NOT NULL CHECK (source IN
+                   ('ruling','derived','superseded_by_derivation','open')),
+  basis          TEXT,
+  PRIMARY KEY (region_version, work_id, unit_ord)
+);
+CREATE TABLE discovery_curated_quoter (
+  list_version      TEXT NOT NULL,
+  canonical_work_id TEXT NOT NULL,
+  ruled_date        TEXT NOT NULL,
+  note              TEXT,
+  PRIMARY KEY (list_version, canonical_work_id)
+);
+
+-- CD batch / schema Amendment 2026-08-12 (Q): Contract-4 storage. Withholding
+-- is DISPLAY-LAYER ONLY -- a withheld row renders no locus and falls to the
+-- matrix's fail-closed state; the row itself remains on every surface and in
+-- every count, and withholding never mutates CERT-01 membership (the frame
+-- hash reads claim/evidence membership fields only -- proven by test). Both
+-- ship EMPTY; the compiled eligibility read lands with C-track's shared SQL
+-- builder, the bijection gates with the audit frames (E).
+CREATE TABLE discovery_withholding (
+  withhold_version TEXT NOT NULL,
+  scope_id         TEXT NOT NULL,
+  predicate_json   TEXT NOT NULL,
+  frame_version    TEXT,
+  stratum_id       TEXT,
+  reason           TEXT NOT NULL,
+  created_date     TEXT NOT NULL,
+  PRIMARY KEY (withhold_version, scope_id)
+);
+CREATE TABLE discovery_stratum_membership (
+  frame_version     TEXT NOT NULL,
+  stratum_id        TEXT NOT NULL,
+  identification_id TEXT NOT NULL REFERENCES discovery_identification(identification_id),
+  PRIMARY KEY (frame_version, stratum_id, identification_id)
+);
+CREATE INDEX ix_stratum_membership_identification
+  ON discovery_stratum_membership(identification_id);
 """
 
 
@@ -1719,6 +1840,42 @@ def create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
 
 
+# CD batch / schema Amendment 2026-08-12 (U): the seven tables the amendment
+# adds, in their release-contract count-key order. Zero is a legitimate count
+# -- the batch creates every one of them EMPTY (D-track populates the locus
+# tables, C-track the region map + curated list, the frames the rest).
+AMENDMENT_2026_08_12_COUNT_TABLES = (
+    "locus_work",
+    "locus_unit",
+    "locus_edition",
+    "discovery_region_map",
+    "discovery_curated_quoter",
+    "discovery_stratum_membership",
+    "discovery_withholding",
+)
+
+
+def amendment_2026_08_12_meta_rows(
+    conn: sqlite3.Connection, *, reference_corpus_sha256: Optional[str] = None,
+) -> List[Tuple[str, str]]:
+    """The CD-batch meta rows (schema Amendment 2026-08-12 (U)), computed by
+    ONE function shared by the synthetic and real build paths so the two can
+    never drift: the unconditional `locus_schema_version` marker, one
+    release-contract count per new table, and -- when the bake was given one --
+    the Contract-0 bake-side coordinate-basis pin (`reference_corpus_sha256`,
+    the stream the evidence w_start/w_end offsets index). The locus-side twin
+    (`locus_reference_corpus_sha256`) is written by the D-track import; the
+    verifier's Contract-0 gate asserts the two EQUAL whenever locus_unit is
+    populated."""
+    rows: List[Tuple[str, str]] = [("locus_schema_version", LOCUS_SCHEMA_VERSION)]
+    for table in AMENDMENT_2026_08_12_COUNT_TABLES:
+        (n,) = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+        rows.append((f"expected_rows_{table}", str(n)))
+    if reference_corpus_sha256:
+        rows.append(("reference_corpus_sha256", reference_corpus_sha256))
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # 2. Membership-based frame_content_hash (SS1.5/SS7 -- key_link: meta.frame_content_hash)
 #
@@ -2580,6 +2737,11 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
             [{"canonical_work_id": w[0], "genre": w[4]} for w in works if w[4]])),
         ("frame_content_hash", frame_content_hash),
     ]
+    # CD batch / Amendment 2026-08-12 (U): same helper as the real build --
+    # the synthetic fixture carries the marker + zero counts, so the loader's
+    # conditional requirements and the verifier's new gates are exercised by
+    # the fixture rather than first met in production.
+    meta_rows.extend(amendment_2026_08_12_meta_rows(conn))
     cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
 
     return {
@@ -4634,6 +4796,7 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
                    de.confidence_band AS confidence_band,
                    de.adjudication_status AS adjudication_status,
                    de.routing_status  AS routing_status,
+                   de.routing_reason  AS routing_reason,
                    de.band_rank       AS band_rank,
                    de.coverage_ppm    AS coverage_ppm,
                    de.matched_letters AS matched_letters,
@@ -4787,6 +4950,13 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
             best["divergence_correctness"],
             assertion_vis,
             identity_vis,
+            # CD batch / Amendment 2026-08-12 (P): the SAME best row's own
+            # routing_reason (Codex finding 2's rule) -- the reading under
+            # which the A0a-2 census counted the 173 router-flagged rows.
+            best["routing_reason"],
+            # Amendment 2026-08-12 (O): fail-closed until C-track lands the
+            # matrix computation; no surface reads this column before then.
+            ids.RENDERED_RELATION_FAIL_CLOSED,
         ))
 
     cur = conn.cursor()
@@ -4797,8 +4967,9 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
             main_pool, main_pool_reason, best_band_rank, page_count,
             max_coverage_ppm, relation_kind, eligibility_basis,
             novelty_status, divergence_correctness,
-            assertion_visibility, identity_visibility
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            assertion_visibility, identity_visibility,
+            routing_reason, rendered_relation
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         insert_rows,
     )
@@ -6740,6 +6911,14 @@ def finalize_build(
     work_author_aliases_path=None,
     work_author_aliases_content_hash: Optional[str] = None,
     coverage_floor: float = 0.99,
+    # CD batch / schema Amendment 2026-08-12 (T), Contract 0: the SHA-256 of
+    # the reference-corpus stream the evidence w_start/w_end offsets index.
+    # Supplied by the bake pipeline; written to meta as
+    # `reference_corpus_sha256`. The D-track locus import writes the twin
+    # `locus_reference_corpus_sha256`, and the verifier asserts the two EQUAL
+    # whenever locus_unit is populated -- so a reference refresh can no longer
+    # silently move every citation in the corpus.
+    reference_corpus_sha256: Optional[str] = None,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
     (claims/evidence, NO physical-MS collapse) -> `build_witness_units` ->
@@ -7429,6 +7608,10 @@ def finalize_build(
             reband_meta_extra["tier_a_reband_count"] = str(n_rebanded)
             for k, v in reband_meta_extra.items():
                 meta_rows.append((k, v))
+        # CD batch / Amendment 2026-08-12 (U): marker + per-table counts +
+        # the Contract-0 bake-side basis pin (when supplied).
+        meta_rows.extend(amendment_2026_08_12_meta_rows(
+            out_conn, reference_corpus_sha256=reference_corpus_sha256))
         cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
 
         (integrity_result,) = out_conn.execute("PRAGMA integrity_check").fetchone()
@@ -7742,6 +7925,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Curated work-id alias groups (D-23d). Absent => every work is "
                              "its own singleton reviewed identity (fail-closed), never a "
                              "guessed grouping.")
+    v2_group.add_argument("--reference-corpus-sha256", metavar="HEX", default=None,
+                        help="Contract 0 (schema Amendment 2026-08-12 (T)): SHA-256 of the "
+                             "reference-corpus stream the evidence w_start/w_end offsets "
+                             "index. Written to meta as reference_corpus_sha256; the "
+                             "verifier asserts equality with the locus build's own "
+                             "locus_reference_corpus_sha256 whenever locus_unit is "
+                             "populated. Omit only on a build with no work-side offsets.")
     real_group.add_argument("--frozen-precision-defaults", action="store_true",
                         help="H3: explicitly acknowledge using the frozen-contract "
                              "band_precision defaults (docs/specs/discovery-sidecar-"
@@ -7873,6 +8063,7 @@ def main(argv=None) -> int:
         work_domains_content_hash=args.work_domains_content_hash,
         work_author_aliases_path=args.work_author_aliases,
         work_author_aliases_content_hash=args.work_author_aliases_content_hash,
+        reference_corpus_sha256=args.reference_corpus_sha256,
     )
     print(f"real build OK: {stats['row_counts']}")
     print(f"novelty={stats['novelty']}")

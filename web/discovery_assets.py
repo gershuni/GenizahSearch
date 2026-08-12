@@ -263,6 +263,55 @@ _RELEASE_CONTRACT_COUNTS = (
     ("expected_rows_manuscript_display", "manuscript_display"),
 )
 
+# CD batch / schema Amendment 2026-08-12 (U). The amendment is ADDITIVE with
+# NO schema_version bump, so these requirements are CONDITIONAL on the
+# amendment's own unconditional marker key, `meta.locus_schema_version`: an
+# asset that carries the marker owes every table, column and count below (a
+# post-batch asset missing one is a partially-built asset -- the exact failure
+# `_REQUIRED_TABLES` exists to prevent, one amendment later); an asset without
+# the marker is a pre-batch asset and validates exactly as before, so the
+# currently-deployed sidecar keeps loading and a rushed rollback stays safe.
+_LOCUS_SCHEMA_MARKER_KEY = "locus_schema_version"
+_AMENDMENT_2026_08_12_TABLES = frozenset({
+    "locus_work",
+    "locus_unit",
+    "locus_edition",
+    "discovery_region_map",
+    "discovery_curated_quoter",
+    "discovery_stratum_membership",
+    "discovery_withholding",
+})
+_AMENDMENT_2026_08_12_COLUMNS: Dict[str, frozenset] = {
+    "discovery_identification": frozenset({"routing_reason", "rendered_relation"}),
+    "locus_work": frozenset({
+        "work_id", "family", "grain", "stream_len", "unit_count",
+    }),
+    "locus_unit": frozenset({
+        "work_id", "unit_ord", "start_offset", "part_key", "label_he", "citation_pos",
+    }),
+    "discovery_region_map": frozenset({
+        "region_version", "work_id", "unit_ord", "discriminative", "source",
+    }),
+    "discovery_curated_quoter": frozenset({
+        "list_version", "canonical_work_id", "ruled_date",
+    }),
+    "discovery_stratum_membership": frozenset({
+        "frame_version", "stratum_id", "identification_id",
+    }),
+    "discovery_withholding": frozenset({
+        "withhold_version", "scope_id", "predicate_json", "reason", "created_date",
+    }),
+}
+_AMENDMENT_2026_08_12_COUNTS = (
+    ("expected_rows_locus_work", "locus_work"),
+    ("expected_rows_locus_unit", "locus_unit"),
+    ("expected_rows_locus_edition", "locus_edition"),
+    ("expected_rows_discovery_region_map", "discovery_region_map"),
+    ("expected_rows_discovery_curated_quoter", "discovery_curated_quoter"),
+    ("expected_rows_discovery_stratum_membership", "discovery_stratum_membership"),
+    ("expected_rows_discovery_withholding", "discovery_withholding"),
+)
+
 # Frozen enum vocab spot-check (docs/specs/discovery-sidecar-schema-v1.md
 # "Frozen Enum Vocabularies" / scripts/discovery_ids.py). Deliberately
 # inlined as plain string constants here rather than importing
@@ -463,28 +512,45 @@ def load_discovery_state() -> bool:
                 "enum -- fail-closed default, never treated as public"
             )
 
+        # CD batch (Amendment 2026-08-12 (U)): the marker key decides whether
+        # this asset owes the batch's tables, columns and counts. The marker's
+        # VALUE is untrusted artifact content and is never interpolated;
+        # presence alone discriminates.
+        post_batch = _LOCUS_SCHEMA_MARKER_KEY in meta
+        required_tables = _REQUIRED_TABLES | (
+            _AMENDMENT_2026_08_12_TABLES if post_batch else frozenset()
+        )
+        required_columns: Dict[str, frozenset] = dict(_REQUIRED_COLUMNS)
+        if post_batch:
+            for table, cols in _AMENDMENT_2026_08_12_COLUMNS.items():
+                required_columns[table] = required_columns.get(table, frozenset()) | cols
+        contract_counts = _RELEASE_CONTRACT_COUNTS + (
+            _AMENDMENT_2026_08_12_COUNTS if post_batch else ()
+        )
+
         table_rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         ).fetchall()
         actual_tables = {row["name"] for row in table_rows}
-        missing_tables = _REQUIRED_TABLES - actual_tables
+        missing_tables = required_tables - actual_tables
         if missing_tables:
             raise _LoaderRefusal(f"missing required table(s): {sorted(missing_tables)}")
 
         # Required COLUMNS (Amendment 2026-08-02). A SUBSET check per table via
         # PRAGMA table_info -- an unexpected extra column is NOT a failure. The
-        # table names come from the fixed `_REQUIRED_COLUMNS` allowlist above,
+        # table names come from the fixed `_REQUIRED_COLUMNS` allowlist above
+        # (plus the fixed amendment allowlist when the marker is present),
         # never from user input (PRAGMA cannot be parameterized).
-        for table in sorted(_REQUIRED_COLUMNS):
+        for table in sorted(required_columns):
             column_rows = conn.execute(f"PRAGMA table_info({table})").fetchall()  # noqa: S608 -- fixed allowlisted table names, never user input
             actual_columns = {row["name"] for row in column_rows}
-            missing_columns = _REQUIRED_COLUMNS[table] - actual_columns
+            missing_columns = required_columns[table] - actual_columns
             if missing_columns:
                 raise _LoaderRefusal(
                     f"table {table!r} missing required column(s): {sorted(missing_columns)}"
                 )
 
-        for meta_key, table in _RELEASE_CONTRACT_COUNTS:
+        for meta_key, table in contract_counts:
             expected = meta.get(meta_key)
             (actual,) = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()  # noqa: S608 -- table is one of the fixed allowlisted names above, never user input
             # `meta_key`, `table` and `actual` are ours (fixed allowlist, and a

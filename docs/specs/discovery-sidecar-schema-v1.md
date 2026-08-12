@@ -1163,6 +1163,232 @@ own dated amendment first.
 
 ---
 
+## Amendment 2026-08-12 (CD schema batch — locus addressing, the rendered relation, Contract-4 storage, the Contract-0 basis pin)
+
+*Authorized by `_tmp/PLAN-granularity-ship.md` v11 (Codex pre-flight APPROVE, 3 rounds,
+dispositions in `_tmp/CODEX-PREFLIGHT-CD.md`) and the frozen Contract-1 semantics in
+[`discovery-relation-matrix-v1.md`](discovery-relation-matrix-v1.md). ONE dated amendment;
+everything below is ADDITIVE.*
+
+**Version policy (Codex finding 1).** NO `schema_version` bump — the marker stays
+`discovery-v1` (pinned by test). The loader sets, builder DDL, projector rules/counts,
+verifier gates, fixtures and tests move in lockstep, one commit set. The post-batch
+detection marker is the new unconditional meta key **`locus_schema_version = 'locus-v1'`**
+(§(U)): a loader that sees it requires every table, column and count key this amendment
+adds; an asset without it is a pre-batch asset and loads exactly as before. Sharper than a
+version bump for the same three reasons as the Phase-136 RETAIN DECISION, without breaking
+rollback.
+
+**Population posture.** The batch creates every new table EMPTY and every new column with
+a fail-closed default. D-track populates the locus tables and coverage; C-track populates
+the region map (owner input of 2026-08-11), the curated quoter list (owner ruling
+2026-08-12: both ילקוט שמעוני works), and the real matrix computation. The projector
+hard-rejects unregistered tables, so the projection rules land HERE, with the DDL — a
+batch asset projects cleanly with zero locus rows (Codex finding 4).
+
+### (N) The locus address tables
+
+Imported from the `build_work_divisions.py` artifact (D-track), re-keyed at import from
+raw `locus_ref_id` to the OPAQUE `work_id` via the crosswalk — fail-closed: a locus row
+whose ref id has no crosswalk entry is skipped and counted, never guessed. **The raw
+`locus_ref_id` is never stored**: the asset carries opaque ids only (the standing D-03a
+posture — the verifier's raw-work-id sweep extends to these tables), and import
+provenance lives in the import report, not the asset.
+
+```sql
+CREATE TABLE locus_work (
+  work_id       TEXT PRIMARY KEY REFERENCES works(work_id),
+  family        TEXT NOT NULL CHECK (family IN ('sefaria','ja','msource_header')),
+  grain         TEXT NOT NULL,   -- closed set validated by the D-track import gate
+  stream_len    INTEGER NOT NULL,
+  unit_count    INTEGER NOT NULL
+);
+CREATE TABLE locus_unit (
+  work_id      TEXT NOT NULL REFERENCES locus_work(work_id),
+  unit_ord     INTEGER NOT NULL,
+  start_offset INTEGER NOT NULL,  -- coordinate space: the work's norm_stream (rule (G))
+  part_key     TEXT NOT NULL,
+  label_he     TEXT NOT NULL,
+  citation_pos INTEGER,
+  PRIMARY KEY (work_id, unit_ord)
+);
+CREATE INDEX ix_locus_unit_part ON locus_unit(work_id, part_key);
+CREATE TABLE locus_edition (
+  work_id         TEXT PRIMARY KEY REFERENCES locus_work(work_id),
+  title_he        TEXT NOT NULL,
+  title_original  TEXT NOT NULL,
+  author_short    TEXT NOT NULL,
+  author_full     TEXT NOT NULL,
+  publisher       TEXT NOT NULL,
+  publisher_city  TEXT NOT NULL,
+  publisher_year  TEXT NOT NULL,
+  editor          TEXT NOT NULL,
+  edition         TEXT NOT NULL
+);
+```
+
+Projection: keep rows whose `work_id` is in the projected `works` set (locus rows for
+pruned — e.g. M-source-identity — works never ship). FK closure extends to all three
+tables.
+
+### (O) `discovery_identification.rendered_relation` — the Contract-1 matrix column
+
+```sql
+  rendered_relation TEXT NOT NULL DEFAULT 'uncertain'
+                    CHECK (rendered_relation IN
+                      ('direct_witness','shared_text','quotes_this_work',
+                       'work_quotes_page','uncertain'))
+```
+
+The stored output of the frozen six-step precedence matrix
+(`discovery-relation-matrix-v1.md` §2), recomputed PER ASSET after public pruning —
+concretely, inside the existing `discovery_identification` rematerialization the public
+projection already performs. **Until C-track lands the matrix implementation, every build
+writes the fail-closed state `uncertain`** — which is literally the matrix's missing-input
+rule, and no surface reads the column before C-track. C-track also brings the verifier's
+row-for-row recompute-equality gate (mutation-proven: a deliberately mis-stored row fails
+the build); the batch's verifier checks vocabulary and presence only.
+
+### (P) `discovery_identification.routing_reason` — the reason of the identification's own best row
+
+```sql
+  routing_reason TEXT NOT NULL DEFAULT 'none'
+                 CHECK (routing_reason IN
+                   ('impurity','runner_up_conflict','co_citation','none',
+                    'later_shared_text','low_coverage','gen2_parallel_surface',
+                    'gen2_router_not_shipped'))
+```
+
+Codex finding 2's rule, verbatim: the identification carries the `routing_reason` of the
+SAME evidence row `populate_discovery_identification` already selects as `best` (lowest
+`band_rank`, then the D-13b lexicographic `evidence_id` tie-break — the row that is
+already the display basis, and the reading under which the A0a-2 census counted the 173
+router-flagged rows). Materialized by the same materializer at bake AND at public
+projection (which reuses it), never re-derived elsewhere. The batch implements this
+column with real values; matrix step 2 reads it.
+
+### (Q) Contract-4 storage — withholding + stratum membership
+
+```sql
+CREATE TABLE discovery_withholding (
+  withhold_version TEXT NOT NULL,
+  scope_id         TEXT NOT NULL,
+  predicate_json   TEXT NOT NULL,   -- a CONJUNCTION of predicates over identification fields
+  frame_version    TEXT,            -- the audit frame cell this scope expresses, when one does
+  stratum_id       TEXT,
+  reason           TEXT NOT NULL,
+  created_date     TEXT NOT NULL,
+  PRIMARY KEY (withhold_version, scope_id)
+);
+CREATE TABLE discovery_stratum_membership (
+  frame_version     TEXT NOT NULL,
+  stratum_id        TEXT NOT NULL,
+  identification_id TEXT NOT NULL REFERENCES discovery_identification(identification_id),
+  PRIMARY KEY (frame_version, stratum_id, identification_id)
+);
+CREATE INDEX ix_stratum_membership_identification
+  ON discovery_stratum_membership(identification_id);
+```
+
+Both ship EMPTY from the batch. Semantics (plan Contract 4): withholding is
+DISPLAY-LAYER ONLY — a withheld row renders no locus and falls to the matrix's
+fail-closed state; the row itself remains on every surface and in every count, and
+**withholding never mutates CERT-01 membership** (§(T) proves it structurally). The
+compiled read lands with C-track's shared eligibility SQL builder; the frame-time
+bijection gates (every audit cell ↔ one scope, membership counts equal) land with the
+frames in E. Projection: `discovery_withholding` copies verbatim (versioned control-plane
+config, the `band_precision` rationale); `discovery_stratum_membership` is filtered
+AFTER the public identification rematerialization — keep rows whose `identification_id`
+exists in the just-materialized public table.
+
+### (R) Contract-1 input tables — the region map + the curated quoter list
+
+```sql
+CREATE TABLE discovery_region_map (
+  region_version TEXT NOT NULL,
+  work_id        TEXT NOT NULL REFERENCES locus_work(work_id),
+  unit_ord       INTEGER NOT NULL,
+  discriminative INTEGER CHECK (discriminative IN (0,1) OR discriminative IS NULL),
+  source         TEXT NOT NULL CHECK (source IN
+                   ('ruling','derived','superseded_by_derivation','open')),
+  basis          TEXT,
+  PRIMARY KEY (region_version, work_id, unit_ord)
+);
+CREATE TABLE discovery_curated_quoter (
+  list_version      TEXT NOT NULL,
+  canonical_work_id TEXT NOT NULL,
+  ruled_date        TEXT NOT NULL,
+  note              TEXT,
+  PRIMARY KEY (list_version, canonical_work_id)
+);
+```
+
+“Never a JSON on someone's disk” (`discovery-relation-matrix-v1.md` §2): matrix step 3
+reads `discovery_region_map`, step 4's curated half reads `discovery_curated_quoter`,
+each at the single version named in meta (§(U)). `discriminative` is tri-state on
+purpose: `NULL` is an `open` card and fails closed per the frozen step-3 semantics (a
+unit with no row at all ALWAYS blocks the demotion — the map is partial). First
+populations (C-track): the owner's 260-unit region input of 2026-08-11; curated list v1 =
+ילקוט שמעוני על נ"ך + על התורה (owner ruling 2026-08-12). Projection: region rows follow
+their `locus_work` row; the curated list copies verbatim (opaque ids only).
+
+### (S) The population lock — Contract 2's bounded-withholding denominator
+
+The PRE-withholding public candidate population, LOCKED as versioned constants
+(Codex finding 8): **denominator = public asset, identification grain (the leaf grain),
+`main_pool = 1`, PRE-withholding — INDEPENDENT of locus addressability**, so the 22-work
+skip fix moves citation coverage, never the locked population. Per-family counts use the
+closed five-way family vocabulary `bible / canonical / daf / ja / other_staged`
+(precedence: language first, content second — Arabic tafsir sits in `ja`), assigned by
+the versioned `shared/discovery_family.py` (`fam-v1`). The lock is EMITTED ONCE by
+`scripts/emit_population_lock.py` against the current public asset into a TRACKED JSON,
+supplied to the builder as a hash-pinned input, and COPIED — never recomputed — into
+every subsequent asset's meta. The verifier recomputes the CURRENT pre-withholding
+per-family counts and enforces the retention floors (overall ≥ 90%, per family ≥ 80%,
+A0b ratifies) against the locked constants; a breach BLOCKS deploy 2. Coverage is
+reported against BOTH the locked and the post-withhold populations.
+
+### (T) Contract 0 — the coordinate-basis pin, and the CERT-01 frame-regression gate
+
+Two meta keys pin the two streams that every citation silently assumes are the same
+stream:
+
+| key | written by | pins |
+|---|---|---|
+| `reference_corpus_sha256` | the bake (`--reference-corpus-sha256`, hash-pinned input idiom of (K)) | the reference-corpus stream the evidence `w_start`/`w_end` offsets index |
+| `locus_reference_corpus_sha256` | the D-track locus import (from the locus build's `coverage.json`) | the stream the locus unit offsets were computed from |
+
+Verifier gate (batch, mutation-proven by flipping one hash): **if `locus_unit` is
+non-empty, both keys must be present and EQUAL**; the build fails otherwise. A
+reference-corpus refresh can no longer silently move every citation in the corpus.
+
+The batch also ships `scripts/check_frame_regression.py` (Codex finding 5): given a
+BEFORE and an AFTER asset, it recomputes `compute_frame_content_hash` over both and
+asserts equality, plus claim/evidence key-set equality for sharp diagnostics. The stated
+invariant it rests on: the frame hash reads ONLY the eight claim/evidence membership
+fields, and nothing this amendment adds — locus tables, region map, curated list,
+withholding, membership, the two identification columns — enters that tuple set. A test
+proves the invariant by adding rows to every new table on a fixture and asserting the
+hash unchanged; a flipped confidence band must fail the gate.
+
+### (U) New meta keys, and the projector's copy-vs-recompute discipline
+
+| key | discipline |
+|---|---|
+| `locus_schema_version` (`'locus-v1'`, unconditional) | copied — the post-batch marker |
+| `expected_rows_locus_work` / `_locus_unit` / `_locus_edition` / `_discovery_region_map` / `_discovery_curated_quoter` / `_discovery_stratum_membership` / `_discovery_withholding` | RECOMPUTED over projected rows (the (C1) count loop; zero is a legitimate count) |
+| `reference_corpus_sha256`, `locus_reference_corpus_sha256` | copied (provenance pins) |
+| `population_lock_version` / `_sha256` / `_total` / `_family_bible` / `_family_canonical` / `_family_daf` / `_family_ja` / `_family_other_staged` | copied — LOCKED constants; recomputing would un-lock them |
+| `region_map_version`, `curated_quoter_version` | copied — the single active version the matrix reads (written when populated) |
+
+Loader contract: when `locus_schema_version` is present, `web/discovery_assets.py`
+requires all seven new tables, the two new `discovery_identification` columns, and the
+seven new count keys through its existing mechanisms; an asset without the marker is
+validated exactly as before this amendment (old assets keep loading; a rushed rollback
+stays safe).
+
+---
+
 *This document is FROZEN as of 2026-07-22 (plan 134-01, Task 1). Later
 Phase 134 plans (fixture/distillation/loader/service/frame) implement
 against this contract; any correction requires a new dated amendment
@@ -1199,4 +1425,13 @@ three hash-pinned-input provenance meta keys and makes
 `work_domains_content_hash` contractual whenever `works.genre` is populated;
 states what the `divergence_correctness` CHECK actually enforces under SQL
 three-valued logic and why owner ruling L makes the one-directional reading
-mandatory; and records that the curated author key stores NO column).*
+mandatory; and records that the curated author key stores NO column);
+2026-08-12 (the CD schema batch — the three locus address tables keyed on
+opaque work_id; `discovery_identification.rendered_relation` (the Contract-1
+matrix column, fail-closed until C-track) and `.routing_reason` (the best
+row's reason, Codex finding 2); Contract-4 withholding + stratum-membership
+storage; the region-map and curated-quoter input tables; the population-lock
+meta constants and their copy-never-recompute discipline; the Contract-0
+reference-corpus basis pin with its equality gate; the CERT-01
+frame-regression script; and the `locus_schema_version` loader marker that
+keeps pre-batch assets loading unchanged).*

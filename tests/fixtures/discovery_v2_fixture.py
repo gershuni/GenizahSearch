@@ -120,6 +120,85 @@ NEW_COUNT_META_KEY_BY_TABLE: Dict[str, str] = {
     "manuscript_display": "expected_rows_manuscript_display",
 }
 
+# ---------------------------------------------------------------------------
+# CD batch (schema Amendment 2026-08-12): the seven tables, the two
+# discovery_identification columns, and the meta keys the batch adds ON TOP of
+# the Amendment 2026-08-02 shape. Column lists MIRROR the amendment's DDL
+# (drift against the builder is guarded by test). The v1 strip removes all of
+# it (the golden fixture is regenerated post-batch), `upgrade_db_to_post_
+# rebuild` deliberately does NOT re-add it (its shape stays 2026-08-02, which
+# the loader accepts as a PRE-batch asset -- no marker, no requirement), and
+# `upgrade_db_to_cd_batch` re-adds it with the same defect-knob pattern.
+# ---------------------------------------------------------------------------
+CD_BATCH_TABLE_COLUMNS: Dict[str, Tuple[Tuple[str, str], ...]] = {
+    "locus_work": (
+        ("work_id", "TEXT PRIMARY KEY"),
+        ("family", "TEXT NOT NULL"),
+        ("grain", "TEXT NOT NULL"),
+        ("stream_len", "INTEGER NOT NULL"),
+        ("unit_count", "INTEGER NOT NULL"),
+    ),
+    "locus_unit": (
+        ("work_id", "TEXT NOT NULL"),
+        ("unit_ord", "INTEGER NOT NULL"),
+        ("start_offset", "INTEGER NOT NULL"),
+        ("part_key", "TEXT NOT NULL"),
+        ("label_he", "TEXT NOT NULL"),
+        ("citation_pos", "INTEGER"),
+    ),
+    "locus_edition": (
+        ("work_id", "TEXT PRIMARY KEY"),
+        ("title_he", "TEXT NOT NULL"),
+        ("title_original", "TEXT NOT NULL"),
+        ("author_short", "TEXT NOT NULL"),
+        ("author_full", "TEXT NOT NULL"),
+        ("publisher", "TEXT NOT NULL"),
+        ("publisher_city", "TEXT NOT NULL"),
+        ("publisher_year", "TEXT NOT NULL"),
+        ("editor", "TEXT NOT NULL"),
+        ("edition", "TEXT NOT NULL"),
+    ),
+    "discovery_region_map": (
+        ("region_version", "TEXT NOT NULL"),
+        ("work_id", "TEXT NOT NULL"),
+        ("unit_ord", "INTEGER NOT NULL"),
+        ("discriminative", "INTEGER"),
+        ("source", "TEXT NOT NULL"),
+        ("basis", "TEXT"),
+    ),
+    "discovery_curated_quoter": (
+        ("list_version", "TEXT NOT NULL"),
+        ("canonical_work_id", "TEXT NOT NULL"),
+        ("ruled_date", "TEXT NOT NULL"),
+        ("note", "TEXT"),
+    ),
+    "discovery_stratum_membership": (
+        ("frame_version", "TEXT NOT NULL"),
+        ("stratum_id", "TEXT NOT NULL"),
+        ("identification_id", "TEXT NOT NULL"),
+    ),
+    "discovery_withholding": (
+        ("withhold_version", "TEXT NOT NULL"),
+        ("scope_id", "TEXT NOT NULL"),
+        ("predicate_json", "TEXT NOT NULL"),
+        ("frame_version", "TEXT"),
+        ("stratum_id", "TEXT"),
+        ("reason", "TEXT NOT NULL"),
+        ("created_date", "TEXT NOT NULL"),
+    ),
+}
+CD_BATCH_ADDED_COLUMNS: Dict[str, Tuple[Tuple[str, str], ...]] = {
+    "discovery_identification": (
+        ("routing_reason", "TEXT NOT NULL DEFAULT 'none'"),
+        ("rendered_relation", "TEXT NOT NULL DEFAULT 'uncertain'"),
+    ),
+}
+CD_BATCH_MARKER_KEY = "locus_schema_version"
+CD_BATCH_MARKER_VALUE = "locus-v1"
+CD_BATCH_COUNT_META_KEY_BY_TABLE: Dict[str, str] = {
+    table: f"expected_rows_{table}" for table in CD_BATCH_TABLE_COLUMNS
+}
+
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -182,8 +261,16 @@ def _write_v1_shaped_copy(dest_db: Path) -> None:
             conn.execute(f'ALTER TABLE "{table}__v1" RENAME TO "{table}"')
         for table in NEW_TABLE_COLUMNS:
             conn.execute(f'DROP TABLE IF EXISTS "{table}"')
+        # CD batch (Amendment 2026-08-12): the regenerated golden also carries
+        # the batch's tables, columns and meta keys -- the v1 shape has none of
+        # them. (The two identification COLUMNS go with the table drop above.)
+        for table in CD_BATCH_TABLE_COLUMNS:
+            conn.execute(f'DROP TABLE IF EXISTS "{table}"')
         conn.executemany(
-            "DELETE FROM meta WHERE key = ?", [(k,) for k in _POST_REBUILD_META_KEYS]
+            "DELETE FROM meta WHERE key = ?",
+            [(k,) for k in _POST_REBUILD_META_KEYS]
+            + [(CD_BATCH_MARKER_KEY,)]
+            + [(k,) for k in CD_BATCH_COUNT_META_KEY_BY_TABLE.values()],
         )
         conn.commit()
     finally:
@@ -360,5 +447,100 @@ def materialize_sidecar(dest_dir: Path, **upgrade_kwargs) -> Path:
     # still WITHHOLD something -- a knob cannot omit what the base already has.
     _write_v1_shaped_copy(db_path)
     upgrade_db_to_post_rebuild(db_path, **upgrade_kwargs)
+    write_manifest(dest_dir, db_path)
+    return db_path
+
+
+def upgrade_db_to_cd_batch(
+    db_path: Path,
+    *,
+    omit_tables: Sequence[str] = (),
+    omit_columns: Sequence[Tuple[str, str]] = (),
+    omit_marker: bool = False,
+    meta_overrides: Optional[Mapping[str, str]] = None,
+    omit_meta_keys: Sequence[str] = (),
+) -> None:
+    """Upgrade a post-rebuild (Amendment 2026-08-02) sidecar to the CD-batch
+    (Amendment 2026-08-12) shape, in place -- the seven new tables, the two
+    ``discovery_identification`` columns, the ``locus_schema_version`` marker
+    and the seven count keys. Same defect-knob pattern as
+    ``upgrade_db_to_post_rebuild``; ``omit_marker`` builds the deliberate
+    PRE-batch presentation (marker absent -> the loader must not require any
+    of it)."""
+    omitted_cols = set(omit_columns)
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        existing_tables = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        for table, columns in CD_BATCH_ADDED_COLUMNS.items():
+            if table not in existing_tables:
+                continue
+            present = {
+                row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for name, decl in columns:
+                if name in present or (table, name) in omitted_cols:
+                    continue
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+        for table, columns in CD_BATCH_TABLE_COLUMNS.items():
+            if table in omit_tables or table in existing_tables:
+                continue
+            cols = [
+                f"{name} {decl}"
+                for name, decl in columns
+                if (table, name) not in omitted_cols
+            ]
+            conn.execute(f"CREATE TABLE {table} ({', '.join(cols)})")
+
+        meta: Dict[str, str] = {}
+        if not omit_marker:
+            meta[CD_BATCH_MARKER_KEY] = CD_BATCH_MARKER_VALUE
+        for table, meta_key in CD_BATCH_COUNT_META_KEY_BY_TABLE.items():
+            if table in omit_tables:
+                # Same convention as upgrade_db_to_post_rebuild: still write
+                # the count key (as 0) so a missing-TABLE test fails on the
+                # table check, not vacuously on the missing meta key.
+                meta[meta_key] = "0"
+                continue
+            (count,) = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            meta[meta_key] = str(count)
+        if meta_overrides:
+            meta.update({k: str(v) for k, v in meta_overrides.items()})
+        for key in omit_meta_keys:
+            meta.pop(key, None)
+        for key, value in meta.items():
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+        for key in omit_meta_keys:
+            conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def materialize_cd_batch_sidecar(
+    dest_dir: Path,
+    *,
+    post_rebuild_kwargs: Optional[Mapping] = None,
+    **cd_batch_kwargs,
+) -> Path:
+    """The full CD-batch (Amendment 2026-08-12) presentation: v1 base ->
+    post-rebuild upgrade -> CD-batch upgrade -> manifest written LAST, so the
+    loader's content-hash check never masks the defect under test."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    db_path = dest_dir / f"{GOLDEN_BASENAME}.db"
+    _write_v1_shaped_copy(db_path)
+    upgrade_db_to_post_rebuild(db_path, **dict(post_rebuild_kwargs or {}))
+    upgrade_db_to_cd_batch(db_path, **cd_batch_kwargs)
     write_manifest(dest_dir, db_path)
     return db_path
