@@ -418,6 +418,135 @@ def test_loader_accepts_pre_batch_asset_without_marker(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# (R) The Contract-1 input ingests — curated quoter + region map
+# ---------------------------------------------------------------------------
+
+TRACKED_CURATED = REPO_ROOT / "docs" / "specs" / "discovery-curated-quoter-v1.json"
+
+
+def test_tracked_curated_list_is_well_formed():
+    import json as _json
+    curated = _json.loads(TRACKED_CURATED.read_text(encoding="utf-8"))
+    assert curated["list_version"] == "quoter-v1"
+    assert curated["ruled_date"] == "2026-08-12"
+    ids_in_list = [e["canonical_work_id"] for e in curated["entries"]]
+    assert ids_in_list == ["w001383", "w001384"]  # both Yalkut works, owner ruling
+
+
+def _write_json(path, payload):
+    import json as _json
+    path.write_text(_json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def test_curated_ingest_inserts_and_fails_closed_on_unknown_id(tmp_path):
+    db = tmp_path / "cd.db"
+    _build_synthetic(db)
+    conn = sqlite3.connect(str(db))
+    try:
+        (canonical,) = conn.execute(
+            "SELECT canonical_work_id FROM works LIMIT 1").fetchone()
+        good = tmp_path / "curated.json"
+        _write_json(good, {
+            "list_version": "quoter-test", "ruled_date": "2026-08-12",
+            "entries": [{"canonical_work_id": canonical, "note": "t"}],
+        })
+        meta_rows = sidecar_build.ingest_curated_quoter(conn, str(good))
+        assert meta_rows == [("curated_quoter_version", "quoter-test")]
+        row = conn.execute(
+            "SELECT list_version, canonical_work_id, ruled_date, note "
+            "FROM discovery_curated_quoter").fetchone()
+        assert row == ("quoter-test", canonical, "2026-08-12", "t")
+
+        bad = tmp_path / "bad.json"
+        _write_json(bad, {
+            "list_version": "quoter-test2", "ruled_date": "2026-08-12",
+            "entries": [{"canonical_work_id": "w_nope"}],
+        })
+        try:
+            sidecar_build.ingest_curated_quoter(conn, str(bad))
+        except ValueError as exc:
+            assert "w_nope" in str(exc)
+        else:
+            raise AssertionError("unknown canonical id MUST fail the build")
+    finally:
+        conn.close()
+
+
+def test_region_ingest_requires_locus_and_resolves_every_row(tmp_path):
+    db = tmp_path / "cd.db"
+    _build_synthetic(db)
+    region = tmp_path / "region.json"
+    _write_json(region, {"frame": "region-test", "rows": [
+        {"locus_ref_id": "REF:x", "unit_ord": 0, "discriminative": False,
+         "source": "derived", "basis": "b"},
+        {"locus_ref_id": "REF:x", "unit_ord": 1, "discriminative": None,
+         "source": "open"},
+    ]})
+
+    conn = sqlite3.connect(str(db))
+    try:
+        # Precondition: empty locus_unit fails closed with the D-track message.
+        try:
+            sidecar_build.ingest_region_map(conn, str(region), {"REF:x": "w1"})
+        except ValueError as exc:
+            assert "locus_unit is EMPTY" in str(exc)
+        else:
+            raise AssertionError("region ingest before the locus import MUST fail")
+    finally:
+        conn.close()
+
+    _add_locus_rows(db)  # one locus_work + unit_ord 0 for a real work
+    conn = sqlite3.connect(str(db))
+    try:
+        (work_id,) = conn.execute("SELECT work_id FROM locus_work").fetchone()
+        conn.execute(
+            "INSERT INTO locus_unit (work_id, unit_ord, start_offset, part_key, "
+            "label_he, citation_pos) VALUES (?, 1, 500, 'ch:0.2', 'פרק ב', 2)",
+            (work_id,),
+        )
+        crosswalk = {"REF:x": work_id}
+        meta_rows = sidecar_build.ingest_region_map(conn, str(region), crosswalk)
+        assert meta_rows == [("region_map_version", "region-test")]
+        stored = conn.execute(
+            "SELECT region_version, work_id, unit_ord, discriminative, source, basis "
+            "FROM discovery_region_map ORDER BY unit_ord").fetchall()
+        # The tri-state survives: False -> 0, open/None -> NULL (fails closed).
+        assert stored == [
+            ("region-test", work_id, 0, 0, "derived", "b"),
+            ("region-test", work_id, 1, None, "open", None),
+        ]
+
+        # An unanchored ruling (unit nobody has) fails closed.
+        bad = tmp_path / "bad_region.json"
+        _write_json(bad, {"frame": "region-test2", "rows": [
+            {"locus_ref_id": "REF:x", "unit_ord": 99, "discriminative": True,
+             "source": "ruling"},
+        ]})
+        try:
+            sidecar_build.ingest_region_map(conn, str(bad), crosswalk)
+        except ValueError as exc:
+            assert "unanchored" in str(exc)
+        else:
+            raise AssertionError("a ruling on a nonexistent unit MUST fail")
+
+        # An unresolvable ref id fails closed, and the message withholds it.
+        orphan = tmp_path / "orphan_region.json"
+        _write_json(orphan, {"frame": "region-test3", "rows": [
+            {"locus_ref_id": "REF:unknown", "unit_ord": 0,
+             "discriminative": True, "source": "ruling"},
+        ]})
+        try:
+            sidecar_build.ingest_region_map(conn, str(orphan), crosswalk)
+        except ValueError as exc:
+            assert "no crosswalk entry" in str(exc)
+            assert "REF:unknown" not in str(exc)  # raw ref ids never reach messages
+        else:
+            raise AssertionError("an unresolvable ref id MUST fail")
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Projection carries the batch through
 # ---------------------------------------------------------------------------
 

@@ -1859,6 +1859,94 @@ AMENDMENT_2026_08_12_COUNT_TABLES = (
 )
 
 
+def ingest_curated_quoter(conn: sqlite3.Connection, path: str) -> List[Tuple[str, str]]:
+    """Ingest the tracked curated-quoter list (Amendment 2026-08-12 (R)) into
+    `discovery_curated_quoter` and return its meta rows.
+
+    Fail-closed: a canonical id the asset does not carry is a typo in an
+    owner ruling, never a silent no-op -- the build stops. (Projection copies
+    the table verbatim; a row whose work is later pruned publicly is inert
+    there, which is documented at the projection rule.)"""
+    with open(path, encoding="utf-8") as fh:
+        curated = json.load(fh)
+    list_version = str(curated["list_version"])
+    ruled_date = str(curated["ruled_date"])
+    known = {r[0] for r in conn.execute("SELECT DISTINCT canonical_work_id FROM works")}
+    rows = []
+    for entry in curated["entries"]:
+        canonical_work_id = str(entry["canonical_work_id"])
+        if canonical_work_id not in known:
+            raise ValueError(
+                f"curated quoter list names canonical_work_id {canonical_work_id!r} "
+                "which this asset does not carry -- fail closed, never a silent no-op"
+            )
+        rows.append((list_version, canonical_work_id, ruled_date,
+                     entry.get("note")))
+    conn.executemany(
+        "INSERT INTO discovery_curated_quoter "
+        "(list_version, canonical_work_id, ruled_date, note) VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    return [("curated_quoter_version", list_version)]
+
+
+def ingest_region_map(
+    conn: sqlite3.Connection, path: str, crosswalk: Dict[str, str],
+) -> List[Tuple[str, str]]:
+    """Ingest the owner's region input (Amendment 2026-08-12 (R)) into
+    `discovery_region_map`, re-keyed raw locus_ref_id -> opaque work_id via
+    the crosswalk, and return its meta rows.
+
+    PRECONDITION (fail-closed, stated in the error): the locus tables must
+    already be populated -- a region ruling is ABOUT a locus unit, so this
+    input is supplied together with the D-track locus import, never before.
+    Every row must resolve: an unresolvable ref id or a (work, unit) pair
+    absent from locus_unit is a data defect in an owner ruling, never skipped.
+
+    The input's Hebrew `unit`/`work` display labels are deliberately NOT
+    stored -- the sidecar carries opaque ids + the tri-state + `basis` only;
+    labels live on locus_unit."""
+    with open(path, encoding="utf-8") as fh:
+        region = json.load(fh)
+    region_version = str(region["frame"])
+    unit_keys = {
+        (w, o) for w, o in conn.execute("SELECT work_id, unit_ord FROM locus_unit")
+    }
+    if not unit_keys:
+        raise ValueError(
+            "region map supplied but locus_unit is EMPTY -- the region input rules "
+            "on locus units, so --region-map is supplied together with the locus "
+            "import (D-track), never before it"
+        )
+    rows = []
+    for r in region["rows"]:
+        work_id = crosswalk.get(r["locus_ref_id"])
+        if work_id is None:
+            raise ValueError(
+                "region input references a locus_ref_id with no crosswalk entry "
+                "(ref id withheld from this message; see the input file) -- fail closed"
+            )
+        unit_ord = int(r["unit_ord"])
+        if (work_id, unit_ord) not in unit_keys:
+            raise ValueError(
+                f"region input rules on (work {work_id!r}, unit_ord {unit_ord}) "
+                "which locus_unit does not carry -- an unanchored ruling, fail closed"
+            )
+        discriminative = r.get("discriminative")
+        rows.append((
+            region_version, work_id, unit_ord,
+            None if discriminative is None else (1 if discriminative else 0),
+            str(r["source"]), r.get("basis"),
+        ))
+    conn.executemany(
+        "INSERT INTO discovery_region_map "
+        "(region_version, work_id, unit_ord, discriminative, source, basis) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    return [("region_map_version", region_version)]
+
+
 def population_lock_meta_rows(lock: Dict, lock_sha256: str) -> List[Tuple[str, str]]:
     """The population lock's COPIED meta constants (Amendment 2026-08-12 (S)).
 
@@ -6963,6 +7051,12 @@ def finalize_build(
     # meta; the verifier's retention gate enforces the lock's own floors
     # against every shipped asset's recomputed population.
     population_lock_path=None,
+    # CD batch / schema Amendment 2026-08-12 (R): Contract-1's two input
+    # tables. The curated list can be supplied on any post-batch bake; the
+    # region map REQUIRES the locus tables populated (its ingest fails closed
+    # otherwise), so it travels with the D-track locus import.
+    curated_quoter_path=None,
+    region_map_path=None,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
     (claims/evidence, NO physical-MS collapse) -> `build_witness_units` ->
@@ -7503,6 +7597,19 @@ def finalize_build(
             populate_manuscript_display(out_conn, libraries_csv_path)
         )
 
+        # CD batch / Amendment 2026-08-12 (R): the Contract-1 input tables,
+        # ingested BEFORE the count/meta block so the release-contract counts
+        # include their rows. Each returns its version meta row.
+        contract1_input_meta_rows: List[Tuple[str, str]] = []
+        if curated_quoter_path:
+            contract1_input_meta_rows.extend(
+                ingest_curated_quoter(out_conn, curated_quoter_path))
+        if region_map_path:
+            with open(crosswalk_path, encoding="utf-8") as fh:
+                _cw = json.load(fh)
+            contract1_input_meta_rows.extend(ingest_region_map(
+                out_conn, region_map_path, _cw.get("crosswalk", _cw)))
+
         # 136-12 (VIS-01 vs D-22): REPORT the disagreement, never resolve it.
         launch_scope_reconciliation = compute_launch_scope_reconciliation(out_conn)
 
@@ -7662,6 +7769,8 @@ def finalize_build(
                 _lock = json.load(fh)
             meta_rows.extend(
                 population_lock_meta_rows(_lock, _hash_file(Path(population_lock_path))))
+        # Amendment 2026-08-12 (R): the active region/curated versions.
+        meta_rows.extend(contract1_input_meta_rows)
         cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
 
         (integrity_result,) = out_conn.execute("PRAGMA integrity_check").fetchone()
@@ -7975,6 +8084,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Curated work-id alias groups (D-23d). Absent => every work is "
                              "its own singleton reviewed identity (fail-closed), never a "
                              "guessed grouping.")
+    v2_group.add_argument("--curated-quoter", metavar="PATH", default=None,
+                        help="Tracked curated-quoter list JSON (Amendment 2026-08-12 (R); "
+                             "docs/specs/discovery-curated-quoter-v1.json). Matrix step 4's "
+                             "curated half; rows relabel, never delete. A canonical id the "
+                             "asset does not carry fails the build.")
+    v2_group.add_argument("--region-map", metavar="PATH", default=None,
+                        help="Owner region-input JSON (Amendment 2026-08-12 (R)). Matrix "
+                             "step 3's input, re-keyed via the crosswalk. REQUIRES the "
+                             "locus tables populated (supply with the D-track locus "
+                             "import); fails closed otherwise.")
     v2_group.add_argument("--population-lock", metavar="PATH", default=None,
                         help="Tracked population-lock JSON (schema Amendment 2026-08-12 (S), "
                              "scripts/emit_population_lock.py). Constants are COPIED into "
@@ -8120,6 +8239,8 @@ def main(argv=None) -> int:
         work_author_aliases_content_hash=args.work_author_aliases_content_hash,
         reference_corpus_sha256=args.reference_corpus_sha256,
         population_lock_path=args.population_lock,
+        curated_quoter_path=args.curated_quoter,
+        region_map_path=args.region_map,
     )
     print(f"real build OK: {stats['row_counts']}")
     print(f"novelty={stats['novelty']}")
