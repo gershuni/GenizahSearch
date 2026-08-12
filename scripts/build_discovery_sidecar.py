@@ -551,9 +551,14 @@ CREATE TABLE discovery_identification (
   -- CD batch / schema Amendment 2026-08-12 (O): the Contract-1 rendered
   -- relation -- the stored output of the frozen precedence matrix
   -- (docs/specs/discovery-relation-matrix-v1.md §2), recomputed per asset
-  -- after public pruning. Until C-track lands the matrix computation every
-  -- build writes the fail-closed state 'uncertain' (the matrix's own
-  -- missing-input rule); NO surface reads this column before C-track.
+  -- after public pruning.
+  --
+  -- ⟨AMENDED 2026-08-12, C-track⟩ This comment used to end "NO surface reads
+  -- this column before C-track". THREE now do, unconditionally: the claims
+  -- query, the manuscript-summary query and the findings query. That is why
+  -- `web/discovery_assets.py::_REQUIRED_COLUMNS` requires the column of EVERY
+  -- asset rather than only of post-batch ones -- an asset without it does not
+  -- degrade, it loads and then errors on every read.
   rendered_relation   TEXT NOT NULL DEFAULT 'uncertain'
                       CHECK (rendered_relation IN
                         ('direct_witness','shared_text','quotes_this_work',

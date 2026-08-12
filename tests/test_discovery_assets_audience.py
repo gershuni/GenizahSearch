@@ -262,22 +262,37 @@ _AMENDMENT_COLUMNS = {
         "main_pool", "main_pool_reason", "best_band_rank", "page_count",
         "max_coverage_ppm", "relation_kind", "novelty_status",
         "divergence_correctness", "assertion_visibility", "identity_visibility",
-        # ⟨PROMOTED 2026-08-12, C-track step 3c⟩ From the LATER Amendment
-        # 2026-08-12, where it is marker-conditional. It is unconditionally
-        # required now because three read paths SELECT it unconditionally, so an
-        # asset without it does not degrade -- it loads, reports itself
-        # available, and answers every panel and findings read with
-        # `unavailable / query_failed` (measured on the served pre-batch asset).
-        # This mirror is therefore no longer "exactly the 2026-08-02 amendment";
-        # it is "every column a read path cannot run without", which is what the
-        # contract was always for.
-        "rendered_relation",
     }),
     "manuscript_display": frozenset({
         "sys_id", "library_code", "library_sort_key",
         "shelfmark_display", "shelfmark_sort_key",
     }),
 }
+
+#: Columns from a LATER amendment that the loader nevertheless requires of EVERY
+#: asset, because a read path SELECTs them unconditionally. Kept as its own set
+#: rather than folded into `_AMENDMENT_COLUMNS` above (Codex review, 2026-08-12):
+#: that set is the independent restatement of Amendment 2026-08-02, and quietly
+#: adding a 2026-08-12 column to it would make the pin claim to check one thing
+#: while checking another. The required-column contract is the UNION, and saying
+#: so is what keeps both halves auditable.
+#:
+#: `rendered_relation` is here because three read paths select it (the claims
+#: query, the manuscript-summary query, the findings query), so an asset without
+#: it does not degrade -- it loads, reports itself available, and answers every
+#: panel and findings read with `unavailable / query_failed`. Measured on the
+#: served pre-batch asset.
+_PROMOTED_RUNTIME_COLUMNS = {
+    "discovery_identification": frozenset({"rendered_relation"}),
+}
+
+
+def _expected_required_columns():
+    """Amendment 2026-08-02 ∪ the promoted runtime columns."""
+    merged = {table: set(cols) for table, cols in _AMENDMENT_COLUMNS.items()}
+    for table, cols in _PROMOTED_RUNTIME_COLUMNS.items():
+        merged.setdefault(table, set()).update(cols)
+    return {table: frozenset(cols) for table, cols in merged.items()}
 
 
 def test_fully_valid_post_rebuild_public_asset_passes(tmp_path, monkeypatch):
@@ -368,12 +383,28 @@ def test_extra_unexpected_column_does_not_fail_readiness(tmp_path, monkeypatch):
     assert da.discovery_available() is True
 
 
-def test_required_columns_mapping_matches_the_amendment_exactly(tmp_path):
+def test_required_columns_mapping_is_the_amendment_plus_promoted_runtime_columns(tmp_path):
     """Behavior 5: the required-column set covers every column the Amendment
     2026-08-02 adds -- including the ones on PRE-EXISTING tables, not only the
-    new tables' own columns."""
+    new tables' own columns -- PLUS every column promoted because a read path
+    selects it unconditionally.
+
+    ⟨RENAMED 2026-08-12, Codex review⟩ It was
+    `..._matches_the_amendment_exactly`, and after `rendered_relation` was
+    promoted that name was false: the mapping is deliberately a SUPERSET of the
+    2026-08-02 amendment. The two halves are now separate sets and the assertion
+    is their union, so neither can absorb the other silently.
+    """
     assert isinstance(da._REQUIRED_COLUMNS, dict)
-    assert da._REQUIRED_COLUMNS == _AMENDMENT_COLUMNS
+    assert da._REQUIRED_COLUMNS == _expected_required_columns()
+    # The promotion is a real addition, not a restatement -- if a future edit
+    # folded it into the amendment set, the union above would still pass while
+    # the pin stopped meaning what it says.
+    for table, columns in _PROMOTED_RUNTIME_COLUMNS.items():
+        assert not (columns & _AMENDMENT_COLUMNS.get(table, frozenset())), (
+            f"{table}: a promoted runtime column was folded into the "
+            "Amendment 2026-08-02 set, which is the one thing this split exists "
+            "to prevent")
     for table, columns in da._REQUIRED_COLUMNS.items():
         assert isinstance(columns, frozenset), f"{table} must map to a frozenset"
 
