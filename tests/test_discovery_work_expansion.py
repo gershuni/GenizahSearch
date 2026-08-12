@@ -606,12 +606,39 @@ def test_partial_anchor_error_names_the_present_and_the_missing_fields(tmp_path)
 
 
 def test_sql_path_and_pure_helper_agree_on_every_field_both_compute(tmp_path):
+    """⟨STRENGTHENED 2026-08-12, Codex review of step 3d.⟩
+
+    As written this compared two producers whose cap was the IDENTITY on every
+    row: each carrier's identification verdict equalled its stored claim type, so
+    a pure producer that skipped `cap_member_relation` entirely would have passed.
+    A mirror that only exercises the identity case mirrors nothing.
+
+    Three changes, each closing one hole:
+
+    * a DEMOTED carrier (stored `direct_witness`, identification `shared_text`),
+      so the cap has to actually fire on both sides;
+    * a carrier with NO identification at all, whose pure-side input row OMITS
+      `identification_rendered_relation` entirely -- the two producers read that
+      input differently on purpose (`row[...]` in the SQL presenter, where the
+      column is always SELECTed, and `.get(...)` in the pure helper, where the
+      caller supplies the dict), and this is the row that proves the asymmetry
+      lands on the same answer;
+    * `zip()` truncated silently to the shorter list, so a producer returning
+      FEWER rows compared clean. Counts and key sets are now asserted first.
+    """
     carriers = [
         _carrier("990000000000000001", "p001", confidence_band="tier_a"),
         _carrier("990000000000000002", "p002", confidence_band="screening_rb",
                  claim_type="quotes_this_work"),
         _carrier("990000000000000003", "p003", confidence_band="weak",
                  evidence_source=_PROPAGATED),
+        # the cap FIRES here: stored direct_witness, identification demoted
+        _carrier("990000000000000004", "p004", confidence_band="tier_a",
+                 claim_type="direct_witness", identification_relation="shared_text"),
+        # ...and here there is no verdict to cap against at all (§3.2a)
+        _carrier("990000000000000005", "p005", confidence_band="tier_a",
+                 claim_type="direct_witness",
+                 identification_relation=NO_IDENTIFICATION),
     ]
     db = _build_expansion_db(tmp_path / "symmetry.db", carriers,
                              units=[("unitX", ["990000000000000001",
@@ -621,20 +648,22 @@ def test_sql_path_and_pure_helper_agree_on_every_field_both_compute(tmp_path):
                   anchor_confidence_band="screening_canon")
     sql_items = _service_for(db).get_work_witnesses("wEXP001", **anchor)
 
-    claim_rows = [
-        {"page_id": c["page_id"], "work_id": "wEXP001", "claim_id": f"c{i:06d}",
-         "claim_type": c["claim_type"], "sys_id": c["sys_id"],
-         # C-track step 3d: the pure helper has no DB, so its input rows must
-         # CARRY the identification's matrix output the SQL path joins for. The
-         # mirror caught its absence immediately -- the pure side fell closed to
-         # `uncertain` while SQL rendered `direct_witness` -- which is the whole
-         # reason this comparison exists.
-         "identification_rendered_relation": c["identification_relation"],
-         "evidence_source": c["evidence_source"],
-         "confidence_band": c["confidence_band"],
-         "library_code": "CUL", "shelfmark_display": f"T-S {c['sys_id'][-4:]}"}
-        for i, c in enumerate(carriers)
-    ]
+    claim_rows = []
+    for i, c in enumerate(carriers):
+        row = {
+            "page_id": c["page_id"], "work_id": "wEXP001", "claim_id": f"c{i:06d}",
+            "claim_type": c["claim_type"], "sys_id": c["sys_id"],
+            "evidence_source": c["evidence_source"],
+            "confidence_band": c["confidence_band"],
+            "library_code": "CUL", "shelfmark_display": f"T-S {c['sys_id'][-4:]}",
+        }
+        # The pure helper has no DB, so its input rows must CARRY the verdict the
+        # SQL path joins for -- except where there IS none, which is the case the
+        # key's ABSENCE has to represent.
+        if c["identification_relation"] != NO_IDENTIFICATION:
+            row["identification_rendered_relation"] = c["identification_relation"]
+        claim_rows.append(row)
+
     pure_items = _project_work_witnesses(
         claim_rows,
         {"990000000000000001": "unitX", "990000000000000002": "unitX"},
@@ -643,11 +672,22 @@ def test_sql_path_and_pure_helper_agree_on_every_field_both_compute(tmp_path):
     # `band_label` is the one field the pure helper has no source for (it needs
     # the sidecar's band-measurement read and a UI language); everything else
     # must agree exactly.
+    assert len(sql_items) == len(pure_items), (
+        f"row COUNTS disagree: SQL {len(sql_items)}, pure {len(pure_items)} -- "
+        "a zip() here would have compared the shorter list and passed")
+    assert sql_items, "the fixture produced no rows, so this proves nothing"
     comparable = [k for k in sql_items[0] if k != "band_label"]
     assert sorted(comparable) == sorted(k for k in pure_items[0])
     for sql_row, pure_row in zip(sql_items, pure_items):
+        assert set(sql_row) - {"band_label"} == set(pure_row), "key sets drifted"
         for key in comparable:
             assert sql_row[key] == pure_row[key], f"SQL/pure disagreement on {key!r}"
+
+    # ...and the two rows the cap is ABOUT really did move, so the comparison
+    # above was comparing something.
+    by_sys = {r["representative_sys_id"]: r for r in sql_items}
+    assert by_sys["990000000000000004"]["rendered_relation"] == "shared_text"
+    assert by_sys["990000000000000005"]["rendered_relation"] == "uncertain"
 
 
 def test_anchor_unit_still_excluded_and_same_unit_members_still_suppressed(tmp_path):

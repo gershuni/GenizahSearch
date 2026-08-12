@@ -1047,12 +1047,12 @@ def _identification_row(
     """
     anchor = _anchor_identity(row)
     title, missing = _routed_title(row, lang)
-    # C-track step 3b: ONE relation feeds every display decision below -- the
-    # chip, the headline, the filter code and D-08a's percentage gate -- and it
-    # is the matrix output capped at member grain, never the stored claim type.
-    # The stored type still exists on the row and is still read, but only by
-    # `_anchor_identity` above, where it is a machine key for a query rather than
-    # a claim to a reader.
+    # C-track step 3b, narrowed by 3d: ONE relation feeds every display decision
+    # below -- the chip, the headline, the filter code and D-08a's percentage
+    # gate -- and it is the matrix output capped at member grain. The stored
+    # claim type is no longer on this surface at all: step 3d retired its last
+    # consumer, `_anchor_identity` above, which now carries this same capped
+    # value into the expansion query.
     rendered_relation = row.get("rendered_relation")
     evidence_source = row.get("evidence_source")
     in_main_pool = row.get("main_pool") is True

@@ -2617,15 +2617,22 @@ class DiscoveryService:
             "title_missing": not bool(title),
             "author": row.get("display_author") if display_title else row.get("author"),
             "genre": row.get("display_genre") if display_title else row.get("genre"),
-            "relation_kind": row.get("claim_type"),
-            # C-track step 3b: what this row may SAY, as against `relation_kind`,
-            # which is what the build stored. The two are different questions and
-            # the surface needs both: every display read (chip, headline, the
-            # coverage gate) goes through `rendered_relation`, while
-            # `relation_kind` survives as the ANCHOR identity that travels into
-            # the expansion query, where it is compared to other rows' stored
-            # claim types. Capped per matrix-spec 3.2 -- a page-level row never
-            # out-asserts the identification it belongs to.
+            # C-track step 3b, narrowed by 3d: what this row may SAY, as against
+            # the stored `claim_type` the build recorded. ONE field, because every
+            # display read -- chip, headline, filter code, D-08a's percentage
+            # gate -- goes through it.
+            #
+            # Step 3b also emitted the stored value as `relation_kind`, for one
+            # consumer: `_anchor_identity` turned it into the expansion query's
+            # `anchor_claim_type`. Step 3d retired that consumer (the anchor now
+            # travels already capped) and dropped the field from
+            # `SURFACE_CLAIM_FIELDS`, but left this line building it -- a value
+            # the projection then silently discarded. Removed: a producer writing
+            # a field nothing consumes is the same hazard as an allowlist
+            # carrying one, one layer earlier.
+            #
+            # Capped per matrix-spec §3.2 -- a page-level row never out-asserts
+            # the identification it belongs to.
             "rendered_relation": cap_member_relation(
                 row.get("claim_type"), row.get("identification_rendered_relation")),
             "main_pool": None if row.get("main_pool") is None else bool(row.get("main_pool")),
