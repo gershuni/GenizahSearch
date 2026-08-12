@@ -1248,11 +1248,30 @@ tables.
 The stored output of the frozen six-step precedence matrix
 (`discovery-relation-matrix-v1.md` §2), recomputed PER ASSET after public pruning —
 concretely, inside the existing `discovery_identification` rematerialization the public
-projection already performs. **Until C-track lands the matrix implementation, every build
-writes the fail-closed state `uncertain`** — which is literally the matrix's missing-input
-rule, and no surface reads the column before C-track. C-track also brings the verifier's
-row-for-row recompute-equality gate (mutation-proven: a deliberately mis-stored row fails
-the build); the batch's verifier checks vocabulary and presence only.
+projection already performs.
+
+**⟨AMENDED 2026-08-12b — C-track⟩** The column is now COMPUTED, not fail-closed. The
+implementation is `shared/discovery_relation_matrix.py` (`matrix-v1`), imported by the
+builder, the projector, the verifier and the read path — never re-implemented, because the
+verifier's gate recomputes with the same module and a second implementation would make it a
+comparison of the code against itself. Three consequences worth knowing at the schema layer:
+
+- **Insert-then-recompute, one transaction.** `populate_discovery_identification` still
+  inserts the fail-closed constant, then overwrites it by recomputing over the COMPLETE
+  table. Step 4's divergence ratio is a per-work aggregate, so no row can know its own
+  relation while the table is still filling.
+- **Every matrix input is recoverable from stored columns** — `eligibility_basis` carries
+  step 1, `routing_reason` step 2, `max_coverage_ppm` step 5, `relation_kind` step 6,
+  `novelty_status` step 4a, and `discovery_curated_quoter` step 4b. That is what makes the
+  recompute a function of the ARTIFACT, and hence what makes the equality gate meaningful.
+- **The parameterization is stored** (three `relation_matrix_*` meta keys, §U) and read back
+  by the verifier rather than assumed.
+
+The verifier's row-for-row recompute-equality gate is `check_relation_matrix_recompute`,
+mutation-proven: a single mis-stored row out of eighteen fails the build, as does a curated
+ruling the stored values predate, as does step 3 activated with no footprint recipe wired.
+`check_amendment_2026_08_12_contract` keeps its narrower vocabulary-and-presence job, which
+is what must still hold on an asset whose recompute cannot run at all.
 
 ### (P) `discovery_identification.routing_reason` — the reason of the identification's own best row
 
@@ -1385,6 +1404,7 @@ hash unchanged; a flipped confidence band must fail the gate.
 | `reference_corpus_sha256`, `locus_reference_corpus_sha256` | copied (provenance pins) |
 | `population_lock_version` / `_sha256` / `_total` / `_family_bible` / `_family_canonical` / `_family_daf` / `_family_ja` / `_family_other_staged` | copied — LOCKED constants; recomputing would un-lock them |
 | `region_map_version`, `curated_quoter_version` | copied — the single active version the matrix reads (written when populated) |
+| `relation_matrix_version` (`'matrix-v1'`), `relation_matrix_region_active` (`'0'`/`'1'`), `relation_matrix_quoter_threshold` (a ratio, or `''` for unset) | **⟨ADDED 2026-08-12b — C-track⟩** written by the SAME builder helper on both build paths, so the public asset re-declares the parameterization it recomputed under. All three keys are always written: a missing key ("built before the matrix shipped") and an empty threshold ("built with no threshold") must not be the same observation |
 
 Loader contract: when `locus_schema_version` is present, `web/discovery_assets.py`
 requires all seven new tables, the two new `discovery_identification` columns, and the
@@ -1439,4 +1459,11 @@ storage; the region-map and curated-quoter input tables; the population-lock
 meta constants and their copy-never-recompute discipline; the Contract-0
 reference-corpus basis pin with its equality gate; the CERT-01
 frame-regression script; and the `locus_schema_version` loader marker that
-keeps pre-batch assets loading unchanged).*
+keeps pre-batch assets loading unchanged); 2026-08-12b (C-track —
+`rendered_relation` becomes COMPUTED by `shared/discovery_relation_matrix.py`
+(`matrix-v1`) instead of fail-closed: insert-then-recompute in one
+transaction, every matrix input recoverable from stored columns, the three
+`relation_matrix_*` parameterization meta keys, and the verifier's
+row-for-row recompute-equality gate — which also refuses a foreign matrix
+version, a missing parameterization on a marker-bearing asset, and step 3
+activated before a footprint recipe exists).*

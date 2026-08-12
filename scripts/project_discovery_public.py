@@ -549,7 +549,15 @@ def _materialize_public_identification(out_conn: sqlite3.Connection) -> int:
     (`shared.discovery_main_pool`), `eligibility_basis`, and the SS(B1)
     `display_work_id` selection all come out right by construction. The
     canonical-group index is built from the PUBLIC `works` table, so the
-    representative is automatically chosen among public members only."""
+    representative is automatically chosen among public members only.
+
+    C-track adds one more input to that list: `discovery_curated_quoter`, read
+    by Contract 1's step 4 when the materializer recomputes `rendered_relation`
+    as its last act. It too is already projected here, which is what makes the
+    PUBLIC relation a function of the PUBLIC asset -- necessary, not cosmetic,
+    because step 4's divergence ratio is a per-work aggregate whose denominators
+    shrink with pruning. Copying the column instead would ship values that are
+    true of the private row population and false of this one."""
     import build_discovery_sidecar as builder  # local: avoid a module-load cycle
 
     out_conn.execute("DELETE FROM discovery_identification")
@@ -650,6 +658,13 @@ PROJECTION_RULES: Dict[str, Callable] = {
     # zero rows in all seven. `rendered_relation` needs no rule of its own --
     # it rides the identification rematerialization (the production
     # materializer recomputes it per asset, post-pruning, by construction).
+    #
+    # This dict's order is NOT the projection order: `project()` iterates the
+    # tables SORTED, and sequences the order-sensitive steps explicitly
+    # afterwards (`_materialize_public_identification`, then
+    # `_materialize_public_stratum_membership`). That post-pass is what
+    # guarantees Contract 1's input tables are already populated when the grain
+    # recomputes `rendered_relation` -- reordering these keys would not.
     "locus_work": _project_locus_work,
     "locus_unit": _project_locus_unit,
     "locus_edition": _project_locus_edition,

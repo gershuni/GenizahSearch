@@ -129,6 +129,12 @@ from shared.discovery_visibility import (  # noqa: E402
     identity_visibility as derive_identity_visibility,
     reconcile_launch_scope,
 )
+
+# C-track / Contract 1: the precedence matrix. IMPORTED, never restated -- the
+# release verifier recomputes `rendered_relation` from the same module and
+# asserts equality row-for-row, so a second implementation here would turn that
+# gate into a comparison of this file against itself.
+from shared import discovery_relation_matrix as relation_matrix  # noqa: E402
 SCHEMA_VERSION = "discovery-v1"
 SIDECAR_VERSION = "discovery-v1-synthetic-fixture"
 
@@ -2000,6 +2006,12 @@ def amendment_2026_08_12_meta_rows(
         rows.append((f"expected_rows_{table}", str(n)))
     if reference_corpus_sha256:
         rows.append(("reference_corpus_sha256", reference_corpus_sha256))
+    # C-track: which parameterization this asset's `rendered_relation` values
+    # were produced under. The verifier reconstructs it from HERE rather than
+    # assuming deploy 1 -- a gate that recomputes under its own assumptions
+    # would silently pass rows stored under different ones.
+    rows.extend(relation_matrix.parameterization_meta_rows(
+        relation_matrix.DEPLOY_1_PARAMETERIZATION))
     return rows
 
 
@@ -5081,8 +5093,13 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
             # routing_reason (Codex finding 2's rule) -- the reading under
             # which the A0a-2 census counted the 173 router-flagged rows.
             best["routing_reason"],
-            # Amendment 2026-08-12 (O): fail-closed until C-track lands the
-            # matrix computation; no surface reads this column before then.
+            # C-track: inserted fail-closed and OVERWRITTEN a few lines below by
+            # `relation_matrix.recompute_and_store`, in this same transaction.
+            # Contract 1's step 4 is a work-level aggregate over the asset's own
+            # rows, so no single row can know its relation while the table is
+            # still being filled; recomputing from the COMMITTED table is also
+            # what the projector and the verifier do, which is what keeps the
+            # three from drifting.
             ids.RENDERED_RELATION_FAIL_CLOSED,
         ))
 
@@ -5101,6 +5118,13 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
         insert_rows,
     )
 
+    # C-track / Contract 1: replace the fail-closed placeholder with the
+    # matrix's verdict, computed over the now-complete table by the ONE shared
+    # implementation the verifier recomputes with.
+    relation_counts = relation_matrix.recompute_and_store(
+        conn, relation_matrix.DEPLOY_1_PARAMETERIZATION
+    )
+
     counts = assert_identification_grain_consistent(conn)
     n_rows = counts["identifications"]
 
@@ -5113,6 +5137,9 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
         "identifications_more_matches": n_rows - n_main,
         "main_pool_reason_counts": reason_counts,
         "duplicate_canonical_groups": n_duplicate_groups,
+        # C-track: the rendered-relation census, so a build log shows what the
+        # matrix actually moved instead of only that it ran.
+        "rendered_relation_counts": relation_counts,
     }
 
 
@@ -7592,14 +7619,14 @@ def finalize_build(
             out_conn, novelty_grain_index, alias_groups=novelty_alias_groups
         )
 
-        identification_stats = populate_discovery_identification(out_conn)
-        identification_stats.update(
-            populate_manuscript_display(out_conn, libraries_csv_path)
-        )
-
-        # CD batch / Amendment 2026-08-12 (R): the Contract-1 input tables,
-        # ingested BEFORE the count/meta block so the release-contract counts
-        # include their rows. Each returns its version meta row.
+        # CD batch / Amendment 2026-08-12 (R): the Contract-1 input tables.
+        # Ingested BEFORE the identification grain, because C-track's matrix
+        # runs as the last step of `populate_discovery_identification` and step 4
+        # reads `discovery_curated_quoter` -- ingesting afterwards would render
+        # every row as though the owner's curated list were still empty, and the
+        # build would pass while asserting the pre-ruling relations. (Also still
+        # before the count/meta block, so the release-contract counts include
+        # their rows.) Each returns its version meta row.
         contract1_input_meta_rows: List[Tuple[str, str]] = []
         if curated_quoter_path:
             contract1_input_meta_rows.extend(
@@ -7609,6 +7636,11 @@ def finalize_build(
                 _cw = json.load(fh)
             contract1_input_meta_rows.extend(ingest_region_map(
                 out_conn, region_map_path, _cw.get("crosswalk", _cw)))
+
+        identification_stats = populate_discovery_identification(out_conn)
+        identification_stats.update(
+            populate_manuscript_display(out_conn, libraries_csv_path)
+        )
 
         # 136-12 (VIS-01 vs D-22): REPORT the disagreement, never resolve it.
         launch_scope_reconciliation = compute_launch_scope_reconciliation(out_conn)

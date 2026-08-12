@@ -1,6 +1,6 @@
 {
   "band_precision_rows": 7,
-  "content_hash": "adba639cfa4ed39609d54545b5ced189c4aaee55d8b7706b8edc7da5463e3dea",
+  "content_hash": "ca605757d89030a303bc2c5c499ee757f7c9f80ea96c7110222830cf961c4c89",
   "display_evidence_choices": {
     "01495cbc9d27962cdf07899294fbc79277d4484497d3b6d2888a173ed8b0094d": "c04d8783ddf20e2c9f776f24212c98c4378c70b09f0d128b24ccc84597b271e5",
     "079114a58cfc864f8088ee727b3dfef38c865aafe101dd98f03812aeae627dc7": "ab4e525bd677e65838a472f2f7e9ff37a228e51578561f3d02077c6e5a28457e",
@@ -37,7 +37,14 @@
     },
     "manuscript_display": 0,
     "manuscript_display_missing_from_libraries_csv": 17,
-    "manuscript_display_sys_ids_with_claims": 17
+    "manuscript_display_sys_ids_with_claims": 17,
+    "rendered_relation_counts": {
+      "direct_witness": 0,
+      "quotes_this_work": 0,
+      "shared_text": 0,
+      "uncertain": 18,
+      "work_quotes_page": 0
+    }
   },
   "novelty": {
     "novelty_evidence_rows": 24,

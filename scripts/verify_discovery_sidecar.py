@@ -43,6 +43,7 @@ import build_discovery_sidecar as sidecar_build  # scripts/build_discovery_sidec
 # never-duplicated posture as compute_frame_content_hash): the retention gate
 # is only meaningful if it assigns families exactly as the lock emitter did.
 import shared.discovery_family as discovery_family
+import shared.discovery_relation_matrix as relation_matrix
 
 
 class VerificationError(Exception):
@@ -1875,6 +1876,15 @@ def check_frame_content_hash(
 
 _AMENDMENT_2026_08_12_IDENTIFICATION_COLUMNS = ("routing_reason", "rendered_relation")
 
+# The post-batch marker key. Mirrored as a literal for the same independence
+# reason as the count tables below.
+_LOCUS_SCHEMA_MARKER_KEY = "locus_schema_version"
+
+# How many mismatching rows a Contract-1 failure names before summarizing. A
+# systematic matrix error mismatches EVERY row, and 55,377 ids in one violation
+# string is a message nobody reads.
+_RELATION_MISMATCH_REPORT_LIMIT = 5
+
 # MIRRORED from the builder's AMENDMENT_2026_08_12_COUNT_TABLES, deliberately
 # NOT imported (the verifier's standing independence convention -- a builder
 # bug must be visible to the verifier that exists to catch it; drift between
@@ -1897,11 +1907,12 @@ def check_amendment_2026_08_12_contract(conn: sqlite3.Connection, meta: dict) ->
     table (zero is a legitimate count -- the batch creates them empty; the
     count keys keep a half-imported asset from passing as complete).
 
-    The row-for-row rendered_relation RECOMPUTE-equality gate is C-track's,
-    landing with the matrix implementation itself; until then every build
-    stores the fail-closed state and this check pins vocabulary + presence."""
+    The row-for-row rendered_relation RECOMPUTE-equality gate is a separate
+    check (`check_relation_matrix_recompute`, C-track); this one pins vocabulary
+    and presence, which is what still has to hold on an asset whose recompute
+    cannot run at all."""
     violations: List[str] = []
-    if "locus_schema_version" not in meta:
+    if _LOCUS_SCHEMA_MARKER_KEY not in meta:
         violations.append(
             "meta.locus_schema_version absent -- a current asset must carry the "
             "Amendment 2026-08-12 marker (the builder writes it unconditionally)"
@@ -1983,6 +1994,76 @@ def check_locus_reference_basis(conn: sqlite3.Connection, meta: dict) -> List[st
                     "meta.locus_reference_corpus_sha256 is absent -- the import never "
                     "carried the locus build's own stream pin"
                 )
+    return violations
+
+
+def check_relation_matrix_recompute(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """Contract 1's asset-relativity gate: every stored `rendered_relation` must
+    EQUAL what the frozen matrix renders from that row's own inputs, recomputed
+    here, row for row.
+
+    Why a recompute and not a spot check: `rendered_relation` is the only column
+    on the identification grain that is derived rather than observed, and step 4
+    is a work-level aggregate, so a projector that copied the column instead of
+    recomputing it would ship values that are *correct for a different row
+    population* -- true of the private asset, false of the public one, and
+    invisible to any per-row sanity rule.
+
+    The parameterization is read from the ASSET'S OWN meta, never assumed: a
+    gate that recomputed under deploy-1 defaults would silently pass an asset
+    built with a threshold set. A missing parameterization is only tolerated on
+    a pre-batch asset (no `locus_schema_version` marker); once the marker is
+    there, absence of the keys is itself a violation.
+    """
+    violations: List[str] = []
+    if not _has_table(conn, "discovery_identification"):
+        # A missing grain table is reported by the gate-bearing-table check,
+        # which exists for exactly that. Raising here instead would replace a
+        # precise violation with a traceback.
+        return violations
+    marker = meta.get(_LOCUS_SCHEMA_MARKER_KEY)
+    missing = [k for k in relation_matrix.PARAMETERIZATION_META_KEYS if k not in meta]
+    if missing:
+        if marker is not None:
+            violations.append(
+                "Contract 1: asset carries the locus-schema marker but is missing "
+                "relation-matrix parameterization meta keys ("
+                + ", ".join(sorted(missing))
+                + ") -- the stored rendered_relation values cannot be re-derived, "
+                "so nothing can vouch for them"
+            )
+        return violations
+
+    try:
+        parameterization = relation_matrix.parameterization_from_meta(meta)
+    except relation_matrix.RelationMatrixError as exc:
+        violations.append(f"Contract 1: unusable matrix parameterization in meta -- {exc}")
+        return violations
+
+    try:
+        mismatches = relation_matrix.stored_relation_mismatches(
+            conn, parameterization, limit=_RELATION_MISMATCH_REPORT_LIMIT + 1
+        )
+    except relation_matrix.RelationMatrixError as exc:
+        # Includes RegionInputUnavailable: step 3 active with no footprint
+        # recipe wired. Fails the build rather than recomputing region-blind.
+        violations.append(f"Contract 1: cannot recompute rendered_relation -- {exc}")
+        return violations
+
+    if mismatches:
+        shown = mismatches[:_RELATION_MISMATCH_REPORT_LIMIT]
+        detail = "; ".join(
+            f"{iid}: stored {stored!r} != matrix {recomputed!r}"
+            for iid, stored, recomputed in shown
+        )
+        more = (
+            f" (+ at least {len(mismatches) - len(shown)} more)"
+            if len(mismatches) > len(shown) else ""
+        )
+        violations.append(
+            f"Contract 1: {len(shown)}{'+' if more else ''} rows store a "
+            f"rendered_relation the matrix does not produce -- {detail}{more}"
+        )
     return violations
 
 
@@ -2117,6 +2198,7 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         # presence/vocabulary/count contract + the Contract-0 basis pin.
         violations += check_amendment_2026_08_12_contract(conn, meta)
         violations += check_locus_reference_basis(conn, meta)
+        violations += check_relation_matrix_recompute(conn, meta)
         violations += check_population_lock_retention(conn, meta)
         violations += check_coverage_gap_report(conn)  # non-fatal report
     finally:

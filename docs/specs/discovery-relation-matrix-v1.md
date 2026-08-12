@@ -252,6 +252,50 @@ Adjacent owner items riding the same sitting (not matrix parameters): the expans
 honesty cue (catalogue-disagree rows are ~two-in-three false — the yardstick stays OUT of
 adjudication either way), and A0b's Contract-2/3 floor ratifications.
 
+## 5a. Amendment 2026-08-12b — the curated list is ruled, and the matrix is implemented
+
+*Two factual updates. Neither changes a rule in §2; both change what §2's frozen text
+asserts about the SHIPPING configuration, which is why they are recorded here rather than
+in a code comment.*
+
+**1. Step 4's curated list is no longer empty.** §2 says it "ships EMPTY until ruled". The
+owner ruled it on 2026-08-12: **both** ילקוט שמעוני works, tracked at
+`docs/specs/discovery-curated-quoter-v1.json` (`quoter-v1`). So deploy 1's step 4 has one
+LIVE arm — the curated arm, which needs no threshold — while the divergence arm stays off
+(no T). Consequences, stated plainly:
+
+- §2's census table is measured at "curated list empty" and is therefore **stale for step 4
+  and step 6** by the curated works' row count. Measured on the public asset: w001383 (על
+  נ"ך) 35 main-pool rows, w001384 (על התורה) 66 — so ~101 rows move from step 6 to step 4,
+  and the §2 line attributing 101 rows to על נ"ך alone matches the PAIR's total, not
+  נ"ך's. A0b re-ratifies the counts against the locked population (§5 item 1).
+- Deploy 1 therefore does move rows, which §2's "claims no measured improvement … gated by
+  B on no-regression only" already accommodates: B's `--compare --expect-delta` run
+  measures the change. The ruling is a correction, not a tuning: על נ"ך graded 4/4 false in
+  A0c and 0/57 `correct` across the 1,402 blind grades.
+
+**2. The matrix is implemented** in `shared/discovery_relation_matrix.py` (`matrix-v1`) —
+ONE module, imported by the builder, the projector, the release verifier and the read path.
+Three points the spec's §2 implies but does not spell out, now fixed in code and test:
+
+- **The parameterization travels IN the asset** (`relation_matrix_version`,
+  `relation_matrix_region_active`, `relation_matrix_quoter_threshold`). The verifier
+  reconstructs it from meta and refuses a foreign matrix version, because a gate that
+  recomputed under its own defaults would pass rows stored under a different setting.
+- **Step 3 active with no footprint recipe is a BUILD FAILURE**, not a region-blind
+  recompute (`RegionInputUnavailable`). The footprint arrives with the D-track locus import;
+  until then activating step 3 stops the build rather than silently blessing it.
+- **Step 4a's sub-floor works are absent rather than 0.0.** The census recipe stored `0.0`
+  for works with fewer than 5 novelty-checked rows; since T is validated into `(0, 1]`, the
+  two spellings render identically for every admissible threshold — the equivalence is
+  exercised in `tests/test_discovery_relation_matrix.py`, not merely asserted here.
+
+Coverage note, recorded so green is not mistaken for proof: the SYNTHETIC fixture has no
+coverage values at all, so a stock synthetic asset reaches **step 5 on every row** and
+exercises no other branch. The per-step and precedence proofs are unit-level; the asset-level
+proofs drive the stored columns explicitly (`tests/test_discovery_relation_matrix_wiring.py`).
+The first real-asset census arrives with the C-track bake.
+
 ## 6. Provenance
 
 Measurements: `_tmp/CONTRACT1-matrix-findings.md` (inputs, frontier, §7.6 aggregate
