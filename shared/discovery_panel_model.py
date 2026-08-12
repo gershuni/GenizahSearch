@@ -83,6 +83,7 @@ from shared.discovery_main_pool import (
     bucket_label,
 )
 from shared.discovery_novelty import NOVELTY_STATUSES, is_hidden_by_default
+from shared.discovery_relation_matrix import NEVER_RENDERED_IN_V1
 from shared.discovery_surface_projection import (
     STATUS_OK,
     SURFACE_STATUSES,
@@ -1323,6 +1324,14 @@ def _related_pages(bundle: PanelServiceBundle) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+#: The rendered states that HAVE reader strings, which is the frozen vocabulary
+#: minus the one the owner has not assigned strings for. Derived from
+#: `NEVER_RENDERED_IN_V1` rather than listed, so the day a direction signal ships
+#: and `work_quotes_page` becomes reachable, this set grows with it instead of
+#: silently dropping a chip.
+_CHIPPABLE_RELATIONS: frozenset = ids.RENDERED_RELATIONS - NEVER_RENDERED_IN_V1
+
+
 def _work_chip(row: Mapping[str, Any], lang: str) -> Dict[str, Any]:
     title, missing = _routed_title(row, lang)
     in_main_pool = row.get("main_pool") is True
@@ -1335,9 +1344,17 @@ def _work_chip(row: Mapping[str, Any], lang: str) -> Dict[str, Any]:
         "in_main_pool": in_main_pool,
         "bucket": bucket_label(in_main_pool, lang),
     }
-    relation_kind = row.get("relation_kind")
-    if relation_kind in ids.CLAIM_TYPES:
-        chip["relation_chip"] = ds.relation_chip(relation_kind, lang)
+    # C-track step 3c: the strongest matrix output over this work's
+    # identifications in this manuscript, NOT the strongest stored claim type.
+    # The membership test widens with it -- `uncertain` is a renderable state
+    # here, and a pane that dropped its chip would be silent about exactly the
+    # rows the matrix exists to qualify. `work_quotes_page` stays out, because
+    # `relation_chip` raises on it (§1: no owner-assigned strings), and this
+    # caller is the reason the test is a membership check rather than a
+    # try/except: a swallowed ValueError drops the element instead of failing.
+    rendered_relation = row.get("rendered_relation")
+    if rendered_relation in _CHIPPABLE_RELATIONS:
+        chip["relation_chip"] = ds.relation_chip(rendered_relation, lang)
     return chip
 
 

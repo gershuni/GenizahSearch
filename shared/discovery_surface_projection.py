@@ -194,7 +194,13 @@ SURFACE_WORK_SUMMARY_FIELDS: Tuple[str, ...] = (
     "best_band_rank",
     "gated",
     "main_pool",
-    "relation_kind",
+    #: ⟨CHANGED 2026-08-12 -- C-track step 3c⟩ Was `relation_kind`, computed in
+    #: SQL as the strongest raw `claim_type` over the work's claims here. It is
+    #: now the strongest MATRIX OUTPUT over its identifications (matrix spec
+    #: §3.1's last bullet), and INSTEAD OF rather than alongside: unlike the
+    #: claim row, nothing on this surface needs the stored value -- the pane
+    #: carries no anchor and issues no follow-up query.
+    "rendered_relation",
 )
 
 #: D-11/D-11a: an unevaluated candidate alignment. One row per DISTINCT

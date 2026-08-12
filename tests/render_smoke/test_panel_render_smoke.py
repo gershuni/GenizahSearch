@@ -211,7 +211,7 @@ def _work_summary_source(**overrides) -> Dict[str, Any]:
         'best_band_rank': 0,
         'gated': False,
         'main_pool': True,
-        'relation_kind': ids.CLAIM_TYPE_DIRECT_WITNESS,
+        'rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
     }
     row.update(overrides)
     return row

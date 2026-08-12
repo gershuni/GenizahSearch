@@ -12,6 +12,7 @@ single-rule test can see it."""
 from __future__ import annotations
 
 import itertools
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -401,6 +402,73 @@ def test_the_cap_never_out_asserts_either_input_over_the_whole_space():
                 member, identification, out)
             assert out not in _STATES_STRONGER_THAN.get(identification, set()), (
                 member, identification, out)
+
+
+# ---------------------------------------------------------------------------
+# §3.1's strongest-member aggregate, as SQL and its inverse.
+# ---------------------------------------------------------------------------
+
+def _rank_in_sqlite(value):
+    """Evaluate the generated SQL on a real SQLite, because the point of
+    generating it is that SQLite -- not Python -- computes it."""
+    conn = sqlite3.connect(":memory:")
+    try:
+        expression = matrix.relation_rank_sql("v")
+        row = conn.execute(
+            f"SELECT {expression} FROM (SELECT ? AS v)", (value,)).fetchone()
+    finally:
+        conn.close()
+    return row[0]
+
+
+@pytest.mark.parametrize("relation,rank", (
+    (ids.RENDERED_RELATION_DIRECT_WITNESS, 0),
+    (ids.RENDERED_RELATION_QUOTES_THIS_WORK, 1),
+    (ids.RENDERED_RELATION_SHARED_TEXT, 2),
+    (ids.RENDERED_RELATION_UNCERTAIN, 3),
+    (ids.RENDERED_RELATION_WORK_QUOTES_PAGE, 3),
+    (None, 3),
+    ("bogus", 3),
+))
+def test_the_generated_rank_expression_orders_by_strength(relation, rank):
+    """Strongest = 0, and everything unrankable -- NULL included -- ranks last.
+    `MIN(rank)` inside a GROUP BY is therefore strongest-member, and a work with
+    no published identification lands on the fail-closed state instead of
+    borrowing the strongest thing in its group."""
+    assert _rank_in_sqlite(relation) == rank
+
+
+def test_the_rank_expression_and_its_inverse_round_trip():
+    for relation in matrix.RELATION_RANK_ORDER:
+        assert matrix.relation_from_rank(_rank_in_sqlite(relation)) == relation
+
+
+@pytest.mark.parametrize("rank", (3, 99, -1, None, "", "0", 1.5, 0.0, True, False))
+def test_an_unrankable_rank_reads_back_as_the_fail_closed_state(rank):
+    """`"0"` and `1.5` are the interesting members. A coercing `int(rank)` turns
+    the string into "Matches this work" and the float into "Includes a
+    quotation" -- inventing a relation out of a type error, on the one code path
+    whose whole job is to be the strict inverse of a SQL expression that only
+    ever returns integers."""
+    assert matrix.relation_from_rank(rank) == ids.RENDERED_RELATION_FAIL_CLOSED
+
+
+@pytest.mark.parametrize("column", (
+    "di.rendered_relation; DROP TABLE works", "1", "", None, "a b", "x'--",
+))
+def test_the_rank_expression_refuses_anything_that_is_not_a_column(column):
+    """The argument is code-supplied today. It is validated anyway, because an
+    interpolated fragment nobody checks is how a query module grows an injection
+    point it did not mean to have."""
+    with pytest.raises(RelationMatrixError):
+        matrix.relation_rank_sql(column)
+
+
+def test_the_rank_order_is_the_frozen_strength_order():
+    """Pinned against §3.1's order rather than against the module's own rank
+    table, so reordering either one without the other is a red test."""
+    assert matrix.RELATION_RANK_ORDER == (
+        "direct_witness", "quotes_this_work", "shared_text")
 
 
 # ---------------------------------------------------------------------------

@@ -2021,11 +2021,60 @@ def test_manuscript_scope_names_the_works_with_pages_band_and_gating(ms_scope_se
     assert alpha["best_band_rank"] == _band_rank("track1_direct", "expert_verified")
     assert alpha["gated"] is False
     assert alpha["main_pool"] is True
-    assert alpha["relation_kind"] == "direct_witness"
+    # C-track step 3c: the MATRIX output for this work in this manuscript, not
+    # the strongest raw claim type over its claims.
+    assert alpha["rendered_relation"] == "direct_witness"
+    assert "relation_kind" not in alpha, (
+        "this surface carries ONE relation field -- it has no anchor and issues "
+        "no follow-up query, so the stored value has no second job here")
 
     # Deterministic ordering: strongest band first, then a stable key.
     ranks = [row["best_band_rank"] for row in env["items"]]
     assert ranks == sorted(ranks)
+
+
+def test_manuscript_pane_relation_is_the_strongest_MATRIX_output_over_the_group(tmp_path):
+    """§3.1's last bullet: strongest-member, but over matrix outputs.
+
+    Driven from the asset three ways. The stored `claim_type` never moves, so a
+    query still ranking claim types reports `direct_witness` every time.
+    """
+    for rendered, expected in (
+        ("direct_witness", "direct_witness"),
+        ("quotes_this_work", "quotes_this_work"),
+        ("shared_text", "shared_text"),
+    ):
+        variant_dir = tmp_path / rendered
+        variant_dir.mkdir()
+        db_path = _build_manuscript_scope_db(variant_dir)
+        writer = sqlite3.connect(str(db_path))
+        try:
+            writer.execute(
+                "UPDATE discovery_identification SET rendered_relation = ?", (rendered,))
+            writer.commit()
+        finally:
+            writer.close()
+        env = _service_for(db_path, _MS_VERSION).get_manuscript_works_enveloped(_MS_PAGES)
+        alpha = next(r for r in env["items"] if r["canonical_work_id"] == "w000920")
+        assert alpha["rendered_relation"] == expected
+
+
+def test_a_manuscript_pane_work_with_no_identification_reads_uncertain(tmp_path):
+    """The LEFT JOIN misses, so there is no verdict to report -- §3.2a, and the
+    same answer the claim rows give. It must not fall back to the strongest
+    thing available, which is what a raw-`claim_type` rank would have done."""
+    no_ident_dir = tmp_path / "no-ident"
+    no_ident_dir.mkdir()
+    db_path = _build_manuscript_scope_db(no_ident_dir)
+    writer = sqlite3.connect(str(db_path))
+    try:
+        writer.execute("DELETE FROM discovery_identification")
+        writer.commit()
+    finally:
+        writer.close()
+    env = _service_for(db_path, _MS_VERSION).get_manuscript_works_enveloped(_MS_PAGES)
+    assert env["items"], "the works must still be NAMED -- the row never vanishes"
+    assert {r["rendered_relation"] for r in env["items"]} == {"uncertain"}
 
 
 def test_gated_work_is_returned_with_the_flag_set_not_omitted(ms_scope_service):

@@ -620,6 +620,35 @@ def _render_related_pages(section: Mapping[str, Any], lang: str, page_id: Option
 # ---------------------------------------------------------------------------
 
 
+def _manuscript_work_chip(chip: Mapping[str, Any]) -> None:
+    """One work in "elsewhere in this manuscript": its name, its page count, and
+    -- since C-track step 3c -- what it is CLAIMING.
+
+    The relation chip was computed by the model and thrown away here, so the
+    pane named a dozen works while saying nothing about how any of them relates
+    to the manuscript; every one of them read as an identification. Owner ruled
+    2026-08-12 that it should show a relation.
+
+    Rendered as a second neutral chip beside the work, which is the panel's OWN
+    established pattern for exactly this shape (`_render_generic_group` below)
+    rather than a new one invented here. It stays visually neutral for the same
+    reason every other relation chip does: colour-coding by relation kind
+    reintroduces per-tier styling through the back door (D-24).
+
+    Absent rather than blank when the model emitted no chip -- an empty chip
+    element beside a work would read as a relation the pane failed to load.
+    """
+    classes = 'chip here' if not chip.get('gated') else 'chip gated'
+    label = chip.get('work_title') or ''
+    count = chip.get('page_count')
+    if isinstance(count, int):
+        label = f'{label} ({count})'
+    ui.label(label).classes(classes)
+    relation = chip.get('relation_chip')
+    if relation:
+        _neutral_chip(relation)
+
+
 def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -> None:
     with ui.element('div').classes(PANEL_MANUSCRIPT_PANE_CLASS):
         ui.label(pane.get('header') or '').classes('font-semibold')
@@ -653,24 +682,14 @@ def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -
         shown = works if not pane.get('paginated') else works[:threshold]
         with ui.row().classes('items-center gap-1 flex-wrap'):
             for chip in shown:
-                classes = 'chip here' if not chip.get('gated') else 'chip gated'
-                label = chip.get('work_title') or ''
-                count = chip.get('page_count')
-                if isinstance(count, int):
-                    label = f'{label} ({count})'
-                ui.label(label).classes(classes)
+                _manuscript_work_chip(chip)
         if pane.get('paginated'):
             rest = ui.element('div')
             rest.style('display: none;')
             with rest:
                 with ui.row().classes('items-center gap-1 flex-wrap'):
                     for chip in works[threshold:]:
-                        classes = 'chip here' if not chip.get('gated') else 'chip gated'
-                        label = chip.get('work_title') or ''
-                        count = chip.get('page_count')
-                        if isinstance(count, int):
-                            label = f'{label} ({count})'
-                        ui.label(label).classes(classes)
+                        _manuscript_work_chip(chip)
             hidden = {'value': True}
 
             def _show_rest() -> None:

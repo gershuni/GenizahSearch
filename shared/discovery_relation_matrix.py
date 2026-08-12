@@ -37,6 +37,7 @@ is what measures it.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
@@ -280,6 +281,65 @@ def cap_member_relation(
     if identification_rank < member_rank:
         return identification_relation
     return member_relation_kind
+
+
+# ---------------------------------------------------------------------------
+# §3.1's strongest-member aggregate, for the ONE surface that computes it in SQL.
+# ---------------------------------------------------------------------------
+
+#: The rank order the SQL aggregate and its inverse both read, strongest first.
+#: Everything NOT named here — `uncertain`, `work_quotes_page`, a NULL, a
+#: future token — ranks last and reads back as `uncertain`.
+RELATION_RANK_ORDER: Tuple[str, ...] = (
+    ids.RENDERED_RELATION_DIRECT_WITNESS,
+    ids.RENDERED_RELATION_QUOTES_THIS_WORK,
+    ids.RENDERED_RELATION_SHARED_TEXT,
+)
+
+_SAFE_SQL_COLUMN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
+
+
+def relation_rank_sql(column: str) -> str:
+    """A SQL expression ranking ``column``'s rendered relation, strongest = 0.
+
+    Generated from :data:`RELATION_RANK_ORDER` rather than typed into a query,
+    because the manuscript-summary pane needs ``MIN(rank)`` inside a ``GROUP
+    BY`` and then needs to read the rank back — two halves of one ordering that
+    a query module cannot hold without eventually disagreeing with the module
+    that owns it. The inverse is :func:`relation_from_rank`; neither exists
+    without the other.
+
+    ``column`` is a code-supplied identifier and is validated as one anyway: an
+    interpolated fragment nobody checked is how a query module grows an
+    injection point it did not mean to have.
+    """
+    if not _SAFE_SQL_COLUMN.match(column or ""):
+        raise RelationMatrixError(
+            f"relation_rank_sql: {column!r} is not a plain column reference"
+        )
+    whens = " ".join(
+        f"WHEN '{relation}' THEN {rank}"
+        for rank, relation in enumerate(RELATION_RANK_ORDER)
+    )
+    return f"CASE {column} {whens} ELSE {len(RELATION_RANK_ORDER)} END"
+
+
+def relation_from_rank(rank: Optional[int]) -> str:
+    """The inverse of :func:`relation_rank_sql`. Anything that is not an exact
+    in-range integer rank -- ``None``, a float, a numeric STRING, a bool -- is
+    the fail-closed state.
+
+    Deliberately strict rather than coercing. SQLite returns an integer for the
+    expression this inverts, so any other type means the value did not come from
+    that expression, and `int()` would have turned `1.5` into "Includes a
+    quotation" and the string `"0"` into "Matches this work" -- a coercion that
+    invents a relation out of a type error.
+    """
+    if not isinstance(rank, int) or isinstance(rank, bool):
+        return ids.RENDERED_RELATION_FAIL_CLOSED
+    if 0 <= rank < len(RELATION_RANK_ORDER):
+        return RELATION_RANK_ORDER[rank]
+    return ids.RENDERED_RELATION_FAIL_CLOSED
 
 
 def work_divergence_ratios(

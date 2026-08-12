@@ -139,7 +139,7 @@ def work_summary_row(**overrides):
         'best_band_rank': 0,
         'gated': False,
         'main_pool': True,
-        'relation_kind': ids.CLAIM_TYPE_DIRECT_WITNESS,
+        'rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
     })
     row.update(overrides)
     assert set(row) == set(SURFACE_WORK_SUMMARY_FIELDS)
@@ -567,6 +567,52 @@ def test_a_gated_work_renders_dimmed_rather_than_being_absent():
     assert here and gated, f'a chip state is missing: {sorted(chips)}'
     assert 'here' in chips[here[0]] and 'gated' not in chips[here[0]]
     assert 'gated' in chips[gated[0]], 'the gated work is not dimmed'
+
+
+def test_the_manuscript_pane_RENDERS_the_relation_beside_each_work():
+    """Owner ruling 2026-08-12, C-track step 3c.
+
+    The model computed `relation_chip` for every work on this pane and the
+    renderer dropped it on the floor, so a pane listing a dozen works said
+    nothing about how any of them relates to the manuscript -- every one read as
+    an identification. Asserted on the RENDERED pane, scoped to it: the model
+    emitting the chip is what the previous version already did.
+    """
+    works = [
+        work_summary_row(display_work_id='w1', neutral_title='Alpha',
+                         rendered_relation=ids.RENDERED_RELATION_DIRECT_WITNESS),
+        work_summary_row(display_work_id='w2', neutral_title='Beta',
+                         rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT),
+        work_summary_row(display_work_id='w3', neutral_title='Gamma',
+                         rendered_relation=ids.RENDERED_RELATION_UNCERTAIN),
+    ]
+    client = _render(model_for(claim_items=[claim_row()], works=works))
+    text = _scoped_text(client, dp.PANEL_MANUSCRIPT_PANE_CLASS)
+    for relation in (ids.RENDERED_RELATION_DIRECT_WITNESS,
+                     ids.RENDERED_RELATION_SHARED_TEXT,
+                     ids.RENDERED_RELATION_UNCERTAIN):
+        assert ds.relation_chip(relation, 'en') in text, (relation, text)
+    # ...and it is the NEUTRAL chip, not a per-relation class (D-24).
+    rel_chips = [c for c in _elements_with_class(client, 'rel')
+                 if c.text in {ds.relation_chip(r, 'en')
+                               for r in (ids.RENDERED_RELATION_DIRECT_WITNESS,
+                                         ids.RENDERED_RELATION_SHARED_TEXT,
+                                         ids.RENDERED_RELATION_UNCERTAIN)}]
+    assert len(rel_chips) >= 3
+    for chip in rel_chips:
+        assert set(chip._classes or []) == {'rel'}, chip._classes
+
+
+def test_a_pane_work_with_no_relation_renders_the_work_without_an_empty_chip():
+    """Absent, not blank. An empty chip element beside a work would read as a
+    relation the pane failed to load."""
+    works = [work_summary_row(display_work_id='w1', neutral_title='Alpha',
+                              rendered_relation=None)]
+    client = _render(model_for(claim_items=[claim_row()], works=works))
+    text = _scoped_text(client, dp.PANEL_MANUSCRIPT_PANE_CLASS)
+    assert 'Alpha' in text
+    pane_rel = [c for c in _elements_with_class(client, 'rel') if not (c.text or '').strip()]
+    assert pane_rel == [], 'an empty relation chip was rendered'
 
 
 def test_the_manuscript_pane_carries_no_catalogue_description():
