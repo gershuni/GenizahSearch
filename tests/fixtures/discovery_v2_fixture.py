@@ -176,6 +176,15 @@ CD_BATCH_TABLE_COLUMNS: Dict[str, Tuple[Tuple[str, str], ...]] = {
         ("source", "TEXT NOT NULL"),
         ("basis", "TEXT"),
     ),
+    "discovery_region_band": (
+        ("band_version", "TEXT NOT NULL"),
+        ("work_id", "TEXT NOT NULL"),
+        ("w_start", "INTEGER NOT NULL"),
+        ("w_end", "INTEGER NOT NULL"),
+        ("discriminative", "INTEGER"),
+        ("source", "TEXT NOT NULL"),
+        ("basis", "TEXT"),
+    ),
     "discovery_curated_quoter": (
         ("list_version", "TEXT NOT NULL"),
         ("canonical_work_id", "TEXT NOT NULL"),

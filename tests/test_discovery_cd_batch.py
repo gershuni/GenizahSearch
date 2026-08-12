@@ -314,6 +314,14 @@ def test_frame_moves_on_nothing_the_amendment_adds(tmp_path):
             "INSERT INTO discovery_curated_quoter VALUES ('q1', ?, '2026-08-12', NULL)",
             (canonical,),
         )
+        # Amendment 2026-08-13 (V): the band table joins the same invariant. A
+        # region band changes what a surface CLAIMS about a row, never which
+        # rows exist, so it must be outside the frame's tuple set exactly as the
+        # region map is.
+        conn.execute(
+            "INSERT INTO discovery_region_band VALUES ('b1', ?, 0, 100, 0, 'ruling', 'test')",
+            (work_id,),
+        )
         conn.execute(
             "INSERT INTO discovery_withholding VALUES "
             "('w1', 's1', '{\"main_pool\": 1}', NULL, NULL, 'test', '2026-08-12')"

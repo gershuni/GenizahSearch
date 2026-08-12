@@ -664,6 +664,45 @@ CREATE TABLE discovery_curated_quoter (
   PRIMARY KEY (list_version, canonical_work_id)
 );
 
+-- Amendment 2026-08-13 (V): matrix step 3's SECOND region source, keyed on
+-- work-side OFFSETS instead of locus units. Same step, same output
+-- (`shared_text`), same fail-closed tri-state -- a different address space.
+--
+-- Why it exists: the contamination the owner named (סדר התפילות appended to
+-- משנה תורה ספר אהבה; the רבון כל העולמים paragraph inside תנא דבי אליהו רבה)
+-- is a BAND INSIDE a work, and `discovery_curated_quoter` is keyed on the work
+-- alone, so listing the work demotes its genuine witnesses too (measured: 779
+-- halakhic-body rows of ספר אהבה). `discovery_region_map` cannot hold it
+-- either -- its `work_id` REFERENCES locus_work, which is empty until the
+-- D-track import. Bands need neither table: `discovery_evidence.w_start/w_end`
+-- are already stored and 88.1% populated.
+--
+-- `w_start`/`w_end` index the reference work's NORMALIZED Hebrew-letter stream
+-- -- the same coordinate space as `discovery_evidence.w_start`/`w_end`
+-- (Amendment 2026-08-07 (F)+(G)) and as `span_start`/`span_end` on the page
+-- side, per standing rule (G). HALF-OPEN, matching
+-- `shared.discovery_locus.merge_witnessed_spans`: a band covers `w_start <= x <
+-- w_end`, and containment is `band.w_start <= row.w_start AND row.w_end <=
+-- band.w_end`.
+--
+-- Keyed on `work_id`, NOT `canonical_work_id`: canonical ids are a cross-corpus
+-- DEDUP key and collide across editions (measured: 15 groups on the private
+-- asset, every one a sefaria/msource pair), while an offset is only meaningful
+-- against the one stream its own work was indexed from. A canonical-keyed band
+-- would silently apply one edition's offsets to another's text.
+CREATE TABLE discovery_region_band (
+  band_version   TEXT NOT NULL,
+  work_id        TEXT NOT NULL REFERENCES works(work_id),
+  w_start        INTEGER NOT NULL,
+  w_end          INTEGER NOT NULL,
+  discriminative INTEGER CHECK (discriminative IN (0,1) OR discriminative IS NULL),
+  source         TEXT NOT NULL CHECK (source IN
+                   ('ruling','derived','superseded_by_derivation','open')),
+  basis          TEXT,
+  PRIMARY KEY (band_version, work_id, w_start, w_end),
+  CHECK (w_start >= 0 AND w_end > w_start)
+);
+
 -- CD batch / schema Amendment 2026-08-12 (Q): Contract-4 storage. Withholding
 -- is DISPLAY-LAYER ONLY -- a withheld row renders no locus and falls to the
 -- matrix's fail-closed state; the row itself remains on every surface and in
@@ -1859,6 +1898,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
 # adds, in their release-contract count-key order. Zero is a legitimate count
 # -- the batch creates every one of them EMPTY (D-track populates the locus
 # tables, C-track the region map + curated list, the frames the rest).
+# Amendment 2026-08-13 (V) appends the eighth, `discovery_region_band`.
 AMENDMENT_2026_08_12_COUNT_TABLES = (
     "locus_work",
     "locus_unit",
@@ -1867,6 +1907,7 @@ AMENDMENT_2026_08_12_COUNT_TABLES = (
     "discovery_curated_quoter",
     "discovery_stratum_membership",
     "discovery_withholding",
+    "discovery_region_band",
 )
 
 
@@ -1956,6 +1997,184 @@ def ingest_region_map(
         rows,
     )
     return [("region_map_version", region_version)]
+
+
+def ingest_region_band(
+    conn: sqlite3.Connection,
+    path: str,
+    reference_corpus_sha256: Optional[str] = None,
+) -> List[Tuple[str, str]]:
+    """Ingest an owner-ruled region-band file (Amendment 2026-08-13 (V)) into
+    `discovery_region_band` and return its meta rows.
+
+    Unlike `ingest_region_map` this has NO locus precondition -- a band is
+    addressed in the same work-offset space `discovery_evidence.w_start/w_end`
+    already use, so it is ingestable before the D-track locus import. That is
+    the entire point of the table.
+
+    Four fail-closed validations, each of which would otherwise produce a
+    demotion nobody could defend:
+
+    * **The stream must be NAMED.** A band is a pair of character offsets, and
+      offsets mean nothing without saying which stream they index. The file
+      declares `reference_corpus_sha256`; it must equal the one the asset is
+      being pinned to. A band file and an unpinned bake is the Contract-0 hole
+      this table would otherwise widen -- so it is refused here rather than
+      discovered later by the verifier.
+    * **`work_id`, not `canonical_work_id`.** Canonical ids collide across
+      editions (15 groups on the private asset), and an offset is only valid
+      against the stream its own work was indexed from.
+    * **In-stream.** Each row declares its work's `stream_len` and the band must
+      fall inside it; a band past the end of the text is a measurement taken
+      against a different edition. Two things keep this from being purely
+      self-attested (Codex review 2026-08-13, finding 7): rows naming the same
+      work must AGREE about its length, and the declared length is checked
+      against the largest work-side offset the ASSET itself observed for that
+      work. The residual limit is stated rather than papered over — a file can
+      still declare a length LARGER than the true stream and place a band in the
+      slack, because nothing at bake time holds the stream. Closing that needs a
+      SHA-bound `work_id -> stream_len` manifest, which arrives with the D-track
+      locus import (`locus_work.stream_len` is exactly it).
+    * **No contradictory overlap.** Two overlapping bands of the same version
+      and work that disagree about `discriminative` make the footprint
+      classifier's answer depend on row order. Identical verdicts may overlap
+      (an owner may rule the same stretch twice from two bases); disagreeing
+      ones stop the build.
+    """
+    with open(path, encoding="utf-8") as fh:
+        band = json.load(fh)
+    band_version = str(band["band_version"])
+
+    declared_sha = band.get("reference_corpus_sha256")
+    if not declared_sha:
+        raise ValueError(
+            "region band file declares no reference_corpus_sha256 -- a band is a "
+            "pair of offsets and offsets are meaningless without naming the stream "
+            "they index (Contract 0), fail closed"
+        )
+    if not reference_corpus_sha256:
+        raise ValueError(
+            "region band file supplied but the bake carries no "
+            "--reference-corpus-sha256 -- the asset would ship owner-ruled offsets "
+            "against an unnamed stream (Contract 0), fail closed"
+        )
+    if declared_sha != reference_corpus_sha256:
+        raise ValueError(
+            "region band file was measured against reference corpus "
+            f"{declared_sha[:12]}... but this bake pins {reference_corpus_sha256[:12]}"
+            "... -- the offsets index a DIFFERENT stream, fail closed"
+        )
+
+    known = {r[0] for r in conn.execute("SELECT work_id FROM works")}
+    # The largest work-side offset this ASSET actually observed per work. It is a
+    # lower bound on the true stream length, so a declared length below it is
+    # provably wrong -- which is what stops `stream_len` being a number the file
+    # asserts about itself and nothing can contradict.
+    observed_max = {
+        work_id: w_end for work_id, w_end in conn.execute(
+            """
+            SELECT dc.work_id, MAX(de.w_end)
+            FROM discovery_evidence de
+            JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+            WHERE de.w_end IS NOT NULL
+            GROUP BY dc.work_id
+            """
+        )
+    }
+    declared_lengths: Dict[str, int] = {}
+    rows: List[Tuple] = []
+    for r in band["rows"]:
+        work_id = str(r["work_id"])
+        if work_id not in known:
+            raise ValueError(
+                f"region band names work_id {work_id!r} which this asset does not "
+                "carry -- fail closed, never a silent no-op"
+            )
+        w_start, w_end = int(r["w_start"]), int(r["w_end"])
+        if w_start < 0 or w_end <= w_start:
+            raise ValueError(
+                f"region band on {work_id!r} has a malformed half-open span "
+                f"[{w_start}, {w_end}) -- fail closed"
+            )
+        stream_len = int(r["stream_len"])
+        seen = declared_lengths.setdefault(work_id, stream_len)
+        if seen != stream_len:
+            raise ValueError(
+                f"region band file declares two different stream lengths for "
+                f"{work_id!r} ({seen} and {stream_len}) -- at most one is the "
+                "stream this bake pins, fail closed"
+            )
+        floor = observed_max.get(work_id)
+        if floor is not None and stream_len < floor:
+            raise ValueError(
+                f"region band declares {work_id!r} to be {stream_len} letters, but "
+                f"this asset already carries a work-side offset ending at {floor} "
+                "-- the declared stream is not the stream the evidence indexes, "
+                "fail closed"
+            )
+        if w_end > stream_len:
+            raise ValueError(
+                f"region band on {work_id!r} ends at {w_end} but its stream is "
+                f"{stream_len} letters -- the band was measured against a different "
+                "edition, fail closed"
+            )
+        discriminative = r.get("discriminative")
+        rows.append((
+            band_version, work_id, w_start, w_end,
+            None if discriminative is None else (1 if discriminative else 0),
+            str(r["source"]), r.get("basis"),
+        ))
+
+    for work_id, spans in _group_bands_by_work(rows).items():
+        conflict = _conflicting_overlap(spans)
+        if conflict is not None:
+            (a_start, a_end, a_disc), (b_start, b_end, b_disc) = conflict
+            raise ValueError(
+                f"region bands on {work_id!r} overlap with DIFFERENT verdicts: "
+                f"[{a_start}, {a_end}) says discriminative={a_disc} while "
+                f"[{b_start}, {b_end}) says {b_disc} -- the classifier's answer "
+                "would depend on row order, fail closed"
+            )
+
+    conn.executemany(
+        "INSERT INTO discovery_region_band "
+        "(band_version, work_id, w_start, w_end, discriminative, source, basis) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    return [("region_band_version", band_version)]
+
+
+def _group_bands_by_work(rows: Iterable[Tuple]) -> Dict[str, List[Tuple[int, int, Optional[int]]]]:
+    """`(version, work, start, end, disc, source, basis)` rows -> per-work spans."""
+    out: Dict[str, List[Tuple[int, int, Optional[int]]]] = {}
+    for _version, work_id, w_start, w_end, discriminative, _source, _basis in rows:
+        out.setdefault(work_id, []).append((w_start, w_end, discriminative))
+    return out
+
+
+def _conflicting_overlap(
+    spans: List[Tuple[int, int, Optional[int]]],
+) -> Optional[Tuple[Tuple[int, int, Optional[int]], Tuple[int, int, Optional[int]]]]:
+    """The first pair of HALF-OPEN spans that overlap and disagree, or None.
+
+    Sorted sweep rather than the O(n^2) pair loop, and it compares against every
+    still-open predecessor rather than only the immediately preceding span: a
+    long band followed by two short ones inside it overlaps both, and a
+    neighbours-only check would miss the second.
+    """
+    open_spans: List[Tuple[int, int, Optional[int]]] = []
+    # Keyed on the OFFSETS only: a bare `sorted(spans)` falls through to the
+    # tri-state when two bands share a span, and `None < 0` raises TypeError --
+    # crashing on the very input this function exists to reject.
+    for span in sorted(spans, key=lambda s: (s[0], s[1])):
+        w_start, _w_end, discriminative = span
+        open_spans = [s for s in open_spans if s[1] > w_start]
+        for prior in open_spans:
+            if prior[2] != discriminative:
+                return prior, span
+        open_spans.append(span)
+    return None
 
 
 def population_lock_meta_rows(lock: Dict, lock_sha256: str) -> List[Tuple[str, str]]:
@@ -7089,6 +7308,10 @@ def finalize_build(
     # otherwise), so it travels with the D-track locus import.
     curated_quoter_path=None,
     region_map_path=None,
+    # Amendment 2026-08-13 (V): step 3's offset-keyed region source. Needs no
+    # locus tables, but REQUIRES `reference_corpus_sha256` -- its ingest refuses
+    # an unpinned bake rather than shipping offsets against an unnamed stream.
+    region_band_path=None,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
     (claims/evidence, NO physical-MS collapse) -> `build_witness_units` ->
@@ -7641,6 +7864,9 @@ def finalize_build(
                 _cw = json.load(fh)
             contract1_input_meta_rows.extend(ingest_region_map(
                 out_conn, region_map_path, _cw.get("crosswalk", _cw)))
+        if region_band_path:
+            contract1_input_meta_rows.extend(ingest_region_band(
+                out_conn, region_band_path, reference_corpus_sha256))
 
         identification_stats = populate_discovery_identification(out_conn)
         identification_stats.update(
@@ -8131,6 +8357,13 @@ def build_parser() -> argparse.ArgumentParser:
                              "step 3's input, re-keyed via the crosswalk. REQUIRES the "
                              "locus tables populated (supply with the D-track locus "
                              "import); fails closed otherwise.")
+    v2_group.add_argument("--region-band", metavar="PATH", default=None,
+                        help="Owner region-BAND JSON (Amendment 2026-08-13 (V)). Matrix "
+                             "step 3's offset-keyed source: same step, same shared_text "
+                             "output, addressed by half-open work-stream offsets instead "
+                             "of locus units, so it needs NO locus import. REQUIRES "
+                             "--reference-corpus-sha256 and refuses a file measured "
+                             "against a different stream.")
     v2_group.add_argument("--population-lock", metavar="PATH", default=None,
                         help="Tracked population-lock JSON (schema Amendment 2026-08-12 (S), "
                              "scripts/emit_population_lock.py). Constants are COPIED into "
@@ -8278,6 +8511,7 @@ def main(argv=None) -> int:
         population_lock_path=args.population_lock,
         curated_quoter_path=args.curated_quoter,
         region_map_path=args.region_map,
+        region_band_path=args.region_band,
     )
     print(f"real build OK: {stats['row_counts']}")
     print(f"novelty={stats['novelty']}")

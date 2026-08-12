@@ -415,6 +415,67 @@ exercises no other branch. The per-step and precedence proofs are unit-level; th
 proofs drive the stored columns explicitly (`tests/test_discovery_relation_matrix_wiring.py`).
 The first real-asset census arrives with the C-track bake.
 
+## 5b. Amendment 2026-08-13 (V) — step 3 gets a source, and can fire at last
+
+*No rule in §2 changes. Step 3's semantics, its position in the precedence order,
+its fail-closed tri-state and its `shared_text` output are all exactly as frozen.
+What changes is that the step now has an INPUT it can compute, which it never had.*
+
+**1. Step 3 was unreachable, not merely inactive.** `iter_relation_inputs` hardcoded
+`footprint_all_non_discriminative=None` and raised `RegionInputUnavailable` on
+`region_active` alone, because the only addressing scheme on offer was the locus
+unit and `locus_unit` is empty until the D-track import. `discovery_region_band`
+(schema Amendment 2026-08-13 (V)) addresses the same judgement in work-offset
+space — the space `discovery_evidence.w_start`/`w_end` already occupy — so step 3
+becomes computable without the D-track. The guard narrows to its real meaning:
+region active with NOTHING to read still stops the build.
+
+**2. The footprint recipe, stated once.** An identification's matched footprint is
+the `(w_start, w_end)` of its **`evidence_kind = 'witness'`** evidence rows. That
+channel is the one carrying a same-work claim and the only one with a work-side
+alignment: measured on the private asset, all 40,995 `shared_text` rows have a NULL
+`w_start` against 1,808 of 256,420 `witness` rows (0.7%). Counting `shared_text`
+would report ignorance the asset does not have, and block a step that should fire.
+
+Containment is TOTAL and half-open — a row that merely overlaps a band witnesses
+text the ruling does not cover, which is exactly what "ENTIRE matched footprint"
+excludes. The tri-state resolves as: **True** every witness row inside a
+non-discriminative band; **False** some row inside a discriminative one; **None**
+some row unplaceable (NULL offset), covered by no band, or covered by an `open`
+card. **"Not knowable" dominates "discriminative"** — both block, so the surface
+cannot tell them apart, but a reader asking WHY a row did not demote must not be
+told "I placed it in distinctive text" when the truth is "I could not place it".
+
+**3. Deploy 1 is UNCHANGED.** `DEPLOY_1_PARAMETERIZATION` still carries
+`region_active=False`; the owner's 2026-08-11 ruling stands and this amendment does
+not revisit it. The capability ships dark and is priced offline over a copy
+(`_tmp/make_region_band_variant.py`), the same way the QUOTER threshold was. Whether
+to activate step 3, and on which bands, is an owner decision this amendment
+deliberately does not make. Pinned by
+`tests/test_discovery_region_band.py::test_bands_present_but_region_off_change_nothing`.
+
+**4. What it would do, measured on the deploy-1 candidate pair** (2026-08-13, two
+`source='derived'` candidate bands — `ספר אהבה`'s prayer order and `תנא דבי אליהו
+רבה`'s `רבון כל העולמים` paragraph; `_tmp/region_band_candidate.json`):
+
+| asset | identifications leaving `direct_witness` | rendering `shared_text` |
+|---|---:|---:|
+| private | 1,327 | 1,751 |
+| public | 21 | 46 |
+
+The public figure is small BECAUSE `ספר אהבה` is `msource`/private and reaches no
+public surface at all; the public effect of these two bands is `תנא דבי אליהו רבה`
+alone. The claim this amendment makes is therefore about the MECHANISM, not about
+these two rows: §2 called region "the load-bearing" input and the plan blocked it
+behind a multi-week import, and it is now computable from stored columns.
+`_tmp/band_candidates.py` ranks the corpus for the owner's naming pass.
+
+**5. Precedence is unaffected but now observable.** With bands present, step 3 fires
+ahead of steps 4, 5 and 6, so rows that previously rendered `quotes_this_work` (step
+6 pass-through) or `uncertain` (step 5) can now render `shared_text` instead. On the
+private variant that is 42 and 382 rows respectively. That is the frozen order doing
+what it says, not a new rule.
+
 ## 6. Provenance
 
 Measurements: `_tmp/CONTRACT1-matrix-findings.md` (inputs, frontier, §7.6 aggregate

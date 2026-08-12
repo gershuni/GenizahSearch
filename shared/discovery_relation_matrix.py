@@ -394,12 +394,19 @@ _SHIPPED_BASIS = ids.ROUTING_STATUS_SHIPPED
 
 
 class RegionInputUnavailable(RelationMatrixError):
-    """Raised when step 3 is ACTIVE but no footprint recipe is wired.
+    """Raised when step 3 is ACTIVE but no region source is present.
 
     Fails the build rather than recomputing with `None`: a verifier that quietly
     treated "I cannot compute the region input" as "the region does not fire"
     would pass every row the builder demoted, which is the exact shape of a
-    vacuous gate. The footprint recipe arrives with the D-track locus import.
+    vacuous gate.
+
+    ⟨AMENDMENT 2026-08-13 (V)⟩ This used to fire on ``region_active`` alone,
+    because no footprint recipe existed at all and the locus-unit one was owed
+    to the D-track. There is now an offset-keyed source
+    (``discovery_region_band``), so the guard narrows to its actual meaning:
+    region active with NOTHING to read. It has not become dead code — an empty
+    or absent band table with step 3 switched on still stops the build.
     """
 
 
@@ -412,15 +419,21 @@ def iter_relation_inputs(
 
     Two passes over the table: the first tallies step 4a's work-level
     divergence, the second yields the per-row inputs. Both read only stored
-    columns plus ``discovery_curated_quoter``.
+    columns plus ``discovery_curated_quoter`` — and, when step 3 is active,
+    ``discovery_region_band`` joined to the witness evidence.
     """
+    footprints: Dict[str, Optional[bool]] = {}
     if parameterization.region_active:
-        # Guard, not a TODO: see RegionInputUnavailable.
-        raise RegionInputUnavailable(
-            "step 3 (region) is active in this parameterization, but no matched-"
-            "footprint recipe is wired yet (D-track locus import). Refusing to "
-            "recompute rendered relations with an absent region input."
-        )
+        bands = region_bands_by_work(conn)
+        if not bands:
+            # Guard, not a TODO: see RegionInputUnavailable.
+            raise RegionInputUnavailable(
+                "step 3 (region) is active in this parameterization, but this asset "
+                "carries no region source -- discovery_region_band is absent or "
+                "empty and the locus-unit map needs the D-track import. Refusing to "
+                "recompute rendered relations with an absent region input."
+            )
+        footprints = footprint_verdicts(conn, bands)
 
     divergence = work_divergence_ratios(
         conn.execute(
@@ -442,12 +455,149 @@ def iter_relation_inputs(
         yield identification_id, RelationInputs(
             has_shipped_evidence=(eligibility_basis == _SHIPPED_BASIS),
             routing_reason=routing_reason,
-            footprint_all_non_discriminative=None,
+            # `.get` returning None is load-bearing, not a lookup miss swallowed:
+            # an identification with no witness evidence at all has no footprint
+            # to place, which is precisely the "not knowable" state that blocks
+            # the demotion.
+            footprint_all_non_discriminative=footprints.get(identification_id),
             work_divergence=divergence.get(canonical_work_id),
             on_curated_quoter_list=canonical_work_id in curated,
             coverage_known=max_coverage_ppm is not None,
             stored_relation_kind=relation_kind,
         )
+
+
+# ---------------------------------------------------------------------------
+# Step 3's footprint recipe (Amendment 2026-08-13 (V)).
+#
+# `docs/specs/discovery-relation-matrix-v1.md` §2 freezes step 3 as "the row's
+# ENTIRE matched footprint lies in non-discriminative units". Everything below
+# answers that one question from stored columns.
+# ---------------------------------------------------------------------------
+
+#: The evidence channel that carries a same-work claim, and the only one with a
+#: work-side alignment. Measured on the private asset: every one of the 40,995
+#: `shared_text` rows has a NULL `w_start`, against 1,808 of 256,420 `witness`
+#: rows (0.7%). Including `shared_text` would therefore make almost every
+#: identification "unplaceable" and block a step that should fire — reporting
+#: ignorance the asset does not actually have.
+_FOOTPRINT_EVIDENCE_KIND = "witness"
+
+_FOOTPRINT_SQL = """
+SELECT di.identification_id, dc.work_id, de.w_start, de.w_end
+FROM discovery_identification di
+JOIN discovery_evidence de ON de.sys_id = di.sys_id
+JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+JOIN works w ON w.work_id = dc.work_id
+             AND w.canonical_work_id = di.canonical_work_id
+WHERE de.evidence_kind = ?
+"""
+
+
+def region_bands_by_work(
+    conn: sqlite3.Connection,
+) -> Dict[str, List[Tuple[int, int, Optional[int]]]]:
+    """This asset's region bands, grouped by ``work_id`` and sorted.
+
+    An ABSENT table yields ``{}`` — a pre-amendment asset has no bands, and step
+    3 simply cannot fire on it. An absent table is not the same as an unreadable
+    one: any other SQL error propagates.
+
+    **Every row is read, with no version filter, and that is deliberate.** The
+    ingest writes one ``band_version`` per asset, and the release verifier
+    asserts an asset carries exactly one and that it equals
+    ``meta.region_band_version``. Selecting a version HERE instead would be
+    weaker in both directions: the builder calls this before the meta rows are
+    written (``populate_discovery_identification`` runs ahead of the meta
+    block), so a read-time selection would find no version and silently fire on
+    nothing; and an asset that somehow carried two versions would be quietly
+    half-read rather than refused.
+    """
+    present = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='discovery_region_band'"
+    ).fetchone()
+    if not present:
+        return {}
+    out: Dict[str, List[Tuple[int, int, Optional[int]]]] = {}
+    for work_id, w_start, w_end, discriminative in conn.execute(
+        "SELECT work_id, w_start, w_end, discriminative FROM discovery_region_band"
+    ):
+        out.setdefault(work_id, []).append((w_start, w_end, discriminative))
+    for spans in out.values():
+        # Sorted on the OFFSETS only. A bare `spans.sort()` compares the third
+        # element when two bands share a span, and `discriminative` is a
+        # tri-state -- `None < 0` raises TypeError in Python 3. Two bands can
+        # share a span across band_versions (the primary key includes the
+        # version), and this reads every version deliberately, so the crash is
+        # reachable on exactly the asset the verifier exists to reject -- during
+        # the BUILD, before any verifier runs.
+        spans.sort(key=lambda s: (s[0], s[1]))
+    return out
+
+
+def covering_verdict(
+    bands: List[Tuple[int, int, Optional[int]]],
+    w_start: Optional[int],
+    w_end: Optional[int],
+) -> Optional[int]:
+    """The verdict of the band CONTAINING ``[w_start, w_end)``, or ``None``.
+
+    Containment is total and half-open — ``band.w_start <= w_start and w_end <=
+    band.w_end`` — matching the work-side span convention of
+    ``shared.discovery_locus.merge_witnessed_spans``. A row that merely
+    OVERLAPS a band is not covered by it: it witnesses text outside the
+    owner's ruling, and the ruling says nothing about that text.
+
+    ``None`` means "no band covers this row", which is one of the two ways step
+    3 fails closed. It is also what an unplaceable row (NULL offset) returns.
+    """
+    if w_start is None or w_end is None:
+        return None
+    for band_start, band_end, discriminative in bands:
+        if band_start > w_start:
+            # Sorted by start: no later band can begin at or before w_start.
+            break
+        if w_end <= band_end:
+            return discriminative
+    return None
+
+
+def footprint_verdicts(
+    conn: sqlite3.Connection,
+    bands_by_work: Dict[str, List[Tuple[int, int, Optional[int]]]],
+) -> Dict[str, Optional[bool]]:
+    """``identification_id -> footprint_all_non_discriminative``, the tri-state.
+
+    * ``True``  — every witness row is covered by a band ruled non-discriminative.
+    * ``False`` — some witness row is covered by a band ruled discriminative.
+    * ``None``  — some witness row is not placeable (NULL offset), or is covered
+      by no band, or by an ``open`` card (NULL verdict). Not knowable.
+
+    **"Not knowable" dominates "discriminative".** Both block the demotion, so
+    the choice is invisible at the surface and visible only to whoever reads
+    these verdicts to explain WHY a row did not demote — and there, "I could not
+    place part of this footprint" and "I placed it in text the owner called
+    distinctive" are different facts. Reporting the second when the first is
+    true would overstate what the map knows.
+
+    Identifications with no witness evidence at all are absent from the result;
+    the caller reads that as ``None``.
+    """
+    tally: Dict[str, Optional[bool]] = {}
+    for identification_id, work_id, w_start, w_end in conn.execute(
+        _FOOTPRINT_SQL, (_FOOTPRINT_EVIDENCE_KIND,)
+    ):
+        if tally.get(identification_id, True) is None:
+            continue  # already unknowable; nothing can restore it
+        verdict = covering_verdict(bands_by_work.get(work_id, []), w_start, w_end)
+        if verdict is None:
+            tally[identification_id] = None
+        elif verdict == 1:
+            tally[identification_id] = False
+        else:
+            tally.setdefault(identification_id, True)
+    return tally
 
 
 def curated_quoter_work_ids(conn: sqlite3.Connection) -> frozenset:

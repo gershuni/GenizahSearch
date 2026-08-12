@@ -473,6 +473,24 @@ def _project_discovery_curated_quoter(ctx: ProjectionContext) -> List[Dict[str, 
     return _rows_as_dicts(ctx.conn, "discovery_curated_quoter")
 
 
+def _project_discovery_region_band(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    """Amendment 2026-08-13 (V): bands follow their `works` row, like the region
+    map follows its `locus_work` row — NOT verbatim like the curated list.
+
+    The difference is the key. The curated list is canonical, work-level config
+    whose rows stay meaningful (if inert) after pruning. A band is a pair of
+    offsets into ONE work's stream, keyed on `work_id`; carried past its work it
+    is a dangling coordinate nothing can resolve, and it would still be counted
+    by the release-contract count key, which is a side channel about the private
+    population on a public asset."""
+    if "discovery_region_band" not in _table_names(ctx.conn):
+        return []
+    return [
+        row for row in _rows_as_dicts(ctx.conn, "discovery_region_band")
+        if row["work_id"] in ctx.public_work_ids
+    ]
+
+
 def _project_discovery_withholding(ctx: ProjectionContext) -> List[Dict[str, Any]]:
     """Explicit rule: copy verbatim (Amendment 2026-08-12 (Q)). Withholding
     scopes are versioned control-plane config the RUNTIME compiles against
@@ -633,6 +651,7 @@ def _project_meta(ctx: ProjectionContext, projected_counts: Dict[str, int]) -> L
         "locus_edition": "expected_rows_locus_edition",
         "discovery_region_map": "expected_rows_discovery_region_map",
         "discovery_curated_quoter": "expected_rows_discovery_curated_quoter",
+        "discovery_region_band": "expected_rows_discovery_region_band",
         "discovery_stratum_membership": "expected_rows_discovery_stratum_membership",
         "discovery_withholding": "expected_rows_discovery_withholding",
     }
@@ -670,6 +689,7 @@ PROJECTION_RULES: Dict[str, Callable] = {
     "locus_edition": _project_locus_edition,
     "discovery_region_map": _project_discovery_region_map,
     "discovery_curated_quoter": _project_discovery_curated_quoter,
+    "discovery_region_band": _project_discovery_region_band,
     "discovery_withholding": _project_discovery_withholding,
     "discovery_stratum_membership": _project_discovery_stratum_membership,
     # `meta` is handled specially (needs the OTHER tables' projected counts

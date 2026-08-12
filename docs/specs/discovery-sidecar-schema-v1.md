@@ -1412,6 +1412,99 @@ seven new count keys through its existing mechanisms; an asset without the marke
 validated exactly as before this amendment (old assets keep loading; a rushed rollback
 stays safe).
 
+## Amendment 2026-08-13 (V) — `discovery_region_band`, matrix step 3's offset-keyed source
+
+Adds an **eighth** table to the Amendment 2026-08-12 set (and so an eighth
+`expected_rows_*` count key, an eighth `_GATE_BEARING_TABLES` member, and an eighth
+loader-required table under the `locus_schema_version` marker).
+
+```sql
+CREATE TABLE discovery_region_band (
+  band_version   TEXT NOT NULL,
+  work_id        TEXT NOT NULL REFERENCES works(work_id),
+  w_start        INTEGER NOT NULL,
+  w_end          INTEGER NOT NULL,
+  discriminative INTEGER CHECK (discriminative IN (0,1) OR discriminative IS NULL),
+  source         TEXT NOT NULL CHECK (source IN
+                   ('ruling','derived','superseded_by_derivation','open')),
+  basis          TEXT,
+  PRIMARY KEY (band_version, work_id, w_start, w_end),
+  CHECK (w_start >= 0 AND w_end > w_start)
+);
+```
+
+`w_start`/`w_end` index the reference work's **normalized Hebrew-letter stream** — the
+same coordinate space as `discovery_evidence.w_start`/`w_end` (Amendment 2026-08-07
+(F)+(G)) and `span_start`/`span_end` on the page side, per the standing rule in (G).
+**Half-open**, matching `shared.discovery_locus.merge_witnessed_spans`.
+
+### Why a second region table rather than a wider `discovery_region_map`
+
+The contamination this addresses is a BAND INSIDE a work: `סדר התפילות` appended to
+`משנה תורה, ספר אהבה` (the halakhic text closes at the colophon at offset 166,647 of
+208,438 — exactly 80.0% in — and everything after it is the annual prayer order), and
+the `רבון כל העולמים` paragraph inside `תנא דבי אליהו רבה` (1,274 letters, 0.51% of the
+work). Neither existing input can express it:
+
+* `discovery_curated_quoter` is keyed on the WORK, so listing the work demotes its
+  genuine witnesses too — measured, 779 halakhic-body rows of `ספר אהבה`;
+* `discovery_region_map.work_id` is `REFERENCES locus_work(work_id)`, and `locus_work`
+  is empty until the D-track import.
+
+Bands need neither: `discovery_evidence.w_start`/`w_end` are already stored and 88.1%
+populated on the public asset.
+
+### `work_id`, not `canonical_work_id`
+
+Canonical ids are a cross-corpus DEDUP key and collide across editions — measured, 15
+groups on the private asset, every one a sefaria/msource pair. An offset is only
+meaningful against the stream its own work was indexed from, so a canonical-keyed band
+would silently apply one edition's offsets to another's text. This is the one place the
+band table deliberately differs from `discovery_curated_quoter`, which is canonical
+BECAUSE it addresses works rather than positions.
+
+### Contract 0, forced earlier
+
+A band is a pair of offsets, and offsets are meaningless without naming the stream they
+index. **Non-empty bands therefore REQUIRE `meta.reference_corpus_sha256`**, asserted by
+`check_region_band_contract`. `check_locus_reference_basis` makes the same demand for the
+locus tables but can only make it once `locus_unit` is populated; bands make the pin
+checkable before the D-track, so it is required before the D-track. The ingest refuses
+an unpinned bake outright, and refuses a band file whose own declared
+`reference_corpus_sha256` differs from the one being pinned.
+
+### What `stream_len` does and does not prove
+
+Each band row declares its work's `stream_len`, and the ingest refuses a band ending past
+it. Two checks keep that from being a number the file asserts about itself with nothing
+able to contradict it: rows naming the same work must AGREE about its length, and the
+declared length is checked against the largest work-side offset the ASSET already carries
+for that work (a lower bound on the true stream). **The residual limit, stated rather than
+implied: a file can still declare a length LARGER than the true stream and place a band in
+the slack**, because nothing at bake time holds the stream itself. Closing that needs a
+SHA-bound `work_id → stream_len` manifest — which is exactly `locus_work.stream_len`, and
+so arrives with the D-track locus import. (Codex code review 2026-08-13, finding 7.)
+
+### Projection
+
+Bands follow their `works` row — pruned, NOT copied verbatim like
+`discovery_curated_quoter`. The difference is the key: a canonical, work-level ruling
+stays meaningful (if inert) after pruning, while a pair of offsets into a pruned work's
+stream is a dangling coordinate that nothing can resolve and that the release-contract
+count key would still report.
+
+### One version per asset, enforced rather than selected
+
+The DDL comment for `discovery_region_map`/`discovery_curated_quoter` has always said the
+matrix reads them "at the single version named in meta". No reader ever filtered on a
+version and nothing checked the claim. `check_single_input_version` now asserts, for all
+three input tables, that a populated table carries exactly ONE version and that
+`meta.{curated_quoter,region_band,region_map}_version` names it. Enforcing beats
+filtering here: filtering would make a two-version asset ship half its rulings silently;
+this makes it fail. (The read stays unfiltered deliberately — the builder recomputes the
+matrix inside `populate_discovery_identification`, which runs BEFORE the meta block is
+written, so a read-time version selection would find no version and fire on nothing.)
+
 ---
 
 *This document is FROZEN as of 2026-07-22 (plan 134-01, Task 1). Later

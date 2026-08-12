@@ -296,6 +296,7 @@ _AMENDMENT_2026_08_12_TABLES = frozenset({
     "discovery_curated_quoter",
     "discovery_stratum_membership",
     "discovery_withholding",
+    "discovery_region_band",  # Amendment 2026-08-13 (V)
 })
 _AMENDMENT_2026_08_12_COLUMNS: Dict[str, frozenset] = {
     "discovery_identification": frozenset({"routing_reason", "rendered_relation"}),

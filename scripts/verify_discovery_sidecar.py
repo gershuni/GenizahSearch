@@ -1819,6 +1819,12 @@ _GATE_BEARING_TABLES = frozenset({
     "discovery_curated_quoter",
     "discovery_stratum_membership",
     "discovery_withholding",
+    # Amendment 2026-08-13 (V): the same hazard, one step worse. An absent band
+    # table does not merely make step 3 read as "never fires" -- with region
+    # ACTIVE it is the difference between a demotion and none, so its absence
+    # must be a violation and not the quiet answer the matrix would otherwise
+    # take from `region_bands_by_work` returning {}.
+    "discovery_region_band",
 })
 
 
@@ -1931,6 +1937,7 @@ _AMENDMENT_2026_08_12_COUNT_TABLES = (
     "discovery_curated_quoter",
     "discovery_stratum_membership",
     "discovery_withholding",
+    "discovery_region_band",  # Amendment 2026-08-13 (V)
 )
 
 
@@ -2028,6 +2035,148 @@ def check_locus_reference_basis(conn: sqlite3.Connection, meta: dict) -> List[st
                     "meta.locus_reference_corpus_sha256 is absent -- the import never "
                     "carried the locus build's own stream pin"
                 )
+    return violations
+
+
+#: The Contract-1 input tables that carry their own version column, paired with
+#: the meta key naming the ACTIVE version. The matrix reads each table WHOLE (no
+#: version filter), which is only sound while an asset carries exactly one — so
+#: that is asserted here rather than assumed at the read.
+_VERSIONED_INPUT_TABLES = (
+    ("discovery_curated_quoter", "list_version", "curated_quoter_version"),
+    ("discovery_region_band", "band_version", "region_band_version"),
+    ("discovery_region_map", "region_version", "region_map_version"),
+)
+
+
+def check_single_input_version(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """Each Contract-1 input table carries EXACTLY ONE version, and meta names it.
+
+    The DDL comment has always said the matrix reads these "at the single
+    version named in meta", but no reader ever filtered on one and nothing
+    checked the claim. Both halves are fixed here rather than at the read, and
+    the direction matters: filtering at the read would make a two-version asset
+    ship half its rulings silently, while this makes it fail. An asset with two
+    versions of an owner ruling is not an asset with a preference — it is one
+    nobody can say the meaning of.
+
+    Empty table: no violation. Nothing is being read, and the count contract in
+    `check_amendment_2026_08_12_contract` already pins emptiness itself."""
+    violations: List[str] = []
+    for table, version_column, meta_key in _VERSIONED_INPUT_TABLES:
+        if not _has_table(conn, table):
+            continue  # check_gate_bearing_tables_present already reports absence
+        versions = sorted(
+            r[0] for r in conn.execute(
+                f"SELECT DISTINCT {version_column} FROM {table}")
+        )
+        if not versions:
+            continue
+        if len(versions) > 1:
+            violations.append(
+                f"{table}: carries {len(versions)} distinct {version_column} values "
+                f"({versions}) -- the matrix reads the table whole, so two versions "
+                f"of an owner ruling would both fire"
+            )
+            continue
+        declared = meta.get(meta_key)
+        if declared is None:
+            violations.append(
+                f"{table}: populated at {version_column}={versions[0]!r} but "
+                f"meta.{meta_key} is absent -- the asset does not say which ruling "
+                f"it shipped"
+            )
+        elif declared != versions[0]:
+            violations.append(
+                f"{table}: rows carry {version_column}={versions[0]!r} but "
+                f"meta.{meta_key}={declared!r} -- meta names a ruling the table "
+                f"does not hold"
+            )
+    return violations
+
+
+def check_region_band_contract(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """Amendment 2026-08-13 (V): the region-band table's own soundness contract.
+
+    Four things the CHECK constraints cannot express, each of which would
+    otherwise produce a demotion nobody could defend:
+
+    * **Contract 0, forced.** A band is a pair of offsets into a reference
+      stream. Non-empty bands therefore REQUIRE `meta.reference_corpus_sha256`.
+      Without this the band table would be a way to ship owner-ruled offsets
+      against an unnamed stream — precisely the hole `check_locus_reference_basis`
+      closes for the locus tables, which it can only close when `locus_unit` is
+      populated. Bands make the pin checkable earlier, so it is required earlier.
+    * **The work must exist.** SQLite does not enforce the `REFERENCES works`
+      FK unless `PRAGMA foreign_keys` is on, and the release path does not turn
+      it on. A band on an unknown work is inert, which is the failure mode that
+      looks like success.
+    * **`work_id`, not `canonical_work_id`.** Offsets are stream-specific and
+      canonical ids collide across editions, so a band whose `work_id` happens
+      to be someone's canonical id would address the wrong text. Caught by the
+      same membership check, called out separately because it is the mistake a
+      reader of the curated-quoter table would make.
+    * **No contradictory overlap.** Two overlapping bands that disagree make
+      `covering_verdict` order-dependent. The ingest rejects this; the verifier
+      re-derives it, because a hand-edited or badly-projected asset never went
+      through the ingest.
+    """
+    violations: List[str] = []
+    if not _has_table(conn, "discovery_region_band"):
+        return violations
+    rows = list(conn.execute(
+        "SELECT work_id, w_start, w_end, discriminative FROM discovery_region_band"))
+    if not rows:
+        return violations
+
+    if not meta.get("reference_corpus_sha256"):
+        violations.append(
+            f"Contract 0: discovery_region_band carries {len(rows)} owner-ruled "
+            "band(s) but meta.reference_corpus_sha256 is absent -- the offsets "
+            "index a stream the asset never names"
+        )
+
+    known = {r[0] for r in conn.execute("SELECT work_id FROM works")}
+    unknown = sorted({w for w, _s, _e, _d in rows if w not in known})
+    if unknown:
+        violations.append(
+            f"discovery_region_band: band(s) on work_id(s) the asset does not "
+            f"carry: {unknown[:5]}{'...' if len(unknown) > 5 else ''} -- an inert "
+            "ruling reads as a silent pass"
+        )
+
+    by_work: Dict[str, List[Tuple[int, int, Optional[int]]]] = {}
+    for work_id, w_start, w_end, discriminative in rows:
+        if w_start is None or w_end is None or w_start < 0 or w_end <= w_start:
+            violations.append(
+                f"discovery_region_band: malformed half-open span "
+                f"[{w_start}, {w_end}) on work {work_id!r}"
+            )
+            continue
+        by_work.setdefault(work_id, []).append((w_start, w_end, discriminative))
+
+    for work_id, spans in sorted(by_work.items()):
+        open_spans: List[Tuple[int, int, Optional[int]]] = []
+        # Offsets only -- a bare sort compares the tri-state on a span tie and
+        # `None < 0` raises, turning a violation this gate should REPORT into a
+        # crash that takes the whole verify run with it.
+        for span in sorted(spans, key=lambda s: (s[0], s[1])):
+            w_start = span[0]
+            open_spans = [s for s in open_spans if s[1] > w_start]
+            for prior in open_spans:
+                if prior[2] != span[2]:
+                    violations.append(
+                        f"discovery_region_band: bands on work {work_id!r} overlap "
+                        f"with different verdicts -- [{prior[0]}, {prior[1]}) says "
+                        f"discriminative={prior[2]} while [{span[0]}, {span[1]}) "
+                        f"says {span[2]}; the footprint classifier would depend on "
+                        f"row order"
+                    )
+                    break
+            else:
+                open_spans.append(span)
+                continue
+            break
     return violations
 
 
@@ -2232,6 +2381,12 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         # presence/vocabulary/count contract + the Contract-0 basis pin.
         violations += check_amendment_2026_08_12_contract(conn, meta)
         violations += check_locus_reference_basis(conn, meta)
+        # Amendment 2026-08-13 (V): both run BEFORE the recompute gate. That
+        # gate reads the band table through the matrix module, so an asset with
+        # two versions or a contradictory overlap must be reported as what it
+        # is rather than as whatever the recompute happened to make of it.
+        violations += check_single_input_version(conn, meta)
+        violations += check_region_band_contract(conn, meta)
         violations += check_relation_matrix_recompute(conn, meta)
         violations += check_population_lock_retention(conn, meta)
         violations += check_coverage_gap_report(conn)  # non-fatal report
