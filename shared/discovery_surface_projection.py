@@ -224,7 +224,15 @@ SURFACE_FINDING_FIELDS: Tuple[str, ...] = (
     "best_band_rank",
     "page_count",
     "max_coverage_ppm",
-    "relation_kind",
+    #: ⟨CHANGED 2026-08-12 -- C-track⟩ Was `relation_kind` (the stored
+    #: `claim_type`-shaped column). This surface now carries Contract 1's matrix
+    #: output instead, and carries it INSTEAD OF rather than alongside, because
+    #: `web/components/findings_rows.py` reads the relation for two purposes --
+    #: the chip AND the gate on whether a coverage percentage may be shown -- and
+    #: those two must not disagree. A row the matrix demoted to `shared_text`
+    #: while still advertising "68% of page" would contradict its own demotion.
+    #: One field means one answer.
+    "rendered_relation",
     "novelty_status",
     "novelty_offered",
     #: Ruling F: does this row disagree with a catalogue identification?

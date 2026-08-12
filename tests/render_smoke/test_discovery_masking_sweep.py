@@ -907,7 +907,7 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
                 lambda ln=lang, a=as_of: fr.render_novelty_help(ln, as_of=a)))
         # 9. row shapes the matrix never produced.
         odd_rows = [
-            tf.finding_row(neutral_title=title, relation_kind="not_a_relation"),
+            tf.finding_row(neutral_title=title, rendered_relation="not_a_relation"),
             tf.finding_row(neutral_title=title,
                            unit=tf.FINDINGS_UNIT_MANUSCRIPT, work_count=3,
                            multi_work_annotation=True),
@@ -1315,7 +1315,7 @@ def _rendered_error_states(seed: Optional[str] = None) -> List[Tuple[str, str]]:
             out.append((f"rendered-outage/{status}/{lang}",
                         "\n".join(_client_texts(client))))
         client = _render_component(lambda ln=lang, t=title: fr.render_finding_row(
-            tf.finding_row(neutral_title=t, relation_kind="not_a_relation"), ln))
+            tf.finding_row(neutral_title=t, rendered_relation="not_a_relation"), ln))
         out.append((f"rendered-malformed-row/{lang}",
                     "\n".join(_client_texts(client))))
     return out

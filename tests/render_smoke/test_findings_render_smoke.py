@@ -297,7 +297,8 @@ def _finding_source(**overrides) -> Dict[str, Any]:
         "best_band_rank": 0,
         "page_count": 3,
         "max_coverage_ppm": 680000,
-        "relation_kind": ids.CLAIM_TYPE_DIRECT_WITNESS,
+        # C-track: the findings surface carries Contract 1's matrix output.
+        "rendered_relation": ids.RENDERED_RELATION_DIRECT_WITNESS,
         "novelty_status": CANDIDATE_STATUS,
         "novelty_offered": True,
         "divergent": False,
@@ -353,7 +354,7 @@ def corpus_rows() -> List[Tuple[str, Dict[str, Any]]]:
         main_pool_reason="shared_wording",
         best_band_rank=4,
         max_coverage_ppm=None,
-        relation_kind=ids.CLAIM_TYPE_SHARED_TEXT,
+        rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT,
         novelty_status=DEFAULT_STATUS,
         novelty_offered=False,
         divergent=True,
@@ -968,7 +969,7 @@ def test_every_shipped_unit_renders_its_row_anatomy(lang, unit):
         unit=unit,
         novelty_offered=unit != FINDINGS_UNIT_WORK,
         novelty_status=CANDIDATE_STATUS if unit != FINDINGS_UNIT_WORK else None,
-        relation_kind=(ids.CLAIM_TYPE_DIRECT_WITNESS
+        rendered_relation=(ids.RENDERED_RELATION_DIRECT_WITNESS
                        if unit == FINDINGS_UNIT_IDENTIFICATION else None),
         work_count=2 if unit == FINDINGS_UNIT_MANUSCRIPT else 1,
         multi_work_annotation=unit == FINDINGS_UNIT_MANUSCRIPT,
@@ -1017,7 +1018,7 @@ def test_a_row_with_no_measurement_shows_no_coverage_element(lang):
     """Rendered as an ABSENCE, never as a zero or a placeholder implying a
     failed lookup. A shared-wording row has no measurement at all."""
     client = render_rows([finding_row(
-        max_coverage_ppm=None, relation_kind=ids.CLAIM_TYPE_SHARED_TEXT)], lang)
+        max_coverage_ppm=None, rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT)], lang)
     assert not _elements_with_class(client, fr.ROW_COVERAGE_CLASS)
     ASSERTION_COUNT["n"] += 1
 
@@ -1939,7 +1940,7 @@ def test_the_rendered_findings_page_is_honest(monkeypatch, status, lang, unit, b
         unit=unit, main_pool=bucket == BUCKET_MAIN,
         novelty_offered=unit != FINDINGS_UNIT_WORK,
         novelty_status=(CANDIDATE_STATUS if unit != FINDINGS_UNIT_WORK else None),
-        relation_kind=(ids.CLAIM_TYPE_DIRECT_WITNESS
+        rendered_relation=(ids.RENDERED_RELATION_DIRECT_WITNESS
                        if unit == FINDINGS_UNIT_IDENTIFICATION else None),
     )] if status == STATUS_OK else []
     client = render_page(
@@ -2321,7 +2322,7 @@ def test_FP_LIVE_VOCAB_a_live_vocabulary_findings_envelope_PASSES(caplog):
     this page produces."""
     envelope = findings_envelope([finding_row()])
     item = envelope["items"][0]
-    assert item["relation_kind"] == ids.CLAIM_TYPE_DIRECT_WITNESS
+    assert item["rendered_relation"] == ids.RENDERED_RELATION_DIRECT_WITNESS
     assert item["main_pool_reason"] == "main_full_coverage"
     assert item["novelty_status"] == CANDIDATE_STATUS
     assert_envelope_honesty(envelope, lang="en", where="FP-LIVE-VOCAB")
@@ -2372,7 +2373,7 @@ def _error_modes(fixture_service) -> List[Tuple[str, str]]:
     # the shared module's exception. See
     # `test_the_surface_never_lets_a_vocabulary_enumerating_message_reach_an_egress`
     # for the shared-module finding this deliberately does not paper over.
-    client = render_rows([finding_row(relation_kind="not_a_relation",
+    client = render_rows([finding_row(rendered_relation="not_a_relation",
                                       neutral_title=None)], "en")
     modes.append(("malformed-row", scoped_text(client, fr.ROW_CLASS)))
 
@@ -2404,7 +2405,7 @@ def test_the_surface_never_lets_a_vocabulary_enumerating_message_reach_an_egress
     * this plan's OWN raising accessor names its authority instead of
       enumerating it, so the same defect is not reintroduced.
     """
-    client = render_rows([finding_row(relation_kind="not_a_relation")], "en")
+    client = render_rows([finding_row(rendered_relation="not_a_relation")], "en")
     assert _elements_with_class(client, fr.ROW_CLASS), "the row failed to render"
     assert not _elements_with_class(client, fr.ROW_RELATION_CLASS), (
         "an out-of-vocabulary relation kind produced a chip")

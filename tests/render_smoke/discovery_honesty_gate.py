@@ -628,6 +628,14 @@ ELIGIBILITY_BASES: frozenset = frozenset({"shipped", "human_confirmed", "review_
 #: scanning -- a broken implementation passing the stated gate.
 MACHINE_VOCABULARY_FIELDS: Mapping[str, frozenset] = {
     "relation_kind": frozenset(ids.CLAIM_TYPES),
+    #: ⟨ADDED 2026-08-12 -- C-track⟩ Contract 1's stored matrix output. Declared
+    #: as a MACHINE carrier, not reader text, precisely because that is what
+    #: prohibits its underscore-bearing values (`direct_witness`,
+    #: `shared_text`, `quotes_this_work`, `work_quotes_page`) from appearing raw
+    #: on any surface. The classification IS the leak protection here -- the
+    #: chip a reader sees comes from `relation_chip`, and the stored token must
+    #: never reach the markup that carries it.
+    "rendered_relation": frozenset(ids.RENDERED_RELATIONS),
     "claim_type": frozenset(ids.CLAIM_TYPES),
     "anchor_claim_type": frozenset(ids.CLAIM_TYPES),
     "evidence_source": frozenset(ids.EVIDENCE_SOURCES),

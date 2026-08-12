@@ -212,9 +212,25 @@ _ROW_DIRECT: Dict[str, str] = {
     "he": "התאמה ל{work_title}",
 }
 
+# ⟨AMENDED 2026-08-12 -- C-track⟩ Was "Partial match with {work_title}" /
+# "התאמה חלקית ל{work_title}". Retired for the same reason as the chip: the row
+# means the page includes a quotation OF the work, which is not a partial
+# version of matching it. Left unchanged, this headline would have contradicted
+# the chip on the very same row.
 _ROW_PARTIAL: Dict[str, str] = {
-    "en": "Partial match with {work_title}",
-    "he": "התאמה חלקית ל{work_title}",
+    "en": "Includes a quotation from {work_title}",
+    "he": "כולל ציטוט מ{work_title}",
+}
+
+# ⟨ADDED 2026-08-12 -- C-track⟩ The fail-closed row. Deliberately asserts
+# NOTHING: the work title alone, with no relation verb. The chip beside it
+# already says "Needs review", so repeating that here would both duplicate the
+# chip and dress an absence of knowledge up as a finding. A0b ratifies the
+# wording (matrix spec 5a.1); the semantics -- no assertion -- are fixed by
+# section 2's missing-input rule and are not a wording choice.
+_ROW_UNCERTAIN: Dict[str, str] = {
+    "en": "{work_title}",
+    "he": "{work_title}",
 }
 
 _ROW_SHARED: Dict[str, str] = {
@@ -278,12 +294,20 @@ def row_headline(
       know the family.
     - `coverage_ppm` of `None` omits the clause and its separator.
     """
-    if relation_kind == ids.CLAIM_TYPE_DIRECT_WITNESS:
+    if relation_kind == ids.RENDERED_RELATION_DIRECT_WITNESS:
         template = _ROW_DIRECT
-    elif relation_kind == ids.CLAIM_TYPE_QUOTES_THIS_WORK:
+    elif relation_kind == ids.RENDERED_RELATION_QUOTES_THIS_WORK:
         template = _ROW_PARTIAL
-    elif relation_kind == ids.CLAIM_TYPE_SHARED_TEXT:
+    elif relation_kind == ids.RENDERED_RELATION_SHARED_TEXT:
         template = _ROW_SHARED
+    elif relation_kind == ids.RENDERED_RELATION_UNCERTAIN:
+        # C-track: an EXPLICIT branch, because the previous `else: raise` was
+        # being load-bearing by accident. `findings_rows.py` catches the
+        # ValueError and omits the coverage figure, which happens to be the
+        # right outcome -- but reached through an exception, so nothing said so
+        # and nothing tested it. `work_quotes_page` still raises: it has no
+        # owner-assigned strings and the matrix provably never emits it.
+        template = _ROW_UNCERTAIN
     else:
         raise ValueError(
             "row_headline: unknown relation kind {!r}".format(relation_kind)
@@ -291,7 +315,7 @@ def row_headline(
 
     headline = _pick(template, lang).format(work_title=work_title)
 
-    if relation_kind != ids.CLAIM_TYPE_DIRECT_WITNESS:
+    if relation_kind != ids.RENDERED_RELATION_DIRECT_WITNESS:
         return headline
     if evidence_source == ids.EVIDENCE_SOURCE_PROPAGATED:
         return headline

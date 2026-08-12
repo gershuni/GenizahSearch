@@ -317,8 +317,8 @@ def test_row_headline_direct_family_carries_qualified_matched_letter_coverage():
 
     # A weaker relation is match framing WITHOUT a percentage, even when a
     # coverage value is supplied.
-    partial = ds.row_headline(WORK_EN, 680000, ids.CLAIM_TYPE_QUOTES_THIS_WORK, "en")
-    assert partial == "Partial match with " + WORK_EN
+    partial = ds.row_headline(WORK_EN, 680000, ids.RENDERED_RELATION_QUOTES_THIS_WORK, "en")
+    assert partial == "Includes a quotation from " + WORK_EN
     assert "%" not in partial
 
     # Coverage absent (the 11,941 shared-wording claims carry no matched
@@ -327,6 +327,51 @@ def test_row_headline_direct_family_carries_qualified_matched_letter_coverage():
                                evidence_source=ids.EVIDENCE_SOURCE_TRACK1_DIRECT)
     assert none_cov == "Matches " + WORK_EN
     assert "%" not in none_cov
+
+
+def test_the_uncertain_headline_asserts_nothing_and_carries_no_percentage():
+    """The fail-closed row. An EXPLICIT branch now, where the old code reached
+    the right outcome by raising and letting the caller swallow it: the headline
+    is the work title alone, with no relation verb and no coverage figure, even
+    when a coverage value is supplied. The chip beside it says "Needs review",
+    so the headline must not repeat it either."""
+    for lang, title in (("en", WORK_EN), ("he", WORK_HE)):
+        headline = ds.row_headline(
+            title, 680000, ids.RENDERED_RELATION_UNCERTAIN, lang,
+            evidence_source=ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
+        )
+        assert headline == title
+        assert "%" not in headline
+        for verb in ("Matches", "Shares text", "Includes a quotation",
+                     "התאמה", "חולק", "כולל"):
+            assert verb not in headline
+        for chip_text in ("Needs review", "דורש בדיקה"):
+            assert chip_text not in headline
+        gate_string(headline, lang, where="row_headline/uncertain")
+
+
+def test_the_headline_and_the_chip_never_disagree_on_a_row():
+    """The inconsistency this pairing exists to prevent: Step 2 changed the chip
+    to "Includes a quotation" while `_ROW_PARTIAL` still said "Partial match
+    with", so one row would have carried both registers at once. Neither string
+    may contain wording the other retired."""
+    retired = ("Partial match", "Direct match", "התאמה חלקית", "התאמה ישירה")
+    emittable = sorted(ids.RENDERED_RELATIONS - {ids.RENDERED_RELATION_WORK_QUOTES_PAGE})
+    for lang, title in (("en", WORK_EN), ("he", WORK_HE)):
+        for state in emittable:
+            headline = ds.row_headline(title, None, state, lang)
+            chip = ds.relation_chip(state, lang)
+            for gone in retired:
+                assert gone not in headline, f"{state}/{lang} headline: {gone!r}"
+                assert gone not in chip, f"{state}/{lang} chip: {gone!r}"
+
+
+def test_work_quotes_page_still_raises_in_the_headline_too():
+    """Same reasoning as the chip: no owner-assigned strings, provably never
+    emitted, so the raise is the proof rather than a gap."""
+    for lang in LANGS:
+        with pytest.raises(ValueError):
+            ds.row_headline(WORK_EN, None, ids.RENDERED_RELATION_WORK_QUOTES_PAGE, lang)
 
 
 # ---------------------------------------------------------------------------

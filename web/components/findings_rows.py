@@ -1502,7 +1502,12 @@ def coverage_clause(item: Mapping[str, Any], lang: str = "en") -> Optional[str]:
     show and is omitted by the null rule.
     """
     ppm = item.get("max_coverage_ppm")
-    relation = item.get("relation_kind")
+    # C-track: gated on the RENDERED relation, not the stored claim_type. This
+    # is the whole reason the surface carries one field rather than two: a row
+    # the matrix demoted to `shared_text` (or fail-closed to `uncertain`) must
+    # not still advertise "68% of page", which is what gating on the stored
+    # value would have let it do.
+    relation = item.get("rendered_relation")
     if ppm is None or not relation:
         return None
     try:
@@ -1687,7 +1692,11 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
     rather than papered over with an invented tooltip.
     """
     with ui.row().classes(f"{ROW_META_CLASS} side items-center gap-2 flex-wrap"):
-        relation = item.get("relation_kind")
+        # C-track: Contract 1's matrix output, not the stored claim_type. The
+        # two grouped units carry NULL here and therefore render no chip, which
+        # is the rule matrix-spec 3.1 pins: a row aggregating DIFFERENT
+        # identifications asserts no single relation.
+        relation = item.get("rendered_relation")
         if relation:
             try:
                 chip = ds.relation_chip(relation, lang)
