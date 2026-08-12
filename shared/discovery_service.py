@@ -215,6 +215,7 @@ from shared.discovery_novelty import (
     NOVELTY_STATUSES,
     is_hidden_by_default,
 )
+from shared.discovery_relation_matrix import cap_member_relation
 from shared.discovery_surface_projection import (
     STATUS_OK,
     busy_envelope,
@@ -2425,6 +2426,13 @@ class DiscoveryService:
                        w.neutral_title, w.author, w.genre, w.canonical_work_id,
                        di.identification_id, di.display_work_id, di.main_pool,
                        di.main_pool_reason, di.page_count AS identification_page_count,
+                       -- C-track step 3b: the identification's matrix output, the
+                       -- CAP on what this page-level row may assert (spec 3.2).
+                       -- No new join -- `di` is already here for the display work.
+                       -- It leaves the service inside `rendered_relation`, never as
+                       -- its own surface field: a second relation-shaped column on
+                       -- the row is a second answer waiting for a renderer.
+                       di.rendered_relation AS identification_rendered_relation,
                        CASE WHEN de.routing_status = 'shipped' THEN 'shipped'
                             WHEN de.adjudication_status = 'human_confirmed'
                                  THEN 'human_confirmed'
@@ -2533,6 +2541,16 @@ class DiscoveryService:
             "author": row.get("display_author") if display_title else row.get("author"),
             "genre": row.get("display_genre") if display_title else row.get("genre"),
             "relation_kind": row.get("claim_type"),
+            # C-track step 3b: what this row may SAY, as against `relation_kind`,
+            # which is what the build stored. The two are different questions and
+            # the surface needs both: every display read (chip, headline, the
+            # coverage gate) goes through `rendered_relation`, while
+            # `relation_kind` survives as the ANCHOR identity that travels into
+            # the expansion query, where it is compared to other rows' stored
+            # claim types. Capped per matrix-spec 3.2 -- a page-level row never
+            # out-asserts the identification it belongs to.
+            "rendered_relation": cap_member_relation(
+                row.get("claim_type"), row.get("identification_rendered_relation")),
             "main_pool": None if row.get("main_pool") is None else bool(row.get("main_pool")),
             "restored_by_human_confirmation": bool(row.get("restored_by_human_confirmation")),
             "low_coverage_marker": bool(row.get("low_coverage_marker")),

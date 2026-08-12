@@ -168,6 +168,7 @@ def _claim_source(**overrides) -> Dict[str, Any]:
         'genre': 'Responsa and Halakhic Decisions / Responsa- Gaonim',
         'title_missing': False,
         'relation_kind': ids.CLAIM_TYPE_DIRECT_WITNESS,
+        'rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
         'evidence_source': ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
         'confidence_band': ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
         'band_label': band_label(ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
@@ -291,6 +292,11 @@ def corpus_rows() -> List[Tuple[str, Dict[str, Any]]]:
     # with more than one member each.
     rows.append(('SURFACE_CLAIM_FIELDS', surface_safe_claim(_claim_source(
         relation_kind=ids.CLAIM_TYPE_SHARED_TEXT,
+        # C-track step 3b: the fail-closed state, observed by the gate at least
+        # once. It is the newest member of the rendered vocabulary and the one a
+        # leak would be least expected on -- and it is a legitimate cap output
+        # for this row (a shared-text member under an `uncertain` identification).
+        rendered_relation=ids.RENDERED_RELATION_UNCERTAIN,
         evidence_source=ids.EVIDENCE_SOURCE_PROPAGATED,
         confidence_band=ids.CONFIDENCE_BAND_CORROBORATED,
         band_label=band_label(ids.EVIDENCE_SOURCE_PROPAGATED,

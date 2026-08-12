@@ -128,7 +128,26 @@ SURFACE_CLAIM_FIELDS: Tuple[str, ...] = (
     # relation + band (the chip carries the relation; the band label is the
     # tooltip -- A-2). `band_label` comes from `serialize_banded_claim`, never
     # from a hardcoded string in a query module.
+    #
+    # ⟨CHANGED 2026-08-12 -- C-track step 3b⟩ TWO relation-shaped fields on this
+    # surface, where `SURFACE_FINDING_FIELDS` deliberately carries one. The
+    # difference is real and is the reason both are here:
+    #
+    #   * `rendered_relation` is Contract 1's matrix output for this row, capped
+    #     at member grain (spec 3.2). EVERY display read takes it -- the chip,
+    #     the headline, the filter code, and the gate on whether a coverage
+    #     percentage may be shown. One field, one answer, exactly as on findings.
+    #   * `relation_kind` is the row's STORED claim type, and it survives here as
+    #     a MACHINE value: `_anchor_identity` turns it into `anchor_claim_type`,
+    #     which travels into the expansion query and is compared there against
+    #     other rows' stored claim types. That comparison is not a display read
+    #     and must not be made against a rendered verdict.
+    #
+    # The pane's own chips are Step 3d's business; until then the pane renders
+    # raw claim types on both sides of a pair, which is the one place a reader
+    # can still see the pre-matrix register.
     "relation_kind",
+    "rendered_relation",
     "evidence_source",
     "confidence_band",
     "band_label",

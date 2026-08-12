@@ -275,6 +275,135 @@ def test_deploy_1_is_the_owner_ruled_parameterization():
 
 
 # ---------------------------------------------------------------------------
+# §3.2 -- the member-grain cap.
+# ---------------------------------------------------------------------------
+
+#: For each state, the states STRICTLY STRONGER than it, per §3.1's frozen
+#: order. Written out by hand rather than derived from the module's own rank
+#: table: a property checked against the implementation's own ordering would
+#: pass for any ordering it happened to have.
+_STATES_STRONGER_THAN = {
+    ids.RENDERED_RELATION_DIRECT_WITNESS: set(),
+    ids.RENDERED_RELATION_QUOTES_THIS_WORK: {
+        ids.RENDERED_RELATION_DIRECT_WITNESS,
+    },
+    ids.RENDERED_RELATION_SHARED_TEXT: {
+        ids.RENDERED_RELATION_DIRECT_WITNESS,
+        ids.RENDERED_RELATION_QUOTES_THIS_WORK,
+    },
+    ids.RENDERED_RELATION_UNCERTAIN: {
+        ids.RENDERED_RELATION_DIRECT_WITNESS,
+        ids.RENDERED_RELATION_QUOTES_THIS_WORK,
+        ids.RENDERED_RELATION_SHARED_TEXT,
+    },
+}
+
+
+@pytest.mark.parametrize("member", sorted(ids.CLAIM_TYPES))
+def test_cap_is_the_identity_when_the_identification_agrees(member):
+    """Step 6's identity case at member grain: the corpus is mostly this."""
+    assert matrix.cap_member_relation(member, member) == member
+
+
+@pytest.mark.parametrize("member", sorted(ids.CLAIM_TYPES))
+def test_an_uncertain_identification_forces_uncertain(member):
+    """§3.2 bullet 1, and the one every surface leans on: a fail-closed
+    identification cannot carry a confident page-level row underneath it."""
+    assert matrix.cap_member_relation(
+        member, ids.RENDERED_RELATION_UNCERTAIN) == ids.RENDERED_RELATION_UNCERTAIN
+
+
+def test_a_demoted_identification_demotes_a_direct_member():
+    """§3.2 bullet 2, the case it was written for."""
+    assert matrix.cap_member_relation(
+        ids.CLAIM_TYPE_DIRECT_WITNESS, ids.RENDERED_RELATION_SHARED_TEXT
+    ) == ids.RENDERED_RELATION_SHARED_TEXT
+    assert matrix.cap_member_relation(
+        ids.CLAIM_TYPE_DIRECT_WITNESS, ids.RENDERED_RELATION_QUOTES_THIS_WORK
+    ) == ids.RENDERED_RELATION_QUOTES_THIS_WORK
+
+
+def test_a_weaker_member_keeps_its_own_relation_under_a_stronger_identification():
+    """"Members already asserting a non-direct relation keep their own" -- in
+    the direction where that clause and the never-out-assert principle agree."""
+    assert matrix.cap_member_relation(
+        ids.CLAIM_TYPE_SHARED_TEXT, ids.RENDERED_RELATION_DIRECT_WITNESS
+    ) == ids.RENDERED_RELATION_SHARED_TEXT
+    assert matrix.cap_member_relation(
+        ids.CLAIM_TYPE_SHARED_TEXT, ids.RENDERED_RELATION_QUOTES_THIS_WORK
+    ) == ids.RENDERED_RELATION_SHARED_TEXT
+    assert matrix.cap_member_relation(
+        ids.CLAIM_TYPE_QUOTES_THIS_WORK, ids.RENDERED_RELATION_DIRECT_WITNESS
+    ) == ids.RENDERED_RELATION_QUOTES_THIS_WORK
+
+
+def test_the_one_disputed_cell_follows_the_principle_not_the_enumeration():
+    """Identification `shared_text`, member `quotes_this_work`.
+
+    §3.2's enumeration ("members already asserting a non-direct relation keep
+    their own") would keep `quotes_this_work` here; §3.2's own lead-in sentence
+    ("it never out-asserts its identification") demotes it, because §3.1's
+    frozen order puts `quotes_this_work` ABOVE `shared_text`. The amendment of
+    2026-08-12 resolves it for the principle, priced at <=53 claim rows in the
+    panel's 150,604-row default population.
+
+    This is the ONE cell where the two readings differ, so it is the one test
+    that would notice the resolution being quietly reversed.
+    """
+    assert matrix.cap_member_relation(
+        ids.CLAIM_TYPE_QUOTES_THIS_WORK, ids.RENDERED_RELATION_SHARED_TEXT
+    ) == ids.RENDERED_RELATION_SHARED_TEXT
+
+
+def test_no_identification_to_cap_against_renders_uncertain():
+    """§5a.1's resolution, which is §2's missing-input rule: with no published
+    identification there is no verdict to cap against, so the member asserts
+    nothing. Reached on 52,510 of 231,322 claim rows behind the review toggle,
+    and on none of the 150,604 default rows (measured, 2026-08-12)."""
+    for member in sorted(ids.CLAIM_TYPES):
+        assert matrix.cap_member_relation(
+            member, None) == ids.RENDERED_RELATION_UNCERTAIN
+
+
+@pytest.mark.parametrize("bad", (None, "", "bogus", "direct-witness", 0, True))
+def test_a_member_outside_the_stored_vocabulary_fails_closed(bad):
+    assert matrix.cap_member_relation(
+        bad, ids.RENDERED_RELATION_DIRECT_WITNESS
+    ) == ids.RENDERED_RELATION_FAIL_CLOSED
+
+
+@pytest.mark.parametrize("side", ("member", "identification"))
+def test_work_quotes_page_fails_closed_on_either_side(side):
+    """It has no reader strings (§1), so a member rendering it would raise in
+    `relation_chip`; and giving it a rank would invent the very semantics §1
+    defers. Unreachable as an identification output in v1 -- this is the belt to
+    that braces."""
+    token = ids.RENDERED_RELATION_WORK_QUOTES_PAGE
+    if side == "member":
+        out = matrix.cap_member_relation(token, ids.RENDERED_RELATION_DIRECT_WITNESS)
+    else:
+        out = matrix.cap_member_relation(ids.CLAIM_TYPE_DIRECT_WITNESS, token)
+    assert out == ids.RENDERED_RELATION_FAIL_CLOSED
+
+
+def test_the_cap_never_out_asserts_either_input_over_the_whole_space():
+    """The property, over every (member, identification) pair including the
+    absent and out-of-vocabulary ones. Two claims: the output is always a
+    renderable state, and it is never STRONGER than either input."""
+    members = sorted(ids.CLAIM_TYPES) + [None, "bogus"]
+    identifications = sorted(ids.RENDERED_RELATIONS) + [None, "bogus"]
+    for member in members:
+        for identification in identifications:
+            out = matrix.cap_member_relation(member, identification)
+            assert out in ids.RENDERED_RELATIONS
+            assert out not in matrix.NEVER_RENDERED_IN_V1
+            assert out not in _STATES_STRONGER_THAN.get(member, set()), (
+                member, identification, out)
+            assert out not in _STATES_STRONGER_THAN.get(identification, set()), (
+                member, identification, out)
+
+
+# ---------------------------------------------------------------------------
 # Step 4a's ratio recipe.
 # ---------------------------------------------------------------------------
 

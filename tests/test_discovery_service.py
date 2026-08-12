@@ -1560,6 +1560,66 @@ def test_enveloped_claim_row_key_set_is_exactly_the_surface_allowlist(d13g_servi
     assert row["evidence_id"]
 
 
+# ---------------------------------------------------------------------------
+# C-track step 3b: the claim row carries the MATRIX output, capped at member
+# grain (matrix spec §3.2), read from the identification the row already joins.
+# ---------------------------------------------------------------------------
+
+def _service_over_mutated_identifications(tmp_path, sql, params=()):
+    """A d13g service reading an asset whose `discovery_identification` table
+    was rewritten by `sql`.
+
+    The service opens its sidecar READ-ONLY, so the mutation is applied to the
+    FILE before the service exists -- which is the honest way round anyway: what
+    these tests prove is that the read path reports what the ASSET says, so the
+    only mutation worth making is the asset's own.
+    """
+    db_path = _build_d13g_regression_db(tmp_path)
+    writer = sqlite3.connect(str(db_path))
+    try:
+        writer.execute(sql, params)
+        writer.commit()
+    finally:
+        writer.close()
+    return _service_for(db_path, _D13G_VERSION)
+
+
+@pytest.mark.parametrize("rendered,expected", (
+    ("direct_witness", "direct_witness"),
+    ("shared_text", "shared_text"),
+    ("quotes_this_work", "quotes_this_work"),
+    ("uncertain", "uncertain"),
+))
+def test_claim_row_relation_is_capped_by_its_identifications_matrix_output(
+        tmp_path, rendered, expected):
+    """The stored claim type stays put; what the row may SAY follows the
+    identification. Driven from the asset four ways, so a presenter that ignored
+    the joined column would report `direct_witness` all four times."""
+    service = _service_over_mutated_identifications(
+        tmp_path, "UPDATE discovery_identification SET rendered_relation = ?",
+        (rendered,))
+    row = service.get_claims_for_page_enveloped(_D13G_SHOWN_PAGE)["items"][0]
+    assert row["relation_kind"] == "direct_witness", (
+        "the STORED claim type is a build fact and never moves")
+    assert row["rendered_relation"] == expected
+
+
+def test_a_claim_row_with_no_published_identification_renders_uncertain(tmp_path):
+    """Matrix spec §5a.1's resolution at claim grain: no identification, no
+    verdict to cap against, so the row asserts nothing.
+
+    Reached only behind the review toggle in the served corpus -- 0 of 150,604
+    default rows and 52,510 of 231,322 overall (measured 2026-08-12) -- which is
+    exactly why it needs a test rather than a reader to find it.
+    """
+    service = _service_over_mutated_identifications(
+        tmp_path, "DELETE FROM discovery_identification")
+    row = service.get_claims_for_page_enveloped(_D13G_SHOWN_PAGE)["items"][0]
+    assert row["identification_id"] is None
+    assert row["relation_kind"] == "direct_witness"
+    assert row["rendered_relation"] == "uncertain"
+
+
 class _ExecuteSpy:
     """Counts `execute` calls on a real connection object, delegating
     everything else -- so a per-row follow-up query is visible as a count that

@@ -94,6 +94,10 @@ def claim_row(**overrides):
         'neutral_title': 'Some Recorded Work',
         'title_missing': False,
         'relation_kind': ids.CLAIM_TYPE_DIRECT_WITNESS,
+        # C-track step 3b: the matrix output, capped at member grain -- the
+        # step-6 identity case by default, so no unrelated assertion in this file
+        # depends on which of the two fields a renderer reads.
+        'rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
         'evidence_source': ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
         'confidence_band': ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
         'band_label': band_label(

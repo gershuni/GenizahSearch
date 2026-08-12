@@ -109,6 +109,12 @@ def claim_row(**overrides):
         "genre": None,
         "title_missing": False,
         "relation_kind": ids.CLAIM_TYPE_DIRECT_WITNESS,
+        # C-track step 3b: the matrix output, capped at member grain. Defaults to
+        # the SAME value as `relation_kind` because that is the step-6 identity
+        # case the corpus is mostly made of -- a fixture that defaulted the two
+        # apart would make every unrelated assertion in this file depend on which
+        # of them a renderer happened to read.
+        "rendered_relation": ids.RENDERED_RELATION_DIRECT_WITNESS,
         "evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
         "confidence_band": ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
         "band_label": band_label(
@@ -1050,6 +1056,108 @@ def test_direct_family_row_carries_coverage_and_a_propagated_row_carries_none():
     assert "coverage_ppm" not in propagated_row
     assert "coverage_label" not in propagated_row
     assert "%" not in propagated_row["headline"]
+
+
+# ---------------------------------------------------------------------------
+# C-track step 3b: the panel's claim rows render the MATRIX output, capped at
+# member grain (matrix spec §3.2), and every display decision on the row reads
+# that ONE field.
+# ---------------------------------------------------------------------------
+
+
+def test_the_row_chip_and_headline_follow_the_rendered_relation_not_the_stored_one():
+    """A row the matrix demoted says so, in both places a reader reads it.
+
+    The fixture keeps `relation_kind` at `direct_witness` on purpose: this is a
+    row the build stored as a direct witness and the matrix demoted, which is
+    the entire population C-track exists for. If either string still came from
+    the stored column this assertion fails.
+    """
+    model = pm.build_panel_rows(bundle([
+        claim_row(rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT)]))
+    row = list(pm.iter_rows(model))[0]
+    assert row["relation_chip"] == ds.relation_chip(
+        ids.RENDERED_RELATION_SHARED_TEXT, "en")
+    assert row["headline"] == ds.row_headline(
+        "Some Recorded Work", 680000, ids.RENDERED_RELATION_SHARED_TEXT, "en",
+        evidence_source=ids.EVIDENCE_SOURCE_TRACK1_DIRECT)
+    assert row["relation_code"] == ds.filter_code(ids.CLAIM_TYPE_SHARED_TEXT)
+
+
+def test_a_demoted_row_loses_its_coverage_percentage_with_its_chip():
+    """D-08a's gate reads the SAME field the chip does.
+
+    The failure this pins is a row whose chip says "Shares text with this work"
+    while the line beside it still advertises "68% of page" -- two answers to
+    one question, which is exactly what one field prevents.
+    """
+    for demoted in (ids.RENDERED_RELATION_SHARED_TEXT,
+                    ids.RENDERED_RELATION_QUOTES_THIS_WORK,
+                    ids.RENDERED_RELATION_UNCERTAIN):
+        model = pm.build_panel_rows(bundle([claim_row(rendered_relation=demoted)]))
+        row = list(pm.iter_rows(model))[0]
+        assert "coverage_ppm" not in row, demoted
+        assert "coverage_label" not in row, demoted
+        assert "%" not in row["headline"], demoted
+
+
+def test_a_fail_closed_row_asserts_nothing_and_carries_no_filter_code():
+    """`uncertain` renders "Needs review", a headline that is the work title
+    alone, and NO relation code -- there is no fourth filter code, and inventing
+    one would put the fail-closed state into a reader-facing filter set nobody
+    has ruled on."""
+    model = pm.build_panel_rows(bundle([
+        claim_row(rendered_relation=ids.RENDERED_RELATION_UNCERTAIN)]))
+    row = list(pm.iter_rows(model))[0]
+    assert row["relation_chip"] == ds.relation_chip(
+        ids.RENDERED_RELATION_UNCERTAIN, "en")
+    assert row["headline"] == "Some Recorded Work"
+    assert "relation_code" not in row
+
+
+def test_the_anchor_identity_still_carries_the_STORED_claim_type():
+    """The one field on this surface that must NOT follow the matrix.
+
+    `anchor_claim_type` travels into the expansion query, where it is compared
+    against other rows' stored claim types to compute `relations_differ`. A
+    rendered verdict there would compare two different vocabularies and quietly
+    mark every demoted row as differing from itself.
+    """
+    model = pm.build_panel_rows(bundle([
+        claim_row(relation_kind=ids.CLAIM_TYPE_DIRECT_WITNESS,
+                  rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT)]))
+    row = list(pm.iter_rows(model))[0]
+    assert row["expansion"]["anchor_claim_type"] == ids.CLAIM_TYPE_DIRECT_WITNESS
+
+
+def test_a_generic_group_member_chip_follows_the_rendered_relation_too():
+    """A group member is a claim row like any other. It was the SECOND consumer
+    of the stored column and the easy one to miss -- the group leaves the
+    identifications bucket, which changes where the row is shown, not what it
+    may say."""
+    members = _confirmed_plus_generic(members=3)
+    for row in members:
+        row["rendered_relation"] = ids.RENDERED_RELATION_UNCERTAIN
+    model = pm.build_panel_rows(bundle(members))
+    assert model.generic_groups != ()
+    chips = {work["relation_chip"]
+             for group in model.generic_groups for work in group["works"]}
+    assert chips == {ds.relation_chip(ids.RENDERED_RELATION_UNCERTAIN, "en")}
+
+
+def test_a_claim_row_without_a_rendered_relation_is_refused():
+    """It is a REQUIRED vocabulary, not an anchor-optional one: every row hands
+    this value to `relation_chip` and `row_headline` unconditionally, so an
+    absent value would reach a lookup that raises while quoting it."""
+    with pytest.raises(pm.PanelContractError) as excinfo:
+        pm.build_panel_rows(bundle([claim_row(rendered_relation=None)]))
+    assert "claim_vocabulary_outside_closed_set" in str(excinfo.value)
+    assert "rendered_relation" in str(excinfo.value)
+
+
+def test_a_claim_row_whose_rendered_relation_is_foreign_is_refused():
+    with pytest.raises(pm.PanelContractError):
+        pm.build_panel_rows(bundle([claim_row(rendered_relation="bogus")]))
 
 
 def test_every_row_carries_the_relation_chip_and_the_band_label_as_a_tooltip_only():

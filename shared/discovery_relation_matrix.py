@@ -200,6 +200,88 @@ def render_relation(
     return ids.RENDERED_RELATION_FAIL_CLOSED
 
 
+# ---------------------------------------------------------------------------
+# §3.2 — the member-grain cap.
+#
+# `render_relation` above answers at the IDENTIFICATION grain (one manuscript ×
+# one work). Two surfaces render an assertion one grain BELOW that — the panel's
+# page-level claim rows, and the expansion pane's representative chip — and §3.2
+# fixes what those may say: the member's own relation, except it never
+# out-asserts the identification it belongs to.
+# ---------------------------------------------------------------------------
+
+#: §3.1's frozen strength order, as comparable ranks. `direct_witness` >
+#: `quotes_this_work` > `shared_text` > `uncertain` is the SAME order the
+#: identification-grain SQL aggregate uses, written once here so the two cannot
+#: drift.
+#:
+#: `work_quotes_page` is deliberately ABSENT rather than ranked. It has no
+#: owner-assigned reader strings (spec §1), so a member rendering it would raise
+#: in `relation_chip`; and inventing a rank for it would be inventing the very
+#: semantics §1 defers. Absent means the cap fails closed on it — see below.
+_RELATION_STRENGTH: Dict[str, int] = {
+    ids.RENDERED_RELATION_DIRECT_WITNESS: 3,
+    ids.RENDERED_RELATION_QUOTES_THIS_WORK: 2,
+    ids.RENDERED_RELATION_SHARED_TEXT: 1,
+    ids.RENDERED_RELATION_UNCERTAIN: 0,
+}
+
+
+def cap_member_relation(
+    member_relation_kind: Optional[str],
+    identification_relation: Optional[str],
+) -> str:
+    """§3.2: what ONE member-grain row may assert, given its identification's
+    matrix output.
+
+    ``member_relation_kind`` is the member's OWN stored ``claim_type``;
+    ``identification_relation`` is the stored ``rendered_relation`` of the
+    identification it belongs to, or ``None`` when there is none.
+
+    The rule is the MINIMUM of the two over the frozen strength order — "never
+    out-assert your identification", which is §3.2's own lead-in sentence.
+
+    ⟨AMENDMENT 2026-08-12 — C-track, step 3b⟩ §3.2 states that principle and then
+    enumerates it in two bullets: an `uncertain` identification forces
+    `uncertain`, and a demoted identification demotes a `direct_witness` member
+    while "members already asserting a non-direct relation keep their own". Those
+    bullets and the principle DISAGREE in exactly one cell — identification
+    `shared_text`, member `quotes_this_work` — because §3.1's frozen order puts
+    `quotes_this_work` ABOVE `shared_text`, so the enumeration's literal reading
+    would let that member out-assert its identification. The principle wins here,
+    and the enumeration is read as what it is: a walk-through of the common
+    cases, written with the direct-witness member in mind.
+
+    Priced before it was decided, on the served asset
+    (`discovery-v3-PUBLIC`, 2026-08-12): the disputed cell is **at most 53
+    claim rows** in the panel's whole default population of 150,604 — a superset
+    bound, since it counts every default-population `quotes_this_work` row under
+    an identification that MIGHT reach step 2. A0b ratifies §3.2; this note is
+    what it ratifies against.
+
+    Absence, both kinds, renders ``uncertain``:
+
+    * **No identification to cap against** (`None`). §3.2 assumes one exists;
+      §5a.1 rules the case where none does — "stored relation absent →
+      `uncertain`", §2's missing-input rule — for the expansion pane, and the
+      same reading applies here for the same reason: there is no verdict to cap
+      against, and a member asserting on its own would be asserting more than
+      anything published about it. Measured: this never happens in the panel's
+      DEFAULT population (0 of 150,604 rows), and happens for 52,510 of 231,322
+      rows behind the review toggle.
+    * **Anything outside the two vocabularies** — a NULL member, a typo, a
+      future token, or `work_quotes_page` on either side. Fails closed, exactly
+      as step 6 does.
+    """
+    member_rank = _RELATION_STRENGTH.get(member_relation_kind)
+    identification_rank = _RELATION_STRENGTH.get(identification_relation)
+    if member_rank is None or identification_rank is None:
+        return ids.RENDERED_RELATION_FAIL_CLOSED
+    if identification_rank < member_rank:
+        return identification_relation
+    return member_relation_kind
+
+
 def work_divergence_ratios(
     rows: Iterable[Tuple[str, Optional[str]]],
 ) -> Dict[str, float]:

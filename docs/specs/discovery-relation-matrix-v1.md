@@ -123,7 +123,7 @@ a row in this table before it ships.**
 | findings — identification unit | `shared/discovery_service.py:863` → chip `web/components/findings_rows.py:1690` | one identification (1 ms × 1 work, all its pages) | stored `relation_kind` | stored matrix column | `uncertain`, no locus, row stays |
 | findings — work unit (grouped) | `:906` — `NULL AS relation_kind` → no chip | all identifications of one display work | none asserted | unchanged — asserts nothing | row + counts stay |
 | findings — manuscript unit (grouped) | `:884` — `NULL AS relation_kind` → no chip | all identifications in one manuscript (multi-work) | none asserted | unchanged — asserts nothing | row + counts stay |
-| panel — claim rows | `:2445` aliases raw `claim_type` → `relation_kind`; chips via `shared/discovery_panel_model.py:690,1034,1310` | one page-level claim (member of an identification) | raw `claim_type` | member's own relation, **capped** (§3.2) by its identification's matrix output | `uncertain`, no leaf locus |
+| panel — claim rows ✅ **landed 2026-08-12 (step 3b)** | `shared/discovery_service.py:2552` computes `rendered_relation` from `di.rendered_relation` (`:2435`, no new join) via `cap_member_relation`; display reads at `shared/discovery_panel_model.py:694,1051,1053,1074,1083` | one page-level claim (member of an identification) | ~~raw `claim_type`~~ | member's own relation, **capped** (§3.2) by its identification's matrix output | `uncertain`, no leaf locus |
 | panel — manuscript summary ("elsewhere in this manuscript") | `:1425–1433` SQL strongest-member over claims; chip `web/components/discovery_panel.py:786` | identifications of one canonical work in this manuscript | SQL `MIN(CASE claim_type…)` | strongest **matrix output** over members (drop the second comparator in SQL) | withheld member contributes `uncertain` to the max; row stays |
 | panel — expansion pair rows | `:1479` raw `claim_type` + `anchor_claim_type`; **the two raw `relation_chip(claim_type)` calls: `web/components/discovery_panel.py:425,428`** | one carrier × anchor pair | raw claim types, both sides | each side's own relation, capped (§3.2) by its OWN identification's matrix output; `relations_differ` kept | `uncertain`, no citation |
 | panel — related pages | `SURFACE_RELATED_PAGE_FIELDS` (no relation field) | unevaluated candidate alignment | none asserted | unchanged — pinned never to grow a relation without a row here | n/a (not an identification) |
@@ -187,6 +187,34 @@ vocabulary, except it never out-asserts its identification:
 
 Rationale: every demote step is evidence about the identification as a whole; a page-level
 row asserting MORE than its identification would reopen exactly the gap the matrix closes.
+
+**⟨AMENDED 2026-08-12c — implementation of §3.2, C-track step 3b.⟩ The rule is the MINIMUM
+over §3.1's frozen strength order, and the two bullets above are read as what they are: a
+walk-through of the common cases.** The lead-in sentence ("it never out-asserts its
+identification") and the enumeration disagree in **exactly one cell** — identification
+`shared_text`, member `quotes_this_work` — because §3.1 puts `quotes_this_work` ABOVE
+`shared_text`, so "members already asserting a non-direct relation keep their own" would let
+that member out-assert the identification it belongs to. The principle wins. Priced before it
+was decided, on the served asset: **at most 53 claim rows** of the panel's 150,604-row default
+population sit in the disputed cell (a superset — it counts every default-population
+`quotes_this_work` row under an identification that *might* reach step 2). A0b ratifies §3.2;
+this is what it ratifies against. Implemented ONCE in
+`shared/discovery_relation_matrix.py::cap_member_relation`, with the disputed cell as its own
+named test.
+
+**§3.2a No identification to cap against → `uncertain`, at claim grain too.** §5a.1 rules this
+for the expansion pane; the same reading holds here, from §2's missing-input rule and for the
+same reason — there is no verdict to cap against, and a member asserting on its own would
+assert more than anything published about it. Measured on the served asset (2026-08-12): this
+never arises in the panel's DEFAULT population (**0 of 150,604** claim rows), and arises for
+**52,510 of 231,322** rows behind the review toggle — which reconciles exactly with §5a.1's
+"52,510 do not" figure and is why the review toggle, not the default surface, is where readers
+will see it.
+
+**§3.2b `work_quotes_page` fails closed on either side of the cap.** It has no owner-assigned
+reader strings (§1), so a member rendering it would raise in `relation_chip`; and giving it a
+rank in the strength order would invent the very semantics §1 defers. It is therefore absent
+from the rank table rather than ranked, and either side carrying it renders `uncertain`.
 
 ## 4. The scoring crosswalk (grade → metric)
 

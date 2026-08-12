@@ -687,7 +687,11 @@ def _generic_group(
             "work_id": _display_work_id(member),
             "work_title": title,
             "title_missing": missing,
-            "relation_chip": ds.relation_chip(member.get("relation_kind"), lang),
+            # C-track step 3b: the matrix output, capped at member grain -- not
+            # the stored claim type. A group member is a claim row like any
+            # other; the only thing this group changes is that it leaves the
+            # identifications bucket, not what each row may assert.
+            "relation_chip": ds.relation_chip(member.get("rendered_relation"), lang),
         })
     return {
         "kind": "generic_passage_group",
@@ -768,6 +772,15 @@ def _is_default_surface_eligible(row: Mapping[str, Any]) -> bool:
 _REQUIRED_CLAIM_VOCABULARIES: Tuple[Tuple[str, frozenset], ...] = (
     ("routing_status", ids.ROUTING_STATUSES),
     ("adjudication_status", ids.ADJUDICATION_STATUSES),
+    #: ⟨ADDED 2026-08-12 -- C-track step 3b⟩ Contract 1's matrix output, capped
+    #: at member grain. REQUIRED, not anchor-optional, for reason 2 above: every
+    #: row hands this value to `relation_chip` and `row_headline`
+    #: unconditionally, so an absent or foreign value would reach a lookup that
+    #: raises while quoting it. Note this is the RENDERED vocabulary (five
+    #: states, `uncertain` among them), not `CLAIM_TYPES` -- the fail-closed
+    #: state is a legitimate value here and refusing it would refuse exactly the
+    #: rows the matrix exists to soften.
+    ("rendered_relation", ids.RENDERED_RELATIONS),
 )
 
 _ANCHOR_CLAIM_VOCABULARIES: Tuple[Tuple[str, frozenset], ...] = (
@@ -1015,7 +1028,13 @@ def _identification_row(
     """
     anchor = _anchor_identity(row)
     title, missing = _routed_title(row, lang)
-    relation_kind = row.get("relation_kind")
+    # C-track step 3b: ONE relation feeds every display decision below -- the
+    # chip, the headline, the filter code and D-08a's percentage gate -- and it
+    # is the matrix output capped at member grain, never the stored claim type.
+    # The stored type still exists on the row and is still read, but only by
+    # `_anchor_identity` above, where it is a machine key for a query rather than
+    # a claim to a reader.
+    rendered_relation = row.get("rendered_relation")
     evidence_source = row.get("evidence_source")
     in_main_pool = row.get("main_pool") is True
     level = _disclosure_level_for(row)
@@ -1029,10 +1048,9 @@ def _identification_row(
         "work_title": title,
         "title_missing": missing,
         "headline": ds.row_headline(
-            title, row.get("coverage_ppm"), relation_kind, lang,
+            title, row.get("coverage_ppm"), rendered_relation, lang,
             evidence_source=evidence_source),
-        "relation_chip": ds.relation_chip(relation_kind, lang),
-        "relation_code": ds.filter_code(relation_kind),
+        "relation_chip": ds.relation_chip(rendered_relation, lang),
         "band_tooltip": ds.relation_tooltip(
             evidence_source, row.get("confidence_band"), lang),
         "in_main_pool": in_main_pool,
@@ -1047,10 +1065,22 @@ def _identification_row(
         "expansion": _expansion_descriptor(row, title, lang, anchor),
     }
 
+    # The relation FILTER's short code. Emitted only where one exists: the three
+    # stored claim types have codes, the fail-closed state does not, and
+    # inventing a fourth code would put "Needs review" into a reader-facing
+    # filter set nobody has ruled on. An ABSENT key rather than a null, like
+    # every other conditional field here -- and `filter_code` still raises on
+    # anything it does not know, so the branch is a decision, not a swallow.
+    if rendered_relation in ids.CLAIM_TYPES:
+        emitted["relation_code"] = ds.filter_code(rendered_relation)
+
     # D-08a: the ONE permitted percentage, direct family only, always with its
-    # matched-letter qualifier (which `row_headline` composes).
+    # matched-letter qualifier (which `row_headline` composes). Gated on the
+    # RENDERED relation for the same reason the findings page is: a row the
+    # matrix demoted must not go on advertising "68% of page" beside a chip that
+    # says it shares text.
     if (
-        relation_kind == ids.CLAIM_TYPE_DIRECT_WITNESS
+        rendered_relation == ids.RENDERED_RELATION_DIRECT_WITNESS
         and evidence_source != ids.EVIDENCE_SOURCE_PROPAGATED
         and row.get("coverage_ppm") is not None
     ):
