@@ -24,6 +24,7 @@ is loaded and does NOT itself re-check readiness.
 """
 
 import json
+import re
 
 from nicegui import ui
 
@@ -186,6 +187,75 @@ def _inject_atlas_renderer() -> None:
         'var tries=0;(function boot(){'
         'if(window.AtlasDecode&&typeof window.AtlasDecode.init==="function"){'
         'window.AtlasDecode.init(window.__ATLAS_CONFIG__);return;}'
+        'if(tries++>200)return;setTimeout(boot,50);})();'
+        '})();</script>'
+    )
+
+
+def create_embedded_atlas(*, instance_id: str = 'start-atlas', height_px: int = 520) -> None:
+    """Render one Atlas canvas without the standalone page's title or prose.
+
+    The Start page mounts this component lazily after an explicit visitor action,
+    so the large Atlas asset does not compete with the launchpad's first paint.
+    IDs are namespaced to keep this component independent of ``/atlas`` chrome.
+    """
+    if not re.fullmatch(r'[a-z][a-z0-9-]*', instance_id):
+        raise ValueError('instance_id must be a lowercase DOM-safe prefix')
+    if not 320 <= height_px <= _ATLAS_CANVAS_HEIGHT_PX:
+        raise ValueError('embedded Atlas height must be between 320 and 720 pixels')
+
+    canvas_id = f'{instance_id}-canvas'
+    box_id = f'{instance_id}-canvas-box'
+    loading_id = f'{instance_id}-loading'
+    cap_class = f'{instance_id}-h-cap'
+    height_css = f'height: {height_px}px;'
+    cap_style = (
+        f'<style id="{instance_id}-height-cap">'
+        '@media (hover: none) and (pointer: coarse){'
+        f'.{cap_class}{{'
+        f'height: min({height_px}px, {_ATLAS_CANVAS_VIEWPORT_FRACTION}vh) !important;'
+        '}}'
+        '</style>'
+    )
+    ui.add_head_html(cap_style)
+
+    with ui.element('div').classes(
+        f'w-full rounded-lg overflow-hidden {cap_class}'
+    ).style(
+        f'position: relative; width: 100%; {height_css} '
+        'background: var(--bg-secondary); border: 1px solid var(--border-light);'
+    ).props(f'id="{box_id}"'):
+        ui.element('canvas').props(f'id={canvas_id}').props(
+            f'aria-label="{tr("The Visual Genizah Atlas")}"'
+        ).classes(cap_class).style(f'display:block; width:100%; {height_css}')
+        with ui.element('div').classes('flex items-center justify-center').style(
+            'position: absolute; inset: 0; pointer-events: none;'
+        ).props(f'id="{loading_id}"'):
+            ui.label(tr('Loading the atlas…')).classes('text-sm').style(
+                'color: var(--text-secondary);'
+            )
+
+    config = {
+        'manifestUrl': _ATLAS_MANIFEST_URL,
+        'dataBase': _ATLAS_DATA_BASE,
+        'canvasId': canvas_id,
+        'loadingId': loading_id,
+        'boxId': box_id,
+        'lang': get_language(),
+        'rtl': is_rtl(),
+        'labels': _renderer_labels(),
+    }
+    config_json = json.dumps(config, ensure_ascii=False)
+    config_key = json.dumps(instance_id)
+    ui.add_body_html(f'<script src="{_ATLAS_DECODER_SRC}"></script>')
+    ui.add_body_html(
+        '<script>(function(){'
+        f'var key={config_key},config={config_json};'
+        'window.__ATLAS_EMBED_CONFIGS__=window.__ATLAS_EMBED_CONFIGS__||{};'
+        'window.__ATLAS_EMBED_CONFIGS__[key]=config;'
+        'var tries=0;(function boot(){'
+        'if(window.AtlasDecode&&typeof window.AtlasDecode.init==="function"){'
+        'window.AtlasDecode.init(config);return;}'
         'if(tries++>200)return;setTimeout(boot,50);})();'
         '})();</script>'
     )

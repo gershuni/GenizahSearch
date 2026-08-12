@@ -1771,6 +1771,7 @@ def create_layout():
 
                 nav_items = [
                     ('/', 'home', tr('Home'), None),
+                    ('/start', 'explore', tr('Start Here'), None),
                     ('/about', 'info', tr('About the Genizah'), None),
                     ('/search', 'search', tr('Search'), None),
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
@@ -2337,6 +2338,30 @@ def dashboard_page():
         # recovery fragment on every homepage load (cheap no-op when absent).
         _render_password_recovery_handler()
 
+
+@ui.page('/start', title='Start Here | התחילו כאן — Dicta Genizah Search')
+def start_page_route():
+    """Guided launchpad for visitors who do not yet have a search query."""
+    safe_user_set('current_page', '/start')
+    ui.add_head_html(page_meta(
+        '/start',
+        title='Start Here | התחילו כאן — Dicta Genizah Search',
+        description=(
+            'A guided introduction to the Cairo Genizah, prepared searches, '
+            'selected manuscripts, and research tools.'
+        ),
+        needs_iiif=True,
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.start import create_start_page
+        create_start_page()
+
 @ui.page('/search', title='Full-Text Search | חיפוש טקסט מלא — Dicta Genizah Search')
 def search_page_route(
     q: str = None, tag: str = None,
@@ -2391,11 +2416,18 @@ def parallels_page_route(text: str = None):
         create_parallels_page(initial_text=text)
 
 @ui.page('/browse', title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search')
-def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None, embed: str = None):
+def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None, embed: str = None, computed: str = None):
     # R2-1 discovery-review iframe: ?embed=1 renders a bare viewer (no nav shell,
     # no snapshot write, no current_page write) so it can be framed inside the
     # standalone discovery-review deck without stomping normal browse state.
     _embed = (embed or '').strip().lower() in ('1', 'true', 'yes', 'on')
+    # Guided-tour deep links may ask the existing computed-identifications panel
+    # to start open. Keep the request inert unless the authoritative discovery
+    # readiness gate passes; normal /browse visits retain their current state.
+    _open_computed = (
+        (computed or '').strip().lower() in ('1', 'true', 'yes', 'on')
+        and discovery_available()
+    )
     if not _embed:
         safe_user_set('current_page', '/browse')
     # Dynamic metadata for manuscript pages when sys_id is provided
@@ -2505,7 +2537,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     content = ui.column().classes('w-full items-stretch').style('padding:0;margin:0') if _embed else create_layout()
     with content:
         from web.pages.browse import create_browse_page
-        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie, embedded=_embed)
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie, embedded=_embed, open_computed=_open_computed)
 
 @ui.page('/joins-lab', title='Joins Lab | Dicta Genizah Search')
 def joins_lab_page_route(

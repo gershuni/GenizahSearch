@@ -190,10 +190,22 @@ class BrowsePageRefs:
     page_client: Any = None
     content_container: Any = None
     slider_refs: Dict[str, Any] = field(default_factory=dict)
+    # One-shot /browse?computed=1 request. This deliberately lives outside
+    # enrichment_refs because that dict is cleared on manuscript navigation.
+    # It is consumed only after a real panel model is available, so an ordinary
+    # browse visit and an unavailable discovery sidecar both remain collapsed.
+    open_discovery_panel_requested: bool = False
 
     # Callback functions (set after definition in create_browse_page)
     enter_joined_view: Any = None
     update_content: Any = None
+
+
+def _consume_initial_panel_open(refs: BrowsePageRefs, open_state: Dict[str, bool]) -> None:
+    """Apply a deep-link open request once a renderable panel model exists."""
+    if refs.open_discovery_panel_requested:
+        open_state['value'] = True
+        refs.open_discovery_panel_requested = False
 
 
 async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, generation):
@@ -754,6 +766,7 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
         return
 
     open_state = refs.enrichment_refs.setdefault('discovery_panel_open', {'value': False})
+    _consume_initial_panel_open(refs, open_state)
 
     async def _retry():
         """Re-issue the four eager reads and re-render. The retry offered on an

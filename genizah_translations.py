@@ -4895,3 +4895,12 @@ TRANSLATIONS.update({
     "This page will return as soon as the data is ready.":
         "הדף יחזור ברגע שהנתונים יהיו מוכנים.",
 })
+
+# --- Guided welcome launchpad (2026-08-12) ---
+TRANSLATIONS.update({
+    "Start Here": "התחילו כאן",
+    "Not sure what to search? Start here": "לא יודעים מה לחפש? התחילו כאן",
+    "Start Here | Dicta Genizah Search": "התחילו כאן | אתר הגניזה של דיקטה",
+    "A guided introduction to the Cairo Genizah, prepared searches, selected manuscripts, and research tools.":
+        "מבוא מודרך לגניזת קהיר, חיפושים מוכנים, כתבי יד נבחרים וכלי מחקר.",
+})

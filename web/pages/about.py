@@ -11,30 +11,15 @@ A visually engaging introduction for general audiences:
 - Credits and further reading
 """
 
-import random
-
 from nicegui import ui
 from web.translations import get_language
 from web.components.typography import h2
-from web.state import state
+from web.random_fragment import navigate_random_fragment
 
 
 def _html(content: str):
     """Helper to emit raw HTML without sanitization."""
     return ui.html(content, sanitize=False)
-
-
-def _navigate_random_fragment():
-    """Navigate to a random Genizah fragment in the browse view."""
-    try:
-        if state.meta_mgr and state.meta_mgr.csv_bank:
-            all_ids = list(state.meta_mgr.csv_bank.keys())
-            random_id = random.choice(all_ids)
-            ui.navigate.to(f'/browse?sys_id={random_id}')
-            return
-    except Exception:
-        pass  # HTML processing failed; use original text
-    ui.navigate.to('/browse')
 
 
 # Wikimedia Commons images (public domain)
@@ -477,7 +462,7 @@ def _create_hebrew_content():
         with ui.row().classes('w-full justify-center gap-3 mb-8 flex-wrap'):
             ui.button('התחילו לחפש', icon='search', on_click=lambda: ui.navigate.to('/search')).props('color=primary')
             ui.button('דפדפו בכתבי יד', icon='menu_book', on_click=lambda: ui.navigate.to('/browse')).props('outline')
-            ui.button('קטע גניזה אקראי', icon='casino', on_click=lambda: _navigate_random_fragment()).props('outline')
+            ui.button('קטע גניזה אקראי', icon='casino', on_click=navigate_random_fragment).props('outline')
 
         # Credits
         _html('''
@@ -682,7 +667,7 @@ def _create_english_content():
         with ui.row().classes('w-full justify-center gap-3 mb-8 flex-wrap'):
             ui.button('Start Searching', icon='search', on_click=lambda: ui.navigate.to('/search')).props('color=primary')
             ui.button('Browse Manuscripts', icon='menu_book', on_click=lambda: ui.navigate.to('/browse')).props('outline')
-            ui.button('Random Fragment', icon='casino', on_click=lambda: _navigate_random_fragment()).props('outline')
+            ui.button('Random Fragment', icon='casino', on_click=navigate_random_fragment).props('outline')
 
         # Credits
         _html('''
