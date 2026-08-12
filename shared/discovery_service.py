@@ -606,10 +606,80 @@ _BAND_RANK_CASE_SQL = _build_band_rank_case_sql()
 # layer down by the identification join.
 # ---------------------------------------------------------------------------
 
-_CLAIMS_DEFAULT_ROUTING_CLAUSE = (
-    "AND (de.routing_status = 'shipped' "
-    "OR de.adjudication_status = 'human_confirmed')"
-)
+# ---------------------------------------------------------------------------
+# ONE eligibility clause builder (Codex pre-flight finding 3).
+#
+# Four read paths decided eligibility independently and disagreed three ways:
+# the claims query applied D-13g above; the three shared_text (related-pages)
+# queries hardcoded `routing_status = 'shipped'`, which is the pre-D-13g
+# predicate; and the work-expansion CTE applied NO routing predicate at all.
+# Three spellings of "which rows may a reader see" is how one of them ends up
+# wrong without anybody editing it.
+#
+# MEASURED on the served asset (`discovery-v3-PUBLIC`, 2026-08-12) before any
+# behaviour changed, because the two disagreements are not the same size:
+#
+#   * shared_text: 28,684 rows, 28,673 shipped, and ZERO human_confirmed. So
+#     moving those three sites onto the D-13g rule restores nothing today --
+#     it is a consistency fix whose visible effect is nil, which is exactly
+#     why it is safe to make now.
+#   * expansion CTE: 222,972 rows admitted today, 142,254 eligible under
+#     D-13g -- 80,718 rows (36%) are review_only DISPLAY evidence
+#     (65,719 gen2_parallel_surface / 14,213 gen2_router_not_shipped /
+#     786 later_shared_text). At the pane's real grain that is 88,337 ->
+#     48,701 (work, unit) pairs, 589 of 613 works changing and 58 panes
+#     emptying, with 39,636 pairs reachable ONLY through a review_only row.
+#     That is an owner decision about what the pane CLAIMS, not a cleanup, so
+#     the CTE takes an explicit mode that DEFAULTS to today's behaviour and
+#     changes nothing until ruled.
+# ---------------------------------------------------------------------------
+
+#: D-13g: shipped OR human-confirmed. The rule the build materializes into
+#: `discovery_identification.eligibility_basis`, so a read path using it agrees
+#: with the table it joins against.
+ELIGIBILITY_DEFAULT = "default"
+#: The pre-D-13g predicate. Kept nameable because a caller may legitimately
+#: want it, never because it is the default.
+ELIGIBILITY_SHIPPED_ONLY = "shipped_only"
+#: No routing predicate -- admits review_only. What `include_review=True` means,
+#: and (for now) what the expansion CTE does unconditionally.
+ELIGIBILITY_ALL = "all"
+
+ELIGIBILITY_MODES = frozenset({
+    ELIGIBILITY_DEFAULT, ELIGIBILITY_SHIPPED_ONLY, ELIGIBILITY_ALL,
+})
+
+
+def eligibility_clause(mode: str, prefix: str = "") -> str:
+    """The `AND`-prefixed routing predicate for `mode`, or `''` for `all`.
+
+    `prefix` is the table alias plus dot (`'de.'`) where the query needs one;
+    the shared_text queries select straight from `discovery_evidence` and pass
+    nothing. An unknown mode raises rather than defaulting: silently falling
+    back to a weaker predicate is how review_only rows reach a reader.
+    """
+    if mode not in ELIGIBILITY_MODES:
+        raise ValueError(
+            f"eligibility_clause: unknown mode {mode!r} "
+            f"(expected one of {sorted(ELIGIBILITY_MODES)})"
+        )
+    if mode == ELIGIBILITY_ALL:
+        return ""
+    if mode == ELIGIBILITY_SHIPPED_ONLY:
+        return f"AND {prefix}routing_status = 'shipped'"
+    return (
+        f"AND ({prefix}routing_status = 'shipped' "
+        f"OR {prefix}adjudication_status = 'human_confirmed')"
+    )
+
+
+def _review_toggle_mode(include_review: bool) -> str:
+    """`include_review` as an eligibility mode -- the one place the toggle's
+    meaning is written down."""
+    return ELIGIBILITY_ALL if include_review else ELIGIBILITY_DEFAULT
+
+
+_CLAIMS_DEFAULT_ROUTING_CLAUSE = eligibility_clause(ELIGIBILITY_DEFAULT, "de.")
 
 # The manuscript scope is served by `page_id IN (...)` over the browse page's
 # own page list, NOT by `discovery_evidence.sys_id` -- that column has no
@@ -1463,12 +1533,31 @@ def _build_manuscript_works_sql(n_page_ids: int) -> str:
 # same reason `_present_claim_row` needs it: `serialize_banded_claim` REFUSES to
 # emit a bandless presentation without it (SC#1), and the expansion's
 # `band_label` is produced by that serializer rather than formatted locally.
-def _build_work_witnesses_ranked_cte_sql(*, restrict_work_id: bool = True) -> str:
+def _build_work_witnesses_ranked_cte_sql(
+    *, restrict_work_id: bool = True, eligibility: str = ELIGIBILITY_ALL,
+) -> str:
     """The ranked CTE body. `restrict_work_id=False` builds the CORPUS-WIDE
     form (no `dc.work_id = ?` bind), used ONLY by the cardinality probe that
     has to rank every work at this exact grain through this exact fragment --
-    the service itself always builds the per-work form."""
+    the service itself always builds the per-work form.
+
+    `eligibility` DEFAULTS to `ELIGIBILITY_ALL`, which is what this CTE has
+    always done: it applies no routing predicate, so a claim whose DISPLAY
+    evidence is `review_only` appears on the expansion pane. That is the
+    default here rather than the D-13g rule for one reason -- switching it is a
+    decision about what the pane claims, and the decision has not been made.
+    The parameter exists so the divergence is explicit, tested, and one argument
+    away from resolved, instead of an absent predicate nobody can see.
+
+    Measured cost of the change, so the ruling has numbers (served asset,
+    2026-08-12): 80,718 of 222,972 CTE rows are review_only display evidence;
+    at the pane's real (work, unit) grain that is 88,337 -> 48,701, with 589 of
+    613 works changing, 58 panes emptying, and 39,636 pairs reachable ONLY
+    through a review_only row. Both curated Yalkut works lose ~84% of their
+    pane presence (w001384 1,752 -> 273; w001383 1,126 -> 184).
+    """
     work_clause = "dc.work_id = ?\n    AND " if restrict_work_id else ""
+    routing_clause = eligibility_clause(eligibility, "de.")
     return f"""
   SELECT
     COALESCE(wum.unit_id, 'sys:' || de.sys_id) AS unit_key,
@@ -1489,6 +1578,7 @@ def _build_work_witnesses_ranked_cte_sql(*, restrict_work_id: bool = True) -> st
   LEFT JOIN witness_unit_members wum ON wum.sys_id = de.sys_id
   LEFT JOIN manuscript_display md ON md.sys_id = de.sys_id
   WHERE {work_clause}dc.claim_type IN ('direct_witness', 'quotes_this_work')
+    {routing_clause}
 """
 
 
@@ -2572,7 +2662,7 @@ class DiscoveryService:
         conn = self._get_conn()
         if conn is None:
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
-        routing_clause = "" if include_review else "AND routing_status = 'shipped'"
+        routing_clause = eligibility_clause(_review_toggle_mode(include_review))
         try:
             cur = conn.execute(
                 f"""
@@ -2626,7 +2716,7 @@ class DiscoveryService:
         page = self._clamp_page(page)
         page_size = self._clamp_page_size(page_size)
         offset = (page - 1) * page_size
-        routing_clause = "" if include_review else "AND routing_status = 'shipped'"
+        routing_clause = eligibility_clause(_review_toggle_mode(include_review))
         try:
             cur = conn.execute(
                 f"""
@@ -3299,9 +3389,13 @@ class DiscoveryService:
         """PANEL-02: shared_text alignments touching this page, from EITHER
         side (a_page_id or other_page_id) -- both columns are indexed.
 
-        L1 fix: defaults to SHIPPED-only -- review_only rows (e.g. the
-        family-router tafsir_targum/with_arabic co-citation collections)
-        are excluded unless ``include_review=True``."""
+        L1 fix: review_only rows (e.g. the family-router
+        tafsir_targum/with_arabic co-citation collections) are excluded unless
+        ``include_review=True``. Since Codex finding 3 the default is D-13g
+        eligibility (shipped OR human-confirmed) rather than shipped-only, so
+        this query agrees with the claims query and with
+        `discovery_identification.eligibility_basis`. Measured no-op on the
+        served asset: zero shared_text rows are human-confirmed."""
         if not self.is_available():
             return []
         conn = self._get_conn()
@@ -3310,7 +3404,7 @@ class DiscoveryService:
         page = self._clamp_page(page)
         page_size = self._clamp_page_size(page_size)
         offset = (page - 1) * page_size
-        routing_clause = "" if include_review else "AND routing_status = 'shipped'"
+        routing_clause = eligibility_clause(_review_toggle_mode(include_review))
         try:
             cur = conn.execute(
                 f"""

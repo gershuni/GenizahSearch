@@ -252,6 +252,28 @@ Adjacent owner items riding the same sitting (not matrix parameters): the expans
 honesty cue (catalogue-disagree rows are ~two-in-three false — the yardstick stays OUT of
 adjudication either way), and A0b's Contract-2/3 floor ratifications.
 
+**⟨ADDED 2026-08-12b — a new adjacent item, measured⟩ Does the expansion pane apply D-13g
+eligibility?** It applies NO routing predicate today, so a claim whose *display* evidence is
+`review_only` appears on the pane. The other three read paths now share one clause; this one
+is deliberately left on its current behaviour because changing it changes what the pane
+claims. Measured on the served asset (`discovery-v3-PUBLIC`, 2026-08-12):
+
+| | today | under D-13g |
+|---|---:|---:|
+| CTE rows | 222,972 | 142,254 |
+| (work, unit) pairs — the pane's real grain | 88,337 | 48,701 |
+| works with any pane population | 613 | 555 (58 empty) |
+
+80,718 CTE rows are review_only display evidence — 65,719 `gen2_parallel_surface`, 14,213
+`gen2_router_not_shipped`, 786 `later_shared_text`. 39,636 (work, unit) pairs are reachable
+ONLY through such a row, so they are real losses, not duplicates of eligible rows. 589 of 613
+works' counts change. The two curated Yalkut works lose ~84% of their pane presence
+(w001384 1,752 → 273; w001383 1,126 → 184), which is worth noticing next to the curated
+ruling: much of what those works contribute to the pane is gen-2 parallel-surface material
+the router deliberately did not ship. Implementation is one argument
+(`_build_work_witnesses_ranked_cte_sql(eligibility=...)`); the ruling and its number belong
+in the same commit.
+
 ## 5a. Amendment 2026-08-12b — the curated list is ruled, and the matrix is implemented
 
 *Two factual updates. Neither changes a rule in §2; both change what §2's frozen text
