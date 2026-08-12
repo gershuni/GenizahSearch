@@ -25,6 +25,13 @@ session, so their size is a recurring cost; `scripts/check_docs.py` fails the bu
 passes its ceiling. When a ceiling is hit, split closed content into `docs/archive/` — never
 raise the number.
 
+**Effort is routed, not pinned.** Sessions run at `high`. Raise with `/effort xhigh` for the
+calls where being wrong costs the owner grading hours — sample design and weighting, threshold
+selection, the precedence matrix, relation-label taxonomy, anything that decides what a public
+claim asserts. Drop to `/effort medium` for plumbing: deck builders, schema batches, harness
+scaffolding, mechanical edits. Say which tier you are on when it is not the default.
+Subagents run on Sonnet 5 (`CLAUDE_CODE_SUBAGENT_MODEL`).
+
 ## Project Overview
 
 GenizahSearch is a collaborative research platform for the Cairo Genizah, featuring:
