@@ -39,6 +39,10 @@ for _p in (_REPO_ROOT, _SCRIPTS_DIR):
 
 import discovery_ids as ids  # scripts/discovery_ids.py -- FROZEN enum vocab
 import build_discovery_sidecar as sidecar_build  # scripts/build_discovery_sidecar.py -- canonical frame-hash recipe
+# The fam-v1 family assignment -- the ONE canonical recipe (same
+# never-duplicated posture as compute_frame_content_hash): the retention gate
+# is only meaningful if it assigns families exactly as the lock emitter did.
+import shared.discovery_family as discovery_family
 
 
 class VerificationError(Exception):
@@ -1982,6 +1986,75 @@ def check_locus_reference_basis(conn: sqlite3.Connection, meta: dict) -> List[st
     return violations
 
 
+def check_population_lock_retention(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """Contract 2's bounded-withholding rule, executable (Amendment 2026-08-12
+    (S)): the CURRENT pre-withholding population, per fam-v1 family, must
+    retain the lock's floors against the LOCKED constants carried in meta.
+    A breach BLOCKS the build -- a materially failing population is a plan
+    failure, never a denominator adjustment.
+
+    Conditional on the lock keys being present (a pre-lock asset asserts
+    nothing). On a PRIVATE asset the recomputed population is a superset of
+    the public one, so the >= floors pass trivially there; the gate has its
+    teeth on the public projection, which is the population the lock governs.
+
+    Withholding refinement stated for honesty: rows withheld by Contract 4
+    still COUNT here (withholding is display-layer and must never satisfy or
+    evade a retention floor by deletion -- rows are never deleted); the
+    per-cell withholding-vs-retention arithmetic lands with the frame gates."""
+    if "population_lock_version" not in meta:
+        return []
+    violations: List[str] = []
+    if meta.get("population_lock_family_version") != discovery_family.FAMILY_VERSION:
+        return [
+            "population lock: meta.population_lock_family_version does not match "
+            f"this verifier's {discovery_family.FAMILY_VERSION!r} -- a retention "
+            "recomputation under a different family rule is meaningless (value withheld)"
+        ]
+    try:
+        daf_overrides = set(json.loads(meta.get("population_lock_daf_overrides", "[]")))
+        floor_overall = float(meta["population_lock_retention_floor_overall"])
+        floor_family = float(meta["population_lock_retention_floor_per_family"])
+        locked_total = int(meta["population_lock_total"])
+        locked = {
+            family: int(meta[f"population_lock_family_{family}"])
+            for family in discovery_family.FAMILIES
+        }
+    except (KeyError, TypeError, ValueError):
+        return [
+            "population lock: lock meta keys incomplete or non-numeric -- an asset "
+            "carrying population_lock_version must carry the full constant set"
+        ]
+
+    works = {
+        w: (g, c) for w, g, c in conn.execute(
+            "SELECT work_id, genre, source_corpus FROM works")
+    }
+    current = {family: 0 for family in discovery_family.FAMILIES}
+    for display_work_id, canonical_work_id in conn.execute(
+        "SELECT display_work_id, canonical_work_id FROM discovery_identification "
+        "WHERE main_pool = 1"
+    ):
+        genre, corpus = works.get(display_work_id, (None, None))
+        current[discovery_family.assign_family(
+            genre, corpus, canonical_work_id, daf_overrides)] += 1
+
+    current_total = sum(current.values())
+    if current_total < floor_overall * locked_total:
+        violations.append(
+            f"population lock: overall retention breached -- current main-pool total "
+            f"{current_total} < {floor_overall:.0%} of locked {locked_total} "
+            "(blocks deploy 2; remediate the population, never the denominator)"
+        )
+    for family in discovery_family.FAMILIES:
+        if locked[family] and current[family] < floor_family * locked[family]:
+            violations.append(
+                f"population lock: family {family!r} retention breached -- current "
+                f"{current[family]} < {floor_family:.0%} of locked {locked[family]}"
+            )
+    return violations
+
+
 # ---------------------------------------------------------------------------
 # verify() -- the single all-invariant entry point
 # ---------------------------------------------------------------------------
@@ -2044,6 +2117,7 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         # presence/vocabulary/count contract + the Contract-0 basis pin.
         violations += check_amendment_2026_08_12_contract(conn, meta)
         violations += check_locus_reference_basis(conn, meta)
+        violations += check_population_lock_retention(conn, meta)
         violations += check_coverage_gap_report(conn)  # non-fatal report
     finally:
         conn.close()

@@ -1,0 +1,47 @@
+{
+  "by_family": {
+    "bible": 19885,
+    "canonical": 1823,
+    "daf": 1026,
+    "ja": 3842,
+    "other_staged": 1888
+  },
+  "daf_override_canonical_ids": [
+    "w001131",
+    "w001312",
+    "w001313",
+    "w001314",
+    "w001315",
+    "w001316",
+    "w001317",
+    "w001318",
+    "w001319",
+    "w001320",
+    "w001321",
+    "w001322",
+    "w001323",
+    "w001324",
+    "w001325",
+    "w001326",
+    "w001327",
+    "w001328",
+    "w001329",
+    "w001330",
+    "w001331",
+    "w001332",
+    "w001333",
+    "w001334",
+    "w001335"
+  ],
+  "emitted": "2026-08-12",
+  "family_version": "fam-v1",
+  "lock_version": "poplock-v1",
+  "measured_against": {
+    "crosswalk_sha256": "bcde04bd460bbf6c91e354121109b793c4c1e7e9b203433ca640aed848345f0e",
+    "locus_db_sha256": "aaac6f90d9ee2b4c3e0b83c0220e9215dc2cdee0c9995cd2ed6672b951898263",
+    "public_db_sha256": "504bfe738ae180843e1e6b86a06de368b7db73b51c850456db361cb0e0ee4341"
+  },
+  "retention_floor_overall": 0.9,
+  "retention_floor_per_family": 0.8,
+  "total": 28464
+}

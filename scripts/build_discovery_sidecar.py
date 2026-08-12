@@ -595,7 +595,11 @@ CREATE INDEX ix_manuscript_display_sort
 -- ---------------------------------------------------------------------------
 CREATE TABLE locus_work (
   work_id       TEXT PRIMARY KEY REFERENCES works(work_id),
-  family        TEXT NOT NULL CHECK (family IN ('sefaria','ja','msource_header')),
+  -- family vocabulary MEASURED against the locus artifact 2026-08-12 (the
+  -- first CHECK draft omitted msource_daf and would have rejected the
+  -- D-track import outright): sefaria/ja/msource_header/msource_daf.
+  family        TEXT NOT NULL CHECK (family IN
+                  ('sefaria','ja','msource_header','msource_daf')),
   grain         TEXT NOT NULL,
   stream_len    INTEGER NOT NULL,
   unit_count    INTEGER NOT NULL
@@ -1853,6 +1857,41 @@ AMENDMENT_2026_08_12_COUNT_TABLES = (
     "discovery_stratum_membership",
     "discovery_withholding",
 )
+
+
+def population_lock_meta_rows(lock: Dict, lock_sha256: str) -> List[Tuple[str, str]]:
+    """The population lock's COPIED meta constants (Amendment 2026-08-12 (S)).
+
+    Copied, never recomputed -- recomputing them per asset would un-lock them;
+    the projector's copy-vs-recompute table carries the same rule. The
+    verifier's retention gate recomputes the CURRENT population and enforces
+    the lock's own floors against these constants."""
+    import shared.discovery_family as _fam
+
+    families_in_lock = set(lock["by_family"])
+    unknown = families_in_lock - set(_fam.FAMILIES)
+    if unknown or lock.get("family_version") != _fam.FAMILY_VERSION:
+        raise ValueError(
+            "population lock does not match the fam-v1 contract "
+            f"(family_version={lock.get('family_version')!r}, "
+            f"unknown families={sorted(unknown)})"
+        )
+    rows: List[Tuple[str, str]] = [
+        ("population_lock_version", str(lock["lock_version"])),
+        ("population_lock_family_version", str(lock["family_version"])),
+        ("population_lock_sha256", lock_sha256),
+        ("population_lock_total", str(int(lock["total"]))),
+        ("population_lock_retention_floor_overall",
+         repr(float(lock["retention_floor_overall"]))),
+        ("population_lock_retention_floor_per_family",
+         repr(float(lock["retention_floor_per_family"]))),
+        ("population_lock_daf_overrides",
+         json.dumps(sorted(lock["daf_override_canonical_ids"]))),
+    ]
+    for family in _fam.FAMILIES:
+        rows.append((f"population_lock_family_{family}",
+                     str(int(lock["by_family"].get(family, 0)))))
+    return rows
 
 
 def amendment_2026_08_12_meta_rows(
@@ -6919,6 +6958,11 @@ def finalize_build(
     # whenever locus_unit is populated -- so a reference refresh can no longer
     # silently move every citation in the corpus.
     reference_corpus_sha256: Optional[str] = None,
+    # CD batch / schema Amendment 2026-08-12 (S): the tracked population-lock
+    # JSON (scripts/emit_population_lock.py). Its constants are COPIED into
+    # meta; the verifier's retention gate enforces the lock's own floors
+    # against every shipped asset's recomputed population.
+    population_lock_path=None,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
     (claims/evidence, NO physical-MS collapse) -> `build_witness_units` ->
@@ -7612,6 +7656,12 @@ def finalize_build(
         # the Contract-0 bake-side basis pin (when supplied).
         meta_rows.extend(amendment_2026_08_12_meta_rows(
             out_conn, reference_corpus_sha256=reference_corpus_sha256))
+        # Amendment 2026-08-12 (S): the population lock's copied constants.
+        if population_lock_path:
+            with open(population_lock_path, encoding="utf-8") as fh:
+                _lock = json.load(fh)
+            meta_rows.extend(
+                population_lock_meta_rows(_lock, _hash_file(Path(population_lock_path))))
         cur.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", meta_rows)
 
         (integrity_result,) = out_conn.execute("PRAGMA integrity_check").fetchone()
@@ -7925,6 +7975,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Curated work-id alias groups (D-23d). Absent => every work is "
                              "its own singleton reviewed identity (fail-closed), never a "
                              "guessed grouping.")
+    v2_group.add_argument("--population-lock", metavar="PATH", default=None,
+                        help="Tracked population-lock JSON (schema Amendment 2026-08-12 (S), "
+                             "scripts/emit_population_lock.py). Constants are COPIED into "
+                             "meta -- never recomputed -- and the verifier enforces the "
+                             "lock's retention floors against every shipped asset.")
     v2_group.add_argument("--reference-corpus-sha256", metavar="HEX", default=None,
                         help="Contract 0 (schema Amendment 2026-08-12 (T)): SHA-256 of the "
                              "reference-corpus stream the evidence w_start/w_end offsets "
@@ -8064,6 +8119,7 @@ def main(argv=None) -> int:
         work_author_aliases_path=args.work_author_aliases,
         work_author_aliases_content_hash=args.work_author_aliases_content_hash,
         reference_corpus_sha256=args.reference_corpus_sha256,
+        population_lock_path=args.population_lock,
     )
     print(f"real build OK: {stats['row_counts']}")
     print(f"novelty={stats['novelty']}")

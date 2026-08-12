@@ -1198,8 +1198,13 @@ provenance lives in the import report, not the asset.
 ```sql
 CREATE TABLE locus_work (
   work_id       TEXT PRIMARY KEY REFERENCES works(work_id),
-  family        TEXT NOT NULL CHECK (family IN ('sefaria','ja','msource_header')),
+  -- family vocabulary measured against the artifact 2026-08-12 (corrected
+  -- same-day: the first draft omitted msource_daf)
+  family        TEXT NOT NULL CHECK (family IN
+                  ('sefaria','ja','msource_header','msource_daf')),
   grain         TEXT NOT NULL,   -- closed set validated by the D-track import gate
+                                 -- (measured: chapter, chapter_halakhah, daf2, daf4,
+                                 --  daf_bavli, daf_rif, page, section)
   stream_len    INTEGER NOT NULL,
   unit_count    INTEGER NOT NULL
 );
