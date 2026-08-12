@@ -172,9 +172,13 @@ fidelity review, each fact cited to code)*:
   surface. The 'more matches' bucket is a first-class, always-visible toggle.
 
 **§3.2 The member-grain cap rule** *(drafted here — the plan left member-grain semantics
-to this table; A0b ratifies)*: a member-grain surface (panel claim row, expansion pair
-side) renders the member's OWN stored relation mapped through §1's vocabulary, except it
-never out-asserts its identification:
+to this table; A0b ratifies. Dated amendment 2026-08-12, Codex pre-flight finding 7: the
+rule applies to RENDERED member-grain assertions only — panel claim rows and the
+expansion pane's REPRESENTATIVE chip. Witness-unit members are not individually rendered
+on the pane (§3.1b) and therefore carry no assertion to cap; capping them would invent a
+surface that does not exist)*: a rendered member-grain assertion (panel claim row, the
+pane's representative chip) is the member's OWN stored relation mapped through §1's
+vocabulary, except it never out-asserts its identification:
 
 - identification matrix output `uncertain` → the member renders `uncertain`;
 - identification demoted to `shared_text` / `quotes_this_work` → a member whose own
