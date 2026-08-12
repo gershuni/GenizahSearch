@@ -150,6 +150,27 @@ matrix's fail-closed state; the row itself remains on every surface and in every
 - The manuscript-summary row sits at the identification grain (one canonical work × this
   manuscript), so strongest-member applies — but over MATRIX outputs, not raw claim types.
 
+**§3.1b Measured render-path facts** *(dated amendment 2026-08-12 — B's four-agent
+fidelity review, each fact cited to code)*:
+
+- **The expansion pane is always ANCHORED in production.** Its one caller
+  (`web/components/discovery_panel.py:231-239`) passes all four anchor kwargs,
+  enforced all-or-none by `_anchor_identity`; unanchored mode is unreachable by readers.
+  The anchored query **excludes the anchor's own `unit_key`**
+  (`shared/discovery_service.py:3492-3500`), so a manuscript's pane row is visible only
+  from OTHER identifications' panes — and a work whose every identification sits in one
+  witness unit has a row NO reader can see.
+- **Unit members are not individually rendered on the pane.** Each row carries one
+  identity — the representative's (`:1874-1950`); `member_sys_ids` is a bare id list with
+  no name, link, or chip. An assertion "about" a member does not exist on this surface;
+  the §3 table's expansion row asserts about the REPRESENTATIVE only.
+- **`relations_differ` and the displayed band are viewer-dependent** (they compare the
+  row to the anchor); the row's `claim_type` is anchor-invariant.
+- **The findings page never queries `divergence=DIVERGENCE_HIDDEN`** — both call sites
+  hardcode `SHOWN` (`web/pages/findings.py:954`, `:3144`) and the live novelty filter
+  defaults to unfiltered; the service's `HIDDEN` keyword default is dead code on this
+  surface. The 'more matches' bucket is a first-class, always-visible toggle.
+
 **§3.2 The member-grain cap rule** *(drafted here — the plan left member-grain semantics
 to this table; A0b ratifies)*: a member-grain surface (panel claim row, expansion pair
 side) renders the member's OWN stored relation mapped through §1's vocabulary, except it
