@@ -2313,6 +2313,16 @@ _EMITTED_SCHEMA = {
     "model.disclosure_levels[].related_pages.rows[]": {
         "sys_id": _OPT_STR, "library_code": _OPT_STR,
         "shelfmark_display": _OPT_STR, "page_number": _OPT_INT,
+        # ⟨ADDED 2026-08-12⟩ Part of the row's LINK address, not an assertion:
+        # folio numbers are per-volume, so a link needs sys_id AND volume. The
+        # production side shipped it in 3238194c ("the panel's two link sites
+        # now open the folio, through one builder"), which updated
+        # `SURFACE_RELATED_PAGE_FIELDS` and the honesty gate's
+        # `READER_TEXT_FIELDS` but never THIS table -- so the gate has been RED
+        # since, on all five scenarios in both languages. That is the cost of a
+        # hand-maintained closed schema, and also the point of one: it is the
+        # only structure that would have noticed a field appearing.
+        "volume_ie": _OPT_STR,
         "display_missing": _BOOL, "evidence_row_count": _OPT_INT,
     },
 }
