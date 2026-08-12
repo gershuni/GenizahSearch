@@ -1186,8 +1186,42 @@ def check_coverage_gap_report(conn: sqlite3.Connection) -> List[str]:
     # public surface, so not a release violation (see
     # check_works_genre_vocabulary for the measurement that set that scope).
     # Reported so the curation gap does not stay invisible between rebuilds.
+    #
+    # The reachability predicate was MISSING here (found 2026-08-12 running this
+    # verifier over the C-track bake). This counted EVERY NULL-genre work and
+    # then described the total as "reachable from no public surface" -- so on
+    # both real assets it printed a reassurance that was false about every work
+    # it counted, immediately above the fatal violation counting the SAME rows:
+    # "181 work(s) ... reachable from no public surface" one line above
+    # "VIOLATION: 181 work(s) reachable from a public surface". Same 181, and
+    # 58/58 on the public side.
+    #
+    # It is a leftover from the FIRST scoping, which `check_works_genre_vocabulary`
+    # records as wrong and superseded ("58 of 58 public and 181 of 181 private are
+    # reachable. Not a few more -- every single one."). That correction landed in
+    # the check and never reached this report. So the message is not merely
+    # imprecise: it tells an operator the gap is inert at exactly the moment the
+    # release is failing because it is not.
+    #
+    # Subtracting the reachable population makes the sentence true again, and
+    # makes it SILENT on today's assets -- which is correct, because when every
+    # NULL-genre work is reachable there is no inert remainder to report and the
+    # violation already says everything there is to say. The predicate is the
+    # same one check_works_genre_vocabulary uses; keep them together.
+    if not _has_table(conn, "discovery_identification"):
+        return []
     (inert,) = conn.execute(
-        "SELECT COUNT(*) FROM works WHERE genre IS NULL OR genre = ''").fetchone()
+        """
+        SELECT COUNT(DISTINCT w.work_id) FROM works w
+         WHERE (w.genre IS NULL OR w.genre = '')
+           AND NOT (
+             EXISTS (SELECT 1 FROM discovery_identification di
+                      WHERE di.canonical_work_id = w.canonical_work_id)
+             OR EXISTS (SELECT 1 FROM discovery_claim dc
+                         WHERE dc.work_id = w.work_id)
+           )
+        """
+    ).fetchone()
     if inert:
         print(
             f"genre-curation report (non-fatal): {inert} work(s) carry no genre and "

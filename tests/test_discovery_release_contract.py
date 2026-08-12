@@ -562,11 +562,19 @@ def test_gate_bearing_control_is_not_vacuous():
 # ---------------------------------------------------------------------------
 #
 # `check_works_genre_vocabulary` promised "never silently NULL-as-absent" while
-# every query in it filtered NULLs out. The rule is scoped to REACHABLE works:
-# measured on both real artifacts, ZERO of the 58 public / 181 private
-# NULL-genre rows are reachable through discovery_identification, shipped
-# evidence, or human-confirmed evidence. A blanket rule would fail the deployed
-# artifact over rows no reader can meet.
+# every query in it filtered NULLs out. The rule is scoped to REACHABLE works,
+# and the SCOPE ITSELF was measured wrong once -- worth stating carefully here,
+# because the wrong version of this paragraph outlived its correction in two
+# other places (see the third test below).
+#
+# The first measurement defined reachable as "has an identification, or shipped,
+# or human-confirmed evidence" -- the DEFAULT population -- and found ZERO of the
+# 58 public / 181 private NULL-genre works reachable. That scoping missed
+# `get_claims_for_page(include_review=True)`, which drops the routing predicate
+# entirely. Re-measured on the population the opt-in panel can actually return:
+# **58 of 58 public and 181 of 181 private are reachable** -- every one, not a
+# handful. Confirmed again on the 2026-08-12 C-track bake, which fails this
+# check with exactly those two counts.
 #
 # The control therefore has to make the work reachable, which is also what makes
 # it a real test rather than a restatement of the query.
@@ -685,6 +693,83 @@ def test_null_genre_reachable_only_through_the_review_opt_in_is_a_violation(tmp_
         f"the run failed for another reason, so this proves nothing about the "
         f"genre check. Output:\n{out}"
     )
+
+
+def test_the_non_fatal_genre_report_does_not_contradict_the_violation(tmp_path, capsys):
+    """The reassurance and the violation must not describe the same rows.
+
+    `check_coverage_gap_report` prints a non-fatal note about NULL-genre works
+    "reachable from no public surface". Its query had NO reachability predicate
+    at all -- it counted every NULL-genre work -- so on both real artifacts it
+    printed that sentence about rows that are ALL reachable, one line above the
+    fatal violation counting the very same rows:
+
+        genre-curation report (non-fatal): 181 work(s) ... reachable from NO public surface
+        VIOLATION: works.genre: 181 work(s) reachable from A public surface ...
+
+    Same 181 (58/58 on the public side). It was a leftover from the superseded
+    first scoping, and it told an operator the gap was inert at exactly the
+    moment the release was failing because it was not.
+
+    This pins BOTH directions, because the cheap fix -- deleting the report --
+    would also pass a one-directional test:
+      * a reachable NULL-genre work must NOT produce the inert note (it is not
+        inert, and the violation already speaks for it);
+      * a genuinely unreachable one still MUST, or the curation gap goes back to
+        being invisible between rebuilds, which is the note's whole purpose.
+    """
+    # --- direction 1: reachable => violation fires, inert note must NOT ---
+    db = _copy_fixture(tmp_path, "genre_report_reachable.db")
+    conn = _connect_rw(db)
+    work_id = _reachable_work_id(conn)
+    assert work_id is not None, "fixture has no reachable work -- control is vacuous"
+    conn.execute("UPDATE works SET genre = NULL WHERE work_id = ?", (work_id,))
+    conn.commit()
+    conn.close()
+
+    verify_mod.verify(str(db), EXPECTED_FRAME_HASH)
+    out = "".join(capsys.readouterr())
+
+    assert "reachable from a public surface have a NULL/empty genre" in out, (
+        f"the reachable-work violation did not fire, so the contradiction this "
+        f"test is about cannot be observed here. Output:\n{out}")
+    assert "genre-curation report" not in out, (
+        "the non-fatal report called a REACHABLE NULL-genre work 'reachable from "
+        "no public surface', contradicting the violation printed beside it about "
+        f"the same row. Output:\n{out}")
+
+    # --- direction 2: genuinely inert => the note must still fire ---
+    db2 = _copy_fixture(tmp_path, "genre_report_inert.db")
+    conn = _connect_rw(db2)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(works)")]
+    conn.row_factory = sqlite3.Row
+    template = conn.execute("SELECT * FROM works LIMIT 1").fetchone()
+    assert template is not None, "fixture has no works row to clone"
+    # Clone a real row rather than synthesize one: the table carries NOT NULL
+    # defaults and a CHECK on source_corpus, and an existing row satisfies every
+    # constraint by construction.
+    values = {c: template[c] for c in cols}
+    values["work_id"] = "w_inert_genre_probe"
+    values["canonical_work_id"] = "w_inert_genre_probe"
+    values["genre"] = None
+    conn.execute(
+        f"INSERT INTO works ({','.join(values)}) "
+        f"VALUES ({','.join('?' for _ in values)})", list(values.values()))
+    conn.commit()
+    (refs,) = conn.execute(
+        "SELECT (SELECT COUNT(*) FROM discovery_claim WHERE work_id = 'w_inert_genre_probe')"
+        "     + (SELECT COUNT(*) FROM discovery_identification "
+        "         WHERE canonical_work_id = 'w_inert_genre_probe')").fetchone()
+    conn.close()
+    assert refs == 0, (
+        f"the seeded work is referenced by {refs} row(s), so it is not inert and "
+        "direction 2 would prove nothing")
+
+    verify_mod.verify(str(db2), EXPECTED_FRAME_HASH)
+    out2 = "".join(capsys.readouterr())
+    assert "genre-curation report" in out2, (
+        "a genuinely unreachable NULL-genre work produced NO curation note -- the "
+        f"report has been narrowed into silence. Output:\n{out2}")
 
 
 def test_entirely_unpopulated_genre_column_is_the_pre_rebuild_state_not_a_violation(tmp_path):
