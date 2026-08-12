@@ -167,7 +167,6 @@ def _claim_source(**overrides) -> Dict[str, Any]:
         'author': 'Rashi',
         'genre': 'Responsa and Halakhic Decisions / Responsa- Gaonim',
         'title_missing': False,
-        'relation_kind': ids.CLAIM_TYPE_DIRECT_WITNESS,
         'rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
         'evidence_source': ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
         'confidence_band': ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
@@ -264,8 +263,8 @@ def _expansion_source(**overrides) -> Dict[str, Any]:
         'library_code': 'CUL',
         'shelfmark_display': 'T-S 12.123',
         'display_missing': False,
-        'claim_type': ids.CLAIM_TYPE_SHARED_TEXT,
-        'anchor_claim_type': ids.CLAIM_TYPE_DIRECT_WITNESS,
+        'rendered_relation': ids.RENDERED_RELATION_SHARED_TEXT,
+        'anchor_rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
         'relations_differ': True,
         'displayed_evidence_source': ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
         'displayed_confidence_band': ids.CONFIDENCE_BAND_SCREENING_RB,
@@ -291,7 +290,6 @@ def corpus_rows() -> List[Tuple[str, Dict[str, Any]]]:
     # so `routing_reason` / `coverage_status` / `eligibility_basis` are observed
     # with more than one member each.
     rows.append(('SURFACE_CLAIM_FIELDS', surface_safe_claim(_claim_source(
-        relation_kind=ids.CLAIM_TYPE_SHARED_TEXT,
         # C-track step 3b: the fail-closed state, observed by the gate at least
         # once. It is the newest member of the rendered vocabulary and the one a
         # leak would be least expected on -- and it is a legitimate cap output
@@ -326,7 +324,7 @@ def corpus_rows() -> List[Tuple[str, Dict[str, Any]]]:
     rows.append(('SURFACE_EXPANSION_FIELDS',
                  surface_safe_expansion(_expansion_source(
                      display_missing=True, relations_differ=False,
-                     claim_type=ids.CLAIM_TYPE_DIRECT_WITNESS,
+                     rendered_relation=ids.RENDERED_RELATION_DIRECT_WITNESS,
                      displayed_evidence_source=ids.EVIDENCE_SOURCE_PROPAGATED,
                      displayed_confidence_band=ids.CONFIDENCE_BAND_WEAK,
                      band_label=band_label(ids.EVIDENCE_SOURCE_PROPAGATED,
@@ -631,14 +629,21 @@ def test_g_the_known_carrier_floor_is_a_subset_of_the_machine_half():
 
 
 def test_g_every_floor_member_is_an_allowlist_field():
-    """Four of them -- claim_type, anchor_claim_type, displayed_evidence_source,
-    displayed_confidence_band -- arrive with 136-21's SURFACE_EXPANSION_FIELDS,
-    and `shade` with 136-22's SURFACE_LAUNCH_SHADE_FIELDS. If one is ever
-    missing, establish which namespace it belongs to BEFORE deleting it."""
+    """Four of them -- rendered_relation, anchor_rendered_relation,
+    displayed_evidence_source, displayed_confidence_band -- arrive with 136-21's
+    SURFACE_EXPANSION_FIELDS, and `shade` with 136-22's
+    SURFACE_LAUNCH_SHADE_FIELDS. If one is ever missing, establish which
+    namespace it belongs to BEFORE deleting it.
+
+    ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ The first two were `claim_type` and
+    `anchor_claim_type`. The pane now carries each side's CAPPED matrix relation
+    instead of its stored claim type, so those are the names the floor has to
+    find on the expansion allowlist.
+    """
     missing = sorted(KNOWN_CARRIER_FLOOR - ALLOWLIST_FIELD_UNION)
     assert missing == [], f'floor members outside the allowlist union: {missing}'
-    for field in ('claim_type', 'anchor_claim_type', 'displayed_evidence_source',
-                  'displayed_confidence_band'):
+    for field in ('rendered_relation', 'anchor_rendered_relation',
+                  'displayed_evidence_source', 'displayed_confidence_band'):
         assert field in _ALLOWLIST_BY_NAME['SURFACE_EXPANSION_FIELDS'], field
     assert 'shade' in _ALLOWLIST_BY_NAME['SURFACE_LAUNCH_SHADE_FIELDS']
 
@@ -1458,7 +1463,7 @@ def forced_error_paths() -> List[Tuple[str, str]]:
     try:
         build_panel_rows(PanelServiceBundle(
             claims=make_envelope(STATUS_OK, [surface_safe_claim(_claim_source(
-                relation_kind=None))], 1,
+                rendered_relation=None))], 1,
                 meta={'page_id': 'p', 'include_review': False}),
             page_ids=make_envelope(STATUS_OK, ['p'], 1, meta={
                 'sys_id': 's', 'resolved': True, 'truncated': False, 'volume_ie': None}),
@@ -2367,7 +2372,7 @@ def _lazy_read_envelopes(seed: Optional[str], lang: str) -> Dict[str, Any]:
         # flag is rendered text, so it belongs in the capture.
         surface_safe_expansion(_expansion_source(
             unit_id='unit-3', display_missing=True, relations_differ=True,
-            anchor_claim_type=ids.CLAIM_TYPE_SHARED_TEXT)),
+            anchor_rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT)),
     ]
     del lang
     return {

@@ -1545,7 +1545,7 @@ def test_enveloped_claim_row_key_set_is_exactly_the_surface_allowlist(d13g_servi
     # Every display field the panel renders, present and populated in ONE query.
     assert row["display_work_id"] == "w000902"
     assert row["neutral_title"] == "Synthetic Commentary On Beta"
-    assert row["relation_kind"] == "direct_witness"
+    assert row["rendered_relation"] == "direct_witness"
     assert row["confidence_band"] == "tier_a"
     assert row["band_label"]
     assert row["band_rank"] == _band_rank("track1_direct", "tier_a")
@@ -1599,8 +1599,9 @@ def test_claim_row_relation_is_capped_by_its_identifications_matrix_output(
         tmp_path, "UPDATE discovery_identification SET rendered_relation = ?",
         (rendered,))
     row = service.get_claims_for_page_enveloped(_D13G_SHOWN_PAGE)["items"][0]
-    assert row["relation_kind"] == "direct_witness", (
-        "the STORED claim type is a build fact and never moves")
+    assert "relation_kind" not in row, (
+        "step 3d removed the stored claim type from this surface -- its last "
+        "consumer was the expansion anchor, which now travels already capped")
     assert row["rendered_relation"] == expected
 
 
@@ -1616,7 +1617,6 @@ def test_a_claim_row_with_no_published_identification_renders_uncertain(tmp_path
         tmp_path, "DELETE FROM discovery_identification")
     row = service.get_claims_for_page_enveloped(_D13G_SHOWN_PAGE)["items"][0]
     assert row["identification_id"] is None
-    assert row["relation_kind"] == "direct_witness"
     assert row["rendered_relation"] == "uncertain"
 
 

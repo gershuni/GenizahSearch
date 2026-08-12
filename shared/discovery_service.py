@@ -1564,8 +1564,28 @@ def _build_work_witnesses_ranked_cte_sql(
     The parameter exists so the divergence is explicit, tested, and one argument
     away from resolved, instead of an absent predicate nobody can see.
 
-    Measured cost of the change, so the ruling has numbers (served asset,
-    2026-08-12): 80,718 of 222,972 CTE rows are review_only display evidence;
+    ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ The CTE now carries each claim's
+    IDENTIFICATION-grain matrix output (`identification_rendered_relation`), so
+    both presenters can cap the pane's rendered relation per matrix-spec §3.2.
+    Two joins, and the shape is deliberate: `works` by primary key, then
+    `discovery_identification` on the pair its `UNIQUE (sys_id,
+    canonical_work_id)` constraint already indexes.
+
+    The cheaper-looking alternative -- resolve this work's `canonical_work_id`
+    once outside the CTE and bind it -- is WRONG here and was rejected in
+    pre-flight: this same fragment builds the CORPUS-WIDE form
+    (`restrict_work_id=False`) for the cardinality probe, where there is no
+    single work, and a bound constant would apply one work's identification
+    verdict to every work in the corpus. It also measured no faster.
+
+    Measured cost, on the served asset's three heaviest works (count query, the
+    latency-critical path a cold panel blocks on): 320 -> 440 ms, 225 -> 306 ms,
+    228 -> 303 ms, i.e. +33-37%, against `DISCOVERY_QUERY_TIMEOUT_BROWSE` of
+    2.0 s. EXPLAIN confirms the identification join is an index SEARCH, not a
+    scan. Re-measure if that budget ever tightens.
+
+    Measured cost of the eligibility change, so the ruling has numbers (served
+    asset, 2026-08-12): 80,718 of 222,972 CTE rows are review_only display evidence;
     at the pane's real (work, unit) grain that is 88,337 -> 48,701, with 589 of
     613 works changing, 58 panes emptying, and 39,636 pairs reachable ONLY
     through a review_only row. Both curated Yalkut works lose ~84% of their
@@ -1587,11 +1607,15 @@ def _build_work_witnesses_ranked_cte_sql(
     de.adjudication_status AS adjudication_status,
     md.library_code AS library_code,
     md.shelfmark_display AS shelfmark_display,
+    di.rendered_relation AS identification_rendered_relation,
     {_BAND_RANK_CASE_SQL} AS band_rank
   FROM discovery_claim dc
   JOIN discovery_evidence de ON de.evidence_id = dc.display_evidence_id
   LEFT JOIN witness_unit_members wum ON wum.sys_id = de.sys_id
   LEFT JOIN manuscript_display md ON md.sys_id = de.sys_id
+  JOIN works w ON w.work_id = dc.work_id
+  LEFT JOIN discovery_identification di ON di.sys_id = de.sys_id
+         AND di.canonical_work_id = w.canonical_work_id
   WHERE {work_clause}dc.claim_type IN ('direct_witness', 'quotes_this_work')
     {routing_clause}
 """
@@ -1612,13 +1636,24 @@ _WORK_WITNESSES_RANKED_CTE_SQL = _build_work_witnesses_ranked_cte_sql()
 # produce a rank.
 # ---------------------------------------------------------------------------
 
+#: ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ The anchor's STORED claim type is REPLACED by
+#: `anchor_rendered_relation`, not joined by it: the tuple stays three wide.
+#: After this step nothing on this surface needs the anchor's STORED claim type
+#: -- the chip renders the anchor's capped matrix relation and
+#: `relations_differ` compares the two RENDERED values -- and an anchor field
+#: with no consumer is a field a renderer eventually prints, which is the exact
+#: defect step 3d exists to remove.
+#:
+#: The anchor arrives ALREADY capped. Its origin is the panel model's own claim
+#: row, whose `rendered_relation` step 3b capped against its identification, so
+#: capping it again here would be a second implementation of §3.2.
 _ANCHOR_IDENTITY_FIELDS: Tuple[str, ...] = (
-    "anchor_claim_type", "anchor_evidence_source", "anchor_confidence_band",
+    "anchor_rendered_relation", "anchor_evidence_source", "anchor_confidence_band",
 )
 
 
 def _validate_anchor_identity(
-    anchor_claim_type: Optional[str],
+    anchor_rendered_relation: Optional[str],
     anchor_evidence_source: Optional[str],
     anchor_confidence_band: Optional[str],
 ) -> bool:
@@ -1626,7 +1661,7 @@ def _validate_anchor_identity(
     supplied. Raises ValueError naming which fields were PRESENT and which were
     MISSING on any of the six partial combinations."""
     supplied = {
-        "anchor_claim_type": anchor_claim_type,
+        "anchor_rendered_relation": anchor_rendered_relation,
         "anchor_evidence_source": anchor_evidence_source,
         "anchor_confidence_band": anchor_confidence_band,
     }
@@ -1637,7 +1672,7 @@ def _validate_anchor_identity(
             "the anchor identity is all-three-or-none: present "
             f"{present}, missing {missing} -- ranking the anchor side needs BOTH "
             "its evidence_source and its confidence_band, and `relations_differ` "
-            "needs its claim_type (PANEL-02 / DATA-01)"
+            "needs its rendered relation (PANEL-02 / DATA-01)"
         )
     return bool(present)
 
@@ -1684,6 +1719,7 @@ _WORK_EXPANSION_ORDER_BY = "band_rank ASC, sys_id ASC, page_id ASC, claim_id ASC
 #: Every column the row query returns. Named explicitly so a new CTE column
 #: cannot silently reach a caller.
 _WORK_EXPANSION_ROW_COLUMNS = """unit_key, unit_id, page_id, work_id, claim_id, claim_type,
+               identification_rendered_relation,
                sys_id, evidence_source, confidence_band, adjudication_status,
                library_code, shelfmark_display,
                displayed_evidence_source, displayed_confidence_band, displayed_band_rank"""
@@ -1816,7 +1852,7 @@ def _project_work_witnesses(
     *,
     enabled_bands: Optional[Iterable[str]] = None,
     anchor_sys_id: Optional[str] = None,
-    anchor_claim_type: Optional[str] = None,
+    anchor_rendered_relation: Optional[str] = None,
     anchor_evidence_source: Optional[str] = None,
     anchor_confidence_band: Optional[str] = None,
     page: int = 1,
@@ -1843,7 +1879,7 @@ def _project_work_witnesses(
             set are kept. None/empty = no filtering (every band shown).
         anchor_sys_id: when given, the unit containing this sys_id
             (merged or singleton) is excluded entirely from the result.
-        anchor_claim_type, anchor_evidence_source, anchor_confidence_band:
+        anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band:
             the ANCHOR side's own identity (136-21) -- ALL THREE OR NONE
             (see ``_validate_anchor_identity``). When supplied, the displayed
             band becomes the WEAKER of the pair (DATA-01) and the
@@ -1862,8 +1898,11 @@ def _project_work_witnesses(
         the unit -- the surface a caller uses to retrieve suppressed
         member claims on expansion, via ``get_claims_for_page`` +
         ``witness_unit_members``; there is no ``supporting_page_ids``
-        column, G4/R5), plus the 136-21 fields: both sides' relation kinds
-        (``anchor_claim_type`` / ``relations_differ``), the resolved displayed
+        column, G4/R5), plus the 136-21 fields: both sides' RENDERED relations
+        (``rendered_relation`` / ``anchor_rendered_relation``, each capped per
+        matrix-spec §3.2) with ``relations_differ`` over that pair, the stored
+        ``claim_type`` for the carrier (internal only -- the surface allowlist
+        drops it), the resolved displayed
         pair (``displayed_evidence_source`` / ``displayed_confidence_band`` /
         ``band_rank``) and the carrier's name (``library_code`` /
         ``shelfmark_display`` / ``display_missing``, READ OFF the input rows --
@@ -1875,7 +1914,7 @@ def _project_work_witnesses(
         identically, and a test asserts the two agree over all of them.
     """
     _validate_anchor_identity(
-        anchor_claim_type, anchor_evidence_source, anchor_confidence_band)
+        anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band)
     rows = list(claim_rows)
     if not rows:
         return []
@@ -1933,6 +1972,14 @@ def _project_work_witnesses(
         library_code = best_row.get("library_code") or None
         shelfmark_display = best_row.get("shelfmark_display") or None
         claim_type = best_row["claim_type"]
+        # C-track step 3d: what this row may SAY about the representative --
+        # its own stored claim type capped by its identification's matrix output
+        # (§3.2), and `uncertain` when there is no identification to cap against
+        # (§3.2a). Computed here as well as in the SQL presenter because this is
+        # the REFERENCE implementation the mirror test compares against; both
+        # call the one matrix function rather than restating the rule.
+        rendered_relation = cap_member_relation(
+            claim_type, best_row.get("identification_rendered_relation"))
         items.append({
             "work_id": best_row["work_id"],
             "unit_id": unit_key[1] if unit_key[0] == "unit" else None,
@@ -1945,14 +1992,22 @@ def _project_work_witnesses(
             # `test_sql_projection_matches_the_pure_reference` compares every key.
             **_representative_browse_address(best_row["page_id"]),
             "claim_type": claim_type,
+            "rendered_relation": rendered_relation,
             "evidence_source": best_row["evidence_source"],
             "confidence_band": displayed_band,
             "member_sys_ids": member_sys_ids,
-            "anchor_claim_type": anchor_claim_type,
+            "anchor_rendered_relation": anchor_rendered_relation,
             "anchor_evidence_source": anchor_evidence_source,
             "anchor_confidence_band": anchor_confidence_band,
+            # C-track step 3d: computed over the two RENDERED relations, not the
+            # two stored claim types. The marker exists to tell the renderer
+            # whether to draw the anchor's chip beside the carrier's, so it has
+            # to compare the values those chips SHOW. On stored values it would
+            # both claim a difference where the two chips are identical (two
+            # stored types capping to one state) and hide a real one.
             "relations_differ": bool(
-                anchor_claim_type is not None and claim_type != anchor_claim_type),
+                anchor_rendered_relation is not None
+                and rendered_relation != anchor_rendered_relation),
             "displayed_evidence_source": resolved_source,
             "displayed_confidence_band": resolved_band,
             "band_rank": resolved_rank,
@@ -1982,7 +2037,7 @@ def _present_expansion_row(
     measurements: Mapping[Tuple[str, str], Tuple[Optional[str], Optional[float]]],
     lang: str,
     *,
-    anchor_claim_type: Optional[str],
+    anchor_rendered_relation: Optional[str],
     anchor_evidence_source: Optional[str],
     anchor_confidence_band: Optional[str],
 ) -> Dict[str, Any]:
@@ -2019,6 +2074,11 @@ def _present_expansion_row(
     library_code = row["library_code"] or None
     shelfmark_display = row["shelfmark_display"] or None
     claim_type = row["claim_type"]
+    # C-track step 3d: see the identical call in `_project_work_witnesses` --
+    # the two producers MIRROR each other and a test compares every key, so the
+    # cap is computed the same way in both, through the one matrix function.
+    rendered_relation = cap_member_relation(
+        claim_type, row["identification_rendered_relation"])
     return {
         "work_id": row["work_id"],
         "unit_id": row["unit_id"],
@@ -2037,14 +2097,17 @@ def _present_expansion_row(
         # "representative" in the name, and no ordinal claimed anywhere.
         **_representative_browse_address(row["page_id"]),
         "claim_type": claim_type,
+        "rendered_relation": rendered_relation,
         "evidence_source": row["evidence_source"],
         "confidence_band": row["confidence_band"],
         "member_sys_ids": sorted(members_by_key.get(row["unit_key"], {row["sys_id"]})),
-        "anchor_claim_type": anchor_claim_type,
+        "anchor_rendered_relation": anchor_rendered_relation,
         "anchor_evidence_source": anchor_evidence_source,
         "anchor_confidence_band": anchor_confidence_band,
+        # Over the two RENDERED relations -- see the note on the mirror producer.
         "relations_differ": bool(
-            anchor_claim_type is not None and claim_type != anchor_claim_type),
+            anchor_rendered_relation is not None
+            and rendered_relation != anchor_rendered_relation),
         "displayed_evidence_source": displayed_source,
         "displayed_confidence_band": displayed_band,
         "band_rank": row["displayed_band_rank"],
@@ -3506,7 +3569,7 @@ class DiscoveryService:
         page_size: Optional[int] = None,
         anchor_sys_id: Optional[str] = None,
         *,
-        anchor_claim_type: Optional[str] = None,
+        anchor_rendered_relation: Optional[str] = None,
         anchor_evidence_source: Optional[str] = None,
         anchor_confidence_band: Optional[str] = None,
         lang: str = "en",
@@ -3525,10 +3588,11 @@ class DiscoveryService:
         ok-with-zero.
 
         136-21 additions, all opt-in through the anchor triple:
-          * ``anchor_claim_type`` / ``anchor_evidence_source`` /
+          * ``anchor_rendered_relation`` / ``anchor_evidence_source`` /
             ``anchor_confidence_band`` -- ALL THREE OR NONE. Every existing call
             site keeps working unchanged (all three default to None).
-          * every row carries both sides' relation kind, ``relations_differ``,
+          * every row carries both sides' RENDERED relation (capped per
+            matrix-spec §3.2), ``relations_differ`` computed over that pair,
             the RESOLVED weaker ``displayed_*`` pair with its ``band_label``,
             and the carrier's ``library_code`` / ``shelfmark_display`` /
             ``display_missing``.
@@ -3548,11 +3612,11 @@ class DiscoveryService:
         # Validated OUTSIDE the try: a partial anchor set is a caller bug, and
         # swallowing it into `[]` is precisely the silence this plan removes.
         _validate_anchor_identity(
-            anchor_claim_type, anchor_evidence_source, anchor_confidence_band)
+            anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band)
         try:
             rows, _total = self._query_work_expansion(
                 work_id, enabled_bands=enabled_bands, page=page, page_size=page_size,
-                anchor_sys_id=anchor_sys_id, anchor_claim_type=anchor_claim_type,
+                anchor_sys_id=anchor_sys_id, anchor_rendered_relation=anchor_rendered_relation,
                 anchor_evidence_source=anchor_evidence_source,
                 anchor_confidence_band=anchor_confidence_band, lang=lang,
             )
@@ -3575,7 +3639,7 @@ class DiscoveryService:
         page: int = 1,
         page_size: Optional[int] = None,
         anchor_sys_id: Optional[str] = None,
-        anchor_claim_type: Optional[str] = None,
+        anchor_rendered_relation: Optional[str] = None,
         anchor_evidence_source: Optional[str] = None,
         anchor_confidence_band: Optional[str] = None,
         lang: str = "en",
@@ -3601,7 +3665,7 @@ class DiscoveryService:
         temporary failure.
         """
         _validate_anchor_identity(
-            anchor_claim_type, anchor_evidence_source, anchor_confidence_band)
+            anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band)
         if not self.is_available():
             return [], 0
         conn = self._get_conn()
@@ -3659,7 +3723,7 @@ class DiscoveryService:
             items = [
                 _present_expansion_row(
                     r, members_by_key, measurements, lang,
-                    anchor_claim_type=anchor_claim_type,
+                    anchor_rendered_relation=anchor_rendered_relation,
                     anchor_evidence_source=anchor_evidence_source,
                     anchor_confidence_band=anchor_confidence_band,
                 )
@@ -3674,7 +3738,7 @@ class DiscoveryService:
         page: int = 1,
         page_size: Optional[int] = None,
         anchor_sys_id: Optional[str] = None,
-        anchor_claim_type: Optional[str] = None,
+        anchor_rendered_relation: Optional[str] = None,
         anchor_evidence_source: Optional[str] = None,
         anchor_confidence_band: Optional[str] = None,
         lang: str = "en",
@@ -3705,13 +3769,13 @@ class DiscoveryService:
             anchored, `other_carrier_band` when not.
         """
         anchored = _validate_anchor_identity(
-            anchor_claim_type, anchor_evidence_source, anchor_confidence_band)
+            anchor_rendered_relation, anchor_evidence_source, anchor_confidence_band)
         if not self.is_available():
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
         try:
             rows, total = self._query_work_expansion(
                 work_id, enabled_bands=enabled_bands, page=page, page_size=page_size,
-                anchor_sys_id=anchor_sys_id, anchor_claim_type=anchor_claim_type,
+                anchor_sys_id=anchor_sys_id, anchor_rendered_relation=anchor_rendered_relation,
                 anchor_evidence_source=anchor_evidence_source,
                 anchor_confidence_band=anchor_confidence_band, lang=lang,
             )
@@ -4208,7 +4272,7 @@ class DiscoveryService:
         page: int = 1,
         page_size: Optional[int] = None,
         anchor_sys_id: Optional[str] = None,
-        anchor_claim_type: Optional[str] = None,
+        anchor_rendered_relation: Optional[str] = None,
         anchor_evidence_source: Optional[str] = None,
         anchor_confidence_band: Optional[str] = None,
         lang: str = "en",
@@ -4229,7 +4293,7 @@ class DiscoveryService:
             self.get_work_expansion_enveloped,
             (work_id,
              None if enabled_bands is None else tuple(enabled_bands),
-             page, page_size, anchor_sys_id, anchor_claim_type,
+             page, page_size, anchor_sys_id, anchor_rendered_relation,
              anchor_evidence_source, anchor_confidence_band, lang),
             timeout=self._browse_timeout(), heavy=True,
         )

@@ -627,7 +627,13 @@ ELIGIBILITY_BASES: frozenset = frozenset({"shipped", "human_confirmed", "review_
 #: vocabulary-prohibition assertion vacuous, and is exempted from strict
 #: scanning -- a broken implementation passing the stated gate.
 MACHINE_VOCABULARY_FIELDS: Mapping[str, frozenset] = {
-    "relation_kind": frozenset(ids.CLAIM_TYPES),
+    #: ⟨REMOVED 2026-08-12 -- C-track steps 3b/3c/3d⟩ `relation_kind` and
+    #: `claim_type` used to be classified here. They are gone because no
+    #: allowlist carries them any more, and this map must be an EXACT partition
+    #: of the allowlist union -- the gate names a leftover entry a DEAD ENTRY and
+    #: fails on it, which is right: a classification for a field no surface has
+    #: is a rule nothing exercises, and it would silently pre-approve the field
+    #: if it ever came back for a different reason.
     #: ⟨ADDED 2026-08-12 -- C-track⟩ Contract 1's stored matrix output. Declared
     #: as a MACHINE carrier, not reader text, precisely because that is what
     #: prohibits its underscore-bearing values (`direct_witness`,
@@ -636,8 +642,14 @@ MACHINE_VOCABULARY_FIELDS: Mapping[str, frozenset] = {
     #: chip a reader sees comes from `relation_chip`, and the stored token must
     #: never reach the markup that carries it.
     "rendered_relation": frozenset(ids.RENDERED_RELATIONS),
-    "claim_type": frozenset(ids.CLAIM_TYPES),
-    "anchor_claim_type": frozenset(ids.CLAIM_TYPES),
+    #: ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ The expansion pane's two relation
+    #: carriers are now the RENDERED pair, capped per matrix-spec §3.2. The
+    #: stored `claim_type` / `anchor_claim_type` left `SURFACE_EXPANSION_FIELDS`
+    #: with that step (the pane rendered them, which is what made it the last
+    #: surface printing "Direct match" on router-declined rows) and are no longer
+    #: on ANY allowlist -- so classifying them here would classify a field the
+    #: partition can no longer see.
+    "anchor_rendered_relation": frozenset(ids.RENDERED_RELATIONS),
     "evidence_source": frozenset(ids.EVIDENCE_SOURCES),
     "displayed_evidence_source": frozenset(ids.EVIDENCE_SOURCES),
     "confidence_band": _ALL_CONFIDENCE_BANDS,
@@ -726,7 +738,7 @@ READER_TEXT_FIELDS: Mapping[str, str] = {
     "default_eligible": "boolean: D-13g's two-limb predicate, shared/discovery_service.py::_CLAIMS_DEFAULT_ROUTING_CLAUSE",
     "gated": "boolean: the screening-gate flag, shared/discovery_service.py::get_manuscript_works_enveloped",
     "display_missing": "boolean: manuscript_display row absent, DiscoveryService expansion query",
-    "relations_differ": "boolean: claim_type <> anchor_claim_type, DiscoveryService expansion query",
+    "relations_differ": "boolean: rendered_relation <> anchor_rendered_relation (C-track step 3d: over the RENDERED pair, so the marker cannot disagree with the chips it governs), DiscoveryService expansion query",
     "is_leaf": "boolean: the facet tree's leaf flag, DiscoveryService._project_facets",
     "novelty_offered": "boolean: whether the novelty axis is offered, shared/discovery_service.py::get_findings_enveloped",
     "divergent": "boolean: MAX(novelty_status IN the hidden-by-default shades) over the row's group, shared/discovery_service.py::_divergence_flag_sql",
@@ -737,16 +749,25 @@ READER_TEXT_FIELDS: Mapping[str, str] = {
 #: never the definition of the carrier set (the partition is that) and never an
 #: assertion that all of them appear in the OBSERVED values.
 #:
-#: `claim_type`, `anchor_claim_type`, `displayed_evidence_source` and
-#: `displayed_confidence_band` arrive with plan 136-21's
-#: `SURFACE_EXPANSION_FIELDS`, and `shade` with 136-22's
+#: `rendered_relation`, `anchor_rendered_relation`, `displayed_evidence_source`
+#: and `displayed_confidence_band` come from plan 136-21's
+#: `SURFACE_EXPANSION_FIELDS`, and `shade` from 136-22's
 #: `SURFACE_LAUNCH_SHADE_FIELDS`; both are registered in `_ALL_ALLOWLISTS`
 #: before this gate runs. If a member is ever missing from the union, establish
 #: which namespace it belongs to BEFORE deleting it -- dropping a name because
 #: an assertion failed is how a real carrier gets exempted, which is the failure
 #: this whole mechanism exists to prevent.
+#:
+#: ⟨CHANGED 2026-08-12 -- C-track steps 3b/3c/3d⟩ `relation_kind`, `claim_type`
+#: and `anchor_claim_type` are OUT, and this is the one place where removing a
+#: name is the correct move rather than the failure mode above: they are no
+#: longer on any allowlist at all. Every surface now carries the RENDERED
+#: relation instead -- claim rows and the manuscript pane as `rendered_relation`,
+#: the expansion pane as that plus `anchor_rendered_relation`. The stored
+#: vocabulary still exists in the asset; it simply no longer reaches a surface,
+#: which is what steps 3b-3d were for.
 KNOWN_CARRIER_FLOOR: frozenset = frozenset({
-    "relation_kind", "claim_type", "anchor_claim_type",
+    "rendered_relation", "anchor_rendered_relation",
     "evidence_source", "displayed_evidence_source",
     "confidence_band", "displayed_confidence_band",
     "adjudication_status", "routing_status", "routing_reason",

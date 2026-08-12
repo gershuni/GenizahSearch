@@ -108,12 +108,10 @@ def claim_row(**overrides):
         "author": None,
         "genre": None,
         "title_missing": False,
-        "relation_kind": ids.CLAIM_TYPE_DIRECT_WITNESS,
-        # C-track step 3b: the matrix output, capped at member grain. Defaults to
-        # the SAME value as `relation_kind` because that is the step-6 identity
-        # case the corpus is mostly made of -- a fixture that defaulted the two
-        # apart would make every unrelated assertion in this file depend on which
-        # of them a renderer happened to read.
+        # C-track step 3b, narrowed to ONE field by step 3d: the matrix output,
+        # capped at member grain. The stored `relation_kind` left this surface
+        # with step 3d, which retired its last consumer (the expansion query's
+        # anchor now travels as the capped relation).
         "rendered_relation": ids.RENDERED_RELATION_DIRECT_WITNESS,
         "evidence_source": ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
         "confidence_band": ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
@@ -1115,19 +1113,30 @@ def test_a_fail_closed_row_asserts_nothing_and_carries_no_filter_code():
     assert "relation_code" not in row
 
 
-def test_the_anchor_identity_still_carries_the_STORED_claim_type():
-    """The one field on this surface that must NOT follow the matrix.
+def test_the_anchor_travels_as_its_CAPPED_relation_not_its_stored_claim_type():
+    """⟨REPLACES a step-3b test that pinned the opposite.⟩
 
-    `anchor_claim_type` travels into the expansion query, where it is compared
-    against other rows' stored claim types to compute `relations_differ`. A
-    rendered verdict there would compare two different vocabularies and quietly
-    mark every demoted row as differing from itself.
+    Step 3b kept the stored `relation_kind` on this surface for exactly one
+    consumer: `_anchor_identity` turned it into the expansion query's
+    `anchor_claim_type`. Step 3d retired that consumer — the expansion pane
+    renders the anchor's CAPPED relation as a chip and compares it against the
+    carrier's own capped relation — so the descriptor carries
+    `anchor_rendered_relation` and the stored type is gone from the surface
+    entirely.
+
+    The fixture is the case that distinguishes the two designs: a row the build
+    stored as `direct_witness` and the matrix demoted. Under the old design the
+    descriptor carried `direct_witness`; under this one it carries `shared_text`,
+    which is what the pane will show.
     """
     model = pm.build_panel_rows(bundle([
-        claim_row(relation_kind=ids.CLAIM_TYPE_DIRECT_WITNESS,
-                  rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT)]))
+        claim_row(rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT)]))
     row = list(pm.iter_rows(model))[0]
-    assert row["expansion"]["anchor_claim_type"] == ids.CLAIM_TYPE_DIRECT_WITNESS
+    assert row["expansion"]["anchor_rendered_relation"] == (
+        ids.RENDERED_RELATION_SHARED_TEXT)
+    assert "anchor_claim_type" not in row["expansion"], (
+        "the stored claim type is gone from this surface -- a field with no "
+        "consumer is a field a renderer eventually prints")
 
 
 def test_a_generic_group_member_chip_follows_the_rendered_relation_too():
@@ -1148,11 +1157,22 @@ def test_a_generic_group_member_chip_follows_the_rendered_relation_too():
 def test_a_claim_row_without_a_rendered_relation_is_refused():
     """It is a REQUIRED vocabulary, not an anchor-optional one: every row hands
     this value to `relation_chip` and `row_headline` unconditionally, so an
-    absent value would reach a lookup that raises while quoting it."""
+    absent value would reach a lookup that raises while quoting it.
+
+    ⟨AMENDED 2026-08-12 -- C-track step 3d⟩ The refusal CODE changed, and the
+    change is correct rather than incidental. Step 3d made this field part of the
+    anchor identity (`_anchor_identity` reads it instead of the stored
+    `relation_kind`), and `_validate_claim_row` runs the anchor's ALL-OR-NONE
+    contract FIRST by design -- so an absent value is now reported as a partial
+    anchor, which additionally NAMES the missing field, rather than as a
+    vocabulary miss. Both are loud refusals of the same row; this asserts the one
+    that actually speaks. A present-but-foreign value still goes through the
+    vocabulary check (the test below).
+    """
     with pytest.raises(pm.PanelContractError) as excinfo:
         pm.build_panel_rows(bundle([claim_row(rendered_relation=None)]))
-    assert "claim_vocabulary_outside_closed_set" in str(excinfo.value)
-    assert "rendered_relation" in str(excinfo.value)
+    assert "claim_anchor_identity_partial" in str(excinfo.value)
+    assert "anchor_rendered_relation" in str(excinfo.value)
 
 
 def test_a_claim_row_whose_rendered_relation_is_foreign_is_refused():
@@ -1970,7 +1990,7 @@ def test_every_identification_row_carries_a_lazy_expansion_descriptor():
     descriptor = row["expansion"]
     assert descriptor["work_id"] == "w000001"
     assert descriptor["anchor_sys_id"] == "990051079570205171"
-    assert descriptor["anchor_claim_type"] == ids.CLAIM_TYPE_DIRECT_WITNESS
+    assert descriptor["anchor_rendered_relation"] == ids.RENDERED_RELATION_DIRECT_WITNESS
     assert descriptor["anchor_evidence_source"] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
     assert descriptor["anchor_confidence_band"] == \
         ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC
@@ -1982,7 +2002,7 @@ def test_every_identification_row_carries_a_lazy_expansion_descriptor():
 
 
 @pytest.mark.parametrize("dropped", [
-    "sys_id", "relation_kind", "evidence_source", "confidence_band",
+    "sys_id", "rendered_relation", "evidence_source", "confidence_band",
 ])
 def test_a_partial_anchor_identity_raises_naming_present_and_missing_fields(dropped):
     with pytest.raises(ValueError) as exc:
@@ -2001,7 +2021,7 @@ def test_a_partial_anchor_identity_raises_naming_present_and_missing_fields(drop
 
 
 @pytest.mark.parametrize("dropped", [
-    "sys_id", "relation_kind", "evidence_source", "confidence_band",
+    "sys_id", "rendered_relation", "evidence_source", "confidence_band",
 ])
 def test_a_partial_anchor_inside_a_generic_group_is_refused(
         dropped, verse_chain_generic_group):
@@ -2020,7 +2040,7 @@ def test_a_partial_anchor_inside_a_generic_group_is_refused(
 
 
 @pytest.mark.parametrize("dropped", [
-    "sys_id", "relation_kind", "evidence_source", "confidence_band",
+    "sys_id", "rendered_relation", "evidence_source", "confidence_band",
 ])
 def test_a_partial_anchor_on_a_nested_granularity_row_is_refused(
         dropped, two_granularity_rashi):
@@ -2041,7 +2061,7 @@ def test_a_partial_anchor_on_a_nested_granularity_row_is_refused(
 
 
 @pytest.mark.parametrize("dropped", [
-    "sys_id", "relation_kind", "evidence_source", "confidence_band",
+    "sys_id", "rendered_relation", "evidence_source", "confidence_band",
 ])
 def test_a_partial_anchor_on_a_row_the_collapse_discards_is_refused(
         dropped, two_titles_duplicate):
@@ -2132,7 +2152,7 @@ def test_a_caller_supplied_status_is_withheld():
 
 
 @pytest.mark.parametrize("field_name", [
-    "routing_status", "adjudication_status", "relation_kind",
+    "routing_status", "adjudication_status", "rendered_relation",
     "evidence_source", "confidence_band",
 ])
 def test_an_out_of_vocabulary_claim_value_is_withheld(field_name):
@@ -2388,7 +2408,11 @@ _EMITTED_SCHEMA = {
     },
     "model.disclosure_levels[].rows[].expansion": {
         "work_id": _OPT_STR, "heading": _STR, "page_size": (int,),
-        "loaded": _BOOL, "anchor_sys_id": _STR, "anchor_claim_type": _STR,
+        # ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ Was `anchor_claim_type`. The
+        # descriptor carries the anchor's CAPPED rendered relation, because that
+        # is what the pane's anchor chip shows and what `relations_differ`
+        # compares against the carrier's own capped relation.
+        "loaded": _BOOL, "anchor_sys_id": _STR, "anchor_rendered_relation": _STR,
         "anchor_evidence_source": _STR, "anchor_confidence_band": _STR,
     },
     "model.disclosure_levels[].generic_groups[]": {
@@ -2600,11 +2624,11 @@ def kitchen_sink_bundle(lang="en", **overrides):
                   work_id="w000400", canonical_work_id="w000400",
                   display_work_id="w000400", neutral_title="Another work",
                   author="מחבר ב", span_start=2000, span_end=2555,
-                  relation_kind=ids.CLAIM_TYPE_SHARED_TEXT),
+                  rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT),
         claim_row(claim_id="claim-176", evidence_id="ev-176", work_id="w000176",
                   canonical_work_id="w000176", display_work_id="w000176",
                   neutral_title=W000176_RAW_TITLE, span_start=3000, span_end=3300,
-                  relation_kind=ids.CLAIM_TYPE_QUOTES_THIS_WORK),
+                  rendered_relation=ids.RENDERED_RELATION_QUOTES_THIS_WORK),
         claim_row(claim_id="claim-prop", evidence_id="ev-prop", work_id="w000900",
                   canonical_work_id="w000900", display_work_id="w000900",
                   neutral_title="A propagated carrier", span_start=3400, span_end=3500,

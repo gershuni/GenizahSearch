@@ -93,10 +93,8 @@ def claim_row(**overrides):
         'display_work_id': 'w000001',
         'neutral_title': 'Some Recorded Work',
         'title_missing': False,
-        'relation_kind': ids.CLAIM_TYPE_DIRECT_WITNESS,
-        # C-track step 3b: the matrix output, capped at member grain -- the
-        # step-6 identity case by default, so no unrelated assertion in this file
-        # depends on which of the two fields a renderer reads.
+        # C-track step 3b, narrowed to ONE field by 3d: the matrix output,
+        # capped at member grain.
         'rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
         'evidence_source': ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
         'confidence_band': ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC,
@@ -202,8 +200,8 @@ def expansion_row(**overrides):
         'library_code': 'CUL',
         'shelfmark_display': 'T-S 12.123',
         'display_missing': False,
-        'claim_type': ids.CLAIM_TYPE_DIRECT_WITNESS,
-        'anchor_claim_type': ids.CLAIM_TYPE_DIRECT_WITNESS,
+        'rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
+        'anchor_rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
         'relations_differ': False,
         'displayed_evidence_source': ids.EVIDENCE_SOURCE_TRACK1_DIRECT,
         'displayed_confidence_band': ids.CONFIDENCE_BAND_SCREENING_RB,
@@ -494,7 +492,7 @@ def test_the_relation_chip_carries_the_band_label_as_a_title_attribute_only():
     expected_tooltip = ds.relation_tooltip(
         row['evidence_source'], row['confidence_band'], 'en')
     assert (chip._props or {}).get('title') == expected_tooltip
-    assert chip.text == ds.relation_chip(row['relation_kind'], 'en')
+    assert chip.text == ds.relation_chip(row['rendered_relation'], 'en')
     assert expected_tooltip not in (chip.text or ''), (
         'the band label is VISIBLE text; it is tooltip-only (D-24)')
 
@@ -502,7 +500,7 @@ def test_the_relation_chip_carries_the_band_label_as_a_title_attribute_only():
 def test_no_relation_keyed_class_is_applied_to_any_chip():
     for kind in sorted(ids.CLAIM_TYPES):
         model = model_for(claim_items=[claim_row(
-            relation_kind=kind,
+            rendered_relation=kind,
             coverage_ppm=None if kind != ids.CLAIM_TYPE_DIRECT_WITNESS else 680000)])
         client = _render(model)
         for chip in _elements_with_class(client, 'rel'):
@@ -829,7 +827,10 @@ def test_an_opened_expansion_excludes_the_anchor_and_shows_the_weaker_band(spy):
         setattr(dp_disc, 'get_work_expansion_enveloped', real)
 
     assert captured['anchor_sys_id'] == '990051079570205171', captured
-    assert captured['anchor_claim_type'] == ids.CLAIM_TYPE_DIRECT_WITNESS
+    # C-track step 3d: the anchor crosses into the expansion query as its CAPPED
+    # rendered relation, never as its stored claim type.
+    assert captured['anchor_rendered_relation'] == ids.RENDERED_RELATION_DIRECT_WITNESS
+    assert 'anchor_claim_type' not in captured, captured
     assert captured['anchor_evidence_source'] == ids.EVIDENCE_SOURCE_TRACK1_DIRECT
     assert captured['anchor_confidence_band'] == ids.CONFIDENCE_BAND_HIGH_CONFIDENCE_ALGORITHMIC
     # The WEAKER band of the pair is resolved server-side and arrives as
@@ -903,8 +904,8 @@ def test_a_display_missing_carrier_gets_an_explicit_unnamed_treatment(spy):
 def test_differing_relations_render_two_distinct_chips(spy):
     spy.results['get_work_expansion_enveloped'] = make_envelope(
         STATUS_OK,
-        [expansion_row(claim_type=ids.CLAIM_TYPE_SHARED_TEXT,
-                       anchor_claim_type=ids.CLAIM_TYPE_DIRECT_WITNESS,
+        [expansion_row(rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT,
+                       anchor_rendered_relation=ids.RENDERED_RELATION_DIRECT_WITNESS,
                        relations_differ=True)],
         1, meta={'work_id': 'w000001', 'anchor_mode': 'anchored',
                  'filter_basis': 'displayed_band', 'anchor_excluded': True})
@@ -928,8 +929,8 @@ def test_agreeing_relations_render_exactly_one_chip(spy):
 def test_no_expansion_chip_carries_a_stored_vocabulary_key(spy):
     spy.results['get_work_expansion_enveloped'] = make_envelope(
         STATUS_OK,
-        [expansion_row(claim_type=ids.CLAIM_TYPE_QUOTES_THIS_WORK,
-                       anchor_claim_type=ids.CLAIM_TYPE_DIRECT_WITNESS,
+        [expansion_row(rendered_relation=ids.RENDERED_RELATION_QUOTES_THIS_WORK,
+                       anchor_rendered_relation=ids.RENDERED_RELATION_DIRECT_WITNESS,
                        relations_differ=True)],
         1, meta={'work_id': 'w000001', 'anchor_mode': 'anchored',
                  'filter_basis': 'displayed_band', 'anchor_excluded': True})
@@ -1001,7 +1002,7 @@ def test_hebrew_renders_rtl_and_bilingual():
     root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
     assert (root._props or {}).get('dir') == 'rtl'
     text = _scoped_text(client, dp.PANEL_ROOT_CLASS)
-    assert ds.relation_chip(row['relation_kind'], 'he') in text
+    assert ds.relation_chip(row['rendered_relation'], 'he') in text
     assert ds.recall_disclaimer('he') in text
 
 

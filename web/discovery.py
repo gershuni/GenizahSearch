@@ -528,7 +528,7 @@ async def get_work_expansion_enveloped(
     page: int = 1,
     page_size: Optional[int] = None,
     anchor_sys_id: Optional[str] = None,
-    anchor_claim_type: Optional[str] = None,
+    anchor_rendered_relation: Optional[str] = None,
     anchor_evidence_source: Optional[str] = None,
     anchor_confidence_band: Optional[str] = None,
     lang: str = "en",
@@ -548,7 +548,7 @@ async def get_work_expansion_enveloped(
     inside its budget surfaces as `timeout`; it is never softened into an
     approximate or capped figure.
 
-    The anchor identity is ALL THREE OR NONE (`anchor_claim_type`,
+    The anchor identity is ALL THREE OR NONE (`anchor_rendered_relation`,
     `anchor_evidence_source`, `anchor_confidence_band`); a partial set raises
     `ValueError` and is NOT converted into an envelope, because it is a caller
     bug rather than a service state -- the same posture `get_findings_enveloped`
@@ -559,7 +559,7 @@ async def get_work_expansion_enveloped(
     try:
         return await _service.get_work_expansion_enveloped_async(
             work_id, enabled_bands, page=page, page_size=page_size,
-            anchor_sys_id=anchor_sys_id, anchor_claim_type=anchor_claim_type,
+            anchor_sys_id=anchor_sys_id, anchor_rendered_relation=anchor_rendered_relation,
             anchor_evidence_source=anchor_evidence_source,
             anchor_confidence_band=anchor_confidence_band, lang=lang,
         )

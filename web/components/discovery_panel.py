@@ -233,7 +233,7 @@ def _render_expansion(row: Mapping[str, Any], lang: str,
                 page=state['page'],
                 page_size=descriptor.get('page_size'),
                 anchor_sys_id=descriptor.get('anchor_sys_id'),
-                anchor_claim_type=descriptor.get('anchor_claim_type'),
+                anchor_rendered_relation=descriptor.get('anchor_rendered_relation'),
                 anchor_evidence_source=descriptor.get('anchor_evidence_source'),
                 anchor_confidence_band=descriptor.get('anchor_confidence_band'),
                 lang=lang,
@@ -420,12 +420,22 @@ def _render_expansion_envelope(
             if title:
                 ui.label(title)
             band_label = item.get('band_label')
-            # BOTH sides' relation kinds when they DIFFER, using the service's
-            # own `relations_differ` marker -- never a comparison made here.
-            _neutral_chip(ds.relation_chip(item.get('claim_type'), lang), band_label)
+            # BOTH sides' RENDERED relations when they DIFFER, using the
+            # service's own `relations_differ` marker -- never a comparison made
+            # here.
+            #
+            # C-track step 3d: these were the stored `claim_type` /
+            # `anchor_claim_type`, which is what made this pane the last surface
+            # still printing "Direct match" on rows the router declined to ship.
+            # Both values are now the matrix output capped at member grain
+            # (matrix-spec §3.2), and `relations_differ` compares the same two
+            # values -- so the marker can no longer disagree with the chips it
+            # governs.
+            _neutral_chip(ds.relation_chip(item.get('rendered_relation'), lang), band_label)
             if item.get('relations_differ'):
                 _neutral_chip(
-                    ds.relation_chip(item.get('anchor_claim_type'), lang), band_label)
+                    ds.relation_chip(item.get('anchor_rendered_relation'), lang),
+                    band_label)
 
     if page_size > 0 and total > page_size:
         with ui.row().classes('items-center gap-2'):

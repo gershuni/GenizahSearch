@@ -123,6 +123,34 @@ def _build_expansion_db(
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             evidence_rows,
         )
+        # C-track step 3d: the identification grain the pane's relation is capped
+        # against. Hand-seeded rather than produced by
+        # `populate_discovery_identification` on purpose: this fixture carries no
+        # coverage at all, so the real builder would reach the matrix's step 5 on
+        # every row and store `uncertain` everywhere -- green, and blind to every
+        # other branch. Seeding the verdict explicitly is what lets a test drive
+        # the cap.
+        identification_relation_by_sys = {}
+        for c in carriers:
+            relation = c.get("identification_relation", c["claim_type"])
+            if relation == NO_IDENTIFICATION:
+                continue
+            # First carrier wins: the grain is (sys_id, canonical_work_id), so
+            # two claims on one manuscript share ONE identification row.
+            identification_relation_by_sys.setdefault(c["sys_id"], relation)
+        cur.executemany(
+            "INSERT INTO discovery_identification (identification_id, sys_id, "
+            "canonical_work_id, display_work_id, main_pool, main_pool_reason, "
+            "best_band_rank, page_count, relation_kind, rendered_relation, "
+            "novelty_status, assertion_visibility, identity_visibility) "
+            "VALUES (?, ?, ?, ?, 1, 'main_multifolio', 0, 1, ?, ?, "
+            "'not_checked', 'public', 'public')",
+            [
+                (f"ident-{sys_id}", sys_id, work_id, work_id,
+                 "direct_witness", relation)
+                for sys_id, relation in sorted(identification_relation_by_sys.items())
+            ],
+        )
         for unit_id, members in units:
             cur.execute("INSERT INTO witness_units (unit_id) VALUES (?)", (unit_id,))
             cur.executemany(
@@ -160,21 +188,121 @@ def _service_for(db_path, version="test-expansion"):
 
 
 def _carrier(sys_id, page_id, *, claim_type="direct_witness",
-             evidence_source=_TRACK1, confidence_band="tier_a"):
+             evidence_source=_TRACK1, confidence_band="tier_a",
+             identification_relation=None):
+    """One carrier claim.
+
+    `identification_relation` is the matrix output stored on this carrier's
+    IDENTIFICATION (C-track step 3d). `None` means "the step-6 identity case":
+    the identification renders what the claim stores, which is what the corpus is
+    mostly made of and what keeps every assertion in this file that is not ABOUT
+    the cap unaffected by it. Pass `NO_IDENTIFICATION` to seed no identification
+    row at all -- matrix spec §3.2a's case.
+    """
     return {
         "sys_id": sys_id, "page_id": page_id, "claim_type": claim_type,
         "evidence_source": evidence_source, "confidence_band": confidence_band,
+        "identification_relation": (
+            claim_type if identification_relation is None else identification_relation),
     }
+
+
+#: Sentinel for `_carrier(identification_relation=...)`: seed NO identification
+#: row for this carrier, so the pane row has no verdict to cap against.
+NO_IDENTIFICATION = "__no_identification__"
 
 
 #: The anchor triple used wherever the anchor's own identity is not the
 #: variable under test. `direct_witness` + the STRONGEST band, so the other
 #: carrier decides the displayed band unless a test says otherwise.
 _ANCHOR_STRONG = dict(
-    anchor_claim_type="direct_witness",
+    anchor_rendered_relation="direct_witness",
     anchor_evidence_source=_TRACK1,
     anchor_confidence_band="expert_verified",
 )
+
+#: The same anchor after its OWN identification demoted it (C-track step 3d).
+#: Its stored claim type is still `direct_witness`; what it RENDERS is
+#: `shared_text`, and rendering is what the pane compares.
+_ANCHOR_DEMOTED = dict(_ANCHOR_STRONG, anchor_rendered_relation="shared_text")
+
+
+# ===========================================================================
+# C-track step 3d: the pane renders the MATRIX output, capped at member grain
+# (matrix spec §3.2), on BOTH sides of the pair -- and `relations_differ`
+# compares the same two values the chips show.
+# ===========================================================================
+
+def test_a_demoted_identification_demotes_the_panes_carrier_row(tmp_path):
+    """The population this step exists for: the build stored `direct_witness`
+    and the matrix demoted the identification, so the pane must not go on
+    calling it a direct match."""
+    db = _build_expansion_db(tmp_path / "demoted.db", [
+        _carrier("990000000000000001", "p001", claim_type="direct_witness",
+                 identification_relation="shared_text"),
+    ])
+    row = _service_for(db).get_work_witnesses("wEXP001", **_ANCHOR_STRONG)[0]
+    assert row["claim_type"] == "direct_witness", "the STORED type never moves"
+    assert row["rendered_relation"] == "shared_text"
+
+
+def test_a_carrier_with_no_published_identification_renders_uncertain(tmp_path):
+    """Matrix spec §5a.1, which is what makes the owner's "keep every row"
+    ruling safe: 39,036 of the 39,636 pairs reachable only through a
+    router-declined row have NO published identification, so there is no verdict
+    to cap against and the row asserts nothing -- while keeping its place, its
+    link and its counts."""
+    db = _build_expansion_db(tmp_path / "no-ident.db", [
+        _carrier("990000000000000001", "p001", claim_type="direct_witness",
+                 identification_relation=NO_IDENTIFICATION),
+    ])
+    items = _service_for(db).get_work_witnesses("wEXP001", **_ANCHOR_STRONG)
+    assert len(items) == 1, "the row KEEPS its place -- it is relabelled, not removed"
+    assert items[0]["rendered_relation"] == "uncertain"
+    assert items[0]["shelfmark_display"], "and it keeps its name"
+
+
+def test_relations_differ_is_FALSE_when_two_stored_types_cap_to_one_state(tmp_path):
+    """The case that proves the marker moved to the rendered vocabulary.
+
+    The scenario: the carrier stores `quotes_this_work` and the ANCHOR stores
+    `direct_witness` -- so the old, stored-value comparison said "these differ"
+    and drew a second chip. But the anchor was itself demoted to `shared_text`
+    (that is what `_ANCHOR_DEMOTED` carries), and the carrier's identification
+    demotes it to `shared_text` too. Both chips would therefore read "Shares text
+    with this work", and marking them as differing would contradict what the
+    reader sees.
+
+    Note the cap only ever WEAKENS -- it cannot promote a member to a state its
+    identification does not support -- so the two stored types have to converge
+    DOWNWARD for this case to exist at all. That is a property worth stating: a
+    first draft of this test tried to converge them upward and was wrong about
+    the rule, not about the code.
+    """
+    db = _build_expansion_db(tmp_path / "same-after-cap.db", [
+        _carrier("990000000000000001", "p001", claim_type="quotes_this_work",
+                 identification_relation="shared_text"),
+    ])
+    row = _service_for(db).get_work_witnesses("wEXP001", **_ANCHOR_DEMOTED)[0]
+    assert row["claim_type"] == "quotes_this_work", (
+        "the carrier's STORED type differs from the anchor's stored "
+        "`direct_witness` -- which is what the old comparison saw")
+    assert row["rendered_relation"] == row["anchor_rendered_relation"] == "shared_text"
+    assert row["relations_differ"] is False
+
+
+def test_relations_differ_is_TRUE_when_one_stored_type_caps_two_ways(tmp_path):
+    """The mirror image: identical stored types, different rendered ones,
+    because the carrier's identification was demoted and the anchor's was not.
+    On stored values this real difference would be invisible."""
+    db = _build_expansion_db(tmp_path / "differ-after-cap.db", [
+        _carrier("990000000000000001", "p001", claim_type="direct_witness",
+                 identification_relation="shared_text"),
+    ])
+    row = _service_for(db).get_work_witnesses("wEXP001", **_ANCHOR_STRONG)[0]
+    assert row["claim_type"] == "direct_witness", "the stored types are the SAME"
+    assert row["rendered_relation"] != row["anchor_rendered_relation"]
+    assert row["relations_differ"] is True
 
 
 # ===========================================================================
@@ -194,7 +322,7 @@ def test_row_carries_both_sides_relation_and_band(tmp_path):
     assert row["confidence_band"] == "tier_a"
     assert row["evidence_source"] == _TRACK1
     # the ANCHOR's side, alongside it
-    assert row["anchor_claim_type"] == "direct_witness"
+    assert row["anchor_rendered_relation"] == "direct_witness"
     assert row["anchor_confidence_band"] == "expert_verified"
     assert row["anchor_evidence_source"] == _TRACK1
 
@@ -206,8 +334,8 @@ def test_relations_differ_is_true_and_both_kinds_are_present_and_distinct(tmp_pa
     row = _service_for(db).get_work_witnesses("wEXP001", **_ANCHOR_STRONG)[0]
     assert row["relations_differ"] is True
     assert row["claim_type"] == "quotes_this_work"
-    assert row["anchor_claim_type"] == "direct_witness"
-    assert row["claim_type"] != row["anchor_claim_type"]
+    assert row["anchor_rendered_relation"] == "direct_witness"
+    assert row["claim_type"] != row["anchor_rendered_relation"]
 
 
 def test_relations_differ_is_false_when_both_sides_share_a_relation(tmp_path):
@@ -216,7 +344,7 @@ def test_relations_differ_is_false_when_both_sides_share_a_relation(tmp_path):
     ])
     row = _service_for(db).get_work_witnesses("wEXP001", **_ANCHOR_STRONG)[0]
     assert row["relations_differ"] is False
-    assert row["claim_type"] == row["anchor_claim_type"] == "direct_witness"
+    assert row["claim_type"] == row["anchor_rendered_relation"] == "direct_witness"
 
 
 def test_stronger_anchor_displays_the_other_carriers_band(tmp_path):
@@ -237,7 +365,7 @@ def test_weaker_anchor_displays_the_anchors_own_band(tmp_path):
     ])
     row = _service_for(db).get_work_witnesses(
         "wEXP001",
-        anchor_claim_type="direct_witness",
+        anchor_rendered_relation="direct_witness",
         anchor_evidence_source=_PROPAGATED,
         anchor_confidence_band="weak",
     )[0]
@@ -260,10 +388,10 @@ def test_anchor_evidence_source_reaches_the_band_comparison(tmp_path):
     ])
     service = _service_for(db)
     stronger = service.get_work_witnesses(
-        "wEXP001", anchor_claim_type="direct_witness",
+        "wEXP001", anchor_rendered_relation="direct_witness",
         anchor_evidence_source=_PROPAGATED, anchor_confidence_band="corroborated")[0]
     weaker = service.get_work_witnesses(
-        "wEXP001", anchor_claim_type="direct_witness",
+        "wEXP001", anchor_rendered_relation="direct_witness",
         anchor_evidence_source=_TRACK1, anchor_confidence_band="screening_canon")[0]
     assert stronger["displayed_confidence_band"] == "screening_rb"
     assert weaker["displayed_confidence_band"] == "screening_canon"
@@ -306,7 +434,7 @@ def test_band_label_tracks_the_resolved_pair_not_the_carriers_raw_pair(tmp_path)
         _carrier("990000000000000001", "p001", confidence_band="tier_a"),
     ])
     row = _service_for(db).get_work_witnesses(
-        "wEXP001", anchor_claim_type="direct_witness",
+        "wEXP001", anchor_rendered_relation="direct_witness",
         anchor_evidence_source=_PROPAGATED, anchor_confidence_band="weak")[0]
     resolved = serialize_banded_claim(
         {"evidence_source": _PROPAGATED, "confidence_band": "weak",
@@ -382,7 +510,7 @@ def test_enabled_band_filter_with_a_weaker_anchor_excludes_an_enabled_carrier(tm
     ])
     service = _service_for(db)
     weak_anchor = dict(
-        anchor_claim_type="direct_witness",
+        anchor_rendered_relation="direct_witness",
         anchor_evidence_source=_PROPAGATED,
         anchor_confidence_band="weak",
     )
@@ -421,7 +549,7 @@ def test_no_anchor_call_keeps_the_nine_legacy_keys_with_null_anchor_fields(tmp_p
                 "representative_claim_id", "claim_type", "evidence_source",
                 "confidence_band", "member_sys_ids"):
         assert key in row, f"pre-existing key {key!r} disappeared"
-    assert row["anchor_claim_type"] is None
+    assert row["anchor_rendered_relation"] is None
     assert row["anchor_evidence_source"] is None
     assert row["anchor_confidence_band"] is None
     assert row["relations_differ"] is False
@@ -430,9 +558,9 @@ def test_no_anchor_call_keeps_the_nine_legacy_keys_with_null_anchor_fields(tmp_p
     assert row["library_code"] == "CUL"
 
 
-_ANCHOR_KEYS = ("anchor_claim_type", "anchor_evidence_source", "anchor_confidence_band")
+_ANCHOR_KEYS = ("anchor_rendered_relation", "anchor_evidence_source", "anchor_confidence_band")
 _ANCHOR_VALUES = {
-    "anchor_claim_type": "direct_witness",
+    "anchor_rendered_relation": "direct_witness",
     "anchor_evidence_source": _TRACK1,
     "anchor_confidence_band": "tier_a",
 }
@@ -440,11 +568,11 @@ _ANCHOR_VALUES = {
 
 @pytest.mark.parametrize("present", [
     (),
-    ("anchor_claim_type",),
+    ("anchor_rendered_relation",),
     ("anchor_evidence_source",),
     ("anchor_confidence_band",),
-    ("anchor_claim_type", "anchor_evidence_source"),
-    ("anchor_claim_type", "anchor_confidence_band"),
+    ("anchor_rendered_relation", "anchor_evidence_source"),
+    ("anchor_rendered_relation", "anchor_confidence_band"),
     ("anchor_evidence_source", "anchor_confidence_band"),
     _ANCHOR_KEYS,
 ])
@@ -470,9 +598,9 @@ def test_partial_anchor_error_names_the_present_and_the_missing_fields(tmp_path)
     ])
     with pytest.raises(ValueError) as exc:
         _service_for(db).get_work_witnesses(
-            "wEXP001", anchor_claim_type="direct_witness")
+            "wEXP001", anchor_rendered_relation="direct_witness")
     message = str(exc.value)
-    assert "anchor_claim_type" in message, "the PRESENT field is not named"
+    assert "anchor_rendered_relation" in message, "the PRESENT field is not named"
     assert "anchor_evidence_source" in message, "a MISSING field is not named"
     assert "anchor_confidence_band" in message, "a MISSING field is not named"
 
@@ -488,7 +616,7 @@ def test_sql_path_and_pure_helper_agree_on_every_field_both_compute(tmp_path):
     db = _build_expansion_db(tmp_path / "symmetry.db", carriers,
                              units=[("unitX", ["990000000000000001",
                                                "990000000000000002"])])
-    anchor = dict(anchor_claim_type="direct_witness",
+    anchor = dict(anchor_rendered_relation="direct_witness",
                   anchor_evidence_source=_TRACK1,
                   anchor_confidence_band="screening_canon")
     sql_items = _service_for(db).get_work_witnesses("wEXP001", **anchor)
@@ -496,6 +624,12 @@ def test_sql_path_and_pure_helper_agree_on_every_field_both_compute(tmp_path):
     claim_rows = [
         {"page_id": c["page_id"], "work_id": "wEXP001", "claim_id": f"c{i:06d}",
          "claim_type": c["claim_type"], "sys_id": c["sys_id"],
+         # C-track step 3d: the pure helper has no DB, so its input rows must
+         # CARRY the identification's matrix output the SQL path joins for. The
+         # mirror caught its absence immediately -- the pure side fell closed to
+         # `uncertain` while SQL rendered `direct_witness` -- which is the whole
+         # reason this comparison exists.
+         "identification_rendered_relation": c["identification_relation"],
          "evidence_source": c["evidence_source"],
          "confidence_band": c["confidence_band"],
          "library_code": "CUL", "shelfmark_display": f"T-S {c['sys_id'][-4:]}"}
@@ -729,7 +863,7 @@ def test_count_and_list_agree_under_a_weaker_anchor_filter(tmp_path):
         _carrier("990000000000000001", "p001", confidence_band="tier_a"),
         _carrier("990000000000000002", "p002", confidence_band="screening_rb"),
     ])
-    weak_anchor = dict(anchor_claim_type="direct_witness",
+    weak_anchor = dict(anchor_rendered_relation="direct_witness",
                        anchor_evidence_source=_PROPAGATED,
                        anchor_confidence_band="weak")
     service = _service_for(db)
@@ -1087,7 +1221,7 @@ def test_total_survives_exhaustion_through_an_anchored_band_filtered_call(
     service = _service_for(db_path, "test-large")
     anchored_kwargs = dict(
         anchor_sys_id=_SYNTHETIC_ANCHOR_SYS,
-        anchor_claim_type="direct_witness",
+        anchor_rendered_relation="direct_witness",
         anchor_evidence_source=_TRACK1,
         anchor_confidence_band="tier_a",
         enabled_bands=["tier_a"],
@@ -1203,6 +1337,17 @@ def _resolve_probe_artifact():
             audience = row[0] if row else None
             tables = {r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'")}
+            # ⟨ADDED 2026-08-12 -- C-track step 3d⟩ A COLUMN check, not only a
+            # table check: the expansion CTE now joins
+            # `discovery_identification.rendered_relation`, so a PRE-batch
+            # artifact -- which the served one still is -- cannot answer the
+            # query at all. Qualifying it would turn a known asset-version state
+            # into an OperationalError inside the test body, which reads as a
+            # code defect instead of the "no conforming artifact" state this
+            # probe already knows how to report.
+            identification_columns = {
+                r[1] for r in conn.execute(
+                    "PRAGMA table_info(discovery_identification)")}
         except Exception:
             continue
         finally:
@@ -1210,6 +1355,8 @@ def _resolve_probe_artifact():
         if audience != "public":
             continue
         if not _PROBE_REQUIRED_TABLES.issubset(tables):
+            continue
+        if "rendered_relation" not in identification_columns:
             continue
         return (path, audience), None
     # A file IS present and did not qualify -- stale, private, or incomplete.
@@ -1521,14 +1668,20 @@ def test_the_exact_count_reaches_the_envelope_untransformed():
 # surface receives, and what the envelope wraps them in.
 # ===========================================================================
 
-#: The INTERNAL expansion row, before projection. Twenty keys.
+#: The INTERNAL expansion row, before projection.
 _INTERNAL_EXPANSION_KEYS = frozenset({
     # the pre-plan nine
     "work_id", "unit_id", "representative_sys_id", "representative_page_id",
     "representative_claim_id", "claim_type", "evidence_source", "confidence_band",
     "member_sys_ids",
+    # ⟨ADDED 2026-08-12 -- C-track step 3d⟩ The carrier's RENDERED relation: its
+    # stored `claim_type` capped by its identification's matrix output (§3.2).
+    # `claim_type` stays on the INTERNAL row above -- both producers need it to
+    # compute this, and the mirror test compares it -- but only this one reaches
+    # a surface.
+    "rendered_relation",
     # the anchor side (136-21)
-    "anchor_claim_type", "anchor_evidence_source", "anchor_confidence_band",
+    "anchor_rendered_relation", "anchor_evidence_source", "anchor_confidence_band",
     "relations_differ",
     # the resolved band presentation
     "displayed_evidence_source", "displayed_confidence_band", "band_rank",
@@ -1550,6 +1703,12 @@ _INTERNAL_EXPANSION_KEYS = frozenset({
 _INTERNAL_ONLY_KEYS = frozenset({
     "evidence_source", "confidence_band",
     "anchor_evidence_source", "anchor_confidence_band",
+    # ⟨ADDED 2026-08-12 -- C-track step 3d⟩ The carrier's STORED claim type is now
+    # internal-only, for the same shape of reason as the raw band pairs above: the
+    # surface shows the CAPPED relation, and leaving the stored one alongside it
+    # invites a renderer to draw that instead -- which is exactly what this pane
+    # did until step 3d, printing "Direct match" on 35,754 router-declined rows.
+    "claim_type",
 })
 
 #: Keys that must NEVER reach a surface, named individually because a generic
@@ -1563,7 +1722,10 @@ _NEVER_ON_A_SURFACE = (
 #: rather than implied by the allowlist -- a control that deleted one from the
 #: allowlist would otherwise still satisfy "the key set equals the allowlist".
 _PUBLIC_MUST_CONTAIN = (
-    "relations_differ", "anchor_claim_type", "claim_type",
+    # C-track step 3d: `rendered_relation` REPLACES `claim_type` here. The pane
+    # renders the capped relation on both sides, so those are the two the section
+    # cannot be drawn without.
+    "relations_differ", "rendered_relation", "anchor_rendered_relation",
     "library_code", "shelfmark_display", "display_missing",
     "displayed_evidence_source", "displayed_confidence_band",
     "band_label", "band_rank",

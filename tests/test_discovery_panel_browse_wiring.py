@@ -851,7 +851,7 @@ def test_entry_control_visible_when_the_manuscript_has_rows_elsewhere(spy):
             'neutral_title': 'Some Recorded Work', 'author': None, 'genre': None,
             'title_missing': False, 'page_count': 12, 'best_band_rank': 0,
             'gated': False, 'main_pool': True,
-            'relation_kind': ids.CLAIM_TYPE_DIRECT_WITNESS,
+            'rendered_relation': ids.RENDERED_RELATION_DIRECT_WITNESS,
         })])
     model = build_panel_rows(_fetch())
     assert model.entry_control == {

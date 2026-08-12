@@ -129,24 +129,19 @@ SURFACE_CLAIM_FIELDS: Tuple[str, ...] = (
     # tooltip -- A-2). `band_label` comes from `serialize_banded_claim`, never
     # from a hardcoded string in a query module.
     #
-    # ⟨CHANGED 2026-08-12 -- C-track step 3b⟩ TWO relation-shaped fields on this
-    # surface, where `SURFACE_FINDING_FIELDS` deliberately carries one. The
-    # difference is real and is the reason both are here:
+    # ⟨CHANGED 2026-08-12 -- C-track steps 3b then 3d⟩ ONE relation field, as on
+    # `SURFACE_FINDING_FIELDS`. Contract 1's matrix output for this row, capped
+    # at member grain (spec 3.2); EVERY display read takes it -- the chip, the
+    # headline, the filter code, and the gate on whether a coverage percentage
+    # may be shown.
     #
-    #   * `rendered_relation` is Contract 1's matrix output for this row, capped
-    #     at member grain (spec 3.2). EVERY display read takes it -- the chip,
-    #     the headline, the filter code, and the gate on whether a coverage
-    #     percentage may be shown. One field, one answer, exactly as on findings.
-    #   * `relation_kind` is the row's STORED claim type, and it survives here as
-    #     a MACHINE value: `_anchor_identity` turns it into `anchor_claim_type`,
-    #     which travels into the expansion query and is compared there against
-    #     other rows' stored claim types. That comparison is not a display read
-    #     and must not be made against a rendered verdict.
-    #
-    # The pane's own chips are Step 3d's business; until then the pane renders
-    # raw claim types on both sides of a pair, which is the one place a reader
-    # can still see the pre-matrix register.
-    "relation_kind",
+    # Step 3b kept the stored `relation_kind` here alongside it, for one stated
+    # reason: `_anchor_identity` turned it into the expansion query's
+    # `anchor_claim_type`. Step 3d retired that consumer -- the anchor now
+    # travels as its CAPPED rendered relation, because that is what the pane's
+    # anchor chip shows and what `relations_differ` compares -- so the stored
+    # value has no reader on this surface and is gone. A field with no consumer
+    # is a field a renderer eventually prints.
     "rendered_relation",
     "evidence_source",
     "confidence_band",
@@ -334,10 +329,20 @@ SURFACE_EXPANSION_FIELDS: Tuple[str, ...] = (
     "library_code",
     "shelfmark_display",
     "display_missing",
-    # both sides' relation kinds (PANEL-02: "shows each side's own relation type
-    # when they differ")
-    "claim_type",
-    "anchor_claim_type",
+    # ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ Both sides' RENDERED relations,
+    # each capped at member grain (matrix spec §3.2), REPLACING the stored
+    # `claim_type` / `anchor_claim_type` pair this row used to carry.
+    #
+    # Replaced rather than joined, and that is the structural half of the fix.
+    # `relations_differ` is now computed over these two values, so after this
+    # step nothing on this surface reads the stored pair -- and an allowlisted
+    # field with no consumer is a field a renderer eventually prints, which is
+    # exactly how this pane came to be the last one asserting "Direct match" on
+    # 35,754 rows the router declined to ship. The INTERNAL rows keep
+    # `claim_type` (both producers need it to compute the cap, and the
+    # pure/SQL mirror test compares it); the surface never sees it again.
+    "rendered_relation",
+    "anchor_rendered_relation",
     "relations_differ",
     # the RESOLVED band presentation (DATA-01: the WEAKER of the pair)
     "displayed_evidence_source",

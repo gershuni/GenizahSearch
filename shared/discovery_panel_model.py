@@ -225,7 +225,12 @@ PIPELINE_STEPS: Tuple[str, ...] = (
 #: what keeps that sweep able to fail.
 MACHINE_VOCABULARY_FIELDS: frozenset = frozenset({
     "main_pool_reason",
-    "anchor_claim_type",
+    #: C-track step 3d: was `anchor_claim_type`. The descriptor now carries the
+    #: anchor's CAPPED rendered relation, because that is what the pane's anchor
+    #: chip shows and what `relations_differ` compares. Still machine vocabulary
+    #: -- it feeds a later query and a renderer branch, and reaches a reader only
+    #: through `relation_chip`.
+    "anchor_rendered_relation",
     "anchor_evidence_source",
     "anchor_confidence_band",
     "status",
@@ -784,8 +789,14 @@ _REQUIRED_CLAIM_VOCABULARIES: Tuple[Tuple[str, frozenset], ...] = (
     ("rendered_relation", ids.RENDERED_RELATIONS),
 )
 
+#: ⟨CHANGED 2026-08-12 -- C-track step 3d⟩ `relation_kind` is GONE from this
+#: list, because it is gone from the claim surface: step 3d retired its last
+#: consumer (the expansion query's anchor), so `SURFACE_CLAIM_FIELDS` no longer
+#: carries it and a vocabulary check on an absent field would be a check on
+#: nothing. The anchor's relation is validated by `rendered_relation` in
+#: `_REQUIRED_CLAIM_VOCABULARIES` above -- REQUIRED there rather than optional
+#: here, which is strictly stronger.
 _ANCHOR_CLAIM_VOCABULARIES: Tuple[Tuple[str, frozenset], ...] = (
-    ("relation_kind", ids.CLAIM_TYPES),
     ("evidence_source", ids.EVIDENCE_SOURCES),
 )
 
@@ -974,7 +985,14 @@ def _anchor_identity(row: Mapping[str, Any]) -> Dict[str, Any]:
     """
     anchor = {
         "anchor_sys_id": row.get("sys_id"),
-        "anchor_claim_type": row.get("relation_kind"),
+        # C-track step 3d: the anchor travels as its CAPPED rendered relation,
+        # not as its stored `relation_kind`. The expansion pane renders this
+        # value as the anchor's chip and compares it against the carrier's own
+        # capped relation, so sending the stored type would put one surface's
+        # two chips in two different vocabularies. It is already capped -- step
+        # 3b capped it against this claim's identification -- so nothing here
+        # re-applies §3.2.
+        "anchor_rendered_relation": row.get("rendered_relation"),
         "anchor_evidence_source": row.get("evidence_source"),
         "anchor_confidence_band": row.get("confidence_band"),
     }
