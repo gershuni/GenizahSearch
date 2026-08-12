@@ -20,6 +20,7 @@ from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
 from web.atlas_assets import atlas_preview_available
 from web.discovery_assets import discovery_available
+from web.analytics import posthog_capture
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,30 @@ def create_page():
                         icon='search',
                         on_click=lambda: _navigate_search()
                     ).props(f'round color=primary aria-label="{tr("Search")}"').style('width: 44px; height: 44px;')
+
+            # A first-class escape hatch for the many visitors who arrive
+            # curious about the Genizah but without a query in mind.  This is
+            # a native anchor (rather than a click-only card), so it keeps the
+            # browser's keyboard, context-menu, and open-in-new-tab behavior.
+            with ui.row().classes('w-full justify-center mt-3'):
+                with ui.link(target='/start').classes(
+                    'no-underline inline-flex items-center justify-center gap-2 px-5 py-2'
+                ).props('data-testid=home-start-cta').style(
+                    'min-height: 44px; border-radius: 999px; '
+                    'background: var(--primary-600); color: white; font-weight: 600;'
+                ).on(
+                    'click',
+                    lambda: posthog_capture(
+                        'welcome_action_clicked',
+                        {
+                            'route_id': 'home',
+                            'action_id': 'home_start_here',
+                            'difficulty': 'introductory',
+                        },
+                    ),
+                ):
+                    ui.icon('explore').props('aria-hidden=true').classes('text-lg')
+                    ui.label(tr('Not sure what to search? Start here'))
 
         # === Capability Chips (clickable) ===
         with ui.row().classes('w-full justify-center gap-2 flex-wrap mt-2 px-2'):

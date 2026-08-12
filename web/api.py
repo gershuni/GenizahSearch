@@ -465,6 +465,7 @@ def init_api_routes(app_override=None):
             "## Primary entry points\n"
             "\n"
             "- [Home](https://genizahsearch.com/): site overview and navigation\n"
+            "- [Start here](https://genizahsearch.com/start): guided routes, prepared searches, and selected manuscripts for visitors without a query\n"
             "- [About](https://genizahsearch.com/about): project background and the Cairo Genizah\n"
             "- [Help](https://genizahsearch.com/help): user guide and search tips\n"
             "- [Catalog browse](https://genizahsearch.com/catalog-browse): structured browse by domain, author, work\n"
@@ -546,6 +547,7 @@ def init_api_routes(app_override=None):
         """Static/editorial pages sitemap."""
         pages = [
             ('/', '1.0', 'weekly'),
+            ('/start', '0.9', 'weekly'),
             ('/catalog-browse', '0.8', 'weekly'),
             ('/discoveries', '0.7', 'weekly'),
             ('/browse', '0.6', 'daily'),

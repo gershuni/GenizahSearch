@@ -503,7 +503,7 @@ VIEWER_STYLES = '''
 # BrowsePageRefs imported from web.pages.browse_enrichment (Phase 73, Plan 01)
 
 
-def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False):
+def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False):
     """Create the professional manuscript viewer page UI.
 
     embedded=True (R2-1 discovery-review iframe): renders a bare viewer — the
@@ -512,7 +512,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     normal /browse tab's remembered position (browse_state.py:120 tab-stomping).
     """
     state = BrowseState()
-    refs = BrowsePageRefs()
+    refs = BrowsePageRefs(open_discovery_panel_requested=bool(open_computed))
     service = get_service()
 
     # Track metadata panel visibility
