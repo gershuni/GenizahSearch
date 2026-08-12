@@ -550,9 +550,20 @@ def covering_verdict(
     owner's ruling, and the ruling says nothing about that text.
 
     ``None`` means "no band covers this row", which is one of the two ways step
-    3 fails closed. It is also what an unplaceable row (NULL offset) returns.
+    3 fails closed. It is also what an unplaceable row returns — NULL offsets,
+    and MALFORMED ones.
+
+    Malformed is a real case here and not defensive noise: the band table is
+    guarded by ``CHECK (w_start >= 0 AND w_end > w_start)``, but
+    ``discovery_evidence.w_start``/``w_end`` carry no such constraint. A
+    degenerate ``[100, 100)`` or an inverted ``[150, 50)`` witness span would
+    otherwise satisfy ``band_start <= w_start and w_end <= band_end`` against a
+    band containing neither endpoint's interval, and return a CONFIDENT verdict
+    about a row whose footprint means nothing — the exact shape of an
+    unwarranted demotion. Nothing upstream emits such a row today; the guard is
+    what keeps that from being load-bearing. (Adversarial review 2026-08-13.)
     """
-    if w_start is None or w_end is None:
+    if w_start is None or w_end is None or w_end <= w_start:
         return None
     for band_start, band_end, discriminative in bands:
         if band_start > w_start:

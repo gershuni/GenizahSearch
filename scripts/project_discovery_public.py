@@ -555,7 +555,9 @@ def _project_discovery_identification(ctx: ProjectionContext) -> List[Dict[str, 
     return []
 
 
-def _materialize_public_identification(out_conn: sqlite3.Connection) -> int:
+def _materialize_public_identification(
+    out_conn: sqlite3.Connection, private_conn: sqlite3.Connection
+) -> int:
     """Run the PRIVATE builder's identification materializer against the public
     artifact, after its base tables are populated.
 
@@ -575,11 +577,28 @@ def _materialize_public_identification(out_conn: sqlite3.Connection) -> int:
     PUBLIC relation a function of the PUBLIC asset -- necessary, not cosmetic,
     because step 4's divergence ratio is a per-work aggregate whose denominators
     shrink with pruning. Copying the column instead would ship values that are
-    true of the private row population and false of this one."""
+    true of the private row population and false of this one.
+
+    Amendment 2026-08-13 (W): the matrix parameterization is no longer a
+    constant the materializer reaches for, so this passes the PRIVATE asset's
+    own -- read from its meta, which is the only authority for what an asset's
+    stored relations were produced under. Recomputing the public rows under
+    deploy 1 while copying a private meta that says otherwise would produce an
+    artifact that fails its OWN recompute gate.
+
+    Absent parameterization meta (a pre-C-track private asset) means deploy 1,
+    which is what such an asset was in fact built under."""
     import build_discovery_sidecar as builder  # local: avoid a module-load cycle
+    from shared import discovery_relation_matrix as relation_matrix
+
+    private_meta = dict(private_conn.execute("SELECT key, value FROM meta"))
+    if all(k in private_meta for k in relation_matrix.PARAMETERIZATION_META_KEYS):
+        parameterization = relation_matrix.parameterization_from_meta(private_meta)
+    else:
+        parameterization = relation_matrix.DEPLOY_1_PARAMETERIZATION
 
     out_conn.execute("DELETE FROM discovery_identification")
-    builder.populate_discovery_identification(out_conn)
+    builder.populate_discovery_identification(out_conn, parameterization)
     (n,) = out_conn.execute("SELECT COUNT(*) FROM discovery_identification").fetchone()
     return n
 
@@ -1043,7 +1062,7 @@ def project(
             # BEFORE _project_meta, which publishes its row count.
             if "discovery_identification" in projected_counts:
                 projected_counts["discovery_identification"] = (
-                    _materialize_public_identification(out_conn)
+                    _materialize_public_identification(out_conn, private_conn)
                 )
             # Amendment 2026-08-12 (Q): membership rows reference the
             # identification table, so their filtered copy runs only AFTER it

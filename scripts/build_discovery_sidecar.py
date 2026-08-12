@@ -2214,6 +2214,7 @@ def population_lock_meta_rows(lock: Dict, lock_sha256: str) -> List[Tuple[str, s
 
 def amendment_2026_08_12_meta_rows(
     conn: sqlite3.Connection, *, reference_corpus_sha256: Optional[str] = None,
+    parameterization: Optional["relation_matrix.MatrixParameterization"] = None,
 ) -> List[Tuple[str, str]]:
     """The CD-batch meta rows (schema Amendment 2026-08-12 (U)), computed by
     ONE function shared by the synthetic and real build paths so the two can
@@ -2234,8 +2235,14 @@ def amendment_2026_08_12_meta_rows(
     # were produced under. The verifier reconstructs it from HERE rather than
     # assuming deploy 1 -- a gate that recomputes under its own assumptions
     # would silently pass rows stored under different ones.
+    #
+    # Amendment 2026-08-13 (W): the SAME value the materializer recomputed
+    # under, passed by the caller. These two used to name the constant
+    # independently, which was safe only while it WAS a constant -- the moment a
+    # bake can carry a threshold, two independent references are two chances to
+    # declare one parameterization and store another.
     rows.extend(relation_matrix.parameterization_meta_rows(
-        relation_matrix.DEPLOY_1_PARAMETERIZATION))
+        parameterization or relation_matrix.DEPLOY_1_PARAMETERIZATION))
     return rows
 
 
@@ -5127,7 +5134,10 @@ def _page_competition_index(
     return index
 
 
-def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
+def populate_discovery_identification(
+    conn: sqlite3.Connection,
+    parameterization: Optional["relation_matrix.MatrixParameterization"] = None,
+) -> Dict:
     """Materialize `discovery_identification` -- ONE row per
     `(sys_id, canonical_work_id)`, grouping all of that identification's
     page-claims.
@@ -5345,8 +5355,20 @@ def populate_discovery_identification(conn: sqlite3.Connection) -> Dict:
     # C-track / Contract 1: replace the fail-closed placeholder with the
     # matrix's verdict, computed over the now-complete table by the ONE shared
     # implementation the verifier recomputes with.
+    # Amendment 2026-08-13 (W): the parameterization is an ARGUMENT, not a
+    # constant. It was hardcoded to deploy 1, which meant neither open parameter
+    # -- the QUOTER threshold nor step 3's activation -- could be expressed by a
+    # bake at all, so an owner ruling on either was unshippable until this knob
+    # existed. `None` keeps deploy 1, so every existing caller is unchanged.
+    #
+    # The PROJECTOR must pass the private asset's own value, or the public asset
+    # would be recomputed under a different parameterization than its (copied)
+    # meta declares. That is not merely convention: the release verifier
+    # recomputes each asset under the parameterization ITS meta names, so a
+    # projector passing the wrong one produces an artifact that fails its own
+    # recompute gate.
     relation_counts = relation_matrix.recompute_and_store(
-        conn, relation_matrix.DEPLOY_1_PARAMETERIZATION
+        conn, parameterization or relation_matrix.DEPLOY_1_PARAMETERIZATION
     )
 
     counts = assert_identification_grain_consistent(conn)
@@ -7312,6 +7334,10 @@ def finalize_build(
     # locus tables, but REQUIRES `reference_corpus_sha256` -- its ingest refuses
     # an unpinned bake rather than shipping offsets against an unnamed stream.
     region_band_path=None,
+    # Amendment 2026-08-13 (W): Contract 1's two OPEN parameters, as a bake
+    # input. `None` is deploy 1 (the owner's 2026-08-11 ruling), so an existing
+    # caller is byte-for-byte unchanged.
+    relation_parameterization=None,
 ) -> Dict:
     """Orchestrate the REAL distillation end to end (F13 order): distill
     (claims/evidence, NO physical-MS collapse) -> `build_witness_units` ->
@@ -7868,7 +7894,8 @@ def finalize_build(
             contract1_input_meta_rows.extend(ingest_region_band(
                 out_conn, region_band_path, reference_corpus_sha256))
 
-        identification_stats = populate_discovery_identification(out_conn)
+        identification_stats = populate_discovery_identification(
+            out_conn, relation_parameterization)
         identification_stats.update(
             populate_manuscript_display(out_conn, libraries_csv_path)
         )
@@ -8025,7 +8052,8 @@ def finalize_build(
         # CD batch / Amendment 2026-08-12 (U): marker + per-table counts +
         # the Contract-0 bake-side basis pin (when supplied).
         meta_rows.extend(amendment_2026_08_12_meta_rows(
-            out_conn, reference_corpus_sha256=reference_corpus_sha256))
+            out_conn, reference_corpus_sha256=reference_corpus_sha256,
+            parameterization=relation_parameterization))
         # Amendment 2026-08-12 (S): the population lock's copied constants.
         if population_lock_path:
             with open(population_lock_path, encoding="utf-8") as fh:
@@ -8364,6 +8392,19 @@ def build_parser() -> argparse.ArgumentParser:
                              "of locus units, so it needs NO locus import. REQUIRES "
                              "--reference-corpus-sha256 and refuses a file measured "
                              "against a different stream.")
+    v2_group.add_argument("--quoter-threshold", metavar="RATIO", type=float, default=None,
+                        help="Contract 1 matrix step 4a (Amendment 2026-08-13 (W)): the "
+                             "work-divergence threshold T in (0, 1]. OMITTED = deploy 1, "
+                             "where the arm cannot fire. Recorded in meta as "
+                             "relation_matrix_quoter_threshold and recomputed against by "
+                             "the release verifier. An owner ruling on T is unshippable "
+                             "without this flag.")
+    v2_group.add_argument("--region-active", action="store_true",
+                        help="Contract 1 matrix step 3 (Amendment 2026-08-13 (W)): "
+                             "activate the region step. Requires a region source -- with "
+                             "an empty discovery_region_band the build FAILS "
+                             "(RegionInputUnavailable) rather than recomputing "
+                             "region-blind. Default OFF, the owner's 2026-08-11 ruling.")
     v2_group.add_argument("--population-lock", metavar="PATH", default=None,
                         help="Tracked population-lock JSON (schema Amendment 2026-08-12 (S), "
                              "scripts/emit_population_lock.py). Constants are COPIED into "
@@ -8405,6 +8446,16 @@ def main(argv=None) -> int:
     if args.golden is None and args.smoke is None and args.db_path is None:
         parser.error("db_path is required unless --smoke N or --golden PATH is given")
 
+    # Amendment 2026-08-13 (W): the fixture generators build at deploy 1 on
+    # purpose -- the golden fixture is a release-contract artifact and its hashes
+    # are pinned. Refusing the combination is the point: silently ignoring a
+    # threshold someone asked for is how a fixture ends up disagreeing with the
+    # parameterization its own meta declares.
+    if (args.golden is not None or args.smoke is not None) and (
+            args.quoter_threshold is not None or args.region_active):
+        parser.error(
+            "--quoter-threshold/--region-active are build parameters and do not "
+            "apply to --golden/--smoke, which generate deploy-1 fixtures")
     if args.golden is not None:
         return _write_golden(args.golden)
     if args.smoke is not None:
@@ -8512,6 +8563,12 @@ def main(argv=None) -> int:
         curated_quoter_path=args.curated_quoter,
         region_map_path=args.region_map,
         region_band_path=args.region_band,
+        # Constructed here rather than defaulted inside, so an out-of-domain
+        # threshold is refused by the dataclass at the CLI boundary instead of
+        # midway through a bake. Both defaults reproduce deploy 1 exactly.
+        relation_parameterization=relation_matrix.MatrixParameterization(
+            region_active=args.region_active,
+            quoter_threshold=args.quoter_threshold),
     )
     print(f"real build OK: {stats['row_counts']}")
     print(f"novelty={stats['novelty']}")

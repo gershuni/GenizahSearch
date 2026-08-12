@@ -183,6 +183,20 @@ def test_an_unplaceable_row_is_covered_by_nothing():
     assert matrix.covering_verdict([(0, 10 ** 9, 0)], 5, None) is None
 
 
+def test_a_malformed_witness_span_is_unplaceable_not_covered():
+    """`discovery_evidence.w_start`/`w_end` carry NO CHECK constraint (the band
+    table does). A degenerate or inverted witness span would otherwise satisfy
+    `band_start <= w_start and w_end <= band_end` and produce a CONFIDENT verdict
+    about a footprint that means nothing — an unwarranted demotion from a
+    malformed operand. Nothing emits such a row today; this is what stops that
+    fact from being load-bearing. (Adversarial review 2026-08-13.)"""
+    assert matrix.covering_verdict([(0, 100, 1)], 100, 100) is None   # degenerate
+    assert matrix.covering_verdict([(0, 100, 1)], 150, 50) is None    # inverted
+    assert matrix.covering_verdict([(0, 100, 0)], 60, 40) is None
+    # Control: the same band still answers for a well-formed span inside it.
+    assert matrix.covering_verdict([(0, 100, 1)], 40, 60) == 1
+
+
 def test_a_row_covered_by_no_band_returns_none():
     assert matrix.covering_verdict([(100, 200, 0)], 900, 950) is None
     assert matrix.covering_verdict([], 900, 950) is None

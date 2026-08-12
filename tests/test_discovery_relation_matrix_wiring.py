@@ -304,7 +304,11 @@ def test_the_grain_is_rematerialized_after_every_base_table_is_populated():
 
     src = Path(proj.__file__).read_text(encoding="utf-8")
     loop = src.index("for table in sorted(")
-    grain = src.index("_materialize_public_identification(out_conn)", loop)
+    # Matched on the call's NAME rather than its full argument list: the
+    # signature grew a `private_conn` in Amendment 2026-08-13 (W), and a
+    # source-text assertion that pins arguments it does not care about breaks on
+    # every unrelated signature change while proving nothing extra.
+    grain = src.index("_materialize_public_identification(out_conn", loop)
     membership = src.index("_materialize_public_stratum_membership(", grain)
     assert loop < grain < membership, (
         "the identification rematerialization must follow the generic insert "
@@ -381,5 +385,161 @@ def test_the_projected_asset_passes_its_own_recompute_gate(tmp_path):
     try:
         assert verify_mod.check_relation_matrix_recompute(out, _meta(out)) == []
         assert _meta(out).get("relation_matrix_version") == matrix.MATRIX_VERSION
+    finally:
+        out.close()
+
+
+# ---------------------------------------------------------------------------
+# 4. Amendment 2026-08-13 (W) — the parameterization is a BAKE INPUT
+#
+# It was hardcoded to deploy 1 in two independent places (the materializer and
+# the meta writer), which meant an owner ruling on either open parameter -- the
+# QUOTER threshold or step 3's activation -- could not be expressed by a bake at
+# all. These pin that the knob exists, that its default changes nothing, and
+# that the projector honours the PRIVATE asset's value rather than the constant.
+# ---------------------------------------------------------------------------
+
+def test_the_default_parameterization_is_still_deploy_1(asset):
+    """The knob must be invisible to every existing caller."""
+    census_default = matrix.recompute_and_store(asset)
+    stored_default = dict(asset.execute(
+        "SELECT identification_id, rendered_relation FROM discovery_identification"))
+    census_explicit = matrix.recompute_and_store(asset, matrix.DEPLOY_1_PARAMETERIZATION)
+    stored_explicit = dict(asset.execute(
+        "SELECT identification_id, rendered_relation FROM discovery_identification"))
+    assert census_default == census_explicit
+    assert stored_default == stored_explicit
+
+
+def test_a_threshold_bake_stores_the_threshold_it_recomputed_under(tmp_path):
+    """The materializer and the meta writer used to name `DEPLOY_1` separately.
+    That is safe only while it IS a constant: the moment a bake can carry a
+    threshold, two independent references are two chances to declare one
+    parameterization and store values produced under another. Here they must
+    agree, and the verifier -- which recomputes under what META says -- is what
+    proves they did."""
+    db = tmp_path / "t.db"
+    _build_synthetic(db)
+    conn = sqlite3.connect(str(db))
+    try:
+        param = matrix.MatrixParameterization(region_active=False, quoter_threshold=0.5)
+        # The materializer INSERTs the whole grain, so it runs against an empty
+        # table -- the same DELETE-then-materialize the projector does.
+        conn.execute("DELETE FROM discovery_identification")
+        sidecar_build.populate_discovery_identification(conn, param)
+        conn.execute("UPDATE discovery_identification SET max_coverage_ppm = 500000")
+        # Step 4a needs a work whose divergence ratio actually clears T, or the
+        # threshold changes nothing and the control below proves nothing. The
+        # synthetic asset's largest work carries THREE identifications against a
+        # floor of five, so the fixture is reshaped rather than hoped over:
+        # WORK_DIVERGENCE_MIN_DENOMINATOR rows on distinct sys_ids are moved onto
+        # one canonical work and marked divergent.
+        floor = matrix.WORK_DIVERGENCE_MIN_DENOMINATOR
+        canonical = "w000001"
+        # Clear the target work FIRST. Moving rows onto it before clearing would
+        # delete the very rows the update then wants to convert, and leave the
+        # work below the floor -- which is how this was written the first time,
+        # and the guard below is what said so.
+        conn.execute("DELETE FROM discovery_identification "
+                     "WHERE canonical_work_id = ?", (canonical,))
+        targets = [r[0] for r in conn.execute(
+            "SELECT MIN(identification_id) FROM discovery_identification "
+            "GROUP BY sys_id ORDER BY sys_id LIMIT ?", (floor + 1,))]
+        assert len(targets) > floor, "not enough distinct sys_ids in the fixture"
+        conn.execute(
+            "UPDATE discovery_identification "
+            "SET canonical_work_id = ?, novelty_status = 'diverges_work', "
+            "    relation_kind = ?, max_coverage_ppm = 500000 "
+            "WHERE identification_id IN ({})".format(",".join("?" * len(targets))),
+            (canonical, ids.CLAIM_TYPE_DIRECT_WITNESS, *targets))
+        (n_checked,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification "
+            "WHERE canonical_work_id = ?", (canonical,)).fetchone()
+        assert n_checked >= floor, (
+            "the fixture cannot make step 4a fire, so this test cannot prove "
+            "the threshold reached the stored values")
+        matrix.recompute_and_store(conn, param)
+        (n_quoted,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification "
+            "WHERE canonical_work_id = ? AND rendered_relation = ?",
+            (canonical, ids.RENDERED_RELATION_QUOTES_THIS_WORK)).fetchone()
+        assert n_quoted == n_checked, "T=0.5 did not actually move these rows"
+        for key, value in sidecar_build.amendment_2026_08_12_meta_rows(
+                conn, parameterization=param):
+            conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+            conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, value))
+        conn.commit()
+
+        meta = _meta(conn)
+        assert meta["relation_matrix_quoter_threshold"] == repr(0.5)
+        assert verify_mod.check_relation_matrix_recompute(conn, meta) == []
+
+        # The control: recompute under deploy 1 while meta still says T=0.5, and
+        # the gate must object. Without this the assertion above would pass on
+        # any pair of self-consistent numbers.
+        matrix.recompute_and_store(conn, matrix.DEPLOY_1_PARAMETERIZATION)
+        conn.commit()
+        assert verify_mod.check_relation_matrix_recompute(conn, meta), (
+            "the gate accepted values recomputed under a parameterization its "
+            "own meta does not name")
+    finally:
+        conn.close()
+
+
+def test_region_active_with_no_bands_stops_a_real_bake(tmp_path):
+    """Activating step 3 on an asset with no region source must FAIL the build,
+    not silently recompute region-blind -- through the real materializer, not
+    only through the matrix module."""
+    db = tmp_path / "r.db"
+    _build_synthetic(db)
+    conn = sqlite3.connect(str(db))
+    try:
+        param = matrix.MatrixParameterization(region_active=True, quoter_threshold=None)
+        conn.execute("DELETE FROM discovery_identification")
+        with pytest.raises(matrix.RegionInputUnavailable):
+            sidecar_build.populate_discovery_identification(conn, param)
+    finally:
+        conn.close()
+
+
+def test_the_projector_recomputes_under_the_PRIVATE_assets_parameterization(tmp_path):
+    """THE property the projector's new argument exists for.
+
+    The public asset COPIES the three parameterization meta keys from the
+    private one, and the release verifier recomputes each asset under the
+    parameterization its own meta names. So a projector that recomputed under
+    deploy 1 while copying a meta saying T=0.5 would emit an artifact that fails
+    its OWN gate -- which is exactly what this asserts, by shipping a private
+    asset at a non-default threshold and checking the public one end to end."""
+    import project_discovery_public as proj
+
+    private = tmp_path / "private.db"
+    _build_synthetic(private)
+    conn = sqlite3.connect(str(private))
+    try:
+        param = matrix.MatrixParameterization(region_active=False, quoter_threshold=0.5)
+        conn.execute("DELETE FROM discovery_identification")
+        sidecar_build.populate_discovery_identification(conn, param)
+        conn.execute("UPDATE discovery_identification SET max_coverage_ppm = 500000")
+        matrix.recompute_and_store(conn, param)
+        for key, value in matrix.parameterization_meta_rows(param):
+            conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+            conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, value))
+        conn.commit()
+    finally:
+        conn.close()
+
+    public = tmp_path / "public.db"
+    proj.project(str(private), str(public),
+                 masking_patterns=["ZZ-MATRIX-WIRING-DISPOSABLE-MARKER-ZZ"])
+    out = sqlite3.connect(str(public))
+    try:
+        meta = _meta(out)
+        assert meta["relation_matrix_quoter_threshold"] == repr(0.5), (
+            "the public asset must carry the private asset's parameterization")
+        assert verify_mod.check_relation_matrix_recompute(out, meta) == [], (
+            "the public asset's stored relations disagree with the "
+            "parameterization its own meta declares -- the projector recomputed "
+            "under a different one")
     finally:
         out.close()

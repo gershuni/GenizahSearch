@@ -476,6 +476,42 @@ ahead of steps 4, 5 and 6, so rows that previously rendered `quotes_this_work` (
 private variant that is 42 and 382 rows respectively. That is the frozen order doing
 what it says, not a new rule.
 
+## 5c. Amendment 2026-08-13 (W) — the parameterization is a BAKE INPUT
+
+*§2's two open parameters could not be expressed by a bake at all. This changes no
+semantics; it makes a ruling on either one shippable.*
+
+`DEPLOY_1_PARAMETERIZATION` was named as a CONSTANT in two independent places —
+the materializer (`populate_discovery_identification`) and the meta writer
+(`amendment_2026_08_12_meta_rows`). So §5's whole "what A0b ratifies" section
+priced parameters that no build could carry: **whichever way the owner rules on
+the QUOTER threshold, shipping it needed this knob first.** Now:
+
+- `--quoter-threshold RATIO` and `--region-active` are build inputs; both default
+  to deploy 1, so an existing caller is byte-for-byte unchanged (verified: the
+  golden fixture regenerates to the same `content_hash` and `frame_content_hash`).
+- The two references become ONE argument. Naming the constant twice was safe only
+  while it WAS a constant — once a bake can carry a threshold, two independent
+  references are two chances to declare one parameterization in meta and store
+  values produced under another.
+- **The projector reads the PRIVATE asset's parameterization from its meta** and
+  materializes the public grain under it. It previously took the constant, which
+  was correct only because deploy 1 was the only reachable value. The failure
+  mode is not theoretical: the public asset COPIES the three parameterization
+  meta keys, and the release verifier recomputes each asset under the
+  parameterization ITS meta names — so a projector using the wrong one emits an
+  artifact that fails its own recompute gate.
+- `--golden`/`--smoke` REFUSE the flags rather than ignoring them. Those generate
+  release-contract fixtures at deploy 1 and their hashes are pinned; silently
+  dropping a threshold someone asked for is how a fixture comes to disagree with
+  the parameterization its own meta declares.
+
+Pinned by `tests/test_discovery_relation_matrix_wiring.py` §4, including the
+control that matters — recompute under deploy 1 while meta says `T=0.5` and the
+verifier must object. That control needed the synthetic fixture RESHAPED: its
+largest work carries three identifications against step 4a's floor of five, so
+without the reshape the threshold moved nothing and the control proved nothing.
+
 ## 6. Provenance
 
 Measurements: `_tmp/CONTRACT1-matrix-findings.md` (inputs, frontier, §7.6 aggregate
