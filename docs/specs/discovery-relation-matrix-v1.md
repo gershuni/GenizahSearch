@@ -252,11 +252,19 @@ Adjacent owner items riding the same sitting (not matrix parameters): the expans
 honesty cue (catalogue-disagree rows are ~two-in-three false — the yardstick stays OUT of
 adjudication either way), and A0b's Contract-2/3 floor ratifications.
 
-**⟨ADDED 2026-08-12b — a new adjacent item, measured⟩ Does the expansion pane apply D-13g
-eligibility?** It applies NO routing predicate today, so a claim whose *display* evidence is
-`review_only` appears on the pane. The other three read paths now share one clause; this one
-is deliberately left on its current behaviour because changing it changes what the pane
-claims. Measured on the served asset (`discovery-v3-PUBLIC`, 2026-08-12):
+**⟨ADDED 2026-08-12b, then RULED the same day⟩ The expansion pane keeps every row; the
+matrix labels them.** The question was first posed as "should the pane apply D-13g
+eligibility", i.e. hide rows whose *display* evidence is `review_only`. **Owner ruling
+2026-08-12: no — publication is not gated on human review.** That settles the eligibility
+axis: `_build_work_witnesses_ranked_cte_sql` keeps `ELIGIBILITY_ALL`, and the numbers below
+are recorded as the cost of the road NOT taken, not as pending work.
+
+Note for anyone re-reading the term: `routing_status = 'review_only'` is the ROUTER's
+verdict. Human review is the orthogonal `adjudication_status` axis. No row here is waiting
+on a person, and hiding them would not have created a review queue — it would simply have
+removed them.
+
+Measured on the served asset (`discovery-v3-PUBLIC`, 2026-08-12):
 
 | | today | under D-13g |
 |---|---:|---:|
@@ -266,13 +274,32 @@ claims. Measured on the served asset (`discovery-v3-PUBLIC`, 2026-08-12):
 
 80,718 CTE rows are review_only display evidence — 65,719 `gen2_parallel_surface`, 14,213
 `gen2_router_not_shipped`, 786 `later_shared_text`. 39,636 (work, unit) pairs are reachable
-ONLY through such a row, so they are real losses, not duplicates of eligible rows. 589 of 613
-works' counts change. The two curated Yalkut works lose ~84% of their pane presence
-(w001384 1,752 → 273; w001383 1,126 → 184), which is worth noticing next to the curated
-ruling: much of what those works contribute to the pane is gen-2 parallel-surface material
-the router deliberately did not ship. Implementation is one argument
-(`_build_work_witnesses_ranked_cte_sql(eligibility=...)`); the ruling and its number belong
-in the same commit.
+ONLY through such a row. 589 of 613 works' counts would have changed and 58 panes would have
+emptied; the two curated Yalkut works would have lost ~84% of their pane presence
+(w001384 1,752 → 273; w001383 1,126 → 184).
+
+**§5a.1 What the ruling leaves open, and it is a REAL gap in §3.2.** Keeping the rows means
+each one still has to render something, and 39,036 of those 39,636 pairs **have no published
+identification at all** (measured: of 80,718 ineligible-display rows, 28,208 have an
+identification and 52,510 do not). §3.2's cap rule assumes an identification whose verdict
+can cap the member; here there is none to cap against. Today's behaviour fills the gap with
+the raw `claim_type`, which means the pane currently asserts:
+
+| what the pane prints today | rows | of which no published identification |
+|---|---:|---:|
+| "Direct match" on `gen2_parallel_surface` | 35,754 | 19,981 |
+| "Partial match" on `gen2_parallel_surface` | 29,965 | 18,848 |
+| "Partial match" on `gen2_router_not_shipped` | 11,642 | 10,845 |
+| "Direct match" on `gen2_router_not_shipped` | 2,571 | 2,386 |
+| `later_shared_text` (both types) | 786 | 450 |
+
+**Resolution, from §2's own missing-input rule rather than a new decision:** "stored
+`relation_kind` absent → `uncertain`". A pane row with no published identification has no
+identification-grain relation, so it renders `uncertain` — "Needs review" / "דורש בדיקה" —
+and keeps its place, its link, and its counts. That is the fail-closed reading of §3.2
+extended to the case §3.2 did not name, and it is what makes the ruling above safe: the rows
+stay visible, and they stop being called direct matches. It lands with C-track's surface
+half; A0b ratifies the wording, not the semantics.
 
 ## 5a. Amendment 2026-08-12b — the curated list is ruled, and the matrix is implemented
 
