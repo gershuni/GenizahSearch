@@ -34,7 +34,10 @@ Work-side sources, by edition class (crosswalk ref-id prefix):
          work side is dropped for that work -- never silently approximated.
   J:     per_doc raw file (whole file, header included -- matching the
          builder), exact offsets, same stream-equality assert.
-  M:     Tanakh only, re-projection (above); everything else -> no work pane.
+  M:     re-projection (above) into the public targets named by
+         `_REPROJECTION_KEY_PREFIXES` -- Tanakh (REF-3) plus Bavli / Mishnah /
+         Yerushalmi / Tosefta (REF-4, 2026-08-13); everything else -> no work
+         pane.
 
 Usage (all inputs explicit -- no defaults for asset paths, per the
 stage_cd_preview lesson that a defaulted path silently stages stale data):
@@ -53,6 +56,7 @@ import difflib
 import hashlib
 import json
 import pickle
+import re
 import shutil
 import sqlite3
 import sys
@@ -190,21 +194,31 @@ class WorkSources:
         return self._cache[ref_id]
 
 
-class TanakhTargets:
-    """Sefaria Tanakh books as re-projection targets, keyed by the masked
-    work's neutral_title (exact match, verified 39/39 in the design probe)."""
+#: Manifest key prefixes whose entries are PUBLIC re-projection targets.
+#: `tanakh_` came with REF-3 (39/39 exact-title match, the design probe);
+#: the four rabbinic corpora came with REF-4 (owner, 2026-08-13: "Add the
+#: wiksource talmudic works") -- 170 tractates fetched with the same
+#: license-ranked machinery, `title_he` set to the works table's EXACT
+#: neutral_title so this same lookup covers them with no new mapping.
+_REPROJECTION_KEY_PREFIXES = (
+    "tanakh_", "bavli_", "mishnah_", "yerushalmi_", "tosefta_")
+
+
+class ReprojectionTargets:
+    """Public Sefaria editions as re-projection targets, keyed by the masked
+    work's neutral_title (exact match)."""
 
     def __init__(self, refs_staging: Path, man_by_key: Dict[str, dict]):
         self.refs_staging = refs_staging
         self.key_by_title = {
             e["title_he"]: e["key"] for e in man_by_key.values()
-            if e["key"].startswith("tanakh_")
+            if e["key"].startswith(_REPROJECTION_KEY_PREFIXES)
         }
         self.man_by_key = man_by_key
         self._cache: Dict[str, Optional[Tuple[str, str, object]]] = {}
 
     def for_title(self, neutral_title: str) -> Optional[Tuple[str, str, object]]:
-        """-> (tanakh_key, nfc_text, offsets_with_stream) or None."""
+        """-> (target_key, nfc_text, offsets_with_stream) or None."""
         key = self.key_by_title.get(neutral_title or "")
         if not key:
             return None
@@ -216,6 +230,35 @@ class TanakhTargets:
             self._cache[key] = (nfc, stream, offs)
         nfc, stream, offs = self._cache[key]
         return key, nfc, (stream, offs)
+
+
+#: The J-corpus per_doc structural markers -- `+פסוק~ +כב~`-style label/value
+#: tokens (`+` prefix, `~` suffix). Measured over all 92 per_doc files:
+#: 1,743 distinct tokens, and OUTSIDE this grammar the corpus contains only
+#: three stray `+~` pairs -- `+` and `~` are never content characters, which
+#: is what licenses removing them wholesale.
+_JA_MARKER_RE = re.compile(r"\+[^+~\n]{0,40}~")
+
+
+def clean_ja_markers(text: Optional[str]) -> Optional[str]:
+    """Strip per_doc structural markers from a J-corpus DISPLAY piece.
+
+    Display-only, applied AFTER slicing and BEFORE the word-highlight pass
+    (owner, 2026-08-13: the edition pane showed raw `+פסוק~ +כב~` tokens).
+    The marker letters live inside the matcher's coordinate stream, so the
+    stream and the stored offsets are never touched -- only the already-cut
+    piece text loses them. The two boundary rules handle a token the piece
+    slice cut in half; safe because `~` never appears as content.
+    """
+    if not text or ("+" not in text and "~" not in text):
+        return text
+    s = _JA_MARKER_RE.sub("", text)
+    s = re.sub(r"^[^+~\n]{0,40}~", "", s)    # token cut at the piece start
+    s = re.sub(r"\+[^+~\n]{0,40}$", "", s)   # token cut at the piece end
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    s = re.sub(r" ?\n ?", "\n", s)
+    s = re.sub(r"\n{2,}", "\n", s)           # marker-only lines vanish
+    return s.strip(" ")
 
 
 def _word_tokens(text: str) -> List[Tuple[int, int, str]]:
@@ -364,7 +407,7 @@ def main() -> int:
     counters: Counter = Counter()
     sources = WorkSources(refs_staging, Path(args.ja_dir), man_by_key,
                           pkl_stream, counters)
-    tanakh = TanakhTargets(refs_staging, man_by_key)
+    targets = ReprojectionTargets(refs_staging, man_by_key)
 
     shutil.copyfile(src, out)
     conn = sqlite3.connect(out)
@@ -436,7 +479,7 @@ def main() -> int:
         if r["w_start"] is None or r["w_end"] is None or not refs:
             counters["work_no_offsets_or_refs"] += 1
         elif kinds == {"M"}:
-            target = tanakh.for_title(titles.get(work_id, ""))
+            target = targets.for_title(titles.get(work_id, ""))
             mstream = pkl_stream.get(refs[0])
             if target is None:
                 counters["work_masked_no_target"] += 1
@@ -473,6 +516,13 @@ def main() -> int:
                 wsrc = "direct"
                 if refs[0].startswith("REF2:"):
                     attribution = man_by_key[refs[0][5:]].get("attribution_text")
+                elif refs[0].startswith("J:"):
+                    # Structural markers out of the DISPLAY pieces, before
+                    # the highlight pass reads them (owner, 2026-08-13).
+                    cleaned = tuple(clean_ja_markers(x) for x in (wb, ws, wa))
+                    if cleaned != (wb, ws, wa):
+                        counters["ja_markers_cleaned"] += 1
+                    wb, ws, wa = cleaned
                 counters["work_direct"] += 1
 
         # The word-level parallel highlight (owner, 2026-08-13 round 2):
