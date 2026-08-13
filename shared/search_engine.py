@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import threading
+import time
 import weakref
 import html
 import json
@@ -2232,6 +2233,7 @@ class SearchEngine:
         return results
 
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all"):
+        search_started = time.perf_counter()
         # R2-#1: discard any stale per-thread downgrade signal from a prior
         # invocation (e.g., a prior request that crashed before consuming).
         # Keeps the signal one-shot per execute_search call, so it cannot
@@ -2548,6 +2550,7 @@ class SearchEngine:
         if search_field != 'content' and _has_wildcard_component:
             search_field = 'content'
 
+        tantivy_started = time.perf_counter()
         try:
             query = self.index.parse_query(t_query_str, [search_field])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
@@ -2559,6 +2562,7 @@ class SearchEngine:
             LOGGER.warning("Search query failed to parse/execute for pattern %s: %s", t_query_str, e)
             return []
 
+        tantivy_elapsed_ms = (time.perf_counter() - tantivy_started) * 1000.0
         hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
         LOGGER.debug(f"Tantivy returned {total_hits} hits")
@@ -2576,6 +2580,7 @@ class SearchEngine:
                 for page in browse_map.get(sid, []):
                     restrict_uids.add(page['uid'])
 
+        materialize_started = time.perf_counter()
         try:
             for i, (score, doc_addr) in enumerate(hits):
                 if progress_callback and i % 5 == 0:
@@ -2671,6 +2676,7 @@ class SearchEngine:
             was_interrupted = True
             LOGGER.debug(f"Search interrupted at hit {i}/{total_hits}, found {len(results)} results so far")
 
+        materialize_elapsed_ms = (time.perf_counter() - materialize_started) * 1000.0
         LOGGER.debug(f"Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(results)
 
@@ -2679,7 +2685,9 @@ class SearchEngine:
         # otherwise DROP LOCAL hits. RRF k=60 used (BM25 IDF from two independent
         # indexes is not comparable; raw score sort would mis-rank — Codex revision).
         # Phase 95 smoke-fix (item 2): skip LOCAL merge when corpus_scope='genizah'.
+        local_merge_elapsed_ms = 0.0
         if corpus_scope != "genizah" and getattr(self, "local_searcher", None) is not None:
+            local_merge_started = time.perf_counter()
             try:
                 # Phase 95-05 follow-up: reuse the main path's already-built,
                 # operator-expanded Responsa candidate query (captured above, pre-
@@ -2702,6 +2710,7 @@ class SearchEngine:
                 local_hits = []
             if local_hits:
                 deduped = self._rrf_merge(deduped, local_hits, k=RRF_K)
+            local_merge_elapsed_ms = (time.perf_counter() - local_merge_started) * 1000.0
         # End Phase 95 D-08 LOCAL merge.
 
         # --- Apply Exclusion Filter (NOT Filter) ---
@@ -2724,6 +2733,13 @@ class SearchEngine:
             deduped = filtered
 
         LOGGER.debug(f"Results after dedup & filtering: {len(deduped)}")
+        LOGGER.info(
+            "search_perf mode=%s scope=%s candidates=%d regex_kept=%d final=%d "
+            "tantivy_ms=%.0f materialize_ms=%.0f local_merge_ms=%.0f total_ms=%.0f",
+            mode, corpus_scope, total_hits, len(results), len(deduped),
+            tantivy_elapsed_ms, materialize_elapsed_ms, local_merge_elapsed_ms,
+            (time.perf_counter() - search_started) * 1000.0,
+        )
 
         # --- Attach Responsa explosion guard warning to first result ---
         # Phase 78 Concern #6: ALSO record on the thread-local so the

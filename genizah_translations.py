@@ -29,6 +29,7 @@ TRANSLATIONS = {
     "Stopped": "נעצר",
     "Stopping...": "עוצר...",
     "Search stopped": "החיפוש נעצר",
+    "Searches are busy. Please try again shortly.": "החיפושים עמוסים כרגע. נסו שוב בעוד זמן קצר.",
     "Reset": "אפס",
     "Unknown": "לא ידוע",
     "Unknown Shelfmark": "מספר מדף לא ידוע",

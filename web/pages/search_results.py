@@ -742,8 +742,6 @@ def create_result_card(search_state, refs, index, result):
                 if _joins_ie_id:
                     _joins_url += f'&volume_ie={_joins_ie_id}'
 
-                _joins_icon_ref = {'has_joins': False}
-
                 # WR-06: thread the result's pgpid through to create_joins_dialog
                 # so fetch_connected_fragments does not have to resolve it from
                 # document_id via an extra Supabase round-trip on every open. Use
@@ -757,10 +755,21 @@ def create_result_card(search_state, refs, index, result):
                 except Exception:
                     _joins_pgpid = None
 
-                def _open_joins_for_card(s=sys_id, sm=shelfmark, url=_joins_url,
-                                         ref=_joins_icon_ref, pid=_joins_pgpid):
-                    """D-21: joins exist → open dialog; none → open Lab in new tab."""
-                    if ref['has_joins']:
+                async def _open_joins_for_card(s=sys_id, sm=shelfmark, url=_joins_url,
+                                                pid=_joins_pgpid):
+                    """Fetch optional joins only after a visitor requests this card."""
+                    try:
+                        data = await run.io_bound(
+                            fetch_connected_fragments,
+                            shelfmark=sm,
+                            document_id=s,
+                            pgpid=pid,
+                        )
+                    except Exception:
+                        # The Lab remains useful when the optional lookup is unavailable.
+                        ui.navigate.to(url, new_tab=True)
+                        return
+                    if data.get('total_joins', 0) > 0:
                         create_joins_dialog(
                             shelfmark=sm,
                             document_id=s,
@@ -776,51 +785,6 @@ def create_result_card(search_state, refs, index, result):
                 ).props(f'flat round dense size=sm aria-label="{tr("Find Joins in the Joins Lab")}"').style(
                     'color: var(--neutral-400);'
                 ).tooltip(tr('Find Joins in the Joins Lab'))
-
-                async def _load_card_joins_count(s=sys_id, sm=shelfmark,
-                                                 btn=joins_btn, ref=_joins_icon_ref):
-                    """Load joins-presence hint off the event loop (Codex MEDIUM — synchronous I/O)."""
-                    try:
-                        data = await run.io_bound(
-                            fetch_connected_fragments,
-                            shelfmark=sm,
-                            document_id=s,
-                        )
-                        has = data.get('total_joins', 0) > 0
-                        ref['has_joins'] = has
-                        if has:
-                            btn.style('color: var(--primary-600);')
-                    except Exception:
-                        # #11: the joins-presence hint is best-effort and non-blocking.
-                        # On failure the button still opens the Lab; surface a quiet
-                        # tooltip so the user knows the hint itself didn't load.
-                        try:
-                            btn.tooltip(tr('Could not check for joins — open the Joins Lab to search'))
-                        except Exception:
-                            pass  # Icon stays neutral; acts as straight-to-Lab on failure
-
-                # Defer the joins-presence hint off the initial render. Use
-                # asyncio.call_later (NOT ui.timer): a card cleared by a new
-                # search before this fires would otherwise raise 'parent_slot
-                # has been deleted' inside NiceGUI's timer machinery (BEFORE the
-                # callback body runs, so an inner try/except can't catch it).
-                _card_client = ui.context.client
-
-                def _schedule_card_joins_count(_run=_load_card_joins_count, _client=_card_client):
-                    async def _runner():
-                        try:
-                            with _client:
-                                await _run()
-                        except RuntimeError:
-                            pass  # card slot deleted (navigation / new search) — benign
-                        except Exception:
-                            pass  # joins-presence hint is best-effort
-                    asyncio.ensure_future(_runner())
-
-                try:
-                    asyncio.get_event_loop().call_later(0.15, _schedule_card_joins_count)
-                except RuntimeError:
-                    pass  # NiceGUI lifecycle guard (no running loop / card gone)
 
         # Snippet — enrich with earlier chain terms if refinement is active
         if snippet:
@@ -840,7 +804,7 @@ def create_result_card(search_state, refs, index, result):
         expand_container.set_visibility(False)
         search_state.expansion_refs[index] = expand_container
 
-        # Build thumbnail URL eagerly (browser preloads in background)
+        # Build the URL now, but defer the hidden accordion's image request.
         _img_url = None
         if sys_id:
             page_idx = max(0, int(display.get('img', '1')) - 1) if display.get('img') else 0
@@ -900,7 +864,7 @@ def create_result_card(search_state, refs, index, result):
                         'click', lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
                     ):
                         ui.html(
-                            f'<img src="{_img_url}" '
+                            f'<img src="{_img_url}" loading="lazy" decoding="async" '
                             f'onerror="this.style.display=\'none\'" '
                             f'style="width: 200px; height: 250px; object-fit: contain; border-radius: 8px;" />',
                             sanitize=False

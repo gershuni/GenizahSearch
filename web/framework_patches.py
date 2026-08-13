@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import re
 
 from packaging.version import Version as _V
 
 import nicegui as _nicegui
+from nicegui.storage import RequestTrackingMiddleware as _NiceGUIRequestTrackingMiddleware
+from starlette.middleware.sessions import SessionMiddleware as _StarletteSessionMiddleware
 
 logger = logging.getLogger(__name__)
 _NV = _V(_nicegui.__version__)
@@ -25,10 +28,78 @@ _PATCH_AUDIT_THRESHOLD = _V('3.8.0')
 if _NV > _PATCH_AUDIT_THRESHOLD:
     logger.warning(
         'NiceGUI %s exceeds framework_patches audit threshold %s. '
-        'Re-audit upstream fixes for ESM is_file handler and <html lang> '
+        'Re-audit upstream fixes for static-asset sessions, ESM is_file handler, and <html lang> '
         'template, then bump _PATCH_AUDIT_THRESHOLD or remove obsolete patches.',
         _NV, _PATCH_AUDIT_THRESHOLD,
     )
+
+
+_VERSIONED_NICEGUI_ASSET_RE = re.compile(
+    r'^/_nicegui/[^/]+/(?:static|libraries|components|esm)(?:/|$)'
+)
+_CONTENT_HASHED_ATLAS_RE = re.compile(
+    r'^/atlas-data/atlas-v1-[0-9a-f]{12}\.bin$'
+)
+
+
+def _is_public_cacheable_asset_path(path: str) -> bool:
+    """Return whether ``path`` is public, session-free, and safe to CDN-cache.
+
+    Deliberately excluded: page HTML, APIs, auth, ``/_nicegui_ws``, NiceGUI
+    dynamic resources, and the mutable Atlas manifest. Those must retain normal
+    session behavior and/or revalidation semantics.
+    """
+    return (
+        path == '/favicon.ico'
+        or path == '/static'
+        or path.startswith('/static/')
+        or bool(_VERSIONED_NICEGUI_ASSET_RE.match(path))
+        or bool(_CONTENT_HASHED_ATLAS_RE.match(path))
+    )
+
+
+class _CacheSafeSessionMiddleware(_StarletteSessionMiddleware):
+    """Bypass cookie parsing/signing only for known-public immutable assets."""
+
+    async def __call__(self, scope, receive, send) -> None:
+        if (
+            scope.get('type') == 'http'
+            and _is_public_cacheable_asset_path(scope.get('path', ''))
+        ):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
+
+class _CacheSafeRequestTrackingMiddleware(_NiceGUIRequestTrackingMiddleware):
+    """Avoid creating NiceGUI user storage for public asset requests."""
+
+    async def dispatch(self, request, call_next):
+        if _is_public_cacheable_asset_path(request.url.path):
+            return await call_next(request)
+        return await super().dispatch(request, call_next)
+
+
+def _patch_static_asset_session_middleware() -> None:
+    """Install cache-safe NiceGUI middleware classes before ``ui.run``.
+
+    NiceGUI imports both middleware classes into ``nicegui.storage`` and later
+    constructs them inside ``set_storage_secret``. Replacing those two module
+    references here changes only the instances NiceGUI is about to install; it
+    does not monkey-patch Starlette globally.
+    """
+    if _NV > _PATCH_AUDIT_THRESHOLD:
+        logger.warning(
+            'Static asset session patch skipped: NiceGUI %s exceeds audited %s',
+            _NV, _PATCH_AUDIT_THRESHOLD,
+        )
+        return
+
+    import nicegui.storage as _storage
+
+    _storage.SessionMiddleware = _CacheSafeSessionMiddleware
+    _storage.RequestTrackingMiddleware = _CacheSafeRequestTrackingMiddleware
+    logger.debug('Static asset session patch applied (NiceGUI %s)', _NV)
 
 
 def _patch_nicegui_esm_handler() -> None:
@@ -110,6 +181,7 @@ def apply_all_patches() -> None:
     supported versions are logged at WARNING level so they surface in logs.
     """
     for name, fn in [
+        ('Static asset sessions', _patch_static_asset_session_middleware),
         ('ESM is_file', _patch_nicegui_esm_handler),
         ('HTML lang', _patch_html_lang_attribute),
     ]:

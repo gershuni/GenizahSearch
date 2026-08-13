@@ -51,6 +51,7 @@ from web.document_service import (
     get_sys_ids_with_transcriptions, get_sys_ids_with_pgp_text,
     get_fragments_by_tag, get_all_distinct_tags,
 )
+from web.search_load_control import enrichment_batch_slot, try_acquire_ui_search_slot
 from shared.fgp_service import get_sys_ids_with_fgp_sources
 from shared.transcription_service import union_manual_transcriptions
 from urllib.parse import quote
@@ -4870,7 +4871,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 logger.exception(f"Search Error: {e}")
                 return []
 
-        results = await run.io_bound(run_core_search)
+        # Protect the shared NiceGUI thread pool from bursts of independent
+        # browser sessions. The future, rather than this page coroutine, owns
+        # the release so a disconnected client cannot free a still-running job.
+        _core_slot_release = await try_acquire_ui_search_slot()
+        if _core_slot_release is None:
+            search_state.is_running = False
+            search_state.is_cancelled = False
+            search_state.progress = 0
+            search_btn.style('display: inline-flex;')
+            stop_btn.style('display: none;')
+            progress_bar.classes('opacity-0')
+            status_label.text = ''
+            ui.notify(tr('Searches are busy. Please try again shortly.'), type='warning', timeout=4000)
+            return
+        try:
+            _core_future = asyncio.get_running_loop().run_in_executor(
+                run.thread_pool, run_core_search,
+            )
+            _core_future.add_done_callback(
+                lambda _future, release=_core_slot_release: release()
+            )
+            _core_slot_release = None  # ownership transferred to the future callback
+            results = await _core_future
+        finally:
+            if _core_slot_release is not None:
+                _core_slot_release()
 
         # Handle validation errors from explosion guard (returned as sentinel dict
         # because run_core_search runs in io_bound thread and cannot call ui.notify)
@@ -5366,44 +5392,41 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         logger.info("Search perf: visible_enrichment_ms=%.0f (ids=%d)", (_t_stage1_done - _t_stage1) * 1000, len(visible_ids))
 
         # --- STAGE 2: Background-enrich remaining sys_ids in chunks ---
-        _t_stage2 = time.perf_counter()
         remaining_ids = all_sys_ids[PAGE_SIZE:]
-        if remaining_ids and search_state.search_generation == this_generation:
-            CHUNK_SIZE = 200
-            for chunk_start in range(0, len(remaining_ids), CHUNK_SIZE):
+
+        async def _enrich_remaining_results():
+            """Fill non-visible cards without holding up the completed search."""
+            _t_stage2 = time.perf_counter()
+            async with enrichment_batch_slot():
+                CHUNK_SIZE = 200
+                for chunk_start in range(0, len(remaining_ids), CHUNK_SIZE):
+                    if search_state.search_generation != this_generation:
+                        return  # A newer search owns the page now.
+                    chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
+                    bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids = await asyncio.gather(
+                        run.io_bound(collect_fjms_enrichment, chunk_ids),
+                        run.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
+                        run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
+                        run.io_bound(collect_vs_availability, chunk_ids),
+                        run.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
+                        run.io_bound(_web_fgp_sys_ids, chunk_ids),
+                    )
+                    if search_state.search_generation != this_generation:
+                        return
+                    bg_domains, bg_counts, bg_printed, bg_meas = bg_fjms_tuple
+                    search_state._measurement_cache.update(bg_meas)
+                    _process_domain_data(bg_domains)
+                    search_state.transcription_sys_ids |= bg_trans_ids
+                    search_state.manual_transcription_sys_ids |= union_manual_transcriptions(bg_pgp_text_ids, bg_fgp_ids)
+                    search_state.catalog_source_counts.update(bg_counts)
+                    search_state.printed_ids |= bg_printed
+                    search_state.translation_data.update(bg_trans_data)
+                    search_state.vs_availability.update(bg_vs)
+
                 if search_state.search_generation != this_generation:
-                    break  # New search started, abandon background enrichment
-                chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
-                bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids = await asyncio.gather(
-                    run.io_bound(collect_fjms_enrichment, chunk_ids),
-                    run.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
-                    run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
-                    run.io_bound(collect_vs_availability, chunk_ids),
-                    run.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
-                    run.io_bound(_web_fgp_sys_ids, chunk_ids),
-                )
-                if search_state.search_generation != this_generation:
-                    break
-                bg_domains, bg_counts, bg_printed, bg_meas = bg_fjms_tuple
-                search_state._measurement_cache.update(bg_meas)  # Phase 54
-                _process_domain_data(bg_domains)
-                search_state.transcription_sys_ids |= bg_trans_ids
-                search_state.manual_transcription_sys_ids |= union_manual_transcriptions(bg_pgp_text_ids, bg_fgp_ids)
-                search_state.catalog_source_counts.update(bg_counts)
-                search_state.printed_ids |= bg_printed
-                search_state.translation_data.update(bg_trans_data)
-                search_state.vs_availability.update(bg_vs)  # Phase 57
-            # Final UI update + re-render after all background chunks complete
-            # (P2 fix: apply filters/exclusions to newly discovered domains/printed IDs)
-            if search_state.search_generation == this_generation:
+                    return
                 _apply_enrichment_to_ui()
                 _render_with_filters(reset_expansion=False)
-                # Phase 94 EXPORT-META-06: re-sync export payload after all
-                # background-enriched chunks have folded their sys_ids into
-                # search_state. Single write covers all enriched data -- avoids
-                # N writes inside the chunk loop.
-                # Smoke verification round 2 (2026-05-21): re-sync the Hebrew
-                # domain_name_map alongside the other enrichment signals.
                 from web.export_state import update_search_export_enrichment
                 update_search_export_enrichment(
                     transcription_sys_ids=search_state.transcription_sys_ids,
@@ -5413,6 +5436,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 )
             _t_stage2_done = time.perf_counter()
             logger.info("Search perf: background_enrichment_ms=%.0f (ids=%d)", (_t_stage2_done - _t_stage2) * 1000, len(remaining_ids))
+
+        if remaining_ids and search_state.search_generation == this_generation:
+            async def _run_remaining_enrichment():
+                try:
+                    with _page_client:
+                        await _enrich_remaining_results()
+                except RuntimeError:
+                    # The page may be gone before its optional enrichment starts.
+                    pass
+                except Exception:
+                    logger.exception("Search background enrichment failed")
+
+            asyncio.ensure_future(_run_remaining_enrichment())
 
     # --- Restore Responsa state from URL parameters ---
     if initial_mode == 'responsa':
