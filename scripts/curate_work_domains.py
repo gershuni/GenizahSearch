@@ -332,33 +332,97 @@ def _open_ro(path: str) -> sqlite3.Connection:
 
 
 def load_worklist(asset_path: str) -> List[Dict[str, Any]]:
-    """Every CANONICAL work carrying at least one shipped claim.
+    """Every CANONICAL work REACHABLE from a public surface.
 
     Keyed on ``works.canonical_work_id`` so a duplicate work (the same work
     reachable under two source ids) is never assigned twice.  The canonical
     work's OWN title and author are carried (D-13a: the canonical work's own
     title wins).
+
+    Scope, and why it is not "shipped".
+
+    This function is the PRODUCER for a curated artifact whose CONSUMER is
+    ``verify_discovery_sidecar.check_works_genre_vocabulary``: every work that
+    check calls reachable must carry a genre, and a work absent from this
+    worklist gets no assignment, so the builder leaves ``works.genre`` NULL and
+    the check fails.  Producer scope and contract scope therefore have to be the
+    same set, and until 2026-08-13 they were not.
+
+    This originally selected works carrying at least one SHIPPED claim.  The
+    verifier's reachability is wider -- ``get_claims_for_page`` takes
+    ``include_review=True``, which drops the routing clause ENTIRELY
+    (``shared/discovery_service.py``), so the opt-in panel can return a work
+    whose every claim is review-only or unreviewed.  Reachable is "referenced by
+    ANY surviving claim, or present in ``discovery_identification``".
+
+    Measured on the deploy-1 candidate when the scope was widened: the shipped
+    scope covered 1,084 of 1,254 reachable canonical works private / 560 of 613
+    public, and the 170 / 53 it missed were EXACTLY the NULL-genre population the
+    verifier was failing on.  The rule table places all but 30 / 3 of them with
+    no new curation.
+
+    This is the same scope error, on the same asset, that
+    ``build_discovery_sidecar.assert_author_key_coverage`` was corrected for on
+    2026-08-04 (Codex code review finding 6) -- that check cited THIS
+    function's "at least one shipped claim" docstring as its justification for
+    scoping to shipped, then widened to reachability without the worklist
+    following.  Widening here also makes the alias artifact a superset, which
+    that check is satisfied by.
+
+    ``shipped_claims`` is retained on every row and is now genuinely 0 for some
+    of them; it is reporting metadata (``build_report``), never a filter.
     """
     conn = _open_ro(asset_path)
     try:
         works = {r["work_id"]: dict(r) for r in conn.execute("SELECT * FROM works")}
-        rows = conn.execute(
-            """
-            SELECT w.canonical_work_id AS cw,
-                   COUNT(DISTINCT dc.claim_id) AS shipped_claims
-              FROM discovery_claim dc
-              JOIN works w ON w.work_id = dc.work_id
-              JOIN discovery_evidence e ON e.claim_id = dc.claim_id
-             WHERE e.routing_status = 'shipped'
-             GROUP BY 1
-            """
-        ).fetchall()
+        shipped = {
+            r["cw"]: int(r["shipped_claims"])
+            for r in conn.execute(
+                """
+                SELECT w.canonical_work_id AS cw,
+                       COUNT(DISTINCT dc.claim_id) AS shipped_claims
+                  FROM discovery_claim dc
+                  JOIN works w ON w.work_id = dc.work_id
+                  JOIN discovery_evidence e ON e.claim_id = dc.claim_id
+                 WHERE e.routing_status = 'shipped'
+                 GROUP BY 1
+                """
+            )
+        }
+        # The reachability predicate is MIRRORED from the verifier rather than
+        # shared, per the standing independence rule for checks.  Guarded on
+        # `discovery_identification` so this degrades on a legacy asset instead
+        # of raising, exactly as the verifier's own check does.
+        has_identification = bool(
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='discovery_identification'"
+            ).fetchone()
+        )
+        identification_clause = (
+            """EXISTS (SELECT 1 FROM discovery_identification di
+                        WHERE di.canonical_work_id = w.canonical_work_id)
+               OR """
+            if has_identification
+            else ""
+        )
+        reachable = [
+            r["cw"]
+            for r in conn.execute(
+                f"""
+                SELECT DISTINCT w.canonical_work_id AS cw
+                  FROM works w
+                 WHERE {identification_clause}
+                       EXISTS (SELECT 1 FROM discovery_claim dc
+                                WHERE dc.work_id = w.work_id)
+                """
+            )
+        ]
     finally:
         conn.close()
 
     out: List[Dict[str, Any]] = []
-    for row in rows:
-        cw = row["cw"]
+    for cw in reachable:
         canonical = works.get(cw)
         if canonical is None:
             raise CurationError(
@@ -371,7 +435,7 @@ def load_worklist(asset_path: str) -> List[Dict[str, Any]]:
                 "neutral_title": canonical.get("neutral_title"),
                 "author": canonical.get("author"),
                 "source_corpus": canonical.get("source_corpus"),
-                "shipped_claims": int(row["shipped_claims"]),
+                "shipped_claims": shipped.get(cw, 0),
             }
         )
     out.sort(key=lambda r: r["canonical_work_id"])

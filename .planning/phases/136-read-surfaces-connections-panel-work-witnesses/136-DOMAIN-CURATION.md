@@ -24,6 +24,15 @@ Two hash-pinned artifacts and the rows the owner ruled on.
 |---|---|---|
 | Work → FJMS domain | `discovery_data/work_domains-v1.json` | `sha256:573937731e2e31f4ad3fccd6f84aadecc7e67210bf4cda82513dfc5c4d94f605` |
 | Author alias map | `discovery_data/work_author_aliases-v1.json` | `sha256:acce47f67dcde456eb477fc092294ee42546963f5d977549f53e635da65f8a64` |
+
+> **⚠ SUPERSEDED — these are the hashes 136-09 produced, kept as the phase record.
+> Do not re-pin a bake to them.** Both artifacts were re-emitted on 2026-08-13 when
+> `load_worklist` was widened from "carries a shipped claim" to the verifier's own
+> reachability scope — the two scopes had drifted, and the gap was the NULL-`works.genre`
+> release blocker (53 public / 170 private works). Live pins are in the bake recipe;
+> current values `work_domains sha256:ad6ef23f…`, `aliases sha256:ded52f3f…`.
+> No existing assignment changed: the re-emission added rows and preserved all 29
+> owner rulings verbatim.
 | Harness + validator | `scripts/curate_work_domains.py` | committed |
 | Tests | `tests/test_work_domains.py` (41) | committed |
 

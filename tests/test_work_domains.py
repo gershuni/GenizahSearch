@@ -850,3 +850,180 @@ def test_alias_english_match_does_not_steal_from_a_hebrew_match():
     assert r["person_id"] == 12, (
         "adding the English exact key changed an existing Hebrew resolution"
     )
+
+
+# ---------------------------------------------------------------------------
+# The worklist's SCOPE (2026-08-13).
+#
+# `load_worklist` is the producer for an artifact whose consumer is
+# `verify_discovery_sidecar.check_works_genre_vocabulary`. A work the worklist
+# omits gets no assignment, so the builder leaves `works.genre` NULL and that
+# check fails. The two scopes have to be the same set; they were not, and the
+# gap WAS the NULL-genre release blocker (53 public / 170 private works on the
+# deploy-1 candidate).
+#
+# This is the same scope error, on the same asset, that
+# `assert_author_key_coverage` was corrected for on 2026-08-04 -- that check
+# cited this function's old "at least one shipped claim" docstring as its
+# justification, then widened to reachability without the worklist following.
+# ---------------------------------------------------------------------------
+
+
+def _synthetic_asset(path, *, with_identification=True):
+    """A four-table asset exercising each reachability class exactly once."""
+    import sqlite3
+
+    conn = sqlite3.connect(str(path))
+    conn.executescript(
+        """
+        CREATE TABLE works (work_id TEXT PRIMARY KEY, canonical_work_id TEXT,
+                            neutral_title TEXT, author TEXT, source_corpus TEXT);
+        CREATE TABLE discovery_claim (claim_id TEXT PRIMARY KEY, work_id TEXT);
+        CREATE TABLE discovery_evidence (evidence_id TEXT PRIMARY KEY,
+                                         claim_id TEXT, routing_status TEXT);
+        """
+    )
+    if with_identification:
+        conn.execute(
+            "CREATE TABLE discovery_identification (identification_id TEXT "
+            "PRIMARY KEY, canonical_work_id TEXT)"
+        )
+    conn.executemany(
+        "INSERT INTO works VALUES (?,?,?,?,?)",
+        [
+            # shipped -- in scope under BOTH the old and the new predicate.
+            ("w000001", "w000001", "shipped work", "A", "heb"),
+            # review-only -- reachable via include_review=True, and the exact
+            # class the old shipped-scoped worklist dropped.
+            ("w000002", "w000002", "review-only work", "B", "heb"),
+            # identification but no claim of its own.
+            ("w000003", "w000003", "identified work", "C", "heb"),
+            # unreachable: no claim, no identification. Must stay OUT -- the fix
+            # widens the scope, it does not abolish it.
+            ("w000004", "w000004", "orphan work", "D", "heb"),
+            # a non-canonical duplicate of w000002; must never be assigned twice.
+            ("w000005", "w000002", "duplicate of the review-only work", "B", "heb"),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO discovery_claim VALUES (?,?)",
+        [("c1", "w000001"), ("c2", "w000002"), ("c5", "w000005")],
+    )
+    conn.executemany(
+        "INSERT INTO discovery_evidence VALUES (?,?,?)",
+        [("e1", "c1", "shipped"), ("e2", "c2", "review"), ("e5", "c5", "review")],
+    )
+    if with_identification:
+        conn.execute(
+            "INSERT INTO discovery_identification VALUES (?,?)", ("i3", "w000003")
+        )
+    conn.commit()
+    conn.close()
+    return str(path)
+
+
+def test_worklist_includes_a_work_whose_only_claim_is_review_only(tmp_path):
+    """THE regression. `get_claims_for_page(include_review=True)` drops the
+    routing clause entirely, so a work with no shipped evidence is still
+    selectable -- and the verifier's genre check counts it reachable. Scoping
+    the worklist to `routing_status='shipped'` left exactly this class with a
+    NULL genre and failed the release gate."""
+    asset = _synthetic_asset(tmp_path / "a.db")
+    ids = {e["canonical_work_id"] for e in cwd.load_worklist(asset)}
+    assert "w000002" in ids, (
+        "a work whose only evidence is review-only was dropped from the worklist; "
+        "it will get no domain assignment, the builder will leave works.genre "
+        "NULL, and check_works_genre_vocabulary will fail on it"
+    )
+    assert "w000003" in ids, "a work reachable via discovery_identification was dropped"
+    assert "w000001" in ids, "widening the scope must not lose the shipped works"
+
+
+def test_worklist_still_excludes_a_work_reachable_from_nothing(tmp_path):
+    """The fix widens the scope; it does not abolish it. A work carrying no
+    claim and no identification is not reachable and must not be curated --
+    otherwise the artifact asserts a public genre for a work no surface returns."""
+    asset = _synthetic_asset(tmp_path / "a.db")
+    ids = {e["canonical_work_id"] for e in cwd.load_worklist(asset)}
+    assert "w000004" not in ids
+
+
+def test_worklist_keys_a_duplicate_on_its_canonical_id_only_once(tmp_path):
+    """w000005 is a non-canonical duplicate of w000002. Both carry claims, and
+    the widened predicate scans `works` rather than grouping claims, so this is
+    where a duplicate assignment would appear if it were going to."""
+    asset = _synthetic_asset(tmp_path / "a.db")
+    ids = [e["canonical_work_id"] for e in cwd.load_worklist(asset)]
+    assert ids.count("w000002") == 1
+    assert "w000005" not in ids
+
+
+def test_worklist_reports_zero_shipped_claims_rather_than_omitting_the_field(tmp_path):
+    """`shipped_claims` survives as reporting metadata and is genuinely 0 for
+    the newly-in-scope works. `build_report` reads it, so it may not go absent."""
+    asset = _synthetic_asset(tmp_path / "a.db")
+    by_id = {e["canonical_work_id"]: e for e in cwd.load_worklist(asset)}
+    assert by_id["w000001"]["shipped_claims"] == 1
+    assert by_id["w000002"]["shipped_claims"] == 0
+    assert by_id["w000003"]["shipped_claims"] == 0
+
+
+def test_worklist_degrades_on_an_asset_with_no_identification_table(tmp_path):
+    """The identification clause is guarded so a legacy asset degrades instead
+    of raising -- the same posture the verifier's own check takes."""
+    asset = _synthetic_asset(tmp_path / "a.db", with_identification=False)
+    ids = {e["canonical_work_id"] for e in cwd.load_worklist(asset)}
+    assert ids == {"w000001", "w000002"}, (
+        "without discovery_identification the claim-reachable works must still "
+        f"be curated; got {sorted(ids)}"
+    )
+
+
+@_have_live_asset
+def test_worklist_covers_every_work_the_genre_check_calls_reachable():
+    """The producer/consumer invariant, stated against the real asset.
+
+    This is the test whose absence let the two scopes drift. It asserts the
+    containment directly rather than a count, so it keeps holding as the asset
+    grows -- and it fails on the pre-2026-08-13 worklist, which is the point.
+    """
+    import sqlite3
+
+    worklist = {e["canonical_work_id"] for e in cwd.load_worklist(_LIVE_ASSET)}
+    conn = sqlite3.connect(f"file:{_LIVE_ASSET}?mode=ro", uri=True)
+    try:
+        # Verbatim the reachability predicate of
+        # verify_discovery_sidecar.check_works_genre_vocabulary, including its
+        # guard -- `_LIVE_ASSET` is the 136-09-era asset and predates
+        # `discovery_identification`, so an unguarded clause raises here rather
+        # than testing anything.
+        identification_clause = (
+            """EXISTS (SELECT 1 FROM discovery_identification di
+                        WHERE di.canonical_work_id = w.canonical_work_id)
+               OR """
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='discovery_identification'"
+            ).fetchone()
+            else ""
+        )
+        reachable = {
+            r[0]
+            for r in conn.execute(
+                f"""
+                SELECT DISTINCT w.canonical_work_id FROM works w
+                 WHERE {identification_clause}
+                       EXISTS (SELECT 1 FROM discovery_claim dc
+                                WHERE dc.work_id = w.work_id)
+                """
+            )
+        }
+    finally:
+        conn.close()
+    assert reachable, "fixture asset has no reachable works"
+    missing = sorted(reachable - worklist)
+    assert not missing, (
+        f"{len(missing)} work(s) the verifier calls reachable are absent from the "
+        "curation worklist. Each will carry a NULL works.genre and fail "
+        f"check_works_genre_vocabulary. First few: {missing[:5]}"
+    )

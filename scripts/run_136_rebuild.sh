@@ -30,9 +30,9 @@ python scripts/build_discovery_sidecar.py \
     --novelty-verdicts                  discovery_data/novelty_production_verdicts.json \
     --novelty-verdicts-sha256           eb6fc4f88c059bb383b3541123c14227587a614e0e501406e96c29229322c413 \
     --work-domains                      discovery_data/work_domains-v1.json \
-    --work-domains-content-hash         sha256:573937731e2e31f4ad3fccd6f84aadecc7e67210bf4cda82513dfc5c4d94f605 \
+    --work-domains-content-hash         sha256:ad6ef23f3d4f4fba13193dc593162b065f428cca66682d281aa0944dd21a0e0a \
     --work-author-aliases               discovery_data/work_author_aliases-v1.json \
-    --work-author-aliases-content-hash  sha256:acce47f67dcde456eb477fc092294ee42546963f5d977549f53e635da65f8a64 \
+    --work-author-aliases-content-hash  sha256:ded52f3fb47903537482f8112750db88bd6bac7a33fe019711eb6d5a5fddbbba \
     --precision-spec                    "$PHASE/136-PRECISION-SPEC.json" \
     --out                               "$OUT" \
     --release
