@@ -4905,4 +4905,10 @@ TRANSLATIONS.update({
     "Start Here | Dicta Genizah Search": "התחילו כאן | אתר הגניזה של דיקטה",
     "A guided introduction to the Cairo Genizah, prepared searches, selected manuscripts, and research tools.":
         "מבוא מודרך לגניזת קהיר, חיפושים מוכנים, כתבי יד נבחרים וכלי מחקר.",
+    "Find and compare joining fragments": "מצאו והשוו קטעים מצטרפים",
+    "Pin an anchor fragment, build a line-by-line query, and compare possible physical joins.":
+        "קבעו קטע עוגן, בנו שאילתה שורה־אחר־שורה והשוו בין צירופים פיזיים אפשריים.",
+    "Review algorithmic text matches": "בחנו התאמות טקסטואליות אלגוריתמיות",
+    "Text matching": "התאמת טקסט",
+    "Requires review": "טעון בדיקה",
 })

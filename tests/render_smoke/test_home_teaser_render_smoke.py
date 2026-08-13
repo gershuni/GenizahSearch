@@ -52,6 +52,7 @@ import httpx
 # package conftest; the import is idempotent).
 import web.main as _web_main  # noqa: E402, F401
 import web.atlas_assets as aa
+import web.discovery_assets as da
 from nicegui import core
 from nicegui.context import context as _nicegui_context
 from nicegui.testing.general import prepare_simulation
@@ -82,6 +83,12 @@ def _set_atlas_predicate(monkeypatch, *, flag_on: bool, ready: bool) -> None:
     routes use (MEDIUM-6), not a hand-wired stand-in."""
     monkeypatch.setattr(aa, 'ATLAS_PREVIEW_ENABLED', flag_on)
     monkeypatch.setattr(aa, '_state', aa._AtlasState(ready=ready))
+
+
+def _set_discovery_predicate(monkeypatch, *, flag_on: bool, ready: bool) -> None:
+    """Drive the shared discovery flag+loaded-asset predicate."""
+    monkeypatch.setattr(da, 'DISCOVERY_ENABLED', flag_on)
+    monkeypatch.setattr(da, '_state', da._DiscoveryState(ready=ready))
 
 
 # ---------------------------------------------------------------------------
@@ -362,3 +369,60 @@ def test_teaser_absent_when_flag_on_but_asset_not_loaded(monkeypatch):
         )
 
     _run_home_smoke(driver, lang='en')
+
+
+def test_requested_discovery_tools_appear_across_homepage_surfaces(monkeypatch):
+    """Computed IDs and Atlas reach chips, carousel, and tool cards; Joins Lab
+    gets its requested tool card. Every marked entry navigates to its own route."""
+    _set_atlas_predicate(monkeypatch, flag_on=True, ready=True)
+    _set_discovery_predicate(monkeypatch, flag_on=True, ready=True)
+
+    expected = {
+        'home-chip-computed': '/computed-identifications',
+        'home-chip-atlas': '/atlas',
+        'home-carousel-computed': '/computed-identifications',
+        'home-carousel-atlas': '/atlas',
+        'computed-tool-card': '/computed-identifications',
+        'joins-lab-tool-card': '/joins-lab',
+        'atlas-teaser-card': '/atlas',
+    }
+
+    async def driver(user):
+        await user.open('/')
+        for marker, route in expected.items():
+            element = _marked_element(user, marker)
+            assert element is not None, f'missing homepage entry point: {marker}'
+            with patch('nicegui.ui.navigate.to') as nav_mock:
+                _click_element(user, element)
+                assert nav_mock.called
+                assert all(call.args == (route,) for call in nav_mock.call_args_list)
+
+    _run_home_smoke(driver, lang='en')
+
+
+def test_gated_homepage_entries_hide_cleanly_and_joins_card_remains_he(monkeypatch):
+    """Unavailable asset-backed tools vanish from all new entry points, while
+    the always-public Joins Lab card remains useful and translated in Hebrew."""
+    _set_atlas_predicate(monkeypatch, flag_on=True, ready=False)
+    _set_discovery_predicate(monkeypatch, flag_on=True, ready=False)
+
+    async def driver(user):
+        await user.open('/')
+        for marker in (
+            'home-chip-computed',
+            'home-chip-atlas',
+            'home-carousel-computed',
+            'home-carousel-atlas',
+            'computed-tool-card',
+            'atlas-teaser-card',
+        ):
+            assert _marked_element(user, marker) is None
+
+        joins_card = _marked_element(user, 'joins-lab-tool-card')
+        assert joins_card is not None
+        blob = ' '.join(_descendant_texts(joins_card))
+        assert 'מעבדת צירופים' in blob
+        assert 'מצאו והשוו קטעים מצטרפים' in blob
+        assert 'Find and compare joining fragments' not in blob
+
+    _run_home_smoke(driver, lang='he')
