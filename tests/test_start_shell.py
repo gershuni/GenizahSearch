@@ -49,3 +49,13 @@ def test_homepage_has_native_start_link_and_bounded_event_properties():
     assert 'Not sure what to search? Start here' not in source
     assert "'query'" not in source[source.index("'welcome_action_clicked'"):source.index("'welcome_action_clicked'") + 500]
     assert "'shelfmark'" not in source[source.index("'welcome_action_clicked'"):source.index("'welcome_action_clicked'") + 500]
+
+
+def test_start_primary_action_keeps_theme_safe_text_and_about_is_reciprocal():
+    start_source = Path('web/pages/start.py').read_text(encoding='utf-8')
+    about_source = Path('web/pages/about.py').read_text(encoding='utf-8')
+
+    assert '.start-page a.start-action-primary' in start_source
+    assert 'color: var(--text-inverse) !important' in start_source
+    assert 'ui.link(target="/about")' in start_source
+    assert "ui.link(target='/start')" in about_source

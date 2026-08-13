@@ -28,6 +28,24 @@ HERO_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/f/f7/Education_%28T
 SCHECHTER_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/9/9e/Solomon_Schechter_studying_the_fragments_of_the_Cairo_Genizah%2C_c._1898.jpg'
 
 
+def _render_start_bridge(*, is_hebrew: bool) -> None:
+    """Connect the narrative About page to the guided, task-oriented Start page."""
+    title = 'רוצים להתחיל לחקור?' if is_hebrew else 'Ready to explore?'
+    description = (
+        'עברו לעמוד ההתחלה המודרך: כתבי יד נבחרים, חיפושים מוכנים וכלי מחקר.'
+        if is_hebrew
+        else 'Open the guided Start page for selected manuscripts, prepared searches, and research tools.'
+    )
+    with ui.link(target='/start').classes('about-start-bridge no-underline').mark('about-start-bridge'):
+        ui.icon('explore').classes('about-start-bridge-icon').props('aria-hidden=true')
+        with ui.column().classes('gap-1'):
+            ui.label(title).classes('about-start-bridge-title')
+            ui.label(description).classes('about-start-bridge-description')
+        ui.icon('arrow_back' if is_hebrew else 'arrow_forward').classes(
+            'about-start-bridge-arrow'
+        ).props('aria-hidden=true')
+
+
 def create_about_page():
     """Create the About page with bilingual content about the Cairo Genizah."""
 
@@ -87,6 +105,26 @@ def create_about_page():
         padding-right: 20px;
         margin-bottom: 32px !important;
     }
+    .about-start-bridge {
+        width: 100%; min-height: 76px; display: flex; align-items: center; gap: 14px;
+        margin: 4px 0 30px; padding: 14px 16px;
+        border: 1px solid var(--border-light); border-radius: 14px;
+        background: color-mix(in srgb, var(--primary-600) 7%, var(--bg-card));
+        color: var(--text-primary); box-shadow: var(--shadow-sm);
+        transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+    }
+    .about-start-bridge:hover {
+        transform: translateY(-2px); border-color: var(--primary-600);
+        box-shadow: var(--shadow-md); text-decoration: none;
+    }
+    .about-start-bridge-icon {
+        flex: none; width: 42px; height: 42px; display: inline-flex;
+        align-items: center; justify-content: center; border-radius: 999px;
+        color: var(--primary-700); background: color-mix(in srgb, var(--primary-600) 13%, transparent);
+    }
+    .about-start-bridge-title { color: var(--text-primary); font-weight: 750; }
+    .about-start-bridge-description { color: var(--text-secondary); font-size: .88rem; line-height: 1.55; }
+    .about-start-bridge-arrow { flex: none; color: var(--primary-700); margin-inline-start: auto; }
     [dir="ltr"] .about-lead {
         border-right: none;
         border-left: 3px solid var(--primary-600, #8b6914);
@@ -314,6 +352,8 @@ def _create_hebrew_content():
         </p>
         ''')
 
+        _render_start_bridge(is_hebrew=True)
+
         _html('<h2>מקום שמירה שהפך לארכיון</h2>')
 
         _html('''
@@ -513,6 +553,8 @@ def _create_english_content():
             hundreds of thousands of pages spanning a thousand years.
         </p>
         ''')
+
+        _render_start_bridge(is_hebrew=False)
 
         _html('<h2>A storeroom that became an archive</h2>')
 

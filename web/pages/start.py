@@ -111,6 +111,10 @@ _UI_COPY = {
         "en": "Choose a way into the Cairo Genizah. Every card opens a real manuscript, search, or research tool.",
         "he": "בחרו דרך להיכנס אל גניזת קהיר. כל כרטיס פותח כתב יד, חיפוש או כלי מחקר אמיתי.",
     },
+    "about_link": {
+        "en": "New to the Cairo Genizah? Read its story",
+        "he": "חדשים בגניזת קהיר? קראו את סיפורה",
+    },
     "choose": {"en": "Choose your route", "he": "בחרו מסלול"},
     "revolutions_title": {"en": "The four revolutions in Genizah Studies", "he": "ארבע המהפכות בחקר הגניזה"},
     "revolutions_intro": {
@@ -212,6 +216,7 @@ def _native_card(
     image_alt: str | None = None,
     reference_href: str | None = None,
     reference_label: str | None = None,
+    extra_class: str = "",
     event: str = "welcome_action_clicked",
 ) -> None:
     """Render an actual anchor so keyboard and browser link behavior stay native."""
@@ -248,7 +253,7 @@ def _native_card(
         )
 
     if reference_href and reference_label:
-        with ui.element("article").classes("start-card"):
+        with ui.element("article").classes(f"start-card {extra_class}"):
             with primary_link("start-card-primary no-underline"):
                 render_contents()
             ui.link(reference_label, reference_href, new_tab=True).classes(
@@ -263,7 +268,7 @@ def _native_card(
                 ),
             )
     else:
-        with primary_link("start-card no-underline"):
+        with primary_link(f"start-card no-underline {extra_class}"):
             render_contents()
 
 
@@ -392,6 +397,7 @@ def _route_card(route_id: str, lang: str) -> None:
         action_id=f"route_{route_id}",
         difficulty="introductory" if route_id != "research" else "research",
         icon=route["icon"],
+        extra_class=f"start-route-card start-route-card-{route_id}",
         event="welcome_route_selected",
     )
 
@@ -428,14 +434,24 @@ def create_start_page() -> None:
     ui.add_head_html(
         """
         <style>
-        .start-page { direction: var(--start-dir); text-align: var(--start-align); }
+        .start-page { direction: var(--start-dir); text-align: var(--start-align); color: var(--text-primary); }
         .start-hero {
+            position: relative; isolation: isolate; overflow: hidden;
             padding: clamp(1.25rem, 4vw, 2.75rem);
             border: 1px solid var(--border-light);
-            border-radius: 18px;
-            background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+            border-radius: 22px;
+            background:
+                radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--primary-600) 18%, transparent), transparent 34%),
+                linear-gradient(135deg, var(--bg-card), var(--bg-secondary));
+            box-shadow: var(--shadow-md);
         }
         .start-hero-lead { max-width: 760px; color: var(--text-secondary); font-size: 1.05rem; line-height: 1.75; }
+        .start-about-link {
+            min-height: 44px; display: inline-flex; align-items: center; gap: .45rem;
+            margin-top: .65rem; color: var(--primary-700); font-weight: 650;
+            text-decoration: none;
+        }
+        .start-about-link:hover { text-decoration: underline; text-underline-offset: 3px; }
         .start-section { scroll-margin-top: 1rem; padding-block: clamp(1.25rem, 3vw, 2.25rem); }
         .start-section + .start-section { border-top: 1px solid var(--border-light); }
         .start-section-intro { max-width: 760px; color: var(--text-secondary); line-height: 1.65; }
@@ -465,15 +481,15 @@ def create_start_page() -> None:
             border: 1px solid var(--border-light);
             border-radius: 14px;
             overflow: hidden;
-            background: var(--bg-tertiary);
+            background: var(--bg-card);
             transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
         }
         .start-card:hover { transform: translateY(-2px); border-color: var(--primary-600); box-shadow: 0 8px 24px rgba(0,0,0,.09); }
         .start-card:focus-visible { outline: 3px solid var(--primary-600); outline-offset: 3px; }
         .start-card-primary { display: flex; flex: 1; flex-direction: column; color: inherit; }
         .start-card-primary:focus-visible { outline: 3px solid var(--primary-600); outline-offset: -3px; }
-        .start-card-image { width: 100%; height: 150px; background: var(--bg-secondary); }
-        .start-card-image img { width: 100%; height: 150px; object-fit: cover; }
+        .start-card-image { width: 100%; height: 164px; background: var(--bg-secondary); }
+        .start-card-image img { width: 100%; height: 164px; object-fit: cover; }
         .start-card-body { display: flex; flex: 1; flex-direction: column; gap: .5rem; padding: 1rem; }
         .start-card-title { margin: 0; color: var(--text-primary); font-size: 1.02rem; font-weight: 700; line-height: 1.45; }
         .start-card-description { color: var(--text-secondary); font-size: .9rem; line-height: 1.6; }
@@ -484,6 +500,16 @@ def create_start_page() -> None:
             text-underline-offset: 2px;
         }
         .start-card-arrow { color: var(--primary-600); flex: none; }
+        .start-route-card {
+            min-height: 188px; border-top: 3px solid var(--primary-600);
+            box-shadow: var(--shadow-sm);
+        }
+        .start-route-card .start-card-body { padding: 1.15rem; }
+        .start-route-card .start-card-arrow {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 2.25rem; height: 2.25rem; border-radius: 999px;
+            background: color-mix(in srgb, var(--primary-600) 12%, transparent);
+        }
         .start-eyebrow {
             align-self: flex-start; padding: .2rem .55rem; border-radius: 999px;
             background: color-mix(in srgb, var(--primary-600) 13%, transparent);
@@ -495,7 +521,11 @@ def create_start_page() -> None:
             display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
             border-radius: 10px; padding: .6rem 1rem; text-decoration: none; font-weight: 600;
         }
-        .start-action-primary { background: var(--primary-700); color: var(--text-inverse); }
+        .start-page a.start-action-primary {
+            background: var(--primary-700); color: var(--text-inverse) !important;
+            box-shadow: var(--shadow-sm);
+        }
+        .start-page a.start-action-primary:hover { filter: brightness(.96); box-shadow: var(--shadow-md); }
         .start-action-secondary, .start-fallback-link { border: 1px solid var(--border-light); color: var(--text-primary); }
         .start-notice {
             display: flex; gap: .75rem; align-items: flex-start; padding: 1rem;
@@ -505,7 +535,7 @@ def create_start_page() -> None:
         .start-atlas-invitation {
             display: flex; gap: 1rem; align-items: flex-start; padding: 1.1rem;
             border: 1px solid var(--border-light); border-radius: 14px;
-            background: var(--bg-tertiary);
+            background: var(--bg-card); box-shadow: var(--shadow-sm);
         }
         .start-atlas-invitation > .q-icon { color: var(--primary-600); flex: none; }
         .start-atlas-full-link {
@@ -534,8 +564,11 @@ def create_start_page() -> None:
         }
         .start-computed-feature {
             padding: clamp(1rem, 2.5vw, 1.5rem); border: 1px solid var(--primary-300);
-            border-radius: 16px;
-            background: color-mix(in srgb, var(--primary-600) 6%, var(--bg-secondary));
+            border-radius: 18px;
+            background:
+                radial-gradient(circle at 96% 0%, color-mix(in srgb, var(--primary-600) 14%, transparent), transparent 30%),
+                color-mix(in srgb, var(--primary-600) 6%, var(--bg-card));
+            box-shadow: var(--shadow-md);
         }
         @media (max-width: 420px) {
             .start-hero { padding: 1.1rem; border-radius: 12px; }
@@ -553,6 +586,9 @@ def create_start_page() -> None:
         with ui.element("header").classes("start-hero w-full"):
             h1(_copy("title", lang), classes="text-3xl sm:text-4xl font-bold", style="margin:0;")
             ui.label(_copy("lead", lang)).classes("start-hero-lead mt-3")
+            with ui.link(target="/about").classes("start-about-link"):
+                ui.icon("auto_stories").props("aria-hidden=true")
+                ui.label(_copy("about_link", lang))
             h2(_copy("choose", lang), classes="text-lg font-bold mt-7 mb-3")
             with ui.element("nav").classes("start-card-grid w-full").props(
                 f'aria-label="{html.escape(_copy("choose", lang), quote=True)}"'
@@ -798,18 +834,5 @@ def create_start_page() -> None:
                         difficulty="research",
                         icon="extension",
                     )
-
-                if atlas_preview_available():
-                    _native_card(
-                        title=_copy("atlas_title", lang),
-                        description=_copy("atlas_description", lang),
-                        href="/atlas",
-                        route_id="research",
-                        action_id="visual_atlas_research",
-                        difficulty="research",
-                        icon="hub",
-                    )
-
-
 
 __all__ = ["create_start_page"]

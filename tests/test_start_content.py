@@ -106,8 +106,11 @@ def test_computed_examples_require_availability_and_exact_frame(monkeypatch):
 
     content = load_start_content()
     launch_hash = content['computed_candidates'][0]['frame_content_hashes'][0]
+    next_frame_hash = 'dc15864d2ecd32367c858457a961d5a1aef0e47c399d466adc31d632da96aac4'
 
     assert content['computed_candidates_published'] is True
+    assert all(next_frame_hash in entry['frame_content_hashes']
+               for entry in content['computed_candidates'])
 
     monkeypatch.setattr(assets, 'discovery_available', lambda: False)
     assert live_computed_candidates(content) == []
@@ -117,6 +120,11 @@ def test_computed_examples_require_availability_and_exact_frame(monkeypatch):
     assert live_computed_candidates(content) == []
 
     monkeypatch.setattr(assets, 'discovery_meta', lambda key: launch_hash)
+    assert [entry['id'] for entry in live_computed_candidates(content)] == [
+        entry['id'] for entry in content['computed_candidates']
+    ]
+
+    monkeypatch.setattr(assets, 'discovery_meta', lambda key: next_frame_hash)
     assert [entry['id'] for entry in live_computed_candidates(content)] == [
         entry['id'] for entry in content['computed_candidates']
     ]

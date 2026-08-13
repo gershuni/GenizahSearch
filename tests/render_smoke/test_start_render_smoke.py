@@ -109,6 +109,7 @@ def test_start_renders_three_routes_one_h1_and_native_links_en(monkeypatch):
         assert any(href.startswith('/search?q=') for href in hrefs)
         assert any(href.startswith('/browse?sys_id=') for href in hrefs)
         assert any(href.startswith('/catalog-browse?work=') for href in hrefs)
+        assert '/about' in hrefs
         assert 'https://www.midrash.eu/' in hrefs
         assert 'https://fjms.genizah.org/' in hrefs
 
@@ -153,8 +154,13 @@ def test_optional_tools_and_frame_bound_candidates_hide_and_show_cleanly(monkeyp
 
     async def visible_driver(user):
         await user.open('/start')
-        hrefs = _hrefs(_elements(user))
+        initial_elements = _elements(user)
+        hrefs = _hrefs(initial_elements)
         assert '/atlas' in hrefs
+        assert sum(
+            (getattr(element, '_props', None) or {}).get('href') == '/atlas'
+            for element in initial_elements
+        ) == 1
         assert '/computed-identifications' in hrefs
         assert '/puzzle' in hrefs  # pending saved ID intentionally degrades to the generic tool
         computed_hrefs = {href for href in hrefs if 'computed=1' in href}
@@ -180,3 +186,25 @@ def test_optional_tools_and_frame_bound_candidates_hide_and_show_cleanly(monkeyp
         assert sum(getattr(element, 'tag_name', None) == 'h1' for element in elements) == 1
 
     _run('en', visible_driver)
+
+
+def test_about_and_start_are_bilingual_companion_pages(monkeypatch):
+    _set_gates(monkeypatch, enabled=False)
+
+    async def english_driver(user):
+        await user.open('/about')
+        elements = _elements(user)
+        assert '/start' in _hrefs(elements)
+        assert len(_marked(elements, 'about-start-bridge')) == 1
+        await user.should_see('Ready to explore?')
+
+    _run('en', english_driver)
+
+    async def hebrew_driver(user):
+        await user.open('/about')
+        elements = _elements(user)
+        assert '/start' in _hrefs(elements)
+        assert len(_marked(elements, 'about-start-bridge')) == 1
+        await user.should_see('רוצים להתחיל לחקור?')
+
+    _run('he', hebrew_driver)
