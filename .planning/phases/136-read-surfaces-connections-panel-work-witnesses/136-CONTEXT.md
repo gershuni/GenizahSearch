@@ -325,15 +325,29 @@ note · `NOVEL-01`/`D-23b` candidacy wording · `discovery-budgets.md` findings-
          two negative controls that prove the exception is SCOPED could no longer fail — they failed as
          tests instead, which is the mechanism working. Verified after restoring: the detector fires in
          both languages and the text is words-only, so the exemption still reaches it.
-    2. **The section.** Both language call sites of `_render_confidence_section` and its TOC entry were
-       removed in the same merge, so the BAND-05 methods card does not render at all. The limitations
-       paragraph now lives in the practical computed-identifications card (its D-06a binding is to the
-       PARAGRAPH class, so the move cost nothing). The function, its copy tables and the per-band anchor
-       registry are still defined and now reached only by tests; `web/main.py`'s `/help` route still
-       awaits two band queries per request and discards both, and `/help` is still served
-       `noindex, noarchive` by `discovery_methods_noindex()`. **Whether D-10/BAND-05 is retired as a
-       REQUIREMENT is an OPEN OWNER DECISION** — removing the call sites did not settle it, and the
-       dead code, the two queries and the noindex should be deleted with it or the section restored.
+    2. **The section — RESTORED the same day (owner).** The merge removed both language call sites of
+       `_render_confidence_section` and its TOC entry, so the BAND-05 methods card stopped rendering.
+       That was not a free choice: **REL-01 gates the public launch on "the BAND-05 immutable methods
+       report is published"** and **CERT-02 names it as where each tier's unit and status are
+       recorded**, so retiring it would have removed the surface Phase 139 is meant to publish onto.
+       The owner ruled restore. It renders again, BELOW the practical computed-identifications card
+       (its audience is someone auditing the method; a first-time reader needs the practical guidance
+       first), on the same `discovery_available()` gate, and the two per-request band queries in
+       `web/main.py`'s `/help` route feed it again rather than being discarded.
+       - **Shortened in the same pass** (owner: "concise and understandable"). The estimand prose is
+         stated ONCE for the section instead of once per tier; an ungraded tier stops after its count
+         and status instead of printing four further "not yet measured" lines the status had just
+         made; and the two-bucket rule and the limitations paragraph are no longer rendered here at
+         all, because the practical card carries both and a reader met each of them twice on one page.
+         Nothing publishable is withheld — the status line is unconditional.
+       - **The limitations paragraph must render exactly ONCE on the page**, and that is now asserted.
+         `LIMITATIONS_TEXT_SHA256` digests the text of every element carrying
+         `_LIMITATIONS_PARAGRAPH_CLASS`, so re-adding the paragraph to this section — where it used to
+         live — silently doubles the digested string and fails the pin on wording nobody edited.
+       - BAND-05 stays `[ ]` in REQUIREMENTS.md: rendering the section is not the same as REL-01's
+         *published* report, which still waits on CERT-01's outcome copy at Phase 139.
+       - `/help` remains `noindex, noarchive` via `discovery_methods_noindex()`, which is correct
+         again for the reason its name gives.
 - **D-06b — The public projection is NOT certificate-covered (Codex F-02).** The measurement is on the
   all-source population; the public projection is a structurally different one, and `135-09-CERT01-MEASUREMENT.md`
   itself records the Sefaria-only figure as descriptive, not pre-registered. Never copy the all-source

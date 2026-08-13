@@ -23,15 +23,17 @@ from shared.discovery_band_labels import (
 
 
 # ---------------------------------------------------------------------------
-# ⟨RETIRED 2026-08-13⟩ The BAND-05 section documented below no longer RENDERS:
-# both language call sites of `_render_confidence_section` and its TOC entry
-# were removed in favour of the practical computed-identifications card. The
-# function, its helpers, `_CONFIDENCE_*` copy and the per-band anchor registry
-# are all still defined and are now reached only by tests. Whether D-10/BAND-05
-# is retired as a REQUIREMENT (and this code, the two per-request band queries
-# in web/main.py's /help route, and the /help noindex deleted with it) is an
-# OPEN OWNER DECISION -- not settled by the removal of the call sites. Do not
-# read the block below as describing what a visitor sees today.
+# ⟨RETIRED AND RESTORED 2026-08-13⟩ A merge removed both language call sites of
+# `_render_confidence_section` and its TOC entry; the owner restored them the
+# same day, because REL-01 gates the public launch on this report being
+# published and CERT-02 names it as where each tier's unit and status are
+# recorded -- so retiring it was never a free choice. It now renders BELOW the
+# practical computed-identifications card, on the same `discovery_available()`
+# gate, and was SHORTENED in the same pass (owner: "concise and
+# understandable"): the estimand prose is stated once for the section instead of
+# once per tier, an ungraded tier stops after its count and status rather than
+# printing four more placeholder lines, and the two-bucket rule and limitations
+# paragraph moved out entirely because the practical card already carries them.
 #
 # BAND-05 "Confidence Bands & Methods" methods section (Phase 135, plan 135-02,
 # D-10; rewritten QUALITATIVELY in Phase 136, plan 136-02, D-06a). A flag-gated,
@@ -104,27 +106,32 @@ _CONFIDENCE_TOC_TITLE = {
     'he': 'דרגות ודאות ושיטות',
 }
 
+# ⟨SHORTENED 2026-08-13, owner: "keep it concise and understandable"⟩ Three
+# sentences instead of five, and the dangling cross-reference is gone: this
+# section no longer carries the "Known limitations" subsection (it moved to the
+# practical card), so pointing at it "below" would have sent the reader nowhere.
 _CONFIDENCE_INTRO = {
     'en': (
-        'Confidence here is a group-level status, not a per-item probability. Each band below '
-        'names its population, its unit of measurement and sample size, and whether it has '
-        'been graded to completion — in words, never as a percentage or an interval. A '
-        'sampled band status is never applied to an individual identification. Every '
-        'identification remains an unreviewed algorithmic estimate; see “Known '
-        'limitations” below for what that does and does not mean.'
+        'Each tier below says how many identifications it holds and whether anyone has '
+        'graded it — in words, never as a percentage or an interval. Grading is done on a '
+        'sample and describes the tier as a whole, so it is never a probability for a single '
+        'identification, and every identification remains an unreviewed algorithmic match. '
+        'Where a tier has not been graded, this says so.'
     ),
     'he': (
-        'מידת הביטחון כאן היא סטטוס ברמת הקבוצה, ולא הסתברות פרטנית. כל דרגה למטה מציינת את '
-        'האוכלוסייה שלה, את יחידת המדידה וגודל המדגם, ואם היא נבדקה עד תום — במילים, לעולם '
-        'לא כאחוז או כטווח. סטטוס דגימה ברמת דרגה לעולם אינו מיוחס לזיהוי בודד. כל זיהוי נותר '
-        'הערכה אלגוריתמית שלא נבדקה; ראו "מגבלות ידועות" למטה למה זה אומר ומה לא.'
+        'כל דרגה למטה מציינת כמה זיהויים היא כוללת ואם דורגה — במילים, לעולם לא כאחוז או '
+        'כטווח. הדירוג נעשה על מדגם ומתאר את הדרגה כולה, ולכן אינו הסתברות לזיהוי בודד, וכל '
+        'זיהוי נותר התאמה אלגוריתמית שלא נבדקה. דרגה שלא דורגה — כך נאמר עליה.'
     ),
 }
 
 _CONFIDENCE_FIELD_LABELS = {
+    # ⟨SHORTENED 2026-08-13⟩ was "Population (shipped claims in this band)" --
+    # the parenthetical restated the field for an audience that already knows
+    # what a population is, and puzzled the one that does not.
     'population': {
-        'en': 'Population (shipped claims in this band)',
-        'he': 'אוכלוסייה (טענות שפורסמו בדרגה זו)',
+        'en': 'Identifications in this tier',
+        'he': 'זיהויים בדרגה זו',
     },
     'unit': {'en': 'Unit of measurement', 'he': 'יחידת מדידה'},
     'sample': {'en': 'Sample size', 'he': 'גודל המדגם'},
@@ -301,31 +308,19 @@ _NOVELTY_CHECK_TEXT = {
 }
 
 
-def _render_bucket_rule_subsection(lk, text_style):
-    """Task 2.1: the two-bucket rule, verbatim from MAIN_POOL_SENTENCE, plus
-    what the second bucket does NOT mean (insufficient evidence, never
-    "probably wrong")."""
-    h3(
-        _BUCKET_RULE_HEADING[lk],
-        classes='text-lg font-semibold mt-3 mb-1',
-        style='color: var(--text-primary);',
-    )
-    ui.label(MAIN_POOL_SENTENCE[lk]).style(text_style)
-    ui.label(_SECOND_BUCKET_MEANING[lk]).style(text_style)
-
-
-def _render_known_limitations_subsection(lk, text_style):
-    """Task 2.2: containment, the two-sides-of-one-leaf caveat, and the dating
-    caveat — every share stated in words, never as a measured percentage."""
-    h3(
-        _LIMITATIONS_HEADING[lk],
-        classes='text-lg font-semibold mt-3 mb-1',
-        style='color: var(--text-primary);',
-    )
-    # The marker class goes on THIS label and nothing else -- not the heading,
-    # not the subsection, not the card. The D-06a exception must cover the
-    # approved SENTENCE and nothing adjacent to it.
-    ui.label(_LIMITATIONS_TEXT[lk]).classes(_LIMITATIONS_PARAGRAPH_CLASS).style(text_style)
+#: ⟨DELETED 2026-08-13⟩ `_render_bucket_rule_subsection` and
+#: `_render_known_limitations_subsection` are gone. Both rendered copy the
+#: practical computed-identifications card now carries, so a reader met the
+#: two-bucket rule and the limitations paragraph TWICE on one page -- and a
+#: second element carrying `_LIMITATIONS_PARAGRAPH_CLASS` also breaks the
+#: wording pin, which digests every element with that class.
+#:
+#: Their heading/copy CONSTANTS are deliberately kept: `_BUCKET_RULE_HEADING`
+#: and `_LIMITATIONS_HEADING` are imported by the render-smoke pins in
+#: tests/render_smoke/test_panel_render_smoke.py (the D-06a card-boundary
+#: control and the "scope is the paragraph, not the heading" assertion), and
+#: `_SECOND_BUCKET_MEANING`'s point -- the second group is not "probably wrong"
+#: -- is made in the practical card's pane guide instead.
 
 
 def _render_novelty_check_subsection(lk, text_style):
@@ -424,8 +419,27 @@ def _render_confidence_section(lang, precision, band_counts):
 
             ui.label(_CONFIDENCE_INTRO[lk]).style(text_style).classes('mb-2')
 
-            _render_bucket_rule_subsection(lk, text_style)
-            _render_known_limitations_subsection(lk, text_style)
+            # WHAT IS MEASURED, ONCE. It is the same estimand prose for all
+            # seven tiers, so rendering it per tier was six repetitions of one
+            # sentence -- most of this section's length was repetition, not
+            # information.
+            ui.label(
+                f"{_CONFIDENCE_FIELD_LABELS['unit'][lk]}: {_CONFIDENCE_UNIT_PROSE[lk]}"
+            ).style(text_style).classes('mb-2')
+
+            # The bucket rule and the limitations paragraph are NOT rendered
+            # here any more -- both now live in the practical
+            # computed-identifications card above, so a reader met each of them
+            # twice on one page.
+            #
+            # For the limitations paragraph that was also a CORRECTNESS
+            # problem, not only repetition: `LIMITATIONS_TEXT_SHA256` digests
+            # the text of EVERY element carrying `_LIMITATIONS_PARAGRAPH_CLASS`,
+            # so a second copy silently doubles the digested string and the pin
+            # fails on wording nobody touched. Do not re-add it here.
+            #
+            # The novelty check STAYS: nothing else on the page carries it, and
+            # it is NOVEL-01/D-23b's candidate-is-not-a-confirmed-find framing.
             _render_novelty_check_subsection(lk, text_style)
 
             for evidence_source, canonical_band in _confidence_bands():
@@ -465,8 +479,22 @@ def _render_one_band(evidence_source, canonical_band, lang, precision, band_coun
     pop_val = f"{n:,}" if isinstance(n, int) else ph['count_unavailable'][lk]
     ui.label(f"{fl['population'][lk]}: {pop_val}").style(text_style)
 
-    # unit of measurement (static estimand prose).
-    ui.label(f"{fl['unit'][lk]}: {_CONFIDENCE_UNIT_PROSE[lk]}").style(text_style)
+    # measurement status — QUALITATIVE ONLY (D-06a): no percentage, no CI, no
+    # strata table. band_measurement_status() is the SAME status-derivation
+    # function is_default_eligible() reads — a status change here needs no
+    # code edit, only a sidecar data change.
+    status = band_measurement_status(row)
+    ui.label(f"{fl['status'][lk]}: {_measurement_status_copy(status, lk)}").style(text_style)
+
+    # ⟨2026-08-13, owner: "concise and understandable"⟩ AN UNGRADED TIER STOPS
+    # HERE. Its sample size, date, grader, audit state and report id are all
+    # absent, so what rendered was four more lines of "not yet measured" under a
+    # status line that had just said exactly that -- and with most tiers
+    # ungraded, that repetition WAS this section, which is how a methods page
+    # ends up unreadable. Nothing publishable is withheld: the status line above
+    # is the honest statement, and it is unconditional.
+    if status == 'not_measured':
+        return
 
     # sample size — THREE distinct numbers, never conflated with population.
     def _num(v):
@@ -479,21 +507,18 @@ def _render_one_band(evidence_source, canonical_band, lang, precision, band_coun
     ]
     ui.label(f"{fl['sample'][lk]}: " + "; ".join(sample_parts)).style(text_style)
 
-    # measurement status — QUALITATIVE ONLY (D-06a): no percentage, no CI, no
-    # strata table. band_measurement_status() is the SAME status-derivation
-    # function is_default_eligible() reads — a status change here needs no
-    # code edit, only a sidecar data change.
-    status = band_measurement_status(row)
-    ui.label(f"{fl['status'][lk]}: {_measurement_status_copy(status, lk)}").style(text_style)
-
-    # the four CERT-01 registry fields — read via .get(), placeholder when
-    # absent/NULL, NEVER fabricated (135-05 columns; filled by 135-09).
-    ui.label(f"{fl['measurement_date'][lk]}: {row.get('measurement_date') or nm}").style(text_style)
-    ui.label(f"{fl['grader'][lk]}: {row.get('grader') or nm}").style(text_style)
+    # the CERT-01 registry fields — read via .get(), NEVER fabricated (135-05
+    # columns; filled by 135-09). Each is skipped when absent rather than
+    # printed as a placeholder; the audit state is unconditional because its
+    # own placeholder ("independent audit pending") is a real statement about a
+    # graded tier rather than a stand-in for a missing one.
+    for field in ('measurement_date', 'grader', 'report_id'):
+        value = row.get(field)
+        if value:
+            ui.label(f"{fl[field][lk]}: {value}").style(text_style)
     ui.label(
         f"{fl['audit_status'][lk]}: {row.get('audit_status') or ph['audit_pending'][lk]}"
     ).style(text_style)
-    ui.label(f"{fl['report_id'][lk]}: {row.get('report_id') or nm}").style(text_style)
 
 
 def _help_tool_link(label: str, target: str, marker: str, *, rtl: bool = False) -> None:
@@ -766,6 +791,13 @@ def _create_english_content(precision=None, band_counts=None):
             ]
             if discovery_available():
                 toc_items.append(('computed-identifications', 'Computed Identifications (Beta)'))
+                # BAND-05 methods section (D-10), restored 2026-08-13 under the
+                # SAME gate as the card above and its body card below. The
+                # pre-merge code additionally carried an `anchor == 'confidence'
+                # and not discovery_available()` continue inside the render loop;
+                # it is not restored, because appending under this gate already
+                # decides it and a second unreachable guard reads as a real one.
+                toc_items.append(('confidence', _CONFIDENCE_TOC_TITLE['en']))
             if atlas_preview_available():
                 toc_items.append(('visual-atlas', 'The Visual Genizah Atlas'))
             toc_items.extend([
@@ -1306,6 +1338,16 @@ Browse the scholarly catalog by domain classification, author, or work title.
 
     if discovery_available():
         _render_computed_identifications_help('en')
+        # BAND-05 methods section (Phase 135, D-10; qualitative per D-06a),
+        # RESTORED 2026-08-13 and placed BELOW the practical card deliberately:
+        # REL-01 gates the public launch on this report being published and
+        # CERT-02 names it as where each tier's unit and status are recorded, so
+        # it has to exist -- but its audience is someone auditing the method,
+        # and a first-time reader needs the practical guidance first.
+        #
+        # Codex #11: this body is its OWN conditional card, never part of the
+        # TOC render loop, so it carries this gate rather than inheriting one.
+        _render_confidence_section('en', precision, band_counts)
 
     if atlas_preview_available():
         _render_visual_atlas_help('en')
@@ -1442,6 +1484,9 @@ def _create_hebrew_content(precision=None, band_counts=None):
             ]
             if discovery_available():
                 toc_items.append(('computed-identifications', 'זיהויים מחושבים (בטא)'))
+                # BAND-05 methods section (D-10), restored 2026-08-13 -- see the
+                # English half for why the loop-level guard is not restored.
+                toc_items.append(('confidence', _CONFIDENCE_TOC_TITLE['he']))
             if atlas_preview_available():
                 toc_items.append(('visual-atlas', 'אטלס הגניזה החזותי'))
             toc_items.extend([
@@ -1973,6 +2018,8 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
     if discovery_available():
         _render_computed_identifications_help('he')
+        # BAND-05 methods section, restored 2026-08-13 -- see the English half.
+        _render_confidence_section('he', precision, band_counts)
 
     if atlas_preview_available():
         _render_visual_atlas_help('he')

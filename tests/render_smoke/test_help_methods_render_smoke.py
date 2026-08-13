@@ -22,6 +22,7 @@ from tests.render_smoke.discovery_honesty_gate import (
     DiscoveryHonestyScopeError,
     DiscoveryHonestyViolation,
     assert_discovery_honesty,
+    assert_surface_honesty,
 )
 
 
@@ -171,7 +172,12 @@ def test_help_explains_current_computed_matches_pane_in_english():
         await user.should_see('View text match')
         await user.should_see('Does not correspond to the catalogue — not adjudicated')
         await user.should_see('algorithmic suggestions, not identifications reviewed by a scholar')
-        await user.should_not_see('Confidence Bands and Methods')
+        # ⟨REVERSED 2026-08-13, owner⟩ This asserted the BAND-05 methods section
+        # was ABSENT. It is back: REL-01 gates the public launch on that report
+        # being published and CERT-02 names it as where each tier's unit and
+        # status are recorded, so retiring it was not a free choice. Now pinned
+        # PRESENT, below this card.
+        await user.should_see('Confidence Bands and Methods')
 
     _run('en', driver)
 
@@ -188,7 +194,8 @@ def test_help_explains_computed_matches_in_hebrew_rtl():
         await user.should_see('כולל דף זה')
         await user.should_see('הצגת התאמת הטקסט')
         await user.should_see('אינו מתאים לקטלוג — לא הוכרע')
-        await user.should_not_see('דרגות ודאות ושיטות')
+        # ⟨REVERSED 2026-08-13, owner⟩ see the English half.
+        await user.should_see('דרגות ודאות ושיטות')
 
     _run('he', driver)
 
@@ -397,6 +404,150 @@ def test_discovery_honesty_gate_catches_negated_prohibited_wording():
 # what is on it, so the corpus-wide surface -- the one that carries all the
 # controls -- was undocumented.
 # ---------------------------------------------------------------------------
+
+def _class_scoped_text(user, class_name: str) -> str:
+    """All rendered text inside elements carrying ``class_name``. Generic
+    counterpart of ``_computed_id_section_text``, for scopes other than the
+    computed-identifications card."""
+    parts = []
+    with user._client:
+        for element in user._client.elements.values():
+            if class_name in (getattr(element, '_classes', None) or []):
+                for node in element.descendants(include_self=True):
+                    for attr in ('text', 'content'):
+                        value = getattr(node, attr, None)
+                        if isinstance(value, str) and value:
+                            parts.append(value)
+    return '\n'.join(parts)
+
+
+def _elements_with_class(user, class_name: str):
+    with user._client:
+        return [e for e in user._client.elements.values()
+                if class_name in (getattr(e, '_classes', None) or [])]
+
+
+# ---------------------------------------------------------------------------
+# The BAND-05 methods section, RESTORED 2026-08-13 (owner) after a merge
+# stopped it rendering. REL-01 gates the public launch on this report being
+# published and CERT-02 names it as where each tier's unit and status are
+# recorded, so its absence was a release-gate problem, not a tidy-up.
+# ---------------------------------------------------------------------------
+
+def test_the_restored_band_section_renders_in_both_languages_and_stays_gated():
+    """Present under both languages, absent when discovery is unavailable.
+
+    The gate matters as much as the presence: the section reports on an
+    unreleased artifact, so a flag-off/sidecar-missing environment must not
+    advertise it.
+    """
+    from web.pages.help import _CONFIDENCE_SECTION_CLASS, _CONFIDENCE_TOC_TITLE
+
+    async def english(user):
+        await user.open('/help')
+        await user.should_see(_CONFIDENCE_TOC_TITLE['en'])
+        anchors = _anchor_names(_elements(user))
+        assert 'help-confidence' in anchors
+        # The per-tier deep-link targets BAND-03's tooltips are specified to
+        # link to. They went away with the section; assert they are back.
+        assert 'help-confidence-tier_a' in anchors
+        assert len(_elements_with_class(user, _CONFIDENCE_SECTION_CLASS)) == 1
+
+    _run('en', english)
+
+    async def hebrew(user):
+        await user.open('/help')
+        await user.should_see(_CONFIDENCE_TOC_TITLE['he'])
+        assert 'help-confidence' in _anchor_names(_elements(user))
+
+    _run('he', hebrew)
+
+    async def gated_off(user):
+        await user.open('/help')
+        anchors = _anchor_names(_elements(user))
+        assert 'help-confidence' not in anchors
+        assert 'help-confidence-tier_a' not in anchors
+        await user.should_not_see(_CONFIDENCE_TOC_TITLE['en'])
+
+    _run('en', gated_off, discovery_on=False, atlas_on=True)
+
+
+def test_the_limitations_paragraph_renders_exactly_once_so_its_digest_pin_holds():
+    """A SECOND copy of the D-06a paragraph would break the wording pin.
+
+    `LIMITATIONS_TEXT_SHA256` digests the text of EVERY element carrying
+    `_LIMITATIONS_PARAGRAPH_CLASS`, so re-rendering the paragraph inside the
+    restored methods section -- where it used to live -- silently doubles the
+    digested string and fails the pin on wording nobody edited. That is a
+    plausible future edit, which is why this is asserted rather than commented.
+    """
+    from web.pages.help import _LIMITATIONS_PARAGRAPH_CLASS
+
+    async def driver(user):
+        await user.open('/help')
+        carriers = _elements_with_class(user, _LIMITATIONS_PARAGRAPH_CLASS)
+        assert len(carriers) == 1, (
+            f'the D-06a limitations paragraph renders {len(carriers)} times; the '
+            'digest pin covers all of them concatenated, so more than one breaks '
+            'it. It belongs in the practical card only.'
+        )
+
+    _run('en', driver)
+    _run('he', driver)
+
+
+def test_an_ungraded_tier_states_that_once_instead_of_four_placeholder_lines():
+    """The owner asked for concise. With no measurement in the artifact every
+    tier is ungraded, and what used to render was the status line plus FOUR more
+    lines each reading "not yet measured" -- repetition that was most of the
+    section's length. The status line is unconditional and says it once; the
+    sample/date/grader/report/audit fields appear only where a measurement
+    exists, so nothing publishable is withheld.
+    """
+    from web.pages.help import _CONFIDENCE_FIELD_LABELS, _CONFIDENCE_SECTION_CLASS
+
+    async def driver(user):
+        await user.open('/help')
+        text = _class_scoped_text(user, _CONFIDENCE_SECTION_CLASS)
+        fl = _CONFIDENCE_FIELD_LABELS
+        assert fl['population']['en'] in text
+        assert fl['status']['en'] in text
+        assert 'not yet measured' in text
+        for withheld in ('sample', 'measurement_date', 'grader', 'report_id',
+                         'audit_status'):
+            assert fl[withheld]['en'] not in text, (
+                f"{fl[withheld]['en']!r} rendered for an UNGRADED tier -- it has "
+                'no value, so this is a placeholder line the status already made'
+            )
+        # The estimand prose is section-level now, so it appears ONCE rather
+        # than once per tier.
+        assert text.count(fl['unit']['en']) == 1
+
+    _run('en', driver)
+
+
+def test_the_restored_band_section_passes_the_strict_honesty_gate():
+    """SIX detectors, accuracy included -- the strictest scan available, and it
+    is available here precisely because the D-06a limitations paragraph is no
+    longer inside this section. This is the surface D-06a rewrote, so a
+    percentage, an interval or a raw band key leaking back in is the exact
+    regression to catch."""
+    from web.pages.help import _CONFIDENCE_SECTION_CLASS
+
+    def _drive(lang):
+        async def driver(user):
+            await user.open('/help')
+            text = _class_scoped_text(user, _CONFIDENCE_SECTION_CLASS)
+            fragment = (f'<div class="{_CONFIDENCE_SECTION_CLASS}">'
+                        f'{html.escape(text)}</div>')
+            assert_surface_honesty(
+                fragment, scope_selector=_CONFIDENCE_SECTION_CLASS, lang=lang)
+
+        return driver
+
+    _run('en', _drive('en'))
+    _run('he', _drive('he'))
+
 
 def test_help_documents_the_computed_identifications_page_controls_in_english():
     """A DRIFT GUARD, not a content test.
