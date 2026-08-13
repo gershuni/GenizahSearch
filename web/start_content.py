@@ -13,7 +13,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 
 CONTENT_PATH = Path(__file__).with_name("start_content.v1.json")
@@ -98,6 +98,8 @@ def _validate_start_content(doc: Any) -> dict[str, Any]:
         _fail("$.content_id", "must equal 'start-curated-v1'")
     if doc.get("status") != "curated_v1":
         _fail("$.status", "must equal 'curated_v1'")
+    if not isinstance(doc.get("computed_candidates_published"), bool):
+        _fail("$.computed_candidates_published", "must be a boolean")
 
     counts = _mapping(doc.get("featured_counts"), "$.featured_counts")
     expected_count_keys = {"searches", "manuscripts", "works", "computed_candidates"}
@@ -150,6 +152,18 @@ def _validate_start_content(doc: Any) -> dict[str, Any]:
         if not thumbnail.startswith(expected_prefix):
             _fail(f"{location}.thumbnail", "must use the internal image endpoint for the same sys_id")
         _bilingual(entry.get("alt"), f"{location}.alt")
+        reference = entry.get("reference")
+        if reference is not None:
+            reference = _mapping(reference, f"{location}.reference")
+            if set(reference) != {"label", "url"}:
+                _fail(f"{location}.reference", "must contain exactly 'label' and 'url'")
+            _bilingual(reference.get("label"), f"{location}.reference.label")
+            url = _nonempty_string(
+                reference.get("url"), f"{location}.reference.url", max_length=500
+            )
+            parsed = urlsplit(url)
+            if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+                _fail(f"{location}.reference.url", "must be a credential-free HTTPS URL")
 
     works = _list(doc.get("works"), "$.works")
     if len(works) != 6:
@@ -163,8 +177,8 @@ def _validate_start_content(doc: Any) -> dict[str, Any]:
             _fail(f"{location}.catalog_value", "must be a positive structured catalogue title ID")
 
     candidates = _list(doc.get("computed_candidates"), "$.computed_candidates")
-    if len(candidates) != 10:
-        _fail("$.computed_candidates", "launch v1 requires exactly 10 entries")
+    if not 1 <= len(candidates) <= 20:
+        _fail("$.computed_candidates", "must contain between 1 and 20 curated entries")
     for index, raw in enumerate(candidates):
         location = f"$.computed_candidates[{index}]"
         entry = _mapping(raw, location)
@@ -204,6 +218,7 @@ def _validate_start_content(doc: Any) -> dict[str, Any]:
     elif not isinstance(parallels.get("text"), str):
         _fail("$.demos.parallels.text", "must be a string")
     _sys_id(demos["joins"].get("sys_id"), "$.demos.joins.sys_id")
+    _positive_page(demos["joins"].get("page"), "$.demos.joins.page")
 
     for key, collection in (("searches", searches), ("manuscripts", manuscripts), ("works", works), ("computed_candidates", candidates)):
         if counts[key] > len(collection):
@@ -260,7 +275,10 @@ def demo_url(name: str, entry: Mapping[str, Any]) -> str:
     if name == "parallels":
         return "/parallels?" + urlencode({"text": str(entry["text"])})
     if name == "joins":
-        return "/joins-lab?" + urlencode({"sys_id": str(entry["sys_id"])})
+        return "/joins-lab?" + urlencode({
+            "sys_id": str(entry["sys_id"]),
+            "page": int(entry["page"]),
+        })
     raise ValueError(f"unknown start demo {name!r}")
 
 
@@ -268,6 +286,8 @@ def live_computed_candidates(content: Mapping[str, Any]) -> list[Mapping[str, An
     """Return only candidates bound to the exact loaded discovery frame."""
     from web.discovery_assets import discovery_available, discovery_meta
 
+    if not content.get("computed_candidates_published", False):
+        return []
     if not discovery_available():
         return []
     live_hash = discovery_meta("frame_content_hash")

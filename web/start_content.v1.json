@@ -2,11 +2,12 @@
   "schema_version": 1,
   "content_id": "start-curated-v1",
   "status": "curated_v1",
+  "computed_candidates_published": true,
   "featured_counts": {
     "searches": 3,
     "manuscripts": 3,
     "works": 3,
-    "computed_candidates": 3
+    "computed_candidates": 4
   },
   "searches": [
     {
@@ -163,7 +164,11 @@
       "category": {"en": "Palimpsest and Midrash", "he": "פלימפססט ומדרש"},
       "title": {"en": "A Sifra hidden beneath the Mishnah", "he": "ספרא המסתתר מתחת למשנה"},
       "description": {"en": "A palimpsest: the visible Mishnah was written over an earlier layer from the halakhic midrash Sifra.", "he": "פלימפססט: נוסח המשנה הגלוי נכתב על גבי שכבה קדומה יותר של מדרש ההלכה ספרא."},
-      "alt": {"en": "Mishnah and Sifra palimpsest T-S E2.51", "he": "פלימפססט של משנה וספרא, T-S E2.51"}
+      "alt": {"en": "Mishnah and Sifra palimpsest T-S E2.51", "he": "פלימפססט של משנה וספרא, T-S E2.51"},
+      "reference": {
+        "label": {"en": "Read Elyashiv Cherlow’s article", "he": "קראו את מאמרו של אלישיב שרלו"},
+        "url": "https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit/fragment-month/fotm-2025/fragment-2"
+      }
     },
     {
       "id": "ms-talmud-yoma",
@@ -253,124 +258,100 @@
   ],
   "computed_candidates": [
     {
-      "id": "computed-mishnah-commentary-nezikin",
-      "identification_id": "23950416c28da3c28f5e03afa2fb1a90e72fd9308d2e589fab35d2e5947f86ef",
-      "work_id": "w000028",
-      "sys_id": "990053245250205171",
-      "shelfmark": "ENA 3108.9a",
-      "page": 1,
+      "id": "computed-hayyuj-kitab-al-nutaf",
+      "identification_id": "e13f328f61040c2f6b591624dcd0922ace137b62293ebf62269a715672f53c5b",
+      "work_id": "w000068",
+      "sys_id": "990051269760205171",
+      "shelfmark": "T-S Ar.24.81",
+      "page": 2,
       "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Mishnah commentary", "he": "פירוש המשנה"},
-      "title": {"en": "A suggested match to a Mishnah commentary", "he": "התאמה מוצעת לפירוש המשנה"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
+      "category": {"en": "Philology and grammar", "he": "בלשנות ודקדוק"},
+      "title": {"en": "Judah Hayyuj, Kitab al-Nutaf", "he": "יהודה חיוג׳, ספר המריטה"},
+      "description": {"en": "Catalogued as Judeo-Arabic biblical exegesis on Jeremiah and Ezekiel; the automatic match suggests Hayyuj’s grammatical work.", "he": "מקוטלג כפרשנות מקרא בערבית־יהודית לירמיהו וליחזקאל; ההתאמה האוטומטית מצביעה על חיבורו הדקדוקי של יהודה חיוג׳."}
     },
     {
-      "id": "computed-saadiah-exodus",
-      "identification_id": "7c846434dc48a0ebd3dcef526f8d13e2511b903f198c6ef3c69634d9a26acafd",
-      "work_id": "w000033",
-      "sys_id": "990053407970205171",
-      "shelfmark": "MS heb. d.43/17",
-      "page": 1,
+      "id": "computed-maimonides-logic",
+      "identification_id": "a8828dcbf734a7ddb4d6c2064c69bdc9acd3e0504c46625acd34ea838b2e6a48",
+      "work_id": "w000023",
+      "sys_id": "990053596740205171",
+      "shelfmark": "ENA 3171.7",
+      "page": 2,
       "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Judeo-Arabic Bible", "he": "מקרא בערבית־יהודית"},
-      "title": {"en": "A suggested match to Saadia's Exodus translation", "he": "התאמה מוצעת לתרגום רס״ג לשמות"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
+      "category": {"en": "Philosophy and logic", "he": "פילוסופיה ולוגיקה"},
+      "title": {"en": "Maimonides, Treatise on Logic", "he": "הרמב״ם, באור מלאכת ההגיון"},
+      "description": {"en": "Catalogued only under broad philosophy and theology headings; the automatic match suggests Maimonides’ specific work on logic.", "he": "מקוטלג רק תחת כותרות כלליות של פילוסופיה ותאולוגיה; ההתאמה האוטומטית מצביעה על חיבורו המסוים של הרמב״ם בלוגיקה."}
     },
     {
-      "id": "computed-twenty-treatises",
-      "identification_id": "bd32475a930411e539cbb0dc8d7b5e1b1137bee7c0e52a3d07d7c43c1862a75c",
+      "id": "computed-keter-malkhut",
+      "identification_id": "b7aa95c8c8378b84a2e697521737f6141555678d4685e9beaaeac860fecde929",
+      "work_id": "w001129",
+      "sys_id": "990051639550205171",
+      "shelfmark": "T-S NS 269.196",
+      "page": 8,
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
+      "category": {"en": "Piyyut", "he": "פיוט"},
+      "title": {"en": "Solomon ibn Gabirol, Keter Malkhut", "he": "שלמה אבן גבירול, כתר מלכות"},
+      "description": {"en": "Catalogued as linguistics; the automatic match suggests Ibn Gabirol’s Keter Malkhut.", "he": "מקוטלג כבלשנות; ההתאמה האוטומטית מצביעה על כתר מלכות לרבי שלמה אבן גבירול."}
+    },
+    {
+      "id": "computed-twenty-chapters",
+      "identification_id": "ebde1012ea00a18d054b6cd8bfe2186a860be0da0cdd5f59080bca4f06f02f06",
       "work_id": "w000057",
-      "sys_id": "990001594880205171",
-      "shelfmark": "Ms. EVR ARAB II 210",
-      "page": 5,
+      "sys_id": "990051284490205171",
+      "shelfmark": "T-S Ar.32.13",
+      "page": 1,
       "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Jewish theology", "he": "תאולוגיה יהודית"},
-      "title": {"en": "A suggested match to Twenty Treatises", "he": "התאמה מוצעת לעשרים מאמרים"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
+      "category": {"en": "Jewish kalam", "he": "כלאם יהודי"},
+      "title": {"en": "Daud al-Muqammis, Twenty Chapters", "he": "דאוד אלמקמץ, עשרים מאמרים"},
+      "description": {"en": "The Baker/Polliack catalogue gives no specific work; the automatic match suggests Daud al-Muqammis’s Twenty Chapters.", "he": "בקטלוג בייקר–פוליאק לא צוין חיבור מסוים; ההתאמה האוטומטית מצביעה על עשרים מאמרים לדאוד אלמקמץ."}
     },
     {
-      "id": "computed-rashi-genesis",
-      "identification_id": "d4d5882e5fc245d16112ab289f0872604eae47955a81eeae1dd976c5fe2e645b",
-      "work_id": "w001281",
-      "sys_id": "990053007600205171",
-      "shelfmark": "Ms. 3833 (Lutzki 772)",
+      "id": "computed-ben-hofni-tzitzit",
+      "identification_id": "bd57368373fad942f2405a7760733f2cec93cfcf422463bfaf6243a349ed1b17",
+      "work_id": "w000066",
+      "sys_id": "990053241810205171",
+      "shelfmark": "ENA 3063.6",
+      "page": 1,
+      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
+      "category": {"en": "Gaonic halakhah", "he": "הלכה גאונית"},
+      "title": {"en": "Samuel ben Hofni, Laws of the Commandment of Tzitzit", "he": "ספר דיני מצות הציצית לרשב״ח"},
+      "description": {"en": "Catalogued as Talmudic commentary on Shabbat 22a; the automatic match suggests Samuel ben Hofni’s work on the laws of tzitzit.", "he": "מקוטלג כפירוש תלמוד למסכת שבת כב ע״א; ההתאמה האוטומטית מצביעה על ספר דיני מצות הציצית לרב שמואל בן חופני."}
+    },
+    {
+      "id": "computed-rashi-numbers",
+      "identification_id": "8d2a157f0c0d9c4f0e268805e18ac7a6f3b97a3841df2413a57eca27a9403eb4",
+      "work_id": "w001304",
+      "sys_id": "990053174320205171",
+      "shelfmark": "ENA 2570.3",
       "page": 2,
       "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
       "category": {"en": "Biblical commentary", "he": "פרשנות המקרא"},
-      "title": {"en": "A suggested match to Rashi on Genesis", "he": "התאמה מוצעת לרש״י על בראשית"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
+      "title": {"en": "Rashi on Numbers", "he": "רש״י על במדבר"},
+      "description": {"en": "The catalogue gives biblical-exegesis passages in Numbers and Deuteronomy; the automatic match proposes the more specific identification Rashi on Numbers.", "he": "הקטלוג מציין קטעי פרשנות מקרא בבמדבר ובדברים; ההתאמה האוטומטית מציעה זיהוי מסוים יותר: רש״י על במדבר."}
     },
     {
-      "id": "computed-tosafot-ketubot",
-      "identification_id": "a7d274dd4d5c1577e8eb8ef92d3f221cea17a7f7bf350fdcbc9b91f620e09a6e",
-      "work_id": "w001360",
-      "sys_id": "990052338310205171",
-      "shelfmark": "T-S AS 196.340",
-      "page": 2,
-      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Talmud commentary", "he": "פרשנות התלמוד"},
-      "title": {"en": "A suggested match to Tosafot on Ketubot", "he": "התאמה מוצעת לתוספות על כתובות"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
-    },
-    {
-      "id": "computed-tosafot-hullin",
-      "identification_id": "c9232e25c96715b1de91adc06b0458dedc01c946f3649650a93f47e129be4293",
-      "work_id": "w001357",
-      "sys_id": "990051632970205171",
-      "shelfmark": "T-S NS 266.152",
-      "page": 2,
-      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Talmud commentary", "he": "פרשנות התלמוד"},
-      "title": {"en": "A suggested match to Tosafot on Hullin", "he": "התאמה מוצעת לתוספות על חולין"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
-    },
-    {
-      "id": "computed-rashi-exodus",
-      "identification_id": "d86146a9cbe1a8f228f1a54b21342a22c03ed7caa873cf08d7ebbe7dc86a08a7",
-      "work_id": "w001278",
-      "sys_id": "990052314610205171",
-      "shelfmark": "T-S AS 192.81",
+      "id": "computed-saadiah-beliefs-opinions",
+      "identification_id": "84bf109e0fe2d044ee75219530c49ad5940d76463415fb01f8d388adc2d3bfac",
+      "work_id": "w000006",
+      "sys_id": "990051260290205171",
+      "shelfmark": "T-S Ar.18(1).24",
       "page": 1,
       "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Biblical commentary", "he": "פרשנות המקרא"},
-      "title": {"en": "A suggested match to Rashi on Exodus", "he": "התאמה מוצעת לרש״י על שמות"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
+      "category": {"en": "Philosophy and theology", "he": "פילוסופיה ותאולוגיה"},
+      "title": {"en": "Saadia Gaon, The Book of Beliefs and Opinions", "he": "רס״ג, הנבחר באמונות ודעות"},
+      "description": {"en": "Catalogued as halakhah, ethical literature, and a discussion of repentance; the automatic match suggests Saadia Gaon’s Book of Beliefs and Opinions.", "he": "מקוטלג כהלכה, מוסר ודיון בתשובה; ההתאמה האוטומטית מצביעה על ספר הנבחר באמונות ודעות לרס״ג."}
     },
     {
-      "id": "computed-tosafot-kiddushin",
-      "identification_id": "28307da7aa4b57ec7f1714e7014e161127e5871e530522c3b55126fadf8b511b",
-      "work_id": "w001361",
-      "sys_id": "990051566900205171",
-      "shelfmark": "T-S NS 191.134",
-      "page": 2,
+      "id": "computed-mevasser-objections-saadiah",
+      "identification_id": "c2082111b7cca01290b2ed3dc8a682c3911d3f9118cc7c1272d9aee7a0e5d6ce",
+      "work_id": "w000031",
+      "sys_id": "990001538420205171",
+      "shelfmark": "Ms. EVR ARAB I 2030",
+      "page": 42,
       "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Talmud commentary", "he": "פרשנות התלמוד"},
-      "title": {"en": "A suggested match to Tosafot on Kiddushin", "he": "התאמה מוצעת לתוספות על קידושין"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
-    },
-    {
-      "id": "computed-saadiah-deuteronomy",
-      "identification_id": "a0ebbe84a82e8d125866ff7d696bfd23456154c6c34010dba684dd292b280165",
-      "work_id": "w000035",
-      "sys_id": "990052304160205171",
-      "shelfmark": "T-S AS 190.334",
-      "page": 1,
-      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Judeo-Arabic Bible", "he": "מקרא בערבית־יהודית"},
-      "title": {"en": "A suggested match to Saadia's Deuteronomy translation", "he": "התאמה מוצעת לתרגום רס״ג לדברים"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
-    },
-    {
-      "id": "computed-guide-perplexed",
-      "identification_id": "9f78f4fb93b04b0f09a6d79f17c684e28313c991e153ee3abd1495360340c900",
-      "work_id": "w001193",
-      "sys_id": "990051404290205171",
-      "shelfmark": "T-S NS 28.231",
-      "page": 2,
-      "frame_content_hashes": ["53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7"],
-      "category": {"en": "Philosophy", "he": "פילוסופיה"},
-      "title": {"en": "A suggested match to the Guide for the Perplexed", "he": "התאמה מוצעת למורה הנבוכים"},
-      "description": {"en": "An automatic textual match offered for examination, not a reviewed identification.", "he": "התאמת טקסט אוטומטית המוצעת לבדיקה, לא זיהוי שנבדק."}
+      "category": {"en": "Polemics", "he": "פולמוס"},
+      "title": {"en": "Mevasser ha-Levi, Objections to Saadia", "he": "מבשר הלוי, השגות על רס״ג"},
+      "description": {"en": "Catalogued as commentary on the Torah; the automatic match suggests Mevasser ha-Levi’s objections to Saadia Gaon.", "he": "מקוטלג כפירוש התורה; ההתאמה האוטומטית מצביעה על השגות מבשר הלוי על רס״ג."}
     }
   ],
   "puzzle": {
@@ -383,15 +364,16 @@
   "demos": {
     "parallels": {
       "id": "demo-parallels",
-      "enabled": false,
-      "text": "",
-      "title": {"en": "Find textual parallels", "he": "מצאו מקבילות טקסטואליות"},
-      "description": {"en": "A prepared example can be enabled after its result quality is checked.", "he": "אפשר להפעיל דוגמה מוכנה לאחר בדיקת איכות התוצאות."}
+      "enabled": true,
+      "text": "דרור יקרא לבן עם בת\nוינצרכם כמו בבת\nנעים שמכם ולא ישבת\nשבו נוחו ביום שבת\n\nדרוש נוי ואולמי\nואות ישע עשה עמי\nנטע שורק בתוך כרמי\nשעה שועת בני עמי",
+      "title": {"en": "Find parallels to Deror Yikra", "he": "מצאו מקבילות לדרור יקרא"},
+      "description": {"en": "Open a prepared parallel search for the opening stanzas of Dunash ben Labrat’s Sabbath poem.", "he": "פתחו חיפוש מקבילות מוכן לבתים הפותחים של פיוט השבת מאת דונש בן לברט."}
     },
     "joins": {
       "id": "demo-joins",
-      "enabled": false,
+      "enabled": true,
       "sys_id": "990001403820205171",
+      "page": 1,
       "title": {"en": "Open the Joins Lab with an anchor", "he": "פתחו את מעבדת הצירופים עם כתב יד עוגן"},
       "description": {"en": "Start from one manuscript and investigate possible physical or textual relationships.", "he": "התחילו מכתב יד אחד וחקרו קשרים פיזיים או טקסטואליים אפשריים."}
     }

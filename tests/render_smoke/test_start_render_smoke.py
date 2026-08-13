@@ -125,7 +125,7 @@ def test_start_renders_hebrew_rtl_without_english_title_leak(monkeypatch):
         assert (getattr(root, '_style', {}) or {}).get('direction') == 'rtl'
         h1s = [element for element in elements if getattr(element, 'tag_name', None) == 'h1']
         assert len(h1s) == 1
-        assert 'לא יודעים מה לחפש? התחילו כאן.' in (getattr(h1s[0], 'content', '') or '')
+        assert 'גלו את גניזת קהיר' in (getattr(h1s[0], 'content', '') or '')
         assert any(
             'ארבע המהפכות בחקר הגניזה' in (getattr(element, 'content', '') or '')
             for element in elements
@@ -157,7 +157,12 @@ def test_optional_tools_and_frame_bound_candidates_hide_and_show_cleanly(monkeyp
         assert '/atlas' in hrefs
         assert '/computed-identifications' in hrefs
         assert '/puzzle' in hrefs  # pending saved ID intentionally degrades to the generic tool
-        assert sum('computed=1' in href for href in hrefs) == 3
+        computed_hrefs = {href for href in hrefs if 'computed=1' in href}
+        assert len(computed_hrefs) == 4
+        assert '/browse?sys_id=990051269760205171&page=2&computed=1' in computed_hrefs
+        assert '/browse?sys_id=990053596740205171&page=2&computed=1' in computed_hrefs
+        assert any(href.startswith('/parallels?text=') for href in hrefs)
+        assert '/joins-lab?sys_id=990001403820205171&page=1' in hrefs
         assert len(_marked(_elements(user), 'start-computed-feature')) == 1
 
         # The heavy Atlas renderer is absent from first paint, then mounts

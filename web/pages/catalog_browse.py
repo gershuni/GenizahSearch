@@ -142,6 +142,13 @@ def create_catalog_browse_page(
     # Always from fjms.get_browse_library_facets(...) — NEVER page-local counts.
     current_library_facets = {'value': {}}
 
+    # Programmatic select updates during bootstrap can emit the same change
+    # events as a visitor selection. Until the initial URL/session state has
+    # produced its first result set, ignore those synthetic events. A serial
+    # also prevents a slower, older request from repainting over newer filters.
+    initial_load_complete = {'value': False}
+    refresh_serial = {'value': 0}
+
     # Cached lists for cross-filtering
     authors_list = {'data': []}
     works_list = {'data': []}
@@ -450,6 +457,8 @@ def create_catalog_browse_page(
     # ── Refresh results table ──────────────────────────────────────
     async def refresh_results():
         """Refresh the results table and pagination based on current filters."""
+        refresh_serial['value'] += 1
+        this_refresh = refresh_serial['value']
         ui.run_javascript('window.__showLoadingBar && window.__showLoadingBar()')
         if loading_spinner['ref']:
             loading_spinner['ref'].set_visibility(True)
@@ -459,6 +468,9 @@ def create_catalog_browse_page(
         except Exception as e:
             logger.error(f"catalog_browse fetch_results error: {e}")
             data = {"results": [], "total": 0}
+
+        if this_refresh != refresh_serial['value']:
+            return
 
         if loading_spinner['ref']:
             loading_spinner['ref'].set_visibility(False)
@@ -490,8 +502,13 @@ def create_catalog_browse_page(
             logger.warning("catalog_browse: facet refresh failed: %s", e)
             current_library_facets['value'] = {}
 
+        if this_refresh != refresh_serial['value']:
+            return
+
         # Batch resolve shelfmarks via io_bound
         resolved_meta = await run.io_bound(_resolve_all, results)
+        if this_refresh != refresh_serial['value']:
+            return
 
         # Build table rows with resolved shelfmarks + detail data
         rows = []
@@ -940,6 +957,8 @@ def create_catalog_browse_page(
 
     async def on_author_selected(e):
         """Handle author selection from select."""
+        if not initial_load_complete['value']:
+            return
         val = e.value
         if val and isinstance(val, str) and val.strip():
             current_author['value'] = val.strip()
@@ -954,6 +973,8 @@ def create_catalog_browse_page(
 
     async def on_work_selected(e):
         """Handle work/title selection from select."""
+        if not initial_load_complete['value']:
+            return
         val = e.value
         if val and isinstance(val, str) and val.strip():
             current_work['value'] = val.strip()
@@ -2019,10 +2040,13 @@ def create_catalog_browse_page(
 
     async def initial_load():
         """Load initial data and fetch results on page open."""
-        await _restore_session_filters()
-        await fetch_authors()
-        await fetch_works()
-        await refresh_results()
+        try:
+            await _restore_session_filters()
+            await fetch_authors()
+            await fetch_works()
+            await refresh_results()
+        finally:
+            initial_load_complete['value'] = True
 
     async def _deferred_initial_load():
         await asyncio.sleep(0.1)

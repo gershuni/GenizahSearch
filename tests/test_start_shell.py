@@ -44,5 +44,8 @@ def test_homepage_has_native_start_link_and_bounded_event_properties():
     assert "'route_id': 'home'" in source
     assert "'action_id': 'home_start_here'" in source
     assert "'difficulty': 'introductory'" in source
+    assert "What's on this website? Start here to explore the Cairo Genizah" in source
+    assert 'background: var(--primary-700); color: var(--text-inverse)' in source
+    assert 'Not sure what to search? Start here' not in source
     assert "'query'" not in source[source.index("'welcome_action_clicked'"):source.index("'welcome_action_clicked'") + 500]
     assert "'shelfmark'" not in source[source.index("'welcome_action_clicked'"):source.index("'welcome_action_clicked'") + 500]
