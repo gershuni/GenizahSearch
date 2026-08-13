@@ -1997,11 +1997,20 @@ body {
 .gs-discovery .gs-findings-row-excerpt-ctx {
     color: var(--text-secondary);
 }
+/* The matched-word mark wears the SITE'S match voice — the same amber
+   gradient as `.highlight-match` on /parallels — because the first cut used
+   --bg-active, which on the light theme is #ecfdf5 on a #f8fafc pane:
+   invisible (owner report, 2026-08-13). Still ONE rule for every row. */
 .gs-discovery .gs-findings-row-excerpt-hl {
-    background: var(--bg-active);
+    background: linear-gradient(120deg, #fef08a 0%, #fde047 100%);
     border-radius: 3px;
     padding: 0 1px;
-    box-shadow: inset 0 -2px 0 var(--primary-600);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+}
+[data-theme="dark"] .gs-discovery .gs-findings-row-excerpt-hl {
+    background: linear-gradient(120deg, #854d0e 0%, #a16207 100%);
+    color: white;
 }
 /* JA {...} Hebrew-word marks: content colored, braces removed by the
    renderer. Language markup carried by the source text -- one rule for every

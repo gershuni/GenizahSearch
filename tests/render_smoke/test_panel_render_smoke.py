@@ -2442,6 +2442,30 @@ def _divergent_rows_bundle(lang: str, seed_title: Optional[str] = None
     )
 
 
+def _excerpt_envelope(seed: Optional[str], lang: str):
+    """An OK excerpt envelope with the seed standing in EVERY text piece --
+    both context windows, both spans, the attribution -- plus word-highlight
+    intervals and the JA brace markup, so the panel's loader-gated disclosure
+    (excerpt-v1) paints every branch of the piece composer onto this surface.
+    """
+    from shared.discovery_surface_projection import surface_safe_excerpt
+    piece = seed or f'excerpt capture text ({lang})'
+    row = surface_safe_excerpt({
+        'identification_id': 'c' * 64,
+        'evidence_id': 'b' * 64,
+        'a_page_id': '990000000000000944_IE1_P000002_FL3',
+        'frag_before': piece, 'frag_span': piece, 'frag_after': piece,
+        'frag_clipped': False,
+        'work_before': piece, 'work_span': '{' + piece + '}',
+        'work_after': piece, 'work_clipped': False,
+        'work_source': 'reprojected',
+        'attribution': piece, 'n_spans': 2, 'text_layer': 'htr',
+        'frag_hl': [[0, 4]], 'work_hl': [[0, 4]],
+        'work_markup': 'ja_braces',
+    })
+    return make_envelope(STATUS_OK, [row], 1, meta={})
+
+
 def _render_every_panel_surface(seed: Optional[str] = None) -> str:
     """Every surface a READER can see on this panel, as text.
 
@@ -2505,6 +2529,27 @@ def _render_every_panel_surface(seed: Optional[str] = None) -> str:
             _divergent_rows_bundle(lang, seed_title=title),
         ):
             parts.append(_render_capture(_paint_body(build_panel_rows(bundle))))
+
+        # The loader-gated text-vs-text disclosure (excerpt-v1, 2026-08-13):
+        # rendered once WITH a loader, so the toggle exists, the click sweep
+        # opens it, and the excerpt envelope -- the seed standing in every
+        # text piece -- is painted onto THIS surface. Without this the new
+        # branch in `_render_identification_row` never executes and the
+        # line-granular gate rightly fails.
+        excerpt_env = _excerpt_envelope(seed, lang)
+
+        async def _load_excerpt(_row, _env=excerpt_env):
+            return _env
+
+        excerpt_model = build_panel_rows(
+            bundle_for(dict(MANUSCRIPT_PROFILES[1][1]), lang, STATUS_OK,
+                       seed_title=title))
+        parts.append(_render_capture(
+            lambda m=excerpt_model, le=_load_excerpt: (
+                dp.render_discovery_panel_body(
+                    m, on_retry=_noop_retry,
+                    page_id='990000000000000944_IE1_P000002_FL3',
+                    load_excerpt=le))))
 
         # ...and once with NO page id, the shape the seam produces when the
         # page scope never resolved: the lazy related-pages read must decline

@@ -2393,6 +2393,11 @@ _EMITTED_SCHEMA = {
     },
     "model.disclosure_levels[].rows[]": {
         "kind": _STR, "claim_id": _OPT_STR, "page_id": _OPT_STR,
+        # ⟨ADDED 2026-08-13 -- excerpt-v1⟩ what the row's text-vs-text
+        # disclosure fetches by. An identity key carried verbatim from the
+        # projected claim row, so the row on screen and the excerpt fetched
+        # can never be two different identifications.
+        "identification_id": _OPT_STR,
         "sys_id": _OPT_STR, "work_id": _OPT_STR, "work_title": _STR,
         "title_missing": _BOOL, "headline": _STR, "relation_chip": _STR,
         "relation_code": _STR, "band_tooltip": _STR, "in_main_pool": _BOOL,
@@ -2462,9 +2467,9 @@ _EMITTED_SCHEMA = {
 #: Keys that must be present on every identification row -- the object a reader
 #: acts on, and the one whose silent shrinkage would be hardest to notice.
 _REQUIRED_ROW_KEYS = frozenset({
-    "kind", "claim_id", "work_id", "work_title", "headline", "relation_chip",
-    "band_tooltip", "in_main_pool", "bucket", "disclosure_level", "gated",
-    "nested", "expansion",
+    "kind", "claim_id", "identification_id", "work_id", "work_title",
+    "headline", "relation_chip", "band_tooltip", "in_main_pool", "bucket",
+    "disclosure_level", "gated", "nested", "expansion",
 })
 
 #: A key NAME that asserts human review, in any spelling anyone has reached for.

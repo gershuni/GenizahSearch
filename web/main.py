@@ -1467,7 +1467,22 @@ def _render_password_recovery_handler():
 # Modern Theme System - Professional Research UI
 # ============================================================================
 
-COMMON_STYLES = '<link rel="stylesheet" href="/static/common.css">'
+# Cache-buster: the stylesheet URL carries a content hash, so a deploy (or a
+# dev-server restart) that changes common.css is picked up on the next normal
+# page load instead of waiting out the browser's heuristic cache. Root cause of
+# the 2026-08-13 invisible-highlight report: the bare URL kept serving CSS from
+# before the rule existed. Computed ONCE at import — the file does not change
+# under a running server.
+def _common_css_version() -> str:
+    import hashlib
+    try:
+        with open(os.path.join(STATIC_DIR, 'common.css'), 'rb') as f:
+            return hashlib.md5(f.read()).hexdigest()[:10]
+    except OSError:
+        return APP_VERSION
+
+
+COMMON_STYLES = f'<link rel="stylesheet" href="/static/common.css?v={_common_css_version()}">'
 
 
 def _resolve_ui_language() -> str:

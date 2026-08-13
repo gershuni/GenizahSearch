@@ -490,6 +490,21 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
     # placeholder handles, so no per-user state is introduced anywhere else.
     refs.enrichment_refs['discovery_bundle'] = discovery_bundle
 
+    # Whether identification rows may offer the text-vs-text disclosure
+    # (excerpt-v1): ONE availability read per enrichment load, never per row,
+    # and False when the loaded sidecar predates the excerpt table (a rollback
+    # asset must hide the toggle, not offer one that fails). Guarded like the
+    # panel fetch itself -- a discovery hiccup must never take the rest of the
+    # enrichment phase down.
+    excerpts_on = False
+    if discovery_bundle is not None:
+        try:
+            from web.discovery import excerpts_available
+            excerpts_on = await excerpts_available()
+        except Exception as e:
+            logger.error("Discovery excerpt availability check failed: %s", e)
+    refs.enrichment_refs['discovery_excerpts_on'] = excerpts_on
+
     # Process PGP + FGP sources — centralized per-page filter (FGP-04.4). Preserves
     # the prior PGP behavior exactly; FGP rows are aligned to the displayed image
     # by folio (1r↔1r) using the multi-IE-aware folio label resolved above.
@@ -795,6 +810,14 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
             except (RuntimeError, AttributeError):
                 return
         refs.enrichment_refs['discovery_bundle'] = fresh
+        # The retry that recovers the panel must also recover the excerpt
+        # toggle -- availability can flip with the same outage.
+        try:
+            from web.discovery import excerpts_available
+            refs.enrichment_refs['discovery_excerpts_on'] = await excerpts_available()
+        except Exception as e:
+            logger.error("Discovery excerpt availability check failed: %s", e)
+            refs.enrichment_refs['discovery_excerpts_on'] = False
         update_discovery_panel_section(state, refs)
 
     # THE LAUNCH HIGHLIGHT on the entry control (owner, 2026-08-07: "perhaps just
@@ -933,13 +956,26 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
     # an id the service already told it.
     _page_id = (bundle.claims.get('meta') or {}).get('page_id')
 
+    # The excerpt loader, injected so the panel component renders without
+    # reading (the findings page's own pattern). None -- and therefore NO
+    # toggle on any row -- unless the loaded sidecar carries the excerpt-v1
+    # table.
+    load_excerpt = None
+    if refs.enrichment_refs.get('discovery_excerpts_on'):
+        from web.discovery import get_excerpt_enveloped
+
+        async def load_excerpt(row):
+            return await get_excerpt_enveloped(
+                str(row.get('identification_id') or ''))
+
     if panel_container is not None:
         panel_container.style(
             'display: block;' if open_state['value'] else 'display: none;')
         with panel_container:
             render_discovery_panel_body(model, on_retry=_retry, page_id=_page_id,
                                         catalogue_title=_catalogue_title,
-                                        catalogue_identity=_catalogue_identity)
+                                        catalogue_identity=_catalogue_identity,
+                                        load_excerpt=load_excerpt)
 
     if entry_container is not None:
         with entry_container:

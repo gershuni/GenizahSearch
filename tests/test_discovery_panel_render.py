@@ -241,7 +241,8 @@ def model_for(**kwargs):
 # Render harness.
 # ---------------------------------------------------------------------------
 
-def _render(model, page_id: Optional[str] = 'page-1', driver=None):
+def _render(model, page_id: Optional[str] = 'page-1', driver=None,
+            load_excerpt=None):
     """Render the REAL panel body in a bare client context and return the
     client; `driver(client)` runs INSIDE the same event loop so interaction
     handlers can be awaited."""
@@ -255,7 +256,8 @@ def _render(model, page_id: Optional[str] = 'page-1', driver=None):
         core.loop = asyncio.get_running_loop()
         with Client(ui.page('/_discovery_panel_probe')) as client:
             with client:
-                dp.render_discovery_panel_body(model, page_id=page_id)
+                dp.render_discovery_panel_body(model, page_id=page_id,
+                                               load_excerpt=load_excerpt)
                 if driver is not None:
                     await driver(client)
         holder['client'] = client
@@ -1576,3 +1578,52 @@ def test_a_divergent_claim_is_absent_from_the_default_section_on_screen():
     assert title not in visible, (
         'the divergent claim renders outside every disclosure -- it is in the '
         'default view')
+
+
+# ---------------------------------------------------------------------------
+# The text-vs-text disclosure on identification rows (excerpt-v1, owner
+# 2026-08-13). The panel renders the SAME injected component as the findings
+# page (`findings_rows.render_excerpt_disclosure`); these tests pin the
+# WIRING -- presence is loader-gated, and the loader receives the row's own
+# identification_id -- not the component's internals, which the findings
+# render-smoke suite already drives through every state.
+# ---------------------------------------------------------------------------
+
+def _excerpt_toggle_buttons(client, lang='en'):
+    return _buttons(client, contains=ds.excerpt_strings(lang)['toggle'])
+
+
+def test_excerpt_toggle_renders_on_the_identification_row_with_a_loader():
+    async def load_excerpt(row):
+        return {'status': 'ok', 'items': [], 'total': 0}
+
+    client = _render(model_for(claim_items=[claim_row()]),
+                     load_excerpt=load_excerpt)
+    assert len(_excerpt_toggle_buttons(client)) == 1
+
+
+def test_no_excerpt_toggle_renders_without_a_loader():
+    """`load_excerpt=None` is the rollback contract: a pre-excerpt sidecar
+    must produce NO toggle, not a toggle that fails on click."""
+    client = _render(model_for(claim_items=[claim_row()]))
+    assert _excerpt_toggle_buttons(client) == []
+
+
+def test_the_toggle_hands_the_loader_the_rows_own_identification_id():
+    """The wiring test: browse_enrichment's closure reads
+    `row['identification_id']`, so the row rendered and the excerpt fetched
+    can never be two different identifications."""
+    calls: List[str] = []
+
+    async def load_excerpt(row):
+        calls.append(str(row.get('identification_id')))
+        return {'status': 'ok', 'items': [], 'total': 0}
+
+    async def driver(client):
+        toggle = _excerpt_toggle_buttons(client)[0]
+        await _click(toggle)
+        await _drain()
+
+    _render(model_for(claim_items=[claim_row()]),
+            load_excerpt=load_excerpt, driver=driver)
+    assert calls == ['ident-1']

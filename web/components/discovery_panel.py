@@ -64,6 +64,7 @@ from web.components import discovery_links as links
 from web.components.findings_rows import (
     ROW_CATALOGUE_TITLE_CLASS,
     copy_text as _findings_copy,
+    render_excerpt_disclosure,
 )
 from web.translations import tr
 
@@ -452,7 +453,8 @@ def _render_expansion_envelope(
 
 
 def _render_identification_row(row: Mapping[str, Any], lang: str,
-                               catalogue_title=None, catalogue_identity=None) -> None:
+                               catalogue_title=None, catalogue_identity=None,
+                               load_excerpt=None) -> None:
     with ui.element('div').classes(f'{PANEL_ROW_CLASS} row'):
         # 1. verb + work title, as PLAIN TEXT. `/work/{id}` does not exist until
         #    Phase 136.1, and a dead link is worse than plain text.
@@ -478,6 +480,14 @@ def _render_identification_row(row: Mapping[str, Any], lang: str,
         with ui.row().classes('items-center gap-2 side'):
             _render_expansion(row, lang, catalogue_title, catalogue_identity)
             _render_vote_placeholders(lang)
+
+        # 6. the text-vs-text disclosure (excerpt-v1) -- the SAME component the
+        #    findings page renders, injected the same way: this module renders,
+        #    it does not read. Absent entirely (not merely empty) when the
+        #    caller passed no loader -- excerpts unavailable, or a pre-excerpt
+        #    sidecar after a rollback.
+        if load_excerpt is not None and row.get('identification_id'):
+            render_excerpt_disclosure(row, lang, load_excerpt)
 
 
 # ---------------------------------------------------------------------------
@@ -717,7 +727,7 @@ def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -
 
 def render_discovery_panel_body(
     model: PanelModel, *, on_retry=None, page_id: Optional[str] = None,
-    catalogue_title=None, catalogue_identity=None,
+    catalogue_title=None, catalogue_identity=None, load_excerpt=None,
 ) -> None:
     lang = _lang_of(model)
     root = ui.element('div').classes(f'gs-discovery {PANEL_ROOT_CLASS} w-full')
@@ -752,7 +762,8 @@ def render_discovery_panel_body(
                 for level in model.disclosure_levels:
                     _render_level(level, lang, page_id, on_retry=on_retry,
                                   catalogue_title=catalogue_title,
-                                  catalogue_identity=catalogue_identity)
+                                  catalogue_identity=catalogue_identity,
+                                  load_excerpt=load_excerpt)
 
         with ui.element('div').classes('dpanes'):
             if model.lead_with_manuscript_pane:
@@ -765,13 +776,14 @@ def render_discovery_panel_body(
 
 def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
                   on_retry=None, catalogue_title=None,
-                  catalogue_identity=None) -> None:
+                  catalogue_identity=None, load_excerpt=None) -> None:
     """Exactly the disclosure levels the model emits -- no more, no fewer."""
     if level.get('default_visible'):
         ui.label(level.get('label') or '').classes('font-semibold')
         for row in level.get('rows') or ():
             _render_identification_row(row, lang, catalogue_title,
-                                       catalogue_identity)
+                                       catalogue_identity,
+                                       load_excerpt=load_excerpt)
         return
 
     # A collapsed level. `notid` is applied only where the model says the level
@@ -800,7 +812,8 @@ def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
                 _render_generic_group(group, lang)
             for row in level.get('rows') or ():
                 _render_identification_row(row, lang, catalogue_title,
-                                           catalogue_identity)
+                                           catalogue_identity,
+                                           load_excerpt=load_excerpt)
             related = level.get('related_pages')
             if related is not None:
                 _render_related_pages(related, lang, page_id, on_retry=on_retry)

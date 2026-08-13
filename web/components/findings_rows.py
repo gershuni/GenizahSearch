@@ -2447,10 +2447,18 @@ def _render_excerpt(item: Mapping[str, Any], lang: str, load_excerpt) -> None:
     async def _toggle(_event=None) -> None:
         state["open"] = not state["open"]
         body.style("display: flex;" if state["open"] else "display: none;")
+        button.set_text(strings["toggle_hide"] if state["open"]
+                        else strings["toggle"])
         if state["open"] and not state["loaded"]:
             await _load()
 
     button.on("click", _toggle)
+
+
+#: Public name for the browse connections panel (owner, 2026-08-13): the SAME
+#: disclosure on the panel's identification rows, one component for both
+#: surfaces so the two can never drift apart.
+render_excerpt_disclosure = _render_excerpt
 
 
 __all__ = [
@@ -2487,6 +2495,7 @@ __all__ = [
     "ROW_EXPANDER_CLASS",
     "ROW_EXCERPT_CLASS",
     "ROW_PREVIEW_CLASS",
+    "render_excerpt_disclosure",
     "EXPANSION_KEY_BY_UNIT",
     "REPORT_ADDRESS",
     "ROW_SHELFMARK_CLASS",

@@ -395,9 +395,16 @@ SURFACE_FACET_FIELDS: Tuple[str, ...] = (
 #:     surface never re-derives a band, a relation or a coverage figure from
 #:     the pieces here.
 #:   * anything about the MASKED alignment query the bake used to re-project a
-#:     Bible work (`align_score` is the only number that survives -- the
-#:     masked stream itself, and the corpus it belongs to, never exist in this
-#:     table by construction; see the Architecture note in the owning plan).
+#:     Bible work -- the masked stream itself, and the corpus it belongs to,
+#:     never exist in this table by construction; see the Architecture note in
+#:     the owning plan.
+#:   * `align_score` (2026-08-13, second thought the same day): the sidecar
+#:     COLUMN stays -- the offline verifier and the bake's own QA read it --
+#:     but no renderer consumes it, and "a field with no consumer is a field a
+#:     renderer eventually prints" applies with force to a number that would
+#:     read as a per-row confidence figure (D-06/D-24). Concretely, its
+#:     `score` token also collides with the honesty gate's rate-shaped key
+#:     scan, which would reject every correct excerpt envelope.
 SURFACE_EXCERPT_FIELDS: Tuple[str, ...] = (
     "identification_id",
     "evidence_id",
@@ -416,8 +423,6 @@ SURFACE_EXCERPT_FIELDS: Tuple[str, ...] = (
     "work_after",
     "work_clipped",
     "work_source",
-    # reprojected rows only (`work_source == 'reprojected'`); None otherwise
-    "align_score",
     "attribution",
     "n_spans",
     "text_layer",

@@ -616,6 +616,16 @@ COVERAGE_STATUSES: frozenset = frozenset({"measured", "no_denominator", "not_app
 #: `eligibility_basis`: the `CASE ... END AS eligibility_basis` literals in
 #: `shared/discovery_service.py`.
 ELIGIBILITY_BASES: frozenset = frozenset({"shipped", "human_confirmed", "review_opt_in"})
+#: `work_source` / `work_markup` (excerpt-v1, 2026-08-13): the offline
+#: verifier's `check_excerpt_vocabulary` literals in
+#: `scripts/verify_discovery_sidecar.py`, which pin the served asset to
+#: exactly these members (plus NULL) on every release.
+EXCERPT_WORK_SOURCES: frozenset = frozenset({"direct", "reprojected"})
+EXCERPT_WORK_MARKUPS: frozenset = frozenset({"ja_braces"})
+#: `text_layer`: the evidence writer's own default set in
+#: `scripts/build_discovery_sidecar.py` (`htr` default; `fgp`/`pgp` where a
+#: human transcription layer matched), carried verbatim onto the excerpt row.
+TEXT_LAYERS: frozenset = frozenset({"htr", "fgp", "pgp"})
 
 #: FIELD -> the frozen vocabulary that field carries. Classifying a field as a
 #: machine carrier REQUIRES naming its vocabulary, and naming a vocabulary puts
@@ -665,6 +675,15 @@ MACHINE_VOCABULARY_FIELDS: Mapping[str, frozenset] = {
     "shade": frozenset(LAUNCH_CONTRIBUTION_SHADES),
     "unit": frozenset(FINDINGS_UNITS),
     "level": frozenset(FACET_LEVELS),
+    #: ⟨ADDED 2026-08-13 -- excerpt-v1⟩ the excerpt row's three stored
+    #: vocabularies. Machine carriers, not reader text: the renderer keys the
+    #: reprojected note, the HTR qualifier and the {...} transform on them,
+    #: and none of the tokens may reach a surface raw ('ja_braces' is the one
+    #: underscore-bearing member the classification thereby prohibits
+    #: everywhere else).
+    "work_source": EXCERPT_WORK_SOURCES,
+    "work_markup": EXCERPT_WORK_MARKUPS,
+    "text_layer": TEXT_LAYERS,
 }
 
 #: The NON-CARRIER half: FIELD -> a written reason naming both its KIND and its
@@ -743,6 +762,19 @@ READER_TEXT_FIELDS: Mapping[str, str] = {
     "novelty_offered": "boolean: whether the novelty axis is offered, shared/discovery_service.py::get_findings_enveloped",
     "divergent": "boolean: MAX(novelty_status IN the hidden-by-default shades) over the row's group, shared/discovery_service.py::_divergence_flag_sql",
     "multi_work_annotation": "boolean: work_count > 1, DiscoveryService findings query",
+    # -- excerpt-v1 (2026-08-13), scripts/bake_discovery_excerpts.py ----------
+    "a_page_id": "identity: the excerpted page's corpus header, discovery_excerpt.a_page_id",
+    "frag_before": "reader text: the manuscript excerpt's leading context piece, scripts/bake_discovery_excerpts.py::pieces",
+    "frag_span": "reader text: the manuscript excerpt's matched span piece, scripts/bake_discovery_excerpts.py::pieces",
+    "frag_after": "reader text: the manuscript excerpt's trailing context piece, scripts/bake_discovery_excerpts.py::pieces",
+    "work_before": "reader text: the edition excerpt's leading context piece, scripts/bake_discovery_excerpts.py::pieces",
+    "work_span": "reader text: the edition excerpt's matched span piece, scripts/bake_discovery_excerpts.py::pieces",
+    "work_after": "reader text: the edition excerpt's trailing context piece, scripts/bake_discovery_excerpts.py::pieces",
+    "attribution": "reader text: the edition's attribution_text, refs_staging manifest via scripts/bake_discovery_excerpts.py",
+    "frag_clipped": "boolean: the fragment context window hit the page boundary, scripts/bake_discovery_excerpts.py::pieces",
+    "work_clipped": "boolean: the edition context window hit the stream boundary, scripts/bake_discovery_excerpts.py::pieces",
+    "frag_hl": "numeric-interval list: word-alignment char offsets into frag_span, scripts/bake_discovery_excerpts.py::fuzzy_word_intervals",
+    "work_hl": "numeric-interval list: word-alignment char offsets into work_span, scripts/bake_discovery_excerpts.py::fuzzy_word_intervals",
 }
 
 #: Every carrier known TODAY, named in ONE place. A FLOOR on the machine half --
@@ -773,6 +805,8 @@ KNOWN_CARRIER_FLOOR: frozenset = frozenset({
     "adjudication_status", "routing_status", "routing_reason",
     "measurement_status", "novelty_status", "main_pool_reason",
     "coverage_status", "eligibility_basis", "shade",
+    # excerpt-v1 (2026-08-13), SURFACE_EXCERPT_FIELDS
+    "work_source", "work_markup", "text_layer",
 })
 
 # ---------------------------------------------------------------------------

@@ -1075,6 +1075,11 @@ def _identification_row(
         "in_main_pool": in_main_pool,
         "bucket": bucket_label(in_main_pool, lang),
         "main_pool_reason": row.get("main_pool_reason"),
+        # The key the text-vs-text disclosure fetches by (excerpt-v1,
+        # 2026-08-13). Carried verbatim from the projected claim row, so the
+        # row on screen and the excerpt fetched can never be two different
+        # identifications.
+        "identification_id": row.get("identification_id"),
         "disclosure_level": level,
         "gated": level != LEVEL_IDENTIFICATIONS,
         "span_start": row.get("span_start"),
