@@ -2340,13 +2340,11 @@ def _raw_html(content: str):
     against the live DOM with a headless browser, the one place a server-side
     render test is structurally blind to). This content is trusted BY
     CONSTRUCTION: `_compose_excerpt_piece` escapes every text segment itself
-    and emits only its own literal tags. The try/except keeps older NiceGUI
-    (no `sanitize` parameter, renders raw already) working unchanged.
+    and emits only its own literal tags. NiceGUI 3.8.0 is pinned in both
+    runtime requirement files, so the sanitizer control is part of the
+    supported API rather than an optional compatibility path.
     """
-    try:
-        return ui.html(content, sanitize=False)
-    except TypeError:
-        return ui.html(content)
+    return ui.html(content, sanitize=False)
 
 
 def _render_excerpt(item: Mapping[str, Any], lang: str, load_excerpt) -> None:

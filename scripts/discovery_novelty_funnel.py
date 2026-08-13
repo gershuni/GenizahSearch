@@ -889,6 +889,7 @@ def _run_dry_run_demo() -> int:
             "pgp_text_normalized": "",
             "fgp_text_normalized": "",
             "m_source_shelfmark_text_normalized": "",
+            "known_witness_confidence": "",
         }
     )
     print(f"  cache key (demo) -> {cache_key_demo[:16]}...")
