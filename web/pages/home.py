@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 def create_page():
     """Create the research dashboard home page."""
     page_client = ui.context.client
+    # Take one readiness snapshot for every homepage entry point. This keeps
+    # chips, announcements, carousel slides, and tool cards in agreement if a
+    # feature is disabled or its startup asset fails validation.
+    _discovery_ready = discovery_available()
+    _atlas_ready = atlas_preview_available()
 
     with ui.column().classes('w-full max-w-7xl mx-auto gap-3 fade-in'):
 
@@ -168,20 +173,34 @@ def create_page():
         # === Capability Chips (clickable) ===
         with ui.row().classes('w-full justify-center gap-2 flex-wrap mt-2 px-2'):
             _chips = [
-                ('text_fields', tr('Free Text Search'), '/search'),
-                ('spellcheck', tr('Spelling Variants'), '/search?mode=variants'),
-                ('compare_arrows', tr('Parallel Detection'), '/parallels'),
-                ('hub', tr('Join Search'), '/search?mode=responsa'),
-                ('terminal', tr('Advanced Search'), '/search?mode=Regex'),
-                ('image', tr('Images + Text'), '/browse'),
-                ('category', tr('Browse by Identification'), '/catalog-browse'),
-                ('lightbulb', tr('Community'), '/discoveries'),
-                ('computer', tr('Downloadable App'), '/download'),
+                ('text_fields', tr('Free Text Search'), '/search', None),
+                ('spellcheck', tr('Spelling Variants'), '/search?mode=variants', None),
+                ('compare_arrows', tr('Parallel Detection'), '/parallels', None),
+                ('hub', tr('Join Search'), '/search?mode=responsa', None),
+                ('terminal', tr('Advanced Search'), '/search?mode=Regex', None),
+                ('image', tr('Images + Text'), '/browse', None),
+                ('category', tr('Browse by Identification'), '/catalog-browse', None),
             ]
-            for icon_name, label, href in _chips:
-                with ui.row().classes('items-center gap-1 px-2 py-1 cursor-pointer hover:shadow-sm transition-all').style(
+            if _discovery_ready:
+                _chips.append((
+                    'travel_explore', tr('Computed Identifications'),
+                    '/computed-identifications', 'home-chip-computed',
+                ))
+            if _atlas_ready:
+                _chips.append((
+                    'public', tr('The Visual Genizah Atlas'), '/atlas', 'home-chip-atlas',
+                ))
+            _chips.extend([
+                ('lightbulb', tr('Community'), '/discoveries', None),
+                ('computer', tr('Downloadable App'), '/download', None),
+            ])
+            for icon_name, label, href, marker in _chips:
+                chip = ui.row().classes('items-center gap-1 px-2 py-1 cursor-pointer hover:shadow-sm transition-all').style(
                     'border: 1px solid var(--border-light); border-radius: 16px; background: var(--bg-tertiary);'
-                ).on('click', lambda h=href: ui.navigate.to(h)):
+                ).on('click', lambda h=href: ui.navigate.to(h))
+                if marker:
+                    chip.mark(marker)
+                with chip:
                     ui.icon(icon_name).classes('text-sm').style('color: var(--primary-600);')
                     ui.label(label).classes('text-xs').style('color: var(--text-secondary);')
 
@@ -271,7 +290,7 @@ def create_page():
                         f'unelevated color=white text-color={cta_text_color}'
                     ).classes('font-bold self-start')
 
-        if discovery_available() or atlas_preview_available():
+        if _discovery_ready or _atlas_ready:
             with ui.row().classes('w-full mt-2 gap-3 flex-wrap items-stretch'):
                 # Computed Identifications (Phase 136).
                 #
@@ -285,7 +304,7 @@ def create_page():
                 # no count. MATCH-framing ("may be the same work as"), never
                 # assertion-framing ("is") — the surface shows candidates for a
                 # reader to judge, not settled facts.
-                if discovery_available():
+                if _discovery_ready:
                     _announcement_card(
                         mark='discovery-announcement',
                         route='/computed-identifications',
@@ -302,7 +321,7 @@ def create_page():
                     )
                 # The Visual Genizah Atlas (#7, 2026-07-21). Claim-free: no
                 # counts, no "identifications" — it just names the map.
-                if atlas_preview_available():
+                if _atlas_ready:
                     _announcement_card(
                         mark='atlas-announcement',
                         route='/atlas',
@@ -381,12 +400,30 @@ def create_page():
                 'link': '/discoveries',
             },
         ]
+        if _discovery_ready:
+            _slides_data.append({
+                'icon': 'travel_explore',
+                'heading': tr('Computed Identifications'),
+                'body': tr(_DISCOVERY_BLURB_PLAIN),
+                'link': '/computed-identifications',
+                'mark': 'home-carousel-computed',
+            })
+        if _atlas_ready:
+            _slides_data.append({
+                'icon': 'public',
+                'heading': tr('The Visual Genizah Atlas'),
+                'body': tr('A new interactive map of textual connections across the Cairo Genizah.'),
+                'link': '/atlas',
+                'mark': 'home-carousel-atlas',
+            })
 
         # Build slide cards
         _slide_cards = []
         for i, slide in enumerate(_slides_data):
             card = ui.card().classes(_card_classes).props('role=button tabindex=0').style(_card_style)
             card.on('click', lambda link=slide['link']: ui.navigate.to(link))
+            if slide.get('mark'):
+                card.mark(slide['mark'])
             if i > 0:
                 card.set_visibility(False)
             with card:
@@ -517,6 +554,29 @@ def create_page():
                             ui.badge(tr('Lab Mode')).props('outline color=blue-9').classes('text-xs')
                             ui.badge(tr('Chunk Analysis')).props('outline color=blue-9').classes('text-xs')
 
+            # Joins Lab Card
+            with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/joins-lab')).on(
+                'keydown.enter', lambda: ui.navigate.to('/joins-lab')
+            ).on('keydown.space', lambda: ui.navigate.to('/joins-lab')).mark('joins-lab-tool-card'):
+                with ui.column().classes('w-full'):
+                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                        'background: linear-gradient(135deg, #0f766e, #115e59);'
+                    ):
+                        ui.icon('join_inner').classes('text-3xl text-white')
+                        with ui.column().classes('gap-0'):
+                            h3(tr('Joins Lab'), classes='text-base font-bold text-white')
+                            ui.label(tr('Find and compare joining fragments')).classes('text-xs text-white/80')
+
+                    with ui.column().classes('p-4 gap-3'):
+                        ui.label(tr(
+                            'Pin an anchor fragment, build a line-by-line query, and compare possible physical joins.'
+                        )).classes('text-sm').style('color: var(--text-secondary);')
+                        with ui.row().classes('gap-2 flex-wrap'):
+                            ui.badge(tr('Anchor')).props('outline color=teal-9').classes('text-xs')
+                            ui.badge(tr('Candidates')).props('outline color=teal-9').classes('text-xs')
+
             # Browse by Shelfmark Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
@@ -559,6 +619,34 @@ def create_page():
                             ui.badge(tr('Domains')).props('outline color=purple').classes('text-xs')
                             ui.badge(tr('Authors')).props('outline color=purple').classes('text-xs')
 
+            # Computed Identifications Card. It uses the same flag+asset gate as
+            # the page route and keeps the established suggestion-not-verdict
+            # wording from the launch announcement.
+            if _discovery_ready:
+                with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+                    'role=button tabindex=0'
+                ).on('click', lambda: ui.navigate.to('/computed-identifications')).on(
+                    'keydown.enter', lambda: ui.navigate.to('/computed-identifications')
+                ).on(
+                    'keydown.space', lambda: ui.navigate.to('/computed-identifications')
+                ).mark('computed-tool-card'):
+                    with ui.column().classes('w-full'):
+                        with ui.row().classes('w-full p-4 items-center gap-3').style(
+                            'background: linear-gradient(135deg, #6366f1, #4338ca);'
+                        ):
+                            ui.icon('travel_explore').classes('text-3xl text-white')
+                            with ui.column().classes('gap-0'):
+                                h3(tr('Computed Identifications'), classes='text-base font-bold text-white')
+                                ui.label(tr('Review algorithmic text matches')).classes('text-xs text-white/80')
+
+                        with ui.column().classes('p-4 gap-3'):
+                            ui.label(tr(_DISCOVERY_BLURB_PLAIN)).classes('text-sm').style(
+                                'color: var(--text-secondary);'
+                            )
+                            with ui.row().classes('gap-2 flex-wrap'):
+                                ui.badge(tr('Text matching')).props('outline color=indigo-9').classes('text-xs')
+                                ui.badge(tr('Requires review')).props('outline color=indigo-9').classes('text-xs')
+
             # Community Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
@@ -587,7 +675,7 @@ def create_page():
             # from a fourth surface (the homepage). Static card (no async data
             # fetch) — CLS-safe — and carries no claim-level statements (no
             # counts, no "identifications", no "discoveries found").
-            if atlas_preview_available():
+            if _atlas_ready:
                 with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                     'role=button tabindex=0'
                 ).on('click', lambda: ui.navigate.to('/atlas')).on('keydown.enter', lambda: ui.navigate.to('/atlas')).on('keydown.space', lambda: ui.navigate.to('/atlas')).mark('atlas-teaser-card'):
