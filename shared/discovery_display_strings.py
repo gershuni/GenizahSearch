@@ -770,7 +770,7 @@ def matches_filter_codes(relation_kind: str, codes: Iterable[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 _EXCERPT_STRINGS: Dict[str, Dict[str, str]] = {
-    "toggle": {"en": "Compare texts", "he": "השוואת טקסטים"},
+    "toggle": {"en": "View text match", "he": "הצגת התאמת הטקסט"},
     "frag_label": {"en": "Manuscript passage", "he": "קטע כתב היד"},
     # Appended to frag_label for the automated layer only (text_layer='htr');
     # FGP/PGP transcriptions are human work and carry no such qualifier.
