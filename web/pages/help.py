@@ -10,6 +10,7 @@ from nicegui import ui
 from web.translations import get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.discovery_assets import discovery_available
+from web.atlas_assets import atlas_preview_available
 from web.components.typography import h1, h2, h3
 from shared.discovery_band_labels import (
     BAND_LABELS,
@@ -196,19 +197,15 @@ _LIMITATIONS_HEADING = {'en': 'Known limitations, stated plainly', 'he': 'מגב
 
 _LIMITATIONS_TEXT = {
     'en': (
-        "A work that contains another work's text can absorb matches that really belong to the "
-        'contained work — a blessing or prayer embedded inside a larger legal code is the live '
-        'example — so a small minority of the main pool, a low single-digit share, is '
-        'misattributed for this reason. A two-page agreement is often the two sides of one '
-        'physical leaf rather than two independent leaves. A composition date can rule out an '
-        'implausible direction of borrowing, but it cannot settle identity by itself.'
+        'Automatic matching can be misled by quotations, formulas, shared wording, short '
+        'passages, and errors in the automatic transcription. A larger work that embeds another '
+        'text may also attract a match that belongs to the embedded passage. Inspect the image, '
+        'the text match, and the surrounding context before accepting any suggestion.'
     ),
     'he': (
-        'חיבור המכיל בתוכו טקסט של חיבור אחר עלול לספוג התאמות ששייכות למעשה לחיבור המוכל '
-        'בתוכו — ברכה או תפילה המשובצת בתוך קובץ הלכתי גדול היא הדוגמה החיה — כך שמיעוט קטן '
-        'מהמאגר העיקרי, נתח נמוך וחד-ספרתי, משויך בטעות מסיבה זו. הסכמה בין שני עמודים היא '
-        'לעיתים קרובות שני צדי אותו דף פיזי, ולא שני דפים עצמאיים. תאריך חיבור יכול לשלול '
-        'כיוון היווצרות בלתי סביר, אך אינו יכול לקבוע זהות בפני עצמו.'
+        'התאמה אוטומטית עלולה לטעות בגלל ציטוטים, נוסחאות, לשון משותפת, קטעים קצרים ושגיאות '
+        'בתעתוק האוטומטי. גם חיבור גדול המשבץ בתוכו טקסט אחר עלול למשוך התאמה ששייכת לקטע '
+        'המשובץ. לפני שמקבלים הצעה יש לבדוק את התמונה, את התאמת הטקסט ואת ההקשר.'
     ),
 }
 
@@ -442,13 +439,177 @@ def _render_one_band(evidence_source, canonical_band, lang, precision, band_coun
     ui.label(f"{fl['report_id'][lk]}: {row.get('report_id') or nm}").style(text_style)
 
 
+def _help_tool_link(label: str, target: str, marker: str, *, rtl: bool = False) -> None:
+    """Render a compact native link at the end of a practical help section."""
+    arrow = 'arrow_back' if rtl else 'arrow_forward'
+    with ui.link(target=target).classes(
+        'inline-flex items-center gap-2 min-h-[44px] px-4 py-2 rounded-lg '
+        'no-underline font-semibold'
+    ).style(
+        'color: var(--primary-700); border: 1px solid var(--border-medium); '
+        'background: var(--bg-secondary);'
+    ).mark(marker):
+        ui.label(label)
+        ui.icon(arrow).props('aria-hidden=true')
+
+
+def _render_computed_identifications_help(lang: str) -> None:
+    """Practical guide to the current two-level computed-matches interface."""
+    is_hebrew = lang == 'he'
+    text_style = (
+        'color: var(--text-secondary); line-height: 1.75;'
+        + (' direction: rtl; text-align: right;' if is_hebrew else '')
+    )
+
+    with ui.card().classes('w-full p-6').mark('help-computed-identifications'):
+        ui.element('a').props('name="help-computed-identifications"')
+        with ui.row().classes('items-center gap-3 mb-3 flex-wrap'):
+            ui.icon('fact_check').classes('text-2xl text-primary').props('aria-hidden=true')
+            h2(
+                'זיהויים מחושבים (בטא)' if is_hebrew else 'Computed Identifications (Beta)',
+                classes='text-xl font-bold',
+                style='color: var(--text-primary);',
+            )
+
+        ui.label(
+            (
+                'האתר משווה את התעתיקים האוטומטיים של כתבי־היד לספרייה גדולה של חיבורים '
+                'מוכרים, ומציע התאמות טקסטואליות לבדיקה. אלו הצעות אלגוריתמיות, לא זיהויים '
+                'שנבדקו בידי חוקר.'
+            )
+            if is_hebrew
+            else (
+                'The site compares automatic manuscript transcriptions with a large library of '
+                'known works and offers promising textual matches for examination. These are '
+                'algorithmic suggestions, not identifications reviewed by a scholar.'
+            )
+        ).classes('mb-3').style(text_style)
+
+        h3(
+            'כך קוראים את הפאנל' if is_hebrew else 'Reading the matches pane',
+            classes='text-lg font-semibold mt-2 mb-1',
+            style='color: var(--text-primary);',
+        )
+        ui.markdown(
+            '''
+- **בדף זה** מציג את קבוצת המועמדים הראשית לדף הפתוח.
+- **הצג התאמות אפשריות נוספות** פותח מועמדים שלא נכנסו לקבוצה הראשית; אין פירוש הדבר שהם שגויים.
+- **בכתב־יד זה** מרכז חיבורים שהוצעו באחד מדפי כתב־היד; התווית **כולל דף זה** מסמנת שהחיבור מופיע גם בדף הפתוח.
+- **הצגת התאמת הטקסט** מאפשרת להשוות את קטעי הטקסט שעליהם מבוססת ההצעה.
+- **אינו מתאים לקטלוג — לא הוכרע** מציין חוסר התאמה לזיהוי הקטלוגי הקיים, בלי לקבוע אם הקטלוג או ההצעה נכונים.
+            '''
+            if is_hebrew
+            else '''
+- **On this page** contains the main group of candidates for the open folio.
+- **Show more possible matches** opens candidates outside that first group; it does not mean they are wrong.
+- **In this manuscript** gathers works suggested on any page of the manuscript; **includes this page** marks a work also found on the open folio.
+- **View text match** lets you compare the passages on which the suggestion is based.
+- **Does not correspond to the catalogue — not adjudicated** records a difference from existing catalogue metadata without declaring either side correct.
+            ''',
+            extras=['rtl'] if is_hebrew else [],
+        ).style(text_style)
+
+        h3(
+            'כיצד בודקים הצעה' if is_hebrew else 'How to evaluate a suggestion',
+            classes='text-lg font-semibold mt-3 mb-1',
+            style='color: var(--text-primary);',
+        )
+        ui.label(MAIN_POOL_SENTENCE[lang]).style(text_style)
+        ui.label(_LIMITATIONS_TEXT[lang]).classes(_LIMITATIONS_PARAGRAPH_CLASS).style(text_style)
+        ui.label(
+            (
+                'התחילו מן ההתאמה, אבל חזרו תמיד לתמונה, לתעתוק ולהקשר. עד לבדיקת חוקר, '
+                'יש לצטט את כתב־היד ואת מקורות הקטלוג — לא את ההצעה כזיהוי ודאי.'
+            )
+            if is_hebrew
+            else (
+                'Use the match as a lead, then return to the image, transcription, and context. '
+                'Until a scholar has reviewed it, cite the manuscript and catalogue sources — '
+                'not the suggestion as an established identification.'
+            )
+        ).classes('mt-2').style(text_style)
+
+        _help_tool_link(
+            'עיון בכל ההתאמות המחושבות' if is_hebrew else 'Explore all computed matches',
+            '/computed-identifications',
+            'help-computed-identifications-link',
+            rtl=is_hebrew,
+        )
+
+
+def _render_visual_atlas_help(lang: str) -> None:
+    """Short orientation to the atlas and the claims it does not make."""
+    is_hebrew = lang == 'he'
+    text_style = (
+        'color: var(--text-secondary); line-height: 1.75;'
+        + (' direction: rtl; text-align: right;' if is_hebrew else '')
+    )
+
+    with ui.card().classes('w-full p-6').mark('help-visual-atlas'):
+        ui.element('a').props('name="help-visual-atlas"')
+        with ui.row().classes('items-center gap-3 mb-3 flex-wrap'):
+            ui.icon('hub').classes('text-2xl text-primary').props('aria-hidden=true')
+            h2(
+                'אטלס הגניזה החזותי' if is_hebrew else 'The Visual Genizah Atlas',
+                classes='text-xl font-bold',
+                style='color: var(--text-primary);',
+            )
+
+        ui.label(
+            (
+                'האטלס מציג מבט רחב על קשרים טקסטואליים בין כתבי־יד בכל קורפוס הגניזה. '
+                'כתבי־יד בעלי טקסט דומה מתקבצים יחד, וקווים מסמנים קשרים שחושבו ביניהם.'
+            )
+            if is_hebrew
+            else (
+                'The atlas gives a corpus-wide view of textual connections between Genizah '
+                'manuscripts. Manuscripts with similar text gather into clusters, and lines mark '
+                'connections calculated between them.'
+            )
+        ).classes('mb-2').style(text_style)
+        ui.markdown(
+            '''
+- חפשו לפי כותרת או מספר מדף, או התקרבו לאזור שמסקרן אתכם.
+- החליפו צביעה לפי תחום או ספרייה, הסתירו ספרייה, או התמקדו במקבץ אחד.
+- לחצו על כתב־יד לתצוגה מקדימה, ומשם פתחו את עמוד העיון המלא.
+- בטלפון מומלץ לעבור למסך מלא כדי לגרור ולהגדיל בחופשיות.
+            '''
+            if is_hebrew
+            else '''
+- Search by title or shelfmark, or zoom into a region that catches your attention.
+- Color by domain or library, hide a library, or focus on one constellation.
+- Select a manuscript for a preview, then open its full Browse page.
+- On a phone, Full screen gives the easiest pan-and-zoom experience.
+            ''',
+            extras=['rtl'] if is_hebrew else [],
+        ).style(text_style)
+        ui.label(
+            (
+                'חשוב: הקרבה במפה משקפת דמיון טקסטואלי שחושב אלגוריתמית — לא מוצא פיזי '
+                'משותף ולא צירוף בין קטעים. האטלס נועד לגלות שכנים וקשרים שכדאי לבדוק בכתב־היד.'
+            )
+            if is_hebrew
+            else (
+                'Important: proximity reflects algorithmically calculated textual similarity — '
+                'not shared physical provenance and not a proposed physical join. Use the atlas '
+                'to discover neighbours and connections worth checking in the manuscript.'
+            )
+        ).classes('mt-2').style(text_style)
+
+        _help_tool_link(
+            'פתיחת אטלס הגניזה' if is_hebrew else 'Open the Visual Genizah Atlas',
+            '/atlas',
+            'help-visual-atlas-link',
+            rtl=is_hebrew,
+        )
+
+
 def create_help_page(precision=None, band_counts=None):
     """Create the comprehensive Help Center page with bilingual content.
 
-    ``precision`` / ``band_counts`` (optional) carry the band_precision rows +
-    the runtime display-deduplicated per-band claim counts fetched by the async
-    /help route (web/main.py); when None the flag-gated methods section falls
-    back to placeholders."""
+    ``precision`` / ``band_counts`` remain accepted for route compatibility;
+    the former confidence-band report has been replaced by a practical guide
+    to the current reader-facing tools."""
 
     is_hebrew = get_language() == 'he'
 
@@ -491,22 +652,22 @@ def _create_english_content(precision=None, band_counts=None):
                 ('reading-desk', 'Reading Desk'),
                 ('browse', 'Browse Manuscript'),
                 ('catalog-browse', 'Browse by Identification'),
+            ]
+            if discovery_available():
+                toc_items.append(('computed-identifications', 'Computed Identifications (Beta)'))
+            if atlas_preview_available():
+                toc_items.append(('visual-atlas', 'The Visual Genizah Atlas'))
+            toc_items.extend([
                 ('lists', 'Lists'),
                 ('export', 'Exporting Data'),
                 ('api', 'Public API & AI Tools'),
                 ('my-library', 'My Library — Local Documents'),
-            ]
+            ])
             if WEB_PUZZLE_ENABLED:
                 toc_items.insert(9, ('puzzle', 'Fragment Puzzle'))
                 toc_items.insert(10, ('community-publish', 'Community Publishing'))
-            # BAND-05 methods section TOC entry — gated on discovery_available()
-            # (mirrors the WEB_PUZZLE_ENABLED conditional-insert + loop-continue).
-            if discovery_available():
-                toc_items.append(('confidence', _CONFIDENCE_TOC_TITLE['en']))
             for anchor, title in toc_items:
                 if not WEB_PUZZLE_ENABLED and anchor in {'puzzle', 'community-publish'}:
-                    continue
-                if anchor == 'confidence' and not discovery_available():
                     continue
                 ui.link(f'• {title}', f'#help-{anchor}').classes('text-primary hover:underline')
 
@@ -1032,6 +1193,12 @@ Browse the scholarly catalog by domain classification, author, or work title.
 - **Cross-links:** Domain and author labels on the manuscript Browse page link directly here with the appropriate filter pre-set
         ''').style('color: var(--text-secondary);')
 
+    if discovery_available():
+        _render_computed_identifications_help('en')
+
+    if atlas_preview_available():
+        _render_visual_atlas_help('en')
+
     # === Lists ===
     with ui.card().classes('w-full p-6'):
         ui.element('a').props(f'name="help-lists"')
@@ -1128,13 +1295,6 @@ In the **[downloadable desktop app](/download)** you can run all the search mode
 *My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.*
         ''').style('color: var(--text-secondary);')
 
-    # === Confidence Bands and Methods (Phase 135, BAND-05, D-10) ===
-    # Codex #11: this body card is NOT part of the TOC render loop above (which
-    # emits only ui.link TOC entries), so it carries its OWN discovery_available()
-    # gate — the loop-continue only gates the TOC LINK, not this card.
-    if discovery_available():
-        _render_confidence_section('en', precision, band_counts)
-
     # === Contact ===
     with ui.card().classes('w-full p-6'):
         with ui.row().classes('items-center gap-3 mb-4'):
@@ -1168,22 +1328,22 @@ def _create_hebrew_content(precision=None, band_counts=None):
                 ('reading-desk', 'שולחן קריאה (Reading Desk)'),
                 ('browse', 'עיון בכתב יד'),
                 ('catalog-browse', 'עיון לפי זיהוי'),
+            ]
+            if discovery_available():
+                toc_items.append(('computed-identifications', 'זיהויים מחושבים (בטא)'))
+            if atlas_preview_available():
+                toc_items.append(('visual-atlas', 'אטלס הגניזה החזותי'))
+            toc_items.extend([
                 ('lists', 'רשימות'),
                 ('export', 'ייצוא נתונים'),
                 ('api', 'ממשק API ציבורי וכלי AI'),
                 ('my-library', 'הספרייה שלי — מסמכים מקומיים'),
-            ]
+            ])
             if WEB_PUZZLE_ENABLED:
                 toc_items.insert(8, ('puzzle', 'פאזל קטעים'))
                 toc_items.insert(9, ('community-publish', 'פרסום לקהילה'))
-            # BAND-05 methods section TOC entry — gated on discovery_available()
-            # (mirrors the WEB_PUZZLE_ENABLED conditional-insert + loop-continue).
-            if discovery_available():
-                toc_items.append(('confidence', _CONFIDENCE_TOC_TITLE['he']))
             for anchor, title in toc_items:
                 if not WEB_PUZZLE_ENABLED and anchor in {'puzzle', 'community-publish'}:
-                    continue
-                if anchor == 'confidence' and not discovery_available():
                     continue
                 ui.link(f'• {title}', f'#help-{anchor}').classes('text-primary hover:underline').style('direction: rtl;')
 
@@ -1700,6 +1860,12 @@ def _create_hebrew_content(precision=None, band_counts=None):
 - **קישורים צולבים:** תוויות תחום ומחבר בעמוד עיון בכתב יד מקשרות ישירות לכאן עם המסנן המתאים
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
+    if discovery_available():
+        _render_computed_identifications_help('he')
+
+    if atlas_preview_available():
+        _render_visual_atlas_help('he')
+
     # === Lists ===
     with ui.card().classes('w-full p-6'):
         ui.element('a').props(f'name="help-lists"')
@@ -1779,13 +1945,6 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
 *תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.*
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
-
-    # === דרגות ודאות ושיטות (Phase 135, BAND-05, D-10) ===
-    # Codex #11: this body card is NOT part of the TOC render loop above (which
-    # emits only ui.link TOC entries), so it carries its OWN discovery_available()
-    # gate — the loop-continue only gates the TOC LINK, not this card.
-    if discovery_available():
-        _render_confidence_section('he', precision, band_counts)
 
     # === Contact ===
     with ui.card().classes('w-full p-6'):

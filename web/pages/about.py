@@ -15,6 +15,8 @@ from nicegui import ui
 from web.translations import get_language
 from web.components.typography import h2
 from web.random_fragment import navigate_random_fragment
+from web.discovery_assets import discovery_available
+from web.atlas_assets import atlas_preview_available
 
 
 def _html(content: str):
@@ -26,6 +28,48 @@ def _html(content: str):
 # Hero: T-S K5.13 manuscript fragment - a real Genizah page, much more evocative than the renovated synagogue
 HERO_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/f/f7/Education_%28T-S_K5.13%29_%28cropped%29.jpg'
 SCHECHTER_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/9/9e/Solomon_Schechter_studying_the_fragments_of_the_Cairo_Genizah%2C_c._1898.jpg'
+
+
+def _new_research_tool_cards(*, is_hebrew: bool) -> str:
+    """Optional About-page cards, gated by the same readiness checks as routes."""
+    cards = []
+    if discovery_available():
+        cards.append(
+            '''
+            <a href="/computed-identifications" class="about-tool">
+                <div class="about-tool-icon">🧭</div>
+                <h3>זיהויים מחושבים (בטא)</h3>
+                <p>בחנו התאמות טקסטואליות בין דפי גניזה לחיבורים מוכרים. כל תוצאה היא הצעה אוטומטית לבדיקה מחקרית, ולא זיהוי שנבדק.</p>
+            </a>
+            '''
+            if is_hebrew
+            else '''
+            <a href="/computed-identifications" class="about-tool">
+                <div class="about-tool-icon">🧭</div>
+                <h3>Computed Identifications (Beta)</h3>
+                <p>Examine textual matches between Genizah pages and known works. Every result is an automatic suggestion for scholarly review.</p>
+            </a>
+            '''
+        )
+    if atlas_preview_available():
+        cards.append(
+            '''
+            <a href="/atlas" class="about-tool">
+                <div class="about-tool-icon">✨</div>
+                <h3>אטלס הגניזה החזותי</h3>
+                <p>גלו מקבצים וקשרים טקסטואליים בין כתבי־יד בכל הקורפוס. הקרבה במפה משקפת דמיון טקסטואלי, לא מוצא פיזי.</p>
+            </a>
+            '''
+            if is_hebrew
+            else '''
+            <a href="/atlas" class="about-tool">
+                <div class="about-tool-icon">✨</div>
+                <h3>The Visual Genizah Atlas</h3>
+                <p>Discover clusters and textual connections across the corpus. Proximity reflects textual similarity, not physical provenance.</p>
+            </a>
+            '''
+        )
+    return ''.join(cards)
 
 
 def _render_start_bridge(*, is_hebrew: bool) -> None:
@@ -463,7 +507,7 @@ def _create_hebrew_content():
         # Tools
         h2('מה אפשר לעשות כאן', classes='text-xl font-bold mb-2', style='color: var(--text-primary);')
 
-        _html('''
+        _html(f'''
         <div class="about-tools">
             <a href="/search" class="about-tool">
                 <div class="about-tool-icon">🔍</div>
@@ -490,6 +534,7 @@ def _create_hebrew_content():
                 <h3>מעבדת הצירופים</h3>
                 <p>שחזרו כתבי יד מפוזרים: עגנו קטע, חפשו את הקטע המצטרף, והשוו ביניהם זה לצד זה.</p>
             </a>
+            {_new_research_tool_cards(is_hebrew=True)}
             <a href="/help#api" class="about-tool">
                 <div class="about-tool-icon">🤖</div>
                 <h3>ממשק API וכלי AI</h3>
@@ -670,7 +715,7 @@ def _create_english_content():
         # Tools
         h2('What you can do here', classes='text-xl font-bold mb-2', style='color: var(--text-primary);')
 
-        _html('''
+        _html(f'''
         <div class="about-tools">
             <a href="/search" class="about-tool">
                 <div class="about-tool-icon">🔍</div>
@@ -697,6 +742,7 @@ def _create_english_content():
                 <h3>Joins Lab</h3>
                 <p>Reconstruct dispersed manuscripts: pin an anchor fragment, search for the joining piece, and compare them side by side.</p>
             </a>
+            {_new_research_tool_cards(is_hebrew=False)}
             <a href="/help#api" class="about-tool">
                 <div class="about-tool-icon">🤖</div>
                 <h3>Public API &amp; AI Tools</h3>

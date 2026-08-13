@@ -13,7 +13,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 
 CONTENT_PATH = Path(__file__).with_name("start_content.v1.json")
@@ -24,6 +24,13 @@ _ID_RE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
 _SYS_ID_RE = re.compile(r"^99\d{10,}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _WORK_ID_RE = re.compile(r"^w\d{6}$")
+_INTERNAL_IMAGE_ROUTES = (
+    "/api/nli_image_by_sysid/{sys_id}",
+    "/api/cambridge_image/{sys_id}",
+    "/api/jts_image/{sys_id}",
+    "/api/manchester_image/{sys_id}",
+    "/api/oxford_image/{sys_id}",
+)
 
 
 class StartContentError(ValueError):
@@ -77,6 +84,26 @@ def _sys_id(value: Any, location: str) -> str:
     if not _SYS_ID_RE.fullmatch(value):
         _fail(location, "must be a production-shaped manuscript sys_id")
     return value
+
+
+def _internal_thumbnail(value: Any, *, sys_id: str, location: str) -> str:
+    """Accept only a same-manuscript image URL served by this application."""
+    thumbnail = _nonempty_string(value, location, max_length=300)
+    parsed = urlsplit(thumbnail)
+    allowed_paths = {route.format(sys_id=sys_id) for route in _INTERNAL_IMAGE_ROUTES}
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if (
+        parsed.scheme
+        or parsed.netloc
+        or parsed.fragment
+        or parsed.path not in allowed_paths
+        or not query
+        or "page" not in query
+        or set(query) - {"page", "width", "suffix"}
+        or any(len(values) != 1 or not values[0].isdecimal() for values in query.values())
+    ):
+        _fail(location, "must use an allowed internal image endpoint for the same sys_id")
+    return thumbnail
 
 
 def _positive_page(value: Any, location: str) -> None:
@@ -147,10 +174,7 @@ def _validate_start_content(doc: Any) -> dict[str, Any]:
         sys_id = _sys_id(entry.get("sys_id"), f"{location}.sys_id")
         _nonempty_string(entry.get("shelfmark"), f"{location}.shelfmark", max_length=200)
         _positive_page(entry.get("page"), f"{location}.page")
-        expected_prefix = f"/api/nli_image_by_sysid/{sys_id}?"
-        thumbnail = _nonempty_string(entry.get("thumbnail"), f"{location}.thumbnail", max_length=300)
-        if not thumbnail.startswith(expected_prefix):
-            _fail(f"{location}.thumbnail", "must use the internal image endpoint for the same sys_id")
+        _internal_thumbnail(entry.get("thumbnail"), sys_id=sys_id, location=f"{location}.thumbnail")
         _bilingual(entry.get("alt"), f"{location}.alt")
         reference = entry.get("reference")
         if reference is not None:
@@ -189,8 +213,10 @@ def _validate_start_content(doc: Any) -> dict[str, Any]:
             _fail(f"{location}.identification_id", "must be a lowercase sha256 identifier")
         if not _WORK_ID_RE.fullmatch(str(entry.get("work_id", ""))):
             _fail(f"{location}.work_id", "must be a stable discovery work ID")
-        _sys_id(entry.get("sys_id"), f"{location}.sys_id")
+        sys_id = _sys_id(entry.get("sys_id"), f"{location}.sys_id")
         _positive_page(entry.get("page"), f"{location}.page")
+        _internal_thumbnail(entry.get("thumbnail"), sys_id=sys_id, location=f"{location}.thumbnail")
+        _bilingual(entry.get("alt"), f"{location}.alt")
         hashes = _list(entry.get("frame_content_hashes"), f"{location}.frame_content_hashes")
         if not hashes or any(not isinstance(value, str) or not _HEX64_RE.fullmatch(value) for value in hashes):
             _fail(f"{location}.frame_content_hashes", "must be a non-empty list of lowercase sha256 hashes")

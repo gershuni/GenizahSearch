@@ -10,8 +10,9 @@ from unittest.mock import patch
 import httpx
 import web.discovery_assets as discovery_assets
 import web.main as web_main
+import web.pages.about as about_page
 import web.pages.start as start_page
-from nicegui import core
+from nicegui import core, events
 from nicegui.context import context as nicegui_context
 from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
@@ -72,11 +73,26 @@ def _hrefs(elements):
     }
 
 
+def _click_element(user, element):
+    with user._client:
+        for listener in element._event_listeners.values():
+            if listener.element_id != element.id:
+                continue
+            arguments = events.GenericEventArguments(
+                sender=element,
+                client=user._client,
+                args=None,
+            )
+            events.handle_event(listener.handler, arguments)
+
+
 def _set_gates(monkeypatch, *, enabled: bool):
     launch_hash = '53725098ece6cf152a72425587dc2fe9119261427fc82e008a5b953dcbd2bce7'
     monkeypatch.setattr(start_page, 'atlas_preview_available', lambda: enabled)
     monkeypatch.setattr(start_page, 'discovery_available', lambda: enabled)
     monkeypatch.setattr(start_page, 'WEB_PUZZLE_ENABLED', enabled)
+    monkeypatch.setattr(about_page, 'atlas_preview_available', lambda: enabled)
+    monkeypatch.setattr(about_page, 'discovery_available', lambda: enabled)
     monkeypatch.setattr(web_main, 'atlas_preview_available', lambda: enabled)
     monkeypatch.setattr(web_main, 'discovery_available', lambda: enabled)
     monkeypatch.setattr(web_main, 'WEB_PUZZLE_ENABLED', enabled)
@@ -112,6 +128,27 @@ def test_start_renders_three_routes_one_h1_and_native_links_en(monkeypatch):
         assert '/about' in hrefs
         assert 'https://www.midrash.eu/' in hrefs
         assert 'https://fjms.genizah.org/' in hrefs
+
+        panels = {
+            route_id: _marked(elements, f'start-route-{route_id}')[0]
+            for route_id in ('explore', 'search', 'research')
+        }
+        assert panels['explore'].visible is True
+        assert panels['search'].visible is False
+        assert panels['research'].visible is False
+
+        search_choice = _marked(elements, 'start-route-choice-search')[0]
+        _click_element(user, search_choice)
+        assert panels['explore'].visible is False
+        assert panels['search'].visible is True
+        assert panels['research'].visible is False
+        assert 'start-route-card-active' in search_choice._classes
+
+        # Different content types now have different visual grammars instead
+        # of repeating the same paragraph card throughout the page.
+        classes = [set(getattr(element, '_classes', [])) for element in _elements(user)]
+        assert any('start-query-preview' in value for value in classes)
+        assert sum('start-compact-link' in value for value in classes) >= 5
 
     _run('en', driver)
 
@@ -170,6 +207,16 @@ def test_optional_tools_and_frame_bound_candidates_hide_and_show_cleanly(monkeyp
         assert any(href.startswith('/parallels?text=') for href in hrefs)
         assert '/joins-lab?sys_id=990001403820205171&page=1' in hrefs
         assert len(_marked(_elements(user), 'start-computed-feature')) == 1
+        image_sources = {
+            str((getattr(element, '_props', None) or {}).get('src', ''))
+            for element in _elements(user)
+        }
+        assert {
+            '/api/nli_image_by_sysid/990051269760205171?page=1&width=640',
+            '/api/nli_image_by_sysid/990053596740205171?page=1&width=640',
+            '/api/nli_image_by_sysid/990051639550205171?page=7&width=640',
+            '/api/nli_image_by_sysid/990051284490205171?page=0&width=640',
+        } <= image_sources
 
         # The heavy Atlas renderer is absent from first paint, then mounts
         # inline without introducing a second page heading.
@@ -206,5 +253,34 @@ def test_about_and_start_are_bilingual_companion_pages(monkeypatch):
         assert '/start' in _hrefs(elements)
         assert len(_marked(elements, 'about-start-bridge')) == 1
         await user.should_see('רוצים להתחיל לחקור?')
+
+    _run('he', hebrew_driver)
+
+
+def test_about_tools_include_atlas_and_computed_when_ready(monkeypatch):
+    _set_gates(monkeypatch, enabled=True)
+
+    async def english_driver(user):
+        await user.open('/about')
+        elements = _elements(user)
+        # The About cards are one safe static HTML block, so inspect its
+        # rendered content rather than expecting one NiceGUI link per card.
+        html_content = '\n'.join(
+            str(getattr(element, 'content', '') or '') for element in elements
+        )
+        assert 'href="/computed-identifications"' in html_content
+        assert 'Computed Identifications (Beta)' in html_content
+        assert 'href="/atlas"' in html_content
+        assert 'The Visual Genizah Atlas' in html_content
+
+    _run('en', english_driver)
+
+    async def hebrew_driver(user):
+        await user.open('/about')
+        html_content = '\n'.join(
+            str(getattr(element, 'content', '') or '') for element in _elements(user)
+        )
+        assert 'זיהויים מחושבים (בטא)' in html_content
+        assert 'אטלס הגניזה החזותי' in html_content
 
     _run('he', hebrew_driver)
