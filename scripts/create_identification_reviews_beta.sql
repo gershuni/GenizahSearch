@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS public.identification_reviews (
         'potentially_new', 'already_known', 'other_unsure'
     )),
     comment TEXT CHECK (comment IS NULL OR char_length(comment) <= 1500),
+    -- The assessment is always public after approval. The free-text comment is
+    -- public only when the moderator explicitly checks the publication box.
+    publish_comment BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT identification_reviews_direct_novelty_scope CHECK (
         relation_verdict = 'direct_witness' OR direct_novelty IS NULL),
 
@@ -60,6 +63,10 @@ CREATE TABLE IF NOT EXISTS public.identification_reviews (
     -- by clicking repeatedly. Every revision goes back through moderation.
     UNIQUE (identification_id, reviewer_key)
 );
+
+-- Upgrade an already-installed beta table; harmless on a clean install.
+ALTER TABLE public.identification_reviews
+    ADD COLUMN IF NOT EXISTS publish_comment BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS identification_reviews_pending_idx
     ON public.identification_reviews (status, updated_at DESC);
@@ -203,6 +210,7 @@ BEGIN
         comment = EXCLUDED.comment,
         reviewer_user_id = EXCLUDED.reviewer_user_id,
         status = 'pending',
+        publish_comment = FALSE,
         moderation_note = NULL,
         reviewed_at = NULL,
         reviewed_by = NULL,
@@ -235,7 +243,9 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-    SELECT r.relation_verdict, r.direct_novelty, r.comment, r.reviewed_at
+    SELECT r.relation_verdict, r.direct_novelty,
+           CASE WHEN r.publish_comment THEN r.comment ELSE NULL END,
+           r.reviewed_at
     FROM public.identification_reviews AS r
     WHERE r.identification_id = p_identification_id
       AND r.status = 'approved'
@@ -245,6 +255,45 @@ $$;
 REVOKE ALL ON FUNCTION public.get_published_identification_reviews_beta(TEXT)
     FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_published_identification_reviews_beta(TEXT)
+    TO anon, authenticated;
+
+
+-- One bounded public read for all identification leaves visible on a page.
+-- It exposes the finding id only as the grouping key supplied by the caller;
+-- no reviewer or moderation identity crosses this boundary.
+CREATE OR REPLACE FUNCTION public.get_published_identification_reviews_batch_beta(
+    p_identification_ids TEXT[]
+)
+RETURNS TABLE (
+    identification_id TEXT,
+    relation_verdict TEXT,
+    direct_novelty TEXT,
+    comment TEXT,
+    published_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF COALESCE(array_length(p_identification_ids, 1), 0) > 100 THEN
+        RAISE EXCEPTION 'too many identification review targets';
+    END IF;
+    RETURN QUERY
+    SELECT r.identification_id, r.relation_verdict, r.direct_novelty,
+           CASE WHEN r.publish_comment THEN r.comment ELSE NULL END,
+           r.reviewed_at
+    FROM public.identification_reviews AS r
+    WHERE r.identification_id = ANY(COALESCE(p_identification_ids, ARRAY[]::TEXT[]))
+      AND r.status = 'approved'
+    ORDER BY r.identification_id, r.reviewed_at DESC NULLS LAST, r.id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_published_identification_reviews_batch_beta(TEXT[])
+    FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_published_identification_reviews_batch_beta(TEXT[])
     TO anon, authenticated;
 
 
@@ -291,6 +340,99 @@ REVOKE ALL ON FUNCTION public.moderate_identification_review_beta(UUID, TEXT, TE
     FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.moderate_identification_review_beta(UUID, TEXT, TEXT)
     TO authenticated;
+
+
+-- Editable moderation. The moderator may correct or complete the structured
+-- assessment, edit the submitted comment, and decide independently whether
+-- that comment is suitable for public display.
+CREATE OR REPLACE FUNCTION public.moderate_identification_review_beta_v2(
+    p_review_id UUID,
+    p_status TEXT,
+    p_moderation_note TEXT DEFAULT NULL,
+    p_relation_verdict TEXT DEFAULT NULL,
+    p_direct_novelty TEXT DEFAULT NULL,
+    p_comment TEXT DEFAULT NULL,
+    p_publish_comment BOOLEAN DEFAULT FALSE
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_count INTEGER;
+    v_relation TEXT;
+    v_novelty TEXT;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    ) THEN
+        RAISE EXCEPTION 'admin role required' USING ERRCODE = '42501';
+    END IF;
+    IF p_status NOT IN ('approved', 'rejected') THEN
+        RAISE EXCEPTION 'invalid moderation status';
+    END IF;
+
+    SELECT relation_verdict, direct_novelty
+    INTO v_relation, v_novelty
+    FROM public.identification_reviews
+    WHERE id = p_review_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    v_relation := COALESCE(
+        NULLIF(btrim(COALESCE(p_relation_verdict, '')), ''), v_relation);
+    IF v_relation NOT IN (
+        'direct_witness', 'manuscript_quotes_work', 'shared_source',
+        'work_quotes_manuscript', 'not_meaningful', 'other_unsure'
+    ) THEN
+        RAISE EXCEPTION 'invalid identification review relation';
+    END IF;
+
+    v_novelty := NULLIF(btrim(COALESCE(p_direct_novelty, '')), '');
+    IF v_relation <> 'direct_witness' THEN
+        v_novelty := NULL;
+    ELSIF v_novelty IS NOT NULL AND v_novelty NOT IN (
+        'potentially_new', 'already_known', 'other_unsure'
+    ) THEN
+        RAISE EXCEPTION 'invalid direct identification status';
+    END IF;
+
+    p_comment := NULLIF(btrim(COALESCE(p_comment, '')), '');
+    p_moderation_note := NULLIF(btrim(COALESCE(p_moderation_note, '')), '');
+    IF p_comment IS NOT NULL AND char_length(p_comment) > 1500 THEN
+        RAISE EXCEPTION 'identification review comment too long';
+    END IF;
+    IF p_moderation_note IS NOT NULL
+       AND char_length(p_moderation_note) > 1000 THEN
+        RAISE EXCEPTION 'moderation note too long';
+    END IF;
+
+    UPDATE public.identification_reviews
+    SET relation_verdict = v_relation,
+        direct_novelty = v_novelty,
+        comment = p_comment,
+        publish_comment = COALESCE(p_publish_comment, FALSE)
+                          AND p_comment IS NOT NULL,
+        status = p_status,
+        moderation_note = p_moderation_note,
+        reviewed_at = now(),
+        reviewed_by = auth.uid(),
+        updated_at = now()
+    WHERE id = p_review_id;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    RETURN v_count = 1;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.moderate_identification_review_beta_v2(
+    UUID, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN
+) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.moderate_identification_review_beta_v2(
+    UUID, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN
+) TO authenticated;
 
 -- Verification:
 --   SELECT policyname, cmd FROM pg_policies

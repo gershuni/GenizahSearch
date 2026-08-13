@@ -524,6 +524,11 @@ def _render_page(monkeypatch, *, lang="en", findings=None, facets=None, state=No
 
     monkeypatch.setattr(fp, "get_findings_enveloped", findings or _fake_findings())
     monkeypatch.setattr(fp, "get_findings_facets_enveloped", facets or _fake_facets())
+
+    async def _no_approved_reviews(_items):
+        return {}
+
+    monkeypatch.setattr(fp, "_fetch_approved_review_map", _no_approved_reviews)
     if launch is not None:
         monkeypatch.setattr(fp, "get_launch_stats_enveloped", launch)
     if state is not None:
@@ -1127,13 +1132,17 @@ _OFFLOAD_WRAPPER_MODULES = {
         "the FJMS bilingual domain vocabulary, primed once per process through "
         "web.bounded_io.bounded_io_bound"
     ),
+    "web.identification_reviews": (
+        "the identity-free approved-review batch, dispatched once through "
+        "web.bounded_io.bounded_io_bound"
+    ),
 }
 
 
 def test_module_adds_no_nested_offload_and_no_direct_service_call():
     """(i) no run.io_bound, (ii) no access to the composition module's private
     singleton, (iii) no call to a service-module symbol, (iv) every awaited read
-    is a name imported from one of the two declared offloading wrapper modules.
+    is a name imported from one of the declared offloading wrapper modules.
 
     tests/test_no_await_sync_function.py passes too, but it detects ONLY an
     `await` on a LOCALLY defined synchronous `def` and could not have caught any

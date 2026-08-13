@@ -173,6 +173,31 @@ async def fetch_discovery_panel_bundle(page, lang: str, is_stale=None):
     )
 
 
+async def fetch_published_identification_reviews(bundle) -> Dict[str, Any]:
+    """One identity-free public review read for the panel's visible claims."""
+    if bundle is None:
+        return {}
+    identification_ids = [
+        str(item.get('identification_id') or '')
+        for item in (bundle.claims.get('items') or ())
+        if item.get('identification_id')
+    ]
+    if not identification_ids:
+        return {}
+    try:
+        from web.identification_reviews import (
+            published_reviews_by_identification_async,
+        )
+        from web.supabase_client import get_client
+
+        return await published_reviews_by_identification_async(
+            identification_ids, client=get_client())
+    except Exception as e:
+        logger.info("Browse identification reviews unavailable: %s",
+                    type(e).__name__)
+        return {}
+
+
 @dataclass
 class BrowsePageRefs:
     """UI element references and callbacks needed by extracted browse_enrichment functions.
@@ -515,6 +540,8 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
         except Exception as e:
             logger.error("Discovery excerpt availability check failed: %s", e)
     refs.enrichment_refs['discovery_excerpts_on'] = excerpts_on
+    refs.enrichment_refs['discovery_approved_reviews'] = (
+        await fetch_published_identification_reviews(discovery_bundle))
 
     # Process PGP + FGP sources — centralized per-page filter (FGP-04.4). Preserves
     # the prior PGP behavior exactly; FGP rows are aligned to the displayed image
@@ -821,6 +848,8 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
             except (RuntimeError, AttributeError):
                 return
         refs.enrichment_refs['discovery_bundle'] = fresh
+        refs.enrichment_refs['discovery_approved_reviews'] = (
+            await fetch_published_identification_reviews(fresh))
         # The retry that recovers the panel must also recover the excerpt
         # toggle -- availability can flip with the same outage.
         try:
@@ -987,6 +1016,8 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
                                         catalogue_title=_catalogue_title,
                                         catalogue_identity=_catalogue_identity,
                                         load_excerpt=load_excerpt,
+                                        approved_reviews=refs.enrichment_refs.get(
+                                            'discovery_approved_reviews') or {},
                                         sidecar_version=(
                                             bundle.claims.get('meta') or {}
                                         ).get('sidecar_version'))

@@ -92,6 +92,7 @@ from web.components import discovery_links as links
 from web.components.identification_review import (
     REPORT_ADDRESS as _REVIEW_REPORT_ADDRESS,
     render_identification_review_action,
+    render_published_identification_reviews,
     report_mailto as _review_report_mailto,
 )
 
@@ -1885,7 +1886,7 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                        sidecar_version: Any = None,
                        load_children=None, preview_url=None,
                        catalogue_title=None, on_suppress=None,
-                       load_excerpt=None) -> None:
+                       load_excerpt=None, approved_reviews=()) -> None:
     """One result row, in whichever unit the service produced it.
 
     The unit arrives ON the row (`unit`, part of the projection); it is
@@ -1970,6 +1971,11 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                 _render_excerpt(item, lang, load_excerpt)
             if preview_url is not None:
                 _render_preview(item, lang, preview_url)
+
+    # Approved assessments are HUMAN editorial output, so they are a sibling
+    # after the computed row rather than content inside its bordered box.
+    if unit == FINDINGS_UNIT_IDENTIFICATION:
+        render_published_identification_reviews(approved_reviews, lang)
 
 
 def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
@@ -2098,6 +2104,9 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
                 return
             state["loaded"] = True
             children = list((envelope or {}).get("items") or ())
+            review_map = dict(
+                ((envelope or {}).get("meta") or {}).get("approved_reviews")
+                or {})
             # `make_envelope` guarantees an int here (it coerces and raises), so
             # the default is for a hand-built mapping in a probe, never for a
             # real read.
@@ -2134,7 +2143,10 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
                                        preview_url=preview_url,
                                        catalogue_title=catalogue_title,
                                        on_suppress=on_suppress,
-                                       load_excerpt=load_excerpt)
+                                       load_excerpt=load_excerpt,
+                                       approved_reviews=review_map.get(
+                                           str(child.get("identification_id") or ""),
+                                           ()))
             extent["holder"] = _render_expansion_extent(
                 state["shown"], total, lang, on_more=_more)
 

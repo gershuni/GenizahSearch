@@ -3060,7 +3060,7 @@ def test_the_beta_note_promises_no_accuracy_and_lists_no_roadmap(lang):
 
 @pytest.mark.parametrize("lang", LANGS)
 def test_a_row_offers_a_version_bound_review_with_the_email_fallback(
-    lang, monkeypatch,
+    lang,
 ):
     """The structured review replaces the row's email-only action, while the
     reproducible email target remains available inside its dialog."""
@@ -3068,7 +3068,6 @@ def test_a_row_offers_a_version_bound_review_with_the_email_fallback(
 
     version = "discovery-v1-SENTINEL-VERSION"
     row = finding_row()
-    monkeypatch.setattr(ir, "published_reviews", lambda *_a, **_kw: ())
     client = render_and_click(
         lambda: fr.render_finding_row(
             row, lang, sidecar_version=version),
@@ -3091,6 +3090,49 @@ def test_a_row_offers_a_version_bound_review_with_the_email_fallback(
     assert version in body, (
         "the report does not name the artifact that produced the row, so it "
         "cannot be reproduced against it")
+
+
+def test_the_hebrew_review_action_asks_whether_the_match_is_correct():
+    assert ir.review_text("action", "he") == "האם ההתאמה נכונה?"
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_an_approved_human_assessment_renders_OUTSIDE_the_computed_row(lang):
+    approved = [{
+        "relation_verdict": ir.RELATION_DIRECT_WITNESS,
+        "direct_novelty": ir.DIRECT_NOVELTY_POTENTIALLY_NEW,
+        "comment": "Editor-approved comment",
+        "published_at": "2026-08-13T12:00:00Z",
+    }]
+    client = _client_render(lambda: fr.render_finding_row(
+        finding_row(), lang, approved_reviews=approved))
+    blocks = _elements_with_class(client, ir.REVIEW_PUBLIC_CLASS)
+    assert len(blocks) == 1
+    ancestor_classes = {
+        class_name
+        for ancestor in _element_ancestors(blocks[0])
+        for class_name in (ancestor._classes or [])
+    }
+    assert fr.ROW_CLASS not in ancestor_classes, (
+        "the human-reviewed assessment is inside the computed-result box")
+    assert "w-full" not in (blocks[0]._classes or [])
+    assert "p-3" not in (blocks[0]._classes or [])
+
+    expected = (
+        (ir.REVIEW_PUBLIC_RELATION_CLASS, "verified",
+         ir.review_text("public_relation_label", lang)),
+        (ir.REVIEW_PUBLIC_NOVELTY_CLASS, "new_releases",
+         ir.review_text("public_novelty_label", lang)),
+        (ir.REVIEW_PUBLIC_COMMENT_CLASS, "comment",
+         ir.review_text("public_comment_label", lang)),
+    )
+    for marker, icon_name, tooltip_prefix in expected:
+        icons = _elements_with_class(client, marker)
+        assert len(icons) == 1
+        assert icons[0]._props.get("name") == icon_name
+        assert tooltip_prefix in icons[0]._props.get("aria-label", "")
+    assert "Editor-approved comment" in _elements_with_class(
+        client, ir.REVIEW_PUBLIC_COMMENT_CLASS)[0]._props["aria-label"]
 
 
 @pytest.mark.parametrize("lang", LANGS)

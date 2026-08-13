@@ -33,6 +33,7 @@ import pytest
 import scripts.discovery_ids as ids
 import shared.discovery_display_strings as ds
 import web.components.discovery_panel as dp
+import web.components.identification_review as ir
 from shared.discovery_band_labels import band_label
 from shared.discovery_errors import DiscoveryUnavailable
 from shared.discovery_main_pool import (
@@ -244,7 +245,7 @@ def model_for(**kwargs):
 # ---------------------------------------------------------------------------
 
 def _render(model, page_id: Optional[str] = 'page-1', driver=None,
-            load_excerpt=None, sidecar_version=None):
+            load_excerpt=None, sidecar_version=None, approved_reviews=None):
     """Render the REAL panel body in a bare client context and return the
     client; `driver(client)` runs INSIDE the same event loop so interaction
     handlers can be awaited."""
@@ -260,7 +261,8 @@ def _render(model, page_id: Optional[str] = 'page-1', driver=None,
             with client:
                 dp.render_discovery_panel_body(model, page_id=page_id,
                                                load_excerpt=load_excerpt,
-                                               sidecar_version=sidecar_version)
+                                               sidecar_version=sidecar_version,
+                                               approved_reviews=approved_reviews)
                 if driver is not None:
                     await driver(client)
         holder['client'] = client
@@ -995,6 +997,34 @@ def test_review_action_is_enabled_only_when_the_artifact_version_is_known():
     for forbidden in ('ui.notify', 'supabase', 'record_vote', 'save_vote'):
         assert forbidden not in src, (
             f'{PANEL_PATH} reaches into review storage via {forbidden!r}')
+
+
+def test_approved_assessment_is_a_sibling_after_the_computed_panel_row():
+    identification_id = claim_row()['identification_id']
+    approved = {identification_id: [{
+        'relation_verdict': ir.RELATION_SHARED_SOURCE,
+        'direct_novelty': None,
+        'comment': None,
+        'published_at': '2026-08-13T12:00:00Z',
+    }]}
+    client = _render(
+        model_for(claim_items=[claim_row()]), approved_reviews=approved)
+    blocks = _elements_with_class(client, ir.REVIEW_PUBLIC_CLASS)
+    assert len(blocks) == 1
+    ancestor_classes = set()
+    slot = getattr(blocks[0], 'parent_slot', None)
+    while slot is not None:
+        parent = getattr(slot, 'parent', None)
+        if parent is None:
+            break
+        ancestor_classes.update(parent._classes or [])
+        slot = getattr(parent, 'parent_slot', None)
+    assert dp.PANEL_ROW_CLASS not in ancestor_classes
+    assert len(_elements_with_class(
+        client, ir.REVIEW_PUBLIC_RELATION_CLASS)) == 1
+    assert len(_elements_with_class(
+        client, ir.REVIEW_PUBLIC_NOVELTY_CLASS)) == 1
+    assert not _elements_with_class(client, ir.REVIEW_PUBLIC_COMMENT_CLASS)
 
 
 def test_exactly_the_disclosure_levels_the_model_emits_are_rendered():

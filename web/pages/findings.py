@@ -34,13 +34,15 @@ page already relied on is still on the element it was written for.
 OFF-LOOP DISCIPLINE (T-136-16-05)
 ---------------------------------
 Every read on this page is a direct ``await`` on an async wrapper that offloads
-EXACTLY ONCE internally. Two modules provide those wrappers:
+EXACTLY ONCE internally. Three modules provide those wrappers:
 
 * ``web.discovery`` -- every discovery-sidecar read (``run_in_executor`` +
   ``asyncio.wait``, never ``wait_for``);
 * ``web.discovery_genre_labels`` -- the one FJMS read this page needs, the
   bilingual domain vocabulary, primed at most once per process through
   ``web.bounded_io.bounded_io_bound``.
+* ``web.identification_reviews`` -- the approved, identity-free human review
+  overlay, fetched for all visible identification ids in one bounded request.
 
 This module therefore adds NO second offload wrapper around either, makes no
 synchronous service call, and never reaches for the composition module's
@@ -138,7 +140,11 @@ from web.discovery_genre_labels import (
     genre_display_label,
     prime_domain_translations,
 )
+from web.identification_reviews import (
+    published_reviews_by_identification_async,
+)
 from web.safe_storage import safe_user_get, safe_user_set
+from web.supabase_client import get_client
 from web.translations import get_language, tr
 
 logger = logging.getLogger(__name__)
@@ -1121,6 +1127,25 @@ def effective_page_size(envelope: Dict[str, Any]) -> int:
     return _default_page_size()
 
 
+async def _fetch_approved_review_map(items) -> Dict[str, Any]:
+    """One public Supabase read for the identification leaves in ``items``."""
+    identification_ids = [
+        str(item.get("identification_id") or "")
+        for item in items
+        if item.get("identification_id")
+    ]
+    if not identification_ids:
+        return {}
+    try:
+        client = get_client()
+        return await published_reviews_by_identification_async(
+            identification_ids, client=client)
+    except Exception as exc:  # noqa: BLE001 -- overlay failure cannot hide findings
+        logger.info("findings: approved reviews unavailable (%s)",
+                    type(exc).__name__)
+        return {}
+
+
 def clamp_page_to_total(state: Dict[str, Any], envelope: Dict[str, Any]) -> bool:
     """Pull a persisted page back inside the real set. Returns whether it moved.
 
@@ -1663,13 +1688,18 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         excerpts_on = await excerpts_available()
         if _stale():
             return
+        approved_reviews = await _fetch_approved_review_map(
+            envelope.get("items") or ())
+        if _stale():
+            return
         results_region.clear()
         with results_region:
             _render_results(envelope, state, lang, refresh,
                             more_pool_total=launch_meta.get("more_pool_total"),
                             sidecar_version=launch_meta.get("sidecar_version"),
                             suppressed=suppressed, hidden=hidden,
-                            excerpts_on=excerpts_on)
+                            excerpts_on=excerpts_on,
+                            approved_reviews=approved_reviews)
         if _stale():
             return
         await _populate_facets(
@@ -2461,6 +2491,7 @@ def _render_results(
     suppressed: Tuple[str, ...] = (),
     hidden: Optional[Dict[str, Any]] = None,
     excerpts_on: bool = False,
+    approved_reviews: Optional[Mapping[str, Any]] = None,
 ) -> None:
     status = (envelope or {}).get("status")
     if status != "ok":
@@ -2591,7 +2622,8 @@ def _render_results(
             _render_row(item, lang, sidecar_version=sidecar_version,
                         state=state, catalogue_title=_catalogue_title,
                         refresh=refresh, suppressed=suppressed,
-                        hidden=hidden, excerpts_on=excerpts_on)
+                        hidden=hidden, excerpts_on=excerpts_on,
+                        approved_reviews=approved_reviews)
 
     _render_pager(total, state, lang, refresh,
                   page_size=effective_page_size(envelope),
@@ -3382,7 +3414,8 @@ def _render_row(item: Dict[str, Any], lang: str,
                 refresh=None,
                 suppressed: Tuple[str, ...] = (),
                 hidden: Optional[Dict[str, Any]] = None,
-                excerpts_on: bool = False) -> None:
+                excerpts_on: bool = False,
+                approved_reviews: Optional[Mapping[str, Any]] = None) -> None:
     """One result row, in whichever of the three shipped units the service
     produced it.
 
@@ -3403,7 +3436,18 @@ def _render_row(item: Dict[str, Any], lang: str,
     loader = None
     if state is not None:
         async def loader(row, page=1, _state=dict(state), _hidden=suppressed):  # noqa: F811
-            return await _fetch_children(_state, row, page, _hidden)
+            envelope = await _fetch_children(_state, row, page, _hidden)
+            if (envelope or {}).get("status") == "ok":
+                review_map = await _fetch_approved_review_map(
+                    (envelope or {}).get("items") or ())
+                envelope = {
+                    **envelope,
+                    "meta": {
+                        **dict((envelope or {}).get("meta") or {}),
+                        "approved_reviews": review_map,
+                    },
+                }
+            return envelope
 
     # THE ADMIN ✕, on the identification leaf only and only for an admin. The
     # handler is built HERE rather than in the component for the same reason
@@ -3466,7 +3510,9 @@ def _render_row(item: Dict[str, Any], lang: str,
                             load_children=loader, preview_url=preview_url,
                             catalogue_title=catalogue_title,
                             on_suppress=on_suppress,
-                            load_excerpt=load_excerpt)
+                            load_excerpt=load_excerpt,
+                            approved_reviews=(approved_reviews or {}).get(
+                                str(item.get("identification_id") or ""), ()))
 
 
 def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh,

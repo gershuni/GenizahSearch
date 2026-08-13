@@ -13,11 +13,18 @@ from web.identification_reviews import (
     RELATION_VERDICTS,
     ReviewSubmission,
     anonymous_reviewer_key,
+    moderate_review,
     normalize_submission,
     published_reviews,
+    published_reviews_by_identification,
     submit_review,
 )
-from web.components.identification_review import relation_verdict_text
+from web.components.identification_review import (
+    direct_novelty_icon,
+    relation_verdict_icon,
+    relation_verdict_text,
+    review_text,
+)
 
 
 SESSION_UUID = "0123456789abcdef0123456789abcdef"
@@ -78,6 +85,12 @@ def test_every_relation_has_bilingual_reader_copy_without_assertive_public_terms
             assert prohibited not in english.lower()
 
 
+def test_every_vote_value_has_a_compact_public_icon():
+    assert all(relation_verdict_icon(value) for value in RELATION_VERDICTS)
+    assert direct_novelty_icon(DIRECT_NOVELTY_POTENTIALLY_NEW) == "new_releases"
+    assert direct_novelty_icon(None) == "remove_circle_outline"
+
+
 class _RpcClient:
     def __init__(self, data):
         self.data = data
@@ -115,13 +128,62 @@ def test_public_read_uses_the_identity_free_rpc():
     assert "reviewer" not in rows[0]
 
 
+def test_public_batch_groups_rows_and_strips_the_grouping_id_from_each_review():
+    rows = [{
+        "identification_id": "a" * 64,
+        "relation_verdict": RELATION_SHARED_SOURCE,
+        "direct_novelty": None,
+        "comment": None,
+        "published_at": "2026-08-13T12:00:00Z",
+    }]
+    client = _RpcClient(rows)
+    grouped = published_reviews_by_identification(
+        ["a" * 64, "a" * 64], client=client)
+    assert grouped == {"a" * 64: ({
+        "relation_verdict": RELATION_SHARED_SOURCE,
+        "direct_novelty": None,
+        "comment": None,
+        "published_at": "2026-08-13T12:00:00Z",
+    },)}
+    assert client.calls == [(
+        "get_published_identification_reviews_batch_beta",
+        {"p_identification_ids": ["a" * 64]},
+    )]
+
+
+def test_moderator_can_edit_both_votes_and_keep_the_comment_private():
+    client = _RpcClient(True)
+    assert moderate_review(
+        "review-id", "approved", "checked",
+        relation_verdict=RELATION_DIRECT_WITNESS,
+        direct_novelty=DIRECT_NOVELTY_POTENTIALLY_NEW,
+        comment="Useful, but private.",
+        publish_comment=False,
+        client=client,
+    )
+    name, params = client.calls[0]
+    assert name == "moderate_identification_review_beta_v2"
+    assert params["p_relation_verdict"] == RELATION_DIRECT_WITNESS
+    assert params["p_direct_novelty"] == DIRECT_NOVELTY_POTENTIALLY_NEW
+    assert params["p_comment"] == "Useful, but private."
+    assert params["p_publish_comment"] is False
+
+
+def test_requested_hebrew_question_is_exact():
+    assert review_text("action", "he") == "האם ההתאמה נכונה?"
+
+
 def test_migration_keeps_table_writes_private_and_public_output_identity_free():
     sql = Path("scripts/create_identification_reviews_beta.sql").read_text(
         encoding="utf-8")
     assert "ENABLE ROW LEVEL SECURITY" in sql
     assert "REVOKE ALL ON TABLE public.identification_reviews FROM anon" in sql
     assert "GRANT INSERT" not in sql
-    assert "TO anon, authenticated" in sql  # the two constrained public RPCs
+    assert "TO anon, authenticated" in sql  # constrained public RPC grants
+    assert "ADD COLUMN IF NOT EXISTS publish_comment" in sql
+    assert "CASE WHEN r.publish_comment THEN r.comment ELSE NULL END" in sql
+    assert "get_published_identification_reviews_batch_beta" in sql
+    assert "moderate_identification_review_beta_v2" in sql
 
     public_function = sql.split(
         "CREATE OR REPLACE FUNCTION public.get_published_identification_reviews_beta",

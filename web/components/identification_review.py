@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from typing import Any, Dict, Mapping, Optional
 from urllib.parse import quote
 
@@ -22,23 +23,29 @@ from web.identification_reviews import (
     IdentificationReviewError,
     ReviewSubmission,
     anonymous_reviewer_key,
-    published_reviews,
     reviews_enabled,
     submit_review,
 )
 from web.safe_storage import get_session_uuid
-from web.supabase_client import get_client, get_user_client
+from web.supabase_client import get_user_client
 
 
 REVIEW_ACTION_CLASS = "gs-identification-review-action"
 REVIEW_DIALOG_CLASS = "gs-identification-review-dialog"
 REVIEW_PUBLIC_CLASS = "gs-identification-review-public"
+REVIEW_PUBLIC_ITEM_CLASS = "gs-identification-review-public-item"
+REVIEW_PUBLIC_RELATION_CLASS = "gs-identification-review-public-relation"
+REVIEW_PUBLIC_NOVELTY_CLASS = "gs-identification-review-public-novelty"
+REVIEW_PUBLIC_COMMENT_CLASS = "gs-identification-review-public-comment"
 REPORT_ADDRESS = "gershuni@gmail.com"
 
 
 _COPY: Dict[str, Dict[str, str]] = {
-    "action": {"en": "Review this match", "he": "בדיקת התאמה זו"},
-    "title": {"en": "Review this computed match", "he": "בדיקת ההתאמה המחושבת"},
+    "action": {"en": "Review this match", "he": "האם ההתאמה נכונה?"},
+    "title": {
+        "en": "Review this computed match",
+        "he": "האם ההתאמה המחושבת נכונה?",
+    },
     "beta": {"en": "Beta", "he": "בטא"},
     "question": {
         "en": "What best describes the relationship?",
@@ -64,18 +71,26 @@ _COPY: Dict[str, Dict[str, str]] = {
         ),
     },
     "public_title": {
-        "en": "Published community reviews",
-        "he": "בדיקות קהילה שפורסמו",
+        "en": "Human-reviewed assessment",
+        "he": "הערכה שנבדקה ואושרה",
     },
     "public_caveat": {
-        "en": "Moderated responses are evidence for review, not a scholarly consensus.",
-        "he": "תגובות שנבדקו הן חומר לבחינה, לא קונצנזוס מחקרי.",
+        "en": "Checked and published by a project editor.",
+        "he": "נבדק ופורסם בידי עורך/ת הפרויקט.",
     },
-    "public_empty": {
-        "en": "No approved community reviews yet.",
-        "he": "עדיין אין בדיקות קהילה מאושרות.",
+    "public_relation_label": {
+        "en": "How well the match fits",
+        "he": "עד כמה ההתאמה נכונה",
     },
-    "loading": {"en": "Loading approved reviews…", "he": "הבדיקות המאושרות נטענות…"},
+    "public_novelty_label": {
+        "en": "How new the identification is",
+        "he": "עד כמה הזיהוי חדש",
+    },
+    "public_comment_label": {
+        "en": "Published comment",
+        "he": "הערה שפורסמה",
+    },
+    "not_assessed": {"en": "Not assessed", "he": "לא הוערך"},
     "submit": {"en": "Send for review", "he": "שליחה לבדיקה"},
     "cancel": {"en": "Cancel", "he": "ביטול"},
     "success": {
@@ -137,6 +152,23 @@ _DIRECT_OPTIONS = {
 }
 
 
+_RELATION_ICONS = {
+    RELATION_DIRECT_WITNESS: "verified",
+    RELATION_MANUSCRIPT_QUOTES_WORK: "format_quote",
+    RELATION_SHARED_SOURCE: "account_tree",
+    RELATION_WORK_QUOTES_MANUSCRIPT: "reply",
+    RELATION_NOT_MEANINGFUL: "link_off",
+    RELATION_OTHER_UNSURE: "help_outline",
+}
+
+
+_DIRECT_NOVELTY_ICONS = {
+    DIRECT_NOVELTY_POTENTIALLY_NEW: "new_releases",
+    DIRECT_NOVELTY_ALREADY_KNOWN: "history",
+    DIRECT_NOVELTY_OTHER_UNSURE: "help_outline",
+}
+
+
 def _lang(lang: str) -> str:
     return "he" if lang == "he" else "en"
 
@@ -155,6 +187,25 @@ def direct_novelty_text(verdict: Any, lang: str = "en") -> str:
     lang = _lang(lang)
     return _DIRECT_OPTIONS[lang].get(
         str(verdict or ""), _DIRECT_OPTIONS[lang][DIRECT_NOVELTY_OTHER_UNSURE])
+
+
+def relation_verdict_icon(verdict: Any) -> str:
+    return _RELATION_ICONS.get(str(verdict or ""), "help_outline")
+
+
+def direct_novelty_icon(verdict: Any) -> str:
+    return _DIRECT_NOVELTY_ICONS.get(
+        str(verdict or ""), "remove_circle_outline")
+
+
+def _public_review_icon(
+    name: str, tooltip: str, marker: str, *, color: str,
+) -> None:
+    ui.icon(name).classes(marker).style(
+        f"font-size: 17px; color: {color}; opacity: 0.78;"
+    ).props(
+        f'role=img aria-label="{escape(tooltip, quote=True)}"'
+    ).tooltip(tooltip)
 
 
 def report_mailto(item: Mapping[str, Any], lang: str = "en",
@@ -176,20 +227,60 @@ def _context_page_number(item: Mapping[str, Any]) -> Optional[int]:
     return value
 
 
-def _render_published_item(review: Mapping[str, Any], lang: str) -> None:
-    relation = str(review.get("relation_verdict") or "")
-    relation_label = relation_verdict_text(relation, lang)
-    with ui.column().classes("w-full gap-1 p-2 rounded").style(
-        "background: var(--surface-secondary);"
-    ):
-        ui.label(relation_label).classes("text-sm font-medium")
-        novelty = review.get("direct_novelty")
-        if relation == RELATION_DIRECT_WITNESS and novelty:
-            ui.label(direct_novelty_text(novelty, lang)).classes(
-                "text-xs").style("color: var(--text-secondary);")
-        comment = str(review.get("comment") or "").strip()
-        if comment:
-            ui.label(comment).classes("text-sm whitespace-pre-wrap").props("dir=auto")
+def render_published_identification_reviews(
+    reviews: Any, lang: str = "en",
+) -> None:
+    """Render approved human assessments as a subtle computed-card sibling."""
+    rows = [dict(row) for row in (reviews or ())]
+    if not rows:
+        return
+    lang = _lang(lang)
+    provenance = (
+        f'{review_text("public_title", lang)}. '
+        f'{review_text("public_caveat", lang)}'
+    )
+    with ui.row().classes(
+        f"{REVIEW_PUBLIC_CLASS} items-center gap-1 mt-1 px-1 flex-wrap"
+    ).props(f'aria-label="{escape(provenance, quote=True)}"'):
+        _public_review_icon(
+            "fact_check", provenance, "gs-identification-review-public-source",
+            color="var(--success)",
+        )
+        for review in rows:
+            relation = str(review.get("relation_verdict") or "")
+            novelty = review.get("direct_novelty")
+            novelty_text = (
+                direct_novelty_text(novelty, lang)
+                if relation == RELATION_DIRECT_WITNESS and novelty
+                else review_text("not_assessed", lang)
+            )
+            comment = str(review.get("comment") or "").strip()
+            relation_tooltip = (
+                f'{review_text("public_relation_label", lang)}: '
+                f'{relation_verdict_text(relation, lang)}'
+            )
+            novelty_tooltip = (
+                f'{review_text("public_novelty_label", lang)}: {novelty_text}'
+            )
+            with ui.row().classes(
+                f"{REVIEW_PUBLIC_ITEM_CLASS} items-center gap-1"
+            ):
+                _public_review_icon(
+                    relation_verdict_icon(relation), relation_tooltip,
+                    REVIEW_PUBLIC_RELATION_CLASS, color="var(--success)",
+                )
+                _public_review_icon(
+                    direct_novelty_icon(novelty), novelty_tooltip,
+                    REVIEW_PUBLIC_NOVELTY_CLASS, color="var(--primary)",
+                )
+                if comment:
+                    comment_tooltip = (
+                        f'{review_text("public_comment_label", lang)}: {comment}'
+                    )
+                    _public_review_icon(
+                        "comment", comment_tooltip, REVIEW_PUBLIC_COMMENT_CLASS,
+                        color="var(--text-secondary)",
+                    )
 
 
 def render_identification_review_action(
@@ -214,7 +305,7 @@ def render_identification_review_action(
     # forms would roughly double the page payload before a reader asks for one.
     dialog_state: Dict[str, Any] = {}
 
-    def _build_dialog() -> tuple[Any, Any]:
+    def _build_dialog() -> Any:
         with ui.dialog() as dialog, ui.card().classes(
             f"{REVIEW_DIALOG_CLASS} w-full max-w-2xl p-5"
         ):
@@ -297,35 +388,13 @@ def render_identification_review_action(
                 ui.button(
                     review_text("submit", lang), on_click=_submit).props("color=primary")
 
-            ui.separator()
-            ui.label(review_text("public_title", lang)).classes("font-medium")
-            ui.label(review_text("public_caveat", lang)).classes("text-xs").style(
-                "color: var(--text-secondary);")
-            with ui.column().classes(
-                f"{REVIEW_PUBLIC_CLASS} w-full gap-2"
-            ) as public_box:
-                ui.label(review_text("loading", lang)).classes("text-sm")
-        return dialog, public_box
+        return dialog
 
     async def _open() -> None:
         if not dialog_state:
-            dialog_state["dialog"], dialog_state["public_box"] = _build_dialog()
+            dialog_state["dialog"] = _build_dialog()
         dialog = dialog_state["dialog"]
-        public_box = dialog_state["public_box"]
         dialog.open()
-        try:
-            # Public RPC output contains no reviewer key or user id.
-            public_client = get_client()
-            rows = await run.io_bound(
-                published_reviews, identification_id, client=public_client)
-        except Exception:
-            rows = ()
-        public_box.clear()
-        with public_box:
-            if not rows:
-                ui.label(review_text("public_empty", lang)).classes("text-sm")
-            for row in rows:
-                _render_published_item(row, lang)
 
     ui.button(
         review_text("action", lang), icon="rate_review", on_click=_open,
@@ -339,9 +408,11 @@ __all__ = [
     "REVIEW_ACTION_CLASS",
     "REVIEW_DIALOG_CLASS",
     "REVIEW_PUBLIC_CLASS",
+    "REVIEW_PUBLIC_ITEM_CLASS",
     "direct_novelty_text",
     "relation_verdict_text",
     "render_identification_review_action",
+    "render_published_identification_reviews",
     "report_mailto",
     "review_text",
 ]

@@ -11,11 +11,12 @@ offers the existing email channel instead.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ DIRECT_NOVELTY_VERDICTS = frozenset({
 
 REVIEW_STATUSES = frozenset({"pending", "approved", "rejected"})
 MAX_COMMENT_LENGTH = 1500
+_PUBLIC_READ_SEMAPHORE = asyncio.Semaphore(4)
 
 
 class IdentificationReviewError(ValueError):
@@ -197,10 +199,62 @@ def published_reviews(identification_id: str, *, client) -> Sequence[Dict[str, A
     return tuple(dict(row) for row in (response.data or ()))
 
 
+def published_reviews_by_identification(
+    identification_ids: Iterable[Any], *, client,
+) -> Dict[str, Sequence[Dict[str, Any]]]:
+    """Batch the public review overlay for one rendered page.
+
+    Public findings pages can contain dozens of identification leaves.  One RPC
+    per leaf would turn the small human-review overlay into the most expensive
+    part of the page, so the SQL boundary accepts the visible ids as one bounded
+    request and still returns only identity-free approved fields.
+    """
+    ids = []
+    for value in identification_ids:
+        cleaned = str(value or "").strip()
+        if cleaned and len(cleaned) <= 128 and cleaned not in ids:
+            ids.append(cleaned)
+        if len(ids) >= 100:
+            break
+    if not ids or client is None:
+        return {}
+    try:
+        response = client.rpc(
+            "get_published_identification_reviews_batch_beta",
+            {"p_identification_ids": ids},
+        ).execute()
+    except Exception as exc:
+        logger.info("published identification review batch unavailable (%s)",
+                    type(exc).__name__)
+        return {}
+    grouped: Dict[str, list[Dict[str, Any]]] = {}
+    for raw in response.data or ():
+        row = dict(raw)
+        identification_id = str(row.pop("identification_id", "") or "")
+        if identification_id in ids:
+            grouped.setdefault(identification_id, []).append(row)
+    return {key: tuple(rows) for key, rows in grouped.items()}
+
+
+async def published_reviews_by_identification_async(
+    identification_ids: Iterable[Any], *, client,
+) -> Dict[str, Sequence[Dict[str, Any]]]:
+    """Off-loop form for async page builders; exactly one bounded dispatch."""
+    from web.bounded_io import bounded_io_bound
+
+    result = await bounded_io_bound(
+        _PUBLIC_READ_SEMAPHORE,
+        published_reviews_by_identification,
+        identification_ids,
+        client=client,
+    )
+    return dict(result or {})
+
+
 _ADMIN_SELECT = (
     "id,identification_id,sidecar_version,sys_id,page_id,page_number,work_id,"
     "displayed_relation,relation_verdict,direct_novelty,comment,status,"
-    "reviewer_user_id,submitted_at,updated_at"
+    "publish_comment,reviewer_user_id,submitted_at,updated_at"
 )
 
 
@@ -219,21 +273,44 @@ def pending_reviews(*, client) -> Sequence[Dict[str, Any]]:
     return tuple(dict(row) for row in (response.data or ()))
 
 
-def moderate_review(review_id: str, status: str, note: Optional[str], *, client) -> bool:
-    """Approve or reject one review through the admin-only RPC."""
+def moderate_review(
+    review_id: str,
+    status: str,
+    note: Optional[str],
+    *,
+    relation_verdict: Optional[str] = None,
+    direct_novelty: Optional[str] = None,
+    comment: Optional[str] = None,
+    publish_comment: bool = False,
+    client,
+) -> bool:
+    """Save the moderator's edited assessment and approve or reject it."""
     if status not in {"approved", "rejected"}:
         raise IdentificationReviewError("Invalid moderation decision.")
     rid = _clean_required(review_id, field="review", maximum=64)
+    relation = _clean_optional(relation_verdict, maximum=64)
+    if relation is not None and relation not in RELATION_VERDICTS:
+        raise IdentificationReviewError("Invalid moderated relationship.")
+    novelty = _clean_optional(direct_novelty, maximum=64)
+    if relation is not None and relation != RELATION_DIRECT_WITNESS:
+        novelty = None
+    elif novelty is not None and novelty not in DIRECT_NOVELTY_VERDICTS:
+        raise IdentificationReviewError("Invalid moderated novelty assessment.")
+    cleaned_comment = _clean_optional(comment, maximum=MAX_COMMENT_LENGTH)
     params = {
         "p_review_id": rid,
         "p_status": status,
         "p_moderation_note": _clean_optional(note, maximum=1000),
+        "p_relation_verdict": relation,
+        "p_direct_novelty": novelty,
+        "p_comment": cleaned_comment,
+        "p_publish_comment": bool(publish_comment and cleaned_comment),
     }
     if client is None:
         return False
     try:
         response = client.rpc(
-            "moderate_identification_review_beta", params).execute()
+            "moderate_identification_review_beta_v2", params).execute()
     except Exception as exc:
         logger.warning("identification review moderation failed (%s)",
                        type(exc).__name__)
@@ -244,7 +321,7 @@ def moderate_review(review_id: str, status: str, note: Optional[str], *, client)
     if isinstance(rows, list) and rows:
         value = rows[0]
         if isinstance(value, Mapping):
-            return bool(value.get("moderate_identification_review_beta", True))
+            return bool(value.get("moderate_identification_review_beta_v2", True))
     return bool(rows)
 
 
@@ -268,6 +345,8 @@ __all__ = [
     "normalize_submission",
     "pending_reviews",
     "published_reviews",
+    "published_reviews_by_identification",
+    "published_reviews_by_identification_async",
     "reviews_enabled",
     "submit_review",
 ]
