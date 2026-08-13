@@ -8,6 +8,7 @@ import pytest
 from web.start_content import (
     StartContentError,
     _validate_start_content,
+    demo_url,
     live_computed_candidates,
     load_start_content,
     manuscript_url,
@@ -23,7 +24,7 @@ def test_launch_pool_shape_balance_and_unique_ids():
     assert len(content['searches']) == 12
     assert len(content['manuscripts']) == 12
     assert len(content['works']) == 6
-    assert len(content['computed_candidates']) == 10
+    assert len(content['computed_candidates']) == 8
     assert all(set(entry['category']) == {'en', 'he'} for entry in content['manuscripts'])
     assert {'Prayer', 'Bible and book art', 'Personal letter', 'Calendar'} <= {
         entry['category']['en'] for entry in content['manuscripts']
@@ -49,6 +50,7 @@ def test_all_generated_destinations_are_safe_internal_links_and_encoded():
         + [work_url(entry) for entry in content['works']]
         + [manuscript_url(entry, computed=True) for entry in content['computed_candidates']]
         + [puzzle_url(content['puzzle'])]
+        + [demo_url(name, content['demos'][name]) for name in ('parallels', 'joins')]
     )
 
     assert all(url.startswith('/') and not url.startswith('//') for url in urls)
@@ -105,6 +107,8 @@ def test_computed_examples_require_availability_and_exact_frame(monkeypatch):
     content = load_start_content()
     launch_hash = content['computed_candidates'][0]['frame_content_hashes'][0]
 
+    assert content['computed_candidates_published'] is True
+
     monkeypatch.setattr(assets, 'discovery_available', lambda: False)
     assert live_computed_candidates(content) == []
 
@@ -118,13 +122,56 @@ def test_computed_examples_require_availability_and_exact_frame(monkeypatch):
     ]
 
 
-def test_computed_examples_keep_the_non_reviewed_wording_and_exact_page():
+def test_manuscript_reference_and_prepared_research_demos_are_validated():
     content = load_start_content()
-    expected = 'An automatic textual match offered for examination, not a reviewed identification.'
-    assert all(entry['description']['en'] == expected for entry in content['computed_candidates'])
-    twenty = next(entry for entry in content['computed_candidates'] if entry['id'] == 'computed-twenty-treatises')
+    palimpsest = next(
+        entry for entry in content['manuscripts']
+        if entry['shelfmark'] == 'T-S E2.51'
+    )
+    assert palimpsest['reference']['url'].startswith('https://www.lib.cam.ac.uk/')
+    assert 'Cherlow' in palimpsest['reference']['label']['en']
+
+    parallels = content['demos']['parallels']
+    assert parallels['enabled'] is True
+    assert parallels['text'].startswith('דרור יקרא לבן עם בת')
+    assert parse_qs(urlsplit(demo_url('parallels', parallels)).query)['text'] == [
+        parallels['text']
+    ]
+
+    joins = content['demos']['joins']
+    assert joins['enabled'] is True
+    assert parse_qs(urlsplit(demo_url('joins', joins)).query) == {
+        'sys_id': ['990001403820205171'],
+        'page': ['1'],
+    }
+
+
+def test_computed_examples_are_the_selected_launch_set_with_exact_pages():
+    content = load_start_content()
+    assert {entry['id'] for entry in content['computed_candidates']} == {
+        'computed-hayyuj-kitab-al-nutaf',
+        'computed-maimonides-logic',
+        'computed-keter-malkhut',
+        'computed-twenty-chapters',
+        'computed-ben-hofni-tzitzit',
+        'computed-rashi-numbers',
+        'computed-saadiah-beliefs-opinions',
+        'computed-mevasser-objections-saadiah',
+    }
+    assert all('automatic' in entry['description']['en'].lower()
+               for entry in content['computed_candidates'])
+    twenty = next(entry for entry in content['computed_candidates'] if entry['id'] == 'computed-twenty-chapters')
     assert parse_qs(urlsplit(manuscript_url(twenty, computed=True)).query) == {
-        'sys_id': ['990001594880205171'],
-        'page': ['5'],
+        'sys_id': ['990051284490205171'],
+        'page': ['1'],
+        'computed': ['1'],
+    }
+    objections = next(
+        entry for entry in content['computed_candidates']
+        if entry['id'] == 'computed-mevasser-objections-saadiah'
+    )
+    assert parse_qs(urlsplit(manuscript_url(objections, computed=True)).query) == {
+        'sys_id': ['990001538420205171'],
+        'page': ['42'],
         'computed': ['1'],
     }

@@ -4900,6 +4900,8 @@ TRANSLATIONS.update({
 TRANSLATIONS.update({
     "Start Here": "התחילו כאן",
     "Not sure what to search? Start here": "לא יודעים מה לחפש? התחילו כאן",
+    "What's on this website? Start here to explore the Cairo Genizah":
+        "מה יש באתר? התחילו כאן כדי להכיר את גניזת קהיר",
     "Start Here | Dicta Genizah Search": "התחילו כאן | אתר הגניזה של דיקטה",
     "A guided introduction to the Cairo Genizah, prepared searches, selected manuscripts, and research tools.":
         "מבוא מודרך לגניזת קהיר, חיפושים מוכנים, כתבי יד נבחרים וכלי מחקר.",

@@ -150,7 +150,7 @@ def create_page():
                     'no-underline inline-flex items-center justify-center gap-2 px-5 py-2'
                 ).props('data-testid=home-start-cta').style(
                     'min-height: 44px; border-radius: 999px; '
-                    'background: var(--primary-600); color: white; font-weight: 600;'
+                    'background: var(--primary-700); color: var(--text-inverse); font-weight: 600;'
                 ).on(
                     'click',
                     lambda: posthog_capture(
@@ -163,7 +163,7 @@ def create_page():
                     ),
                 ):
                     ui.icon('explore').props('aria-hidden=true').classes('text-lg')
-                    ui.label(tr('Not sure what to search? Start here'))
+                    ui.label(tr("What's on this website? Start here to explore the Cairo Genizah"))
 
         # === Capability Chips (clickable) ===
         with ui.row().classes('w-full justify-center gap-2 flex-wrap mt-2 px-2'):

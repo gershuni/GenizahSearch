@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import html
 import logging
-import random
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -107,7 +106,7 @@ _REVOLUTIONS_COPY = (
 )
 
 _UI_COPY = {
-    "title": {"en": "Not sure what to search? Start here.", "he": "לא יודעים מה לחפש? התחילו כאן."},
+    "title": {"en": "Explore the Cairo Genizah", "he": "גלו את גניזת קהיר"},
     "lead": {
         "en": "Choose a way into the Cairo Genizah. Every card opens a real manuscript, search, or research tool.",
         "he": "בחרו דרך להיכנס אל גניזת קהיר. כל כרטיס פותח כתב יד, חיפוש או כלי מחקר אמיתי.",
@@ -127,7 +126,6 @@ _UI_COPY = {
         "en": "Move across genres: famous texts, prayers, poetry, magic, letters, legal documents, calendars, and more.",
         "he": "עברו בין סוגות: חיבורים מפורסמים, תפילות, פיוטים, מאגיה, מכתבים, מסמכים משפטיים, לוחות שנה ועוד.",
     },
-    "surprise_me": {"en": "Surprise me from the selected set", "he": "הפתיעו אותי מתוך המבחר"},
     "true_random": {"en": "Open a truly random fragment", "he": "פתחו קטע אקראי באמת"},
     "atlas_title": {"en": "Discover the Visual Genizah Atlas", "he": "גלו את אטלס הגניזה החזותי"},
     "atlas_description": {
@@ -159,12 +157,16 @@ _UI_COPY = {
     },
     "computed_title": {"en": "A new approach: Computed Identifications (Beta)", "he": "גישה חדשה: זיהויים ממוחשבים (בטא)"},
     "computed_description": {
-        "en": "Textual algorithms compare fragments with known works across the corpus and offer matches for scholarly examination. Every match shown here is an automatic suggestion, not a reviewed identification.",
-        "he": "אלגוריתמים טקסטואליים משווים קטעים לחיבורים מוכרים ברחבי הקורפוס ומציעים התאמות לבדיקה מחקרית. כל התאמה המוצגת כאן היא הצעה אוטומטית, לא זיהוי שנבדק.",
+        "en": "Textual algorithms compare fragments with known works across the corpus and offer matches for scholarly examination. Every match is an automatic suggestion, not a reviewed identification.",
+        "he": "אלגוריתמים טקסטואליים משווים קטעים לחיבורים מוכרים ברחבי הקורפוס ומציעים התאמות לבדיקה מחקרית. כל התאמה היא הצעה אוטומטית, לא זיהוי שנבדק.",
     },
     "computed_examples_intro": {
-        "en": "Explore ten strong examples across several genres. Open one to inspect the manuscript and its evidence, and decide for yourself.",
-        "he": "עיינו בעשר דוגמאות חזקות מכמה סוגות. פתחו אחת מהן, בדקו את כתב היד ואת הראיות והכריעו בעצמכם.",
+        "en": "Explore selected examples across several genres. Open one to inspect the manuscript and its evidence, and decide for yourself.",
+        "he": "עיינו בדוגמאות נבחרות מכמה סוגות. פתחו אחת מהן, בדקו את כתב היד ואת הראיות והכריעו בעצמכם.",
+    },
+    "computed_generic_intro": {
+        "en": "Explore the experimental finding aid. Curated examples will appear here only after scholarly review.",
+        "he": "עיינו בכלי האיתור הניסיוני. דוגמאות נבחרות יוצגו כאן רק לאחר בדיקה מחקרית.",
     },
     "computed_open_all": {"en": "Explore all computed matches", "he": "לעיון בכל ההתאמות הממוחשבות"},
     "other_research_tools": {"en": "More research tools", "he": "כלי מחקר נוספים"},
@@ -208,24 +210,14 @@ def _native_card(
     eyebrow: str | None = None,
     image_src: str | None = None,
     image_alt: str | None = None,
+    reference_href: str | None = None,
+    reference_label: str | None = None,
     event: str = "welcome_action_clicked",
 ) -> None:
     """Render an actual anchor so keyboard and browser link behavior stay native."""
     aria = html.escape(f"{title}. {description}", quote=True)
-    with (
-        ui.link(target=href)
-        .classes("start-card no-underline")
-        .props(f'aria-label="{aria}"')
-        .on(
-            "click",
-            lambda: _track(
-                event,
-                route_id=route_id,
-                action_id=action_id,
-                difficulty=difficulty,
-            ),
-        )
-    ):
+
+    def render_contents() -> None:
         if image_src:
             alt = html.escape(image_alt or "", quote=True)
             ui.image(image_src).classes("start-card-image").props(
@@ -238,6 +230,41 @@ def _native_card(
                 h3(title, classes="start-card-title")
                 ui.icon(icon).classes("start-card-arrow").props("aria-hidden=true")
             ui.label(description).classes("start-card-description")
+
+    def primary_link(classes: str):
+        return (
+            ui.link(target=href)
+            .classes(classes)
+            .props(f'aria-label="{aria}"')
+            .on(
+                "click",
+                lambda: _track(
+                    event,
+                    route_id=route_id,
+                    action_id=action_id,
+                    difficulty=difficulty,
+                ),
+            )
+        )
+
+    if reference_href and reference_label:
+        with ui.element("article").classes("start-card"):
+            with primary_link("start-card-primary no-underline"):
+                render_contents()
+            ui.link(reference_label, reference_href, new_tab=True).classes(
+                "start-card-reference"
+            ).props("rel=noopener noreferrer").on(
+                "click",
+                lambda: _track(
+                    event,
+                    route_id=route_id,
+                    action_id=f"{action_id}_reference",
+                    difficulty=difficulty,
+                ),
+            )
+    else:
+        with primary_link("start-card no-underline"):
+            render_contents()
 
 
 def _show_more_collection(
@@ -282,17 +309,6 @@ def _show_more_collection(
             ).classes("start-touch-target").props(
                 f'aria-label="{html.escape(_copy("show_more", lang), quote=True)}"'
             )
-
-
-def _navigate_curated(manuscripts: Sequence[Mapping[str, Any]]) -> None:
-    entry = random.choice(list(manuscripts))
-    _track(
-        "welcome_action_clicked",
-        route_id="explore",
-        action_id="curated_surprise",
-        difficulty="introductory",
-    )
-    ui.navigate.to(manuscript_url(entry))
 
 
 def _navigate_true_random() -> None:
@@ -454,11 +470,19 @@ def create_start_page() -> None:
         }
         .start-card:hover { transform: translateY(-2px); border-color: var(--primary-600); box-shadow: 0 8px 24px rgba(0,0,0,.09); }
         .start-card:focus-visible { outline: 3px solid var(--primary-600); outline-offset: 3px; }
+        .start-card-primary { display: flex; flex: 1; flex-direction: column; color: inherit; }
+        .start-card-primary:focus-visible { outline: 3px solid var(--primary-600); outline-offset: -3px; }
         .start-card-image { width: 100%; height: 150px; background: var(--bg-secondary); }
         .start-card-image img { width: 100%; height: 150px; object-fit: cover; }
         .start-card-body { display: flex; flex: 1; flex-direction: column; gap: .5rem; padding: 1rem; }
         .start-card-title { margin: 0; color: var(--text-primary); font-size: 1.02rem; font-weight: 700; line-height: 1.45; }
         .start-card-description { color: var(--text-secondary); font-size: .9rem; line-height: 1.6; }
+        .start-card-reference {
+            min-height: 44px; display: flex; align-items: center; padding: .55rem 1rem;
+            border-top: 1px solid var(--border-light); color: var(--primary-700);
+            font-size: .85rem; font-weight: 700; text-decoration: underline;
+            text-underline-offset: 2px;
+        }
         .start-card-arrow { color: var(--primary-600); flex: none; }
         .start-eyebrow {
             align-self: flex-start; padding: .2rem .55rem; border-radius: 999px;
@@ -471,7 +495,7 @@ def create_start_page() -> None:
             display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
             border-radius: 10px; padding: .6rem 1rem; text-decoration: none; font-weight: 600;
         }
-        .start-action-primary { background: var(--primary-600); color: white; }
+        .start-action-primary { background: var(--primary-700); color: var(--text-inverse); }
         .start-action-secondary, .start-fallback-link { border: 1px solid var(--border-light); color: var(--text-primary); }
         .start-notice {
             display: flex; gap: .75rem; align-items: flex-start; padding: 1rem;
@@ -499,7 +523,7 @@ def create_start_page() -> None:
         .start-revolution-number {
             display: inline-flex; align-items: center; justify-content: center;
             width: 2rem; height: 2rem; border-radius: 999px; margin-bottom: .65rem;
-            color: white; background: var(--primary-600); font-weight: 800;
+            color: var(--text-inverse); background: var(--primary-700); font-weight: 800;
         }
         .start-revolution-body { color: var(--text-secondary); line-height: 1.65; }
         .start-source-links { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin-top: .75rem; }
@@ -584,6 +608,7 @@ def create_start_page() -> None:
             ui.label(_copy("selected_manuscripts_intro", lang)).classes("start-section-intro mb-3")
 
             def render_manuscript(entry: Mapping[str, Any]) -> None:
+                reference = entry.get("reference")
                 _native_card(
                     title=localized(entry, "title", lang),
                     description=localized(entry, "description", lang),
@@ -595,6 +620,8 @@ def create_start_page() -> None:
                     eyebrow=f"{localized(entry, 'category', lang)} · {entry['shelfmark']}",
                     image_src=str(entry["thumbnail"]),
                     image_alt=localized(entry, "alt", lang),
+                    reference_href=(str(reference["url"]) if reference else None),
+                    reference_label=(localized(reference, "label", lang) if reference else None),
                 )
 
             _show_more_collection(
@@ -607,11 +634,6 @@ def create_start_page() -> None:
                 lang=lang,
             )
             with ui.element("div").classes("start-actions mt-4"):
-                ui.button(
-                    _copy("surprise_me", lang),
-                    icon="auto_awesome",
-                    on_click=lambda: _navigate_curated(content["manuscripts"]),
-                ).props("no-caps color=primary").classes("start-touch-target")
                 ui.button(
                     _copy("true_random", lang),
                     icon="casino",
@@ -682,7 +704,9 @@ def create_start_page() -> None:
                     "start-computed-feature"
                 ):
                     h3(_copy("computed_title", lang), classes="text-xl font-bold")
-                    ui.label(_copy("computed_examples_intro", lang)).classes(
+                    candidates = live_computed_candidates(content)
+                    intro_key = "computed_examples_intro" if candidates else "computed_generic_intro"
+                    ui.label(_copy(intro_key, lang)).classes(
                         "start-section-intro mt-2 mb-3"
                     )
                     with ui.element("div").classes("start-notice mb-4"):
@@ -701,7 +725,6 @@ def create_start_page() -> None:
                         ),
                     )
 
-                    candidates = live_computed_candidates(content)
                     if candidates:
 
                         def render_candidate(entry: Mapping[str, Any]) -> None:

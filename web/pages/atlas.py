@@ -192,6 +192,38 @@ def _inject_atlas_renderer() -> None:
     )
 
 
+def _embedded_atlas_bootstrap_js(config: dict, instance_id: str) -> str:
+    """Return the executable loader used by an Atlas mounted after page load."""
+    config_json = json.dumps(config, ensure_ascii=False)
+    config_key = json.dumps(instance_id)
+    decoder_src = json.dumps(_ATLAS_DECODER_SRC)
+    return (
+        '(function(){'
+        f'var key={config_key},config={config_json},src={decoder_src};'
+        'window.__ATLAS_EMBED_CONFIGS__=window.__ATLAS_EMBED_CONFIGS__||{};'
+        'window.__ATLAS_EMBED_CONFIGS__[key]=config;'
+        'var started=false,tries=0;'
+        'function boot(){'
+        'if(started)return true;'
+        'if(window.AtlasDecode&&typeof window.AtlasDecode.init==="function"){'
+        'started=true;window.AtlasDecode.init(config);return true;}'
+        'return false;}'
+        'function poll(){'
+        'if(boot())return;'
+        'if(tries++<=200){setTimeout(poll,50);return;}'
+        'var loading=document.getElementById(config.loadingId);'
+        'if(loading)loading.textContent=config.labels.loadError||"The atlas could not be loaded.";}'
+        'if(boot())return;'
+        'var script=document.querySelector("script[data-genizah-atlas-decoder]");'
+        'if(!script){'
+        'script=document.createElement("script");'
+        'script.src=src;script.dataset.genizahAtlasDecoder="1";'
+        'script.onload=poll;script.onerror=poll;document.head.appendChild(script);'
+        '}else{poll();}'
+        '})();'
+    )
+
+
 def create_embedded_atlas(*, instance_id: str = 'start-atlas', height_px: int = 520) -> None:
     """Render one Atlas canvas without the standalone page's title or prose.
 
@@ -245,20 +277,12 @@ def create_embedded_atlas(*, instance_id: str = 'start-atlas', height_px: int = 
         'rtl': is_rtl(),
         'labels': _renderer_labels(),
     }
-    config_json = json.dumps(config, ensure_ascii=False)
-    config_key = json.dumps(instance_id)
-    ui.add_body_html(f'<script src="{_ATLAS_DECODER_SRC}"></script>')
-    ui.add_body_html(
-        '<script>(function(){'
-        f'var key={config_key},config={config_json};'
-        'window.__ATLAS_EMBED_CONFIGS__=window.__ATLAS_EMBED_CONFIGS__||{};'
-        'window.__ATLAS_EMBED_CONFIGS__[key]=config;'
-        'var tries=0;(function boot(){'
-        'if(window.AtlasDecode&&typeof window.AtlasDecode.init==="function"){'
-        'window.AtlasDecode.init(config);return;}'
-        'if(tries++>200)return;setTimeout(boot,50);})();'
-        '})();</script>'
-    )
+    # This component is created from a click handler on /start. NiceGUI inserts
+    # add_body_html() markup with insertAdjacentHTML after the socket connects,
+    # and browsers deliberately do not execute script tags inserted that way.
+    # Create/load the script element through JavaScript instead, then start the
+    # renderer. AtlasDecode.init() already polls until the new canvas mounts.
+    ui.run_javascript(_embedded_atlas_bootstrap_js(config, instance_id))
 
 
 def create_atlas_page() -> None:
