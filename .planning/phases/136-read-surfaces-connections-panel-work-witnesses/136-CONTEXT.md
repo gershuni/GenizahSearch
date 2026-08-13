@@ -307,6 +307,33 @@ note · `NOVEL-01`/`D-23b` candidacy wording · `discovery-budgets.md` findings-
   - **Still owed at 139:** REL-01/CERT-02 also require tier-A to go public *with* its measured number.
     That clause must be amended or satisfied at the release gate; 136 publishes nothing, so nothing is
     violated now.
+  - **⟨AMENDED 2026-08-13 — owner, post-launch⟩ The approved limitations WORDING was revised, and the
+    BAND-05 SECTION it lived in no longer renders.** Two separate facts, and conflating them is how the
+    next session gets this wrong:
+    1. **The wording.** A merged branch (`codex/start-card-visuals`) rewrote `_LIMITATIONS_TEXT` and
+       dropped its two substantive disclosures — the qualitative misattribution rate (the containment
+       residue: the ONLY place a reader is told how often the main pool is wrong for this reason) and
+       the two-sides-of-one-leaf caveat (the honesty note on the multi-folio limb of the main-pool rule
+       itself). Both are RESTORED, shorter and in the plainer register of the revision that dropped
+       them, whose opening list and actionable closing sentence are kept. The composition-date caveat
+       is deliberately NOT restored (a statement about method, not something a reader acts on). Owner
+       approved the revision; `LIMITATIONS_TEXT_SHA256` was re-pinned in the same commit, which is what
+       that pin exists to force. D-06a's substance is unchanged: still qualitative, still no
+       percentage, no interval, no strata table.
+       - The rate wording is what makes D-06a's ONE named exception load-bearing instead of vacuous.
+         The replacement wording tripped no detector, so the scoped exemption protected nothing and the
+         two negative controls that prove the exception is SCOPED could no longer fail — they failed as
+         tests instead, which is the mechanism working. Verified after restoring: the detector fires in
+         both languages and the text is words-only, so the exemption still reaches it.
+    2. **The section.** Both language call sites of `_render_confidence_section` and its TOC entry were
+       removed in the same merge, so the BAND-05 methods card does not render at all. The limitations
+       paragraph now lives in the practical computed-identifications card (its D-06a binding is to the
+       PARAGRAPH class, so the move cost nothing). The function, its copy tables and the per-band anchor
+       registry are still defined and now reached only by tests; `web/main.py`'s `/help` route still
+       awaits two band queries per request and discards both, and `/help` is still served
+       `noindex, noarchive` by `discovery_methods_noindex()`. **Whether D-10/BAND-05 is retired as a
+       REQUIREMENT is an OPEN OWNER DECISION** — removing the call sites did not settle it, and the
+       dead code, the two queries and the noindex should be deleted with it or the section restored.
 - **D-06b — The public projection is NOT certificate-covered (Codex F-02).** The measurement is on the
   all-source population; the public projection is a structurally different one, and `135-09-CERT01-MEASUREMENT.md`
   itself records the Sefaria-only figure as descriptive, not pre-registered. Never copy the all-source

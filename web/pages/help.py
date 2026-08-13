@@ -23,6 +23,16 @@ from shared.discovery_band_labels import (
 
 
 # ---------------------------------------------------------------------------
+# ⟨RETIRED 2026-08-13⟩ The BAND-05 section documented below no longer RENDERS:
+# both language call sites of `_render_confidence_section` and its TOC entry
+# were removed in favour of the practical computed-identifications card. The
+# function, its helpers, `_CONFIDENCE_*` copy and the per-band anchor registry
+# are all still defined and are now reached only by tests. Whether D-10/BAND-05
+# is retired as a REQUIREMENT (and this code, the two per-request band queries
+# in web/main.py's /help route, and the /help noindex deleted with it) is an
+# OPEN OWNER DECISION -- not settled by the removal of the call sites. Do not
+# read the block below as describing what a visitor sees today.
+#
 # BAND-05 "Confidence Bands & Methods" methods section (Phase 135, plan 135-02,
 # D-10; rewritten QUALITATIVELY in Phase 136, plan 136-02, D-06a). A flag-gated,
 # bilingual SECTION inside this Help page (never a new route), with per-band
@@ -50,8 +60,15 @@ from shared.discovery_band_labels import (
 _CONFIDENCE_SECTION_CLASS = 'discovery-methods-section'
 
 # The limitations PARAGRAPH's own marker class (Phase 136, plan 136-17).
-# A MARKUP HOOK ONLY: the wording of _LIMITATIONS_TEXT, its heading and the
-# enclosing methods card are untouched.
+# A MARKUP HOOK ONLY: the wording of _LIMITATIONS_TEXT and its heading are
+# untouched.
+#
+# ⟨AMENDED 2026-08-13⟩ The paragraph no longer sits in the BAND-05 methods card
+# (retired, below): it renders inside the practical computed-identifications
+# card, under `_COMPUTED_ID_SECTION_CLASS`. The BINDING is unchanged, because it
+# was always to THIS paragraph class and never to whatever card encloses it --
+# which is exactly why the move cost nothing. Read "the enclosing card" below as
+# the computed-identifications card.
 #
 # What it is for: the shared honesty gate's accuracy/rate detector fires on
 # qualitative error-rate language ("a small minority ... a low single-digit
@@ -67,6 +84,20 @@ _CONFIDENCE_SECTION_CLASS = 'discovery-methods-section'
 # `tests/render_smoke/discovery_honesty_gate.py::D06A_QUALITATIVE_SCOPES` holds
 # exactly this string and is pinned to it by a lazy-import equality assertion.
 _LIMITATIONS_PARAGRAPH_CLASS = 'discovery-methods-limitations'
+
+# The practical computed-identifications card's scope class (2026-08-13).
+#
+# The honesty gate scans a CSS CLASS, not a NiceGUI `.mark()` marker, and
+# retiring the BAND-05 card took the only scope class on this page off the page
+# with it -- so `assert_discovery_honesty(scope_selector=...)` had nothing to
+# bind to and NO gate could run over the real /help render at all. That is the
+# state the restored honesty tests found; this class is what they scope to.
+#
+# NOT registered in D06A_QUALITATIVE_SCOPES, and it must never be: the card
+# encloses the limitations paragraph, so registering the CARD would exempt every
+# neighbouring subsection inside it -- the precise leak the paragraph-level
+# binding exists to prevent (round 10; see control 12b).
+_COMPUTED_ID_SECTION_CLASS = 'discovery-computed-id-section'
 
 _CONFIDENCE_TOC_TITLE = {
     'en': 'Confidence Bands and Methods',
@@ -195,17 +226,43 @@ _SECOND_BUCKET_MEANING = {
 
 _LIMITATIONS_HEADING = {'en': 'Known limitations, stated plainly', 'he': 'מגבלות ידועות, כפי שהן'}
 
+#: ⟨REVISED 2026-08-13, owner-approved⟩ The two SUBSTANTIVE disclosures were
+#: restored after a revision dropped them: the qualitative misattribution rate
+#: (the containment residue -- the only place a reader is told how often the
+#: main pool is wrong for this reason) and the two-sides-of-one-leaf caveat (the
+#: honesty note attached to the multi-folio limb of the main-pool rule itself).
+#: Restored SHORTER and in the plainer register of the revision that dropped
+#: them -- its opening list and its actionable closing sentence are kept
+#: verbatim. The composition-date caveat was NOT restored: it is a statement
+#: about method rather than something a reader must act on, and the owner asked
+#: for shorter.
+#:
+#: The qualitative rate wording is what makes D-06a's ONE named exception
+#: load-bearing rather than vacuous: "minority" / "single-digit" are the
+#: quantity words and "share" / "misattributed" the rate words the shared
+#: gate's accuracy detector fires on (`_QUANTITY_WORDS_*` / `_RATE_WORDS_*` in
+#: tests/render_smoke/discovery_honesty_gate.py), and it is compliant ONLY
+#: inside `_LIMITATIONS_PARAGRAPH_CLASS` below. The Hebrew quantity token is
+#: `חד-ספרתי` with a PLAIN HYPHEN, never a maqaf -- the detector matches the
+#: literal, so a typographic "improvement" there silently unbinds the control.
+#: `LIMITATIONS_TEXT_SHA256` in tests/render_smoke/test_panel_render_smoke.py
+#: pins this wording and was re-pinned in the same commit as this revision.
 _LIMITATIONS_TEXT = {
     'en': (
         'Automatic matching can be misled by quotations, formulas, shared wording, short '
-        'passages, and errors in the automatic transcription. A larger work that embeds another '
-        'text may also attract a match that belongs to the embedded passage. Inspect the image, '
-        'the text match, and the surrounding context before accepting any suggestion.'
+        'passages, and errors in the automatic transcription. A larger work that embeds '
+        'another text absorbs matches belonging to the embedded passage — a prayer inside a '
+        'legal code — so a low single-digit share of the main pool is misattributed this '
+        'way. Two pages matching the same work are often two sides of one leaf, not two '
+        'independent leaves. Check the image, the text match, and the context before '
+        'accepting a suggestion.'
     ),
     'he': (
         'התאמה אוטומטית עלולה לטעות בגלל ציטוטים, נוסחאות, לשון משותפת, קטעים קצרים ושגיאות '
-        'בתעתוק האוטומטי. גם חיבור גדול המשבץ בתוכו טקסט אחר עלול למשוך התאמה ששייכת לקטע '
-        'המשובץ. לפני שמקבלים הצעה יש לבדוק את התמונה, את התאמת הטקסט ואת ההקשר.'
+        'בתעתוק האוטומטי. חיבור גדול המשבץ בתוכו טקסט אחר סופג התאמות ששייכות לקטע המשובץ — '
+        'תפילה בתוך קובץ הלכתי — ולכן נתח נמוך וחד-ספרתי מהמאגר העיקרי משויך בטעות מסיבה זו. '
+        'שני עמודים המתאימים לאותו חיבור הם לעיתים שני צדי אותו דף, ולא שני דפים עצמאיים. '
+        'לפני שמקבלים הצעה כדאי לבדוק את התמונה, את התאמת הטקסט ואת ההקשר.'
     ),
 }
 
@@ -461,7 +518,9 @@ def _render_computed_identifications_help(lang: str) -> None:
         + (' direction: rtl; text-align: right;' if is_hebrew else '')
     )
 
-    with ui.card().classes('w-full p-6').mark('help-computed-identifications'):
+    with ui.card().classes(
+            f'w-full p-6 {_COMPUTED_ID_SECTION_CLASS}'
+    ).mark('help-computed-identifications'):
         ui.element('a').props('name="help-computed-identifications"')
         with ui.row().classes('items-center gap-3 mb-3 flex-wrap'):
             ui.icon('fact_check').classes('text-2xl text-primary').props('aria-hidden=true')
@@ -505,6 +564,58 @@ def _render_computed_identifications_help(lang: str) -> None:
 - **In this manuscript** gathers works suggested on any page of the manuscript; **includes this page** marks a work also found on the open folio.
 - **View text match** lets you compare the passages on which the suggestion is based.
 - **Does not correspond to the catalogue — not adjudicated** records a difference from existing catalogue metadata without declaring either side correct.
+            ''',
+            extras=['rtl'] if is_hebrew else [],
+        ).style(text_style)
+
+        # The PAGE, as distinct from the pane above (owner, 2026-08-13). The card
+        # documented the connections pane and then linked to
+        # /computed-identifications without saying what is there -- so the
+        # corpus-wide surface, which is the one with all the controls, was
+        # undocumented.
+        #
+        # Bucket NAMES are deliberately not written here. They have exactly one
+        # definition (`shared.discovery_main_pool.bucket_label`), the page itself
+        # never retypes them, and a Help page holding its own copy of them is how
+        # a fourth vocabulary for the two pools gets created.
+        h3(
+            'דף הזיהויים המחושבים' if is_hebrew else 'The Computed Identifications page',
+            classes='text-lg font-semibold mt-3 mb-1',
+            style='color: var(--text-primary);',
+        )
+        ui.label(
+            (
+                'הפאנל מראה את ההתאמות של כתב־היד הפתוח; הדף מציג את כולן יחד, בכל האוסף, '
+                'ומאפשר להגיע אליהן לפי חיבור, מחבר או יחס לקטלוג ולא רק לפי סימן מדף. '
+                'בדף עצמו, "איך לקרוא את הדף הזה" פורש את ההנחיות שלהלן במלואן.'
+            )
+            if is_hebrew
+            else (
+                'The pane shows the matches for the manuscript you are reading; the page '
+                'gathers them across the whole corpus, so you can arrive by work, author, or '
+                'relationship to the catalogue rather than only by shelfmark. On the page '
+                'itself, "How to read this page" expands the guidance below.'
+            )
+        ).classes('mb-2').style(text_style)
+        ui.markdown(
+            '''
+- **אילו ממצאים** מצמצם לפי היחס לאמצעי העזר: כל הממצאים, מועמדים לממצאים חדשים, ממצאים שאינם מתאימים לקטלוג, או אחד מן השניים.
+- **באיזה מאגר** מחליף בין קבוצת המועמדים הראשית לבין הרחבה ממנה, לפי אותו כלל שבפאנל.
+- **הצג כ** קובע מה נמנה בכל שורה — זיהוי, כתב יד או חיבור — ולצידו מיון: **החזקים תחילה**, **דפים שהותאמו** או **טקסט שהותאם**.
+- **תחום החיבור המזוהה**, **מחבר** ו**חיבור** מצמצמים לפי החיבור שזוהה, ולא לפי נושא הקטלוג של כתב־היד.
+- סינון המסומן **עדיין לא זמין** חסר את הנתונים הדרושים לו; אין זה כמו סינון שאינו מחזיר דבר.
+- המספר בראש הדף מתאר את המהדורה כולה ואינו משתנה בעקבות סינון; השורה שלצד התוצאות מציינת תמיד מה נמנה ברשימה הנוכחית, ולכן שני המספרים יכולים להיות שונים בלי שדבר שגוי.
+- **הצגת התאמת הטקסט** פועלת גם כאן, ובשורות הבודדות יש **דיווח על בעיה** — הדרך המהירה להודיע לנו שהצעה שגויה.
+            '''
+            if is_hebrew
+            else '''
+- **Which findings** narrows by relationship to the finding aids: all findings, candidates for new finds, those that do not correspond to the catalogue, or either of the two.
+- **Which pool** switches between the main group of candidates and the wider one, on the same rule the pane uses.
+- **Show as** sets what one row counts — an identification, a manuscript, or a work — and the sort beside it offers **Strongest first**, **Pages matched** or **Matched text**.
+- **Domain of the identified work**, **Author** and **Work** narrow by the work that was identified, not by the manuscript's catalogue subject.
+- A filter tagged **not available yet** is missing the data it would need; that is not the same as a filter returning nothing.
+- The figure at the top of the page describes the whole release and deliberately does not move when you filter; the line beside the results always states what the current list counts, so the two numbers can differ without either being wrong.
+- **View text match** works here as well, and individual rows carry **Report a problem** — the quickest way to tell us a suggestion is wrong.
             ''',
             extras=['rtl'] if is_hebrew else [],
         ).style(text_style)

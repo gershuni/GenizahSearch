@@ -110,9 +110,14 @@ SERVICE_PATH = 'shared/discovery_service.py'
 #:
 #: THIS IS A PIN, NEVER A LICENCE TO EDIT. The sentence is owner-approved D-06a
 #: text; a revision of it is out of scope and contradicts D-06a.
+#:
+#: ⟨RE-PINNED 2026-08-13⟩ The wording was revised WITH OWNER APPROVAL (the
+#: qualitative misattribution-rate language, dropped by an intervening edit,
+#: was restored -- shorter, both languages) and the digests below were
+#: recomputed from that render in the same commit.
 LIMITATIONS_TEXT_SHA256 = {
-    'en': 'c209693ccdcbcc9b7548a091cdf3d22c7078591014cdfcc9424bbaa9302aef3a',
-    'he': '43144bc0cfd79abb080bcddb4219202c39c267402e159a6aa42f5e6f20694487',
+    'en': '1aa5b7097ba412d5a56f9b26a3b9b8d3ad318633c6d18938722017648ee1b35b',
+    'he': '529c5559471419e321c97afcf8f26354be4e9cc4c8ccd9e841dd58d4311cdcf1',
 }
 
 _SIM_READY = False
@@ -1924,18 +1929,17 @@ def test_FP_D06A_LIVE_PAGE(lang):
 
 
 @pytest.mark.parametrize('lang', LANGS)
-def test_FP_D06A_PRACTICAL_LIMITATIONS_NEED_NO_EXCEPTION(lang):
-    """The replacement Help copy is qualitative in its own right.
-
-    It passes the honesty gate whether scanned as part of the old broad card
-    scope or through the legacy paragraph marker; the marker remains only for
-    stable render coverage while the confidence-band report is retired.
-    """
+def test_FP_D06A_CARD_BOUNDARY(lang):
+    """The pair that proves the SELECTOR discriminates: the same sentence scoped
+    to `_CONFIDENCE_SECTION_CLASS` FAILS, scoped to the registered entry it
+    PASSES. With the scope registered as the card's class both halves pass,
+    which is exactly the leak round 10 found."""
     import html as _html
     from web.pages.help import _CONFIDENCE_SECTION_CLASS, _LIMITATIONS_TEXT
     sentence = _LIMITATIONS_TEXT[lang]
     card = f'<div class="{_CONFIDENCE_SECTION_CLASS}">{_html.escape(sentence)}</div>'
-    assert_surface_honesty(card, scope_selector=_CONFIDENCE_SECTION_CLASS, lang=lang)
+    with pytest.raises(DiscoveryHonestyViolation):
+        assert_surface_honesty(card, scope_selector=_CONFIDENCE_SECTION_CLASS, lang=lang)
     scope = D06A_QUALITATIVE_SCOPES[0]
     paragraph = f'<div class="{scope}">{_html.escape(sentence)}</div>'
     assert_surface_honesty(paragraph, scope_selector=scope, lang=lang)
