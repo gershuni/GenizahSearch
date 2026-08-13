@@ -4232,6 +4232,32 @@ def test_the_excerpt_is_fetched_on_first_open_not_with_the_row():
     ASSERTION_COUNT["n"] += 1
 
 
+def test_the_excerpt_markup_is_rendered_UNSANITIZED():
+    """NiceGUI 3.x sanitizes `ui.html` content IN THE BROWSER by default, and
+    that sanitizer strips `class` attributes -- the excerpt arrived with its
+    span structure intact and every highlight class silently removed (owner
+    report 2026-08-13, confirmed against the live DOM). A server-side render
+    test cannot see the browser's sanitizer run; what it CAN see is the flag
+    that turns it on. So: every Html element inside the excerpt body must
+    carry `sanitize: False`. Safe because `_compose_excerpt_piece` escapes
+    every text segment itself and emits only its own literal tags."""
+    async def _load(_item):
+        return _excerpt_envelope([_excerpt_row()])
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), "en", load_excerpt=_load),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    htmls = [el for el in client.elements.values()
+             if type(el).__name__ == "Html"
+             and fr.ROW_EXCERPT_CLASS + "-text" in (el.content or "")]
+    assert len(htmls) == 2, "expected the two excerpt panes' Html elements"
+    for el in htmls:
+        assert el._props.get("sanitize") is not True, (
+            "an excerpt pane's ui.html sanitizes client-side: the browser "
+            "will strip the highlight classes the render tests assert on")
+    ASSERTION_COUNT["n"] += 1
+
+
 @pytest.mark.parametrize("lang", LANGS)
 def test_a_failed_excerpt_load_says_so_and_offers_retry(lang):
     """A raised read and a non-ok envelope both render the NAMED failure with a

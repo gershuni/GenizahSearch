@@ -2330,6 +2330,25 @@ def _compose_excerpt_piece(text: str, intervals, ja_braces: bool,
     return "".join(parts)
 
 
+def _raw_html(content: str):
+    """`ui.html` WITHOUT the client-side sanitizer.
+
+    NiceGUI 3.x sanitizes `ui.html` content in the BROWSER by default
+    (setHTML/DOMPurify), and that sanitizer strips `class` attributes -- so
+    the excerpt markup arrived with its span structure intact and every
+    highlight class silently removed (owner report, 2026-08-13; confirmed
+    against the live DOM with a headless browser, the one place a server-side
+    render test is structurally blind to). This content is trusted BY
+    CONSTRUCTION: `_compose_excerpt_piece` escapes every text segment itself
+    and emits only its own literal tags. The try/except keeps older NiceGUI
+    (no `sanitize` parameter, renders raw already) working unchanged.
+    """
+    try:
+        return ui.html(content, sanitize=False)
+    except TypeError:
+        return ui.html(content)
+
+
 def _render_excerpt(item: Mapping[str, Any], lang: str, load_excerpt) -> None:
     """The identification leaf's text-vs-text disclosure (excerpt-v1).
 
@@ -2393,13 +2412,13 @@ def _render_excerpt(item: Mapping[str, Any], lang: str, load_excerpt) -> None:
                 if (row.get("text_layer") or "") == "htr":
                     label = f"{label} ({strings['frag_htr_note']})"
                 ui.label(label).classes("dnote text-xs")
-                ui.html(f'<p class="{ROW_EXCERPT_CLASS}-text" dir="rtl">'
-                        f'{_piece_markup(row, "frag")}</p>')
+                _raw_html(f'<p class="{ROW_EXCERPT_CLASS}-text" dir="rtl">'
+                          f'{_piece_markup(row, "frag")}</p>')
             with ui.element("div").classes(f"{ROW_EXCERPT_CLASS}-pane"):
                 ui.label(strings["work_label"]).classes("dnote text-xs")
                 if row.get("work_span"):
-                    ui.html(f'<p class="{ROW_EXCERPT_CLASS}-text" dir="rtl">'
-                            f'{_piece_markup(row, "work")}</p>')
+                    _raw_html(f'<p class="{ROW_EXCERPT_CLASS}-text" dir="rtl">'
+                              f'{_piece_markup(row, "work")}</p>')
                     if row.get("work_source") == "reprojected":
                         ui.label(strings["reprojected_note"]).classes(
                             "dnote text-xs")
