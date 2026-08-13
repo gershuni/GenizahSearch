@@ -2320,6 +2320,162 @@ def check_population_lock_retention(conn: sqlite3.Connection, meta: dict) -> Lis
 
 
 # ---------------------------------------------------------------------------
+# 10. Excerpt sidecar (_tmp/PLAN-textvtext-excerpts.md, Track C) -- its own
+#     marker-conditional contract, INDEPENDENT of the CD batch above.
+#
+#     Deliberately NOT folded into `_GATE_BEARING_TABLES` /
+#     `check_gate_bearing_tables_present`: that set is UNCONDITIONAL (this
+#     verifier's own comment on it explains why -- "any asset that reaches
+#     this point is a current one"), which is the right rule for the locus
+#     tables because the CD batch's builder now creates them on every build.
+#     The excerpt table has no such guarantee yet -- it ships on its own bake
+#     schedule (Track B), so an asset built before that (or the
+#     currently-deployed candidate, verified while Track B is still in
+#     flight) must keep verifying clean. Hence a genuinely marker-conditional
+#     check, mirroring the shape `check_amendment_2026_08_12_contract` had
+#     before locus tables became unconditional.
+# ---------------------------------------------------------------------------
+
+_EXCERPT_SCHEMA_MARKER_KEY = "excerpt_schema_version"
+_EXPECTED_EXCERPT_SCHEMA_VERSION = "excerpt-v1"
+
+# MIRRORED from web/discovery_assets.py's own literals, deliberately NOT
+# imported (the verifier's standing independence convention -- a loader bug
+# must be visible to the verifier that exists to catch it).
+_EXCERPT_TABLE = "discovery_excerpt"
+_EXCERPT_COLUMNS = (
+    "identification_id", "evidence_id", "a_page_id",
+    "frag_before", "frag_span", "frag_after", "frag_clipped",
+    "work_before", "work_span", "work_after", "work_clipped",
+    "work_source", "align_score", "attribution", "n_spans", "text_layer",
+    # round 2 (2026-08-13): parallel-highlight intervals + JA markup flag.
+    "frag_hl", "work_hl", "work_markup",
+)
+_EXCERPT_META_KEYS = (
+    "expected_rows_discovery_excerpt",
+    "excerpt_ctx",
+    "excerpt_span_cap",
+    "excerpt_refs_manifest_sha256",
+)
+_EXCERPT_WORK_SOURCE_VALUES = frozenset({"direct", "reprojected"})
+
+
+def check_excerpt_contract(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """The excerpt table's own presence/vocabulary/count contract, gated on
+    ITS OWN `excerpt_schema_version` marker.
+
+    Marker ABSENT: nothing here is required -- an asset built before Track B,
+    or the currently-deployed candidate verified before the bake has run,
+    still verifies clean (mirrors the loader's identical rollback story).
+
+    Marker PRESENT: its value must equal 'excerpt-v1' (reject-incompatible,
+    the same idiom `check_meta_audience` and the schema-version checks use
+    elsewhere in this file); `discovery_excerpt` must exist with every
+    contract column; all four excerpt meta keys must be present; and the
+    table's row count must equal `meta.expected_rows_discovery_excerpt`."""
+    marker = meta.get(_EXCERPT_SCHEMA_MARKER_KEY)
+    if marker is None:
+        return []
+
+    violations: List[str] = []
+    if marker != _EXPECTED_EXCERPT_SCHEMA_VERSION:
+        violations.append(
+            f"meta.excerpt_schema_version: found value withheld, expected "
+            f"{_EXPECTED_EXCERPT_SCHEMA_VERSION!r} -- reject-incompatible"
+        )
+
+    table_present = _has_table(conn, _EXCERPT_TABLE)
+    if not table_present:
+        violations.append(
+            f"{_EXCERPT_TABLE}: table absent -- an asset carrying the "
+            "excerpt_schema_version marker must carry the table"
+        )
+    else:
+        for column in _EXCERPT_COLUMNS:
+            if not _has_column(conn, _EXCERPT_TABLE, column):
+                violations.append(f"{_EXCERPT_TABLE}.{column}: column absent")
+
+    missing_meta = [k for k in _EXCERPT_META_KEYS if k not in meta]
+    if missing_meta:
+        violations.append(
+            f"meta missing required excerpt key(s): {sorted(missing_meta)}"
+        )
+
+    if table_present and "expected_rows_discovery_excerpt" not in missing_meta:
+        (actual,) = conn.execute(f"SELECT COUNT(*) FROM {_EXCERPT_TABLE}").fetchone()
+        expected = meta.get("expected_rows_discovery_excerpt")
+        try:
+            expected_int = int(expected)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            violations.append(
+                f"meta.expected_rows_discovery_excerpt missing or non-integer "
+                f"(actual count {actual})"
+            )
+        else:
+            if expected_int != actual:
+                violations.append(
+                    f"meta.expected_rows_discovery_excerpt={expected_int} != "
+                    f"actual {_EXCERPT_TABLE} count {actual}"
+                )
+    return violations
+
+
+def check_excerpt_vocabulary(conn: sqlite3.Connection) -> List[str]:
+    """Cell-level vocabulary + non-emptiness on `discovery_excerpt`, compat-
+    gated on the table's presence (same convention as the other cell-value
+    checks in this file) rather than on the marker -- a table that exists at
+    all owes these regardless of what meta says about it.
+
+    `work_source` is a closed 3-state enum (NULL / 'direct' / 'reprojected');
+    `frag_span` is the fragment passage text itself, so a NULL or empty one is
+    a build defect on the row the pipeline selected as "best", never a
+    legitimate value."""
+    if not _has_table(conn, _EXCERPT_TABLE):
+        return []
+    violations: List[str] = []
+
+    source_rows = conn.execute(
+        f"SELECT DISTINCT work_source FROM {_EXCERPT_TABLE}"
+    ).fetchall()
+    bad_sources = {
+        r[0] for r in source_rows
+        if r[0] is not None and r[0] not in _EXCERPT_WORK_SOURCE_VALUES
+    }
+    if bad_sources:
+        violations.append(
+            f"{_EXCERPT_TABLE}.work_source: {sorted(bad_sources)} outside "
+            "the closed NULL / 'direct' / 'reprojected' vocabulary"
+        )
+
+    # round 2 (2026-08-13): work_markup is a closed 2-state enum. The renderer
+    # keys the {...}-stripping transform on it, so an unknown value here is a
+    # transform nobody designed firing (or not firing) on reader-facing text.
+    markup_rows = conn.execute(
+        f"SELECT DISTINCT work_markup FROM {_EXCERPT_TABLE}"
+    ).fetchall()
+    bad_markup = {
+        r[0] for r in markup_rows
+        if r[0] is not None and r[0] != "ja_braces"
+    }
+    if bad_markup:
+        violations.append(
+            f"{_EXCERPT_TABLE}.work_markup: {sorted(bad_markup)} outside "
+            "the closed NULL / 'ja_braces' vocabulary"
+        )
+
+    (n_blank,) = conn.execute(
+        f"SELECT COUNT(*) FROM {_EXCERPT_TABLE} "
+        "WHERE frag_span IS NULL OR frag_span = ''"
+    ).fetchone()
+    if n_blank:
+        violations.append(
+            f"{_EXCERPT_TABLE}.frag_span: {n_blank} row(s) NULL or empty -- "
+            "every excerpt row must carry a non-empty fragment span"
+        )
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # verify() -- the single all-invariant entry point
 # ---------------------------------------------------------------------------
 
@@ -2389,6 +2545,11 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         violations += check_region_band_contract(conn, meta)
         violations += check_relation_matrix_recompute(conn, meta)
         violations += check_population_lock_retention(conn, meta)
+        # Excerpt sidecar (PLAN-textvtext-excerpts.md, Track C): its own
+        # marker-conditional presence/vocabulary/count contract, independent
+        # of the CD batch above.
+        violations += check_excerpt_contract(conn, meta)
+        violations += check_excerpt_vocabulary(conn)
         violations += check_coverage_gap_report(conn)  # non-fatal report
     finally:
         conn.close()

@@ -2999,3 +2999,320 @@ def test_a_FAILED_folio_resolution_costs_the_link_and_never_the_result_set(
         folio_service._first_match_pages = original
     assert item["first_match_page"] is None
     assert item["sys_id"] == _FOLIO_SYS
+
+
+# ===========================================================================
+# PLAN-textvtext-excerpts.md, Track D: the text-vs-text excerpt read path --
+# `excerpts_available()` (path/version-aware, per (c)), `get_excerpt_enveloped`
+# / `get_excerpt_enveloped_async` (the ENVELOPED-end-to-end shape a Codex
+# pre-flight review required, mirroring `get_work_expansion_enveloped` rather
+# than `get_evidence`'s legacy list-swallows-failures shape), and the
+# `SURFACE_EXCERPT_FIELDS` allowlist.
+#
+# Masking discipline unchanged: every fixture below is fabricated in-test via
+# scripts/build_discovery_sidecar (synthetic ids, synthetic titles) plus a
+# hand-built `discovery_excerpt` table -- `scripts/bake_discovery_excerpts.py`,
+# the real producer named in the plan, does not exist yet, so this table is
+# built directly here, exactly the way other ad hoc schema pieces in this file
+# are. Never real research data.
+# ===========================================================================
+
+from shared.discovery_surface_projection import (  # noqa: E402 -- appended section
+    SURFACE_EXCERPT_FIELDS,
+    surface_safe_excerpt,
+)
+
+_EXCERPT_VERSION = "test-excerpt-v1"
+_EXCERPT_WORK = "w000950"
+_EXCERPT_SYS = "990000000000000950"
+_EXCERPT_PAGE = "excerpt_p01"
+
+_EXCERPT_TABLE_SQL = """
+CREATE TABLE discovery_excerpt(
+  identification_id TEXT PRIMARY KEY,
+  evidence_id TEXT NOT NULL, a_page_id TEXT NOT NULL,
+  frag_before TEXT NOT NULL, frag_span TEXT NOT NULL, frag_after TEXT NOT NULL,
+  frag_clipped INTEGER NOT NULL,
+  work_before TEXT, work_span TEXT, work_after TEXT, work_clipped INTEGER,
+  work_source TEXT, align_score REAL, attribution TEXT, n_spans INTEGER,
+  text_layer TEXT,
+  frag_hl TEXT, work_hl TEXT, work_markup TEXT
+)
+"""
+
+
+def _build_excerpt_base_db(tmp_path, name, version):
+    """A minimal sidecar with ONE real, materialized identification -- the
+    same real builder pipeline (`_new_sidecar` / `populate_discovery_identification`)
+    every other integration fixture in this file uses, so the
+    `identification_id` an excerpt row keys on is a genuine one, never a
+    made-up string. Carries NO `discovery_excerpt` table: callers add one via
+    `_add_excerpt_table` when a test wants the feature PRESENT; the bare db
+    returned here is itself the "older asset" fixture.
+    """
+    works = [
+        (_EXCERPT_WORK, _EXCERPT_WORK, "Synthetic Excerpt Work", "Synthetic Author E",
+         "Synthetic Parent A / Synthetic Leaf A", "sefaria"),
+    ]
+    specs = [
+        sidecar_build._mk_evidence(
+            page_id=_EXCERPT_PAGE, work_id=_EXCERPT_WORK, sys_id=_EXCERPT_SYS,
+            evidence_kind=sidecar_build._WITNESS, evidence_source=sidecar_build._TRACK1,
+            confidence_band=sidecar_build._TIER_A,
+            adjudication_status=sidecar_build._HUMAN_CONFIRMED,
+            audit_status=sidecar_build._NA,
+            routing_status=sidecar_build._SHIPPED,
+            routing_reason=sidecar_build._NONE_REASON,
+            span_start=0, span_end=900, matched_letters=880, n_spans=1,
+            coverage=0.9, page_norm_letters=978,
+        ),
+    ]
+    return _new_sidecar(tmp_path, name, works=works, evidence_specs=specs, version=version)
+
+
+def _identification_id_in(db_path):
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT identification_id FROM discovery_identification LIMIT 1"
+        ).fetchone()
+        assert row is not None, "fixture produced no discovery_identification row"
+        return row[0]
+    finally:
+        conn.close()
+
+
+def _add_excerpt_table(db_path, identification_id, *, with_marker=True, row=None):
+    """Adds `discovery_excerpt` (+ its bake-time marker, unless suppressed) to
+    an already-built sidecar -- the shape `scripts/bake_discovery_excerpts.py`
+    is meant to produce, per the plan. `with_marker=False` lets the AND-gate
+    test below build the table WITHOUT the marker, and the older-asset tests
+    simply never call this at all -- so both halves of the conjunction are
+    independently reachable.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(_EXCERPT_TABLE_SQL)
+        fields = {
+            "identification_id": identification_id,
+            "evidence_id": "test-evidence-950",
+            "a_page_id": _EXCERPT_PAGE,
+            "frag_before": "before text ",
+            "frag_span": "MATCHED FRAGMENT SPAN",
+            "frag_after": " after text",
+            "frag_clipped": 0,
+            "work_before": "work before ",
+            "work_span": "MATCHED WORK SPAN",
+            "work_after": " work after",
+            "work_clipped": 0,
+            "work_source": "direct",
+            "align_score": None,
+            "attribution": "Synthetic Edition Attribution",
+            "n_spans": 1,
+            "text_layer": "htr",
+        }
+        if row:
+            fields.update(row)
+        conn.execute(
+            "INSERT INTO discovery_excerpt (%s) VALUES (%s)" % (
+                ", ".join(fields), ", ".join("?" for _ in fields)),
+            tuple(fields.values()),
+        )
+        if with_marker:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('excerpt_schema_version', 'excerpt-v1')"
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_excerpt_round_trips_through_the_envelope_with_only_allowlisted_fields(tmp_path):
+    db_path = _build_excerpt_base_db(tmp_path, "excerpt-roundtrip.db", _EXCERPT_VERSION)
+    ident_id = _identification_id_in(db_path)
+    _add_excerpt_table(db_path, ident_id)
+    service = _service_for(db_path, _EXCERPT_VERSION)
+
+    env = asyncio.run(service.get_excerpt_enveloped_async(ident_id))
+
+    assert env["status"] == STATUS_OK
+    assert env["total"] == 1
+    assert len(env["items"]) == 1
+    item = env["items"][0]
+    assert set(item) == set(SURFACE_EXCERPT_FIELDS)
+    assert item["identification_id"] == ident_id
+    assert item["frag_span"] == "MATCHED FRAGMENT SPAN"
+    assert item["work_span"] == "MATCHED WORK SPAN"
+    assert item["attribution"] == "Synthetic Edition Attribution"
+    assert item["work_source"] == "direct"
+
+
+def test_an_identification_with_no_excerpt_row_is_an_honest_empty_not_an_outage(tmp_path):
+    db_path = _build_excerpt_base_db(tmp_path, "excerpt-empty.db", _EXCERPT_VERSION)
+    ident_id = _identification_id_in(db_path)
+    _add_excerpt_table(db_path, ident_id)  # the row exists for THIS id only
+    service = _service_for(db_path, _EXCERPT_VERSION)
+
+    env = asyncio.run(
+        service.get_excerpt_enveloped_async(ident_id + "-does-not-exist"))
+
+    assert env["status"] == STATUS_OK
+    assert env["items"] == []
+    assert env["total"] == 0
+    assert is_outage(env) is False
+
+
+def test_excerpts_unavailable_on_an_older_asset_and_the_read_stays_safe(tmp_path):
+    """Older asset: no `discovery_excerpt` table, no marker. The UI's
+    "old-asset/new-code: toggle hidden" rule means a real caller never reaches
+    `get_excerpt_enveloped_async` here at all -- `excerpts_available()` gates
+    that -- but the call must still be safe rather than crash, and it must
+    report a named outage (`unavailable`) rather than a silent ok-with-zero
+    that a caller which skipped the gate could mistake for "no excerpt"."""
+    db_path = _build_excerpt_base_db(tmp_path, "excerpt-old-asset.db", _EXCERPT_VERSION)
+    ident_id = _identification_id_in(db_path)
+    # deliberately NOT calling _add_excerpt_table.
+    service = _service_for(db_path, _EXCERPT_VERSION)
+
+    assert service.excerpts_available() is False
+    assert asyncio.run(service.excerpts_available_async()) is False
+
+    env = asyncio.run(service.get_excerpt_enveloped_async(ident_id))
+    assert env["status"] == STATUS_UNAVAILABLE
+    assert env["items"] == []
+    assert env["total"] == 0
+    assert is_outage(env) is True
+
+
+def test_excerpts_available_requires_both_the_marker_and_the_table(tmp_path):
+    """Proves the AND is real, not just documented: EITHER half missing must
+    still read False, so a partially-baked asset (a marker written before its
+    table, or a table copied without its meta row) never turns the toggle on."""
+    version = "excerpt-and-gate"
+
+    marker_only_db = _build_excerpt_base_db(tmp_path, "excerpt-marker-only.db", version)
+    conn = sqlite3.connect(marker_only_db)
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('excerpt_schema_version', 'excerpt-v1')")
+    conn.commit()
+    conn.close()
+    assert _service_for(marker_only_db, version).excerpts_available() is False
+
+    table_only_db = _build_excerpt_base_db(tmp_path, "excerpt-table-only.db", version)
+    _add_excerpt_table(
+        table_only_db, _identification_id_in(table_only_db), with_marker=False)
+    assert _service_for(table_only_db, version).excerpts_available() is False
+
+    both_db = _build_excerpt_base_db(tmp_path, "excerpt-both.db", version)
+    _add_excerpt_table(both_db, _identification_id_in(both_db), with_marker=True)
+    assert _service_for(both_db, version).excerpts_available() is True
+
+
+def test_excerpts_available_is_path_aware_not_just_version_aware(tmp_path):
+    """Mirrors the hazard `get_launch_stats_enveloped_async` documents at
+    length: `sidecar_version` can stay IDENTICAL across a resolved-path swap
+    (the pre-rebuild asset, the private rebuild and the public projection all
+    three report the SAME version locally), so `excerpts_available()` caches
+    per `(path, version)` -- like `_band_measurements`/`_launch_stats_cache`
+    -- specifically so a path swap under a CONSTANT version flips the answer
+    instead of replaying the previous asset's."""
+    constant_version = "excerpt-avail-constant-version"
+    old_db = _build_excerpt_base_db(tmp_path, "excerpt-avail-old.db", constant_version)
+    new_db = _build_excerpt_base_db(tmp_path, "excerpt-avail-new.db", constant_version)
+    _add_excerpt_table(new_db, _identification_id_in(new_db))
+    # old_db deliberately carries no discovery_excerpt table.
+
+    state = {"path": old_db}
+    service = DiscoveryService(
+        path_provider=lambda: state["path"],
+        availability_callable=lambda: True,
+        sidecar_version_provider=lambda: constant_version,
+    )
+
+    assert service.excerpts_available() is False
+
+    state["path"] = new_db
+    assert service.excerpts_available() is True, (
+        "a path swap at a CONSTANT version must not serve the PREVIOUS "
+        "asset's availability answer"
+    )
+
+
+def test_excerpt_read_does_not_serve_the_previous_assets_row_after_a_path_swap_at_a_constant_version(
+        tmp_path):
+    """The exact hazard `get_excerpt_enveloped_async`'s own docstring names:
+    `_browse_cached_call`'s generic LRU key has no path component, and
+    `sidecar_version` can stay IDENTICAL across a resolved-path swap -- so
+    without a path-aware key, swapping the resolved path while the version
+    STAYS CONSTANT would keep answering out of the PREVIOUS asset's cache
+    entry for the SAME `identification_id` (identical here on purpose: both
+    builds use the same `(sys_id, canonical_work_id)` pair, so the swap is
+    indistinguishable from the cache's point of view except for the path).
+    """
+    constant_version = "excerpt-constant-version"
+    db_a = _build_excerpt_base_db(tmp_path, "excerpt-swap-a.db", constant_version)
+    db_b = _build_excerpt_base_db(tmp_path, "excerpt-swap-b.db", constant_version)
+    ident_a = _identification_id_in(db_a)
+    ident_b = _identification_id_in(db_b)
+    assert ident_a == ident_b, (
+        "both builds share (sys_id, canonical_work_id) on purpose -- see docstring"
+    )
+    _add_excerpt_table(db_a, ident_a, row={"frag_span": "SPAN FROM ASSET A"})
+    _add_excerpt_table(db_b, ident_b, row={"frag_span": "SPAN FROM ASSET B"})
+
+    state = {"path": db_a}
+    service = DiscoveryService(
+        path_provider=lambda: state["path"],
+        availability_callable=lambda: True,
+        sidecar_version_provider=lambda: constant_version,
+    )
+
+    async def _run():
+        env_a = await service.get_excerpt_enveloped_async(ident_a)
+        assert env_a["items"][0]["frag_span"] == "SPAN FROM ASSET A", env_a
+
+        state["path"] = db_b
+        env_b = await service.get_excerpt_enveloped_async(ident_a)
+        assert env_b["items"][0]["frag_span"] == "SPAN FROM ASSET B", (
+            "a path swap at a CONSTANT version must not serve asset A's "
+            "cached excerpt row for asset B's request"
+        )
+
+    asyncio.run(_run())
+
+
+def test_excerpt_lru_serves_the_second_call(tmp_path):
+    db_path = _build_excerpt_base_db(tmp_path, "excerpt-lru.db", _EXCERPT_VERSION)
+    ident_id = _identification_id_in(db_path)
+    _add_excerpt_table(db_path, ident_id)
+    service = _service_for(db_path, _EXCERPT_VERSION)
+    calls = {"n": 0}
+    real_fn = service.get_excerpt_enveloped
+
+    def _counting(identification_id):
+        calls["n"] += 1
+        return real_fn(identification_id)
+
+    service.get_excerpt_enveloped = _counting
+
+    async def _run():
+        e1 = await service.get_excerpt_enveloped_async(ident_id)
+        e2 = await service.get_excerpt_enveloped_async(ident_id)
+        assert calls["n"] == 1, "the second identical call must be served from the LRU cache"
+        assert e1 == e2
+
+    asyncio.run(_run())
+
+
+def test_surface_safe_excerpt_is_an_allowlist_not_a_denylist():
+    fake_row = {field: f"value-{field}" for field in SURFACE_EXCERPT_FIELDS}
+    # A field the future bake might grow, and the forbidden badge itself --
+    # neither may survive projection.
+    fake_row["a_future_bake_field"] = "should not reach a surface"
+    fake_row["review_overlay"] = "Expert-reviewed"
+
+    projected = surface_safe_excerpt(fake_row)
+
+    assert "a_future_bake_field" not in projected
+    assert "review_overlay" not in projected
+    assert set(projected) == set(SURFACE_EXCERPT_FIELDS)

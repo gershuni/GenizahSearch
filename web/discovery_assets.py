@@ -329,6 +329,60 @@ _AMENDMENT_2026_08_12_COUNTS = (
     ("expected_rows_discovery_withholding", "discovery_withholding"),
 )
 
+# Excerpt sidecar (_tmp/PLAN-textvtext-excerpts.md, Track C). Its OWN
+# conditional marker, INDEPENDENT of `locus_schema_version` above -- the
+# excerpt table ships on its own bake schedule, so an asset can carry either
+# amendment, both, or neither. Same shape as the CD batch: an asset that
+# carries the marker owes the table, its columns and its count; an asset
+# without it validates exactly as before (a pre-excerpt or currently-deployed
+# asset keeps loading).
+#
+# Unlike `_LOCUS_SCHEMA_MARKER_KEY`, this marker's VALUE is also checked
+# (reject-incompatible, the same idiom as `schema_version`/`audience` above):
+# it names a version downstream readers may come to depend on, so a present
+# key with an unrecognised value is closer to a corrupt/foreign artifact than
+# to "not yet built" and must fail closed rather than being silently treated
+# the same as absent.
+_EXCERPT_SCHEMA_MARKER_KEY = "excerpt_schema_version"
+_EXPECTED_EXCERPT_SCHEMA_VERSION = "excerpt-v1"
+_AMENDMENT_EXCERPT_TABLES = frozenset({"discovery_excerpt"})
+_AMENDMENT_EXCERPT_COLUMNS: Dict[str, frozenset] = {
+    "discovery_excerpt": frozenset({
+        "identification_id",
+        "evidence_id",
+        "a_page_id",
+        "frag_before",
+        "frag_span",
+        "frag_after",
+        "frag_clipped",
+        "work_before",
+        "work_span",
+        "work_after",
+        "work_clipped",
+        "work_source",
+        "align_score",
+        "attribution",
+        "n_spans",
+        "text_layer",
+        # round 2 (2026-08-13): word-level parallel-highlight intervals
+        # (JSON, char offsets into the span pieces) + the JA brace-markup flag.
+        "frag_hl",
+        "work_hl",
+        "work_markup",
+    }),
+}
+_AMENDMENT_EXCERPT_COUNTS = (
+    ("expected_rows_discovery_excerpt", "discovery_excerpt"),
+)
+# Non-count meta keys the marker also makes required, presence-only (the bake
+# writes them as plain strings; only the count key above is parsed as an int
+# and compared against the actual row count).
+_AMENDMENT_EXCERPT_META_KEYS = frozenset({
+    "excerpt_ctx",
+    "excerpt_span_cap",
+    "excerpt_refs_manifest_sha256",
+})
+
 # Frozen enum vocab spot-check (docs/specs/discovery-sidecar-schema-v1.md
 # "Frozen Enum Vocabularies" / scripts/discovery_ids.py). Deliberately
 # inlined as plain string constants here rather than importing
@@ -543,6 +597,33 @@ def load_discovery_state() -> bool:
                 required_columns[table] = required_columns.get(table, frozenset()) | cols
         contract_counts = _RELEASE_CONTRACT_COUNTS + (
             _AMENDMENT_2026_08_12_COUNTS if post_batch else ()
+        )
+
+        # Excerpt sidecar: its own marker, independent of `post_batch` above.
+        # The VALUE is checked before presence discriminates anything -- a
+        # marker with the wrong value must fail closed even if every table it
+        # would have gated happens to already be present.
+        excerpt_marker = meta.get(_EXCERPT_SCHEMA_MARKER_KEY)
+        if excerpt_marker is not None and excerpt_marker != _EXPECTED_EXCERPT_SCHEMA_VERSION:
+            raise _LoaderRefusal(
+                f"incompatible excerpt_schema_version (expected "
+                f"{_EXPECTED_EXCERPT_SCHEMA_VERSION!r}, found value withheld) -- "
+                "reject-incompatible"
+            )
+        has_excerpt = excerpt_marker is not None
+        required_tables = required_tables | (
+            _AMENDMENT_EXCERPT_TABLES if has_excerpt else frozenset()
+        )
+        if has_excerpt:
+            for table, cols in _AMENDMENT_EXCERPT_COLUMNS.items():
+                required_columns[table] = required_columns.get(table, frozenset()) | cols
+            missing_excerpt_meta = _AMENDMENT_EXCERPT_META_KEYS - meta.keys()
+            if missing_excerpt_meta:
+                raise _LoaderRefusal(
+                    f"meta missing required excerpt key(s): {sorted(missing_excerpt_meta)}"
+                )
+        contract_counts = contract_counts + (
+            _AMENDMENT_EXCERPT_COUNTS if has_excerpt else ()
         )
 
         table_rows = conn.execute(

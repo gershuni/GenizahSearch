@@ -763,6 +763,52 @@ def matches_filter_codes(relation_kind: str, codes: Iterable[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Text-vs-text excerpt disclosure (excerpt-v1, 2026-08-13). Claim vocabulary
+# for the findings row's "Compare texts" panes. Match-framing register only
+# (same ruling as the relation chips); the work pane's absence copy names an
+# availability fact and never hints at WHY an edition is undisplayable.
+# ---------------------------------------------------------------------------
+
+_EXCERPT_STRINGS: Dict[str, Dict[str, str]] = {
+    "toggle": {"en": "Compare texts", "he": "השוואת טקסטים"},
+    "frag_label": {"en": "Manuscript passage", "he": "קטע כתב היד"},
+    # Appended to frag_label for the automated layer only (text_layer='htr');
+    # FGP/PGP transcriptions are human work and carry no such qualifier.
+    "frag_htr_note": {"en": "automated transcription", "he": "תעתיק אוטומטי"},
+    "work_label": {"en": "Edition passage", "he": "קטע המהדורה"},
+    "work_unavailable": {
+        "en": "The reference edition's text is not available for display.",
+        "he": "טקסט מהדורת הייחוס אינו זמין להצגה.",
+    },
+    # The row exists but carries no excerpt (identifications whose evidence
+    # is not excerpt-eligible). An honest empty, not an outage.
+    "none": {
+        "en": "No text excerpts are available for this identification.",
+        "he": "אין קטעי טקסט זמינים לזיהוי זה.",
+    },
+    # work_source='reprojected': the passage was LOCATED in this (public)
+    # edition by alignment, rather than read off stored offsets into it.
+    "reprojected_note": {
+        "en": "Passage located in this edition by automated alignment.",
+        "he": "הקטע אותר במהדורה זו בהתאמה אוטומטית.",
+    },
+    "multi_span": {
+        "en": "The strongest of {count} matching passages.",
+        "he": "הקטע המובהק מתוך {count} קטעים תואמים.",
+    },
+    "failed": {
+        "en": "The excerpt could not be loaded.",
+        "he": "לא ניתן היה לטעון את הקטעים.",
+    },
+}
+
+
+def excerpt_strings(lang: str = "en") -> Dict[str, str]:
+    """Every excerpt-disclosure string, resolved for one language."""
+    return {key: _pick(entry, lang) for key, entry in _EXCERPT_STRINGS.items()}
+
+
+# ---------------------------------------------------------------------------
 # Service-state copy (D-13/D-14 envelope). An outage is a visible temporary
 # state with a retry -- never an empty section, which is indistinguishable
 # from "this manuscript has no computed identifications" and would quietly

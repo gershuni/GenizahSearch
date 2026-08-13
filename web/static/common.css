@@ -1955,3 +1955,62 @@ body {
     font-size: 14px;
     line-height: 1.55;
 }
+
+/* ---- findings row: text-vs-text disclosure (excerpt-v1, 2026-08-13) ----
+   Two panes, even weight (the validated discovery-panel layout: 1fr/1fr wide,
+   stacking on narrow screens). The highlight `-hl` is ONE rule for every row,
+   pane, relation kind, band and novelty status — a per-anything variant of it
+   is exactly the styling D-24 prohibits (see the hard rules at the top of this
+   block). Every directional property is logical; scroll is confined to each
+   pane's own text box. Tokens only — the parchment/dark themes restyle these
+   through the variables, never through a second rule set. */
+.gs-discovery .gs-findings-row-excerpt-panes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+@media (max-width: 900px) {
+    .gs-discovery .gs-findings-row-excerpt-panes {
+        grid-template-columns: 1fr;
+    }
+    .gs-discovery .gs-findings-row-excerpt-toggle {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+.gs-discovery .gs-findings-row-excerpt-pane {
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    min-width: 0;
+}
+.gs-discovery .gs-findings-row-excerpt-text {
+    margin: 4px 0 0;
+    font-size: 14px;
+    line-height: 1.85;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+}
+.gs-discovery .gs-findings-row-excerpt-ctx {
+    color: var(--text-secondary);
+}
+.gs-discovery .gs-findings-row-excerpt-hl {
+    background: var(--bg-active);
+    border-radius: 3px;
+    padding: 0 1px;
+    box-shadow: inset 0 -2px 0 var(--primary-600);
+}
+/* JA {...} Hebrew-word marks: content colored, braces removed by the
+   renderer. Language markup carried by the source text -- one rule for every
+   row, so it stays clear of D-24 exactly the way the highlight does. */
+.gs-discovery .gs-findings-row-excerpt-heb {
+    color: var(--primary-700);
+    font-weight: 600;
+}
+.gs-discovery .gs-findings-row-excerpt-attr {
+    color: var(--text-secondary);
+    font-size: 10px;
+}

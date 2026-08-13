@@ -1560,3 +1560,43 @@ transaction, every matrix input recoverable from stored columns, the three
 row-for-row recompute-equality gate — which also refuses a foreign matrix
 version, a missing parameterization on a marker-bearing asset, and step 3
 activated before a footprint recipe exists).*
+
+## Amendment 2026-08-13 (W) — `discovery_excerpt`, the text-vs-text bake (excerpt-v1)
+
+**What ships.** One new PUBLIC-asset-only table, `discovery_excerpt`, baked by
+`scripts/bake_discovery_excerpts.py` AFTER `project_discovery_public.py`, holding
+per identification the six PLAIN-TEXT pieces of a side-by-side excerpt:
+`{frag,work}_{before,span,after}` (+ `frag_clipped`/`work_clipped`,
+`work_source`, `align_score`, `attribution`, `n_spans`, `text_layer`,
+`evidence_id`, `a_page_id`; PK `identification_id`). No HTML ever enters the
+sidecar — the renderer (`web/components/findings_rows.py::_render_excerpt`)
+escapes and composes. Row selection is FROZEN: the identification's best
+eligible witness row by (`matched_letters` DESC, `evidence_id` ASC), over the
+same eligibility clause the findings pipeline uses.
+
+**Coordinate spaces, named at the point of use.** Fragment pieces are projected
+from the bake corpus page snapshot via `shared.discovery_locus.norm_stream`
+offsets (`aligned_page_start/end`, falling back to `span_start/end`); work
+pieces come EXACTLY off `w_start/w_end` for REF2/J editions (stream equality
+against the reference pickle is asserted per work — a mismatch drops the work
+side, never approximates it). For masked-edition Tanakh works the span is
+RE-PROJECTED into the staged public-domain Sefaria Tanakh
+(`work_source='reprojected'`, `align_score` recorded; the masked stream serves
+only as an in-memory alignment query and never reaches any output). Non-Tanakh
+masked editions ship no work side (`work_source` NULL) and the UI renders the
+availability sentence.
+
+**Loader/verifier lockstep (conditional marker, the `locus_schema_version`
+pattern).** Meta marker `excerpt_schema_version` — present ⇒ its value must be
+`excerpt-v1` and the loader/verifier require the table, its 16 columns,
+`expected_rows_discovery_excerpt` (count equality), `excerpt_ctx`,
+`excerpt_span_cap`, and `excerpt_refs_manifest_sha256`; absent ⇒ pre-excerpt
+assets load unchanged. The verifier additionally pins the `work_source` vocab
+{NULL, 'direct', 'reprojected'} and non-empty `frag_span`, and is deliberately
+NOT extended via `_GATE_BEARING_TABLES` (that set is unconditional).
+
+**Frame invariance.** The bake touches neither `discovery_claim` nor
+`discovery_evidence`, so `frame_content_hash` is unchanged by construction;
+`scripts/check_frame_regression.py` over the (pre-bake, post-bake) pair is a
+required gate, alongside the projection masking gate re-run over the final
+artifact.

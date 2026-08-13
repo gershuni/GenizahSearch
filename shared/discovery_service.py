@@ -225,6 +225,7 @@ from shared.discovery_surface_projection import (
     busy_envelope,
     make_envelope,
     surface_safe_claim,
+    surface_safe_excerpt,
     surface_safe_expansion,
     surface_safe_facet,
     surface_safe_finding,
@@ -2159,6 +2160,17 @@ class DiscoveryService:
         # serve one artifact's headline for the other.
         self._launch_stats_cache: Optional[Tuple[tuple, Dict[str, Any]]] = None
 
+        # Text-vs-text excerpts (PLAN-textvtext-excerpts.md): whether the
+        # LOADED sidecar carries the excerpt-v1 marker AND the
+        # `discovery_excerpt` table, cached per (path, version) for the SAME
+        # reason `_launch_stats_cache` is: this predicate is checked on every
+        # panel render to decide whether the toggle shows at all, so it must
+        # be cheap, and a version-only key is not safe here -- all three local
+        # artifacts (pre-rebuild, private rebuild, public projection) report
+        # the identical `sidecar_version`, so a version-only cache would serve
+        # one artifact's availability answer for another after a path swap.
+        self._excerpt_availability_cache: Optional[Tuple[tuple, bool]] = None
+
         # Heavy-query bounded concurrency (mirrors web/search_api.py's
         # _HeavySemaphoreState, kept per-instance since this class -- unlike
         # the module-function shape of search_api.py -- IS the natural
@@ -2304,6 +2316,57 @@ class DiscoveryService:
         except Exception as e:
             logger.error("DiscoveryService.get_version error: %s", e)
             return None
+
+    def excerpts_available(self) -> bool:
+        """PLAN-textvtext-excerpts.md: True iff the LOADED sidecar carries
+        BOTH the `excerpt_schema_version = 'excerpt-v1'` meta marker AND the
+        `discovery_excerpt` table (checked via `sqlite_master`, never by
+        querying the table itself and catching the failure -- a missing table
+        is the ORDINARY older-asset case here, not an error worth logging).
+
+        EITHER half missing reads False: a marker written before its table, or
+        a table copied without its meta row, is a partially-baked asset and
+        must gate exactly like an asset with neither -- "old-asset/new-code:
+        toggle hidden" (the owning plan) depends on this being conjunctive.
+
+        Cached per `(path, version)`, mirroring `_band_measurements` /
+        `_launch_stats_cache` -- and for the SAME reason those two cache that
+        way rather than by version alone: `sidecar_version` can stay identical
+        across a resolved-path swap (the pre-rebuild asset, the private
+        rebuild and the public projection all three report
+        `discovery-v1-real` locally), so a version-only key would serve one
+        artifact's availability answer for another. The connection is
+        resolved FIRST (`_get_conn()`), then keyed on the path/version IT
+        resolved -- reading `self._last_path` before that call would key on
+        the PREVIOUS artifact on the first call after a swap (the same
+        ordering `get_launch_stats_enveloped` documents).
+        """
+        if not self.is_available():
+            return False
+        conn = self._get_conn()
+        if conn is None:
+            return False
+        key = (self._last_path, self._last_version)
+        cached = self._excerpt_availability_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        try:
+            marker_row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'excerpt_schema_version'"
+            ).fetchone()
+            marker_ok = bool(marker_row) and marker_row["value"] == "excerpt-v1"
+            table_row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'discovery_excerpt'"
+            ).fetchone()
+            available = bool(marker_ok and table_row is not None)
+        except Exception as e:
+            logger.error("DiscoveryService.excerpts_available error: %s", e)
+            available = False
+
+        self._excerpt_availability_cache = (key, available)
+        return available
 
     def get_band_precision(
         self, evidence_source: Optional[str], confidence_band: Optional[str]
@@ -3568,6 +3631,101 @@ class DiscoveryService:
             logger.error("DiscoveryService.get_evidence error for %s: %s", claim_id, e)
             return []
 
+    # ------------------------------------------------------------------
+    # Text-vs-text excerpts (PLAN-textvtext-excerpts.md). One row, one
+    # identification: `_query_excerpt_for_identification` RAISES on a genuine
+    # query failure (mirrors `_query_work_expansion`) and is shared by BOTH
+    # public shapes below, exactly the way `get_work_witnesses` /
+    # `get_work_expansion_enveloped` share `_query_work_expansion` -- so the
+    # two entry points cannot classify the same failure differently.
+    # ------------------------------------------------------------------
+
+    def _query_excerpt_for_identification(
+        self, identification_id: str
+    ) -> List[Dict[str, Any]]:
+        """The excerpt row for `identification_id`, projected through
+        `surface_safe_excerpt`, as a list of 0 or 1 items -- RAISES on a query
+        failure, INCLUDING `sqlite3.OperationalError` when `discovery_excerpt`
+        itself does not exist (an older asset, pre `excerpt-v1`). That is
+        deliberate: this helper does not special-case the missing table, so
+        both callers below classify it exactly the way they classify any other
+        query failure, and `excerpts_available()` -- not this method -- is what
+        the UI actually gates the toggle on.
+        """
+        if not self.is_available():
+            return []
+        conn = self._get_conn()
+        if conn is None:
+            return []
+        cur = conn.execute(
+            "SELECT * FROM discovery_excerpt WHERE identification_id = ?",
+            (identification_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return []
+        item = dict(row)
+        # The parallel-highlight intervals are stored as JSON text; decode to
+        # lists of [start, end) pairs so the envelope carries structured data.
+        # A malformed value degrades to None -- the renderer's whole-span
+        # fallback -- rather than taking the excerpt down with it.
+        for key in ("frag_hl", "work_hl"):
+            value = item.get(key)
+            if isinstance(value, str):
+                try:
+                    item[key] = json.loads(value)
+                except (ValueError, TypeError):
+                    item[key] = None
+        return [surface_safe_excerpt(item)]
+
+    def get_excerpt_for_identification(
+        self, identification_id: str
+    ) -> List[Dict[str, Any]]:
+        """LEGACY LIST CONTRACT (mirrors `get_work_witnesses`): `[]` on EVERY
+        failure path, including "no such table" on an older asset -- never
+        raises. Prefer `get_excerpt_enveloped`/`get_excerpt_enveloped_async`
+        on any surface that must tell an outage apart from a genuine "no
+        excerpt for this identification" (D-13); this shape exists for parity
+        with the other PANEL-03-adjacent reads and is not itself
+        surface-facing.
+        """
+        try:
+            return self._query_excerpt_for_identification(identification_id)
+        except Exception as e:
+            # Type name only -- see get_work_witnesses: this module reads an
+            # artifact that may carry restricted content, and a driver message
+            # can quote its input.
+            logger.error(
+                "DiscoveryService.get_excerpt_for_identification query failed (%s)",
+                type(e).__name__)
+            return []
+
+    def get_excerpt_enveloped(self, identification_id: str) -> Dict[str, Any]:
+        """The text-vs-text excerpt in the CLOSED four-key envelope (D-13):
+        `{status, items, total, meta}` -- mirrors `get_work_expansion_enveloped`
+        exactly.
+
+        `items` is `[]` (with `status='ok'`) both when this identification has
+        no excerpt row (an HONEST EMPTY -- most identifications outside the
+        best-eligible-witness selection never get one, and that is not an
+        outage) and is the ONLY way an absent row is reported; a query failure
+        instead reports `unavailable`, never a silent ok-with-zero.
+        """
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        try:
+            rows = self._query_excerpt_for_identification(identification_id)
+        except Exception as e:
+            # Type name only -- see get_work_expansion_enveloped.
+            logger.error(
+                "DiscoveryService.get_excerpt_enveloped query failed (%s)",
+                type(e).__name__)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        return make_envelope(
+            STATUS_OK, rows, total=len(rows),
+            meta={"identification_id": identification_id},
+        )
+
     def get_work_witnesses(
         self,
         work_id: str,
@@ -4005,6 +4163,16 @@ class DiscoveryService:
     async def get_version_async(self) -> Optional[str]:
         return await self._run_off_loop(self.get_version, timeout=self._browse_timeout())
 
+    async def excerpts_available_async(self) -> bool:
+        """The async shape of `excerpts_available` -- a thin off-loop wrapper,
+        exactly like `get_version_async`. NOT routed through `cache_name`/
+        `_browse_cached_call`: `excerpts_available` already caches itself, per
+        `(path, version)`, for the reason its own docstring states; layering
+        the generic version-only LRU on top would only add a SECOND, less
+        safe cache in front of the first one."""
+        return await self._run_off_loop(
+            self.excerpts_available, timeout=self._browse_timeout())
+
     async def get_band_precision_async(
         self, evidence_source: Optional[str], confidence_band: Optional[str]
     ) -> Optional[Dict[str, Any]]:
@@ -4256,6 +4424,49 @@ class DiscoveryService:
     ) -> List[Dict[str, Any]]:
         return await self._run_off_loop(
             self.get_evidence, claim_id, page, page_size, timeout=self._browse_timeout()
+        )
+
+    async def get_excerpt_enveloped_async(self, identification_id: str) -> Dict[str, Any]:
+        """The async shape of `get_excerpt_enveloped` -- a thin wrapper over
+        the SAME sync implementation, never a second query path. BROWSE
+        budget (this is a per-identification, per-page-render read, not a
+        corpus-wide one) and `_browse_timeout()`, exactly like
+        `get_claims_for_page_enveloped_async`.
+
+        PATH-AWARE CACHE KEY, and this is load-bearing rather than decorative:
+        `_enveloped_off_loop`'s `cache_name` branch delegates to
+        `_browse_cached_call`, whose key is `(cache_name,) + args +
+        (version,)` -- with NO path component (see that method, and see
+        `get_launch_stats_enveloped_async`'s docstring for the identical
+        hazard spelled out at length). `sidecar_version` can stay IDENTICAL
+        across a resolved-path swap -- the pre-rebuild asset, the private
+        rebuild and the public projection all three report
+        `discovery-v1-real` locally -- so without something path-scoped in the
+        key, a path swap at a constant version would keep serving the
+        PREVIOUS asset's excerpt row for the SAME `identification_id`.
+
+        Unlike `get_launch_stats_enveloped_async`, this read does NOT forego
+        `cache_name` for that reason -- a per-identification cache is exactly
+        the shape `_browse_cached_call` is for, and building a second private
+        cache here would just duplicate `_browse_cached_call`'s own
+        LRU-eviction bookkeeping. Instead the resolved PATH is folded into the
+        cache key by making it part of the args tuple: resolved via the path
+        provider directly (the same call `_get_conn()` makes) so it is correct
+        even before `_get_conn()` has run for this request, then threaded
+        through a two-argument lambda that drops it before calling the real
+        sync method -- `get_excerpt_enveloped` itself takes no path argument,
+        so its call shape and its cache key are decoupled on purpose.
+        """
+        try:
+            path = self._path_provider() if self._path_provider is not None else None
+        except Exception as e:
+            logger.error("DiscoveryService: path_provider raised: %s", e)
+            path = None
+        return await self._enveloped_off_loop(
+            lambda ident, _path: self.get_excerpt_enveloped(ident),
+            (identification_id, path),
+            timeout=self._browse_timeout(),
+            cache_name="excerpt_by_ident",
         )
 
     async def get_work_witnesses_async(

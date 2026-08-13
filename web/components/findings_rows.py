@@ -73,6 +73,7 @@ Hebrew reader's most honesty-sensitive element.
 
 from __future__ import annotations
 
+import html as _html
 import inspect as _inspect
 from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import quote
@@ -212,6 +213,10 @@ ROW_CHILDREN_STATE_CLASS = "gs-findings-row-children-state"
 #: manuscripts, so "preview" there would have to pick one, and picking is
 #: adjudication -- which is the one thing no surface here does.
 ROW_PREVIEW_CLASS = "gs-findings-row-preview"
+#: The text-vs-text disclosure (excerpt-v1), leaf-only for the same reason as
+#: the preview: a grouped row spans identifications, and choosing whose texts
+#: to show is adjudication.
+ROW_EXCERPT_CLASS = "gs-findings-row-excerpt"
 
 
 def preview_targets_a_folio(item: Mapping[str, Any]) -> bool:
@@ -1886,7 +1891,8 @@ def _render_author(item: Mapping[str, Any]) -> None:
 def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                        sidecar_version: Any = None,
                        load_children=None, preview_url=None,
-                       catalogue_title=None, on_suppress=None) -> None:
+                       catalogue_title=None, on_suppress=None,
+                       load_excerpt=None) -> None:
     """One result row, in whichever unit the service produced it.
 
     The unit arrives ON the row (`unit`, part of the projection); it is
@@ -1953,23 +1959,30 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
         _render_row_meta(item, lang, unit, sidecar_version=sidecar_version,
                          on_suppress=on_suppress)
 
-        # THE TWO AFFORDANCES, each on the unit where it has a meaning. A
-        # grouped row opens onto its children; the leaf previews its manuscript.
-        # Neither is on both: a work row spanning manuscripts has no single page
-        # to preview, and an identification has nothing underneath it to open.
+        # THE AFFORDANCES, each on the unit where it has a meaning. A
+        # grouped row opens onto its children; the leaf previews its manuscript
+        # and compares its texts. None is on both: a work row spanning
+        # manuscripts has no single page to preview and no single pair of
+        # texts to compare, and an identification has nothing underneath it
+        # to open.
         if load_children is not None and expansion_target(item) is not None:
             _render_expansion(item, lang, load_children,
                               sidecar_version=sidecar_version,
                               preview_url=preview_url,
                               catalogue_title=catalogue_title,
-                              on_suppress=on_suppress)
-        elif unit == FINDINGS_UNIT_IDENTIFICATION and preview_url is not None:
-            _render_preview(item, lang, preview_url)
+                              on_suppress=on_suppress,
+                              load_excerpt=load_excerpt)
+        elif unit == FINDINGS_UNIT_IDENTIFICATION:
+            if load_excerpt is not None:
+                _render_excerpt(item, lang, load_excerpt)
+            if preview_url is not None:
+                _render_preview(item, lang, preview_url)
 
 
 def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
                       sidecar_version: Any = None, preview_url=None,
-                      catalogue_title=None, on_suppress=None) -> None:
+                      catalogue_title=None, on_suppress=None,
+                      load_excerpt=None) -> None:
     """The grouped row's children, IN PLACE, fetched when the reader asks.
 
     Lazy for the reason the panel's expansion is: the heaviest work carries
@@ -2127,7 +2140,8 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
                                        sidecar_version=sidecar_version,
                                        preview_url=preview_url,
                                        catalogue_title=catalogue_title,
-                                       on_suppress=on_suppress)
+                                       on_suppress=on_suppress,
+                                       load_excerpt=load_excerpt)
             extent["holder"] = _render_expansion_extent(
                 state["shown"], total, lang, on_more=_more)
 
@@ -2255,6 +2269,190 @@ def _render_preview(item: Mapping[str, Any], lang: str, preview_url) -> None:
     button.on("click", _toggle)
 
 
+def _compose_excerpt_piece(text: str, intervals, ja_braces: bool,
+                           *, whole_span: bool = False) -> str:
+    """Escaped markup for one excerpt piece, by per-character flags.
+
+    Two independent flags -- `hl` (a matched word) and `heb` (inside a JA
+    {...} Hebrew-word mark) -- are painted onto a character array and then
+    chunked into runs, the way the research decks render mixed states: runs
+    can overlap freely and the output can never produce mis-nested tags.
+    Brace characters themselves are DROPPED (the owner's ruling: color the
+    content, remove the marks); an orphan brace -- a pair split across the
+    piece boundary by the offset slice -- is dropped without coloring, so a
+    truncation artifact never paints a claim. Newlines pass through untouched
+    (the pane is `white-space: pre-wrap`), which is what keeps the manuscript
+    lineation visible.
+    """
+    n = len(text)
+    hl = [whole_span] * n
+    for pair in intervals or ():
+        try:
+            start, end = int(pair[0]), int(pair[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        for k in range(max(0, start), min(n, end)):
+            hl[k] = True
+    heb = [False] * n
+    drop = [False] * n
+    if ja_braces:
+        open_at: Optional[int] = None
+        for i, ch in enumerate(text):
+            if ch == "{":
+                drop[i] = True
+                open_at = i
+            elif ch == "}":
+                drop[i] = True
+                if open_at is not None:
+                    for k in range(open_at + 1, i):
+                        heb[k] = True
+                    open_at = None
+    parts = []
+    i = 0
+    while i < n:
+        if drop[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and not drop[j] and hl[j] == hl[i] and heb[j] == heb[i]:
+            j += 1
+        segment = _html.escape(text[i:j])
+        classes = []
+        if hl[i]:
+            classes.append(f"{ROW_EXCERPT_CLASS}-hl")
+        if heb[i]:
+            classes.append(f"{ROW_EXCERPT_CLASS}-heb")
+        if classes:
+            parts.append(f'<span class="{" ".join(classes)}">{segment}</span>')
+        else:
+            parts.append(segment)
+        i = j
+    return "".join(parts)
+
+
+def _render_excerpt(item: Mapping[str, Any], lang: str, load_excerpt) -> None:
+    """The identification leaf's text-vs-text disclosure (excerpt-v1).
+
+    ON THE LEAF ONLY -- same reasoning as the preview: a grouped row spans
+    identifications, and choosing which one's texts to show is adjudication.
+
+    The excerpt is fetched on FIRST OPEN (a page of 50 rows must not issue 50
+    sidecar reads nobody asked for), through the INJECTED `load_excerpt` --
+    this module renders; it does not read. Failure is NAMED and retryable
+    (the preview's silent no-render is a pattern the 2026-08-13 pre-flight
+    flagged, not one to copy). An ok-empty envelope is the honest "no
+    excerpts for this identification", which is a different sentence from an
+    outage and gets different copy.
+
+    The six pieces arrive as PLAIN TEXT from the sidecar and are escaped here
+    before entering markup; the highlight is ONE class, identical for every
+    row, relation kind, band and novelty status -- D-24 leaves no room for a
+    per-anything variant of it.
+    """
+    strings = ds.excerpt_strings(lang)
+    body = ui.column().classes(f"{ROW_EXCERPT_CLASS} w-full gap-1")
+    body.style("display: none;")
+    state = {"open": False, "loaded": False}
+    button = ui.button(strings["toggle"]).props(
+        "flat dense size=sm no-caps").classes(
+        f"{ROW_EXCERPT_CLASS}-toggle dnote")
+
+    def _piece_markup(row: Mapping[str, Any], side: str) -> str:
+        """One side's {before, span, after}, composed as markup.
+
+        The span piece highlights the MATCHED WORDS when the bake carried
+        word-level alignment intervals (`frag_hl`/`work_hl`, char offsets
+        into the span piece) -- fuzzy on the bake side, so an HTR miscopy
+        still pairs with its edition word. `None` intervals (no work side to
+        be parallel to, or a pre-round-2 asset) fall back to highlighting the
+        whole span, which is the claim the offsets themselves make.
+
+        `work_markup == 'ja_braces'` turns the J-corpus {...} Hebrew-word
+        convention into a colored span WITH THE BRACES REMOVED, on the work
+        side only -- keyed on the baked flag, never sniffed from the text, so
+        a literal brace in any other corpus stays a literal brace.
+        """
+        ja = side == "work" and row.get("work_markup") == "ja_braces"
+        hl = row.get(f"{side}_hl")
+        before = _compose_excerpt_piece(row.get(f"{side}_before") or "",
+                                        None, ja)
+        after = _compose_excerpt_piece(row.get(f"{side}_after") or "",
+                                       None, ja)
+        span = _compose_excerpt_piece(row.get(f"{side}_span") or "",
+                                      hl, ja, whole_span=hl is None)
+        return (f'<span class="{ROW_EXCERPT_CLASS}-ctx">{before}</span>'
+                f'{span}'
+                f'<span class="{ROW_EXCERPT_CLASS}-ctx">{after}</span>')
+
+    def _render_panes(row: Mapping[str, Any]) -> None:
+        with ui.element("div").classes(f"{ROW_EXCERPT_CLASS}-panes w-full"):
+            with ui.element("div").classes(f"{ROW_EXCERPT_CLASS}-pane"):
+                label = strings["frag_label"]
+                # 'htr' is the automated layer; FGP/PGP transcriptions are
+                # human work and carry no qualifier.
+                if (row.get("text_layer") or "") == "htr":
+                    label = f"{label} ({strings['frag_htr_note']})"
+                ui.label(label).classes("dnote text-xs")
+                ui.html(f'<p class="{ROW_EXCERPT_CLASS}-text" dir="rtl">'
+                        f'{_piece_markup(row, "frag")}</p>')
+            with ui.element("div").classes(f"{ROW_EXCERPT_CLASS}-pane"):
+                ui.label(strings["work_label"]).classes("dnote text-xs")
+                if row.get("work_span"):
+                    ui.html(f'<p class="{ROW_EXCERPT_CLASS}-text" dir="rtl">'
+                            f'{_piece_markup(row, "work")}</p>')
+                    if row.get("work_source") == "reprojected":
+                        ui.label(strings["reprojected_note"]).classes(
+                            "dnote text-xs")
+                    attribution = row.get("attribution")
+                    if attribution:
+                        ui.label(str(attribution)).classes(
+                            f"{ROW_EXCERPT_CLASS}-attr dnote text-xs")
+                else:
+                    # An availability fact, not an outage -- and it never
+                    # says WHY the edition is undisplayable.
+                    ui.label(strings["work_unavailable"]).classes(
+                        f"{ROW_EXCERPT_CLASS}-state dnote text-xs")
+        n_spans = row.get("n_spans")
+        if isinstance(n_spans, int) and n_spans > 1:
+            ui.label(strings["multi_span"].format(
+                count=_count(n_spans))).classes("dnote text-xs")
+
+    async def _load(_event=None) -> None:
+        """`_event` accepted and ignored so the retry button can bind this
+        directly (NiceGUI passes click args positionally)."""
+        body.clear()
+        try:
+            envelope = await load_excerpt(item)
+        except Exception:
+            # Never echo identifiers into a reader-visible error line (D-25).
+            envelope = None
+        with body:
+            if not envelope or (envelope or {}).get("status") != "ok":
+                # NAMED, and retryable. `state['loaded']` stays False so the
+                # next open tries again instead of re-rendering the failure.
+                with ui.row().classes(
+                        f"{ROW_EXCERPT_CLASS}-state items-center gap-2"):
+                    ui.label(strings["failed"]).classes("dnote text-xs")
+                    ui.button(ds.retry_label(lang), on_click=_load).props(
+                        "flat dense size=sm no-caps")
+                return
+            state["loaded"] = True
+            rows_ = list((envelope or {}).get("items") or ())
+            if not rows_:
+                ui.label(strings["none"]).classes(
+                    f"{ROW_EXCERPT_CLASS}-state dnote text-xs")
+                return
+            _render_panes(rows_[0])
+
+    async def _toggle(_event=None) -> None:
+        state["open"] = not state["open"]
+        body.style("display: flex;" if state["open"] else "display: none;")
+        if state["open"] and not state["loaded"]:
+            await _load()
+
+    button.on("click", _toggle)
+
+
 __all__ = [
     "LAUNCH_ALL_TOTAL_CLASS",
     "LAUNCH_BASIS_CLASS",
@@ -2287,6 +2485,7 @@ __all__ = [
     "ROW_CHILDREN_STATE_CLASS",
     "ROW_CHILD_CLASS",
     "ROW_EXPANDER_CLASS",
+    "ROW_EXCERPT_CLASS",
     "ROW_PREVIEW_CLASS",
     "EXPANSION_KEY_BY_UNIT",
     "REPORT_ADDRESS",

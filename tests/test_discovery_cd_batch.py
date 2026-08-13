@@ -274,6 +274,163 @@ def test_amendment_contract_check_has_vocabulary_teeth():
 
 
 # ---------------------------------------------------------------------------
+# Excerpt sidecar (_tmp/PLAN-textvtext-excerpts.md, Track C) -- the
+# verifier's `check_excerpt_contract` / `check_excerpt_vocabulary`, proven
+# able to fail. Genuinely marker-conditional (unlike the CD batch's own
+# `check_amendment_2026_08_12_contract` above, whose marker-absence is now
+# itself a violation): the excerpt table ships on its own bake schedule, so
+# an asset without the marker must verify clean regardless of shape.
+# ---------------------------------------------------------------------------
+
+_EXCERPT_COLUMNS = tuple(verify_mod._EXCERPT_COLUMNS)
+_GOOD_EXCERPT_ROW = (
+    "i1", "ev1", "p1", "before", "span text", "after", 0,
+    "wbefore", "wspan", "wafter", 0, "direct", 0.9, "attribution text", 1, "htr",
+    "[[0, 4]]", "[[0, 5]]", None,
+)
+
+
+def _excerpt_conn_with_table(omit_columns=()):
+    conn = sqlite3.connect(":memory:")
+    cols = [c for c in _EXCERPT_COLUMNS if c not in omit_columns]
+    conn.execute(f"CREATE TABLE discovery_excerpt ({', '.join(cols)})")
+    return conn
+
+
+def _valid_excerpt_conn():
+    conn = _excerpt_conn_with_table()
+    conn.execute(f"INSERT INTO discovery_excerpt VALUES ({', '.join('?' * len(_EXCERPT_COLUMNS))})",
+                 _GOOD_EXCERPT_ROW)
+    return conn
+
+
+def _excerpt_meta(**overrides):
+    meta = {
+        verify_mod._EXCERPT_SCHEMA_MARKER_KEY: verify_mod._EXPECTED_EXCERPT_SCHEMA_VERSION,
+        "expected_rows_discovery_excerpt": "1",
+        "excerpt_ctx": "90",
+        "excerpt_span_cap": "600",
+        "excerpt_refs_manifest_sha256": "a" * 64,
+    }
+    meta.update(overrides)
+    return meta
+
+
+def test_excerpt_marker_and_column_literals_cannot_drift_between_loader_and_verifier():
+    """The verifier deliberately does NOT import the loader's constants (its
+    standing independence convention), so the two literal sets are pinned
+    against each other here instead."""
+    assert verify_mod._EXCERPT_SCHEMA_MARKER_KEY == da._EXCERPT_SCHEMA_MARKER_KEY
+    assert verify_mod._EXPECTED_EXCERPT_SCHEMA_VERSION == da._EXPECTED_EXCERPT_SCHEMA_VERSION
+    assert set(verify_mod._EXCERPT_COLUMNS) == da._AMENDMENT_EXCERPT_COLUMNS["discovery_excerpt"]
+    assert set(verify_mod._EXCERPT_META_KEYS) == (
+        da._AMENDMENT_EXCERPT_META_KEYS
+        | {meta_key for meta_key, _table in da._AMENDMENT_EXCERPT_COUNTS}
+    )
+
+
+def test_excerpt_contract_check_marker_absent_is_a_noop_even_on_a_malformed_shape():
+    """Backward compat at the CHECK-FUNCTION level: with no marker in meta,
+    a table missing a required column and carrying a nonsense row count must
+    still verify clean -- proof the gate is genuinely marker-conditional
+    rather than just happening to pass on a well-formed table."""
+    conn = _excerpt_conn_with_table(omit_columns=["frag_span"])
+    try:
+        assert verify_mod.check_excerpt_contract(conn, {}) == []
+        assert verify_mod.check_excerpt_contract(
+            conn, {"expected_rows_discovery_excerpt": "999"}
+        ) == []
+    finally:
+        conn.close()
+
+
+def test_excerpt_contract_check_full_matrix():
+    conn = _valid_excerpt_conn()
+    try:
+        meta = _excerpt_meta()
+        assert verify_mod.check_excerpt_contract(conn, meta) == []
+
+        # Marker present but the wrong value -> reject-incompatible.
+        bad_value = dict(meta, **{verify_mod._EXCERPT_SCHEMA_MARKER_KEY: "excerpt-v0-wrong"})
+        assert any(
+            "excerpt_schema_version" in v
+            for v in verify_mod.check_excerpt_contract(conn, bad_value)
+        )
+
+        # A count that stopped matching -> violation.
+        bad_count = dict(meta, expected_rows_discovery_excerpt="999")
+        assert any(
+            "expected_rows_discovery_excerpt" in v
+            for v in verify_mod.check_excerpt_contract(conn, bad_count)
+        )
+
+        # Each of the four excerpt meta keys is independently required once
+        # the marker is present.
+        for key in (
+            "expected_rows_discovery_excerpt", "excerpt_ctx",
+            "excerpt_span_cap", "excerpt_refs_manifest_sha256",
+        ):
+            missing = {k: v for k, v in meta.items() if k != key}
+            violations = verify_mod.check_excerpt_contract(conn, missing)
+            assert any(key in v for v in violations), (key, violations)
+    finally:
+        conn.close()
+
+
+def test_excerpt_contract_check_table_missing_when_marker_present():
+    conn = sqlite3.connect(":memory:")
+    try:
+        violations = verify_mod.check_excerpt_contract(
+            conn, _excerpt_meta(expected_rows_discovery_excerpt="0")
+        )
+        assert any("table absent" in v for v in violations)
+    finally:
+        conn.close()
+
+
+def test_excerpt_contract_check_column_missing_when_marker_present():
+    conn = _excerpt_conn_with_table(omit_columns=["frag_span"])
+    try:
+        violations = verify_mod.check_excerpt_contract(
+            conn, _excerpt_meta(expected_rows_discovery_excerpt="0")
+        )
+        assert any("frag_span" in v and "column absent" in v for v in violations)
+    finally:
+        conn.close()
+
+
+def test_excerpt_vocabulary_check_is_a_noop_when_table_absent():
+    conn = sqlite3.connect(":memory:")
+    try:
+        assert verify_mod.check_excerpt_vocabulary(conn) == []
+    finally:
+        conn.close()
+
+
+def test_excerpt_vocabulary_check_catches_bad_work_source_and_blank_span():
+    conn = _valid_excerpt_conn()
+    try:
+        assert verify_mod.check_excerpt_vocabulary(conn) == []
+
+        conn.execute("UPDATE discovery_excerpt SET work_source = 'bogus_source'")
+        assert any(
+            "work_source" in v for v in verify_mod.check_excerpt_vocabulary(conn)
+        )
+
+        conn.execute("UPDATE discovery_excerpt SET work_source = 'direct', frag_span = ''")
+        assert any(
+            "frag_span" in v for v in verify_mod.check_excerpt_vocabulary(conn)
+        )
+
+        # NULL work_source is the legitimate "no work pane" case and must
+        # NEVER be flagged -- a positive control against an over-strict gate.
+        conn.execute("UPDATE discovery_excerpt SET work_source = NULL, frag_span = 'ok'")
+        assert verify_mod.check_excerpt_vocabulary(conn) == []
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # (T) The CERT-01 frame-regression gate
 # ---------------------------------------------------------------------------
 
@@ -467,6 +624,212 @@ def test_the_batch_stays_marker_conditional_except_for_the_column_surfaces_read(
         assert _load_from(tmp_path, monkeypatch) is True, (
             "the locus tables, the count meta keys and `routing_reason` are "
             "still marker-conditional -- no read path selects any of them")
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+# ---------------------------------------------------------------------------
+# Excerpt sidecar (_tmp/PLAN-textvtext-excerpts.md, Track C) -- the loader's
+# OWN marker-conditional contract, independent of `locus_schema_version`
+# above. Layered on top of an already-materialized CD-batch sidecar (the
+# realistic base: the currently-deployed candidate already carries the CD
+# batch), same defect-knob / build-UP convention as
+# `fixture_mod.upgrade_db_to_cd_batch`.
+# ---------------------------------------------------------------------------
+
+_EXCERPT_MARKER_KEY = da._EXCERPT_SCHEMA_MARKER_KEY
+_EXCERPT_MARKER_VALUE = da._EXPECTED_EXCERPT_SCHEMA_VERSION
+_EXCERPT_ROW_VALUES = {
+    "identification_id": "synthetic-ident-1",
+    "evidence_id": "synthetic-ev-1",
+    "a_page_id": "synthetic-page-1",
+    "frag_before": "before",
+    "frag_span": "span text",
+    "frag_after": "after",
+    "frag_clipped": 0,
+    "work_before": "wbefore",
+    "work_span": "wspan",
+    "work_after": "wafter",
+    "work_clipped": 0,
+    "work_source": "direct",
+    "align_score": None,
+    "attribution": "attribution text",
+    "n_spans": 1,
+    "text_layer": "htr",
+    "frag_hl": "[[0, 4]]",
+    "work_hl": "[[0, 5]]",
+    "work_markup": None,
+}
+
+
+def _add_excerpt_layer(
+    db,
+    *,
+    omit_marker=False,
+    marker_value=_EXCERPT_MARKER_VALUE,
+    omit_table=False,
+    omit_columns=(),
+    meta_overrides=None,
+    omit_meta_keys=(),
+):
+    """Layer the excerpt marker/table/meta on top of an already-materialized
+    CD-batch sidecar, IN PLACE. Every defect knob BUILDS UP from a valid
+    shape -- never tears one down -- mirroring
+    ``fixture_mod.upgrade_db_to_cd_batch``'s own convention."""
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        if not omit_table:
+            present_cols = [c for c in _EXCERPT_COLUMNS if c not in omit_columns]
+            conn.execute(f"CREATE TABLE discovery_excerpt ({', '.join(present_cols)})")
+            values = [_EXCERPT_ROW_VALUES[c] for c in present_cols]
+            placeholders = ", ".join("?" for _ in present_cols)
+            conn.execute(
+                f"INSERT INTO discovery_excerpt ({', '.join(present_cols)}) "
+                f"VALUES ({placeholders})",
+                values,
+            )
+
+        meta = {}
+        if not omit_marker:
+            meta[_EXCERPT_MARKER_KEY] = marker_value
+        if not omit_table:
+            (count,) = conn.execute("SELECT COUNT(*) FROM discovery_excerpt").fetchone()
+            meta["expected_rows_discovery_excerpt"] = str(count)
+        else:
+            # Same convention as upgrade_db_to_cd_batch: still write the
+            # count key so a missing-TABLE test fails on the table check,
+            # never vacuously on the missing meta key.
+            meta["expected_rows_discovery_excerpt"] = "0"
+        meta["excerpt_ctx"] = "90"
+        meta["excerpt_span_cap"] = "600"
+        meta["excerpt_refs_manifest_sha256"] = "a" * 64
+        if meta_overrides:
+            meta.update({k: str(v) for k, v in meta_overrides.items()})
+        for key in omit_meta_keys:
+            meta.pop(key, None)
+
+        for key, value in meta.items():
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+        for key in omit_meta_keys:
+            conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _load_excerpt_case(tmp_path, monkeypatch, **excerpt_kwargs):
+    db = fixture_mod.materialize_cd_batch_sidecar(tmp_path)
+    _add_excerpt_layer(db, **excerpt_kwargs)
+    # Manifest content_hash must reflect the bytes AFTER the excerpt layer,
+    # or the loader's hash check refuses the asset before the excerpt
+    # contract ever runs -- masking the defect under test.
+    fixture_mod.write_manifest(tmp_path, db)
+    return _load_from(tmp_path, monkeypatch)
+
+
+def test_loader_ignores_excerpt_amendment_when_marker_and_table_are_both_absent(
+        tmp_path, monkeypatch):
+    """Backward compat: an asset that predates the excerpt bake (or the
+    currently-deployed candidate, verified before Track B runs) keeps
+    loading -- the excerpt table is not required when its marker is absent."""
+    try:
+        fixture_mod.materialize_cd_batch_sidecar(tmp_path)
+        assert _load_from(tmp_path, monkeypatch) is True
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_accepts_the_full_excerpt_shape(tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(tmp_path, monkeypatch) is True
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_refuses_excerpt_marker_with_wrong_value(tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(
+            tmp_path, monkeypatch, marker_value="excerpt-v0-wrong"
+        ) is False
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_refuses_excerpt_marker_present_but_table_missing(tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(tmp_path, monkeypatch, omit_table=True) is False
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_refuses_excerpt_marker_present_but_count_mismatch(tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(
+            tmp_path, monkeypatch,
+            meta_overrides={"expected_rows_discovery_excerpt": "999"},
+        ) is False
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_refuses_excerpt_marker_present_but_column_missing(tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(
+            tmp_path, monkeypatch, omit_columns=["frag_span"]
+        ) is False
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_refuses_excerpt_marker_present_but_expected_rows_key_missing(
+        tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(
+            tmp_path, monkeypatch, omit_meta_keys=["expected_rows_discovery_excerpt"]
+        ) is False
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_refuses_excerpt_marker_present_but_ctx_key_missing(tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(
+            tmp_path, monkeypatch, omit_meta_keys=["excerpt_ctx"]
+        ) is False
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_refuses_excerpt_marker_present_but_span_cap_key_missing(tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(
+            tmp_path, monkeypatch, omit_meta_keys=["excerpt_span_cap"]
+        ) is False
+    finally:
+        monkeypatch.undo()
+        _restore_loader_state()
+
+
+def test_loader_refuses_excerpt_marker_present_but_manifest_sha_key_missing(
+        tmp_path, monkeypatch):
+    try:
+        assert _load_excerpt_case(
+            tmp_path, monkeypatch, omit_meta_keys=["excerpt_refs_manifest_sha256"]
+        ) is False
     finally:
         monkeypatch.undo()
         _restore_loader_state()

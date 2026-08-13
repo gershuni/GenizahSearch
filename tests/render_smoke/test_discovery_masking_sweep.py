@@ -529,10 +529,25 @@ def _render_findings_page(*, lang: str, findings: Any, facets: Any = None,
     async def _launch(*_a, **_k):
         return dict(launch_envelope)
 
+    # excerpt-v1 (2026-08-13): availability answered TRUE so `_render_row`
+    # builds the `load_excerpt` closure, and the read stubbed so the driven
+    # click on the compare-texts toggle EXECUTES that closure -- the
+    # line-granular gate named exactly those three lines when the page-level
+    # capture ran without this.
+    async def _excerpts_on():
+        return True
+
+    async def _excerpt(_identification_id):
+        return {"status": "ok",
+                "items": [_excerpt_capture_row("טקסט קטע ההשוואה")],
+                "total": 1, "meta": {}}
+
     patch = _Patch()
     patch.setattr(fp, "get_findings_enveloped", _findings)
     patch.setattr(fp, "get_findings_facets_enveloped", _facets)
     patch.setattr(fp, "get_launch_stats_enveloped", _launch)
+    patch.setattr(fp, "excerpts_available", _excerpts_on)
+    patch.setattr(fp, "get_excerpt_enveloped", _excerpt)
     patch.setattr(fp, "discovery_meta",
                   lambda key: as_of if key == "data_as_of" else None)
 
@@ -1021,6 +1036,45 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
                 tf.finding_row(neutral_title=title), ln,
                 on_suppress=_noop_suppress),
              fr.ROW_SUPPRESS_CLASS),
+            # h) THE TEXT-VS-TEXT DISCLOSURE (excerpt-v1, 2026-08-13), opened
+            #    onto every sentence it can put on a screen. The pieces are
+            #    CORPUS TEXT -- the one payload in either surface that carries
+            #    reference-edition content -- so each state is driven with the
+            #    seed standing where restricted text would stand:
+            #    h1) the full direct row (both panes, attribution, the HTR
+            #        qualifier, the multi-span line),
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                load_excerpt=_excerpt_loader(seed=seed)),
+             fr.ROW_EXCERPT_CLASS + "-toggle"),
+            #    h2) a reprojected row -- the alignment-disclosure sentence,
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                load_excerpt=_excerpt_loader(seed=seed, mode="reprojected")),
+             fr.ROW_EXCERPT_CLASS + "-toggle"),
+            #    h3) a masked-edition row -- the availability sentence, with the
+            #        fragment pane still painted,
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                load_excerpt=_excerpt_loader(seed=seed, mode="nowork")),
+             fr.ROW_EXCERPT_CLASS + "-toggle"),
+            #    h4) the honest empty (ok, no row),
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                load_excerpt=_excerpt_loader(seed=seed, mode="empty")),
+             fr.ROW_EXCERPT_CLASS + "-toggle"),
+            #    h5) a RAISED loader -- the except branch, the named failure and
+            #        its retry,
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                load_excerpt=_excerpt_loader(seed=seed, mode="raise")),
+             fr.ROW_EXCERPT_CLASS + "-toggle"),
+            #    h6) a non-ok envelope -- the same failure surface by the other
+            #        route.
+            (lambda ln=lang: fr.render_finding_row(
+                tf.finding_row(neutral_title=title), ln,
+                load_excerpt=_excerpt_loader(seed=seed, mode="busy")),
+             fr.ROW_EXCERPT_CLASS + "-toggle"),
         ):
             _take(_render_component(driver) if marker is None
                   else tf.render_and_click(driver, marker))
@@ -1041,6 +1095,53 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
              fr.ROW_CHILDREN_STATE_CLASS + "-more"])
         _take(client)
     return texts, hrefs
+
+
+def _excerpt_loader(*, seed: Optional[str], mode: str = "direct"):
+    """A `load_excerpt` for every state the disclosure can render. The six
+    text pieces and the attribution carry the seed where restricted corpus
+    text would stand -- this is the ONE payload in either surface whose values
+    are reference-edition content rather than titles and identifiers."""
+    piece = _seeded(seed, "טקסט קטע ההשוואה")
+
+    async def _load(_row):
+        if mode == "raise":
+            raise RuntimeError("forced for the capture")
+        if mode == "busy":
+            return {"status": "busy", "items": [], "total": 0, "meta": {}}
+        if mode == "empty":
+            return {"status": "ok", "items": [], "total": 0, "meta": {}}
+        row = _excerpt_capture_row(piece)
+        if mode == "reprojected":
+            row["work_source"] = "reprojected"
+            row["align_score"] = 99.0
+        elif mode == "nowork":
+            row.update(work_before=None, work_span=None, work_after=None,
+                       work_clipped=None, work_source=None, attribution=None)
+        return {"status": "ok", "items": [row], "total": 1, "meta": {}}
+
+    return _load
+
+
+def _excerpt_capture_row(piece: str) -> Dict[str, Any]:
+    """One full excerpt row: htr layer (the qualifier line), n_spans > 1 (the
+    multi-span line), word-level highlight intervals (the interval-composed
+    run path) AND the JA brace markup with the seed INSIDE a {...} mark -- so
+    the capture paints every composition branch, and the scan proves a
+    restricted string inside a colored Hebrew-word span would be seen."""
+    return {
+        "identification_id": "i-capture", "evidence_id": "e-capture",
+        "a_page_id": "p-capture",
+        "frag_before": piece, "frag_span": piece, "frag_after": piece,
+        "frag_clipped": 1,
+        "work_before": piece, "work_span": piece + " {" + piece + "}",
+        "work_after": piece,
+        "work_clipped": 0, "work_source": "direct", "align_score": None,
+        "attribution": piece, "n_spans": 3, "text_layer": "htr",
+        "frag_hl": [[0, max(1, len(piece) // 2)]],
+        "work_hl": [[0, max(1, len(piece) // 2)]],
+        "work_markup": "ja_braces",
+    }
 
 
 def _children_loader(*, seed: Optional[str], total: Any):
@@ -1173,6 +1274,12 @@ def payload_map(seed: Optional[str] = None) -> Dict[str, List[Tuple[str, Any]]]:
         "get_launch_stats_enveloped": (
             [(n, e) for n, e in findings_envelopes if n.startswith("launch/")]
             + [("launch_shades", panel["launch_shades"])]),
+        # excerpt-v1 (2026-08-13): the one payload whose values are CORPUS TEXT.
+        # The seed stands in every text piece and the attribution.
+        "get_excerpt_enveloped": [("excerpt", {
+            "status": "ok",
+            "items": [_excerpt_capture_row(_seeded(seed, "טקסט קטע ההשוואה"))],
+            "total": 1, "meta": {}})],
     }
 
 
@@ -2246,20 +2353,26 @@ def test_no_launch_figure_reaches_the_CHANGELOG():
           "and audience, and nowhere else.")
 
 
-def test_the_changelog_says_flag_gated_and_claims_no_launch():
-    """The release note must not read as a user-facing launch. Deployed and
-    gated are different claims, and the difference is the posture of the whole
-    milestone."""
+def test_the_changelog_states_the_gate_alongside_the_visibility_claim():
+    """AMENDED 2026-08-13. The original assertion pinned the pre-flip heading
+    ("Built and deployed, NOT public") and went red when commit 04434714
+    correctly rewrote the changelog for the 2026-08-08 flag flip -- the
+    heading changed and this test was not updated with it. The posture it
+    protected has genuinely changed: the surfaces ARE publicly visible now,
+    so "claims no launch" is no longer the honest requirement.
+
+    What still must hold, and is asserted instead: the entry that announces
+    visibility must state the fail-closed gate IN THE SAME SECTION (the flag
+    is necessary but not sufficient), so the changelog never reads as an
+    ungated launch."""
     changelog = _read("CHANGELOG.md")
-    section_start = changelog.index("### Built and deployed, NOT public")
-    section = changelog[section_start:changelog.index("### New Features", section_start)]
-    for phrase in ("DISCOVERY_ENABLED", "hide", "not live"):
+    section_start = changelog.index("### LIVE (beta) — discovery read surfaces")
+    section = changelog[section_start:changelog.index("###", section_start + 3)]
+    for phrase in ("DISCOVERY_ENABLED", "fail-closed",
+                   "necessary but not sufficient", "discovery_available"):
         assert phrase.lower() in section.lower(), (
-            f"the changelog entry does not say {phrase!r}")
-    ASSERTED_PROHIBITED = ("now available to", "is now live", "launched", "public beta")
-    for phrase in ASSERTED_PROHIBITED:
-        assert phrase not in section.lower(), (
-            f"the changelog entry claims a launch: {phrase!r}")
+            f"the changelog's visibility section no longer states {phrase!r} -- "
+            "the gate must be claimed wherever the visibility is")
 
 
 def test_zz_report_what_this_sweep_scanned(clean_capture, capsys):

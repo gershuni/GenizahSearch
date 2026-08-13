@@ -146,6 +146,7 @@ SWEEP_INPUTS = {
     "rule_sentence": [{}],
     "recall_disclaimer": [{}],
     "novelty_strings": [{}],
+    "excerpt_strings": [{}],
     "novelty_unknown_badge": [{}],
     "filter_codes": [{}],
     "filter_code": [{"relation_kind": k} for k in STORED_RELATION_KEYS],

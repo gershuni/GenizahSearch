@@ -384,6 +384,52 @@ SURFACE_FACET_FIELDS: Tuple[str, ...] = (
     "count",
 )
 
+#: Text-vs-text (`PLAN-textvtext-excerpts.md`): ONE `discovery_excerpt` row --
+#: the bake-time-selected best eligible witness for an identification,
+#: PLAIN TEXT pieces only (no HTML; the renderer composes and escapes).
+#:
+#: What it deliberately does NOT name, and why:
+#:   * anything from `discovery_evidence`/`discovery_claim` beyond the two ids
+#:     needed to LABEL the row (`evidence_id`, `a_page_id`) -- the excerpt row
+#:     is baked from those tables but is its own frozen output shape, and this
+#:     surface never re-derives a band, a relation or a coverage figure from
+#:     the pieces here.
+#:   * anything about the MASKED alignment query the bake used to re-project a
+#:     Bible work (`align_score` is the only number that survives -- the
+#:     masked stream itself, and the corpus it belongs to, never exist in this
+#:     table by construction; see the Architecture note in the owning plan).
+SURFACE_EXCERPT_FIELDS: Tuple[str, ...] = (
+    "identification_id",
+    "evidence_id",
+    "a_page_id",
+    # the fragment (manuscript) side -- three plain-text pieces + whether the
+    # context window was clipped against the page boundary
+    "frag_before",
+    "frag_span",
+    "frag_after",
+    "frag_clipped",
+    # the work (edition) side -- None/None/None/None is the honest "no work
+    # pane" state (masked non-Bible work, mismatched stream, below-threshold
+    # re-projection); `work_source` names WHICH of those this row is
+    "work_before",
+    "work_span",
+    "work_after",
+    "work_clipped",
+    "work_source",
+    # reprojected rows only (`work_source == 'reprojected'`); None otherwise
+    "align_score",
+    "attribution",
+    "n_spans",
+    "text_layer",
+    # round 2 (2026-08-13): word-level parallel-highlight intervals, decoded
+    # by the service to lists of [start, end) char pairs into the span pieces
+    # (None = not computed -> whole-span fallback), and the JA brace-markup
+    # flag ('ja_braces' | None) the renderer keys the {...} transform on.
+    "frag_hl",
+    "work_hl",
+    "work_markup",
+)
+
 _ALL_ALLOWLISTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("SURFACE_CLAIM_FIELDS", SURFACE_CLAIM_FIELDS),
     ("SURFACE_WORK_SUMMARY_FIELDS", SURFACE_WORK_SUMMARY_FIELDS),
@@ -392,6 +438,7 @@ _ALL_ALLOWLISTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("SURFACE_EXPANSION_FIELDS", SURFACE_EXPANSION_FIELDS),
     ("SURFACE_LAUNCH_SHADE_FIELDS", SURFACE_LAUNCH_SHADE_FIELDS),
     ("SURFACE_FACET_FIELDS", SURFACE_FACET_FIELDS),
+    ("SURFACE_EXCERPT_FIELDS", SURFACE_EXCERPT_FIELDS),
 )
 
 
@@ -469,6 +516,11 @@ def surface_safe_launch_shade(row: Mapping[str, Any]) -> Dict[str, Any]:
 def surface_safe_facet(row: Mapping[str, Any]) -> Dict[str, Any]:
     """One domain / author / work facet row."""
     return _project(row, SURFACE_FACET_FIELDS)
+
+
+def surface_safe_excerpt(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One text-vs-text `discovery_excerpt` row (`PLAN-textvtext-excerpts.md`)."""
+    return _project(row, SURFACE_EXCERPT_FIELDS)
 
 
 # ---------------------------------------------------------------------------

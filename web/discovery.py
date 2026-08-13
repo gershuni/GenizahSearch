@@ -86,6 +86,23 @@ async def get_version() -> Optional[str]:
         return None
 
 
+async def excerpts_available() -> bool:
+    """PLAN-textvtext-excerpts.md: whether the text-vs-text toggle may show at
+    all -- False on a flag-off/absent/not-ready sidecar OR a loaded sidecar
+    that predates the excerpt-v1 marker+table (an older asset, per the
+    plan's "old-asset/new-code: toggle hidden" rule). A transient query
+    timeout ALSO fails to False here rather than raising -- the gate a surface
+    checks before deciding whether to render a control must itself never be
+    the thing that breaks the render."""
+    if not discovery_available():
+        return False
+    try:
+        return await _service.excerpts_available_async()
+    except DiscoveryUnavailable:
+        logger.info("discovery.excerpts_available: temporarily unavailable")
+        return False
+
+
 async def get_claims_for_page(
     page_id: str, *, page: int = 1, page_size: Optional[int] = None
 ) -> List[Dict[str, Any]]:
@@ -493,6 +510,36 @@ async def get_evidence(
     except DiscoveryUnavailable:
         logger.info("discovery.get_evidence: temporarily unavailable for claim_id=%s", claim_id)
         return []
+
+
+async def get_excerpt_enveloped(identification_id: str) -> Dict[str, Any]:
+    """The text-vs-text excerpt for one identification, the ENVELOPED shape
+    (D-13, `PLAN-textvtext-excerpts.md`) -- `{status, items, total, meta}`.
+
+    ENVELOPED end-to-end, deliberately NOT a legacy list pass-through: this
+    read is brand new, so unlike `get_evidence`/`get_work_witnesses` above it
+    carries no pre-existing `[]`-swallowing caller to stay compatible with.
+    `items` is `[]` with `status='ok'` for the honest "no excerpt for this
+    identification" case; a query failure or timeout reports `unavailable`/
+    `timeout` instead, never a silent ok-with-zero.
+
+    Callers should check `excerpts_available()` before showing the toggle at
+    all (the toggle-hidden rule); this pass-through does not re-check it
+    itself and is safe to call even when unavailable -- `discovery_available()`
+    still gates it, and the service's own `unavailable` classification covers
+    an older asset with no `discovery_excerpt` table.
+    """
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_excerpt_enveloped_async(identification_id)
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        logger.info(
+            "discovery.get_excerpt_enveloped: timeout for identification_id=%s",
+            identification_id)
+        return timeout_envelope(meta={"reason": "query_timeout"})
 
 
 async def get_work_witnesses(

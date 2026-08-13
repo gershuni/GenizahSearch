@@ -4154,3 +4154,290 @@ def test_a_warmup_miss_cannot_outlive_the_render_that_cached_it(monkeypatch):
         "`_render_results` now awaits, so csv_bank can change mid-render and even "
         "a per-render negative cache can go stale")
     ASSERTION_COUNT["n"] += 1
+
+
+# ---------------------------------------------------------------------------
+# The text-vs-text disclosure (excerpt-v1, 2026-08-13)
+# ---------------------------------------------------------------------------
+
+def _excerpt_row(**overrides) -> Dict[str, Any]:
+    """One projected discovery_excerpt row, the six plain-text pieces."""
+    row = {
+        "identification_id": "i-0001", "evidence_id": "e-0001",
+        "a_page_id": "p-0001",
+        "frag_before": "מלים שלפני", "frag_span": "גוף הקטע בכתב היד",
+        "frag_after": "מלים שאחרי", "frag_clipped": 0,
+        "work_before": "טרם", "work_span": "נוסח המהדורה של החיבור",
+        "work_after": "בתר", "work_clipped": 0,
+        "work_source": "direct", "align_score": None,
+        "attribution": '"Tanakh, Psalms", via Sefaria.org. License: Public Domain.',
+        "n_spans": 1, "text_layer": "htr",
+        "frag_hl": None, "work_hl": None, "work_markup": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def _excerpt_envelope(rows_=(), status="ok"):
+    return {"status": status, "items": list(rows_), "total": len(rows_),
+            "meta": {}}
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_excerpt_toggle_is_offered_on_the_leaf_only_and_only_when_injected(lang):
+    """Grouped rows span identifications, so a compare-texts control there would
+    have to choose whose texts to show -- adjudication, which no surface here
+    does. And with NO loader injected (an older asset), the leaf renders the
+    pre-excerpt anatomy: no dead control."""
+    async def _load(_item):
+        return _excerpt_envelope([_excerpt_row()])
+
+    leaf = _client_render(lambda: fr.render_finding_row(
+        finding_row(), lang, load_excerpt=_load))
+    assert _elements_with_class(leaf, fr.ROW_EXCERPT_CLASS + "-toggle"), (
+        "the identification leaf offers no compare-texts toggle")
+
+    for unit in (FINDINGS_UNIT_MANUSCRIPT, FINDINGS_UNIT_WORK):
+        grouped = _client_render(lambda u=unit: fr.render_finding_row(
+            finding_row(unit=u), lang, load_excerpt=_load))
+        assert not _elements_with_class(
+            grouped, fr.ROW_EXCERPT_CLASS + "-toggle"), unit
+
+    bare = _client_render(lambda: fr.render_finding_row(finding_row(), lang))
+    assert not _elements_with_class(bare, fr.ROW_EXCERPT_CLASS + "-toggle"), (
+        "a leaf with no injected loader still renders a toggle -- that control "
+        "cannot work against an asset without excerpts")
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_excerpt_is_fetched_on_first_open_not_with_the_row():
+    """A page of 50 rows must not issue 50 sidecar reads nobody asked for."""
+    calls = {"n": 0}
+
+    async def _load(_item):
+        calls["n"] += 1
+        return _excerpt_envelope([_excerpt_row()])
+
+    _client_render(lambda: fr.render_finding_row(
+        finding_row(), "en", load_excerpt=_load))
+    assert calls["n"] == 0, "the excerpt was fetched with the row"
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), "en", load_excerpt=_load),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    assert calls["n"] == 1
+    text = scoped_text(client, fr.ROW_EXCERPT_CLASS)
+    assert "גוף הקטע בכתב היד" in text
+    assert "נוסח המהדורה של החיבור" in text
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_a_failed_excerpt_load_says_so_and_offers_retry(lang):
+    """A raised read and a non-ok envelope both render the NAMED failure with a
+    retry -- never an empty body, which is indistinguishable from 'no excerpt'."""
+    async def _raise(_item):
+        raise RuntimeError("boom")
+
+    async def _busy(_item):
+        return _excerpt_envelope(status="busy")
+
+    for load in (_raise, _busy):
+        client = render_and_click(
+            lambda load=load: fr.render_finding_row(
+                finding_row(), lang, load_excerpt=load),
+            fr.ROW_EXCERPT_CLASS + "-toggle")
+        text = scoped_text(client, fr.ROW_EXCERPT_CLASS + "-state")
+        assert ds.excerpt_strings(lang)["failed"] in text, (
+            "a failed excerpt load rendered no named failure")
+        assert ds.retry_label(lang) in scoped_text(client, fr.ROW_EXCERPT_CLASS)
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_an_ok_empty_excerpt_is_an_honest_empty_not_an_outage(lang):
+    """7,216 identifications carry no excerpt-eligible evidence. Theirs is a
+    fact ('no excerpts for this identification'), not a failure, and it gets
+    different copy with no retry."""
+    async def _empty(_item):
+        return _excerpt_envelope([])
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), lang, load_excerpt=_empty),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    text = scoped_text(client, fr.ROW_EXCERPT_CLASS + "-state")
+    assert ds.excerpt_strings(lang)["none"] in text
+    assert ds.excerpt_strings(lang)["failed"] not in text
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_a_missing_work_span_renders_the_unavailable_copy_not_an_empty_pane(lang):
+    """The masked-edition rows (3,463 in the baked asset) show the fragment
+    pane plus an availability sentence that never says WHY the edition is
+    undisplayable."""
+    async def _load(_item):
+        return _excerpt_envelope([_excerpt_row(
+            work_before=None, work_span=None, work_after=None,
+            work_source=None, attribution=None)])
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), lang, load_excerpt=_load),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    text = scoped_text(client, fr.ROW_EXCERPT_CLASS)
+    assert ds.excerpt_strings(lang)["work_unavailable"] in text
+    assert "גוף הקטע בכתב היד" in text, "the fragment pane must still render"
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_reprojected_note_and_attribution_appear_only_when_carried(lang):
+    """work_source='reprojected' discloses that the passage was LOCATED in this
+    edition by alignment; a direct row must not carry that sentence."""
+    async def _reproj(_item):
+        return _excerpt_envelope([_excerpt_row(
+            work_source="reprojected", align_score=99.7)])
+
+    async def _direct(_item):
+        return _excerpt_envelope([_excerpt_row()])
+
+    reproj = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), lang, load_excerpt=_reproj),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    strings = ds.excerpt_strings(lang)
+    reproj_text = scoped_text(reproj, fr.ROW_EXCERPT_CLASS)
+    assert strings["reprojected_note"] in reproj_text
+    assert "Sefaria.org" in reproj_text, "the attribution line is missing"
+
+    direct = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), lang, load_excerpt=_direct),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    assert strings["reprojected_note"] not in scoped_text(
+        direct, fr.ROW_EXCERPT_CLASS)
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_htr_qualifier_is_keyed_on_the_text_layer():
+    """'automated transcription' belongs to the automated layer only -- FGP and
+    PGP transcriptions are human work and must not carry it."""
+    async def _htr(_item):
+        return _excerpt_envelope([_excerpt_row(text_layer="htr")])
+
+    async def _fgp(_item):
+        return _excerpt_envelope([_excerpt_row(text_layer="fgp")])
+
+    note = ds.excerpt_strings("en")["frag_htr_note"]
+    htr = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), "en", load_excerpt=_htr),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    assert note in scoped_text(htr, fr.ROW_EXCERPT_CLASS)
+    fgp = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), "en", load_excerpt=_fgp),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    assert note not in scoped_text(fgp, fr.ROW_EXCERPT_CLASS)
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_excerpt_pieces_are_escaped_before_entering_markup():
+    """The six pieces are corpus text rendered through `ui.html`; a piece
+    carrying markup must land as TEXT, not as elements. Positive control: the
+    probe seeds a live tag and asserts it arrives entity-escaped."""
+    async def _load(_item):
+        return _excerpt_envelope([_excerpt_row(
+            frag_span='<img src=x onerror=alert(1)>')])
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), "en", load_excerpt=_load),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    # `_subtree_texts` surfaces the `ui.html` element's raw content string, so
+    # the entity-escaped form is directly observable here.
+    html_out = scoped_text(client, fr.ROW_EXCERPT_CLASS)
+    assert "&lt;img" in html_out, "the seeded tag was not entity-escaped"
+    assert "<img src=x" not in html_out, "corpus text reached the DOM as markup"
+    ASSERTION_COUNT["n"] += 1
+
+
+# ---------------------------------------------------------------------------
+# Round 2 (owner, 2026-08-13): word-level parallel highlight, JA {...} marks,
+# and lineation. `_compose_excerpt_piece` is a pure function, so its branch
+# behavior is asserted directly; one driven test proves the panes consume it.
+# ---------------------------------------------------------------------------
+
+def test_word_intervals_highlight_only_the_matched_words():
+    """With intervals carried, the highlight is the MATCHED WORDS -- the
+    unmatched remainder of the span stays plain text."""
+    out = fr._compose_excerpt_piece("אבג דהו זחט", [[0, 3], [8, 11]], False)
+    hl = fr.ROW_EXCERPT_CLASS + "-hl"
+    assert f'<span class="{hl}">אבג</span>' in out
+    assert f'<span class="{hl}">זחט</span>' in out
+    assert "דהו" in out and f'">דהו' not in out.replace(
+        f'<span class="{hl}">', ""), "the unmatched word was highlighted"
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_null_intervals_fall_back_to_the_whole_span():
+    """A pre-round-2 asset (or a row with no work side) carries NULL intervals;
+    the whole span keeps the highlight the offsets themselves claim."""
+    out = fr._compose_excerpt_piece("אבג דהו", None, False, whole_span=True)
+    hl = fr.ROW_EXCERPT_CLASS + "-hl"
+    assert out == f'<span class="{hl}">אבג דהו</span>'
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_ja_braces_are_removed_and_their_content_colored():
+    """{...} is the J-corpus Hebrew-word convention: the braces go, the content
+    gets the -heb class -- and an ORPHAN brace (a pair split by the offset
+    slice) is dropped without coloring anything."""
+    heb = fr.ROW_EXCERPT_CLASS + "-heb"
+    out = fr._compose_excerpt_piece("אלכלאם {שבת} אלעברי", None, True)
+    assert "{" not in out and "}" not in out
+    assert f'<span class="{heb}">שבת</span>' in out
+
+    orphan = fr._compose_excerpt_piece("אלכלאם {שבת", None, True)
+    assert "{" not in orphan
+    assert heb not in orphan, "an orphan brace painted a Hebrew-word claim"
+
+    # ...and the transform NEVER fires without the flag: a literal brace in
+    # any other corpus stays a literal brace.
+    plain = fr._compose_excerpt_piece("א {ב} ג", None, False)
+    assert "{" in plain and heb not in plain
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_hl_and_heb_overlap_without_misnesting():
+    """A matched word inside a {...} mark carries BOTH classes on one run --
+    the char-flag composition cannot produce misnested tags."""
+    text = "{אבג} דהו"
+    out = fr._compose_excerpt_piece(text, [[0, 5]], True)
+    assert f'class="{fr.ROW_EXCERPT_CLASS}-hl {fr.ROW_EXCERPT_CLASS}-heb"' in out
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_newlines_survive_the_composition():
+    """The manuscript lineation is the newline characters + `pre-wrap`; the
+    composer must pass them through every branch untouched."""
+    text = "שורה אחת\nשורה שניה"
+    for intervals, ja in (([[0, 4]], False), (None, True), (None, False)):
+        out = fr._compose_excerpt_piece(text, intervals, ja,
+                                        whole_span=intervals is None)
+        assert "\n" in out, f"lineation lost (intervals={intervals}, ja={ja})"
+    ASSERTION_COUNT["n"] += 1
+
+
+def test_the_pane_consumes_intervals_and_markup_from_the_row():
+    """Driven end-to-end: a row carrying intervals + the JA flag renders
+    word-level highlights and stripped braces inside the panes."""
+    async def _load(_item):
+        return _excerpt_envelope([_excerpt_row(
+            frag_span="אבג דהו", frag_hl=[[0, 3]],
+            work_span="אבג {שבת} דהו", work_hl=[[0, 3]],
+            work_markup="ja_braces")])
+
+    client = render_and_click(
+        lambda: fr.render_finding_row(finding_row(), "en", load_excerpt=_load),
+        fr.ROW_EXCERPT_CLASS + "-toggle")
+    text = scoped_text(client, fr.ROW_EXCERPT_CLASS)
+    assert f'<span class="{fr.ROW_EXCERPT_CLASS}-hl">אבג</span>' in text
+    assert f'<span class="{fr.ROW_EXCERPT_CLASS}-heb">שבת</span>' in text
+    assert "{" not in text.replace("{count}", ""), "braces reached the pane"
+    ASSERTION_COUNT["n"] += 1

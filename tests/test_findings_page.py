@@ -1336,6 +1336,14 @@ def test_page_load_dispatch_total_is_the_sum_over_the_reads_the_page_issues():
         reads.append("suppressed")
         return await wd.suppressed_identification_ids(*args, **kwargs)
 
+    # THE FIFTH READ (excerpt-v1, 2026-08-13): the per-refresh excerpts
+    # availability probe. One dispatch on this first (uncached) call; the
+    # service memoizes it per (path, version), so the criterion stays "one
+    # dispatch per read the page ISSUES".
+    async def _counting_excerpts_available(*args, **kwargs):
+        reads.append("excerpts_available")
+        return await wd.excerpts_available(*args, **kwargs)
+
     _ensure_sim()
     from nicegui import core, ui
     from nicegui.client import Client
@@ -1361,6 +1369,8 @@ def test_page_load_dispatch_total_is_the_sum_over_the_reads_the_page_issues():
                 stack.enter_context(patch.object(fp, "get_launch_stats_enveloped", _counting_launch))
                 stack.enter_context(patch.object(
                     fp, "suppressed_identification_ids", _counting_suppressed))
+                stack.enter_context(patch.object(
+                    fp, "excerpts_available", _counting_excerpts_available))
                 with Client(ui.page("/_findings_dispatch_probe")) as client:
                     with client:
                         await fp.create_findings_page()

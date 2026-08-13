@@ -540,6 +540,8 @@ _READ_PATH_ARGS = {
     # 136-14: the findings facet cascade. `domain` is the first level, and the
     # only one that needs no level above it selected.
     "level": "domain",
+    # excerpt-v1: the text-vs-text read is keyed by the identification.
+    "identification_id": "i-nonexistent",
 }
 
 # The unavailable envelope each wrapper shape returns. Anything else is data.

@@ -1,0 +1,541 @@
+# -*- coding: utf-8 -*-
+"""Bake text-vs-text excerpts into a PUBLIC discovery sidecar (excerpt-v1).
+
+Runs AFTER project_discovery_public.py, on the public asset only, and writes a
+new `discovery_excerpt` table: per identification, six PLAIN-TEXT pieces
+({before, span, after} for the fragment side and for the reference-work side)
+for the identification's best eligible witness-evidence row. The renderer
+composes and escapes; no HTML ever enters the sidecar.
+
+Why bake-time and not runtime: the offsets in `discovery_evidence` are
+coordinates in normalized letter streams that only exist next to the bake
+corpus (the HTR page snapshots and the reference editions). Baking excerpts
+freezes exactly what the matcher saw and leaves the web app with zero
+runtime normalization and zero reference-corpus dependency.
+
+FRAME-HASH INVARIANCE: this script must never touch `discovery_claim` or
+`discovery_evidence` (compute_frame_content_hash reads only those two), so a
+baked asset keeps the certified frame hash byte-for-byte. The gate step runs
+scripts/check_frame_regression.py on the (input, output) pair to prove it.
+
+MASKED-CORPUS SAFETY (read before editing): ~70% of identifications were
+matched against a reference edition whose text must never ship. For the
+Tanakh subset (~93% of that mass) this script re-projects the span into the
+PUBLIC-DOMAIN Sefaria Tanakh staged in refs_staging: the masked edition's
+letter stream is used ONLY as an in-memory alignment query and is never
+written to the output DB, a log line, an exception message, or a temp file.
+Non-Tanakh masked works get NO work-side pieces (the UI shows an honest
+"not available for display" state). The projection's own masking gate
+(project_discovery_public.run_masking_gate) re-runs over the final artifact.
+
+Work-side sources, by edition class (crosswalk ref-id prefix):
+  REF2:  refs_staging body file, exact offsets. The recomputed stream must
+         EQUAL the pickle stream for that ref (prepped_for discipline) or the
+         work side is dropped for that work -- never silently approximated.
+  J:     per_doc raw file (whole file, header included -- matching the
+         builder), exact offsets, same stream-equality assert.
+  M:     Tanakh only, re-projection (above); everything else -> no work pane.
+
+Usage (all inputs explicit -- no defaults for asset paths, per the
+stage_cd_preview lesson that a defaulted path silently stages stale data):
+
+  python scripts/bake_discovery_excerpts.py <public.db> --out <baked.db> \
+      --crosswalk <crosswalk.json> --refs-staging <dir> --ja-dir <dir> \
+      --fullcorpus <fullcorpus_v2.db> --ref-pkl <ref_corpus_v2.pkl> \
+      [--ctx 90] [--span-cap 600] [--min-align-score 65] [--limit N]
+
+`--limit` exists for a fast dev smoke ONLY; every gate runs on a full bake.
+"""
+from __future__ import annotations
+
+import argparse
+import difflib
+import hashlib
+import json
+import pickle
+import shutil
+import sqlite3
+import sys
+import time
+import unicodedata
+from collections import Counter, OrderedDict
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+_REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO))
+sys.path.insert(0, str(_REPO / "scripts"))
+
+from shared.discovery_locus import norm_stream  # noqa: E402
+
+EXCERPT_SCHEMA_VERSION = "excerpt-v1"
+
+_DDL = """
+CREATE TABLE discovery_excerpt (
+    identification_id TEXT PRIMARY KEY,
+    evidence_id       TEXT NOT NULL,
+    a_page_id         TEXT NOT NULL,
+    frag_before       TEXT NOT NULL,
+    frag_span         TEXT NOT NULL,
+    frag_after        TEXT NOT NULL,
+    frag_clipped      INTEGER NOT NULL,
+    work_before       TEXT,
+    work_span         TEXT,
+    work_after        TEXT,
+    work_clipped      INTEGER,
+    work_source       TEXT,
+    align_score       REAL,
+    attribution       TEXT,
+    n_spans           INTEGER,
+    text_layer        TEXT,
+    frag_hl           TEXT,
+    work_hl           TEXT,
+    work_markup       TEXT
+)
+"""
+
+# The best-row rule, frozen: highest matched_letters, ties broken by
+# evidence_id ascending. Deterministic across bakes.
+_BEST_ROWS_SQL = """
+SELECT di.identification_id, de.evidence_id, de.a_page_id,
+       de.matched_letters, de.n_spans, de.text_layer,
+       de.span_start, de.span_end, de.w_start, de.w_end,
+       de.aligned_page_start, de.aligned_page_end, dc.work_id
+  FROM discovery_identification di
+  JOIN discovery_evidence de ON de.sys_id = di.sys_id
+  JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+       AND dc.work_id IN (SELECT work_id FROM works
+                           WHERE canonical_work_id = di.canonical_work_id)
+ WHERE de.evidence_kind = 'witness'
+   AND (de.routing_status = 'shipped'
+        OR de.adjudication_status = 'human_confirmed')
+"""
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 22), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def pieces(nfc: str, offs, lo: int, hi: int, ctx: int,
+           cap: int) -> Tuple[str, str, str, int]:
+    """{before, span, after} in readable NFC text for stream span [lo, hi).
+
+    `offs[i]` is the NFC index of stream letter i (shared.discovery_locus
+    contract), so every slice below is on the NFC string. Spans longer than
+    `cap` stream letters keep their first and last cap/2 letters joined by an
+    ellipsis -- a capped span is FLAGGED, never silently shortened.
+    """
+    a0 = int(offs[lo])
+    z0 = int(offs[hi - 1]) + 1
+    before = nfc[max(0, a0 - ctx):a0]
+    after = nfc[z0:z0 + ctx]
+    if hi - lo > cap:
+        half = cap // 2
+        head_end = int(offs[lo + half - 1]) + 1
+        tail_start = int(offs[hi - half])
+        return before, nfc[a0:head_end] + " ⋯ " + nfc[tail_start:z0], after, 1
+    return before, nfc[a0:z0], after, 0
+
+
+class WorkSources:
+    """Lazy, cached access to public reference texts (NFC + stream + offsets).
+
+    Every text handed out is verified against the pickle stream for its ref id
+    when the pickle carries one -- a mismatch means the on-disk file drifted
+    from what the pipeline matched against, and the work side is dropped for
+    that work (counter `work_stream_mismatch`) rather than approximated.
+    """
+
+    def __init__(self, refs_staging: Path, ja_dir: Path,
+                 man_by_key: Dict[str, dict], pkl_stream: Dict[str, str],
+                 counters: Counter):
+        self.refs_staging = refs_staging
+        self.ja_dir = ja_dir
+        self.man_by_key = man_by_key
+        self.pkl_stream = pkl_stream
+        self.counters = counters
+        self._cache: Dict[str, Optional[Tuple[str, object]]] = {}
+
+    def _load(self, ref_id: str) -> Optional[Tuple[str, object]]:
+        if ref_id.startswith("REF2:"):
+            ent = self.man_by_key.get(ref_id[5:])
+            if not ent:
+                self.counters["work_no_manifest_entry"] += 1
+                return None
+            path = self.refs_staging / ent["body_file"]
+        elif ref_id.startswith("J:"):
+            path = self.ja_dir / (ref_id[2:] + ".txt")
+        else:
+            return None
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            self.counters["work_file_error"] += 1
+            return None
+        nfc = unicodedata.normalize("NFC", raw)
+        stream, offs = norm_stream(nfc)
+        expected = self.pkl_stream.get(ref_id)
+        if expected is not None and stream != expected:
+            self.counters["work_stream_mismatch"] += 1
+            return None
+        return nfc, offs
+
+    def get(self, ref_id: str) -> Optional[Tuple[str, object]]:
+        if ref_id not in self._cache:
+            self._cache[ref_id] = self._load(ref_id)
+        return self._cache[ref_id]
+
+
+class TanakhTargets:
+    """Sefaria Tanakh books as re-projection targets, keyed by the masked
+    work's neutral_title (exact match, verified 39/39 in the design probe)."""
+
+    def __init__(self, refs_staging: Path, man_by_key: Dict[str, dict]):
+        self.refs_staging = refs_staging
+        self.key_by_title = {
+            e["title_he"]: e["key"] for e in man_by_key.values()
+            if e["key"].startswith("tanakh_")
+        }
+        self.man_by_key = man_by_key
+        self._cache: Dict[str, Optional[Tuple[str, str, object]]] = {}
+
+    def for_title(self, neutral_title: str) -> Optional[Tuple[str, str, object]]:
+        """-> (tanakh_key, nfc_text, offsets_with_stream) or None."""
+        key = self.key_by_title.get(neutral_title or "")
+        if not key:
+            return None
+        if key not in self._cache:
+            path = self.refs_staging / self.man_by_key[key]["body_file"]
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            nfc = unicodedata.normalize("NFC", raw)
+            stream, offs = norm_stream(nfc)
+            self._cache[key] = (nfc, stream, offs)
+        nfc, stream, offs = self._cache[key]
+        return key, nfc, (stream, offs)
+
+
+def _word_tokens(text: str) -> List[Tuple[int, int, str]]:
+    """Whitespace-separated tokens as (start, end, normalized) over `text`.
+    The normalized form is the letters-only finals-folded stream of the token
+    (norm_stream), so punctuation, nikud, braces and the cap ellipsis never
+    participate in matching; a token with no Hebrew letters is dropped."""
+    out: List[Tuple[int, int, str]] = []
+    i, n = 0, len(text)
+    while i < n:
+        while i < n and text[i].isspace():
+            i += 1
+        if i >= n:
+            break
+        j = i
+        while j < n and not text[j].isspace():
+            j += 1
+        norm, _ = norm_stream(text[i:j])
+        if norm:
+            out.append((i, j, norm))
+        i = j
+    return out
+
+
+def fuzzy_word_intervals(a_text: str, b_text: str,
+                         min_ratio: float = 72.0
+                         ) -> Tuple[List[List[int]], List[List[int]]]:
+    """Char intervals (into each ORIGINAL string) of the words the two spans
+    share -- the reader-facing 'these are the same words' highlight.
+
+    Two passes: exact matching on normalized word sequences
+    (difflib.SequenceMatcher, order-preserving), then an order-preserving
+    greedy fuzzy pass over the unmatched gaps (rapidfuzz ratio >= min_ratio)
+    so an HTR miscopy or a plene/defective spelling difference still pairs.
+    Runs of adjacent matched words merge into one interval, so the space
+    between two matched words is inside the highlight rather than a hole.
+    """
+    from rapidfuzz.fuzz import ratio as _fz_ratio
+
+    aw, bw = _word_tokens(a_text), _word_tokens(b_text)
+    an = [t[2] for t in aw]
+    bn = [t[2] for t in bw]
+    a_hit = [False] * len(aw)
+    b_hit = [False] * len(bw)
+    blocks = difflib.SequenceMatcher(None, an, bn,
+                                     autojunk=False).get_matching_blocks()
+    for ai, bi, size in blocks:
+        for k in range(size):
+            a_hit[ai + k] = True
+            b_hit[bi + k] = True
+    prev_a = prev_b = 0
+    for ai, bi, size in blocks:  # includes the terminal zero-size block
+        cursor = prev_b
+        for i2 in range(prev_a, ai):
+            best: Optional[Tuple[float, int]] = None
+            for j2 in range(cursor, bi):
+                score = _fz_ratio(an[i2], bn[j2])
+                if score >= min_ratio and (best is None or score > best[0]):
+                    best = (score, j2)
+            if best is not None:
+                a_hit[i2] = True
+                b_hit[best[1]] = True
+                cursor = best[1] + 1
+        prev_a, prev_b = ai + size, bi + size
+
+    def to_intervals(words, hits) -> List[List[int]]:
+        iv: List[List[int]] = []
+        last = None
+        for idx, ((s, e, _), hit) in enumerate(zip(words, hits)):
+            if not hit:
+                continue
+            if iv and last == idx - 1:
+                iv[-1][1] = e
+            else:
+                iv.append([s, e])
+            last = idx
+        return iv
+
+    return to_intervals(aw, a_hit), to_intervals(bw, b_hit)
+
+
+def reproject(query: str, tstream: str, prior: float,
+              min_score: float) -> Optional[Tuple[int, int, float]]:
+    """Locate `query` (a masked-edition letter span, IN MEMORY ONLY) inside a
+    public target stream. Position-prior window first, whole book as the one
+    fallback. Returns (lo, hi, score) in target-stream space, or None."""
+    from rapidfuzz.fuzz import partial_ratio_alignment
+
+    total = len(tstream)
+    center = int(prior * total)
+    half = max(len(query) * 3, total // 10)
+    w_lo, w_hi = max(0, center - half), min(total, center + half)
+    res = partial_ratio_alignment(query, tstream[w_lo:w_hi],
+                                  score_cutoff=min_score)
+    if res is not None:
+        return w_lo + res.dest_start, w_lo + res.dest_end, float(res.score)
+    res = partial_ratio_alignment(query, tstream, score_cutoff=min_score)
+    if res is not None:
+        return res.dest_start, res.dest_end, float(res.score)
+    return None
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    ap.add_argument("public_db")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--crosswalk", required=True)
+    ap.add_argument("--refs-staging", required=True)
+    ap.add_argument("--ja-dir", required=True)
+    ap.add_argument("--fullcorpus", required=True)
+    ap.add_argument("--ref-pkl", required=True)
+    ap.add_argument("--ctx", type=int, default=90)
+    ap.add_argument("--span-cap", type=int, default=600)
+    ap.add_argument("--min-align-score", type=float, default=65.0)
+    ap.add_argument("--limit", type=int, default=0,
+                    help="dev smoke only; gates run on full bakes")
+    ap.add_argument("--skip-masking-gate", action="store_true",
+                    help="dev smoke only; NEVER for a deployable artifact")
+    args = ap.parse_args()
+
+    t0 = time.time()
+    src, out = Path(args.public_db), Path(args.out)
+    if not src.is_file():
+        sys.exit(f"no such asset: {src}")
+    if out.resolve() == src.resolve():
+        sys.exit("--out must not be the input (the pre-excerpt artifact is "
+                 "the frame-regression BEFORE side)")
+
+    crosswalk = json.load(open(args.crosswalk, encoding="utf-8"))
+    ref_by_work: Dict[str, List[str]] = {}
+    for rid, wid in crosswalk.items():
+        ref_by_work.setdefault(wid, []).append(rid)
+    for refs in ref_by_work.values():
+        refs.sort()
+
+    refs_staging = Path(args.refs_staging)
+    manifest_path = refs_staging / "manifest.json"
+    man = json.load(open(manifest_path, encoding="utf-8"))
+    man_by_key = {e["key"]: e for e in man["entries"]}
+
+    print("loading reference pickle (streams only)...", flush=True)
+    works_pkl = pickle.load(open(args.ref_pkl, "rb"))
+    pkl_stream = {w["id"]: w["stream"] for w in works_pkl}
+    del works_pkl
+
+    counters: Counter = Counter()
+    sources = WorkSources(refs_staging, Path(args.ja_dir), man_by_key,
+                          pkl_stream, counters)
+    tanakh = TanakhTargets(refs_staging, man_by_key)
+
+    shutil.copyfile(src, out)
+    conn = sqlite3.connect(out)
+    conn.row_factory = sqlite3.Row
+    full = sqlite3.connect(Path(args.fullcorpus).resolve().as_uri()
+                           + "?mode=ro", uri=True)
+
+    titles = dict(conn.execute("SELECT work_id, neutral_title FROM works"))
+
+    # best eligible witness row per identification (frozen rule)
+    best: Dict[str, sqlite3.Row] = {}
+    for r in conn.execute(_BEST_ROWS_SQL):
+        k = r["identification_id"]
+        cur = best.get(k)
+        if cur is None or (-(r["matched_letters"] or 0), str(r["evidence_id"])) \
+                < (-(cur["matched_letters"] or 0), str(cur["evidence_id"])):
+            best[k] = r
+    print(f"identifications with an eligible row: {len(best):,}", flush=True)
+
+    conn.execute(_DDL)
+
+    page_cache: OrderedDict = OrderedDict()          # a_page_id -> (nfc, offs)
+    align_cache: Dict[Tuple[str, int, int], Optional[Tuple[int, int, float]]] = {}
+
+    def page_text(page_id: str):
+        if page_id in page_cache:
+            page_cache.move_to_end(page_id)
+            return page_cache[page_id]
+        row = full.execute("SELECT text FROM pages WHERE page_id = ?",
+                           (page_id,)).fetchone()
+        if not row or not row[0]:
+            res = None
+        else:
+            nfc = unicodedata.normalize("NFC", row[0])
+            _, offs = norm_stream(nfc)
+            res = (nfc, offs)
+        page_cache[page_id] = res
+        if len(page_cache) > 512:
+            page_cache.popitem(last=False)
+        return res
+
+    inserted = 0
+    items = sorted(best.items())
+    if args.limit:
+        items = items[:args.limit]
+    for ident_id, r in items:
+        # ---- fragment side (mandatory: no fragment pieces -> no row) ----
+        pt = page_text(r["a_page_id"])
+        if pt is None:
+            counters["frag_page_missing"] += 1
+            continue
+        nfc, offs = pt
+        if r["aligned_page_start"] is not None and r["aligned_page_end"] is not None:
+            lo, hi = r["aligned_page_start"], r["aligned_page_end"]
+        else:
+            lo, hi = r["span_start"], r["span_end"]
+            counters["frag_fallback_span"] += 1
+        if lo is None or hi is None or hi <= lo or hi > len(offs):
+            counters["frag_span_out_of_range"] += 1
+            continue
+        fb, fs, fa, fclip = pieces(nfc, offs, lo, hi, args.ctx, args.span_cap)
+
+        # ---- work side (optional: fail-soft to no pane, never approximate) ----
+        wb = ws = wa = wsrc = attribution = None
+        wclip = score = None
+        work_id = r["work_id"]
+        refs = ref_by_work.get(work_id) or []
+        kinds = {x.split(":", 1)[0] for x in refs}
+        if r["w_start"] is None or r["w_end"] is None or not refs:
+            counters["work_no_offsets_or_refs"] += 1
+        elif kinds == {"M"}:
+            target = tanakh.for_title(titles.get(work_id, ""))
+            mstream = pkl_stream.get(refs[0])
+            if target is None:
+                counters["work_masked_no_target"] += 1
+            elif mstream is None or r["w_end"] > len(mstream):
+                counters["work_masked_span_oor"] += 1
+            else:
+                tkey, tnfc, (tstream, toffs) = target
+                ck = (work_id, r["w_start"], r["w_end"])
+                if ck not in align_cache:
+                    align_cache[ck] = reproject(
+                        mstream[r["w_start"]:r["w_end"]], tstream,
+                        r["w_start"] / max(1, len(mstream)),
+                        args.min_align_score)
+                loc = align_cache[ck]
+                if loc is None:
+                    counters["work_reproject_below_threshold"] += 1
+                else:
+                    tlo, thi, score = loc
+                    wb, ws, wa, wclip = pieces(tnfc, toffs, tlo, thi,
+                                               args.ctx, args.span_cap)
+                    wsrc = "reprojected"
+                    attribution = man_by_key[tkey].get("attribution_text")
+                    counters["work_reprojected"] += 1
+        else:
+            wt = sources.get(refs[0])
+            if wt is None:
+                pass  # counter already incremented inside WorkSources
+            elif r["w_end"] > len(wt[1]):
+                counters["work_span_out_of_range"] += 1
+            else:
+                wnfc, woffs = wt
+                wb, ws, wa, wclip = pieces(wnfc, woffs, r["w_start"],
+                                           r["w_end"], args.ctx, args.span_cap)
+                wsrc = "direct"
+                if refs[0].startswith("REF2:"):
+                    attribution = man_by_key[refs[0][5:]].get("attribution_text")
+                counters["work_direct"] += 1
+
+        # The word-level parallel highlight (owner, 2026-08-13 round 2):
+        # computed only when BOTH spans exist -- with no work side there is
+        # nothing to be parallel to, and the renderer falls back to the
+        # whole-span treatment on NULL.
+        frag_hl = work_hl = None
+        if ws:
+            fh, wh = fuzzy_word_intervals(fs, ws)
+            frag_hl, work_hl = json.dumps(fh), json.dumps(wh)
+            if fh:
+                counters["hl_computed"] += 1
+            else:
+                counters["hl_empty"] += 1
+        # J-corpus texts mark Hebrew words inside the Judeo-Arabic with {...};
+        # the renderer strips the braces and colors the content, keyed on this
+        # flag so the transform can never fire on a text that means a literal
+        # brace.
+        work_markup = ("ja_braces" if wsrc == "direct" and refs
+                       and refs[0].startswith("J:") else None)
+
+        conn.execute(
+            "INSERT INTO discovery_excerpt VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (ident_id, r["evidence_id"], r["a_page_id"], fb, fs, fa, fclip,
+             wb, ws, wa, wclip, wsrc, score, attribution,
+             r["n_spans"], r["text_layer"], frag_hl, work_hl, work_markup))
+        inserted += 1
+        if inserted % 5000 == 0:
+            print(f"  {inserted:,} rows...", flush=True)
+
+    n = conn.execute("SELECT COUNT(*) FROM discovery_excerpt").fetchone()[0]
+    meta_rows = [
+        ("excerpt_schema_version", EXCERPT_SCHEMA_VERSION),
+        ("expected_rows_discovery_excerpt", str(n)),
+        ("excerpt_ctx", str(args.ctx)),
+        ("excerpt_span_cap", str(args.span_cap)),
+        ("excerpt_refs_manifest_sha256", sha256_file(manifest_path)),
+    ]
+    conn.executemany("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                     meta_rows)
+    conn.commit()
+    conn.execute("VACUUM")
+    conn.close()
+    full.close()
+
+    print(f"\nrows inserted: {n:,} of {len(items):,} candidates "
+          f"({time.time() - t0:,.0f}s)")
+    for k in sorted(counters):
+        print(f"  {k:<34} {counters[k]:>7,}")
+
+    if args.limit and not args.skip_masking_gate:
+        print("\n--limit smoke: artifact is NOT deployable; masking gate "
+              "still runs.", flush=True)
+    if args.skip_masking_gate:
+        print("\nMASKING GATE SKIPPED (--skip-masking-gate): artifact must "
+              "not be deployed.", flush=True)
+        return 0
+    import project_discovery_public as proj
+    passed, _ = proj.run_masking_gate(str(out))
+    print(f"masking gate: {'PASS' if passed else 'FAIL'}", flush=True)
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -119,6 +119,8 @@ from web.discovery import (
     NOVELTY_VIEW_EITHER,
     NOVELTY_VIEWS,
     cached_suppressed_identification_ids,
+    excerpts_available,
+    get_excerpt_enveloped,
     get_findings_enveloped,
     get_findings_facets_enveloped,
     get_launch_stats_enveloped,
@@ -1654,12 +1656,20 @@ async def _render_body(state: Dict[str, Any], lang: str, page_client: Any,
         launch_meta = await _launch_meta()
         if _stale():
             return
+        # ONE availability probe per refresh, not one per row: the service
+        # caches it per (path, version), and the rows only receive a loader
+        # when the served asset actually carries excerpts -- an older asset
+        # renders exactly the pre-excerpt page (no dead toggle).
+        excerpts_on = await excerpts_available()
+        if _stale():
+            return
         results_region.clear()
         with results_region:
             _render_results(envelope, state, lang, refresh,
                             more_pool_total=launch_meta.get("more_pool_total"),
                             sidecar_version=launch_meta.get("sidecar_version"),
-                            suppressed=suppressed, hidden=hidden)
+                            suppressed=suppressed, hidden=hidden,
+                            excerpts_on=excerpts_on)
         if _stale():
             return
         await _populate_facets(
@@ -2450,6 +2460,7 @@ def _render_results(
     more_pool_total: Any = None, sidecar_version: Any = None,
     suppressed: Tuple[str, ...] = (),
     hidden: Optional[Dict[str, Any]] = None,
+    excerpts_on: bool = False,
 ) -> None:
     status = (envelope or {}).get("status")
     if status != "ok":
@@ -2580,7 +2591,7 @@ def _render_results(
             _render_row(item, lang, sidecar_version=sidecar_version,
                         state=state, catalogue_title=_catalogue_title,
                         refresh=refresh, suppressed=suppressed,
-                        hidden=hidden)
+                        hidden=hidden, excerpts_on=excerpts_on)
 
     _render_pager(total, state, lang, refresh,
                   page_size=effective_page_size(envelope),
@@ -3370,7 +3381,8 @@ def _render_row(item: Dict[str, Any], lang: str,
                 catalogue_title=None,
                 refresh=None,
                 suppressed: Tuple[str, ...] = (),
-                hidden: Optional[Dict[str, Any]] = None) -> None:
+                hidden: Optional[Dict[str, Any]] = None,
+                excerpts_on: bool = False) -> None:
     """One result row, in whichever of the three shipped units the service
     produced it.
 
@@ -3440,10 +3452,21 @@ def _render_row(item: Dict[str, Any], lang: str,
                 # click doing nothing at all, so SAY so instead.
                 _notify_suppress_failed()
 
+    # The text-vs-text loader, injected only when the served asset carries
+    # excerpts (excerpt-v1 marker) -- an older asset gets no toggle at all,
+    # which is the rollback-safe direction: new code + old asset renders the
+    # pre-excerpt page rather than a control that cannot work.
+    load_excerpt = None
+    if excerpts_on:
+        async def load_excerpt(row):
+            return await get_excerpt_enveloped(
+                str(row.get("identification_id") or ""))
+
     rows.render_finding_row(item, lang, sidecar_version=sidecar_version,
                             load_children=loader, preview_url=preview_url,
                             catalogue_title=catalogue_title,
-                            on_suppress=on_suppress)
+                            on_suppress=on_suppress,
+                            load_excerpt=load_excerpt)
 
 
 def _render_pager(total: int, state: Dict[str, Any], lang: str, refresh,
