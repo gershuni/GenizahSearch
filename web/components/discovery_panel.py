@@ -63,6 +63,7 @@ from shared.discovery_surface_projection import STATUS_OK, is_outage
 from web.components import discovery_links as links
 from web.components.findings_rows import (
     ROW_CATALOGUE_TITLE_CLASS,
+    ROW_DIVERGENCE_CLASS,
     copy_text as _findings_copy,
     render_excerpt_disclosure,
 )
@@ -464,6 +465,16 @@ def _render_identification_row(row: Mapping[str, Any], lang: str,
         #    the chip's tooltip and never visible text.
         with ui.row().classes('items-center gap-2 side'):
             _neutral_chip(row.get('relation_chip') or '', row.get('band_tooltip'))
+            # owner ruling 2026-08-13, Ruling F amended: divergence is a
+            # per-row marker, not a fourth disclosure level. Same element and
+            # class treatment `findings_rows.py` uses for this exact marker
+            # (`chip` + `ROW_DIVERGENCE_CLASS`), so the two surfaces match --
+            # NO tooltip and no per-kind colour (D-24): the model supplies one
+            # pre-localized string on `catalogue_divergent` rows and nothing
+            # else to render.
+            if row.get('catalogue_divergent'):
+                ui.label(row.get('divergence_chip') or '').classes(
+                    f'chip {ROW_DIVERGENCE_CLASS}')
             if row.get('coverage_label'):
                 ui.label(row['coverage_label']).classes('dnote')
             ui.label(str(row.get('bucket') or '')).classes('dnote')
@@ -667,6 +678,15 @@ def _manuscript_work_chip(chip: Mapping[str, Any]) -> None:
     relation = chip.get('relation_chip')
     if relation:
         _neutral_chip(relation)
+    # Owner ruling 2026-08-13: a second, separate marker beside the chip --
+    # never folded into the same label the page-count uses -- so a reader
+    # scanning the "In this manuscript" pane can tell which of these works
+    # is also matched on the page they are already looking at. Same muted
+    # `dnote` treatment the row-level secondary text (coverage, bucket) already
+    # uses next to a chip in this file; absent, not blank, when the model did
+    # not mark this work as on-page.
+    if chip.get('on_this_page'):
+        ui.label(chip.get('this_page_marker') or '').classes('dnote')
 
 
 def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -> None:
@@ -790,14 +810,11 @@ def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
     # is NOT identifications (D-13e), so the marking follows the model rather
     # than a guess made here.
     #
-    # A `warning` -- ruling F's fourth level supplies one and nothing else does
-    # -- is rendered BESIDE the toggle rather than inside it. Everything under
-    # a `<details>` except its `<summary>` is hidden while the element is
-    # closed, so a warning placed in the body would only be met AFTER the
-    # decision it exists to inform. Driven by the model's own key, so this
-    # renderer still branches on no level identity.
-    if level.get('warning'):
-        ui.label(level['warning']).classes('dnote')
+    # owner ruling 2026-08-13: the fourth level (ruling F's divergence axis) is
+    # GONE -- divergence is now a per-row marker on the identification row
+    # itself (see `_render_identification_row`), not a level with its own
+    # warning. There is exactly one collapsed level left ("more matches"), and
+    # it no longer has a `warning` key to read.
     classes = 'disc' if level.get('is_identifications') else 'disc notid'
     details = ui.element('details').classes(classes)
     if level.get('visible'):
@@ -806,15 +823,26 @@ def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
         with ui.element('summary').classes('font-semibold'):
             ui.label(level.get('label') or '')
         with ui.element('div').classes('dbody'):
-            if level.get('note'):
-                ui.label(level['note']).classes('dnote')
-            for group in level.get('generic_groups') or ():
-                _render_generic_group(group, lang)
+            # ORDER (owner ruling 2026-08-13): the removed "also shares text"
+            # level's `note` / `generic_groups` / `related_pages` now live on
+            # THIS level alongside its own `rows`, and the identification rows
+            # come FIRST -- they are this level's primary content, not an
+            # afterthought to a note about shared wording. The note describes
+            # the generic-groups/related-pages block, so it sits directly ABOVE
+            # that block and never above the identification rows, where it
+            # would mislabel them as "not identifications". It is rendered only
+            # when there is a generic-groups or related-pages block for it to
+            # describe.
             for row in level.get('rows') or ():
                 _render_identification_row(row, lang, catalogue_title,
                                            catalogue_identity,
                                            load_excerpt=load_excerpt)
+            generic_groups = level.get('generic_groups') or ()
             related = level.get('related_pages')
+            if level.get('note') and (generic_groups or related is not None):
+                ui.label(level['note']).classes('dnote')
+            for group in generic_groups:
+                _render_generic_group(group, lang)
             if related is not None:
                 _render_related_pages(related, lang, page_id, on_retry=on_retry)
 

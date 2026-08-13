@@ -180,26 +180,29 @@ SCOPE_STATES: Tuple[str, ...] = (
 #: below and the suite that reads it enumerate it identically.
 SURFACE_STATUSES_ORDERED: Tuple[str, ...] = tuple(sorted(SURFACE_STATUSES))
 
-#: The three disclosure levels D-13e ratified, plus ruling F's FOURTH. Level 2
-#: holds the generic identical-span groups and the related-pages section and is
-#: explicitly NOT identifications.
+#: TWO disclosure levels (owner ruling, 2026-08-13, collapsing D-13e's three
+#: plus ruling F's fourth). Level 2 -- LEVEL_MORE_MATCHES -- now carries
+#: everything that used to be split across the old middle level (the generic
+#: identical-span groups, the related-pages section, the not-an-identification
+#: note) AND the old gated level (short-evidence / not-default-eligible rows).
+#: It is explicitly NOT the identifications level, but its rows ARE
+#: identifications (never renamed "not an identification" the way the generic
+#: groups are) -- the note on the level distinguishes the two populations it
+#: merges.
 #:
-#: The fourth is ORTHOGONAL to the first three rather than weaker than them
-#: (`136-GATE1-DECISIONS.md` section F): it holds the claims that contradict a
-#: catalogue identification, at whatever strength, and it is hidden by default
-#: behind an explicitly warned toggle. Ruling F names the panel plans
-#: (136-15/136-17) that must build it, and the same ruling's own rationale is
-#: why it is a LEVEL and not a badge -- the system never treats the catalogue's
-#: disagreement as a verdict, it surfaces the disagreement and lets the reader
-#: decide, which is a decision a reader can only make before opening it.
+#: Ruling F's old fourth level is GONE as a routing axis (owner ruling,
+#: 2026-08-13, amending ruling F): a catalogue-divergent claim is no longer
+#: pulled into a level of its own. It routes through the SAME two levels as
+#: every other claim, on the SAME tests, and carries a per-row marker instead
+#: (`catalogue_divergent` / `divergence_chip` on the identification row, set in
+#: `_identification_row`). Ruling F's underlying rule -- the system never
+#: treats the catalogue's non-correspondence as a verdict -- is unchanged; only
+#: where that fact is expressed moved from a level gate to a row flag.
 LEVEL_IDENTIFICATIONS = "identifications"
-LEVEL_ALSO_SHARES_TEXT = ds.TOGGLE_ALSO_SHARES_TEXT
 LEVEL_MORE_MATCHES = ds.TOGGLE_MORE_MATCHES
-LEVEL_DIVERGENCE = ds.TOGGLE_DIVERGENCE
 
 DISCLOSURE_LEVEL_KEYS: Tuple[str, ...] = (
-    LEVEL_IDENTIFICATIONS, LEVEL_ALSO_SHARES_TEXT, LEVEL_MORE_MATCHES,
-    LEVEL_DIVERGENCE,
+    LEVEL_IDENTIFICATIONS, LEVEL_MORE_MATCHES,
 )
 
 #: The pipeline's named steps. ORDER IS LOAD-BEARING and the names exist so a
@@ -462,10 +465,6 @@ class PanelServiceBundle:
     related_rows: Optional[Mapping[str, Any]] = None
     lang: str = "en"
     show_more: bool = False
-    #: Ruling F's fourth level, opened. DEFAULT FALSE, and the default is the
-    #: ruling: a caller that has never heard of divergence gets the hidden
-    #: posture rather than its opposite.
-    show_divergence: bool = False
 
     def __post_init__(self) -> None:
         # One of the two public boundaries. Our own refusals pass through
@@ -890,6 +889,11 @@ def _validate_claim_row(row: Mapping[str, Any], *, include_review: bool) -> None
 def _is_catalogue_divergent(row: Mapping[str, Any]) -> bool:
     """Whether this claim contradicts a catalogue identification (ruling F).
 
+    Feeds the per-row `catalogue_divergent` flag and, when True, the
+    `divergence_chip` (`_identification_row`) -- since the owner's 2026-08-13
+    amendment this is no longer a routing decision (`_disclosure_level_for`
+    does not call it), only a labelling one.
+
     DERIVED from `shared.discovery_novelty.is_hidden_by_default`, never from a
     restated shade list -- that predicate is the policy, and a second membership
     test here would be a second policy the first one could not move.
@@ -898,8 +902,9 @@ def _is_catalogue_divergent(row: Mapping[str, Any]) -> bool:
     The vocabulary is frozen by the schema's own CHECK constraint and by the
     release verifier's frozen-enum check, so an unrecognized value here means
     the artifact is not the one this code was written against -- and the
-    fail-quiet reading of that would silently put an unclassifiable row in the
-    DEFAULT view, which is the one place ruling F says it must not be.
+    fail-quiet reading of that would silently answer a question nobody has
+    actually verified, mislabelling the row (as divergent when it is not, or
+    the reverse) rather than refusing to guess.
     """
     status = row.get("novelty_status")
     try:
@@ -919,22 +924,25 @@ def _disclosure_level_for(row: Mapping[str, Any]) -> str:
     a toggle and stays reachable. Bucket membership itself is the materialized
     shared-rule decision on the row (`main_pool`), never recomputed.
 
-    DIVERGENCE IS TESTED FIRST, and the order is the ruling. Ruling F's axis is
-    ORTHOGONAL to the other three -- a catalogue-divergent claim can be
-    main-pool, default-eligible and long-evidence, i.e. a level-1 row by every
-    other test -- so a divergence test placed anywhere but first would leave
-    exactly the strongest divergent rows in the default view, which is the one
-    place the ruling says they must not be.
+    DIVERGENCE IS NO LONGER A ROUTING AXIS (owner ruling, 2026-08-13, amending
+    ruling F). The original ruling F tested `_is_catalogue_divergent` FIRST and
+    routed a match to a level of its own, orthogonal to the other three, so
+    that the strongest divergent rows could never reach the default view. The
+    owner's amendment removes that first branch entirely: a catalogue-divergent
+    claim now falls through to exactly the same tests as any other claim, and
+    when it qualifies for the default view it appears there, carrying the
+    existing neutral chip (`catalogue_divergent` / `ds.divergence_chip` on the
+    emitted row -- see `_identification_row`) rather than being kept out of it.
+    `_is_catalogue_divergent` is KEPT for that per-row flag; it no longer feeds
+    this function.
 
-    It is tested BEFORE the human-confirmation carve-out too. Human
-    confirmation adjudicates the CLAIM; it does not adjudicate the
-    DISAGREEMENT, and `divergence_correctness` -- the only field that could --
-    is human-only (ruling L) and NULL on every shipped row. Reading a confirmed
-    claim as a settled divergence would be this module supplying the verdict
-    ruling F says nobody has reached.
+    `divergence_correctness` -- ruling L's human-only column -- remains NULL on
+    every shipped row, so the chip wording still takes no side: it states that
+    the claim does not correspond to the catalogue and that neither side has
+    been adjudicated, never which one is right. The amendment changes WHERE
+    that fact is expressed (a row marker instead of a level gate), not what it
+    asserts.
     """
-    if _is_catalogue_divergent(row):
-        return LEVEL_DIVERGENCE
     if not _is_default_surface_eligible(row):
         # Only reachable under `include_review`. Stated explicitly rather than
         # left to fall through the `main_pool` test below, which would be the
@@ -1075,6 +1083,16 @@ def _identification_row(
         "in_main_pool": in_main_pool,
         "bucket": bucket_label(in_main_pool, lang),
         "main_pool_reason": row.get("main_pool_reason"),
+        # Owner ruling, 2026-08-13 (amending ruling F): divergence is now a
+        # PER-ROW marker, not a routing axis -- `_disclosure_level_for` no
+        # longer tests `_is_catalogue_divergent` first, so a catalogue-
+        # divergent claim can land in EITHER level and must say so on the row
+        # itself wherever it lands. `catalogue_divergent` is always present
+        # (True/False); `divergence_chip` follows the file's absent-not-None
+        # convention (like `relation_code` below) and is emitted ONLY when
+        # True, so a renderer cannot print an empty chip by forgetting to
+        # check the flag first.
+        "catalogue_divergent": _is_catalogue_divergent(row),
         # The key the text-vs-text disclosure fetches by (excerpt-v1,
         # 2026-08-13). Carried verbatim from the projected claim row, so the
         # row on screen and the excerpt fetched can never be two different
@@ -1097,6 +1115,13 @@ def _identification_row(
     # anything it does not know, so the branch is a decision, not a swallow.
     if rendered_relation in ids.CLAIM_TYPES:
         emitted["relation_code"] = ds.filter_code(rendered_relation)
+
+    # Owner ruling, 2026-08-13 (amending ruling F). ABSENT, never a False-y
+    # empty string, when the claim is not catalogue-divergent -- a renderer
+    # that forgot to check `catalogue_divergent` prints nothing rather than an
+    # empty chip.
+    if emitted["catalogue_divergent"]:
+        emitted["divergence_chip"] = ds.divergence_chip(lang)
 
     # D-08a: the ONE permitted percentage, direct family only, always with its
     # matched-letter qualifier (which `row_headline` composes). Gated on the
@@ -1355,9 +1380,12 @@ def _related_pages(bundle: PanelServiceBundle) -> Dict[str, Any]:
 _CHIPPABLE_RELATIONS: frozenset = ids.RENDERED_RELATIONS - NEVER_RENDERED_IN_V1
 
 
-def _work_chip(row: Mapping[str, Any], lang: str) -> Dict[str, Any]:
+def _work_chip(
+    row: Mapping[str, Any], lang: str, on_this_page_ids: frozenset = frozenset()
+) -> Dict[str, Any]:
     title, missing = _routed_title(row, lang)
     in_main_pool = row.get("main_pool") is True
+    on_this_page = _display_work_id(row) in on_this_page_ids
     chip: Dict[str, Any] = {
         "work_id": _display_work_id(row),
         "work_title": title,
@@ -1366,7 +1394,14 @@ def _work_chip(row: Mapping[str, Any], lang: str) -> Dict[str, Any]:
         "gated": bool(row.get("gated")),
         "in_main_pool": in_main_pool,
         "bucket": bucket_label(in_main_pool, lang),
+        # The pane lists ALL works in the manuscript, including ones the
+        # current page itself claims, so this flag is what lets the renderer
+        # say "includes this page" rather than imply "elsewhere" (the header
+        # renamed for the same reason -- see `_manuscript_pane`).
+        "on_this_page": on_this_page,
     }
+    if on_this_page:
+        chip["this_page_marker"] = ds.this_page_marker(lang)
     # C-track step 3c: the strongest matrix output over this work's
     # identifications in this manuscript, NOT the strongest stored claim type.
     # The membership test widens with it -- `uncertain` is a renderable state
@@ -1391,13 +1426,34 @@ def _work_chip_sort_key(chip: Mapping[str, Any], row: Mapping[str, Any]):
     )
 
 
+def _on_this_page_work_ids(bundle: PanelServiceBundle) -> frozenset:
+    """The work ids claimed on the CURRENT page, for the manuscript pane's
+    `on_this_page` marker.
+
+    Reads the EAGER claims envelope the panel already has -- no new query.
+    Guarded for a non-`ok` claims envelope (outage/timeout/busy): a failed read
+    is not evidence that this page claims nothing, so it must not manufacture
+    a marker either way. Empty set there, exactly like an `ok` zero -- both
+    read as "nothing to mark", which is correct for the zero and safe (never
+    an over-claim) for the outage.
+    """
+    if not _is_ok(bundle.claims):
+        return frozenset()
+    return frozenset(_display_work_id(item) for item in _items(bundle.claims))
+
+
 def _manuscript_pane(
     bundle: PanelServiceBundle, outcome: ArbitrationOutcome
 ) -> Dict[str, Any]:
     lang = bundle.lang
     works_envelope = bundle.manuscript_works
     pane: Dict[str, Any] = {
-        "header": ds.section_header(ds.SECTION_ELSEWHERE_IN_MANUSCRIPT, lang),
+        # Renamed 2026-08-13 (owner ruling): the pane lists ALL works in the
+        # manuscript, including works the OPEN page itself claims, so
+        # "Elsewhere in this manuscript" asserted something false whenever a
+        # work's pages include the current folio. See
+        # `ds.SECTION_IN_THIS_MANUSCRIPT`.
+        "header": ds.section_header(ds.SECTION_IN_THIS_MANUSCRIPT, lang),
         "scope_state": outcome.scope_state,
         "partial_scope": outcome.scope_state == SCOPE_TRUNCATED,
         "reader_aid_only": True,
@@ -1436,7 +1492,11 @@ def _manuscript_pane(
         pane["works"] = ()
         return pane
 
-    decorated = [(_work_chip(row, lang), row) for row in _items(works_envelope)]
+    on_this_page_ids = _on_this_page_work_ids(bundle)
+    decorated = [
+        (_work_chip(row, lang, on_this_page_ids), row)
+        for row in _items(works_envelope)
+    ]
     decorated.sort(key=lambda pair: _work_chip_sort_key(pair[0], pair[1]))
     pane["state"] = PANE_POPULATED
     pane["works"] = tuple(chip for chip, _row in decorated)
@@ -1534,7 +1594,6 @@ class PanelModel:
 
     lang: str
     show_more: bool
-    show_divergence: bool
     panel_status: str
     entry_control: Dict[str, Any]
     service_state: Dict[str, Any]
@@ -1553,11 +1612,13 @@ class PanelModel:
     # -- below is walked twice by the honesty sweep.
     @property
     def related_pages(self) -> Dict[str, Any]:
-        return self._level(LEVEL_ALSO_SHARES_TEXT)["related_pages"]
+        # Owner ruling, 2026-08-13: the middle level merged into
+        # `LEVEL_MORE_MATCHES`, which now carries this key too.
+        return self._level(LEVEL_MORE_MATCHES)["related_pages"]
 
     @property
     def generic_groups(self) -> Tuple[Dict[str, Any], ...]:
-        return self._level(LEVEL_ALSO_SHARES_TEXT)["generic_groups"]
+        return self._level(LEVEL_MORE_MATCHES)["generic_groups"]
 
     def _level(self, key: str) -> Dict[str, Any]:
         for level in self.disclosure_levels:
@@ -1613,8 +1674,18 @@ def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
 
     default_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_IDENTIFICATIONS)
     gated_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_MORE_MATCHES)
-    divergent_rows = tuple(r for r in rows if r["disclosure_level"] == LEVEL_DIVERGENCE)
 
+    # TWO levels only (owner ruling, 2026-08-13). The old middle level ("also
+    # shares text with") and the old fourth level (ruling F's divergence gate)
+    # are both gone as ROUTING; a row that used to land on either now lands on
+    # `LEVEL_MORE_MATCHES` alongside the material that used to live on the
+    # middle level -- the generic identical-span groups, the related-pages
+    # section and the not-an-identification note all merge into this ONE
+    # gated level. A catalogue-divergent row that qualifies for
+    # `LEVEL_IDENTIFICATIONS` stays there, carrying its own `divergence_chip`
+    # (`_identification_row`) rather than being pulled out into a level of its
+    # own. `ds.divergence_warning` is NOT used here any more -- the per-row
+    # chip replaced the level-level warning; the findings page still reads it.
     levels: Tuple[Dict[str, Any], ...] = (
         {
             "key": LEVEL_IDENTIFICATIONS,
@@ -1625,48 +1696,15 @@ def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
             "rows": default_rows,
         },
         {
-            "key": LEVEL_ALSO_SHARES_TEXT,
-            "label": ds.disclosure_toggle(ds.TOGGLE_ALSO_SHARES_TEXT, lang),
-            "is_identifications": False,
-            "default_visible": False,
-            "visible": False,
-            "note": ds.not_an_identification_note(lang),
-            "generic_groups": tuple(generic_groups),
-            "related_pages": _related_pages(bundle),
-        },
-        {
             "key": LEVEL_MORE_MATCHES,
             "label": ds.disclosure_toggle(ds.TOGGLE_MORE_MATCHES, lang),
             "is_identifications": True,
             "default_visible": False,
             "visible": bool(bundle.show_more),
+            "note": ds.not_an_identification_note(lang),
+            "generic_groups": tuple(generic_groups),
+            "related_pages": _related_pages(bundle),
             "rows": gated_rows,
-        },
-        {
-            "key": LEVEL_DIVERGENCE,
-            "label": ds.disclosure_toggle(ds.TOGGLE_DIVERGENCE, lang),
-            # These ARE identifications -- the catalogue names a different one,
-            # and ruling F is explicit that the system takes no side on which
-            # is right. Marking them `is_identifications: False` would be the
-            # renderer's `notid` treatment saying they are not identifications
-            # at all, which is a side.
-            "is_identifications": True,
-            "default_visible": False,
-            "visible": bool(bundle.show_divergence),
-            # OUTSIDE the collapsed body, unlike the middle level's `note`.
-            # Ruling F's toggle is an "explicitly warned" one, and a warning
-            # that lives inside a `<details>` is one a reader only meets AFTER
-            # opening -- i.e. after the decision it exists to inform.
-            #
-            # EMPTY WHEN THERE IS NOTHING TO WARN ABOUT. The warning states a
-            # fact about THIS folio ("these findings conflict with an existing
-            # catalogue identification"), so on a folio with no divergent claim
-            # it would be a standing assertion of a conflict that does not
-            # exist -- and ~76% of the corpus has none. The LEVEL still renders
-            # (like the empty "show more" level beside it); only the claim
-            # about the folio is withheld.
-            "warning": ds.divergence_warning(lang) if divergent_rows else "",
-            "rows": divergent_rows,
         },
     )
 
@@ -1676,7 +1714,6 @@ def _build_panel_rows(bundle: PanelServiceBundle) -> PanelModel:
     return PanelModel(
         lang=lang,
         show_more=bool(bundle.show_more),
-        show_divergence=bool(bundle.show_divergence),
         panel_status=outcome.panel_status,
         entry_control=entry_control,
         service_state=_service_state(bundle.claims, lang),

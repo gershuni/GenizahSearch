@@ -397,7 +397,16 @@ def not_an_identification_note(lang: str = "en") -> str:
 # ---------------------------------------------------------------------------
 
 SECTION_ON_THIS_PAGE = "on_this_page"
-SECTION_ELSEWHERE_IN_MANUSCRIPT = "elsewhere_in_manuscript"
+#: Renamed 2026-08-13 (owner ruling), from `elsewhere_in_manuscript`. The pane
+#: this heads lists ALL works found anywhere in the manuscript, including
+#: works whose pages include the OPEN folio -- so "elsewhere" asserted
+#: something false on every one of those chips, not just imprecisely: it told
+#: the reader a work was somewhere else when the panel's own claims section,
+#: right above it, was reporting that same work HERE. The key string keeps its
+#: old value's SHAPE (an already-scoped identifier) but not its text, and
+#: nothing reads the old key -- `shared/discovery_panel_model.py` is this
+#: constant's only consumer.
+SECTION_IN_THIS_MANUSCRIPT = "in_this_manuscript"
 SECTION_OTHER_MANUSCRIPTS = "other_manuscripts"
 SECTION_PAGES_MATCHING_THIS_PAGE = "pages_matching_this_page"
 
@@ -406,9 +415,9 @@ _SECTION_HEADERS: Dict[str, Dict[str, str]] = {
         "en": "On this page",
         "he": "בדף זה",
     },
-    SECTION_ELSEWHERE_IN_MANUSCRIPT: {
-        "en": "Elsewhere in this manuscript",
-        "he": "במקומות אחרים בכתב" + _MAQAF + "היד",
+    SECTION_IN_THIS_MANUSCRIPT: {
+        "en": "In this manuscript",
+        "he": "בכתב" + _MAQAF + "יד זה",
     },
     SECTION_OTHER_MANUSCRIPTS: {
         "en": "Other manuscripts matching {work_title}",
@@ -437,17 +446,46 @@ def section_header(section_key: str, lang: str = "en", work_title: str = "") -> 
     return _pick(entry, lang).format(work_title=work_title)
 
 
+_THIS_PAGE_MARKER: Dict[str, str] = {
+    "en": "includes this page",
+    "he": "כולל דף זה",
+}
+
+
+def this_page_marker(lang: str = "en") -> str:
+    """The reader-aid marker on a manuscript-pane work chip whose pages
+    include the OPEN folio (owner ruling, 2026-08-13).
+
+    NEUTRAL, no quality claim (D-24): it names a page-membership fact --
+    this work's pages include the one on screen -- and nothing about the
+    strength, correctness or precedence of any identification. The pane
+    lists every work found anywhere in the manuscript, this page's own
+    claims included, and `SECTION_IN_THIS_MANUSCRIPT` no longer says
+    "elsewhere" -- this marker is what lets a chip for a work claimed HERE
+    say so honestly rather than reading as one more entry "elsewhere"."""
+    return _pick(_THIS_PAGE_MARKER, lang)
+
+
 # ---------------------------------------------------------------------------
-# Disclosure toggles. D-13e ratified THREE levels for the panel:
-# (1) identifications, default visible; (2) "Also shares text with",
-# collapsed; (3) "Show more possible matches". Ruling F adds a FOURTH,
-# orthogonal opt-in: catalogue-divergent rows, hidden by default behind an
-# explicitly warned toggle.
+# Disclosure toggles. D-13e ratified THREE levels for the panel: (1)
+# identifications, default visible; (2) "Also shares text with", collapsed;
+# (3) "Show more possible matches". Ruling F added a FOURTH, orthogonal
+# opt-in -- catalogue-divergent rows, hidden by default behind an explicitly
+# warned toggle -- which the panel model built as a fourth LEVEL.
+#
+# The owner's 2026-08-13 ruling collapsed the panel to TWO levels and RETIRED
+# the fourth as a level: `TOGGLE_DIVERGENCE` (the toggle that opened it) and
+# `_TOGGLE_DIVERGENCE` (its label text) are deleted below, because
+# `shared/discovery_panel_model.py` was their only consumer outside tests and
+# the model no longer routes any row to a divergence-only level. Divergence is
+# now a PER-ROW marker instead -- `divergence_chip`, further down -- and
+# `TOGGLE_ALSO_SHARES_TEXT` is KEPT because a renderer outside this model
+# (`web/components/discovery_panel.py`) still calls
+# `disclosure_toggle(TOGGLE_ALSO_SHARES_TEXT, ...)` directly.
 # ---------------------------------------------------------------------------
 
 TOGGLE_MORE_MATCHES = "more_matches"
 TOGGLE_ALSO_SHARES_TEXT = "also_shares_text"
-TOGGLE_DIVERGENCE = "divergence"
 
 _TOGGLE_ALSO_SHARES_TEXT: Dict[str, str] = {
     "en": "Also shares text with",
@@ -472,12 +510,9 @@ _TOGGLE_ALSO_SHARES_TEXT: Dict[str, str] = {
 # after the selector was renamed, so one screen carried two vocabularies for
 # one fact -- a reader filtered on "do not correspond" and got rows labelled
 # "Disagrees" (found by external review, 2026-08-06). Both surfaces read this
-# module, so the panel and the findings page change together.
-_TOGGLE_DIVERGENCE: Dict[str, str] = {
-    "en": "Show findings that do not correspond to the catalogue",
-    "he": "הצג ממצאים שאינם מתאימים לקטלוג",
-}
-
+# module, so the panel and the findings page change together. This rule
+# outlived the panel's own divergence TOGGLE (retired 2026-08-13, see above):
+# it governs the WORDING, and `divergence_chip`'s row marker still carries it.
 _DIVERGENCE_WARNING: Dict[str, str] = {
     "en": (
         "These findings do not correspond to an existing catalogue "
@@ -501,28 +536,31 @@ def disclosure_toggle(toggle_key: str, lang: str = "en") -> str:
         return _pick(_SHOW_MORE_TOGGLE, lang)
     if toggle_key == TOGGLE_ALSO_SHARES_TEXT:
         return _pick(_TOGGLE_ALSO_SHARES_TEXT, lang)
-    if toggle_key == TOGGLE_DIVERGENCE:
-        return _pick(_TOGGLE_DIVERGENCE, lang)
     raise ValueError(
         "disclosure_toggle: unknown toggle key {!r} (expected one of {})".format(
             toggle_key,
-            [TOGGLE_MORE_MATCHES, TOGGLE_ALSO_SHARES_TEXT, TOGGLE_DIVERGENCE],
+            [TOGGLE_MORE_MATCHES, TOGGLE_ALSO_SHARES_TEXT],
         )
     )
 
 
 def divergence_warning(lang: str = "en") -> str:
-    """The warning ruling F requires beside the divergence control. It records
-    the non-correspondence and explicitly declines to adjudicate it."""
+    """The warning ruling F requires beside a divergence control. It records
+    the non-correspondence and explicitly declines to adjudicate it.
+
+    The PANEL's own divergence control (and the level it warned about) was
+    retired by the owner's 2026-08-13 ruling -- see the comment above
+    `TOGGLE_ALSO_SHARES_TEXT`. This function is unchanged and still serves the
+    findings page's own divergence selector, which is a SEPARATE control this
+    ruling does not touch."""
     return _pick(_DIVERGENCE_WARNING, lang)
 
 
-# The per-ROW marker. The toggle above is a control and the warning is the
-# prose beside it; neither travels with a row once the reader has opened the
-# axis, and on the findings page a divergent row then sits in a flat list
-# among ordinary ones. So the row carries its own marker, and the marker
-# states BOTH facts on its face: that the two do not correspond, and that
-# neither side has been adjudicated.
+# The per-ROW marker. On the findings page a divergent row sits in a flat list
+# among ordinary ones, so the row carries its own marker rather than relying
+# on a control or a warning that does not travel with it. The marker states
+# BOTH facts on its face: that the two do not correspond, and that neither
+# side has been adjudicated.
 #
 # The second half is not decoration. `divergence_correctness` -- ruling L's
 # human-only column -- is NULL on every shipped row, so no adjudication
@@ -531,10 +569,13 @@ def divergence_warning(lang: str = "en") -> str:
 # cases is that BOTH directions occur. The wording therefore never says which
 # side is right, in either language.
 #
-# "Does not correspond", never "Disagrees" -- see `_TOGGLE_DIVERGENCE` above
-# for the full reasoning. This chip is the string a reader meets MOST often
-# (~23.6% of rows carry it), so it is the one that most needs to match the
-# control they filtered with.
+# "Does not correspond", never "Disagrees" -- see the "DO NOT CORRESPOND"
+# comment above `_DIVERGENCE_WARNING` for the full reasoning. This chip is the
+# string a reader meets MOST often (~23.6% of rows carry it), and since the
+# owner's 2026-08-13 ruling it is ALSO the panel's only surviving divergence
+# marker (the panel's level-level warning and toggle are gone; the browse
+# panel now emits this same chip per row, from
+# `shared/discovery_panel_model.py`).
 _DIVERGENCE_CHIP: Dict[str, str] = {
     "en": "Does not correspond to the catalogue — not adjudicated",
     "he": "אינו מתאים לקטלוג — לא הוכרע",

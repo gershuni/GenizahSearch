@@ -96,10 +96,13 @@ contains the whole liturgy, and `claim_type` defaults to *same work* whenever th
 missing from the reference corpus (only 22 liturgy works ship). The rule cuts it 37%; **1–3% of the main
 pool remains misattributed**, and no sidecar-computable signal fixes it.
 
-⚠ **Open at gate 1:** does the panel's three-level disclosure survive? Its middle bucket
-(*"also shares text with"*) is behind-the-default on quality *and* distinguished only by relation, which
-the relation chip now carries — so it arguably collapses into "more matches". **D-13e locks three
-buckets**, so this needs a decision.
+✔ **Resolved 2026-08-13 (owner ruling, post-launch):** the collapse this flagged happened, and went
+further — the panel is now **two sections**. "On this page" holds ALL main-pool rows, with
+catalogue-divergent ones carrying the neutral per-row chip (Ruling F's default-hidden posture
+amended the same day); one collapsed "More possible matches" absorbs the middle bucket's
+shared-text groups + related-pages (reachability rationale preserved) + non-main-pool rows. The
+manuscript pane is renamed "In this manuscript" with an "includes this page" marker. Recorded in
+`136-GATE1-DECISIONS.md` § D-13e amendment + § F amendment.
 
 ## Theme
 
@@ -217,7 +220,7 @@ Interactive sketches are preserved in `sources/`. Both run offline with no build
 | `works.genre` + composition year | Genre is entirely NULL; missing liturgy dates neutralised date-based demotion | rebuild |
 | `discovery_routing_audit.kept_tie` | NULL `demoted_work_id` makes tie pairs unreconstructable | rebuild |
 | **D-16 / PANEL-01** | The findings page needs the relation filter currently specified only for the panel | **open**, gate 1 |
-| **D-13e** | Panel's middle disclosure bucket may collapse into "more matches" under the two-bucket model | **open**, gate 1 |
+| **D-13e** | Panel collapsed to TWO sections; middle bucket's content merged into "more matches", divergence became a per-row chip (Ruling F amended) | resolved 2026-08-13 |
 | **NOVEL-01 / D-23b** | D-23b mandates "Not found in the finding aids checked" and prohibits "new"; shipped wording uses "new finds" under a candidacy hedge | amendment owed, with the *candidate ≠ discovery* reasoning on the record |
 | **D-21** | — | no change (owner declined "Citations") |
 | **PANEL-01/02** | Panel-level relation/tier filters are new scope (D-16 covers `/work/{id}` only) | carry to gate 1 |

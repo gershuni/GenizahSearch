@@ -66,6 +66,13 @@ pinned prompt (section 5 below) no longer asks for this field at all, and
 structurally incapable of surfacing a model-supplied value. A future human/owner annotation pass
 (not the model arm) is the sole remaining path that may populate this column.
 
+**⟨AMENDED 2026-08-13, owner ruling — `136-GATE1-DECISIONS.md` § F amendment⟩ Ruling F's
+default-hidden/explicit-warned-toggle POSTURE is retired on the browse panel.** Divergent rows now
+render wherever normal routing places them (main-pool rows in the default view), each carrying the
+neutral per-row chip ("Does not correspond to the catalogue — not adjudicated"). The shade
+vocabulary, `HIDDEN_BY_DEFAULT_SHADES` as a predicate, the findings page's three-state divergence
+filter, and ruling L's human-only correctness axis are all unchanged.
+
 `novelty_source_label` populates on every shade where SOME finding aid says something nameable about
 this fragment-work pair: `confirms` / `refines_granularity` / `aid_more_specific` / `alias_merge` /
 `extends` / `diverges_work` / `diverges_part` / `container_predicts`. It stays `NULL` on `fills_gap`

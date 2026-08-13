@@ -35,9 +35,12 @@ import shared.discovery_display_strings as ds
 import web.components.discovery_panel as dp
 from shared.discovery_band_labels import band_label
 from shared.discovery_errors import DiscoveryUnavailable
-from shared.discovery_main_pool import REASON_MAIN_FULL_COVERAGE
+from shared.discovery_main_pool import (
+    REASON_INSUFFICIENT_LENGTH,
+    REASON_MAIN_FULL_COVERAGE,
+)
 from shared.discovery_panel_model import (
-    LEVEL_ALSO_SHARES_TEXT,
+    LEVEL_MORE_MATCHES,
     ROWS_NOT_REQUESTED,
     PanelServiceBundle,
     build_panel_rows,
@@ -215,7 +218,7 @@ def expansion_row(**overrides):
 
 
 def bundle(claim_items=(), works=(), related_total=0, related_rows=None,
-           lang='en', show_more=False, show_divergence=False):
+           lang='en', show_more=False):
     return PanelServiceBundle(
         claims=make_envelope(STATUS_OK, list(claim_items), len(claim_items),
                              meta={'page_id': 'page-1', 'include_review': False}),
@@ -229,7 +232,6 @@ def bundle(claim_items=(), works=(), related_total=0, related_rows=None,
         related_rows=related_rows,
         lang=lang,
         show_more=show_more,
-        show_divergence=show_divergence,
     )
 
 
@@ -631,7 +633,7 @@ def test_the_manuscript_pane_carries_no_catalogue_description():
 
 def _related_section(model):
     for level in model.disclosure_levels:
-        if level['key'] == LEVEL_ALSO_SHARES_TEXT:
+        if level['key'] == LEVEL_MORE_MATCHES:
             return level['related_pages']
     raise AssertionError('no related-pages section')
 
@@ -1486,13 +1488,14 @@ def test_the_mixed_fixture_really_does_vary_the_four_reads_independently(failing
 
 
 # ---------------------------------------------------------------------------
-# RULING F -- the fourth disclosure level, RENDERED.
-#
-# The model decides which claims belong there; these assert what a reader
-# actually meets. The one thing that cannot be tested in the model is WHERE the
-# warning ends up: everything under a `<details>` except its `<summary>` is
-# hidden while the element is closed, so a warning in the body would be met
-# only AFTER the decision it exists to inform.
+# RULING F, AMENDED 2026-08-13 -- divergence renders as a per-row CHIP, not a
+# fourth <details> disclosure any more. The old ruling F routed a divergent
+# claim to a hidden-by-default level with its own warning; the owner's
+# 2026-08-13 amendment retires that posture. The chip is `findings_rows.py`'s
+# own `ROW_DIVERGENCE_CLASS` treatment, reused rather than reinvented, so the
+# two surfaces read as one product -- these tests assert what a reader
+# actually meets now: the chip sits ON the row, wherever the row's own
+# eligibility puts it, with no dedicated disclosure and no per-level warning.
 # ---------------------------------------------------------------------------
 
 def _details_elements(client):
@@ -1500,84 +1503,79 @@ def _details_elements(client):
             if (getattr(el, 'tag', '') or '') == 'details']
 
 
-def _divergence_details(client, lang='en'):
-    label = ds.disclosure_toggle(ds.TOGGLE_DIVERGENCE, lang)
-    found = [el for el in _details_elements(client)
-             if label in _subtree_texts(el)]
-    assert len(found) == 1, f'expected one divergence <details>, got {len(found)}'
-    return found[0]
+def _divergence_chip_labels(client, lang='en'):
+    chip_text = ds.divergence_chip(lang)
+    return [el for el in client.elements.values()
+            if type(el).__name__ == 'Label'
+            and dp.ROW_DIVERGENCE_CLASS in (getattr(el, '_classes', None) or [])
+            and (getattr(el, 'text', '') or '') == chip_text]
 
 
 @pytest.mark.parametrize('lang', ['en', 'he'])
-def test_a_divergent_claim_renders_in_a_closed_fourth_disclosure(lang):
+def test_a_main_pool_divergent_row_renders_its_chip_outside_any_disclosure(lang):
+    """The row is main-pool, default-eligible and long-evidence -- a level-1
+    row by every other test -- so the 2026-08-13 amendment puts it in the
+    OPEN default level: no `<details>` wraps IT (the empty "more matches"
+    level still renders its own, always-present, always-collapsed
+    `<details>`, which is not this row's), and the chip sits right there
+    beside the row."""
     model = model_for(claim_items=[claim_row(novelty_status='diverges_work')],
                       lang=lang)
     client = _render(model)
 
-    details = _divergence_details(client, lang)
-    assert 'open' not in (details._props or {}), (
-        'ruling F requires the level be hidden by default; it rendered open')
-    assert 'notid' not in (details._classes or []), (
-        "the level took the 'not identifications' treatment -- the catalogue "
-        'names a DIFFERENT identification and ours is still one')
-
-    body = '\n'.join(_subtree_texts(details))
-    assert claim_row()['neutral_title'] in body, 'the claim is not reachable at all'
-
-
-@pytest.mark.parametrize('lang', ['en', 'he'])
-def test_the_warning_renders_OUTSIDE_the_collapsed_body(lang):
-    """The whole reason it is a `warning` key and not a `note`."""
-    model = model_for(claim_items=[claim_row(novelty_status='diverges_part')],
-                      lang=lang)
-    client = _render(model)
-
-    warning = ds.divergence_warning(lang)
-    details = _divergence_details(client, lang)
-    assert warning not in _subtree_texts(details), (
-        'the warning is inside the collapsed <details> -- a reader meets it '
-        'only after opening, i.e. after the decision it exists to inform')
-
-    root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
-    assert warning in _subtree_texts(root), (
-        'the warning is not on the panel at all')
-
-
-def test_an_undivergent_panel_renders_no_divergence_warning():
-    """The other direction, so the assertion above cannot pass by rendering the
-    warning unconditionally."""
-    client = _render(model_for(claim_items=[claim_row()]))
-    root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
-    assert ds.divergence_warning('en') not in _subtree_texts(root)
-
-
-def test_opening_the_axis_renders_the_fourth_disclosure_open():
-    model = model_for(claim_items=[claim_row(novelty_status='diverges_work')],
-                      show_divergence=True)
-    details = _divergence_details(_render(model))
-    assert 'open' in (details._props or {})
-
-
-def test_a_divergent_claim_is_absent_from_the_default_section_on_screen():
-    """Not merely filed elsewhere in the model -- absent from what the reader
-    sees without opening anything."""
-    client = _render(model_for(
-        claim_items=[claim_row(novelty_status='diverges_work')]))
-    root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
-    title = claim_row()['neutral_title']
+    chips = _divergence_chip_labels(client, lang)
+    assert chips, 'the divergence chip did not render on the row'
 
     inside_a_disclosure = set()
     for details in _details_elements(client):
         inside_a_disclosure.update(id(el) for el in details.descendants())
-    visible = [
-        text
-        for el in root.descendants(include_self=True)
-        if id(el) not in inside_a_disclosure
-        for text in _subtree_texts(el)
-    ]
-    assert title not in visible, (
-        'the divergent claim renders outside every disclosure -- it is in the '
-        'default view')
+    assert not any(id(chip) in inside_a_disclosure for chip in chips), (
+        'the divergent row rendered inside a <details> -- the default level '
+        'is open, undisclosed content, and the retired fourth level may have '
+        'come back')
+
+    root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
+    assert claim_row()['neutral_title'] in '\n'.join(_subtree_texts(root)), (
+        'the claim itself is not reachable')
+
+
+def test_an_undivergent_row_renders_no_divergence_chip():
+    """The other direction, so the assertion above cannot pass by rendering
+    the chip unconditionally."""
+    client = _render(model_for(claim_items=[claim_row()]))
+    assert _divergence_chip_labels(client) == []
+
+
+def test_a_screened_divergent_row_still_carries_its_chip_inside_more_matches():
+    """Divergence grants no promotion (a second pin on the model, repeated
+    here at the render layer): a row that fails the ordinary main-pool test is
+    screened onto "more matches" exactly as it would be if it were not
+    divergent, and still carries its own chip once that level is opened."""
+    weak_divergent = claim_row(
+        novelty_status='diverges_work', main_pool=False,
+        main_pool_reason=REASON_INSUFFICIENT_LENGTH, matched_letters=12,
+        coverage_ppm=20000)
+    model = model_for(claim_items=[weak_divergent], show_more=True)
+    client = _render(model)
+
+    details = _details_elements(client)
+    assert len(details) == 1, (
+        f'expected exactly one collapsed level ("more matches"), got {len(details)}')
+    chips = _divergence_chip_labels(client)
+    assert chips, 'the divergence chip did not render inside "more matches"'
+
+
+def test_no_disclosure_carries_a_divergence_warning_any_more():
+    """The old fourth level's `warning` key is gone along with the level it
+    warned about; nothing on the panel renders `divergence_warning` text."""
+    model = model_for(
+        claim_items=[claim_row(novelty_status='diverges_work', main_pool=False,
+                              main_pool_reason=REASON_INSUFFICIENT_LENGTH,
+                              matched_letters=12, coverage_ppm=20000)],
+        show_more=True)
+    client = _render(model)
+    root = _elements_with_class(client, dp.PANEL_ROOT_CLASS)[0]
+    assert ds.divergence_warning('en') not in _subtree_texts(root)
 
 
 # ---------------------------------------------------------------------------

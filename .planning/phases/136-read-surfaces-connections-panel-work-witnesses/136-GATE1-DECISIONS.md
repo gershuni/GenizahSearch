@@ -98,6 +98,16 @@ they remain LOCKED exactly as recorded above.
 
 ### D-13e -- does the middle "Also shares text with" bucket survive as a THIRD disclosure level?
 
+**⟨AMENDED 2026-08-13, owner ruling, direct session⟩ The panel collapses to TWO sections** — "On
+this page" (all main-pool rows, divergent ones carrying the per-row chip; see the § F amendment)
+and ONE collapsed "More possible matches" section that absorbs the middle bucket's content
+unchanged: the generic-passage groups, the D-11a related-pages block, and the
+never-an-identification note all move INSIDE it, still labelled as not-identifications. The 2026-08-02
+reachability rationale below is PRESERVED, not overturned — the 38,377 otherwise-unreachable items
+keep their route; only the number of containers changes (the sketch skill had already flagged this
+bucket as "open at gate 1" for exactly this collapse). Trigger: five stacked regions on a
+~68%-mobile surface, three of them collapsed toggles.
+
 - **Question:** does the panel keep a distinct THIRD disclosure level ("Also shares text with"), or
   does it collapse into "more matches"?
 - **Measured number** (`136-GATE1-EVIDENCE.md`): total middle-bucket population **40,615**; of
@@ -540,6 +550,26 @@ Only the single `refines_granularity` row is split into two, by direction.
 ---
 
 ## F. Divergence becomes its own OPT-IN category, split by SCOPE, with a separate CORRECTNESS axis
+
+**⟨AMENDED 2026-08-13, owner ruling, direct session (beta-launch day)⟩ The browse panel's
+default-hidden POSTURE is retired; the CATEGORY, the wording, and the findings-page filter all
+survive.** What prompted it: the owner hit the posture's failure mode live on the first day the
+excerpt surfaces shipped — a main-pool, 2-folio, 100%-coverage identification (JTS ENA 2932.18 →
+רס"ג תהלים פירוש) was invisible on /browse behind the bottom toggle, while the manuscript pane
+advertised the same work ungated on the same screen. Measured scope of the posture: 3,570 main-pool
+identifications (12.5% of the main pool: 3,463 `diverges_work` + 107 `diverges_part`) sat behind
+the toggle, and these are precisely the potential catalogue corrections — the highest-value rows in
+the system. Ruling: the panel shows divergent rows wherever the NORMAL routing puts them (main-pool
+rows in the default view), each carrying the existing neutral per-row chip ("Does not correspond to
+the catalogue — not adjudicated", `discovery_display_strings.divergence_chip`) — the caveat travels
+ON the row instead of being a place the row is kept. This is the treatment the corpus-wide findings
+page already shipped with, so the two surfaces now agree. Everything else in this section stands:
+the shade vocabulary, `divergence_correctness` as human-only (ruling L), the findings page's
+three-state divergence filter (owner, 2026-08-05), and the catalogue-never-evidence discipline —
+the system still takes no side; the chip still names a non-correspondence and its non-adjudication,
+nothing more. `shared/discovery_novelty.py::is_hidden_by_default` keeps its name as the shade
+predicate (it still drives the findings filter and the chip flag) but no longer causes hiding on
+the panel; its docstring records the same amendment.
 
 **Provenance.** Rulings F and G below arrived through a normal orchestrator dispatch in a later
 continuation of this same plan (136-03), after the owner read the ACTUAL 97 candidate cases the prior

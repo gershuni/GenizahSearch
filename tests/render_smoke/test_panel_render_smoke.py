@@ -2409,17 +2409,20 @@ def _lazy_read_envelopes(seed: Optional[str], lang: str) -> Dict[str, Any]:
 
 def _divergent_rows_bundle(lang: str, seed_title: Optional[str] = None
                            ) -> PanelServiceBundle:
-    """A claim in ruling F's FOURTH disclosure, WITH that disclosure open.
+    """A row carrying the per-row `catalogue_divergent` chip (owner ruling,
+    2026-08-13, amending ruling F).
 
     Nothing else in this suite produces one: every other fixture carries the
-    fail-closed `not_checked` shade, so the divergence level rendered empty and
-    its warning -- the sentence a reader must have BEFORE opening the level --
-    was never painted, nor was the level's own row loop.
+    fail-closed `not_checked` shade, so the `_render_identification_row`
+    branch that paints `divergence_chip` was never reached.
 
     The row is deliberately main-pool and default-eligible: a level-1 row by
-    every test except the divergence one, which is what makes the capture cover
-    the ORTHOGONAL case rather than a weak row that would have been gated
-    anyway.
+    every test except this one, which is what makes the capture cover the
+    ORTHOGONAL case (a divergent row that STAYS in the default level) rather
+    than a weak row that would have been screened onto "more matches" anyway.
+    The old fourth disclosure level and its own `show_divergence` visibility
+    flag are both gone -- the chip is unconditional on the row, not gated
+    behind a separate toggle.
     """
     base = _claim_source(novelty_status='diverges_work')
     rows = [surface_safe_claim(dict(
@@ -2438,7 +2441,6 @@ def _divergent_rows_bundle(lang: str, seed_title: Optional[str] = None
             'unit': 'distinct_opposite_pages'}),
         related_rows=None,
         lang=lang,
-        show_divergence=True,
     )
 
 

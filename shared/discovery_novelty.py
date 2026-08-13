@@ -239,10 +239,19 @@ def is_candidate_for_new_finds(novelty_status: str) -> bool:
 
 
 def is_hidden_by_default(novelty_status: str) -> bool:
-    """Ruling F's default-hidden/explicit-warned-toggle posture. Only
-    diverges_work/diverges_part are hidden by default -- every other shade,
-    including container_predicts (ruling H's explicit carve-out), renders
-    normally."""
+    """Ruling F's divergence-shade predicate: True only for
+    diverges_work/diverges_part -- every other shade, including
+    container_predicts (ruling H's explicit carve-out), is False.
+
+    ⟨AMENDED 2026-08-13, owner ruling -- `136-GATE1-DECISIONS.md` § F
+    amendment⟩ The NAME no longer describes the browse panel: the panel now
+    shows these rows wherever normal routing puts them, carrying the neutral
+    per-row chip (`discovery_display_strings.divergence_chip`) instead of
+    being gated behind a toggle. The predicate itself is unchanged and still
+    load-bearing twice over -- it flags the chip on panel rows and drives the
+    findings page's three-state divergence filter
+    (`discovery_service.DIVERGENCE_SHADE_ORDER`). The name is kept for
+    stability; read it as "is a catalogue-divergent shade"."""
     if novelty_status not in NOVELTY_STATUSES:
         raise ValueError(f"is_hidden_by_default: unknown novelty_status {novelty_status!r}")
     return novelty_status in HIDDEN_BY_DEFAULT_SHADES

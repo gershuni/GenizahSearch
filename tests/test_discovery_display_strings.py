@@ -128,7 +128,7 @@ SWEEP_INPUTS = {
     "not_an_identification_note": [{}],
     "section_header": [
         {"section_key": ds.SECTION_ON_THIS_PAGE},
-        {"section_key": ds.SECTION_ELSEWHERE_IN_MANUSCRIPT},
+        {"section_key": ds.SECTION_IN_THIS_MANUSCRIPT},
         {"section_key": ds.SECTION_OTHER_MANUSCRIPTS, "work_title": WORK_EN},
         {"section_key": ds.SECTION_OTHER_MANUSCRIPTS, "work_title": WORK_HE},
         {"section_key": ds.SECTION_PAGES_MATCHING_THIS_PAGE},
@@ -136,10 +136,10 @@ SWEEP_INPUTS = {
     "disclosure_toggle": [
         {"toggle_key": ds.TOGGLE_MORE_MATCHES},
         {"toggle_key": ds.TOGGLE_ALSO_SHARES_TEXT},
-        {"toggle_key": ds.TOGGLE_DIVERGENCE},
     ],
     "divergence_warning": [{}],
     "divergence_chip": [{}],
+    "this_page_marker": [{}],
     "related_pages_label": [{}],
     "related_pages_count_line": [{"count": 0}, {"count": 1}, {"count": 37397}],
     "bucket_name": [{"in_main_pool": True}, {"in_main_pool": False}],
@@ -468,9 +468,9 @@ def test_filter_codes_round_trip_without_exposing_a_stored_key():
 def test_hebrew_section_headers_use_the_u05be_maqaf():
     other = ds.section_header(ds.SECTION_OTHER_MANUSCRIPTS, "he", work_title=WORK_HE)
     pages = ds.section_header(ds.SECTION_PAGES_MATCHING_THIS_PAGE, "he")
-    elsewhere = ds.section_header(ds.SECTION_ELSEWHERE_IN_MANUSCRIPT, "he")
+    in_manuscript = ds.section_header(ds.SECTION_IN_THIS_MANUSCRIPT, "he")
 
-    for header in (other, pages, elsewhere):
+    for header in (other, pages, in_manuscript):
         assert MAQAF in header, (
             "D-21 fixes the Hebrew maqaf at U+05BE; {!r} carries none".format(header)
         )
@@ -483,9 +483,10 @@ def test_hebrew_section_headers_use_the_u05be_maqaf():
         "דפים התואמים לדף זה "
         "בכתבי" + MAQAF + "יד אחרים"
     )
+    assert in_manuscript == "בכתב" + MAQAF + "יד זה"
 
     assert ds.section_header(ds.SECTION_ON_THIS_PAGE, "en") == "On this page"
-    assert ds.section_header(ds.SECTION_ELSEWHERE_IN_MANUSCRIPT, "en") == "Elsewhere in this manuscript"
+    assert ds.section_header(ds.SECTION_IN_THIS_MANUSCRIPT, "en") == "In this manuscript"
     assert ds.section_header(ds.SECTION_OTHER_MANUSCRIPTS, "en", work_title=WORK_EN) == (
         "Other manuscripts matching " + WORK_EN
     )
@@ -495,6 +496,19 @@ def test_hebrew_section_headers_use_the_u05be_maqaf():
 
     with pytest.raises(ValueError):
         ds.section_header("no_such_section", "en")
+
+
+# ---------------------------------------------------------------------------
+# Behaviour test 8 -- the manuscript-pane "on this page" marker (owner ruling,
+# 2026-08-13). Bilingual, and NEUTRAL: a page-membership fact, no quality
+# claim (D-24).
+# ---------------------------------------------------------------------------
+
+def test_this_page_marker_is_bilingual_and_neutral():
+    assert ds.this_page_marker("en") == "includes this page"
+    assert ds.this_page_marker("he") == "כולל דף זה"
+    for lang in LANGS:
+        gate_string(ds.this_page_marker(lang), lang, where="this_page_marker")
 
 
 # ---------------------------------------------------------------------------

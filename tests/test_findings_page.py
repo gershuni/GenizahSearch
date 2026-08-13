@@ -5352,47 +5352,50 @@ def test_the_findings_control_labels_its_STATE_not_the_panels_disclosure(
     """The correction the owner asked for, as an assertion.
 
     `TOGGLE_DIVERGENCE` -- "Show findings that disagree with the catalogue" --
-    was ratified for the PANEL, where it labels D-13e's fourth disclosure: a
-    section that opens onto divergent rows ONLY, which the string describes
-    exactly. On THIS page the same string sat on a purely additive filter that
-    widened a mixed set and kept every non-divergent row, so it described a
-    mechanic the page does not have. The owner read the control as broken and
-    then named the reason: "so why 'show that disagree' shows also those who do
-    not disagree?".
+    was ratified for the PANEL, where it used to label D-13e's fourth
+    disclosure: a section that opened onto divergent rows ONLY, which the
+    string described exactly. On THIS page the same string sat on a purely
+    additive filter that widened a mixed set and kept every non-divergent row,
+    so it described a mechanic the page does not have. The owner read the
+    control as broken and then named the reason: "so why 'show that disagree'
+    shows also those who do not disagree?".
 
-    So the findings page labels its STATES, and the panel keeps the string.
+    So the findings page labels its STATES, and the panel kept its own string
+    -- until the owner's 2026-08-13 amendment retired the panel's
+    disclosure-based divergence wording ENTIRELY (`TOGGLE_DIVERGENCE` and
+    `LEVEL_DIVERGENCE` are both deleted from `shared/discovery_panel_model.py`
+    / `shared/discovery_display_strings.py`; divergence is a per-ROW chip
+    there now, `ds.divergence_chip`, never a disclosure toggle's label). There
+    is therefore nothing left of the OLD panel string to check for leakage
+    against -- the two controls that string used to distinguish no longer
+    both exist. What survives, and what this test still pins, is the
+    findings-page selector's own closed vocabulary: its current choice is one
+    of its own four labels, and (the surviving half of the original spirit)
+    none of those four collide with the panel's own live divergence string,
+    the row chip.
 
-    The two controls the owner was reacting to (a candidacy switch and a
-    cycling divergence chip) are gone now, replaced by ONE four-state selector
-    (owner ruling, 2026-08-06). The property this test pins survived that
-    redesign unchanged -- only the vocabulary the STATE label is drawn from
-    changed, from three chip-state keys to the selector's own four option
-    labels -- so this is TRANSLATED against the new control, not retired with
-    the old one.
+    The two controls the owner was originally reacting to (a candidacy switch
+    and a cycling divergence chip) were replaced by ONE four-state selector
+    (owner ruling, 2026-08-06); that redesign is what this test was already
+    translated against before the 2026-08-13 amendment retired the panel side
+    of the comparison.
     """
-    from shared.discovery_display_strings import TOGGLE_DIVERGENCE, disclosure_toggle
-
-    ratified = disclosure_toggle(TOGGLE_DIVERGENCE, lang)
     client = _render_page(monkeypatch, lang=lang)
-
-    labels = {(element._props or {}).get("label")
-              for element in client.elements.values()}
-    assert ratified not in labels, (
-        "the panel's disclosure wording is back on a findings-page control -- "
-        "it promises a divergent-only section and this control filters a list")
 
     option_labels = set(fp._novelty_view_options(lang).values())
     assert _divergence_label(client) in option_labels, (
         f"the selector's current choice {_divergence_label(client)!r} is not "
         f"one of its own four state labels {option_labels!r}")
-    assert ratified not in option_labels, (
-        "the panel's disclosure string leaked into the selector's own option set")
 
-    # ...and the PANEL still uses it, so this is a page-level correction rather
-    # than a retirement of ratified vocabulary.
-    import shared.discovery_panel_model as pm
+    # The panel's own SURVIVING divergence string (the per-row chip) is a
+    # different mechanic again -- a marker on an identification, not a filter
+    # state -- so the findings page's own four labels must not collide with it
+    # either.
+    from shared.discovery_display_strings import divergence_chip
 
-    assert pm.LEVEL_DIVERGENCE == TOGGLE_DIVERGENCE
+    assert divergence_chip(lang) not in option_labels, (
+        "the panel's row-chip wording leaked into the findings selector's own "
+        "option set")
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])
