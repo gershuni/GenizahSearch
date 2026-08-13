@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Admin suppression of individual computed identifications (owner ruling,
 2026-08-06).
 
