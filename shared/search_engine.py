@@ -2754,10 +2754,22 @@ class SearchEngine:
         return deduped
 
     def _deduplicate(self, results):
+        # V0.8 wins outright on a uid collision. V0.7 rows must ALSO dedupe against
+        # each other: the same uid arrives twice for one page -- once from the
+        # aggregated scope='system' continuous doc and once from its scope='page'
+        # doc -- and the old `uid not in v8` test let both through, rendering the
+        # identical folio as two separate results.
         v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
         final = list(v8.values())
+        seen_v7 = set()
         for r in results:
-            if r['display']['source'] == "V0.7" and r['uid'] not in v8: final.append(r)
+            if r['display']['source'] != "V0.7":
+                continue
+            uid = r['uid']
+            if uid in v8 or uid in seen_v7:
+                continue
+            seen_v7.add(uid)
+            final.append(r)
         return final
 
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None,

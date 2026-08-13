@@ -666,20 +666,35 @@ def create_result_card(search_state, refs, index, result):
         with ui.row().classes('gap-1 mt-1'):
             # Browse
             if sys_id:
+                # Page identity for the browse deep-link. A bare /browse?sys_id=
+                # is NOT a harmless degradation: browse then resolves the first
+                # p_num==1 page of the FIRST volume, which for a multi-IE
+                # manuscript is a different folio than the one that matched.
+                # So derive each component independently, and fall back from
+                # raw_header to uid -- the uid ('IE..._P..._FL...') carries
+                # ie_id/p_num/fl_id on its own even when raw_header is missing,
+                # empty, or unparseable.
                 _card_fl_id = None
                 _card_ie_id = None
-                if 'raw_header' in result and state.meta_mgr:
-                    try:
-                        _parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
-                        _card_fl_id = _parsed.get('fl_id')
-                        _card_ie_id = _parsed.get('ie_id')
-                    except Exception:
-                        pass  # UI visibility update failed; continue rendering
+                _card_p_num = None
+                if state.meta_mgr:
+                    for _id_src in (result.get('raw_header'), result.get('uid')):
+                        if not _id_src or (_card_fl_id and _card_ie_id and _card_p_num):
+                            continue
+                        try:
+                            _parsed = state.meta_mgr.parse_full_id_components(_id_src)
+                        except Exception:
+                            continue  # unparseable source; try the next one
+                        _card_fl_id = _card_fl_id or _parsed.get('fl_id')
+                        _card_ie_id = _card_ie_id or _parsed.get('ie_id')
+                        _card_p_num = _card_p_num or _parsed.get('p_num')
                 _card_browse_url = f'/browse?sys_id={sys_id}'
                 if _card_fl_id:
                     _card_browse_url += f'&fl_id={_card_fl_id}'
                 if _card_ie_id:
                     _card_browse_url += f'&volume_ie={_card_ie_id}'
+                if _card_p_num:
+                    _card_browse_url += f'&page={_card_p_num}'
                 with ui.link(target=_card_browse_url).classes('no-underline'):
                     ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
 
@@ -1545,6 +1560,8 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 browse_url += f'&fl_id={fl_id}'
                             if ie_id:
                                 browse_url += f'&volume_ie={ie_id}'
+                            if current_p_num:
+                                browse_url += f'&page={current_p_num}'
                             # Use ui.link for full page reload to ensure browse page recreates with PGP data
                             with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse')):
                                 ui.button(icon='menu_book').props(f'flat round size=sm aria-label="{tr("Browse")}"')
@@ -1683,6 +1700,8 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     browse_url += f'&fl_id={fl_id}'
                                 if ie_id:
                                     browse_url += f'&volume_ie={ie_id}'
+                                if current_p_num:
+                                    browse_url += f'&page={current_p_num}'
                                 with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
                                     ui.button(icon='menu_book').props(f'flat round size=sm color=green aria-label="{tr("Browse Full Manuscript")}"')
 
@@ -2324,6 +2343,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                         browse_url = f'/browse?sys_id={sys_id}'
                         if fl_id:
                             browse_url += f'&fl_id={fl_id}'
+                        if ie_id:
+                            browse_url += f'&volume_ie={ie_id}'
+                        if current_p_num:
+                            browse_url += f'&page={current_p_num}'
                         # Use ui.link for full page reload to ensure browse page recreates with PGP data
                         with ui.link(target=browse_url).classes('btn-primary no-underline'):
                             ui.icon('menu_book').classes('mr-2')

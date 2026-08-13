@@ -781,7 +781,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if _sys_id and is_synthetic_sys_id(_sys_id):
                     return None
                 if fl_id:
-                    return service.get_browse_page_by_fl(fl_id, sys_id=_sys_id)
+                    _fl_page = service.get_browse_page_by_fl(fl_id, sys_id=_sys_id)
+                    if _fl_page:
+                        return _fl_page
+                    # FL lookup came back empty. Do NOT dead-end here: the
+                    # inbound URL also carries volume_ie (+ page), which
+                    # addresses the same folio by a different route. Erroring
+                    # out instead was strictly worse than the fallback.
+                    if _sys_id:
+                        return service.get_browse_page(
+                            _sys_id,
+                            p_num=p_num if p_num is not None else 1,
+                            volume_ie=_volume_ie,
+                        )
+                    return None
                 elif p_num is not None:
                     return service.get_browse_page(_sys_id, p_num=p_num, volume_ie=_volume_ie)
                 elif _current_p_num is not None:
@@ -4690,7 +4703,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             state.is_loading = True
             update_content()  # Show spinner synchronously before async kicks in
             # Cat-2: deferred to next event loop tick to allow spinner to render before load.
-            asyncio.ensure_future(load_page(fl_id=bootstrap['fl_id']))
+            # p_num is passed alongside fl_id purely as a FALLBACK: the fl_id
+            # route wins when it resolves, but when the FL id is stale/unknown
+            # (or its uid has no text) _fetch_page retries the volume+page
+            # route instead of dead-ending on 'No text available'.
+            asyncio.ensure_future(load_page(fl_id=bootstrap['fl_id'], p_num=bootstrap['p_num']))
         elif action == 'sys_id':
             if bootstrap['clear_desk']:
                 # Stale desk - use snapshot helper, not direct pop (Codex HIGH #9).
