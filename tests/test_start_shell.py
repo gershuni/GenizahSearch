@@ -59,3 +59,12 @@ def test_start_primary_action_keeps_theme_safe_text_and_about_is_reciprocal():
     assert 'color: var(--text-inverse) !important' in start_source
     assert 'ui.link(target="/about")' in start_source
     assert "ui.link(target='/start')" in about_source
+
+
+def test_computed_examples_use_an_intentional_responsive_four_card_grid():
+    source = Path('web/pages/start.py').read_text(encoding='utf-8')
+
+    assert '.start-computed-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }' in source
+    assert '@media (max-width: 1100px)' in source
+    assert 'container_class="start-computed-grid"' in source
+    assert 'image_src=str(entry["thumbnail"])' in source

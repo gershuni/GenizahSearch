@@ -104,6 +104,11 @@ def test_invalid_editorial_change_fails_before_rendering():
     with pytest.raises(StartContentError, match='internal image endpoint'):
         _validate_start_content(content)
 
+    content = deepcopy(load_start_content())
+    content['computed_candidates'][0]['thumbnail'] = '/api/nli_image_by_sysid/000000000000000000?page=0'
+    with pytest.raises(StartContentError, match='internal image endpoint'):
+        _validate_start_content(content)
+
 
 def test_computed_examples_require_availability_and_exact_frame(monkeypatch):
     import web.discovery_assets as assets
@@ -172,6 +177,17 @@ def test_computed_examples_are_the_selected_launch_set_with_exact_pages():
     }
     assert all('automatic' in entry['description']['en'].lower()
                for entry in content['computed_candidates'])
+    assert all(
+        entry['thumbnail'].startswith('/api/')
+        and f"/{entry['sys_id']}?" in entry['thumbnail']
+        and set(entry['alt']) == {'en', 'he'}
+        for entry in content['computed_candidates']
+    )
+    ben_hofni = next(
+        entry for entry in content['computed_candidates']
+        if entry['id'] == 'computed-ben-hofni-tzitzit'
+    )
+    assert ben_hofni['thumbnail'].startswith('/api/jts_image/')
     twenty = next(entry for entry in content['computed_candidates'] if entry['id'] == 'computed-twenty-chapters')
     assert parse_qs(urlsplit(manuscript_url(twenty, computed=True)).query) == {
         'sys_id': ['990051284490205171'],

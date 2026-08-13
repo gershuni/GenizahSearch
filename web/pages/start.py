@@ -217,8 +217,10 @@ def _native_card(
     reference_href: str | None = None,
     reference_label: str | None = None,
     extra_class: str = "",
+    preview_text: str | None = None,
+    on_click: Callable[[], None] | None = None,
     event: str = "welcome_action_clicked",
-) -> None:
+) -> Any:
     """Render an actual anchor so keyboard and browser link behavior stay native."""
     aria = html.escape(f"{title}. {description}", quote=True)
 
@@ -231,29 +233,36 @@ def _native_card(
         with ui.element("div").classes("start-card-body"):
             if eyebrow:
                 ui.label(eyebrow).classes("start-eyebrow")
+            if preview_text:
+                ui.label(preview_text).classes("start-query-preview").props(
+                    "dir=rtl lang=he"
+                )
             with ui.row().classes("w-full items-start justify-between gap-2 no-wrap"):
                 h3(title, classes="start-card-title")
                 ui.icon(icon).classes("start-card-arrow").props("aria-hidden=true")
             ui.label(description).classes("start-card-description")
 
     def primary_link(classes: str):
+        def tracked_click() -> None:
+            _track(
+                event,
+                route_id=route_id,
+                action_id=action_id,
+                difficulty=difficulty,
+            )
+            if on_click is not None:
+                on_click()
+
         return (
             ui.link(target=href)
             .classes(classes)
             .props(f'aria-label="{aria}"')
-            .on(
-                "click",
-                lambda: _track(
-                    event,
-                    route_id=route_id,
-                    action_id=action_id,
-                    difficulty=difficulty,
-                ),
-            )
+            .on("click", tracked_click)
         )
 
     if reference_href and reference_label:
-        with ui.element("article").classes(f"start-card {extra_class}"):
+        article = ui.element("article").classes(f"start-card {extra_class}")
+        with article:
             with primary_link("start-card-primary no-underline"):
                 render_contents()
             ui.link(reference_label, reference_href, new_tab=True).classes(
@@ -267,9 +276,45 @@ def _native_card(
                     difficulty=difficulty,
                 ),
             )
+        return article
     else:
-        with primary_link(f"start-card no-underline {extra_class}"):
+        link = primary_link(f"start-card no-underline {extra_class}")
+        with link:
             render_contents()
+        return link
+
+
+def _compact_link(
+    *,
+    title: str,
+    description: str,
+    href: str,
+    route_id: str,
+    action_id: str,
+    difficulty: str,
+    icon: str,
+) -> None:
+    """Render a concise icon-led link instead of another full text card."""
+    aria = html.escape(f"{title}. {description}", quote=True)
+    with ui.link(target=href).classes("start-compact-link no-underline").props(
+        f'aria-label="{aria}"'
+    ).on(
+        "click",
+        lambda: _track(
+            "welcome_action_clicked",
+            route_id=route_id,
+            action_id=action_id,
+            difficulty=difficulty,
+        ),
+    ):
+        with ui.element("span").classes("start-compact-icon"):
+            ui.icon(icon).props("aria-hidden=true")
+        with ui.element("span").classes("start-compact-copy"):
+            ui.label(title).classes("start-compact-title")
+            ui.label(description).classes("start-compact-description")
+        ui.icon("arrow_back" if get_language() == "he" else "arrow_forward").classes(
+            "start-compact-arrow"
+        ).props("aria-hidden=true")
 
 
 def _show_more_collection(
@@ -281,10 +326,11 @@ def _show_more_collection(
     difficulty: str,
     render_entry: Callable[[Mapping[str, Any]], None],
     lang: str,
+    container_class: str = "",
 ) -> None:
     """Show a deterministic first window and replace it in-place on demand."""
     offset = {"value": 0}
-    container = ui.element("div").classes("start-card-grid w-full")
+    container = ui.element("div").classes(f"start-card-grid {container_class} w-full")
 
     def render_window() -> None:
         container.clear()
@@ -384,12 +430,18 @@ def _render_atlas_invitation(lang: str) -> None:
                     )
 
 
-def _route_card(route_id: str, lang: str) -> None:
+def _route_card(
+    route_id: str,
+    lang: str,
+    *,
+    on_select: Callable[[], None],
+    active: bool = False,
+) -> Any:
     route = _ROUTE_COPY[route_id]
     selected = "he" if lang == "he" else "en"
     title = route["title"][selected]
     description = route["description"][selected]
-    _native_card(
+    card = _native_card(
         title=title,
         description=description,
         href=f"#start-{route_id}",
@@ -397,9 +449,17 @@ def _route_card(route_id: str, lang: str) -> None:
         action_id=f"route_{route_id}",
         difficulty="introductory" if route_id != "research" else "research",
         icon=route["icon"],
-        extra_class=f"start-route-card start-route-card-{route_id}",
+        extra_class=(
+            f"start-route-card start-route-card-{route_id}"
+            + (" start-route-card-active" if active else "")
+        ),
+        on_click=on_select,
         event="welcome_route_selected",
     )
+    card.mark(f"start-route-choice-{route_id}")
+    if active:
+        card.props("aria-current=location")
+    return card
 
 
 def _render_content_error(lang: str) -> None:
@@ -430,6 +490,26 @@ def create_start_page() -> None:
         logger.exception("Start-page curation failed validation")
         _render_content_error(lang)
         return
+
+    route_sections: dict[str, Any] = {}
+    route_choices: dict[str, Any] = {}
+
+    def select_route(route_id: str) -> None:
+        """Keep one guided route visible instead of presenting a wall of cards."""
+        for candidate_id, section in route_sections.items():
+            section.set_visibility(candidate_id == route_id)
+        for candidate_id, choice in route_choices.items():
+            is_active = candidate_id == route_id
+            if is_active:
+                choice.classes(add="start-route-card-active")
+                choice.props(add="aria-current=location")
+            else:
+                choice.classes(remove="start-route-card-active")
+                choice.props(remove="aria-current")
+        ui.run_javascript(
+            f"requestAnimationFrame(() => document.getElementById('start-{route_id}')"
+            "?.scrollIntoView({behavior: 'smooth', block: 'start'}));"
+        )
 
     ui.add_head_html(
         """
@@ -504,6 +584,11 @@ def create_start_page() -> None:
             min-height: 188px; border-top: 3px solid var(--primary-600);
             box-shadow: var(--shadow-sm);
         }
+        .start-route-card-active {
+            border-color: var(--primary-600);
+            background: color-mix(in srgb, var(--primary-600) 9%, var(--bg-card));
+            box-shadow: 0 10px 28px color-mix(in srgb, var(--primary-600) 18%, transparent);
+        }
         .start-route-card .start-card-body { padding: 1.15rem; }
         .start-route-card .start-card-arrow {
             display: inline-flex; align-items: center; justify-content: center;
@@ -514,6 +599,54 @@ def create_start_page() -> None:
             align-self: flex-start; padding: .2rem .55rem; border-radius: 999px;
             background: color-mix(in srgb, var(--primary-600) 13%, transparent);
             color: var(--primary-600); font-size: .72rem; font-weight: 700;
+        }
+        .start-query-preview {
+            width: 100%; padding: .7rem .8rem; border-radius: 10px;
+            border: 1px dashed color-mix(in srgb, var(--primary-600) 45%, var(--border-light));
+            background: color-mix(in srgb, var(--primary-600) 7%, var(--bg-secondary));
+            color: var(--text-primary); font-size: 1rem; font-weight: 700;
+            line-height: 1.55; unicode-bidi: isolate; text-align: right;
+        }
+        .start-search-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .start-search-card { min-height: 0; }
+        .start-search-card .start-card-description {
+            display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+        }
+        .start-compact-grid {
+            display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .25rem 1.25rem;
+        }
+        .start-compact-link {
+            min-width: 0; min-height: 78px; display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+            gap: .8rem; padding: .75rem .25rem;
+            border-bottom: 1px solid var(--border-light); color: inherit;
+            transition: color .16s ease, border-color .16s ease, transform .16s ease;
+        }
+        .start-compact-link:hover {
+            color: inherit; border-color: var(--primary-600); transform: translateY(-1px);
+        }
+        .start-compact-link:focus-visible {
+            outline: 3px solid var(--primary-600); outline-offset: 3px; border-radius: 8px;
+        }
+        .start-compact-icon {
+            width: 40px; height: 40px; display: inline-flex; align-items: center;
+            justify-content: center; border-radius: 999px;
+            color: var(--primary-700);
+            background: color-mix(in srgb, var(--primary-600) 12%, transparent);
+        }
+        .start-compact-copy { min-width: 0; display: flex; flex-direction: column; gap: .18rem; }
+        .start-compact-title { color: var(--text-primary); font-weight: 750; line-height: 1.35; }
+        .start-compact-description {
+            color: var(--text-secondary); font-size: .84rem; line-height: 1.45;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .start-compact-arrow { color: var(--primary-600); }
+        .start-route-panel { animation: start-route-in .18s ease-out; }
+        @keyframes start-route-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         .start-touch-target { min-height: 44px; min-width: 44px; }
         .start-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
@@ -570,12 +703,26 @@ def create_start_page() -> None:
                 color-mix(in srgb, var(--primary-600) 6%, var(--bg-card));
             box-shadow: var(--shadow-md);
         }
+        .start-computed-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .start-computed-card { min-height: 100%; }
+        @media (max-width: 1100px) {
+            .start-computed-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 820px) {
+            .start-search-grid, .start-compact-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 620px) {
+            .start-computed-grid { grid-template-columns: 1fr; }
+        }
         @media (max-width: 420px) {
             .start-hero { padding: 1.1rem; border-radius: 12px; }
             .start-card-grid { grid-template-columns: 1fr; }
             .start-actions > * { width: 100%; }
         }
-        @media (prefers-reduced-motion: reduce) { .start-card { transition: none; } }
+        @media (prefers-reduced-motion: reduce) {
+            .start-card, .start-compact-link { transition: none; }
+            .start-route-panel { animation: none; }
+        }
         </style>
         """
     )
@@ -594,7 +741,12 @@ def create_start_page() -> None:
                 f'aria-label="{html.escape(_copy("choose", lang), quote=True)}"'
             ):
                 for route_id in ("explore", "search", "research"):
-                    _route_card(route_id, lang)
+                    route_choices[route_id] = _route_card(
+                        route_id,
+                        lang,
+                        on_select=lambda selected=route_id: select_route(selected),
+                        active=route_id == "explore",
+                    )
 
         with ui.element("details").classes(
             "start-section start-revolutions-disclosure w-full"
@@ -638,7 +790,11 @@ def create_start_page() -> None:
                     ui.icon("travel_explore").props("aria-hidden=true")
                     ui.label(_copy("revolutions_conclusion", lang))
 
-        with ui.element("section").classes("start-section w-full").props("id=start-explore").mark("start-route-explore"):
+        explore_section = ui.element("section").classes(
+            "start-section start-route-panel w-full"
+        ).props("id=start-explore").mark("start-route-explore")
+        route_sections["explore"] = explore_section
+        with explore_section:
             h2(_ROUTE_COPY["explore"]["title"][lang], classes="text-2xl font-bold")
             h3(_copy("selected_manuscripts", lang), classes="text-lg font-bold mt-5")
             ui.label(_copy("selected_manuscripts_intro", lang)).classes("start-section-intro mb-3")
@@ -680,7 +836,12 @@ def create_start_page() -> None:
                 h3(_copy("atlas_title", lang), classes="text-lg font-bold mt-7 mb-3")
                 _render_atlas_invitation(lang)
 
-        with ui.element("section").classes("start-section w-full").props("id=start-search").mark("start-route-search"):
+        search_section = ui.element("section").classes(
+            "start-section start-route-panel w-full"
+        ).props("id=start-search").mark("start-route-search")
+        route_sections["search"] = search_section
+        search_section.set_visibility(False)
+        with search_section:
             h2(_ROUTE_COPY["search"]["title"][lang], classes="text-2xl font-bold")
             h3(_copy("prepared_searches", lang), classes="text-lg font-bold mt-5")
             ui.label(_copy("prepared_searches_intro", lang)).classes("start-section-intro mb-3")
@@ -695,6 +856,8 @@ def create_start_page() -> None:
                     difficulty=str(entry["difficulty"]),
                     icon="search",
                     eyebrow=_copy(str(entry["difficulty"]), lang),
+                    preview_text=str(entry["query"]),
+                    extra_class="start-search-card",
                 )
 
             _show_more_collection(
@@ -705,13 +868,14 @@ def create_start_page() -> None:
                 difficulty="mixed",
                 render_entry=render_search,
                 lang=lang,
+                container_class="start-search-grid",
             )
 
             h3(_copy("known_works", lang), classes="text-lg font-bold mt-8")
             ui.label(_copy("known_works_intro", lang)).classes("start-section-intro mb-3")
 
             def render_work(entry: Mapping[str, Any]) -> None:
-                _native_card(
+                _compact_link(
                     title=localized(entry, "title", lang),
                     description=localized(entry, "description", lang),
                     href=work_url(entry),
@@ -729,9 +893,15 @@ def create_start_page() -> None:
                 difficulty="guided",
                 render_entry=render_work,
                 lang=lang,
+                container_class="start-compact-grid",
             )
 
-        with ui.element("section").classes("start-section w-full").props("id=start-research").mark("start-route-research"):
+        research_section = ui.element("section").classes(
+            "start-section start-route-panel w-full"
+        ).props("id=start-research").mark("start-route-research")
+        route_sections["research"] = research_section
+        research_section.set_visibility(False)
+        with research_section:
             h2(_copy("research_tools", lang), classes="text-2xl font-bold")
             ui.label(_copy("research_intro", lang)).classes("start-section-intro mb-4")
 
@@ -773,6 +943,9 @@ def create_start_page() -> None:
                                 difficulty="research",
                                 icon="fact_check",
                                 eyebrow=f"{localized(entry, 'category', lang)} · {entry['shelfmark']}",
+                                image_src=str(entry["thumbnail"]),
+                                image_alt=localized(entry, "alt", lang),
+                                extra_class="start-computed-card",
                             )
 
                         _show_more_collection(
@@ -783,15 +956,16 @@ def create_start_page() -> None:
                             difficulty="research",
                             render_entry=render_candidate,
                             lang=lang,
+                            container_class="start-computed-grid",
                         )
 
             h3(_copy("other_research_tools", lang), classes="text-lg font-bold mb-3")
 
-            with ui.element("div").classes("start-card-grid w-full"):
+            with ui.element("div").classes("start-compact-grid w-full"):
                 demos = content["demos"]
                 if demos["parallels"]["enabled"]:
                     entry = demos["parallels"]
-                    _native_card(
+                    _compact_link(
                         title=localized(entry, "title", lang),
                         description=localized(entry, "description", lang),
                         href=demo_url("parallels", entry),
@@ -801,7 +975,7 @@ def create_start_page() -> None:
                         icon="compare_arrows",
                     )
                 else:
-                    _native_card(
+                    _compact_link(
                         title="מקבילות טקסטואליות" if rtl else "Textual parallels",
                         description="הדביקו טקסט וחפשו קטעים דומים בקורפוס." if rtl else "Paste text and look for similar passages across the corpus.",
                         href="/parallels",
@@ -813,7 +987,7 @@ def create_start_page() -> None:
 
                 if demos["joins"]["enabled"]:
                     entry = demos["joins"]
-                    _native_card(
+                    _compact_link(
                         title=localized(entry, "title", lang),
                         description=localized(entry, "description", lang),
                         href=demo_url("joins", entry),
@@ -825,7 +999,7 @@ def create_start_page() -> None:
 
                 if WEB_PUZZLE_ENABLED:
                     entry = content["puzzle"]
-                    _native_card(
+                    _compact_link(
                         title=localized(entry, "title", lang),
                         description=localized(entry, "description", lang),
                         href=puzzle_url(entry),

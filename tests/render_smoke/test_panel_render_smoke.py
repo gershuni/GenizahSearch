@@ -1924,17 +1924,18 @@ def test_FP_D06A_LIVE_PAGE(lang):
 
 
 @pytest.mark.parametrize('lang', LANGS)
-def test_FP_D06A_CARD_BOUNDARY(lang):
-    """The pair that proves the SELECTOR discriminates: the same sentence scoped
-    to `_CONFIDENCE_SECTION_CLASS` FAILS, scoped to the registered entry it
-    PASSES. With the scope registered as the card's class both halves pass,
-    which is exactly the leak round 10 found."""
+def test_FP_D06A_PRACTICAL_LIMITATIONS_NEED_NO_EXCEPTION(lang):
+    """The replacement Help copy is qualitative in its own right.
+
+    It passes the honesty gate whether scanned as part of the old broad card
+    scope or through the legacy paragraph marker; the marker remains only for
+    stable render coverage while the confidence-band report is retired.
+    """
     import html as _html
     from web.pages.help import _CONFIDENCE_SECTION_CLASS, _LIMITATIONS_TEXT
     sentence = _LIMITATIONS_TEXT[lang]
     card = f'<div class="{_CONFIDENCE_SECTION_CLASS}">{_html.escape(sentence)}</div>'
-    with pytest.raises(DiscoveryHonestyViolation):
-        assert_surface_honesty(card, scope_selector=_CONFIDENCE_SECTION_CLASS, lang=lang)
+    assert_surface_honesty(card, scope_selector=_CONFIDENCE_SECTION_CLASS, lang=lang)
     scope = D06A_QUALITATIVE_SCOPES[0]
     paragraph = f'<div class="{scope}">{_html.escape(sentence)}</div>'
     assert_surface_honesty(paragraph, scope_selector=scope, lang=lang)
