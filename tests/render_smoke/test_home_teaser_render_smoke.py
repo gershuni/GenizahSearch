@@ -426,3 +426,47 @@ def test_gated_homepage_entries_hide_cleanly_and_joins_card_remains_he(monkeypat
         assert 'Find and compare joining fragments' not in blob
 
     _run_home_smoke(driver, lang='he')
+
+
+def test_the_hero_text_column_keeps_a_width_floor_so_the_row_wraps_on_a_phone():
+    """A REGRESSION GUARD on a defect that looks idiomatic in review.
+
+    The hero is a `flex-wrap` row: the title/subtitle column beside the inline
+    stats. While that column carried `flex-1 min-w-0` it was allowed to shrink
+    to NOTHING, so the row's min-content width was the stats' width alone, the
+    line never overflowed, `flex-wrap` never fired on a phone, and the stats
+    kept their intrinsic width while the Hebrew title wrapped one word per line
+    down a tall, mostly-empty card (reported 2026-08-13, on mobile).
+
+    `min-w-0` is the right default nearly everywhere in a flex layout, which is
+    exactly why this needs a guard rather than a comment: the floor reads like
+    something to tidy away. Asserted as a DECLARATION rather than a computed
+    layout because a headless render exposes no geometry -- so this cannot prove
+    the hero looks right, only that the property whose absence broke it is still
+    there.
+    """
+    async def driver(user):
+        await user.open('/')
+        column = _marked_element(user, 'home-hero-text')
+        assert column is not None, (
+            'the hero text column lost its marker; if the hero was '
+            'restructured, re-point this guard rather than deleting it'
+        )
+        style_items = (getattr(column, '_style', None) or {}).items()
+        style = '; '.join(f'{prop}: {value}' for prop, value in style_items)
+        classes = getattr(column, '_classes', None) or []
+        assert 'min-w-0' not in classes, (
+            'the hero text column is back to `min-w-0`: it may now shrink to '
+            'zero, so flex-wrap will not fire and the title collapses to one '
+            'word per line on a phone'
+        )
+        assert 'min-width' in style and 'min(' in style, (
+            'the hero text column lost its min-width floor. Without it the row '
+            'cannot wrap on a phone; with a BARE floor (no `min()`) it '
+            f'overflows a 320px viewport instead. Style was: {style!r}'
+        )
+        assert 'flex' in style, (
+            f'the hero text column lost its flex basis. Style was: {style!r}'
+        )
+
+    _run_home_smoke(driver, lang='he')

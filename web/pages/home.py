@@ -84,7 +84,25 @@ def create_page():
             'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
         ):
             with ui.row().classes('w-full items-center justify-between gap-4 flex-wrap'):
-                with ui.column().classes('gap-1 flex-1 min-w-0'):
+                # THE TEXT COLUMN NEEDS A REAL MINIMUM, not `flex-1 min-w-0`.
+                #
+                # `flex-1 min-w-0` says this column may shrink to NOTHING, so the
+                # row's min-content width was the STATS' width alone -- the line
+                # therefore never overflowed, `flex-wrap` never fired on a phone,
+                # and the stats kept their full intrinsic width while the title
+                # was squeezed into the leftover ~140px: one word per line, beside
+                # a tall empty gap that `items-center` then centred the short
+                # stats row against. That gap was the reported bug; the wrapping
+                # was its cause, not stray padding.
+                #
+                # A floor is what lets `flex-wrap` do its job: below it the two
+                # items cannot share a line, so the stats drop to their own row
+                # and the text gets the full width. `min()` is load-bearing -- a
+                # bare `min-width: 20rem` would overflow a 320px viewport, which
+                # is the defect this would otherwise trade for.
+                with ui.column().classes('gap-1').style(
+                    'flex: 1 1 20rem; min-width: min(100%, 20rem);'
+                ).mark('home-hero-text'):
                     h1(tr('Dicta Genizah Search: Full-Text Manuscript Search'),
                        classes='text-lg font-bold',
                        style='color: var(--text-primary); margin: 0;')
@@ -92,8 +110,9 @@ def create_page():
                         'text-sm'
                     ).style('color: var(--text-secondary);')
 
-                # Inline stats
-                with ui.row().classes('items-center gap-4'):
+                # Inline stats. `flex-wrap` so the two stats stack rather than
+                # overflow once they have a narrow line to themselves.
+                with ui.row().classes('items-center gap-4 flex-wrap'):
                     def mini_stat(icon, value_fn, label):
                         with ui.row().classes('items-center gap-1'):
                             ui.icon(icon).classes('text-base').style('color: var(--primary-600);')
