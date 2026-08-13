@@ -85,8 +85,12 @@ def test_launch_searches_are_specific_and_use_the_intended_search_features():
         entry for entry in content['searches']
         if entry['id'] == 'search-table-talk-responsa'
     )
-    assert table_talk['responsa_flags']['flex_spaces'] is True
-    assert parse_qs(urlsplit(search_url(table_talk)).query)['flex_spaces'] == ['1']
+    assert table_talk['mode'] == 'responsa'
+    assert table_talk['query'] == '#אין (משיחין/מסיחין) [2] #סעודה'
+    params = parse_qs(urlsplit(search_url(table_talk)).query)
+    assert params['q'] == ['#אין (משיחין/מסיחין) [2] #סעודה']
+    assert params['mode'] == ['responsa']
+    assert 'flex_spaces' not in params
 
 
 def test_invalid_editorial_change_fails_before_rendering():

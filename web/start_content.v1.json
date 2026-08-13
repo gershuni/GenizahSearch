@@ -72,8 +72,8 @@
       "id": "search-table-talk-responsa",
       "difficulty": "advanced",
       "mode": "responsa",
-      "query": "%אין [2] %משיחין [2] %בסעודה",
-      "responsa_flags": {"variants": false, "ja": false, "flex_spaces": true, "bidirectional": false},
+      "query": "#אין (משיחין/מסיחין) [2] #סעודה",
+      "responsa_flags": {"variants": false, "ja": false, "flex_spaces": false, "bidirectional": false},
       "title": {"en": "A saying with uncertain spacing", "he": "מאמר עם מרווחים לא ודאיים"},
       "description": {"en": "Word gaps and spelling operators recover “ein mesihin ba-se'udah” from uneven automatic transcription.", "he": "מרווחי מילים וסימני כתיב מאתרים את „אין משיחין בסעודה” גם בתעתיק אוטומטי לא אחיד."}
     },
