@@ -67,6 +67,7 @@ from web.components.findings_rows import (
     copy_text as _findings_copy,
     render_excerpt_disclosure,
 )
+from web.components.identification_review import render_identification_review_action
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
@@ -197,16 +198,6 @@ def render_discovery_entry_control(model: PanelModel, *, on_toggle=None,
 # ---------------------------------------------------------------------------
 # One identification row, in the documented order.
 # ---------------------------------------------------------------------------
-
-
-def _render_vote_placeholders(lang: str) -> None:
-    """Inert. Wired in a later phase; they must not imply a vote was recorded,
-    so they carry no handler at all and are marked disabled."""
-    del lang  # the label is page chrome; the model supplies no vote wording
-    with ui.row().classes('items-center gap-1 dnote').style('margin-inline-start: auto;'):
-        for icon in ('thumb_up_off_alt', 'thumb_down_off_alt'):
-            ui.button(icon=icon).props('flat dense size=sm disable').tooltip(
-                tr('Coming soon'))
 
 
 def _render_expansion(row: Mapping[str, Any], lang: str,
@@ -455,7 +446,7 @@ def _render_expansion_envelope(
 
 def _render_identification_row(row: Mapping[str, Any], lang: str,
                                catalogue_title=None, catalogue_identity=None,
-                               load_excerpt=None) -> None:
+                               load_excerpt=None, sidecar_version=None) -> None:
     with ui.element('div').classes(f'{PANEL_ROW_CLASS} row'):
         # 1. verb + work title, as PLAIN TEXT. `/work/{id}` does not exist until
         #    Phase 136.1, and a dead link is worse than plain text.
@@ -487,10 +478,14 @@ def _render_identification_row(row: Mapping[str, Any], lang: str,
         if row.get('low_coverage_note'):
             ui.label(row['low_coverage_note']).classes('dnote')
 
-        # 5. the actions, with the inert vote placeholders at the inline end.
+        # 5. the actions. The structured review is version-bound and leaf-only;
+        #    without a version it renders nothing rather than recording an
+        #    irreproducible assessment.
         with ui.row().classes('items-center gap-2 side'):
             _render_expansion(row, lang, catalogue_title, catalogue_identity)
-            _render_vote_placeholders(lang)
+            render_identification_review_action(
+                row, lang, sidecar_version=sidecar_version,
+                shown_relation=row.get('relation_chip'))
 
         # 6. the text-vs-text disclosure (excerpt-v1) -- the SAME component the
         #    findings page renders, injected the same way: this module renders,
@@ -748,6 +743,7 @@ def _render_manuscript_pane(pane: Mapping[str, Any], lang: str, on_retry=None) -
 def render_discovery_panel_body(
     model: PanelModel, *, on_retry=None, page_id: Optional[str] = None,
     catalogue_title=None, catalogue_identity=None, load_excerpt=None,
+    sidecar_version=None,
 ) -> None:
     lang = _lang_of(model)
     root = ui.element('div').classes(f'gs-discovery {PANEL_ROOT_CLASS} w-full')
@@ -783,7 +779,8 @@ def render_discovery_panel_body(
                     _render_level(level, lang, page_id, on_retry=on_retry,
                                   catalogue_title=catalogue_title,
                                   catalogue_identity=catalogue_identity,
-                                  load_excerpt=load_excerpt)
+                                  load_excerpt=load_excerpt,
+                                  sidecar_version=sidecar_version)
 
         with ui.element('div').classes('dpanes'):
             if model.lead_with_manuscript_pane:
@@ -796,14 +793,16 @@ def render_discovery_panel_body(
 
 def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
                   on_retry=None, catalogue_title=None,
-                  catalogue_identity=None, load_excerpt=None) -> None:
+                  catalogue_identity=None, load_excerpt=None,
+                  sidecar_version=None) -> None:
     """Exactly the disclosure levels the model emits -- no more, no fewer."""
     if level.get('default_visible'):
         ui.label(level.get('label') or '').classes('font-semibold')
         for row in level.get('rows') or ():
             _render_identification_row(row, lang, catalogue_title,
                                        catalogue_identity,
-                                       load_excerpt=load_excerpt)
+                                       load_excerpt=load_excerpt,
+                                       sidecar_version=sidecar_version)
         return
 
     # A collapsed level. `notid` is applied only where the model says the level
@@ -836,7 +835,8 @@ def _render_level(level: Mapping[str, Any], lang: str, page_id: Optional[str],
             for row in level.get('rows') or ():
                 _render_identification_row(row, lang, catalogue_title,
                                            catalogue_identity,
-                                           load_excerpt=load_excerpt)
+                                           load_excerpt=load_excerpt,
+                                           sidecar_version=sidecar_version)
             generic_groups = level.get('generic_groups') or ()
             related = level.get('related_pages')
             if level.get('note') and (generic_groups or related is not None):

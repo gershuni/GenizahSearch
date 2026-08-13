@@ -244,7 +244,7 @@ def model_for(**kwargs):
 # ---------------------------------------------------------------------------
 
 def _render(model, page_id: Optional[str] = 'page-1', driver=None,
-            load_excerpt=None):
+            load_excerpt=None, sidecar_version=None):
     """Render the REAL panel body in a bare client context and return the
     client; `driver(client)` runs INSIDE the same event loop so interaction
     handlers can be awaited."""
@@ -259,7 +259,8 @@ def _render(model, page_id: Optional[str] = 'page-1', driver=None,
         with Client(ui.page('/_discovery_panel_probe')) as client:
             with client:
                 dp.render_discovery_panel_body(model, page_id=page_id,
-                                               load_excerpt=load_excerpt)
+                                               load_excerpt=load_excerpt,
+                                               sidecar_version=sidecar_version)
                 if driver is not None:
                     await driver(client)
         holder['client'] = client
@@ -969,25 +970,31 @@ def test_the_expansion_heading_uses_match_framing(spy):
 
 
 # ===========================================================================
-# Vote placeholders and disclosure levels.
+# Review action and disclosure levels.
 # ===========================================================================
 
-def test_vote_controls_are_inert():
-    client = _render(model_for(claim_items=[claim_row()]))
-    votes = [b for b in _buttons(client)
-             if 'thumb' in ((b._props or {}).get('icon') or '')]
-    assert len(votes) == 2, 'the two vote placeholders are missing'
-    for button in votes:
-        assert 'disable' in (button._props or {}), 'a vote placeholder is enabled'
-        handlers = [ln for ln in button._event_listeners.values() if ln.type == 'click']
-        assert handlers == [], 'a vote placeholder carries a click handler'
-    # ...and nothing in the renderer can show a confirmation: it neither
-    # notifies nor writes. A word scan over the rendered text would be the wrong
-    # check here -- "Some Recorded Work" is a legitimate work title.
+def test_review_action_is_enabled_only_when_the_artifact_version_is_known():
+    client = _render(
+        model_for(claim_items=[claim_row()]),
+        sidecar_version='discovery-v1-test')
+    actions = _elements_with_class(client, 'gs-identification-review-action')
+    assert len(actions) == 1
+    assert not _elements_with_class(client, 'gs-identification-review-dialog'), (
+        'the full review form was eagerly added for every findings row')
+    assert 'disable' not in (actions[0]._props or {})
+    handlers = [listener for listener in actions[0]._event_listeners.values()
+                if listener.type == 'click']
+    assert handlers, 'the beta review action is not wired'
+
+    without_version = _render(model_for(claim_items=[claim_row()]))
+    assert not _elements_with_class(
+        without_version, 'gs-identification-review-action')
+
+    # The panel stays a renderer: storage remains behind the shared component.
     src = _read(PANEL_PATH)
     for forbidden in ('ui.notify', 'supabase', 'record_vote', 'save_vote'):
         assert forbidden not in src, (
-            f'{PANEL_PATH} names {forbidden!r}; the vote controls are inert')
+            f'{PANEL_PATH} reaches into review storage via {forbidden!r}')
 
 
 def test_exactly_the_disclosure_levels_the_model_emits_are_rendered():

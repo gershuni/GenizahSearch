@@ -53,6 +53,7 @@ import pytest
 import scripts.discovery_ids as ids
 import shared.discovery_display_strings as ds
 import web.components.findings_rows as fr
+import web.components.identification_review as ir
 import web.discovery_assets as da
 import web.main as wm
 import web.pages.findings as fp
@@ -3058,17 +3059,30 @@ def test_the_beta_note_promises_no_accuracy_and_lists_no_roadmap(lang):
 
 
 @pytest.mark.parametrize("lang", LANGS)
-def test_a_row_offers_a_report_prefilled_with_its_id_and_the_data_version(lang):
-    """H2. A report has to be reproducible against the exact artifact that
-    produced the row, so the identifier and the version are both in the body."""
+def test_a_row_offers_a_version_bound_review_with_the_email_fallback(
+    lang, monkeypatch,
+):
+    """The structured review replaces the row's email-only action, while the
+    reproducible email target remains available inside its dialog."""
     from urllib.parse import unquote
 
     version = "discovery-v1-SENTINEL-VERSION"
     row = finding_row()
-    client = render_rows([row], lang, sidecar_version=version)
+    monkeypatch.setattr(ir, "published_reviews", lambda *_a, **_kw: ())
+    client = render_and_click(
+        lambda: fr.render_finding_row(
+            row, lang, sidecar_version=version),
+        ir.REVIEW_ACTION_CLASS)
 
-    links = _elements_with_class(client, fr.ROW_REPORT_CLASS)
-    assert len(links) == 1, f"expected one report link, got {len(links)}"
+    actions = _elements_with_class(client, ir.REVIEW_ACTION_CLASS)
+    assert len(actions) == 1, f"expected one review action, got {len(actions)}"
+    assert ir.review_text("action", lang) in scoped_text(
+        client, ir.REVIEW_ACTION_CLASS)
+
+    links = [element for element in client.elements.values()
+             if type(element).__name__ == "Link"
+             and ((element._props or {}).get("href") or "").startswith("mailto:")]
+    assert len(links) == 1, "the review dialog lost its email fallback"
     href = (links[0]._props or {}).get("href") or ""
     assert href.startswith(f"mailto:{fr.REPORT_ADDRESS}?")
 
@@ -3077,8 +3091,6 @@ def test_a_row_offers_a_report_prefilled_with_its_id_and_the_data_version(lang):
     assert version in body, (
         "the report does not name the artifact that produced the row, so it "
         "cannot be reproduced against it")
-    assert fr.copy_text("report_link", lang) in scoped_text(
-        client, fr.ROW_REPORT_CLASS)
 
 
 @pytest.mark.parametrize("lang", LANGS)
@@ -3150,7 +3162,7 @@ def test_no_report_link_without_an_identifier_or_a_version():
         grouped = finding_row(unit=unit, identification_id=None)
         assert fr.report_mailto(grouped, "en", version) is None, unit
         client = render_rows([grouped], "en", sidecar_version=version)
-        assert not _elements_with_class(client, fr.ROW_REPORT_CLASS), unit
+        assert not _elements_with_class(client, ir.REVIEW_ACTION_CLASS), unit
 
     assert fr.report_mailto(finding_row(), "en", version) is not None
 
@@ -3287,10 +3299,10 @@ def test_the_children_are_the_SAME_row_anatomy_as_a_top_level_row():
 
     children = _elements_with_class(client, fr.ROW_CHILD_CLASS)
     assert len(children) == 1, "expected one child row, got {}".format(len(children))
-    # The child inherited the version, so it carries the report affordance, and
+    # The child inherited the version, so it carries the review affordance, and
     # the preview it is entitled to as a leaf.
-    assert _elements_with_class(client, fr.ROW_REPORT_CLASS), (
-        "the child row lost the report affordance")
+    assert _elements_with_class(client, ir.REVIEW_ACTION_CLASS), (
+        "the child row lost the review affordance")
     assert _elements_with_class(client, fr.ROW_PREVIEW_CLASS + "-toggle"), (
         "the child leaf lost its preview")
     # ...and exactly ONE expander on the whole subtree -- the parent's.

@@ -152,6 +152,17 @@ async def fetch_discovery_panel_bundle(page, lang: str, is_stale=None):
         # the manuscript on this branch.
         works_env = make_envelope(STATUS_OK, [], 0, meta={'page_scope_resolved': False})
 
+    # Bind reader assessments to the artifact version that supplied the claims.
+    # Older envelopes did not carry it, so enrich the envelope at this boundary
+    # rather than making the renderer perform a second lookup.
+    claims_env = {
+        **claims_env,
+        'meta': {
+            **dict(claims_env.get('meta') or {}),
+            'sidecar_version': _discovery.discovery_sidecar_version(),
+        },
+    }
+
     return PanelServiceBundle(
         claims=claims_env,
         page_ids=page_ids_env,
@@ -975,7 +986,10 @@ def update_discovery_panel_section(state: BrowseState, refs: BrowsePageRefs):
             render_discovery_panel_body(model, on_retry=_retry, page_id=_page_id,
                                         catalogue_title=_catalogue_title,
                                         catalogue_identity=_catalogue_identity,
-                                        load_excerpt=load_excerpt)
+                                        load_excerpt=load_excerpt,
+                                        sidecar_version=(
+                                            bundle.claims.get('meta') or {}
+                                        ).get('sidecar_version'))
 
     if entry_container is not None:
         with entry_container:

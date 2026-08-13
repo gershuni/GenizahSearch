@@ -76,8 +76,6 @@ from __future__ import annotations
 import html as _html
 import inspect as _inspect
 from typing import Any, Dict, Mapping, Optional, Tuple
-from urllib.parse import quote
-
 from nicegui import ui
 
 import shared.discovery_display_strings as ds
@@ -91,6 +89,11 @@ from shared.discovery_service import (
 )
 from shared.discovery_surface_projection import is_outage
 from web.components import discovery_links as links
+from web.components.identification_review import (
+    REPORT_ADDRESS as _REVIEW_REPORT_ADDRESS,
+    render_identification_review_action,
+    report_mailto as _review_report_mailto,
+)
 
 # ---------------------------------------------------------------------------
 # Marker classes. Render-smoke assertions scope to these; an assertion that
@@ -272,9 +275,9 @@ _COPY: Dict[str, Dict[str, str]] = {
     # `136-FLAG-ON-READINESS.md`). Wrong attributions are SYSTEMATIC rather than
     # incidental -- CERT-01's per-stratum precision runs 1.000 down to 0.471 --
     # so the correction mechanism at scale is the next data bake, NOT a
-    # per-item takedown list. Reports feed the bake. The owner's ruling on the
-    # mechanism was "email us is enough", so this is a `mailto:` and nothing
-    # else: no table, no write, no moderation queue, no retraction path.
+    # per-item takedown list. Reports feed the bake. This was originally the
+    # email-only channel; the Phase-137 beta now keeps the same version-bound
+    # message solely as the structured review dialog's fallback.
     #
     # THE WORDING PROMISES NOTHING. It invites a report; it does not commit to a
     # response, a correction or a timeline, because none of those is what the
@@ -1648,10 +1651,9 @@ def divergence_marker(item: Mapping[str, Any], lang: str = "en") -> Optional[Tup
     return ds.divergence_chip(lang), ds.divergence_warning(lang)
 
 
-#: Where a report goes. The site's own contact address, as `/about` and the
-#: homepage already publish it -- not a new channel, because the ruling created
-#: no new channel.
-REPORT_ADDRESS = "gershuni@gmail.com"
+#: Where the fallback email goes. The site's own contact address, as `/about`
+#: and the homepage already publish it.
+REPORT_ADDRESS = _REVIEW_REPORT_ADDRESS
 
 
 def report_mailto(item: Mapping[str, Any], lang: str = "en",
@@ -1676,13 +1678,7 @@ def report_mailto(item: Mapping[str, Any], lang: str = "en",
     field that reaches a URL unquoted is one data change away from breaking the
     link or smuggling a header into it.
     """
-    identification = item.get("identification_id")
-    if not identification or not sidecar_version:
-        return None
-    subject = quote(copy_text("report_subject", lang))
-    body = quote(copy_text("report_body", lang).format(
-        identification=identification, version=sidecar_version))
-    return f"mailto:{REPORT_ADDRESS}?subject={subject}&body={body}"
+    return _review_report_mailto(item, lang, sidecar_version)
 
 
 def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
@@ -1757,16 +1753,13 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
             ui.label(copy_text("multi_work", lang)).classes(
                 f"{ROW_ANNOTATION_CLASS} dnote text-xs")
 
-        # ON THE ROW, at the end of the meta line. A reader reporting a problem
-        # is looking at the row that has it, and a page-level affordance could
-        # not prefill WHICH row -- which is the one thing that makes a report
-        # usable by the next bake. It is the smallest element on the line and
-        # the last, so it reads as an aside rather than as an action the page
-        # is asking for.
-        target = report_mailto(item, lang, sidecar_version)
-        if target:
-            ui.link(copy_text("report_link", lang), target).classes(
-                f"{ROW_REPORT_CLASS} dnote text-xs")
+        # The Phase-137 beta replaces the email-only report with a structured,
+        # moderated assessment. It remains leaf-only and version-bound for the
+        # same reproducibility reason as the old link. The dialog retains the
+        # mailto as a fallback if its migration or service is unavailable.
+        render_identification_review_action(
+            item, lang, sidecar_version=sidecar_version,
+            shown_relation=item.get("rendered_relation"))
 
         # THE ADMIN ✕. INJECTED, like every other affordance on this row: this
         # module renders and does not read, so it cannot reach Supabase and does
@@ -2119,7 +2112,7 @@ def _render_expansion(item: Mapping[str, Any], lang: str, load_children,
             for child in children:
                 with ui.column().classes(f"{ROW_CHILD_CLASS} w-full"):
                     # The child is a LEAF row, rendered by this same renderer --
-                    # so it carries its own report affordance and its own
+                    # so it carries its own review affordance and its own
                     # preview, and it cannot drift from a top-level row's
                     # anatomy. It is given NO `load_children`: a leaf has
                     # nothing under it, and passing one would build a tree.

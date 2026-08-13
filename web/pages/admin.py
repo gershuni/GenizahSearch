@@ -7,11 +7,20 @@ Uses Supabase directly for all data operations.
 """
 
 import logging
-from nicegui import ui
-from web.translations import tr
+from nicegui import run, ui
+from web.translations import get_language, tr
 from web.auth_state import GlobalAuthState
 from web.state import state
 from web.components.typography import h1, h2, h3
+from web.components import discovery_links
+from web.components.identification_review import (
+    direct_novelty_text,
+    relation_verdict_text,
+)
+from web.identification_reviews import (
+    moderate_review,
+    pending_reviews as fetch_pending_identification_reviews,
+)
 from web.supabase_client import get_client, get_user_client
 
 logger = logging.getLogger(__name__)
@@ -144,6 +153,15 @@ def delete_user(user_id: str):
         return {'error': str(e)}
 
 
+def get_pending_identification_reviews():
+    """Fetch the admin-only queue with the authenticated request client."""
+    try:
+        return fetch_pending_identification_reviews(client=get_user_client())
+    except Exception as e:
+        logger.error("Error fetching identification reviews: %s", type(e).__name__)
+        return ()
+
+
 async def create_admin_page():
     """Create the Admin Panel page."""
 
@@ -167,6 +185,7 @@ async def create_admin_page():
         # === Tabs ===
         with ui.tabs().classes('w-full') as tabs:
             pending_tab = ui.tab(tr('Pending Corrections'))
+            identification_reviews_tab = ui.tab(tr('Identification Reviews'))
             users_tab = ui.tab(tr('Users'))
             stats_tab = ui.tab(tr('Statistics'))
 
@@ -174,6 +193,9 @@ async def create_admin_page():
             # Pending Corrections panel
             with ui.tab_panel(pending_tab):
                 await create_pending_corrections_view()
+
+            with ui.tab_panel(identification_reviews_tab):
+                await create_identification_reviews_view()
 
             # All Users panel
             with ui.tab_panel(users_tab):
@@ -198,6 +220,108 @@ async def create_pending_corrections_view():
 
         for corr in pending:
             await create_pending_correction_card(corr)
+
+
+async def create_identification_reviews_view():
+    """Moderation queue for the public computed-identification beta."""
+    pending = get_pending_identification_reviews()
+    lang = get_language()
+
+    if not pending:
+        with ui.column().classes('w-full items-center py-12'):
+            ui.icon('fact_check').classes('text-6xl').style(
+                'color: var(--success);')
+            h3(tr('No pending identification reviews'), classes='text-xl',
+               style='color: var(--text-secondary);')
+            ui.label(tr('All submitted match reviews have been checked')).style(
+                'color: var(--text-muted);')
+        return
+
+    h3(f"{len(pending)} {tr('identification reviews pending')}",
+       classes='text-lg font-medium mb-4')
+    for review in pending:
+        create_identification_review_card(review, lang)
+
+
+def create_identification_review_card(review, lang: str):
+    """One pending assessment with enough artifact context to verify it."""
+    sys_id = str(review.get('sys_id') or '')
+    page_number = review.get('page_number')
+    shelfmark, _title = get_shelfmark_for_id(sys_id) if sys_id else ('', '')
+    target = discovery_links.browse_url(sys_id, page=page_number) if sys_id else None
+
+    with ui.card().classes('w-full p-4 mb-4'):
+        with ui.column().classes('w-full gap-3'):
+            with ui.row().classes('w-full items-center justify-between gap-3'):
+                with ui.column().classes('gap-0'):
+                    if target:
+                        ui.link(shelfmark or sys_id, target).classes(
+                            'font-bold text-primary')
+                    elif shelfmark or sys_id:
+                        ui.label(shelfmark or sys_id).classes('font-bold')
+                    ui.label(str(review.get('work_id') or '')).classes(
+                        'text-xs font-mono').style('color: var(--text-muted);')
+                ui.badge(tr('Anonymous') if not review.get('reviewer_user_id')
+                         else tr('Registered user')).props('outline')
+
+            with ui.row().classes('w-full gap-4 flex-wrap'):
+                with ui.column().classes('flex-1 min-w-64 gap-1'):
+                    ui.label(tr('Community assessment')).classes(
+                        'text-sm font-medium')
+                    ui.label(relation_verdict_text(
+                        review.get('relation_verdict'), lang)).classes(
+                            'text-base font-bold')
+                    if review.get('direct_novelty'):
+                        ui.label(direct_novelty_text(
+                            review.get('direct_novelty'), lang)).classes('text-sm')
+                with ui.column().classes('flex-1 min-w-64 gap-1'):
+                    ui.label(tr('Displayed by the site')).classes(
+                        'text-sm font-medium')
+                    ui.label(str(review.get('displayed_relation') or '-')).classes(
+                        'text-sm')
+                    ui.label(
+                        f"{tr('Data version')}: {review.get('sidecar_version') or '-'}"
+                    ).classes('text-xs font-mono').style(
+                        'color: var(--text-muted);')
+
+            comment = str(review.get('comment') or '').strip()
+            if comment:
+                with ui.column().classes('w-full gap-1 p-3 rounded').style(
+                    'background: var(--surface-secondary);'):
+                    ui.label(tr('Optional comment')).classes('text-sm font-medium')
+                    ui.label(comment).classes('whitespace-pre-wrap').props('dir=auto')
+
+            ui.label(
+                f"{tr('Finding')}: {review.get('identification_id') or '-'}"
+            ).classes('text-xs font-mono break-all').style(
+                'color: var(--text-muted);')
+
+            moderation_note = ui.input(tr('Private moderation note')).classes(
+                'w-full').props('outlined dense maxlength=1000')
+            review_id = str(review.get('id') or '')
+
+            async def _decide(status: str, rid=review_id,
+                              note_input=moderation_note) -> None:
+                client = get_user_client()
+                ok = await run.io_bound(
+                    moderate_review, rid, status, note_input.value, client=client)
+                if not ok:
+                    ui.notify(tr('The review could not be updated'), type='negative')
+                    return
+                ui.notify(
+                    tr('Identification review approved')
+                    if status == 'approved'
+                    else tr('Identification review rejected'),
+                    type='positive' if status == 'approved' else 'info')
+                ui.navigate.reload()
+
+            with ui.row().classes('gap-2'):
+                ui.button(
+                    tr('Approve and publish'),
+                    on_click=lambda: _decide('approved')).props('color=positive')
+                ui.button(
+                    tr('Reject'), on_click=lambda: _decide('rejected')).props(
+                        'flat color=negative')
 
 
 async def create_pending_correction_card(corr):
