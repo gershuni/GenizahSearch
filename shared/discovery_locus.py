@@ -35,6 +35,7 @@ __all__ = [
     "citation_runs",
     "citation_seq_for_daf",
     "render_ranges",
+    "render_locus_label",
     "select_locus_work",
     "norm_stream",
     "stream_offset_for_raw",
@@ -712,6 +713,56 @@ def render_ranges(ranges: Sequence[Tuple[int, int]], labels) -> str:
         out.append(head if lo == hi
                    else f"{head}{RANGE_SEP}{shorten_range_tail(head, tail)}")
     return PIECE_SEP.join(out)
+
+
+def render_locus_label(
+    unit_starts: Sequence[int],
+    labels: Sequence[str],
+    citation_seq: Sequence[Optional[int]],
+    spans: Iterable[Tuple[int, int]],
+) -> str:
+    """Render witnessed work-side spans in one work's citation system.
+
+    Each span is resolved independently before citation-position folding. That
+    preserves unwitnessed gaps while still folding repeated citation positions
+    (an edition can revisit one printed folio). A table with even one missing
+    citation position falls back, as a whole, to unit-ordinal order: mixing two
+    coordinate systems in one label would make adjacency ambiguous.
+
+    Empty or structurally invalid inputs raise instead of manufacturing a
+    plausible citation. The bake catches that failure and stores
+    ``locus_status='unavailable'``.
+    """
+    if not unit_starts:
+        raise ValueError("a work with no units cannot carry a locus")
+    if len(unit_starts) != len(labels) or len(labels) != len(citation_seq):
+        raise ValueError("unit starts, labels, and citation positions must align")
+    if any(not isinstance(start, int) or start < 0 for start in unit_starts):
+        raise ValueError("unit starts must be non-negative integers")
+    if any(a >= b for a, b in zip(unit_starts, unit_starts[1:])):
+        raise ValueError("unit starts must be strictly increasing")
+    if any(not isinstance(label, str) or not label.strip() for label in labels):
+        raise ValueError("every locus unit must carry a non-empty label")
+
+    witnessed = merge_witnessed_spans(spans)
+    if not witnessed:
+        raise ValueError("no witnessed spans were supplied")
+    pieces = [units_for_span(unit_starts, start, end) for start, end in witnessed]
+
+    if any(position is None for position in citation_seq):
+        effective_seq: Sequence[Optional[int]] = list(range(len(labels)))
+        labels_by_position = {i: label for i, label in enumerate(labels)}
+    else:
+        effective_seq = citation_seq
+        labels_by_position = {}
+        for position, label in zip(effective_seq, labels):
+            assert position is not None  # narrowed by the all-present branch
+            labels_by_position.setdefault(position, label)
+
+    runs, unplaced = citation_runs(pieces, effective_seq)
+    if unplaced or not runs:
+        raise ValueError("the witnessed units could not be placed in citation order")
+    return render_ranges(runs, labels_by_position)
 
 
 class RefSpanProjectionError(RuntimeError):

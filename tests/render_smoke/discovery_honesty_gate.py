@@ -720,6 +720,7 @@ READER_TEXT_FIELDS: Mapping[str, str] = {
     "member_sys_ids": "id-list: Alma system numbers, witness_unit_members",
     "value": "identity: the facet's own key, DiscoveryService._project_facets",
     "parent": "identity: the parent facet's key, DiscoveryService._project_facets",
+    "part_key": "identity: the locus unit's canonical part key, locus_unit.part_key",
     # -- reader text ---------------------------------------------------------
     "neutral_title": "reader text: works.neutral_title (routed through display_work_title)",
     "author": "reader text: works.author",
@@ -729,7 +730,9 @@ READER_TEXT_FIELDS: Mapping[str, str] = {
     "shelfmark_display": "reader text: manuscript_display.shelfmark_display",
     "band_label": "reader text: shared/discovery_band_labels.py::serialize_banded_claim",
     "novelty_source_label": "reader text (masked): shared/discovery_novelty.py MASKED_PROVENANCE_LABELS",
+    "locus_label": "reader text: baked citation from locus_unit.label_he or works.neutral_title",
     "label": "reader text: the facet's display label, DiscoveryService._project_facets",
+    "label_he": "reader text: the locus division label, locus_unit.label_he",
     # -- numeric -------------------------------------------------------------
     "band_rank": "numeric: shared/discovery_band_labels.py::_band_rank",
     "best_band_rank": "numeric: MIN(band_rank) over the manuscript, DiscoveryService",
@@ -749,6 +752,7 @@ READER_TEXT_FIELDS: Mapping[str, str] = {
     "work_count": "numeric: COUNT(DISTINCT work_id), DiscoveryService findings query",
     "manuscript_count": "numeric: COUNT(DISTINCT sys_id), DiscoveryService",
     "identification_count": "numeric: COUNT(*) per shade, DiscoveryService launch stats",
+    "citation_pos": "numeric: the locus unit's folded scholarly citation order, locus_unit.citation_pos",
     # -- boolean -------------------------------------------------------------
     "title_missing": "boolean: works.neutral_title IS NULL, DiscoveryService",
     "main_pool": "boolean: discovery_identification.main_pool, materialized by scripts/build_discovery_sidecar.py",

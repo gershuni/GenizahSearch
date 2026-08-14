@@ -68,6 +68,7 @@ from shared.discovery_surface_projection import (
     surface_safe_claim,
     surface_safe_expansion,
     surface_safe_launch_shade,
+    surface_safe_locus_unit,
     surface_safe_related_page,
     surface_safe_work_summary,
     timeout_envelope,
@@ -184,6 +185,7 @@ def _claim_source(**overrides) -> Dict[str, Any]:
         'main_pool_reason': 'main_full_coverage',
         'identification_id': 'c' * 64,
         'identification_page_count': 3,
+        'locus_label': 'פרק א',
         'novelty_status': 'fills_gap',
         'novelty_source_label': _MASKED_SOURCE_LABEL,
         'matched_letters': 500,
@@ -340,6 +342,8 @@ def corpus_rows() -> List[Tuple[str, Dict[str, Any]]]:
     for shade in LAUNCH_CONTRIBUTION_SHADES:
         rows.append(('SURFACE_LAUNCH_SHADE_FIELDS',
                      surface_safe_launch_shade(_launch_shade_source(shade))))
+    rows.append(('SURFACE_LOCUS_UNIT_FIELDS', surface_safe_locus_unit({
+        'citation_pos': 10, 'part_key': 'ch:10', 'label_he': 'Chapter Ten'})))
     return rows
 
 
@@ -2834,6 +2838,11 @@ def test_the_capture_paints_every_render_entry_point_the_panel_has(masking_captu
         'letting the capture cover less than this suite claims.')
     unknown = sorted(masking_capture['exercised'] - expected)
     assert not unknown, f'the instrumentation recorded non-emitting functions: {unknown}'
+
+
+def test_locus_subline_renders_with_the_baked_label_and_no_matches_wording(masking_capture):
+    assert '↳ פרק א' in masking_capture['text']
+    assert 'matches פרק א' not in masking_capture['text'].lower()
 
 
 def test_the_capture_executes_every_line_of_every_ui_emitting_function(masking_capture):

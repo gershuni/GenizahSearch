@@ -455,6 +455,10 @@ def _render_identification_row(row: Mapping[str, Any], lang: str,
         # 1. verb + work title, as PLAIN TEXT. `/work/{id}` does not exist until
         #    Phase 136.1, and a dead link is worse than plain text.
         ui.label(row.get('headline') or '').classes('font-semibold')
+        if row.get('locus_subline'):
+            ui.label(row['locus_subline']).classes('dnote locus_subline').props(
+                'dir="auto"').style('unicode-bidi: isolate;')
+
 
         # 2. the meta line, beginning with the relation chip; the band label is
         #    the chip's tooltip and never visible text.

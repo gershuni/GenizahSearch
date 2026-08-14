@@ -33,6 +33,7 @@ from shared.discovery_locus import (
     parse_canonical_header,
     parse_unit_numeral,
     render_ranges,
+    render_locus_label,
     sefaria_daf,
     select_locus_work,
     select_primary_alignment,
@@ -1015,3 +1016,29 @@ class TestSelectLocusWork:
     def test_no_evidence_anywhere_means_no_place_rather_than_an_invented_one(self):
         assert select_locus_work({"wA": 0, "wB": 0}, "wA") is None
         assert select_locus_work({}, "wA") is None
+
+
+class TestRenderLocusLabel:
+    def test_separate_witness_spans_never_bridge_an_unwitnessed_unit(self):
+        assert render_locus_label(
+            [0, 100, 200, 300], ["א", "ב", "ג", "ד"], [1, 2, 3, 4],
+            [(10, 80), (220, 280)],
+        ) == f"א{PIECE_SEP}ג"
+
+    def test_minimum_overlap_drops_a_clipped_leading_unit(self):
+        assert render_locus_label(
+            [0, 100, 200], ["א", "ב", "ג"], [1, 2, 3], [(90, 180)]
+        ) == "ב"
+
+    def test_missing_citation_positions_fall_back_as_one_ordinal_system(self):
+        assert render_locus_label(
+            [0, 100, 200], ["א", "ב", "ג"], [10, None, 12], [(0, 250)]
+        ) == f"א{RANGE_SEP}ג"
+
+    @pytest.mark.parametrize(
+        "starts,labels,positions",
+        [([], [], []), ([0, 0], ["א", "ב"], [1, 2]), ([0], [""], [1])],
+    )
+    def test_invalid_unit_tables_fail_closed(self, starts, labels, positions):
+        with pytest.raises(ValueError):
+            render_locus_label(starts, labels, positions, [(0, 10)])

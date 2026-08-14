@@ -230,6 +230,7 @@ from shared.discovery_surface_projection import (
     surface_safe_facet,
     surface_safe_finding,
     surface_safe_launch_shade,
+    surface_safe_locus_unit,
     surface_safe_related_page,
     surface_safe_work_summary,
     timeout_envelope,
@@ -937,6 +938,7 @@ _FINDINGS_UNIT_SELECT: Dict[str, str] = {
         di.page_count                  AS page_count,
         di.max_coverage_ppm            AS max_coverage_ppm,
         di.rendered_relation           AS rendered_relation,
+        {locus}                        AS locus_label,
         di.novelty_status              AS novelty_status,
         {divergent}                    AS divergent,
         1                              AS work_count,
@@ -958,6 +960,7 @@ _FINDINGS_UNIT_SELECT: Dict[str, str] = {
         SUM(di.page_count)             AS page_count,
         MAX(di.max_coverage_ppm)       AS max_coverage_ppm,
         NULL                           AS rendered_relation,
+        {locus}                        AS locus_label,
         CASE WHEN COUNT(DISTINCT di.novelty_status) = 1
              THEN MIN(di.novelty_status) ELSE NULL END AS novelty_status,
         {divergent}                    AS divergent,
@@ -980,6 +983,7 @@ _FINDINGS_UNIT_SELECT: Dict[str, str] = {
         SUM(di.page_count)             AS page_count,
         MAX(di.max_coverage_ppm)       AS max_coverage_ppm,
         NULL                           AS rendered_relation,
+        {locus}                        AS locus_label,
         NULL                           AS novelty_status,
         {divergent}                    AS divergent,
         1                              AS work_count,
@@ -1186,6 +1190,9 @@ def _build_findings_filter(
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
+    locus_from: Optional[int] = None,
+    locus_to: Optional[int] = None,
+    locus_enabled: bool = False,
     suppressed: Optional[Iterable[str]] = None,
     sys_id: Optional[str] = None,
 ) -> Tuple[str, List[Any]]:
@@ -1305,6 +1312,45 @@ def _build_findings_filter(
         where.append("di.display_work_id = ?")
         params.append(work_id)
 
+    if locus_enabled and work_id and (locus_from is not None or locus_to is not None):
+        bounds = []
+        for name, value in (("locus_from", locus_from), ("locus_to", locus_to)):
+            if value is None:
+                bounds.append(None)
+                continue
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be a non-negative unit ordinal")
+            try:
+                ordinal = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"{name} must be a non-negative unit ordinal"
+                ) from exc
+            if ordinal < 0:
+                raise ValueError(f"{name} must be a non-negative unit ordinal")
+            bounds.append(ordinal)
+        from_ord, to_ord = bounds
+        if from_ord is not None and to_ord is not None and from_ord > to_ord:
+            raise ValueError("locus_from cannot follow locus_to")
+        overlap = [
+            "p.identification_id=di.identification_id",
+            "p.locus_work_id=?",
+        ]
+        range_params: List[Any] = [work_id]
+        if from_ord is not None:
+            overlap.append("lu.citation_pos >= ?")
+            range_params.append(from_ord)
+        if to_ord is not None:
+            overlap.append("lu.citation_pos <= ?")
+            range_params.append(to_ord)
+        where.append(
+            "EXISTS (SELECT 1 FROM discovery_locus_piece p "
+            "JOIN locus_unit lu ON lu.work_id=p.locus_work_id "
+            "AND lu.unit_ord BETWEEN p.start_unit_ord AND p.end_unit_ord WHERE "
+            + " AND ".join(overlap) + ")"
+        )
+        params.extend(range_params)
+
     # THE MANUSCRIPT AXIS (owner report, 2026-08-07: "In One Row Per Manuscript I
     # don't see the computed identifications at all").
     #
@@ -1415,12 +1461,16 @@ def _build_findings_query(
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
+    locus_from: Optional[int] = None,
+    locus_to: Optional[int] = None,
     suppressed: Optional[Iterable[str]] = None,
     sys_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
     count_only: bool = False,
     count_cap: Optional[int] = None,
+    locus_enabled: bool = False,
+    locus_filter_enabled: bool = False,
 ) -> Tuple[str, List[Any]]:
     """Build the findings query for ONE unit. The single query builder -- all
     three offered units come through here.
@@ -1449,7 +1499,9 @@ def _build_findings_query(
     where_sql, params = _build_findings_filter(
         unit=unit, bucket=bucket, novelty=novelty,
         divergence=divergence, domain=domain,
-        author=author, work_id=work_id, suppressed=suppressed, sys_id=sys_id)
+        author=author, work_id=work_id, locus_from=locus_from,
+        locus_to=locus_to, locus_enabled=locus_filter_enabled,
+        suppressed=suppressed, sys_id=sys_id)
     group_by = _FINDINGS_UNIT_GROUP_BY[unit]
     group_sql = f"GROUP BY {group_by}" if group_by else ""
 
@@ -1466,7 +1518,10 @@ def _build_findings_query(
     # name and flag on a domain.
     flag_sql, flag_params = _divergence_flag_sql(aggregate=bool(group_by))
     sql = f"""
-        SELECT {_FINDINGS_UNIT_SELECT[unit].format(divergent=flag_sql)},
+        SELECT {_FINDINGS_UNIT_SELECT[unit].format(
+                   divergent=flag_sql,
+                   locus=("di.locus_label" if locus_enabled
+                          and unit == FINDINGS_UNIT_IDENTIFICATION else "NULL"))},
                COUNT(*) OVER () AS _total_rows
         {_FINDINGS_FROM}
         {where_sql}
@@ -2170,6 +2225,8 @@ class DiscoveryService:
         # the identical `sidecar_version`, so a version-only cache would serve
         # one artifact's availability answer for another after a path swap.
         self._excerpt_availability_cache: Optional[Tuple[tuple, bool]] = None
+        self._locus_display_cache: Optional[Tuple[tuple, bool]] = None
+        self._locus_filter_cache: Optional[Tuple[tuple, bool]] = None
 
         # Heavy-query bounded concurrency (mirrors web/search_api.py's
         # _HeavySemaphoreState, kept per-instance since this class -- unlike
@@ -2243,6 +2300,26 @@ class DiscoveryService:
                 self._conn = new_conn
                 self._last_path = path
                 self._last_version = version
+                try:
+                    locus_row = new_conn.execute(
+                        "SELECT value FROM meta WHERE key='locus_display_version'"
+                    ).fetchone()
+                    has_locus_display = bool(
+                        locus_row and locus_row[0] == "locus-display-v1"
+                    )
+                except Exception:
+                    has_locus_display = False
+                self._locus_display_cache = ((path, version), has_locus_display)
+                try:
+                    locus_filter_row = new_conn.execute(
+                        "SELECT value FROM meta WHERE key='locus_filter_version'"
+                    ).fetchone()
+                    has_locus_filter = bool(
+                        locus_filter_row and locus_filter_row[0] == "locus-filter-v1"
+                    )
+                except Exception:
+                    has_locus_filter = False
+                self._locus_filter_cache = ((path, version), has_locus_filter)
                 if old_conn is not None:
                     try:
                         old_conn.close()
@@ -2260,6 +2337,38 @@ class DiscoveryService:
             logger.error("DiscoveryService.is_available: availability_callable raised: %s", e)
             return False
         return self._get_conn() is not None
+
+    def _has_locus_display(self, conn: ThreadLocalConnection) -> bool:
+        """Whether this exact asset advertises the additive baked-label contract."""
+        key = (self._last_path, self._last_version)
+        cached = self._locus_display_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        try:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key='locus_display_version'"
+            ).fetchone()
+            enabled = bool(row and row[0] == "locus-display-v1")
+        except Exception:
+            enabled = False
+        self._locus_display_cache = (key, enabled)
+        return enabled
+
+    def _has_locus_filter(self, conn: ThreadLocalConnection) -> bool:
+        """Whether this asset carries the interval index used by range filters."""
+        key = (self._last_path, self._last_version)
+        cached = self._locus_filter_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        try:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key='locus_filter_version'"
+            ).fetchone()
+            enabled = bool(row and row[0] == "locus-filter-v1")
+        except Exception:
+            enabled = False
+        self._locus_filter_cache = (key, enabled)
+        return enabled
 
     # ------------------------------------------------------------------
     # Pagination helpers
@@ -2552,6 +2661,7 @@ class DiscoveryService:
         page_size = self._clamp_page_size(page_size)
         offset = (page - 1) * page_size
         routing_clause = "" if include_review else _CLAIMS_DEFAULT_ROUTING_CLAUSE
+        locus_sql = "dc.locus_label" if self._has_locus_display(conn) else "NULL"
         try:
             cur = conn.execute(
                 f"""
@@ -2566,6 +2676,7 @@ class DiscoveryService:
                        w.neutral_title, w.author, w.genre, w.canonical_work_id,
                        di.identification_id, di.display_work_id, di.main_pool,
                        di.main_pool_reason, di.page_count AS identification_page_count,
+                       {locus_sql} AS locus_label,
                        -- C-track step 3b: the identification's matrix output, the
                        -- CAP on what this page-level row may assert (spec 3.2).
                        -- No new join -- `di` is already here for the display work.
@@ -3014,6 +3125,29 @@ class DiscoveryService:
             logger.error("DiscoveryService._first_match_pages error: %s", e)
             return {}
 
+    def get_locus_units_enveloped(self, work_id: str) -> Dict[str, Any]:
+        """Ordered address units for one selected work, when the asset supports it."""
+        if not self.is_available():
+            return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+        conn = self._get_conn()
+        if conn is None or not self._has_locus_filter(conn):
+            return unavailable_envelope(meta={"reason": "locus_filter_unavailable"})
+        try:
+            rows = conn.execute(
+                "SELECT citation_pos, MIN(part_key) AS part_key, "
+                "MIN(label_he) AS label_he FROM locus_unit "
+                "WHERE work_id=? GROUP BY citation_pos ORDER BY citation_pos",
+                (str(work_id),),
+            ).fetchall()
+        except Exception as exc:
+            logger.error("DiscoveryService.get_locus_units error: %s", exc)
+            return unavailable_envelope(meta={"reason": "query_failed"})
+        items = [surface_safe_locus_unit(dict(row)) for row in rows]
+        return make_envelope(
+            STATUS_OK, items, len(items),
+            meta={"work_id": str(work_id), "locus_filter": True},
+        )
+
     def get_findings_enveloped(
         self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
         bucket: str = BUCKET_MAIN,
@@ -3022,6 +3156,8 @@ class DiscoveryService:
         domain: Optional[str] = None,
         author: Optional[str] = None,
         work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
         sort: str = FINDINGS_SORT_BAND_RANK,
         page: int = 1,
         page_size: Optional[int] = None,
@@ -3049,7 +3185,8 @@ class DiscoveryService:
         sql, params = _build_findings_query(
             unit=unit, sort=sort, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain,
-            author=author, work_id=work_id, page=page, page_size=page_size,
+            author=author, work_id=work_id, locus_from=locus_from,
+            locus_to=locus_to, page=page, page_size=page_size,
             suppressed=suppressed, sys_id=sys_id)
 
         if not self.is_available():
@@ -3057,6 +3194,17 @@ class DiscoveryService:
         conn = self._get_conn()
         if conn is None:
             return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+
+        locus_filter_enabled = self._has_locus_filter(conn)
+        if self._has_locus_display(conn):
+            sql, params = _build_findings_query(
+                unit=unit, sort=sort, bucket=bucket, novelty=novelty,
+                divergence=divergence, domain=domain,
+                author=author, work_id=work_id, locus_from=locus_from,
+                locus_to=locus_to, page=page, page_size=page_size,
+                suppressed=suppressed, sys_id=sys_id, locus_enabled=True,
+                locus_filter_enabled=locus_filter_enabled,
+            )
 
         novelty_offered = findings_novelty_offered(unit)
         count_cap = _get_int_env("DISCOVERY_FINDINGS_COUNT_MAX", 0)
@@ -3068,8 +3216,10 @@ class DiscoveryService:
                     unit=unit, sort=sort, bucket=bucket, novelty=novelty,
                     divergence=divergence,
                     domain=domain, author=author, work_id=work_id,
+                    locus_from=locus_from, locus_to=locus_to,
                     suppressed=suppressed, sys_id=sys_id,
-                    count_only=True, count_cap=count_cap)
+                    count_only=True, count_cap=count_cap,
+                    locus_filter_enabled=locus_filter_enabled)
                 counted = int(conn.execute(count_sql, count_params).fetchone()["n"])
                 if counted > count_cap:
                     total, approximate = count_cap, True
@@ -3095,8 +3245,9 @@ class DiscoveryService:
                         unit=unit, sort=sort, bucket=bucket, novelty=novelty,
                         divergence=divergence,
                         domain=domain, author=author, work_id=work_id,
+                        locus_from=locus_from, locus_to=locus_to,
                         suppressed=suppressed, sys_id=sys_id,
-                        count_only=True)
+                        count_only=True, locus_filter_enabled=locus_filter_enabled)
                     total = int(conn.execute(count_sql, count_params).fetchone()["n"])
         except Exception as e:
             logger.error("DiscoveryService.get_findings error (unit=%s): %s", unit, e)
@@ -3186,6 +3337,9 @@ class DiscoveryService:
             # the tail of the set is unreachable, with nothing saying so.
             "page_size": page_size,
             "approximate_total": approximate,
+            "locus_filter": locus_filter_enabled,
+            "locus_from": locus_from if locus_filter_enabled else None,
+            "locus_to": locus_to if locus_filter_enabled else None,
         })
 
     def get_findings_facets_enveloped(
@@ -4318,6 +4472,14 @@ class DiscoveryService:
             cache_name="related_pages_enveloped",
         )
 
+    async def get_locus_units_enveloped_async(self, work_id: str) -> Dict[str, Any]:
+        return await self._enveloped_off_loop(
+            self.get_locus_units_enveloped,
+            (work_id,),
+            timeout=self._findings_timeout(),
+            heavy=True,
+        )
+
     async def get_findings_enveloped_async(
         self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
         bucket: str = BUCKET_MAIN,
@@ -4326,6 +4488,8 @@ class DiscoveryService:
         domain: Optional[str] = None,
         author: Optional[str] = None,
         work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
         sort: str = FINDINGS_SORT_BAND_RANK,
         page: int = 1,
         page_size: Optional[int] = None,
@@ -4340,7 +4504,7 @@ class DiscoveryService:
             # POSITIONAL: order matches the sync signature, `suppressed` last.
             # A tuple (not a list) because this is also a cache key.
             (unit, bucket, tuple(novelty or ()) or None, divergence,
-             domain, author, work_id, sort, page, page_size,
+             domain, author, work_id, locus_from, locus_to, sort, page, page_size,
              tuple(suppressed or ()) or None, sys_id),
             timeout=self._findings_timeout(), heavy=True,
         )

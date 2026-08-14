@@ -621,6 +621,23 @@ def test_two_granularity_rashi_pair_stays_an_identification(two_granularity_rash
     assert lead["granularity_subline"] == ds.granularity_subline(other_title, "en")
 
 
+def test_locus_subline_is_separate_from_the_alternate_granularity_line(
+    two_granularity_rashi,
+):
+    rows = list(pm.iter_rows(pm.build_panel_rows(bundle([
+        {**row, "locus_label": "פרק א"} for row in two_granularity_rashi
+    ]))))
+    lead = [row for row in rows if row["span_start"] == 0][0]
+    assert lead["locus_subline"] == "↳ פרק א"
+    assert lead["granularity_subline"]
+    assert lead["locus_subline"] != lead["granularity_subline"]
+
+
+def test_missing_locus_label_omits_the_line_for_rollback_assets():
+    row = list(pm.iter_rows(pm.build_panel_rows(bundle([claim_row(locus_label=None)]))))[0]
+    assert "locus_subline" not in row
+
+
 def test_lead_attribution_nests_competing_attributions_deterministically():
     """One passage produces one row; the others nest, in the shared total
     order -- `lead_attribution`, never a fresh tie-break."""
