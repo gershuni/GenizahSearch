@@ -378,8 +378,27 @@ def test_every_module_ruling_settles_a_module_held_row():
         offered = {(c["domain_parent"], c["domain_leaf"])
                    for c in held["candidate_leaves"]}
         assert (spec["domain_parent"], spec["domain_leaf"]) in offered, wid
-        assert spec["owner_ruling"] in (cwd.RULING_P, cwd.RULING_Q), wid
+        assert spec["owner_ruling"] in (
+            cwd.RULING_P,
+            cwd.RULING_Q,
+            cwd.RULING_SAADIA_PHILOSOPHY,
+        ), wid
         assert spec["why"].strip(), wid
+
+
+def test_saadia_commentary_and_sefer_yetzirah_have_distinct_owner_rulings():
+    commentary = cwd.OWNER_RULINGS["w000021"]
+    base_work = cwd.OWNER_RULINGS["w000522"]
+
+    assert (commentary["domain_parent"], commentary["domain_leaf"]) == (
+        "Philosophy, Theology, Ethical literature",
+        "Philosophy",
+    )
+    assert commentary["owner_ruling"] == cwd.RULING_SAADIA_PHILOSOPHY
+    assert (base_work["domain_parent"], base_work["domain_leaf"]) == (
+        "Kabbalah",
+        "Other",
+    )
 
 
 def test_the_posture_statement_records_the_applied_rulings(vocab):

@@ -1627,6 +1627,9 @@ for _yetzirah, _yetzirah_why in (
 
 RULING_P = "136-GATE1-DECISIONS.md § Ruling P"
 RULING_Q = "136-GATE1-DECISIONS.md § Ruling Q"
+RULING_SAADIA_PHILOSOPHY = (
+    "owner ruling 2026-08-14: Saadia's commentary on Sefer Yetzirah -> Philosophy"
+)
 
 #: work id -> the ruled assignment.  ``why`` is recorded on the row's ``note``.
 OWNER_RULINGS: Dict[str, Dict[str, Any]] = {}
@@ -1672,14 +1675,15 @@ _ruled("w001140", "Philosophy, Theology, Ethical literature",
        "Yemen / Martyrdom / Resurrection are theological-ethical treatises in "
        "letter form; Documentary/Letters means archival correspondence and would "
        "be a category error")
-for _yetzirah_ruled in ("w000021", "w000522"):
-    _ruled(_yetzirah_ruled, "Kabbalah", "Other", RULING_Q,
-           "the vocabulary has no Sefer Yetzirah leaf; the mystical tradition is "
-           "its conventional home, and FJMS's own (n=1, unusable) signal also "
-           "pointed mystical. Text and commentary are kept together so they do "
-           "not split across parents. THIN: Saadia's commentary is genuinely "
-           "philosophical-cosmological, and Philosophy is a defensible "
-           "alternative for w000021 alone")
+_ruled("w000522", "Kabbalah", "Other", RULING_Q,
+       "the vocabulary has no Sefer Yetzirah leaf; the mystical tradition is "
+       "the work's conventional home, and FJMS's own (n=1, unusable) signal "
+       "also pointed mystical")
+_ruled("w000021", "Philosophy, Theology, Ethical literature", "Philosophy",
+       RULING_SAADIA_PHILOSOPHY,
+       "Saadia's commentary is a philosophical-cosmological reading; the owner "
+       "ruled that the commentary should not inherit Sefer Yetzirah's Kabbalah "
+       "classification")
 _ruled("w000058", "Polemics", "Polemics Jewish-Christian", RULING_Q,
        "catalogue 64% (n=69); its subject IS the disputation")
 _ruled("w001132", "Secular Poetry", "Other", RULING_Q,
