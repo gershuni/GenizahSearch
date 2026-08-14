@@ -306,6 +306,92 @@ def test_fully_valid_post_rebuild_public_asset_passes(tmp_path, monkeypatch):
     assert da.discovery_available() is True
 
 
+def _add_locus_display_contract(db_path, *, count_drift=False):
+    conn = sqlite3.connect(db_path)
+    for table in ("discovery_claim", "discovery_identification"):
+        conn.execute(
+            f"ALTER TABLE {table} ADD COLUMN locus_status "
+            "TEXT NOT NULL DEFAULT 'unavailable'"
+        )
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN locus_work_id TEXT")
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN locus_label TEXT")
+    rows = [("locus_display_version", "locus-display-v1")]
+    for grain, table in (
+        ("claim", "discovery_claim"),
+        ("identification", "discovery_identification"),
+    ):
+        total = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        rows.extend([
+            (f"expected_locus_{grain}_resolved", "0"),
+            (f"expected_locus_{grain}_whole_work", "0"),
+            (f"expected_locus_{grain}_unavailable", str(total)),
+        ])
+    if count_drift:
+        rows = [
+            (key, "999" if key == "expected_locus_claim_unavailable" else value)
+            for key, value in rows
+        ]
+    conn.executemany("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)", rows)
+    conn.commit()
+    conn.close()
+
+
+def test_locus_display_marker_accepts_a_complete_additive_contract(tmp_path, monkeypatch):
+    db_path = materialize_sidecar(tmp_path)
+    _add_locus_display_contract(db_path)
+    write_manifest(tmp_path, db_path)
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+    assert da.load_discovery_state() is True
+
+
+def test_locus_display_count_drift_fails_readiness(tmp_path, monkeypatch):
+    db_path = materialize_sidecar(tmp_path)
+    _add_locus_display_contract(db_path, count_drift=True)
+    write_manifest(tmp_path, db_path)
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+    assert da.load_discovery_state() is False
+
+
+def _add_locus_filter_contract(db_path, *, count_drift=False):
+    _add_locus_display_contract(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE discovery_locus_piece ("
+        "identification_id TEXT NOT NULL, locus_work_id TEXT NOT NULL, "
+        "piece_ord INTEGER NOT NULL, start_unit_ord INTEGER NOT NULL, "
+        "end_unit_ord INTEGER NOT NULL)"
+    )
+    conn.executemany(
+        "INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
+        [
+            ("locus_filter_version", "locus-filter-v1"),
+            ("expected_rows_discovery_locus_piece", "1" if count_drift else "0"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_locus_filter_marker_accepts_a_complete_additive_contract(tmp_path, monkeypatch):
+    db_path = materialize_sidecar(tmp_path)
+    _add_locus_filter_contract(db_path)
+    write_manifest(tmp_path, db_path)
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+    assert da.load_discovery_state() is True
+
+
+def test_locus_filter_count_drift_fails_readiness(tmp_path, monkeypatch):
+    db_path = materialize_sidecar(tmp_path)
+    _add_locus_filter_contract(db_path, count_drift=True)
+    write_manifest(tmp_path, db_path)
+    _point_loader_at(monkeypatch, tmp_path)
+    monkeypatch.setattr(da, "DISCOVERY_ENABLED", True)
+    assert da.load_discovery_state() is False
+
+
 def test_missing_discovery_identification_table_fails_readiness(tmp_path, monkeypatch):
     """Behavior 1."""
     materialize_sidecar(tmp_path, omit_tables=["discovery_identification"])

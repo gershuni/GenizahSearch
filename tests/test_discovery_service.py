@@ -2555,6 +2555,11 @@ def test_a_rate_under_an_allowed_key_never_reaches_a_surface(value, shape, holde
     # the sibling detector in `tests/render_smoke/discovery_honesty_gate.py`
     # cites `MS Heb c.57` for exactly this reason.
     "MS Heb c.57", "Or.1080 J266", "CUL Or.1081 2.75",
+    # Percent-encoded UTF-8 in a provenance URL is an address, not a precision
+    # claim.  This exact shape occurs in 15,107 baked excerpt attributions; the
+    # old detector read the ``7%`` in ``%D7%AA`` as a published rate and made
+    # every affected text-match button fail closed.
+    "Original source: http://he.wikisource.org/wiki/%D7%AA%D7%9C%D7%9E%D7%95%D7%93",
 ])
 def test_the_rate_check_does_not_reject_valid_envelope_values(value):
     """The false-positive half, and the reason this is a SHAPE rule rather than
@@ -2601,6 +2606,7 @@ def test_no_real_display_value_in_the_artifact_trips_the_rate_check():
             "SELECT neutral_title FROM works",
             "SELECT author FROM works",
             "SELECT genre FROM works",
+            "SELECT attribution FROM discovery_excerpt",
         ):
             values.extend(str(v) for (v,) in conn.execute(sql) if v is not None)
     finally:

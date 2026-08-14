@@ -221,6 +221,98 @@ def test_per_identification_unit_is_one_row_per_manuscript_and_work_and_is_the_d
     assert all(row["novelty_offered"] is True for row in default["items"])
 
 
+def test_locus_is_leaf_only_and_old_assets_return_no_label(tmp_path):
+    db_path = _build_findings_db(tmp_path, name="findings-locus.db")
+    old_service = _service_for(db_path)
+    assert all(
+        row["locus_label"] is None
+        for row in old_service.get_findings_enveloped(bucket=BUCKET_ALL)["items"]
+    )
+
+    conn = sqlite3.connect(db_path)
+    identification_id, work_id = conn.execute(
+        "SELECT identification_id, display_work_id FROM discovery_identification LIMIT 1"
+    ).fetchone()
+    conn.execute(
+        "UPDATE discovery_identification SET locus_status='whole_work', "
+        "locus_work_id=?, locus_label='Synthetic Work Locus' "
+        "WHERE identification_id=?", (work_id, identification_id),
+    )
+    conn.execute(
+        "INSERT INTO meta(key,value) VALUES ('locus_display_version','locus-display-v1')"
+    )
+    conn.commit()
+    conn.close()
+
+    service = _service_for(db_path)
+    leaves = service.get_findings_enveloped(bucket=BUCKET_ALL)["items"]
+    assert any(row["locus_label"] == "Synthetic Work Locus" for row in leaves)
+    grouped = service.get_findings_enveloped(
+        unit=FINDINGS_UNIT_MANUSCRIPT, bucket=BUCKET_ALL
+    )["items"]
+    assert grouped and all(row["locus_label"] is None for row in grouped)
+
+
+def test_locus_range_filters_by_witnessed_interval_and_old_assets_ignore_it(tmp_path):
+    db_path = _build_findings_db(tmp_path, name="findings-locus-range.db")
+    old_service = _service_for(db_path)
+    old = old_service.get_findings_enveloped(
+        bucket=BUCKET_ALL, work_id="wA", locus_from=2, locus_to=2
+    )
+    assert old["total"] == 3
+    assert old_service.get_locus_units_enveloped("wA")["status"] == "unavailable"
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("INSERT INTO locus_work VALUES ('wA','sefaria','chapter',300,3)")
+    conn.executemany(
+        "INSERT INTO locus_unit VALUES ('wA',?,?,?,?,?)",
+        [
+            (0, 0, "ch:1", "Synthetic Chapter 1", 1),
+            (1, 100, "ch:2", "Synthetic Chapter 2", 2),
+            (2, 200, "ch:3", "Synthetic Chapter 3", 3),
+        ],
+    )
+    rows = conn.execute(
+        "SELECT identification_id, sys_id FROM discovery_identification "
+        "WHERE display_work_id='wA' ORDER BY sys_id"
+    ).fetchall()
+    for identification_id, sys_id in rows:
+        conn.execute(
+            "UPDATE discovery_identification SET locus_status='resolved', "
+            "locus_work_id='wA', locus_label='Synthetic locus' "
+            "WHERE identification_id=?",
+            (identification_id,),
+        )
+        ordinal = {"s1": 0, "s2": 2, "s6": 1}[sys_id]
+        conn.execute(
+            "INSERT INTO discovery_locus_piece VALUES (?,?,?,?,?)",
+            (identification_id, "wA", 0, ordinal, ordinal),
+        )
+    conn.executemany(
+        "INSERT INTO meta(key,value) VALUES (?,?)",
+        [
+            ("locus_display_version", "locus-display-v1"),
+            ("locus_filter_version", "locus-filter-v1"),
+            ("expected_rows_discovery_locus_piece", "3"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    service = _service_for(db_path)
+    exact = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, work_id="wA", locus_from=2, locus_to=2
+    )
+    assert _values(exact, "sys_id") == ["s6"]
+    overlapping = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, work_id="wA", locus_from=1, locus_to=2
+    )
+    assert set(_values(overlapping, "sys_id")) == {"s1", "s6"}
+    units = service.get_locus_units_enveloped("wA")
+    assert units["status"] == STATUS_OK
+    assert [item["citation_pos"] for item in units["items"]] == [1, 2, 3]
+
+
 def test_per_manuscript_unit_annotates_a_manuscript_carrying_more_than_one_work(service):
     env = service.get_findings_enveloped(unit=FINDINGS_UNIT_MANUSCRIPT, bucket=BUCKET_ALL)
     assert env["total"] == 6, "one row per manuscript (s1..s6)"

@@ -124,6 +124,7 @@ from web.discovery import (
     get_findings_enveloped,
     get_findings_facets_enveloped,
     get_launch_stats_enveloped,
+    get_locus_units_enveloped,
     novelty_view_shades,
     suppress_identification,
     suppressed_identification_ids,
@@ -256,6 +257,8 @@ _KEY_WORK = _STORAGE_PREFIX + "work_id"
 #: would show a reader who switches language the title they picked in the
 #: other one.
 _KEY_WORK_LABEL = _STORAGE_PREFIX + "work_label"
+_KEY_LOCUS_FROM = _STORAGE_PREFIX + "locus_from"
+_KEY_LOCUS_TO = _STORAGE_PREFIX + "locus_to"
 _KEY_PAGE = _STORAGE_PREFIX + "page"
 
 
@@ -639,6 +642,18 @@ _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
         "en": "Search works...",
         "he": "חיפוש חיבורים...",
     },
+    "locus_range_header": {
+        "en": "Part of work",
+        "he": "חלק מן החיבור",
+    },
+    "locus_range_from": {
+        "en": "From",
+        "he": "מ־",
+    },
+    "locus_range_to": {
+        "en": "To",
+        "he": "עד",
+    },
     # An `ok` facet envelope carrying NO items. Deliberately a different
     # statement from `needs_tag` above, because it is a different fact: that
     # one says the data to filter on is absent, this one says the data is
@@ -845,6 +860,14 @@ def read_state() -> Dict[str, Any]:
         value = safe_user_get(key, None)
         return value if isinstance(value, str) and value else None
 
+    def _opt_ordinal(key: str) -> Optional[int]:
+        value = safe_user_get(key, None)
+        try:
+            ordinal = int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+        return ordinal if ordinal is not None and ordinal >= 0 else None
+
     state = {
         "unit": unit,
         "bucket": bucket,
@@ -854,6 +877,8 @@ def read_state() -> Dict[str, Any]:
         "author": _opt(_KEY_AUTHOR),
         "work_id": _opt(_KEY_WORK),
         "work_label": _opt(_KEY_WORK_LABEL),
+        "locus_from": _opt_ordinal(_KEY_LOCUS_FROM),
+        "locus_to": _opt_ordinal(_KEY_LOCUS_TO),
         "page": page if page >= 1 else 1,
     }
     return normalise_state(state)
@@ -893,6 +918,18 @@ def normalise_state(state: Dict[str, Any]) -> Dict[str, Any]:
     coupling has a home that is already wired rather than needing to be
     reintroduced at both sites under time pressure.
     """
+    if not state.get("work_id"):
+        for key in ("locus_from", "locus_to"):
+            if key in state:
+                state[key] = None
+    elif (
+        state.get("locus_from") is not None
+        and state.get("locus_to") is not None
+        and state["locus_from"] > state["locus_to"]
+    ):
+        state["locus_from"], state["locus_to"] = (
+            state["locus_to"], state["locus_from"]
+        )
     return state
 
 
@@ -906,6 +943,8 @@ def write_state(state: Dict[str, Any]) -> None:
     safe_user_set(_KEY_AUTHOR, state["author"])
     safe_user_set(_KEY_WORK, state["work_id"])
     safe_user_set(_KEY_WORK_LABEL, state.get("work_label"))
+    safe_user_set(_KEY_LOCUS_FROM, state.get("locus_from"))
+    safe_user_set(_KEY_LOCUS_TO, state.get("locus_to"))
     safe_user_set(_KEY_PAGE, state["page"])
 
 
@@ -957,6 +996,8 @@ async def fetch_findings(state: Dict[str, Any],
         domain=state.get("domain"),
         author=state.get("author"),
         work_id=state.get("work_id"),
+        locus_from=state.get("locus_from"),
+        locus_to=state.get("locus_to"),
         # THE MANUSCRIPT AXIS (2026-08-07), read from the state like every other
         # filter. NORMALLY ABSENT here: no control on this page sets `sys_id`, so
         # `state.get` returns `None` and the predicate adds nothing. It is passed
@@ -2009,6 +2050,10 @@ def _render_facet_groups(lang: str) -> None:
             ui.column().classes(
                 f"{FILTER_BAR_CLASS}-{level}-items w-full gap-1"
             ).style("max-height: 340px; overflow-y: auto;")
+            if level == "work":
+                ui.column().classes(
+                    f"{FILTER_BAR_CLASS}-locus-items w-full gap-2"
+                )
 
 
 def _facet_containers(filter_bar: Any) -> Dict[str, Any]:
@@ -2018,7 +2063,65 @@ def _facet_containers(filter_bar: Any) -> Dict[str, Any]:
         for level in ("domain", "author", "work"):
             if f"{FILTER_BAR_CLASS}-{level}-items" in classes:
                 containers[level] = element
+        if f"{FILTER_BAR_CLASS}-locus-items" in classes:
+            containers["locus"] = element
     return containers
+
+
+async def fetch_locus_units(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Lazy work-specific address-unit read through the discovery wrapper."""
+    return await get_locus_units_enveloped(str(state.get("work_id") or ""))
+
+
+def _render_locus_range(
+    envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh
+) -> None:
+    """Render From/To only when the selected work has addressable units."""
+    if (envelope or {}).get("status") != "ok":
+        return
+    items = list(envelope.get("items") or ())
+    options = {
+        int(item["citation_pos"]): str(
+            item.get("label_he") or item.get("part_key") or ""
+        )
+        for item in items
+    }
+    if not options:
+        return
+
+    _card_header(copy_text("locus_range_header", lang))
+
+    async def _pick(event, state_key: str) -> None:
+        value = getattr(event, "value", None)
+        try:
+            candidate = int(value) if value is not None else None
+        except (TypeError, ValueError):
+            candidate = None
+        picked = candidate if candidate in options else None
+        if picked != state.get(state_key):
+            state[state_key] = picked
+            start, end = state.get("locus_from"), state.get("locus_to")
+            if start is not None and end is not None and start > end:
+                other = "locus_to" if state_key == "locus_from" else "locus_from"
+                state[other] = picked
+            state["page"] = 1
+            await refresh()
+
+    with ui.row().classes("w-full gap-2 flex-nowrap"):
+        for state_key, copy_key in (
+            ("locus_from", "locus_range_from"),
+            ("locus_to", "locus_range_to"),
+        ):
+            selected = state.get(state_key)
+            ui.select(
+                options=options,
+                value=selected if selected in options else None,
+                with_input=True,
+                on_change=lambda event, key=state_key: _pick(event, key),
+                label=copy_text(copy_key, lang),
+            ).props(
+                "dense outlined clearable use-input input-debounce=300 options-dense"
+            ).classes(f"{FILTER_BAR_CLASS}-{state_key.replace('_', '-')} grow min-w-0")
 
 
 async def _prime_domain_labels(lang: str) -> None:
@@ -2122,6 +2225,26 @@ async def _populate_facets(
         container.clear()
         with container:
             _render_facet_items(level, envelope, state, lang, refresh)
+
+    locus_container = containers.get("locus")
+    if locus_container is None:
+        return
+    locus_container.clear()
+    work_id = state.get("work_id")
+    if not work_id:
+        return
+    locus_key = ("locus", work_id) + _artifact_identity()
+    locus_cached = cache.get("locus") if cache is not None else None
+    if locus_cached is not None and locus_cached[0] == locus_key:
+        locus_envelope = locus_cached[1]
+    else:
+        locus_envelope = await fetch_locus_units(state)
+        if cache is not None and (locus_envelope or {}).get("status") == "ok":
+            cache["locus"] = (locus_key, locus_envelope)
+        if _stale():
+            return
+    with locus_container:
+        _render_locus_range(locus_envelope, state, lang, refresh)
 
 
 def facet_display_label(level: str, item: Dict[str, Any], lang: str) -> str:
@@ -2408,6 +2531,8 @@ def _render_facet_select(
             if level == "work":
                 state["work_label"] = (
                     raw_labels.get(picked) if picked is not None else None)
+                state["locus_from"] = None
+                state["locus_to"] = None
             state["page"] = 1
             await refresh()
 
@@ -2809,6 +2934,8 @@ def _clear_filter_axis(state: Dict[str, Any], axis: Optional[str]) -> None:
         state[key] = _CHIP_AXIS_NEUTRAL.get(key)
         if key == "work_id":
             state["work_label"] = None
+            state["locus_from"] = None
+            state["locus_to"] = None
     state["page"] = 1
 
 

@@ -156,6 +156,9 @@ SURFACE_CLAIM_FIELDS: Tuple[str, ...] = (
     "main_pool_reason",
     "identification_id",
     "identification_page_count",
+    # Baked only under meta.locus_display_version. Pre-marker assets project
+    # this optional field as None and remain fully readable.
+    "locus_label",
     # novelty (masked label only)
     "novelty_status",
     "novelty_source_label",
@@ -253,6 +256,9 @@ SURFACE_FINDING_FIELDS: Tuple[str, ...] = (
     #: while still advertising "68% of page" would contradict its own demotion.
     #: One field means one answer.
     "rendered_relation",
+    # Identification leaf only; grouped findings rows deliberately project
+    # NULL because they have no single page/work locus.
+    "locus_label",
     "novelty_status",
     "novelty_offered",
     #: Ruling F: does this row disagree with a catalogue identification?
@@ -384,6 +390,12 @@ SURFACE_FACET_FIELDS: Tuple[str, ...] = (
     "count",
 )
 
+SURFACE_LOCUS_UNIT_FIELDS: Tuple[str, ...] = (
+    "citation_pos",
+    "part_key",
+    "label_he",
+)
+
 #: Text-vs-text (`PLAN-textvtext-excerpts.md`): ONE `discovery_excerpt` row --
 #: the bake-time-selected best eligible witness for an identification,
 #: PLAIN TEXT pieces only (no HTML; the renderer composes and escapes).
@@ -443,6 +455,7 @@ _ALL_ALLOWLISTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("SURFACE_EXPANSION_FIELDS", SURFACE_EXPANSION_FIELDS),
     ("SURFACE_LAUNCH_SHADE_FIELDS", SURFACE_LAUNCH_SHADE_FIELDS),
     ("SURFACE_FACET_FIELDS", SURFACE_FACET_FIELDS),
+    ("SURFACE_LOCUS_UNIT_FIELDS", SURFACE_LOCUS_UNIT_FIELDS),
     ("SURFACE_EXCERPT_FIELDS", SURFACE_EXCERPT_FIELDS),
 )
 
@@ -521,6 +534,11 @@ def surface_safe_launch_shade(row: Mapping[str, Any]) -> Dict[str, Any]:
 def surface_safe_facet(row: Mapping[str, Any]) -> Dict[str, Any]:
     """One domain / author / work facet row."""
     return _project(row, SURFACE_FACET_FIELDS)
+
+
+def surface_safe_locus_unit(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One addressable unit offered by the work-specific range control."""
+    return _project(row, SURFACE_LOCUS_UNIT_FIELDS)
 
 
 def surface_safe_excerpt(row: Mapping[str, Any]) -> Dict[str, Any]:
@@ -613,11 +631,19 @@ _RATE_WORD_RE = re.compile(
 #: Version-shaped tokens are not rates. Bounded to explicit `v`/`version`
 #: syntax at a word boundary -- a wider rule would also excuse `accuracy 0.9`.
 _VERSION_RE = re.compile(r"\b(v|version\s*)\d+(\.\d+)*\b", re.IGNORECASE)
+#: URLs are attribution/provenance, not reader-facing precision prose.  In
+#: particular, Hebrew Wikisource paths contain ordinary percent-encoded UTF-8
+#: bytes such as ``%D7%AA``.  The percentage detector otherwise reads the
+#: trailing ``7%`` in every one of those escape sequences as a published rate
+#: and rejects the whole excerpt envelope.  Strip complete HTTP(S) tokens before
+#: applying any of the rate shapes; prose around the URL is still checked.
+_URL_RE = re.compile(r"\bhttps?://[^\s<>\"']+", re.IGNORECASE)
 
 
 def _rate_or_interval_violation(value: str) -> Optional[str]:
     """The reason `value` is a rendered rate/interval, or None."""
-    stripped = _VERSION_RE.sub(" ", value)
+    stripped = _URL_RE.sub(" ", value)
+    stripped = _VERSION_RE.sub(" ", stripped)
     if _PERCENT_RE.search(stripped):
         return "a percentage"
     if _INTERVAL_RE.search(stripped):

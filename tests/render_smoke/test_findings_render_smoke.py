@@ -300,6 +300,7 @@ def _finding_source(**overrides) -> Dict[str, Any]:
         "max_coverage_ppm": 680000,
         # C-track: the findings surface carries Contract 1's matrix output.
         "rendered_relation": ids.RENDERED_RELATION_DIRECT_WITNESS,
+        "locus_label": "פרק א",
         "novelty_status": CANDIDATE_STATUS,
         "novelty_offered": True,
         "divergent": False,
@@ -356,6 +357,7 @@ def corpus_rows() -> List[Tuple[str, Dict[str, Any]]]:
         best_band_rank=4,
         max_coverage_ppm=None,
         rendered_relation=ids.RENDERED_RELATION_SHARED_TEXT,
+        locus_label=None,
         novelty_status=DEFAULT_STATUS,
         novelty_offered=False,
         divergent=True,
@@ -1064,6 +1066,18 @@ def test_the_curated_title_renders_and_the_raw_one_never_does_uncurated(lang):
 def test_an_uncurated_title_passes_through(lang):
     client = render_rows([finding_row()], lang)
     assert UNCURATED_RAW_TITLE in scoped_text(client, fr.ROW_CLASS)
+    ASSERTION_COUNT["n"] += 1
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_identification_locus_is_a_dedicated_bidi_isolated_subline(lang):
+    client = render_rows([finding_row(locus_label="פרק א")], lang)
+    labels = _elements_with_class(client, "locus_subline")
+    assert len(labels) == 1
+    assert "↳ פרק א" in labels[0].text
+    assert labels[0]._props.get("dir") == "auto"
+    assert labels[0]._style.get("unicode-bidi") == "isolate"
+    assert "matches" not in labels[0].text.lower()
     ASSERTION_COUNT["n"] += 1
 
 

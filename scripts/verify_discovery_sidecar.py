@@ -2038,6 +2038,181 @@ def check_locus_reference_basis(conn: sqlite3.Connection, meta: dict) -> List[st
     return violations
 
 
+_LOCUS_DISPLAY_VERSION = "locus-display-v1"
+_LOCUS_DISPLAY_STATUSES = ("resolved", "whole_work", "unavailable")
+_LOCUS_DIVISIONS_SHA256 = (
+    "aaac6f90d9ee2b4c3e0b83c0220e9215dc2cdee0c9995cd2ed6672b951898263"
+)
+
+
+def check_locus_display_contract(conn: sqlite3.Connection, meta: dict) -> List[str]:
+    """Marker-conditional baked-locus schema, census, and coordinate checks."""
+    marker = meta.get("locus_display_version")
+    if marker is None:
+        return []
+    violations: List[str] = []
+    if marker != _LOCUS_DISPLAY_VERSION:
+        violations.append("meta.locus_display_version is not locus-display-v1")
+        return violations
+    for table in ("discovery_claim", "discovery_identification"):
+        for column in ("locus_status", "locus_work_id", "locus_label"):
+            if not _has_column(conn, table, column):
+                violations.append(f"{table}.{column}: absent under locus-display-v1")
+    if violations:
+        return violations
+
+    for grain, table in (
+        ("claim", "discovery_claim"),
+        ("identification", "discovery_identification"),
+    ):
+        bad_statuses = {
+            row[0] for row in conn.execute(f"SELECT DISTINCT locus_status FROM {table}")
+        } - set(_LOCUS_DISPLAY_STATUSES)
+        if bad_statuses:
+            violations.append(
+                f"{table}.locus_status: {len(bad_statuses)} value(s) outside the vocabulary"
+            )
+        for status in _LOCUS_DISPLAY_STATUSES:
+            (actual,) = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE locus_status=?", (status,)
+            ).fetchone()
+            key = f"expected_locus_{grain}_{status}"
+            try:
+                expected = int(meta.get(key))
+            except (TypeError, ValueError):
+                violations.append(f"meta.{key} missing or non-integer")
+                continue
+            if expected != actual:
+                violations.append(f"meta.{key}={expected} != actual status count {actual}")
+        (bad_shape,) = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE "
+            "(locus_status IN ('resolved','whole_work') AND "
+            " (locus_work_id IS NULL OR locus_label IS NULL OR trim(locus_label)='')) "
+            "OR (locus_status='unavailable' AND "
+            " (locus_work_id IS NOT NULL OR locus_label IS NOT NULL))"
+        ).fetchone()
+        if bad_shape:
+            violations.append(f"{table}: {bad_shape} locus row(s) violate status/label shape")
+
+    (bad_claim_coordinates,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_claim "
+        "WHERE locus_status <> 'unavailable' AND locus_work_id <> work_id"
+    ).fetchone()
+    if bad_claim_coordinates:
+        violations.append(
+            f"discovery_claim: {bad_claim_coordinates} locus row(s) use another work's offsets"
+        )
+    (bad_identification_coordinates,) = conn.execute(
+        "SELECT COUNT(*) FROM discovery_identification di "
+        "JOIN works lw ON lw.work_id=di.locus_work_id "
+        "WHERE di.locus_status <> 'unavailable' "
+        "AND lw.canonical_work_id <> di.canonical_work_id"
+    ).fetchone()
+    if bad_identification_coordinates:
+        violations.append(
+            "discovery_identification: locus coordinate work crosses canonical work identity"
+        )
+    (bad_resolved,) = conn.execute(
+        "SELECT COUNT(*) FROM ("
+        " SELECT locus_work_id FROM discovery_claim WHERE locus_status='resolved'"
+        " UNION ALL"
+        " SELECT locus_work_id FROM discovery_identification WHERE locus_status='resolved'"
+        ") x LEFT JOIN locus_work lw ON lw.work_id=x.locus_work_id "
+        "WHERE lw.work_id IS NULL"
+    ).fetchone()
+    if bad_resolved:
+        violations.append(f"locus display: {bad_resolved} resolved row(s) lack a unit table")
+    (bad_whole_work,) = conn.execute(
+        "SELECT COUNT(*) FROM ("
+        " SELECT locus_work_id FROM discovery_claim WHERE locus_status='whole_work'"
+        " UNION ALL"
+        " SELECT locus_work_id FROM discovery_identification WHERE locus_status='whole_work'"
+        ") x JOIN locus_work lw ON lw.work_id=x.locus_work_id"
+    ).fetchone()
+    if bad_whole_work:
+        violations.append(
+            f"locus display: {bad_whole_work} whole-work row(s) have a populated unit table"
+        )
+    if conn.execute("SELECT COUNT(*) FROM locus_unit").fetchone()[0]:
+        if meta.get("locus_divisions_sha256") != _LOCUS_DIVISIONS_SHA256:
+            violations.append("meta.locus_divisions_sha256 is absent or not the pinned input")
+
+    filter_marker = meta.get("locus_filter_version")
+    if filter_marker is not None:
+        if filter_marker != "locus-filter-v1":
+            violations.append("meta.locus_filter_version is not locus-filter-v1")
+            return violations
+        if not _has_table(conn, "discovery_locus_piece"):
+            violations.append(
+                "discovery_locus_piece: absent under locus-filter-v1"
+            )
+            return violations
+        for column in (
+            "identification_id", "locus_work_id", "piece_ord",
+            "start_unit_ord", "end_unit_ord",
+        ):
+            if not _has_column(conn, "discovery_locus_piece", column):
+                violations.append(
+                    f"discovery_locus_piece.{column}: absent under locus-filter-v1"
+                )
+        if violations:
+            return violations
+        try:
+            expected_pieces = int(meta.get("expected_rows_discovery_locus_piece"))
+        except (TypeError, ValueError):
+            violations.append(
+                "meta.expected_rows_discovery_locus_piece missing or non-integer"
+            )
+        else:
+            actual_pieces = conn.execute(
+                "SELECT COUNT(*) FROM discovery_locus_piece"
+            ).fetchone()[0]
+            if expected_pieces != actual_pieces:
+                violations.append(
+                    "meta.expected_rows_discovery_locus_piece="
+                    f"{expected_pieces} != actual row count {actual_pieces}"
+                )
+        (bad_piece_shape,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_locus_piece p "
+            "LEFT JOIN discovery_identification di "
+            " ON di.identification_id=p.identification_id "
+            "LEFT JOIN locus_work lw ON lw.work_id=p.locus_work_id "
+            "WHERE di.identification_id IS NULL OR lw.work_id IS NULL "
+            "OR di.locus_status <> 'resolved' "
+            "OR di.locus_work_id <> p.locus_work_id "
+            "OR p.piece_ord < 0 OR p.start_unit_ord < 0 "
+            "OR p.end_unit_ord < p.start_unit_ord "
+            "OR p.end_unit_ord >= lw.unit_count"
+        ).fetchone()
+        if bad_piece_shape:
+            violations.append(
+                f"discovery_locus_piece: {bad_piece_shape} row(s) violate coordinate shape"
+            )
+        (bad_ordinals,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_locus_piece p "
+            "WHERE p.piece_ord <> ("
+            " SELECT COUNT(*) FROM discovery_locus_piece earlier "
+            " WHERE earlier.identification_id=p.identification_id "
+            " AND earlier.piece_ord < p.piece_ord)"
+        ).fetchone()
+        if bad_ordinals:
+            violations.append(
+                f"discovery_locus_piece: {bad_ordinals} row(s) have noncontiguous piece ordinals"
+            )
+        (resolved_without_piece,) = conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification di "
+            "LEFT JOIN discovery_locus_piece p "
+            " ON p.identification_id=di.identification_id "
+            "WHERE di.locus_status='resolved' AND p.identification_id IS NULL"
+        ).fetchone()
+        if resolved_without_piece:
+            violations.append(
+                "discovery_locus_piece: "
+                f"{resolved_without_piece} resolved identification(s) lack an interval"
+            )
+    return violations
+
+
 #: The Contract-1 input tables that carry their own version column, paired with
 #: the meta key naming the ACTIVE version. The matrix reads each table WHOLE (no
 #: version filter), which is only sound while an asset carries exactly one — so
@@ -2537,6 +2712,7 @@ def verify(db_path, expected_frame_hash=None, *, expected_band_vocabulary: Optio
         # presence/vocabulary/count contract + the Contract-0 basis pin.
         violations += check_amendment_2026_08_12_contract(conn, meta)
         violations += check_locus_reference_basis(conn, meta)
+        violations += check_locus_display_contract(conn, meta)
         # Amendment 2026-08-13 (V): both run BEFORE the recompute gate. That
         # gate reads the band table through the matrix module, so an asset with
         # two versions or a contradictory overlap must be reported as what it

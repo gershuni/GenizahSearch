@@ -329,6 +329,39 @@ _AMENDMENT_2026_08_12_COUNTS = (
     ("expected_rows_discovery_withholding", "discovery_withholding"),
 )
 
+# Locus display is a second, independently rollback-safe amendment. The
+# earlier locus schema marker only promises the address tables; deployed
+# assets carrying that marker predate the baked claim/identification labels.
+_LOCUS_DISPLAY_MARKER_KEY = "locus_display_version"
+_EXPECTED_LOCUS_DISPLAY_VERSION = "locus-display-v1"
+_LOCUS_DISPLAY_COLUMNS: Dict[str, frozenset] = {
+    "discovery_claim": frozenset({
+        "locus_status", "locus_work_id", "locus_label",
+    }),
+    "discovery_identification": frozenset({
+        "locus_status", "locus_work_id", "locus_label",
+    }),
+}
+_LOCUS_DISPLAY_STATUSES = ("resolved", "whole_work", "unavailable")
+_LOCUS_DISPLAY_META_KEYS = frozenset(
+    f"expected_locus_{grain}_{status}"
+    for grain in ("claim", "identification")
+    for status in _LOCUS_DISPLAY_STATUSES
+)
+
+_LOCUS_FILTER_MARKER_KEY = "locus_filter_version"
+_EXPECTED_LOCUS_FILTER_VERSION = "locus-filter-v1"
+_LOCUS_FILTER_TABLES = frozenset({"discovery_locus_piece"})
+_LOCUS_FILTER_COLUMNS: Dict[str, frozenset] = {
+    "discovery_locus_piece": frozenset({
+        "identification_id", "locus_work_id", "piece_ord",
+        "start_unit_ord", "end_unit_ord",
+    }),
+}
+_LOCUS_FILTER_COUNTS = (
+    ("expected_rows_discovery_locus_piece", "discovery_locus_piece"),
+)
+
 # Excerpt sidecar (_tmp/PLAN-textvtext-excerpts.md, Track C). Its OWN
 # conditional marker, INDEPENDENT of `locus_schema_version` above -- the
 # excerpt table ships on its own bake schedule, so an asset can carry either
@@ -626,6 +659,48 @@ def load_discovery_state() -> bool:
             _AMENDMENT_EXCERPT_COUNTS if has_excerpt else ()
         )
 
+        locus_display_marker = meta.get(_LOCUS_DISPLAY_MARKER_KEY)
+        if (
+            locus_display_marker is not None
+            and locus_display_marker != _EXPECTED_LOCUS_DISPLAY_VERSION
+        ):
+            raise _LoaderRefusal(
+                f"incompatible locus_display_version (expected "
+                f"{_EXPECTED_LOCUS_DISPLAY_VERSION!r}, found value withheld) -- "
+                "reject-incompatible"
+            )
+        has_locus_display = locus_display_marker is not None
+        if has_locus_display:
+            for table, cols in _LOCUS_DISPLAY_COLUMNS.items():
+                required_columns[table] = required_columns.get(table, frozenset()) | cols
+            missing_locus_meta = _LOCUS_DISPLAY_META_KEYS - meta.keys()
+            if missing_locus_meta:
+                raise _LoaderRefusal(
+                    f"meta missing required locus display key(s): "
+                    f"{sorted(missing_locus_meta)}"
+                )
+
+        locus_filter_marker = meta.get(_LOCUS_FILTER_MARKER_KEY)
+        if (
+            locus_filter_marker is not None
+            and locus_filter_marker != _EXPECTED_LOCUS_FILTER_VERSION
+        ):
+            raise _LoaderRefusal(
+                f"incompatible locus_filter_version (expected "
+                f"{_EXPECTED_LOCUS_FILTER_VERSION!r}, found value withheld) -- "
+                "reject-incompatible"
+            )
+        has_locus_filter = locus_filter_marker is not None
+        if has_locus_filter:
+            if not has_locus_display:
+                raise _LoaderRefusal(
+                    "locus_filter_version requires locus_display_version"
+                )
+            required_tables = required_tables | _LOCUS_FILTER_TABLES
+            for table, cols in _LOCUS_FILTER_COLUMNS.items():
+                required_columns[table] = required_columns.get(table, frozenset()) | cols
+            contract_counts = contract_counts + _LOCUS_FILTER_COUNTS
+
         table_rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         ).fetchall()
@@ -668,6 +743,30 @@ def load_discovery_state() -> bool:
                     f"release-contract row-count mismatch on meta.{meta_key}: "
                     f"actual {table} count={actual} (expected value withheld)"
                 )
+
+        if has_locus_display:
+            for grain, table in (
+                ("claim", "discovery_claim"),
+                ("identification", "discovery_identification"),
+            ):
+                for status in _LOCUS_DISPLAY_STATUSES:
+                    meta_key = f"expected_locus_{grain}_{status}"
+                    (actual,) = conn.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE locus_status=?", (status,)
+                    ).fetchone()  # noqa: S608 -- table is the fixed tuple above
+                    try:
+                        expected_int = int(meta.get(meta_key))
+                    except (TypeError, ValueError):
+                        raise _LoaderRefusal(
+                            f"locus display meta.{meta_key} is not an integer "
+                            "(value withheld)"
+                        ) from None
+                    if expected_int != actual:
+                        raise _LoaderRefusal(
+                            f"locus display count mismatch on meta.{meta_key}: "
+                            f"actual {table} status count={actual} "
+                            "(expected value withheld)"
+                        )
 
         # Frozen enum vocab spot-check (defense-in-depth). The full
         # (evidence_kind x evidence_source x confidence_band) combination

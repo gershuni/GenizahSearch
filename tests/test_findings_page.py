@@ -524,6 +524,7 @@ def _render_page(monkeypatch, *, lang="en", findings=None, facets=None, state=No
 
     monkeypatch.setattr(fp, "get_findings_enveloped", findings or _fake_findings())
     monkeypatch.setattr(fp, "get_findings_facets_enveloped", facets or _fake_facets())
+
     if launch is not None:
         monkeypatch.setattr(fp, "get_launch_stats_enveloped", launch)
     if state is not None:
@@ -6218,6 +6219,40 @@ def test_a_lone_refresh_is_never_treated_as_stale(monkeypatch):
     assert MAIN_ROW_TITLE in _scoped_text(client, fp.RESULTS_CLASS)
     for level in ("domain", "author", "work"):
         assert _elements_with_class(client, f"{fp.FILTER_BAR_CLASS}-{level}-items")
+
+
+def test_selected_work_lazily_renders_a_citation_order_range(monkeypatch):
+    calls = []
+
+    async def _units(work_id):
+        calls.append(work_id)
+        return {
+            "status": "ok",
+            "items": [
+                {"citation_pos": 10, "part_key": "ch:10", "label_he": "Chapter Ten"},
+                {"citation_pos": 11, "part_key": "ch:11", "label_he": "Chapter Eleven"},
+            ],
+            "total": 2,
+            "meta": {"work_id": work_id, "locus_filter": True},
+        }
+
+    monkeypatch.setattr(fp, "get_locus_units_enveloped", _units)
+    client = _render_page(
+        monkeypatch,
+        lang="en",
+        state=_state(work_id=_UNCURATED_WORK_ID, work_label=_UNCURATED_RAW_TITLE),
+    )
+    assert calls == [_UNCURATED_WORK_ID]
+    from_controls = _elements_with_class(
+        client, f"{fp.FILTER_BAR_CLASS}-locus-from"
+    )
+    to_controls = _elements_with_class(
+        client, f"{fp.FILTER_BAR_CLASS}-locus-to"
+    )
+    assert len(from_controls) == len(to_controls) == 1
+    assert from_controls[0].options == to_controls[0].options == {
+        10: "Chapter Ten", 11: "Chapter Eleven"
+    }
 
 
 def test_the_facet_cascade_stops_reading_when_the_token_moves(monkeypatch):

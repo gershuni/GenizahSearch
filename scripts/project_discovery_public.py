@@ -341,6 +341,13 @@ def _project_discovery_claim(ctx: ProjectionContext) -> List[Dict[str, Any]]:
     for cid in sorted(ctx.surviving_claim_ids):
         row = dict(ctx.claims_by_id[cid])
         row["display_evidence_id"] = ctx.recomputed_display_evidence[cid]
+        # Locus labels are projections of evidence, not private annotations.
+        # Fail closed during the copy and recompute after every public-only
+        # input table has been populated.
+        if "locus_status" in row:
+            row["locus_status"] = "unavailable"
+            row["locus_work_id"] = None
+            row["locus_label"] = None
         out.append(row)
     return out
 
@@ -449,6 +456,11 @@ def _project_locus_edition(ctx: ProjectionContext) -> List[Dict[str, Any]]:
         row for row in _rows_as_dicts(ctx.conn, "locus_edition")
         if row["work_id"] in kept
     ]
+
+
+def _project_discovery_locus_piece(ctx: ProjectionContext) -> List[Dict[str, Any]]:
+    """Derived from public-only evidence after identification materialization."""
+    return []
 
 
 def _project_discovery_region_map(ctx: ProjectionContext) -> List[Dict[str, Any]]:
@@ -599,6 +611,8 @@ def _materialize_public_identification(
 
     out_conn.execute("DELETE FROM discovery_identification")
     builder.populate_discovery_identification(out_conn, parameterization)
+    if private_meta.get("locus_display_version") == builder.LOCUS_DISPLAY_VERSION:
+        builder.materialize_locus_labels(out_conn)
     (n,) = out_conn.execute("SELECT COUNT(*) FROM discovery_identification").fetchone()
     return n
 
@@ -668,6 +682,7 @@ def _project_meta(ctx: ProjectionContext, projected_counts: Dict[str, int]) -> L
         "locus_work": "expected_rows_locus_work",
         "locus_unit": "expected_rows_locus_unit",
         "locus_edition": "expected_rows_locus_edition",
+        "discovery_locus_piece": "expected_rows_discovery_locus_piece",
         "discovery_region_map": "expected_rows_discovery_region_map",
         "discovery_curated_quoter": "expected_rows_discovery_curated_quoter",
         "discovery_region_band": "expected_rows_discovery_region_band",
@@ -706,6 +721,7 @@ PROJECTION_RULES: Dict[str, Callable] = {
     "locus_work": _project_locus_work,
     "locus_unit": _project_locus_unit,
     "locus_edition": _project_locus_edition,
+    "discovery_locus_piece": _project_discovery_locus_piece,
     "discovery_region_map": _project_discovery_region_map,
     "discovery_curated_quoter": _project_discovery_curated_quoter,
     "discovery_region_band": _project_discovery_region_band,
@@ -804,6 +820,24 @@ def check_fk_closure(conn: sqlite3.Connection) -> List[str]:
                         f"{table}: work_id {work_id!r} not in projected locus_work (dangling FK)"
                     )
 
+    if _table_exists(conn, "discovery_locus_piece"):
+        ident_ids = {
+            row[0] for row in cur.execute(
+                "SELECT identification_id FROM discovery_identification"
+            ).fetchall()
+        }
+        for ident_id, work_id in cur.execute(
+            "SELECT identification_id, locus_work_id FROM discovery_locus_piece"
+        ).fetchall():
+            if ident_id not in ident_ids:
+                violations.append(
+                    f"discovery_locus_piece: identification_id {ident_id!r} is dangling"
+                )
+            if work_id not in locus_work_ids:
+                violations.append(
+                    f"discovery_locus_piece: locus_work_id {work_id!r} is dangling"
+                )
+
     if _table_exists(conn, "discovery_stratum_membership") and _table_exists(
         conn, "discovery_identification"
     ):
@@ -848,6 +882,7 @@ def check_meta_counts(conn: sqlite3.Connection) -> List[str]:
         "expected_rows_locus_work": "locus_work",
         "expected_rows_locus_unit": "locus_unit",
         "expected_rows_locus_edition": "locus_edition",
+        "expected_rows_discovery_locus_piece": "discovery_locus_piece",
         "expected_rows_discovery_region_map": "discovery_region_map",
         "expected_rows_discovery_curated_quoter": "discovery_curated_quoter",
         "expected_rows_discovery_stratum_membership": "discovery_stratum_membership",
@@ -1064,6 +1099,10 @@ def project(
                 projected_counts["discovery_identification"] = (
                     _materialize_public_identification(out_conn, private_conn)
                 )
+            if "discovery_locus_piece" in projected_counts:
+                projected_counts["discovery_locus_piece"] = out_conn.execute(
+                    "SELECT COUNT(*) FROM discovery_locus_piece"
+                ).fetchone()[0]
             # Amendment 2026-08-12 (Q): membership rows reference the
             # identification table, so their filtered copy runs only AFTER it
             # is materialized -- and, like it, before _project_meta publishes
@@ -1073,6 +1112,24 @@ def project(
                     _materialize_public_stratum_membership(private_conn, out_conn)
                 )
             meta_rows = _project_meta(ctx, projected_counts)
+            private_meta = dict(private_conn.execute("SELECT key, value FROM meta"))
+            if private_meta.get("locus_display_version") == "locus-display-v1":
+                import build_discovery_sidecar as builder
+
+                locus_keys = {
+                    "locus_display_version",
+                    "locus_filter_version",
+                    "expected_rows_discovery_locus_piece",
+                } | {
+                    f"expected_locus_{grain}_{status}"
+                    for grain in ("claim", "identification")
+                    for status in builder.LOCUS_STATUSES
+                }
+                meta_rows = [row for row in meta_rows if row["key"] not in locus_keys]
+                meta_rows.extend(
+                    {"key": key, "value": value}
+                    for key, value in builder.locus_display_meta_rows(out_conn)
+                )
             _insert_rows(out_conn, "meta", meta_rows)
             out_conn.commit()
 

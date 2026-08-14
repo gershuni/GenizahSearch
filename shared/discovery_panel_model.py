@@ -1144,6 +1144,10 @@ def _identification_row(
     if len(emitted["nested"]) > 0:
         emitted["granularity_subline"] = emitted["nested"][0]["subline"]
 
+    locus_label = row.get("locus_label")
+    if isinstance(locus_label, str) and locus_label.strip():
+        emitted["locus_subline"] = ds.locus_subline(locus_label.strip(), lang)
+
     return emitted
 
 

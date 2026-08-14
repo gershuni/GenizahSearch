@@ -365,6 +365,12 @@ def granularity_subline(other_work_title: str, lang: str = "en") -> str:
     return _pick(_GRANULARITY_SUBLINE, lang).format(other_work_title=other_work_title)
 
 
+def locus_subline(locus_label: str, lang: str = "en") -> str:
+    """The baked scholarly address, with one language-neutral structural cue."""
+    del lang  # the citation itself is source vocabulary, not translated copy
+    return f"↳ {locus_label}"
+
+
 _MISSING_TITLE: Dict[str, str] = {
     "en": "Title unavailable",
     "he": "הכותרת אינה זמינה",

@@ -73,8 +73,12 @@ import check_atlas_masking as _cam  # scripts/check_atlas_masking.py -- DATA-05 
 # this file, so the three surfaces cannot disagree about which bucket an
 # identification belongs to.
 from shared.discovery_locus import (  # noqa: E402
+    merge_witnessed_spans,
     parse_ref_span_alignments,
+    render_locus_label,
+    select_locus_work,
     select_primary_alignment,
+    units_for_span,
 )
 # Deliberate re-export: this error was raised from this module before the parsing moved
 # to `shared.discovery_locus`, and callers -- including the frozen gate-14 tests --
@@ -149,6 +153,13 @@ REAL_SIDECAR_VERSION = "discovery-v1-real"
 # count key the amendment adds; an asset without it is a pre-batch asset and
 # validates exactly as before.
 LOCUS_SCHEMA_VERSION = "locus-v1"
+LOCUS_DISPLAY_VERSION = "locus-display-v1"
+LOCUS_FILTER_VERSION = "locus-filter-v1"
+LOCUS_DIVISIONS_SHA256 = (
+    "aaac6f90d9ee2b4c3e0b83c0220e9215dc2cdee0c9995cd2ed6672b951898263"
+)
+LOCUS_FAMILIES = frozenset({"sefaria", "ja", "msource_header", "msource_daf"})
+LOCUS_STATUSES = ("resolved", "whole_work", "unavailable")
 
 # Frozen constant timestamps (F13/determinism) -- NEVER wall-clock, so a
 # rebuild in any environment reproduces byte-identical output.
@@ -203,6 +214,16 @@ CREATE TABLE discovery_claim (
   display_evidence_id TEXT NOT NULL,
   source_corpus       TEXT NOT NULL,
   sidecar_version     TEXT NOT NULL,
+  locus_status        TEXT NOT NULL DEFAULT 'unavailable'
+                      CHECK (locus_status IN ('resolved','whole_work','unavailable')),
+  locus_work_id       TEXT REFERENCES works(work_id),
+  locus_label         TEXT,
+  CHECK (
+    (locus_status IN ('resolved','whole_work')
+     AND locus_work_id IS NOT NULL AND length(trim(locus_label)) > 0)
+    OR
+    (locus_status = 'unavailable' AND locus_work_id IS NULL AND locus_label IS NULL)
+  ),
   PRIMARY KEY (page_id, work_id)
 );
 CREATE INDEX ix_discovery_claim_work_id ON discovery_claim(work_id);
@@ -563,6 +584,16 @@ CREATE TABLE discovery_identification (
                       CHECK (rendered_relation IN
                         ('direct_witness','shared_text','quotes_this_work',
                          'work_quotes_page','uncertain')),
+  locus_status        TEXT NOT NULL DEFAULT 'unavailable'
+                      CHECK (locus_status IN ('resolved','whole_work','unavailable')),
+  locus_work_id       TEXT REFERENCES works(work_id),
+  locus_label         TEXT,
+  CHECK (
+    (locus_status IN ('resolved','whole_work')
+     AND locus_work_id IS NOT NULL AND length(trim(locus_label)) > 0)
+    OR
+    (locus_status = 'unavailable' AND locus_work_id IS NULL AND locus_label IS NULL)
+  ),
   UNIQUE (sys_id, canonical_work_id)
 );
 
@@ -637,6 +668,26 @@ CREATE TABLE locus_edition (
   editor          TEXT NOT NULL,
   edition         TEXT NOT NULL
 );
+
+-- Additive, identification-grain search index for locus filtering. One row is
+-- one independently witnessed character interval expressed as inclusive unit
+-- ordinals. Separate pieces are never coalesced across an unwitnessed gap.
+CREATE TABLE discovery_locus_piece (
+  identification_id TEXT NOT NULL
+                    REFERENCES discovery_identification(identification_id)
+                    ON DELETE CASCADE,
+  locus_work_id     TEXT NOT NULL REFERENCES locus_work(work_id),
+  piece_ord         INTEGER NOT NULL,
+  start_unit_ord    INTEGER NOT NULL,
+  end_unit_ord      INTEGER NOT NULL,
+  PRIMARY KEY (identification_id, piece_ord),
+  CHECK (piece_ord >= 0),
+  CHECK (start_unit_ord >= 0),
+  CHECK (end_unit_ord >= start_unit_ord)
+);
+CREATE INDEX ix_discovery_locus_piece_range
+  ON discovery_locus_piece(locus_work_id, start_unit_ord, end_unit_ord,
+                           identification_id);
 
 -- CD batch / schema Amendment 2026-08-12 (R): Contract-1's two input tables.
 -- Matrix step 3 reads discovery_region_map at the single region_version named
@@ -1911,6 +1962,403 @@ AMENDMENT_2026_08_12_COUNT_TABLES = (
 )
 
 
+def _required_locus_columns(conn: sqlite3.Connection, table: str) -> set:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def ingest_locus_divisions(
+    conn: sqlite3.Connection,
+    path: str,
+    crosswalk: Dict[str, str],
+    reference_corpus_sha256: Optional[str],
+    *,
+    expected_sha256: str = LOCUS_DIVISIONS_SHA256,
+) -> List[Tuple[str, str]]:
+    """Validate, re-key, and import the pinned division artifact.
+
+    The source's raw reference ids are used only while this function is in
+    memory. Rows are inserted solely under opaque ids copied from the bake's
+    crosswalk; references absent from that crosswalk, and mapped works absent
+    from this asset, are counted and omitted rather than guessed.
+    """
+    source_path = Path(path)
+    if _hash_file(source_path).lower() != expected_sha256.lower():
+        raise ValueError("locus division database SHA-256 does not match the pinned input")
+    if not reference_corpus_sha256:
+        raise ValueError("--locus-divisions requires --reference-corpus-sha256")
+
+    coverage_path = source_path.with_name("coverage.json")
+    if not coverage_path.is_file():
+        raise ValueError("locus divisions require an accompanying coverage.json")
+    with open(coverage_path, encoding="utf-8") as fh:
+        coverage = json.load(fh)
+    if not isinstance(coverage, dict):
+        raise ValueError("locus coverage metadata must be a JSON object")
+    if str(coverage.get("reference_corpus_sha256", "")).lower() != (
+        reference_corpus_sha256.lower()
+    ):
+        raise ValueError("locus coverage corpus hash does not match this bake")
+    if coverage.get("invariant_problems") != []:
+        raise ValueError("locus coverage reports invariant problems")
+
+    source = sqlite3.connect(
+        f"file:{source_path.resolve().as_posix()}?mode=ro", uri=True
+    )
+    try:
+        expected_columns = {
+            "locus_work": {"locus_ref_id", "family", "grain", "stream_len", "unit_count"},
+            "locus_unit": {
+                "locus_ref_id", "unit_ord", "start_offset", "part_key",
+                "label_he", "citation_pos",
+            },
+            "locus_edition": {
+                "locus_ref_id", "title_he", "title_original", "author_short",
+                "author_full", "publisher", "publisher_city", "publisher_year",
+                "editor", "edition",
+            },
+        }
+        for table, columns in expected_columns.items():
+            if _required_locus_columns(source, table) != columns:
+                raise ValueError(f"locus input table {table} has an incompatible schema")
+
+        work_rows = source.execute(
+            "SELECT locus_ref_id, family, grain, stream_len, unit_count "
+            "FROM locus_work ORDER BY locus_ref_id"
+        ).fetchall()
+        unit_rows = source.execute(
+            "SELECT locus_ref_id, unit_ord, start_offset, part_key, label_he, citation_pos "
+            "FROM locus_unit ORDER BY locus_ref_id, unit_ord"
+        ).fetchall()
+        edition_rows = source.execute(
+            "SELECT locus_ref_id, title_he, title_original, author_short, author_full, "
+            "publisher, publisher_city, publisher_year, editor, edition "
+            "FROM locus_edition ORDER BY locus_ref_id"
+        ).fetchall()
+    finally:
+        source.close()
+
+    try:
+        expected_work_count = int(coverage["works_with_units"])
+        expected_unit_count = int(coverage["units_total"])
+        coverage_families = {str(k): int(v) for k, v in coverage["by_family"].items()}
+        coverage_grains = {str(k): int(v) for k, v in coverage["by_grain"].items()}
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("locus coverage metadata is missing required count fields") from exc
+    if expected_work_count != len(work_rows) or expected_unit_count != len(unit_rows):
+        raise ValueError("locus coverage row counts do not agree with the division database")
+    if set(coverage_families) != LOCUS_FAMILIES:
+        raise ValueError("locus coverage family vocabulary is incompatible")
+
+    family_counts: Dict[str, int] = {family: 0 for family in LOCUS_FAMILIES}
+    grain_counts: Dict[str, int] = {}
+    units_by_ref: Dict[str, List[Tuple]] = {}
+    source_refs = set()
+    for raw_ref, family, grain, stream_len, unit_count in work_rows:
+        source_refs.add(raw_ref)
+        family_counts[family] = family_counts.get(family, 0) + 1
+        grain_counts[grain] = grain_counts.get(grain, 0) + 1
+        if (
+            family not in LOCUS_FAMILIES
+            or not isinstance(grain, str)
+            or not grain.strip()
+            or not isinstance(stream_len, int)
+            or stream_len <= 0
+            or not isinstance(unit_count, int)
+            or unit_count <= 0
+        ):
+            raise ValueError("locus work rows violate the division-table invariants")
+    if family_counts != coverage_families or grain_counts != coverage_grains:
+        raise ValueError("locus coverage family/grain counts do not agree with the database")
+
+    for row in unit_rows:
+        units_by_ref.setdefault(row[0], []).append(row)
+    if set(units_by_ref) != source_refs:
+        raise ValueError("locus units and works do not have the same reference key set")
+    work_by_ref = {row[0]: row for row in work_rows}
+    for raw_ref, rows in units_by_ref.items():
+        _ref, _family, _grain, stream_len, declared_count = work_by_ref[raw_ref]
+        ordinals = [row[1] for row in rows]
+        starts = [row[2] for row in rows]
+        if ordinals != list(range(declared_count)) or len(rows) != declared_count:
+            raise ValueError("locus unit ordinals are not contiguous from zero")
+        if (
+            any(not isinstance(v, int) or v < 0 or v >= stream_len for v in starts)
+            or any(a >= b for a, b in zip(starts, starts[1:]))
+        ):
+            raise ValueError("locus unit offsets are outside their work or not increasing")
+        if any(not str(row[3]).strip() or not str(row[4]).strip() for row in rows):
+            raise ValueError("locus units require non-empty part keys and labels")
+        if any(row[5] is not None and not isinstance(row[5], int) for row in rows):
+            raise ValueError("locus citation positions must be integers or null")
+    if any(row[0] not in source_refs for row in edition_rows):
+        raise ValueError("locus edition rows contain an unknown reference key")
+
+    asset_work_ids = {row[0] for row in conn.execute("SELECT work_id FROM works")}
+    mapped: Dict[str, str] = {}
+    for raw_ref in source_refs:
+        opaque = crosswalk.get(raw_ref)
+        if opaque in asset_work_ids:
+            if opaque in mapped.values():
+                raise ValueError("locus crosswalk maps multiple source works to one opaque work")
+            mapped[raw_ref] = opaque
+
+    for table in ("locus_edition", "locus_unit", "locus_work"):
+        if conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]:
+            raise ValueError(f"{table} must be empty before the locus import")
+
+    conn.executemany(
+        "INSERT INTO locus_work (work_id, family, grain, stream_len, unit_count) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(mapped[row[0]], *row[1:]) for row in work_rows if row[0] in mapped],
+    )
+    conn.executemany(
+        "INSERT INTO locus_unit "
+        "(work_id, unit_ord, start_offset, part_key, label_he, citation_pos) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(mapped[row[0]], *row[1:]) for row in unit_rows if row[0] in mapped],
+    )
+    conn.executemany(
+        "INSERT INTO locus_edition "
+        "(work_id, title_he, title_original, author_short, author_full, publisher, "
+        "publisher_city, publisher_year, editor, edition) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(mapped[row[0]], *row[1:]) for row in edition_rows if row[0] in mapped],
+    )
+
+    imported_works = len(mapped)
+    imported_units = sum(work_by_ref[raw][4] for raw in mapped)
+    imported_editions = sum(1 for row in edition_rows if row[0] in mapped)
+    return [
+        ("locus_divisions_sha256", expected_sha256.lower()),
+        ("locus_coverage_sha256", _hash_file(coverage_path).lower()),
+        ("locus_reference_corpus_sha256", reference_corpus_sha256.lower()),
+        ("locus_source_works", str(len(work_rows))),
+        ("locus_source_units", str(len(unit_rows))),
+        ("locus_source_editions", str(len(edition_rows))),
+        ("locus_unmapped_references", str(len(source_refs - crosswalk.keys()))),
+        ("locus_imported_works", str(imported_works)),
+        ("locus_imported_units", str(imported_units)),
+        ("locus_imported_editions", str(imported_editions)),
+    ]
+
+
+def _locus_table_index(conn: sqlite3.Connection) -> Dict[str, Dict[str, object]]:
+    works = {
+        row[0]: {"stream_len": row[1], "unit_count": row[2], "starts": [],
+                 "labels": [], "citation_seq": []}
+        for row in conn.execute(
+            "SELECT work_id, stream_len, unit_count FROM locus_work ORDER BY work_id"
+        )
+    }
+    for work_id, unit_ord, start, label, citation_pos in conn.execute(
+        "SELECT work_id, unit_ord, start_offset, label_he, citation_pos "
+        "FROM locus_unit ORDER BY work_id, unit_ord"
+    ):
+        table = works.get(work_id)
+        if table is None or unit_ord != len(table["starts"]):
+            raise ValueError("stored locus units are not contiguous within their work")
+        table["starts"].append(start)
+        table["labels"].append(label)
+        table["citation_seq"].append(citation_pos)
+    for table in works.values():
+        if len(table["starts"]) != table["unit_count"]:
+            raise ValueError("stored locus work unit_count does not match its unit rows")
+    return works
+
+
+def _normalise_locus_spans(
+    raw_spans: Iterable[Tuple[object, object]],
+) -> Optional[List[Tuple[int, int]]]:
+    spans: List[Tuple[int, int]] = []
+    for start, end in raw_spans:
+        if start is None and end is None:
+            continue
+        if (
+            not isinstance(start, int)
+            or not isinstance(end, int)
+            or start < 0
+            or end <= start
+        ):
+            return None
+        spans.append((start, end))
+    return merge_witnessed_spans(spans)
+
+
+def _locus_value(
+    tables: Dict[str, Dict[str, object]],
+    work_id: Optional[str],
+    display_title: Optional[str],
+    raw_spans: Iterable[Tuple[object, object]],
+) -> Tuple[str, Optional[str], Optional[str]]:
+    spans = _normalise_locus_spans(raw_spans)
+    if spans is None or not work_id or not spans:
+        return "unavailable", None, None
+    table = tables.get(work_id)
+    if table is None:
+        title = display_title.strip() if isinstance(display_title, str) else ""
+        if title:
+            return "whole_work", work_id, title
+        return "unavailable", None, None
+    if any(end > table["stream_len"] for _start, end in spans):
+        return "unavailable", None, None
+    try:
+        label = render_locus_label(
+            table["starts"], table["labels"], table["citation_seq"], spans
+        )
+    except (IndexError, TypeError, ValueError):
+        return "unavailable", None, None
+    return "resolved", work_id, label
+
+
+def materialize_locus_labels(conn: sqlite3.Connection) -> Dict[str, Dict[str, int]]:
+    """Recompute claim- and identification-grain locus labels from this DB."""
+    tables = _locus_table_index(conn)
+    has_piece_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='discovery_locus_piece'"
+    ).fetchone() is not None
+    if has_piece_table:
+        conn.execute("DELETE FROM discovery_locus_piece")
+    conn.execute(
+        "UPDATE discovery_claim SET locus_status='unavailable', "
+        "locus_work_id=NULL, locus_label=NULL"
+    )
+    conn.execute(
+        "UPDATE discovery_identification SET locus_status='unavailable', "
+        "locus_work_id=NULL, locus_label=NULL"
+    )
+
+    claim_info = {
+        row[0]: (row[1], row[2])
+        for row in conn.execute(
+            "SELECT dc.claim_id, dc.work_id, "
+            "COALESCE(dw.neutral_title, w.neutral_title) "
+            "FROM discovery_claim dc "
+            "JOIN works w ON w.work_id=dc.work_id "
+            "JOIN discovery_evidence display_de ON display_de.evidence_id=dc.display_evidence_id "
+            "LEFT JOIN discovery_identification di ON di.sys_id=display_de.sys_id "
+            " AND di.canonical_work_id=w.canonical_work_id "
+            "LEFT JOIN works dw ON dw.work_id=di.display_work_id"
+        )
+    }
+    claim_spans: Dict[str, List[Tuple[object, object]]] = {}
+    for claim_id, start, end in conn.execute(
+        "SELECT claim_id, w_start, w_end FROM discovery_evidence "
+        "WHERE evidence_kind='witness' ORDER BY claim_id, evidence_id"
+    ):
+        claim_spans.setdefault(claim_id, []).append((start, end))
+    claim_updates = []
+    for claim_id, (work_id, title) in claim_info.items():
+        status, locus_work_id, label = _locus_value(
+            tables, work_id, title, claim_spans.get(claim_id, ())
+        )
+        claim_updates.append((status, locus_work_id, label, claim_id))
+    conn.executemany(
+        "UPDATE discovery_claim SET locus_status=?, locus_work_id=?, locus_label=? "
+        "WHERE claim_id=?",
+        claim_updates,
+    )
+
+    identification_info = {
+        row[0]: (row[1], row[2])
+        for row in conn.execute(
+            "SELECT di.identification_id, di.display_work_id, dw.neutral_title "
+            "FROM discovery_identification di "
+            "JOIN works dw ON dw.work_id=di.display_work_id"
+        )
+    }
+    evidence_by_identification: Dict[str, List[Tuple]] = {}
+    for row in conn.execute(
+        "SELECT di.identification_id, dc.work_id, de.matched_letters, de.w_start, de.w_end "
+        "FROM discovery_identification di "
+        "JOIN discovery_evidence de ON de.sys_id=di.sys_id "
+        "JOIN discovery_claim dc ON dc.claim_id=de.claim_id "
+        "JOIN works w ON w.work_id=dc.work_id "
+        "WHERE w.canonical_work_id=di.canonical_work_id "
+        "AND (de.routing_status=? OR de.adjudication_status=?) "
+        "ORDER BY di.identification_id, dc.work_id, de.evidence_id",
+        (ids.ROUTING_STATUS_SHIPPED, ids.ADJUDICATION_STATUS_HUMAN_CONFIRMED),
+    ):
+        evidence_by_identification.setdefault(row[0], []).append(row[1:])
+    identification_updates = []
+    locus_pieces = []
+    for identification_id, (display_work_id, title) in identification_info.items():
+        evidence = evidence_by_identification.get(identification_id, ())
+        matched_by_work: Dict[str, int] = {}
+        for work_id, matched_letters, _start, _end in evidence:
+            if isinstance(matched_letters, int) and matched_letters > 0:
+                matched_by_work[work_id] = matched_by_work.get(work_id, 0) + matched_letters
+        locus_work_id = select_locus_work(matched_by_work, display_work_id)
+        spans = [(start, end) for work_id, _matched, start, end in evidence
+                 if work_id == locus_work_id]
+        status, stored_work_id, label = _locus_value(
+            tables, locus_work_id, title, spans
+        )
+        identification_updates.append((status, stored_work_id, label, identification_id))
+        if has_piece_table and status == "resolved" and stored_work_id is not None:
+            table = tables[stored_work_id]
+            resolved_spans = _normalise_locus_spans(spans) or []
+            for piece_ord, (start, end) in enumerate(resolved_spans):
+                lo_ord, hi_ord = units_for_span(table["starts"], start, end)
+                locus_pieces.append(
+                    (identification_id, stored_work_id, piece_ord, lo_ord, hi_ord)
+                )
+    conn.executemany(
+        "UPDATE discovery_identification SET locus_status=?, locus_work_id=?, locus_label=? "
+        "WHERE identification_id=?",
+        identification_updates,
+    )
+    if has_piece_table:
+        conn.executemany(
+            "INSERT INTO discovery_locus_piece "
+            "(identification_id, locus_work_id, piece_ord, start_unit_ord, end_unit_ord) "
+            "VALUES (?, ?, ?, ?, ?)",
+            locus_pieces,
+        )
+    return {
+        "claims": {
+            status: conn.execute(
+                "SELECT COUNT(*) FROM discovery_claim WHERE locus_status=?", (status,)
+            ).fetchone()[0]
+            for status in LOCUS_STATUSES
+        },
+        "identifications": {
+            status: conn.execute(
+                "SELECT COUNT(*) FROM discovery_identification WHERE locus_status=?", (status,)
+            ).fetchone()[0]
+            for status in LOCUS_STATUSES
+        },
+        "pieces": len(locus_pieces),
+    }
+
+
+def locus_display_meta_rows(conn: sqlite3.Connection) -> List[Tuple[str, str]]:
+    rows = [("locus_display_version", LOCUS_DISPLAY_VERSION)]
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='discovery_locus_piece'"
+    ).fetchone() is not None:
+        rows.extend([
+            ("locus_filter_version", LOCUS_FILTER_VERSION),
+            (
+                "expected_rows_discovery_locus_piece",
+                str(conn.execute(
+                    "SELECT COUNT(*) FROM discovery_locus_piece"
+                ).fetchone()[0]),
+            ),
+        ])
+    for grain, table in (
+        ("claim", "discovery_claim"),
+        ("identification", "discovery_identification"),
+    ):
+        for status in LOCUS_STATUSES:
+            count = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE locus_status=?", (status,)
+            ).fetchone()[0]
+            rows.append((f"expected_locus_{grain}_{status}", str(count)))
+    return rows
+
+
 def ingest_curated_quoter(conn: sqlite3.Connection, path: str) -> List[Tuple[str, str]]:
     """Ingest the tracked curated-quoter list (Amendment 2026-08-12 (R)) into
     `discovery_curated_quoter` and return its meta rows.
@@ -2243,6 +2691,7 @@ def amendment_2026_08_12_meta_rows(
     # declare one parameterization and store another.
     rows.extend(relation_matrix.parameterization_meta_rows(
         parameterization or relation_matrix.DEPLOY_1_PARAMETERIZATION))
+    rows.extend(locus_display_meta_rows(conn))
     return rows
 
 
@@ -3072,6 +3521,7 @@ def populate_synthetic(conn: sqlite3.Connection, source_db_hash: str) -> Dict:
     novelty_stats = apply_novelty_verdicts(conn, None, alias_groups={})
 
     identification_stats = populate_discovery_identification(conn)
+    identification_stats["locus"] = materialize_locus_labels(conn)
     identification_stats.update(populate_manuscript_display(conn, None))
 
     (n_works,) = cur.execute("SELECT COUNT(*) FROM works").fetchone()
@@ -7319,6 +7769,10 @@ def finalize_build(
     # whenever locus_unit is populated -- so a reference refresh can no longer
     # silently move every citation in the corpus.
     reference_corpus_sha256: Optional[str] = None,
+    # Locus display v1: the pinned work-division database. Its sibling
+    # coverage.json is mandatory and the import re-keys through this bake's
+    # copied crosswalk before any row reaches the output asset.
+    locus_divisions_path=None,
     # CD batch / schema Amendment 2026-08-12 (S): the tracked population-lock
     # JSON (scripts/emit_population_lock.py). Its constants are COPIED into
     # meta; the verifier's retention gate enforces the lock's own floors
@@ -7882,6 +8336,16 @@ def finalize_build(
         # before the count/meta block, so the release-contract counts include
         # their rows.) Each returns its version meta row.
         contract1_input_meta_rows: List[Tuple[str, str]] = []
+        locus_input_meta_rows: List[Tuple[str, str]] = []
+        if locus_divisions_path:
+            with open(crosswalk_path, encoding="utf-8") as fh:
+                _cw = json.load(fh)
+            locus_input_meta_rows.extend(ingest_locus_divisions(
+                out_conn,
+                locus_divisions_path,
+                _cw.get("crosswalk", _cw),
+                reference_corpus_sha256,
+            ))
         if curated_quoter_path:
             contract1_input_meta_rows.extend(
                 ingest_curated_quoter(out_conn, curated_quoter_path))
@@ -7896,6 +8360,7 @@ def finalize_build(
 
         identification_stats = populate_discovery_identification(
             out_conn, relation_parameterization)
+        identification_stats["locus"] = materialize_locus_labels(out_conn)
         identification_stats.update(
             populate_manuscript_display(out_conn, libraries_csv_path)
         )
@@ -8054,6 +8519,7 @@ def finalize_build(
         meta_rows.extend(amendment_2026_08_12_meta_rows(
             out_conn, reference_corpus_sha256=reference_corpus_sha256,
             parameterization=relation_parameterization))
+        meta_rows.extend(locus_input_meta_rows)
         # Amendment 2026-08-12 (S): the population lock's copied constants.
         if population_lock_path:
             with open(population_lock_path, encoding="utf-8") as fh:
@@ -8417,6 +8883,12 @@ def build_parser() -> argparse.ArgumentParser:
                              "verifier asserts equality with the locus build's own "
                              "locus_reference_corpus_sha256 whenever locus_unit is "
                              "populated. Omit only on a build with no work-side offsets.")
+    v2_group.add_argument(
+        "--locus-divisions", metavar="DB", default=None,
+        help="Pinned locus division DB (SHA-256 aaac6f90...898263). Its sibling "
+             "coverage.json is required; rows are re-keyed through --crosswalk "
+             "and raw reference ids never enter the sidecar.",
+    )
     real_group.add_argument("--frozen-precision-defaults", action="store_true",
                         help="H3: explicitly acknowledge using the frozen-contract "
                              "band_precision defaults (docs/specs/discovery-sidecar-"
@@ -8559,6 +9031,7 @@ def main(argv=None) -> int:
         work_author_aliases_path=args.work_author_aliases,
         work_author_aliases_content_hash=args.work_author_aliases_content_hash,
         reference_corpus_sha256=args.reference_corpus_sha256,
+        locus_divisions_path=args.locus_divisions,
         population_lock_path=args.population_lock,
         curated_quoter_path=args.curated_quoter,
         region_map_path=args.region_map,

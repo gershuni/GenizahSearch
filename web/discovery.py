@@ -244,6 +244,8 @@ async def get_findings_enveloped(
     domain: Optional[str] = None,
     author: Optional[str] = None,
     work_id: Optional[str] = None,
+    locus_from: Optional[int] = None,
+    locus_to: Optional[int] = None,
     sort: str = FINDINGS_SORT_BAND_RANK,
     page: int = 1,
     page_size: Optional[int] = None,
@@ -271,11 +273,24 @@ async def get_findings_enveloped(
         return await _service.get_findings_enveloped_async(
             unit, bucket=bucket, novelty=novelty,
             divergence=divergence, domain=domain, author=author,
-            work_id=work_id, sort=sort, page=page, page_size=page_size,
+            work_id=work_id, locus_from=locus_from, locus_to=locus_to,
+            sort=sort, page=page, page_size=page_size,
             suppressed=suppressed, sys_id=sys_id)
     except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+async def get_locus_units_enveloped(work_id: str) -> Dict[str, Any]:
+    """Address units for the selected work; unavailable on pre-filter assets."""
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.get_locus_units_enveloped_async(work_id)
+    except DiscoveryOverload:  # pragma: no cover - mapped by the service
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover - mapped by the service
         return timeout_envelope(meta={"reason": "query_timeout"})
 
 

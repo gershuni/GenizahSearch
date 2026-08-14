@@ -1941,6 +1941,11 @@ def render_finding_row(item: Mapping[str, Any], lang: str = "en",
                 ui.label(manuscripts).classes(f"{ROW_SUB_CLASS} r-sub text-xs")
         else:
             ui.label(_work_title(item, lang)).classes(f"{ROW_TITLE_CLASS} font-bold")
+            locus_label = item.get("locus_label")
+            if isinstance(locus_label, str) and locus_label.strip():
+                ui.label(ds.locus_subline(locus_label.strip(), lang)).classes(
+                    f"{ROW_SUB_CLASS} locus_subline r-sub text-xs"
+                ).props('dir="auto"').style("unicode-bidi: isolate;")
             # THE AUTHOR FIRST, ON ITS OWN LINE, then the shelfmark line that
             # carries the catalogue quotation. Order is the fix: see
             # `ROW_AUTHOR_CLASS`. Sharing the row with "Catalogued as: <title>"
