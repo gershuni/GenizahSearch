@@ -130,7 +130,13 @@ _SQLITE_SIDECAR_SUFFIXES = ("-journal", "-wal", "-shm")
 # writer's alternatives from `finalize_build`'s own meta expression and fails if
 # that expression and this set disagree.
 _V3_ROUTING_MODES = frozenset({
-    "gen2_router", "gen2_router_split_regrained", "lever1_cliff", "none",
+    "gen2_router",
+    "gen2_router_split_regrained",
+    "gen2_router_split_regrained_fullscan_legacy_extrapolated",
+    "gen2_router_split_regrained_fullscan_legacy_v4_extrapolated",
+    "gen2_router_split_regrained_v4_extrapolated",
+    "lever1_cliff",
+    "none",
 })
 
 

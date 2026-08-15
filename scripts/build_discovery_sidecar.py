@@ -8059,6 +8059,15 @@ def finalize_build(
         seftja_dates_path=seftja_dates_path,
         seftja_dates_sha256=seftja_dates_sha256,
     )
+    if (
+        release
+        and track1_release_contract_path is not None
+        and track1_release_contract_sha256 is None
+    ):
+        raise ReleaseInputsIncompleteError(
+            "release Track-1 contract requires "
+            "--track1-release-contract-sha256"
+        )
     if track1_release_contract_sha256 is not None and track1_release_contract_path is None:
         raise ReleaseInputsIncompleteError(
             "Track-1 release-contract SHA-256 was supplied without its path"

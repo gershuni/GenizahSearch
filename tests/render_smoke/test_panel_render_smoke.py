@@ -2190,8 +2190,12 @@ async def _drive_click_handlers(client, rounds: int = 2) -> None:
         for element, handler in listeners:
             if handler is None:
                 continue
-            slot = getattr(element, 'parent_slot', None)
             try:
+                # An earlier driven handler may clear and repaint this
+                # element's container. NiceGUI then raises while resolving the
+                # old element's weak parent-slot reference; treat that detached
+                # control like any other handler that is no longer driveable.
+                slot = getattr(element, 'parent_slot', None)
                 with slot if slot is not None else client:
                     result = (handler()
                               if not inspect.signature(handler).parameters

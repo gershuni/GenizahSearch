@@ -285,6 +285,33 @@ def test_v4_track1_release_contract_is_strict_and_versioned(tmp_path):
         sidecar_build.load_track1_release_contract(bad_schema_path)
 
 
+def test_release_track1_contract_requires_sha_before_loading(tmp_path, monkeypatch):
+    contract_path = _write_json(tmp_path / "track1.json", _v4_track1_contract())
+    loader_called = False
+
+    def _unexpected_load(*_args, **_kwargs):
+        nonlocal loader_called
+        loader_called = True
+        raise AssertionError("unpinned release contract must not be loaded")
+
+    monkeypatch.setattr(sidecar_build, "load_track1_release_contract", _unexpected_load)
+    with pytest.raises(
+        sidecar_build.ReleaseInputsIncompleteError,
+        match="release Track-1 contract requires.*sha256",
+    ):
+        sidecar_build.finalize_build(
+            source_db_path=str(tmp_path / "missing-research.db"),
+            from_approved_path=str(tmp_path / "missing-approved.csv"),
+            crosswalk_path=str(tmp_path / "crosswalk.json"),
+            out_db_path=str(tmp_path / "out.db"),
+            release=True,
+            frozen_precision_defaults=True,
+            track1_release_contract_path=contract_path,
+            masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+        )
+    assert loader_called is False
+
+
 def test_insert_works_real_threads_cross_corpus_map(tmp_path):
     """The cross_corpus_map is threaded into the real-mode works insert:
     both merged members carry the SAME canonical_work_id."""
