@@ -2161,8 +2161,9 @@ def _reset_to_main_bucket(page, lang: str) -> None:
         from playwright.sync_api import expect
 
         chip.click(timeout=_CLICK_TIMEOUT_MS)
-        expect(chip).to_have_attribute(
-            "aria-pressed", "true", timeout=_CONTROL_TIMEOUT_MS
+        bucket_line = page.locator(f".{fp.RESULT_BAR_CLASS}-bucket").first
+        expect(bucket_line).to_contain_text(
+            bucket_name(True, lang), timeout=_CONTROL_TIMEOUT_MS
         )
 
 
@@ -2190,7 +2191,11 @@ def _browser_actionability_probe(page, control_name: str, lang=None) -> None:
     if lang is not None:
         from playwright.sync_api import expect
 
-        expect(region).to_contain_text(
+        # The target name also appears in the invitation and on the control,
+        # both before the click. Wait on the result bar's bucket line: it is
+        # the element whose text changes only after the server-side refresh.
+        bucket_line = page.locator(f".{fp.RESULT_BAR_CLASS}-bucket").first
+        expect(bucket_line).to_contain_text(
             bucket_name(False, lang), timeout=_CONTROL_TIMEOUT_MS
         )
     after = region.inner_html()
