@@ -20,6 +20,9 @@
       "Bash(git stash list:*)",
       "Bash(git worktree list:*)",
 
+      "Bash(ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:*)",
+      "Bash(scp:*ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:*)",
+
       "PowerShell(pytest:*)",
       "PowerShell(python -m pytest:*)",
       "PowerShell(ruff check:*)",
@@ -42,6 +45,8 @@
       "PowerShell(git blame:*)",
       "PowerShell(git stash list:*)",
       "PowerShell(git worktree list:*)",
+      "PowerShell(ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:*)",
+      "PowerShell(scp:*ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:*)",
       "PowerShell(Get-ChildItem:*)",
       "PowerShell(Get-Item:*)",
       "PowerShell(Test-Path:*)",
