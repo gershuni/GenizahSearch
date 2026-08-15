@@ -758,8 +758,14 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
     hrefs: List[str] = []
 
     def _take(client) -> None:
-        texts.extend(_client_texts(client))
-        hrefs.extend(_client_hrefs(client))
+        try:
+            texts.extend(_client_texts(client))
+            hrefs.extend(_client_hrefs(client))
+        finally:
+            # These capture clients are synthetic and never connect. Keeping
+            # dozens of them in NiceGUI's global registry lets later tests'
+            # pruning timer reach a client with no request context.
+            client.delete()
 
     # A facet cascade with a PARENT and its LEAF, so the domain tree renders its
     # branch, its chevron and its collapsed child container rather than a flat
@@ -1392,7 +1398,10 @@ def capture_copy_export(hrefs: List[str], seed: Optional[str] = None) -> str:
         # The seeded row's link target, rendered by the shipped renderer.
         client = _render_component(
             lambda: fr.render_finding_row(tf.finding_row(sys_id=seed), "en"))
-        lines.extend(_client_hrefs(client))
+        try:
+            lines.extend(_client_hrefs(client))
+        finally:
+            client.delete()
     return "\n".join(lines)
 
 
@@ -1478,12 +1487,18 @@ def _rendered_error_states(seed: Optional[str] = None) -> List[Tuple[str, str]]:
             client = _render_findings_page(
                 lang=lang, findings=tf.findings_envelope([], status=status),
                 drive=True)
-            out.append((f"rendered-outage/{status}/{lang}",
-                        "\n".join(_client_texts(client))))
+            try:
+                out.append((f"rendered-outage/{status}/{lang}",
+                            "\n".join(_client_texts(client))))
+            finally:
+                client.delete()
         client = _render_component(lambda ln=lang, t=title: fr.render_finding_row(
             tf.finding_row(neutral_title=t, rendered_relation="not_a_relation"), ln))
-        out.append((f"rendered-malformed-row/{lang}",
-                    "\n".join(_client_texts(client))))
+        try:
+            out.append((f"rendered-malformed-row/{lang}",
+                        "\n".join(_client_texts(client))))
+        finally:
+            client.delete()
     return out
 
 

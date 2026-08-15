@@ -2229,8 +2229,12 @@ def _render_capture(paint, *, drive: bool = True) -> str:
 
     asyncio.run(_run())
     parts: List[str] = []
-    for element in holder['client'].elements.values():
-        parts.extend(_own_texts(element))
+    client = holder['client']
+    try:
+        for element in client.elements.values():
+            parts.extend(_own_texts(element))
+    finally:
+        client.delete()
     return '\n'.join(parts)
 
 

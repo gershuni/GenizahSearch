@@ -2158,8 +2158,12 @@ def _reset_to_main_bucket(page, lang: str) -> None:
     chip = page.get_by_role("button", name=bucket_name(True, lang), exact=True).first
     chip.wait_for(state="visible", timeout=_CONTROL_TIMEOUT_MS)
     if chip.get_attribute("aria-pressed") != "true":
+        from playwright.sync_api import expect
+
         chip.click(timeout=_CLICK_TIMEOUT_MS)
-        page.wait_for_timeout(750)
+        expect(chip).to_have_attribute(
+            "aria-pressed", "true", timeout=_CONTROL_TIMEOUT_MS
+        )
 
 
 def _browser_actionability_probe(page, control_name: str, lang=None) -> None:
@@ -2183,7 +2187,12 @@ def _browser_actionability_probe(page, control_name: str, lang=None) -> None:
     # No preceding disclosure action: click straight away. Playwright's own
     # actionability checks run inside click() and raise on failure.
     locator.click(timeout=_CLICK_TIMEOUT_MS)
-    page.wait_for_timeout(750)
+    if lang is not None:
+        from playwright.sync_api import expect
+
+        expect(region).to_contain_text(
+            bucket_name(False, lang), timeout=_CONTROL_TIMEOUT_MS
+        )
     after = region.inner_html()
     assert after != before, (
         "the results region did not change after a real browser click on "
