@@ -11,6 +11,7 @@ docs/outreach/
 
 # Local Data (Don't upload these huge files!)
 Transcriptions.txt
+Transcriptions.repaired.txt
 AllGenizah_OLD.txt
 # SEED-029 probe: pilot corpus DB is 49MB and regenerable in 63s (extract_pilot.py)
 same_work_spike/probe/data/probe.db
@@ -91,6 +92,9 @@ web.log
 data/*
 !data/few_shot_*.json
 !data/FEW_SHOT_NOTES.md
+# The corpus-repair manifest is the ONLY audit trail for edits to the gitignored
+# 1.4 GB Transcriptions.txt — it must be reviewable in version control.
+!data/v08_repair_manifest.json
 
 # Runtime files
 app.log
