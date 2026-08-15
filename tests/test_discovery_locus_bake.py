@@ -92,6 +92,20 @@ def test_locus_import_rejects_a_bad_pin_before_reading_rows(tmp_path):
         )
 
 
+def test_locus_import_selects_pin_by_reference_corpus(tmp_path, monkeypatch):
+    path, digest = _source_fixture(tmp_path)
+    monkeypatch.setitem(builder.LOCUS_DIVISIONS_BY_REFERENCE_SHA256, REF_SHA, digest)
+    meta = dict(builder.ingest_locus_divisions(
+        _asset(), str(path), {"raw:kept": "w000001"}, REF_SHA
+    ))
+    assert meta["locus_divisions_sha256"] == digest
+
+    with pytest.raises(ValueError, match="no approved"):
+        builder.ingest_locus_divisions(
+            _asset(), str(path), {}, "b" * 64
+        )
+
+
 def test_locus_import_rejects_coverage_invariant_problems(tmp_path):
     path, digest = _source_fixture(tmp_path, invariant_problems=["synthetic"])
     with pytest.raises(ValueError, match="invariant problems"):

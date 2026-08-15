@@ -585,6 +585,178 @@ def route_e1_by_coverage(
     return report
 
 
+def route_v4_references_by_coverage(
+    router: Dict,
+    match_rows,
+    page_chars: Dict[str, int],
+    *,
+    raw_prefix: str = "REF4:",
+) -> Dict:
+    """Route newly appended V4 public references with the frozen threshold.
+
+    These references did not exist when gen-2's coverage router ran, so they
+    cannot be treated as independently routed or as split-grain descendants of
+    an old key.  Their matcher ``matched_letters`` and ``pages.n_chars`` are the
+    same numerator/denominator pair used by the calibrated router.  Reusing its
+    threshold is still an extrapolation to new works, and the dedicated
+    ``v4_reference_keys`` population makes that limitation explicit in parity
+    and asset metadata.
+
+    ``match_rows`` contains ``(page_id, raw_work_id, matched_letters)`` for the
+    unshadowed Track-1 frame.  Any non-V4 row is rejected; callers must split the
+    old and new populations deliberately rather than accidentally routing the
+    entire legacy frame through this path.
+    """
+    threshold = _router_threshold(router)
+    route = router["route"]
+    router.setdefault("v4_reference_keys", set())
+    report = {
+        "considered": 0,
+        "added": 0,
+        "already_present": 0,
+        "same_work": 0,
+        "parallel": 0,
+        "undecided": 0,
+        "undecided_examples": [],
+        "threshold": threshold,
+        "raw_prefix": raw_prefix,
+    }
+    seen = set()
+    for page_id, raw_work, matched_letters in match_rows:
+        if not isinstance(raw_work, str) or not raw_work.startswith(raw_prefix):
+            raise RoutingRegrainError(
+                "V4 reference routing received a row outside its declared raw-id prefix"
+            )
+        key = (page_id, raw_work)
+        if key in seen:
+            raise RoutingRegrainError(
+                "V4 reference routing received a duplicate (page, work) key"
+            )
+        seen.add(key)
+        report["considered"] += 1
+        if key in route:
+            raise RoutingRegrainError(
+                "V4 reference key already exists in the fitted router; the "
+                "new-reference population is no longer disjoint"
+            )
+        n_chars = page_chars.get(page_id)
+        if not n_chars or matched_letters is None:
+            report["undecided"] += 1
+            if len(report["undecided_examples"]) < 5:
+                report["undecided_examples"].append(
+                    {"page_id": page_id, "work_id": raw_work}
+                )
+            continue
+        if n_chars < 0 or matched_letters < 0:
+            raise RoutingRegrainError(
+                "V4 reference coverage received a negative numerator or denominator"
+            )
+        coverage = matched_letters / n_chars
+        if coverage > 1.0:
+            raise RoutingRegrainError(
+                f"V4 reference coverage exceeds 1.0 ({coverage:.4f}) -- the numerator "
+                f"and denominator are not the pair the threshold was calibrated on. "
+                f"Refusing to route on an impossible coverage. "
+                f"(counts only, D-25: matched={matched_letters}, denominator={n_chars})"
+            )
+        surface = SURFACE_SAME_WORK if coverage >= threshold else SURFACE_PARALLEL
+        route[key] = (surface, coverage, 1)
+        router["v4_reference_keys"].add(key)
+        report["added"] += 1
+        if surface == SURFACE_SAME_WORK:
+            report["same_work"] += 1
+        else:
+            report["parallel"] += 1
+    return report
+
+
+def route_fullscan_legacy_by_coverage(
+    router: Dict,
+    match_rows,
+    page_chars: Dict[str, int],
+    historical_keys,
+    *,
+    excluded_prefix: str = "REF4:",
+) -> Dict:
+    """Route legacy-reference pairs newly exposed by V4's full-page scan.
+
+    The historical Track-1 run did not scan every page. V4 must do so because a
+    new public reference can match a page outside that old allowlist; the same
+    scan can consequently expose a legacy-reference pair that the fitted router
+    never saw. These rows are neither fitted decisions nor new REF4 works, so
+    they get a distinct provenance population and reuse the frozen coverage
+    threshold as an explicit extrapolation.
+
+    ``historical_keys`` is the preserved V2 Track-1 snapshot. Any overlap is a
+    hard error: an old pair with no fitted/re-grained decision is regression,
+    not permission to extrapolate it.
+    """
+    threshold = _router_threshold(router)
+    route = router["route"]
+    historical_keys = set(historical_keys)
+    router.setdefault("fullscan_legacy_keys", set())
+    report = {
+        "considered": 0,
+        "added": 0,
+        "same_work": 0,
+        "parallel": 0,
+        "undecided": 0,
+        "undecided_examples": [],
+        "threshold": threshold,
+        "historical_key_count": len(historical_keys),
+    }
+    seen = set()
+    for page_id, raw_work, matched_letters in match_rows:
+        if not isinstance(raw_work, str) or raw_work.startswith(excluded_prefix):
+            raise RoutingRegrainError(
+                "full-scan legacy routing received a row outside its population"
+            )
+        key = (page_id, raw_work)
+        if key in seen:
+            raise RoutingRegrainError(
+                "full-scan legacy routing received a duplicate (page, work) key"
+            )
+        seen.add(key)
+        report["considered"] += 1
+        if key in historical_keys:
+            raise RoutingRegrainError(
+                "an unresolved full-scan key exists in the historical Track-1 frame"
+            )
+        if resolve_routing(page_id, raw_work, router)[0] is not None:
+            raise RoutingRegrainError(
+                "full-scan legacy routing received a key that already has a decision"
+            )
+        n_chars = page_chars.get(page_id)
+        if not n_chars or matched_letters is None:
+            report["undecided"] += 1
+            if len(report["undecided_examples"]) < 5:
+                report["undecided_examples"].append(
+                    {"page_id": page_id, "work_id": raw_work}
+                )
+            continue
+        if n_chars < 0 or matched_letters < 0:
+            raise RoutingRegrainError(
+                "full-scan legacy coverage received a negative numerator or denominator"
+            )
+        coverage = matched_letters / n_chars
+        if coverage > 1.0:
+            raise RoutingRegrainError(
+                f"full-scan legacy coverage exceeds 1.0 ({coverage:.4f}) -- the "
+                f"numerator and denominator are not the calibrated pair. "
+                f"(counts only, D-25: matched={matched_letters}, "
+                f"denominator={n_chars})"
+            )
+        surface = SURFACE_SAME_WORK if coverage >= threshold else SURFACE_PARALLEL
+        route[key] = (surface, coverage, 1)
+        router["fullscan_legacy_keys"].add(key)
+        report["added"] += 1
+        if surface == SURFACE_SAME_WORK:
+            report["same_work"] += 1
+        else:
+            report["parallel"] += 1
+    return report
+
+
 def resolve_routing(
     page_id: str, work_id: str, router: Dict
 ) -> Tuple[Optional[str], Optional[str], Optional[float]]:
@@ -756,6 +928,8 @@ def assert_assembled_parity(
     checked_independent = 0
     checked_regrained = 0
     checked_e1 = 0
+    checked_v4_references = 0
+    checked_fullscan_legacy = 0
     for row in evidence_rows:
         if row[evidence_source_idx] != track1_source:
             continue
@@ -800,6 +974,17 @@ def assert_assembled_parity(
             # extrapolation. Reported apart from BOTH the independent rows and
             # the re-grained ones, because they carry a different warrant.
             checked_e1 += 1
+        elif resolved_key in (router.get("v4_reference_keys") or ()):
+            # New public-reference works did not exist in gen-2's router. Their
+            # decision is a threshold extrapolation at the original metric, not
+            # an independently reproduced router result.
+            checked_v4_references += 1
+        elif resolved_key in (router.get("fullscan_legacy_keys") or ()):
+            # Removing the historical page allowlist exposes legacy-reference
+            # pairs the fitted router never saw. Their decision is also a
+            # threshold extrapolation, but it is deliberately counted apart
+            # from genuinely new REF4 work identities.
+            checked_fullscan_legacy += 1
         else:
             checked_independent += 1
         got = row[routing_status_idx]
@@ -859,6 +1044,8 @@ def assert_assembled_parity(
         "checked_independent": checked_independent,
         "checked_regrained": checked_regrained,
         "checked_e1": checked_e1,
+        "checked_v4_references": checked_v4_references,
+        "checked_fullscan_legacy": checked_fullscan_legacy,
     }
 
 

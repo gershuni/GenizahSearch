@@ -6263,6 +6263,38 @@ def test_selected_work_lazily_renders_a_citation_order_range(monkeypatch):
     }
 
 
+def test_ja_page_range_options_hide_pages_without_changing_unit_labels(monkeypatch):
+    items = [
+        {"citation_pos": 10, "part_key": "page:10", "label_he": "פרק יז, עמ' 219"},
+        {"citation_pos": 11, "part_key": "page:11", "label_he": "פרק יח, עמ׳ 220"},
+    ]
+
+    async def _units(work_id):
+        return {
+            "status": "ok",
+            "items": items,
+            "total": 2,
+            "meta": {
+                "work_id": work_id,
+                "locus_filter": True,
+                "family": "ja",
+                "grain": "page",
+            },
+        }
+
+    monkeypatch.setattr(fp, "get_locus_units_enveloped", _units)
+    client = _render_page(
+        monkeypatch,
+        lang="en",
+        state=_state(work_id=_UNCURATED_WORK_ID, work_label=_UNCURATED_RAW_TITLE),
+    )
+    from_control = _elements_with_class(
+        client, f"{fp.FILTER_BAR_CLASS}-locus-from"
+    )[0]
+    assert from_control.options == {10: "פרק יז", 11: "פרק יח"}
+    assert items[0]["label_he"] == "פרק יז, עמ' 219"
+
+
 def test_the_facet_cascade_stops_reading_when_the_token_moves(monkeypatch):
     """The cascade issues THREE reads and each one is a chance for a newer
     refresh to have taken over. A superseded pass that kept filling containers

@@ -47,6 +47,7 @@ from scripts.build_work_divisions import (
     build_ja,
     build_ja_pages,
     build_sefaria,
+    build_staged_ja_chapters,
     check_invariants,
     ja_edition,
     ja_range_regressions,
@@ -65,6 +66,7 @@ from shared.discovery_locus import (
     RANGE_SEP,
     LocusAddress,
     citation_runs,
+    heb_numeral,
     norm_stream,
     parse_canonical_header,
     stream_offset_for_raw,
@@ -80,6 +82,52 @@ PROVENANCE = "| PROVENANCE-FIELD: SOURCE-MS"
 _STAGING_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "same_work_spike", "probe", "refs_staging")
+
+
+def test_staged_guide_uses_its_three_exact_chapter_resets(tmp_path):
+    parts = (76, 48, 54)
+    lines = ["הקדמת המחבר"]
+    for count in parts:
+        for chapter in range(1, count + 1):
+            # Exercise the source's two non-canonical sixteen markers too.
+            numeral = "יו" if chapter == 16 and count != 54 else heb_numeral(chapter)
+            lines.extend((f"פצל # {numeral}", f"טקסט {chapter}"))
+    raw = "\n".join(lines)
+    (tmp_path / "guide.txt").write_text(raw, encoding="utf-8")
+    stream = norm_stream(raw)[0]
+
+    built = build_staged_ja_chapters(
+        "ja2_rambam_moreh", str(tmp_path), "guide.txt",
+        "REF2:ja2_rambam_moreh", {"REF2:ja2_rambam_moreh": stream},
+    )
+
+    assert built is not None
+    assert (built.family, built.grain, len(built.units)) == ("ja", "chapter", 179)
+    assert built.units[0].label_he == "הקדמה"
+    assert built.units[0].citation_pos == 1
+    assert built.units[1].label_he == "חלק א, פרק א"
+    assert built.units[1].citation_pos == 1001
+    assert built.units[76].label_he == "חלק א, פרק עו"
+    assert built.units[77].label_he == "חלק ב, פרק א"
+    assert built.units[77].citation_pos == 2001
+    assert built.units[-1].label_he == "חלק ג, פרק נד"
+    assert all(a.start < b.start for a, b in zip(built.units, built.units[1:]))
+
+
+def test_staged_guide_fails_closed_on_changed_chapter_sequence(tmp_path):
+    lines = ["פתיחה"]
+    for count in (76, 48, 54):
+        for chapter in range(1, count + 1):
+            numeral = heb_numeral(2 if chapter == 1 and count == 48 else chapter)
+            lines.extend((f"פצל # {numeral}", "טקסט"))
+    raw = "\n".join(lines)
+    (tmp_path / "guide.txt").write_text(raw, encoding="utf-8")
+
+    assert build_staged_ja_chapters(
+        "ja2_rambam_moreh", str(tmp_path), "guide.txt",
+        "REF2:ja2_rambam_moreh",
+        {"REF2:ja2_rambam_moreh": norm_stream(raw)[0]},
+    ) is None
 
 
 # ---------------------------------------------------------------------------
