@@ -1525,6 +1525,13 @@ def test_no_quasar_prop_pins_an_element_to_a_physical_side(module_path):
 # the app lifespan, which is not safe to interleave with the bulk suite.
 # ---------------------------------------------------------------------------
 
+# NiceGUI's simulated ``should_see`` waits only 300 ms by default. A refresh
+# that has already completed by the time its failure dump is built can still
+# lose that race on a busy Windows runner, so post-interaction assertions get a
+# bounded three-second window. The real-browser gate below remains responsible
+# for browser actionability and uses its own larger network/UI timeout.
+_ASYNC_UI_RETRIES = 30
+
 @pytest.mark.render_smoke
 @pytest.mark.parametrize("lang", ["en", "he"])
 def test_more_matches_click_replaces_the_rendered_result_set(lang):
@@ -1601,7 +1608,9 @@ def test_more_matches_click_replaces_the_rendered_result_set(lang):
                         control.click()
 
                         # The RENDERED result region is replaced.
-                        await user.should_see(MORE_ROW_TITLE)
+                        await user.should_see(
+                            MORE_ROW_TITLE, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(MAIN_ROW_TITLE)
             finally:
                 _os.environ.pop("NICEGUI_USER_SIMULATION", None)
@@ -1803,7 +1812,10 @@ def test_turning_candidates_on_then_switching_to_one_row_per_work_does_not_break
                         # or not the popup is showing; then pick the option).
                         user.find(fp.copy_text("novelty_view_label", lang)).click()
                         user.find(words["toggle"]).click()
-                        await user.should_see(_INTERACTION_ROW_TITLES[("identification", True)])
+                        await user.should_see(
+                            _INTERACTION_ROW_TITLES[("identification", True)],
+                            retries=_ASYNC_UI_RETRIES,
+                        )
                         await user.should_not_see(_INTERACTION_ROW_TITLES[("identification", False)])
 
                         # (2) ...and then changes the row unit to one row per
@@ -1815,7 +1827,10 @@ def test_turning_candidates_on_then_switching_to_one_row_per_work_does_not_break
                         # (2a) The new unit is RENDERED, the selection is STILL
                         # APPLIED (a distinct sentinel from the plain work
                         # row), and the old set is gone.
-                        await user.should_see(_INTERACTION_ROW_TITLES[("work", True)])
+                        await user.should_see(
+                            _INTERACTION_ROW_TITLES[("work", True)],
+                            retries=_ASYNC_UI_RETRIES,
+                        )
                         await user.should_not_see(_INTERACTION_ROW_TITLES[("work", False)])
                         await user.should_not_see(
                             _INTERACTION_ROW_TITLES[("identification", True)])
@@ -5047,7 +5062,9 @@ def test_switching_bucket_replaces_the_facet_lists_as_well_as_the_rows():
                         user.find(kind=ui.button,
                                   content=bucket_name(False, lang)).click()
 
-                        await user.should_see(_FACET_MORE_SENTINEL)
+                        await user.should_see(
+                            _FACET_MORE_SENTINEL, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(_FACET_MAIN_SENTINEL)
             finally:
                 _os.environ.pop("NICEGUI_USER_SIMULATION", None)
@@ -5129,7 +5146,9 @@ def test_a_chip_removes_its_own_filter_and_clear_all_removes_every_filter():
 
                         # (1) pick a domain from the facet list.
                         user.find(kind=ui.button, content="Liturgy").click()
-                        await user.should_see(_ROW_FILTERED)
+                        await user.should_see(
+                            _ROW_FILTERED, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(_ROW_UNFILTERED)
 
                         # (2) remove it through the CHIP's own listener.
@@ -5146,14 +5165,20 @@ def test_a_chip_removes_its_own_filter_and_clear_all_removes_every_filter():
                                 in removes[0]._event_listeners.values()
                                 if listener.type == "click")
                             handle_event(listener.handler, None)
-                        await user.should_see(_ROW_UNFILTERED)
+                        await user.should_see(
+                            _ROW_UNFILTERED, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(_ROW_FILTERED)
 
                         # (3) pick it again, then use Clear all.
                         user.find(kind=ui.button, content="Liturgy").click()
-                        await user.should_see(_ROW_FILTERED)
+                        await user.should_see(
+                            _ROW_FILTERED, retries=_ASYNC_UI_RETRIES
+                        )
                         user.find(kind=ui.button, content=tr("Clear All")).click()
-                        await user.should_see(_ROW_UNFILTERED)
+                        await user.should_see(
+                            _ROW_UNFILTERED, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(_ROW_FILTERED)
             finally:
                 _os.environ.pop("NICEGUI_USER_SIMULATION", None)
