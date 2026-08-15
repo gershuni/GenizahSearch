@@ -8,9 +8,16 @@ graceful degradation, and edge cases.
 """
 
 import sqlite3
+from pathlib import Path
 import pytest
 
-from shared.fjms_service import FjmsService, get_fjms_service, get_team_display_name, TEAM_DISPLAY_NAMES
+from shared.fjms_service import (
+    TEAM_DISPLAY_NAMES,
+    FjmsService,
+    fjms_domain_sort_key,
+    get_fjms_service,
+    get_team_display_name,
+)
 
 
 @pytest.fixture
@@ -447,6 +454,37 @@ def test_get_all_domains_piyyut_count(service):
     piyyut = next(d for d in all_domains if d["domain"] == "Piyyut")
     # 990001, 990003, and 990007 all have domain=Piyyut
     assert piyyut["count"] == 3
+
+
+def test_fjms_domain_sort_key_matches_catalog_hierarchy():
+    shuffled = [
+        "Philosophy, Theology, Ethical literature",
+        "Midrash / Aggadic Midrashim",
+        "Unassigned",
+        "Massorah / Lists and Counts",
+        "Biblical Exegesis",
+        "Rabbinic Literature",
+        "Bible: Texts and Translations",
+    ]
+    assert sorted(shuffled, key=fjms_domain_sort_key) == [
+        "Bible: Texts and Translations",
+        "Massorah / Lists and Counts",
+        "Biblical Exegesis",
+        "Rabbinic Literature",
+        "Midrash / Aggadic Midrashim",
+        "Philosophy, Theology, Ethical literature",
+        "Unassigned",
+    ]
+
+
+def test_fjms_path_override_supports_git_worktrees(test_db, monkeypatch):
+    monkeypatch.setenv("GENIZAH_FJMS_DB_PATH", test_db)
+    svc = FjmsService()
+    try:
+        assert svc.is_available() is True
+        assert Path(svc._db_path).resolve() == Path(test_db).resolve()
+    finally:
+        svc.close()
 
 
 # ── Join group tests ─────────────────────────────────────────────

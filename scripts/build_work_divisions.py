@@ -1706,6 +1706,80 @@ def build_sefaria(
     return None
 
 
+# The staged Guide is the original Judeo-Arabic text, not the translated
+# Sefaria edition.  Its body carries its own exact chapter boundaries as
+# ``פצל # <numeral>`` lines, but no versemap sidecar.  The numbering resets in
+# the canonical three parts (76 / 48 / 54 chapters).  Keep this deliberately
+# narrow: none of the other staged JA additions uses this marker grammar, and a
+# reset count that changes fails the whole work closed rather than guessing.
+_STAGED_GUIDE_KEY = "ja2_rambam_moreh"
+_STAGED_GUIDE_PART_CHAPTERS = (76, 48, 54)
+_STAGED_JA_CHAPTER_RE = re.compile(r"^פצל\s*#\s*(\S+)\s*$", re.MULTILINE)
+
+
+def build_staged_ja_chapters(
+    key: str, staging_dir: str, body_file: str, ref_id: str,
+    shipped: Dict[str, str],
+) -> Optional[WorkUnits]:
+    """Build the Guide's three-part chapter table from its own JA markers."""
+    if key != _STAGED_GUIDE_KEY:
+        return None
+    body_path = os.path.join(staging_dir, body_file)
+    if not os.path.exists(body_path):
+        return None
+    raw = _read(body_path)
+    stream, offsets = norm_stream(raw)
+    if shipped.get(ref_id) != stream:
+        return None
+
+    markers = list(_STAGED_JA_CHAPTER_RE.finditer(raw))
+    if len(markers) != sum(_STAGED_GUIDE_PART_CHAPTERS):
+        return None
+
+    marks: List[Tuple[Optional[LocusAddress], int]] = []
+    cursor = 0
+    for part, chapter_count in enumerate(_STAGED_GUIDE_PART_CHAPTERS, 1):
+        for chapter in range(1, chapter_count + 1):
+            marker = markers[cursor]
+            stated = parse_unit_numeral(marker.group(1))
+            # The source twice uses the historically common יו for sixteen;
+            # render the canonical citation טז, but accept no other mismatch.
+            if stated is None and marker.group(1) == "יו":
+                stated = 16
+            if stated != chapter:
+                return None
+            marks.append((
+                LocusAddress(
+                    division=f"חלק {heb_numeral(part)}",
+                    chapter=heb_numeral(chapter),
+                    chapter_kind="פרק",
+                    sub="",
+                    sub_kind="",
+                ),
+                stream_offset_for_raw(offsets, marker.start()),
+            ))
+            cursor += 1
+
+    chapters = _chapter_units(marks)
+    if len(chapters) != len(markers):
+        return None
+    # Text before Part I chapter 1 is a real introduction.  Give each numbered
+    # part its own thousand-wide citation block and keep the introduction at 1.
+    # That makes every part boundary (including introduction -> Part I) a real
+    # break: a span crossing it renders two honest pieces, never the strange
+    # synthetic range ``הקדמה–חלק א, פרק א``.
+    units = [Unit(0, 0, "intro", "הקדמה", 1, ("הקדמה",))]
+    units.extend(
+        unit._replace(
+            unit_ord=index,
+            citation_pos=(unit.citation_pos + 1000
+                          if unit.citation_pos is not None else None),
+        )
+        for index, unit in enumerate(chapters, 1)
+    )
+    return WorkUnits(ref_id, "ja", "chapter", units, len(stream))
+
+
 def _sefaria_verse_units(
     ref_id: str, kind: str, records: Sequence[dict], offsets: Sequence[int],
     stream_len: int, key: str = "", raw: str = "",
@@ -2194,6 +2268,18 @@ corpora are restricted:
         print(f"  SKIPPED: {ENV_JA_DIR} is not set or not a directory")
 
     staging = os.environ.get(ENV_STAGING_DIR)
+    if "ja" in families and staging and os.path.isdir(staging):
+        manifest_path = os.path.join(staging, "manifest.json")
+        entries = (json.load(open(manifest_path, encoding="utf-8")).get("entries", [])
+                   if os.path.exists(manifest_path) else [])
+        for entry in entries:
+            built = build_staged_ja_chapters(
+                entry["key"], staging, entry.get("body_file", f"{entry['key']}.txt"),
+                f"REF2:{entry['key']}", shipped,
+            )
+            if built:
+                works.append(built)
+
     if "sefaria" in families and staging and os.path.isdir(staging):
         manifest_path = os.path.join(staging, "manifest.json")
         entries = (json.load(open(manifest_path, encoding="utf-8")).get("entries", [])
@@ -2202,6 +2288,8 @@ corpora are restricted:
             if entry.get("guard_only"):
                 continue
             key = entry["key"]
+            if key == _STAGED_GUIDE_KEY:
+                continue
             versemap = entry.get("versemap_file") or (
                 f"{key}.versemap.json"
                 if os.path.exists(os.path.join(staging, f"{key}.versemap.json")) else None)

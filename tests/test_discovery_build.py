@@ -3579,14 +3579,17 @@ def test_the_probes_filter_axes_are_PINNED_to_the_shipped_predicate_builder():
     says "the FULL combination space" -- which is round 13's finding 4 verbatim.
 
     `unit` and `bucket` are excluded because neither is optional: `unit` is a
-    grain the probe crosses separately, and `bucket` is the state's stem."""
+    grain the probe crosses separately, and `bucket` is the state's stem.
+    `locus_enabled` is also excluded because it is an internal schema
+    capability selected by DiscoveryService, not page state a reader can set;
+    the reader-settable locus axes are `locus_from` and `locus_to`."""
     import inspect
     from scripts import bench_discovery
     from shared.discovery_service import _build_findings_filter
 
     authority = tuple(
         name for name in inspect.signature(_build_findings_filter).parameters
-        if name not in ("unit", "bucket")
+        if name not in ("unit", "bucket", "locus_enabled")
     )
     probe = tuple(
         "work_id" if axis == "work" else axis

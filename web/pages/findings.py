@@ -83,6 +83,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from nicegui import ui
@@ -2103,6 +2104,26 @@ async def fetch_locus_units(state: Dict[str, Any]) -> Dict[str, Any]:
     return await get_locus_units_enveloped(str(state.get("work_id") or ""))
 
 
+_JA_PAGE_OPTION_SUFFIX = re.compile(r",\s*עמ['׳]?\s*[^,]+\s*$")
+
+
+def _locus_option_label(label: str, *, family: str = "", grain: str = "") -> str:
+    """Keep JA page precision in citations, but not in the range picker.
+
+    A Judeo-Arabic unit's full label (for example ``פרק יז, עמ' 219``) remains
+    the locus rendered beside a finding.  In the From/To control the page is
+    noisy and makes the structural label hard to scan, so only that control
+    presents ``פרק יז``.  Empty structural labels fail soft to the original;
+    a blank option would be less useful than its page.
+    """
+    value = str(label or "")
+    if family == "ja" and grain == "page":
+        structural = _JA_PAGE_OPTION_SUFFIX.sub("", value).strip()
+        if structural:
+            return structural
+    return value
+
+
 def _render_locus_range(
     envelope: Dict[str, Any], state: Dict[str, Any], lang: str, refresh
 ) -> None:
@@ -2110,9 +2131,14 @@ def _render_locus_range(
     if (envelope or {}).get("status") != "ok":
         return
     items = list(envelope.get("items") or ())
+    meta = envelope.get("meta") or {}
+    family = str(meta.get("family") or "")
+    grain = str(meta.get("grain") or "")
     options = {
-        int(item["citation_pos"]): str(
-            item.get("label_he") or item.get("part_key") or ""
+        int(item["citation_pos"]): _locus_option_label(
+            str(item.get("label_he") or item.get("part_key") or ""),
+            family=family,
+            grain=grain,
         )
         for item in items
     }

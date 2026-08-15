@@ -356,8 +356,9 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
     """
     bucket_sql = "di.main_pool = 1" if main_pool else "di.main_pool = 0"
     out: Dict[str, Any] = {"work_id": None, "domain": None, "author": None,
-                           "novelty_status": None, "suppressed": None,
-                           "sys_id": None}
+                           "novelty_status": None, "locus_from": None,
+                           "locus_to": None, "locus_filter_enabled": False,
+                           "suppressed": None, "sys_id": None}
     try:
         row = conn.execute(
             f"""
@@ -392,6 +393,61 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
     if row is not None:
         out.update({"work_id": row[0], "domain": row[1] or None,
                     "author": row[2] or None})
+    # Locus range is a reader filter only on assets carrying the complete
+    # piece/unit pair. Pick real bounds for the chosen work so the benchmark
+    # exercises the shipped EXISTS predicate rather than timing an invented
+    # range that selects nothing. If the heaviest work has no locus pieces,
+    # move the whole coherent pick (work, domain and author together) to the
+    # heaviest work in this bucket that does. Old assets simply leave the
+    # capability false and the two range axes become named skips.
+    try:
+        locus = conn.execute(
+            f"""
+            SELECT MIN(lu.citation_pos), MAX(lu.citation_pos)
+            FROM discovery_identification di
+            JOIN discovery_locus_piece p
+              ON p.identification_id = di.identification_id
+             AND p.locus_work_id = di.display_work_id
+            JOIN locus_unit lu
+              ON lu.work_id = p.locus_work_id
+             AND lu.unit_ord BETWEEN p.start_unit_ord AND p.end_unit_ord
+            WHERE {bucket_sql} AND di.display_work_id = ?
+              AND lu.citation_pos IS NOT NULL
+            """,
+            (out.get("work_id"),),
+        ).fetchone()
+        if locus is None or locus[0] is None or locus[1] is None:
+            locus_work = conn.execute(
+                f"""
+                SELECT di.display_work_id, w.genre, w.author, COUNT(*) AS n,
+                       MIN(lu.citation_pos), MAX(lu.citation_pos)
+                FROM discovery_identification di
+                JOIN works w ON w.work_id = di.display_work_id
+                JOIN discovery_locus_piece p
+                  ON p.identification_id = di.identification_id
+                 AND p.locus_work_id = di.display_work_id
+                JOIN locus_unit lu
+                  ON lu.work_id = p.locus_work_id
+                 AND lu.unit_ord BETWEEN p.start_unit_ord AND p.end_unit_ord
+                WHERE {bucket_sql} AND lu.citation_pos IS NOT NULL
+                GROUP BY di.display_work_id
+                ORDER BY n DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            if locus_work is not None:
+                out.update({"work_id": locus_work[0],
+                            "domain": locus_work[1] or None,
+                            "author": locus_work[2] or None})
+                locus = (locus_work[4], locus_work[5])
+        if locus is not None and locus[0] is not None and locus[1] is not None:
+            out["locus_from"] = int(locus[0])
+            out["locus_to"] = int(locus[1])
+            out["locus_filter_enabled"] = True
+    except sqlite3.Error:
+        # Pre-locus assets are still valid benchmark inputs. The missing
+        # capability is recorded in the picks rather than inferred later.
+        pass
     # ONE REAL SUPPRESSED ID from this bucket. Taken from the bucket rather than
     # invented, so the `NOT IN` clause excludes a row that is really there --
     # a made-up id would build the same SQL shape but exclude nothing, and the
@@ -762,6 +818,12 @@ _FINDINGS_OUT_OF_SCOPE: Tuple[Tuple[str, str], ...] = (
 #: `author`, `work`, every AND-composition and every filtered SECOND-BUCKET
 #: combination unmeasured, while the report said "the FULL combination space"
 #: (code review round 13, finding 4).
+#: `locus_from` / `locus_to` are the two independently settable ends of the
+#: selected work's chapter range. `locus_enabled` is deliberately NOT an axis:
+#: it is an internal schema capability discovered by the service, not page
+#: state a reader can switch. The benchmark passes the equivalent
+#: `locus_filter_enabled` capability for every state when the asset supports it.
+#:
 #: `suppressed` (2026-08-06) is the admin hide list -- a `NOT IN` over
 #: identification ids. It is measured for the same reason every other axis is: it
 #: composes as AND with all of them, it lands in the SAME predicate the count and
@@ -771,7 +833,8 @@ _FINDINGS_OUT_OF_SCOPE: Tuple[Tuple[str, str], ...] = (
 #: shipped_predicate_builder` reads `_build_findings_filter`'s own signature and
 #: fails if this tuple falls behind it -- which is how this entry got added.
 _FINDINGS_FILTER_AXES: Tuple[str, ...] = (
-    "novelty", "divergence", "domain", "author", "work", "suppressed", "sys_id")
+    "novelty", "divergence", "domain", "author", "work", "locus_from",
+    "locus_to", "suppressed", "sys_id")
 
 
 def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
@@ -825,6 +888,15 @@ def _findings_filter_states(picks: Dict[str, Dict[str, Any]],
                 kwargs["author"] = pick.get("author")
             if "work" in on:
                 kwargs["work_id"] = pick.get("work_id")
+            if "locus_from" in on:
+                kwargs["locus_from"] = pick.get("locus_from")
+            if "locus_to" in on:
+                kwargs["locus_to"] = pick.get("locus_to")
+            if pick.get("locus_filter_enabled"):
+                # This is a capability of the loaded asset, not an optional
+                # reader axis. It stays on across the whole state space just as
+                # it does in DiscoveryService after `_has_locus_filter()`.
+                kwargs["locus_filter_enabled"] = True
             if "suppressed" in on:
                 # A REAL id from THIS bucket, so the `NOT IN` is a predicate that
                 # excludes something rather than one the optimiser can discard.
@@ -948,13 +1020,18 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # that pairs it with a domain or an author really can be empty in this
         # asset, and that is a genuine asset fact rather than a probe bug.
         keys = {"novelty": "novelty", "domain": "domain",
-                "author": "author", "work": "work_id"}
+                "author": "author", "work": "work_id",
+                "locus_from": "locus_from", "locus_to": "locus_to"}
         missing = [axis for axis in on
-                   if axis in keys and not kwargs.get(keys[axis])]
+                   if axis in keys and (
+                       kwargs.get(keys[axis]) is None
+                       if axis in {"locus_from", "locus_to"}
+                       else not kwargs.get(keys[axis])
+                   )]
         if missing:
             return (f"this asset offers no value for the {', '.join(missing)} "
-                    f"filter in the {stem} bucket, so that combination cannot be "
-                    "issued against it")
+                    f"filter in the {stem} bucket, so that combination has no "
+                    "non-empty population to measure in this asset")
         # A SINGLE VALUE AXIS never reaches the probe below: every value comes
         # from `_coherent_bucket_pick`, drawn from THIS bucket, so an empty
         # single-axis state means the probe picked something the asset does not
@@ -971,8 +1048,11 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # every unit (the units differ only in grouping, and grouping >=1 row
         # never yields zero groups), and `novelty` is rejected outright on the
         # per-work unit by the builder.
+        predicate_kwargs = dict(kwargs)
+        predicate_kwargs["locus_enabled"] = bool(
+            predicate_kwargs.pop("locus_filter_enabled", False))
         where_sql, params = _build_findings_filter(
-            unit=FINDINGS_UNIT_IDENTIFICATION, **kwargs)
+            unit=FINDINGS_UNIT_IDENTIFICATION, **predicate_kwargs)
         try:
             found = conn.execute(
                 f"SELECT 1 {_FINDINGS_FROM} {where_sql} LIMIT 1", params).fetchone()

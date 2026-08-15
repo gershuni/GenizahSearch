@@ -27,6 +27,8 @@ from v3_routing_ingest import (  # noqa: E402
     load_router,
     parity_report,
     resolve_routing,
+    route_fullscan_legacy_by_coverage,
+    route_v4_references_by_coverage,
 )
 
 
@@ -60,6 +62,104 @@ P1, P2 = "990000000000000001_IE1_P1_FL1", "990000000000000002_IE1_P1_FL1"
 # Column positions in the emitted `evidence_rows` tuples.
 _ROUTING_STATUS_IDX = 7
 _ROUTING_REASON_IDX = 8
+
+
+def test_v4_reference_routing_is_separate_threshold_extrapolation():
+    router = {
+        "route": {},
+        "meta": {"threshold": 0.30},
+        "raw_to_can": {},
+        "counts": {},
+    }
+    report = route_v4_references_by_coverage(
+        router,
+        [(P1, "REF4:one", 30), (P2, "REF4:two", 29)],
+        {P1: 100, P2: 100},
+    )
+    assert report["same_work"] == 1
+    assert report["parallel"] == 1
+    assert router["route"][(P1, "REF4:one")][0] == "same_work"
+    assert router["route"][(P2, "REF4:two")][0] == "parallel"
+    assert router["v4_reference_keys"] == {
+        (P1, "REF4:one"),
+        (P2, "REF4:two"),
+    }
+
+
+def test_v4_reference_routing_rejects_legacy_rows_and_impossible_coverage():
+    router = {
+        "route": {},
+        "meta": {"threshold": 0.30},
+        "raw_to_can": {},
+        "counts": {},
+    }
+    with pytest.raises(RoutingRegrainError, match="outside"):
+        route_v4_references_by_coverage(
+            router, [(P1, "M:legacy", 20)], {P1: 100}
+        )
+    with pytest.raises(RoutingRegrainError, match="exceeds 1.0"):
+        route_v4_references_by_coverage(
+            router, [(P1, "REF4:one", 101)], {P1: 100}
+        )
+    with pytest.raises(RoutingRegrainError, match="negative"):
+        route_v4_references_by_coverage(
+            router, [(P1, "REF4:one", -1)], {P1: 100}
+        )
+
+
+def test_v4_reference_routing_rejects_a_key_in_the_fitted_population():
+    router = {
+        "route": {(P1, "REF4:one"): ("same_work", 0.5, 1)},
+        "meta": {"threshold": 0.30},
+        "raw_to_can": {},
+        "counts": {},
+    }
+    with pytest.raises(RoutingRegrainError, match="no longer disjoint"):
+        route_v4_references_by_coverage(
+            router, [(P1, "REF4:one", 50)], {P1: 100}
+        )
+
+
+def test_fullscan_legacy_routing_is_separate_extrapolation():
+    router = {
+        "route": {},
+        "meta": {"threshold": 0.30},
+        "raw_to_can": {},
+        "counts": {},
+    }
+    report = route_fullscan_legacy_by_coverage(
+        router,
+        [(P1, "M:legacy-one", 30), (P2, "J:legacy-two", 29)],
+        {P1: 100, P2: 100},
+        {("old-page", "M:old-work")},
+    )
+    assert report["same_work"] == 1
+    assert report["parallel"] == 1
+    assert report["historical_key_count"] == 1
+    assert router["fullscan_legacy_keys"] == {
+        (P1, "M:legacy-one"),
+        (P2, "J:legacy-two"),
+    }
+
+
+def test_fullscan_legacy_routing_rejects_wrong_or_historical_population():
+    router = {
+        "route": {},
+        "meta": {"threshold": 0.30},
+        "raw_to_can": {},
+        "counts": {},
+    }
+    with pytest.raises(RoutingRegrainError, match="outside"):
+        route_fullscan_legacy_by_coverage(
+            router, [(P1, "REF4:new", 30)], {P1: 100}, set()
+        )
+    with pytest.raises(RoutingRegrainError, match="historical"):
+        route_fullscan_legacy_by_coverage(
+            router,
+            [(P1, "M:legacy", 30)],
+            {P1: 100},
+            {(P1, "M:legacy")},
+        )
 
 
 def test_the_ingested_routing_follows_the_router_and_the_gate_can_fail(tmp_path):

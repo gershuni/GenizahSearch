@@ -1,0 +1,18 @@
+{
+  "schema_version": "discovery-public-projection-exclusions-v1",
+  "policy_version": "public-projection-exclusions-v1",
+  "ruled_date": "2026-08-14",
+  "ruling": "Retain curated anthology works in the private research bake as routing competitors, but structurally exclude them and their dependent rows from the public projection.",
+  "entries": [
+    {
+      "canonical_work_id": "w001383",
+      "title": "ילקוט שמעוני על נ\"ך",
+      "reason": "Later anthology overlapping many cited works; public attribution is systematically misleading."
+    },
+    {
+      "canonical_work_id": "w001384",
+      "title": "ילקוט שמעוני על התורה",
+      "reason": "Later anthology overlapping many cited works; public attribution is systematically misleading."
+    }
+  ]
+}
