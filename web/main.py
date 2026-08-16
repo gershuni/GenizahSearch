@@ -1719,7 +1719,33 @@ def create_layout():
     content_col.props('id=main-content')
 
     # === "What's New" Banner (dismissible, compact single-line) ===
-    if safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION:
+    #
+    # v9.0.0 announces the two beta research surfaces, so they are resolved BEFORE
+    # the banner is built rather than inside it. Three conditions, each load-bearing:
+    #
+    # 1. Each surface is gated on the SAME availability predicate as its own route
+    #    and nav entry (never a bare flag) — advertising one that clean-hides would
+    #    send the reader to a 404.
+    # 2. If NEITHER is reachable there is nothing to announce, and the banner must
+    #    not render a lead-in sentence followed by no links. A dev or flag-OFF
+    #    environment sees no toast at all.
+    # 3. The toast SUPPRESSES ITSELF on the pages that already feature these
+    #    surfaces — `/` carries the two announcement cards, `/start` links both
+    #    among its tools, and `/help` documents both with their own anchors. A
+    #    toast repeating them there is duplication a reader reads as a bug, and it
+    #    is what made `/start`'s "exactly one /atlas href" render-smoke guard fail:
+    #    the guard was right, the second link was mine. The toast is for the reader
+    #    who arrived at /search or /browse and would otherwise never learn.
+    _WHATS_NEW_SUPPRESSED_ON = ('/', '/start', '/help')
+    _new_surfaces = []
+    if discovery_available():
+        _new_surfaces.append((tr("Computed Identifications"), '/computed-identifications'))
+    if atlas_preview_available():
+        _new_surfaces.append((tr("The Visual Genizah Atlas"), '/atlas'))
+
+    if (_new_surfaces
+            and current_page not in _WHATS_NEW_SUPPRESSED_ON
+            and safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION):
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
             # Fixed-position toast (out of document flow): showing and the 10s
@@ -1732,12 +1758,21 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                # Link the banner to Search — the reading view (where the smarter
-                # transcription default applies) is reached by opening a result.
-                ui.link(
-                    tr("New: when an FGP transcription covers only a small part of the folio, the reading view now shows the fuller MiDRASH transcription by default — the FGP text is still available in the version menu."),
-                    '/search',
-                ).classes('text-xs flex-1 truncate text-primary hover:underline')
+                # Claim-free, as on the homepage cards: the surface NAMES only. No
+                # precision figure, no interval, no count, no accuracy rate; the
+                # lead-in agrees with how many surfaces are actually reachable
+                # rather than promising "two" when one is live.
+                ui.label(
+                    tr("Two new research surfaces, both in beta:") if len(_new_surfaces) > 1
+                    else tr("New in this release:")
+                ).classes('text-xs').style('color: var(--text-secondary);')
+                for _idx, (_surface_name, _surface_route) in enumerate(_new_surfaces):
+                    if _idx:
+                        # Separator, not a list bullet — the row is one line and a
+                        # bullet would read as an item marker on a two-item line.
+                        ui.label('·').classes('text-xs').style('color: var(--text-secondary);')
+                    ui.link(_surface_name, _surface_route).classes(
+                        'text-xs font-semibold text-primary hover:underline')
                 def dismiss_whats_new():
                     # Explicit user dismiss (X button): persist the flag unconditionally.
                     safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)

@@ -4846,6 +4846,14 @@ TRANSLATIONS.update({
 # the existing one.
 # ===========================================================================
 TRANSLATIONS.update({
+    # === v9.0.0 "What's New" toast (web/main.py) — the two beta surfaces ===
+    # Hebrew is the DEFAULT language here, so an unregistered string does not
+    # fall back gracefully — it shows English to most of the site's readers.
+    # Both surface NAMES are already registered below and in the atlas block;
+    # only the two lead-in sentences are new. Claim-free by construction: they
+    # name the surfaces and say "beta", and assert nothing about the matches.
+    "Two new research surfaces, both in beta:": "שני ממשקי מחקר חדשים, שניהם בגרסת בטא:",
+    "New in this release:": "חדש בגרסה זו:",
     # --- Nav entry + page title (the nav tag reuses the existing "Beta") ---
     "Computed Identifications": "זיהויים מחושבים",
     # --- Page meta description ---
