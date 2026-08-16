@@ -89,10 +89,19 @@ separately. (Was an open P2 defect — only `REF4:` rows were excluded —
 `scripts/discovery_routing_cohorts.json`, routes each extrapolated namespace
 separately, and hard-errors on unregistered `REF*` prefixes.)
 
-**Status: C1, C2 (excerpt-bake side), C3 (emitter + consumer), and C4 were
-implemented and committed 2026-08-16** with mutation-proven gates. Still open
-from the conditions: C2's reconcile side (lands with C5), C5–C9, C10, C11's
-handoff-artifact sweep wiring, and the remaining C12 gates tied to those.
+**Status: C1, C2, C3 (emitter + consumer), C4, C5 (`4647c73a` — artifact
+loader with its C11 masking gate, identity_mode-aware reconcile, standalone
+validation in `load_canonical_merges`), C6 (`820071f7`), and C8 (`88f31191` +
+the builder's "daf"-grain support, `141f2072`) were implemented and committed
+2026-08-16** with mutation-proven gates. The REF5 append (V4.1 steps 3a–3c)
+started the same day: 3a done (exactly 10 REF5 references, corpus
+`e6041360…27eae`). Still open from the conditions: C7's acquisition run
+(post-sitting), C9, C10, C11's handoff-artifact sweep wiring, and the
+remaining C12 gates tied to those. Known C5 limit (deliberately not loosened):
+a reconcile run with ONLY public_first rows would emit an empty
+`v4_public_reference_canonical_ids`, which `load_canonical_merges` still
+rejects under the V4 contract — moot for the combined bake (REF5+REF6 always
+carry private siblings), ticket it if a pure-public-first bake ever exists.
 
 ### C5. Public-first identity artifact
 
