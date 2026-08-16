@@ -862,3 +862,58 @@ def test_load_canonical_merges_rejects_standalone_ids_on_v3_contract(tmp_path):
     path = _write_json(tmp_path / "m.json", doc)
     with pytest.raises(sidecar_build.CanonicalMergesError, match="V3 canonical-merge contract"):
         sidecar_build.load_canonical_merges(path)
+
+
+# ---------------------------------------------------------------------------
+# The REPO artifact (scripts/discovery_v4_2_public_first_identities.json):
+# the owner-approved 2026-08-16 conversion, pinned exactly.
+# ---------------------------------------------------------------------------
+
+REPO_ARTIFACT = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "discovery_v4_2_public_first_identities.json"
+)
+
+
+def test_repo_public_first_artifact_loads_and_is_approve_only():
+    doc = load_public_first_artifact(REPO_ARTIFACT)
+    assert doc["ruled_on"] == "2026-08-16"
+    # Approve-only by design: the graded candidate list (rejects/defers) is a
+    # restricted-derived enumeration and must never appear in tracked files;
+    # an absent key hard-errors in the reconcile, which is the fail-closed path.
+    assert {e["verdict"] for e in doc["entries"]} == {"approve"}
+    assert len(doc["entries"]) == 35
+    keys = [e["identity_key"] for e in doc["entries"]]
+    # Fresh keys in Hebrew-alphabetical title order -- pf-1001..pf-1035; the
+    # packet's own ranking-derived numbering must not be reproduced here.
+    assert keys == [f"pf-{1000 + n:04d}" for n in range(1, 36)]
+    titles = [e["title_he"] for e in doc["entries"]]
+    assert titles == sorted(titles)
+
+
+def test_repo_public_first_artifact_genre_mirrors_the_domain_string():
+    doc = load_public_first_artifact(REPO_ARTIFACT)
+    for entry in doc["entries"]:
+        assert entry["genre"] == f"{entry['domain_parent']} / {entry['domain_leaf']}"
+
+
+def test_repo_public_first_artifact_splits_and_licenses_are_pinned():
+    doc = load_public_first_artifact(REPO_ARTIFACT)
+    by_title = {e["title_he"]: e for e in doc["entries"]}
+    # Per-chelek Zohar and per-section Tur splits (owner approval 2026-08-16).
+    for part in ("א", "ב", "ג"):
+        assert by_title[f"ספר הזוהר, חלק {part}"]["provider"] == "hewikisource"
+    for section in ("יורה דעה", "אבן העזר", "חושן משפט"):
+        assert by_title[f"ארבעה טורים, {section}"]["license"] == "CC-BY-SA"
+    # Every approved license is inside the REF6 allowlist.
+    allowed = {"Public Domain", "CC0", "CC-BY", "CC-BY-SA"}
+    assert {e["license"] for e in doc["entries"]} <= allowed
+    # The provisional-include policy (owner, 2026-08-16) is carried on all
+    # four medium-compilation-risk works, and only surfaces via notes.
+    provisional = [
+        e["title_he"] for e in doc["entries"] if "provisionally included" in e["note"]
+    ]
+    assert sorted(provisional) == sorted(
+        ["מחזור ויטרי", "שבלי הלקט", 'סידור רש"י', "מבחר הפנינים"]
+    )

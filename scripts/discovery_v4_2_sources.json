@@ -8,7 +8,7 @@
     "CC-BY-SA"
   ],
   "minimum_hebrew_letters": 1000,
-  "note": "V4.2 REF6 source expansion (docs/specs/discovery-v4.2-combined-bake-and-public-first-plan.md), condition C7. This file carries ONLY the 15 Mishneh Torah book-grain multi-text containers (w000174-w000188); the six small identity_mode=private_sibling additions and the public_first candidates from the same REF6 cohort are owned by other tracks and are not in this file. Each container's ordered child list is copied verbatim, in order, from the measured probe at discovery_builds/discovery_v4/probe_v42/mishneh_torah_container_probe.json -- it is FROZEN; live Sefaria ToC discovery may verify membership/order at fetch time but never silently redefines it. Same schema as scripts/discovery_v4_1_sources.json plus the container/license_ruling extension.",
+  "note": "V4.2 REF6 source expansion (docs/specs/discovery-v4.2-combined-bake-and-public-first-plan.md), condition C7. Carries the 15 Mishneh Torah book-grain multi-text containers (w000174-w000188) plus the post-sitting (2026-08-16) private_sibling additions: rabbeinu_chananel_bava_kamma (w000463), sifrei_zuta_bamidbar (w000524), ben_sira_alfa_beta_a (w001079), and kuzari_ibn_tibbon (w000194 -- the ibn Tibbon translation is its own work identity; Sefaria's Kuzari IS that translation). The halakhot_gedolot_intro and kinyan_torah entries planned pre-sitting were WITHDRAWN by owner rulings (already covered / locus-layer decision). The owner-approved public_first sources (scripts/discovery_v4_2_public_first_identities.json) are NOT here yet: they need the identity_mode/identity_key source-map extension first. Each container's ordered child list is copied verbatim, in order, from the measured probe at discovery_builds/discovery_v4/probe_v42/mishneh_torah_container_probe.json -- it is FROZEN; live Sefaria ToC discovery may verify membership/order at fetch time but never silently redefines it. Same schema as scripts/discovery_v4_1_sources.json plus the container/license_ruling extension.",
   "sources": [
     {
       "key": "mishneh_torah_introduction",
@@ -644,6 +644,47 @@
       "mappings": [
         {
           "target_work_id": "w000188"
+        }
+      ]
+    },
+    {
+      "key": "rabbeinu_chananel_bava_kamma",
+      "provider": "sefaria",
+      "source_ref": "Rabbeinu Chananel on Bava Kamma",
+      "locus_grain": "daf_bavli",
+      "mappings": [
+        {
+          "target_work_id": "w000463"
+        }
+      ]
+    },
+    {
+      "key": "sifrei_zuta_bamidbar",
+      "provider": "sefaria",
+      "source_ref": "Sifrei Zuta",
+      "mappings": [
+        {
+          "target_work_id": "w000524"
+        }
+      ]
+    },
+    {
+      "key": "ben_sira_alfa_beta_a",
+      "provider": "hewikisource",
+      "source_ref": "אלפא ביתא דבן סירא (נוסח א)",
+      "mappings": [
+        {
+          "target_work_id": "w001079"
+        }
+      ]
+    },
+    {
+      "key": "kuzari_ibn_tibbon",
+      "provider": "sefaria",
+      "source_ref": "Kuzari",
+      "mappings": [
+        {
+          "target_work_id": "w000194"
         }
       ]
     }

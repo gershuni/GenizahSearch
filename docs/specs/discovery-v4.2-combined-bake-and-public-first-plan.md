@@ -103,6 +103,26 @@ a reconcile run with ONLY public_first rows would emit an empty
 rejects under the V4 contract — moot for the combined bake (REF5+REF6 always
 carry private siblings), ticket it if a pure-public-first bake ever exists.
 
+**Owner sitting DONE (2026-08-16, both passes) and the C5 artifact is
+written:** `scripts/discovery_v4_2_public_first_identities.json` carries the
+35 owner-approved public-first identities (approve-only by design — the
+graded candidate list and its ranking-derived numbering stay in the
+restricted review location per C11; artifact keys are fresh, assigned in
+Hebrew-alphabetical title order; an absent key hard-errors in the reconcile,
+which is the fail-closed path). Owner policies recorded in the restricted
+rulings file: Hebrew translations of JA works approved as their own work
+identities (Moreh Nevuchim model); compilation-risk-medium works included
+PROVISIONALLY — the post-bake review packet must carry a per-work cost/gain
+readout and the owner decides keep/drop before promotion. The REF6 source
+map gained its four post-sitting `private_sibling` additions (w000463,
+w000524, w001079, w000194), pin-tested and mutation-proven. **Producer-side
+gap, still open:** `load_source_config`, the fetcher, and
+`build_reference` do not yet understand `identity_mode: public_first` /
+`identity_key` (the reconcile CONSUMER landed with C5) — a public_first
+source cannot flow through acquisition/build until that extension lands,
+and the 35 public_first map entries are deliberately NOT authored until it
+does.
+
 ### C5. Public-first identity artifact
 
 A hash-pinned, pre-match owner-approval artifact keyed by a stable

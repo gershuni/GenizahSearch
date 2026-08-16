@@ -418,20 +418,42 @@ def test_v4_2_map_is_stored_without_carriage_returns():
     assert b"\r\n" not in V4_2_MAP.read_bytes()
 
 
+# The four post-sitting (2026-08-16) private_sibling additions: key -> target.
+POST_SITTING_ADDITIONS = {
+    "rabbeinu_chananel_bava_kamma": "w000463",
+    "sifrei_zuta_bamidbar": "w000524",
+    "ben_sira_alfa_beta_a": "w001079",
+    "kuzari_ibn_tibbon": "w000194",
+}
+
+
 def test_v4_2_map_has_exactly_fifteen_containers_and_88_children():
     config = load_source_config(V4_2_MAP)
     assert reference_namespace(config) == "REF6"
-    assert len(config["sources"]) == 15
-    assert all(source.get("container") for source in config["sources"])
-    total_children = sum(len(source["children"]) for source in config["sources"])
+    containers = [s for s in config["sources"] if s.get("container")]
+    additions = [s for s in config["sources"] if not s.get("container")]
+    assert len(config["sources"]) == 19
+    assert len(containers) == 15
+    total_children = sum(len(source["children"]) for source in containers)
     assert total_children == 88
-    targets = source_target_ids(config)
-    assert targets == {f"w{n:06d}" for n in range(174, 189)}
-    assert all(source.get("license_ruling") for source in config["sources"])
+    container_targets = {
+        mapping["target_work_id"]
+        for source in containers
+        for mapping in source["mappings"]
+    }
+    assert container_targets == {f"w{n:06d}" for n in range(174, 189)}
+    assert all(source.get("license_ruling") for source in containers)
     assert all(
         source["license_ruling"]["effective_license"] == "Public Domain"
-        for source in config["sources"]
+        for source in containers
     )
+    # The post-sitting additions are pinned exactly: keys, targets, and the
+    # absence of any container/license_ruling machinery on them.
+    assert {
+        s["key"]: s["mappings"][0]["target_work_id"] for s in additions
+    } == POST_SITTING_ADDITIONS
+    assert all(len(s["mappings"]) == 1 for s in additions)
+    assert not any(s.get("license_ruling") for s in additions)
 
 
 def test_v4_2_map_children_are_copied_verbatim_from_the_probe():
@@ -447,6 +469,7 @@ def test_v4_2_map_children_are_copied_verbatim_from_the_probe():
             child["source_ref"] for child in source["children"]
         ]
         for source in config["sources"]
+        if source.get("container")
     }
     assert map_refs_by_work == probe_refs_by_work
 
