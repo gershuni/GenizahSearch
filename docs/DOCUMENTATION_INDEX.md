@@ -110,6 +110,7 @@ Detailed specifications for complex features:
 | [discovery-v3-bake-plan.md](specs/discovery-v3-bake-plan.md) | discovery-v3 (gen-2 evidence pipeline) bake plan — Codex-approved, NOT deployed |
 | [discovery-v3-naming.md](specs/discovery-v3-naming.md) | Resolves the "v2.1" naming collision between the deployed rebuild and the gen-2 refresh |
 | [discovery-v3-masking-evidence.md](specs/discovery-v3-masking-evidence.md) | Masking-scan evidence for the discovery-v3 track |
+| [discovery-v4-public-reference-expansion.md](specs/discovery-v4-public-reference-expansion.md) | V4 public Sefaria/Wikisource reference expansion — built, deployment owner-gated |
 | [discovery-band-labels-v1.md](specs/discovery-band-labels-v1.md) | Honesty-safe band/label vocabulary (no precision percentages) |
 | [discovery-relation-matrix-v1.md](specs/discovery-relation-matrix-v1.md) | Frozen relation precedence matrix (semantics frozen 2026-08-12) |
 | [discovery-budgets.md](specs/discovery-budgets.md) | Discovery acceptance/performance budgets (PERF-01) |

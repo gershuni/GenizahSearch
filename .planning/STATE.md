@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: Phase 136 COMPLETE (22 of 22 plans). Flag-on is an owner decision; six items still gate it.
-last_updated: "2026-08-04T00:00:00.000Z"
-last_activity: 2026-08-04
+stopped_at: "Discovery beta LIVE in production since 2026-08-08 (DISCOVERY_ENABLED=1). Phases 133-136 CLOSED. Roadmap reconciled 2026-08-16 under the owner's ratify-reality ruling; the five open REL-01 gate items are waived in writing, EXCEPT the cross-surface masking re-sweep over the three post-2026-08-05 surfaces, which is a live obligation and the first task of Phase 139a."
+last_updated: "2026-08-16T00:00:00.000Z"
+last_activity: 2026-08-16
 progress:
-  total_phases: 8
-  completed_phases: 1
-  total_plans: 46
-  completed_plans: 39
-  percent: 13
+  total_phases: 10
+  completed_phases: 4
+  total_plans: 45
+  completed_plans: 45
+  percent: 40
 ---
 
 # Project State
@@ -25,10 +25,34 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 
 ## Current Position
 
-Phase: 136 (read-surfaces-connections-panel-work-witnesses) — **ALL PLANS EXECUTED**
-Plan: **22 of 22 complete** — every plan in the phase has executed.
-Status: Code complete and deployed behind an OFF flag. Flag-on is an owner decision and is
-**gated on six items that are NOT done** — see "WAVE 11" below. Do not read "22 of 22" as "ready".
+> ### ⚠ SUPERSEDED 2026-08-16 — read this before the paragraph below
+>
+> **The discovery beta is LIVE in production and has been since 2026-08-08** (`DISCOVERY_ENABLED=1`;
+> `/computed-identifications`, the browse connections panel and the `/help` methods section are
+> publicly reachable). The "deployed behind an OFF flag" and "the flag must NOT be flipped yet"
+> language throughout this file predates the flip and is **historical**, not current state. The flip
+> was an owner decision; it simply was never written back here, so for eight days this file
+> contradicted the live site.
+>
+> Phases 133-136 are CLOSED. The roadmap was reconciled on 2026-08-16 under the owner's
+> "ratify reality" ruling — see `.planning/ROADMAP.md`, sections "Scope that shipped ahead of its
+> phase" and "REL-01: the 2026-08-08 flag flip, recorded after the fact", which are now the
+> authority for phase status and for the gate waivers.
+>
+> Of the six items recorded below as gating flag-on: **one is resolved** (the 58 NULL-genre works,
+> `2e9b409e`), **four are waived in writing** (D-06b, the CERT-02 tier-A number copy, the
+> correction/retraction policy, VIS-02 — all now homed in Phase 139a), and **one is NOT waived and
+> is a live obligation**: the cross-surface masking sweep was last attested 2026-08-05, and the
+> three surfaces that shipped after it (beta reviews, excerpt view, homepage promotion) have never
+> been swept. That is the first task of Phase 139a.
+
+Phase: 136 (read-surfaces-connections-panel-work-witnesses) — **CLOSED 2026-08-08**
+Plan: **22 of 22 complete.** Four plans (`136-13`, `136-15`, `136-21`, `136-22`) were never ticked
+in ROADMAP.md although their functionality shipped under other commit messages; counted as done on
+the code. See the ROADMAP Progress-table notes.
+Status (historical, as written 2026-08-04): Code complete and deployed behind an OFF flag. Flag-on
+is an owner decision and is **gated on six items that are NOT done** — see "WAVE 11" below. Do not
+read "22 of 22" as "ready".
 
 **WAVE 11 CLOSED 2026-08-05 — `136-19`, the cross-surface masking sweep + flag-on attestation.**
 15 mutations, each watched red by name. An unset `MASKING_SCAN_PATTERNS_FILE` yields a RED suite
@@ -103,7 +127,8 @@ terms, both done. Verified read-only on the box:
   instant the flag flips.
 * `/` 1.1 s, `/browse` 0.31 s, both 200.
 
-**The flag must NOT be flipped yet.** Outstanding before flag-on: 136-19 (cross-surface masking
+**[HISTORICAL — the flag WAS flipped on 2026-08-08 by owner decision; waiver recorded in ROADMAP.md
+2026-08-16. Do not act on the sentence below.]** **The flag must NOT be flipped yet.** Outstanding before flag-on: 136-19 (cross-surface masking
 sweep + readiness attestation) and the open Codex code-review findings — including a **BLOCKER**
 that the D-25 masking test SKIPS when its pattern file is absent (a skip is the silent green that
 rule exists to forbid) and two holes in the honesty gate (`accuracy is 91 percent` and
@@ -405,7 +430,10 @@ Condensed 7-phase roadmap: an early atlas quick win, then the REL-01 gate sequen
 
 **SUPERSEDED IN PART 2026-07-30 — NOVEL-01/02 MOVED INTO Phase 136** (owner, discuss-phase; commit `2251fccb`). The "homed AFTER 136 / 136 stays read-surfaces-only" clause above no longer holds: the novelty axis is the owner's primary reason the read surfaces are worth shipping ("new — or those that are not obvious from the title/identification — are the most important"), and the surfaces cannot be designed around a filter that does not exist. The work the addendum priced (rewiring the LLM title gate to the validated cheap config, running the heuristic funnel, closing the `track1_direct` coverage gap where all 254,612 direct rows sit at `is_new = 0`) becomes execution gates inside 136 and rides the ONE authorized rebuild. VIS-01 stays in 136 as before. Also amended in that commit: **BAND-03** (screening-precision-via-tooltip STRUCK), **BAND-05** (weighted estimate / CI / strata table STRUCK — the methods page becomes qualitative, and `web/pages/help.py:245-260` must be rewritten IN THIS PHASE), **NOVEL-01** wording (tri-state fail-closed, "Not found in the finding aids checked", owner confidence estimate dropped), and a flagged-but-unresolved **CERT-02** conflict owed at 139.
 
-**NOTHING SHIPS BEFORE THE DISCOVERY GATE (owner, 2026-07-28).** The REL-01 CURATED-SURFACE EXCEPTION was granted earlier the same day and then REVERSED — its text has been REMOVED from REL-01, which reverts to its plain reading: it gates ALL public claim surfaces, not merely the flag/sitemap/homepage switches. **Phase 136 BUILDS the read surfaces behind the flag; Phase 139 flips them on.** This is the original REL-01 ordering, so no exception is needed. Do NOT plan any early/preview surface for 136, and do not re-derive one from the addendum's section C (retained only as declined-draft text). The atlas-preview exception is unaffected — the atlas is live and stays live.
+**[SUPERSEDED 2026-08-08 by the owner's decision to flip the flag and launch the beta; recorded in
+writing 2026-08-16 in ROADMAP.md "REL-01: the 2026-08-08 flag flip, recorded after the fact". The
+ruling below governed Phase 136's BUILD and is retained for the decision trail — it no longer
+governs what may ship.]** **NOTHING SHIPS BEFORE THE DISCOVERY GATE (owner, 2026-07-28).** The REL-01 CURATED-SURFACE EXCEPTION was granted earlier the same day and then REVERSED — its text has been REMOVED from REL-01, which reverts to its plain reading: it gates ALL public claim surfaces, not merely the flag/sitemap/homepage switches. **Phase 136 BUILDS the read surfaces behind the flag; Phase 139 flips them on.** This is the original REL-01 ordering, so no exception is needed. Do NOT plan any early/preview surface for 136, and do not re-derive one from the addendum's section C (retained only as declined-draft text). The atlas-preview exception is unaffected — the atlas is live and stays live.
 
 Two consequences to carry into planning: (1) **per-claim human confirmation is NOT required** (owner) — a standing posture for when surfaces go live at 139, with the honesty load on BAND-01/03/04 + CERT-02 + the BAND-05 methods page; a future gen-2 reclassification (~32K–45K rows, same-work → quotation) is handled as a correction, not pre-empted. (2) That correction/retraction policy was condition (f) of the now-declined exception, so it currently has **no requirement carrying it** — decide at 139 whether it needs one. **VIS-01 stays in 136** despite the exception lapsing: building 136 against the public projection from line one keeps that path exercised instead of first touching it at the release gate.
 

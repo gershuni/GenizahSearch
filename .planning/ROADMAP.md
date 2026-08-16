@@ -50,13 +50,15 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
 
 **Phase Numbering:** integer phases are planned milestone work; decimal phases (e.g., 133.1) are urgent insertions marked INSERTED, appearing between their surrounding integers.
 
-- [ ] **Phase 133: Visual Atlas Preview (early quick win)** - Offline layout bake → static, canon-masked corpus-overview asset on a standalone `/atlas` beta page, deployed early under the REL-01 atlas-preview exception.
+- [x] **Phase 133: Visual Atlas Preview (early quick win)** - Offline layout bake → static, canon-masked corpus-overview asset on a standalone `/atlas` beta page, deployed early under the REL-01 atlas-preview exception. **CLOSED 2026-07-21** — live in production (`ATLAS_PREVIEW_ENABLED=1`), re-confirmed 2026-07-29.
 - [x] **Phase 134: Discovery Data Spine** - Masked, versioned `discovery.db` sidecar + async DiscoveryService + frozen-frame & budget artifacts; proves masking, event-loop safety, and fail-open. **CLOSED 2026-07-23** on spine success criteria SC1–SC3 (all met by the v1 build); the owner-review data-quality re-distill (discovery-v2) is re-bracketed as Phase 135's leadoff task, gated on the twin census.
 - [x] **Phase 135: Precision Certificate & Confidence Bands** — CLOSED 2026-07-28 (9/9). ✅ **CERT-01 MEASURED = PASS**: owner graded all 280 cards catalogue-blind, validator 12/12; pre-registered weighted precision **0.9382, 95% CI [0.9084, 0.9644]** vs the 0.85 Strict floor (`135-09-CERT01-MEASUREMENT.md`). Public-scope (Sefaria-only) subgroup 0.9580 CI [0.9240, 0.9847] — descriptive, not pre-registered. ⚠ Still open for Phase 139: `band_precision` has NOT been re-baked (`tier_a` carries no number yet — needs `--precision-spec` + deploy), the CERT-02 outcome copy is unapplied, and the per-stratum spread (1.000 ja → 0.471 msource:medium) must reach the BAND-05 methods page. CERT-01 stays `Pending` until those land. Liturgical-containment FP class (one work = 45% of error; D-17 structurally can't catch it) → **discovery-v3** candidate (renamed from "v2.1" 2026-08-05, `docs/specs/discovery-v3-naming.md`). Data-driven four-band display contract + bilingual methods page + pre-registered tier-A precision measurement (grades in parallel). **Leadoff task = the discovery-v2 data re-distill** (canonical merge + w001239 drop + `work_relations` + Lever-1 coverage routing + (B) band-enum rename; plan `docs/specs/discovery-v2-bake-plan.md`; gated on the SEED-029 census) — the band/precision/display contract binds against v2, not v1.
 - [ ] **Phase 136: Read Surfaces — Connections Panel & Work→Witnesses** - Browse "computed identifications" panel (banded, masked evidence) + `/work/{id}` witness-map page grouped by codicological unit + computed identifications on `/catalog-browse` + a corpus-wide findings page. **SCOPE EXPANDED 2026-07-30** (owner): the novelty axis (NOVEL-01/02) moves IN from post-136, VIS-01 is homed here, and ONE authorized rebuild + flag-OFF redeploy is the first gate.
-- [ ] **Phase 137: Community Judgments** - Supabase `work_witness_judgments` (RLS + GRANTs + append-only) + ✓/?/✗ voting UI as a separate, non-band-affecting layer.
-- [ ] **Phase 138: Leads Queue** - `/leads` high-recall R-B screening lane, explicitly uncertified, canon-lane caveated, same voting.
-- [ ] **Phase 139: Atlas Drill-down, Homepage & Release Hardening** - Server-bounded drill-down explorer (absorbing/upgrading the preview page) + CLS-safe homepage band + SEO/i18n/RTL/a11y/observability + the REL-01 flag-flip gate.
+- [ ] **Phase 137: Community Judgments — Hardening** - **RETITLED 2026-08-16 (owner: "ratify reality").** A beta reviews feature shipped 2026-08-13 outside any plan and is live: it meets JUDGE-03 and JUDGE-05, partially meets JUDGE-02. This phase's job is no longer to build from zero but to close the two it **structurally fails** — JUDGE-01 (votes overwrite instead of appending a superseding event; no band captured at judgment time) and JUDGE-04 (one row per review instead of an aggregate; moderation mutates status columns instead of writing separate append-only events) — plus a live role-matrix test for JUDGE-02. Carries a live-data migration question: vote history for judgments already cast under overwrite semantics is not recoverable.
+- [ ] **Phase 138: Leads Queue** - `/leads` high-recall R-B screening lane, explicitly uncertified, canon-lane caveated, same voting. **Unchanged — the one later phase where nothing was pulled forward** (`web/pages/findings.py` still renders the mode strip's leads tab as "Coming soon"; no `/leads` route exists).
+- [ ] **Phase 139a: Release Hardening & REL-01 Gate Closure** - **SPLIT OUT 2026-08-16.** Close the five REL-01 gate items still open at the 2026-08-08 flag flip, re-run the cross-surface masking sweep over the three surfaces that shipped after the last attestation (2026-08-05), and apply or explicitly defer the CERT-02 tier-A copy. Cheap relative to 139b and unblocks the "beta → released" transition.
+- [ ] **Phase 139b: Atlas Drill-down & Homepage Capstone** - Server-bounded drill-down explorer (absorbing/upgrading the preview page) + SEO/i18n/RTL/a11y/observability. **SC2 (the CLS-safe homepage band) shipped early on 2026-08-12/13** (`c413d5e9`, `fcb1eb8e`) and is retro-credited: it was correctly gated in code on `discovery_available()`/`atlas_preview_available()` rather than on a bare flag. The still-unbuilt explorer is the highest-risk surface in the milestone and remains the first candidate to cut to fast-follow.
+- [ ] **Phase 140: Milestone Bookkeeping & Debt Closure** - **NEW 2026-08-16.** Retro-plan the two production-affecting features that have no plan trace (the relation matrix, the excerpt bake), reconcile the `STATE.md`↔ROADMAP novelty-run contradiction, and decide the phase home for the reference-expansion track (discovery-v3 / V4 / V4.1) and the locus track. Mostly documentation plus one owner-decision checkpoint; sequenced FIRST because every other phase plans against numbers this phase makes true.
 
 ## Phase Details
 
@@ -331,15 +333,82 @@ than from scratch — they passed the plan-checker on 2026-08-02.
 
 **Execution Order:** Phases execute in numeric order: 133 → 134 → 135 → 136 → 137 → 138 → 139. Phase 133 (Visual Atlas Preview) is the early quick win and deploys under the REL-01 ATLAS-PREVIEW exception; the Phase 135 CERT-01 grading runs as a parallel research track spanning 136–138 and must complete before the Phase 139 REL-01 gate.
 
+> **RECONCILED 2026-08-16 (owner ruling: "ratify reality").** This table had drifted from the
+> phase checkboxes above it and from `STATE.md`, three ways at once: it read 134 as `6/8, In
+> Progress` while the same file's checkboxes showed 8/8 and its own prose said CLOSED; it read 136
+> as `14/21` when the phase has 22 plans and 18 boxes were ticked, while `STATE.md` said 22 of 22.
+> Bookkeeping was abandoned mid-phase during the beta push and never caught up with ~60 later
+> `feat(136)`/`fix(136)` commits. The numbers below are reconciled against shipped code, not against
+> whichever document was most optimistic.
+
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 133. Visual Atlas Preview (early quick win) | 5/6 | In Progress|  |
-| 134. Discovery Data Spine | 6/8 | In Progress|  |
+| 133. Visual Atlas Preview (early quick win) | 6/6 | Complete   | 2026-07-21 |
+| 134. Discovery Data Spine | 8/8 | Complete   | 2026-07-23 |
 | 135. Precision Certificate & Confidence Bands | 9/9 | Complete   | 2026-07-28 |
-| 136. Read Surfaces — Connections Panel & Work→Witnesses | 14/21 | In Progress|  |
-| 137. Community Judgments | 0/TBD | Not started | - |
+| 136. Read Surfaces — Connections Panel & Work→Witnesses | 22/22 | Complete   | 2026-08-08 |
+| 136.1 Evidence View, Work Pages & Catalogue Integration | 1/6 SC | In Progress|  |
+| 137. Community Judgments — Hardening | 2/5 JUDGE | In Progress|  |
 | 138. Leads Queue | 0/TBD | Not started | - |
-| 139. Atlas Drill-down, Homepage & Release Hardening | 0/TBD | Not started | - |
+| 139a. Release Hardening & REL-01 Gate Closure | 0/TBD | Not started | - |
+| 139b. Atlas Drill-down & Homepage Capstone | SC2 shipped early | In Progress|  |
+| 140. Milestone Bookkeeping & Debt Closure | 0/TBD | Not started | - |
+
+**Why 133 is Complete and not 5/6:** `133-06`'s outstanding Tasks 3-4 were the human production
+deploy. That deploy happened — `ATLAS_PREVIEW_ENABLED=1` on genizahsearch.com from 2026-07-21
+(CHANGELOG.md, release commit `155758f0`), independently re-confirmed live on 2026-07-29
+(`d725e14d`, phone-confirmed, live page + asset fetch). The checkbox was simply never flipped.
+
+**Why 136 is Complete and not 18/22:** the four unticked plans' functionality is in production under
+other commit messages — `136-13`'s rebuild and redeploy (the asset the site serves today),
+`136-15`'s pure panel display model (`shared/discovery_panel_model.py`), `136-21`'s work-expansion
+service work (`get_work_witnesses`, `build_work_expansion_count_sql` in
+`shared/discovery_service.py`), and `136-22`'s launch-statistics reader (`a4ce0b31`, 2026-08-06).
+The work shipped; the plan files were never marked. Counted as done on the code, not on the boxes.
+
+**Why 136.1, 137 and 139b read as In Progress despite having no plan files:** scope belonging to each
+was built during the beta push, outside any plan. See "Scope that shipped ahead of its phase" below.
+
+## Scope that shipped ahead of its phase
+
+*Recorded 2026-08-16. Between 2026-08-08 and 2026-08-14 the beta launch pulled real scope out of
+three later phases. None of it was wrong to ship; all of it shipped without a plan file, and the
+planning record never caught up. Retro-credit is granted where the built thing actually satisfies
+the criterion, and withheld where it does not — partial credit is recorded as partial.*
+
+| Phase | What shipped early | Credit |
+|---|---|---|
+| **136.1** | The excerpt / "View text match" view (`74702fa8` + follow-ups, 2026-08-13) | **PANEL-03 partially, by a different mechanism.** Excerpts are baked at build time, not offset-validated at render time as SC1 specifies, and the per-work `reuse_ok` licence gate SC2 requires is not visibly enforced in `scripts/bake_discovery_excerpts.py`. SC3 (`/work/{id}`), SC4 (`/catalog-browse`) and SC5 (title links) are unbuilt — no route exists for either. **1 of 6.** |
+| **137** | Beta community identification reviews (`7268a7eb`, `b7618f5a`, 2026-08-13), default-ON | **JUDGE-03 and JUDGE-05 in full; JUDGE-02 partially** (RLS + explicit GRANTs + SECURITY DEFINER RPCs exist, but the only test is a substring assertion against the SQL file text, not a live role-matrix test). **JUDGE-01 and JUDGE-04 structurally not met** — see the Phase 137 entry. **2 of 5.** |
+| **139b** | `/start` guided launchpad + homepage discovery entry points (`c413d5e9`, `fcb1eb8e`, 2026-08-12/13) | **SC2 in full, retro-credited.** Every route and teaser is gated on `atlas_preview_available()` / `discovery_available()` — the availability predicate, never a bare flag — so the clean-hide discipline the phase exists to enforce was respected by the code that jumped the queue. |
+| **136** | The relation precedence matrix (`shared/discovery_relation_matrix.py`, 2026-08-12/13) and the launch-statistics reader (`a4ce0b31`) | Production code that governs what a claim is allowed to assert, with **no plan file at all**. Retro-plans owed — Phase 140. |
+
+## REL-01: the 2026-08-08 flag flip, recorded after the fact
+
+**Owner waiver, 2026-08-16.** `DISCOVERY_ENABLED` was set to 1 in production on 2026-08-08. At that
+moment this repository's written record said the opposite in two places: `STATE.md`'s *"The flag
+must NOT be flipped yet"*, and the standing ruling *"NOTHING SHIPS BEFORE THE DISCOVERY GATE (owner,
+2026-07-28) — Phase 136 BUILDS the read surfaces; Phase 139 flips them on."* The flip was an owner
+decision and remains one; what was missing is that **nobody wrote it down**, so for eight days the
+planning record contradicted the live site. This entry closes that gap rather than re-litigating the
+decision.
+
+Of the six items recorded as gating flag-on, **one is resolved** (the 58 NULL-genre works the
+release verifier failed on — `2e9b409e`, 2026-08-13). The remaining five are **waived in writing,
+with the surfaces staying live under an explicit beta label**:
+
+| Gate item | Status | Reason for waiver |
+|---|---|---|
+| D-06b | Open | Disclosure detail; the shipped surfaces carry the D-06a disclosures and the qualitative methods page, which is the honesty load that matters to a reader. |
+| CERT-02 tier-A-with-its-number copy | Open | Moot under the standing no-percentages ruling — the surfaces deliberately show no precision number, so the copy has nothing to apply to until that ruling changes. `band_precision` remains un-re-baked. |
+| Correction / retraction policy | Open | Lost its carrying requirement when the curated-surface exception was declined on 2026-07-28; genuinely owed, and now homed in **Phase 139a** rather than left unassigned. |
+| VIS-02 reconciliation | Open | A Phase 139 requirement by original registration; stays in 139a. The Phase 136 VIS-01 public projection — the one that actually gates what leaves the building — did ship and is enforced at build time. |
+| Browser-check record | Open | The CI `findings-browser-check` job exists and runs; what is missing is the recorded attestation, not the check. |
+
+**One item is NOT waived and is carried as a live obligation:** the cross-surface masking sweep was
+last attested on 2026-08-05 (`136-19`). Three surfaces shipped after it — the beta reviews, the
+excerpt view, and the homepage promotion — and **none has been swept**. This is a safety check
+rather than a copy or policy debt, and it is the first task of Phase 139a.
 
 ---
 

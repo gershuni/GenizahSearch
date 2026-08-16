@@ -113,6 +113,13 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   that date, and no later commit in this window confirms the follow-up rebuild reached the server. A
   work with no locus data yet reads as having no addressable units, rather than failing.
 
+- **The "Part of work" picker stopped showing a page number where a structural label was wanted**
+  (2026-08-15, `7f249d15`, merged via PR #320). A Judeo-Arabic unit's full label carries its page
+  (for example `פרק יז, עמ' 219`), which is right beside a finding but noise inside a From/To
+  control, where it made the structural label hard to scan. The range picker now shows the
+  structural part alone; the citation shown beside the finding itself is unchanged. Fails soft — an
+  empty structural label keeps its page, since a blank option would be worse than a noisy one.
+
 ### The evidence/excerpt view — "View text match" (web, 2026-08-13)
 
 - **Every computed identification now has a "View text match" disclosure** (`74702fa8` and
@@ -262,6 +269,26 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   discovery-v3 in particular is explicitly not deployed per its own bake-plan record, with several
   owner decisions (a masking-pattern gap, a novelty-run spend authorization) still open before a
   release-quality run.
+- **A "V4" public-reference expansion pipeline was built** (2026-08-15, PR #320, merge `51ff2bd2`;
+  spec `docs/specs/discovery-v4-public-reference-expansion.md`). It acquires public Sefaria and
+  Hebrew Wikisource editions for work identities that had already passed owner review, so that more
+  matched passages can be shown from a publicly reusable edition rather than withheld. It
+  deliberately does **not** infer new work identity from title similarity: every acquired source is
+  mapped explicitly to one existing work id in a reviewed, tracked source map. A 2026-08-14 audit
+  selected 45 identities across 43 containers; 41 were acquired, yielding 43 reference streams, and
+  two too-short sources were quarantined. The reference corpus is an append-only extension of its
+  predecessor — the earlier prefix must compare equal after unpickling — every consuming command
+  verifies a full SHA-256 before reading its input, and the verifier additionally proves each
+  readable public text reproduces its matcher stream exactly. Generated text, audit snapshots and
+  match databases stay in the ignored data depot; only the deterministic transformations and the
+  reviewed source map are tracked. **Built and merged, not deployed:** promoting the expanded
+  reference set remains a separate owner-approved deployment step per its own spec, so no reader
+  sees a V4-sourced passage yet.
+- **Local `master-main` and `origin/master-main` had diverged 6/6** and were reconciled on
+  2026-08-16 (merge `629f4bb6`). The V4 work above was merged upstream through PR #320 while the
+  corpus-repair commits landed only locally, so for a day neither branch was a complete picture and
+  a reachability check against the local branch alone reported the V4 commits as unmerged. They
+  were not.
 - **The 2026-08-08 flag flip itself was an unrecorded operational action** — an env-var edit
   directly on the production box, not a commit or a scripted deploy step. It was confirmed after the
   fact, not simply remembered: commit `04434714` checked that `/computed-identifications` actually
