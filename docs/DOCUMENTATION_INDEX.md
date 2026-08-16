@@ -1,6 +1,6 @@
 # GenizahSearch Documentation Index
 
-> Last updated: 2026-06-16
+> Last updated: 2026-08-16
 
 This directory contains all project documentation, organized by category.
 
@@ -102,6 +102,24 @@ Detailed specifications for complex features:
 | [JOINS_TECHNICAL_SPEC.md](specs/JOINS_TECHNICAL_SPEC.md) | Fragment joins system architecture |
 | [JOINS_SIMPLIFIED_SPEC.md](specs/JOINS_SIMPLIFIED_SPEC.md) | Simplified joins for first release |
 | [PUZZLE_WEB_TECHNICAL_SPEC.md](specs/PUZZLE_WEB_TECHNICAL_SPEC.md) | Web puzzle architecture, blockers, and solution paths |
+| [discovery-sidecar-schema-v1.md](specs/discovery-sidecar-schema-v1.md) | Frozen discovery-claim sidecar schema (Phase 134) |
+| [discovery-frames.md](specs/discovery-frames.md) | discovery-v1 build frame (superseded — never deployed) |
+| [discovery-frames-v2.md](specs/discovery-frames-v2.md) | discovery-v2 build frame — first artifact deployed (2026-07-28) |
+| [discovery-frames-v2.1.md](specs/discovery-frames-v2.1.md) | discovery-v2.1 additive rebuild — the artifact currently serving `/computed-identifications` |
+| [discovery-v2-bake-plan.md](specs/discovery-v2-bake-plan.md) | discovery-v2 bake procedure and owner sign-off |
+| [discovery-v3-bake-plan.md](specs/discovery-v3-bake-plan.md) | discovery-v3 (gen-2 evidence pipeline) bake plan — Codex-approved, NOT deployed |
+| [discovery-v3-naming.md](specs/discovery-v3-naming.md) | Resolves the "v2.1" naming collision between the deployed rebuild and the gen-2 refresh |
+| [discovery-v3-masking-evidence.md](specs/discovery-v3-masking-evidence.md) | Masking-scan evidence for the discovery-v3 track |
+| [discovery-band-labels-v1.md](specs/discovery-band-labels-v1.md) | Honesty-safe band/label vocabulary (no precision percentages) |
+| [discovery-relation-matrix-v1.md](specs/discovery-relation-matrix-v1.md) | Frozen relation precedence matrix (semantics frozen 2026-08-12) |
+| [discovery-budgets.md](specs/discovery-budgets.md) | Discovery acceptance/performance budgets (PERF-01) |
+| [discovery-deploy.md](specs/discovery-deploy.md) | Discovery sidecar deploy / rollback / rebuild runbook (DATA-08) |
+| [discovery-coordination.md](specs/discovery-coordination.md) | Cross-phase discovery coordination notes |
+| [discovery-forward-ledger.md](specs/discovery-forward-ledger.md) | Forward ledger of deferred discovery decisions |
+| [discovery-cert01-protocol.md](specs/discovery-cert01-protocol.md) | CERT-01 precision-certificate protocol (pre-registration, draw, grading) |
+| [discovery-novelty-v1.md](specs/discovery-novelty-v1.md) | Novelty axis design, LLM gate contract, run cost/authorization |
+| [atlas-asset-schema-v1.md](specs/atlas-asset-schema-v1.md) | Baked Atlas binary asset schema |
+| [v3-review-viewer-spec.md](specs/v3-review-viewer-spec.md) | Owner-only LOCAL discovery-v3 grading server (never deployed) |
 
 ---
 

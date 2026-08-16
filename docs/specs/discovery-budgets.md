@@ -4,6 +4,10 @@
 (Phase 136, plan 136-01) — added §5, the corpus-wide findings-page ("Computed Identifications") cap
 table plus two build-time PENDING slots; no pre-existing cap in §1-§4 is changed by this amendment.
 
+> **Note (2026-08-16):** `DISCOVERY_ENABLED` has been ON in production since 2026-08-08. The
+> benchmark-only "flag was OFF" language below describes readiness measurements taken *before* the
+> flip and remains accurate as history; it is not a claim about the flag's state today.
+
 **Tunable ONLY by versioning this artifact.** These numeric caps are a phase
 exit criterion (PERF-01) and a hard contract for every downstream Discovery
 plan (134-06 `DiscoveryService`, 135-139 read surfaces). A cap in this

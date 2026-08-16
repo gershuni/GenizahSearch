@@ -8,7 +8,28 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.5.1?
+## What's New in Version 8.5.2?
+
+### Computed Identifications (beta, web)
+
+The website now shows **computed identifications**: where the text on a Genizah fragment matches a
+known work, the manuscript's browse page can list those matches, and a new corpus-wide
+**Computed Identifications** page lets you sweep the whole corpus for them. Each match states what
+it is claiming — that the fragment carries the work, shares text with it, or includes a quotation —
+and a "View text match" view shows the fragment's own passage beside the work's, with the matching
+words highlighted. A **Start Here** page introduces the site for first-time visitors. This is a
+beta: the [methods page](https://genizahsearch.com/help) explains in plain language how the matches
+were produced and how far they can be trusted, and readers can submit their own verdict on any
+match.
+
+### v8.5.2: Composition Filter Fix & Web Responsiveness
+
+Two unrelated fixes shipped together. Desktop: the Composition Search "Only printed" / "Exclude
+printed" filter silently did nothing (it read the wrong internal data field) — it now actually
+filters, and reaches child/fragment rows too. Web: five page loaders that were silently failing to
+run in the background now load correctly off the main thread, fixing pages that used to hang on
+"Loading..." forever (My Corrections, My Comments, the homepage Recently Viewed panel, discovery
+replies, and the Joins Lab indicator).
 
 ### v8.5.1: Browse doubled-folios fix (desktop)
 

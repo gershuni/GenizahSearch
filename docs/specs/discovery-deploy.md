@@ -2,6 +2,11 @@
 
 **Status:** ACTIVE. Version 1, created 2026-07-23 (Phase 134, plan 134-08).
 
+> **Note (2026-08-16):** `DISCOVERY_ENABLED` has been ON in production since 2026-08-08. The
+> "flag stays OFF" language below describes the flag-bypassed readiness smoke this runbook's
+> *deploy* step runs before the flag is ever touched — it is not a claim that the flag is off in
+> production today.
+
 This is the operational runbook for shipping, rolling back, and reproducibly
 rebuilding the Discovery Data Spine sidecar (`discovery.db`). It is the
 concrete procedure the 134-08 Task 3 human/live-server checkpoint follows and

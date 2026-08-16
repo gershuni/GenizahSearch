@@ -4,7 +4,7 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased] — Connections Atlas (beta, web)
+## [Unreleased] — Connections Atlas & Computed Identifications (beta, web)
 
 ### LIVE (beta) — discovery read surfaces (web)
 
@@ -48,6 +48,249 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
     restricted-corpus strings, with a positive control per class and a fail-closed pattern set.
   - The public artifact is a projected, audience-gated sidecar; a public loader can only ever resolve
     a public artifact, and a private, partial, corrupt or absent one fails closed identically.
+
+### Post-launch discovery refinements (web, 2026-08-11 through 2026-08-14)
+
+- **Catalogue-divergent identifications are no longer hidden behind a toggle, and the browse panel
+  collapsed from four disclosure levels to two** (2026-08-13, `01b313e6`). The old posture hid any
+  identification that does not correspond to the catalogue behind a bottom "show more" toggle — and
+  it failed live on launch day: a main-pool, two-folio, full-coverage identification on one
+  manuscript was invisible in the panel while the manuscript pane advertised the same work ungated
+  on the same screen. Measured scope: **3,570 main-pool identifications, 12.5% of the main pool**,
+  sat behind that toggle — and they are precisely the ones a cataloguer would most want to look at.
+  A catalogue-divergent claim now routes through the same eligibility tests as every other claim and
+  carries a neutral per-row chip instead ("Does not correspond to the catalogue — not adjudicated",
+  the same wording the findings page already shipped). The system still takes no side: which reading
+  is correct stays a human annotation and is never asserted by the software. Separately, the
+  manuscript pane's "Elsewhere in this manuscript" heading became **"In this manuscript"** — the
+  pane lists every work in the manuscript including the open folio, so the old header asserted
+  something false whenever a work covered the page the reader was already on; work chips now carry
+  an "includes this page / כולל דף זה" marker instead. Five stacked regions were three too many on
+  a surface where roughly two-thirds of readers are on a phone.
+
+- **The relation a reader sees on a computed identification is now driven by one frozen precedence
+  matrix instead of scattered per-surface logic** (2026-08-12/13,
+  `76a4844d`/`a59ce38f`/`17b2acdd`/`8c0bc49a`/`bff6a8a7`/`a419f76f`/`3c220e52`/`debaa4cf`,
+  extended `a7d47698`/`b2d5bb04`). The rendered states — "Matches this work" / "Shares text with
+  this work" / "Includes a quotation" / "Needs review" — replace an earlier "Direct match" /
+  "Partial match" pair, the second of which had drifted into a genuine misnomer;
+  `shared/discovery_relation_matrix.py`'s single six-rule precedence table is now the only place any
+  of the four surfaces that render a relation (the findings-page chip, the connections-panel claim
+  rows, the manuscript pane, and the "show more possible matches" expansion pane) may read one from,
+  closing off four call sites that had independently drifted — the expansion pane, for one, had been
+  labelling 35,754 router-declined rows as if they were direct matches. The matrix's input
+  population is measured and frozen (`scripts/emit_population_lock.py`) so a later data change
+  cannot silently reweight it. This is a wording/consistency correction, not a new claim: no
+  precision percentage, confidence interval or human-review badge was added anywhere in the process.
+  Tests: `tests/test_discovery_relation_matrix.py` (49),
+  `tests/test_discovery_relation_matrix_wiring.py`.
+  - Merged and unconditional, behind the same discovery flag that has been on in production since
+    2026-08-08 — the wording is live for any reader who opens a computed identification. Whether the
+    specific sidecar rebuild carrying the frozen population lock has itself reached the production
+    server in this window could not be confirmed from git (sidecar swaps are a manual, gitignored
+    deploy step); the code path is ready either way.
+
+- **`/help`'s qualitative methods section came back after a merge had silently deleted it**
+  (2026-08-13, `44855a13`, `72a529a7`). An earlier merge had dropped both language call sites of the
+  confidence-bands write-up, including the disclosure that a low single-digit *share* — not a
+  percentage — of computed identifications is misattributed. Restored, shortened, and extended with
+  a new subsection specifically about the `/computed-identifications` **page** (the restored text
+  previously covered only the browse-page panel's disclosure). Gated on the same
+  `discovery_available()` predicate as before; static copy, no data dependency, so this is live now
+  with no further deploy needed.
+
+- **The corpus-wide findings page gained a "Part of work" (חלק מן החיבור) range filter** (2026-08-14,
+  `d4d9818d`, merge `f5bb5341`), letting a reader who has picked a specific work narrow results to a
+  From/To span inside it — a Bavli daf range, a Yerushalmi halakha range, a Targum chapter range, or
+  a Judeo-Arabic work's own internal hierarchy — instead of seeing every identification against that
+  work at once. The address computation behind it — book/chapter/daf/halakha/page addressing per
+  work, taken from the edition rather than inferred — is a four-day offline builder
+  (`shared/discovery_locus.py`, ~30 commits on 2026-08-10) that reached no reader-facing surface
+  until this filter shipped four days later. The filter control itself is unconditional code, live
+  under the same discovery gate; whether a given work's identifications actually carry locus data in
+  the production sidecar is a data-completeness question rather than a code gate — a 2026-08-12
+  `docs/OPEN_ISSUES.md` entry recorded that no production consumer existed for the locus table as of
+  that date, and no later commit in this window confirms the follow-up rebuild reached the server. A
+  work with no locus data yet reads as having no addressable units, rather than failing.
+
+### The evidence/excerpt view — "View text match" (web, 2026-08-13)
+
+- **Every computed identification now has a "View text match" disclosure** (`74702fa8` and
+  follow-ups `8f6df14d`, `aeec21a1`, `c83c59b6`, `16279c4d`), on both the `/computed-identifications`
+  findings page and the browse-page connections panel. Opening it shows the manuscript's own passage
+  beside the identified work's edition passage with the words the router actually matched
+  highlighted on both sides — a concrete answer to "what did it actually match on", not only a
+  relation label. The text is baked in advance, not read live:
+  `scripts/bake_discovery_excerpts.py` freezes short plain-text spans (before/span/after, on both
+  the fragment side and the work side) per identification into a new `discovery_excerpt` sidecar
+  table. For identifications matched against a masked reference edition, the bake re-projects the
+  passage onto the corresponding public-domain Bible text instead, for the large majority of that
+  population — solving the "show the matched passage without showing the restricted edition" problem
+  without exposing any restricted text; the masked span is used only as an in-memory alignment key
+  and never reaches the rendered page, consistent with the masking rule. A follow-up fix
+  (`aeec21a1`) was needed because NiceGUI 3.x's client-side sanitizer was stripping the highlight
+  markup on arrival.
+  - Same caveat as the refinements above: merged and reading from the already-live discovery
+    surfaces; the shipping commit's own language ("shipped same day for the beta launch") indicates
+    the underlying sidecar table deployed same-day, but no separate ops/deploy commit in this window
+    confirms that independently.
+
+### The guided Start Here experience and homepage (web, 2026-08-12/13)
+
+- **A new `/start` page** (`c413d5e9`, refined through several follow-up commits) gives a first-time
+  visitor a guided way in: curated manuscripts, a handful of prepared searches, catalogue works,
+  worked examples of computed identifications, gated entry points into the research tools, and
+  collapsible background on the Genizah itself. Bilingual, registered with no feature flag — live now.
+- **The homepage gained direct entry points into the discovery surfaces** (`fcb1eb8e`): a "Computed
+  Identifications" chip, live since the discovery flag is on in production, and a "The Visual Genizah
+  Atlas" chip. Both are gated on their respective availability predicates
+  (`discovery_available()` / `atlas_preview_available()`), and both flags are set in production —
+  `ATLAS_PREVIEW_ENABLED=1` since 2026-07-21, independently re-confirmed live on 2026-07-29.
+- The homepage hero's mobile layout bug (`7ed9ac15`) is covered under Mobile/layout below.
+
+### Community identification reviews (beta, web, 2026-08-13)
+
+- **Readers can submit a verdict on any computed identification** (`7268a7eb`, moderation refined
+  same day in `b7618f5a`): matches this work / includes a quotation / shares a source / the work
+  quotes the manuscript / not meaningful / other-unsure, plus (for direct-witness rows) a novelty
+  verdict. Submitted reviews are held pending; approved ones surface back on the findings page and
+  the browse-panel connections view. All writes go through Supabase RPCs
+  (`submit_identification_review_beta`, `moderate_identification_review_beta_v2`,
+  `get_published_identification_reviews_beta[_batch]`) that carry their own validation, a per-target
+  cooldown and an hourly write cap — the Python layer never writes the table directly, and the
+  migration includes the explicit `GRANT`s the Data API needs. An anonymous visitor can take part
+  too: identity is a one-way, domain-separated SHA-256 hash of the session id, so no session
+  identifier ever leaves the process; a signed-in reader's review keys off their account instead.
+  Moderation (approve/reject/edit before publishing) is restricted to admin accounts.
+  - **New flag, default ON:** `IDENTIFICATION_REVIEWS_ENABLED`.
+  - This is a beta; nothing about it changes a band, a percentage, or a certified identification
+    anywhere else on the site, and no promise is made here about how votes will ultimately be
+    counted or displayed in aggregate.
+  - **Known gaps against the eventual full design**, recorded so the beta is not mistaken for the
+    finished feature: a changed vote overwrites the previous one rather than appending a superseding
+    event, so vote history is not retained; reviews render one row per approved review rather than
+    as an aggregate; and moderation mutates status columns on the same row rather than writing
+    separate append-only moderation events.
+  - Live now — code is unconditional other than the default-true flag. Whether the Supabase
+    migration itself (`scripts/create_identification_reviews_beta.sql`) has been run against the
+    production project could not be confirmed from git; the feature falls back to the existing
+    email-contact channel if it has not, so there is no user-visible failure mode either way.
+
+### Fixed — search & browse folio-link correctness (web, 2026-08-13)
+
+- **A search hit's Browse button could land on a different folio than the one that actually
+  matched** (`48506010`). The deep link was built from `raw_header` alone and silently fell back to
+  a bare `?sys_id=` (folio 1) on any parse failure — landing a reader on the wrong page of a
+  multi-volume manuscript. It now falls back to the self-encoding `uid` (which carries
+  `ie_id`/`p_num`/`fl_id` on its own), and `&page=`/`&volume_ie=` are now carried on all four Browse
+  link sites. The same commit fixed an independent duplicate-result bug in `_deduplicate` (a stale
+  V0.7-vs-V0.7 comparison could keep two copies of the same hit).
+- This closes out, for ordinary search results, the same folio-link defect the 2026-08-08/09 fix
+  above (under "LIVE (beta)") had only fixed for the discovery surfaces — both now route through the
+  same shared `web/components/discovery_links.py` builder and its AST guard.
+
+### Fixed — citation footer, mobile navigation, and homepage layout (web)
+
+- **The citation footer no longer flashes on every load for a reader who dismissed it once**
+  (2026-08-05, `098c0b03`). It used to render expanded, then a post-hydration script read
+  `localStorage` and hid it — so a returning reader watched it paint and vanish on every page. A
+  blocking `<head>` script now applies the right display class before first paint. Dismissing it
+  also no longer **deletes** it (which used to remove the only copy-citation button along with it):
+  it now collapses to a compact one-line form that keeps its own copy button, and that line's own
+  dismissal is session-only, so the reminder returns on the reader's next visit.
+- **The mobile nav drawer no longer covers the page on load** (2026-08-04, `2065290c`). It used to
+  mount open and close itself roughly half a second later via a client round-trip that could fail
+  silently — CI measured the backdrop still intercepting taps five seconds after load, ten times the
+  intended wait. It now mounts closed and lets Quasar's own `show-if-above` decide desktop-vs-mobile
+  at first paint, with no round-trip, while still respecting an explicit prior desktop
+  close-preference.
+- **The homepage hero collapsed to one word per line on phones, beside a large empty gap**
+  (2026-08-13, `7ed9ac15`). The text column had `flex-1 min-w-0`, which let the row shrink it to
+  nothing while the stats column kept its full width; it now has a real minimum width
+  (`flex: 1 1 20rem; min-width: min(100%, 20rem)`).
+
+### Performance (web)
+
+- **Search load is now bounded, and static assets no longer force a session cookie on every
+  response** (2026-08-13, `ab064ff9`). UI search is capped at 3 concurrent core searches and 2
+  concurrent enrichment batches process-wide — a non-blocking cap that degrades rather than queues,
+  so a burst fails fast instead of piling up threadpool workers. Favicon, `/static/*`, versioned
+  bundle assets, and the content-hashed Atlas binary now bypass the session-cookie middleware
+  entirely, so they can actually be cached by a CDN or a browser; ordinary page HTML, the APIs, and
+  auth keep normal session behavior unchanged. This is a **partial** fix for the
+  `Set-Cookie`-on-every-response Cloudflare BYPASS problem (see "Still open" in the v8.5.2 section
+  below) — it removes the cookie cost specifically for cacheable static assets, not for ordinary
+  page requests, so the broader issue is unchanged. Web is not continuous-deploy, and no commit in
+  this window explicitly confirms this change reached production.
+- **The slow-request log stopped over-attributing every slow request to the event loop**
+  (2026-08-04, `ce4f8d99`). Its canned "the event loop was blocked" explanation used to fire
+  unconditionally; it now only blames the loop when the measured loop-lag is actually comparable to
+  the request's own duration, and otherwise points at upstream I/O. The same pass documented,
+  without yet fixing, a sixth unbatched synchronous Supabase call inside browse rendering
+  (`fetch_connected_fragments`, `browse.py`) that the v8.5.2 event-loop sweep had missed — left open
+  deliberately, since a blind off-loop wrap would silently anonymize a user-scoped read.
+
+### Internal — test-suite and CI guard fixes (tests, scripts)
+
+- **A UTF-8 BOM silently disabled five guard tests, including two that guard the authentication
+  boundary** (2026-08-13, `d4ce07fa`). A commit the previous evening (`78347009`) had saved
+  `tests/test_discovery_suppression.py` with a leading BOM; Python imports the file fine, but the
+  repo-wide `ast.parse()` guard tests all failed outright on it — silently taking down the guards
+  against anonymous reads on authenticated Supabase tables and against `set_session` calls outside
+  the OAuth path, along with three other list/state guards. Nobody noticed because the full test
+  suite already segfaults partway through on an unrelated PyQt6 marker gap, so the run never reaches
+  its own summary and reports exit 0 regardless. Fixed by stripping the three BOM bytes.
+- **Two CI-only NiceGUI test-harness bugs fixed** (2026-08-04, `bda0a203`, `886353a3`): a stale
+  closed event loop left on NiceGUI's module-level `core.loop` was corrupting later tests in the
+  same run, a DOM-ancestor walk in a render-smoke test didn't stop at a dead slot, and the
+  discovery module needed reloading in place rather than re-imported.
+- **The Atlas masking-capture CI tool was passing while doing almost none of its job**
+  (2026-08-04, `d11cc054`). The browser-driven script that scans rendered Atlas pages for
+  restricted-corpus strings was waiting on the wrong selector, treated every failed interaction as a
+  non-fatal warning rather than a failure, and never actually exercised the Hebrew interface (it
+  toggled into Hebrew, then dumped the same Hebrew DOM twice while reporting "EN + HE" coverage) —
+  so its first run against live production passed without meaningfully testing either language.
+
+### Data & ops
+
+- **Discovery artifact lineage.** The public artifact behind `/computed-identifications` and the
+  browse-page connections panel today is an **additive** rebuild of the discovery-v2 dataset
+  (deployed to production before 2026-08-05; `DISCOVERY_ENABLED` flipped on 2026-08-08). Everything
+  built after that — the relation-matrix population and locus tables (2026-08-11/12), and a further,
+  from-scratch "discovery-v3" evidence-pipeline rebuild (code-approved 2026-08-07, assembled through
+  2026-08-09) — is validated locally but **not deployed as a new artifact** as of this writing;
+  discovery-v3 in particular is explicitly not deployed per its own bake-plan record, with several
+  owner decisions (a masking-pattern gap, a novelty-run spend authorization) still open before a
+  release-quality run.
+- **The 2026-08-08 flag flip itself was an unrecorded operational action** — an env-var edit
+  directly on the production box, not a commit or a scripted deploy step. It was confirmed after the
+  fact, not simply remembered: commit `04434714` checked that `/computed-identifications` actually
+  returned 200 in production before correcting CHANGELOG.md and `docs/OPEN_ISSUES.md`, which had
+  both still said the flag was unset.
+- **A cross-manuscript text-misattribution bug is repaired in the corpus file but not yet visible in
+  search.** A corpus-wide scan (2026-08-14, `c61fed65`) found the shape at scale: a multi-item
+  system-number record's ingest had, in a handful of cases, appended the next item's folio text onto
+  the previous record's, so a search hit could resolve to entirely the wrong manuscript. An
+  8-record, SHA-256-guarded repair manifest was built and applied (2026-08-15, `318cf117`; 3 records
+  re-filed under their own identifiers, 4 stripped, 1 de-duplicated) — including the case reported
+  as SEED-033, where a phrase search resolved to Heidelberg Hebr. **18** when the matching folio
+  actually belongs to Heidelberg Hebr. **19**. **The repair is live on genizahsearch.com as of
+  2026-08-16** (`7fda9107`): that phrase now returns exactly one hit and it is Heidelberg Hebr. 19,
+  and its browse page renders — the harm was the entity link, not the recall. The manifest was
+  applied on the server against production's own corpus rather than by uploading the local result
+  (all 8 entries matched by SHA-256, 0 skewed), and the file it produced is byte-identical to the
+  local repair, so the two derivations agree without either trusting the other; the original is
+  retained and archived. The index rebuild took 869s and moved the corpus from 1,161,479 to
+  1,161,484 documents. A first attempt had been rolled back after the site degraded to 30-second
+  page loads — diagnosed not as the file swap but as page-cache eviction, with `materialize_ms`
+  going from 1.2s to 62.6s while Tantivy itself stayed healthy — so the rebuild was re-run from a
+  guarded, non-service-restarting script (`scripts/rebuild_index.sh`) in the site's measured
+  quietest hour. Three further identified pairs are **deliberately left unrepaired**: each scores
+  well below the three accepted, and two would require inventing a manuscript that `libraries.csv`
+  has no row for — creating an entity on thin evidence is the same failure the repair exists to
+  undo. The upstream ingest bug is **not** fixed and sits with the MiDRASH team, which is why every
+  manifest entry is hash-guarded and skips rather than blind-patches: a future corpus drop can
+  reproduce the shape at different records.
 
 ### New Features
 - **Connections Atlas (beta, web).** A new claim-free preview page at `/atlas` that renders
