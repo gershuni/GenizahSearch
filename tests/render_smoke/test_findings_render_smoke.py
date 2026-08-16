@@ -2865,8 +2865,11 @@ def capture_rendered_output(destination: str) -> str:
                     finally:
                         patch.undo()
                     chunks.append(f"--- {lang}/{status}/{unit}/{bucket} ---")
-                    for element in client.elements.values():
-                        chunks.extend(_subtree_texts(element))
+                    try:
+                        for element in client.elements.values():
+                            chunks.extend(_subtree_texts(element))
+                    finally:
+                        client.delete()
 
         # TWO STATES THE MATRIX ABOVE CANNOT REACH, each one a branch that
         # PAINTS. A capture that never enters a painting branch is a masking
@@ -2926,8 +2929,11 @@ def capture_rendered_output(destination: str) -> str:
             finally:
                 patch.undo()
             chunks.append(f"--- {lang}/{label} ---")
-            for element in client.elements.values():
-                chunks.extend(_subtree_texts(element))
+            try:
+                for element in client.elements.values():
+                    chunks.extend(_subtree_texts(element))
+            finally:
+                client.delete()
 
     with contextlib.closing(io.open(destination, "w", encoding="utf-8")) as fh:
         fh.write("\n".join(chunks))

@@ -23,6 +23,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from shared import domain_hierarchy as _domain_hierarchy
 from shared.thread_local_db import ThreadLocalConnection
 # Phase 78 (Concern #3): APIError from neutral shared module — NOT from web layer.
 # Plan 03 R2-#3: validate_filter_values uses APIError to fail closed when
@@ -687,6 +688,19 @@ _FJMS_SUBCHILD_IDX = {
 }
 
 
+def fjms_domain_sort_key(value: str) -> tuple:
+    """Compatibility wrapper around the shared, database-free authority."""
+    return _domain_hierarchy.domain_sort_key(value)
+
+
+# Keep the existing public helper and catalogue implementation on the same
+# database-free authority that Discovery imports.  The aliases also preserve
+# compatibility for callers which historically imported the FJMS names here.
+_FJMS_PARENT_IDX = _domain_hierarchy.FJMS_PARENT_IDX
+_FJMS_CHILD_IDX = _domain_hierarchy.FJMS_CHILD_IDX
+_FJMS_SUBCHILD_IDX = _domain_hierarchy.FJMS_SUBCHILD_IDX
+
+
 class FjmsService:
     """Service for accessing FJMS enrichment data from the SQLite sidecar."""
 
@@ -727,18 +741,26 @@ class FjmsService:
 
         # Resolve db_path
         if db_path is None:
-            # Check user-updated sidecar location first (LOCALAPPDATA)
-            import os
-            user_path = os.path.join(
-                os.environ.get('LOCALAPPDATA', ''),
-                'GenizahSearchPro', 'data', _SIDECAR_DIR, _SIDECAR_FILENAME
-            )
-            if os.path.isfile(user_path):
-                db_path = user_path
+            # A worktree does not contain gitignored sidecars. Let a local
+            # preview point explicitly at the main checkout's FJMS database
+            # without copying 1.5 GB or creating a junction. An explicit
+            # constructor argument still has priority over this environment
+            # override, which in turn has priority over auto-detection.
+            configured_path = os.environ.get("GENIZAH_FJMS_DB_PATH", "").strip()
+            if configured_path:
+                db_path = configured_path
             else:
-                root = _find_project_root()
-                if root:
-                    db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME)
+                # Check user-updated sidecar location first (LOCALAPPDATA)
+                user_path = os.path.join(
+                    os.environ.get('LOCALAPPDATA', ''),
+                    'GenizahSearchPro', 'data', _SIDECAR_DIR, _SIDECAR_FILENAME
+                )
+                if os.path.isfile(user_path):
+                    db_path = user_path
+                else:
+                    root = _find_project_root()
+                    if root:
+                        db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME)
 
         if db_path is None:
             logger.warning("FjmsService: No db_path provided and project root not found")

@@ -203,6 +203,115 @@ def test_canonical_merges_release_semantics_reject_wrong_drop_set(tmp_path):
         sidecar_build.load_canonical_merges(path, require_release_semantics=True)
 
 
+def _v4_release_merges_doc(*, v4_members=("w030001", "w040001")):
+    base = [
+        _merge([f"w01{i:04d}", f"w02{i:04d}"], f"w02{i:04d}")
+        for i in range(1, 16)
+    ]
+    base.append(_merge(["w000452", "w001239"], "w000452"))
+    return {
+        "release_contract_version": "discovery-v4-public-reference-merges-v1",
+        "v4_public_reference_canonical_ids": ["w040001"],
+        "v4_source_manifest_sha256": "a" * 64,
+        "merges": [*base, _merge(v4_members, "w040001")],
+        "dropped_by_135": ["w001239"],
+    }
+
+
+def test_v4_canonical_merge_contract_extends_instead_of_weakening_v3(tmp_path):
+    path = _write_json(tmp_path / "m.json", _v4_release_merges_doc())
+    out = sidecar_build.load_canonical_merges(
+        path, require_release_semantics=True
+    )
+    assert out["approve_count"] == 17
+    assert out["v4_public_reference_merges"] == 1
+    assert out["release_contract_version"] == (
+        "discovery-v4-public-reference-merges-v1"
+    )
+    assert out["cross_corpus_map"]["w030001"] == "w040001"
+
+
+def test_v4_canonical_merge_contract_requires_two_member_public_pair(tmp_path):
+    doc = _v4_release_merges_doc(
+        v4_members=("w030001", "w035001", "w040001")
+    )
+    path = _write_json(tmp_path / "m.json", doc)
+    with pytest.raises(sidecar_build.CanonicalMergesError, match="two-member"):
+        sidecar_build.load_canonical_merges(
+            path, require_release_semantics=True
+        )
+
+
+def _v4_track1_contract():
+    return {
+        "schema_version": "discovery-v4-track1-release-contract-v1",
+        "reference_corpus_sha256": "a" * 64,
+        "canonical_masks_sha256": "b" * 64,
+        "source_db_seed_sha256": "d" * 64,
+        "matcher_fingerprint": "c" * 40,
+        "page_count": 667411,
+        "total_rows": 400000,
+        "live_rows": 290000,
+        "ref4_total_rows": 20000,
+        "ref4_live_rows": 15000,
+        "v2_snapshot_rows": 381341,
+        "missing_ref_offsets": 0,
+        "duplicate_pairs": 0,
+        "shadow_algorithm": "track1-shadow-v1",
+        "promoted_columns": [
+            "page_id", "sys_id", "work_id", "cat", "genre", "author", "title",
+            "matched_letters", "best_density", "n_spans", "spans_json",
+            "generation", "ref_spans_json", "shadowed_by",
+        ],
+    }
+
+
+def test_v4_track1_release_contract_is_strict_and_versioned(tmp_path):
+    path = _write_json(tmp_path / "track1.json", _v4_track1_contract())
+    loaded = sidecar_build.load_track1_release_contract(path)
+    assert loaded["live_rows"] == 290000
+    assert len(loaded["sha256"]) == 64
+
+    bad = _v4_track1_contract()
+    bad["missing_ref_offsets"] = 1
+    bad_path = _write_json(tmp_path / "track1-bad.json", bad)
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError, match="missing offsets"):
+        sidecar_build.load_track1_release_contract(bad_path)
+
+    bad_schema = _v4_track1_contract()
+    bad_schema["promoted_columns"] = bad_schema["promoted_columns"][:-1]
+    bad_schema_path = _write_json(tmp_path / "track1-bad-schema.json", bad_schema)
+    with pytest.raises(sidecar_build.ReleaseInputsIncompleteError, match="schema drift"):
+        sidecar_build.load_track1_release_contract(bad_schema_path)
+
+
+def test_release_track1_contract_requires_sha_before_loading(tmp_path, monkeypatch):
+    contract_path = _write_json(tmp_path / "track1.json", _v4_track1_contract())
+    loader_called = False
+
+    def _unexpected_load(*_args, **_kwargs):
+        nonlocal loader_called
+        loader_called = True
+        raise AssertionError("unpinned release contract must not be loaded")
+
+    monkeypatch.setattr(sidecar_build, "load_track1_release_contract", _unexpected_load)
+    with pytest.raises(
+        sidecar_build.ReleaseInputsIncompleteError,
+        match="release Track-1 contract requires.*sha256",
+    ):
+        sidecar_build.finalize_build(
+            source_db_path=str(tmp_path / "missing-research.db"),
+            from_approved_path=str(tmp_path / "missing-approved.csv"),
+            crosswalk_path=str(tmp_path / "crosswalk.json"),
+            out_db_path=str(tmp_path / "out.db"),
+            release=True,
+            frozen_precision_defaults=True,
+            track1_release_contract_path=contract_path,
+            masking_patterns=["TOTALLY-UNMATCHED-MARKER-XYZ-123"],
+        )
+    assert loader_called is False
+
+
 def test_insert_works_real_threads_cross_corpus_map(tmp_path):
     """The cross_corpus_map is threaded into the real-mode works insert:
     both merged members carry the SAME canonical_work_id."""

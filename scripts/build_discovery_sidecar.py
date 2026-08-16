@@ -158,6 +158,19 @@ LOCUS_FILTER_VERSION = "locus-filter-v1"
 LOCUS_DIVISIONS_SHA256 = (
     "aaac6f90d9ee2b4c3e0b83c0220e9215dc2cdee0c9995cd2ed6672b951898263"
 )
+REFERENCE_CORPUS_V2_SHA256 = (
+    "acb6b86f61680e5b459fc8274aa3bce8b69d6bec13512c83a56167c7fd6646de"
+)
+REFERENCE_CORPUS_V4_SHA256 = (
+    "6c540e3987752f1e0ead36f881e8d2f41f903b6e1aa9121b2b109ecfbc8a3133"
+)
+LOCUS_DIVISIONS_V4_SHA256 = (
+    "c6cf55d2388585dd2fb8dcf2cb565bbbb386f7def8a32b710516886c18f0fc40"
+)
+LOCUS_DIVISIONS_BY_REFERENCE_SHA256 = {
+    REFERENCE_CORPUS_V2_SHA256: LOCUS_DIVISIONS_SHA256,
+    REFERENCE_CORPUS_V4_SHA256: LOCUS_DIVISIONS_V4_SHA256,
+}
 LOCUS_FAMILIES = frozenset({"sefaria", "ja", "msource_header", "msource_daf"})
 LOCUS_STATUSES = ("resolved", "whole_work", "unavailable")
 
@@ -850,6 +863,8 @@ _CANONICAL_MERGES_TOP_KEYS = frozenset({
     "merges", "dropped_by_135", "source", "canonical_priority", "owner_ratified",
     "ratified_at", "relations_policy", "chronological_rule_examples", "contested",
     "provisional_relations_measurement_only", "residual_direct", "notes",
+    "release_contract_version", "v4_public_reference_canonical_ids",
+    "v4_source_manifest_sha256",
 })
 _MERGE_ENTRY_KEYS = frozenset({"members_w", "canonical_w", "owner_verdict"})
 _W_ID_RE = re.compile(r"^w\d{6}$")
@@ -860,6 +875,8 @@ _D14_MEMBERS = frozenset({"w000452", "w001239"})
 _D14_CANONICAL = "w000452"
 _D14_DROPPED = "w001239"
 _EXPECTED_APPROVE_MERGES = 16
+_V3_MERGE_CONTRACT = "discovery-v3-canonical-merges-v1"
+_V4_MERGE_CONTRACT = "discovery-v4-public-reference-merges-v1"
 
 
 def _is_w_id(x) -> bool:
@@ -908,6 +925,36 @@ def load_canonical_merges(
         raise CanonicalMergesError("--canonical-merges 'merges' must be a list")
     if not isinstance(dropped_raw, list):
         raise CanonicalMergesError("--canonical-merges 'dropped_by_135' must be a list")
+    contract_version = doc.get("release_contract_version") or _V3_MERGE_CONTRACT
+    if contract_version not in {_V3_MERGE_CONTRACT, _V4_MERGE_CONTRACT}:
+        raise CanonicalMergesError("--canonical-merges has an unsupported release contract version")
+    v4_canonical_raw = doc.get("v4_public_reference_canonical_ids", [])
+    v4_source_manifest_sha256 = doc.get("v4_source_manifest_sha256")
+    if contract_version == _V3_MERGE_CONTRACT:
+        if v4_canonical_raw or v4_source_manifest_sha256 is not None:
+            raise CanonicalMergesError(
+                "V3 canonical-merge contract cannot carry V4 public-reference fields"
+            )
+        v4_canonical_ids = set()
+    else:
+        if not (
+            isinstance(v4_canonical_raw, list)
+            and v4_canonical_raw
+            and all(_is_w_id(value) for value in v4_canonical_raw)
+            and len(v4_canonical_raw) == len(set(v4_canonical_raw))
+        ):
+            raise CanonicalMergesError(
+                "V4 canonical-merge contract requires distinct w000xxx-shaped "
+                "v4_public_reference_canonical_ids"
+            )
+        if not (
+            isinstance(v4_source_manifest_sha256, str)
+            and re.fullmatch(r"[0-9a-f]{64}", v4_source_manifest_sha256)
+        ):
+            raise CanonicalMergesError(
+                "V4 canonical-merge contract requires a lowercase SHA-256 source-manifest pin"
+            )
+        v4_canonical_ids = set(v4_canonical_raw)
 
     dropped = set()
     for d in dropped_raw:
@@ -919,6 +966,7 @@ def load_canonical_merges(
     seen_ids: set = set()
     approve_count = 0
     d14_ok = False
+    approved_groups: List[Tuple[set, str]] = []
     for i, m in enumerate(merges):
         if not isinstance(m, dict):
             raise CanonicalMergesError(f"merges[{i}] must be a JSON object")
@@ -950,6 +998,7 @@ def load_canonical_merges(
             )
         seen_ids |= group_ids
         approve_count += 1
+        approved_groups.append((distinct, canon))
         for member in members:
             cross_corpus_map[member] = canon
         if distinct == _D14_MEMBERS and canon == _D14_CANONICAL:
@@ -957,12 +1006,24 @@ def load_canonical_merges(
 
     if require_release_semantics:
         problems = []
-        if approve_count != _EXPECTED_APPROVE_MERGES:
-            problems.append(f"expected {_EXPECTED_APPROVE_MERGES} approve merges, got {approve_count}")
+        expected_approve = _EXPECTED_APPROVE_MERGES + len(v4_canonical_ids)
+        if approve_count != expected_approve:
+            problems.append(f"expected {expected_approve} approve merges, got {approve_count}")
         if dropped != {_D14_DROPPED}:
             problems.append(f"dropped_by_135 must equal {{{_D14_DROPPED!r}}}")
         if not d14_ok:
             problems.append("D-14 flip absent (the w000452/w001239 group must have canonical_w=w000452)")
+        if v4_canonical_ids:
+            v4_groups = {
+                canon
+                for members, canon in approved_groups
+                if canon in v4_canonical_ids and len(members) == 2
+            }
+            missing_v4 = v4_canonical_ids - v4_groups
+            if missing_v4:
+                problems.append(
+                    f"{len(missing_v4)} V4 public canonical id(s) lack an approved two-member merge"
+                )
         if problems:
             raise CanonicalMergesError(
                 "--canonical-merges semantic-ratification assertion failed: " + "; ".join(problems)
@@ -973,6 +1034,9 @@ def load_canonical_merges(
         "dropped": dropped,
         "sha256": actual_sha,
         "approve_count": approve_count,
+        "release_contract_version": contract_version,
+        "v4_public_reference_merges": len(v4_canonical_ids),
+        "v4_source_manifest_sha256": v4_source_manifest_sha256,
     }
 
 
@@ -1972,7 +2036,7 @@ def ingest_locus_divisions(
     crosswalk: Dict[str, str],
     reference_corpus_sha256: Optional[str],
     *,
-    expected_sha256: str = LOCUS_DIVISIONS_SHA256,
+    expected_sha256: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
     """Validate, re-key, and import the pinned division artifact.
 
@@ -1981,11 +2045,20 @@ def ingest_locus_divisions(
     crosswalk; references absent from that crosswalk, and mapped works absent
     from this asset, are counted and omitted rather than guessed.
     """
+    if not reference_corpus_sha256:
+        raise ValueError("--locus-divisions requires --reference-corpus-sha256")
+    reference_corpus_sha256 = reference_corpus_sha256.lower()
+    if expected_sha256 is None:
+        expected_sha256 = LOCUS_DIVISIONS_BY_REFERENCE_SHA256.get(
+            reference_corpus_sha256
+        )
+        if expected_sha256 is None:
+            raise ValueError(
+                "reference corpus has no approved locus-division input pair"
+            )
     source_path = Path(path)
     if _hash_file(source_path).lower() != expected_sha256.lower():
         raise ValueError("locus division database SHA-256 does not match the pinned input")
-    if not reference_corpus_sha256:
-        raise ValueError("--locus-divisions requires --reference-corpus-sha256")
 
     coverage_path = source_path.with_name("coverage.json")
     if not coverage_path.is_file():
@@ -7177,6 +7250,18 @@ _EXPECTED_E1_R3_FRAME_ROWS = 9996
 _EXPECTED_Q2_WITNESS_COLLECTION_ROWS = 4367
 _EXPECTED_Q2_SHARED_TEXT_ROWS = 60156
 _EXPECTED_TIER_A_ROWS = 275894  # track1_matches WHERE shadowed_by IS NULL
+_TRACK1_V4_CONTRACT_VERSION = "discovery-v4-track1-release-contract-v1"
+_TRACK1_V4_CONTRACT_KEYS = frozenset({
+    "schema_version", "reference_corpus_sha256", "canonical_masks_sha256",
+    "source_db_seed_sha256", "matcher_fingerprint", "page_count", "total_rows", "live_rows",
+    "ref4_total_rows", "ref4_live_rows", "v2_snapshot_rows",
+    "missing_ref_offsets", "duplicate_pairs", "shadow_algorithm", "promoted_columns",
+})
+_TRACK1_V4_PROMOTED_COLUMNS = [
+    "page_id", "sys_id", "work_id", "cat", "genre", "author", "title",
+    "matched_letters", "best_density", "n_spans", "spans_json", "generation",
+    "ref_spans_json", "shadowed_by",
+]
 # PROVENANCE (Codex round 2, HIGH -- and the finding was right).
 #
 # The v3 slim DB's own tier-A count is 275,894: EXACTLY this frozen value. The
@@ -7246,6 +7331,116 @@ class BandVocabPreflightError(RuntimeError):
     rename cascade's root cause was that v2 was inferred, never asserted)."""
 
 
+def load_track1_release_contract(path, *, sha256: Optional[str] = None) -> Dict:
+    """Load the hash-pinned V4 matcher population contract."""
+    contract_path = Path(path)
+    if not contract_path.is_file():
+        raise ReleaseInputsIncompleteError("Track-1 release contract file is missing")
+    actual_sha = _hash_file(contract_path)
+    if sha256 is not None and actual_sha != sha256:
+        raise ReleaseInputsIncompleteError("Track-1 release contract SHA-256 mismatch")
+    try:
+        contract = _json_loads_strict(contract_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ReleaseInputsIncompleteError(
+            "Track-1 release contract is not strict JSON"
+        ) from exc
+    if not isinstance(contract, dict) or set(contract) != _TRACK1_V4_CONTRACT_KEYS:
+        raise ReleaseInputsIncompleteError(
+            "Track-1 release contract does not have the frozen V4 field set"
+        )
+    if contract["schema_version"] != _TRACK1_V4_CONTRACT_VERSION:
+        raise ReleaseInputsIncompleteError("unsupported Track-1 release contract version")
+    for key in (
+        "reference_corpus_sha256", "canonical_masks_sha256", "source_db_seed_sha256"
+    ):
+        if not isinstance(contract[key], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", contract[key]
+        ):
+            raise ReleaseInputsIncompleteError(
+                f"Track-1 release contract {key} is not a lowercase SHA-256"
+            )
+    if not isinstance(contract["matcher_fingerprint"], str) or not re.fullmatch(
+        r"[0-9a-f]{40}", contract["matcher_fingerprint"]
+    ):
+        raise ReleaseInputsIncompleteError(
+            "Track-1 release contract matcher fingerprint is malformed"
+        )
+    count_keys = (
+        "page_count", "total_rows", "live_rows", "ref4_total_rows",
+        "ref4_live_rows", "v2_snapshot_rows", "missing_ref_offsets",
+        "duplicate_pairs",
+    )
+    if any(not isinstance(contract[key], int) or contract[key] < 0 for key in count_keys):
+        raise ReleaseInputsIncompleteError(
+            "Track-1 release contract contains a non-integer or negative count"
+        )
+    if not (
+        contract["live_rows"] <= contract["total_rows"]
+        and contract["ref4_live_rows"] <= contract["ref4_total_rows"]
+        and contract["ref4_total_rows"] <= contract["total_rows"]
+    ):
+        raise ReleaseInputsIncompleteError("Track-1 release contract counts are inconsistent")
+    if contract["v2_snapshot_rows"] != 381_341:
+        raise ReleaseInputsIncompleteError("Track-1 V2 snapshot row count drift")
+    if contract["page_count"] != 667_411:
+        raise ReleaseInputsIncompleteError("Track-1 page-frame count drift")
+    if contract["missing_ref_offsets"] or contract["duplicate_pairs"]:
+        raise ReleaseInputsIncompleteError(
+            "Track-1 release contract reports missing offsets or duplicate pairs"
+        )
+    if contract["shadow_algorithm"] != "track1-shadow-v1":
+        raise ReleaseInputsIncompleteError("Track-1 shadow algorithm drift")
+    if contract["promoted_columns"] != _TRACK1_V4_PROMOTED_COLUMNS:
+        raise ReleaseInputsIncompleteError("Track-1 promoted schema drift")
+    return {**contract, "sha256": actual_sha}
+
+
+def assert_track1_release_contract(conn: sqlite3.Connection, contract: Dict) -> None:
+    """Recompute the V4 matcher contract against the supplied research DB."""
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(track1_matches)")]
+    if columns != contract["promoted_columns"]:
+        raise ReleaseInputsIncompleteError(
+            "research Track-1 table differs from the exact promoted schema"
+        )
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "track1_matches_v2_snapshot" not in tables:
+        raise ReleaseInputsIncompleteError("research DB lacks the preserved V2 snapshot")
+    actual = {
+        "page_count": conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0],
+        "total_rows": conn.execute("SELECT COUNT(*) FROM track1_matches").fetchone()[0],
+        "live_rows": conn.execute(
+            "SELECT COUNT(*) FROM track1_matches WHERE shadowed_by IS NULL"
+        ).fetchone()[0],
+        "ref4_total_rows": conn.execute(
+            "SELECT COUNT(*) FROM track1_matches WHERE work_id LIKE 'REF4:%'"
+        ).fetchone()[0],
+        "ref4_live_rows": conn.execute(
+            "SELECT COUNT(*) FROM track1_matches "
+            "WHERE work_id LIKE 'REF4:%' AND shadowed_by IS NULL"
+        ).fetchone()[0],
+        "v2_snapshot_rows": conn.execute(
+            "SELECT COUNT(*) FROM track1_matches_v2_snapshot"
+        ).fetchone()[0],
+        "missing_ref_offsets": conn.execute(
+            "SELECT COUNT(*) FROM track1_matches WHERE ref_spans_json IS NULL "
+            "OR ref_spans_json='' OR ref_spans_json='[]'"
+        ).fetchone()[0],
+        "duplicate_pairs": conn.execute(
+            "SELECT COUNT(*) FROM (SELECT page_id, work_id, generation, COUNT(*) n "
+            "FROM track1_matches GROUP BY page_id, work_id, generation HAVING n != 1)"
+        ).fetchone()[0],
+    }
+    drift = [key for key, value in actual.items() if value != contract[key]]
+    if drift:
+        raise ReleaseInputsIncompleteError(
+            f"research Track-1 table differs from its release contract in {len(drift)} count(s)"
+        )
+
+
 def _count_tier_a_rows(conn: sqlite3.Connection) -> int:
     (n,) = conn.execute(
         "SELECT COUNT(*) FROM track1_matches WHERE shadowed_by IS NULL"
@@ -7266,6 +7461,7 @@ def _assert_release_inputs_complete(
     q2_collection_tafsir_targum: List[Dict],
     q2_collection_with_arabic: List[Dict],
     tier_a_row_count: Optional[int],
+    expected_tier_a_rows: int = _EXPECTED_TIER_A_ROWS,
 ) -> None:
     """H2: in release mode, REQUIRE every frozen release input present at
     its EXACT expected count -- abort (raise) on any absent/short/long
@@ -7294,7 +7490,7 @@ def _assert_release_inputs_complete(
         (
             "tier_a (track1_matches WHERE shadowed_by IS NULL)",
             tier_a_row_count if tier_a_row_count is not None else 0,
-            _EXPECTED_TIER_A_ROWS,
+            expected_tier_a_rows,
         ),
     ]
     problems = [
@@ -7715,6 +7911,8 @@ def finalize_build(
     allow_partial_sources: bool = False,
     canonical_merges_path=None,
     canonical_merges_sha256: Optional[str] = None,
+    track1_release_contract_path=None,
+    track1_release_contract_sha256: Optional[str] = None,
     composition_dates_path=None,
     composition_dates_sha256: Optional[str] = None,
     seftja_dates_path=None,
@@ -7861,6 +8059,33 @@ def finalize_build(
         seftja_dates_path=seftja_dates_path,
         seftja_dates_sha256=seftja_dates_sha256,
     )
+    if (
+        release
+        and track1_release_contract_path is not None
+        and track1_release_contract_sha256 is None
+    ):
+        raise ReleaseInputsIncompleteError(
+            "release Track-1 contract requires "
+            "--track1-release-contract-sha256"
+        )
+    if track1_release_contract_sha256 is not None and track1_release_contract_path is None:
+        raise ReleaseInputsIncompleteError(
+            "Track-1 release-contract SHA-256 was supplied without its path"
+        )
+    track1_release_contract = None
+    if track1_release_contract_path is not None:
+        track1_release_contract = load_track1_release_contract(
+            track1_release_contract_path, sha256=track1_release_contract_sha256
+        )
+        track1_release_contract_sha256 = track1_release_contract["sha256"]
+        if (
+            reference_corpus_sha256 is not None
+            and track1_release_contract["reference_corpus_sha256"]
+            != reference_corpus_sha256
+        ):
+            raise ReleaseInputsIncompleteError(
+                "Track-1 release contract and bake reference-corpus hashes differ"
+            )
 
     # v2 STEP 0 (135-06, bake plan §6): resolve the optional --precision-spec
     # FAIL-branch reband BEFORE any DB write. A `measured_fail` tier_a outcome
@@ -7901,6 +8126,9 @@ def finalize_build(
     # the body (v2 STEP -1) so it could thread the band_precision rename; its
     # verified SHA is recorded in meta (`canonical_merges_sha256`) below,
     # giving the shipped asset a clean v2 marker alongside band_vocab_version.
+    canonical_merge_contract_version = None
+    canonical_merge_v4_count = 0
+    canonical_merge_v4_source_manifest_sha256 = None
     if v2_build:
         merges_loaded = load_canonical_merges(
             canonical_merges_path, sha256=canonical_merges_sha256,
@@ -7909,6 +8137,11 @@ def finalize_build(
         cross_corpus_map = merges_loaded["cross_corpus_map"]
         dropped_work_ids = merges_loaded["dropped"]
         canonical_merges_sha256 = merges_loaded["sha256"]
+        canonical_merge_contract_version = merges_loaded["release_contract_version"]
+        canonical_merge_v4_count = merges_loaded["v4_public_reference_merges"]
+        canonical_merge_v4_source_manifest_sha256 = merges_loaded[
+            "v4_source_manifest_sha256"
+        ]
     else:
         cross_corpus_map = {}
         dropped_work_ids = set()
@@ -7930,6 +8163,8 @@ def finalize_build(
     gen2_router = None
     regrain_report = None
     e1_route_report = None
+    v4_route_report = None
+    fullscan_legacy_route_report = None
     if gen2_router_evidence_db is not None:
         from v3_routing_ingest import load_router as _load_gen2_router
         gen2_router = _load_gen2_router(str(gen2_router_evidence_db))
@@ -8043,6 +8278,8 @@ def finalize_build(
         # must never silently ingest as empty and produce a tier-A-only
         # sidecar that still passes every other gate, and a failed release
         # build must never have already deleted/overwritten prior artifacts.
+        if track1_release_contract is not None:
+            assert_track1_release_contract(conn_research, track1_release_contract)
         tier_a_row_count = _count_tier_a_rows(conn_research) if release else None
         _assert_release_inputs_complete(
             release=release,
@@ -8053,6 +8290,11 @@ def finalize_build(
             q2_collection_tafsir_targum=q2_collection_tafsir_targum,
             q2_collection_with_arabic=q2_collection_with_arabic,
             tier_a_row_count=tier_a_row_count,
+            expected_tier_a_rows=(
+                track1_release_contract["live_rows"]
+                if track1_release_contract is not None
+                else _EXPECTED_TIER_A_ROWS
+            ),
         )
 
         # SPLIT-GRAIN RE-GRAINING (option 4, owner-approved 2026-08-07). Runs
@@ -8078,6 +8320,9 @@ def finalize_build(
             from v3_routing_ingest import (
                 load_split_grain_coverage as _load_split_cov,
                 regrain_router_to_split as _regrain,
+                resolve_routing as _resolve_route,
+                route_fullscan_legacy_by_coverage as _route_fullscan_legacy,
+                route_v4_references_by_coverage as _route_v4,
             )
             _split_max = _load_split_cov(str(gen2_router_evidence_db))
             # `pages.n_chars` is the RAW character length, and that is
@@ -8094,19 +8339,62 @@ def finalize_build(
                 p: n for p, n in conn_research.execute(
                     "SELECT page_id, n_chars FROM pages")
             }
-            _tier_a_keys = conn_research.execute(
-                "SELECT page_id, work_id FROM track1_matches "
+            _tier_a_rows = conn_research.execute(
+                "SELECT page_id, work_id, matched_letters FROM track1_matches "
                 "WHERE shadowed_by IS NULL"
             ).fetchall()
+            _v4_rows = [row for row in _tier_a_rows if row[1].startswith("REF4:")]
+            _tier_a_keys = [
+                (page_id, work_id)
+                for page_id, work_id, _matched_letters in _tier_a_rows
+                if not work_id.startswith("REF4:")
+            ]
             regrain_report = _regrain(
                 gen2_router, _split_max, _page_chars, _tier_a_keys)
             if regrain_report["undecided"]:
-                raise RoutingConflictError(
-                    f"split-grain re-graining left {regrain_report['undecided']} "
-                    f"tier-A row(s) with no routing decision -- they would keep the "
-                    f"ingest default and silently bypass coverage routing. Halting "
-                    f"rather than defaulting."
+                if track1_release_contract is None:
+                    raise RoutingConflictError(
+                        f"split-grain re-graining left {regrain_report['undecided']} "
+                        f"tier-A row(s) with no routing decision -- they would keep "
+                        f"the ingest default and silently bypass coverage routing. "
+                        f"Halting rather than defaulting."
+                    )
+                _legacy_unresolved = [
+                    row for row in _tier_a_rows
+                    if not row[1].startswith("REF4:")
+                    and _resolve_route(row[0], row[1], gen2_router)[0] is None
+                ]
+                if len(_legacy_unresolved) != regrain_report["undecided"]:
+                    raise RoutingConflictError(
+                        "split-grain undecided count differs from the exact unresolved "
+                        "legacy row set"
+                    )
+                _historical_keys = set(conn_research.execute(
+                    "SELECT page_id, work_id FROM track1_matches_v2_snapshot"
+                ))
+                fullscan_legacy_route_report = _route_fullscan_legacy(
+                    gen2_router,
+                    _legacy_unresolved,
+                    _page_chars,
+                    _historical_keys,
                 )
+                if fullscan_legacy_route_report["undecided"]:
+                    raise RoutingConflictError(
+                        f"full-scan legacy routing left "
+                        f"{fullscan_legacy_route_report['undecided']} row(s) with no "
+                        f"decision -- halting rather than defaulting"
+                    )
+            if _v4_rows:
+                v4_route_report = _route_v4(
+                    gen2_router, _v4_rows, _page_chars, raw_prefix="REF4:"
+                )
+                if v4_route_report["undecided"]:
+                    raise RoutingConflictError(
+                        f"V4 public-reference routing left "
+                        f"{v4_route_report['undecided']} row(s) with no decision "
+                        f"-- they would keep the ingest default and silently "
+                        f"bypass coverage routing. Halting rather than defaulting."
+                    )
 
             # E1 witness routing (2026-08-08, owner-authorized). The four E1
             # collections are drawn ENTIRELY from the matcher's tier B, which
@@ -8418,7 +8706,14 @@ def finalize_build(
             # one it contains. `gen2_router` (not the flag) drives it: intent is not
             # evidence.
             ("coverage_routing", (
-                "gen2_router_split_regrained" if regrain_report is not None
+                "gen2_router_split_regrained_fullscan_legacy_v4_extrapolated"
+                if (v4_route_report is not None
+                    and fullscan_legacy_route_report is not None)
+                else "gen2_router_split_regrained_fullscan_legacy_extrapolated"
+                if fullscan_legacy_route_report is not None
+                else "gen2_router_split_regrained_v4_extrapolated"
+                if v4_route_report is not None
+                else "gen2_router_split_regrained" if regrain_report is not None
                 else ("gen2_router" if gen2_router is not None
                       else ("lever1_cliff" if run_d17 else "none")))),
         ]
@@ -8464,10 +8759,55 @@ def finalize_build(
                 ("coverage_e1_same_work", str(e1_route_report["same_work"])),
                 ("coverage_e1_parallel", str(e1_route_report["parallel"])),
             ])
+        if v4_route_report is not None:
+            meta_rows.extend([
+                ("coverage_v4_reference_routing", "threshold_extrapolated_new_works"),
+                ("coverage_v4_reference_prefix", v4_route_report["raw_prefix"]),
+                ("coverage_v4_reference_considered", str(v4_route_report["considered"])),
+                ("coverage_v4_reference_routed", str(v4_route_report["added"])),
+                ("coverage_v4_reference_same_work", str(v4_route_report["same_work"])),
+                ("coverage_v4_reference_parallel", str(v4_route_report["parallel"])),
+            ])
+        if fullscan_legacy_route_report is not None:
+            meta_rows.extend([
+                ("coverage_fullscan_legacy_routing",
+                 "threshold_extrapolated_allowlist_removal"),
+                ("coverage_fullscan_legacy_considered",
+                 str(fullscan_legacy_route_report["considered"])),
+                ("coverage_fullscan_legacy_routed",
+                 str(fullscan_legacy_route_report["added"])),
+                ("coverage_fullscan_legacy_same_work",
+                 str(fullscan_legacy_route_report["same_work"])),
+                ("coverage_fullscan_legacy_parallel",
+                 str(fullscan_legacy_route_report["parallel"])),
+                ("coverage_fullscan_historical_key_count",
+                 str(fullscan_legacy_route_report["historical_key_count"])),
+            ])
         # v2 provenance (bake plan §7 gate 11, Codex #B2/#5): record the
         # verified SHA-256 of every supplied hash-pinned input in meta.
         if canonical_merges_sha256 is not None:
             meta_rows.append(("canonical_merges_sha256", canonical_merges_sha256))
+        if canonical_merge_contract_version is not None:
+            meta_rows.extend([
+                ("canonical_merges_release_contract", canonical_merge_contract_version),
+                ("canonical_merges_v4_public_references", str(canonical_merge_v4_count)),
+            ])
+        if canonical_merge_v4_source_manifest_sha256 is not None:
+            meta_rows.append((
+                "canonical_merges_v4_source_manifest_sha256",
+                canonical_merge_v4_source_manifest_sha256,
+            ))
+        if track1_release_contract is not None:
+            meta_rows.extend([
+                ("track1_release_contract_version", track1_release_contract["schema_version"]),
+                ("track1_release_contract_sha256", track1_release_contract_sha256),
+                ("track1_reference_masks_sha256", track1_release_contract["canonical_masks_sha256"]),
+                ("track1_source_db_seed_sha256", track1_release_contract["source_db_seed_sha256"]),
+                ("track1_matcher_fingerprint", track1_release_contract["matcher_fingerprint"]),
+                ("track1_input_total_rows", str(track1_release_contract["total_rows"])),
+                ("track1_input_live_rows", str(track1_release_contract["live_rows"])),
+                ("track1_input_ref4_live_rows", str(track1_release_contract["ref4_live_rows"])),
+            ])
         if composition_dates_sha256 is not None:
             meta_rows.append(("composition_dates_sha256", composition_dates_sha256))
         if seftja_dates_sha256 is not None:
@@ -8627,6 +8967,8 @@ def finalize_build(
         # population was independently verified.
         "router_parity": result.get("router_parity"),
         "coverage_regrain": regrain_report,
+        "coverage_v4_references": v4_route_report,
+        "coverage_fullscan_legacy": fullscan_legacy_route_report,
         "manifest_path": str(manifest_path),
         "db_path": str(out_path),
     }
@@ -8774,6 +9116,12 @@ def build_parser() -> argparse.ArgumentParser:
                              "(REQUIRED for --release; Codex #B2).")
     v2_group.add_argument("--canonical-merges-sha256", metavar="HEX", default=None,
                         help="SHA-256 pin verified before --canonical-merges is used.")
+    v2_group.add_argument("--track1-release-contract", metavar="PATH", default=None,
+                        help="Hash-pinned V4 matcher population contract. Its counts, "
+                             "reference offsets, preserved V2 snapshot, and page frame are "
+                             "recomputed against --db-path before a release build.")
+    v2_group.add_argument("--track1-release-contract-sha256", metavar="HEX", default=None,
+                        help="SHA-256 pin verified before --track1-release-contract is used.")
     v2_group.add_argument("--composition-dates", metavar="PATH", default=None,
                         help="Hash-pinned M-source composition dates (REQUIRED for --release "
                              "D-17; Codex #5). Frozen schema; normalized to a numeric year.")
@@ -9014,6 +9362,8 @@ def main(argv=None) -> int:
         allow_partial_sources=args.allow_partial_sources,
         canonical_merges_path=args.canonical_merges,
         canonical_merges_sha256=args.canonical_merges_sha256,
+        track1_release_contract_path=args.track1_release_contract,
+        track1_release_contract_sha256=args.track1_release_contract_sha256,
         composition_dates_path=args.composition_dates,
         composition_dates_sha256=args.composition_dates_sha256,
         seftja_dates_path=args.seftja_dates,

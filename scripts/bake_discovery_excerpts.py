@@ -29,6 +29,9 @@ Non-Tanakh masked works get NO work-side pieces (the UI shows an honest
 (project_discovery_public.run_masking_gate) re-runs over the final artifact.
 
 Work-side sources, by edition class (crosswalk ref-id prefix):
+  REF4:  V4 normalized public-source snapshot, exact offsets. The reference
+         manifest and its acquisition manifest are hash-bound; the recomputed
+         stream must equal the pickle stream.
   REF2:  refs_staging body file, exact offsets. The recomputed stream must
          EQUAL the pickle stream for that ref (prepped_for discipline) or the
          work side is dropped for that work -- never silently approximated.
@@ -45,6 +48,8 @@ stage_cd_preview lesson that a defaulted path silently stages stale data):
   python scripts/bake_discovery_excerpts.py <public.db> --out <baked.db> \
       --crosswalk <crosswalk.json> --refs-staging <dir> --ja-dir <dir> \
       --fullcorpus <fullcorpus_v2.db> --ref-pkl <ref_corpus_v2.pkl> \
+      [--v4-reference-manifest <reference_manifest.json> \
+       --v4-normalized-dir <normalized_dir>] \
       [--ctx 90] [--span-cap 600] [--min-align-score 65] [--limit N]
 
 `--limit` exists for a fast dev smoke ONLY; every gate runs on a full bake.
@@ -64,7 +69,7 @@ import time
 import unicodedata
 from collections import Counter, OrderedDict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO))
@@ -98,22 +103,84 @@ CREATE TABLE discovery_excerpt (
 )
 """
 
-# The best-row rule, frozen: highest matched_letters, ties broken by
-# evidence_id ascending. Deterministic across bakes.
+# The ordinary best-row rule remains highest matched_letters, ties broken by
+# evidence_id ascending.  One excerpt-only exception is admitted: when the
+# public identification's eligible row has no work offsets, a PUBLIC direct
+# witness for that SAME DISPLAY WORK may supply the comparison slice even when
+# its routing decision is review_only.  That row does not create an
+# identification, change a claim, or reach a findings query; it is read only by
+# this post-projection text bake.  Eligible offset-bearing evidence always wins
+# over the fallback.
 _BEST_ROWS_SQL = """
+WITH eligible_ids AS MATERIALIZED (
+    SELECT DISTINCT di.identification_id
+      FROM discovery_identification di
+      JOIN discovery_evidence de ON de.sys_id = di.sys_id
+      JOIN discovery_claim dc ON dc.claim_id = de.claim_id
+      JOIN works canonical_work
+        ON canonical_work.work_id = dc.work_id
+       AND canonical_work.canonical_work_id = di.canonical_work_id
+     WHERE de.evidence_kind = 'witness'
+       AND (de.routing_status = 'shipped'
+            OR de.adjudication_status = 'human_confirmed')
+)
 SELECT di.identification_id, de.evidence_id, de.a_page_id,
        de.matched_letters, de.n_spans, de.text_layer,
        de.span_start, de.span_end, de.w_start, de.w_end,
-       de.aligned_page_start, de.aligned_page_end, dc.work_id
+       de.aligned_page_start, de.aligned_page_end, dc.work_id,
+       de.evidence_source, de.routing_status, de.adjudication_status,
+       de.assertion_visibility
   FROM discovery_identification di
   JOIN discovery_evidence de ON de.sys_id = di.sys_id
   JOIN discovery_claim dc ON dc.claim_id = de.claim_id
-       AND dc.work_id IN (SELECT work_id FROM works
-                           WHERE canonical_work_id = di.canonical_work_id)
+  JOIN works canonical_work
+    ON canonical_work.work_id = dc.work_id
+   AND canonical_work.canonical_work_id = di.canonical_work_id
+  LEFT JOIN eligible_ids ON eligible_ids.identification_id = di.identification_id
  WHERE de.evidence_kind = 'witness'
    AND (de.routing_status = 'shipped'
-        OR de.adjudication_status = 'human_confirmed')
+        OR de.adjudication_status = 'human_confirmed'
+        OR (dc.work_id = di.display_work_id
+            AND de.routing_status = 'review_only'
+            AND de.evidence_source = 'track1_direct'
+            AND de.assertion_visibility = 'public'
+            AND de.w_start IS NOT NULL
+            AND de.w_end > de.w_start
+            AND eligible_ids.identification_id IS NOT NULL))
 """
+
+
+def _has_work_span(row: Mapping[str, object]) -> bool:
+    """Whether an evidence candidate has a non-empty work-side interval."""
+    start, end = row["w_start"], row["w_end"]
+    return start is not None and end is not None and int(end) > int(start)
+
+
+def is_excerpt_only_fallback(row: Mapping[str, object]) -> bool:
+    """True only for the narrow public direct-text fallback described above."""
+    return (
+        row["routing_status"] == "review_only"
+        and row["adjudication_status"] != "human_confirmed"
+        and row["evidence_source"] == "track1_direct"
+        and row["assertion_visibility"] == "public"
+        and _has_work_span(row)
+    )
+
+
+def excerpt_candidate_key(row: Mapping[str, object]) -> Tuple[int, int, str]:
+    """Prefer showable eligible evidence, then the excerpt-only fallback.
+
+    The final rank retains the pre-existing deterministic best-row order for
+    candidates of the same class.
+    """
+    eligible = (
+        row["routing_status"] == "shipped"
+        or row["adjudication_status"] == "human_confirmed"
+    )
+    rank = 0 if eligible and _has_work_span(row) else (
+        1 if is_excerpt_only_fallback(row) else 2
+    )
+    return rank, -int(row["matched_letters"] or 0), str(row["evidence_id"])
 
 
 def sha256_file(path: Path) -> str:
@@ -122,6 +189,34 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 22), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def validate_bake_input_hashes(
+    public_db: Path, crosswalk_path: Path, reference_pickle: Path
+) -> Dict[str, str]:
+    """Bind the excerpt inputs to the already-verified public sidecar.
+
+    Excerpts dereference opaque work ids through the crosswalk and interpret
+    work offsets through the reference pickle. Accepting a different file at
+    either path can produce internally well-formed but wrongly labelled text.
+    The sidecar already records both hashes, so omission is not a compatibility
+    posture here: it is a missing provenance edge and fails closed.
+    """
+    with sqlite3.connect(f"file:{public_db.resolve().as_posix()}?mode=ro", uri=True) as conn:
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+    for key, path, label in (
+        ("crosswalk_sha256", crosswalk_path, "crosswalk"),
+        ("reference_corpus_sha256", reference_pickle, "reference pickle"),
+    ):
+        expected = meta.get(key)
+        if not expected:
+            raise ValueError(f"public sidecar does not record {key}")
+        actual = sha256_file(path)
+        if actual != expected:
+            raise ValueError(
+                f"{label} SHA-256 differs from the public sidecar's recorded input"
+            )
+    return meta
 
 
 def pieces(nfc: str, offs, lo: int, hi: int, ctx: int,
@@ -145,6 +240,43 @@ def pieces(nfc: str, offs, lo: int, hi: int, ctx: int,
     return before, nfc[a0:z0], after, 0
 
 
+def load_v4_public_sources(
+    reference_manifest_path: Path, normalized_dir: Path
+) -> Tuple[Dict[str, str], Dict[str, str], str]:
+    """Reconstruct readable REF4 texts under their pinned matcher streams."""
+    manifest = json.loads(reference_manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != "discovery-v4-reference-manifest-v1":
+        raise ValueError("unsupported V4 reference manifest")
+    acquisition_path = Path(manifest["acquisition_manifest"])
+    if sha256_file(acquisition_path) != manifest["acquisition_manifest_sha256"]:
+        raise ValueError("V4 acquisition manifest hash differs from the reference manifest")
+    acquisition = json.loads(acquisition_path.read_text(encoding="utf-8"))
+    acquired_by_key = {
+        entry["key"]: entry
+        for entry in acquisition["entries"]
+        if entry.get("status") == "acquired"
+    }
+    texts: Dict[str, str] = {}
+    attributions: Dict[str, str] = {}
+    for entry in manifest["entries"]:
+        raw_id = entry["raw_reference_id"]
+        source_key = entry["source_key"]
+        acquired = acquired_by_key.get(source_key)
+        if acquired is None:
+            raise ValueError("V4 reference entry has no acquired public-source row")
+        path = normalized_dir / acquired["normalized_file"]
+        if sha256_file(path) != acquired["normalized_sha256"]:
+            raise ValueError("V4 normalized public-source hash mismatch")
+        normalized = json.loads(path.read_text(encoding="utf-8"))
+        units = {int(unit["ordinal"]): unit["text"] for unit in normalized["units"]}
+        ordinals = [int(row["source_ordinal"]) for row in entry["unit_offsets"]]
+        if len(ordinals) != len(set(ordinals)) or any(value not in units for value in ordinals):
+            raise ValueError("V4 reference manifest names missing or duplicate source units")
+        texts[raw_id] = "\n".join(units[value] for value in ordinals)
+        attributions[raw_id] = normalized["attribution"]
+    return texts, attributions, manifest["acquisition_manifest_sha256"]
+
+
 class WorkSources:
     """Lazy, cached access to public reference texts (NFC + stream + offsets).
 
@@ -156,16 +288,26 @@ class WorkSources:
 
     def __init__(self, refs_staging: Path, ja_dir: Path,
                  man_by_key: Dict[str, dict], pkl_stream: Dict[str, str],
-                 counters: Counter):
+                 counters: Counter, *, v4_text: Optional[Dict[str, str]] = None,
+                 v4_attribution: Optional[Dict[str, str]] = None):
         self.refs_staging = refs_staging
         self.ja_dir = ja_dir
         self.man_by_key = man_by_key
         self.pkl_stream = pkl_stream
         self.counters = counters
+        self.v4_text = v4_text or {}
+        self.v4_attribution = v4_attribution or {}
         self._cache: Dict[str, Optional[Tuple[str, object]]] = {}
 
     def _load(self, ref_id: str) -> Optional[Tuple[str, object]]:
-        if ref_id.startswith("REF2:"):
+        raw = None
+        if ref_id.startswith("REF4:"):
+            raw = self.v4_text.get(ref_id)
+            if raw is None:
+                self.counters["work_v4_source_missing"] += 1
+                return None
+            path = None
+        elif ref_id.startswith("REF2:"):
             ent = self.man_by_key.get(ref_id[5:])
             if not ent:
                 self.counters["work_no_manifest_entry"] += 1
@@ -175,11 +317,12 @@ class WorkSources:
             path = self.ja_dir / (ref_id[2:] + ".txt")
         else:
             return None
-        try:
-            raw = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            self.counters["work_file_error"] += 1
-            return None
+        if path is not None:
+            try:
+                raw = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                self.counters["work_file_error"] += 1
+                return None
         nfc = unicodedata.normalize("NFC", raw)
         stream, offs = norm_stream(nfc)
         expected = self.pkl_stream.get(ref_id)
@@ -187,6 +330,9 @@ class WorkSources:
             self.counters["work_stream_mismatch"] += 1
             return None
         return nfc, offs
+
+    def attribution(self, ref_id: str) -> Optional[str]:
+        return self.v4_attribution.get(ref_id)
 
     def get(self, ref_id: str) -> Optional[Tuple[str, object]]:
         if ref_id not in self._cache:
@@ -370,6 +516,8 @@ def main() -> int:
     ap.add_argument("--ja-dir", required=True)
     ap.add_argument("--fullcorpus", required=True)
     ap.add_argument("--ref-pkl", required=True)
+    ap.add_argument("--v4-reference-manifest")
+    ap.add_argument("--v4-normalized-dir")
     ap.add_argument("--ctx", type=int, default=90)
     ap.add_argument("--span-cap", type=int, default=600)
     ap.add_argument("--min-align-score", type=float, default=65.0)
@@ -387,7 +535,14 @@ def main() -> int:
         sys.exit("--out must not be the input (the pre-excerpt artifact is "
                  "the frame-regression BEFORE side)")
 
-    crosswalk = json.load(open(args.crosswalk, encoding="utf-8"))
+    crosswalk_path = Path(args.crosswalk)
+    ref_pickle_path = Path(args.ref_pkl)
+    try:
+        input_meta = validate_bake_input_hashes(src, crosswalk_path, ref_pickle_path)
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        sys.exit(str(exc))
+
+    crosswalk = json.load(open(crosswalk_path, encoding="utf-8"))
     ref_by_work: Dict[str, List[str]] = {}
     for rid, wid in crosswalk.items():
         ref_by_work.setdefault(wid, []).append(rid)
@@ -400,13 +555,45 @@ def main() -> int:
     man_by_key = {e["key"]: e for e in man["entries"]}
 
     print("loading reference pickle (streams only)...", flush=True)
-    works_pkl = pickle.load(open(args.ref_pkl, "rb"))
+    works_pkl = pickle.load(open(ref_pickle_path, "rb"))
     pkl_stream = {w["id"]: w["stream"] for w in works_pkl}
     del works_pkl
 
+    v4_ids = {ref_id for ref_id in pkl_stream if ref_id.startswith("REF4:")}
+    have_v4_args = bool(args.v4_reference_manifest and args.v4_normalized_dir)
+    if bool(args.v4_reference_manifest) != bool(args.v4_normalized_dir):
+        sys.exit("--v4-reference-manifest and --v4-normalized-dir must be supplied together")
+    if v4_ids and not have_v4_args:
+        sys.exit("REF4 references require their pinned V4 public-source inputs")
+    v4_text: Dict[str, str] = {}
+    v4_attribution: Dict[str, str] = {}
+    v4_source_manifest_sha256 = None
+    if have_v4_args:
+        v4_text, v4_attribution, v4_source_manifest_sha256 = load_v4_public_sources(
+            Path(args.v4_reference_manifest), Path(args.v4_normalized_dir)
+        )
+        if set(v4_text) != v4_ids:
+            sys.exit("V4 public-source set does not equal the REF4 pickle set")
+        expected_source_hash = input_meta.get(
+            "canonical_merges_v4_source_manifest_sha256"
+        )
+        if not expected_source_hash or expected_source_hash != v4_source_manifest_sha256:
+            sys.exit(
+                "V4 public-source manifest differs from the canonical-merge input "
+                "recorded by the public sidecar"
+            )
+        unknown_crosswalk_refs = {
+            raw_id for raw_id in crosswalk
+            if raw_id.startswith("REF4:") and raw_id not in v4_ids
+        }
+        if unknown_crosswalk_refs:
+            sys.exit("crosswalk contains REF4 ids absent from the reference pickle")
+
     counters: Counter = Counter()
-    sources = WorkSources(refs_staging, Path(args.ja_dir), man_by_key,
-                          pkl_stream, counters)
+    sources = WorkSources(
+        refs_staging, Path(args.ja_dir), man_by_key, pkl_stream, counters,
+        v4_text=v4_text, v4_attribution=v4_attribution,
+    )
     targets = ReprojectionTargets(refs_staging, man_by_key)
 
     shutil.copyfile(src, out)
@@ -422,10 +609,12 @@ def main() -> int:
     for r in conn.execute(_BEST_ROWS_SQL):
         k = r["identification_id"]
         cur = best.get(k)
-        if cur is None or (-(r["matched_letters"] or 0), str(r["evidence_id"])) \
-                < (-(cur["matched_letters"] or 0), str(cur["evidence_id"])):
+        if cur is None or excerpt_candidate_key(r) < excerpt_candidate_key(cur):
             best[k] = r
     print(f"identifications with an eligible row: {len(best):,}", flush=True)
+    fallback_count = sum(is_excerpt_only_fallback(row) for row in best.values())
+    if fallback_count:
+        counters["work_review_only_text_fallback"] = fallback_count
 
     conn.execute(_DDL)
 
@@ -516,6 +705,8 @@ def main() -> int:
                 wsrc = "direct"
                 if refs[0].startswith("REF2:"):
                     attribution = man_by_key[refs[0][5:]].get("attribution_text")
+                elif refs[0].startswith("REF4:"):
+                    attribution = sources.attribution(refs[0])
                 elif refs[0].startswith("J:"):
                     # Structural markers out of the DISPLAY pieces, before
                     # the highlight pass reads them (owner, 2026-08-13).
@@ -562,6 +753,12 @@ def main() -> int:
         ("excerpt_span_cap", str(args.span_cap)),
         ("excerpt_refs_manifest_sha256", sha256_file(manifest_path)),
     ]
+    if args.v4_reference_manifest:
+        meta_rows.extend([
+            ("excerpt_v4_reference_manifest_sha256",
+             sha256_file(Path(args.v4_reference_manifest))),
+            ("excerpt_v4_source_manifest_sha256", v4_source_manifest_sha256),
+        ])
     conn.executemany("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
                      meta_rows)
     conn.commit()

@@ -53,6 +53,7 @@ SUPABASE_ANON_KEY=your-anon-key
 
 # Optional
 GENIZAH_PORT=8081
+GENIZAH_FJMS_DB_PATH=  # optional absolute fjms_enrichment.db path; useful from git worktrees
 WEB_PUZZLE_ENABLED=true   # enables web puzzle page (set false to hide)
 ATLAS_PREVIEW_ENABLED=false  # Phase 133 Visual Atlas Preview beta (/atlas); default OFF, ANDed with baked-asset readiness
 MASKING_SCAN_PATTERNS_FILE=  # path to a gitignored restricted-string pattern file for scripts/check_atlas_masking.py (dev/CI only)

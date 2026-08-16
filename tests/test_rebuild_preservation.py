@@ -110,10 +110,12 @@ def _populate_base_rows(conn: sqlite3.Connection, *, is_new: bool) -> None:
     _insert_row(conn, "discovery_claim", dict(
         page_id=PAGE1, work_id=WORK1, claim_id=C1_ID, claim_type=ids.CLAIM_TYPE_DIRECT_WITNESS,
         display_evidence_id=EA_ID, source_corpus="sefaria", sidecar_version="fixture-v1",
+        locus_status="unavailable",
     ))
     _insert_row(conn, "discovery_claim", dict(
         page_id=PAGE2, work_id=WORK2, claim_id=C2_ID, claim_type=ids.CLAIM_TYPE_DIRECT_WITNESS,
         display_evidence_id=EC_ID, source_corpus="ja", sidecar_version="fixture-v1",
+        locus_status="unavailable",
     ))
 
     _new_evidence_cols = dict(
@@ -296,7 +298,7 @@ def test_control_3_row_added_to_claim(fixture_pair):
     conn = sqlite3.connect(str(new_path))
     conn.execute(
         "INSERT INTO discovery_claim (page_id, work_id, claim_id, claim_type, display_evidence_id, "
-        "source_corpus, sidecar_version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "source_corpus, sidecar_version, locus_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         # EB_ID, not EA_ID: phase 136 added the UNIQUE index
         # `ux_discovery_claim_display_evidence_id` (a real uniqueness invariant,
         # not a performance hint), so reusing EA_ID — already the display pointer
@@ -305,7 +307,7 @@ def test_control_3_row_added_to_claim(fixture_pair):
         # fixture that nothing points at yet, so it satisfies both the FK and the
         # new uniqueness constraint.
         (PAGE3, WORK1, ids.claim_id(PAGE3, WORK1), ids.CLAIM_TYPE_DIRECT_WITNESS, EB_ID,
-         "sefaria", "fixture-v1"),
+         "sefaria", "fixture-v1", "unavailable"),
     )
     conn.commit()
     conn.close()

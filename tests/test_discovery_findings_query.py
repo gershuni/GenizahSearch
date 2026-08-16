@@ -311,6 +311,12 @@ def test_locus_range_filters_by_witnessed_interval_and_old_assets_ignore_it(tmp_
     units = service.get_locus_units_enveloped("wA")
     assert units["status"] == STATUS_OK
     assert [item["citation_pos"] for item in units["items"]] == [1, 2, 3]
+    assert units["meta"] == {
+        "work_id": "wA",
+        "locus_filter": True,
+        "family": "sefaria",
+        "grain": "chapter",
+    }
 
 
 def test_per_manuscript_unit_annotates_a_manuscript_carrying_more_than_one_work(service):
@@ -1275,6 +1281,31 @@ def test_a_genre_with_no_separator_is_a_leaf_and_never_also_a_parent(service):
     assert None not in by_value, "a NULL-keyed parent node reached the surface"
     parents = [row["value"] for row in env["items"] if not row["is_leaf"]]
     assert sorted(parents) == [_PARENT_A, _PARENT_B]
+
+
+def test_domain_facets_follow_catalog_browse_order_not_alphabetical():
+    rows = [
+        {"value": "Philosophy, Theology, Ethical literature / Ethical Literature",
+         "label": "", "count": 1},
+        {"value": "Midrash / Aggadic Midrashim", "label": "", "count": 1},
+        {"value": "Biblical Exegesis / Biblical Exegesis- Rabbanite",
+         "label": "", "count": 1},
+        {"value": "Bible: Texts and Translations / Arabic Tafsir",
+         "label": "", "count": 1},
+    ]
+    parent_rows = [
+        {"value": "Philosophy, Theology, Ethical literature", "count": 1},
+        {"value": "Midrash", "count": 1},
+        {"value": "Biblical Exegesis", "count": 1},
+        {"value": "Bible: Texts and Translations", "count": 1},
+    ]
+    items = DiscoveryService._project_facets("domain", rows, parent_rows)
+    assert [item["value"] for item in items if not item["is_leaf"]] == [
+        "Bible: Texts and Translations",
+        "Biblical Exegesis",
+        "Midrash",
+        "Philosophy, Theology, Ethical literature",
+    ]
 
 
 def test_the_facet_count_table_covers_exactly_the_offered_units():

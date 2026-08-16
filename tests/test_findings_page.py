@@ -1525,6 +1525,13 @@ def test_no_quasar_prop_pins_an_element_to_a_physical_side(module_path):
 # the app lifespan, which is not safe to interleave with the bulk suite.
 # ---------------------------------------------------------------------------
 
+# NiceGUI's simulated ``should_see`` waits only 300 ms by default. A refresh
+# that has already completed by the time its failure dump is built can still
+# lose that race on a busy Windows runner, so post-interaction assertions get a
+# bounded three-second window. The real-browser gate below remains responsible
+# for browser actionability and uses its own larger network/UI timeout.
+_ASYNC_UI_RETRIES = 30
+
 @pytest.mark.render_smoke
 @pytest.mark.parametrize("lang", ["en", "he"])
 def test_more_matches_click_replaces_the_rendered_result_set(lang):
@@ -1601,7 +1608,9 @@ def test_more_matches_click_replaces_the_rendered_result_set(lang):
                         control.click()
 
                         # The RENDERED result region is replaced.
-                        await user.should_see(MORE_ROW_TITLE)
+                        await user.should_see(
+                            MORE_ROW_TITLE, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(MAIN_ROW_TITLE)
             finally:
                 _os.environ.pop("NICEGUI_USER_SIMULATION", None)
@@ -1803,7 +1812,10 @@ def test_turning_candidates_on_then_switching_to_one_row_per_work_does_not_break
                         # or not the popup is showing; then pick the option).
                         user.find(fp.copy_text("novelty_view_label", lang)).click()
                         user.find(words["toggle"]).click()
-                        await user.should_see(_INTERACTION_ROW_TITLES[("identification", True)])
+                        await user.should_see(
+                            _INTERACTION_ROW_TITLES[("identification", True)],
+                            retries=_ASYNC_UI_RETRIES,
+                        )
                         await user.should_not_see(_INTERACTION_ROW_TITLES[("identification", False)])
 
                         # (2) ...and then changes the row unit to one row per
@@ -1815,7 +1827,10 @@ def test_turning_candidates_on_then_switching_to_one_row_per_work_does_not_break
                         # (2a) The new unit is RENDERED, the selection is STILL
                         # APPLIED (a distinct sentinel from the plain work
                         # row), and the old set is gone.
-                        await user.should_see(_INTERACTION_ROW_TITLES[("work", True)])
+                        await user.should_see(
+                            _INTERACTION_ROW_TITLES[("work", True)],
+                            retries=_ASYNC_UI_RETRIES,
+                        )
                         await user.should_not_see(_INTERACTION_ROW_TITLES[("work", False)])
                         await user.should_not_see(
                             _INTERACTION_ROW_TITLES[("identification", True)])
@@ -2158,8 +2173,13 @@ def _reset_to_main_bucket(page, lang: str) -> None:
     chip = page.get_by_role("button", name=bucket_name(True, lang), exact=True).first
     chip.wait_for(state="visible", timeout=_CONTROL_TIMEOUT_MS)
     if chip.get_attribute("aria-pressed") != "true":
+        from playwright.sync_api import expect
+
         chip.click(timeout=_CLICK_TIMEOUT_MS)
-        page.wait_for_timeout(750)
+        bucket_line = page.locator(f".{fp.RESULT_BAR_CLASS}-bucket").first
+        expect(bucket_line).to_contain_text(
+            bucket_name(True, lang), timeout=_CONTROL_TIMEOUT_MS
+        )
 
 
 def _browser_actionability_probe(page, control_name: str, lang=None) -> None:
@@ -2183,7 +2203,16 @@ def _browser_actionability_probe(page, control_name: str, lang=None) -> None:
     # No preceding disclosure action: click straight away. Playwright's own
     # actionability checks run inside click() and raise on failure.
     locator.click(timeout=_CLICK_TIMEOUT_MS)
-    page.wait_for_timeout(750)
+    if lang is not None:
+        from playwright.sync_api import expect
+
+        # The target name also appears in the invitation and on the control,
+        # both before the click. Wait on the result bar's bucket line: it is
+        # the element whose text changes only after the server-side refresh.
+        bucket_line = page.locator(f".{fp.RESULT_BAR_CLASS}-bucket").first
+        expect(bucket_line).to_contain_text(
+            bucket_name(False, lang), timeout=_CONTROL_TIMEOUT_MS
+        )
     after = region.inner_html()
     assert after != before, (
         "the results region did not change after a real browser click on "
@@ -5033,7 +5062,9 @@ def test_switching_bucket_replaces_the_facet_lists_as_well_as_the_rows():
                         user.find(kind=ui.button,
                                   content=bucket_name(False, lang)).click()
 
-                        await user.should_see(_FACET_MORE_SENTINEL)
+                        await user.should_see(
+                            _FACET_MORE_SENTINEL, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(_FACET_MAIN_SENTINEL)
             finally:
                 _os.environ.pop("NICEGUI_USER_SIMULATION", None)
@@ -5115,7 +5146,9 @@ def test_a_chip_removes_its_own_filter_and_clear_all_removes_every_filter():
 
                         # (1) pick a domain from the facet list.
                         user.find(kind=ui.button, content="Liturgy").click()
-                        await user.should_see(_ROW_FILTERED)
+                        await user.should_see(
+                            _ROW_FILTERED, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(_ROW_UNFILTERED)
 
                         # (2) remove it through the CHIP's own listener.
@@ -5132,14 +5165,20 @@ def test_a_chip_removes_its_own_filter_and_clear_all_removes_every_filter():
                                 in removes[0]._event_listeners.values()
                                 if listener.type == "click")
                             handle_event(listener.handler, None)
-                        await user.should_see(_ROW_UNFILTERED)
+                        await user.should_see(
+                            _ROW_UNFILTERED, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(_ROW_FILTERED)
 
                         # (3) pick it again, then use Clear all.
                         user.find(kind=ui.button, content="Liturgy").click()
-                        await user.should_see(_ROW_FILTERED)
+                        await user.should_see(
+                            _ROW_FILTERED, retries=_ASYNC_UI_RETRIES
+                        )
                         user.find(kind=ui.button, content=tr("Clear All")).click()
-                        await user.should_see(_ROW_UNFILTERED)
+                        await user.should_see(
+                            _ROW_UNFILTERED, retries=_ASYNC_UI_RETRIES
+                        )
                         await user.should_not_see(_ROW_FILTERED)
             finally:
                 _os.environ.pop("NICEGUI_USER_SIMULATION", None)
@@ -6261,6 +6300,38 @@ def test_selected_work_lazily_renders_a_citation_order_range(monkeypatch):
     assert from_controls[0].options == to_controls[0].options == {
         10: "Chapter Ten", 11: "Chapter Eleven"
     }
+
+
+def test_ja_page_range_options_hide_pages_without_changing_unit_labels(monkeypatch):
+    items = [
+        {"citation_pos": 10, "part_key": "page:10", "label_he": "פרק יז, עמ' 219"},
+        {"citation_pos": 11, "part_key": "page:11", "label_he": "פרק יח, עמ׳ 220"},
+    ]
+
+    async def _units(work_id):
+        return {
+            "status": "ok",
+            "items": items,
+            "total": 2,
+            "meta": {
+                "work_id": work_id,
+                "locus_filter": True,
+                "family": "ja",
+                "grain": "page",
+            },
+        }
+
+    monkeypatch.setattr(fp, "get_locus_units_enveloped", _units)
+    client = _render_page(
+        monkeypatch,
+        lang="en",
+        state=_state(work_id=_UNCURATED_WORK_ID, work_label=_UNCURATED_RAW_TITLE),
+    )
+    from_control = _elements_with_class(
+        client, f"{fp.FILTER_BAR_CLASS}-locus-from"
+    )[0]
+    assert from_control.options == {10: "פרק יז", 11: "פרק יח"}
+    assert items[0]["label_he"] == "פרק יז, עמ' 219"
 
 
 def test_the_facet_cascade_stops_reading_when_the_token_moves(monkeypatch):
