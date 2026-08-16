@@ -14,6 +14,7 @@ import hashlib
 import html
 import json
 import re
+import sys
 import time
 import urllib.parse
 from html.parser import HTMLParser
@@ -51,6 +52,15 @@ try:
     from scripts.discovery_v4_build_reference import _unit_offsets
 except ModuleNotFoundError:  # direct ``python scripts/...py`` invocation
     from discovery_v4_build_reference import _unit_offsets
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# ``heb_numeral``/``daf_label_he`` are the ONE citation-address implementation
+# (shared/discovery_locus.py): daf-page acquisition reuses them rather than
+# re-deriving Hebrew numeral rendering a second time in this file.
+from shared.discovery_locus import daf_label_he, heb_numeral
 
 
 SEFARIA_BASE = "https://www.sefaria.org"
@@ -178,6 +188,80 @@ def select_chapter_links(links: list[dict], prefix: str) -> list[tuple[int, str]
     if len(ordinals) != len(set(ordinals)):
         raise ValueError(f"chapter link prefix produces duplicate ordinals: {prefix}")
     return selected
+
+
+# Downstream consumers of the NEW "daf" locus_grain value born in
+# ``_acquire_wikisource_daf_pages`` (verified 2026-08-16, discovery-v4.2 C8):
+#
+# - ``discovery_v4_build_reference.py`` reads ``locus_grain`` from the
+#   SOURCE-MAP entry (not this acquisition manifest), so a real daf_pages
+#   map entry must declare ``"locus_grain": "daf"`` explicitly or it silently
+#   defaults to "chapter". Its ``_locus_label()`` has NO "daf" branch yet:
+#   the generic fallback re-derives ``f"{title} {heb_numeral(ordinal)}"``
+#   from the raw ordinal, which would MISLABEL every amud even though each
+#   unit already carries the correct ``daf_label_he`` label from acquisition.
+#   That branch must land (with its own tests) BEFORE the first real
+#   daf_pages entry is added to any source map.
+# - Beyond the locus DB the value is opaque: ``locus_work.grain`` is written
+#   verbatim, ``shared/discovery_service.py`` passes it through to envelope
+#   meta unbranched, and the verifier groups by grain self-consistently
+#   (unlike ``family``, whose vocabulary is frozen).
+
+#: Reverse of ``heb_numeral`` (shared/discovery_locus.py), built BY calling it --
+#: never a hand-written gematria table -- so a daf-page title parses back to a
+#: value only when ``heb_numeral`` itself would render that exact string for
+#: that value. This is what makes the round-trip property hold by construction:
+#: ``heb_numeral`` never emits thousands or a geresh (see its docstring), so
+#: every key here is a bare run of Hebrew letters, and an "א1"-style suffix, an
+#: unrecognized letter run, or a value outside 1..999 has no entry and is
+#: refused rather than guessed at.
+_DAF_NUMERAL_TO_INT: dict[str, int] = {
+    heb_numeral(value): value for value in range(1, 1000)
+}
+_DAF_AMUD_TO_INT = {"א": 1, "ב": 2}
+
+
+def parse_daf_page_title(title: str, link_prefix: str) -> tuple[int, int]:
+    """Strictly parse a Wikisource daf/amud page title (C8, Zohar-class shape).
+
+    Grammar (the ONLY strings this accepts): ``f"{link_prefix} {daf} {amud}"``
+    where ``daf`` is exactly some ``heb_numeral(n)`` for ``1 <= n <= 999`` and
+    ``amud`` is exactly ``"א"`` or ``"ב"`` -- one space between each of the
+    three pieces, nothing before, between, or after them.
+
+    Every anomaly this source shape is known to produce is a HARD ERROR here,
+    never a skip: a title that does not start with ``link_prefix + " "``; a
+    remainder that is not exactly two whitespace-separated tokens (this is
+    what rejects the observed זהר חדש suffixes -- "א1" glued to one token, or
+    "א 1" split into two, both fail for having the wrong shape rather than
+    because "1" was specifically disallowed); a daf token outside the reverse
+    table (unrecognized letters, a geresh, digits, niqqud); or an amud token
+    that is not exactly א/ב.
+    """
+    if not title.startswith(link_prefix + " "):
+        raise ValueError(
+            f"page title does not start with {link_prefix!r}: {title!r}"
+        )
+    remainder = title[len(link_prefix) + 1 :]
+    tokens = remainder.split(" ")
+    if len(tokens) != 2 or not all(tokens):
+        raise ValueError(
+            f"page title {title!r} is not {link_prefix!r} + daf + amud "
+            f"(remainder {remainder!r} does not split into exactly two tokens)"
+        )
+    daf_token, amud_token = tokens
+    daf = _DAF_NUMERAL_TO_INT.get(daf_token)
+    if daf is None:
+        raise ValueError(
+            f"page title {title!r} has an unrecognized daf numeral: {daf_token!r}"
+        )
+    amud = _DAF_AMUD_TO_INT.get(amud_token)
+    if amud is None:
+        raise ValueError(
+            f"page title {title!r} has an unrecognized amud letter "
+            f"(expected א or ב): {amud_token!r}"
+        )
+    return daf, amud
 
 
 def _primary_title(node: dict, lang: str) -> str | None:
@@ -702,6 +786,113 @@ def _acquire_wikisource(fetcher: Fetcher, source: dict) -> tuple[dict, list[Path
     )
 
 
+def _acquire_wikisource_daf_pages(fetcher: Fetcher, source: dict) -> tuple[dict, list[Path]]:
+    """Acquire a per-daf/amud Wikisource work (Zohar-class shape, C8).
+
+    Every expected page is REQUESTED by enumeration (daf N in the declared
+    range, amud in א/ב) -- an anomalous sibling page under the same prefix
+    (e.g. the observed "א1"/"א2" זהר חדש suffixes) is simply never asked for,
+    so it cannot contaminate this acquisition. But locus identity for each
+    fetched page comes from PARSING that page's own returned title, never
+    from the enumeration index: ``daf_bavli``'s Sefaria ordinal geometry does
+    not transfer to Wikisource pagination, and a redirect or a mislabeled page
+    could otherwise silently hand back text under the wrong (daf, amud). A
+    disagreement between what was requested and what the fetched title parses
+    as is therefore a hard error (the anti-drift gate), not a warning.
+
+    Completeness is a HARD gate in this mode: every expected page must exist
+    and yield non-empty cleaned text. The chapter-link Wikisource path's
+    ``coverage_status="partial"`` escape is NOT available here -- C8 says so
+    explicitly, because a public_first Zohar-class source with silently
+    missing daf pages would misreport its own coverage.
+    """
+    key = source["key"]
+    link_prefix = source["link_prefix"]
+    daf_first, daf_last = source["daf_range"]
+    raw_paths: list[Path] = []
+    units: list[dict] = []
+    revisions: list[dict] = []
+    missing_pages: list[dict] = []
+    position = 0
+    for daf in range(daf_first, daf_last + 1):
+        for amud_index, amud_letter in enumerate(("א", "ב")):
+            position += 1
+            amud = amud_index + 1
+            expected_title = f"{link_prefix} {heb_numeral(daf)} {amud_letter}"
+            page_path = fetcher.raw_dir / key / f"page-{position:04d}.json"
+            doc = fetcher.wikisource_parse(expected_title, page_path)
+            raw_paths.append(page_path)
+            if doc.get("error"):
+                missing_pages.append(
+                    {"page": expected_title, "error": doc["error"].get("code")}
+                )
+                continue
+            item = doc.get("parse") or {}
+            fetched_title = item.get("title")
+            if not fetched_title:
+                # Falling back to expected_title here would make the
+                # cross-check below compare the expectation against itself.
+                raise ValueError(
+                    f"daf-page parse response for {expected_title!r} carries "
+                    "no title -- the anti-drift gate needs the page's own "
+                    "fetched title, never the requested one"
+                )
+            parsed_daf, parsed_amud = parse_daf_page_title(fetched_title, link_prefix)
+            if (parsed_daf, parsed_amud) != (daf, amud):
+                raise ValueError(
+                    "daf-page parse/enumeration mismatch for "
+                    f"{key}: requested {expected_title!r} (daf={daf}, "
+                    f"amud={amud}) but the fetched title {fetched_title!r} "
+                    f"parses as (daf={parsed_daf}, amud={parsed_amud})"
+                )
+            cleaned = clean_hebrew(visible_text(item.get("text") or ""))
+            if not cleaned:
+                missing_pages.append({"page": expected_title, "error": "empty"})
+                continue
+            ordinal = 2 * (daf - daf_first) + amud_index + 1
+            units.append(
+                {
+                    "ordinal": ordinal,
+                    "label": daf_label_he(daf, amud),
+                    "provider_ref": fetched_title,
+                    "revision_id": item.get("revid"),
+                    "text": cleaned,
+                    "hebrew_letters": count_hebrew_letters(cleaned),
+                }
+            )
+            revisions.append(
+                {"page": fetched_title, "revision_id": item.get("revid")}
+            )
+    if missing_pages:
+        names = ", ".join(entry["page"] for entry in missing_pages)
+        raise ValueError(
+            f"daf-page completeness gate failed for {key}: "
+            f"{len(missing_pages)} page(s) missing or empty "
+            '(coverage_status="partial" is not available in daf_pages mode '
+            f"-- C8): {names}"
+        )
+    return (
+        {
+            "provider": "hewikisource",
+            "source_ref": link_prefix,
+            "source_url": "https://he.wikisource.org/wiki/"
+            + urllib.parse.quote(link_prefix.replace(" ", "_")),
+            "version_title": "Hebrew Wikisource revision snapshot",
+            "license": WIKISOURCE_LICENSE,
+            "license_url": WIKISOURCE_LICENSE_URL,
+            "attribution": f'"{link_prefix}", Hebrew Wikisource contributors.',
+            "revisions": revisions,
+            "coverage_status": "complete",
+            "missing_pages": [],
+            "locus_grain": "daf",
+            "daf_range": [daf_first, daf_last],
+            "page_count": len(units),
+            "units": units,
+        },
+        raw_paths,
+    )
+
+
 def _combined_raw_hash(paths: list[Path]) -> str:
     digest = hashlib.sha256()
     for path in sorted(paths, key=lambda item: str(item)):
@@ -712,14 +903,18 @@ def _combined_raw_hash(paths: list[Path]) -> str:
 
 
 def _source_display_ref(source: dict) -> str:
-    """Return a printable/manifest ref for both plain and container sources.
+    """Return a printable/manifest ref for plain, container, and daf_pages sources.
 
     A container has no single ``source_ref``; it has an ordered list of
-    children, each with its own.
+    children, each with its own. A daf_pages source (C8) likewise has no
+    ``source_ref`` -- it is named by its ``link_prefix`` and ``daf_range``.
     """
     if source.get("container"):
         children = source.get("children") or []
         return f"container/{len(children)} children"
+    if source.get("mode") == "daf_pages":
+        first, last = source["daf_range"]
+        return f"{source['link_prefix']} [daf {first}-{last}]"
     return source["source_ref"]
 
 
@@ -752,6 +947,8 @@ def run(args: argparse.Namespace) -> dict:
                     raise ValueError("existing normalized source has no raw responses")
             elif source.get("container"):
                 acquired, raw_paths = _acquire_container_sefaria(fetcher, source, allowlist)
+            elif source.get("mode") == "daf_pages":
+                acquired, raw_paths = _acquire_wikisource_daf_pages(fetcher, source)
             elif source["provider"] == "sefaria":
                 acquired, raw_paths = _acquire_sefaria(fetcher, source, allowlist)
             else:
@@ -795,6 +992,15 @@ def run(args: argparse.Namespace) -> dict:
                 entry["child_count"] = acquired["child_count"]
                 entry["children"] = acquired["children"]
                 entry["license_ruling"] = acquired.get("license_ruling")
+            if source.get("mode") == "daf_pages":
+                # C8 manifest fields: daf_range, page count, per-page letters
+                # total (the generic ``hebrew_letters``/``unit_count`` above
+                # already carry the aggregate), and the NEW "daf" locus_grain
+                # value (see the module-level note on downstream consumers).
+                entry["mode"] = "daf_pages"
+                entry["locus_grain"] = acquired["locus_grain"]
+                entry["daf_range"] = acquired["daf_range"]
+                entry["page_count"] = acquired["page_count"]
             entries.append(entry)
             print(
                 f"  acquired {len(acquired['units'])} units / {total_letters:,} letters",

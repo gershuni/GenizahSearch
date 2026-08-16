@@ -186,6 +186,48 @@ def load_source_config(path: str | Path) -> dict:
                     )
         elif source.get("provider") not in {"sefaria", "hewikisource"}:
             raise ValueError(f"invalid provider for {key}")
+        mode = source.get("mode")
+        if mode is not None:
+            # "schema_leaves" is the PRE-EXISTING Sefaria mode (V4/V4.1's
+            # midrash_tanchuma_buber et al.; consumed at fetch time by
+            # ``_acquire_sefaria``) -- it was never schema-validated before
+            # this block existed, and it still isn't beyond appearing in the
+            # vocabulary, so every current map keeps validating exactly as it
+            # did. "daf_pages" is the new mode this block actually validates
+            # (discovery-v4.2 C8, the per-daf/amud Zohar-class source shape).
+            # A source map with no "mode" key at all (still most sources)
+            # never enters this block, so it is unaffected either way.
+            if source.get("container"):
+                raise ValueError(f"container source {key} cannot also declare a mode")
+            if mode not in {"schema_leaves", "daf_pages"}:
+                raise ValueError(f"source {key} has an unsupported mode: {mode!r}")
+            if mode == "daf_pages":
+                if source.get("provider") != "hewikisource":
+                    raise ValueError(
+                        f"source {key} mode {mode!r} requires provider 'hewikisource'"
+                    )
+                link_prefix = source.get("link_prefix")
+                if not isinstance(link_prefix, str) or not link_prefix.strip():
+                    raise ValueError(
+                        f"source {key} daf_pages mode requires a non-empty link_prefix"
+                    )
+                daf_range = source.get("daf_range")
+                if (
+                    not isinstance(daf_range, list)
+                    or len(daf_range) != 2
+                    or not all(
+                        isinstance(value, int) and not isinstance(value, bool)
+                        for value in daf_range
+                    )
+                ):
+                    raise ValueError(
+                        f"source {key} daf_pages mode requires a 2-integer daf_range"
+                    )
+                first, last = daf_range
+                if first < 1 or last < first or last > 999:
+                    raise ValueError(
+                        f"source {key} has an insane daf_range: {daf_range!r}"
+                    )
         mappings = source.get("mappings")
         if not isinstance(mappings, list) or not mappings:
             raise ValueError(f"source {key} must have mappings")
