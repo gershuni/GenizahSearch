@@ -529,6 +529,24 @@ def _render_findings_page(*, lang: str, findings: Any, facets: Any = None,
     async def _launch(*_a, **_k):
         return dict(launch_envelope)
 
+    async def _locus_units(work_id):
+        return {
+            "status": "ok",
+            "items": [
+                {"citation_pos": 10, "part_key": "page:10",
+                 "label_he": "פרק יז, עמ' 219"},
+                {"citation_pos": 11, "part_key": "page:11",
+                 "label_he": "פרק יח, עמ' 220"},
+            ],
+            "total": 2,
+            "meta": {
+                "work_id": work_id,
+                "locus_filter": True,
+                "family": "ja",
+                "grain": "page",
+            },
+        }
+
     # excerpt-v1 (2026-08-13): availability answered TRUE so `_render_row`
     # builds the `load_excerpt` closure, and the read stubbed so the driven
     # click on the compare-texts toggle EXECUTES that closure -- the
@@ -546,6 +564,7 @@ def _render_findings_page(*, lang: str, findings: Any, facets: Any = None,
     patch.setattr(fp, "get_findings_enveloped", _findings)
     patch.setattr(fp, "get_findings_facets_enveloped", _facets)
     patch.setattr(fp, "get_launch_stats_enveloped", _launch)
+    patch.setattr(fp, "get_locus_units_enveloped", _locus_units)
     patch.setattr(fp, "excerpts_available", _excerpts_on)
     patch.setattr(fp, "get_excerpt_enveloped", _excerpt)
     patch.setattr(fp, "discovery_meta",
@@ -663,7 +682,6 @@ async def _drive_value_change_handlers(client) -> None:
     import inspect as _inspect
 
     for element in list(client.elements.values()):
-        slot = getattr(element, "parent_slot", None)
         handlers = list(getattr(element, "_change_handlers", None) or ())
         # ...plus any NON-click listener the surface registered itself. NiceGUI's
         # own internal bridges are skipped: they read a different event shape and
@@ -680,6 +698,12 @@ async def _drive_value_change_handlers(client) -> None:
         for value in _control_option_values(element):
             for handler in handlers:
                 try:
+                    # A preceding change handler can repaint the whole result
+                    # region and detach controls that were present in this
+                    # snapshot. Resolve the weak parent-slot reference here so
+                    # a detached control is skipped by the same fail-soft path
+                    # as a handler that is no longer driveable.
+                    slot = getattr(element, "parent_slot", None)
                     with slot if slot is not None else client:
                         result = (handler()
                                   if not _inspect.signature(handler).parameters
@@ -734,8 +758,14 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
     hrefs: List[str] = []
 
     def _take(client) -> None:
-        texts.extend(_client_texts(client))
-        hrefs.extend(_client_hrefs(client))
+        try:
+            texts.extend(_client_texts(client))
+            hrefs.extend(_client_hrefs(client))
+        finally:
+            # These capture clients are synthetic and never connect. Keeping
+            # dozens of them in NiceGUI's global registry lets later tests'
+            # pruning timer reach a client with no request context.
+            client.delete()
 
     # A facet cascade with a PARENT and its LEAF, so the domain tree renders its
     # branch, its chevron and its collapsed child container rather than a flat
@@ -777,6 +807,26 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         _take(_render_findings_page(
             lang=lang, findings=tf.findings_envelope(rows_full),
             facets=rich_facets))
+        # 2a. a selected work with addressable units. The initial facet pass
+        # paints the From/To controls and caches their envelope; the generic
+        # change-handler driver then refreshes the page and exercises the cache
+        # hit as well as the controls' own async selection handlers.
+        _take(_render_findings_page(
+            lang=lang, findings=tf.findings_envelope(rows_full),
+            facets=rich_facets,
+            state={"unit": tf.FINDINGS_UNIT_IDENTIFICATION,
+                   "bucket": tf.BUCKET_MAIN, "sort": "band_rank",
+                   "novelty_view": fp.NOVELTY_VIEW_ALL, "domain": None,
+                   "author": None, "work_id": tf.CURATED_WORK_ID,
+                   "work_label": tf.CURATED_RAW_TITLE, "page": 1}))
+        # A populated locus table can still have no public address options.
+        # Exercise the honest fail-closed branch: it paints no empty controls.
+        _take(_render_component(
+            lambda ln=lang: fp._render_locus_range(
+                {"status": "ok", "items": [], "total": 0, "meta": {}},
+                {"locus_from": None, "locus_to": None}, ln,
+                lambda: None,
+            )))
         # 2b. a PERSISTED PAGE PAST THE END. The page clamps its own state and
         #     refetches, and that refetch is a second painted result region no
         #     other case in this capture produces -- reachable only when the
@@ -1274,6 +1324,21 @@ def payload_map(seed: Optional[str] = None) -> Dict[str, List[Tuple[str, Any]]]:
         "get_launch_stats_enveloped": (
             [(n, e) for n, e in findings_envelopes if n.startswith("launch/")]
             + [("launch_shades", panel["launch_shades"])]),
+        "get_locus_units_enveloped": [("locus_units", {
+            "status": "ok",
+            "items": [{
+                "citation_pos": 1,
+                "part_key": "chapter:1",
+                "label_he": _seeded(seed, "פרק א"),
+            }],
+            "total": 1,
+            "meta": {
+                "work_id": tf.CURATED_WORK_ID,
+                "locus_filter": True,
+                "family": "other_staged",
+                "grain": "chapter",
+            },
+        })],
         # excerpt-v1 (2026-08-13): the one payload whose values are CORPUS TEXT.
         # The seed stands in every text piece and the attribution.
         "get_excerpt_enveloped": [("excerpt", {
@@ -1333,7 +1398,10 @@ def capture_copy_export(hrefs: List[str], seed: Optional[str] = None) -> str:
         # The seeded row's link target, rendered by the shipped renderer.
         client = _render_component(
             lambda: fr.render_finding_row(tf.finding_row(sys_id=seed), "en"))
-        lines.extend(_client_hrefs(client))
+        try:
+            lines.extend(_client_hrefs(client))
+        finally:
+            client.delete()
     return "\n".join(lines)
 
 
@@ -1419,12 +1487,18 @@ def _rendered_error_states(seed: Optional[str] = None) -> List[Tuple[str, str]]:
             client = _render_findings_page(
                 lang=lang, findings=tf.findings_envelope([], status=status),
                 drive=True)
-            out.append((f"rendered-outage/{status}/{lang}",
-                        "\n".join(_client_texts(client))))
+            try:
+                out.append((f"rendered-outage/{status}/{lang}",
+                            "\n".join(_client_texts(client))))
+            finally:
+                client.delete()
         client = _render_component(lambda ln=lang, t=title: fr.render_finding_row(
             tf.finding_row(neutral_title=t, rendered_relation="not_a_relation"), ln))
-        out.append((f"rendered-malformed-row/{lang}",
-                    "\n".join(_client_texts(client))))
+        try:
+            out.append((f"rendered-malformed-row/{lang}",
+                        "\n".join(_client_texts(client))))
+        finally:
+            client.delete()
     return out
 
 
@@ -1662,6 +1736,15 @@ NON_PAINTING_EXEMPT: Dict[Tuple[str, str, str], str] = {
         "nothing -- and it is taken only when the reader's client disconnected "
         "while a cascade read was in flight, which a synchronous capture cannot "
         "produce without faking the client's own liveness.",
+    ("web/pages/findings.py", "_render_locus_range",
+     "except (TypeError, ValueError):"):
+        "the defensive conversion guard for a malformed select event. It only "
+        "chooses a local fallback and paints nothing; the shipped select emits "
+        "integer option keys or None, neither of which can enter this branch.",
+    ("web/pages/findings.py", "_render_locus_range", "candidate = None"):
+        "the local assignment inside the same malformed-event guard. It paints "
+        "nothing, and producing it would require fabricating an event value the "
+        "range select cannot emit from its integer-keyed option vocabulary.",
     ("web/pages/findings.py", "_render_body", "return"):
         "the page-gone guards inside `refresh`. They RETURN -- they put nothing "
         "on a screen -- and they are taken only when the reader's client has "

@@ -124,6 +124,8 @@ SWEEP_INPUTS = {
     "low_coverage_note": [{}],
     "granularity_subline": [{"other_work_title": WORK_EN},
                             {"other_work_title": WORK_HE}],
+    "locus_subline": [{"locus_label": "Part I, chapter 1"},
+                       {"locus_label": "חלק א, פרק א"}],
     "missing_title": [{}],
     "not_an_identification_note": [{}],
     "section_header": [

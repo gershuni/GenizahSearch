@@ -11,9 +11,11 @@ claim rows alone.
 Usage:
     python scripts/project_discovery_public.py <private_db> <public_db_out>
 
-`is_public` (`shared/discovery_visibility.py`) is the ONE eligibility rule
-this script consumes -- it is never restated here. Every table present in
-the private input MUST have an explicit projection rule in
+`is_public` (`shared/discovery_visibility.py`) remains the row-level
+visibility rule. A separate, versioned owner-curated exclusion policy may
+withhold otherwise-public canonical works while retaining them in the private
+research bake as routing competitors. Every table present in the private input
+MUST have an explicit projection rule in
 `PROJECTION_RULES` below; an unrecognized table is a BUILD ERROR
 (`ProjectionError`), never silently copied whole.
 
@@ -35,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -69,12 +72,65 @@ _LATER_SHARED_TEXT = "later_shared_text"
 # graph raises instead of looping forever.
 _MAX_CLOSURE_PASSES = 25
 
+_DEFAULT_PUBLIC_EXCLUSIONS_PATH = os.path.join(
+    _REPO_ROOT, "docs", "specs", "discovery-public-projection-exclusions-v1.json"
+)
+_PUBLIC_EXCLUSIONS_SCHEMA = "discovery-public-projection-exclusions-v1"
+_OPAQUE_WORK_ID_RE = re.compile(r"^w[0-9]{6}$")
+
 # G9: claim types that ASSERT a witness relation and therefore require at least
 # one witness-kind evidence row to survive with them.
 _WITNESS_ASSERTING_CLAIM_TYPES = (
     ids.CLAIM_TYPE_DIRECT_WITNESS,
     ids.CLAIM_TYPE_QUOTES_THIS_WORK,
 )
+
+
+def load_public_projection_exclusions(path: str) -> Tuple[str, Set[str]]:
+    """Load the owner-curated canonical-work exclusion policy.
+
+    The policy is projection-only: excluded works remain in the private asset
+    and continue to participate in routing and competition. The public build
+    drops their evidence first, then closes and recomputes the graph normally.
+    """
+    with open(path, encoding="utf-8") as fh:
+        payload = json.load(fh)
+    expected_top_keys = {
+        "schema_version", "policy_version", "ruled_date", "ruling", "entries"
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_top_keys:
+        raise ProjectionError(
+            "public projection exclusions must use the exact versioned policy shape"
+        )
+    if payload["schema_version"] != _PUBLIC_EXCLUSIONS_SCHEMA:
+        raise ProjectionError("unsupported public projection exclusions schema_version")
+    policy_version = payload["policy_version"]
+    if not isinstance(policy_version, str) or not policy_version:
+        raise ProjectionError("public projection exclusions policy_version must be non-empty")
+    entries = payload["entries"]
+    if not isinstance(entries, list):
+        raise ProjectionError("public projection exclusions entries must be a list")
+    work_ids: Set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {
+            "canonical_work_id", "title", "reason"
+        }:
+            raise ProjectionError(
+                "every public projection exclusion must have canonical_work_id, title, reason"
+            )
+        work_id = entry["canonical_work_id"]
+        if not isinstance(work_id, str) or not _OPAQUE_WORK_ID_RE.fullmatch(work_id):
+            raise ProjectionError(
+                "public projection exclusion canonical_work_id must be an opaque work id"
+            )
+        if work_id in work_ids:
+            raise ProjectionError("public projection exclusions contain a duplicate work id")
+        if not isinstance(entry["title"], str) or not entry["title"]:
+            raise ProjectionError("public projection exclusion title must be non-empty")
+        if not isinstance(entry["reason"], str) or not entry["reason"]:
+            raise ProjectionError("public projection exclusion reason must be non-empty")
+        work_ids.add(work_id)
+    return policy_version, work_ids
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +202,16 @@ class ProjectionContext:
     """Everything the per-table projection rules need, computed ONCE from
     the private asset before any output row is written."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        exclusion_policy_version: str = "test-no-public-exclusions",
+        excluded_canonical_work_ids: Set[str] = frozenset(),
+    ):
         self.conn = conn
+        self.exclusion_policy_version = exclusion_policy_version
+        self.excluded_canonical_work_ids = frozenset(excluded_canonical_work_ids)
         self.works_by_id: Dict[str, Dict[str, Any]] = {
             w["work_id"]: w for w in _rows_as_dicts(conn, "works")
         }
@@ -160,6 +224,21 @@ class ProjectionContext:
         }
 
         all_evidence = _rows_as_dicts(conn, "discovery_evidence")
+        present_canonical_ids = {
+            work["canonical_work_id"] for work in self.works_by_id.values()
+        }
+        self.present_excluded_canonical_work_ids = (
+            self.excluded_canonical_work_ids & present_canonical_ids
+        )
+        self.policy_excluded_claim_ids = {
+            claim_id for claim_id, claim in self.claims_by_id.items()
+            if self.works_by_id.get(claim["work_id"], {}).get("canonical_work_id")
+            in self.excluded_canonical_work_ids
+        }
+        self.policy_excluded_evidence_ids = {
+            ev["evidence_id"] for ev in all_evidence
+            if ev["claim_id"] in self.policy_excluded_claim_ids
+        }
 
         # --- Evidence survival (the D-22 conjunction, per row) -----------
         surviving_evidence_by_claim: Dict[str, List[Dict[str, Any]]] = {}
@@ -170,6 +249,11 @@ class ProjectionContext:
             if claim is None:
                 continue  # orphan evidence in the PRIVATE asset -- not this script's concern
             work = self.works_by_id.get(claim["work_id"])
+            if (
+                work
+                and work.get("canonical_work_id") in self.excluded_canonical_work_ids
+            ):
+                continue
             identity_vis = work.get("identity_visibility") if work else None
             assertion_vis = ev.get("assertion_visibility")
             if visibility.is_public(assertion_vis, identity_vis):
@@ -310,6 +394,8 @@ class ProjectionContext:
         self.public_work_ids: Set[str] = {
             wid for wid in referenced_work_ids
             if self.works_by_id.get(wid, {}).get("identity_visibility") == visibility.VISIBILITY_PUBLIC
+            and self.works_by_id.get(wid, {}).get("canonical_work_id")
+            not in self.excluded_canonical_work_ids
         }
 
 
@@ -665,6 +751,10 @@ def _project_meta(ctx: ProjectionContext, projected_counts: Dict[str, int]) -> L
     private_meta = {row["key"]: row["value"] for row in _rows_as_dicts(ctx.conn, "meta")}
     out_meta = dict(private_meta)
     out_meta["audience"] = "public"
+    out_meta["public_projection_exclusion_version"] = ctx.exclusion_policy_version
+    out_meta["public_projection_excluded_canonical_work_count"] = str(
+        len(ctx.present_excluded_canonical_work_ids)
+    )
     # Recompute -- never copy -- every release-contract row-count key so a
     # reader can never infer how many private rows were removed from a
     # count that quietly stayed at the private total.
@@ -1048,6 +1138,7 @@ def project(
     public_db_out_path: str,
     *,
     masking_patterns: Optional[List[str]] = None,
+    public_exclusions_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the public projection at `public_db_out_path` from
     `private_db_path`. Returns the reconciliation report dict (also written
@@ -1070,7 +1161,15 @@ def project(
                 "projection rule is a build error, never a silent whole-table copy"
             )
 
-        ctx = ProjectionContext(private_conn)
+        exclusions_path = public_exclusions_path or _DEFAULT_PUBLIC_EXCLUSIONS_PATH
+        exclusion_policy_version, excluded_canonical_work_ids = (
+            load_public_projection_exclusions(exclusions_path)
+        )
+        ctx = ProjectionContext(
+            private_conn,
+            exclusion_policy_version=exclusion_policy_version,
+            excluded_canonical_work_ids=excluded_canonical_work_ids,
+        )
 
         out_path = Path(public_db_out_path)
         if out_path.exists():
@@ -1183,6 +1282,17 @@ def project(
             # Evidence dropped as a CASCADE of the above: a claim asserting a
             # witness relation that lost its last witness row goes entirely.
             "pruned_g9_cascade_evidence": len(ctx.pruned_g9_cascade_evidence_ids),
+            "public_projection_exclusions": {
+                "policy_version": ctx.exclusion_policy_version,
+                "configured_canonical_work_count": len(
+                    ctx.excluded_canonical_work_ids
+                ),
+                "present_canonical_work_count": len(
+                    ctx.present_excluded_canonical_work_ids
+                ),
+                "excluded_claim_count": len(ctx.policy_excluded_claim_ids),
+                "excluded_evidence_count": len(ctx.policy_excluded_evidence_ids),
+            },
             # A green `project()` is NOT a release decision. The self-gate above
             # is deliberately narrow -- it checks that what was just emitted is
             # internally coherent (closed graph, honest counts, right audience,
@@ -1237,6 +1347,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("private_db", help="Path to the PRIVATE discovery.db sidecar (input)")
     parser.add_argument("public_db_out", help="Path to write the PUBLIC projection to (output)")
+    parser.add_argument(
+        "--public-exclusions",
+        default=_DEFAULT_PUBLIC_EXCLUSIONS_PATH,
+        help=(
+            "Versioned public-projection canonical-work exclusion policy "
+            "(default: docs/specs/discovery-public-projection-exclusions-v1.json)"
+        ),
+    )
     return parser
 
 
@@ -1244,7 +1362,11 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        report = project(args.private_db, args.public_db_out)
+        report = project(
+            args.private_db,
+            args.public_db_out,
+            public_exclusions_path=args.public_exclusions,
+        )
     except ProjectionError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

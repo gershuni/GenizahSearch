@@ -10,6 +10,7 @@ run time (never hardcoded into this committed file) and never print it.
 """
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from pathlib import Path
@@ -359,6 +360,81 @@ def test_baseline_keeps_exactly_the_fully_open_rows(tmp_path):
     assert claim_ids == {"C1"}
     assert evidence_ids == {"E1"}
     assert work_ids == {"W_OPEN"}
+
+
+def test_owner_public_exclusions_remove_yalkut_but_keep_private_competitors(tmp_path):
+    path, conn = _new_private_conn(tmp_path)
+    _add_work(conn, "W_OPEN", identity_visibility="public")
+    _add_work(conn, "w001383", identity_visibility="public")
+    _add_work(conn, "w001384", identity_visibility="public")
+    _add_claim_with_evidence(
+        conn, claim_id="C_OPEN", page_id="P1", work_id="W_OPEN",
+        evidence_id="E_OPEN", sys_id="SYS_OPEN", assertion_visibility="public",
+    )
+    for suffix, work_id in (("NACH", "w001383"), ("TORAH", "w001384")):
+        _add_claim_with_evidence(
+            conn, claim_id=f"C_{suffix}", page_id=f"P_{suffix}", work_id=work_id,
+            evidence_id=f"E_{suffix}", sys_id=f"SYS_{suffix}",
+            assertion_visibility="public",
+        )
+    _add_meta(conn, audience="private")
+    _finalize(conn)
+
+    out_path, report = _run_projection(tmp_path, path)
+    out_conn = _open_ro(out_path)
+
+    assert out_conn.execute(
+        "SELECT COUNT(*) FROM works WHERE work_id IN ('w001383', 'w001384')"
+    ).fetchone()[0] == 0
+    assert out_conn.execute(
+        "SELECT COUNT(*) FROM discovery_claim WHERE work_id IN ('w001383', 'w001384')"
+    ).fetchone()[0] == 0
+    assert out_conn.execute(
+        "SELECT COUNT(*) FROM discovery_evidence "
+        "WHERE claim_id IN ('C_NACH', 'C_TORAH')"
+    ).fetchone()[0] == 0
+    assert out_conn.execute(
+        "SELECT COUNT(*) FROM discovery_identification "
+        "WHERE canonical_work_id IN ('w001383', 'w001384')"
+    ).fetchone()[0] == 0
+    assert out_conn.execute(
+        "SELECT COUNT(*) FROM works WHERE work_id='W_OPEN'"
+    ).fetchone()[0] == 1
+    assert dict(out_conn.execute(
+        "SELECT key, value FROM meta WHERE key LIKE 'public_projection_exclu%'"
+    ).fetchall()) == {
+        "public_projection_exclusion_version": "public-projection-exclusions-v1",
+        "public_projection_excluded_canonical_work_count": "2",
+    }
+    assert report["public_projection_exclusions"] == {
+        "policy_version": "public-projection-exclusions-v1",
+        "configured_canonical_work_count": 2,
+        "present_canonical_work_count": 2,
+        "excluded_claim_count": 2,
+        "excluded_evidence_count": 2,
+    }
+
+    private_conn = _open_ro(path)
+    assert private_conn.execute(
+        "SELECT COUNT(*) FROM works WHERE work_id IN ('w001383', 'w001384')"
+    ).fetchone()[0] == 2
+
+
+def test_public_exclusion_policy_rejects_duplicate_work_ids(tmp_path):
+    policy = tmp_path / "bad-exclusions.json"
+    payload = {
+        "schema_version": "discovery-public-projection-exclusions-v1",
+        "policy_version": "test-v1",
+        "ruled_date": "2026-08-14",
+        "ruling": "test",
+        "entries": [
+            {"canonical_work_id": "w001383", "title": "a", "reason": "r"},
+            {"canonical_work_id": "w001383", "title": "b", "reason": "r"},
+        ],
+    }
+    policy.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(proj.ProjectionError, match="duplicate"):
+        proj.load_public_projection_exclusions(str(policy))
 
 
 # ---------------------------------------------------------------------------

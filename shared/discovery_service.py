@@ -3133,19 +3133,30 @@ class DiscoveryService:
         if conn is None or not self._has_locus_filter(conn):
             return unavailable_envelope(meta={"reason": "locus_filter_unavailable"})
         try:
+            work = conn.execute(
+                "SELECT family, grain FROM locus_work WHERE work_id=?",
+                (str(work_id),),
+            ).fetchone()
             rows = conn.execute(
                 "SELECT citation_pos, MIN(part_key) AS part_key, "
                 "MIN(label_he) AS label_he FROM locus_unit "
-                "WHERE work_id=? GROUP BY citation_pos ORDER BY citation_pos",
+                "WHERE work_id=? AND citation_pos IS NOT NULL "
+                "GROUP BY citation_pos ORDER BY citation_pos",
                 (str(work_id),),
             ).fetchall()
         except Exception as exc:
             logger.error("DiscoveryService.get_locus_units error: %s", exc)
             return unavailable_envelope(meta={"reason": "query_failed"})
         items = [surface_safe_locus_unit(dict(row)) for row in rows]
+        work_meta = dict(work) if work is not None else {}
         return make_envelope(
             STATUS_OK, items, len(items),
-            meta={"work_id": str(work_id), "locus_filter": True},
+            meta={
+                "work_id": str(work_id),
+                "locus_filter": True,
+                "family": work_meta.get("family"),
+                "grain": work_meta.get("grain"),
+            },
         )
 
     def get_findings_enveloped(
@@ -3497,7 +3508,13 @@ class DiscoveryService:
             for parent, count in parents.items()
         ]
         items.extend(surface_safe_facet(leaf) for leaf in leaves)
-        items.sort(key=lambda it: (it["parent"] or it["value"], it["is_leaf"], it["value"]))
+        from shared.domain_hierarchy import domain_sort_key
+
+        items.sort(key=lambda item: (
+            domain_sort_key(item["value"]),
+            item["is_leaf"],
+            item["value"],
+        ))
         return items
 
     def _findings_timeout(self) -> float:

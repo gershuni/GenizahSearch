@@ -2040,9 +2040,16 @@ def check_locus_reference_basis(conn: sqlite3.Connection, meta: dict) -> List[st
 
 _LOCUS_DISPLAY_VERSION = "locus-display-v1"
 _LOCUS_DISPLAY_STATUSES = ("resolved", "whole_work", "unavailable")
-_LOCUS_DIVISIONS_SHA256 = (
-    "aaac6f90d9ee2b4c3e0b83c0220e9215dc2cdee0c9995cd2ed6672b951898263"
-)
+_LOCUS_DIVISIONS_BY_REFERENCE_SHA256 = {
+    "acb6b86f61680e5b459fc8274aa3bce8b69d6bec13512c83a56167c7fd6646de": (
+        "aaac6f90d9ee2b4c3e0b83c0220e9215dc2cdee0c9"
+        "995cd2ed6672b951898263"
+    ),
+    "6c540e3987752f1e0ead36f881e8d2f41f903b6e1aa9121b2b109ecfbc8a3133": (
+        "c6cf55d2388585dd2fb8dcf2cb565bbbb386f7def8"
+        "a32b710516886c18f0fc40"
+    ),
+}
 
 
 def check_locus_display_contract(conn: sqlite3.Connection, meta: dict) -> List[str]:
@@ -2134,7 +2141,14 @@ def check_locus_display_contract(conn: sqlite3.Connection, meta: dict) -> List[s
             f"locus display: {bad_whole_work} whole-work row(s) have a populated unit table"
         )
     if conn.execute("SELECT COUNT(*) FROM locus_unit").fetchone()[0]:
-        if meta.get("locus_divisions_sha256") != _LOCUS_DIVISIONS_SHA256:
+        expected_locus_sha = _LOCUS_DIVISIONS_BY_REFERENCE_SHA256.get(
+            meta.get("reference_corpus_sha256")
+        )
+        if expected_locus_sha is None:
+            violations.append(
+                "meta.reference_corpus_sha256 has no approved locus input pair"
+            )
+        elif meta.get("locus_divisions_sha256") != expected_locus_sha:
             violations.append("meta.locus_divisions_sha256 is absent or not the pinned input")
 
     filter_marker = meta.get("locus_filter_version")

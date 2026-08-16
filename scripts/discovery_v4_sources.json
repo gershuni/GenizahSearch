@@ -1,0 +1,72 @@
+{
+  "schema_version": "discovery-v4-sources-v1",
+  "license_allowlist": [
+    "Public Domain",
+    "CC0",
+    "CC-BY",
+    "CC-BY-SA"
+  ],
+  "minimum_hebrew_letters": 1000,
+  "aggregate_already_covered": [
+    {
+      "work_id": "w000171",
+      "covered_by": ["w001281", "w001278", "w001299", "w001304", "w001275"],
+      "note": "The external Rashi-on-Torah container is already represented by five public book-level works."
+    }
+  ],
+  "false_title_collisions": [
+    {
+      "work_id": "w000509",
+      "note": "The Wikisource title resolves to Megillat Setarim on Esther, not Nissim Gaon's work."
+    },
+    {
+      "work_id": "w000820",
+      "note": "The Wikisource title is the Breslov work, not the local Karaite work."
+    }
+  ],
+  "sources": [
+    {"key":"sifra","provider":"hewikisource","source_ref":"ספרא","link_prefix":"ספרא על ויקרא ","mappings":[{"target_work_id":"w000163"}]},
+    {"key":"seder_olam_rabbah","provider":"sefaria","source_ref":"Seder Olam Rabbah","mappings":[{"target_work_id":"w000164"}]},
+    {"key":"bereshit_rabbah","provider":"sefaria","source_ref":"Bereshit Rabbah","mappings":[{"target_work_id":"w000156"}]},
+    {"key":"pesikta_derav_kahana","provider":"sefaria","source_ref":"Pesikta DeRav Kahana","mappings":[{"target_work_id":"w000904"}]},
+    {"key":"pirkei_derabbi_eliezer","provider":"sefaria","source_ref":"Pirkei DeRabbi Eliezer","mappings":[{"target_work_id":"w000807"}]},
+    {"key":"derekh_eretz_zuta","provider":"sefaria","source_ref":"Tractate Derekh Eretz Zuta","mappings":[{"target_work_id":"w000787"}]},
+    {"key":"tractate_soferim","provider":"sefaria","source_ref":"Tractate Soferim","mappings":[{"target_work_id":"w000774"}]},
+    {"key":"mekhilta_derabbi_yishmael","provider":"hewikisource","source_ref":"מכילתא דרבי ישמעאל","link_prefix":"מכילתא על שמות ","mappings":[{"target_work_id":"w000766"}]},
+    {"key":"sifrei_devarim","provider":"sefaria","source_ref":"Sifrei Devarim","mappings":[{"target_work_id":"w000166"}]},
+    {"key":"shir_hashirim_rabbah","provider":"sefaria","source_ref":"Shir HaShirim Rabbah","mappings":[{"target_work_id":"w000804"}]},
+    {"key":"sefer_yetzirah","provider":"sefaria","source_ref":"Sefer Yetzirah","mappings":[{"target_work_id":"w000522"}]},
+    {"key":"mekhilta_derabbi_shimon","provider":"sefaria","source_ref":"Mekhilta DeRabbi Shimon Ben Yochai","mappings":[{"target_work_id":"w000321"}]},
+    {"key":"midrash_haserot_veyterot","provider":"hewikisource","source_ref":"מדרש חסרות ויתרות","mappings":[{"target_work_id":"w000859"}]},
+    {"key":"yosippon","provider":"hewikisource","source_ref":"יוסיפון","link_prefix":"יוסיפון (ויקיטקסט)/פרק ","mappings":[{"target_work_id":"w000853"}]},
+    {"key":"heikhalot_rabbati","provider":"hewikisource","source_ref":"היכלות רבתי","link_prefix":"פרקי היכלות רבתי פרק ","mappings":[{"target_work_id":"w000170"}]},
+    {"key":"shaarei_teshuvah","provider":"sefaria","source_ref":"Sha'arei Teshuvah","mappings":[{"target_work_id":"w000189"}]},
+    {"key":"midrash_mishlei","provider":"hewikisource","source_ref":"מדרש משלי","link_prefix":"מדרש משלי (בובר) ","mappings":[{"target_work_id":"w000852"}]},
+    {"key":"vayikra_rabbah","provider":"sefaria","source_ref":"Vayikra Rabbah","mappings":[{"target_work_id":"w000169"}]},
+    {"key":"sifrei_bamidbar","provider":"sefaria","source_ref":"Sifrei Bamidbar","mappings":[{"target_work_id":"w000165"}]},
+    {"key":"midrash_tehillim","provider":"sefaria","source_ref":"Midrash Tehillim","mappings":[{"target_work_id":"w001124"}]},
+    {"key":"rashi_bava_kamma","provider":"sefaria","source_ref":"Rashi on Bava Kamma","locus_grain":"daf_bavli","mappings":[{"target_work_id":"w000172"}]},
+    {"key":"eikhah_rabbah","provider":"sefaria","source_ref":"Eikhah Rabbah","mappings":[{"target_work_id":"w001128"}]},
+    {"key":"diqduqe_hateamim","provider":"hewikisource","source_ref":"דקדוקי הטעמים","mappings":[{"target_work_id":"w000910"}]},
+    {"key":"kohelet_rabbah","provider":"sefaria","source_ref":"Kohelet Rabbah","mappings":[{"target_work_id":"w000891"}]},
+    {"key":"devarim_rabbah","provider":"hewikisource","source_ref":"דברים רבה","link_prefix":"דברים רבה ","mappings":[{"target_work_id":"w000794"}]},
+    {"key":"midrash_shmuel","provider":"sefaria","source_ref":"Midrash Shmuel","mappings":[{"target_work_id":"w000896"}]},
+    {"key":"baraita_melekhet_hamishkan","provider":"hewikisource","source_ref":"ברייתא דמלאכת המשכן","link_prefix":"ברייתא דמלאכת המשכן ","mappings":[{"target_work_id":"w000157"}]},
+    {"key":"midrash_tanchuma_buber","provider":"sefaria","source_ref":"Midrash Tanchuma Buber","mode":"schema_leaves","locus_grain":"section","locus_title_he":"תנחומא בובר","mappings":[{"target_work_id":"w000879"}]},
+    {"key":"perek_shirah","provider":"sefaria","source_ref":"Perek Shirah","mappings":[{"target_work_id":"w000991"}]},
+    {"key":"pesikta_rabbati","provider":"sefaria","source_ref":"Pesikta Rabbati","mappings":[{"target_work_id":"w000803"}]},
+    {"key":"kallah_rabbati","provider":"sefaria","source_ref":"Tractate Kallah Rabbati","mappings":[{"target_work_id":"w000809"}]},
+    {"key":"shemot_rabbah","provider":"sefaria","source_ref":"Shemot Rabbah","locus_title_he":"שמות רבה","mappings":[{"target_work_id":"w000929","chapter_range":[1,14]},{"target_work_id":"w000930","chapter_range":[15,52]}]},
+    {"key":"tractate_kallah","provider":"sefaria","source_ref":"Tractate Kallah","mappings":[{"target_work_id":"w000771"}]},
+    {"key":"esther_rabbah","provider":"hewikisource","source_ref":"אסתר רבה","link_prefix":"אסתר רבה ","mappings":[{"target_work_id":"w000841","chapter_range":[1,6]},{"target_work_id":"w000927","chapter_range":[7,10]}]},
+    {"key":"baraita_diyeshua","provider":"hewikisource","source_ref":"ברייתא דישועה","mappings":[{"target_work_id":"w000754"}]},
+    {"key":"tractate_semachot","provider":"sefaria","source_ref":"Tractate Semachot","mappings":[{"target_work_id":"w000780"}]},
+    {"key":"derekh_eretz_rabbah","provider":"sefaria","source_ref":"Tractate Derekh Eretz Rabbah","mappings":[{"target_work_id":"w000786"}]},
+    {"key":"arugat_habosem","provider":"hewikisource","source_ref":"ערוגת הבושם","mappings":[{"target_work_id":"w000160"}]},
+    {"key":"sefer_zerubbabel","provider":"hewikisource","source_ref":"ספר זרובבל","mappings":[{"target_work_id":"w000737"}]},
+    {"key":"midrash_abba_gurion","provider":"hewikisource","source_ref":"בית המדרש/חדר ראשון/מדרש אבא גוריון","mappings":[{"target_work_id":"w000928"}]},
+    {"key":"midrash_hillel","provider":"hewikisource","source_ref":"מדרש הלל","mappings":[{"target_work_id":"w000782"}]},
+    {"key":"ruth_rabbah","provider":"sefaria","source_ref":"Ruth Rabbah","mappings":[{"target_work_id":"w000805"}]},
+    {"key":"aggadat_bereshit","provider":"sefaria","source_ref":"Aggadat Bereshit","mappings":[{"target_work_id":"w000924"}]}
+  ]
+}
