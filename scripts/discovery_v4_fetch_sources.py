@@ -368,30 +368,73 @@ def _schema_leaf_refs(source_ref: str, schema: dict) -> list[tuple[str, str, str
 
 
 class Fetcher:
-    def __init__(self, output_dir: Path, *, timeout: int = 60) -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        *,
+        timeout: int = 60,
+        request_interval: float = 0.5,
+    ) -> None:
         self.output_dir = output_dir
         self.raw_dir = output_dir / "raw"
         self.normalized_dir = output_dir / "normalized"
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.normalized_dir.mkdir(parents=True, exist_ok=True)
         self.timeout = timeout
+        # Politeness floor between successive requests (REF6 is a ~4,000-
+        # request acquisition; back-to-back requests got this project's IP
+        # HTTP-429 throttled by Wikimedia on 2026-08-16).
+        self.request_interval = max(0.0, float(request_interval))
+        self._last_request_at = 0.0
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
 
+    def _respect_interval(self) -> None:
+        wait = self.request_interval - (time.monotonic() - self._last_request_at)
+        if wait > 0:
+            time.sleep(wait)
+
+    @staticmethod
+    def _retry_after_seconds(response, attempt: int) -> float:
+        """Honor a numeric Retry-After header; otherwise back off
+        exponentially (10s, 20s, 40s, ...) capped at 120s -- a provider-side
+        429 window outlasts the generic 1.5s-scale retry sleeps."""
+        header = (response.headers or {}).get("Retry-After")
+        try:
+            seconds = float(header)
+        except (TypeError, ValueError):
+            seconds = 10.0 * (2**attempt)
+        return min(max(seconds, 1.0), 120.0)
+
     def get_json(self, url: str, *, params: dict | None, raw_path: Path) -> dict:
         error: Exception | None = None
-        for attempt in range(4):
+        attempts = 6
+        for attempt in range(attempts):
+            self._respect_interval()
             try:
                 response = self.session.get(
                     url, params=params, timeout=self.timeout, allow_redirects=True
                 )
+            except requests.RequestException as exc:
+                self._last_request_at = time.monotonic()
+                error = exc
+                if attempt < attempts - 1:
+                    time.sleep(1.5 * (attempt + 1))
+                continue
+            self._last_request_at = time.monotonic()
+            if response.status_code == 429:
+                error = RuntimeError(f"HTTP 429 (rate limited): {url}")
+                if attempt < attempts - 1:
+                    time.sleep(self._retry_after_seconds(response, attempt))
+                continue
+            try:
                 response.raise_for_status()
                 raw_path.parent.mkdir(parents=True, exist_ok=True)
                 raw_path.write_bytes(response.content)
                 return response.json()
             except (requests.RequestException, ValueError) as exc:
                 error = exc
-                if attempt < 3:
+                if attempt < attempts - 1:
                     time.sleep(1.5 * (attempt + 1))
         raise RuntimeError(f"request failed after retries: {url}: {error}")
 
@@ -1106,7 +1149,11 @@ def run(args: argparse.Namespace) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     allowlist = {_license_key(value) for value in config["license_allowlist"]}
     minimum = int(config["minimum_hebrew_letters"])
-    fetcher = Fetcher(output_dir, timeout=args.timeout)
+    fetcher = Fetcher(
+        output_dir,
+        timeout=args.timeout,
+        request_interval=getattr(args, "request_interval", 0.5),
+    )
     entries = []
     for source in config["sources"]:
         display_ref = _source_display_ref(source)
@@ -1274,6 +1321,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument(
+        "--request-interval",
+        type=float,
+        default=0.5,
+        help="Politeness floor (seconds) between successive provider requests.",
+    )
     parser.add_argument(
         "--reuse-existing",
         action="store_true",
