@@ -133,10 +133,47 @@ absent from a V0.8-only index*, not 9,000–20,000 manuscripts of lost content.
 By collection the population is concentrated: CUL 7,757 and JTS 5,910 are 88% of it;
 Heidelberg contributes 4.
 
+## Deployed to production, 2026-08-16
+
+The repair is live. `scripts/apply_v08_repair.py` was run **on the server** against prod's
+own corpus rather than uploading the local result — all 8 manifest entries matched by
+SHA-256, 0 skewed — and the file it produced is byte-identical to the local repair
+(`0ac792ad…`), so the two derivations agree without either trusting the other. The original
+is kept beside it as `Transcriptions.orig-20251122.txt`, and is on Zenodo besides.
+
+Index rebuilt by `scripts/rebuild_index.sh`: **869 s (14 min)**, 1,161,479 → **1,161,484
+docs**. The delta is +5 where +6 was predicted, and the per-scope split says why — pages
+**+3** as expected, system docs **+2**, because Lehnardt 7b/4 already had a system doc. That
+manuscript was already present in V0.8 under a different IE; only the one folio was missing.
+The prediction was wrong, not the build.
+
+Verified against the live index and then the live site: all three re-filed folios present,
+all eight hosts keeping their page at the designed shorter length (Heid 18 folio 2:
+491 → 63 chars), and the reported phrase returning **exactly one hit —
+`p. Heid. Hebr. 19`** — where it previously returned Hebr. 18.
+
+**Correction to the deploy playbook.** A first attempt was rolled back when the site
+degraded to 30-second page loads. It was not the mv: `search_perf` shows `tantivy_ms` steady
+at 6 → 254 ms while `materialize_ms` went 1.2 s → 62.6 s, and there were no path errors
+anywhere — the rename survived the open inode exactly as the recipe claims. The cause was
+page-cache eviction, a 7.8 GB mmap'd index pushed out of a 15.8 GB box by 1.4 GB file reads
+and writes. **Zero-downtime, not zero-impact.** Ten days of non-bot nginx traffic put the
+quiet hour at 01:00 UTC (927 requests against a 9,321 peak), which is where the rebuild ran.
+
 ## Still open
 
-- Whether production really is V0.8-only (unverified from a dev box — check the prod box
-  for `AllGenizah_OLD.txt`, and for the older name `Genizah_OLD.txt` the deployment guide
-  uses, or count `source:"V0.7"` against the production index).
-- The 7,523-record gap between the corpus file (948,549) and the index (941,026).
+- **The upstream ingest bug itself.** Nothing here fixes it; a future corpus drop can
+  reproduce the shape at different records. This is why every manifest entry is guarded by a
+  content hash and skips rather than blind-patches. Reported to the MiDRASH team with the
+  13-row pair list and a standalone scanner.
+- **Three identified pairs left unrepaired** — AIU III A 22→III.A.23, Halpern 41|42|43→44,
+  Halpern 27→29. Each victim does have a single V0.7 page, so re-filing is now possible, but
+  they score 0.196–0.302 against 0.366–0.804 for the three accepted, and two would create a
+  manuscript that `libraries.csv` has no row for. Creating an entity on thin evidence is the
+  same class of act as the defect being fixed, so they keep today's behaviour.
+- The Lab index still serves pre-repair text; it is a separate build from the same corpus.
 - Whether the 6 unattributed back-to-back records have victims that carry their own V0.8.
+
+**Closed since the scan:** production is confirmed V0.8-only (no `AllGenizah_OLD.txt` or
+`Genizah_OLD.txt` on the box), and the 7,523-record gap was empty-bodied records the indexer
+correctly skips.
