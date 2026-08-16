@@ -18,11 +18,16 @@ transformations and the reviewed source map are tracked.
 > because `_tmp/` is this repo's SCRATCH directory (`CLAUDE.md` and
 > `scripts/init.ps1` both describe it as "working notes") and the depot includes
 > the local twin of the artifact production serves, whose content hash matches its
-> own `asset_basename`. The move is provenance-safe: the `reference_manifest.json`
-> entries record absolute `_tmp/...` paths, but every consumer reads only
-> `entries`, `schema_version` and the `*_sha256` fields and never dereferences
-> those strings, so no manifest was rewritten and no pinned hash changed. Pass the
-> new paths as the usual CLI arguments when re-running any stage.
+> own `asset_basename`. The move is provenance-safe for the pinned hashes: no
+> manifest was rewritten and no pinned hash changed. **But the original claim that
+> "every consumer never dereferences the recorded path strings" was wrong**
+> (found 2026-08-16, Codex design review, line-verified):
+> `scripts/bake_discovery_excerpts.py::load_v4_public_sources` reads
+> `manifest["acquisition_manifest"]` as an absolute path, which now points at the
+> deleted `_tmp/` location — the next excerpt bake fails loudly at startup until
+> the acquisition manifest becomes an explicit CLI input. Tracked in
+> `docs/OPEN_ISSUES.md` (P2, 2026-08-16). Every other stage takes its paths as
+> CLI arguments; pass the new depot paths when re-running.
 
 ## Deployed artifact
 
