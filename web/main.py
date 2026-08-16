@@ -1734,14 +1734,27 @@ def create_layout():
     #    among its tools, and `/help` documents both with their own anchors. A
     #    toast repeating them there is duplication a reader reads as a bug, and it
     #    is what made `/start`'s "exactly one /atlas href" render-smoke guard fail:
-    #    the guard was right, the second link was mine. The toast is for the reader
-    #    who arrived at /search or /browse and would otherwise never learn.
-    _WHATS_NEW_SUPPRESSED_ON = ('/', '/start', '/help')
-    _new_surfaces = []
-    if discovery_available():
-        _new_surfaces.append((tr("Computed Identifications"), '/computed-identifications'))
+    #    the guard was right, the second link was mine.
+    #
+    #    `/` is NOT suppressed (owner, 2026-08-16). The toast's whole point is the
+    #    reader ARRIVING at the site, and that arrival is normally the homepage; a
+    #    homepage suppression meant the one visitor it was written for never saw
+    #    it. The homepage cards remain the richer advertisement and the duplication
+    #    is accepted deliberately. Verified safe: no test that opens `/` counts
+    #    hrefs or elements — they all locate by explicit `.mark()`.
+    #
+    # ORDER is the owner's: the introduction first (a reader who does not know what
+    # the Genizah is needs it before either research surface), then the atlas, then
+    # the identifications. `/start` is registered unconditionally and carries no
+    # feature flag, so it is always present and the toast always has something to
+    # say — the empty-list guard below is kept as a structural backstop, not
+    # because it is currently reachable.
+    _WHATS_NEW_SUPPRESSED_ON = ('/start', '/help')
+    _new_surfaces = [(tr("An introduction to the Genizah and this site"), '/start')]
     if atlas_preview_available():
         _new_surfaces.append((tr("The Visual Genizah Atlas"), '/atlas'))
+    if discovery_available():
+        _new_surfaces.append((tr("Computed Identifications"), '/computed-identifications'))
 
     if (_new_surfaces
             and current_page not in _WHATS_NEW_SUPPRESSED_ON
@@ -1755,22 +1768,18 @@ def create_layout():
                 f'z-index: 2000; max-width: 90vw; background: var(--bg-tertiary); '
                 f'border: 1px solid var(--border-light); border-radius: 8px; '
                 f'box-shadow: 0 4px 16px rgba(0,0,0,0.18); direction: {banner_dir};'
-            ) as whats_new_banner:
+            ).mark('whats-new-banner') as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                # Claim-free, as on the homepage cards: the surface NAMES only. No
-                # precision figure, no interval, no count, no accuracy rate; the
-                # lead-in agrees with how many surfaces are actually reachable
-                # rather than promising "two" when one is live.
-                ui.label(
-                    tr("Two new research surfaces, both in beta:") if len(_new_surfaces) > 1
-                    else tr("New in this release:")
-                ).classes('text-xs').style('color: var(--text-secondary);')
+                # Claim-free, as on the homepage cards: the NAMES only, no lead-in
+                # sentence. No precision figure, no interval, no count, no accuracy
+                # rate. A lead-in was tried and dropped (owner, 2026-08-16): on a
+                # one-line toast it pushed the names — the only part a reader acts
+                # on — past the fold on a phone, and it had to be re-worded
+                # whenever the number of live surfaces changed.
                 for _idx, (_surface_name, _surface_route) in enumerate(_new_surfaces):
                     if _idx:
-                        # Separator, not a list bullet — the row is one line and a
-                        # bullet would read as an item marker on a two-item line.
-                        ui.label('·').classes('text-xs').style('color: var(--text-secondary);')
+                        ui.label('*').classes('text-xs').style('color: var(--text-secondary);')
                     ui.link(_surface_name, _surface_route).classes(
                         'text-xs font-semibold text-primary hover:underline')
                 def dismiss_whats_new():

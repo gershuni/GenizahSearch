@@ -4,7 +4,14 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [9.0.0] - 2026-08-16 — Computed Identifications & Connections Atlas (public beta, web)
+## [9.0.0] - 2026-08-16 — Computed Identifications, the Visual Atlas & Start Here (public beta, web)
+
+> **At a glance.** 55,250 computed identifications across 596 works on 39,341 manuscripts (of
+> ~255,000 records in total — this is the portion the matching has reached, not the collection);
+> 48,270 of those identifications can show the matched passage on both sides. The atlas draws
+> 62,645 manuscripts and 437,373 textual connections in 12,922 clusters, from one precomputed
+> 2.2 MB asset. Atlas figures are read from the baked asset whose content hash matches the one
+> production serves; identification figures are read from the deployed V4 build.
 
 > **Web-only release.** No GitHub Release object is created (the desktop polls
 > `/releases/latest` and would prompt every desktop user to update for a release with no

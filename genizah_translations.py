@@ -4846,14 +4846,17 @@ TRANSLATIONS.update({
 # the existing one.
 # ===========================================================================
 TRANSLATIONS.update({
-    # === v9.0.0 "What's New" toast (web/main.py) — the two beta surfaces ===
-    # Hebrew is the DEFAULT language here, so an unregistered string does not
-    # fall back gracefully — it shows English to most of the site's readers.
-    # Both surface NAMES are already registered below and in the atlas block;
-    # only the two lead-in sentences are new. Claim-free by construction: they
-    # name the surfaces and say "beta", and assert nothing about the matches.
-    "Two new research surfaces, both in beta:": "שני ממשקי מחקר חדשים, שניהם בגרסת בטא:",
-    "New in this release:": "חדש בגרסה זו:",
+    # === v9.0.0 "What's New" toast (web/main.py) — the three new surfaces ===
+    # Hebrew is the DEFAULT language here, so an unregistered string does not fall
+    # back gracefully — it shows English to most of the site's readers.
+    #
+    # The toast reads: New Features! <intro> * <atlas> * <computed identifications>.
+    # The atlas and identification NAMES are already registered further down and in
+    # the atlas block, so only the introduction needs an entry. The Hebrew is the
+    # owner's own wording (2026-08-16) and is deliberately DESCRIPTIVE rather than
+    # the nav label "Start Here" / "התחילו כאן": a What's New line has to say what
+    # the new thing IS to a reader who has never seen it, and "Start Here" does not.
+    "An introduction to the Genizah and this site": "דף היכרות עם הגניזה ואתר הגניזה",
     # --- Nav entry + page title (the nav tag reuses the existing "Beta") ---
     "Computed Identifications": "זיהויים מחושבים",
     # --- Page meta description ---

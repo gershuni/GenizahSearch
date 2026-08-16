@@ -10,17 +10,41 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ## What's New in Version 9.0.0?
 
-### v9.0.0: Computed Identifications (public beta, web)
+### v9.0.0: Computed Identifications, the Visual Atlas & Start Here (public beta, web)
 
-The website now shows **computed identifications**: where the text on a Genizah fragment matches a
-known work, the manuscript's browse page can list those matches, and a new corpus-wide
-**Computed Identifications** page lets you sweep the whole corpus for them. Each match states what
-it is claiming — that the fragment carries the work, shares text with it, or includes a quotation —
-and a "View text match" view shows the fragment's own passage beside the work's, with the matching
-words highlighted. A **Start Here** page introduces the site for first-time visitors. This is a
-beta: the [methods page](https://genizahsearch.com/help) explains in plain language how the matches
-were produced and how far they can be trusted, and readers can submit their own verdict on any
-match.
+Three new things on genizahsearch.com. All are **beta**, all are web-only, and the desktop
+application is unchanged in this release.
+
+**Start Here** — a guided way in, at [`/start`](https://genizahsearch.com/start). Curated
+manuscripts, prepared searches, worked examples, and collapsible background on what the Cairo
+Genizah actually is. Written for someone arriving without a shelfmark in mind.
+
+**The Visual Genizah Atlas** — an interactive map of textual connections across the corpus, at
+[`/atlas`](https://genizahsearch.com/atlas). It draws **62,645 manuscripts** joined by **437,373
+textual connections**, grouped into **12,922 clusters** (the 298 largest are labelled), colourable
+by subject domain or by holding library across 60 libraries. Zoom, pan, search by title or
+shelfmark, open a manuscript in a side pane without leaving the map. The whole map is a single
+precomputed 2.2 MB download, so it draws without querying the server. Positions and clusters
+reflect **textual similarity, not physical provenance** — two fragments sitting together were not
+necessarily found together, and the page makes no identification claims.
+
+**Computed Identifications** — where the text on a fragment matches a known work, the software now
+says so. **55,250 computed identifications** across **596 works**, on **39,341 manuscripts**
+(the site holds ~255,000 records in total, so this covers the portion the matching has reached, not
+the whole collection). A manuscript's browse page lists its own matches; a corpus-wide
+[Computed Identifications](https://genizahsearch.com/computed-identifications) page lets you sweep
+all of them, filtered by work, author, subject, or by whether the match is already recorded in a
+finding aid. Each row says what it is claiming — that the fragment carries the work, shares text
+with it, or includes a quotation — rather than asserting a flat identity, and **48,270 of them can
+show you the evidence**: a "View text match" view putting the fragment's own passage beside the
+work's with the matching words highlighted. Matches are split into a main pool (28,635) and a
+wider "more matches" bucket (26,615) you can open deliberately.
+
+These are **machine-generated matches, not reviewed identifications.** The
+[methods page](https://genizahsearch.com/help) explains in plain language how they were produced
+and how far they can be trusted, every surface carries that caveat, and readers can submit their
+own verdict on any match. Where a match does not correspond to the catalogue, the row says so
+without taking a side.
 
 ### v8.5.2: Composition Filter Fix & Web Responsiveness
 
